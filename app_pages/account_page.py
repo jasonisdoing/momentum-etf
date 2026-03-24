@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+from html import escape
 from typing import Any
 
 import pandas as pd
@@ -12,9 +13,19 @@ from config import (
     BUCKET_OPTIONS,
     BUCKET_REVERSE_MAPPING,
 )
+from services.reference_data_service import get_stock_reference_info
+from utils.account_notes import load_account_note, save_account_note
+from utils.account_todos import (
+    complete_account_todo,
+    create_account_todo,
+    delete_account_todo,
+    list_account_todos,
+    reopen_account_todo,
+    update_account_todo_content,
+)
 from utils.data_loader import fetch_ohlcv
-from utils.pool_registry import get_pool_country_code, list_available_pools
-from utils.settings_loader import AccountSettingsError, get_account_settings, resolve_strategy_params
+from utils.rankings import build_account_rankings, get_account_rank_defaults, get_rank_months_max
+from utils.settings_loader import AccountSettingsError, get_account_settings
 from utils.stock_list_io import (
     add_stock,
     check_stock_status,
@@ -24,23 +35,33 @@ from utils.stock_list_io import (
     remove_stock,
     update_stock,
 )
-from utils.stock_meta_updater import fetch_stock_info
 from utils.ui import (
     create_loading_status,
     format_relative_time,
-    load_account_recommendations,
-    render_recommendation_table,
+    render_rank_table,
 )
 
 try:
-    from streamlit import fragment
+    from streamlit import fragment as _streamlit_fragment
 except ImportError:
     try:
-        from streamlit import experimental_fragment as fragment
+        from streamlit import experimental_fragment as _streamlit_fragment
     except ImportError:
+        _streamlit_fragment = None
 
-        def fragment(func):
+
+def fragment(*args, **kwargs):
+    """streamlit fragment 호환 래퍼."""
+    if _streamlit_fragment is None:
+        if args and callable(args[0]) and len(args) == 1 and not kwargs:
+            return args[0]
+
+        def _decorator(func):
             return func
+
+        return _decorator
+
+    return _streamlit_fragment(*args, **kwargs)
 
 
 _DATAFRAME_CSS = """
@@ -70,50 +91,14 @@ def _resolve_target_country_code(target_id: str) -> str:
             return code
     except Exception:
         pass
-    try:
-        if target_norm in list_available_pools():
-            return get_pool_country_code(target_norm, default="kor")
-    except Exception:
-        pass
     return "kor"
 
 
-def _is_pool_target(target_id: str) -> bool:
-    target_norm = (target_id or "").strip().lower()
-    if not target_norm:
-        return False
-    try:
-        return target_norm in list_available_pools()
-    except Exception:
-        return False
-
-
-def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.DataFrame:
-    """stocks.json 메타정보를 DataFrame으로 반환."""
+def _build_stocks_meta_table(account_id: str) -> pd.DataFrame:
+    """계좌 종목 메타정보를 DataFrame으로 반환."""
     etfs = get_etfs(account_id)
     if not etfs:
         return pd.DataFrame()
-
-    # 최신 추천 스냅샷의 현재 비중/타겟 비중을 표시합니다.
-    weight_map: dict[str, float] = {}
-    target_weight_map: dict[str, float] = {}
-    if use_weight:
-        try:
-            from utils.recommendation_storage import fetch_latest_recommendations
-
-            snapshot = fetch_latest_recommendations(account_id)
-            if snapshot:
-                recs = snapshot.get("recommendations") or []
-                for rec in recs:
-                    ticker = str(rec.get("ticker") or "").strip().upper()
-                    weight = rec.get("weight")
-                    target_weight = rec.get("target_weight")
-                    if ticker and weight is not None:
-                        weight_map[ticker] = float(weight) * 100.0
-                    if ticker and target_weight is not None:
-                        target_weight_map[ticker] = float(target_weight) * 100.0
-        except Exception:
-            pass
 
     rows: list[dict[str, Any]] = []
     for idx, etf in enumerate(etfs, 1):
@@ -135,10 +120,6 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
             "6달(%)": etf.get("6_month_earn_rate"),
             "12달(%)": etf.get("12_month_earn_rate"),
         }
-        if use_weight:
-            ticker_upper = str(etf.get("ticker") or "").strip().upper()
-            row["비중"] = weight_map.get(ticker_upper)
-            row["타겟비중"] = target_weight_map.get(ticker_upper)
         rows.append(row)
     df = pd.DataFrame(rows)
     if not df.empty and "1주(%)" in df.columns:
@@ -149,31 +130,16 @@ def _build_stocks_meta_table(account_id: str, *, use_weight: bool = True) -> pd.
 @fragment
 def _render_stocks_meta_table(account_id: str) -> None:
     """종목관리 테이블 렌더링. 업데이트 중일 경우 readonly 모드로 전환하여 스피너 방지."""
-    # 계좌는 비중 표시/입력을 사용하고, 종목풀은 비중 UI를 숨긴다.
-    use_weight = not _is_pool_target(account_id)
-
     # 세션 스테이트 키
     readonly = False
 
-    df = _build_stocks_meta_table(account_id, use_weight=use_weight)
+    df = _build_stocks_meta_table(account_id)
     df_edit = df.copy()
 
     if df.empty:
         st.info("종목 데이터가 없습니다. 종목을 추가하거나 삭제된 종목을 복원하세요.")
     else:
         st.caption(f"총 {len(df)}개 종목 (Source: MongoDB)")
-        if use_weight:
-            weight_series = pd.to_numeric(df.get("비중"), errors="coerce").dropna()
-            target_weight_series = pd.to_numeric(df.get("타겟비중"), errors="coerce").dropna()
-            if weight_series.empty and target_weight_series.empty:
-                st.caption("최신 추천 스냅샷이 없으면 비중과 타겟비중이 비어 있을 수 있습니다.")
-            else:
-                caption_parts: list[str] = []
-                if not weight_series.empty:
-                    caption_parts.append(f"표시 비중 합계: {float(weight_series.sum()):.2f}%")
-                if not target_weight_series.empty:
-                    caption_parts.append(f"표시 타겟비중 합계: {float(target_weight_series.sum()):.2f}%")
-                st.caption(" | ".join(caption_parts))
 
         def _color_pct(val: float | str) -> str:
             if val is None or pd.isna(val):
@@ -284,20 +250,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
         ),
         "티커": st.column_config.TextColumn("티커", width=55),
         "종목명": st.column_config.TextColumn("종목명", width=300),
-        "비중": st.column_config.ProgressColumn(
-            "비중",
-            width="small",
-            format="%.0f%%",
-            min_value=0.0,
-            max_value=100.0,
-        ),
-        "타겟비중": st.column_config.ProgressColumn(
-            "타겟비중",
-            width="small",
-            format="%.0f%%",
-            min_value=0.0,
-            max_value=100.0,
-        ),
         "추가일자": st.column_config.TextColumn("추가일자", width=90),
         "상장일": st.column_config.TextColumn("상장일", width=80),
         "주간거래량": st.column_config.NumberColumn("주간거래량", width=80, format="localized"),
@@ -314,8 +266,6 @@ def _render_stocks_meta_table(account_id: str) -> None:
         "버킷",
         "티커",
         "종목명",
-        "비중",
-        "타겟비중",
         "상장일",
         "주간거래량",
         "1주(%)",
@@ -425,7 +375,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 st.session_state[ss_key_result] = None
             else:
                 with st.spinner("정보 조회 중..."):
-                    info = fetch_stock_info(d_ticker, country_code)
+                    info = get_stock_reference_info(d_ticker, country_code)
                 if info and info.get("name"):
                     st.session_state[ss_key_result] = info
                     # 재진입 시 정보 유지를 위해
@@ -516,42 +466,70 @@ def _render_stocks_meta_table(account_id: str) -> None:
         open_add_dialog()
 
 
-def _render_manual_actions(account_id: str) -> None:
-    """수동 액션 실행 (추천 / 상태 알림) 영역을 렌더링합니다."""
-    st.subheader("🤖 수동 액션 실행")
+def _render_rank_tab(
+    account_id: str,
+    country_code: str,
+    *,
+    selected_ma_type: str | None = None,
+    selected_ma_months: int | None = None,
+) -> None:
+    """계좌별 추세 순위 탭을 렌더링합니다."""
 
-    import subprocess
+    default_ma_type, default_ma_months = get_account_rank_defaults(account_id)
+    max_months = get_rank_months_max()
+    effective_ma_type = str(selected_ma_type or default_ma_type).strip().upper()
+    effective_ma_months = int(selected_ma_months or default_ma_months)
+    effective_ma_months = min(max(effective_ma_months, 1), max_months)
 
-    c1, c2 = st.columns(2)
+    df = build_account_rankings(account_id, ma_type=effective_ma_type, ma_months=effective_ma_months)
+    if df.empty:
+        st.info("표시할 순위 종목이 없습니다.")
+        return
 
-    with c1:
-        if st.button("🚀 추천 시스템 즉시 실행", type="primary", use_container_width=True, key=f"btn_rec_{account_id}"):
-            try:
-                subprocess.Popen(["python", "recommend.py", account_id])
-                st.success(f"✅ `{account_id}` 추천 시스템 실행을 시작했습니다. (배경에서 처리가 완료됩니다)")
-            except Exception as e:
-                st.error(f"⚠️ 실행 시작 오류: {e}")
+    visible_columns = [
+        "#",
+        "버킷",
+        "티커",
+        "종목명",
+        "현재가",
+        "괴리율",
+        "점수",
+        "일간(%)",
+        "1주(%)",
+        "2주(%)",
+        "1달(%)",
+        "3달(%)",
+        "6달(%)",
+        "12달(%)",
+        "고점대비",
+        "추세(3달)",
+        "RSI",
+        "지속",
+    ]
+    updated_at = df.attrs.get("data_updated_at")
+    realtime_active = bool(df.attrs.get("realtime_active"))
+    if updated_at:
+        ts = pd.Timestamp(updated_at)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
 
-    with c2:
-        if st.button(
-            "🔔 포트폴리오 상태 알림 전송", type="secondary", use_container_width=True, key=f"btn_noti_{account_id}"
-        ):
-            try:
-                subprocess.Popen(["python", "scripts/portfolio_notifier.py", account_id])
-                st.success(f"✅ `{account_id}` 상태 알림 전송을 시작했습니다. (배경에서 처리가 완료됩니다)")
-            except Exception as e:
-                st.error(f"⚠️ 전송 시작 오류: {e}")
+        ampm = "오전" if ts.hour < 12 else "오후"
+        hour12 = ts.hour % 12 or 12
+        absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
+        relative_text = format_relative_time(ts)
+        icon = "🟢" if realtime_active else "🔴"
+        message = f"{icon} {absolute_text}"
+        if relative_text:
+            message = f"{message} {relative_text}"
+        st.caption(message)
 
-
-def _get_active_holdings(df: pd.DataFrame) -> pd.DataFrame:
-    """보유 중인 종목만 필터링합니다."""
-    try:
-        from core.backtest.portfolio import get_hold_states
-
-        hold_states = get_hold_states()
-        return df[df["상태"].isin(hold_states)].copy()
-    except Exception:
-        return df
+    render_rank_table(
+        df,
+        country_code=country_code,
+        grouped_by_bucket=False,
+        visible_columns=visible_columns,
+        height=900,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -644,26 +622,6 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
 
     if not to_restore_df.empty:
         st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
-
-        # 탭 3 전용 버튼 스타일링 (복구: 녹색, 완전 삭제: 빨간색)
-        # 탭 3 전용 버튼 스타일링 (복구: 녹색, 완전 삭제: 빨간색)
-        st.markdown(
-            """
-            <style>
-            .stButton > button[kind="primary"] {
-                background-color: #4CAF50 !important;
-                color: white !important;
-                border-color: #4CAF50 !important;
-            }
-            .stButton > button[kind="secondary"] {
-                background-color: #f44336 !important;
-                color: white !important;
-                border-color: #f44336 !important;
-            }
-            </style>
-        """,
-            unsafe_allow_html=True,
-        )
 
         c_res1, c_res2 = st.columns(2)
         with c_res1:
@@ -768,36 +726,288 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         st.session_state[selected_tickers_key] = selected_now
 
 
-def render_account_page(account_id: str, view_mode: str | None = None, loading=None) -> None:
-    """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
-    owns_loading = loading is None
-    loading = loading or create_loading_status()
+@fragment
+def _render_account_note_tab(account_id: str) -> None:
+    """계좌별 메모와 할일 리스트를 렌더링합니다."""
+    note_key = f"account_note_content_{account_id}"
+    loaded_key = f"account_note_loaded_{account_id}"
+    updated_key = f"account_note_updated_{account_id}"
+    note_saved_content_key = f"account_note_saved_content_{account_id}"
+    note_status_key = f"account_note_status_{account_id}"
 
-    # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
-    # 탭 이동 시에도 항상 적용되도록 메인 함수 최상단에 배치
+    def _to_local_ts(value: Any) -> pd.Timestamp | None:
+        if value is None:
+            return None
+        ts = pd.Timestamp(value)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
+        return ts
+
     st.markdown(
         """
         <style>
-        /* 1. 다이얼로그(수정 모달) 내의 버튼 스타일 */
-        div[data-testid="stDialog"] .stButton > button[kind="primary"] {
-            background-color: #4CAF50 !important;
-            color: white !important;
-            border-color: #4CAF50 !important;
+        div[data-testid="stTextArea"] textarea {
+            background-color: #fff3a3 !important;
+            color: #2b2b2b !important;
+            border: 1px solid #e0c95a !important;
         }
-        div[data-testid="stDialog"] .stButton > button[kind="secondary"] {
+        div[data-testid="stTextArea"] textarea::placeholder {
+            color: #8a7a2f !important;
+        }
+        div[class*="st-key-todo_delete_btn_"] .stButton > button {
             background-color: #f44336 !important;
             color: white !important;
             border-color: #f44336 !important;
         }
-
-        /* 호버 효과 */
-        .stButton > button:hover {
-            opacity: 0.9;
-        }
         </style>
-    """,
+        """,
         unsafe_allow_html=True,
     )
+
+    if not st.session_state.get(loaded_key) or note_key not in st.session_state:
+        try:
+            note_doc = load_account_note(account_id)
+        except Exception as exc:
+            st.error(f"메모를 불러오지 못했습니다: {exc}")
+            return
+        st.session_state[note_key] = str((note_doc or {}).get("content") or "")
+        st.session_state[updated_key] = (note_doc or {}).get("updated_at")
+        st.session_state[note_saved_content_key] = str((note_doc or {}).get("content") or "")
+        st.session_state[note_status_key] = "saved"
+        st.session_state[loaded_key] = True
+
+    left_col, right_col = st.columns(2)
+
+    def _save_note_on_change() -> None:
+        try:
+            saved_at = save_account_note(account_id, st.session_state.get(note_key, ""))
+        except Exception as exc:
+            st.session_state[note_status_key] = "failed"
+            st.error(f"메모를 저장하지 못했습니다: {exc}")
+            return
+        st.session_state[updated_key] = saved_at
+        st.session_state[note_saved_content_key] = str(st.session_state.get(note_key, "") or "")
+        st.session_state[note_status_key] = "saved"
+
+    def _save_todo_on_change(todo_id: str, content_key: str) -> None:
+        todo_updated_key = f"todo_updated_{account_id}_{todo_id}"
+        todo_saved_content_key = f"todo_saved_content_{account_id}_{todo_id}"
+        todo_status_key = f"todo_status_{account_id}_{todo_id}"
+        try:
+            saved_at = update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
+        except Exception as exc:
+            st.session_state[todo_status_key] = "failed"
+            st.error(f"할일을 저장하지 못했습니다: {exc}")
+            return
+        st.session_state[todo_updated_key] = saved_at
+        st.session_state[todo_saved_content_key] = str(st.session_state.get(content_key, "") or "")
+        st.session_state[todo_status_key] = "saved"
+
+    with left_col:
+        st.subheader("메모")
+        st.text_area(
+            "메모",
+            key=note_key,
+            height=520,
+            placeholder="이 계좌에 대한 메모를 입력하세요.",
+            on_change=_save_note_on_change,
+        )
+
+        updated_at = st.session_state.get(updated_key)
+        if updated_at is not None:
+            ts = _to_local_ts(updated_at)
+            ampm = "오전" if ts.hour < 12 else "오후"
+            hour12 = ts.hour % 12 or 12
+            absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
+            relative_text = format_relative_time(ts)
+            message = f"마지막 저장: {absolute_text}"
+            if relative_text:
+                message = f"{message} {relative_text}"
+            if st.session_state.get(note_status_key) == "failed":
+                message = f"{message} 🔴 저장 실패"
+            else:
+                message = f"{message} 🟢 저장됨"
+            st.caption(message)
+
+    with right_col:
+        st.subheader("할일")
+
+        def _clear_todo_session_state() -> None:
+            prefixes = (
+                f"todo_content_{account_id}_",
+                f"todo_updated_{account_id}_",
+                f"todo_saved_content_{account_id}_",
+            )
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith(prefixes)]
+            for key in keys_to_remove:
+                st.session_state.pop(key, None)
+
+        @st.dialog("할일 삭제", width="small")
+        def _open_delete_todo_dialog(todo_id: str) -> None:
+            st.warning("이 할일을 완전히 삭제합니다. 되돌릴 수 없습니다.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("취소", key=f"btn_cancel_delete_todo_{account_id}_{todo_id}", width="stretch"):
+                    st.rerun()
+            with c2:
+                if st.button(
+                    "삭제 확인",
+                    key=f"btn_confirm_delete_todo_{account_id}_{todo_id}",
+                    type="primary",
+                    width="stretch",
+                ):
+                    try:
+                        delete_account_todo(account_id, todo_id)
+                    except Exception as exc:
+                        st.error(f"투두를 삭제하지 못했습니다: {exc}")
+                        return
+                    _clear_todo_session_state()
+                    st.success("투두를 삭제했습니다.")
+                    st.rerun()
+
+        if st.button("➕ 새 아이템 생성", key=f"btn_create_todo_{account_id}", width="stretch"):
+            try:
+                create_account_todo(account_id, "")
+            except Exception as exc:
+                st.error(f"투두를 생성하지 못했습니다: {exc}")
+                return
+            _clear_todo_session_state()
+            st.rerun()
+
+        try:
+            todos = list_account_todos(account_id)
+        except Exception as exc:
+            st.error(f"투두 목록을 불러오지 못했습니다: {exc}")
+            return
+
+        if not todos:
+            st.info("투두 아이템이 없습니다. 생성 버튼으로 첫 아이템을 추가하세요.")
+            return
+
+        def _render_todo_item(todo: dict[str, Any]) -> None:
+            todo_id = todo["todo_id"]
+            content_key = f"todo_content_{account_id}_{todo_id}"
+            todo_updated_key = f"todo_updated_{account_id}_{todo_id}"
+            todo_saved_content_key = f"todo_saved_content_{account_id}_{todo_id}"
+            if content_key not in st.session_state:
+                st.session_state[content_key] = str(todo.get("content") or "")
+            if todo_updated_key not in st.session_state:
+                st.session_state[todo_updated_key] = todo.get("updated_at") or todo.get("created_at")
+            if todo_saved_content_key not in st.session_state:
+                st.session_state[todo_saved_content_key] = str(todo.get("content") or "")
+            todo_status_key = f"todo_status_{account_id}_{todo_id}"
+            if todo_status_key not in st.session_state:
+                st.session_state[todo_status_key] = "saved"
+
+            is_done = str(todo.get("status") or "") == "done"
+            display_ts = (
+                pd.Timestamp(st.session_state.get(todo_updated_key))
+                if st.session_state.get(todo_updated_key) is not None
+                else None
+            )
+            if display_ts is not None and display_ts.tzinfo is not None:
+                display_ts = display_ts.tz_convert("Asia/Seoul").tz_localize(None)
+
+            header_parts = []
+            if display_ts is not None:
+                ampm = "오전" if display_ts.hour < 12 else "오후"
+                hour12 = display_ts.hour % 12 or 12
+                created_text = (
+                    f"{display_ts.year}년 {display_ts.month}월 {display_ts.day}일 "
+                    f"{ampm} {hour12}:{display_ts.minute:02d}분"
+                )
+                rel = format_relative_time(display_ts)
+                header_parts.append(created_text if not rel else f"{created_text} {rel}")
+            if is_done:
+                header_parts.append("완료")
+
+            with st.container(border=True):
+                if is_done:
+                    content_html = escape(st.session_state.get(content_key, "") or "").replace("\n", "<br>")
+                    st.markdown(
+                        (
+                            "<div style='min-height:90px;padding:0.75rem 0.9rem;"
+                            "border:1px solid #d9d9d9;border-radius:0.5rem;"
+                            "background-color:#f6f6f6;color:#111;"
+                            "text-decoration: line-through; white-space: normal;"
+                            "margin-bottom:0.75rem;'>"
+                            f"{content_html or '&nbsp;'}"
+                            "</div>"
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.text_area(
+                        "투두 내용",
+                        key=content_key,
+                        height=90,
+                        placeholder="할 일을 입력하세요.",
+                        label_visibility="collapsed",
+                        on_change=_save_todo_on_change,
+                        args=(todo_id, content_key),
+                    )
+
+                status_text = ""
+                if display_ts is not None:
+                    ampm = "오전" if display_ts.hour < 12 else "오후"
+                    hour12 = display_ts.hour % 12 or 12
+                    absolute_text = (
+                        f"{display_ts.year}년 {display_ts.month}월 {display_ts.day}일 "
+                        f"{ampm} {hour12}:{display_ts.minute:02d}분"
+                    )
+                    relative_text = format_relative_time(display_ts)
+                    status_text = absolute_text if not relative_text else f"{absolute_text} {relative_text}"
+                saved_text = "🔴 저장 실패" if st.session_state.get(todo_status_key) == "failed" else "🟢 저장됨"
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if status_text:
+                        st.caption(status_text)
+                    if saved_text:
+                        st.caption(saved_text)
+                with c2:
+                    if is_done:
+                        if st.button("완료취소", key=f"btn_undo_todo_{account_id}_{todo_id}", width="stretch"):
+                            try:
+                                reopen_account_todo(account_id, todo_id)
+                            except Exception as exc:
+                                st.error(f"투두를 완료취소하지 못했습니다: {exc}")
+                                return
+                            _clear_todo_session_state()
+                            st.success("투두를 진행 중으로 되돌렸습니다.")
+                            st.rerun()
+                    elif st.button("완료", key=f"btn_done_todo_{account_id}_{todo_id}", width="stretch"):
+                        try:
+                            update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
+                            complete_account_todo(account_id, todo_id)
+                        except Exception as exc:
+                            st.error(f"투두를 완료 처리하지 못했습니다: {exc}")
+                            return
+                        _clear_todo_session_state()
+                        st.success("투두를 완료 처리했습니다.")
+                        st.rerun()
+                with c3:
+                    if is_done:
+                        st.write("")
+                    else:
+                        with st.container(key=f"todo_delete_btn_{account_id}_{todo_id}"):
+                            if st.button("🗑️ 삭제", key=f"btn_delete_todo_{account_id}_{todo_id}", width="stretch"):
+                                _open_delete_todo_dialog(todo_id)
+
+        for todo in todos:
+            _render_todo_item(todo)
+
+
+def render_account_page(
+    account_id: str,
+    view_mode: str | None = None,
+    loading=None,
+    *,
+    rank_params: dict[str, Any] | None = None,
+) -> None:
+    """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
+    owns_loading = loading is None
+    loading = loading or create_loading_status()
 
     try:
         loading.update(f"{account_id.upper()} 설정 조회")
@@ -809,15 +1019,11 @@ def render_account_page(account_id: str, view_mode: str | None = None, loading=N
 
         country_code = _normalize_code(account_settings.get("country_code"), account_id)
 
-        loading.update(f"{account_id.upper()} 추천 데이터 조회")
-        df, updated_at, loaded_country_code = load_account_recommendations(account_id)
-        country_code = loaded_country_code or country_code
-
         if view_mode is None:
             view_mode = st.segmented_control(
                 "뷰",
-                ["1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"],
-                default="1. 추천 결과",
+                ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"],
+                default="1. 순위",
                 key=f"view_{account_id}",
                 label_visibility="collapsed",
             )
@@ -828,128 +1034,18 @@ def render_account_page(account_id: str, view_mode: str | None = None, loading=N
         elif view_mode == "3. 삭제된 종목":
             loading.update(f"{account_id.upper()} 삭제 종목 테이블 준비")
             _render_deleted_stocks_tab(account_id)
-        else:  # "1. 추천 결과" (Default)
-            if df is None:
-                st.error(
-                    updated_at
-                    or "추천 데이터를 불러오지 못했습니다. 먼저 `python recommend.py <account>` 명령으로 스냅샷을 생성해 주세요."
-                )
-            else:
-                if df.empty:
-                    st.info("표시할 추천 종목이 없습니다.")
-                else:
-                    loading.update(f"{account_id.upper()} 추천 테이블 준비")
-                    render_recommendation_table(
-                        df,
-                        country_code=country_code,
-                        grouped_by_bucket=False,
-                        # customize_columns={"#": ("버킷", 120)} # This will be implemented in utils/ui.py
-                    )
-
-        # --- 공통: 업데이트 시간, 설정, 푸터 (보유종목/종목추세 탭에서만 표시) ---
-        if view_mode in ("1. 추천 결과", "2. 종목 추세") and updated_at:
-            if "," in updated_at:
-                parts = updated_at.split(",", 1)
-                date_part = parts[0].strip()
-                user_part = parts[1].strip()
-                updated_at_rel = format_relative_time(date_part)
-                updated_at_display = f"{date_part}{updated_at_rel}, {user_part}"
-            else:
-                updated_at_rel = format_relative_time(updated_at)
-                updated_at_display = f"{updated_at}{updated_at_rel}"
-
-            if country_code == "kor":
-                from datetime import datetime
-
-                now = datetime.now()
-                now_str = now.strftime("%Y-%m-%d %H:%M:%S")
-                now_rel = format_relative_time(now)
-
-                st.caption(
-                    f"추천 데이터 업데이트: {updated_at_display}  \n가격 데이터 업데이트: {now_str}{now_rel}, Naver"
-                )
-            else:
-                st.caption(f"데이터 업데이트: {updated_at_display}")
-
-            with st.expander("설정", expanded=True):
-                strategy_cfg = account_settings.get("strategy", {}) or {}
-                cagr = None
-                mdd = None
-                backtested_date = None
-                strategy_tuning: dict[str, Any] = {}
-                if isinstance(strategy_cfg, dict):
-                    cagr = strategy_cfg.get("TUNE_CAGR")
-                    mdd = strategy_cfg.get("TUNE_MDD")
-                    backtested_date = strategy_cfg.get("TUNE_DATE")
-                    strategy_tuning = resolve_strategy_params(strategy_cfg)
-
-                    params_to_show = {}
-                    if strategy_tuning.get("MA_MONTH"):
-                        params_to_show["MA개월"] = strategy_tuning.get("MA_MONTH")
-
-                    from config import OPTIMIZATION_METRIC
-
-                    params_to_show.update(
-                        {
-                            "MA타입": strategy_tuning.get("MA_TYPE"),
-                            "리밸런스 주기": strategy_tuning.get("REBALANCE_MODE", "TWICE_A_MONTH"),
-                            "최적화 지표": OPTIMIZATION_METRIC,
-                        }
-                    )
-
-                    param_strs = [f"{key}: {value}" for key, value in params_to_show.items() if value is not None]
-                else:
-                    param_strs = []
-
-                caption_parts: list[str] = []
-                if param_strs:
-                    param_display = ", ".join(param_strs)
-                    caption_parts.append(f"설정: [{param_display}]")
-                else:
-                    caption_parts.append("설정: N/A")
-
-                # 슬리피지 정보 추가
-                from config import BACKTEST_SLIPPAGE
-
-                slippage_config = BACKTEST_SLIPPAGE.get(country_code, {})
-                buy_slip = slippage_config.get("buy_pct")
-                sell_slip = slippage_config.get("sell_pct")
-                if buy_slip is not None and sell_slip is not None:
-                    if buy_slip == sell_slip:
-                        caption_parts.append(f"슬리피지: ±{buy_slip}%")
-                    else:
-                        caption_parts.append(f"슬리피지: 매수+{buy_slip}%/매도-{sell_slip}%")
-
-                try:
-                    from core.backtest.portfolio import get_hold_states
-
-                    hold_states = get_hold_states()
-                    if df is not None:
-                        current_holdings = int(df[df["상태"].isin(hold_states)].shape[0])
-                        caption_parts.append(f"보유종목 수 {current_holdings}")
-                except Exception:
-                    pass
-
-                # 성과 지표 (CAGR, MDD) 및 백테스트 일자 추가
-                if cagr is not None:
-                    caption_parts.append(f"**CAGR: {float(cagr):.2f}%**")
-                if mdd is not None:
-                    caption_parts.append(f"**MDD: {float(mdd):.2f}%**")
-                if backtested_date:
-                    caption_parts.append(f"**백테스트: {backtested_date}**")
-
-                caption_text = ", ".join(caption_parts)
-                if caption_text:
-                    st.caption(caption_text)
-                else:
-                    st.caption("설정 정보를 찾을 수 없습니다.")
-        elif view_mode in ("1. 보유 종목", "2. 종목 추세"):
-            st.caption("데이터를 찾을 수 없습니다.")
-
-        # 수동 액션 실행 (추천 결과 탭에서만 가장 하단에 표시)
-        if view_mode == "1. 추천 결과":
-            st.divider()
-            _render_manual_actions(account_id)
+        elif view_mode == "4. 메모":
+            loading.update(f"{account_id.upper()} 메모 준비")
+            _render_account_note_tab(account_id)
+        else:  # "1. 순위" (Default)
+            loading.update(f"{account_id.upper()} 순위 테이블 준비")
+            rank_params = rank_params or {}
+            _render_rank_tab(
+                account_id,
+                country_code,
+                selected_ma_type=rank_params.get("ma_type"),
+                selected_ma_months=rank_params.get("ma_months"),
+            )
     finally:
         if owns_loading:
             loading.clear()
@@ -965,8 +1061,14 @@ def render_account_deleted_page(account_id: str) -> None:
     _render_deleted_stocks_tab(account_id)
 
 
+def render_account_note_page(account_id: str) -> None:
+    """계좌 메모 뷰를 렌더링한다."""
+    _render_account_note_tab(account_id)
+
+
 __all__ = [
     "render_account_page",
     "render_account_setup_page",
     "render_account_deleted_page",
+    "render_account_note_page",
 ]

@@ -66,7 +66,7 @@ from utils.cache_utils import (
     save_cached_frame,
 )
 from utils.logger import get_app_logger
-from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
+from utils.stock_list_io import get_etfs_by_country, set_listing_date
 
 # ... (omitted code)
 
@@ -211,6 +211,26 @@ class MissingPriceDataError(RuntimeError):
         super().__init__(message)
 
 
+def format_missing_price_data_guidance(
+    exc: MissingPriceDataError,
+    *,
+    target_id: str | None = None,
+) -> list[str]:
+    """가격 캐시 누락 시 사용자에게 보여줄 공통 안내 문구를 생성합니다."""
+    country = str(getattr(exc, "country", "") or "").strip().lower()
+    tickers = list(getattr(exc, "tickers", []) or [])
+    country_label = country.upper() if country else "UNKNOWN"
+    cache_target = str(target_id or "").strip().lower() or country or "<account_id>"
+
+    lines = [
+        f"[{country_label}] 가격 캐시가 없는 티커 {len(tickers)}개",
+    ]
+    if tickers:
+        lines.append(f"누락 티커: {', '.join(tickers)}")
+    lines.append(f"다음을 실행해서 캐시를 업데이트 해주세요. python scripts/update_price_cache.py {cache_target}")
+    return lines
+
+
 def _get_cache_start_dt() -> pd.Timestamp | None:
     """config.py에서 캐시 시작 날짜를 로드합니다."""
     try:
@@ -268,6 +288,16 @@ def _now_with_zone(tz_name: str) -> datetime:
     except Exception:
         pass
     return datetime.now()
+
+
+def _today_in_korea() -> pd.Timestamp:
+    """한국 기준 오늘 날짜를 반환합니다."""
+    try:
+        if ZoneInfo is not None:
+            return pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date())
+    except Exception:
+        pass
+    return pd.Timestamp.now().normalize()
 
 
 def _build_market_open_info() -> dict[str, tuple[str, time]]:
@@ -470,34 +500,9 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
     """
     country_code = (country or "").strip().lower()
 
-    end_dt = pd.Timestamp.now()
-
-    tz_info = MARKET_OPEN_INFO.get(country_code)
-    if tz_info is not None:
-        tz_name, open_time = tz_info
-        try:
-            local_now = _now_with_zone(tz_name)
-            candidate_date = local_now.date()
-
-            end_dt = pd.Timestamp(candidate_date)
-        except Exception:
-            # 타임존 처리 실패 시 안전하게 폴백
-            pass
-    elif country_code == "kor":
-        # 한국 시장: 타임존 정보를 사용하도록 통합
-        try:
-            from datetime import datetime
-
-            import pytz
-
-            tz = pytz.timezone("Asia/Seoul")
-            local_now = datetime.now(tz)
-            end_dt = pd.Timestamp(local_now.date())
-        except Exception:
-            end_dt = end_dt.normalize()
-    else:
-        # 타임존 정보를 모르면 현재 날짜 기준으로 처리
-        end_dt = end_dt.normalize()
+    # 최신 거래일 판단의 기준 날짜는 모든 시장 공통으로 한국 날짜를 사용합니다.
+    # 이렇게 해야 AU 시장처럼 현지 날짜가 먼저 넘어가더라도 "내일 거래일"이 잡히지 않습니다.
+    end_dt = _today_in_korea()
 
     # 최근 10일간의 거래일을 한 번에 조회 (효율성 개선)
     start_date = (end_dt - pd.DateOffset(days=10)).strftime("%Y-%m-%d")
@@ -624,6 +629,7 @@ def _fetch_ohlcv_with_cache(
     account_id: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
+    allow_partial: bool = False,
 ) -> pd.DataFrame | None:
     country_code = (country or "").strip().lower()
 
@@ -631,6 +637,8 @@ def _fetch_ohlcv_with_cache(
         raise ValueError(f"OHLCV 데이터 조회 시 account_id가 필요합니다. (Ticker: {ticker})")
 
     cache_key = account_id.strip().lower()
+
+    from services.reference_data_service import get_listing_date
 
     listing_date_str = get_listing_date(country_code, ticker)
     listing_ts = None
@@ -789,7 +797,12 @@ def _fetch_ohlcv_with_cache(
     if combined_df is None or combined_df.empty:
         return None
 
-    if unfilled_ranges:
+    if unfilled_ranges and allow_partial:
+        ranges_text = ", ".join(
+            f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
+        )
+        logger.warning("%s의 가격 데이터 일부 누락 구간을 남긴 채 부분 캐시를 사용합니다: %s", ticker, ranges_text)
+    elif unfilled_ranges:
         ranges_text = ", ".join(
             f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
         )
@@ -849,8 +862,8 @@ def _fetch_ohlcv_core(
 
     country_code = (country or "").strip().lower()
 
-    # 인덱스(^) 또는 해외 주식의 경우 yfinance 사용
-    if ticker.startswith("^") or country_code in ("us", "au"):
+    # 인덱스(^) 또는 호주 주식의 경우 yfinance 사용
+    if ticker.startswith("^") or country_code == "au":
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
             if not fallback.empty:
@@ -1030,6 +1043,8 @@ def repair_recent_trading_day_gaps(
         latest_trading_day.strftime("%Y-%m-%d"),
         country_code,
     )
+    from services.reference_data_service import get_listing_date
+
     listing_date_str = get_listing_date(country_code, ticker_key)
     listing_ts = None
     if listing_date_str:
@@ -1118,7 +1133,7 @@ def fetch_ohlcv_for_tickers(
 
     # 실시간 데이터 가져오기 (거래일 + 장 시작 이후에만)
     realtime_data = {}
-    supports_realtime = country_lower in ("kor", "au", "us")
+    supports_realtime = country_lower in ("kor", "au")
 
     if is_today and supports_realtime:
         # 거래일 여부 확인 (target_today 기준)
@@ -1156,20 +1171,12 @@ def fetch_ohlcv_for_tickers(
         # 거래일이고 장 시작 이후라면 실시간 데이터 조회 (장 마감 후에도 지연 데이터 보완용)
         if is_trading_day and is_market_open_time:
             try:
-                if country_lower == "kor":
-                    # 1. ETF 조회
-                    etf_data = fetch_naver_etf_inav_snapshot(tickers)
-                    realtime_data.update(etf_data)
+                from services.price_service import get_realtime_snapshot
 
-                    # 2. 누락된 종목은 개별 종목으로 조회 시도
-                    missed_tickers = [t for t in tickers if t.upper() not in realtime_data]
-                    if missed_tickers:
-                        stock_data = fetch_naver_stock_realtime_snapshot(missed_tickers)
-                        realtime_data.update(stock_data)
+                if country_lower == "kor":
+                    realtime_data = get_realtime_snapshot("kor", tickers)
                 elif country_lower == "au":
-                    realtime_data = fetch_au_quoteapi_snapshot(tickers)
-                elif country_lower == "us":
-                    realtime_data = fetch_us_yfinance_snapshot(tickers)
+                    realtime_data = get_realtime_snapshot("au", tickers)
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
@@ -1185,6 +1192,8 @@ def fetch_ohlcv_for_tickers(
         ticker_start = warmup_start
         listing_date_str = None
         try:
+            from services.reference_data_service import get_listing_date
+
             listing_date_str = get_listing_date(country, tkr)
         except Exception:
             listing_date_str = None
@@ -1525,7 +1534,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
 
-    # 한 번에 최대 50개까지만 지원할 수 있으므로 청크로 나눔 (보통 백테스트 종목이 많지 않음)
+    # 한 번에 최대 50개까지만 지원하므로 청크로 나눕니다.
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
         query_str = ",".join([f"SERVICE_ITEM:{code}" for code in chunk])
         url = f"{NAVER_FINANCE_STOCK_POLLING_URL}?query={query_str}"
@@ -1696,90 +1705,15 @@ _AU_QUOTEAPI_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}
 _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
 
 
-def fetch_us_yfinance_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """yfinance를 사용하여 해외 ETF의 실시간(또는 최근 장중) 가격 정보를 조회합니다."""
-
-    if not yf:
-        logger.debug("yfinance 라이브러리가 없어 해외 파이낸스 조회를 건너뜁니다.")
-        return {}
-
-    normalized_tickers = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
-    if not normalized_tickers:
-        return {}
-
-    snapshot: dict[str, dict[str, float]] = {}
-
-    try:
-        # 최근 5일치 데이터를 받아와서 전일 종가와 현재가를 모두 가져옵니다.
-        with _silence_yfinance_output():
-            df = yf.download(normalized_tickers, period="5d", progress=False, auto_adjust=True)
-
-        if df.empty:
-            return {}
-
-        import pandas as pd
-
-        is_multi = isinstance(df.columns, pd.MultiIndex)
-        idx_ticker_level = (
-            1
-            if is_multi and "Ticker" in getattr(df.columns, "names", []) and df.columns.names.index("Ticker") == 1
-            else 0
-        )
-
-        for tk in normalized_tickers:
-            try:
-                if is_multi:
-                    try:
-                        tk_df = df.xs(tk, level=idx_ticker_level, axis=1)
-                    except KeyError:
-                        continue
-                else:
-                    tk_df = df
-                # NaN 제거 후 유효한 종가 데이터만 추출
-                if "Close" not in tk_df:
-                    continue
-                valid_closes = tk_df["Close"].dropna()
-                if len(valid_closes) < 2:
-                    continue
-
-                latest_row = tk_df.loc[valid_closes.index[-1]]
-
-                now_val = float(valid_closes.iloc[-1])
-                prev_close = float(valid_closes.iloc[-2])
-
-                change_rate = ((now_val / prev_close) - 1.0) * 100.0 if prev_close else 0.0
-
-                entry = {
-                    "nowVal": now_val,
-                    "changeRate": change_rate,
-                }
-
-                if "Open" in latest_row and not pd.isna(latest_row["Open"]):
-                    entry["open"] = float(latest_row["Open"])
-                if "High" in latest_row and not pd.isna(latest_row["High"]):
-                    entry["high"] = float(latest_row["High"])
-                if "Low" in latest_row and not pd.isna(latest_row["Low"]):
-                    entry["low"] = float(latest_row["Low"])
-                if "Volume" in latest_row and not pd.isna(latest_row["Volume"]):
-                    entry["volume"] = float(latest_row["Volume"])
-
-                snapshot[tk] = entry
-            except Exception as tk_err:
-                logger.debug(f"[US] {tk} 실시간 데이터 처리 중 오류: {tk_err}")
-
-    except Exception as exc:
-        logger.warning(f"해외 ETF 실시간 조회 실패: {exc}")
-
-    return snapshot
-
-
 def prime_au_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
     """Fetch and cache real-time price snapshot for given Australian ETF tickers."""
 
     global _AU_QUOTEAPI_SNAPSHOT_CACHE, _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT
 
     try:
-        snapshot = fetch_au_quoteapi_snapshot(tickers)
+        from services.price_service import get_realtime_snapshot
+
+        snapshot = get_realtime_snapshot("au", tickers)
     except Exception as exc:
         logger.warning("호주 ETF 실시간 스냅샷 조회 실패: %s", exc)
         return
@@ -1811,7 +1745,9 @@ def prime_naver_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
     global _NAVER_ETF_SNAPSHOT_CACHE, _NAVER_ETF_SNAPSHOT_FETCHED_AT
 
     try:
-        snapshot = fetch_naver_etf_inav_snapshot(tickers)
+        from services.price_service import get_realtime_snapshot
+
+        snapshot = get_realtime_snapshot("kor", tickers)
     except Exception as exc:  # pragma: no cover - 외부 요청 방어
         logger.warning("네이버 ETF 실시간 스냅샷 조회 실패: %s", exc)
         return
@@ -2045,6 +1981,8 @@ def get_exchange_rate_series(
     start_date: str | pd.Timestamp,
     end_date: str | pd.Timestamp,
     symbol: str = "KRW=X",
+    *,
+    allow_partial: bool = False,
 ) -> pd.Series:
     """
     환율 (USD/KRW, AUD/KRW 등) 시계열 데이터를 반환합니다.
@@ -2066,6 +2004,7 @@ def get_exchange_rate_series(
         e_dt,
         account_id=cache_dir_name,
         force_refresh=False,
+        allow_partial=allow_partial,
     )
 
     if df is None or df.empty:

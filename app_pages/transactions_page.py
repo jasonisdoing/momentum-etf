@@ -363,14 +363,17 @@ def _render_manage_tab(account_map, account_id_to_country, loading=None):
 
 def _render_bulk_tab(account_map, account_id_to_country):
     from config import BUCKET_CONFIG
+    from services.reference_data_service import get_stock_reference_info
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.stock_meta_updater import fetch_stock_info
 
     st.subheader("텍스트 일괄 업데이트")
     st.info(
-        "엑셀 또는 증권사 화면에서 복사한 잔고 텍스트를 붙여넣으세요. 파싱 후 [현재 잔고]에 일괄 반영할 수 있습니다.\n\n"
-        "⚠️ **주의**: 일괄 반영 시 선택된 계좌의 **기존 종목 데이터는 모두 삭제되고 입력한 데이터로 완전히 교체(Overwrite)** 됩니다. "
-        "(단, 기존과 동일한 티커의 최초 매수일은 유지됩니다.)"
+        "엑셀 또는 증권사 화면에서 복사한 잔고 텍스트를 붙여넣으세요. 파싱 후 [현재 잔고] 마스터에 일괄 반영할 수 있습니다.\n\n"
+        "⚠️ **주의 1**: 입력 데이터에 포함된 **각 계좌는 계좌별로 개별 저장**됩니다. "
+        "예를 들어 `kor_account`만 입력하면 `kor_account`만 변경되고, 다른 계좌(`isa_account`, `pension_account`, `core_account`, `aus_account`) 데이터는 유지됩니다.\n\n"
+        "⚠️ **주의 2**: 다만 **입력에 포함된 계좌 내부에서는 기존 종목 데이터가 모두 삭제되고, 붙여넣은 데이터로 완전히 교체(Overwrite)** 됩니다. "
+        "즉 어떤 계좌에 3개 종목만 넣어서 반영하면, 그 계좌의 기존 보유 목록은 그 3개 기준으로 다시 저장됩니다.\n\n"
+        "⚠️ **주의 3**: 기존과 동일한 티커가 다시 들어오면 해당 티커의 **최초 매수일은 유지**됩니다."
     )
 
     bucket_name_to_id = {v["name"]: k for k, v in BUCKET_CONFIG.items()}
@@ -451,7 +454,7 @@ def _render_bulk_tab(account_map, account_id_to_country):
                     ticker = _normalize_ticker(row["티커"])
                     stock_name = name_lookup.get(ticker)
                     if not stock_name:
-                        info = fetch_stock_info(ticker, country_code)
+                        info = get_stock_reference_info(ticker, country_code)
                         stock_name = info["name"] if info and info.get("name") else ticker
 
                     new_holdings.append(
@@ -474,7 +477,7 @@ def _render_bulk_tab(account_map, account_id_to_country):
 
 
 def _render_cash_tab(account_map):
-    from utils.data_loader import get_exchange_rate_series
+    from services.price_service import get_exchange_rate_series
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
     from utils.settings_loader import get_account_settings
 
@@ -695,8 +698,8 @@ def _render_snapshot_tab(account_map):
 
 @st.dialog("➕ 신규 종목 추가")
 def add_new_stock_modal(account_map, account_id_to_country):
+    from services.reference_data_service import get_stock_reference_info
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.stock_meta_updater import fetch_stock_info
 
     ss_key = "add_stock_lookup_result"
     new_acc_name = st.selectbox("계좌", options=list(account_map.keys()), key="add_acc_sel")
@@ -710,7 +713,7 @@ def add_new_stock_modal(account_map, account_id_to_country):
     if do_search:
         if new_ticker:
             target_country = account_id_to_country.get(account_map[new_acc_name], "kor")
-            info = fetch_stock_info(new_ticker, target_country)
+            info = get_stock_reference_info(new_ticker, target_country)
             if info and info.get("name"):
                 st.session_state[ss_key] = info
             else:

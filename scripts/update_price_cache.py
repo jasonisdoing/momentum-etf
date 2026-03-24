@@ -25,15 +25,13 @@ from utils.cache_utils import (
 )
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
-from utils.identifier_guard import ensure_account_pool_id_separation
 from utils.logger import get_app_logger
-from utils.pool_registry import get_pool_country_code, list_available_pools
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import get_account_settings, list_available_accounts, load_common_settings
 from utils.stock_list_io import get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
-FETCH_RETRY_DELAY_SECONDS = 5.0
+FETCH_RETRY_DELAY_SECONDS = 2.0
 
 
 def _determine_start_date() -> str:
@@ -75,7 +73,7 @@ def refresh_cache_for_target(
     start_date: str | None,
     progress_callback: Callable[[int, int, str], None] | None = None,
 ):
-    """지정된 계정/종목풀(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
+    """지정된 계정(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
     logger = get_app_logger()
     target_norm = (target_id or "").strip().lower()
 
@@ -83,8 +81,6 @@ def refresh_cache_for_target(
         if target_norm in list_available_accounts():
             settings = get_account_settings(target_norm)
             country_code = settings.get("country_code", "kor").lower()
-        elif target_norm in list_available_pools():
-            country_code = get_pool_country_code(target_norm, default="kor")
         else:
             country_code = "kor"
     except Exception:
@@ -214,9 +210,12 @@ def refresh_cache_for_target(
             for i, etf in enumerate(target_items, 1):
                 ticker = str(etf.get("ticker") or "").strip().upper()
                 name = etf.get("name") or "-"
+                started_at = time.perf_counter()
 
                 if progress_callback:
                     progress_callback(i, total_tickers, f"{name}({ticker})")
+
+                logger.info(" -> 가격 캐시 처리 시작: %d/%d - %s(%s)", i, total_tickers, name, ticker)
 
                 try:
                     range_start = start_date or "1990-01-01"
@@ -230,24 +229,38 @@ def refresh_cache_for_target(
                     if unresolved_days:
                         unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
                         logger.warning(
-                            " -> 가격 캐시 갱신 중: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s",
+                            " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s | 소요 %.1fs",
                             i,
                             total_tickers,
                             name,
                             ticker,
                             unresolved_text,
+                            time.perf_counter() - started_at,
                         )
                     else:
-                        logger.info(" -> 가격 캐시 갱신 중: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+                        logger.info(
+                            " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) | 소요 %.1fs",
+                            i,
+                            total_tickers,
+                            name,
+                            ticker,
+                            time.perf_counter() - started_at,
+                        )
                 except PykrxDataUnavailableError as e:
                     failed_tickers.append(ticker)
                     if _is_today_unavailable_warning(e):
-                        logger.warning("%s 당일 데이터 미집계: %s", ticker, e)
+                        logger.warning(
+                            "%s 당일 데이터 미집계: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                        )
                     else:
-                        logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                        logger.error(
+                            "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                        )
                 except Exception as e:
                     failed_tickers.append(ticker)
-                    logger.error("%s 데이터 처리 중 오류 발생: %s", ticker, e)
+                    logger.error(
+                        "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                    )
 
             if failed_tickers:
                 preview = ", ".join(failed_tickers[:10])
@@ -333,11 +346,6 @@ def main():
     """CLI 진입점"""
     logger = get_app_logger()
     load_env_if_present()
-    try:
-        ensure_account_pool_id_separation()
-    except Exception as exc:
-        logger.error("%s", exc)
-        return
 
     parser = _build_parser()
     args = parser.parse_args()
@@ -347,17 +355,14 @@ def main():
 
     targets_to_update: list[str] = []
     available_accounts = list_available_accounts()
-    available_pools = list_available_pools()
-    available_targets = sorted({*available_accounts, *available_pools})
 
     if not target:
-        # Update all accounts + pools
-        targets_to_update = available_targets
+        targets_to_update = available_accounts
     else:
-        if target in available_targets:
+        if target in available_accounts:
             targets_to_update = [target]
         else:
-            logger.error(f"Target '{target}' is not a valid ID (account/pool).")
+            logger.error(f"Target '{target}' is not a valid account ID.")
             return
 
     if not targets_to_update:

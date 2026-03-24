@@ -88,26 +88,11 @@ def _get_collection(account_id: str):
 
 
 def get_cache_lookup_keys(account_id: str) -> list[str]:
-    """캐시 조회 시도 순서를 반환한다.
-
-    계좌에 pool이 연결되어 있으면 `[account_id, *pool_ids]` 순서로 조회한다.
-    """
+    """캐시 조회 시도 순서를 반환한다."""
     token = (account_id or "").strip().lower()
     if not token:
         return []
-
-    lookup_keys = [token]
-
-    try:
-        from utils.settings_loader import get_account_pool_ids
-
-        for pool_id in get_account_pool_ids(token):
-            if pool_id not in lookup_keys:
-                lookup_keys.append(pool_id)
-    except Exception:
-        pass
-
-    return lookup_keys
+    return [token]
 
 
 def _deserialize_cached_doc(doc: dict[str, Any], collection=None) -> pd.DataFrame | None:
@@ -172,7 +157,7 @@ def load_cached_frame(account_id: str, ticker: str) -> pd.DataFrame | None:
 
 
 def load_cached_frame_with_fallback(account_id: str, ticker: str) -> pd.DataFrame | None:
-    """계좌 캐시를 우선 조회하고, 없으면 연결된 pool 캐시를 fallback으로 조회한다."""
+    """계좌 캐시를 조회한다."""
     for cache_key in get_cache_lookup_keys(account_id):
         df = load_cached_frame(cache_key, ticker)
         if df is not None and not df.empty:
@@ -213,7 +198,7 @@ def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str
 
 
 def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
-    """계좌 캐시를 우선 조회하고, 누락된 티커는 연결된 pool 캐시에서 보완한다."""
+    """계좌 캐시를 조회한다."""
     normalized = []
     for ticker in tickers:
         norm = (ticker or "").strip().upper()
@@ -235,6 +220,60 @@ def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str
         missing -= set(fetched.keys())
 
     return frames
+
+
+def load_cached_updated_at_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, datetime]:
+    """다수의 티커에 대한 캐시 updated_at 시각을 한 번에 조회합니다."""
+    normalized = []
+    for t in tickers:
+        norm = (t or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    collection = _get_collection(account_id)
+    if collection is None:
+        return {}
+
+    results: dict[str, datetime] = {}
+    try:
+        cursor = collection.find({"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1})
+    except Exception:
+        return {}
+
+    for doc in cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        updated_at = doc.get("updated_at")
+        if ticker and isinstance(updated_at, datetime):
+            results[ticker] = updated_at
+
+    return results
+
+
+def load_cached_updated_at_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, datetime]:
+    """계좌 캐시의 updated_at 시각을 조회합니다."""
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    updated_map: dict[str, datetime] = {}
+    missing = set(normalized)
+
+    for cache_key in get_cache_lookup_keys(account_id):
+        if not missing:
+            break
+        fetched = load_cached_updated_at_bulk(cache_key, missing)
+        if not fetched:
+            continue
+        updated_map.update(fetched)
+        missing -= set(fetched.keys())
+
+    return updated_map
 
 
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:

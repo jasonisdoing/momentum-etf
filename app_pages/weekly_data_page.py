@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from utils.data_loader import get_exchange_rate_series
+from services.price_service import get_exchange_rate_series
 from utils.db_manager import get_db_connection
 from utils.report import format_kr_money
 from utils.ui import create_loading_status
@@ -157,7 +157,8 @@ def _format_display_money(value: object) -> str:
 def _get_live_exchange_rate() -> float:
     """현재 시점의 USD/KRW 환율을 반환한다."""
     now = pd.Timestamp(_get_now_kst()).tz_localize(None)
-    series = get_exchange_rate_series(now - pd.Timedelta(days=5), now)
+    # 주별 화면의 환율은 보조 지표이므로, 단기 누락이 있어도 부분 캐시를 우선 사용합니다.
+    series = get_exchange_rate_series(now - pd.Timedelta(days=5), now, allow_partial=True)
     if series.empty:
         return 0.0
     return float(series.iloc[-1])
@@ -189,6 +190,7 @@ def _ensure_historical_exchange_rates() -> None:
     rate_series = get_exchange_rate_series(
         pd.Timestamp(start_date) - pd.Timedelta(days=7),
         pd.Timestamp(end_date),
+        allow_partial=True,
     )
     if rate_series.empty:
         return
@@ -415,16 +417,47 @@ def sync_active_week_summary() -> dict:
     raise RuntimeError(f"활성 주차({active_week_date}) 데이터를 찾지 못했습니다.")
 
 
+def sync_active_week_summary_from_snapshot(
+    *,
+    total_assets: float,
+    total_purchase: float,
+    total_valuation: float,
+    total_cash: float,
+    bucket_totals: dict[str, float],
+    total_profit_count: int,
+    total_loss_count: int,
+) -> dict:
+    """이미 계산된 홈 스냅샷 합계를 활성 주차 행에 반영하고 계산된 문서를 반환한다."""
+
+    _ensure_active_week_row()
+    _ensure_historical_exchange_rates()
+    active_week_date = _upsert_active_week_summary(
+        total_assets=total_assets,
+        total_purchase=total_purchase,
+        total_valuation=total_valuation,
+        total_cash=total_cash,
+        bucket_totals=bucket_totals,
+        total_profit_count=total_profit_count,
+        total_loss_count=total_loss_count,
+        live_exchange_rate=_get_live_exchange_rate(),
+    )
+
+    for doc in _load_weekly_docs():
+        if str(doc.get("week_date", "")) == active_week_date:
+            return doc
+
+    raise RuntimeError(f"활성 주차({active_week_date}) 데이터를 찾지 못했습니다.")
+
+
 def _aggregate_live_summary_into_active_week() -> str:
     """홈 화면과 같은 실시간 합계를 활성 주차 1행에 반영한다."""
     from utils.account_registry import load_account_configs
-    from utils.portfolio_io import load_portfolio_master, load_real_holdings_with_recommendations
+    from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결 실패")
 
-    active_week_date = _get_active_week_date()
     total_assets = 0.0
     total_purchase = 0.0
     total_valuation = 0.0
@@ -449,7 +482,7 @@ def _aggregate_live_summary_into_active_week() -> str:
         cash_balance = float(master_data.get("cash_balance", 0.0) if master_data else 0.0)
         total_cash += cash_balance
 
-        holdings_df = load_real_holdings_with_recommendations(account_id)
+        holdings_df = load_real_holdings_table(account_id)
         if holdings_df is None or holdings_df.empty:
             account_purchase = 0.0
             account_valuation = 0.0
@@ -466,6 +499,37 @@ def _aggregate_live_summary_into_active_week() -> str:
         total_assets += account_valuation + cash_balance
         total_purchase += account_purchase
         total_valuation += account_valuation
+
+    return _upsert_active_week_summary(
+        total_assets=total_assets,
+        total_purchase=total_purchase,
+        total_valuation=total_valuation,
+        total_cash=total_cash,
+        bucket_totals=bucket_totals,
+        total_profit_count=total_profit_count,
+        total_loss_count=total_loss_count,
+        live_exchange_rate=live_exchange_rate,
+    )
+
+
+def _upsert_active_week_summary(
+    *,
+    total_assets: float,
+    total_purchase: float,
+    total_valuation: float,
+    total_cash: float,
+    bucket_totals: dict[str, float],
+    total_profit_count: int,
+    total_loss_count: int,
+    live_exchange_rate: float,
+) -> str:
+    """활성 주차 요약 행을 주어진 집계값으로 갱신한다."""
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패")
+
+    active_week_date = _get_active_week_date()
 
     if total_assets > 0:
         bucket_pct_momentum = (bucket_totals["1. 모멘텀"] / total_assets) * 100

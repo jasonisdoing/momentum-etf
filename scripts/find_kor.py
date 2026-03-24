@@ -10,19 +10,15 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 from utils.logger import get_app_logger
 
 """
-find.py
+find_kor.py
 
-pykrx 라이브러리를 사용하여 지정된 등락률 이상 상승한 종목들을
-섹터별로 분류하여 보여주는 스크립트입니다.
+네이버 금융 ETF API를 사용하여 지정된 등락률 이상 상승한 국내 ETF를 찾고,
+현재 국내 계좌들에 등록된 종목 / 삭제된 종목 / 신규 발견 종목으로 분류합니다.
 
 [사용법]
-python scripts/find.py
-
-[설정 변경]
-최소 등락률을 변경하려면 파일 상단의 MIN_CHANGE_PCT 상수를 수정하세요.
+python scripts/find_kor.py
 """
 
-import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 
@@ -30,51 +26,34 @@ import pandas as pd
 import requests
 from pykrx import stock
 
+from utils.settings_loader import get_account_settings, list_available_accounts
+from utils.stock_list_io import get_deleted_etfs, get_etfs
+
 # --- 설정 ---
-# 최소 등락률 (%)
 MIN_CHANGE_PCT = 3.0
-# 이름에 아래 단어가 포함된 종목은 결과에서 제외합니다.
-# EXCLUDE_KEYWORDS = ["레버리지", "선물", "채권", "커버드콜", "인버스", "ETN", "코리아", "한국", "200", "삼성", "코스닥", "코스피"]
 EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
-# 이름에 아래 단어 중 하나라도 포함된 종목만 포함합니다 (빈 배열이면 모든 종목 포함).
-# INCLUDE_KEYWORDS = ["글로벌"]
-INCLUDE_KEYWORDS = []
-# 최소 거래량 (0이면 필터링 안 함)
-# MIN_VOLUME = 100000
-# MIN_VOLUME = 500000
-MIN_VOLUME = 500000
+INCLUDE_KEYWORDS: list[str] = []
+MIN_VOLUME = 100000
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
-    """
-    네이버 금융 API에서 ETF 데이터를 가져옵니다.
-    실패 시 None을 반환합니다.
-    """
+    """네이버 금융 ETF API에서 기준 이상 상승한 ETF 목록을 가져옵니다."""
     from config import NAVER_FINANCE_ETF_API_URL, NAVER_FINANCE_HEADERS
 
     logger = get_app_logger()
-    url = NAVER_FINANCE_ETF_API_URL
-    headers = NAVER_FINANCE_HEADERS
 
     try:
         logger.info("네이버 API에서 ETF 데이터를 가져오는 중입니다...")
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(NAVER_FINANCE_ETF_API_URL, headers=NAVER_FINANCE_HEADERS, timeout=5)
         response.raise_for_status()
 
         data = response.json()
         items = data.get("result", {}).get("etfItemList")
-
         if not isinstance(items, list) or not items:
             logger.warning("네이버 API 응답에 ETF 데이터가 없습니다.")
-            logger.warning(f"응답 구조: {list(data.keys()) if isinstance(data, dict) else type(data).__name__}")
-            if isinstance(data, dict) and "result" in data:
-                logger.warning(
-                    f"result 내부 키: {list(data['result'].keys()) if isinstance(data['result'], dict) else type(data['result']).__name__}"
-                )
             return None
 
-        # DataFrame 생성
-        gainers_list = []
+        gainers_list: list[dict[str, object]] = []
         for item in items:
             if not isinstance(item, dict):
                 continue
@@ -82,29 +61,24 @@ def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
             ticker = str(item.get("itemcode", "")).strip()
             name = str(item.get("itemname", "")).strip()
             change_rate = item.get("changeRate", 0)
-            volume = item.get("quant", 0)  # 거래량
-            risefall_rate = item.get("risefallRate")  # 괴리율 (None 허용)
-            three_month_rate = item.get("threeMonthEarnRate")  # 3개월 수익률 (None 허용)
-            now_val = item.get("nowVal")  # 현재가
-            nav = item.get("nav")  # NAV
+            volume = item.get("quant", 0)
+            risefall_rate = item.get("risefallRate")
+            three_month_rate = item.get("threeMonthEarnRate")
+            now_val = item.get("nowVal")
+            nav = item.get("nav")
 
-            # 등락률이 기준 이상인 종목만 추가
             try:
                 change_rate_float = float(change_rate)
                 volume_int = int(volume) if volume else 0
 
-                # 괴리율: API에서 제공하면 사용, 없으면 nowVal/nav로 계산
                 risefall_float = None
                 if risefall_rate is not None:
                     risefall_float = float(risefall_rate)
                 elif now_val is not None and nav is not None:
-                    try:
-                        now_val_float = float(now_val)
-                        nav_float = float(nav)
-                        if nav_float > 0:
-                            risefall_float = ((now_val_float / nav_float) - 1.0) * 100.0
-                    except (TypeError, ValueError):
-                        pass
+                    now_val_float = float(now_val)
+                    nav_float = float(nav)
+                    if nav_float > 0:
+                        risefall_float = ((now_val_float / nav_float) - 1.0) * 100.0
 
                 three_month_float = float(three_month_rate) if three_month_rate is not None else None
 
@@ -123,317 +97,209 @@ def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:
                 continue
 
         if not gainers_list:
-            logger.warning(f"등락률 {min_change_pct:.2f}% 이상인 종목이 없습니다. (전체 ETF 수: {len(items)}개)")
-            return pd.DataFrame(columns=["티커", "종목명", "등락률", "거래량", "괴리율"])
+            logger.warning("등락률 %.2f%% 이상인 종목이 없습니다.", min_change_pct)
+            return pd.DataFrame(columns=["티커", "종목명", "등락률", "거래량", "괴리율", "3개월수익률"])
 
         df = pd.DataFrame(gainers_list)
-        logger.info(f"네이버 API에서 {len(df)}개 종목 데이터를 가져왔습니다. (전체 ETF 수: {len(items)}개)")
+        logger.info("네이버 API에서 %d개 종목 데이터를 가져왔습니다.", len(df))
         return df
 
-    except requests.exceptions.Timeout as e:
-        logger.error(f"네이버 API 타임아웃 (5초 초과): {e}")
+    except requests.exceptions.RequestException as exc:
+        logger.error("네이버 API 요청 실패: %s", exc)
         return None
-    except requests.exceptions.HTTPError as e:
-        logger.error(f"네이버 API HTTP 에러 (상태 코드: {response.status_code}): {e}")
-        logger.error(f"응답 내용 (처음 500자): {response.text[:500]}")
-        return None
-    except requests.exceptions.ConnectionError as e:
-        logger.error(f"네이버 API 연결 실패 (네트워크 확인 필요): {e}")
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.error(f"네이버 API 요청 실패: {e}")
-        return None
-    except json.JSONDecodeError as e:
-        logger.error(f"네이버 API 응답이 JSON 형식이 아닙니다: {e}")
-        logger.error(f"응답 내용 (처음 500자): {response.text[:500]}")
-        return None
-    except Exception as e:
-        logger.error(f"네이버 API 데이터 처리 중 예상치 못한 오류: {type(e).__name__}: {e}")
-        import traceback
-
-        logger.error(f"상세 오류:\n{traceback.format_exc()}")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("네이버 API 데이터 처리 중 오류: %s", exc)
         return None
 
 
 def get_latest_trading_day() -> str:
-    """
-    오늘 또는 가장 가까운 과거의 거래일을 'YYYYMMDD' 형식으로 반환합니다.
-    pykrx의 get_market_ohlcv_by_date가 휴일에는 빈 DataFrame을 반환하는 것을 이용합니다.
-    """
+    """가장 최근 국내 거래일을 YYYYMMDD 형식으로 반환합니다."""
     dt = datetime.now()
-    for i in range(10):  # 최대 10일 전까지 탐색
-        date_str = (dt - timedelta(days=i)).strftime("%Y%m%d")
-        # KOSPI 대표 종목(005930)으로 해당 날짜의 거래 여부 확인
+    for days_back in range(10):
+        date_str = (dt - timedelta(days=days_back)).strftime("%Y%m%d")
         df = stock.get_market_ohlcv_by_date(date_str, date_str, "005930")
         if not df.empty:
             return date_str
-    # 탐색 실패 시 오늘 날짜 반환 (오류 발생 가능성 있음)
     return datetime.now().strftime("%Y%m%d")
 
 
-def get_previous_trading_day(date_str: str) -> str:
-    """
-    주어진 날짜('YYYYMMDD')의 이전 거래일을 'YYYYMMDD' 형식으로 반환합니다.
-    """
-    dt = datetime.strptime(date_str, "%Y%m%d")
-    # 시작 날짜 바로 전날부터 탐색
-    for i in range(1, 15):  # 최대 15일 전까지 탐색
-        prev_dt = dt - timedelta(days=i)
-        prev_date_str = prev_dt.strftime("%Y%m%d")
-        # KOSPI 대표 종목(005930)으로 해당 날짜의 거래 여부 확인
-        df = stock.get_market_ohlcv_by_date(prev_date_str, prev_date_str, "005930")
-        if not df.empty:
-            return prev_date_str
-    # 탐색 실패 시, 입력일의 하루 전을 반환 (정확하지 않을 수 있음)
-    return (dt - timedelta(days=1)).strftime("%Y%m%d")
+def _load_target_accounts() -> list[str]:
+    """국내 계좌 목록만 동적으로 로드합니다."""
+    targets: list[str] = []
+    for account_id in list_available_accounts():
+        try:
+            settings = get_account_settings(account_id)
+        except Exception:  # noqa: BLE001
+            continue
+        if str(settings.get("country_code") or "").strip().lower() == "kor":
+            targets.append(account_id)
+    return targets
 
 
-def find_top_gainers(min_change_pct: float = 5.0, asset_type: str = "etf"):
-    """
-    지정된 등락률 이상 상승한 종목들을 보여줍니다.
-    네이버 API 우선, 실패 시 pykrx 폴백 방식 사용.
-    """
-    logger = get_app_logger()
-    try:
-        latest_day = get_latest_trading_day()
-        type_str = f" ({asset_type.upper()})"
-        print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]}{type_str}")
+def _print_item(item: dict[str, object], *, is_deleted: bool = False) -> None:
+    ticker = str(item["티커"])
+    name = str(item["종목명"])
+    change_rate = float(item["등락률"])
+    volume = int(item.get("거래량", 0) or 0)
+    volume_str = f"{volume:,}" if volume else "N/A"
+    risefall = item.get("괴리율")
+    risefall_str = f"{float(risefall):+.2f}%" if risefall is not None and pd.notna(risefall) else "N/A"
+    three_month = item.get("3개월수익률")
+    three_month_str = f"{float(three_month):+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
 
-        df_change = pd.DataFrame()
-        top_gainers = pd.DataFrame()
+    accounts_str = ""
+    if "accounts" in item:
+        accounts_str = f"[{', '.join(item['accounts'])}] "
 
-        # 1. ETF 데이터 가져오기
-        if asset_type == "etf":
-            # 네이버 API 시도 (빠름)
-            naver_df = fetch_naver_etf_data(min_change_pct)
+    base_msg = (
+        f"  - {accounts_str}{name} ({ticker}): "
+        f"금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+    )
 
-            if naver_df is None:
-                # 네이버 API 실패 시 종료 (None 반환)
-                logger.error("❌ 네이버 API 실패. 스크립트를 종료합니다.")
-                print("❌ 네이버 API에서 데이터를 가져올 수 없습니다.")
-                return
-
-            # 네이버 API 성공 (빈 DataFrame도 성공)
-            top_gainers = naver_df
-            if not naver_df.empty:
-                print("✅ 네이버 API 사용 (빠른 조회 성공)")
-
-        # 2. 일반 주식 데이터 가져오기
-        if asset_type == "stock":
-            logger.info("일반 주식의 가격 변동 정보를 가져오는 중입니다...")
-            try:
-                # get_market_price_change_by_ticker는 '등락률' 컬럼을 포함합니다.
-                df_stock = stock.get_market_price_change_by_ticker(latest_day, latest_day, market="ALL")
-                # 필요한 컬럼만 선택하여 df_change에 추가합니다.
-                df_stock_filtered = df_stock[["등락률"]].reset_index()  # 인덱스를 '티커' 컬럼으로 변환
-                df_change = pd.concat([df_change, df_stock_filtered], ignore_index=True)
-            except Exception as e:
-                logger.warning("일반 주식 정보 조회 중 오류가 발생했습니다: %s", e)
-
-        if top_gainers.empty:
-            print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목이 없습니다.")
-            return
-
-        # 키워드 기반 필터링
-        initial_count = len(top_gainers)
-
-        # INCLUDE_KEYWORDS 필터링 (OR 조건: 하나라도 포함되면 포함)
-        if INCLUDE_KEYWORDS:
-            include_pattern = "|".join(INCLUDE_KEYWORDS)
-            top_gainers = top_gainers[top_gainers["종목명"].str.contains(include_pattern, na=False)]
-            include_filtered_count = initial_count - len(top_gainers)
-            if include_filtered_count > 0:
-                print(
-                    f"포함 키워드({', '.join(INCLUDE_KEYWORDS)})에 따라 {include_filtered_count}개 종목을 제외했습니다."
-                )
-
-        # EXCLUDE_KEYWORDS 필터링
-        if EXCLUDE_KEYWORDS:
-            before_exclude = len(top_gainers)
-            exclude_pattern = "|".join(EXCLUDE_KEYWORDS)
-            top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
-            exclude_filtered_count = before_exclude - len(top_gainers)
-            if exclude_filtered_count > 0:
-                print(
-                    f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {exclude_filtered_count}개 종목을 제외했습니다."
-                )
-
-        # 거래량 필터링
-        if MIN_VOLUME > 0 and "거래량" in top_gainers.columns:
-            before_volume = len(top_gainers)
-            top_gainers = top_gainers[top_gainers["거래량"] >= MIN_VOLUME]
-            volume_filtered_count = before_volume - len(top_gainers)
-            if volume_filtered_count > 0:
-                print(f"최소 거래량({MIN_VOLUME:,})에 따라 {volume_filtered_count}개 종목을 제외했습니다.")
-
-        print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
-
-        # 필터링 후 결과 확인
-        if top_gainers.empty:
-            print("\n제외 키워드 필터링 후 남은 종목이 없습니다.")
-            return
-
-        # 등락률 순으로 정렬
-        sorted_gainers = top_gainers.sort_values(by="등락률", ascending=False)
-
-        print("\n--- 상승중인 ETF 목록 ---")
-        for _, row in sorted_gainers.iterrows():
-            ticker = row["티커"]
-            name = row["종목명"]
-            change_rate = row["등락률"]
-
-            # 추가 정보 가져오기
-            volume = row.get("거래량", 0)
-            risefall = row.get("괴리율", None)
-
-            # 3개월 수익률: 네이버 API만 사용
-            three_month_rate = row.get("3개월수익률", None)
-
-            # 거래량 포맷팅 (천 단위 구분)
-            volume_str = f"{volume:,}" if volume else "N/A"
-
-            # 3개월 수익률 포맷팅
-            if three_month_rate is not None and pd.notna(three_month_rate):
-                three_month_str = f"{three_month_rate:+.2f}%"
-            else:
-                three_month_str = "아직없음"
-
-            # 괴리율 포맷팅
-            risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
-
-            print(
-                f"  - {name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
-            )
-
-    except Exception as e:
-        logger.error("오류가 발생했습니다: %s", e)
+    if not is_deleted:
+        print(base_msg)
         return
 
-    # 기존 stocks.json 로드 및 비교
+    deleted_infos = item.get("deleted_infos", [])
+    parts: list[str] = []
+    for info in deleted_infos:
+        account_id = info.get("account_id", "?")
+        deleted_at = info.get("deleted_at")
+        deleted_reason = info.get("deleted_reason") or "사유없음"
+        if hasattr(deleted_at, "strftime"):
+            deleted_date = deleted_at.strftime("%Y-%m-%d")
+        else:
+            deleted_date = str(deleted_at or "")[:10]
+        parts.append(f"[{account_id}] {deleted_date} ({deleted_reason})")
 
-    # 확인할 종목풀 목록
-    from utils.pool_registry import list_available_pools
+    print(f"{base_msg} | 🗑️ 삭제: {' | '.join(parts)}")
 
-    target_pools = list_available_pools()
 
-    # 기존 종목 로드 (MongoDB)
-    # 기존 종목 및 삭제된 종목 로드
-    from utils.stock_list_io import get_deleted_etfs, get_etfs
+def _print_basic_item(item: dict[str, object]) -> None:
+    """상승 종목 기본 목록 한 줄을 출력합니다."""
+    ticker = str(item["티커"])
+    name = str(item["종목명"])
+    change_rate = float(item["등락률"])
+    volume = int(item.get("거래량", 0) or 0)
+    volume_str = f"{volume:,}" if volume else "N/A"
+    risefall = item.get("괴리율")
+    risefall_str = f"{float(risefall):+.2f}%" if risefall is not None and pd.notna(risefall) else "N/A"
+    three_month = item.get("3개월수익률")
+    three_month_str = f"{float(three_month):+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
 
-    existing_tickers_map = defaultdict(list)  # ticker -> list of pool_ids
-    deleted_tickers_map = defaultdict(list)  # ticker -> list of {pool_id, deleted_at, deleted_reason}
+    print(
+        f"  - {name} ({ticker}): "
+        f"금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
+    )
 
-    for pool_id in target_pools:
+
+def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
+    """국내 ETF 상승 종목을 계좌 등록 상태 기준으로 분류해 출력합니다."""
+    latest_day = get_latest_trading_day()
+    print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]} (ETF)")
+
+    top_gainers = fetch_naver_etf_data(min_change_pct)
+    if top_gainers is None:
+        print("❌ 네이버 API에서 데이터를 가져올 수 없습니다.")
+        return
+    if top_gainers.empty:
+        print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목이 없습니다.")
+        return
+
+    print("✅ 네이버 API 사용 (빠른 조회 성공)")
+
+    initial_count = len(top_gainers)
+
+    if INCLUDE_KEYWORDS:
+        include_pattern = "|".join(INCLUDE_KEYWORDS)
+        top_gainers = top_gainers[top_gainers["종목명"].str.contains(include_pattern, na=False)]
+        filtered = initial_count - len(top_gainers)
+        if filtered > 0:
+            print(f"포함 키워드({', '.join(INCLUDE_KEYWORDS)})에 따라 {filtered}개 종목을 제외했습니다.")
+
+    if EXCLUDE_KEYWORDS:
+        before_exclude = len(top_gainers)
+        exclude_pattern = "|".join(EXCLUDE_KEYWORDS)
+        top_gainers = top_gainers[~top_gainers["종목명"].str.contains(exclude_pattern, na=False)]
+        filtered = before_exclude - len(top_gainers)
+        if filtered > 0:
+            print(f"제외 키워드({', '.join(EXCLUDE_KEYWORDS)})에 따라 {filtered}개 종목을 제외했습니다.")
+
+    if MIN_VOLUME > 0 and "거래량" in top_gainers.columns:
+        before_volume = len(top_gainers)
+        top_gainers = top_gainers[top_gainers["거래량"] >= MIN_VOLUME]
+        filtered = before_volume - len(top_gainers)
+        if filtered > 0:
+            print(f"최소 거래량({MIN_VOLUME:,})에 따라 {filtered}개 종목을 제외했습니다.")
+
+    if top_gainers.empty:
+        print("\n필터링 후 남은 종목이 없습니다.")
+        return
+
+    target_accounts = _load_target_accounts()
+    if not target_accounts:
+        print("국내 계좌를 찾지 못했습니다.")
+        return
+
+    print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
+    print()
+    print("--- 상승중인 ETF 목록 ---")
+    for item in sorted(top_gainers.to_dict("records"), key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
+        _print_basic_item(item)
+
+    existing_tickers_map: dict[str, list[str]] = defaultdict(list)
+    deleted_tickers_map: dict[str, list[dict[str, object]]] = defaultdict(list)
+
+    for account_id in target_accounts:
         try:
-            # 활성 종목
-            existing_etfs = get_etfs(pool_id)
-            for item in existing_etfs:
-                existing_tickers_map[item["ticker"]].append(pool_id)
+            for item in get_etfs(account_id):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                if ticker:
+                    existing_tickers_map[ticker].append(account_id)
 
-            # 삭제된 종목
-            deleted_list = get_deleted_etfs(pool_id)
-            for item in deleted_list:
-                t = item.get("ticker")
-                if t:
-                    info = item.copy()
-                    info["pool_id"] = pool_id
-                    deleted_tickers_map[t].append(info)
+            for item in get_deleted_etfs(account_id):
+                ticker = str(item.get("ticker") or "").strip().upper()
+                if not ticker:
+                    continue
+                info = dict(item)
+                info["account_id"] = account_id
+                deleted_tickers_map[ticker].append(info)
+        except Exception as exc:  # noqa: BLE001
+            get_app_logger().warning("%s 종목 로드 중 오류 발생: %s", account_id, exc)
 
-        except Exception as e:
-            logger.warning(f"{pool_id} 종목 로드 중 오류 발생: {e}")
+    my_account_list: list[dict[str, object]] = []
+    deleted_list: list[dict[str, object]] = []
+    new_discovery_list: list[dict[str, object]] = []
 
-    # top_gainers DataFrame에서 티커 목록 추출
-    found_tickers = []
-    if not top_gainers.empty:
-        found_tickers = top_gainers.to_dict("records")
-
-    # 분류
-    my_universe_list = []
-    deleted_list = []
-    new_discovery_list = []
-
-    for item in found_tickers:
-        ticker = item["티커"]
-
+    for item in top_gainers.to_dict("records"):
+        ticker = str(item["티커"]).strip().upper()
         if ticker in existing_tickers_map:
-            # 종목풀 정보 추가
-            item["pools"] = existing_tickers_map[ticker]
-            my_universe_list.append(item)
+            item["accounts"] = existing_tickers_map[ticker]
+            my_account_list.append(item)
         elif ticker in deleted_tickers_map:
-            # 삭제 정보 추가 (여러 계좌일 수 있음, 여기선 첫 번째 정보 사용하거나 모두 표시)
             item["deleted_infos"] = deleted_tickers_map[ticker]
             deleted_list.append(item)
         else:
             new_discovery_list.append(item)
 
-    # 출력 헬퍼
-    def print_item(item, is_deleted=False):
-        ticker = item["티커"]
-        name = item["종목명"]
-        change_rate = item["등락률"]
-        volume = item.get("거래량", 0)
-        volume_str = f"{volume:,}" if volume else "N/A"
-        risefall = item.get("괴리율")
-        risefall_str = f"{risefall:+.2f}%" if risefall is not None else "N/A"
-        three_month = item.get("3개월수익률")
-        three_month_str = f"{three_month:+.2f}%" if three_month is not None and pd.notna(three_month) else "아직없음"
+    print()
+    print("--- 계좌 등록 ETF 목록 ---")
+    if my_account_list:
+        for item in sorted(my_account_list, key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
+            _print_item(item)
 
-        # 종목풀 표시
-        pools_str = ""
-        if "pools" in item:
-            pools_str = f"[{', '.join(item['pools'])}] "
-
-        base_msg = f"  - {pools_str}{name} ({ticker}): 금일수익률: +{change_rate:.2f}%, 3개월: {three_month_str}, 거래량: {volume_str}, 괴리율: {risefall_str}"
-
-        if is_deleted:
-            deleted_infos = item.get("deleted_infos", [])
-            del_msg_parts = []
-            for info in deleted_infos:
-                pool_id = info.get("pool_id", "?")
-                d_date = info.get("deleted_at")
-                d_reason = info.get("deleted_reason") or "사유없음"
-
-                date_str = ""
-                if d_date:
-                    if hasattr(d_date, "strftime"):
-                        date_str = d_date.strftime("%Y-%m-%d")
-                    else:
-                        date_str = str(d_date)[:10]
-                del_msg_parts.append(f"[{pool_id}] {date_str} ({d_reason})")
-
-            del_msg = " | ".join(del_msg_parts)
-            print(f"{base_msg} | 🗑️ 삭제: {del_msg}")
-        else:
-            print(base_msg)
-
-    # 1. 내 유니버스
-    if my_universe_list:
-        print()
-        print("--- 종목풀 등록 ETF 목록 ---")
-        for item in my_universe_list:
-            print_item(item)
-
-    # 2. 삭제된 목록
+    print()
+    print("--- 삭제된 ETF 목록 ---")
     if deleted_list:
-        print()
-        print("--- 삭제된 ETF 목록 ---")
-        for item in deleted_list:
-            print_item(item, is_deleted=True)
+        for item in sorted(deleted_list, key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
+            _print_item(item, is_deleted=True)
 
-    # 3. 신규 발견
+    print()
+    print("--- 신규 발견 종목 ---")
     if new_discovery_list:
-        new_discovery_list = sorted(
-            new_discovery_list,
-            key=lambda item: float(item.get("등락률", 0.0) or 0.0),
-            reverse=True,
-        )
-        print()
-        print("--- 신규 발견 종목 ---")
-        for item in new_discovery_list:
-            print_item(item)
-    else:
-        print("\n✅ 신규로 발견된 종목이 없습니다 (모두 등록됨 혹은 삭제됨).")
+        for item in sorted(new_discovery_list, key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
+            _print_item(item)
 
 
 if __name__ == "__main__":
-    find_top_gainers(min_change_pct=MIN_CHANGE_PCT, asset_type="etf")
+    find_top_gainers()

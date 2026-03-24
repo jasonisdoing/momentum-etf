@@ -1,4 +1,4 @@
-"""모든 종목 목록 페이지 — stocks.json 메타정보 테이블."""
+"""모든 종목 목록 페이지."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _format_volume(val: Any) -> str:
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _build_all_stocks_table(account_id: str) -> pd.DataFrame:
-    """stocks.json 메타정보를 DataFrame으로 반환."""
+    """계좌 종목 메타정보를 DataFrame으로 반환."""
 
     etfs = get_etfs(account_id)
     if not etfs:
@@ -82,7 +82,7 @@ def render_all_stocks_page() -> None:
 
     # page config은 app.py의 main()에서 이미 설정됨
 
-    st.caption("종목 유니버스 메타정보 (stocks.json)")
+    st.caption("종목 유니버스 메타정보")
 
     accounts_meta = load_account_configs()
     if not accounts_meta:
