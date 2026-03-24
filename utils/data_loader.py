@@ -66,7 +66,7 @@ from utils.cache_utils import (
     save_cached_frame,
 )
 from utils.logger import get_app_logger
-from utils.stock_list_io import get_etfs_by_country, get_listing_date, set_listing_date
+from utils.stock_list_io import get_etfs_by_country, set_listing_date
 
 # ... (omitted code)
 
@@ -638,6 +638,8 @@ def _fetch_ohlcv_with_cache(
 
     cache_key = account_id.strip().lower()
 
+    from services.reference_data_service import get_listing_date
+
     listing_date_str = get_listing_date(country_code, ticker)
     listing_ts = None
     if listing_date_str:
@@ -1041,6 +1043,8 @@ def repair_recent_trading_day_gaps(
         latest_trading_day.strftime("%Y-%m-%d"),
         country_code,
     )
+    from services.reference_data_service import get_listing_date
+
     listing_date_str = get_listing_date(country_code, ticker_key)
     listing_ts = None
     if listing_date_str:
@@ -1167,18 +1171,12 @@ def fetch_ohlcv_for_tickers(
         # 거래일이고 장 시작 이후라면 실시간 데이터 조회 (장 마감 후에도 지연 데이터 보완용)
         if is_trading_day and is_market_open_time:
             try:
-                if country_lower == "kor":
-                    # 1. ETF 조회
-                    etf_data = fetch_naver_etf_inav_snapshot(tickers)
-                    realtime_data.update(etf_data)
+                from services.price_service import get_realtime_snapshot
 
-                    # 2. 누락된 종목은 개별 종목으로 조회 시도
-                    missed_tickers = [t for t in tickers if t.upper() not in realtime_data]
-                    if missed_tickers:
-                        stock_data = fetch_naver_stock_realtime_snapshot(missed_tickers)
-                        realtime_data.update(stock_data)
+                if country_lower == "kor":
+                    realtime_data = get_realtime_snapshot("kor", tickers)
                 elif country_lower == "au":
-                    realtime_data = fetch_au_quoteapi_snapshot(tickers)
+                    realtime_data = get_realtime_snapshot("au", tickers)
             except Exception as e:
                 logger.warning(f"실시간 데이터 조회 중 오류 발생: {e}")
 
@@ -1194,6 +1192,8 @@ def fetch_ohlcv_for_tickers(
         ticker_start = warmup_start
         listing_date_str = None
         try:
+            from services.reference_data_service import get_listing_date
+
             listing_date_str = get_listing_date(country, tkr)
         except Exception:
             listing_date_str = None
@@ -1711,7 +1711,9 @@ def prime_au_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
     global _AU_QUOTEAPI_SNAPSHOT_CACHE, _AU_QUOTEAPI_SNAPSHOT_FETCHED_AT
 
     try:
-        snapshot = fetch_au_quoteapi_snapshot(tickers)
+        from services.price_service import get_realtime_snapshot
+
+        snapshot = get_realtime_snapshot("au", tickers)
     except Exception as exc:
         logger.warning("호주 ETF 실시간 스냅샷 조회 실패: %s", exc)
         return
@@ -1743,7 +1745,9 @@ def prime_naver_etf_realtime_snapshot(tickers: Sequence[str]) -> None:
     global _NAVER_ETF_SNAPSHOT_CACHE, _NAVER_ETF_SNAPSHOT_FETCHED_AT
 
     try:
-        snapshot = fetch_naver_etf_inav_snapshot(tickers)
+        from services.price_service import get_realtime_snapshot
+
+        snapshot = get_realtime_snapshot("kor", tickers)
     except Exception as exc:  # pragma: no cover - 외부 요청 방어
         logger.warning("네이버 ETF 실시간 스냅샷 조회 실패: %s", exc)
         return

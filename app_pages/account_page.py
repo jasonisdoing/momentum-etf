@@ -13,6 +13,7 @@ from config import (
     BUCKET_OPTIONS,
     BUCKET_REVERSE_MAPPING,
 )
+from services.reference_data_service import get_stock_reference_info
 from utils.account_notes import load_account_note, save_account_note
 from utils.account_todos import (
     complete_account_todo,
@@ -34,7 +35,6 @@ from utils.stock_list_io import (
     remove_stock,
     update_stock,
 )
-from utils.stock_meta_updater import fetch_stock_info
 from utils.ui import (
     create_loading_status,
     format_relative_time,
@@ -375,7 +375,7 @@ def _render_stocks_meta_table(account_id: str) -> None:
                 st.session_state[ss_key_result] = None
             else:
                 with st.spinner("정보 조회 중..."):
-                    info = fetch_stock_info(d_ticker, country_code)
+                    info = get_stock_reference_info(d_ticker, country_code)
                 if info and info.get("name"):
                     st.session_state[ss_key_result] = info
                     # 재진입 시 정보 유지를 위해
@@ -492,6 +492,7 @@ def _render_rank_tab(
         "티커",
         "종목명",
         "현재가",
+        "괴리율",
         "점수",
         "일간(%)",
         "1주(%)",

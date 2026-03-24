@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from bson import ObjectId
 
+from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings
@@ -55,9 +56,7 @@ def _apply_kor_realtime_overlay_to_holdings(df_holdings: pd.DataFrame) -> pd.Dat
         return df_holdings
 
     try:
-        from utils.data_loader import fetch_naver_etf_inav_snapshot
-
-        realtime_data = fetch_naver_etf_inav_snapshot(tickers)
+        realtime_data = get_realtime_snapshot("kor", tickers)
     except Exception as exc:
         logger.warning("보유 종목 실시간 오버레이 실패: %s", exc)
         return df_holdings
@@ -135,7 +134,6 @@ def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = Fals
 
     # Fetch prices from price cache and exchange rates
     from utils.cache_utils import load_cached_frames_bulk_with_fallback
-    from utils.data_loader import get_exchange_rate_series
 
     tickers = df_holdings["ticker"].tolist()
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
@@ -167,35 +165,9 @@ def load_real_holdings_table(account_id: str, *, strict_price_cache: bool = Fals
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
-    import streamlit as st
-
-    @st.cache_data(ttl=3600, show_spinner=False)
-    def _get_cached_exchange_rates() -> dict[str, float]:
-        rates = {"USD": 0.0, "AUD": 0.0}
-        today_dt = datetime.datetime.today()
-
-        # USD/KRW
-        usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, allow_partial=True)
-        if usd_krw_series.empty:
-            raise RuntimeError("USD/KRW 환율 데이터를 가져오지 못했습니다.")
-        rates["USD"] = float(usd_krw_series.iloc[-1])
-
-        # AUD/KRW
-        aud_krw_series = get_exchange_rate_series(
-            today_dt - pd.Timedelta(days=5),
-            today_dt,
-            symbol="AUDKRW=X",
-            allow_partial=True,
-        )
-        if aud_krw_series.empty:
-            raise RuntimeError("AUD/KRW 환율 데이터를 가져오지 못했습니다.")
-        rates["AUD"] = float(aud_krw_series.iloc[-1])
-
-        return rates
-
-    rates = _get_cached_exchange_rates()
-    usd_krw = rates["USD"]
-    aud_krw = rates["AUD"]
+    rates = get_exchange_rates()
+    usd_krw = float((rates.get("USD") or {}).get("rate"))
+    aud_krw = float((rates.get("AUD") or {}).get("rate"))
 
     def _get_multiplier(currency):
         if currency == "USD":

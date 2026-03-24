@@ -368,6 +368,7 @@ def render_rank_table(
         "일간(%)": st.column_config.NumberColumn("일간(%)", width="small", format="%.2f%%"),
         "평가(%)": st.column_config.NumberColumn("평가(%)", width="small", format="%.2f%%"),
         "평가수익률(%)": st.column_config.NumberColumn("평가수익률(%)", width="small", format="%.2f%%"),
+        "Nav": st.column_config.NumberColumn("Nav", width="small", format="%.0f"),
         "매입금액(KRW)": st.column_config.NumberColumn("매입금액(KRW)", width="small", format="localized"),
         "매입금액": st.column_config.TextColumn("매입금액", width="small"),
         "평가금액(KRW)": st.column_config.NumberColumn("평가금액(KRW)", width="small", format="localized"),

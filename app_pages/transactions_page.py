@@ -363,8 +363,8 @@ def _render_manage_tab(account_map, account_id_to_country, loading=None):
 
 def _render_bulk_tab(account_map, account_id_to_country):
     from config import BUCKET_CONFIG
+    from services.reference_data_service import get_stock_reference_info
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.stock_meta_updater import fetch_stock_info
 
     st.subheader("텍스트 일괄 업데이트")
     st.info(
@@ -454,7 +454,7 @@ def _render_bulk_tab(account_map, account_id_to_country):
                     ticker = _normalize_ticker(row["티커"])
                     stock_name = name_lookup.get(ticker)
                     if not stock_name:
-                        info = fetch_stock_info(ticker, country_code)
+                        info = get_stock_reference_info(ticker, country_code)
                         stock_name = info["name"] if info and info.get("name") else ticker
 
                     new_holdings.append(
@@ -477,7 +477,7 @@ def _render_bulk_tab(account_map, account_id_to_country):
 
 
 def _render_cash_tab(account_map):
-    from utils.data_loader import get_exchange_rate_series
+    from services.price_service import get_exchange_rate_series
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
     from utils.settings_loader import get_account_settings
 
@@ -698,8 +698,8 @@ def _render_snapshot_tab(account_map):
 
 @st.dialog("➕ 신규 종목 추가")
 def add_new_stock_modal(account_map, account_id_to_country):
+    from services.reference_data_service import get_stock_reference_info
     from utils.portfolio_io import load_portfolio_master, save_portfolio_master
-    from utils.stock_meta_updater import fetch_stock_info
 
     ss_key = "add_stock_lookup_result"
     new_acc_name = st.selectbox("계좌", options=list(account_map.keys()), key="add_acc_sel")
@@ -713,7 +713,7 @@ def add_new_stock_modal(account_map, account_id_to_country):
     if do_search:
         if new_ticker:
             target_country = account_id_to_country.get(account_map[new_acc_name], "kor")
-            info = fetch_stock_info(new_ticker, target_country)
+            info = get_stock_reference_info(new_ticker, target_country)
             if info and info.get("name"):
                 st.session_state[ss_key] = info
             else:

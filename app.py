@@ -9,6 +9,7 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
+from services.price_service import get_exchange_rates
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
@@ -601,40 +602,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 # Display Exchange Rates
                 import datetime
 
-                import yfinance as yf
-
-                @st.cache_data(ttl=3600, show_spinner=False)
-                def _get_app_exchange_rates() -> dict[str, Any]:
-                    rates = {
-                        "USD": {"rate": 0.0, "change_pct": 0.0},
-                        "AUD": {"rate": 0.0, "change_pct": 0.0},
-                        "updated_at": datetime.datetime.now(),
-                    }
-
-                    # USD
-                    try:
-                        usd_ticker = yf.Ticker("KRW=X")
-                        curr_usd = float(usd_ticker.fast_info.last_price)
-                        prev_usd = float(usd_ticker.fast_info.previous_close)
-                        rates["USD"]["rate"] = curr_usd
-                        if prev_usd > 0:
-                            rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
-                    except Exception:
-                        pass
-
-                    # AUD
-                    try:
-                        aud_ticker = yf.Ticker("AUDKRW=X")
-                        curr_aud = float(aud_ticker.fast_info.last_price)
-                        prev_aud = float(aud_ticker.fast_info.previous_close)
-                        rates["AUD"]["rate"] = curr_aud
-                        if prev_aud > 0:
-                            rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
-                    except Exception:
-                        pass
-                    return rates
-
-                rates = _get_app_exchange_rates()
+                rates = get_exchange_rates()
 
                 st.subheader("환율")
 

@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from utils.data_loader import get_exchange_rate_series
+from services.price_service import get_exchange_rate_series
 from utils.db_manager import get_db_connection
 from utils.report import format_kr_money
 from utils.ui import create_loading_status

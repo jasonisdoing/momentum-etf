@@ -31,7 +31,15 @@
 
 1.  **순위 계산 유틸 (`utils/rankings.py`)**: 계좌 종목, 가격 캐시, 실제 보유 상태를 합쳐 순위 테이블용 데이터를 만듭니다.
 2.  **화면 계층 (`app.py`, `app_pages/`)**: 계좌 선택, `MA_TYPE`, `MA_MONTHS`를 받아 순위/종목 관리 화면을 렌더링합니다.
-3.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 실제 보유 데이터와 계좌 메모를 읽습니다.
+3.  **서비스 계층 (`services/price_service.py`, `services/reference_data_service.py`)**: 실시간 가격/환율과 저빈도 참조 데이터의 공식 진입점을 제공합니다.
+4.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 실제 보유 데이터와 계좌 메모를 읽습니다.
+
+### 서비스 계층 역할
+
+*   **`services/price_service.py`**: 한국/호주 실시간 가격과 USD/AUD 환율 조회를 통합하고 TTL 캐시를 관리합니다.
+*   **`services/reference_data_service.py`**: KIS 국내 ETF 목록, 종목 메타데이터, 상장일 같은 저빈도 참조 데이터를 읽는 단일 진입점입니다.
+
+화면 계층과 순위 로직은 가능하면 외부 데이터 소스를 직접 호출하지 않고, 먼저 `services/` 계층을 통해 접근하는 것을 원칙으로 합니다.
 
 ## 5. 사용 시 유의사항
 
