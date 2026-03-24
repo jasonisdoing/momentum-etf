@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
 
 from config import BUCKET_MAPPING, CACHE_START_DATE, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from core.strategy.metrics import process_ticker_data
-from utils.cache_utils import load_cached_frames_bulk_with_fallback
+from utils.cache_utils import load_cached_frames_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
 from utils.data_loader import fetch_au_quoteapi_snapshot, fetch_naver_etf_inav_snapshot
 from utils.portfolio_io import load_real_holdings_table
 from utils.settings_loader import AccountSettingsError, get_account_settings
@@ -253,6 +254,7 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
 
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    cache_updated_map = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
     realtime_snapshot = _load_realtime_snapshot(country_code, tickers)
 
     held_tickers: set[str] = set()
@@ -318,6 +320,13 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
     if df.empty:
         return df
 
+    data_updated_at: datetime | None = None
+    realtime_active = bool(realtime_snapshot)
+    if realtime_active:
+        data_updated_at = datetime.now()
+    elif cache_updated_map:
+        data_updated_at = max(cache_updated_map.values())
+
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
         score = row.get("점수")
         if score is None or pd.isna(score):
@@ -333,7 +342,11 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
         kind="stable",
     ).reset_index(drop=True)
     df.insert(0, "#", range(1, len(df) + 1))
-    return df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
+    df = df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
+    df.attrs["realtime_active"] = realtime_active
+    if data_updated_at is not None:
+        df.attrs["data_updated_at"] = data_updated_at
+    return df
 
 
 __all__ = [
