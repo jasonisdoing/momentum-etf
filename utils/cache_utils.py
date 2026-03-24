@@ -17,12 +17,83 @@ from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
+_CLOSE_SERIES_MEMORY_CACHE: dict[tuple[str, str], tuple[datetime | None, pd.Series]] = {}
+
 _COLLECTION_NAME_MAP = {
     "kor": "cache_kor_stocks",
     "us": "cache_us_stocks",
 }
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
+
+
+def _get_close_series_memory_cache(
+    collection_name: str,
+    ticker: str,
+    updated_at: datetime | None,
+) -> pd.Series | None:
+    cached_entry = _CLOSE_SERIES_MEMORY_CACHE.get((collection_name, ticker))
+    if cached_entry is None:
+        return None
+
+    cached_updated_at, cached_series = cached_entry
+    if cached_updated_at != updated_at:
+        return None
+
+    return cached_series.copy()
+
+
+def _set_close_series_memory_cache(
+    collection_name: str,
+    ticker: str,
+    updated_at: datetime | None,
+    close_series: pd.Series,
+) -> None:
+    _CLOSE_SERIES_MEMORY_CACHE[(collection_name, ticker)] = (updated_at, close_series.copy())
+
+
+def _resolve_close_column(columns: Iterable[str] | None) -> str | None:
+    if columns is None:
+        return None
+
+    normalized = [str(column) for column in columns]
+    for candidate in ["unadjusted_close", "Close", "close"]:
+        if candidate in normalized:
+            return candidate
+    return None
+
+
+def _serialize_close_series_payload(close_series: pd.Series, column_name: str) -> Binary | None:
+    if close_series is None or close_series.empty:
+        return None
+
+    close_df = close_series.to_frame(name=column_name)
+    buf = io.BytesIO()
+    try:
+        close_df.to_parquet(buf, engine="pyarrow", compression="snappy")
+    except Exception:
+        return None
+    return Binary(buf.getvalue())
+
+
+def _backfill_close_series_payload(collection, ticker: str, close_series: pd.Series, column_name: str) -> None:
+    close_payload = _serialize_close_series_payload(close_series, column_name)
+    if close_payload is None:
+        return
+
+    try:
+        collection.update_one(
+            {"ticker": ticker},
+            {
+                "$set": {
+                    "close_data": close_payload,
+                    "close_column": column_name,
+                    "close_row_count": int(len(close_series)),
+                }
+            },
+        )
+    except Exception:
+        return
 
 
 def _get_cache_start_date() -> pd.Timestamp | None:
@@ -142,6 +213,73 @@ def _deserialize_cached_doc(doc: dict[str, Any], collection=None) -> pd.DataFram
     return df
 
 
+def _deserialize_cached_close_series_doc(doc: dict[str, Any], collection=None) -> pd.Series | None:
+    """캐시 문서에서 종가 시리즈만 역직렬화한다."""
+    if not doc:
+        return None
+
+    payload = doc.get("close_data")
+    close_column = str(doc.get("close_column") or "").strip() or None
+    if payload is None:
+        payload = doc.get("data")
+    if payload is None:
+        return None
+
+    ticker_name = doc.get("ticker", "UNKNOWN")
+    columns = doc.get("columns")
+    candidate_columns: list[str] = []
+    if close_column:
+        candidate_columns.append(close_column)
+    resolved_column = _resolve_close_column(columns if isinstance(columns, list) else None)
+    if resolved_column and resolved_column not in candidate_columns:
+        candidate_columns.append(resolved_column)
+    if not candidate_columns:
+        candidate_columns = ["unadjusted_close", "Close", "close"]
+
+    close_df = None
+    last_error = None
+    for index, candidate in enumerate(candidate_columns):
+        try:
+            buf = io.BytesIO(payload)
+            if doc.get("close_data") is not None and index == 0:
+                close_df = pd.read_parquet(buf, engine="pyarrow")
+            else:
+                close_df = pd.read_parquet(buf, engine="pyarrow", columns=[candidate])
+            if close_df is not None and not close_df.empty and candidate in close_df.columns:
+                break
+            if doc.get("close_data") is not None and close_df is not None and not close_df.empty:
+                break
+        except Exception as exc:
+            last_error = exc
+            close_df = None
+
+    if close_df is None or close_df.empty:
+        if collection is not None and last_error is not None and ticker_name != "UNKNOWN":
+            logger.warning("종가 시리즈 역직렬화 실패 (%s): %s", ticker_name, last_error)
+        return None
+
+    if not isinstance(close_df.index, pd.DatetimeIndex):
+        try:
+            close_df.index = pd.to_datetime(close_df.index)
+        except Exception:
+            return None
+
+    close_df = close_df.sort_index()
+    close_df = close_df[~close_df.index.duplicated(keep="first")]
+
+    close_series = pd.to_numeric(close_df.iloc[:, 0], errors="coerce").dropna()
+    if close_series.empty:
+        return None
+
+    cache_start = _get_cache_start_date()
+    if cache_start is not None:
+        close_series = close_series[close_series.index >= cache_start]
+
+    if close_series.empty:
+        return None
+    return close_series.astype(float)
+
+
 def load_cached_frame(account_id: str, ticker: str) -> pd.DataFrame | None:
     """저장된 캐시 DataFrame을 로드하고, CACHE_START_DATE 이전 데이터를 필터링합니다."""
     collection = _get_collection(account_id)
@@ -197,6 +335,96 @@ def load_cached_frames_bulk(account_id: str, tickers: Iterable[str]) -> dict[str
     return frames
 
 
+def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, pd.Series]:
+    """다수의 티커에 대한 종가 시리즈만 한 번에 가져온다."""
+    normalized = []
+    for t in tickers:
+        norm = (t or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    collection = _get_collection(account_id)
+    if collection is None:
+        return {}
+
+    series_map: dict[str, pd.Series] = {}
+    collection_name = collection.name
+
+    try:
+        metadata_cursor = collection.find(
+            {"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1}
+        )
+    except Exception:
+        return {}
+
+    pending_tickers: list[str] = []
+    for doc in metadata_cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+
+        updated_at = doc.get("updated_at") if isinstance(doc.get("updated_at"), datetime) else None
+        cached_series = _get_close_series_memory_cache(collection_name, ticker, updated_at)
+        if cached_series is not None:
+            series_map[ticker] = cached_series
+            continue
+        pending_tickers.append(ticker)
+
+    if not pending_tickers:
+        return series_map
+
+    try:
+        cursor = collection.find(
+            {"ticker": {"$in": pending_tickers}},
+            {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
+        )
+    except Exception:
+        return series_map
+
+    fallback_tickers: list[str] = []
+    for doc in cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        close_series = _deserialize_cached_close_series_doc(doc, collection)
+        if close_series is None:
+            fallback_tickers.append(ticker)
+            continue
+        updated_at = doc.get("updated_at") if isinstance(doc.get("updated_at"), datetime) else None
+        _set_close_series_memory_cache(collection_name, ticker, updated_at, close_series)
+        series_map[ticker] = close_series
+
+    if not fallback_tickers:
+        return series_map
+
+    try:
+        fallback_cursor = collection.find(
+            {"ticker": {"$in": fallback_tickers}},
+            {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
+        )
+    except Exception:
+        return series_map
+
+    for doc in fallback_cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        close_series = _deserialize_cached_close_series_doc(doc, collection)
+        if close_series is None:
+            continue
+        updated_at = doc.get("updated_at") if isinstance(doc.get("updated_at"), datetime) else None
+        close_column = (
+            _resolve_close_column(doc.get("columns") if isinstance(doc.get("columns"), list) else None) or "Close"
+        )
+        _backfill_close_series_payload(collection, ticker, close_series, close_column)
+        _set_close_series_memory_cache(collection_name, ticker, updated_at, close_series)
+        series_map[ticker] = close_series
+
+    return series_map
+
+
 def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     """계좌 캐시를 조회한다."""
     normalized = []
@@ -220,6 +448,31 @@ def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str
         missing -= set(fetched.keys())
 
     return frames
+
+
+def load_cached_close_series_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.Series]:
+    """계좌 캐시에서 종가 시리즈만 조회한다."""
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    series_map: dict[str, pd.Series] = {}
+    missing = set(normalized)
+
+    for cache_key in get_cache_lookup_keys(account_id):
+        if not missing:
+            break
+        fetched = load_cached_close_series_bulk(cache_key, missing)
+        if not fetched:
+            continue
+        series_map.update(fetched)
+        missing -= set(fetched.keys())
+
+    return series_map
 
 
 def load_cached_updated_at_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, datetime]:
@@ -326,6 +579,12 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
 
     if not result.acknowledged:
         raise RuntimeError(f"캐시 저장이 확인되지 않았습니다 ({ticker_norm})")
+
+    close_column = _resolve_close_column(df_to_save.columns.astype(str).tolist())
+    if close_column is not None:
+        close_series = pd.to_numeric(df_to_save[close_column], errors="coerce").dropna().astype(float)
+        if not close_series.empty:
+            _backfill_close_series_payload(collection, ticker_norm, close_series, close_column)
 
     saved_doc = collection.find_one({"ticker": ticker_norm}, {"_id": 0, "row_count": 1})
     if not saved_doc:

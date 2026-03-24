@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import os
+import signal
 import sys
 import time
 import uuid
@@ -32,6 +33,7 @@ from utils.stock_list_io import get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
+PER_TICKER_TIMEOUT_SECONDS = 90
 
 
 def _determine_start_date() -> str:
@@ -39,6 +41,27 @@ def _determine_start_date() -> str:
     start = settings.get("CACHE_START_DATE")
     if start:
         return str(start)
+
+
+@contextmanager
+def _ticker_refresh_timeout(seconds: int):
+    """티커 단위 갱신이 장시간 멈추지 않도록 제한한다."""
+    timeout_seconds = int(seconds or 0)
+    if timeout_seconds <= 0 or not hasattr(signal, "SIGALRM"):
+        yield
+        return
+
+    def _raise_timeout(signum, frame):
+        raise TimeoutError(f"티커 처리 제한 시간 {timeout_seconds}초를 초과했습니다.")
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _raise_timeout)
+    signal.alarm(timeout_seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
 
 
 @contextmanager
@@ -219,12 +242,13 @@ def refresh_cache_for_target(
 
                 try:
                     range_start = start_date or "1990-01-01"
-                    unresolved_days = _refresh_single_ticker_with_retry(
-                        ticker=ticker,
-                        country_code=country_code,
-                        range_start=range_start,
-                        temp_token=temp_token,
-                    )
+                    with _ticker_refresh_timeout(PER_TICKER_TIMEOUT_SECONDS):
+                        unresolved_days = _refresh_single_ticker_with_retry(
+                            ticker=ticker,
+                            country_code=country_code,
+                            range_start=range_start,
+                            temp_token=temp_token,
+                        )
 
                     if unresolved_days:
                         unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)

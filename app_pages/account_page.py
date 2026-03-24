@@ -77,9 +77,38 @@ _DATAFRAME_CSS = """
 """
 
 
+@st.cache_data(ttl=30, show_spinner=False)
+def _load_cached_rankings(account_id: str, ma_type: str, ma_months: int) -> pd.DataFrame:
+    """동일 조건의 순위 결과를 짧게 재사용한다."""
+    return build_account_rankings(account_id, ma_type=ma_type, ma_months=ma_months)
+
+
 def _normalize_code(value: Any, fallback: str) -> str:
     text = str(value or "").strip().lower()
     return text or fallback
+
+
+def _format_rank_timestamp(value: Any, *, assume_utc: bool = False) -> str | None:
+    if value is None:
+        return None
+
+    ts = pd.Timestamp(value)
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        if assume_utc:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_localize("Asia/Seoul")
+    ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
+
+    ampm = "오전" if ts.hour < 12 else "오후"
+    hour12 = ts.hour % 12 or 12
+    absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
+    relative_text = format_relative_time(ts)
+    if relative_text:
+        return f"{absolute_text} {relative_text}"
+    return absolute_text
 
 
 def _resolve_target_country_code(target_id: str) -> str:
@@ -472,6 +501,7 @@ def _render_rank_tab(
     *,
     selected_ma_type: str | None = None,
     selected_ma_months: int | None = None,
+    loading=None,
 ) -> None:
     """계좌별 추세 순위 탭을 렌더링합니다."""
 
@@ -480,11 +510,6 @@ def _render_rank_tab(
     effective_ma_type = str(selected_ma_type or default_ma_type).strip().upper()
     effective_ma_months = int(selected_ma_months or default_ma_months)
     effective_ma_months = min(max(effective_ma_months, 1), max_months)
-
-    df = build_account_rankings(account_id, ma_type=effective_ma_type, ma_months=effective_ma_months)
-    if df.empty:
-        st.info("표시할 순위 종목이 없습니다.")
-        return
 
     visible_columns = [
         "#",
@@ -506,23 +531,33 @@ def _render_rank_tab(
         "RSI",
         "지속",
     ]
-    updated_at = df.attrs.get("data_updated_at")
+    if loading is not None:
+        loading.update(f"{account_id.upper()} 순위 캐시 확인")
+    df = _load_cached_rankings(account_id, effective_ma_type, effective_ma_months)
+    if bool(df.attrs.get("cache_blocked")):
+        latest_trading_day_text = _format_rank_timestamp(df.attrs.get("latest_trading_day"))
+        cache_text = _format_rank_timestamp(df.attrs.get("cache_updated_at"))
+        missing_tickers = list(df.attrs.get("missing_tickers") or [])
+        stale_tickers = list(df.attrs.get("stale_tickers") or [])
+
+        st.error("기준 종가 캐시가 최신 거래일 기준으로 준비되지 않아 순위를 표시하지 않습니다.")
+        if latest_trading_day_text:
+            st.caption(f"최신 거래일 기준: {latest_trading_day_text}")
+        if cache_text:
+            st.caption(f"현재 기준 종가 캐시: {cache_text}")
+        if missing_tickers:
+            st.caption(f"캐시 없음: {len(missing_tickers)}개 티커")
+        if stale_tickers:
+            st.caption(f"오래된 캐시: {len(stale_tickers)}개 티커")
+        st.caption("시스템 페이지에서 `모든 가격 캐시 업데이트`를 실행한 뒤, 완료 후 다시 이 페이지를 열어주세요.")
+        st.markdown("[시스템 페이지로 이동](/system)")
+        return
+
+    if df.empty:
+        st.info("표시할 순위 종목이 없습니다.")
+        return
+
     realtime_active = bool(df.attrs.get("realtime_active"))
-    if updated_at:
-        ts = pd.Timestamp(updated_at)
-        if ts.tzinfo is not None:
-            ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
-
-        ampm = "오전" if ts.hour < 12 else "오후"
-        hour12 = ts.hour % 12 or 12
-        absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
-        relative_text = format_relative_time(ts)
-        icon = "🟢" if realtime_active else "🔴"
-        message = f"{icon} {absolute_text}"
-        if relative_text:
-            message = f"{message} {relative_text}"
-        st.caption(message)
-
     render_rank_table(
         df,
         country_code=country_code,
@@ -530,6 +565,24 @@ def _render_rank_tab(
         visible_columns=visible_columns,
         height=900,
     )
+
+    st.write("")
+    status_icon = "🟢" if realtime_active else "🔴"
+    status_text = "실시간 가격 반영 중" if realtime_active else "장마감 캐시 사용 중"
+    st.caption(f"{status_icon} {status_text}")
+
+    realtime_text = _format_rank_timestamp(df.attrs.get("realtime_fetched_at"))
+    cache_text = _format_rank_timestamp(df.attrs.get("cache_updated_at"))
+    ranking_text = _format_rank_timestamp(df.attrs.get("ranking_computed_at"))
+
+    if realtime_text:
+        st.caption(f"실시간 가격: {realtime_text}")
+    if cache_text:
+        st.caption(f"기준 종가 캐시: {cache_text}")
+    if ranking_text:
+        st.caption(f"순위 계산: {ranking_text}")
+
+    st.caption("점수·지속은 기준 종가 시계열에 장중 실시간 가격을 반영해 계산합니다.")
 
 
 # ---------------------------------------------------------------------------
@@ -1038,13 +1091,13 @@ def render_account_page(
             loading.update(f"{account_id.upper()} 메모 준비")
             _render_account_note_tab(account_id)
         else:  # "1. 순위" (Default)
-            loading.update(f"{account_id.upper()} 순위 테이블 준비")
             rank_params = rank_params or {}
             _render_rank_tab(
                 account_id,
                 country_code,
                 selected_ma_type=rank_params.get("ma_type"),
                 selected_ma_months=rank_params.get("ma_months"),
+                loading=loading,
             )
     finally:
         if owns_loading:
