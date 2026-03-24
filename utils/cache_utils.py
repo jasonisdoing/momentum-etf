@@ -222,6 +222,60 @@ def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str
     return frames
 
 
+def load_cached_updated_at_bulk(account_id: str, tickers: Iterable[str]) -> dict[str, datetime]:
+    """다수의 티커에 대한 캐시 updated_at 시각을 한 번에 조회합니다."""
+    normalized = []
+    for t in tickers:
+        norm = (t or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    collection = _get_collection(account_id)
+    if collection is None:
+        return {}
+
+    results: dict[str, datetime] = {}
+    try:
+        cursor = collection.find({"ticker": {"$in": list(set(normalized))}}, {"_id": 0, "ticker": 1, "updated_at": 1})
+    except Exception:
+        return {}
+
+    for doc in cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        updated_at = doc.get("updated_at")
+        if ticker and isinstance(updated_at, datetime):
+            results[ticker] = updated_at
+
+    return results
+
+
+def load_cached_updated_at_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, datetime]:
+    """계좌 캐시의 updated_at 시각을 조회합니다."""
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    updated_map: dict[str, datetime] = {}
+    missing = set(normalized)
+
+    for cache_key in get_cache_lookup_keys(account_id):
+        if not missing:
+            break
+        fetched = load_cached_updated_at_bulk(cache_key, missing)
+        if not fetched:
+            continue
+        updated_map.update(fetched)
+        missing -= set(fetched.keys())
+
+    return updated_map
+
+
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
     if df is None or df.empty:

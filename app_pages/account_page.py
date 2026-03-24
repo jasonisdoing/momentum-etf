@@ -27,6 +27,7 @@ from utils.stock_list_io import (
 from utils.stock_meta_updater import fetch_stock_info
 from utils.ui import (
     create_loading_status,
+    format_relative_time,
     render_rank_table,
 )
 
@@ -458,10 +459,6 @@ def _render_rank_tab(
     effective_ma_months = int(selected_ma_months or default_ma_months)
     effective_ma_months = min(max(effective_ma_months, 1), max_months)
 
-    st.caption(
-        f"기본값: {default_ma_type} / {default_ma_months}개월 | 녹색 행은 실제 보유 종목 | 점수 미계산 종목은 하단 정렬"
-    )
-
     df = build_account_rankings(account_id, ma_type=effective_ma_type, ma_months=effective_ma_months)
     if df.empty:
         st.info("표시할 순위 종목이 없습니다.")
@@ -486,6 +483,23 @@ def _render_rank_tab(
         "RSI",
         "지속",
     ]
+    updated_at = df.attrs.get("data_updated_at")
+    realtime_active = bool(df.attrs.get("realtime_active"))
+    if updated_at:
+        ts = pd.Timestamp(updated_at)
+        if ts.tzinfo is not None:
+            ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
+
+        ampm = "오전" if ts.hour < 12 else "오후"
+        hour12 = ts.hour % 12 or 12
+        absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
+        relative_text = format_relative_time(ts)
+        icon = "🟢" if realtime_active else "🔴"
+        message = f"{icon} {absolute_text}"
+        if relative_text:
+            message = f"{message} {relative_text}"
+        st.caption(message)
+
     render_rank_table(
         df,
         country_code=country_code,
