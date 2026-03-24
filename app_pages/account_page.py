@@ -718,17 +718,18 @@ def _render_account_note_tab(account_id: str) -> None:
     note_key = f"account_note_content_{account_id}"
     loaded_key = f"account_note_loaded_{account_id}"
     updated_key = f"account_note_updated_{account_id}"
+    note_saved_key = f"account_note_saved_{account_id}"
 
     st.markdown(
         """
         <style>
         div[data-testid="stTextArea"] textarea {
-            background-color: #111 !important;
-            color: #fff !important;
-            border: 1px solid #111 !important;
+            background-color: #fff3a3 !important;
+            color: #2b2b2b !important;
+            border: 1px solid #e0c95a !important;
         }
         div[data-testid="stTextArea"] textarea::placeholder {
-            color: #bdbdbd !important;
+            color: #8a7a2f !important;
         }
         div[class*="st-key-todo_delete_btn_"] .stButton > button {
             background-color: #f44336 !important;
@@ -748,9 +749,19 @@ def _render_account_note_tab(account_id: str) -> None:
             return
         st.session_state[note_key] = str((note_doc or {}).get("content") or "")
         st.session_state[updated_key] = (note_doc or {}).get("updated_at")
+        st.session_state[note_saved_key] = False
         st.session_state[loaded_key] = True
 
     left_col, right_col = st.columns(2)
+
+    def _save_note_on_change() -> None:
+        try:
+            saved_at = save_account_note(account_id, st.session_state.get(note_key, ""))
+        except Exception as exc:
+            st.error(f"메모를 저장하지 못했습니다: {exc}")
+            return
+        st.session_state[updated_key] = saved_at
+        st.session_state[note_saved_key] = True
 
     with left_col:
         st.subheader("고정 메모")
@@ -759,6 +770,7 @@ def _render_account_note_tab(account_id: str) -> None:
             key=note_key,
             height=520,
             placeholder="이 계좌에 대한 고정 메모를 입력하세요.",
+            on_change=_save_note_on_change,
         )
 
         updated_at = st.session_state.get(updated_key)
@@ -773,16 +785,9 @@ def _render_account_note_tab(account_id: str) -> None:
             message = f"마지막 저장: {absolute_text}"
             if relative_text:
                 message = f"{message} {relative_text}"
+            if st.session_state.get(note_saved_key):
+                message = f"{message} 🟢 저장됨"
             st.caption(message)
-
-        if st.button("메모 저장", key=f"btn_save_note_{account_id}", type="primary", width="stretch"):
-            try:
-                saved_at = save_account_note(account_id, st.session_state.get(note_key, ""))
-            except Exception as exc:
-                st.error(f"메모를 저장하지 못했습니다: {exc}")
-                return
-            st.session_state[updated_key] = saved_at
-            st.success("메모를 저장했습니다.")
 
     with right_col:
         st.subheader("할일")
@@ -792,6 +797,15 @@ def _render_account_note_tab(account_id: str) -> None:
             keys_to_remove = [key for key in st.session_state.keys() if key.startswith(prefix)]
             for key in keys_to_remove:
                 st.session_state.pop(key, None)
+
+        def _save_todo_on_change(todo_id: str, content_key: str) -> None:
+            try:
+                saved_at = update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
+            except Exception as exc:
+                st.error(f"투두를 저장하지 못했습니다: {exc}")
+                return
+            st.session_state[f"todo_updated_{account_id}_{todo_id}"] = saved_at
+            st.session_state[f"todo_saved_{account_id}_{todo_id}"] = True
 
         @st.dialog("할일 삭제", width="small")
         def _open_delete_todo_dialog(todo_id: str) -> None:
@@ -838,24 +852,36 @@ def _render_account_note_tab(account_id: str) -> None:
         def _render_todo_item(todo: dict[str, Any]) -> None:
             todo_id = todo["todo_id"]
             content_key = f"todo_content_{account_id}_{todo_id}"
+            todo_updated_key = f"todo_updated_{account_id}_{todo_id}"
+            todo_saved_key = f"todo_saved_{account_id}_{todo_id}"
             if content_key not in st.session_state:
                 st.session_state[content_key] = str(todo.get("content") or "")
+            if todo_updated_key not in st.session_state:
+                st.session_state[todo_updated_key] = todo.get("updated_at") or todo.get("created_at")
+            if todo_saved_key not in st.session_state:
+                st.session_state[todo_saved_key] = False
 
             is_done = str(todo.get("status") or "") == "done"
-            created_ts = pd.Timestamp(todo.get("created_at")) if todo.get("created_at") is not None else None
-            if created_ts is not None and created_ts.tzinfo is not None:
-                created_ts = created_ts.tz_convert("Asia/Seoul").tz_localize(None)
+            display_ts = (
+                pd.Timestamp(st.session_state.get(todo_updated_key))
+                if st.session_state.get(todo_updated_key) is not None
+                else None
+            )
+            if display_ts is not None and display_ts.tzinfo is not None:
+                display_ts = display_ts.tz_convert("Asia/Seoul").tz_localize(None)
 
             header_parts = []
-            if created_ts is not None:
-                ampm = "오전" if created_ts.hour < 12 else "오후"
-                hour12 = created_ts.hour % 12 or 12
+            if display_ts is not None:
+                ampm = "오전" if display_ts.hour < 12 else "오후"
+                hour12 = display_ts.hour % 12 or 12
                 created_text = (
-                    f"{created_ts.year}년 {created_ts.month}월 {created_ts.day}일 "
-                    f"{ampm} {hour12}:{created_ts.minute:02d}분"
+                    f"{display_ts.year}년 {display_ts.month}월 {display_ts.day}일 "
+                    f"{ampm} {hour12}:{display_ts.minute:02d}분"
                 )
-                rel = format_relative_time(created_ts)
+                rel = format_relative_time(display_ts)
                 header_parts.append(created_text if not rel else f"{created_text} {rel}")
+            if st.session_state.get(todo_saved_key):
+                header_parts.append("🟢 저장됨")
             if is_done:
                 header_parts.append("완료")
 
@@ -884,18 +910,13 @@ def _render_account_note_tab(account_id: str) -> None:
                         height=90,
                         placeholder="할 일을 입력하세요.",
                         label_visibility="collapsed",
+                        on_change=_save_todo_on_change,
+                        args=(todo_id, content_key),
                     )
 
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    if st.button("저장", key=f"btn_save_todo_{account_id}_{todo_id}", type="primary", width="stretch"):
-                        try:
-                            update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
-                        except Exception as exc:
-                            st.error(f"투두를 저장하지 못했습니다: {exc}")
-                            return
-                        st.success("투두를 저장했습니다.")
-                        st.rerun()
+                c1, c2 = st.columns(2)
+                if not is_done:
+                    c1, c2, c3 = st.columns(3)
                 with c2:
                     if is_done:
                         if st.button("완료취소", key=f"btn_undo_todo_{account_id}_{todo_id}", width="stretch"):
@@ -917,10 +938,8 @@ def _render_account_note_tab(account_id: str) -> None:
                         _clear_todo_session_state()
                         st.success("투두를 완료 처리했습니다.")
                         st.rerun()
-                with c3:
-                    if is_done:
-                        st.write("")
-                    else:
+                if not is_done:
+                    with c3:
                         with st.container(key=f"todo_delete_btn_{account_id}_{todo_id}"):
                             if st.button("🗑️ 삭제", key=f"btn_delete_todo_{account_id}_{todo_id}", width="stretch"):
                                 _open_delete_todo_dialog(todo_id)
