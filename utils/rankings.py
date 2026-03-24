@@ -244,7 +244,42 @@ def _apply_realtime_to_frame(
     return adjusted_df.sort_index()
 
 
-def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> pd.DataFrame:
+def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
+    normalized = df.copy()
+
+    price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
+    percent_columns = ["일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+    one_decimal_columns = ["점수", "RSI"]
+
+    def _round_if_present(column: str, digits: int) -> None:
+        if column not in normalized.columns:
+            return
+        series = pd.to_numeric(normalized[column], errors="coerce")
+        normalized[column] = series.round(digits)
+
+    _round_if_present("현재가", price_digits)
+    _round_if_present("지속", 0)
+
+    for column in percent_columns:
+        _round_if_present(column, 2)
+
+    for column in one_decimal_columns:
+        _round_if_present(column, 1)
+
+    if "지속" in normalized.columns:
+        normalized["지속"] = pd.to_numeric(normalized["지속"], errors="coerce").astype("Int64")
+
+    return normalized
+
+
+def build_account_rankings(
+    account_id: str,
+    *,
+    ma_type: str,
+    ma_months: int,
+    realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
+    held_tickers_override: set[str] | None = None,
+) -> pd.DataFrame:
     settings = get_account_settings(account_id)
     country_code = str(settings.get("country_code") or "").strip().lower()
 
@@ -255,14 +290,21 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
     cache_updated_map = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
-    realtime_snapshot = _load_realtime_snapshot(country_code, tickers)
+    realtime_snapshot = (
+        realtime_snapshot_override
+        if realtime_snapshot_override is not None
+        else _load_realtime_snapshot(country_code, tickers)
+    )
 
     held_tickers: set[str] = set()
-    holdings_df = load_real_holdings_table(account_id)
-    if holdings_df is not None and not holdings_df.empty and "티커" in holdings_df.columns:
-        held_tickers = {
-            str(ticker).strip().upper() for ticker in holdings_df["티커"].tolist() if str(ticker or "").strip()
-        }
+    if held_tickers_override is not None:
+        held_tickers = {str(ticker).strip().upper() for ticker in held_tickers_override if str(ticker or "").strip()}
+    else:
+        holdings_df = load_real_holdings_table(account_id)
+        if holdings_df is not None and not holdings_df.empty and "티커" in holdings_df.columns:
+            held_tickers = {
+                str(ticker).strip().upper() for ticker in holdings_df["티커"].tolist() if str(ticker or "").strip()
+            }
 
     ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
     rows: list[dict[str, Any]] = []
@@ -343,6 +385,7 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
     ).reset_index(drop=True)
     df.insert(0, "#", range(1, len(df) + 1))
     df = df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
+    df = _normalize_ranking_values(df, country_code)
     df.attrs["realtime_active"] = realtime_active
     if data_updated_at is not None:
         df.attrs["data_updated_at"] = data_updated_at
