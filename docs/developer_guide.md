@@ -1,50 +1,64 @@
 # 개발자 가이드 (Developer Guide)
 
-이 문서는 Momentum ETF 시스템의 아키텍처, 데이터 흐름, 그리고 개발 시 반드시 지켜야 할 정합성 원칙을 설명합니다.
+이 문서는 Momentum ETF 순위 시스템의 아키텍처, 데이터 흐름, 그리고 개발 시 반드시 지켜야 할 정합성 원칙을 설명합니다.
 
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
-*   `recommend.py`: 백테스트 엔진을 호출하여 가장 최신 거래일 스냅샷을 추출하고 추천 리포트를 생성하는 엔트리 포인트
-*   `rank.py`: 종목풀(`zpools`) 기반 랭킹 생성 엔트리 포인트
-*   `core/backtest/`: 핵심 시뮬레이션 엔진 및 계좌별 백테스트 실행 로직
-*   `core/rank/`: 종목풀 랭킹 계산/저장 로직
 *   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
+*   `services/`:
+    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
+    *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
+*   `utils/rankings.py`: 순위 테이블 계산 전용 유틸
 *   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
+    *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
     *   `ui.py`: Streamlit 커스텀 컴포넌트 및 스타일링
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
 2.  **Parquet 캐싱**: 수집된 데이터는 `utils/cache_utils.py`를 통해 **Apache Parquet** 포맷으로 MongoDB에 저장됩니다. (기존 Pickle 방식의 버전 충돌 문제를 해결)
-3.  **시뮬레이션**: 백테스트 엔진이 캐시된 데이터를 로드하여 전략 시뮬레이션 수행.
-4.  **추천 생성**: 시뮬레이션의 마지막 날 상태를 스냅샷으로 추출.
+3.  **서비스 오케스트레이션**:
+    *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
+    *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
+4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
+5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
-## 2. 추천/백테스트 정합성 원칙
+### 서비스 사용 원칙
 
-> **Critical**: 이 시스템에서 **추천(Recommend)은 백테스트(Backtest) 시뮬레이션의 마지막 결과**입니다. 두 로직은 물리적으로 하나로 통합되어 있어 완벽한 정합성을 보장합니다.
+1.  실시간 가격/환율 조회는 `services/price_service.py`를 먼저 사용합니다.
+2.  KIS ETF 마스터, 종목 메타데이터, 상장일 조회는 `services/reference_data_service.py`를 먼저 사용합니다.
+3.  화면 계층과 일반 유틸은 외부 데이터 소스를 직접 호출하지 않고, 가능하면 `services/` 계층을 통해 접근합니다.
+4.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
+
+## 2. 순위 화면 정합성 원칙
+
+> **Critical**: 이 시스템은 **순위 화면이 단일 진실 원천(single source of truth)** 입니다. 화면에서 보이는 값은 계좌 종목 목록, 가격 캐시, 실제 보유 데이터로 직접 계산되어야 합니다.
 
 ### 핵심 구조
 | 파일/경로 | 역할 |
 |-----------------|------|
-| `recommend.py` | 백테스트 엔진을 호출하여 최신 권장 사항 추출 및 리포트 생성 |
-| `rank.py` | 종목풀 랭킹 생성 및 저장 |
-| `backtest.py` | 계정 단위 전략 시뮬레이션 실행 엔트리 |
-| `core/backtest/runner.py` | 계좌 설정 로드/검증 후 백테스트 실행 오케스트레이션 |
-| `core/backtest/engine.py` | 계좌 리밸런싱 실행 엔진 |
+| `app.py` | `/rank` 라우트와 상단 선택 컨트롤 렌더링 |
+| `app_pages/account_page.py` | 계좌별 순위/종목 관리/삭제 종목/메모 화면 |
+| `utils/rankings.py` | 순위 계산과 정렬 |
+| `core/strategy/metrics.py` | 이동평균 점수 및 지속일 계산 |
+| `services/price_service.py` | 실시간 가격/환율 조회의 공식 진입점 |
+| `services/reference_data_service.py` | ETF 마스터/메타데이터/상장일 조회의 공식 진입점 |
+| `utils/account_notes.py` | 계좌 메모 저장/조회 |
 
 ### 핵심 일관성 체크리스트
 
-1.  **리밸런싱 주기 엄수**: 비중 조절은 오직 **리밸런싱 날(Rebalance Day)**에만 발생해야 한다.
-2.  **상태 모델 단순화**: 계좌 운용 경로의 상태는 `BUY`와 `HOLD`만 사용한다. 비중 축소/확대는 상태가 아니라 문구로만 표현한다.
+1.  **입력 단순화**: 화면에서 바꾸는 파라미터는 `MA_TYPE`, `MA_MONTHS` 두 개뿐이다.
+2.  **정렬 기준 고정**: 점수가 있는 종목을 점수 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
 3.  **데이터 기준**:
     *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
-    *   추천 리포트 생성 시, "오늘"의 신호는 "어제까지의 마감 데이터"를 보고 결정된 것임
+    *   "오늘"의 순위는 "어제까지의 마감 데이터"를 보고 계산된 것임
+    *   최신 거래일 판단의 기준 날짜는 모든 시장 공통으로 **한국 날짜**를 사용함
 4.  **엄격한 설정 원칙 (Rule 7)**:
     *   코드에 암묵적인 기본값(fallback)을 사용하지 않습니다.
-    *   필수 전략 파라미터가 누락된 경우 명확한 `ValueError`를 발생시켜 의도치 않은 전략 실행을 방지합니다.
+    *   필수 순위 파라미터가 누락된 경우 명확한 `ValueError`를 발생시킵니다.
 
 ## 3. 전략 설정 규칙
 
@@ -52,53 +66,41 @@
 
 ```json
 {
-  "strategy": {
-    "TUNE_MONTHS": 12,
-    "REBALANCE_MODE": "...",
-    "OPTIMIZATION_METRIC": "CAGR|SHARPE|SDR"
-  }
+  "icon": "🇰🇷",
+  "name": "국내 계좌",
+  "country_code": "kor",
+  "currency": "KRW",
+  "MA_TYPE": "ALMA",
+  "MA_MONTHS": 6
 }
 ```
 
-종목풀 설정 포맷(`zpools/<order>_<pool>/config.json`):
-
-```json
-{
-  "name": "국내상장 국내 ETF",
-  "desc": "국내상장 국내 ETF 종목풀",
-  "rank": {
-    "country": "kor|us|au",
-    "months": 12,
-    "ma_type": "HMA"
-  }
-}
-```
-
-계좌 설정의 `country_code`는 현재 `kor` 또는 `au`만 허용합니다. `us`는 종목풀 `rank.country`에서만 사용합니다.
+계좌 설정의 `country_code`는 현재 `kor` 또는 `au`만 허용합니다.
 
 검증 원칙(현재 운영):
 
-* 계좌: `strategy.REBALANCE_MODE` 필수
-* 종목풀: `rank.country/months/ma_type` 필수
+* 계좌: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
 
 코드를 수정할 때는 다음 절차를 따르세요.
 
-1.  **로직 수정**: `core/backtest/`, `core/tune/`, `utils/settings_loader.py`를 우선 확인
+1.  **로직 수정**: `utils/rankings.py`, `core/strategy/metrics.py`, `app_pages/account_page.py`, `utils/ui.py`를 우선 확인
+    *   가격/환율 문제면 `services/price_service.py`를 함께 확인
+    *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
 2.  **검증**:
-    *   **백테스트 실행**: `python backtest.py <account_id>`를 통해 전체 기간 수익률 추이 및 거래 횟수 확인
-    *   **추천 실행**: `python recommend.py <account_id>`를 실행하여 마지막 날 결과가 의도대로 나오는지 확인
+    *   순위 화면에서 `MA_TYPE`, `MA_MONTHS` 변경 시 즉시 테이블이 갱신되는지 확인
+    *   실제 보유 종목이 녹색 행으로 표시되는지 확인
 3.  **확인**:
-    *   `zaccounts/<account_id>/results/` 폴더 내의 로그 파일들을 대조하여 정합성 확인
+    *   점수 컬럼이 `현재가`와 `일간(%)` 사이에 있고 볼드인지 확인
 
-## 5. 추천 시스템의 정의 (Definition of Recommendation)
+## 5. 순위 화면의 정의
 
-**"추천(Recommendation)"**은 계좌의 현재 상태를 기반으로 백테스트 엔진이 내리는 **최신 시뮬레이션 결과**입니다.
+**"순위(Rank)"**는 계좌의 현재 종목 유니버스에서 `MA_TYPE`, `MA_MONTHS` 기준 추세 점수를 계산한 결과입니다.
 
 ### 핵심 원칙
-1.  **백테스트 기반**: 추천 로직은 백테스트와 별개가 아닙니다. 백테스트를 실행했을 때 마지막 거래일 스냅샷이 곧 추천입니다.
-2.  **자산 상태 반영**: 추천은 단순한 시그널 목록이 아니라, 해당 계좌의 **현재 현금 비중과 보유 종목 수**를 고려하여 생성됩니다. 현재 구조에서는 계좌 종목 전체를 계속 보유하고, 활성 버킷과 버킷 내부 종목을 모두 균등 분배한 목표 비중을 사용합니다. 필요할 때만 종목별 `비중/타겟비중`과 예정 비중조절 문구를 표시합니다.
-3.  **내부 매도 이벤트 구분**: 엔진 내부에는 비중 축소 체결 복원을 위한 `pending_action="SELL..."` 이벤트가 남아 있을 수 있지만, 사용자 노출 상태는 `SELL`로 표시하지 않습니다.
-3.  **종목풀 랭킹 분리**: `rank.py`와 `core/rank/`는 계좌 운용과 별도의 독립 서브시스템입니다. 랭킹 결과는 계좌 편입 종목을 사용자가 판단하는 참고 자료로만 사용합니다.
+1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.
+2.  **실보유 구분**: 별도 추천 상태는 사용하지 않고, 실제 보유 종목만 행 색상으로 표시합니다.
+3.  **정렬 규칙**: 점수 내림차순, 점수 계산 불가 종목은 맨 아래입니다.
+4.  **계좌 종목 직접 관리**: 계좌가 자신의 종목 유니버스를 직접 보유하며, 별도 종목풀 fallback은 사용하지 않습니다.

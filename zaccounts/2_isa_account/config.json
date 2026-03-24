@@ -2,22 +2,7 @@
     "icon": "🇰🇷",
     "name": "ISA 계좌",
     "country_code": "kor",
-    "pool": [
-        "us"
-    ],
     "currency": "KRW",
-    "initial_capital_krw": "40000000",
-    "show_hold": true,
-    "strategy": {
-        "TUNE_DATE": "2026-03-15 13:22",
-        "TUNE_CAGR": 53.108409,
-        "TUNE_MDD": -14.335928,
-        "TUNE_MONTHS": 12,
-        "OPTIMIZATION_METRIC": "CAGR",
-        "REBALANCE_MODE": "TWICE_A_MONTH"
-    },
-    "benchmark": {
-        "ticker": "379810",
-        "name": "KODEX 미국나스닥100"
-    }
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 3
 }

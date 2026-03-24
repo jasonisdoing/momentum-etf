@@ -38,6 +38,10 @@ AU_QUOTEAPI_HEADERS = {
     "Origin": "https://www.marketindex.com.au",
 }
 
+# KIS 종목정보파일 다운로드 URL
+KIS_KOSPI_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip"
+KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip"
+
 
 # 통합 시장 거래 시간표
 from datetime import time
@@ -90,7 +94,7 @@ TRADING_DAYS_PER_MONTH = 20
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
-MIN_TRADING_DAYS = 5
+MIN_TRADING_DAYS = 3
 
 
 # 튜닝 최적화 지표 (전역 공통)

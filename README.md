@@ -2,7 +2,7 @@
 
 > **"추세에 순응하되, 위험은 철저히 관리한다."**
 >
-> 데이터 기반의 반(半)자동 ETF 포트폴리오 운용 시스템
+> 데이터 기반의 ETF 순위 분석 시스템
 
 [![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -10,28 +10,18 @@
 
 ## 🚀 소개 (Introduction)
 
-**Momentum ETF**는 계좌/종목풀 설정을 기반으로 동작하는 **ETF 포트폴리오 자동화/분석 시스템**입니다.
+**Momentum ETF**는 계좌 설정을 기반으로 동작하는 **ETF 순위 분석 시스템**입니다.
 현재 운영 모델은 다음과 같습니다.
-* 계좌(`zaccounts/*`): 등록된 전체 종목을 상시 보유하고 점수 비례 비중 조절로 운용
-* 종목풀(`zpools/*`): `rank.py`로 모멘텀 랭킹 산출
-* 계좌 편입 종목: 종목풀 랭킹 결과를 참고해 수동/반자동으로 반영
+* 계좌(`zaccounts/*`): 등록된 전체 종목을 직접 관리하고 비중 조절로 운용
 
-감정이나 직관에 의존하는 투자를 지양하고, **이동평균(MA)**과 **RSI** 등 기술적 지표를 활용하여 **"현재 계좌 종목의 상대 점수에 따라 비중을 조절하는"** 데이터 기반의 의사결정을 지원합니다.
+감정이나 직관에 의존하는 투자를 지양하고, **이동평균(MA)**과 **RSI** 등 기술적 지표를 활용하여 **"현재 계좌 종목의 상대 추세 강도를 비교하는"** 데이터 기반의 의사결정을 지원합니다.
 
 ## ✨ 주요 기능 (Key Features)
 
-*   **📊 통합 추천 시스템 (Unified Recommendation)**: 백테스트 엔진을 기반으로 현재 계좌 상태를 시뮬레이션하여 현재 비중, 타겟비중, 예정 비중조절 정보를 생성합니다.
-*   **🧪 검증된 전략 (Backtesting & Tuning)**: 과거 데이터를 기반으로 전략의 유효성을 검증하고, 시장 상황에 맞는 최적의 파라미터를 자동으로 탐색합니다.
+*   **📊 계좌별 순위 화면**: `MA_TYPE`, `MA_MONTHS`를 바꿔가며 계좌별 종목 추세 점수를 즉시 확인합니다.
+*   **🟩 실보유 강조 표시**: 실제 보유 종목은 순위 테이블에서 녹색 행으로 즉시 구분합니다.
 *   **🛡️ 데이터 안정성 (Robust Caching)**: **Apache Parquet** 포맷을 캐시 엔진으로 도입하여 라이브러리 버전 mismatch로부터 자유롭고 안정적인 데이터 로딩을 보장합니다.
-*   **☁️ 클라우드 자동화 (CI/CD Automation)**: **GitHub Actions**를 통해 정해진 시간에 자동으로 추천 및 캐시 갱신 작업을 수행합니다.
-*   **📋 종목풀 랭킹 시스템 (Pool Ranking)**: 계좌 운용과 별도로 종목풀 랭킹을 생성해 편입 종목 검토 자료를 제공합니다.
-
-## 📊 성과 (Performance)
-*최근 12개월 백테스트 결과 (2024.12.03 기준, 10개 포트폴리오 계좌)*
-- **CAGR**: 72.37%
-- **MDD**: -11.24%
-- **Sharpe Ratio**: 2.82
-*(실제 성과는 시장 상황에 따라 달라질 수 있습니다.)*
+*   **🛠️ 종목 관리**: 계좌별 종목 추가/수정/삭제 및 삭제 종목 복원을 지원합니다.
 
 ## 📚 문서 (Documentation)
 
@@ -39,8 +29,8 @@
 
 *   **[프로젝트 개요 (Project Overview)](docs/project_overview.md)**: 프로젝트의 철학, 상세 기능, 시스템 구조
 *   **[사용자 가이드 (User Guide)](docs/user_guide.md)**: 설치, 설정, 실행 방법, 결과 해석
-*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 종목풀 랭킹 산정, 계좌 리밸런싱, 비중 조절 규칙 상세
-*   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 정합성 원칙
+*   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 이동평균 점수 계산 규칙과 정렬 기준
+*   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 화면 구성
 
 ## ⚡️ 빠른 시작 (Quick Start)
 
@@ -65,33 +55,18 @@ pip install -r requirements.txt
 
 ### 3. 실행
 
-**1. 종목풀 랭킹 생성**
+**1. 웹 실행**
 ```bash
-python rank.py kor
-python rank.py us
-python rank.py au
+python run.py
 ```
 
-**2. 튜닝 (계좌 리밸런싱 파라미터 탐색 및 자동 적용)**
-```bash
-python tune.py kor_account
-python tune.py core_account
-```
+웹에서 다음 기능을 사용합니다.
+* `http://localhost/rank?account=kor_account`
+* `1. 순위`
+* `2. 종목 관리`
+* `3. 삭제된 종목`
 
-**3. 백테스트 (성과 검증)**
-```bash
-python backtest.py kor_account
-python backtest.py core_account
-```
-
-**4. 추천 (비중 조절 가이드 생성)**
-```bash
-python recommend.py kor_account
-python recommend.py core_account
-```
-
-현재 기본 식별자는 다음과 같습니다.
-* 종목풀: `kor`, `us`, `au`
+현재 기본 계좌 식별자는 다음과 같습니다.
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
 
 ## ⚠️ 면책 조항 (Disclaimer)

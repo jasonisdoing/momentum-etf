@@ -11,10 +11,7 @@ from utils.settings_loader import (
     get_account_order,
     get_account_precision,
     get_account_settings,
-    get_account_strategy,
-    get_account_strategy_sections,
     get_slack_channel,
-    get_strategy_rules,
     list_available_accounts,
     load_common_settings,
 )
@@ -170,10 +167,7 @@ __all__ = [
     "get_icon_fallback",
     "get_benchmark_tickers",
     "get_account_settings",
-    "get_account_strategy",
-    "get_account_strategy_sections",
     "get_account_precision",
     "get_slack_channel",
-    "get_strategy_rules",
     "get_common_file_settings",
 ]

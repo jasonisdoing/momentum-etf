@@ -3,12 +3,35 @@
 from collections.abc import Mapping
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from config import MIN_TRADING_DAYS
-from core.backtest.signals import calculate_consecutive_days
 from utils.indicators import calculate_ma_score
 from utils.moving_averages import calculate_moving_average
+
+
+def _consecutive_counter(flags: np.ndarray) -> np.ndarray:
+    """연속 True 일수를 계산합니다."""
+    result = np.zeros(flags.shape[0], dtype=np.int32)
+    streak = 0
+    for idx in range(flags.shape[0]):
+        if flags[idx]:
+            streak += 1
+        else:
+            streak = 0
+        result[idx] = streak
+    return result
+
+
+def calculate_consecutive_days(scores: pd.Series) -> pd.Series:
+    """점수 시계열에서 양수 지속 일수를 계산합니다."""
+    if scores is None or scores.empty:
+        return pd.Series([], dtype=int)
+
+    positive_flags = (scores > 0).to_numpy(dtype=bool, copy=False)
+    streak_values = _consecutive_counter(positive_flags)
+    return pd.Series(streak_values, index=scores.index, dtype=int)
 
 
 def _calculate_score(

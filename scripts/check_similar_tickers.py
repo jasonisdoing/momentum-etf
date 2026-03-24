@@ -1,8 +1,8 @@
 """계좌 내 종목 간 가격 상관관계 분석 스크립트.
 
 사용법:
-    python scripts/check_similar_tickers.py kor_kr
-    python scripts/check_similar_tickers.py us --threshold 0.90 --days 120
+    python scripts/check_similar_tickers.py kor_account
+    python scripts/check_similar_tickers.py aus_account --threshold 0.90
 """
 
 from __future__ import annotations
@@ -18,8 +18,10 @@ import pandas as pd
 # 프로젝트 루트를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.account_registry import get_account_settings, list_available_accounts
+from utils.account_registry import get_account_settings
 from utils.data_loader import get_latest_trading_day, prepare_price_data
+from utils.rankings import get_account_rank_defaults
+from utils.settings_loader import list_available_accounts
 from utils.stock_list_io import get_etfs
 
 
@@ -35,11 +37,11 @@ def load_market_data(
 ) -> tuple[pd.DataFrame, dict[str, StockStats], int, int, list[str], list[str]]:
     """계좌의 전체 종목 종가 데이터와 통계를 로드합니다."""
     account_settings = get_account_settings(account_id)
-    country_code = (account_settings.get("country_code") or account_id).strip().lower()
+    country_code = str(account_settings.get("country_code") or "").strip().lower()
+    if not country_code:
+        raise ValueError(f"계좌 '{account_id}'의 country_code가 비어 있습니다.")
 
-    # 전략 설정에서 MA_MONTH 가져오기 (없으면 기본값 6개월)
-    strategy_cfg = account_settings.get("strategy", {})
-    ma_month = strategy_cfg.get("MA_MONTH", 6)
+    _, ma_month = get_account_rank_defaults(account_id)
 
     # 1개월 = 20거래일 기준
     lookback_days = int(ma_month * 20)
@@ -61,14 +63,14 @@ def load_market_data(
         country=country_code,
         start_date=start_date.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
-        warmup_days=30,  # 웜업 충분히 확보
+        warmup_days=30,
         account_id=account_id,
     )
 
     close_dict: dict[str, pd.Series] = {}
     stats_dict: dict[str, StockStats] = {}
-    missing_tickers: list[str] = []  # 데이터 아예 없음 (캐시 문제)
-    short_tickers: list[str] = []  # 데이터 짧음 (신규 상장 등)
+    missing_tickers: list[str] = []
+    short_tickers: list[str] = []
 
     for ticker in tickers:
         df = prefetched_map.get(ticker)
@@ -91,20 +93,15 @@ def load_market_data(
             continue
 
         series = df_cut[close_col].astype(float)
-        label = ticker
-        close_dict[label] = series
+        close_dict[ticker] = series
 
         start_price = series.iloc[0]
         end_price = series.iloc[-1]
-
-        if start_price > 0:
-            return_pct = (end_price - start_price) / start_price * 100
-        else:
-            return_pct = 0.0
+        return_pct = ((end_price - start_price) / start_price * 100.0) if start_price > 0 else 0.0
 
         avg_vol = 0.0
         if "Volume" in df_cut.columns:
-            avg_vol = df_cut["Volume"].mean()
+            avg_vol = float(df_cut["Volume"].mean())
 
         stats_dict[ticker] = StockStats(
             ticker=ticker,
@@ -145,26 +142,24 @@ def build_similarity_groups(
                 adj[t_i].add(t_j)
                 adj[t_j].add(t_i)
 
-    # 2. 연결 요소(Connected Components) 찾기 - BFS/DFS
+    # 2. 연결 요소 찾기
     visited = set()
     groups = []
 
-    for t in columns:
-        if t in visited:
+    for ticker in columns:
+        if ticker in visited:
             continue
 
-        # 새로운 그룹 발견 (혹은 독립 노드)
-        if t not in adj:  # 연결된 간선이 없는 독립 노드는 제외 (그룹 아님)
+        if ticker not in adj:
             continue
 
-        # BFS로 그룹 탐색
-        component = {t}
-        queue = [t]
-        visited.add(t)
+        component = {ticker}
+        queue = [ticker]
+        visited.add(ticker)
 
         while queue:
-            curr = queue.pop(0)
-            for neighbor in adj[curr]:
+            current = queue.pop(0)
+            for neighbor in adj[current]:
                 if neighbor not in visited:
                     visited.add(neighbor)
                     component.add(neighbor)
@@ -177,28 +172,23 @@ def build_similarity_groups(
     sorted_groups = []
 
     for group in groups:
-        # 수익률 순으로 정렬 (내림차순) --> 첫 번째가 대장주
-        group_stats = [stats[t] for t in group if t in stats]
+        group_stats = [stats[ticker] for ticker in group if ticker in stats]
         if not group_stats:
             continue
 
-        group_stats.sort(key=lambda s: s.return_pct, reverse=True)
+        group_stats.sort(key=lambda item: item.return_pct, reverse=True)
         leader = group_stats[0]
 
-        # 멤버 리스트 생성: (티커, 대장주와의 상관계수)
         members = []
-        for member in group_stats[1:]:  # 대장주 제외
-            corr = corr_matrix.loc[leader.ticker, member.ticker]
-            # 대장주와의 상관계수가 임계값 이상인 경우만 포함
+        for member in group_stats[1:]:
+            corr = float(corr_matrix.loc[leader.ticker, member.ticker])
             if abs(corr) >= threshold:
                 members.append((member.ticker, corr))
 
         if members:
             sorted_groups.append((leader.ticker, members))
 
-    # 그룹 간 정렬 (대장주 수익률 높은 순)
-    sorted_groups.sort(key=lambda x: stats[x[0]].return_pct, reverse=True)
-
+    sorted_groups.sort(key=lambda item: stats[item[0]].return_pct, reverse=True)
     return sorted_groups
 
 
@@ -238,10 +228,10 @@ def print_report(
 
             if abs(corr) >= 0.95:
                 emoji = "🔴"
-                action_msg = "👉 (제거 추천)"
+                action_msg = "👉 (중복 후보)"
             else:
                 emoji = "🟡"
-                action_msg = "👉 (제거 고려)"
+                action_msg = "👉 (검토 필요)"
 
             print(f"  └─ {emoji} {corr:.4f} {member.ticker} ({member.name})")
             print(f"          수익률: {member.return_pct:+.1f}% | 거래량: {member.avg_volume:,.0f}")
@@ -251,8 +241,8 @@ def print_report(
     print(f"{'=' * 70}")
     print("  💡 '유사 그룹'은 서로 상관관계가 높은 종목들의 묶음입니다.")
     print("  각 그룹 내에서 [대장] 종목의 성과가 가장 좋습니다.")
-    print("  🔴 0.95 이상: 매우 유사함 -> 교체 강력 추천")
-    print("  🟡 0.90 ~ 0.95: 유사함 -> 교체 고려")
+    print("  🔴 0.95 이상: 매우 유사함 -> 중복 후보")
+    print("  🟡 0.90 ~ 0.95: 유사함 -> 검토 필요")
     print()
 
 
@@ -287,16 +277,16 @@ def main() -> None:
 
     if missing:
         print(f"\n[오류] 데이터가 없는 {len(missing)}개 종목이 발견되었습니다:")
-        for s in missing:
-            print(f"  - {s}")
+        for item in missing:
+            print(f"  - {item}")
         print("\n모든 종목의 데이터가 필요합니다. 캐시를 갱신해주세요.")
         print(f"실행: python scripts/update_price_cache.py {account_id}")
         sys.exit(1)
 
     if short:
         print(f"\n[주의] 데이터 기간이 짧은 {len(short)}개 종목은 분석에서 제외됩니다:")
-        for s in short:
-            print(f"  - {s}")
+        for item in short:
+            print(f"  - {item}")
         print()
 
     print(f"[{account_id.upper()}] 유사 그룹 분석 중... ({len(prices_df.columns)}개 종목)")

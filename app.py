@@ -9,17 +9,15 @@ import streamlit as st
 import streamlit_authenticator as stauth
 
 from app_pages.account_page import render_account_page
-from app_pages.pool_page import render_pool_page
-from config import BUCKET_MAPPING
+from services.price_service import get_exchange_rates
 from utils.account_registry import (
     get_icon_fallback,
     load_account_configs,
 )
 from utils.formatters import format_price
-from utils.identifier_guard import ensure_account_pool_id_separation
-from utils.pool_registry import load_pool_configs
+from utils.rankings import ALLOWED_MA_TYPES, get_account_rank_defaults, get_rank_months_max
 from utils.report import format_kr_money
-from utils.ui import create_loading_status, load_account_recommendations, render_recommendation_table
+from utils.ui import create_loading_status, render_rank_table
 
 
 def _to_plain_dict(value):
@@ -82,7 +80,7 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     icon = account.get("icon") or get_icon_fallback(account.get("country_code", ""))
 
     title = view_mode if view_mode else account["name"]
-    url_mapping = {"추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+    url_mapping = {"순위": "rank", "종목 관리": "setup", "삭제된 종목": "deleted", "메모": "memo"}
 
     clean_view = view_mode.split(".")[-1].strip() if view_mode else "main"
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
@@ -105,12 +103,18 @@ def _build_account_page(page_cls: Callable[..., object], account: dict[str, Any]
     )
 
 
-def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[dict[str, Any]], view_mode: str):
-    url_mapping = {"요약": "account", "추천 결과": "result", "종목 관리": "setup", "삭제된 종목": "deleted"}
+def _build_unified_account_page(
+    page_cls: Callable[..., object],
+    accounts: list[dict[str, Any]],
+    view_mode: str,
+    *,
+    default: bool = False,
+):
+    url_mapping = {"순위": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
     clean_view = view_mode.split(".")[-1].strip()
     english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
     view_slug = _slugify_path(english_view)
-    url_path = "account" if clean_view == "요약" else f"account-{view_slug}"
+    url_path = "rank" if clean_view == "순위" else f"account-{view_slug}"
 
     account_options: list[tuple[str, str]] = []
     for acc in accounts:
@@ -123,44 +127,6 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
     def _render() -> None:
         loading = create_loading_status()
         try:
-            if view_mode == "0. 요약":
-                summary_frames: list[pd.DataFrame] = []
-                load_errors: list[str] = []
-
-                for acc in accounts:
-                    account_id = acc["account_id"]
-                    account_name = acc.get("name") or account_id.upper()
-                    df, error_message, _ = load_account_recommendations(account_id)
-
-                    if df is None:
-                        load_errors.append(f"{account_name}: {error_message or '추천 데이터를 불러오지 못했습니다.'}")
-                        continue
-
-                    if df.empty:
-                        continue
-
-                    merged_df = df.copy()
-                    merged_df.insert(0, "계좌", account_name)
-                    summary_frames.append(merged_df)
-
-                if load_errors:
-                    st.warning("\n".join(load_errors))
-
-                if not summary_frames:
-                    st.info("표시할 계좌 추천 결과가 없습니다.")
-                    return
-
-                summary_df = pd.concat(summary_frames, ignore_index=True)
-                visible_columns = ["계좌", *[col for col in summary_df.columns if col != "계좌"]]
-                render_recommendation_table(
-                    summary_df,
-                    country_code=None,
-                    grouped_by_bucket=False,
-                    visible_columns=visible_columns,
-                    height=900,
-                )
-                return
-
             if not account_options:
                 st.error("선택 가능한 계좌가 없습니다.")
                 return
@@ -177,16 +143,53 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
                 st.session_state["selected_account_id"] = current_id
                 st.query_params["account"] = current_id
 
-            selected_id = st.selectbox(
-                "계좌 선택",
-                options=option_ids,
-                index=option_ids.index(current_id),
-                format_func=lambda account_id: option_label_map.get(account_id, account_id),
-                key=f"account_selector_{view_slug}",
-            )
+            if clean_view == "순위":
+                default_ma_type, default_ma_months = get_account_rank_defaults(current_id)
+                max_months = get_rank_months_max()
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    selected_id = st.selectbox(
+                        "계좌 선택",
+                        options=option_ids,
+                        index=option_ids.index(current_id),
+                        format_func=lambda account_id: option_label_map.get(account_id, account_id),
+                        key=f"account_selector_{view_slug}",
+                    )
+                selected_default_type = default_ma_type
+                selected_default_months = min(max(default_ma_months, 1), max_months)
+                with c2:
+                    selected_ma_type = st.selectbox(
+                        "MA_TYPE",
+                        options=ALLOWED_MA_TYPES,
+                        index=ALLOWED_MA_TYPES.index(selected_default_type),
+                        key=f"rank_selector_type_{current_id}",
+                    )
+                with c3:
+                    selected_ma_months = st.selectbox(
+                        "MA_MONTHS",
+                        options=list(range(1, max_months + 1)),
+                        index=selected_default_months - 1,
+                        key=f"rank_selector_months_{current_id}",
+                    )
+            else:
+                selected_id = st.selectbox(
+                    "계좌 선택",
+                    options=option_ids,
+                    index=option_ids.index(current_id),
+                    format_func=lambda account_id: option_label_map.get(account_id, account_id),
+                    key=f"account_selector_{view_slug}",
+                )
             st.session_state["selected_account_id"] = selected_id
             st.query_params["account"] = selected_id
-            render_account_page(selected_id, view_mode=view_mode, loading=loading)
+            if clean_view == "순위":
+                render_account_page(
+                    selected_id,
+                    view_mode=view_mode,
+                    loading=loading,
+                    rank_params={"ma_type": selected_ma_type, "ma_months": selected_ma_months},
+                )
+            else:
+                render_account_page(selected_id, view_mode=view_mode, loading=loading)
         finally:
             loading.clear()
 
@@ -195,90 +198,7 @@ def _build_unified_account_page(page_cls: Callable[..., object], accounts: list[
         title=view_mode,
         icon="💼",
         url_path=url_path,
-    )
-
-
-def _build_unified_pool_page(page_cls: Callable[..., object], pools: list[dict[str, str]], view_mode: str):
-    url_mapping = {"랭킹": "rank", "종목 관리": "setup", "삭제된 종목": "deleted"}
-    clean_view = view_mode.split(".")[-1].strip()
-    english_view = url_mapping.get(clean_view, clean_view.replace("/", "_"))
-    view_slug = _slugify_path(english_view)
-    url_path = f"pool-{view_slug}"
-
-    pool_options: list[tuple[str, str]] = []
-    for pool in pools:
-        pool_id = pool["pool_id"]
-        pool_name = pool.get("name") or pool_id.upper()
-        pool_options.append((pool_id, pool_name))
-
-    def _render() -> None:
-        loading = create_loading_status()
-        try:
-            if not pool_options:
-                st.error("선택 가능한 종목풀이 없습니다.")
-                return
-
-            option_ids = [pool_id for pool_id, _ in pool_options]
-            option_label_map = {pool_id: label for pool_id, label in pool_options}
-
-            query_pool = st.query_params.get("pool")
-            current_id = query_pool if query_pool in option_label_map else st.session_state.get("selected_pool_id")
-            if current_id not in option_label_map:
-                current_id = option_ids[0]
-                st.session_state["selected_pool_id"] = current_id
-                st.query_params["pool"] = current_id
-
-            selected_bucket = "전체"
-            if clean_view == "랭킹":
-                bucket_options = ["전체", *BUCKET_MAPPING.values()]
-                query_bucket = st.query_params.get("bucket")
-                current_bucket = (
-                    query_bucket
-                    if isinstance(query_bucket, str) and query_bucket in bucket_options
-                    else st.session_state.get("selected_pool_bucket")
-                )
-                if current_bucket not in bucket_options:
-                    current_bucket = "전체"
-                    st.session_state["selected_pool_bucket"] = current_bucket
-                    st.query_params["bucket"] = current_bucket
-
-                pool_col, bucket_col = st.columns(2)
-                with pool_col:
-                    selected_id = st.selectbox(
-                        "종목풀 선택",
-                        options=option_ids,
-                        index=option_ids.index(current_id),
-                        format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
-                        key=f"pool_selector_{view_slug}",
-                    )
-                with bucket_col:
-                    selected_bucket = st.selectbox(
-                        "버킷 선택",
-                        options=bucket_options,
-                        index=bucket_options.index(current_bucket),
-                        key=f"pool_bucket_selector_{view_slug}",
-                    )
-                st.session_state["selected_pool_bucket"] = selected_bucket
-                st.query_params["bucket"] = selected_bucket
-            else:
-                selected_id = st.selectbox(
-                    "종목풀 선택",
-                    options=option_ids,
-                    index=option_ids.index(current_id),
-                    format_func=lambda pool_id: option_label_map.get(pool_id, pool_id),
-                    key=f"pool_selector_{view_slug}",
-                )
-            st.session_state["selected_pool_id"] = selected_id
-            st.query_params["pool"] = selected_id
-            render_pool_page(selected_id, view_mode=view_mode, selected_bucket=selected_bucket, loading=loading)
-        finally:
-            loading.clear()
-
-    return page_cls(
-        _render,
-        title=view_mode,
-        icon="🧩",
-        url_path=url_path,
+        default=default,
     )
 
 
@@ -295,11 +215,12 @@ def _build_system_page(page_cls: Callable[..., object]):
 
 def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
     def _render_home_page() -> None:
-        from app_pages.weekly_data_page import sync_active_week_summary
+        from app_pages.weekly_data_page import sync_active_week_summary_from_snapshot
+        from services.price_service import get_realtime_snapshot
         from utils.portfolio_io import (
             get_latest_daily_snapshot,
             load_portfolio_master,
-            load_real_holdings_with_recommendations,
+            load_real_holdings_table,
         )
 
         all_holdings = []
@@ -317,39 +238,76 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         total_valuation = 0.0
         total_stock_profit = 0.0
         total_stock_profit_pct = 0.0
+        total_profit_count = 0
+        total_loss_count = 0
         latest_weekly_summary: dict[str, Any] | None = None
-
-        if initial_subtab == "📊 대시보드":
-            try:
-                latest_weekly_summary = sync_active_week_summary()
-            except RuntimeError as exc:
-                st.error(f"주별 데이터 자동 집계 실패: {exc}")
-                st.stop()
+        is_dashboard_page = initial_subtab == "📊 대시보드"
+        is_detail_page = initial_subtab == "📋 상세"
+        bucket_totals = {
+            "1. 모멘텀": 0.0,
+            "2. 혁신기술": 0.0,
+            "3. 시장지수": 0.0,
+            "4. 배당방어": 0.0,
+            "5. 대체헷지": 0.0,
+        }
 
         # 데이터 로딩 (첫 로딩 시 환율/가격 조회로 시간이 걸릴 수 있음)
         visible_accounts = [a for a in accounts if a.get("settings", {}).get("show_hold", True)]
         loading_placeholder = st.empty()
+        dashboard_progress_placeholder = st.empty() if is_dashboard_page else None
+        account_master_map: dict[str, dict[str, Any] | None] = {}
+        kor_holding_tickers: set[str] = set()
+
+        loading_placeholder.info("⏳ 로딩 중... 공통 데이터 준비")
+        for account in visible_accounts:
+            account_id = account["account_id"]
+            master_data = load_portfolio_master(account_id)
+            account_master_map[account_id] = master_data
+
+            country_code = str(account.get("country_code") or "").strip().lower()
+            if country_code != "kor" or not master_data:
+                continue
+
+            holdings = master_data.get("holdings", [])
+            if not isinstance(holdings, list):
+                continue
+            for holding in holdings:
+                ticker = str((holding or {}).get("ticker") or "").strip().upper()
+                if ticker:
+                    kor_holding_tickers.add(ticker)
+
+        shared_exchange_rates = get_exchange_rates()
+        shared_kor_realtime_snapshot = (
+            get_realtime_snapshot("kor", sorted(kor_holding_tickers)) if kor_holding_tickers else {}
+        )
+
         for idx, account in enumerate(visible_accounts):
             account_id = account["account_id"]
             account_name = account.get("name") or account_id.upper()
             loading_placeholder.info(f"⏳ 로딩 중... {account_name} ({idx + 1}/{len(visible_accounts)})")
 
             # 원금 및 현금 로드
-            m_data = load_portfolio_master(account_id)
+            m_data = account_master_map.get(account_id)
             if m_data:
                 global_principal += m_data.get("total_principal", 0.0)
                 global_cash += m_data.get("cash_balance", 0.0)
 
-            df = load_real_holdings_with_recommendations(account_id)
+            df = load_real_holdings_table(
+                account_id,
+                preloaded_exchange_rates=shared_exchange_rates,
+                preloaded_kor_realtime_snapshot=shared_kor_realtime_snapshot,
+            )
 
             if df is not None and not df.empty:
-                df.insert(0, "계좌", account_name)
-                all_holdings.append(df)
+                if is_detail_page:
+                    df.insert(0, "계좌", account_name)
+                    all_holdings.append(df)
                 acc_valuation = df["평가금액(KRW)"].sum()
                 acc_purchase = df["매입금액(KRW)"].sum()
-
-                # Capture the rates from the DataFrame's first row (which we know are correct because they were just calculated)
-                # Alternatively, we can just load it once outside the loop.
+                total_profit_count += int((df["평가손익(KRW)"] >= 0).sum())
+                total_loss_count += int((df["평가손익(KRW)"] < 0).sum())
+                for bucket_name in bucket_totals:
+                    bucket_totals[bucket_name] += float(df.loc[df["버킷"] == bucket_name, "평가금액(KRW)"].sum())
             else:
                 acc_valuation = 0.0
                 acc_purchase = 0.0
@@ -363,6 +321,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             acc_total_assets = acc_valuation + acc_cash
             acc_net_profit = acc_total_assets - acc_principal
             acc_net_profit_pct = (acc_net_profit / acc_principal) * 100 if acc_principal > 0 else 0.0
+            acc_cash_ratio = (acc_cash / acc_total_assets) * 100 if acc_total_assets > 0 else 0.0
 
             # 하나라도 데이터가 있는 경우에만 요약에 추가 (또는 모든 계좌 표시)
             if acc_principal > 0 or acc_cash > 0 or acc_valuation > 0:
@@ -377,12 +336,34 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                         "평가 금액": acc_valuation,
                         "평가 손익": acc_stock_profit,
                         "평가 수익률": acc_stock_profit_pct,
+                        "현금 비중": acc_cash_ratio,
                         "현금": acc_cash,
                     }
                 )
+
+            if dashboard_progress_placeholder is not None:
+                running_total_assets = sum(item["총 자산"] for item in account_summaries)
+                running_total_principal = sum(item["총 원금"] for item in account_summaries)
+                running_total_cash = sum(item["현금"] for item in account_summaries)
+                dashboard_progress_placeholder.markdown(
+                    "\n".join(
+                        [
+                            "### 집계 중",
+                            f"- 진행 계좌: {idx + 1}/{len(visible_accounts)}",
+                            f"- 임시 총 자산: {format_korean_currency(running_total_assets)}",
+                            f"- 임시 투자 원금: {format_korean_currency(running_total_principal)}",
+                            f"- 임시 현금 잔고: {format_korean_currency(running_total_cash)}",
+                        ]
+                    )
+                )
         loading_placeholder.empty()
 
-        if not all_holdings and not account_summaries:
+        if dashboard_progress_placeholder is not None:
+            dashboard_progress_placeholder.empty()
+
+        if (is_detail_page and not all_holdings and not account_summaries) or (
+            not is_detail_page and not account_summaries
+        ):
             st.info("현재 모든 계좌를 통틀어 보유 중인 종목이나 자산 정보가 없습니다.")
             return
 
@@ -398,6 +379,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             total_stock_profit = sum(acc["평가 손익"] for acc in account_summaries)
             total_stock_profit_pct = (total_stock_profit / total_purchase) * 100 if total_purchase > 0 else 0.0
             total_cash = sum(acc["현금"] for acc in account_summaries)
+            total_cash_ratio = (total_cash / total_assets) * 100 if total_assets > 0 else 0.0
 
             # Fetch previous snapshot for change calculation
             prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
@@ -420,11 +402,30 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     "평가 금액": total_valuation,
                     "평가 손익": total_stock_profit,
                     "평가 수익률": total_stock_profit_pct,
+                    "현금 비중": total_cash_ratio,
                     "현금": total_cash,
                 }
             )
 
-        combined_df = pd.concat(all_holdings, ignore_index=True) if all_holdings else pd.DataFrame()
+        if initial_subtab == "📊 대시보드":
+            try:
+                loading_placeholder.info("⏳ 로딩 중... 주별 요약 갱신")
+                latest_weekly_summary = sync_active_week_summary_from_snapshot(
+                    total_assets=total_assets,
+                    total_purchase=total_purchase,
+                    total_valuation=total_valuation,
+                    total_cash=total_cash,
+                    bucket_totals=bucket_totals,
+                    total_profit_count=total_profit_count,
+                    total_loss_count=total_loss_count,
+                )
+                loading_placeholder.empty()
+            except RuntimeError as exc:
+                loading_placeholder.empty()
+                st.error(f"주별 데이터 자동 집계 실패: {exc}")
+                st.stop()
+
+        combined_df = pd.concat(all_holdings, ignore_index=True) if is_detail_page and all_holdings else pd.DataFrame()
 
         weight_df = None
 
@@ -455,16 +456,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
         styled_stat_df = stat_df.style.apply(get_stat_styles, axis=None).hide(axis="index")
 
         # 2. 포트폴리오 비중 테이블 데이터 생성
-        bucket_cols = ["1. 모멘텀", "2. 혁신기술", "3. 시장지수", "4. 배당방어", "5. 대체헷지"]
-        bucket_totals = {}
-        for col in bucket_cols:
-            if not combined_df.empty and "버킷" in combined_df.columns:
-                val = combined_df.loc[combined_df["버킷"] == col, "평가금액(KRW)"].sum()
-            else:
-                val = 0.0
-            bucket_totals[col] = val
-
-        bucket_totals["6. 현금"] = global_cash
+        bucket_totals["6. 현금"] = total_cash
 
         if total_assets > 0:
             weight_row = {}
@@ -538,6 +530,8 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             def format_value(val, row_name):
                 if not isinstance(val, (int, float)):
                     return val
+                if row_name == "현금 비중":
+                    return f"{val:.1f}%"
                 if "수익률" in row_name:
                     return f"{val:+.2f}%"
                 return f"{val:,.0f}원"
@@ -572,7 +566,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                                         s += " color: #e06666; font-weight: bold;"
                                     elif val < 0:
                                         s += " color: #3d85c6; font-weight: bold;"
-                            elif metric_name == "계좌 수익률" or metric_name == "현금":
+                            elif metric_name in {"계좌 수익률", "현금 비중", "현금"}:
                                 s += " font-weight: bold;"
                         style_df.at[i, col] = s
                 return style_df
@@ -676,40 +670,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 # Display Exchange Rates
                 import datetime
 
-                import yfinance as yf
-
-                @st.cache_data(ttl=3600, show_spinner=False)
-                def _get_app_exchange_rates() -> dict[str, Any]:
-                    rates = {
-                        "USD": {"rate": 0.0, "change_pct": 0.0},
-                        "AUD": {"rate": 0.0, "change_pct": 0.0},
-                        "updated_at": datetime.datetime.now(),
-                    }
-
-                    # USD
-                    try:
-                        usd_ticker = yf.Ticker("KRW=X")
-                        curr_usd = float(usd_ticker.fast_info.last_price)
-                        prev_usd = float(usd_ticker.fast_info.previous_close)
-                        rates["USD"]["rate"] = curr_usd
-                        if prev_usd > 0:
-                            rates["USD"]["change_pct"] = ((curr_usd - prev_usd) / prev_usd) * 100
-                    except Exception:
-                        pass
-
-                    # AUD
-                    try:
-                        aud_ticker = yf.Ticker("AUDKRW=X")
-                        curr_aud = float(aud_ticker.fast_info.last_price)
-                        prev_aud = float(aud_ticker.fast_info.previous_close)
-                        rates["AUD"]["rate"] = curr_aud
-                        if prev_aud > 0:
-                            rates["AUD"]["change_pct"] = ((curr_aud - prev_aud) / prev_aud) * 100
-                    except Exception:
-                        pass
-                    return rates
-
-                rates = _get_app_exchange_rates()
+                rates = get_exchange_rates()
 
                 st.subheader("환율")
 
@@ -865,7 +826,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                     )
             combined_df = combined_df.rename(columns=krw_column_renames)
 
-            # render_recommendation_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
+            # render_rank_table 호출 (컬럼 순서 제어를 위해 visible_columns 명시)
             visible_cols = [
                 "계좌",
                 "환종",
@@ -894,14 +855,13 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
             ]
             # Warnings moved to the top of the tabs
 
-            render_recommendation_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
+            render_rank_table(combined_df, grouped_by_bucket=False, visible_columns=visible_cols, height=900)
             st.caption("비중은 총자산에서 차지하는 비중입니다.")
 
     return _render_home_page
 
 
 def main() -> None:
-    ensure_account_pool_id_separation()
     navigation = getattr(st, "navigation", None)
     page_cls = getattr(st, "Page", None)
     if navigation is None or page_cls is None:
@@ -914,8 +874,6 @@ def main() -> None:
         st.stop()
 
     default_icon = "📈"
-    pools = load_pool_configs()
-
     st.set_page_config(
         page_title="Momentum ETF",
         page_icon=default_icon,
@@ -941,6 +899,7 @@ def main() -> None:
     )
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
+    from app_pages.etf_market_page import build_etf_market_page
     from app_pages.transactions_page import build_transaction_page
     from app_pages.weekly_data_page import build_weekly_data_page
 
@@ -974,12 +933,12 @@ def main() -> None:
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["0. 요약", "1. 추천 결과", "2. 종목 관리", "3. 삭제된 종목"]
-    pages["계좌"] = [_build_unified_account_page(page_cls, accounts, view_mode) for view_mode in view_modes]
-
-    # 통합 종목풀 그룹 (풀 선택형 단일 URL)
-    pool_view_modes = ["1. 랭킹", "2. 종목 관리", "3. 삭제된 종목"]
-    pages["종목풀"] = [_build_unified_pool_page(page_cls, pools, view_mode) for view_mode in pool_view_modes]
+    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"]
+    pages["계좌"] = [
+        _build_unified_account_page(page_cls, accounts, view_mode, default=False)
+        for idx, view_mode in enumerate(view_modes)
+    ]
+    pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
     pages["시스템 정보"] = [_build_system_page(page_cls)]
 
     # 네비게이션 객체 생성 (사이드바 방식)
