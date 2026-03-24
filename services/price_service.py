@@ -127,6 +127,17 @@ def get_realtime_cache_meta(cache_key: str) -> dict[str, Any] | None:
     }
 
 
+def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dict[str, Any] | None:
+    """국가별 실시간 스냅샷 캐시 메타데이터를 반환한다."""
+
+    country = _normalize_country_code(country_code)
+    normalized_tickers = _normalize_tickers(tickers)
+    if not normalized_tickers:
+        return None
+    cache_key = _build_realtime_cache_key(country, normalized_tickers)
+    return get_realtime_cache_meta(cache_key)
+
+
 def _normalize_country_code(country_code: str) -> str:
     country = str(country_code or "").strip().lower()
     if not country:

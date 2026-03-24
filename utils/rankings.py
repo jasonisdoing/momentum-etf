@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+from time import perf_counter
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from config import BUCKET_MAPPING, CACHE_START_DATE, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
+from config import BUCKET_MAPPING, CACHE_START_DATE, MARKET_SCHEDULES, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from core.strategy.metrics import process_ticker_data
-from services.price_service import get_realtime_snapshot
-from utils.cache_utils import load_cached_frames_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
+from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
+from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
+from utils.data_loader import get_latest_trading_day
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import AccountSettingsError, get_account_settings
@@ -34,6 +37,53 @@ def _calculate_rsi(close_series: pd.Series, period: int = 14) -> float | None:
         return 100.0
     rs = float(avg_gain.iloc[-1]) / float(avg_loss.iloc[-1])
     return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _get_market_timezone(country_code: str) -> ZoneInfo:
+    schedule = MARKET_SCHEDULES.get(str(country_code or "").strip().lower())
+    timezone_name = str((schedule or {}).get("timezone") or "").strip()
+    if not timezone_name:
+        return ZoneInfo("Asia/Seoul")
+    return ZoneInfo(timezone_name)
+
+
+def _normalize_market_timestamp(
+    value: datetime | pd.Timestamp | None,
+    country_code: str,
+    *,
+    assume_utc: bool,
+) -> pd.Timestamp | None:
+    if value is None:
+        return None
+
+    ts = pd.Timestamp(value)
+    if pd.isna(ts):
+        return None
+
+    market_tz = _get_market_timezone(country_code)
+    if ts.tzinfo is None:
+        if assume_utc:
+            ts = ts.tz_localize("UTC")
+        else:
+            ts = ts.tz_localize(market_tz)
+
+    return ts.tz_convert(market_tz).tz_localize(None)
+
+
+def _build_blocked_rankings_result(
+    *,
+    latest_trading_day: pd.Timestamp,
+    cache_updated_at: pd.Timestamp | None,
+    missing_tickers: list[str],
+    stale_tickers: list[str],
+) -> pd.DataFrame:
+    blocked = pd.DataFrame()
+    blocked.attrs["cache_blocked"] = True
+    blocked.attrs["latest_trading_day"] = latest_trading_day
+    blocked.attrs["cache_updated_at"] = cache_updated_at
+    blocked.attrs["missing_tickers"] = missing_tickers
+    blocked.attrs["stale_tickers"] = stale_tickers
+    return blocked
 
 
 def get_account_rank_defaults(account_id: str) -> tuple[str, int]:
@@ -184,29 +234,25 @@ def _apply_realtime_overlay(
 
 
 def _build_effective_close_series(
-    cached_df: pd.DataFrame | None,
+    cached_close_series: pd.Series | None,
     realtime_entry: dict[str, float] | None,
 ) -> pd.Series | None:
     """실시간 가격을 반영한 종가 시리즈를 생성합니다."""
-    if cached_df is None or cached_df.empty:
+    if cached_close_series is None or cached_close_series.empty:
         return None
     if not isinstance(realtime_entry, dict) or not realtime_entry:
-        return _extract_close_series(cached_df)
+        return cached_close_series
 
     now_val = realtime_entry.get("nowVal")
     if now_val is None:
-        return _extract_close_series(cached_df)
+        return cached_close_series
 
     try:
         realtime_price = float(now_val)
     except (TypeError, ValueError):
-        return _extract_close_series(cached_df)
+        return cached_close_series
 
-    close_series = _extract_close_series(cached_df)
-    if close_series is None or close_series.empty:
-        return close_series
-
-    adjusted = close_series.copy()
+    adjusted = cached_close_series.copy()
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
     last_index = pd.Timestamp(adjusted.index[-1])
     if last_index.tzinfo is not None:
@@ -218,20 +264,6 @@ def _build_effective_close_series(
     else:
         adjusted.iloc[-1] = realtime_price
     return adjusted.sort_index()
-
-
-def _extract_close_series(cached_df: pd.DataFrame | None) -> pd.Series | None:
-    if cached_df is None or cached_df.empty:
-        return None
-
-    close_col = "Close" if "Close" in cached_df.columns else "close" if "close" in cached_df.columns else None
-    if close_col is None:
-        return None
-
-    close_series = pd.to_numeric(cached_df[close_col], errors="coerce").dropna()
-    if close_series.empty:
-        return None
-    return close_series.astype(float)
 
 
 def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
@@ -269,7 +301,11 @@ def build_account_rankings(
     ma_months: int,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     held_tickers_override: set[str] | None = None,
+    status_callback: Any | None = None,
 ) -> pd.DataFrame:
+    if callable(status_callback):
+        status_callback("최신 거래일 기준 캐시 상태 확인")
+    started_at = perf_counter()
     settings = get_account_settings(account_id)
     country_code = str(settings.get("country_code") or "").strip().lower()
 
@@ -277,14 +313,58 @@ def build_account_rankings(
     if not etfs:
         return pd.DataFrame()
 
+    fetch_started_at = perf_counter()
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
-    cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
+    latest_trading_day = get_latest_trading_day(country_code).normalize()
+    missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
+    normalized_cache_updated = {
+        ticker: normalized
+        for ticker, updated_at in cache_updated_map_raw.items()
+        if (normalized := _normalize_market_timestamp(updated_at, country_code, assume_utc=True)) is not None
+    }
+    stale_tickers = sorted(
+        ticker for ticker, updated_at in normalized_cache_updated.items() if updated_at.normalize() < latest_trading_day
+    )
+    latest_cache_updated_at = max(normalized_cache_updated.values()) if normalized_cache_updated else None
+
+    if missing_tickers or stale_tickers:
+        fetch_elapsed = perf_counter() - fetch_started_at
+        total_elapsed = perf_counter() - started_at
+        logger.warning(
+            "[rankings] account=%s blocked latest_trading_day=%s missing=%d stale=%d total=%.3fs fetch=%.3fs",
+            account_id,
+            latest_trading_day.date(),
+            len(missing_tickers),
+            len(stale_tickers),
+            total_elapsed,
+            fetch_elapsed,
+        )
+        return _build_blocked_rankings_result(
+            latest_trading_day=latest_trading_day,
+            cache_updated_at=latest_cache_updated_at,
+            missing_tickers=missing_tickers,
+            stale_tickers=stale_tickers,
+        )
+
+    if callable(status_callback):
+        status_callback("기준 종가 캐시 로드")
+    cached_close_series_map = load_cached_close_series_bulk_with_fallback(account_id, tickers)
+    if callable(status_callback):
+        status_callback("실시간 가격 조회")
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
         else _load_realtime_snapshot(country_code, tickers)
     )
+    fetch_elapsed = perf_counter() - fetch_started_at
+    realtime_meta = None
+    if realtime_snapshot_override is None:
+        realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
 
+    if callable(status_callback):
+        status_callback("보유 종목 확인")
+    holdings_started_at = perf_counter()
     held_tickers: set[str] = set()
     if held_tickers_override is not None:
         held_tickers = {str(ticker).strip().upper() for ticker in held_tickers_override if str(ticker or "").strip()}
@@ -296,32 +376,47 @@ def build_account_rankings(
                 for holding in portfolio_master.get("holdings", [])
                 if str(holding.get("ticker") or "").strip()
             }
+    holdings_elapsed = perf_counter() - holdings_started_at
 
     ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
     rows: list[dict[str, Any]] = []
+    preprocess_elapsed = 0.0
+    metric_elapsed = 0.0
+    process_elapsed = 0.0
+
+    if callable(status_callback):
+        status_callback("순위 계산")
 
     for etf in etfs:
         ticker = str(etf.get("ticker") or "").strip().upper()
         if not ticker:
             continue
 
-        cached_df = cached_frames.get(ticker)
+        cached_close_series = cached_close_series_map.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
-        effective_close_series = _build_effective_close_series(cached_df, realtime_entry)
+        preprocess_started_at = perf_counter()
+        effective_close_series = _build_effective_close_series(cached_close_series, realtime_entry)
+        preprocess_elapsed += perf_counter() - preprocess_started_at
+
+        metric_started_at = perf_counter()
         price_metrics = _extract_price_metrics_from_close_series(effective_close_series)
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
+        metric_elapsed += perf_counter() - metric_started_at
+
         score_value = None
         streak_value: int | None = None
 
         if effective_close_series is not None and not effective_close_series.empty:
+            process_started_at = perf_counter()
             processed = process_ticker_data(
                 ticker,
-                cached_df,
+                None,
                 ma_days=ma_days,
                 precomputed_entry={"close": effective_close_series, "open": effective_close_series},
                 ma_type=ma_type,
                 enable_data_sufficiency_check=False,
             )
+            process_elapsed += perf_counter() - process_started_at
             if processed is not None:
                 score_series = processed.get("ma_score")
                 streak_series = processed.get("buy_signal_days")
@@ -350,18 +445,13 @@ def build_account_rankings(
             }
         )
 
+    dataframe_started_at = perf_counter()
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    data_updated_at: datetime | None = None
     realtime_active = bool(realtime_snapshot)
-    if realtime_active:
-        data_updated_at = datetime.now()
-    else:
-        cache_updated_map = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
-        if cache_updated_map:
-            data_updated_at = max(cache_updated_map.values())
+    ranking_computed_at = datetime.now()
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
         score = row.get("점수")
@@ -381,8 +471,29 @@ def build_account_rankings(
     df = df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
     df = _normalize_ranking_values(df, country_code)
     df.attrs["realtime_active"] = realtime_active
-    if data_updated_at is not None:
-        df.attrs["data_updated_at"] = data_updated_at
+    df.attrs["ranking_computed_at"] = ranking_computed_at
+    if realtime_meta:
+        df.attrs["realtime_fetched_at"] = realtime_meta.get("fetched_at")
+        df.attrs["realtime_expires_at"] = realtime_meta.get("expires_at")
+        df.attrs["realtime_is_stale"] = bool(realtime_meta.get("is_stale", False))
+        df.attrs["realtime_source"] = realtime_meta.get("source")
+    if latest_cache_updated_at is not None:
+        df.attrs["cache_updated_at"] = latest_cache_updated_at
+    df.attrs["latest_trading_day"] = latest_trading_day
+    dataframe_elapsed = perf_counter() - dataframe_started_at
+    total_elapsed = perf_counter() - started_at
+    logger.info(
+        "[rankings] account=%s tickers=%d total=%.3fs fetch=%.3fs holdings=%.3fs preprocess=%.3fs metrics=%.3fs process=%.3fs dataframe=%.3fs",
+        account_id,
+        len(tickers),
+        total_elapsed,
+        fetch_elapsed,
+        holdings_elapsed,
+        preprocess_elapsed,
+        metric_elapsed,
+        process_elapsed,
+        dataframe_elapsed,
+    )
     return df
 
 
