@@ -152,10 +152,26 @@ def reopen_account_todo(account_id: str, todo_id: str) -> datetime:
     return now
 
 
+def delete_account_todo(account_id: str, todo_id: str) -> None:
+    """투두를 완전히 삭제한다."""
+    account_norm = (account_id or "").strip().lower()
+    if not account_norm:
+        raise ValueError("account_id가 필요합니다.")
+
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — account_todos 컬렉션에 쓸 수 없습니다.")
+
+    result = coll.delete_one({"_id": ObjectId(todo_id), "account_id": account_norm})
+    if not result.deleted_count:
+        raise RuntimeError("삭제할 투두 아이템을 찾지 못했습니다.")
+
+
 __all__ = [
     "list_account_todos",
     "create_account_todo",
     "update_account_todo_content",
     "complete_account_todo",
     "reopen_account_todo",
+    "delete_account_todo",
 ]

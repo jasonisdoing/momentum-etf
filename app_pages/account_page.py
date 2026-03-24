@@ -17,7 +17,9 @@ from utils.account_notes import load_account_note, save_account_note
 from utils.account_todos import (
     complete_account_todo,
     create_account_todo,
+    delete_account_todo,
     list_account_todos,
+    reopen_account_todo,
     update_account_todo_content,
 )
 from utils.data_loader import fetch_ohlcv
@@ -608,26 +610,6 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     if not to_restore_df.empty:
         st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
 
-        # 탭 3 전용 버튼 스타일링 (복구: 녹색, 완전 삭제: 빨간색)
-        # 탭 3 전용 버튼 스타일링 (복구: 녹색, 완전 삭제: 빨간색)
-        st.markdown(
-            """
-            <style>
-            .stButton > button[kind="primary"] {
-                background-color: #4CAF50 !important;
-                color: white !important;
-                border-color: #4CAF50 !important;
-            }
-            .stButton > button[kind="secondary"] {
-                background-color: #f44336 !important;
-                color: white !important;
-                border-color: #f44336 !important;
-            }
-            </style>
-        """,
-            unsafe_allow_html=True,
-        )
-
         c_res1, c_res2 = st.columns(2)
         with c_res1:
             if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_tab_restore_{account_id}", width="stretch"):
@@ -737,6 +719,27 @@ def _render_account_note_tab(account_id: str) -> None:
     loaded_key = f"account_note_loaded_{account_id}"
     updated_key = f"account_note_updated_{account_id}"
 
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stTextArea"] textarea {
+            background-color: #111 !important;
+            color: #fff !important;
+            border: 1px solid #111 !important;
+        }
+        div[data-testid="stTextArea"] textarea::placeholder {
+            color: #bdbdbd !important;
+        }
+        div[class*="st-key-todo_delete_btn_"] .stButton > button {
+            background-color: #f44336 !important;
+            color: white !important;
+            border-color: #f44336 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     if not st.session_state.get(loaded_key) or note_key not in st.session_state:
         try:
             note_doc = load_account_note(account_id)
@@ -784,12 +787,42 @@ def _render_account_note_tab(account_id: str) -> None:
     with right_col:
         st.subheader("할일")
 
+        def _clear_todo_session_state() -> None:
+            prefix = f"todo_content_{account_id}_"
+            keys_to_remove = [key for key in st.session_state.keys() if key.startswith(prefix)]
+            for key in keys_to_remove:
+                st.session_state.pop(key, None)
+
+        @st.dialog("할일 삭제", width="small")
+        def _open_delete_todo_dialog(todo_id: str) -> None:
+            st.warning("이 할일을 완전히 삭제합니다. 되돌릴 수 없습니다.")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("취소", key=f"btn_cancel_delete_todo_{account_id}_{todo_id}", width="stretch"):
+                    st.rerun()
+            with c2:
+                if st.button(
+                    "삭제 확인",
+                    key=f"btn_confirm_delete_todo_{account_id}_{todo_id}",
+                    type="primary",
+                    width="stretch",
+                ):
+                    try:
+                        delete_account_todo(account_id, todo_id)
+                    except Exception as exc:
+                        st.error(f"투두를 삭제하지 못했습니다: {exc}")
+                        return
+                    _clear_todo_session_state()
+                    st.success("투두를 삭제했습니다.")
+                    st.rerun()
+
         if st.button("➕ 새 아이템 생성", key=f"btn_create_todo_{account_id}", width="stretch"):
             try:
                 create_account_todo(account_id, "")
             except Exception as exc:
                 st.error(f"투두를 생성하지 못했습니다: {exc}")
                 return
+            _clear_todo_session_state()
             st.rerun()
 
         try:
@@ -836,7 +869,7 @@ def _render_account_note_tab(account_id: str) -> None:
                         (
                             "<div style='min-height:90px;padding:0.75rem 0.9rem;"
                             "border:1px solid #d9d9d9;border-radius:0.5rem;"
-                            "background-color:#f6f6f6;color:#777;"
+                            "background-color:#f6f6f6;color:#111;"
                             "text-decoration: line-through; white-space: normal;"
                             "margin-bottom:0.75rem;'>"
                             f"{content_html or '&nbsp;'}"
@@ -853,9 +886,9 @@ def _render_account_note_tab(account_id: str) -> None:
                         label_visibility="collapsed",
                     )
 
-                c1, c2 = st.columns(2)
+                c1, c2, c3 = st.columns(3)
                 with c1:
-                    if st.button("저장", key=f"btn_save_todo_{account_id}_{todo_id}", width="stretch"):
+                    if st.button("저장", key=f"btn_save_todo_{account_id}_{todo_id}", type="primary", width="stretch"):
                         try:
                             update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
                         except Exception as exc:
@@ -867,12 +900,11 @@ def _render_account_note_tab(account_id: str) -> None:
                     if is_done:
                         if st.button("완료취소", key=f"btn_undo_todo_{account_id}_{todo_id}", width="stretch"):
                             try:
-                                from utils.account_todos import reopen_account_todo
-
                                 reopen_account_todo(account_id, todo_id)
                             except Exception as exc:
                                 st.error(f"투두를 완료취소하지 못했습니다: {exc}")
                                 return
+                            _clear_todo_session_state()
                             st.success("투두를 진행 중으로 되돌렸습니다.")
                             st.rerun()
                     elif st.button("완료", key=f"btn_done_todo_{account_id}_{todo_id}", width="stretch"):
@@ -882,8 +914,16 @@ def _render_account_note_tab(account_id: str) -> None:
                         except Exception as exc:
                             st.error(f"투두를 완료 처리하지 못했습니다: {exc}")
                             return
+                        _clear_todo_session_state()
                         st.success("투두를 완료 처리했습니다.")
                         st.rerun()
+                with c3:
+                    if is_done:
+                        st.write("")
+                    else:
+                        with st.container(key=f"todo_delete_btn_{account_id}_{todo_id}"):
+                            if st.button("🗑️ 삭제", key=f"btn_delete_todo_{account_id}_{todo_id}", width="stretch"):
+                                _open_delete_todo_dialog(todo_id)
 
         for todo in todos:
             _render_todo_item(todo)
@@ -899,32 +939,6 @@ def render_account_page(
     """주어진 계정 설정을 기반으로 계정 페이지를 렌더링합니다 (탭 포함)."""
     owns_loading = loading is None
     loading = loading or create_loading_status()
-
-    # 버튼 스타일링 (특정 영역의 버튼만 색상 적용)
-    # 탭 이동 시에도 항상 적용되도록 메인 함수 최상단에 배치
-    st.markdown(
-        """
-        <style>
-        /* 1. 다이얼로그(수정 모달) 내의 버튼 스타일 */
-        div[data-testid="stDialog"] .stButton > button[kind="primary"] {
-            background-color: #4CAF50 !important;
-            color: white !important;
-            border-color: #4CAF50 !important;
-        }
-        div[data-testid="stDialog"] .stButton > button[kind="secondary"] {
-            background-color: #f44336 !important;
-            color: white !important;
-            border-color: #f44336 !important;
-        }
-
-        /* 호버 효과 */
-        .stButton > button:hover {
-            opacity: 0.9;
-        }
-        </style>
-    """,
-        unsafe_allow_html=True,
-    )
 
     try:
         loading.update(f"{account_id.upper()} 설정 조회")
