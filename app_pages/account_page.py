@@ -837,7 +837,8 @@ def _render_account_note_tab(account_id: str) -> None:
                             "<div style='min-height:90px;padding:0.75rem 0.9rem;"
                             "border:1px solid #d9d9d9;border-radius:0.5rem;"
                             "background-color:#f6f6f6;color:#777;"
-                            "text-decoration: line-through; white-space: normal;'>"
+                            "text-decoration: line-through; white-space: normal;"
+                            "margin-bottom:0.75rem;'>"
                             f"{content_html or '&nbsp;'}"
                             "</div>"
                         ),
