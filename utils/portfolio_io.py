@@ -47,11 +47,12 @@ def load_all_account_holding_tickers() -> set[str]:
     return held_tickers
 
 
-def _apply_kor_realtime_overlay_to_holdings(
+def _apply_realtime_overlay_to_holdings(
     df_holdings: pd.DataFrame,
+    country_code: str,
     realtime_data: dict[str, dict[str, float]] | None = None,
 ) -> pd.DataFrame:
-    """한국 종목 보유 테이블에 실시간 현재가/NAV/괴리율을 덮어쓴다."""
+    """보유 종목 테이블에 실시간 현재가/NAV/괴리율 등을 덮어쓴다."""
     tickers = [
         str(ticker or "").strip().upper() for ticker in df_holdings.get("ticker", []) if str(ticker or "").strip()
     ]
@@ -60,17 +61,19 @@ def _apply_kor_realtime_overlay_to_holdings(
 
     if realtime_data is None:
         try:
-            realtime_data = get_realtime_snapshot("kor", tickers)
+            realtime_data = get_realtime_snapshot(country_code, tickers)
         except Exception as exc:
-            logger.warning("보유 종목 실시간 오버레이 실패: %s", exc)
+            logger.warning("보유 종목 실시간 오버레이 실패 (%s): %s", country_code, exc)
             return df_holdings
 
     if not realtime_data:
         return df_holdings
 
     overlaid = df_holdings.copy()
-    overlaid["Nav"] = overlaid.get("Nav")
-    overlaid["괴리율"] = overlaid.get("괴리율")
+    # 필요한 컬럼 보장
+    for col in ["Nav", "괴리율"]:
+        if col not in overlaid.columns:
+            overlaid[col] = None
 
     for idx, row in overlaid.iterrows():
         ticker = str(row.get("ticker") or "").strip().upper()
@@ -288,10 +291,11 @@ def load_real_holdings_table(
         account_country = str(account_settings.get("country_code") or "").strip().lower()
     except Exception:
         account_country = ""
-    if account_country == "kor":
-        df_holdings = _apply_kor_realtime_overlay_to_holdings(
+    if account_country in ("kor", "au"):
+        df_holdings = _apply_realtime_overlay_to_holdings(
             df_holdings,
-            realtime_data=preloaded_kor_realtime_snapshot,
+            country_code=account_country,
+            realtime_data=preloaded_kor_realtime_snapshot if account_country == "kor" else None,
         )
 
     multiplier = df_holdings["currency"].apply(_get_multiplier)
