@@ -1536,7 +1536,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
 
-    # 한 번에 최대 50개까지만 지원할 수 있으므로 청크로 나눔 (보통 백테스트 종목이 많지 않음)
+    # 한 번에 최대 50개까지만 지원하므로 청크로 나눕니다.
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
         query_str = ",".join([f"SERVICE_ITEM:{code}" for code in chunk])
         url = f"{NAVER_FINANCE_STOCK_POLLING_URL}?query={query_str}"

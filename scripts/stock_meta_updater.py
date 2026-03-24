@@ -32,7 +32,7 @@ def main():
             logger.info(f"Target account specified: {target}")
             update_stock_metadata(target)
         else:
-            logger.info("No target specified. Updating all configured accounts and pools.")
+            logger.info("No target specified. Updating all configured accounts.")
             update_stock_metadata(None)
 
     except Exception as e:
