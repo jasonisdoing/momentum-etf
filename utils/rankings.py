@@ -38,19 +38,11 @@ def get_account_rank_defaults(account_id: str) -> tuple[str, int]:
 
     ma_type = str(settings.get("MA_TYPE") or "").strip().upper()
     if not ma_type:
-        strategy_cfg = settings.get("strategy")
-        if isinstance(strategy_cfg, dict):
-            ma_type = str(strategy_cfg.get("MA_TYPE") or "").strip().upper()
-    if not ma_type:
         raise AccountSettingsError(f"'{account_id}' 설정에 필수 항목 'MA_TYPE'가 누락되었습니다.")
     if ma_type not in ALLOWED_MA_TYPES:
         raise AccountSettingsError(f"'{account_id}' 설정의 MA_TYPE이 유효하지 않습니다: {ma_type}")
 
     ma_months_raw = settings.get("MA_MONTHS")
-    if ma_months_raw is None:
-        strategy_cfg = settings.get("strategy")
-        if isinstance(strategy_cfg, dict):
-            ma_months_raw = strategy_cfg.get("MA_MONTHS")
     if ma_months_raw is None:
         raise AccountSettingsError(f"'{account_id}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
 
@@ -184,6 +176,73 @@ def _apply_realtime_overlay(
     return updated
 
 
+def _apply_realtime_to_frame(
+    cached_df: pd.DataFrame | None,
+    realtime_entry: dict[str, float] | None,
+) -> pd.DataFrame | None:
+    """실시간 가격을 마지막 종가에 반영한 임시 시계열을 생성합니다."""
+    if cached_df is None or cached_df.empty:
+        return cached_df
+    if not isinstance(realtime_entry, dict) or not realtime_entry:
+        return cached_df
+
+    now_val = realtime_entry.get("nowVal")
+    if now_val is None:
+        return cached_df
+
+    try:
+        realtime_price = float(now_val)
+    except (TypeError, ValueError):
+        return cached_df
+
+    close_col = "Close" if "Close" in cached_df.columns else "close" if "close" in cached_df.columns else None
+    if close_col is None:
+        return cached_df
+
+    adjusted_df = cached_df.copy()
+    if adjusted_df.index.empty:
+        return adjusted_df
+
+    today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    last_index = pd.Timestamp(adjusted_df.index[-1])
+    if last_index.tzinfo is not None:
+        last_index = last_index.tz_localize(None)
+    last_index = last_index.normalize()
+
+    target_index = today if last_index < today else adjusted_df.index[-1]
+
+    if target_index not in adjusted_df.index:
+        new_row = {col: pd.NA for col in adjusted_df.columns}
+        if "Open" in adjusted_df.columns:
+            new_row["Open"] = realtime_price
+        if "High" in adjusted_df.columns:
+            new_row["High"] = realtime_price
+        if "Low" in adjusted_df.columns:
+            new_row["Low"] = realtime_price
+        new_row[close_col] = realtime_price
+        if "Volume" in adjusted_df.columns:
+            new_row["Volume"] = 0.0
+        adjusted_df.loc[target_index] = new_row
+    else:
+        adjusted_df.at[target_index, close_col] = realtime_price
+        if "High" in adjusted_df.columns:
+            try:
+                existing_high = adjusted_df.at[target_index, "High"]
+                existing_high_val = float(existing_high) if pd.notna(existing_high) else realtime_price
+                adjusted_df.at[target_index, "High"] = max(existing_high_val, realtime_price)
+            except (TypeError, ValueError):
+                adjusted_df.at[target_index, "High"] = realtime_price
+        if "Low" in adjusted_df.columns:
+            try:
+                existing_low = adjusted_df.at[target_index, "Low"]
+                existing_low_val = float(existing_low) if pd.notna(existing_low) else realtime_price
+                adjusted_df.at[target_index, "Low"] = min(existing_low_val, realtime_price)
+            except (TypeError, ValueError):
+                adjusted_df.at[target_index, "Low"] = realtime_price
+
+    return adjusted_df.sort_index()
+
+
 def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> pd.DataFrame:
     settings = get_account_settings(account_id)
     country_code = str(settings.get("country_code") or "").strip().lower()
@@ -212,15 +271,17 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
             continue
 
         cached_df = cached_frames.get(ticker)
-        price_metrics = _extract_price_metrics(cached_df)
-        price_metrics = _apply_realtime_overlay(price_metrics, realtime_snapshot.get(ticker))
+        realtime_entry = realtime_snapshot.get(ticker)
+        effective_df = _apply_realtime_to_frame(cached_df, realtime_entry)
+        price_metrics = _extract_price_metrics(effective_df)
+        price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         score_value = None
         streak_value: int | None = None
 
-        if cached_df is not None and not cached_df.empty:
+        if effective_df is not None and not effective_df.empty:
             processed = process_ticker_data(
                 ticker,
-                cached_df,
+                effective_df,
                 ma_days=ma_days,
                 ma_type=ma_type,
                 enable_data_sufficiency_check=False,
@@ -236,7 +297,7 @@ def build_account_rankings(account_id: str, *, ma_type: str, ma_months: int) -> 
                     streak_raw = streak_series.iloc[-1]
                     if pd.notna(streak_raw):
                         streak_value = int(streak_raw)
-        elif cached_df is not None and len(cached_df.index) >= MIN_TRADING_DAYS:
+        elif effective_df is not None and len(effective_df.index) >= MIN_TRADING_DAYS:
             pass
 
         rows.append(
