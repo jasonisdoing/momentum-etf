@@ -205,15 +205,23 @@ def _build_unified_account_page(
     )
 
 
-def _build_system_page(page_cls: Callable[..., object]):
-    from app_pages.system_page import render_system_page
+def _build_system_info_pages(page_cls: Callable[..., object]):
+    from app_pages.system_page import render_gemini_page, render_system_page
 
-    return page_cls(
-        render_system_page,
-        title="시스템 정보",
-        icon="🛠️",
-        url_path="system",
-    )
+    return [
+        page_cls(
+            render_system_page,
+            title="시스템정보",
+            icon="🛠️",
+            url_path="system",
+        ),
+        page_cls(
+            render_gemini_page,
+            title="Gemini",
+            icon="🤖",
+            url_path="gemini",
+        ),
+    ]
 
 
 def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
@@ -903,10 +911,21 @@ def main() -> None:
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.etf_market_page import build_etf_market_page
+    from app_pages.public_page import render_public_notebook_rank
     from app_pages.transactions_page import build_transaction_page
     from app_pages.weekly_data_page import build_weekly_data_page
 
     pages = {}
+
+    # 퍼블릭 페이지 (인증 우회 대상)
+    public_pages = [
+        page_cls(
+            render_public_notebook_rank,
+            title="계좌별 ETF 추세 정보 및 보유여부 (Public)",
+            icon="📓",
+            url_path="notebook-lm",
+        )
+    ]
 
     # 요약 그룹
     pages["요약"] = [
@@ -942,12 +961,19 @@ def main() -> None:
         for idx, view_mode in enumerate(view_modes)
     ]
     pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
-    pages["시스템 정보"] = [_build_system_page(page_cls)]
+    pages["시스템 정보"] = _build_system_info_pages(page_cls)
+    # 퍼블릭 관리 (사이드바에는 미노출하되 라우팅은 가능하게 리스트에 추가)
+    pages["_public"] = public_pages
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")
 
     # --- 인증 로직 시작 ---
+    # 퍼블릭 경로는 인증을 건너뜀
+    if pg.url_path == "notebook-lm":
+        pg.run()
+        st.stop()
+
     authenticator = _load_authenticator()
     _, auth_status, _ = authenticator.login(location="main")
 
