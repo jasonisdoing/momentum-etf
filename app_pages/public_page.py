@@ -24,28 +24,9 @@ def _df_to_markdown_simple(df: pd.DataFrame) -> str:
     return "\n".join([header, sep] + rows)
 
 
-def render_public_notebook_rank() -> None:
-    """노트북LM용 퍼블릭 랭킹 정보 출력 (인증 없음)"""
-    # 불필요한 Streamlit UI 요소 숨기기 (노트북LM 파싱 방해 금지)
-    st.markdown(
-        """
-        <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            [data-testid="stSidebar"] {display: none;}
-        </style>
-    """,
-        unsafe_allow_html=True,
-    )
-
-    st.title("계좌별 ETF 추세 정보 및 보유여부")
-    st.caption("이 페이지는 노트북LM용으로 최적화된 최신 랭킹 정보를 제공합니다.")
-
-    # 로딩 상태 표시 (노트북LM 등이 데이터가 준비 중임을 인지하게 함)
-    status_placeholder = st.empty()
-    status_placeholder.info("⏳ 최신 데이터를 준비 중입니다... 잠시만 기다려 주세요.")
-
+@st.cache_data(ttl=3600)  # 1시간 동안 캐시 유지
+def _get_cached_notebook_rank_markdown() -> str:
+    """모든 계좌의 랭킹 정보를 Markdown 형식으로 생성 및 캐싱"""
     accounts = load_account_configs()
     md_output = ""
 
@@ -55,7 +36,7 @@ def render_public_notebook_rank() -> None:
 
         ma_type, ma_months = get_account_rank_defaults(account_id)
 
-        # 실시간 시세 없이 캐시 데이터 기반으로 빠르게 렌더링 (퍼블릭용)
+        # 실시간 시세 없이 캐시 데이터 기반으로 빠르게 렌더링
         df_rank = build_account_rankings(account_id, ma_type=ma_type, ma_months=ma_months)
 
         md_output += f"# {account_name}\n\n"
@@ -108,5 +89,27 @@ def render_public_notebook_rank() -> None:
 
         md_output += "---\n\n"
 
-    status_placeholder.empty()
+    return md_output
+
+
+def render_public_notebook_rank() -> None:
+    """노트북LM용 퍼블릭 랭킹 정보 출력 (인증 없음)"""
+    # 불필요한 Streamlit UI 요소 숨기기 (노트북LM 파싱 방해 금지)
+    st.markdown(
+        """
+        <style>
+            #MainMenu {visibility: hidden;}
+            footer {visibility: hidden;}
+            header {visibility: hidden;}
+            [data-testid="stSidebar"] {display: none;}
+        </style>
+    """,
+        unsafe_allow_html=True,
+    )
+
+    st.title("계좌별 ETF 추세 정보 및 보유여부")
+    st.caption("이 페이지는 노트북LM용으로 최적화된 최신 랭킹 정보를 제공하며, 1시간 단위로 캐싱됩니다.")
+
+    # 캐시된 데이터 가져오기 (매우 빠름)
+    md_output = _get_cached_notebook_rank_markdown()
     st.markdown(md_output)
