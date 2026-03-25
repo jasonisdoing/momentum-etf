@@ -336,9 +336,14 @@ def render_system_page() -> None:
     base_url = f"http://{host}" if is_local else "https://etf.dojason.com"
 
     st.info("**노트북LM 연동 주소 (클릭 시 복사 가능):**")
+    st.code(f"{base_url}/static/notebook_rank.md", language="text")
+    st.caption("✅ **추천**: 자바스크립트를 지원하지 않는 크롤러(노트북LM 등)에 가장 적합한 '순수 텍스트' 주소입니다.")
+
+    st.divider()
+
+    st.info("**비상용/확장용 주소:**")
     st.code(f"{base_url}/?data=rank", language="text")
-    st.caption("ℹ️ 위 주소는 사이드바 메뉴에 나타나지 않는 '숨겨진' 데이터 전용 경로입니다.")
-    # (기존 비상용 주소 로직 제거: 이제 이 주소가 통합된 단일 경로임)
+    st.caption("ℹ️ 위 주소는 데이터 확인용(브라우저)으로 편리하며, 향후 다양한 데이터 확장이 가능한 동적 경로입니다.")
 
 
 def render_gemini_page() -> None:
