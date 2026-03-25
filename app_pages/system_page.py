@@ -330,8 +330,15 @@ def render_system_page() -> None:
             status_placeholder.empty()
             st.warning("⚠️ 이미 다른 프로세스에서 갱신 중입니다.")
 
+    # 현재 접속 환경에 따라 주소 동적으로 결정
+    host = st.context.headers.get("host", "etf.dojason.com")
+    is_local = "localhost" in host or "127.0.0.1" in host
+    base_url = f"http://{host}" if is_local else "https://etf.dojason.com"
+
     st.info("**노트북LM 연동 주소 (클릭 시 복사 가능):**")
-    st.code("https://etf.dojason.com/static/notebook_rank.md", language="text")
+    st.code(f"{base_url}/static/notebook_rank.md", language="text")
+    st.caption("⚠️ 위 주소가 비어 보일 경우, 아래 **비상용 주소**를 사용하세요:")
+    st.code(f"{base_url}/?notebook=true", language="text")
 
 
 def render_gemini_page() -> None:
