@@ -128,7 +128,9 @@ def render_public_notebook_rank() -> None:
     )
 
     st.title("계좌별 ETF 추세 정보 및 보유여부")
-    st.caption("이 페이지는 노트북LM용으로 최적화된 최신 랭킹 정보를 제공하며, 1시간 단위로 캐싱됩니다.")
+    st.caption(
+        "이 페이지는 접속 즉시 캐시된 정보를 보여주며, 데이터가 1시간 이상 경과한 경우 백그라운드에서 자동으로 갱신됩니다."
+    )
 
     # 1. 기존 캐시 파일 읽기
     md_content = ""
