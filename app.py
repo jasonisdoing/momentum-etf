@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -912,21 +911,17 @@ def main() -> None:
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.etf_market_page import build_etf_market_page
+    from app_pages.notebook_api_page import render_notebook_api_page
     from app_pages.transactions_page import build_transaction_page
     from app_pages.weekly_data_page import build_weekly_data_page
 
     pages = {}
 
     # (기존 퍼블릭 페이지 제거됨: 정적 마크다운 파일로 대체)
-    # 🤖 노트북LM 전용 원본 데이터 서빙 (백업 경로: ?notebook=true)
-    if st.query_params.get("notebook") == "true":
-        from utils.notebook_exporter import CACHE_FILE
-
-        if os.path.exists(CACHE_FILE):
-            with open(CACHE_FILE, encoding="utf-8-sig") as f:
-                content = f.read()
-            st.code(content, language="markdown")
-            st.stop()
+    # 🤖 노트북LM 및 외부 API용 데이터 인터셉터 (로그인 무시하고 마크다운 반환)
+    if st.query_params.get("data") == "rank":
+        render_notebook_api_page()
+        st.stop()
 
     # 요약 그룹
     pages["요약"] = [
