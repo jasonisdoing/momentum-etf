@@ -27,3 +27,4 @@ znotes/
 
 # 캐시
 data/notebook_rank_cache.md
+static/notebook_rank.md
