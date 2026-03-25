@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -917,6 +918,15 @@ def main() -> None:
     pages = {}
 
     # (기존 퍼블릭 페이지 제거됨: 정적 마크다운 파일로 대체)
+    # 🤖 노트북LM 전용 원본 데이터 서빙 (백업 경로: ?notebook=true)
+    if st.query_params.get("notebook") == "true":
+        from utils.notebook_exporter import CACHE_FILE
+
+        if os.path.exists(CACHE_FILE):
+            with open(CACHE_FILE, encoding="utf-8-sig") as f:
+                content = f.read()
+            st.code(content, language="markdown")
+            st.stop()
 
     # 요약 그룹
     pages["요약"] = [
