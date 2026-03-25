@@ -10,6 +10,7 @@ import streamlit as st
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.notebook_exporter import update_notebook_rank_cache
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
@@ -311,6 +312,13 @@ def render_system_page() -> None:
             ["python", "scripts/slack_asset_summary.py"],
             "✅ 전체 자산 요약 알림 전송을 시작했습니다.",
         )
+
+    st.write("")
+    if st.button("노트북LM 캐시 강제 갱신", width="stretch", key="btn_system_notebook_refresh"):
+        if update_notebook_rank_cache(force=True):
+            st.success("✅ 노트북LM용 정적 마크다운 파일(static/notebook_rank.md)을 갱신했습니다.")
+        else:
+            st.warning("⚠️ 이미 다른 프로세스에서 갱신 중입니다.")
 
 
 def render_gemini_page() -> None:

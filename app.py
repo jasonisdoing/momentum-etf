@@ -911,21 +911,12 @@ def main() -> None:
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
     from app_pages.etf_market_page import build_etf_market_page
-    from app_pages.public_page import render_public_notebook_rank
     from app_pages.transactions_page import build_transaction_page
     from app_pages.weekly_data_page import build_weekly_data_page
 
     pages = {}
 
-    # 퍼블릭 페이지 (인증 우회 대상)
-    public_pages = [
-        page_cls(
-            render_public_notebook_rank,
-            title="계좌별 ETF 추세 정보 및 보유여부 (Public)",
-            icon="📓",
-            url_path="notebook-lm",
-        )
-    ]
+    # (기존 퍼블릭 페이지 제거됨: 정적 마크다운 파일로 대체)
 
     # 요약 그룹
     pages["요약"] = [
@@ -962,17 +953,15 @@ def main() -> None:
     ]
     pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
     pages["시스템 정보"] = _build_system_info_pages(page_cls)
-    # 퍼블릭 관리 (사이드바에는 미노출하되 라우팅은 가능하게 리스트에 추가)
-    pages["_public"] = public_pages
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")
 
     # --- 인증 로직 시작 ---
-    # 퍼블릭 경로는 인증을 건너뜀
-    if pg.url_path == "notebook-lm":
-        pg.run()
-        st.stop()
+    # --- 전역 백그라운드 작업 ---
+    from utils.notebook_exporter import update_cache_in_background
+
+    update_cache_in_background()  # 1시간마다 노트북LM 캐시 자동 갱신
 
     authenticator = _load_authenticator()
     _, auth_status, _ = authenticator.login(location="main")
