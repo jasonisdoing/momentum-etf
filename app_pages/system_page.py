@@ -7,9 +7,10 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from services.price_service import get_realtime_snapshot
+from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
 
@@ -102,7 +103,7 @@ def _build_manual_rank_extract_tsv(
     progress_bar: st.delta_generator.DeltaGenerator,
     status_placeholder: st.delta_generator.DeltaGenerator,
 ) -> tuple[str, list[str]]:
-    column_order = [
+    column_order_rank = [
         "보유",
         "버킷",
         "티커",
@@ -120,20 +121,38 @@ def _build_manual_rank_extract_tsv(
         "RSI",
         "지속",
     ]
+    column_order_holdings = [
+        "버킷",
+        "티커",
+        "종목명",
+        "현재가",
+        "수량",
+        "평균 매입가",
+        "매입금액(KRW)",
+        "평가금액(KRW)",
+        "평가손익(KRW)",
+        "수익률(%)",
+        "비중(%)",
+        "보유일",
+    ]
 
     accounts = load_account_configs()
     warnings_list: list[str] = []
+    rates = get_exchange_rates()
     kor_snapshot = _collect_kor_realtime_snapshot(
         accounts, status_placeholder=status_placeholder, warnings_list=warnings_list
     )
     holdings_map = _load_holdings_map(accounts, warnings_list=warnings_list)
     total_accounts = len(accounts)
     sections: list[str] = []
+
     for index, account in enumerate(accounts, start=1):
         account_id = str(account["account_id"])
         account_name = str(account.get("name") or account_id)
         country_code = str(account.get("country_code") or "").strip().lower()
-        status_placeholder.info(f"순위 추출 중: {account_name} ({index}/{total_accounts})")
+        status_placeholder.info(f"데이터 추출 중: {account_name} ({index}/{total_accounts})")
+
+        # 1. 순위 데이터 (Rankings)
         ma_type, ma_months = get_account_rank_defaults(account_id)
         account_snapshot = None
         if country_code == "kor":
@@ -143,7 +162,8 @@ def _build_manual_rank_extract_tsv(
                 if str(item.get("ticker") or "").strip()
             }
             account_snapshot = {ticker: kor_snapshot[ticker] for ticker in account_tickers if ticker in kor_snapshot}
-        df = build_account_rankings(
+
+        df_rank = build_account_rankings(
             account_id,
             ma_type=ma_type,
             ma_months=ma_months,
@@ -151,21 +171,91 @@ def _build_manual_rank_extract_tsv(
             held_tickers_override=holdings_map.get(account_id, set()),
         )
 
-        title = f"[{account_name}] {ma_type} {ma_months}개월"
-        if df.empty:
-            sections.append(f"{title}\n{_build_empty_rank_header()}")
-            progress_bar.progress(index / total_accounts if total_accounts else 1.0)
-            continue
+        rank_title = f"[{account_name}] 순위 - {ma_type} {ma_months}개월"
+        rank_text = ""
+        if df_rank.empty:
+            rank_text = f"{rank_title}\n{_build_empty_rank_header()}"
+        else:
+            export_rank_df = df_rank.loc[:, column_order_rank].copy()
+            export_rank_df = export_rank_df.fillna("")
+            buffer_rank = StringIO()
+            export_rank_df.to_csv(buffer_rank, sep="\t", index=False, lineterminator="\n")
+            rank_text = f"{rank_title}\n{buffer_rank.getvalue().rstrip()}"
 
-        export_df = df.loc[:, column_order].copy()
-        export_df = export_df.fillna("")
+        # 2. 보유 상세 데이터 (Holdings)
+        df_hold = load_real_holdings_table(
+            account_id,
+            preloaded_exchange_rates=rates,
+            preloaded_kor_realtime_snapshot=kor_snapshot,
+        )
+        master_data = load_portfolio_master(account_id)
+        cash_val = master_data.get("cash_balance", 0.0) if master_data else 0.0
 
-        buffer = StringIO()
-        export_df.to_csv(buffer, sep="\t", index=False, lineterminator="\n")
-        sections.append(f"{title}\n{buffer.getvalue().rstrip()}")
+        hold_title = f"[{account_name}] 보유 상세"
+        hold_text = ""
+        if df_hold is None or df_hold.empty:
+            # 보유 종목이 없어도 현금은 있을 수 있음
+            total_assets = cash_val
+            if total_assets > 0:
+                df_cash = pd.DataFrame(
+                    [
+                        {
+                            "버킷": "6. 현금",
+                            "티커": "CASH",
+                            "종목명": "현금",
+                            "현재가": 1.0,
+                            "수량": int(cash_val),
+                            "평균 매입가": 1.0,
+                            "매입금액(KRW)": int(cash_val),
+                            "평가금액(KRW)": int(cash_val),
+                            "평가손익(KRW)": 0,
+                            "수익률(%)": 0.0,
+                            "비중(%)": 100.0,
+                            "보유일": "-",
+                        }
+                    ]
+                )
+                buffer_hold = StringIO()
+                df_cash.to_csv(buffer_hold, sep="\t", index=False, lineterminator="\n")
+                hold_text = f"{hold_title}\n{buffer_hold.getvalue().rstrip()}"
+            else:
+                hold_text = f"{hold_title}\n(보유 자산 없음)"
+        else:
+            valuation_total = df_hold["평가금액(KRW)"].sum()
+            total_assets = valuation_total + cash_val
+
+            if total_assets > 0:
+                df_hold["비중(%)"] = ((df_hold["평가금액(KRW)"] / total_assets) * 100.0).round(2)
+                # 현금 행 추가
+                cash_row = {
+                    "버킷": "6. 현금",
+                    "티커": "CASH",
+                    "종목명": "현금",
+                    "현재가": 1.0,
+                    "수량": int(cash_val),
+                    "평균 매입가": 1.0,
+                    "매입금액(KRW)": int(cash_val),
+                    "평가금액(KRW)": int(cash_val),
+                    "평가손익(KRW)": 0,
+                    "수익률(%)": 0.0,
+                    "비중(%)": round((cash_val / total_assets) * 100.0, 2) if total_assets > 0 else 0.0,
+                    "보유일": "-",
+                }
+                df_hold = pd.concat([df_hold, pd.DataFrame([cash_row])], ignore_index=True)
+            else:
+                df_hold["비중(%)"] = 0.0
+
+            export_hold_df = df_hold.loc[:, column_order_holdings].copy()
+            export_hold_df = export_hold_df.fillna("")
+            buffer_hold = StringIO()
+            export_hold_df.to_csv(buffer_hold, sep="\t", index=False, lineterminator="\n")
+            hold_text = f"{hold_title}\n{buffer_hold.getvalue().rstrip()}"
+
+        sections.append(f"{rank_text}\n\n{hold_text}")
         progress_bar.progress(index / total_accounts if total_accounts else 1.0)
 
-    return "\n\n".join(sections), warnings_list
+    separator = "\n\n" + "=" * 50 + "\n\n"
+    return separator.join(sections), warnings_list
 
 
 def render_system_page() -> None:
@@ -225,7 +315,7 @@ def render_system_page() -> None:
         )
 
     st.write("")
-    st.subheader("🧾 계좌 수동 순위 추출")
+    st.subheader("🧾 계좌순위 + 보유비중 추출")
     if "system_manual_rank_extract_tsv" not in st.session_state:
         st.session_state["system_manual_rank_extract_tsv"] = ""
     if "system_manual_rank_extract_warnings" not in st.session_state:
@@ -233,7 +323,7 @@ def render_system_page() -> None:
     progress_placeholder = st.empty()
     status_placeholder = st.empty()
 
-    if st.button("전체 계좌 수동 순위 추출", width="stretch", key="btn_system_manual_rank_extract"):
+    if st.button("전체 계좌순위 + 보유비중 추출", width="stretch", key="btn_system_manual_rank_extract"):
         try:
             progress_bar = progress_placeholder.progress(0.0)
             extract_text, warnings_list = _build_manual_rank_extract_tsv(
@@ -244,7 +334,7 @@ def render_system_page() -> None:
             st.session_state["system_manual_rank_extract_warnings"] = warnings_list
             progress_bar.progress(1.0)
             status_placeholder.empty()
-            st.success("✅ 전체 계좌 수동 순위 추출 텍스트를 생성했습니다.")
+            st.success("✅ 전체 계좌순위 + 보유비중 추출 텍스트를 생성했습니다.")
         except Exception as exc:
             progress_placeholder.empty()
             status_placeholder.empty()
