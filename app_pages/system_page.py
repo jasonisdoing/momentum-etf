@@ -330,6 +330,9 @@ def render_system_page() -> None:
             status_placeholder.empty()
             st.warning("⚠️ 이미 다른 프로세스에서 갱신 중입니다.")
 
+    st.info("**노트북LM 연동 주소 (클릭 시 복사 가능):**")
+    st.code("https://etf.dojason.com/static/notebook_rank.md", language="text")
+
 
 def render_gemini_page() -> None:
     st.subheader("🤖 구글 제미나이용 텍스트 생성 (TSV)")
