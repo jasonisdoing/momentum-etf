@@ -970,7 +970,7 @@ def main() -> None:
 
     # --- 인증 로직 시작 ---
     # 퍼블릭 경로는 인증을 건너뜀
-    if pg.url_path == "notebook-lm":
+    if pg.url_path == "notebook-lm-rank":
         pg.run()
         st.stop()
 
