@@ -194,7 +194,6 @@ def _build_manual_rank_extract_tsv(
         hold_title = f"[{account_name}] 보유 상세"
         hold_text = ""
         if df_hold is None or df_hold.empty:
-            # 보유 종목이 없어도 현금은 있을 수 있음
             total_assets = cash_val
             if total_assets > 0:
                 df_cash = pd.DataFrame(
@@ -226,7 +225,6 @@ def _build_manual_rank_extract_tsv(
 
             if total_assets > 0:
                 df_hold["비중(%)"] = ((df_hold["평가금액(KRW)"] / total_assets) * 100.0).round(2)
-                # 현금 행 추가
                 cash_row = {
                     "버킷": "6. 현금",
                     "티커": "CASH",
@@ -314,17 +312,20 @@ def render_system_page() -> None:
             "✅ 전체 자산 요약 알림 전송을 시작했습니다.",
         )
 
-    st.write("")
-    st.subheader("🧾 계좌순위 + 보유비중 추출")
+
+def render_gemini_page() -> None:
+    st.subheader("🤖 구글 제미나이용 텍스트 생성 (TSV)")
+    st.info("내 투자에 관한 조언을 받기 위해 제미나이에게 전달할 텍스트 데이터를 생성합니다.")
+
     if "system_manual_rank_extract_tsv" not in st.session_state:
         st.session_state["system_manual_rank_extract_tsv"] = ""
     if "system_manual_rank_extract_warnings" not in st.session_state:
         st.session_state["system_manual_rank_extract_warnings"] = []
-    progress_placeholder = st.empty()
-    status_placeholder = st.empty()
 
-    if st.button("전체 계좌순위 + 보유비중 추출", width="stretch", key="btn_system_manual_rank_extract"):
+    if st.button("전체 구글 제미나이용 텍스트 생성", width="stretch", key="btn_system_manual_rank_extract"):
         try:
+            progress_placeholder = st.empty()
+            status_placeholder = st.empty()
             progress_bar = progress_placeholder.progress(0.0)
             extract_text, warnings_list = _build_manual_rank_extract_tsv(
                 progress_bar=progress_bar,
@@ -334,18 +335,16 @@ def render_system_page() -> None:
             st.session_state["system_manual_rank_extract_warnings"] = warnings_list
             progress_bar.progress(1.0)
             status_placeholder.empty()
-            st.success("✅ 전체 계좌순위 + 보유비중 추출 텍스트를 생성했습니다.")
+            st.success("✅ 구글 제미나이용 텍스트(TSV) 생성을 완료했습니다.")
         except Exception as exc:
-            progress_placeholder.empty()
-            status_placeholder.empty()
-            st.error(f"⚠️ 순위 추출 오류: {exc}")
+            st.error(f"⚠️ 추출 오류: {exc}")
 
-    warnings_list = st.session_state.get("system_manual_rank_extract_warnings", [])
-    if warnings_list:
-        st.warning("\n".join(warnings_list))
+    warnings_list_gemini = st.session_state.get("system_manual_rank_extract_warnings", [])
+    if warnings_list_gemini:
+        st.warning("\n".join(warnings_list_gemini))
 
     st.text_area(
-        "추출 결과 (TSV)",
-        height=420,
+        "제미나이용 결과 (TSV)",
+        height=500,
         key="system_manual_rank_extract_tsv",
     )
