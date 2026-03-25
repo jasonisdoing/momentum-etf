@@ -24,3 +24,6 @@ znotes/
 
 # Streamlit secrets
 .streamlit/secrets.toml
+
+# 캐시
+data/notebook_rank_cache.md
