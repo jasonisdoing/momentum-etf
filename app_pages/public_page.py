@@ -42,6 +42,10 @@ def render_public_notebook_rank() -> None:
     st.title("계좌별 ETF 추세 정보 및 보유여부")
     st.caption("이 페이지는 노트북LM용으로 최적화된 최신 랭킹 정보를 제공합니다.")
 
+    # 로딩 상태 표시 (노트북LM 등이 데이터가 준비 중임을 인지하게 함)
+    status_placeholder = st.empty()
+    status_placeholder.info("⏳ 최신 데이터를 준비 중입니다... 잠시만 기다려 주세요.")
+
     accounts = load_account_configs()
     md_output = ""
 
@@ -104,4 +108,5 @@ def render_public_notebook_rank() -> None:
 
         md_output += "---\n\n"
 
+    status_placeholder.empty()
     st.markdown(md_output)
