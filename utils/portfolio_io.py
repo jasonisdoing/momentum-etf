@@ -350,13 +350,20 @@ def load_real_holdings_table(
         df_holdings["매입금액(KRW)"] > 0, (df_holdings["평가손익(KRW)"] / df_holdings["매입금액(KRW)"]) * 100, 0.0
     ).astype(float)
 
-    float_cols = ["평균 매입가", "현재가", "수익률(%)"]
-    for col in float_cols:
-        if col in df_holdings.columns:
-            df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0.0).astype(float)
-
-    # Round KRW money columns to int
+    # 소수점 반올림 및 타입 변환 처리
+    price_digits = 2 if account_country in ("us", "au") else 0
+    percent_cols = ["수익률(%)", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+    price_cols = ["평균 매입가", "현재가", "Nav", "괴리율"]
     int_cols = ["매입금액(KRW)", "평가금액(KRW)", "평가손익(KRW)"]
+
+    for col in percent_cols:
+        if col in df_holdings.columns:
+            df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").round(2)
+
+    for col in price_cols:
+        if col in df_holdings.columns:
+            df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").round(price_digits)
+
     for col in int_cols:
         if col in df_holdings.columns:
             df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0).round(0).astype(int)
