@@ -43,7 +43,7 @@ def main():
     # Streamlit을 실행하기 위한 인자를 구성합니다.
     # sys.argv를 수정하여 `streamlit run app.py` 처럼 보이게 합니다.
     # 추가적인 Streamlit 인자(예: --server.port)를 전달할 수 있도록 합니다.
-    args = ["run", script_path, "--server.enableStaticServing", "true"] + sys.argv[1:]
+    args = ["run", script_path] + sys.argv[1:]
     sys.argv = ["streamlit"] + args
 
     # Streamlit의 메인 CLI 함수를 호출합니다.

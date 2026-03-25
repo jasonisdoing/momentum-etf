@@ -336,9 +336,9 @@ def render_system_page() -> None:
     base_url = f"http://{host}" if is_local else "https://etf.dojason.com"
 
     st.info("**노트북LM 연동 주소 (클릭 시 복사 가능):**")
-    st.code(f"{base_url}/static/notebook_rank.md", language="text")
-    st.caption("⚠️ 위 주소가 비어 보일 경우, 아래 **비상용 주소**를 사용하세요:")
-    st.code(f"{base_url}/?notebook=true", language="text")
+    st.code(f"{base_url}/?data=rank", language="text")
+    st.caption("ℹ️ 위 주소는 사이드바 메뉴에 나타나지 않는 '숨겨진' 데이터 전용 경로입니다.")
+    # (기존 비상용 주소 로직 제거: 이제 이 주소가 통합된 단일 경로임)
 
 
 def render_gemini_page() -> None:
