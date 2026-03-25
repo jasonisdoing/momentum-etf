@@ -104,7 +104,7 @@ def update_notebook_rank_cache(force=False, progress_bar=None, status_callback=N
     try:
         new_md = generate_notebook_rank_markdown(progress_bar=progress_bar, status_callback=status_callback)
         os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
-        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        with open(CACHE_FILE, "w", encoding="utf-8-sig") as f:
             f.write(new_md)
         return True
     finally:
