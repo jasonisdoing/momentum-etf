@@ -5,7 +5,6 @@ import time
 import pandas as pd
 
 from utils.account_registry import load_account_configs
-from utils.portfolio_io import load_real_holdings_table
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 
 CACHE_FILE = "static/notebook_rank.md"
@@ -50,24 +49,13 @@ def generate_notebook_rank_markdown(progress_bar=None, status_callback=None) -> 
 
         ma_type, ma_months = get_account_rank_defaults(account_id)
 
-        # 1. 순위 데이터 (Rankings)
+        # 1. 순위 데이터 (Rankings) - '보유' 컬럼은 build_account_rankings 내부에서 이미 처리됨
         rank_df = build_account_rankings(account_id, ma_type=ma_type, ma_months=ma_months)
         if rank_df.empty:
             continue
 
-        # 2. 보유 종목 데이터 (Holdings)
-        holdings_df = load_real_holdings_table(account_id)
-        holding_tickers = set()
-        if not holdings_df.empty:
-            holding_tickers = set(holdings_df["티커"].astype(str).str.strip().str.upper().unique())
-
-        # 3. 데이터 결합 및 포맷팅
+        # 3. 데이터 결합 및 포맷팅 (build_account_rankings에 이미 '보유' 컬럼 포함됨)
         display_df = rank_df.copy()
-
-        # '보유' 컬럼 추가 (가장 왼쪽)
-        display_df.insert(
-            0, "보유", display_df["티커"].apply(lambda x: "보유" if str(x).strip().upper() in holding_tickers else "")
-        )
 
         # 필요한 컬럼만 선택
         cols = ["보유", "버킷", "티커", "종목명", "현재가", "점수", "일간(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)"]
