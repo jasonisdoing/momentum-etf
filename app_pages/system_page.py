@@ -10,7 +10,11 @@ import streamlit as st
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
-from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
+from utils.portfolio_io import (
+    get_latest_daily_snapshot,
+    load_portfolio_master,
+    load_real_holdings_table,
+)
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
 
@@ -194,11 +198,11 @@ def _build_manual_rank_extract_tsv(
         )
         master_data = load_portfolio_master(account_id)
         cash_val = master_data.get("cash_balance", 0.0) if master_data else 0.0
-
         hold_title = f"[{account_name}] 보유 상세"
-        hold_text = ""
+
         if df_hold is None or df_hold.empty:
             total_assets = cash_val
+            hold_val = 0.0
             if total_assets > 0:
                 df_cash = pd.DataFrame(
                     [
@@ -226,6 +230,7 @@ def _build_manual_rank_extract_tsv(
         else:
             valuation_total = df_hold["평가금액(KRW)"].sum()
             total_assets = valuation_total + cash_val
+            hold_val = valuation_total
 
             if total_assets > 0:
                 df_hold["비중(%)"] = ((df_hold["평가금액(KRW)"] / total_assets) * 100.0).round(2)
@@ -240,7 +245,7 @@ def _build_manual_rank_extract_tsv(
                     "평가금액(KRW)": int(cash_val),
                     "평가손익(KRW)": 0,
                     "수익률(%)": 0.0,
-                    "비중(%)": round((cash_val / total_assets) * 100.0, 2) if total_assets > 0 else 0.0,
+                    "비중(%)": round((cash_val / total_assets) * 100.0, 2),
                     "보유일": "-",
                 }
                 df_hold = pd.concat([df_hold, pd.DataFrame([cash_row])], ignore_index=True)
@@ -253,7 +258,64 @@ def _build_manual_rank_extract_tsv(
             export_hold_df.to_csv(buffer_hold, sep="\t", index=False, lineterminator="\n")
             hold_text = f"{hold_title}\n{buffer_hold.getvalue().rstrip()}"
 
-        sections.append(f"{rank_text}\n\n{hold_text}")
+        # 3. 요약 지표 (Summary Metrics)
+        prev_snap = get_latest_daily_snapshot(account_id, before_today=True)
+        prev_assets_krw = prev_snap.get("total_assets", 0.0) if prev_snap else 0.0
+        daily_profit_krw = total_assets - prev_assets_krw if prev_assets_krw > 0 else 0.0
+        daily_rt_pct = (daily_profit_krw / prev_assets_krw) * 100.0 if prev_assets_krw > 0 else None
+
+        hold_pct = (hold_val / total_assets) * 100.0 if total_assets > 0 else 0.0
+        cash_pct = (cash_val / total_assets) * 100.0 if total_assets > 0 else 0.0
+
+        rt_str = f"{daily_rt_pct:+.2f}%" if daily_rt_pct is not None else "정보 없음"
+        profit_str = f"{int(daily_profit_krw):+,}원" if daily_rt_pct is not None else "정보 없음"
+
+        if account_id == "aus_account":
+            # 호주 계좌 특수 처리 (KRW/AUD 병기)
+            aud_info = rates.get("AUD", {})
+            aud_rate = float(aud_info.get("rate") or 1.0)
+            aud_change = float(aud_info.get("change_pct") or 0.0)
+
+            # AUD 기준 값 계산
+            total_assets_aud = total_assets / aud_rate
+            hold_val_aud = hold_val / aud_rate
+            cash_val_aud = cash_val / aud_rate
+
+            # 전일 AUD 기준 자산 추정 (간소화: 어제 환율 추정)
+            prev_aud_rate = aud_rate / (1 + aud_change / 100.0)
+            prev_assets_aud = prev_assets_krw / prev_aud_rate if prev_assets_krw > 0 else 0.0
+            daily_profit_aud = total_assets_aud - prev_assets_aud if prev_assets_aud > 0 else 0.0
+
+            aud_rt_str = f"{daily_rt_pct:+.2f}%" if daily_rt_pct is not None else "정보 없음"
+            aud_profit_str = f"{daily_profit_aud:+,.2f} AUD" if daily_rt_pct is not None else "정보 없음"
+
+            change_sign = "+" if aud_change > 0 else ""
+            summary_header = (
+                f"[{account_name}] 요약\n"
+                f"- KRW 기준\n"
+                f"  - 총 자산: {int(total_assets):,}원\n"
+                f"  - 보유액: {int(hold_val):,}원 ({hold_pct:.1f}%)\n"
+                f"  - 현금: {int(cash_val):,}원 ({cash_pct:.1f}%)\n"
+                f"  - 전일 대비 수익: {profit_str} ({rt_str})\n"
+                f"- AUD 기준\n"
+                f"  - 총 자산: {total_assets_aud:,.2f} AUD\n"
+                f"  - 보유액: {hold_val_aud:,.2f} AUD\n"
+                f"  - 현금: {cash_val_aud:,.2f} AUD\n"
+                f"  - 전일 대비 수익: {aud_profit_str} ({aud_rt_str})\n"
+                f"- AUD/KRW: {aud_rate:,.2f}원({change_sign}{aud_change:.2f}%)\n"
+            )
+        else:
+            # 일반(한국) 계좌
+            summary_header = (
+                f"[{account_name}] 요약\n"
+                f"- 총 자산: {int(total_assets):,}원\n"
+                f"- 보유액: {int(hold_val):,}원 ({hold_pct:.1f}%)\n"
+                f"- 현금: {int(cash_val):,}원 ({cash_pct:.1f}%)\n"
+                f"- 전일 대비 수익: {profit_str} ({rt_str})\n"
+            )
+
+        # 최종적으로 계좌 섹션 구성 (요약 -> 순위 -> 보유)
+        sections.append(f"{summary_header}\n{rank_text}\n\n{hold_text}")
         progress_bar.progress(index / total_accounts if total_accounts else 1.0)
 
     separator = "\n\n" + "=" * 50 + "\n\n"
