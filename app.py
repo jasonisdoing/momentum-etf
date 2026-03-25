@@ -144,8 +144,6 @@ def _build_unified_account_page(
                 st.query_params["account"] = current_id
 
             if clean_view == "순위":
-                default_ma_type, default_ma_months = get_account_rank_defaults(current_id)
-                max_months = get_rank_months_max()
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     selected_id = st.selectbox(
@@ -155,21 +153,26 @@ def _build_unified_account_page(
                         format_func=lambda account_id: option_label_map.get(account_id, account_id),
                         key=f"account_selector_{view_slug}",
                     )
+
+                # 선택된 계좌(selected_id)를 기준으로 기본값 재계산
+                default_ma_type, default_ma_months = get_account_rank_defaults(selected_id)
+                max_months = get_rank_months_max()
                 selected_default_type = default_ma_type
                 selected_default_months = min(max(default_ma_months, 1), max_months)
+
                 with c2:
                     selected_ma_type = st.selectbox(
                         "MA_TYPE",
                         options=ALLOWED_MA_TYPES,
                         index=ALLOWED_MA_TYPES.index(selected_default_type),
-                        key=f"rank_selector_type_{current_id}",
+                        key=f"rank_selector_type_{selected_id}",
                     )
                 with c3:
                     selected_ma_months = st.selectbox(
                         "MA_MONTHS",
                         options=list(range(1, max_months + 1)),
                         index=selected_default_months - 1,
-                        key=f"rank_selector_months_{current_id}",
+                        key=f"rank_selector_months_{selected_id}",
                     )
             else:
                 selected_id = st.selectbox(
