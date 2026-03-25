@@ -315,9 +315,19 @@ def render_system_page() -> None:
 
     st.write("")
     if st.button("노트북LM 캐시 강제 갱신", width="stretch", key="btn_system_notebook_refresh"):
-        if update_notebook_rank_cache(force=True):
+        progress_placeholder = st.empty()
+        status_placeholder = st.empty()
+        progress_bar = progress_placeholder.progress(0.0)
+
+        def _status_cb(msg):
+            status_placeholder.info(msg)
+
+        if update_notebook_rank_cache(force=True, progress_bar=progress_bar, status_callback=_status_cb):
+            progress_bar.progress(1.0)
+            status_placeholder.empty()
             st.success("✅ 노트북LM용 정적 마크다운 파일(static/notebook_rank.md)을 갱신했습니다.")
         else:
+            status_placeholder.empty()
             st.warning("⚠️ 이미 다른 프로세스에서 갱신 중입니다.")
 
 
