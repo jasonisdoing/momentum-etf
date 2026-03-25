@@ -645,12 +645,32 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     selected_tickers_key = f"{editor_base_key}_selected_tickers"
     editor_nonce = int(st.session_state.get(editor_nonce_key, 0) or 0)
     editor_key = f"{editor_base_key}_{editor_nonce}"
+    editor_state = st.session_state.get(editor_key, {})
 
     selected_tickers = {
         str(ticker).strip().upper()
         for ticker in st.session_state.get(selected_tickers_key, [])
         if str(ticker or "").strip()
     }
+
+    # [Fix] Sync selection state before rendering buttons
+    if editor_state and editor_state.get("edited_rows"):
+        changed = False
+        for idx_str, changes in editor_state["edited_rows"].items():
+            if "복구" in changes:
+                idx = int(idx_str)
+                if 0 <= idx < len(df_deleted):
+                    ticker = str(df_deleted.iloc[idx]["티커"]).strip().upper()
+                    if changes["복구"]:
+                        if ticker not in selected_tickers:
+                            selected_tickers.add(ticker)
+                            changed = True
+                    else:
+                        if ticker in selected_tickers:
+                            selected_tickers.remove(ticker)
+                            changed = True
+        if changed:
+            st.session_state[selected_tickers_key] = list(selected_tickers)
 
     # 전체 선택/해제 컨트롤
     c_all_1, c_all_2, _ = st.columns([1, 1, 3])
@@ -687,9 +707,27 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                     if add_stock(account_id, ticker, bucket=bucket_int):
                         restored += 1
                 if restored > 0:
+                    st.session_state[selected_tickers_key] = []
+                    st.session_state[editor_nonce_key] = editor_nonce + 1
                     st.success(f"{restored}개 종목 복구 완료!")
                     st.rerun()
         with c_res2:
+            st.markdown(
+                f"""
+                <style>
+                div.st-key-btn_tab_hard_del_{account_id} button {{
+                    background-color: #d32f2f !important;
+                    color: white !important;
+                    border: none !important;
+                }}
+                div.st-key-btn_tab_hard_del_{account_id} button:hover {{
+                    background-color: #b71c1c !important;
+                    color: white !important;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
             if st.button(
                 "💀 선택 종목 완전 삭제",
                 type="secondary",
@@ -702,6 +740,8 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                     if hard_remove_stock(account_id, ticker):
                         deleted_count += 1
                 if deleted_count > 0:
+                    st.session_state[selected_tickers_key] = []
+                    st.session_state[editor_nonce_key] = editor_nonce + 1
                     st.success(f"{deleted_count}개 종목 영구 삭제 완료!")
                     st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -769,14 +809,15 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         and "복구" in edited_deleted.columns
         and "티커" in edited_deleted.columns
     ):
-        selected_now = (
-            edited_deleted.loc[edited_deleted["복구"] == True, "티커"]  # noqa: E712
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .tolist()
-        )
-        st.session_state[selected_tickers_key] = selected_now
+        # selection_now = (
+        #     edited_deleted.loc[edited_deleted["복구"] == True, "티커"]  # noqa: E712
+        #     .astype(str)
+        #     .str.strip()
+        #     .str.upper()
+        #     .tolist()
+        # )
+        # st.session_state[selected_tickers_key] = selection_now
+        pass
 
 
 @fragment

@@ -10,7 +10,6 @@ import streamlit as st
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
-from utils.notebook_exporter import update_notebook_rank_cache
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
@@ -103,6 +102,7 @@ def _build_manual_rank_extract_tsv(
     *,
     progress_bar: st.delta_generator.DeltaGenerator,
     status_placeholder: st.delta_generator.DeltaGenerator,
+    target_account_id: str | None = None,
 ) -> tuple[str, list[str]]:
     column_order_rank = [
         "보유",
@@ -138,6 +138,9 @@ def _build_manual_rank_extract_tsv(
     ]
 
     accounts = load_account_configs()
+    if target_account_id:
+        accounts = [acc for acc in accounts if str(acc["account_id"]).lower() == target_account_id.lower()]
+
     warnings_list: list[str] = []
     rates = get_exchange_rates()
     kor_snapshot = _collect_kor_realtime_snapshot(
@@ -313,49 +316,31 @@ def render_system_page() -> None:
             "✅ 전체 자산 요약 알림 전송을 시작했습니다.",
         )
 
-    st.write("")
-    if st.button("노트북LM 캐시 강제 갱신", width="stretch", key="btn_system_notebook_refresh"):
-        progress_placeholder = st.empty()
-        status_placeholder = st.empty()
-        progress_bar = progress_placeholder.progress(0.0)
-
-        def _status_cb(msg):
-            status_placeholder.info(msg)
-
-        if update_notebook_rank_cache(force=True, progress_bar=progress_bar, status_callback=_status_cb):
-            progress_bar.progress(1.0)
-            status_placeholder.empty()
-            st.success("✅ 노트북LM용 정적 마크다운 파일(static/notebook_rank.md)을 갱신했습니다.")
-        else:
-            status_placeholder.empty()
-            st.warning("⚠️ 이미 다른 프로세스에서 갱신 중입니다.")
-
-    # 현재 접속 환경에 따라 주소 동적으로 결정
-    host = st.context.headers.get("host", "etf.dojason.com")
-    is_local = "localhost" in host or "127.0.0.1" in host
-    base_url = f"http://{host}" if is_local else "https://etf.dojason.com"
-
-    st.info("**노트북LM 연동 주소 (클릭 시 복사 가능):**")
-    st.code(f"{base_url}/static/notebook_rank.md", language="text")
-    st.caption("✅ **추천**: 자바스크립트를 지원하지 않는 크롤러(노트북LM 등)에 가장 적합한 '순수 텍스트' 주소입니다.")
-
-    st.divider()
-
-    st.info("**비상용/확장용 주소:**")
-    st.code(f"{base_url}/?data=rank", language="text")
+    # (노트북LM 연동 주소 안내 제거됨 - 신규 전용 페이지로 대체 예정)
     st.caption("ℹ️ 위 주소는 데이터 확인용(브라우저)으로 편리하며, 향후 다양한 데이터 확장이 가능한 동적 경로입니다.")
 
 
-def render_gemini_page() -> None:
-    st.subheader("🤖 구글 제미나이용 텍스트 생성 (TSV)")
-    st.info("내 투자에 관한 조언을 받기 위해 제미나이에게 전달할 텍스트 데이터를 생성합니다.")
+def render_summary_for_ai_page() -> None:
+    st.subheader("AI용 요약 (TSV)")
+    st.info("내 투자에 관한 조언을 받기 위해 AI(제미나이 등)에게 전달할 텍스트 데이터를 생성합니다.")
+
+    accounts = load_account_configs()
+    account_options = ["전체 계좌"] + [
+        f"{acc.get('name') or acc['account_id']} ({acc['account_id']})" for acc in accounts
+    ]
+    account_map = {"전체 계좌": None}
+    for acc in accounts:
+        account_map[f"{acc.get('name') or acc['account_id']} ({acc['account_id']})"] = acc["account_id"]
+
+    selected_account_label = st.selectbox("계좌 선택", options=account_options, index=0)
+    target_account_id = account_map[selected_account_label]
 
     if "system_manual_rank_extract_tsv" not in st.session_state:
         st.session_state["system_manual_rank_extract_tsv"] = ""
     if "system_manual_rank_extract_warnings" not in st.session_state:
         st.session_state["system_manual_rank_extract_warnings"] = []
 
-    if st.button("전체 구글 제미나이용 텍스트 생성", width="stretch", key="btn_system_manual_rank_extract"):
+    if st.button("AI용 요약 텍스트 생성", width="stretch", key="btn_system_manual_rank_extract"):
         try:
             progress_placeholder = st.empty()
             status_placeholder = st.empty()
@@ -363,12 +348,13 @@ def render_gemini_page() -> None:
             extract_text, warnings_list = _build_manual_rank_extract_tsv(
                 progress_bar=progress_bar,
                 status_placeholder=status_placeholder,
+                target_account_id=target_account_id,
             )
             st.session_state["system_manual_rank_extract_tsv"] = extract_text
             st.session_state["system_manual_rank_extract_warnings"] = warnings_list
             progress_bar.progress(1.0)
             status_placeholder.empty()
-            st.success("✅ 구글 제미나이용 텍스트(TSV) 생성을 완료했습니다.")
+            st.success("✅ AI용 요약 텍스트(TSV) 생성을 완료했습니다.")
         except Exception as exc:
             st.error(f"⚠️ 추출 오류: {exc}")
 
@@ -377,7 +363,7 @@ def render_gemini_page() -> None:
         st.warning("\n".join(warnings_list_gemini))
 
     st.text_area(
-        "제미나이용 결과 (TSV)",
+        "AI용 요약 결과 (TSV)",
         height=500,
         key="system_manual_rank_extract_tsv",
     )
