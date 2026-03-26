@@ -570,6 +570,8 @@ def render_summary_for_ai_page() -> None:
         st.session_state["selected_account_id"] = current_id
     if st.query_params.get("account") != current_id:
         st.query_params["account"] = current_id
+    if st.session_state.get("summary_account_selector") != current_id:
+        st.session_state["summary_account_selector"] = current_id
 
     selected_id = st.selectbox(
         "계좌 선택",
@@ -584,7 +586,7 @@ def render_summary_for_ai_page() -> None:
         if _is_summary_memo_dirty(current_id):
             st.session_state[blocked_warning_key] = True
             st.query_params["account"] = current_id
-            selected_id = current_id
+            st.rerun()
         else:
             st.session_state.pop(blocked_warning_key, None)
             st.session_state["selected_account_id"] = selected_id
