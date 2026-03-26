@@ -98,6 +98,13 @@ def _save_summary_memo_if_dirty(account_id: str) -> None:
     st.session_state[memo_error_key] = ""
 
 
+def _save_current_summary_memo() -> None:
+    account_id = str(st.session_state.get("selected_account_id") or "").strip()
+    if not account_id:
+        return
+    _save_summary_memo_if_dirty(account_id)
+
+
 def _format_summary_price(value: Any, *, country_code: str) -> str:
     if value is None or value == "":
         return ""
@@ -527,10 +534,18 @@ def render_summary_for_ai_page() -> None:
     }
 
     # 계좌 선택 및 영속성 관리
+    previous_selected_id = str(st.session_state.get("selected_account_id") or "").strip()
     query_account = st.query_params.get("account")
     current_id = query_account if query_account in account_ids else st.session_state.get("selected_account_id")
     if current_id not in account_ids:
         current_id = account_ids[0]
+
+    if previous_selected_id in account_ids and previous_selected_id != current_id:
+        try:
+            _save_summary_memo_if_dirty(previous_selected_id)
+        except Exception as exc:
+            st.error(f"⚠️ 계좌 전환 전 메모 저장 오류: {exc}")
+            return
 
     # 세션 스테이트 및 쿼리 파라미터 동기화
     if st.session_state.get("selected_account_id") != current_id:
@@ -581,6 +596,7 @@ def render_summary_for_ai_page() -> None:
         height=250,  # 약 10줄
         placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다.",
         key=memo_key,
+        on_change=_save_current_summary_memo,
     )
 
     memo_editor_content = str(st.session_state.get(memo_key) or "")
