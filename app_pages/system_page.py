@@ -81,6 +81,23 @@ def _render_summary_note_styles() -> None:
     )
 
 
+def _save_summary_memo_if_dirty(account_id: str) -> None:
+    memo_key = f"summary_memo_editor_{account_id}"
+    memo_saved_content_key = f"summary_memo_saved_content_{account_id}"
+    memo_updated_key = f"summary_memo_updated_at_{account_id}"
+    memo_error_key = f"summary_memo_save_error_{account_id}"
+
+    current_content = str(st.session_state.get(memo_key) or "")
+    saved_content = str(st.session_state.get(memo_saved_content_key) or "")
+    if current_content == saved_content:
+        return
+
+    updated_at = save_account_note(account_id, current_content)
+    st.session_state[memo_saved_content_key] = current_content
+    st.session_state[memo_updated_key] = updated_at
+    st.session_state[memo_error_key] = ""
+
+
 def _collect_kor_realtime_snapshot(
     accounts: list[dict[str, Any]],
     *,
@@ -469,9 +486,14 @@ def render_summary_for_ai_page() -> None:
 
     # 선택 변경 시 동기화
     if selected_id != current_id:
-        st.session_state["selected_account_id"] = selected_id
-        st.query_params["account"] = selected_id
-        st.rerun()
+        try:
+            _save_summary_memo_if_dirty(current_id)
+        except Exception as exc:
+            st.error(f"⚠️ 계좌 전환 전 메모 저장 오류: {exc}")
+        else:
+            st.session_state["selected_account_id"] = selected_id
+            st.query_params["account"] = selected_id
+            st.rerun()
 
     target_account_id = selected_id
 
