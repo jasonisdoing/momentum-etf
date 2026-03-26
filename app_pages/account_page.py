@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Any
 
@@ -71,6 +72,133 @@ _DATAFRAME_CSS = """
 def _load_cached_rankings(account_id: str, ma_type: str, ma_months: int) -> pd.DataFrame:
     """동일 조건의 순위 결과를 짧게 재사용한다."""
     return build_account_rankings(account_id, ma_type=ma_type, ma_months=ma_months)
+
+
+_DISPLAY_COLUMNS = [
+    "보유여부",
+    "버킷",
+    "티커",
+    "종목명",
+    "현재가",
+    "괴리율",
+    "추세",
+    "고점대비",
+    "일간(%)",
+    "1주(%)",
+    "2주(%)",
+    "1달(%)",
+    "3달(%)",
+    "6달(%)",
+    "12달(%)",
+    "RSI",
+    "지속",
+]
+_PCT_COLUMNS = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+_SCORE_COLUMNS = ["추세", "RSI"]
+
+
+def _format_rank_df_for_display(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
+    cols = [c for c in _DISPLAY_COLUMNS if c in df.columns]
+    out = df[cols].copy()
+
+    price_fmt = (lambda v: f"{v:,.2f}") if country_code == "au" else (lambda v: f"{int(v):,}원")
+    if "현재가" in out.columns:
+        out["현재가"] = out["현재가"].apply(lambda v: price_fmt(v) if pd.notna(v) and v is not None else "-")
+
+    def _fmt_pct(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return "-"
+        return f"+{v:.2f}%" if v > 0 else f"{v:.2f}%"
+
+    for col in _PCT_COLUMNS:
+        if col in out.columns:
+            out[col] = out[col].apply(_fmt_pct)
+
+    for col in _SCORE_COLUMNS:
+        if col in out.columns:
+            out[col] = out[col].apply(lambda v: f"{v:.1f}" if pd.notna(v) and v is not None else "-")
+
+    if "지속" in out.columns:
+        out["지속"] = out["지속"].apply(lambda v: f"{int(v)}일" if pd.notna(v) and v is not None else "-")
+
+    return out
+
+
+def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> None:
+    """APP_TYPE=Local 환경에서 순위 결과를 zaccounts/{account_id}/results/ 에 저장합니다."""
+    if os.environ.get("APP_TYPE", "").strip().lower() != "local":
+        return
+
+    from utils.settings_loader import get_account_dir, get_account_settings
+
+    try:
+        account_dir = get_account_dir(account_id)
+    except Exception:
+        return
+
+    results_dir = account_dir / "results"
+    results_dir.mkdir(exist_ok=True)
+
+    try:
+        country_code = str(get_account_settings(account_id).get("country_code") or "kor").strip().lower()
+    except Exception:
+        country_code = "kor"
+
+    latest_trading_day = df.attrs.get("latest_trading_day")
+    ranking_computed_at = df.attrs.get("ranking_computed_at")
+
+    if latest_trading_day is not None:
+        try:
+            date_str = pd.Timestamp(latest_trading_day).strftime("%Y-%m-%d")
+        except Exception:
+            date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
+    else:
+        date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
+
+    if ranking_computed_at is not None:
+        try:
+            created_at = pd.Timestamp(ranking_computed_at).strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            created_at = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%dT%H:%M:%S")
+    else:
+        created_at = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%dT%H:%M:%S")
+
+    filename = f"rank_{date_str}.log"
+
+    try:
+        from utils.report import render_table_eaw
+
+        display_df = _format_rank_df_for_display(df, country_code)
+
+        _right_align_cols = {
+            "현재가",
+            "괴리율",
+            "추세",
+            "일간(%)",
+            "1주(%)",
+            "2주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "고점대비",
+            "RSI",
+            "지속",
+        }
+        headers = list(display_df.columns)
+        rows = [[str(v) if v is not None else "-" for v in row] for row in display_df.itertuples(index=False)]
+        aligns = ["right" if h in _right_align_cols else "left" for h in headers]
+
+        table_lines = render_table_eaw(headers, rows, aligns)
+        header = (
+            f"랭킹 로그 생성: {created_at}\n"
+            f"종목풀: {account_id} | MA: {ma_type} {ma_months}개월 | 기준일: {date_str}\n"
+            f"\n=== 랭킹 목록 ===\n\n"
+        )
+        content = header + "\n".join(table_lines) + "\n"
+        (results_dir / filename).write_text(content, encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _normalize_code(value: Any, fallback: str) -> str:
@@ -508,9 +636,8 @@ def _render_rank_tab(
         "종목명",
         "현재가",
         "괴리율",
-        "통합점수",
-        "추세점수",
-        "고점점수",
+        "추세",
+        "고점대비",
         "일간(%)",
         "1주(%)",
         "2주(%)",
@@ -518,7 +645,6 @@ def _render_rank_tab(
         "3달(%)",
         "6달(%)",
         "12달(%)",
-        "고점대비",
         "추세(3달)",
         "RSI",
         "지속",
@@ -549,6 +675,8 @@ def _render_rank_tab(
         st.info("표시할 순위 종목이 없습니다.")
         return
 
+    _save_rank_results_locally(account_id, df, effective_ma_type, effective_ma_months)
+
     realtime_active = bool(df.attrs.get("realtime_active"))
     render_rank_table(
         df,
@@ -574,7 +702,7 @@ def _render_rank_tab(
     if ranking_text:
         st.caption(f"순위 계산: {ranking_text}")
 
-    st.caption("통합점수·추세점수·고점점수·지속은 기준 종가 시계열에 장중 실시간 가격을 반영해 계산합니다.")
+    st.caption("추세·지속은 기준 종가 시계열에 장중 실시간 가격을 반영해 계산합니다.")
 
 
 # ---------------------------------------------------------------------------

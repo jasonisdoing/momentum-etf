@@ -156,9 +156,9 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         is_holding = str(row.get("보유", "")).strip() == "보유"
         color = holding_color if is_holding else None
         if color is None:
-            score = row.get("통합점수")
+            score = row.get("추세")
             try:
-                if score is not None and not pd.isna(score) and float(score) <= 0:
+                if score is not None and not pd.isna(score) and float(score) < 0:
                     color = non_positive_score_color
             except (TypeError, ValueError):
                 pass
@@ -245,9 +245,8 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     if "괴리율" in df.columns:
         styled = styled.map(_deviation_style, subset=["괴리율"])
 
-    for score_column in ("통합점수", "추세점수", "고점점수"):
-        if score_column in df.columns:
-            styled = styled.map(lambda _: "font-weight: bold;", subset=[score_column])
+    if "추세" in df.columns:
+        styled = styled.map(lambda _: "font-weight: bold;", subset=["추세"])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):
@@ -395,9 +394,7 @@ def render_rank_table(
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
         "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
-        "통합점수": st.column_config.NumberColumn("통합점수", width=70, format="%.1f"),
-        "추세점수": st.column_config.NumberColumn("추세점수", width=70, format="%.1f"),
-        "고점점수": st.column_config.NumberColumn("고점점수", width=70, format="%.1f"),
+        "추세": st.column_config.NumberColumn("추세", width=70, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
         "문구": st.column_config.TextColumn("문구", width="large"),
