@@ -21,6 +21,8 @@ from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
 from utils.ui import format_relative_time
 
+CURRENT_ACCOUNT_STATE_KEY = "current_account_id"
+
 
 def _run_background(command: list[str], success_message: str) -> None:
     try:
@@ -54,7 +56,25 @@ def _format_note_saved_at(value: Any) -> str | None:
     return absolute_text
 
 
-def _render_summary_note_styles() -> None:
+def _render_summary_note_styles(*, readonly: bool = False) -> None:
+    if readonly:
+        st.markdown(
+            """
+            <style>
+            textarea[aria-label="계좌 메모 (AI 분석 시 상단에 포함됨)"] {
+                background: #f1f3f5;
+                border: 1px solid #cfd4da;
+                color: #111111;
+                border-radius: 16px;
+                padding: 18px 20px;
+                box-shadow: none;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
     st.markdown(
         """
         <style>
@@ -82,31 +102,6 @@ def _render_summary_note_styles() -> None:
     )
 
 
-def _save_summary_memo_if_dirty(account_id: str) -> None:
-    memo_key = f"summary_memo_editor_{account_id}"
-    memo_saved_content_key = f"summary_memo_saved_content_{account_id}"
-    memo_updated_key = f"summary_memo_updated_at_{account_id}"
-    memo_error_key = f"summary_memo_save_error_{account_id}"
-
-    current_content = str(st.session_state.get(memo_key) or "")
-    saved_content = str(st.session_state.get(memo_saved_content_key) or "")
-    if current_content == saved_content:
-        return
-
-    updated_at = save_account_note(account_id, current_content)
-    st.session_state[memo_saved_content_key] = current_content
-    st.session_state[memo_updated_key] = updated_at
-    st.session_state[memo_error_key] = ""
-
-
-def _is_summary_memo_dirty(account_id: str) -> bool:
-    memo_key = f"summary_memo_editor_{account_id}"
-    memo_saved_content_key = f"summary_memo_saved_content_{account_id}"
-    current_content = str(st.session_state.get(memo_key) or "")
-    saved_content = str(st.session_state.get(memo_saved_content_key) or "")
-    return current_content != saved_content
-
-
 def _render_summary_beforeunload_warning(*, enabled: bool) -> None:
     script = """
     <script>
@@ -120,6 +115,35 @@ def _render_summary_beforeunload_warning(*, enabled: bool) -> None:
     </script>
     """ % ("true" if enabled else "false")
     components_html(script, height=0, width=0)
+
+
+def _load_account_options() -> tuple[list[dict[str, Any]], list[str], dict[str, str]]:
+    accounts = load_account_configs()
+    account_ids = [acc["account_id"] for acc in accounts]
+    account_label_map = {
+        acc["account_id"]: f"{acc.get('name') or acc['account_id']} ({acc['account_id']})" for acc in accounts
+    }
+    return accounts, account_ids, account_label_map
+
+
+def _resolve_target_account_id(account_ids: list[str]) -> str:
+    current_id = str(st.session_state.get(CURRENT_ACCOUNT_STATE_KEY) or "").strip()
+    if current_id not in account_ids:
+        current_id = account_ids[0]
+        st.session_state[CURRENT_ACCOUNT_STATE_KEY] = current_id
+
+    try:
+        if "account" in st.query_params:
+            del st.query_params["account"]
+    except Exception:
+        pass
+
+    return current_id
+
+
+def _compute_readonly_note_height(content: str) -> int:
+    line_count = max(len(str(content or "").splitlines()) or 1, 1)
+    return max(250, min(1100, 24 + (line_count * 24)))
 
 
 def _format_summary_price(value: Any, *, country_code: str) -> str:
@@ -540,68 +564,52 @@ def render_system_page() -> None:
     st.caption("ℹ️ 위 주소는 데이터 확인용(브라우저)으로 편리하며, 향후 다양한 데이터 확장이 가능한 동적 경로입니다.")
 
 
-def render_summary_for_ai_page() -> None:
-    st.subheader("AI용 요약 (TSV)")
-    st.info("내 투자에 관한 조언을 받기 위해 AI(제미나이 등)에게 전달할 텍스트 데이터를 생성합니다.")
+def render_note_page() -> None:
+    st.subheader("메모")
+    st.info("계좌 메모를 수정하고 저장합니다.")
 
-    accounts = load_account_configs()
-    account_ids = [acc["account_id"] for acc in accounts]
-    account_label_map = {
-        acc["account_id"]: f"{acc.get('name') or acc['account_id']} ({acc['account_id']})" for acc in accounts
-    }
+    _, account_ids, account_label_map = _load_account_options()
+    blocked_warning_key = "note_account_change_blocked"
+    reset_token_key = "note_account_selector_reset_token"
+    current_id = _resolve_target_account_id(account_ids)
+    selector_token = int(st.session_state.get(reset_token_key) or 0)
+    selector_key = f"note_account_selector_{selector_token}"
 
-    # 계좌 선택 및 영속성 관리
-    previous_selected_id = str(st.session_state.get("selected_account_id") or "").strip()
-    query_account = st.query_params.get("account")
-    blocked_warning_key = "summary_account_change_blocked"
-    current_id = query_account if query_account in account_ids else st.session_state.get("selected_account_id")
-    if current_id not in account_ids:
-        current_id = account_ids[0]
-
-    if previous_selected_id in account_ids and previous_selected_id != current_id:
-        if _is_summary_memo_dirty(previous_selected_id):
-            st.session_state[blocked_warning_key] = True
-            current_id = previous_selected_id
-        else:
-            st.session_state.pop(blocked_warning_key, None)
-
-    # 세션 스테이트 및 쿼리 파라미터 동기화
-    if st.session_state.get("selected_account_id") != current_id:
-        st.session_state["selected_account_id"] = current_id
-    if st.query_params.get("account") != current_id:
-        st.query_params["account"] = current_id
-    if st.session_state.get("summary_account_selector") != current_id:
-        st.session_state["summary_account_selector"] = current_id
+    current_memo_key = f"note_memo_editor_{current_id}"
+    current_saved_key = f"note_memo_saved_content_{current_id}"
+    current_is_dirty = str(st.session_state.get(current_memo_key) or "") != str(
+        st.session_state.get(current_saved_key) or ""
+    )
 
     selected_id = st.selectbox(
         "계좌 선택",
         options=account_ids,
         index=account_ids.index(current_id),
         format_func=lambda acc_id: account_label_map.get(acc_id, acc_id),
-        key="summary_account_selector",
+        key=selector_key,
     )
-
-    # 선택 변경 시 동기화
     if selected_id != current_id:
-        if _is_summary_memo_dirty(current_id):
+        if current_is_dirty:
             st.session_state[blocked_warning_key] = True
-            st.query_params["account"] = current_id
+            st.session_state[reset_token_key] = selector_token + 1
             st.rerun()
-        else:
-            st.session_state.pop(blocked_warning_key, None)
-            st.session_state["selected_account_id"] = selected_id
-            st.query_params["account"] = selected_id
-            st.rerun()
+        st.session_state.pop(blocked_warning_key, None)
+        st.session_state[CURRENT_ACCOUNT_STATE_KEY] = selected_id
+        st.session_state[reset_token_key] = selector_token + 1
+        st.rerun()
 
     target_account_id = selected_id
+    memo_key = f"note_memo_editor_{target_account_id}"
+    memo_loaded_key = f"note_memo_loaded_{target_account_id}"
+    memo_saved_content_key = f"note_memo_saved_content_{target_account_id}"
+    memo_updated_key = f"note_memo_updated_at_{target_account_id}"
+    memo_error_key = f"note_memo_save_error_{target_account_id}"
 
-    # 메모 로드 및 편집 섹션
-    memo_key = f"summary_memo_editor_{target_account_id}"
-    memo_loaded_key = f"summary_memo_loaded_{target_account_id}"
-    memo_saved_content_key = f"summary_memo_saved_content_{target_account_id}"
-    memo_updated_key = f"summary_memo_updated_at_{target_account_id}"
-    memo_error_key = f"summary_memo_save_error_{target_account_id}"
-    if not st.session_state.get(memo_loaded_key):
+    if (
+        not st.session_state.get(memo_loaded_key)
+        or memo_key not in st.session_state
+        or memo_saved_content_key not in st.session_state
+    ):
         note_doc = load_account_note(target_account_id)
         content = str((note_doc or {}).get("content") or "")
         st.session_state[memo_key] = content
@@ -617,7 +625,7 @@ def render_summary_for_ai_page() -> None:
     _render_summary_note_styles()
     st.text_area(
         "계좌 메모 (AI 분석 시 상단에 포함됨)",
-        height=250,  # 약 10줄
+        height=250,
         placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다.",
         key=memo_key,
     )
@@ -627,14 +635,17 @@ def render_summary_for_ai_page() -> None:
     is_dirty = memo_editor_content != saved_content
     _render_summary_beforeunload_warning(enabled=is_dirty)
 
-    save_col, spacer_col = st.columns([1, 5])
+    save_col, _ = st.columns([1, 5])
     with save_col:
-        if st.button("메모 저장", key=f"btn_summary_save_{target_account_id}", type="primary", width="stretch"):
+        if st.button("메모 저장", key=f"btn_note_save_{target_account_id}", type="primary", width="stretch"):
             try:
-                _save_summary_memo_if_dirty(target_account_id)
+                updated_at = save_account_note(target_account_id, memo_editor_content)
             except Exception as exc:
                 st.session_state[memo_error_key] = str(exc)
             else:
+                st.session_state[memo_saved_content_key] = memo_editor_content
+                st.session_state[memo_updated_key] = updated_at
+                st.session_state[memo_error_key] = ""
                 st.rerun()
 
     saved_at_text = _format_note_saved_at(st.session_state.get(memo_updated_key))
@@ -659,6 +670,38 @@ def render_summary_for_ai_page() -> None:
     else:
         st.caption("아직 저장된 메모가 없습니다.")
 
+
+def render_summary_for_ai_page() -> None:
+    st.subheader("AI용 요약 (TSV)")
+    st.info("내 투자에 관한 조언을 받기 위해 AI(제미나이 등)에게 전달할 텍스트 데이터를 생성합니다.")
+
+    _, account_ids, account_label_map = _load_account_options()
+    current_id = _resolve_target_account_id(account_ids)
+    selector_key = "summary_account_selector"
+
+    selected_id = st.selectbox(
+        "계좌 선택",
+        options=account_ids,
+        index=account_ids.index(current_id),
+        format_func=lambda acc_id: account_label_map.get(acc_id, acc_id),
+        key=selector_key,
+    )
+    if selected_id != current_id:
+        st.session_state[CURRENT_ACCOUNT_STATE_KEY] = selected_id
+        st.rerun()
+
+    target_account_id = selected_id
+    note_doc = load_account_note(target_account_id)
+    memo_content = str((note_doc or {}).get("content") or "")
+    _render_summary_note_styles(readonly=True)
+    st.text_area(
+        "계좌 메모 (AI 분석 시 상단에 포함됨)",
+        value=memo_content,
+        height=_compute_readonly_note_height(memo_content),
+        disabled=True,
+        key=f"summary_note_readonly_{target_account_id}",
+    )
+
     st.divider()
 
     if "system_manual_rank_extract_tsv" not in st.session_state:
@@ -675,7 +718,7 @@ def render_summary_for_ai_page() -> None:
                 progress_bar=progress_bar,
                 status_placeholder=status_placeholder,
                 target_account_id=target_account_id,
-                memo_content=memo_editor_content,
+                memo_content=memo_content,
             )
             st.session_state["system_manual_rank_extract_tsv"] = extract_text
             st.session_state["system_manual_rank_extract_warnings"] = warnings_list

@@ -29,6 +29,7 @@ def _to_plain_dict(value):
 
 
 format_korean_currency = format_kr_money
+CURRENT_ACCOUNT_STATE_KEY = "current_account_id"
 
 
 def _format_signed_percent(value: float) -> str:
@@ -47,6 +48,23 @@ def _slugify_path(value: str) -> str:
     raw = str(value or "").strip().lower()
     slug = re.sub(r"[^a-z0-9_-]+", "-", raw)
     return slug.strip("-") or "page"
+
+
+def _clear_account_query_param() -> None:
+    try:
+        if "account" in st.query_params:
+            del st.query_params["account"]
+    except Exception:
+        pass
+
+
+def _get_current_account_id(option_ids: list[str]) -> str:
+    current_id = str(st.session_state.get(CURRENT_ACCOUNT_STATE_KEY) or "").strip()
+    if current_id not in option_ids:
+        current_id = option_ids[0]
+        st.session_state[CURRENT_ACCOUNT_STATE_KEY] = current_id
+    _clear_account_query_param()
+    return current_id
 
 
 def _load_authenticator() -> stauth.Authenticate:
@@ -133,15 +151,7 @@ def _build_unified_account_page(
 
             option_ids = [account_id for account_id, _ in account_options]
             option_label_map = {account_id: label for account_id, label in account_options}
-
-            query_account = st.query_params.get("account")
-            current_id = (
-                query_account if query_account in option_label_map else st.session_state.get("selected_account_id")
-            )
-            if current_id not in option_label_map:
-                current_id = option_ids[0]
-                st.session_state["selected_account_id"] = current_id
-                st.query_params["account"] = current_id
+            current_id = _get_current_account_id(option_ids)
 
             if clean_view == "순위":
                 c1, c2, c3 = st.columns(3)
@@ -182,8 +192,7 @@ def _build_unified_account_page(
                     format_func=lambda account_id: option_label_map.get(account_id, account_id),
                     key=f"account_selector_{view_slug}",
                 )
-            st.session_state["selected_account_id"] = selected_id
-            st.query_params["account"] = selected_id
+            st.session_state[CURRENT_ACCOUNT_STATE_KEY] = selected_id
             if clean_view == "순위":
                 render_account_page(
                     selected_id,
@@ -206,7 +215,7 @@ def _build_unified_account_page(
 
 
 def _build_system_info_pages(page_cls: Callable[..., object]):
-    from app_pages.system_page import render_summary_for_ai_page, render_system_page
+    from app_pages.system_page import render_note_page, render_summary_for_ai_page, render_system_page
 
     return [
         page_cls(
@@ -214,6 +223,12 @@ def _build_system_info_pages(page_cls: Callable[..., object]):
             title="시스템정보",
             icon="🛠️",
             url_path="system",
+        ),
+        page_cls(
+            render_note_page,
+            title="메모",
+            icon="📝",
+            url_path="note",
         ),
         page_cls(
             render_summary_for_ai_page,
