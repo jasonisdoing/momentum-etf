@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 import streamlit as st
+from streamlit.components.v1 import html as components_html
 
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.account_notes import load_account_note, save_account_note
@@ -98,11 +99,27 @@ def _save_summary_memo_if_dirty(account_id: str) -> None:
     st.session_state[memo_error_key] = ""
 
 
-def _save_current_summary_memo() -> None:
-    account_id = str(st.session_state.get("selected_account_id") or "").strip()
-    if not account_id:
-        return
-    _save_summary_memo_if_dirty(account_id)
+def _is_summary_memo_dirty(account_id: str) -> bool:
+    memo_key = f"summary_memo_editor_{account_id}"
+    memo_saved_content_key = f"summary_memo_saved_content_{account_id}"
+    current_content = str(st.session_state.get(memo_key) or "")
+    saved_content = str(st.session_state.get(memo_saved_content_key) or "")
+    return current_content != saved_content
+
+
+def _render_summary_beforeunload_warning(*, enabled: bool) -> None:
+    script = """
+    <script>
+    const enabled = %s;
+    const handler = function(event) {
+        event.preventDefault();
+        event.returnValue = "";
+        return "";
+    };
+    window.parent.onbeforeunload = enabled ? handler : null;
+    </script>
+    """ % ("true" if enabled else "false")
+    components_html(script, height=0, width=0)
 
 
 def _format_summary_price(value: Any, *, country_code: str) -> str:
@@ -536,16 +553,20 @@ def render_summary_for_ai_page() -> None:
     # 계좌 선택 및 영속성 관리
     previous_selected_id = str(st.session_state.get("selected_account_id") or "").strip()
     query_account = st.query_params.get("account")
+    pending_target_key = "summary_pending_target_account"
+    pending_target_id = str(st.session_state.get(pending_target_key) or "").strip()
     current_id = query_account if query_account in account_ids else st.session_state.get("selected_account_id")
     if current_id not in account_ids:
         current_id = account_ids[0]
 
     if previous_selected_id in account_ids and previous_selected_id != current_id:
-        try:
-            _save_summary_memo_if_dirty(previous_selected_id)
-        except Exception as exc:
-            st.error(f"⚠️ 계좌 전환 전 메모 저장 오류: {exc}")
-            return
+        if _is_summary_memo_dirty(previous_selected_id):
+            st.session_state[pending_target_key] = current_id
+            pending_target_id = current_id
+            current_id = previous_selected_id
+        else:
+            st.session_state.pop(pending_target_key, None)
+            pending_target_id = ""
 
     # 세션 스테이트 및 쿼리 파라미터 동기화
     if st.session_state.get("selected_account_id") != current_id:
@@ -563,11 +584,13 @@ def render_summary_for_ai_page() -> None:
 
     # 선택 변경 시 동기화
     if selected_id != current_id:
-        try:
-            _save_summary_memo_if_dirty(current_id)
-        except Exception as exc:
-            st.error(f"⚠️ 계좌 전환 전 메모 저장 오류: {exc}")
+        if _is_summary_memo_dirty(current_id):
+            st.session_state[pending_target_key] = selected_id
+            st.session_state["summary_account_selector"] = current_id
+            st.query_params["account"] = current_id
+            st.rerun()
         else:
+            st.session_state.pop(pending_target_key, None)
             st.session_state["selected_account_id"] = selected_id
             st.query_params["account"] = selected_id
             st.rerun()
@@ -589,6 +612,34 @@ def render_summary_for_ai_page() -> None:
         st.session_state[memo_error_key] = ""
         st.session_state[memo_loaded_key] = True
 
+    if pending_target_id and pending_target_id != target_account_id:
+        st.warning("저장되지 않은 변경이 있습니다. 저장하거나 변경을 버린 뒤에 계좌를 이동할 수 있습니다.")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            if st.button("저장 후 이동", key=f"btn_summary_save_and_move_{target_account_id}", width="stretch"):
+                try:
+                    _save_summary_memo_if_dirty(target_account_id)
+                except Exception as exc:
+                    st.error(f"⚠️ 메모 저장 오류: {exc}")
+                else:
+                    st.session_state.pop(pending_target_key, None)
+                    st.session_state["selected_account_id"] = pending_target_id
+                    st.query_params["account"] = pending_target_id
+                    st.rerun()
+        with c2:
+            if st.button("변경 버리고 이동", key=f"btn_summary_discard_and_move_{target_account_id}", width="stretch"):
+                st.session_state[memo_key] = str(st.session_state.get(memo_saved_content_key) or "")
+                st.session_state[memo_error_key] = ""
+                st.session_state.pop(pending_target_key, None)
+                st.session_state["selected_account_id"] = pending_target_id
+                st.query_params["account"] = pending_target_id
+                st.rerun()
+        with c3:
+            if st.button("계속 편집", key=f"btn_summary_keep_editing_{target_account_id}", width="stretch"):
+                st.session_state.pop(pending_target_key, None)
+                st.query_params["account"] = target_account_id
+                st.rerun()
+
     st.markdown("### 📝 계좌 메모 관리")
     _render_summary_note_styles()
     st.text_area(
@@ -596,24 +647,29 @@ def render_summary_for_ai_page() -> None:
         height=250,  # 약 10줄
         placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다.",
         key=memo_key,
-        on_change=_save_current_summary_memo,
     )
 
     memo_editor_content = str(st.session_state.get(memo_key) or "")
     saved_content = str(st.session_state.get(memo_saved_content_key) or "")
-    if memo_editor_content != saved_content:
-        try:
-            updated_at = save_account_note(target_account_id, memo_editor_content)
-            st.session_state[memo_saved_content_key] = memo_editor_content
-            st.session_state[memo_updated_key] = updated_at
-            st.session_state[memo_error_key] = ""
-        except Exception as exc:
-            st.session_state[memo_error_key] = str(exc)
+    is_dirty = memo_editor_content != saved_content
+    _render_summary_beforeunload_warning(enabled=is_dirty)
+
+    save_col, spacer_col = st.columns([1, 5])
+    with save_col:
+        if st.button("메모 저장", key=f"btn_summary_save_{target_account_id}", type="primary", width="stretch"):
+            try:
+                _save_summary_memo_if_dirty(target_account_id)
+            except Exception as exc:
+                st.session_state[memo_error_key] = str(exc)
+            else:
+                st.rerun()
 
     saved_at_text = _format_note_saved_at(st.session_state.get(memo_updated_key))
     save_error = str(st.session_state.get(memo_error_key) or "").strip()
     if save_error:
         st.caption(f"저장 오류: {save_error}")
+    elif is_dirty:
+        st.caption("저장되지 않은 변경이 있습니다.")
     elif saved_at_text:
         st.markdown(
             f"""
