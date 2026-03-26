@@ -98,6 +98,67 @@ def _save_summary_memo_if_dirty(account_id: str) -> None:
     st.session_state[memo_error_key] = ""
 
 
+def _format_summary_price(value: Any, *, country_code: str) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+
+    if country_code == "au":
+        return f"A${amount:,.2f}"
+    if country_code == "kor":
+        return f"{int(round(amount)):,}원"
+    return str(value)
+
+
+def _format_summary_percent(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{amount:.2f}%"
+
+
+def _format_summary_krw(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return f"{int(round(amount)):,}원"
+
+
+def _format_summary_export_df(df: pd.DataFrame, *, country_code: str, kind: str) -> pd.DataFrame:
+    formatted = df.copy()
+    price_columns = ["현재가"]
+    if kind == "holdings":
+        price_columns.append("평균 매입가")
+
+    percent_columns = [column for column in formatted.columns if "(%)" in column]
+    krw_columns = [
+        column for column in ("매입금액(KRW)", "평가금액(KRW)", "평가손익(KRW)") if column in formatted.columns
+    ]
+
+    for column in price_columns:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].map(
+                lambda value: _format_summary_price(value, country_code=country_code)
+            )
+
+    for column in percent_columns:
+        formatted[column] = formatted[column].map(_format_summary_percent)
+
+    for column in krw_columns:
+        formatted[column] = formatted[column].map(_format_summary_krw)
+
+    return formatted.fillna("")
+
+
 def _collect_kor_realtime_snapshot(
     accounts: list[dict[str, Any]],
     *,
@@ -253,7 +314,7 @@ def _build_manual_rank_extract_tsv(
             rank_text = f"{rank_title}\n{_build_empty_rank_header()}"
         else:
             export_rank_df = df_rank.loc[:, column_order_rank].copy()
-            export_rank_df = export_rank_df.fillna("")
+            export_rank_df = _format_summary_export_df(export_rank_df, country_code=country_code, kind="rank")
             buffer_rank = StringIO()
             export_rank_df.to_csv(buffer_rank, sep="\t", index=False, lineterminator="\n")
             rank_text = f"{rank_title}\n{buffer_rank.getvalue().rstrip()}"
@@ -291,7 +352,8 @@ def _build_manual_rank_extract_tsv(
                     ]
                 )
                 buffer_hold = StringIO()
-                df_cash.to_csv(buffer_hold, sep="\t", index=False, lineterminator="\n")
+                export_cash_df = _format_summary_export_df(df_cash, country_code=country_code, kind="holdings")
+                export_cash_df.to_csv(buffer_hold, sep="\t", index=False, lineterminator="\n")
                 hold_text = f"{hold_title}\n{buffer_hold.getvalue().rstrip()}"
             else:
                 hold_text = f"{hold_title}\n(보유 자산 없음)"
@@ -321,7 +383,7 @@ def _build_manual_rank_extract_tsv(
                 df_hold["비중(%)"] = 0.0
 
             export_hold_df = df_hold.loc[:, column_order_holdings].copy()
-            export_hold_df = export_hold_df.fillna("")
+            export_hold_df = _format_summary_export_df(export_hold_df, country_code=country_code, kind="holdings")
             buffer_hold = StringIO()
             export_hold_df.to_csv(buffer_hold, sep="\t", index=False, lineterminator="\n")
             hold_text = f"{hold_title}\n{buffer_hold.getvalue().rstrip()}"
@@ -338,7 +400,7 @@ def _build_manual_rank_extract_tsv(
         rt_str = f"{daily_rt_pct:+.2f}%" if daily_rt_pct is not None else "정보 없음"
         profit_str = f"{int(daily_profit_krw):+,}원" if daily_rt_pct is not None else "정보 없음"
 
-        if account_id == "aus_account":
+        if country_code == "au":
             # 호주 계좌 특수 처리 (KRW/AUD 병기)
             aud_info = rates.get("AUD", {})
             aud_rate = float(aud_info.get("rate") or 1.0)
