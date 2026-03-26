@@ -8,6 +8,7 @@ import pandas as pd
 import streamlit as st
 
 from services.price_service import get_exchange_rates, get_realtime_snapshot
+from utils.account_notes import load_account_note, save_account_note
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
 from utils.portfolio_io import (
@@ -17,6 +18,7 @@ from utils.portfolio_io import (
 )
 from utils.rankings import build_account_rankings, get_account_rank_defaults
 from utils.stock_list_io import get_etfs
+from utils.ui import format_relative_time
 
 
 def _run_background(command: list[str], success_message: str) -> None:
@@ -29,6 +31,54 @@ def _run_background(command: list[str], success_message: str) -> None:
 
 def _build_empty_rank_header() -> str:
     return "보유\t버킷\t티커\t종목명\t현재가\t점수\t일간(%)\t1주(%)\t2주(%)\t1달(%)\t3달(%)\t6달(%)\t12달(%)\t고점대비\tRSI\t지속"
+
+
+def _format_note_saved_at(value: Any) -> str | None:
+    if value is None:
+        return None
+
+    ts = pd.Timestamp(value)
+    if pd.isna(ts):
+        return None
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
+
+    ampm = "오전" if ts.hour < 12 else "오후"
+    hour12 = ts.hour % 12 or 12
+    absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
+    relative_text = format_relative_time(ts)
+    if relative_text:
+        return f"{absolute_text} {relative_text}"
+    return absolute_text
+
+
+def _render_summary_note_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        textarea[aria-label="계좌 메모 (AI 분석 시 상단에 포함됨)"] {
+            background: #fff1a8;
+            border: 1px solid #d8b93f;
+            color: #3a3522;
+            border-radius: 16px;
+            padding: 18px 20px;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+        }
+
+        textarea[aria-label="계좌 메모 (AI 분석 시 상단에 포함됨)"]::placeholder {
+            color: #9a8634;
+            opacity: 1;
+        }
+
+        textarea[aria-label="계좌 메모 (AI 분석 시 상단에 포함됨)"]:focus {
+            border-color: #d0ae2f;
+            box-shadow: 0 0 0 1px #d0ae2f;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def _collect_kor_realtime_snapshot(
@@ -107,6 +157,7 @@ def _build_manual_rank_extract_tsv(
     progress_bar: st.delta_generator.DeltaGenerator,
     status_placeholder: st.delta_generator.DeltaGenerator,
     target_account_id: str | None = None,
+    memo_content: str = "",
 ) -> tuple[str, list[str]]:
     column_order_rank = [
         "보유",
@@ -319,7 +370,11 @@ def _build_manual_rank_extract_tsv(
         progress_bar.progress(index / total_accounts if total_accounts else 1.0)
 
     separator = "\n\n" + "=" * 50 + "\n\n"
-    return separator.join(sections), warnings_list
+    final_text = separator.join(sections)
+    if memo_content.strip():
+        final_text = f"{memo_content.strip()}\n\n" + final_text
+
+    return final_text, warnings_list
 
 
 def render_system_page() -> None:
@@ -387,15 +442,95 @@ def render_summary_for_ai_page() -> None:
     st.info("내 투자에 관한 조언을 받기 위해 AI(제미나이 등)에게 전달할 텍스트 데이터를 생성합니다.")
 
     accounts = load_account_configs()
-    account_options = ["전체 계좌"] + [
-        f"{acc.get('name') or acc['account_id']} ({acc['account_id']})" for acc in accounts
-    ]
-    account_map = {"전체 계좌": None}
-    for acc in accounts:
-        account_map[f"{acc.get('name') or acc['account_id']} ({acc['account_id']})"] = acc["account_id"]
+    account_ids = [acc["account_id"] for acc in accounts]
+    account_label_map = {
+        acc["account_id"]: f"{acc.get('name') or acc['account_id']} ({acc['account_id']})" for acc in accounts
+    }
 
-    selected_account_label = st.selectbox("계좌 선택", options=account_options, index=0)
-    target_account_id = account_map[selected_account_label]
+    # 계좌 선택 및 영속성 관리
+    query_account = st.query_params.get("account")
+    current_id = query_account if query_account in account_ids else st.session_state.get("selected_account_id")
+    if current_id not in account_ids:
+        current_id = account_ids[0]
+
+    # 세션 스테이트 및 쿼리 파라미터 동기화
+    if st.session_state.get("selected_account_id") != current_id:
+        st.session_state["selected_account_id"] = current_id
+    if st.query_params.get("account") != current_id:
+        st.query_params["account"] = current_id
+
+    selected_id = st.selectbox(
+        "계좌 선택",
+        options=account_ids,
+        index=account_ids.index(current_id),
+        format_func=lambda acc_id: account_label_map.get(acc_id, acc_id),
+        key="summary_account_selector",
+    )
+
+    # 선택 변경 시 동기화
+    if selected_id != current_id:
+        st.session_state["selected_account_id"] = selected_id
+        st.query_params["account"] = selected_id
+        st.rerun()
+
+    target_account_id = selected_id
+
+    # 메모 로드 및 편집 섹션
+    memo_key = f"summary_memo_editor_{target_account_id}"
+    memo_loaded_key = f"summary_memo_loaded_{target_account_id}"
+    memo_saved_content_key = f"summary_memo_saved_content_{target_account_id}"
+    memo_updated_key = f"summary_memo_updated_at_{target_account_id}"
+    memo_error_key = f"summary_memo_save_error_{target_account_id}"
+    if not st.session_state.get(memo_loaded_key):
+        note_doc = load_account_note(target_account_id)
+        content = str((note_doc or {}).get("content") or "")
+        st.session_state[memo_key] = content
+        st.session_state[memo_saved_content_key] = content
+        st.session_state[memo_updated_key] = (note_doc or {}).get("updated_at")
+        st.session_state[memo_error_key] = ""
+        st.session_state[memo_loaded_key] = True
+
+    st.markdown("### 📝 계좌 메모 관리")
+    _render_summary_note_styles()
+    st.text_area(
+        "계좌 메모 (AI 분석 시 상단에 포함됨)",
+        height=250,  # 약 10줄
+        placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다.",
+        key=memo_key,
+    )
+
+    memo_editor_content = str(st.session_state.get(memo_key) or "")
+    saved_content = str(st.session_state.get(memo_saved_content_key) or "")
+    if memo_editor_content != saved_content:
+        try:
+            updated_at = save_account_note(target_account_id, memo_editor_content)
+            st.session_state[memo_saved_content_key] = memo_editor_content
+            st.session_state[memo_updated_key] = updated_at
+            st.session_state[memo_error_key] = ""
+        except Exception as exc:
+            st.session_state[memo_error_key] = str(exc)
+
+    saved_at_text = _format_note_saved_at(st.session_state.get(memo_updated_key))
+    save_error = str(st.session_state.get(memo_error_key) or "").strip()
+    if save_error:
+        st.caption(f"저장 오류: {save_error}")
+    elif saved_at_text:
+        st.markdown(
+            f"""
+            <div style="color:#6b7280;font-size:0.95rem;">
+                마지막 저장: {saved_at_text}
+                <span style="display:inline-flex;align-items:center;gap:0.35rem;margin-left:0.35rem;">
+                    <span style="width:0.9rem;height:0.9rem;border-radius:999px;background:#7fd36a;display:inline-block;border:1px solid #69bb55;"></span>
+                    <span>저장됨</span>
+                </span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.caption("아직 저장된 메모가 없습니다.")
+
+    st.divider()
 
     if "system_manual_rank_extract_tsv" not in st.session_state:
         st.session_state["system_manual_rank_extract_tsv"] = ""
@@ -411,6 +546,7 @@ def render_summary_for_ai_page() -> None:
                 progress_bar=progress_bar,
                 status_placeholder=status_placeholder,
                 target_account_id=target_account_id,
+                memo_content=memo_editor_content,
             )
             st.session_state["system_manual_rank_extract_tsv"] = extract_text
             st.session_state["system_manual_rank_extract_warnings"] = warnings_list
@@ -426,6 +562,6 @@ def render_summary_for_ai_page() -> None:
 
     st.text_area(
         "AI용 요약 결과 (TSV)",
-        height=500,
+        height=250,  # 약 10줄
         key="system_manual_rank_extract_tsv",
     )
