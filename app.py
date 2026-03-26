@@ -947,7 +947,7 @@ def main() -> None:
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"]
+    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"]
     pages["계좌"] = [
         _build_unified_account_page(page_cls, accounts, view_mode, default=False)
         for idx, view_mode in enumerate(view_modes)
