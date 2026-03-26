@@ -512,7 +512,7 @@ def _render_rank_tab(
     effective_ma_months = min(max(effective_ma_months, 1), max_months)
 
     visible_columns = [
-        "#",
+        "보유여부",
         "버킷",
         "티커",
         "종목명",
