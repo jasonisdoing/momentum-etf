@@ -583,6 +583,7 @@ def _render_rank_tab(
 # ---------------------------------------------------------------------------
 # 삭제된 종목 관리 탭
 # ---------------------------------------------------------------------------
+@fragment
 def _render_deleted_stocks_tab(account_id: str) -> None:
     """삭제된 종목 목록을 표시하고 복구/완전삭제 기능을 제공합니다."""
     deleted_etfs = get_deleted_etfs(account_id)
@@ -684,8 +685,6 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     )
 
     if not to_restore_df.empty:
-        st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
-
         c_res1, c_res2 = st.columns(2)
         with c_res1:
             if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_tab_restore_{account_id}", width="stretch"):
@@ -741,8 +740,16 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     df_deleted_editor = df_deleted.copy()
     df_deleted_editor["복구"] = df_deleted_editor["티커"].astype(str).str.upper().isin(selected_tickers)
 
+    def _style_deleted_row(row: pd.Series) -> list[str]:
+        ticker = str(row.get("티커") or "").strip().upper()
+        if ticker in selected_tickers:
+            return ["background-color: #eceff1"] * len(row)
+        return [""] * len(row)
+
+    styled_deleted_editor = df_deleted_editor.style.apply(_style_deleted_row, axis=1)
+
     edited_deleted = st.data_editor(
-        df_deleted_editor,
+        styled_deleted_editor,
         hide_index=True,
         width="stretch",
         column_config={

@@ -566,7 +566,6 @@ def render_system_page() -> None:
 
 def render_note_page() -> None:
     st.subheader("메모")
-    st.info("계좌 메모를 수정하고 저장합니다.")
 
     _, account_ids, account_label_map = _load_account_options()
     blocked_warning_key = "note_account_change_blocked"
