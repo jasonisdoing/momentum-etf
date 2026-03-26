@@ -553,20 +553,17 @@ def render_summary_for_ai_page() -> None:
     # 계좌 선택 및 영속성 관리
     previous_selected_id = str(st.session_state.get("selected_account_id") or "").strip()
     query_account = st.query_params.get("account")
-    pending_target_key = "summary_pending_target_account"
-    pending_target_id = str(st.session_state.get(pending_target_key) or "").strip()
+    blocked_warning_key = "summary_account_change_blocked"
     current_id = query_account if query_account in account_ids else st.session_state.get("selected_account_id")
     if current_id not in account_ids:
         current_id = account_ids[0]
 
     if previous_selected_id in account_ids and previous_selected_id != current_id:
         if _is_summary_memo_dirty(previous_selected_id):
-            st.session_state[pending_target_key] = current_id
-            pending_target_id = current_id
+            st.session_state[blocked_warning_key] = True
             current_id = previous_selected_id
         else:
-            st.session_state.pop(pending_target_key, None)
-            pending_target_id = ""
+            st.session_state.pop(blocked_warning_key, None)
 
     # 세션 스테이트 및 쿼리 파라미터 동기화
     if st.session_state.get("selected_account_id") != current_id:
@@ -585,12 +582,11 @@ def render_summary_for_ai_page() -> None:
     # 선택 변경 시 동기화
     if selected_id != current_id:
         if _is_summary_memo_dirty(current_id):
-            st.session_state[pending_target_key] = selected_id
-            st.session_state["summary_account_selector"] = current_id
+            st.session_state[blocked_warning_key] = True
             st.query_params["account"] = current_id
-            st.rerun()
+            selected_id = current_id
         else:
-            st.session_state.pop(pending_target_key, None)
+            st.session_state.pop(blocked_warning_key, None)
             st.session_state["selected_account_id"] = selected_id
             st.query_params["account"] = selected_id
             st.rerun()
@@ -612,33 +608,8 @@ def render_summary_for_ai_page() -> None:
         st.session_state[memo_error_key] = ""
         st.session_state[memo_loaded_key] = True
 
-    if pending_target_id and pending_target_id != target_account_id:
-        st.warning("저장되지 않은 변경이 있습니다. 저장하거나 변경을 버린 뒤에 계좌를 이동할 수 있습니다.")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            if st.button("저장 후 이동", key=f"btn_summary_save_and_move_{target_account_id}", width="stretch"):
-                try:
-                    _save_summary_memo_if_dirty(target_account_id)
-                except Exception as exc:
-                    st.error(f"⚠️ 메모 저장 오류: {exc}")
-                else:
-                    st.session_state.pop(pending_target_key, None)
-                    st.session_state["selected_account_id"] = pending_target_id
-                    st.query_params["account"] = pending_target_id
-                    st.rerun()
-        with c2:
-            if st.button("변경 버리고 이동", key=f"btn_summary_discard_and_move_{target_account_id}", width="stretch"):
-                st.session_state[memo_key] = str(st.session_state.get(memo_saved_content_key) or "")
-                st.session_state[memo_error_key] = ""
-                st.session_state.pop(pending_target_key, None)
-                st.session_state["selected_account_id"] = pending_target_id
-                st.query_params["account"] = pending_target_id
-                st.rerun()
-        with c3:
-            if st.button("계속 편집", key=f"btn_summary_keep_editing_{target_account_id}", width="stretch"):
-                st.session_state.pop(pending_target_key, None)
-                st.query_params["account"] = target_account_id
-                st.rerun()
+    if st.session_state.pop(blocked_warning_key, False):
+        st.warning("저장되지 않은 변경이 있어 계좌 이동이 취소되었습니다. 먼저 저장한 뒤 다시 이동하세요.")
 
     st.markdown("### 📝 계좌 메모 관리")
     _render_summary_note_styles()
