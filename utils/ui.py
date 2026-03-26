@@ -330,6 +330,7 @@ def render_rank_table(
     visible_columns: list[str] | None = None,
     grouped_by_bucket: bool = True,
     height: int | None = 750,
+    column_config_overrides: dict[str, st.column_config.BaseColumn] | None = None,
 ) -> None:
     # 스타일링 준비 (전체 DF 기준)
     # 하지만 여기서는 버킷별로 쪼개서 보여줘야 하므로, 쪼갠 뒤 각각 스타일링 적용 필요
@@ -401,6 +402,9 @@ def render_rank_table(
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
+
+    if column_config_overrides:
+        column_config_map.update(column_config_overrides)
 
     if "평균 매입가" in df.columns and not pd.api.types.is_numeric_dtype(df["평균 매입가"]):
         column_config_map["평균 매입가"] = st.column_config.TextColumn("평균 매입가", width="small")
