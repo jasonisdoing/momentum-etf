@@ -342,6 +342,7 @@ def render_rank_table(
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=60),
+        "보유여부": st.column_config.TextColumn("보유여부", width=40),
         "계좌": st.column_config.TextColumn("계좌", width=100),
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),

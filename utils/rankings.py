@@ -467,7 +467,19 @@ def build_account_rankings(
         ascending=[True, False, True],
         kind="stable",
     ).reset_index(drop=True)
-    df.insert(0, "#", range(1, len(df) + 1))
+    # 보유여부 계산 (보유 1, 보유 2, 대기 1, 대기 2...)
+    holding_idx = 0
+    waiting_idx = 0
+    status_values = []
+    for _, row in df.iterrows():
+        if str(row.get("보유", "")).strip() == "보유":
+            holding_idx += 1
+            status_values.append(f"보유 {holding_idx}")
+        else:
+            waiting_idx += 1
+            status_values.append(f"대기 {waiting_idx}")
+
+    df.insert(0, "보유여부", status_values)
     df = df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
     df = _normalize_ranking_values(df, country_code)
     df.attrs["realtime_active"] = realtime_active
