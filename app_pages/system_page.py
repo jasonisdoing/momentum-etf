@@ -33,7 +33,7 @@ def _run_background(command: list[str], success_message: str) -> None:
 
 
 def _build_empty_rank_header() -> str:
-    return "보유\t버킷\t티커\t종목명\t현재가\t점수\t일간(%)\t1주(%)\t2주(%)\t1달(%)\t3달(%)\t6달(%)\t12달(%)\t고점대비\tRSI\t지속"
+    return "보유\t버킷\t티커\t종목명\t현재가\t통합점수\t추세점수\t고점점수\t일간(%)\t1주(%)\t2주(%)\t1달(%)\t3달(%)\t6달(%)\t12달(%)\t고점대비\tRSI\t지속"
 
 
 def _format_note_saved_at(value: Any) -> str | None:
@@ -291,7 +291,9 @@ def _build_manual_rank_extract_tsv(
         "티커",
         "종목명",
         "현재가",
-        "점수",
+        "통합점수",
+        "추세점수",
+        "고점점수",
         "일간(%)",
         "1주(%)",
         "2주(%)",

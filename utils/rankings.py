@@ -7,7 +7,16 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from config import BUCKET_MAPPING, CACHE_START_DATE, MARKET_SCHEDULES, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
+from config import (
+    BUCKET_MAPPING,
+    CACHE_START_DATE,
+    HIGH_POINT_PENALTY_FACTOR,
+    MARKET_SCHEDULES,
+    MIN_TRADING_DAYS,
+    TRADING_DAYS_PER_MONTH,
+    WEIGHT_HIGH_POINT_SCORE,
+    WEIGHT_TREND_SCORE,
+)
 from core.strategy.metrics import process_ticker_data
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
@@ -271,7 +280,7 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
     percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
-    one_decimal_columns = ["점수", "RSI"]
+    one_decimal_columns = ["통합점수", "추세점수", "고점점수", "RSI"]
 
     def _round_if_present(column: str, digits: int) -> None:
         if column not in normalized.columns:
@@ -292,6 +301,22 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
         normalized["지속"] = pd.to_numeric(normalized["지속"], errors="coerce").astype("Int64")
 
     return normalized
+
+
+def _calculate_high_point_score(drawdown_pct: float | None) -> float | None:
+    if drawdown_pct is None or pd.isna(drawdown_pct):
+        return None
+
+    return max(0.0, 100.0 - (abs(float(drawdown_pct)) * HIGH_POINT_PENALTY_FACTOR))
+
+
+def _calculate_total_score(trend_score: float | None, high_point_score: float | None) -> float | None:
+    if trend_score is None or pd.isna(trend_score):
+        return None
+    if high_point_score is None or pd.isna(high_point_score):
+        return None
+
+    return (float(trend_score) * WEIGHT_TREND_SCORE) + (float(high_point_score) * WEIGHT_HIGH_POINT_SCORE)
 
 
 def build_account_rankings(
@@ -431,6 +456,9 @@ def build_account_rankings(
         elif effective_close_series is not None and len(effective_close_series.index) >= MIN_TRADING_DAYS:
             pass
 
+        high_point_score = _calculate_high_point_score(price_metrics.get("고점대비"))
+        total_score = _calculate_total_score(score_value, high_point_score)
+
         rows.append(
             {
                 "버킷": BUCKET_MAPPING.get(int(etf.get("bucket") or 0), str(etf.get("bucket") or "")),
@@ -438,7 +466,9 @@ def build_account_rankings(
                 "티커": ticker,
                 "종목명": etf.get("name", ""),
                 "상장일": etf.get("listing_date", "-"),
-                "점수": score_value,
+                "통합점수": total_score,
+                "추세점수": score_value,
+                "고점점수": high_point_score,
                 "지속": streak_value,
                 "보유": "보유" if ticker in held_tickers else "",
                 **price_metrics,
@@ -453,18 +483,39 @@ def build_account_rankings(
     realtime_active = bool(realtime_snapshot)
     ranking_computed_at = datetime.now()
 
-    def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        score = row.get("점수")
-        if score is None or pd.isna(score):
-            return (1, float("-inf"), str(row.get("티커", "")))
-        return (0, float(score), str(row.get("티커", "")))
+    def _to_sortable_score(value: Any) -> float:
+        if value is None or pd.isna(value):
+            return float("-inf")
+        return float(value)
+
+    def _sort_key(row: pd.Series) -> tuple[int, float, float, float, str]:
+        total_score = row.get("통합점수")
+        return (
+            1 if total_score is None or pd.isna(total_score) else 0,
+            _to_sortable_score(total_score),
+            _to_sortable_score(row.get("추세점수")),
+            _to_sortable_score(row.get("고점점수")),
+            str(row.get("티커", "")),
+        )
 
     sort_values = df.apply(_sort_key, axis=1, result_type="expand")
-    sort_values.columns = ["_missing_score", "_score_value", "_ticker_sort"]
+    sort_values.columns = [
+        "_missing_total_score",
+        "_total_score_value",
+        "_trend_score_value",
+        "_high_point_score_value",
+        "_ticker_sort",
+    ]
     df = pd.concat([df, sort_values], axis=1)
     df = df.sort_values(
-        by=["_missing_score", "_score_value", "_ticker_sort"],
-        ascending=[True, False, True],
+        by=[
+            "_missing_total_score",
+            "_total_score_value",
+            "_trend_score_value",
+            "_high_point_score_value",
+            "_ticker_sort",
+        ],
+        ascending=[True, False, False, False, True],
         kind="stable",
     ).reset_index(drop=True)
     # 보유여부 계산 (보유 1, 보유 2, 대기 1, 대기 2...)
@@ -480,7 +531,15 @@ def build_account_rankings(
             status_values.append(f"대기 {waiting_idx}")
 
     df.insert(0, "보유여부", status_values)
-    df = df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
+    df = df.drop(
+        columns=[
+            "_missing_total_score",
+            "_total_score_value",
+            "_trend_score_value",
+            "_high_point_score_value",
+            "_ticker_sort",
+        ]
+    )
     df = _normalize_ranking_values(df, country_code)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

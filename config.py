@@ -73,9 +73,18 @@ MARKET_SCHEDULES = {
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
-
 # 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
+
+
+# 랭킹 점수 계산 파라미터
+# HIGH_POINT_PENALTY_FACTOR는 고점대비 낙폭 1%당 차감 강도를 뜻합니다.
+# 값을 키우면 신고가 근처 종목이 더 유리해지고, 값을 낮추면 낙폭 패널티가 완화됩니다.
+# WEIGHT_TREND_SCORE와 WEIGHT_HIGH_POINT_SCORE는 통합점수 비중이며, 두 값의 합은 1.0 기준으로 맞추는 것을 권장합니다.
+# 추세를 더 중시하려면 WEIGHT_TREND_SCORE를, 신고가 근접도를 더 중시하려면 WEIGHT_HIGH_POINT_SCORE를 높이면 됩니다.
+HIGH_POINT_PENALTY_FACTOR = 5
+WEIGHT_TREND_SCORE = 0.7
+WEIGHT_HIGH_POINT_SCORE = 0.3
