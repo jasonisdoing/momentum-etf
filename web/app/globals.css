@@ -118,6 +118,13 @@ a {
   padding: 0 12px 14px;
 }
 
+.loginAppContent {
+  width: 100%;
+  min-height: 100vh;
+  margin: 0;
+  padding: 0;
+}
+
 .topbarFx {
   display: flex;
   align-items: center;
@@ -139,6 +146,45 @@ a {
   color: var(--ink);
   font-size: 17px;
   font-weight: 700;
+}
+
+.topbarFxLoading {
+  display: inline-flex;
+  align-items: center;
+  min-width: 26px;
+  min-height: 20px;
+}
+
+.topbarSpinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(31, 107, 70, 0.18);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+  animation: topbarSpin 0.7s linear infinite;
+}
+
+@keyframes topbarSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.topbarLogout {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.topbarLogout:hover {
+  border-color: rgba(31, 107, 70, 0.28);
+  color: var(--accent);
 }
 
 .hero {
@@ -317,6 +363,62 @@ a {
 .section li {
   color: var(--muted);
   line-height: 1.6;
+}
+
+.loginPage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.loginCard {
+  width: min(100%, 420px);
+  display: grid;
+  gap: 14px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.loginHeader h1 {
+  margin: 0 0 8px;
+  font-size: 28px;
+}
+
+.loginHeader p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.loginField {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.loginField input {
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--ink);
+  font: inherit;
+}
+
+.loginField input:focus {
+  outline: none;
+  border-color: rgba(31, 107, 70, 0.28);
+  box-shadow: 0 0 0 3px rgba(31, 107, 70, 0.08);
+}
+
+.loginButton {
+  width: 100%;
 }
 
 .route-list {

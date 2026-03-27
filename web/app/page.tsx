@@ -14,6 +14,12 @@ const appItems = [
     icon: "▤",
   },
   {
+    href: "/stocks",
+    title: "종목 관리",
+    description: "계좌별 활성 종목 목록을 보고 버킷과 삭제를 관리",
+    icon: "◎",
+  },
+  {
     href: "/cash",
     title: "자산관리",
     description: "계좌별 원금과 현금을 직접 관리",

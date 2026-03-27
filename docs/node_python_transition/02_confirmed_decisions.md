@@ -4,7 +4,10 @@
 
 ### Node.js
 
+- 앱 메뉴
 - 대시보드
+- 벌크 입력
+- 종목 관리
 - 자산관리
 - 스냅샷
 - ETF 마켓
@@ -28,9 +31,11 @@
 - `원금/현금` 기능의 소유권은 Node.js 쪽이다.
 - Python에서는 `원금/현금` 메뉴를 제거하는 방향이다.
 - 스냅샷은 1차에서 Node.js에 `리스트 중심 단순 화면`으로 먼저 둔다.
-- Node 화면은 가능하면 Python 계산 로직 또는 Python API를 재사용한다.
+- Node 화면은 가능하면 기존 Mongo 스키마와 계산 결과를 재사용한다.
 - 아직 이전하지 않은 기능은 Python에서 유지한다.
 - 앞으로 Node UI는 `ERP 스타일 기준`으로 구현한다.
+- Node 인증은 `Google OAuth + 허용 이메일 화이트리스트` 방식으로 간다.
+- Python과 Node를 연결하는 임시 브리지 UI는 우선순위가 아니다.
 
 ## Node UI 스타일 기준
 
@@ -48,6 +53,8 @@
 ### Node.js
 
 - `/dashboard`
+- `/import`
+- `/stocks`
 - `/cash`
 - `/snapshots`
 - `/market`
@@ -55,8 +62,7 @@
 ### Python(Streamlit)
 
 - `/py/weekly`
-- `/py/import`
-- `/py/rank`
+- `/py/`
 - `/py/stocks`
 - `/py/deleted`
 - `/py/system`
@@ -72,6 +78,8 @@
 Python에서 소유권을 넘길 대상:
 
 - 대시보드
+- 벌크 입력
+- 종목 관리
 - 원금/현금
 - 스냅샷
 - ETF 마켓
