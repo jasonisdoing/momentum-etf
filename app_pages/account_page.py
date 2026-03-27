@@ -175,8 +175,6 @@ def _render_rank_table_text(account_id: str, df: pd.DataFrame, ma_type: str, ma_
 
 def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> None:
     """순위 결과를 zaccounts/{account_id}/results/ 에 저장합니다."""
-    import json
-
     from utils.settings_loader import get_account_dir
 
     try:
@@ -193,78 +191,6 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
     if content:
         (results_dir / f"rank_{date_str}.log").write_text(content, encoding="utf-8")
 
-    # JSON 저장
-    try:
-        cols = [c for c in _DISPLAY_COLUMNS if c in df.columns]
-        json_df = df[cols].copy()
-        # pandas to_json이 NaN → null 변환을 자동 처리
-        records = json.loads(json_df.to_json(orient="records", force_ascii=False))
-        json_data = {"ma_type": ma_type, "ma_months": ma_months, "date": date_str, "items": records}
-        (results_dir / f"rank_{date_str}.json").write_text(json.dumps(json_data, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _update_static_rank_txt() -> None:
-    """모든 계좌의 최신 rank_*.log를 합쳐 static/rank.txt와 rank.json에 저장합니다."""
-    import json
-    from pathlib import Path
-
-    from utils.account_registry import _load_account_configs_impl
-    from utils.rankings import get_account_rank_defaults
-    from utils.settings_loader import get_account_dir
-
-    accounts = _load_account_configs_impl()
-    sections: list[str] = []
-    json_accounts: list[dict] = []
-
-    for account in accounts:
-        account_id = str(account["account_id"])
-        account_name = str(account.get("name") or account_id)
-
-        try:
-            results_dir = get_account_dir(account_id) / "results"
-        except Exception:
-            continue
-
-        if not results_dir.is_dir():
-            continue
-
-        ma_type, ma_months = get_account_rank_defaults(account_id)
-
-        # 텍스트 버전
-        log_files = sorted(results_dir.glob("rank_*.log"), reverse=True)
-        if not log_files:
-            sections.append(f"[{account_name}] 순위 - {ma_type} {ma_months}개월\n데이터 없음")
-        else:
-            sections.append(Path(log_files[0]).read_text(encoding="utf-8").strip())
-
-        # JSON 버전
-        json_files = sorted(results_dir.glob("rank_*.json"), reverse=True)
-        if json_files:
-            try:
-                data = json.loads(Path(json_files[0]).read_text(encoding="utf-8"))
-                data["account_name"] = account_name
-                json_accounts.append(data)
-            except Exception:
-                pass
-
-    if not sections:
-        return
-
-    app_root = Path(__file__).resolve().parent.parent
-    static_dir = app_root / "static"
-    static_dir.mkdir(exist_ok=True)
-
-    combined = ("\n\n" + "=" * 50 + "\n\n").join(sections)
-    (static_dir / "rank.txt").write_text(combined + "\n", encoding="utf-8")
-
-    if json_accounts:
-        (static_dir / "rank.json").write_text(
-            json.dumps({"description": "계좌별 종목 순위 정보", "accounts": json_accounts}, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
-
 
 def cleanup_old_rank_logs(max_keep: int = 10) -> None:
     """각 계좌의 rank_*.log 파일을 최신 max_keep개만 남기고 삭제합니다."""
@@ -280,10 +206,9 @@ def cleanup_old_rank_logs(max_keep: int = 10) -> None:
         if not results_dir.is_dir():
             continue
 
-        for pattern in ("rank_*.log", "rank_*.json"):
-            files = sorted(results_dir.glob(pattern), reverse=True)
-            for old_file in files[max_keep:]:
-                old_file.unlink(missing_ok=True)
+        log_files = sorted(results_dir.glob("rank_*.log"), reverse=True)
+        for old_file in log_files[max_keep:]:
+            old_file.unlink(missing_ok=True)
 
 
 def _normalize_code(value: Any, fallback: str) -> str:
@@ -761,7 +686,6 @@ def _render_rank_tab(
         return
 
     _save_rank_results_locally(account_id, df, effective_ma_type, effective_ma_months)
-    _update_static_rank_txt()
 
     realtime_active = bool(df.attrs.get("realtime_active"))
     render_rank_table(
