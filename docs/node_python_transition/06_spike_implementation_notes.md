@@ -7,6 +7,7 @@
   - 검증용 경로:
     - `/`
     - `/dashboard`
+    - `/import`
     - `/cash`
     - `/snapshots`
     - `/market`
@@ -21,8 +22,8 @@
 
 ## 의도
 
-- 운영 배포 파일은 건드리지 않는다.
-- 하이브리드 공존 가능성만 별도 세트로 검증한다.
+- 초기 스파이크 단계에서는 운영 배포 파일을 건드리지 않는다.
+- 이후 실제 운영 배포까지 진행하면서 하이브리드 공존 가능성을 검증했다.
 
 ## 실행 의도
 
@@ -30,6 +31,7 @@
 
 - `http://localhost:8080/` -> Node.js
 - `http://localhost:8080/dashboard` -> Node.js
+- `http://localhost:8080/import` -> Node.js
 - `http://localhost:8080/cash` -> Node.js
 - `http://localhost:8080/snapshots` -> Node.js
 - `http://localhost:8080/market` -> Node.js
@@ -42,6 +44,7 @@
 - Next.js 최소 경로 생성 확인
   - `/`
   - `/dashboard`
+  - `/import`
   - `/cash`
   - `/snapshots`
   - `/market`
@@ -58,13 +61,20 @@
 - `/api/market` 추가
 - Node `대시보드(/dashboard)` 실기능 구현
 - `/api/dashboard`, `/api/fx` 추가
+- Node `벌크 입력(/import)` 실기능 구현
+- `/api/import/preview`, `/api/import/save` 추가
 - 루트 `/` 를 앱 런처형 홈으로 교체
 - 상단 공통 환율 바 추가
-- Node 1차 메뉴 `/dashboard`, `/cash`, `/snapshots`, `/market`를 모두 실제 데이터 기반으로 확인
+- Node 1차 메뉴 `/dashboard`, `/import`, `/cash`, `/snapshots`, `/market`를 모두 실제 데이터 기반으로 확인
 - 하이브리드 컨테이너 재빌드 및 기동 확인
 - nginx가 컨테이너 재생성 이후 이전 Docker 내부 IP를 계속 바라보며 `502 Bad Gateway`를 내는 문제 확인
 - `resolver 127.0.0.11` + 변수 기반 `proxy_pass`로 nginx가 컨테이너 재생성 이후에도 새 IP를 다시 해석하도록 수정
 - 수정 후 `/dashboard` 와 `/py/` 모두 `200 OK`로 복구 확인
+- 운영 `https://etf.dojason.com/` 기준 하이브리드 1차 배포 확인
+- 운영 `https://etf.dojason.com/py/` 흰 화면을 `_stcore` 프록시 경로 수정으로 복구 확인
+- 로컬 개발 원칙을 `npm run dev` 중심으로 정리
+- `web/` 개발 서버에서도 저장소 루트 `.env`와 `zaccounts`를 읽도록 경로 보정
+- `벌크 입력`은 Python과 동일하게 계좌별 완전 교체, 최초 매수일 유지 규칙을 따른다.
 
 ## 이번 턴에서 막힌 지점
 
@@ -72,6 +82,6 @@
 
 ## 다음 검증 우선순위
 
-1. 운영 배포 파일과 `nginx-proxy` 경로 분기 방식 설계
-2. 운영 서버 또는 스테이징에서 하이브리드 배포 테스트
-3. 배포 후 회귀 확인과 2차 UX 개선 우선순위 정리
+1. 다음 Python 메뉴 이관 대상 확정
+2. Node 1차 구현
+3. 필요 시 하이브리드/운영 회귀 확인

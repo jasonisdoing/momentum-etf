@@ -8,6 +8,12 @@ const appItems = [
     icon: "▣",
   },
   {
+    href: "/import",
+    title: "벌크 입력",
+    description: "TSV 붙여넣기로 계좌별 보유 종목을 일괄 반영",
+    icon: "▤",
+  },
+  {
     href: "/cash",
     title: "자산관리",
     description: "계좌별 원금과 현금을 직접 관리",
@@ -24,12 +30,6 @@ const appItems = [
     title: "ETF 마켓",
     description: "ETF 시장 현황과 필터 기반 조회",
     icon: "◈",
-  },
-  {
-    href: "/py/rank",
-    title: "Python 순위",
-    description: "기존 Streamlit 분석 화면 바로가기",
-    icon: "△",
   },
 ];
 

@@ -12,12 +12,28 @@ type AccountConfig = {
 
 const ACCOUNT_DIR_PATTERN = /^(?<order>\d+)_(?<account>[a-z0-9_]+)$/;
 
-function getAccountsRoot(): string {
-  return path.join(process.cwd(), "zaccounts");
+async function getAccountsRoot(): Promise<string> {
+  const candidates = [
+    path.join(process.cwd(), "zaccounts"),
+    path.join(process.cwd(), "..", "zaccounts"),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      // 개발(`web/`)과 Docker(`/app`)를 모두 지원하기 위해 실제 존재 경로를 우선 사용한다.
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error("zaccounts 디렉터리를 찾을 수 없습니다.");
 }
 
 export async function loadAccountConfigs(): Promise<AccountConfig[]> {
-  const entries = await fs.readdir(getAccountsRoot(), { withFileTypes: true });
+  const accountsRoot = await getAccountsRoot();
+  const entries = await fs.readdir(accountsRoot, { withFileTypes: true });
   const configs: AccountConfig[] = [];
 
   for (const entry of entries) {
@@ -30,7 +46,7 @@ export async function loadAccountConfigs(): Promise<AccountConfig[]> {
       continue;
     }
 
-    const configPath = path.join(getAccountsRoot(), entry.name, "config.json");
+    const configPath = path.join(accountsRoot, entry.name, "config.json");
     const raw = await fs.readFile(configPath, "utf-8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
