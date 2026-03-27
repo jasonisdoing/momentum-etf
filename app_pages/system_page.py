@@ -736,3 +736,102 @@ def render_summary_for_ai_page() -> None:
         height=250,  # 약 10줄
         key="system_manual_rank_extract_tsv",
     )
+
+
+def _build_signal_text() -> str:
+    """모든 계좌의 랭킹(종목 점수)만 TSV로 추출합니다. 보유·메모·자산 정보 제외."""
+    column_order = [
+        "보유",
+        "버킷",
+        "티커",
+        "종목명",
+        "현재가",
+        "일간(%)",
+        "추세",
+        "고점",
+        "1주(%)",
+        "2주(%)",
+        "1달(%)",
+        "3달(%)",
+        "6달(%)",
+        "12달(%)",
+        "RSI",
+        "지속",
+    ]
+
+    accounts = load_account_configs()
+    warnings_list: list[str] = []
+    kor_snapshot = _collect_kor_realtime_snapshot_quiet(accounts, warnings_list)
+    holdings_map = _load_holdings_map(accounts, warnings_list=warnings_list)
+
+    sections: list[str] = []
+    for account in accounts:
+        account_id = str(account["account_id"])
+        account_name = str(account.get("name") or account_id)
+        country_code = str(account.get("country_code") or "").strip().lower()
+
+        ma_type, ma_months = get_account_rank_defaults(account_id)
+        account_snapshot = None
+        if country_code == "kor":
+            account_tickers = {
+                str(item.get("ticker") or "").strip().upper()
+                for item in get_etfs(account_id)
+                if str(item.get("ticker") or "").strip()
+            }
+            account_snapshot = {t: kor_snapshot[t] for t in account_tickers if t in kor_snapshot}
+
+        df_rank = build_account_rankings(
+            account_id,
+            ma_type=ma_type,
+            ma_months=ma_months,
+            realtime_snapshot_override=account_snapshot,
+            held_tickers_override=holdings_map.get(account_id, set()),
+        )
+
+        title = f"[{account_name}] 순위 - {ma_type} {ma_months}개월"
+        if df_rank.empty:
+            sections.append(f"{title}\n{_build_empty_rank_header()}")
+        else:
+            export_df = df_rank.loc[:, [c for c in column_order if c in df_rank.columns]].copy()
+            export_df = _format_summary_export_df(export_df, country_code=country_code, kind="rank")
+            buf = StringIO()
+            export_df.to_csv(buf, sep="\t", index=False, lineterminator="\n")
+            sections.append(f"{title}\n{buf.getvalue().rstrip()}")
+
+    return ("\n\n" + "=" * 50 + "\n\n").join(sections)
+
+
+def _collect_kor_realtime_snapshot_quiet(
+    accounts: list[dict[str, Any]],
+    warnings_list: list[str],
+) -> dict[str, dict[str, float]]:
+    """UI 없이 한국 실시간 시세를 조회합니다."""
+    kor_tickers: set[str] = set()
+    for account in accounts:
+        if str(account.get("country_code") or "").strip().lower() != "kor":
+            continue
+        for item in get_etfs(str(account["account_id"])):
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if ticker:
+                kor_tickers.add(ticker)
+
+    if not kor_tickers:
+        return {}
+
+    try:
+        snapshot = get_realtime_snapshot("kor", sorted(kor_tickers))
+    except Exception as exc:
+        warnings_list.append(f"실시간 조회 실패: {exc}")
+        return {}
+
+    return snapshot or {}
+
+
+def render_signal_for_ai_page() -> None:
+    """퍼블릭 페이지: 계좌별 종목 점수(랭킹)만 표시합니다. 인증 불요."""
+    st.title("계좌별 종목 점수(랭킹)")
+
+    with st.spinner("랭킹 계산 중..."):
+        signal_text = _build_signal_text()
+
+    st.code(signal_text, language=None)
