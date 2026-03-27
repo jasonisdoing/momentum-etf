@@ -8,10 +8,10 @@ import type { ReactNode } from "react";
 const navItems = [
   { href: "/", label: "앱 메뉴" },
   { href: "/dashboard", label: "대시보드" },
+  { href: "/import", label: "벌크 입력" },
   { href: "/cash", label: "자산관리" },
   { href: "/snapshots", label: "스냅샷" },
   { href: "/market", label: "ETF 마켓" },
-  { href: "/py/", label: "Python 순위" },
 ];
 
 type AppShellProps = {

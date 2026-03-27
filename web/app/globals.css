@@ -376,6 +376,22 @@ a {
   cursor: pointer;
 }
 
+.secondaryButton {
+  min-height: 34px;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.secondaryButton:hover {
+  border-color: rgba(31, 107, 70, 0.28);
+}
+
 .toggleButton {
   min-height: 32px;
   padding: 7px 12px;
@@ -395,6 +411,11 @@ a {
 }
 
 .primaryButton:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
+.secondaryButton:disabled {
   cursor: wait;
   opacity: 0.7;
 }
@@ -433,6 +454,20 @@ a {
   align-items: center;
   gap: 12px;
   margin-bottom: 10px;
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tableMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .filterBar {
@@ -675,6 +710,42 @@ a {
   text-align: right;
 }
 
+.bulkGuide {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.bulkGuide p {
+  margin: 0;
+}
+
+.bulkTextarea {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.5;
+  margin-bottom: 12px;
+}
+
+.bulkTextarea:focus {
+  outline: none;
+  border-color: rgba(31, 107, 70, 0.28);
+  box-shadow: 0 0 0 3px rgba(31, 107, 70, 0.08);
+}
+
+.prelineText {
+  white-space: pre-line;
+}
+
 @media (max-width: 1100px) {
   .appFrame {
     min-height: auto;
@@ -695,6 +766,10 @@ a {
   .tableToolbar {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .toolbarActions {
+    width: 100%;
   }
 
   .filterBar {
