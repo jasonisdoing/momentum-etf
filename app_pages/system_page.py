@@ -739,41 +739,14 @@ def render_summary_for_ai_page() -> None:
 
 
 def _build_signal_text() -> str:
-    """각 계좌의 최신 rank_*.log 파일을 읽어 합칩니다. 계산 없이 파일만 읽습니다."""
+    """static/rank.txt 파일을 읽어 반환합니다. 계산 없이 파일만 읽습니다."""
     from pathlib import Path
 
-    from utils.settings_loader import get_account_dir
+    rank_file = Path("static/rank.txt")
+    if rank_file.is_file():
+        return rank_file.read_text(encoding="utf-8").strip()
 
-    accounts = load_account_configs()
-    sections: list[str] = []
-
-    for account in accounts:
-        account_id = str(account["account_id"])
-        account_name = str(account.get("name") or account_id)
-
-        try:
-            results_dir = get_account_dir(account_id) / "results"
-        except Exception:
-            continue
-
-        if not results_dir.is_dir():
-            continue
-
-        # 가장 최신 rank_*.log 파일 선택
-        ma_type, ma_months = get_account_rank_defaults(account_id)
-        log_files = sorted(results_dir.glob("rank_*.log"), reverse=True)
-        if not log_files:
-            sections.append(f"[{account_name}] 순위 - {ma_type} {ma_months}개월\n데이터 없음")
-            continue
-
-        latest_log = log_files[0]
-        content = Path(latest_log).read_text(encoding="utf-8").strip()
-        sections.append(content)
-
-    if not sections:
-        return "랭킹 데이터가 없습니다. /rank 페이지에서 먼저 순위를 조회하세요."
-
-    return ("\n\n" + "=" * 50 + "\n\n").join(sections)
+    return "랭킹 데이터가 없습니다."
 
 
 def render_signal_for_ai_page() -> None:

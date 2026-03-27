@@ -145,7 +145,6 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
         country_code = "kor"
 
     latest_trading_day = df.attrs.get("latest_trading_day")
-    ranking_computed_at = df.attrs.get("ranking_computed_at")
 
     if latest_trading_day is not None:
         try:
@@ -154,14 +153,6 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
             date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
     else:
         date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
-
-    if ranking_computed_at is not None:
-        try:
-            created_at = pd.Timestamp(ranking_computed_at).strftime("%Y-%m-%dT%H:%M:%S")
-        except Exception:
-            created_at = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%dT%H:%M:%S")
-    else:
-        created_at = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%dT%H:%M:%S")
 
     filename = f"rank_{date_str}.log"
 
@@ -190,15 +181,66 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
         aligns = ["right" if h in _right_align_cols else "left" for h in headers]
 
         table_lines = render_table_eaw(headers, rows, aligns)
-        header = (
-            f"랭킹 로그 생성: {created_at}\n"
-            f"종목풀: {account_id} | MA: {ma_type} {ma_months}개월 | 기준일: {date_str}\n"
-            f"\n=== 랭킹 목록 ===\n\n"
-        )
-        content = header + "\n".join(table_lines) + "\n"
+
+        # 계좌명 조회
+        try:
+            acc_settings = get_account_settings(account_id)
+            from utils.account_registry import get_account_order
+
+            order = int(get_account_order(account_id))
+            base_name = acc_settings.get("name") or account_id.upper()
+            acc_name = f"{order}. {base_name}"
+        except Exception:
+            acc_name = account_id
+
+        title = f"[{acc_name}] 순위 - {ma_type} {ma_months}개월"
+        content = title + "\n" + "\n".join(table_lines) + "\n"
         (results_dir / filename).write_text(content, encoding="utf-8")
+
+        # static/rank.txt 합본 업데이트
+        _update_static_rank_txt()
     except Exception:
         pass
+
+
+def _update_static_rank_txt() -> None:
+    """모든 계좌의 최신 rank_*.log를 합쳐 static/rank.txt에 저장합니다."""
+    from pathlib import Path
+
+    from utils.account_registry import _load_account_configs_impl
+    from utils.rankings import get_account_rank_defaults
+    from utils.settings_loader import get_account_dir
+
+    accounts = _load_account_configs_impl()
+    sections: list[str] = []
+
+    for account in accounts:
+        account_id = str(account["account_id"])
+        account_name = str(account.get("name") or account_id)
+
+        try:
+            results_dir = get_account_dir(account_id) / "results"
+        except Exception:
+            continue
+
+        if not results_dir.is_dir():
+            continue
+
+        ma_type, ma_months = get_account_rank_defaults(account_id)
+        log_files = sorted(results_dir.glob("rank_*.log"), reverse=True)
+        if not log_files:
+            sections.append(f"[{account_name}] 순위 - {ma_type} {ma_months}개월\n데이터 없음")
+            continue
+
+        sections.append(Path(log_files[0]).read_text(encoding="utf-8").strip())
+
+    if not sections:
+        return
+
+    static_dir = Path("static")
+    static_dir.mkdir(exist_ok=True)
+    combined = ("\n\n" + "=" * 50 + "\n\n").join(sections)
+    (static_dir / "rank.txt").write_text(combined + "\n", encoding="utf-8")
 
 
 def _normalize_code(value: Any, fallback: str) -> str:
