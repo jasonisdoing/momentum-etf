@@ -560,17 +560,6 @@ def render_system_page() -> None:
             "✅ 전체 자산 요약 알림 전송을 시작했습니다.",
         )
 
-    st.divider()
-    st.subheader("🔗 종목순위 API")
-    try:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(str(st.context.url))
-        base_url = f"{parsed.scheme}://{parsed.netloc}"
-    except Exception:
-        base_url = "http://localhost"
-    st.code(f"{base_url}/app/static/rank.json", language=None)
-
 
 def render_note_page() -> None:
     st.subheader("메모")

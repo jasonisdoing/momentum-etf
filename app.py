@@ -888,7 +888,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
 
 
 def _startup_cleanup() -> None:
-    """앱 시작 시 1회 실행: 오래된 rank 로그 정리."""
+    """앱 시작 시 1회 실행: 오래된 rank 로그 정리 및 static/rank.json 복원."""
     if "startup_cleanup_done" not in st.session_state:
         from app_pages.account_page import cleanup_old_rank_logs
 
