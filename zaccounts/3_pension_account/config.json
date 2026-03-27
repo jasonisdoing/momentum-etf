@@ -1,8 +1,8 @@
 {
     "icon": "🇰🇷",
-    "name": "연금 계좌",
+    "name": "연금저축 계좌",
     "country_code": "kor",
     "currency": "KRW",
     "MA_TYPE": "ALMA",
-    "MA_MONTHS": 3
+    "MA_MONTHS": 4
 }

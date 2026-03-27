@@ -7,7 +7,13 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from config import BUCKET_MAPPING, CACHE_START_DATE, MARKET_SCHEDULES, MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
+from config import (
+    BUCKET_MAPPING,
+    CACHE_START_DATE,
+    MARKET_SCHEDULES,
+    MIN_TRADING_DAYS,
+    TRADING_DAYS_PER_MONTH,
+)
 from core.strategy.metrics import process_ticker_data
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
@@ -149,7 +155,7 @@ def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> 
         "3달(%)": None,
         "6달(%)": None,
         "12달(%)": None,
-        "고점대비": None,
+        "고점": None,
         "추세(3달)": [],
         "RSI": None,
     }
@@ -181,7 +187,7 @@ def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> 
         "3달(%)": _calc_period_return(series, 60),
         "6달(%)": _calc_period_return(series, 126),
         "12달(%)": _calc_period_return(series, 252),
-        "고점대비": drawdown,
+        "고점": drawdown,
         "추세(3달)": series.iloc[-60:].astype(float).tolist(),
         "RSI": _calculate_rsi(series),
     }
@@ -270,8 +276,8 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
     normalized = df.copy()
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
-    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
-    one_decimal_columns = ["점수", "RSI"]
+    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
+    one_decimal_columns = ["추세", "RSI"]
 
     def _round_if_present(column: str, digits: int) -> None:
         if column not in normalized.columns:
@@ -438,7 +444,7 @@ def build_account_rankings(
                 "티커": ticker,
                 "종목명": etf.get("name", ""),
                 "상장일": etf.get("listing_date", "-"),
-                "점수": score_value,
+                "추세": score_value,
                 "지속": streak_value,
                 "보유": "보유" if ticker in held_tickers else "",
                 **price_metrics,
@@ -453,22 +459,55 @@ def build_account_rankings(
     realtime_active = bool(realtime_snapshot)
     ranking_computed_at = datetime.now()
 
+    def _to_sortable_score(value: Any) -> float:
+        if value is None or pd.isna(value):
+            return float("-inf")
+        return float(value)
+
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        score = row.get("점수")
-        if score is None or pd.isna(score):
-            return (1, float("-inf"), str(row.get("티커", "")))
-        return (0, float(score), str(row.get("티커", "")))
+        trend = row.get("추세")
+        return (
+            1 if trend is None or pd.isna(trend) else 0,
+            _to_sortable_score(trend),
+            str(row.get("티커", "")),
+        )
 
     sort_values = df.apply(_sort_key, axis=1, result_type="expand")
-    sort_values.columns = ["_missing_score", "_score_value", "_ticker_sort"]
+    sort_values.columns = [
+        "_missing_trend",
+        "_trend_value",
+        "_ticker_sort",
+    ]
     df = pd.concat([df, sort_values], axis=1)
     df = df.sort_values(
-        by=["_missing_score", "_score_value", "_ticker_sort"],
+        by=[
+            "_missing_trend",
+            "_trend_value",
+            "_ticker_sort",
+        ],
         ascending=[True, False, True],
         kind="stable",
     ).reset_index(drop=True)
-    df.insert(0, "#", range(1, len(df) + 1))
-    df = df.drop(columns=["_missing_score", "_score_value", "_ticker_sort"])
+    # 보유여부 계산 (보유 1, 보유 2, 대기 1, 대기 2...)
+    holding_idx = 0
+    waiting_idx = 0
+    status_values = []
+    for _, row in df.iterrows():
+        if str(row.get("보유", "")).strip() == "보유":
+            holding_idx += 1
+            status_values.append(f"보유 {holding_idx}")
+        else:
+            waiting_idx += 1
+            status_values.append(f"대기 {waiting_idx}")
+
+    df.insert(0, "보유여부", status_values)
+    df = df.drop(
+        columns=[
+            "_missing_trend",
+            "_trend_value",
+            "_ticker_sort",
+        ]
+    )
     df = _normalize_ranking_values(df, country_code)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

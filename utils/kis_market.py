@@ -373,6 +373,15 @@ def _to_float_or_none(value: object) -> float | None:
         return None
 
 
+def _to_non_negative_float_or_none(value: object) -> float | None:
+    parsed = _to_float_or_none(value)
+    if parsed is None:
+        return None
+    if parsed < 0:
+        return None
+    return parsed
+
+
 def _is_domestic_etf(row: pd.Series) -> bool:
     group_code = str(row.get("그룹코드") or row.get("증권그룹구분코드") or "").strip().upper()
     name = str(row.get("한글종목명") or "").strip().upper()
@@ -417,7 +426,7 @@ def load_kis_domestic_etf_master() -> pd.DataFrame:
 
     etf_df["상장일"] = etf_df["상장일자"].apply(_normalize_listing_date)
     etf_df["기준가"] = etf_df["기준가"].apply(_to_float_or_none)
-    etf_df["전일거래량"] = etf_df["전일거래량"].apply(_to_float_or_none)
+    etf_df["전일거래량"] = etf_df["전일거래량"].apply(_to_non_negative_float_or_none)
     etf_df["시가총액"] = etf_df.get("시가총액", pd.Series(index=etf_df.index)).apply(_to_float_or_none)
 
     etf_df = etf_df.rename(

@@ -70,42 +70,15 @@ MARKET_SCHEDULES = {
     },
 }
 
-# 백테스트 체결 슬리피지 가정치 (%)
-BACKTEST_SLIPPAGE = {
-    "kor": {
-        "buy_pct": 0.5,
-        "sell_pct": 0.5,
-    },
-    "us": {
-        "buy_pct": 0.25,
-        "sell_pct": 0.25,
-    },
-    "au": {
-        "buy_pct": 1.0,
-        "sell_pct": 1.0,
-    },
-}
-
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
-
 
 # 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
-MIN_TRADING_DAYS = 3
+MIN_TRADING_DAYS = 5
 
-
-# 튜닝 최적화 지표 (전역 공통)
-# CAGR, SHARPE, SDR 중 선택
-OPTIMIZATION_METRIC = "CAGR"
-
-# -----------------------------------------------------------------------
-# 완전 균등 비중 배분 (Fully Equal Bucket Allocation)
-# -----------------------------------------------------------------------
-# 계좌에 포함된 버킷은 버킷 수 기준으로 균등 분배합니다.
-# 각 버킷 내부 종목도 해당 버킷 종목 수 기준으로 균등 분배합니다.
-# 리밸런싱 버퍼: 현재비중과 목표비중 차이가 이 값 미만이면 매매를 유보합니다.
-# 잦은 리밸런싱으로 인한 수수료/슬리피지를 방어합니다.
-REBALANCE_BUFFER = 2  # ±2%
+# 고점 컬럼 색상 기준 (%)
+# 이 값 이상이면 녹색(고점 근처), 미만이면 빨간색(낙폭 큼)
+HIGH_POINT_GREEN_THRESHOLD = -5

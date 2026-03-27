@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import subprocess
-from html import escape
 from typing import Any
 
 import pandas as pd
@@ -14,15 +13,6 @@ from config import (
     BUCKET_REVERSE_MAPPING,
 )
 from services.reference_data_service import get_stock_reference_info
-from utils.account_notes import load_account_note, save_account_note
-from utils.account_todos import (
-    complete_account_todo,
-    create_account_todo,
-    delete_account_todo,
-    list_account_todos,
-    reopen_account_todo,
-    update_account_todo_content,
-)
 from utils.data_loader import fetch_ohlcv
 from utils.rankings import build_account_rankings, get_account_rank_defaults, get_rank_months_max
 from utils.settings_loader import AccountSettingsError, get_account_settings
@@ -81,6 +71,144 @@ _DATAFRAME_CSS = """
 def _load_cached_rankings(account_id: str, ma_type: str, ma_months: int) -> pd.DataFrame:
     """동일 조건의 순위 결과를 짧게 재사용한다."""
     return build_account_rankings(account_id, ma_type=ma_type, ma_months=ma_months)
+
+
+_DISPLAY_COLUMNS = [
+    "보유여부",
+    "버킷",
+    "티커",
+    "종목명",
+    "현재가",
+    "일간(%)",
+    "괴리율",
+    "추세",
+    "고점",
+    "1주(%)",
+    "2주(%)",
+    "1달(%)",
+    "3달(%)",
+    "6달(%)",
+    "12달(%)",
+    "RSI",
+    "지속",
+]
+_PCT_COLUMNS = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
+_SCORE_COLUMNS = ["추세", "RSI"]
+
+
+def _format_rank_df_for_display(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
+    cols = [c for c in _DISPLAY_COLUMNS if c in df.columns]
+    out = df[cols].copy()
+
+    price_fmt = (lambda v: f"{v:,.2f}") if country_code == "au" else (lambda v: f"{int(v):,}원")
+    if "현재가" in out.columns:
+        out["현재가"] = out["현재가"].apply(lambda v: price_fmt(v) if pd.notna(v) and v is not None else "-")
+
+    def _fmt_pct(v):
+        if v is None or (isinstance(v, float) and pd.isna(v)):
+            return "-"
+        return f"+{v:.2f}%" if v > 0 else f"{v:.2f}%"
+
+    for col in _PCT_COLUMNS:
+        if col in out.columns:
+            out[col] = out[col].apply(_fmt_pct)
+
+    for col in _SCORE_COLUMNS:
+        if col in out.columns:
+            out[col] = out[col].apply(lambda v: f"{v:.1f}" if pd.notna(v) and v is not None else "-")
+
+    if "지속" in out.columns:
+        out["지속"] = out["지속"].apply(lambda v: f"{int(v)}일" if pd.notna(v) and v is not None else "-")
+
+    return out
+
+
+def _render_rank_table_text(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> str | None:
+    """순위 DataFrame을 텍스트 테이블로 렌더링합니다."""
+    from utils.report import render_table_eaw
+    from utils.settings_loader import get_account_settings
+
+    try:
+        country_code = str(get_account_settings(account_id).get("country_code") or "kor").strip().lower()
+    except Exception:
+        country_code = "kor"
+
+    try:
+        display_df = _format_rank_df_for_display(df, country_code)
+
+        _right_align_cols = {
+            "현재가",
+            "괴리율",
+            "추세",
+            "일간(%)",
+            "1주(%)",
+            "2주(%)",
+            "1달(%)",
+            "3달(%)",
+            "6달(%)",
+            "12달(%)",
+            "고점",
+            "RSI",
+            "지속",
+        }
+        headers = list(display_df.columns)
+        rows = [[str(v) if v is not None else "-" for v in row] for row in display_df.itertuples(index=False)]
+        aligns = ["right" if h in _right_align_cols else "left" for h in headers]
+
+        table_lines = render_table_eaw(headers, rows, aligns)
+
+        # 계좌명 조회
+        try:
+            from utils.account_registry import get_account_order
+
+            order = int(get_account_order(account_id))
+            base_name = get_account_settings(account_id).get("name") or account_id.upper()
+            acc_name = f"{order}. {base_name}"
+        except Exception:
+            acc_name = account_id
+
+        title = f"[{acc_name}] 순위 - {ma_type} {ma_months}개월"
+        return title + "\n" + "\n".join(table_lines) + "\n"
+    except Exception:
+        return None
+
+
+def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> None:
+    """순위 결과를 zaccounts/{account_id}/results/ 에 저장합니다."""
+    from utils.settings_loader import get_account_dir
+
+    try:
+        account_dir = get_account_dir(account_id)
+    except Exception:
+        return
+
+    results_dir = account_dir / "results"
+    results_dir.mkdir(exist_ok=True)
+
+    date_str = pd.Timestamp.now(tz="Asia/Seoul").strftime("%Y-%m-%d")
+
+    content = _render_rank_table_text(account_id, df, ma_type, ma_months)
+    if content:
+        (results_dir / f"rank_{date_str}.log").write_text(content, encoding="utf-8")
+
+
+def cleanup_old_rank_logs(max_keep: int = 10) -> None:
+    """각 계좌의 rank_*.log 파일을 최신 max_keep개만 남기고 삭제합니다."""
+    from utils.account_registry import _load_account_configs_impl
+    from utils.settings_loader import get_account_dir
+
+    for account in _load_account_configs_impl():
+        try:
+            results_dir = get_account_dir(str(account["account_id"])) / "results"
+        except Exception:
+            continue
+
+        if not results_dir.is_dir():
+            continue
+
+        log_files = sorted(results_dir.glob("rank_*.log"), reverse=True)
+        for old_file in log_files[max_keep:]:
+            old_file.unlink(missing_ok=True)
 
 
 def _normalize_code(value: Any, fallback: str) -> str:
@@ -512,21 +640,21 @@ def _render_rank_tab(
     effective_ma_months = min(max(effective_ma_months, 1), max_months)
 
     visible_columns = [
-        "#",
+        "보유여부",
         "버킷",
         "티커",
         "종목명",
         "현재가",
-        "괴리율",
-        "점수",
         "일간(%)",
+        "괴리율",
+        "추세",
+        "고점",
         "1주(%)",
         "2주(%)",
         "1달(%)",
         "3달(%)",
         "6달(%)",
         "12달(%)",
-        "고점대비",
         "추세(3달)",
         "RSI",
         "지속",
@@ -557,6 +685,8 @@ def _render_rank_tab(
         st.info("표시할 순위 종목이 없습니다.")
         return
 
+    _save_rank_results_locally(account_id, df, effective_ma_type, effective_ma_months)
+
     realtime_active = bool(df.attrs.get("realtime_active"))
     render_rank_table(
         df,
@@ -582,7 +712,7 @@ def _render_rank_tab(
     if ranking_text:
         st.caption(f"순위 계산: {ranking_text}")
 
-    st.caption("점수·지속은 기준 종가 시계열에 장중 실시간 가격을 반영해 계산합니다.")
+    st.caption("추세·지속은 기준 종가 시계열에 장중 실시간 가격을 반영해 계산합니다.")
 
 
 # ---------------------------------------------------------------------------
@@ -593,6 +723,7 @@ def _render_rank_tab(
 # ---------------------------------------------------------------------------
 # 삭제된 종목 관리 탭
 # ---------------------------------------------------------------------------
+@fragment
 def _render_deleted_stocks_tab(account_id: str) -> None:
     """삭제된 종목 목록을 표시하고 복구/완전삭제 기능을 제공합니다."""
     deleted_etfs = get_deleted_etfs(account_id)
@@ -645,12 +776,32 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     selected_tickers_key = f"{editor_base_key}_selected_tickers"
     editor_nonce = int(st.session_state.get(editor_nonce_key, 0) or 0)
     editor_key = f"{editor_base_key}_{editor_nonce}"
+    editor_state = st.session_state.get(editor_key, {})
 
     selected_tickers = {
         str(ticker).strip().upper()
         for ticker in st.session_state.get(selected_tickers_key, [])
         if str(ticker or "").strip()
     }
+
+    # [Fix] Sync selection state before rendering buttons
+    if editor_state and editor_state.get("edited_rows"):
+        changed = False
+        for idx_str, changes in editor_state["edited_rows"].items():
+            if "복구" in changes:
+                idx = int(idx_str)
+                if 0 <= idx < len(df_deleted):
+                    ticker = str(df_deleted.iloc[idx]["티커"]).strip().upper()
+                    if changes["복구"]:
+                        if ticker not in selected_tickers:
+                            selected_tickers.add(ticker)
+                            changed = True
+                    else:
+                        if ticker in selected_tickers:
+                            selected_tickers.remove(ticker)
+                            changed = True
+        if changed:
+            st.session_state[selected_tickers_key] = list(selected_tickers)
 
     # 전체 선택/해제 컨트롤
     c_all_1, c_all_2, _ = st.columns([1, 1, 3])
@@ -674,8 +825,6 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     )
 
     if not to_restore_df.empty:
-        st.info(f"선택한 {len(to_restore_df)}개 종목에 대한 작업을 선택하세요.")
-
         c_res1, c_res2 = st.columns(2)
         with c_res1:
             if st.button("♻️ 선택 종목 복구", type="primary", key=f"btn_tab_restore_{account_id}", width="stretch"):
@@ -687,9 +836,27 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                     if add_stock(account_id, ticker, bucket=bucket_int):
                         restored += 1
                 if restored > 0:
+                    st.session_state[selected_tickers_key] = []
+                    st.session_state[editor_nonce_key] = editor_nonce + 1
                     st.success(f"{restored}개 종목 복구 완료!")
                     st.rerun()
         with c_res2:
+            st.markdown(
+                f"""
+                <style>
+                div.st-key-btn_tab_hard_del_{account_id} button {{
+                    background-color: #d32f2f !important;
+                    color: white !important;
+                    border: none !important;
+                }}
+                div.st-key-btn_tab_hard_del_{account_id} button:hover {{
+                    background-color: #b71c1c !important;
+                    color: white !important;
+                }}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
             if st.button(
                 "💀 선택 종목 완전 삭제",
                 type="secondary",
@@ -702,6 +869,8 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
                     if hard_remove_stock(account_id, ticker):
                         deleted_count += 1
                 if deleted_count > 0:
+                    st.session_state[selected_tickers_key] = []
+                    st.session_state[editor_nonce_key] = editor_nonce + 1
                     st.success(f"{deleted_count}개 종목 영구 삭제 완료!")
                     st.rerun()
         st.markdown("</div>", unsafe_allow_html=True)
@@ -711,8 +880,16 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
     df_deleted_editor = df_deleted.copy()
     df_deleted_editor["복구"] = df_deleted_editor["티커"].astype(str).str.upper().isin(selected_tickers)
 
+    def _style_deleted_row(row: pd.Series) -> list[str]:
+        ticker = str(row.get("티커") or "").strip().upper()
+        if ticker in selected_tickers:
+            return ["background-color: #eceff1"] * len(row)
+        return [""] * len(row)
+
+    styled_deleted_editor = df_deleted_editor.style.apply(_style_deleted_row, axis=1)
+
     edited_deleted = st.data_editor(
-        df_deleted_editor,
+        styled_deleted_editor,
         hide_index=True,
         width="stretch",
         column_config={
@@ -769,286 +946,15 @@ def _render_deleted_stocks_tab(account_id: str) -> None:
         and "복구" in edited_deleted.columns
         and "티커" in edited_deleted.columns
     ):
-        selected_now = (
-            edited_deleted.loc[edited_deleted["복구"] == True, "티커"]  # noqa: E712
-            .astype(str)
-            .str.strip()
-            .str.upper()
-            .tolist()
-        )
-        st.session_state[selected_tickers_key] = selected_now
-
-
-@fragment
-def _render_account_note_tab(account_id: str) -> None:
-    """계좌별 메모와 할일 리스트를 렌더링합니다."""
-    note_key = f"account_note_content_{account_id}"
-    loaded_key = f"account_note_loaded_{account_id}"
-    updated_key = f"account_note_updated_{account_id}"
-    note_saved_content_key = f"account_note_saved_content_{account_id}"
-    note_status_key = f"account_note_status_{account_id}"
-
-    def _to_local_ts(value: Any) -> pd.Timestamp | None:
-        if value is None:
-            return None
-        ts = pd.Timestamp(value)
-        if ts.tzinfo is not None:
-            ts = ts.tz_convert("Asia/Seoul").tz_localize(None)
-        return ts
-
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stTextArea"] textarea {
-            background-color: #fff3a3 !important;
-            color: #2b2b2b !important;
-            border: 1px solid #e0c95a !important;
-        }
-        div[data-testid="stTextArea"] textarea::placeholder {
-            color: #8a7a2f !important;
-        }
-        div[class*="st-key-todo_delete_btn_"] .stButton > button {
-            background-color: #f44336 !important;
-            color: white !important;
-            border-color: #f44336 !important;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if not st.session_state.get(loaded_key) or note_key not in st.session_state:
-        try:
-            note_doc = load_account_note(account_id)
-        except Exception as exc:
-            st.error(f"메모를 불러오지 못했습니다: {exc}")
-            return
-        st.session_state[note_key] = str((note_doc or {}).get("content") or "")
-        st.session_state[updated_key] = (note_doc or {}).get("updated_at")
-        st.session_state[note_saved_content_key] = str((note_doc or {}).get("content") or "")
-        st.session_state[note_status_key] = "saved"
-        st.session_state[loaded_key] = True
-
-    left_col, right_col = st.columns(2)
-
-    def _save_note_on_change() -> None:
-        try:
-            saved_at = save_account_note(account_id, st.session_state.get(note_key, ""))
-        except Exception as exc:
-            st.session_state[note_status_key] = "failed"
-            st.error(f"메모를 저장하지 못했습니다: {exc}")
-            return
-        st.session_state[updated_key] = saved_at
-        st.session_state[note_saved_content_key] = str(st.session_state.get(note_key, "") or "")
-        st.session_state[note_status_key] = "saved"
-
-    def _save_todo_on_change(todo_id: str, content_key: str) -> None:
-        todo_updated_key = f"todo_updated_{account_id}_{todo_id}"
-        todo_saved_content_key = f"todo_saved_content_{account_id}_{todo_id}"
-        todo_status_key = f"todo_status_{account_id}_{todo_id}"
-        try:
-            saved_at = update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
-        except Exception as exc:
-            st.session_state[todo_status_key] = "failed"
-            st.error(f"할일을 저장하지 못했습니다: {exc}")
-            return
-        st.session_state[todo_updated_key] = saved_at
-        st.session_state[todo_saved_content_key] = str(st.session_state.get(content_key, "") or "")
-        st.session_state[todo_status_key] = "saved"
-
-    with left_col:
-        st.subheader("메모")
-        st.text_area(
-            "메모",
-            key=note_key,
-            height=520,
-            placeholder="이 계좌에 대한 메모를 입력하세요.",
-            on_change=_save_note_on_change,
-        )
-
-        updated_at = st.session_state.get(updated_key)
-        if updated_at is not None:
-            ts = _to_local_ts(updated_at)
-            ampm = "오전" if ts.hour < 12 else "오후"
-            hour12 = ts.hour % 12 or 12
-            absolute_text = f"{ts.year}년 {ts.month}월 {ts.day}일 {ampm} {hour12}:{ts.minute:02d}분"
-            relative_text = format_relative_time(ts)
-            message = f"마지막 저장: {absolute_text}"
-            if relative_text:
-                message = f"{message} {relative_text}"
-            if st.session_state.get(note_status_key) == "failed":
-                message = f"{message} 🔴 저장 실패"
-            else:
-                message = f"{message} 🟢 저장됨"
-            st.caption(message)
-
-    with right_col:
-        st.subheader("할일")
-
-        def _clear_todo_session_state() -> None:
-            prefixes = (
-                f"todo_content_{account_id}_",
-                f"todo_updated_{account_id}_",
-                f"todo_saved_content_{account_id}_",
-            )
-            keys_to_remove = [key for key in st.session_state.keys() if key.startswith(prefixes)]
-            for key in keys_to_remove:
-                st.session_state.pop(key, None)
-
-        @st.dialog("할일 삭제", width="small")
-        def _open_delete_todo_dialog(todo_id: str) -> None:
-            st.warning("이 할일을 완전히 삭제합니다. 되돌릴 수 없습니다.")
-            c1, c2 = st.columns(2)
-            with c1:
-                if st.button("취소", key=f"btn_cancel_delete_todo_{account_id}_{todo_id}", width="stretch"):
-                    st.rerun()
-            with c2:
-                if st.button(
-                    "삭제 확인",
-                    key=f"btn_confirm_delete_todo_{account_id}_{todo_id}",
-                    type="primary",
-                    width="stretch",
-                ):
-                    try:
-                        delete_account_todo(account_id, todo_id)
-                    except Exception as exc:
-                        st.error(f"투두를 삭제하지 못했습니다: {exc}")
-                        return
-                    _clear_todo_session_state()
-                    st.success("투두를 삭제했습니다.")
-                    st.rerun()
-
-        if st.button("➕ 새 아이템 생성", key=f"btn_create_todo_{account_id}", width="stretch"):
-            try:
-                create_account_todo(account_id, "")
-            except Exception as exc:
-                st.error(f"투두를 생성하지 못했습니다: {exc}")
-                return
-            _clear_todo_session_state()
-            st.rerun()
-
-        try:
-            todos = list_account_todos(account_id)
-        except Exception as exc:
-            st.error(f"투두 목록을 불러오지 못했습니다: {exc}")
-            return
-
-        if not todos:
-            st.info("투두 아이템이 없습니다. 생성 버튼으로 첫 아이템을 추가하세요.")
-            return
-
-        def _render_todo_item(todo: dict[str, Any]) -> None:
-            todo_id = todo["todo_id"]
-            content_key = f"todo_content_{account_id}_{todo_id}"
-            todo_updated_key = f"todo_updated_{account_id}_{todo_id}"
-            todo_saved_content_key = f"todo_saved_content_{account_id}_{todo_id}"
-            if content_key not in st.session_state:
-                st.session_state[content_key] = str(todo.get("content") or "")
-            if todo_updated_key not in st.session_state:
-                st.session_state[todo_updated_key] = todo.get("updated_at") or todo.get("created_at")
-            if todo_saved_content_key not in st.session_state:
-                st.session_state[todo_saved_content_key] = str(todo.get("content") or "")
-            todo_status_key = f"todo_status_{account_id}_{todo_id}"
-            if todo_status_key not in st.session_state:
-                st.session_state[todo_status_key] = "saved"
-
-            is_done = str(todo.get("status") or "") == "done"
-            display_ts = (
-                pd.Timestamp(st.session_state.get(todo_updated_key))
-                if st.session_state.get(todo_updated_key) is not None
-                else None
-            )
-            if display_ts is not None and display_ts.tzinfo is not None:
-                display_ts = display_ts.tz_convert("Asia/Seoul").tz_localize(None)
-
-            header_parts = []
-            if display_ts is not None:
-                ampm = "오전" if display_ts.hour < 12 else "오후"
-                hour12 = display_ts.hour % 12 or 12
-                created_text = (
-                    f"{display_ts.year}년 {display_ts.month}월 {display_ts.day}일 "
-                    f"{ampm} {hour12}:{display_ts.minute:02d}분"
-                )
-                rel = format_relative_time(display_ts)
-                header_parts.append(created_text if not rel else f"{created_text} {rel}")
-            if is_done:
-                header_parts.append("완료")
-
-            with st.container(border=True):
-                if is_done:
-                    content_html = escape(st.session_state.get(content_key, "") or "").replace("\n", "<br>")
-                    st.markdown(
-                        (
-                            "<div style='min-height:90px;padding:0.75rem 0.9rem;"
-                            "border:1px solid #d9d9d9;border-radius:0.5rem;"
-                            "background-color:#f6f6f6;color:#111;"
-                            "text-decoration: line-through; white-space: normal;"
-                            "margin-bottom:0.75rem;'>"
-                            f"{content_html or '&nbsp;'}"
-                            "</div>"
-                        ),
-                        unsafe_allow_html=True,
-                    )
-                else:
-                    st.text_area(
-                        "투두 내용",
-                        key=content_key,
-                        height=90,
-                        placeholder="할 일을 입력하세요.",
-                        label_visibility="collapsed",
-                        on_change=_save_todo_on_change,
-                        args=(todo_id, content_key),
-                    )
-
-                status_text = ""
-                if display_ts is not None:
-                    ampm = "오전" if display_ts.hour < 12 else "오후"
-                    hour12 = display_ts.hour % 12 or 12
-                    absolute_text = (
-                        f"{display_ts.year}년 {display_ts.month}월 {display_ts.day}일 "
-                        f"{ampm} {hour12}:{display_ts.minute:02d}분"
-                    )
-                    relative_text = format_relative_time(display_ts)
-                    status_text = absolute_text if not relative_text else f"{absolute_text} {relative_text}"
-                saved_text = "🔴 저장 실패" if st.session_state.get(todo_status_key) == "failed" else "🟢 저장됨"
-
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    if status_text:
-                        st.caption(status_text)
-                    if saved_text:
-                        st.caption(saved_text)
-                with c2:
-                    if is_done:
-                        if st.button("완료취소", key=f"btn_undo_todo_{account_id}_{todo_id}", width="stretch"):
-                            try:
-                                reopen_account_todo(account_id, todo_id)
-                            except Exception as exc:
-                                st.error(f"투두를 완료취소하지 못했습니다: {exc}")
-                                return
-                            _clear_todo_session_state()
-                            st.success("투두를 진행 중으로 되돌렸습니다.")
-                            st.rerun()
-                    elif st.button("완료", key=f"btn_done_todo_{account_id}_{todo_id}", width="stretch"):
-                        try:
-                            update_account_todo_content(account_id, todo_id, st.session_state.get(content_key, ""))
-                            complete_account_todo(account_id, todo_id)
-                        except Exception as exc:
-                            st.error(f"투두를 완료 처리하지 못했습니다: {exc}")
-                            return
-                        _clear_todo_session_state()
-                        st.success("투두를 완료 처리했습니다.")
-                        st.rerun()
-                with c3:
-                    if is_done:
-                        st.write("")
-                    else:
-                        with st.container(key=f"todo_delete_btn_{account_id}_{todo_id}"):
-                            if st.button("🗑️ 삭제", key=f"btn_delete_todo_{account_id}_{todo_id}", width="stretch"):
-                                _open_delete_todo_dialog(todo_id)
-
-        for todo in todos:
-            _render_todo_item(todo)
+        # selection_now = (
+        #     edited_deleted.loc[edited_deleted["복구"] == True, "티커"]  # noqa: E712
+        #     .astype(str)
+        #     .str.strip()
+        #     .str.upper()
+        #     .tolist()
+        # )
+        # st.session_state[selected_tickers_key] = selection_now
+        pass
 
 
 def render_account_page(
@@ -1075,7 +981,7 @@ def render_account_page(
         if view_mode is None:
             view_mode = st.segmented_control(
                 "뷰",
-                ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"],
+                ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"],
                 default="1. 순위",
                 key=f"view_{account_id}",
                 label_visibility="collapsed",
@@ -1087,9 +993,6 @@ def render_account_page(
         elif view_mode == "3. 삭제된 종목":
             loading.update(f"{account_id.upper()} 삭제 종목 테이블 준비")
             _render_deleted_stocks_tab(account_id)
-        elif view_mode == "4. 메모":
-            loading.update(f"{account_id.upper()} 메모 준비")
-            _render_account_note_tab(account_id)
         else:  # "1. 순위" (Default)
             rank_params = rank_params or {}
             _render_rank_tab(
@@ -1114,14 +1017,8 @@ def render_account_deleted_page(account_id: str) -> None:
     _render_deleted_stocks_tab(account_id)
 
 
-def render_account_note_page(account_id: str) -> None:
-    """계좌 메모 뷰를 렌더링한다."""
-    _render_account_note_tab(account_id)
-
-
 __all__ = [
     "render_account_page",
     "render_account_setup_page",
     "render_account_deleted_page",
-    "render_account_note_page",
 ]

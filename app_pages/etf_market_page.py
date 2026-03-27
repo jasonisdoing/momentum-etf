@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 
 import pandas as pd
@@ -10,6 +11,28 @@ import streamlit as st
 from services.price_service import get_realtime_snapshot
 from services.reference_data_service import get_kor_etf_master
 from utils.ui import render_rank_table
+
+EXCLUSION_KEYWORD_GROUPS = {
+    "인버스": ["인버스"],
+    "2X": ["2X"],
+    "레버리지": ["레버리지"],
+    "선물": ["선물"],
+    "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
+    "혼합": ["혼합"],
+    "리츠": ["리츠"],
+    "합성": ["합성"],
+    "커버드콜": ["커버드콜"],
+}
+
+DEFAULT_EXCLUDED_KEYWORD_GROUPS = [
+    "인버스",
+    "2X",
+    "레버리지",
+    "선물",
+    "채권(모든종류)",
+    "혼합",
+    "리츠",
+]
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -73,7 +96,28 @@ def render_etf_market_page() -> None:
         st.error("국내 ETF 목록을 불러오지 못했습니다.")
         return
 
-    query = st.text_input("검색", placeholder="티커 또는 종목명")
+    query_col, market_cap_col, volume_col = st.columns([2.2, 1, 1])
+    with query_col:
+        query = st.text_input("검색", placeholder="티커 또는 종목명")
+    with market_cap_col:
+        min_market_cap = st.number_input(
+            "최소 시가총액(억)", min_value=0.0, value=None, step=100.0, placeholder="예: 1000"
+        )
+    with volume_col:
+        min_prev_volume = st.number_input(
+            "최소 전일 거래량(주)",
+            min_value=0,
+            value=None,
+            step=10000,
+            placeholder="예: 100000",
+        )
+    excluded_keyword_groups = st.pills(
+        "기본 제외 키워드",
+        options=list(EXCLUSION_KEYWORD_GROUPS.keys()),
+        default=DEFAULT_EXCLUDED_KEYWORD_GROUPS,
+        selection_mode="multi",
+    )
+
     filtered = df.copy()
 
     query_text = str(query or "").strip().upper()
@@ -82,6 +126,19 @@ def render_etf_market_page() -> None:
             filtered["티커"].astype(str).str.upper().str.contains(query_text, na=False)
             | filtered["종목명"].astype(str).str.upper().str.contains(query_text, na=False)
         ]
+
+    if excluded_keyword_groups:
+        expanded_keywords = [
+            keyword for group in excluded_keyword_groups for keyword in EXCLUSION_KEYWORD_GROUPS.get(group, [])
+        ]
+        keyword_pattern = "|".join(re.escape(keyword) for keyword in expanded_keywords)
+        filtered = filtered[~filtered["종목명"].astype(str).str.contains(keyword_pattern, case=False, na=False)]
+
+    if min_market_cap is not None:
+        filtered = filtered[filtered["시가총액(억)"].ge(float(min_market_cap)).fillna(False)]
+
+    if min_prev_volume is not None:
+        filtered = filtered[filtered["전일거래량(주)"].ge(float(min_prev_volume)).fillna(False)]
 
     filtered = filtered.sort_values(["일간(%)", "티커"], ascending=[False, True], na_position="last").reset_index(
         drop=True
@@ -107,7 +164,6 @@ def render_etf_market_page() -> None:
         "일간(%)",
         "현재가",
         "괴리율",
-        "Nav",
         "3달(%)",
         "상장일",
         "전일거래량(주)",
@@ -119,6 +175,10 @@ def render_etf_market_page() -> None:
         grouped_by_bucket=False,
         visible_columns=[column for column in visible_columns if column in filtered.columns],
         height=760,
+        column_config_overrides={
+            "전일거래량(주)": st.column_config.NumberColumn("전일거래량(주)", width=90, format="localized"),
+            "시가총액(억)": st.column_config.NumberColumn("시가총액(억)", width=90, format="localized"),
+        },
     )
 
 

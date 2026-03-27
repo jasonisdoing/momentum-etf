@@ -488,11 +488,13 @@ def _render_cash_tab(account_map):
         today_dt = pd.Timestamp.today().normalize()
         rates = {"USD": 0.0, "AUD": 0.0}
 
-        usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt)
+        usd_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, allow_partial=True)
         if not usd_krw_series.empty:
             rates["USD"] = float(usd_krw_series.iloc[-1])
 
-        aud_krw_series = get_exchange_rate_series(today_dt - pd.Timedelta(days=5), today_dt, symbol="AUDKRW=X")
+        aud_krw_series = get_exchange_rate_series(
+            today_dt - pd.Timedelta(days=5), today_dt, symbol="AUDKRW=X", allow_partial=True
+        )
         if not aud_krw_series.empty:
             rates["AUD"] = float(aud_krw_series.iloc[-1])
 
