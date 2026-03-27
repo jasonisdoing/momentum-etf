@@ -9,6 +9,7 @@
 - 대화가 끊겨도 이어서 작업할 수 있게 한다.
 - 다른 사람이 와도 현재 의사결정과 다음 액션을 바로 이해할 수 있게 한다.
 - 문서만 읽고도 "무엇이 확정되었고, 무엇이 아직 미정인지" 구분할 수 있게 한다.
+- 앞으로 Node UI는 `ERP 스타일 기준`으로 구현한다.
 
 ## 읽는 순서
 
@@ -17,15 +18,14 @@
 3. [03_execution_strategy.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/03_execution_strategy.md)
 4. [04_progress_status.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/04_progress_status.md)
 5. [05_next_steps.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/05_next_steps.md)
+6. [06_spike_implementation_notes.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/06_spike_implementation_notes.md)
 
-## 참고 원본 문서
+## 참고 문서
 
-- [menu_ownership_v1.txt](/Users/jason/DEV/momentum-etf/docs/menu_ownership_v1.txt)
-- [menu_transition_v1.txt](/Users/jason/DEV/momentum-etf/docs/menu_transition_v1.txt)
 - [project_overview.md](/Users/jason/DEV/momentum-etf/docs/project_overview.md)
 - [developer_guide.md](/Users/jason/DEV/momentum-etf/docs/developer_guide.md)
 - [server_infrastructure.md](/Users/jason/DEV/momentum-etf/docs/server_infrastructure.md)
 
 ## 현재 한 줄 상태
 
-아직 Node 앱 코드는 만들지 않았고, 먼저 `Node + Python 최소 공존 버전`을 실제로 띄워보는 기술 검증을 우선하기로 결정한 상태다.
+`Node + Python 하이브리드 1차 메뉴`는 구현과 로컬 검증을 마쳤고, 다음 우선순위는 `배포 테스트`다.

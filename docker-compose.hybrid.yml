@@ -7,7 +7,7 @@ services:
       - .env
     volumes:
       - ./zaccounts:/app/zaccounts:ro
-    restart: always
+    restart: unless-stopped
 
   python_app:
     build: .
@@ -21,20 +21,15 @@ services:
       - ./.streamlit:/app/.streamlit
       - /etc/localtime:/etc/localtime:ro
       - /etc/timezone:/etc/timezone:ro
-    restart: always
+    restart: unless-stopped
 
   hybrid_proxy:
     image: nginx:1.27-alpine
     depends_on:
       - node_app
       - python_app
-    expose:
-      - "80"
-    environment:
-      - VIRTUAL_HOST=etf.dojason.com
-      - LETSENCRYPT_HOST=etf.dojason.com
-      - LETSENCRYPT_EMAIL=kimwootak@catholic.ac.kr
-      - TZ=Asia/Seoul
+    ports:
+      - "8080:80"
     volumes:
       - ./infra/hybrid/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    restart: always
+    restart: unless-stopped

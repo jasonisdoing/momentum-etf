@@ -794,14 +794,22 @@ def edit_stock_modal(row_data):
 
 
 def build_transaction_page(page_cls, active_tab: str | None = None):
-    title = active_tab if active_tab else "계좌 관리"
+    title_map = {
+        None: "계좌 관리",
+        "📊 잔고 CRUD": "잔고 CRUD",
+        "📥 벌크 입력": "벌크 입력",
+        "💵 원금/현금": "원금/현금",
+        "📸 스냅샷": "스냅샷",
+        "📈 그래프": "그래프",
+    }
+    title = title_map.get(active_tab, active_tab if active_tab else "계좌 관리")
     slug_map = {
         None: "transactions",
-        "📊 잔고 CRUD": "transactions_holdings",
-        "📥 벌크 입력": "transactions_import",
-        "💵 원금/현금": "transactions_cash",
-        "📸 스냅샷": "transactions_snapshot",
-        "📈 그래프": "transactions_chart",
+        "📊 잔고 CRUD": "holdings",
+        "📥 벌크 입력": "import",
+        "💵 원금/현금": "cash",
+        "📸 스냅샷": "snapshot",
+        "📈 그래프": "chart",
     }
     url_path = slug_map.get(active_tab, "transactions")
     return page_cls(
