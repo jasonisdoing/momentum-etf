@@ -887,7 +887,17 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
     return _render_home_page
 
 
+def _startup_cleanup() -> None:
+    """앱 시작 시 1회 실행: 오래된 rank 로그 정리."""
+    if "startup_cleanup_done" not in st.session_state:
+        from app_pages.account_page import cleanup_old_rank_logs
+
+        cleanup_old_rank_logs(max_keep=10)
+        st.session_state["startup_cleanup_done"] = True
+
+
 def main() -> None:
+    _startup_cleanup()
     navigation = getattr(st, "navigation", None)
     page_cls = getattr(st, "Page", None)
     if navigation is None or page_cls is None:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import subprocess
 from typing import Any
 
@@ -124,41 +123,17 @@ def _format_rank_df_for_display(df: pd.DataFrame, country_code: str) -> pd.DataF
     return out
 
 
-def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> None:
-    """APP_TYPE=Local 환경에서 순위 결과를 zaccounts/{account_id}/results/ 에 저장합니다."""
-    if os.environ.get("APP_TYPE", "").strip().lower() != "local":
-        return
-
-    from utils.settings_loader import get_account_dir, get_account_settings
-
-    try:
-        account_dir = get_account_dir(account_id)
-    except Exception:
-        return
-
-    results_dir = account_dir / "results"
-    results_dir.mkdir(exist_ok=True)
+def _render_rank_table_text(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> str | None:
+    """순위 DataFrame을 텍스트 테이블로 렌더링합니다."""
+    from utils.report import render_table_eaw
+    from utils.settings_loader import get_account_settings
 
     try:
         country_code = str(get_account_settings(account_id).get("country_code") or "kor").strip().lower()
     except Exception:
         country_code = "kor"
 
-    latest_trading_day = df.attrs.get("latest_trading_day")
-
-    if latest_trading_day is not None:
-        try:
-            date_str = pd.Timestamp(latest_trading_day).strftime("%Y-%m-%d")
-        except Exception:
-            date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
-    else:
-        date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
-
-    filename = f"rank_{date_str}.log"
-
     try:
-        from utils.report import render_table_eaw
-
         display_df = _format_rank_df_for_display(df, country_code)
 
         _right_align_cols = {
@@ -184,20 +159,44 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
 
         # 계좌명 조회
         try:
-            acc_settings = get_account_settings(account_id)
             from utils.account_registry import get_account_order
 
             order = int(get_account_order(account_id))
-            base_name = acc_settings.get("name") or account_id.upper()
+            base_name = get_account_settings(account_id).get("name") or account_id.upper()
             acc_name = f"{order}. {base_name}"
         except Exception:
             acc_name = account_id
 
         title = f"[{acc_name}] 순위 - {ma_type} {ma_months}개월"
-        content = title + "\n" + "\n".join(table_lines) + "\n"
-        (results_dir / filename).write_text(content, encoding="utf-8")
+        return title + "\n" + "\n".join(table_lines) + "\n"
     except Exception:
-        pass
+        return None
+
+
+def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, ma_months: int) -> None:
+    """순위 결과를 zaccounts/{account_id}/results/ 에 저장합니다."""
+    from utils.settings_loader import get_account_dir
+
+    try:
+        account_dir = get_account_dir(account_id)
+    except Exception:
+        return
+
+    results_dir = account_dir / "results"
+    results_dir.mkdir(exist_ok=True)
+
+    latest_trading_day = df.attrs.get("latest_trading_day")
+    if latest_trading_day is not None:
+        try:
+            date_str = pd.Timestamp(latest_trading_day).strftime("%Y-%m-%d")
+        except Exception:
+            date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
+    else:
+        date_str = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).strftime("%Y-%m-%d")
+
+    content = _render_rank_table_text(account_id, df, ma_type, ma_months)
+    if content:
+        (results_dir / f"rank_{date_str}.log").write_text(content, encoding="utf-8")
 
 
 def _update_static_rank_txt() -> None:
@@ -239,6 +238,25 @@ def _update_static_rank_txt() -> None:
     static_dir.mkdir(exist_ok=True)
     combined = ("\n\n" + "=" * 50 + "\n\n").join(sections)
     (static_dir / "rank.txt").write_text(combined + "\n", encoding="utf-8")
+
+
+def cleanup_old_rank_logs(max_keep: int = 10) -> None:
+    """각 계좌의 rank_*.log 파일을 최신 max_keep개만 남기고 삭제합니다."""
+    from utils.account_registry import _load_account_configs_impl
+    from utils.settings_loader import get_account_dir
+
+    for account in _load_account_configs_impl():
+        try:
+            results_dir = get_account_dir(str(account["account_id"])) / "results"
+        except Exception:
+            continue
+
+        if not results_dir.is_dir():
+            continue
+
+        log_files = sorted(results_dir.glob("rank_*.log"), reverse=True)
+        for old_file in log_files[max_keep:]:
+            old_file.unlink(missing_ok=True)
 
 
 def _normalize_code(value: Any, fallback: str) -> str:
