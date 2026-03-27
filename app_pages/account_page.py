@@ -237,7 +237,8 @@ def _update_static_rank_txt() -> None:
     if not sections:
         return
 
-    static_dir = Path("static")
+    app_root = Path(__file__).resolve().parent.parent
+    static_dir = app_root / "static"
     static_dir.mkdir(exist_ok=True)
     combined = ("\n\n" + "=" * 50 + "\n\n").join(sections)
     (static_dir / "rank.txt").write_text(combined + "\n", encoding="utf-8")
