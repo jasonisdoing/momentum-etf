@@ -29,5 +29,3 @@ data/*
 
 # 자동 생성 정적 파일
 static/rank.txt
-
-#
