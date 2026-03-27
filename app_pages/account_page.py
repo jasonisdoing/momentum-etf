@@ -200,9 +200,7 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
         # pandas to_json이 NaN → null 변환을 자동 처리
         records = json.loads(json_df.to_json(orient="records", force_ascii=False))
         json_data = {"ma_type": ma_type, "ma_months": ma_months, "date": date_str, "items": records}
-        (results_dir / f"rank_{date_str}.json").write_text(
-            json.dumps(json_data, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        (results_dir / f"rank_{date_str}.json").write_text(json.dumps(json_data, ensure_ascii=False), encoding="utf-8")
     except Exception:
         pass
 
@@ -263,10 +261,7 @@ def _update_static_rank_txt() -> None:
 
     if json_accounts:
         (static_dir / "rank.json").write_text(
-            json.dumps(
-                {"description": "계좌별 종목 순위 정보", "accounts": json_accounts}, ensure_ascii=False, indent=2
-            )
-            + "\n",
+            json.dumps({"description": "계좌별 종목 순위 정보", "accounts": json_accounts}, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
 
