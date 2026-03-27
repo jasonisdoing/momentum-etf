@@ -10,6 +10,10 @@ __pycache__/
 venv/
 *.pyc
 
+# Node.js
+web/node_modules/
+web/.next/
+
 # OS
 .DS_Store
 

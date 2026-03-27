@@ -935,7 +935,6 @@ def main() -> None:
     )
 
     # --- 1. 페이지 정의 (인증보다 먼저 수행하여 라우팅 정보 등록) ---
-    from app_pages.etf_market_page import build_etf_market_page
     from app_pages.transactions_page import build_transaction_page
     from app_pages.weekly_data_page import build_weekly_data_page
 
@@ -944,44 +943,22 @@ def main() -> None:
     # (기존 퍼블릭 페이지 제거됨: 정적 마크다운 파일로 대체)
     # 🤖 노트북LM 및 외부 API용 데이터 인터셉터 제거됨
 
-    # 요약 그룹
-    pages["요약"] = [
-        page_cls(
-            _build_home_page(accounts, initial_subtab="📊 대시보드"),
-            title="대시보드",
-            icon="🏠",
-            url_path="summary_dashboard",
-            default=True,
-        ),
-        page_cls(
-            _build_home_page(accounts, initial_subtab="📋 상세"),
-            title="상세",
-            icon="📋",
-            url_path="summary_details",
-        ),
-        build_weekly_data_page(page_cls, title="주별", url_path="summary_weekly"),
+    # 데이터 그룹
+    pages["데이터"] = [
+        build_weekly_data_page(page_cls, title="주별", url_path="weekly"),
+        build_transaction_page(page_cls, "📥 벌크 입력"),
     ]
 
-    # 계좌 관리 그룹
-    transaction_tabs = [
-        "📊 잔고 CRUD",
-        "📥 벌크 입력",
-        "💵 원금/현금",
-        "📸 스냅샷",
-    ]
-    pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
-
-    # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"]
-    pages["계좌"] = [
-        _build_unified_account_page(page_cls, accounts, view_mode, default=False)
+    # 계좌분석 그룹 (계좌 선택형 단일 URL)
+    view_modes = ["순위", "종목 관리", "삭제된 종목"]
+    pages["계좌분석"] = [
+        _build_unified_account_page(page_cls, accounts, view_mode, default=(view_mode == "순위"))
         for idx, view_mode in enumerate(view_modes)
     ]
-    pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
 
-    # 시스템 정보 그룹
+    # 시스템 그룹
     system_pages = _build_system_info_pages(page_cls)
-    pages["시스템 정보"] = system_pages
+    pages["시스템"] = system_pages
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")

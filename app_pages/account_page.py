@@ -211,6 +211,14 @@ def cleanup_old_rank_logs(max_keep: int = 10) -> None:
             old_file.unlink(missing_ok=True)
 
 
+def _normalize_account_view_mode(view_mode: str | None) -> str:
+    """계좌 화면 뷰 모드를 표준 라벨로 맞춥니다."""
+    clean_view = str(view_mode or "").split(".")[-1].strip()
+    if clean_view in {"순위", "종목 관리", "삭제된 종목"}:
+        return clean_view
+    return "순위"
+
+
 def _normalize_code(value: Any, fallback: str) -> str:
     text = str(value or "").strip().lower()
     return text or fallback
@@ -978,22 +986,25 @@ def render_account_page(
 
         country_code = _normalize_code(account_settings.get("country_code"), account_id)
 
+        normalized_view_mode = _normalize_account_view_mode(view_mode)
+
         if view_mode is None:
             view_mode = st.segmented_control(
                 "뷰",
-                ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"],
-                default="1. 순위",
+                ["순위", "종목 관리", "삭제된 종목"],
+                default="순위",
                 key=f"view_{account_id}",
                 label_visibility="collapsed",
             )
+            normalized_view_mode = _normalize_account_view_mode(view_mode)
 
-        if view_mode == "2. 종목 관리":
+        if normalized_view_mode == "종목 관리":
             loading.update(f"{account_id.upper()} 종목 관리 테이블 준비")
             _render_stocks_meta_table(account_id)
-        elif view_mode == "3. 삭제된 종목":
+        elif normalized_view_mode == "삭제된 종목":
             loading.update(f"{account_id.upper()} 삭제 종목 테이블 준비")
             _render_deleted_stocks_tab(account_id)
-        else:  # "1. 순위" (Default)
+        else:
             rank_params = rank_params or {}
             _render_rank_tab(
                 account_id,
