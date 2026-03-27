@@ -560,8 +560,9 @@ def render_system_page() -> None:
             "✅ 전체 자산 요약 알림 전송을 시작했습니다.",
         )
 
-    # (노트북LM 연동 주소 안내 제거됨 - 신규 전용 페이지로 대체 예정)
-    st.caption("ℹ️ 위 주소는 데이터 확인용(브라우저)으로 편리하며, 향후 다양한 데이터 확장이 가능한 동적 경로입니다.")
+    st.divider()
+    st.subheader("🔗 종목순위 API")
+    st.code("http://localhost/app/static/rank.json", language=None)
 
 
 def render_note_page() -> None:
@@ -736,21 +737,3 @@ def render_summary_for_ai_page() -> None:
         height=250,  # 약 10줄
         key="system_manual_rank_extract_tsv",
     )
-
-
-def _build_signal_text() -> str:
-    """static/rank.txt 파일을 읽어 반환합니다. 계산 없이 파일만 읽습니다."""
-    from pathlib import Path
-
-    app_root = Path(__file__).resolve().parent.parent
-    rank_file = app_root / "static" / "rank.txt"
-    if rank_file.is_file():
-        return rank_file.read_text(encoding="utf-8").strip()
-
-    return "랭킹 데이터가 없습니다."
-
-
-def render_signal_for_ai_page() -> None:
-    """퍼블릭 페이지: 계좌별 종목 점수(랭킹)만 표시합니다. 인증 불요."""
-    st.title("계좌별 종목 점수(랭킹)")
-    st.code(_build_signal_text(), language=None)
