@@ -235,7 +235,6 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         "3달(%)",
         "6달(%)",
         "12달(%)",
-        "고점대비",
     ]
     for col in pct_columns:
         if col in df.columns:
@@ -245,8 +244,9 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     if "괴리율" in df.columns:
         styled = styled.map(_deviation_style, subset=["괴리율"])
 
-    if "추세" in df.columns:
-        styled = styled.map(lambda _: "font-weight: bold;", subset=["추세"])
+    for bold_col in ("추세", "고점대비"):
+        if bold_col in df.columns:
+            styled = styled.map(lambda _: "font-weight: bold;", subset=[bold_col])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):
