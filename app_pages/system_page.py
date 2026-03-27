@@ -562,7 +562,14 @@ def render_system_page() -> None:
 
     st.divider()
     st.subheader("🔗 종목순위 API")
-    st.code("http://localhost/app/static/rank.json", language=None)
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(str(st.context.url))
+        base_url = f"{parsed.scheme}://{parsed.netloc}"
+    except Exception:
+        base_url = "http://localhost"
+    st.code(f"{base_url}/app/static/rank.json", language=None)
 
 
 def render_note_page() -> None:
