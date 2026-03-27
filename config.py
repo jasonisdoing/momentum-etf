@@ -78,3 +78,7 @@ TRADING_DAYS_PER_MONTH = 20
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
+
+# 고점 컬럼 색상 기준 (%)
+# 이 값 이상이면 녹색(고점 근처), 미만이면 빨간색(낙폭 큼)
+HIGH_POINT_GREEN_THRESHOLD = -10

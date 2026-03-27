@@ -155,7 +155,7 @@ def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> 
         "3달(%)": None,
         "6달(%)": None,
         "12달(%)": None,
-        "고점대비": None,
+        "고점": None,
         "추세(3달)": [],
         "RSI": None,
     }
@@ -187,7 +187,7 @@ def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> 
         "3달(%)": _calc_period_return(series, 60),
         "6달(%)": _calc_period_return(series, 126),
         "12달(%)": _calc_period_return(series, 252),
-        "고점대비": drawdown,
+        "고점": drawdown,
         "추세(3달)": series.iloc[-60:].astype(float).tolist(),
         "RSI": _calculate_rsi(series),
     }
@@ -276,7 +276,7 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
     normalized = df.copy()
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
-    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
     one_decimal_columns = ["추세", "RSI"]
 
     def _round_if_present(column: str, digits: int) -> None:

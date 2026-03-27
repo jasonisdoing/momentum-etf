@@ -876,7 +876,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "3달(%)",
                 "6달(%)",
                 "12달(%)",
-                "고점대비",
+                "고점",
                 "추세(3달)",
             ]
             # Warnings moved to the top of the tabs
