@@ -226,7 +226,7 @@ def load_real_holdings_table(
                 "3달(%)": None,
                 "6달(%)": None,
                 "12달(%)": None,
-                "고점대비": None,
+                "고점": None,
                 "추세(3달)": [],
             }
 
@@ -240,7 +240,7 @@ def load_real_holdings_table(
                 "3달(%)": None,
                 "6달(%)": None,
                 "12달(%)": None,
-                "고점대비": None,
+                "고점": None,
                 "추세(3달)": [],
             }
 
@@ -254,7 +254,7 @@ def load_real_holdings_table(
                 "3달(%)": None,
                 "6달(%)": None,
                 "12달(%)": None,
-                "고점대비": None,
+                "고점": None,
                 "추세(3달)": [],
             }
 
@@ -278,7 +278,7 @@ def load_real_holdings_table(
             "3달(%)": _calc_period_return(close_series, 60),
             "6달(%)": _calc_period_return(close_series, 126),
             "12달(%)": _calc_period_return(close_series, 252),
-            "고점대비": drawdown,
+            "고점": drawdown,
             "추세(3달)": close_series.iloc[-60:].astype(float).tolist(),
         }
 
@@ -352,7 +352,7 @@ def load_real_holdings_table(
 
     # 소수점 반올림 및 타입 변환 처리
     price_digits = 2 if account_country in ("us", "au") else 0
-    percent_cols = ["수익률(%)", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점대비"]
+    percent_cols = ["수익률(%)", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
     price_cols = ["평균 매입가", "현재가", "Nav", "괴리율"]
     int_cols = ["매입금액(KRW)", "평가금액(KRW)", "평가손익(KRW)"]
 

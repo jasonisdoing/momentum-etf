@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from config import BUCKET_CONFIG, BUCKET_MAPPING
+from config import BUCKET_CONFIG, BUCKET_MAPPING, HIGH_POINT_GREEN_THRESHOLD
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -244,9 +244,36 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     if "괴리율" in df.columns:
         styled = styled.map(_deviation_style, subset=["괴리율"])
 
-    for bold_col in ("추세", "고점대비"):
-        if bold_col in df.columns:
-            styled = styled.map(lambda _: "font-weight: bold;", subset=[bold_col])
+    def _style_trend(val: Any) -> str:
+        """추세: 양수 녹색, 음수 빨간색, 항상 볼드."""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "font-weight: bold;"
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return "font-weight: bold;"
+        if num > 0:
+            return "color: green; font-weight: bold;"
+        if num < 0:
+            return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
+
+    def _style_high_point(val: Any) -> str:
+        """고점: 임계값 이상 녹색(고점 근처), 미만 빨간색(낙폭 큼), 항상 볼드."""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "font-weight: bold;"
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return "font-weight: bold;"
+        if num >= HIGH_POINT_GREEN_THRESHOLD:
+            return "color: green; font-weight: bold;"
+        return "color: red; font-weight: bold;"
+
+    if "추세" in df.columns:
+        styled = styled.map(_style_trend, subset=["추세"])
+    if "고점" in df.columns:
+        styled = styled.map(_style_high_point, subset=["고점"])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):
@@ -392,7 +419,7 @@ def render_rank_table(
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
-        "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
+        "고점": st.column_config.NumberColumn("고점", width="small", format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
         "추세": st.column_config.NumberColumn("추세", width=70, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
