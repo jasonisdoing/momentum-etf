@@ -196,9 +196,6 @@ def _save_rank_results_locally(account_id: str, df: pd.DataFrame, ma_type: str, 
         title = f"[{acc_name}] 순위 - {ma_type} {ma_months}개월"
         content = title + "\n" + "\n".join(table_lines) + "\n"
         (results_dir / filename).write_text(content, encoding="utf-8")
-
-        # static/rank.txt 합본 업데이트
-        _update_static_rank_txt()
     except Exception:
         pass
 
@@ -719,6 +716,7 @@ def _render_rank_tab(
         return
 
     _save_rank_results_locally(account_id, df, effective_ma_type, effective_ma_months)
+    _update_static_rank_txt()
 
     realtime_active = bool(df.attrs.get("realtime_active"))
     render_rank_table(
