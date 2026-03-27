@@ -11,7 +11,7 @@ const navItems = [
   { href: "/cash", label: "자산관리" },
   { href: "/snapshots", label: "스냅샷" },
   { href: "/market", label: "ETF 마켓" },
-  { href: "/py/rank", label: "Python 순위" },
+  { href: "/py/", label: "Python 순위" },
 ];
 
 type AppShellProps = {
