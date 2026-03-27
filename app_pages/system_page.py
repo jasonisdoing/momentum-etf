@@ -742,7 +742,8 @@ def _build_signal_text() -> str:
     """static/rank.txt 파일을 읽어 반환합니다. 계산 없이 파일만 읽습니다."""
     from pathlib import Path
 
-    rank_file = Path("static/rank.txt")
+    app_root = Path(__file__).resolve().parent.parent
+    rank_file = app_root / "static" / "rank.txt"
     if rank_file.is_file():
         return rank_file.read_text(encoding="utf-8").strip()
 
