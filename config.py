@@ -81,4 +81,4 @@ MIN_TRADING_DAYS = 5
 
 # 고점 컬럼 색상 기준 (%)
 # 이 값 이상이면 녹색(고점 근처), 미만이면 빨간색(낙폭 큼)
-HIGH_POINT_GREEN_THRESHOLD = -10
+HIGH_POINT_GREEN_THRESHOLD = -5
