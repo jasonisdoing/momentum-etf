@@ -8,6 +8,7 @@
     - `/`
     - `/dashboard`
     - `/import`
+    - `/stocks`
     - `/cash`
     - `/snapshots`
     - `/market`
@@ -32,6 +33,7 @@
 - `http://localhost:8080/` -> Node.js
 - `http://localhost:8080/dashboard` -> Node.js
 - `http://localhost:8080/import` -> Node.js
+- `http://localhost:8080/stocks` -> Node.js
 - `http://localhost:8080/cash` -> Node.js
 - `http://localhost:8080/snapshots` -> Node.js
 - `http://localhost:8080/market` -> Node.js
@@ -45,6 +47,7 @@
   - `/`
   - `/dashboard`
   - `/import`
+  - `/stocks`
   - `/cash`
   - `/snapshots`
   - `/market`
@@ -63,9 +66,11 @@
 - `/api/dashboard`, `/api/fx` 추가
 - Node `벌크 입력(/import)` 실기능 구현
 - `/api/import/preview`, `/api/import/save` 추가
+- Node `종목 관리(/stocks)` 실기능 구현
+- `/api/stocks` 추가
 - 루트 `/` 를 앱 런처형 홈으로 교체
 - 상단 공통 환율 바 추가
-- Node 1차 메뉴 `/dashboard`, `/import`, `/cash`, `/snapshots`, `/market`를 모두 실제 데이터 기반으로 확인
+- Node 1차 메뉴 `/dashboard`, `/import`, `/stocks`, `/cash`, `/snapshots`, `/market`를 모두 실제 데이터 기반으로 확인
 - 하이브리드 컨테이너 재빌드 및 기동 확인
 - nginx가 컨테이너 재생성 이후 이전 Docker 내부 IP를 계속 바라보며 `502 Bad Gateway`를 내는 문제 확인
 - `resolver 127.0.0.11` + 변수 기반 `proxy_pass`로 nginx가 컨테이너 재생성 이후에도 새 IP를 다시 해석하도록 수정
@@ -75,6 +80,8 @@
 - 로컬 개발 원칙을 `npm run dev` 중심으로 정리
 - `web/` 개발 서버에서도 저장소 루트 `.env`와 `zaccounts`를 읽도록 경로 보정
 - `벌크 입력`은 Python과 동일하게 계좌별 완전 교체, 최초 매수일 유지 규칙을 따른다.
+- Node 인증을 `Google OAuth + 허용 이메일 화이트리스트` 방식으로 전환했다.
+- `web/` 개발 서버는 루트 `.env`에서 Google OAuth 인증 설정도 함께 읽는다.
 
 ## 이번 턴에서 막힌 지점
 
@@ -82,6 +89,6 @@
 
 ## 다음 검증 우선순위
 
-1. 다음 Python 메뉴 이관 대상 확정
-2. Node 1차 구현
+1. `삭제된 종목` Node 이관
+2. `주별` Node 이관
 3. 필요 시 하이브리드/운영 회귀 확인

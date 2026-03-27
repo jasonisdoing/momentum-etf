@@ -30,6 +30,10 @@
 - Node `벌크 입력(/import)` 1차 화면과 `/api/import/preview`, `/api/import/save`를 구현했다.
 - Node `벌크 입력(/import)`에서 실제 TSV 파싱, 미리보기, Mongo 저장이 성공했고 Python 화면과 반영 결과 일치까지 확인했다.
 - 루트 앱 런처와 상단 메뉴에서 `Python 순위` 연결을 제거하고 Node 이전 메뉴 중심으로 정리했다.
+- Node `종목 관리(/stocks)` 1차 화면과 `/api/stocks`를 구현했다.
+- Node `종목 관리(/stocks)`에서 활성 종목 조회, 버킷 변경, 소프트 삭제가 가능하도록 구현했다.
+- Node 인증을 `Google OAuth + 허용 이메일 화이트리스트` 방식으로 전환했다.
+- 로컬에서 Google 로그인 흐름과 허용 이메일 인증이 성공적으로 동작함을 확인했다.
 - 로컬 개발 원칙을 정리했다.
   - 기본 개발은 `npm run dev` + Python 개별 실행
   - Docker 하이브리드 테스트는 프록시/배포 구조 검증이 필요할 때만 수행
@@ -39,7 +43,6 @@
 - `스냅샷(/snapshots)` 2차 UX 정리
 - `대시보드(/dashboard)` 2차 정리
 - 남아 있는 Python 메뉴의 Node 이관
-  - `종목 관리`
   - `삭제된 종목`
   - `주별`
   - `시스템정보`
@@ -48,13 +51,13 @@
 
 ## 현재 상태 한 줄 요약
 
-`하이브리드 1차 배포와 핵심 메뉴 이전은 끝났고, 이제 다음 단계는 남은 Python 메뉴를 Node로 순차 이관하는 것이다.`
+`하이브리드 1차 배포, Google OAuth 인증 전환, 종목 관리 1차 이관은 끝났고, 이제 다음 단계는 삭제된 종목부터 순차 이관하는 것이다.`
 
 ## 지금 시점의 핵심 미해결 기술 이슈
 
 - Node로 아직 옮기지 않은 Python 화면의 저장/조회 규칙을 어떤 순서로 이관할지
 - 로컬 개발 시 Docker 없이도 빠르게 검증하되, 배포 구조 회귀는 어떤 시점에 다시 확인할지
-- Streamlit에 남겨둘 최소 기능 범위를 어디까지로 고정할지
+- Streamlit 제거 시점을 언제로 잡을지
 
 ## 이번 턴에서 실제 확인한 사실
 
@@ -80,6 +83,9 @@
 - 로컬 `web/` 개발 서버는 기본 포트 `3000`을 사용하며, `8080`은 Docker 하이브리드 프록시 전용 포트다.
 - 로컬 `npm run dev`에서도 저장소 루트 `.env`와 `zaccounts`를 읽도록 Node 경로를 보정했다.
 - Node `벌크 입력(/import)`는 Python과 동일하게 `계좌별 완전 교체`, `최초 매수일 유지` 규칙으로 동작한다.
+- Node `종목 관리(/stocks)`는 계좌 선택, 버킷 변경, 소프트 삭제까지 포함한 1차 기능으로 동작한다.
+- Node 로그인은 `.streamlit/secrets.toml` 비밀번호 대신 Google OAuth를 사용한다.
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_ALLOWED_EMAILS`, `AUTH_SESSION_SECRET`이 Node 인증 필수 설정값이다.
 
 ## 이번 턴의 환경 제약
 

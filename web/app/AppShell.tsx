@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 const navItems = [
   { href: "/", label: "앱 메뉴" },
   { href: "/dashboard", label: "대시보드" },
   { href: "/import", label: "벌크 입력" },
+  { href: "/stocks", label: "종목 관리" },
   { href: "/cash", label: "자산관리" },
   { href: "/snapshots", label: "스냅샷" },
   { href: "/market", label: "ETF 마켓" },
@@ -48,24 +49,40 @@ function getFxChangeClass(value: number | undefined): string | undefined {
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const [fx, setFx] = useState<FxSummary | null>(null);
+  const [isFxLoading, setIsFxLoading] = useState(true);
+  const isLoginPage = pathname === "/login";
 
   useEffect(() => {
+    if (isLoginPage) {
+      return;
+    }
+
     let alive = true;
 
     async function loadFx() {
       try {
+        if (alive) {
+          setIsFxLoading(true);
+        }
         const response = await fetch("/api/fx", { cache: "no-store" });
         if (!response.ok) {
+          if (alive) {
+            setFx(null);
+            setIsFxLoading(false);
+          }
           return;
         }
         const payload = (await response.json()) as FxSummary;
         if (alive) {
           setFx(payload);
+          setIsFxLoading(false);
         }
       } catch {
         if (alive) {
           setFx(null);
+          setIsFxLoading(false);
         }
       }
     }
@@ -74,7 +91,17 @@ export function AppShell({ children }: AppShellProps) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [isLoginPage]);
+
+  async function handleLogout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  }
+
+  if (isLoginPage) {
+    return <div className="appContent loginAppContent">{children}</div>;
+  }
 
   return (
     <div className="appFrame">
@@ -98,17 +125,38 @@ export function AppShell({ children }: AppShellProps) {
         </nav>
         <div className="topbarFx">
           <span className="topbarFxItem">
-            USD/KRW: <strong>{formatRate(fx?.USD?.rate)}</strong>
-            <span className={getFxChangeClass(fx?.USD?.change_pct)}>
-              {formatChangePct(fx?.USD?.change_pct)}
-            </span>
+            USD/KRW:{" "}
+            {isFxLoading ? (
+              <span className="topbarFxLoading" aria-label="환율 로딩 중">
+                <span className="topbarSpinner" />
+              </span>
+            ) : (
+              <>
+                <strong>{formatRate(fx?.USD?.rate)}</strong>
+                <span className={getFxChangeClass(fx?.USD?.change_pct)}>
+                  {formatChangePct(fx?.USD?.change_pct)}
+                </span>
+              </>
+            )}
           </span>
           <span className="topbarFxItem">
-            AUD/KRW: <strong>{formatRate(fx?.AUD?.rate)}</strong>
-            <span className={getFxChangeClass(fx?.AUD?.change_pct)}>
-              {formatChangePct(fx?.AUD?.change_pct)}
-            </span>
+            AUD/KRW:{" "}
+            {isFxLoading ? (
+              <span className="topbarFxLoading" aria-label="환율 로딩 중">
+                <span className="topbarSpinner" />
+              </span>
+            ) : (
+              <>
+                <strong>{formatRate(fx?.AUD?.rate)}</strong>
+                <span className={getFxChangeClass(fx?.AUD?.change_pct)}>
+                  {formatChangePct(fx?.AUD?.change_pct)}
+                </span>
+              </>
+            )}
           </span>
+          <button className="topbarLogout" type="button" onClick={handleLogout}>
+            로그아웃
+          </button>
         </div>
       </header>
       <div className="appContent">{children}</div>

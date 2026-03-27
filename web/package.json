@@ -2,9 +2,9 @@
   "name": "momentum-etf-web",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/run-next.mjs dev",
     "build": "next build",
-    "start": "next start"
+    "start": "node scripts/run-next.mjs start"
   },
   "dependencies": {
     "mongodb": "^6.20.0",
