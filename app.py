@@ -978,13 +978,6 @@ def main() -> None:
     with st.sidebar:
         st.write(f"환영합니다, {st.session_state.get('name', 'User')}님!")
         authenticator.logout(button_name="로그아웃", location="sidebar")
-        st.divider()
-        st.caption("Node 메뉴 바로가기")
-        st.markdown("- [앱 메뉴](/)")
-        st.markdown("- [대시보드](/dashboard)")
-        st.markdown("- [자산관리](/cash)")
-        st.markdown("- [스냅샷](/snapshots)")
-        st.markdown("- [ETF 마켓](/market)")
     # --- 인증 로직 끝 ---
 
     from utils.ui import inject_global_css
