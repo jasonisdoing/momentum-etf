@@ -11,3 +11,4 @@ toolbarMode = "minimal"
 
 [server]
 port = 80
+enableStaticServing = true
