@@ -1,0 +1,31 @@
+# Node + Python 전환 인수인계 폴더
+
+이 폴더는 Momentum ETF를 `기존 Python(Streamlit)` 단일 앱에서
+`Node.js + TypeScript 프론트엔드`와 `Python 백엔드/기존 화면`이 공존하는 구조로
+점진 전환하기 위한 인수인계 문서 세트다.
+
+목표는 다음과 같다.
+
+- 대화가 끊겨도 이어서 작업할 수 있게 한다.
+- 다른 사람이 와도 현재 의사결정과 다음 액션을 바로 이해할 수 있게 한다.
+- 문서만 읽고도 "무엇이 확정되었고, 무엇이 아직 미정인지" 구분할 수 있게 한다.
+
+## 읽는 순서
+
+1. [01_context_and_goal.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/01_context_and_goal.md)
+2. [02_confirmed_decisions.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/02_confirmed_decisions.md)
+3. [03_execution_strategy.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/03_execution_strategy.md)
+4. [04_progress_status.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/04_progress_status.md)
+5. [05_next_steps.md](/Users/jason/DEV/momentum-etf/docs/node_python_transition/05_next_steps.md)
+
+## 참고 원본 문서
+
+- [menu_ownership_v1.txt](/Users/jason/DEV/momentum-etf/docs/menu_ownership_v1.txt)
+- [menu_transition_v1.txt](/Users/jason/DEV/momentum-etf/docs/menu_transition_v1.txt)
+- [project_overview.md](/Users/jason/DEV/momentum-etf/docs/project_overview.md)
+- [developer_guide.md](/Users/jason/DEV/momentum-etf/docs/developer_guide.md)
+- [server_infrastructure.md](/Users/jason/DEV/momentum-etf/docs/server_infrastructure.md)
+
+## 현재 한 줄 상태
+
+아직 Node 앱 코드는 만들지 않았고, 먼저 `Node + Python 최소 공존 버전`을 실제로 띄워보는 기술 검증을 우선하기로 결정한 상태다.
