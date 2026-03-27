@@ -863,7 +863,7 @@ def _fetch_ohlcv_core(
     country_code = (country or "").strip().lower()
 
     # 인덱스(^) 또는 호주 주식의 경우 yfinance 사용
-    if ticker.startswith("^") or country_code == "au":
+    if ticker.startswith("^") or country_code in ("au", "us"):
         if existing_df is not None and not existing_df.empty:
             fallback = existing_df[(existing_df.index >= start_dt) & (existing_df.index <= end_dt)]
             if not fallback.empty:

@@ -206,7 +206,7 @@ def _ensure_historical_exchange_rates() -> None:
             {"week_date": doc["week_date"]},
             {
                 "$set": {
-                    "exchange_rate": float(rate),
+                    "exchange_rate": round(float(rate), 2),
                     "updated_at": now,
                 }
             },
@@ -254,7 +254,7 @@ def _get_effective_exchange_rate(doc: dict) -> float:
         live_exchange_rate = _get_live_exchange_rate()
         if live_exchange_rate > 0:
             exchange_rate = live_exchange_rate
-    return exchange_rate
+    return round(exchange_rate, 2)
 
 
 def _apply_derived_fields(source: dict) -> dict:
@@ -295,8 +295,8 @@ def _apply_running_total_principal(docs: list[dict]) -> list[dict]:
             doc["weekly_return_pct"] = 0.0
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["weekly_return_pct"] = (_to_int(doc.get("weekly_profit", 0)) / total_principal) * 100
-            doc["cumulative_return_pct"] = (_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100
+            doc["weekly_return_pct"] = round((_to_int(doc.get("weekly_profit", 0)) / total_principal) * 100, 4)
+            doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 4)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
 
     return [docs_by_date[doc["week_date"]] for doc in docs]
@@ -389,7 +389,7 @@ def _build_display_rows(docs: list[dict]) -> list[dict]:
         current_rate = float(row.get("환율", 0.0) or 0.0)
         older_rate = float(rows[idx + 1].get("환율", 0.0) or 0.0) if idx + 1 < len(rows) else 0.0
         if older_rate > 0:
-            row["환율(변동)"] = ((current_rate / older_rate) - 1.0) * 100
+            row["환율(변동)"] = round(((current_rate / older_rate) - 1.0) * 100, 4)
         else:
             row["환율(변동)"] = 0.0
     return rows
@@ -553,13 +553,13 @@ def _upsert_active_week_summary(
                 "total_assets": int(round(total_assets)),
                 "purchase_amount": int(round(total_purchase)),
                 "valuation_amount": int(round(total_valuation)),
-                "exchange_rate": float(live_exchange_rate),
-                "bucket_pct_momentum": float(bucket_pct_momentum),
-                "bucket_pct_innovation": float(bucket_pct_innovation),
-                "bucket_pct_market": float(bucket_pct_market),
-                "bucket_pct_dividend": float(bucket_pct_dividend),
-                "bucket_pct_alternative": float(bucket_pct_alternative),
-                "bucket_pct_cash": float(bucket_pct_cash),
+                "exchange_rate": round(float(live_exchange_rate), 2),
+                "bucket_pct_momentum": round(float(bucket_pct_momentum), 4),
+                "bucket_pct_innovation": round(float(bucket_pct_innovation), 4),
+                "bucket_pct_market": round(float(bucket_pct_market), 4),
+                "bucket_pct_dividend": round(float(bucket_pct_dividend), 4),
+                "bucket_pct_alternative": round(float(bucket_pct_alternative), 4),
+                "bucket_pct_cash": round(float(bucket_pct_cash), 4),
                 "profit_count": total_profit_count,
                 "loss_count": total_loss_count,
                 "updated_at": _get_now_kst(),

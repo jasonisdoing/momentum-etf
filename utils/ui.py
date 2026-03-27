@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from config import BUCKET_CONFIG, BUCKET_MAPPING
+from config import BUCKET_CONFIG, BUCKET_MAPPING, HIGH_POINT_GREEN_THRESHOLD
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -156,9 +156,9 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         is_holding = str(row.get("보유", "")).strip() == "보유"
         color = holding_color if is_holding else None
         if color is None:
-            score = row.get("점수")
+            score = row.get("추세")
             try:
-                if score is not None and not pd.isna(score) and float(score) <= 0:
+                if score is not None and not pd.isna(score) and float(score) < 0:
                     color = non_positive_score_color
             except (TypeError, ValueError):
                 pass
@@ -235,7 +235,6 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
         "3달(%)",
         "6달(%)",
         "12달(%)",
-        "고점대비",
     ]
     for col in pct_columns:
         if col in df.columns:
@@ -245,8 +244,36 @@ def _style_rows_by_state(df: pd.DataFrame, *, country_code: str) -> pd.io.format
     if "괴리율" in df.columns:
         styled = styled.map(_deviation_style, subset=["괴리율"])
 
-    if "점수" in df.columns:
-        styled = styled.map(lambda _: "font-weight: bold;", subset=["점수"])
+    def _style_trend(val: Any) -> str:
+        """추세: 양수 녹색, 음수 빨간색, 항상 볼드."""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "font-weight: bold;"
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return "font-weight: bold;"
+        if num > 0:
+            return "color: green; font-weight: bold;"
+        if num < 0:
+            return "color: red; font-weight: bold;"
+        return "font-weight: bold;"
+
+    def _style_high_point(val: Any) -> str:
+        """고점: 임계값 이상 녹색(고점 근처), 미만 빨간색(낙폭 큼), 항상 볼드."""
+        if val is None or (isinstance(val, float) and pd.isna(val)):
+            return "font-weight: bold;"
+        try:
+            num = float(val)
+        except (TypeError, ValueError):
+            return "font-weight: bold;"
+        if num >= HIGH_POINT_GREEN_THRESHOLD:
+            return "color: green; font-weight: bold;"
+        return "color: red; font-weight: bold;"
+
+    if "추세" in df.columns:
+        styled = styled.map(_style_trend, subset=["추세"])
+    if "고점" in df.columns:
+        styled = styled.map(_style_high_point, subset=["고점"])
 
     # 가격 컬럼 포맷팅
     def _safe_format(fmt: str):
@@ -330,6 +357,7 @@ def render_rank_table(
     visible_columns: list[str] | None = None,
     grouped_by_bucket: bool = True,
     height: int | None = 750,
+    column_config_overrides: dict[str, st.column_config.BaseColumn] | None = None,
 ) -> None:
     # 스타일링 준비 (전체 DF 기준)
     # 하지만 여기서는 버킷별로 쪼개서 보여줘야 하므로, 쪼갠 뒤 각각 스타일링 적용 필요
@@ -342,6 +370,7 @@ def render_rank_table(
     # 공통 컬럼 설정
     column_config_map: dict[str, st.column_config.BaseColumn] = {
         "#": st.column_config.TextColumn("#", width=60),
+        "보유여부": st.column_config.TextColumn("보유여부", width=40),
         "계좌": st.column_config.TextColumn("계좌", width=100),
         "환종": st.column_config.TextColumn("환종", width=60),
         "타입": st.column_config.TextColumn("타입", width=120),
@@ -390,9 +419,9 @@ def render_rank_table(
         "3달(%)": st.column_config.NumberColumn("3달(%)", width="small", format="%.2f%%"),
         "6달(%)": st.column_config.NumberColumn("6달(%)", width="small", format="%.2f%%"),
         "12달(%)": st.column_config.NumberColumn("12달(%)", width="small", format="%.2f%%"),
-        "고점대비": st.column_config.NumberColumn("고점대비", width="small", format="%.2f%%"),
+        "고점": st.column_config.NumberColumn("고점", width="small", format="%.2f%%"),
         "추세(3달)": st.column_config.LineChartColumn("추세(3달)", width="small"),
-        "점수": st.column_config.NumberColumn("점수", width=50, format="%.1f"),
+        "추세": st.column_config.NumberColumn("추세", width=70, format="%.1f"),
         "RSI": st.column_config.NumberColumn("RSI", width=50, format="%.1f"),
         "지속": st.column_config.NumberColumn("지속", width=50),
         "문구": st.column_config.TextColumn("문구", width="large"),
@@ -400,6 +429,9 @@ def render_rank_table(
     }
     if show_deviation and "괴리율" in df.columns:
         column_config_map["괴리율"] = st.column_config.NumberColumn("괴리율", width="small", format="%.2f%%")
+
+    if column_config_overrides:
+        column_config_map.update(column_config_overrides)
 
     if "평균 매입가" in df.columns and not pd.api.types.is_numeric_dtype(df["평균 매입가"]):
         column_config_map["평균 매입가"] = st.column_config.TextColumn("평균 매입가", width="small")

@@ -29,6 +29,7 @@ def _to_plain_dict(value):
 
 
 format_korean_currency = format_kr_money
+CURRENT_ACCOUNT_STATE_KEY = "current_account_id"
 
 
 def _format_signed_percent(value: float) -> str:
@@ -47,6 +48,23 @@ def _slugify_path(value: str) -> str:
     raw = str(value or "").strip().lower()
     slug = re.sub(r"[^a-z0-9_-]+", "-", raw)
     return slug.strip("-") or "page"
+
+
+def _clear_account_query_param() -> None:
+    try:
+        if "account" in st.query_params:
+            del st.query_params["account"]
+    except Exception:
+        pass
+
+
+def _get_current_account_id(option_ids: list[str]) -> str:
+    current_id = str(st.session_state.get(CURRENT_ACCOUNT_STATE_KEY) or "").strip()
+    if current_id not in option_ids:
+        current_id = option_ids[0]
+        st.session_state[CURRENT_ACCOUNT_STATE_KEY] = current_id
+    _clear_account_query_param()
+    return current_id
 
 
 def _load_authenticator() -> stauth.Authenticate:
@@ -133,19 +151,9 @@ def _build_unified_account_page(
 
             option_ids = [account_id for account_id, _ in account_options]
             option_label_map = {account_id: label for account_id, label in account_options}
-
-            query_account = st.query_params.get("account")
-            current_id = (
-                query_account if query_account in option_label_map else st.session_state.get("selected_account_id")
-            )
-            if current_id not in option_label_map:
-                current_id = option_ids[0]
-                st.session_state["selected_account_id"] = current_id
-                st.query_params["account"] = current_id
+            current_id = _get_current_account_id(option_ids)
 
             if clean_view == "순위":
-                default_ma_type, default_ma_months = get_account_rank_defaults(current_id)
-                max_months = get_rank_months_max()
                 c1, c2, c3 = st.columns(3)
                 with c1:
                     selected_id = st.selectbox(
@@ -155,21 +163,26 @@ def _build_unified_account_page(
                         format_func=lambda account_id: option_label_map.get(account_id, account_id),
                         key=f"account_selector_{view_slug}",
                     )
+
+                # 선택된 계좌(selected_id)를 기준으로 기본값 재계산
+                default_ma_type, default_ma_months = get_account_rank_defaults(selected_id)
+                max_months = get_rank_months_max()
                 selected_default_type = default_ma_type
                 selected_default_months = min(max(default_ma_months, 1), max_months)
+
                 with c2:
                     selected_ma_type = st.selectbox(
                         "MA_TYPE",
                         options=ALLOWED_MA_TYPES,
                         index=ALLOWED_MA_TYPES.index(selected_default_type),
-                        key=f"rank_selector_type_{current_id}",
+                        key=f"rank_selector_type_{selected_id}",
                     )
                 with c3:
                     selected_ma_months = st.selectbox(
                         "MA_MONTHS",
                         options=list(range(1, max_months + 1)),
                         index=selected_default_months - 1,
-                        key=f"rank_selector_months_{current_id}",
+                        key=f"rank_selector_months_{selected_id}",
                     )
             else:
                 selected_id = st.selectbox(
@@ -179,8 +192,7 @@ def _build_unified_account_page(
                     format_func=lambda account_id: option_label_map.get(account_id, account_id),
                     key=f"account_selector_{view_slug}",
                 )
-            st.session_state["selected_account_id"] = selected_id
-            st.query_params["account"] = selected_id
+            st.session_state[CURRENT_ACCOUNT_STATE_KEY] = selected_id
             if clean_view == "순위":
                 render_account_page(
                     selected_id,
@@ -202,15 +214,29 @@ def _build_unified_account_page(
     )
 
 
-def _build_system_page(page_cls: Callable[..., object]):
-    from app_pages.system_page import render_system_page
+def _build_system_info_pages(page_cls: Callable[..., object]):
+    from app_pages.system_page import render_note_page, render_summary_for_ai_page, render_system_page
 
-    return page_cls(
-        render_system_page,
-        title="시스템 정보",
-        icon="🛠️",
-        url_path="system",
-    )
+    return [
+        page_cls(
+            render_system_page,
+            title="시스템정보",
+            icon="🛠️",
+            url_path="system",
+        ),
+        page_cls(
+            render_note_page,
+            title="메모",
+            icon="📝",
+            url_path="note",
+        ),
+        page_cls(
+            render_summary_for_ai_page,
+            title="AI용 요약",
+            icon="🤖",
+            url_path="summary-for-ai",
+        ),
+    ]
 
 
 def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None = None):
@@ -850,7 +876,7 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
                 "3달(%)",
                 "6달(%)",
                 "12달(%)",
-                "고점대비",
+                "고점",
                 "추세(3달)",
             ]
             # Warnings moved to the top of the tabs
@@ -861,7 +887,17 @@ def _build_home_page(accounts: list[dict[str, Any]], initial_subtab: str | None 
     return _render_home_page
 
 
+def _startup_cleanup() -> None:
+    """앱 시작 시 1회 실행: 오래된 rank 로그 정리 및 static/rank.json 복원."""
+    if "startup_cleanup_done" not in st.session_state:
+        from app_pages.account_page import cleanup_old_rank_logs
+
+        cleanup_old_rank_logs(max_keep=10)
+        st.session_state["startup_cleanup_done"] = True
+
+
 def main() -> None:
+    _startup_cleanup()
     navigation = getattr(st, "navigation", None)
     page_cls = getattr(st, "Page", None)
     if navigation is None or page_cls is None:
@@ -905,6 +941,9 @@ def main() -> None:
 
     pages = {}
 
+    # (기존 퍼블릭 페이지 제거됨: 정적 마크다운 파일로 대체)
+    # 🤖 노트북LM 및 외부 API용 데이터 인터셉터 제거됨
+
     # 요약 그룹
     pages["요약"] = [
         page_cls(
@@ -933,13 +972,16 @@ def main() -> None:
     pages["계좌 관리"] = [build_transaction_page(page_cls, tab) for tab in transaction_tabs]
 
     # 통합 계좌 그룹 (계좌 선택형 단일 URL)
-    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목", "4. 메모"]
+    view_modes = ["1. 순위", "2. 종목 관리", "3. 삭제된 종목"]
     pages["계좌"] = [
         _build_unified_account_page(page_cls, accounts, view_mode, default=False)
         for idx, view_mode in enumerate(view_modes)
     ]
     pages["ETF 마켓"] = [build_etf_market_page(page_cls)]
-    pages["시스템 정보"] = [_build_system_page(page_cls)]
+
+    # 시스템 정보 그룹
+    system_pages = _build_system_info_pages(page_cls)
+    pages["시스템 정보"] = system_pages
 
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")
@@ -962,7 +1004,6 @@ def main() -> None:
         st.divider()
     # --- 인증 로직 끝 ---
 
-    # 전역 CSS 주입
     from utils.ui import inject_global_css
 
     inject_global_css()
