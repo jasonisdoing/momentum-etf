@@ -973,12 +973,26 @@ def main() -> None:
     system_pages = _build_system_info_pages(page_cls)
     pages["시스템 정보"] = system_pages
 
+    # 공개 그룹 (로그인한 사용자도 사이드바에서 접근 가능)
+    from app_pages.system_page import render_signal_for_ai_page
+
+    pages["PUBLIC"] = [
+        page_cls(render_signal_for_ai_page, title="종목 순위", icon="📡", url_path="rank-for-ai"),
+    ]
+
+    # --- 퍼블릭 페이지: 비로그인 시 사이드바 없이 바로 렌더링 ---
+    from utils.ui import inject_global_css
+
+    current_url = str(getattr(st.context, "url", "") or "")
+    if "/rank-for-ai" in current_url and not st.session_state.get("authentication_status"):
+        inject_global_css()
+        render_signal_for_ai_page()
+        st.stop()
+
     # 네비게이션 객체 생성 (사이드바 방식)
     pg = navigation(pages, position="sidebar")
 
     # --- 인증 로직 시작 ---
-    # --- 전역 백그라운드 작업 ---
-
     authenticator = _load_authenticator()
     _, auth_status, _ = authenticator.login(location="main")
 
@@ -995,9 +1009,6 @@ def main() -> None:
         authenticator.logout(button_name="로그아웃", location="sidebar")
         st.divider()
     # --- 인증 로직 끝 ---
-
-    # 전역 CSS 주입
-    from utils.ui import inject_global_css
 
     inject_global_css()
 
