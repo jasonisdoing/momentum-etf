@@ -36,8 +36,6 @@ dnspython==2.8.0
     # via pymongo
 exchange-calendars==4.11.1
     # via pandas-market-calendars
-extra-streamlit-components==0.1.71
-    # via streamlit-authenticator
 fonttools==4.59.2
     # via matplotlib
 frozendict==2.4.6

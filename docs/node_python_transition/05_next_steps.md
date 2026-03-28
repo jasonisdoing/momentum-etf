@@ -2,8 +2,8 @@
 
 ## 바로 다음 액션
 
-하이브리드 1차 배포, `Google OAuth 인증`, `시스템정보/메모/AI용 요약/주별 이관`, `종목 관리/삭제된 종목 통합`, `Tabler 표준화 2차`, `Python UI 종료 안내 전환`까지 끝났다.
-이제 다음 작업은 `전역 Tabler 표준화 지속 + 주별 완성도 보정 + Python 배포 정리`다.
+하이브리드 1차 배포, `Google OAuth 인증`, `시스템정보/메모/AI용 요약/주별 이관`, `종목 관리/삭제된 종목 통합`, `Tabler 표준화 2차`, `Python UI 제거`까지 끝났다.
+이제 다음 작업은 `전역 Tabler 표준화 지속 + 주별 완성도 보정 + 남은 Python 런타임 의존 정리`다.
 
 ## Step 1. 전역 Tabler 표준화 지속
 
@@ -44,11 +44,11 @@
 - Node dev 서버에서 `.env`, `zaccounts`, Mongo 연결이 정상인가
 - 화면 수정이 즉시 반영되는가
 
-## Step 4. Python 배포 정리
+## Step 4. 남은 Python 런타임 정리
 
 목표:
 
-- Python 메뉴가 모두 옮겨진 만큼, 남은 Python 배포 의존과 `/py` 경로 처리 방식을 정리한다.
+- Python UI는 제거됐으므로, 남은 Python 스크립트 호출 의존만 정리한다.
 
 검증 후보:
 
@@ -59,6 +59,7 @@
 - `/snapshots`
 - `/weekly`
 - `/market`
+- `/system`
 
 ## 작업자가 이어서 할 때 첫 문장
 
