@@ -280,34 +280,29 @@ export function CashManager() {
                       </div>
                     </td>
                     <td>
-                      <div className="tableReadonly">{formatNumber(account.total_principal)}</div>
+                      <span className="tablePlainValue">{formatNumber(account.total_principal)}</span>
                     </td>
                     <td>
                       {account.currency === "KRW" ? (
-                        <div className="tableReadonly">{formatNumber(account.cash_balance_krw)}</div>
+                        <span className="tablePlainValue">{formatNumber(account.cash_balance_krw)}</span>
                       ) : (
-                        <div className="tableCellStack">
-                          <div className="tableReadonly">{formatNumber(account.cash_balance_native)}</div>
-                          <span className="tableSubtext">
-                            {account.currency}/KRW {formatNumber(rates[account.currency] ?? 0)}
-                          </span>
-                        </div>
+                        <span className="tablePlainValue">{formatNumber(account.cash_balance_native)}</span>
                       )}
                     </td>
                     <td>
-                      <div className="tableReadonly">{formatNumber(account.cash_balance_krw)}</div>
+                      <span className="tablePlainValue">{formatNumber(account.cash_balance_krw)}</span>
                     </td>
                     <td>{account.cash_currency}</td>
                     <td>
                       {account.account_id === "aus_account" ? (
-                        <div className="tableReadonly">{formatNumber(account.intl_shares_value)}</div>
+                        <span className="tablePlainValue">{formatNumber(account.intl_shares_value)}</span>
                       ) : (
                         <span className="tableMuted">-</span>
                       )}
                     </td>
                     <td>
                       {account.account_id === "aus_account" ? (
-                        <div className="tableReadonly">{formatNumber(account.intl_shares_change)}</div>
+                        <span className="tablePlainValue">{formatNumber(account.intl_shares_change)}</span>
                       ) : (
                         <span className="tableMuted">-</span>
                       )}
@@ -372,9 +367,6 @@ export function CashManager() {
                       value={normalizeInputValue(editingAccount.cash_balance_native)}
                       onChange={(event) => updateEditingAccount("cash_balance_native", event.target.value)}
                     />
-                    <div className="tableFooterMeta text-start mt-1">
-                      {editingAccount.currency}/KRW {formatNumber(rates[editingAccount.currency] ?? 0)}
-                    </div>
                   </>
                 )}
               </div>

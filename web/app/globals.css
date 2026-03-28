@@ -1131,6 +1131,12 @@ a {
   background: rgba(246, 243, 237, 0.95);
 }
 
+.tablePlainValue {
+  display: inline-block;
+  min-width: 120px;
+  color: var(--ink);
+}
+
 .tableEmpty {
   padding: 20px 0;
   text-align: center;
