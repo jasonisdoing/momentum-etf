@@ -1,5 +1,4 @@
-import { loadAccountConfigs } from "./accounts";
-import { getMongoDb } from "./mongo";
+import { fetchFastApiJson } from "./internal-api";
 
 type StockMetaDoc = {
   account_id?: string;
@@ -89,132 +88,31 @@ function formatDeletedDate(value: Date | string | undefined): string {
 }
 
 export async function loadDeletedStocksTable(accountId?: string): Promise<DeletedStocksTableData> {
-  const configs = await loadAccountConfigs();
-  if (configs.length === 0) {
-    throw new Error("계좌 설정이 없습니다.");
-  }
-
-  const accounts: DeletedStocksAccountItem[] = configs.map((config) => ({
-    account_id: config.account_id,
-    order: config.order,
-    name: config.name,
-    icon: config.icon,
-  }));
-
-  const targetAccountId = String(accountId ?? accounts[0]?.account_id ?? "").trim().toLowerCase();
-  if (!targetAccountId) {
-    throw new Error("계좌를 찾을 수 없습니다.");
-  }
-
-  const db = await getMongoDb();
-  const docs = await db
-    .collection<StockMetaDoc>("stock_meta")
-    .find({
-      account_id: targetAccountId,
-      is_deleted: true,
-    })
-    .project({
-      ticker: 1,
-      name: 1,
-      bucket: 1,
-      listing_date: 1,
-      "1_week_avg_volume": 1,
-      "1_week_earn_rate": 1,
-      "2_week_earn_rate": 1,
-      "1_month_earn_rate": 1,
-      "3_month_earn_rate": 1,
-      "6_month_earn_rate": 1,
-      "12_month_earn_rate": 1,
-      deleted_at: 1,
-      deleted_reason: 1,
-    })
-    .toArray();
-
-  const rows = docs
-    .map((doc) => {
-      const bucketId = Number(doc.bucket ?? 1);
-      return {
-        ticker: normalizeText(doc.ticker, ""),
-        name: normalizeText(doc.name, ""),
-        bucket_id: bucketId,
-        bucket_name: BUCKETS[bucketId] ?? BUCKETS[1],
-        listing_date: normalizeText(doc.listing_date),
-        week_volume: normalizeNumber(doc["1_week_avg_volume"]),
-        return_1w: normalizeNumber(doc["1_week_earn_rate"]),
-        return_2w: normalizeNumber(doc["2_week_earn_rate"]),
-        return_1m: normalizeNumber(doc["1_month_earn_rate"]),
-        return_3m: normalizeNumber(doc["3_month_earn_rate"]),
-        return_6m: normalizeNumber(doc["6_month_earn_rate"]),
-        return_12m: normalizeNumber(doc["12_month_earn_rate"]),
-        deleted_date: formatDeletedDate(doc.deleted_at),
-        deleted_reason: normalizeText(doc.deleted_reason),
-      };
-    })
-    .sort((left, right) => {
-      const bucketDiff = left.bucket_id - right.bucket_id;
-      if (bucketDiff !== 0) {
-        return bucketDiff;
-      }
-      return right.deleted_date.localeCompare(left.deleted_date);
-    });
-
-  return {
-    accounts,
-    rows,
-    account_id: targetAccountId,
-  };
+  return fetchFastApiJson<DeletedStocksTableData>(
+    `/internal/stocks/deleted${accountId ? `?account_id=${encodeURIComponent(accountId)}` : ""}`,
+  );
 }
 
 export async function restoreDeletedStocks(accountId: string, tickers: string[]): Promise<number> {
-  const accountNorm = String(accountId ?? "").trim().toLowerCase();
-  const tickerList = tickers
-    .map((ticker) => String(ticker ?? "").trim().toUpperCase())
-    .filter(Boolean);
-
-  if (!accountNorm || tickerList.length === 0) {
-    throw new Error("복구할 종목을 선택하세요.");
-  }
-
-  const db = await getMongoDb();
-  const now = new Date();
-  const result = await db.collection<StockMetaDoc>("stock_meta").updateMany(
-    {
-      account_id: accountNorm,
-      ticker: { $in: tickerList },
-      is_deleted: true,
-    },
-    {
-      $set: {
-        is_deleted: false,
-        deleted_at: null,
-        deleted_reason: null,
-        added_date: now.toISOString().slice(0, 10),
-        updated_at: now,
-      },
-    },
-  );
-
-  return result.modifiedCount;
+  const payload = await fetchFastApiJson<{ restored_count: number }>("/internal/stocks/deleted", {
+    method: "PATCH",
+    body: JSON.stringify({
+      account_id: accountId,
+      tickers,
+    }),
+  });
+  return Number(payload.restored_count ?? 0);
 }
 
 export async function hardDeleteStocks(accountId: string, tickers: string[]): Promise<number> {
-  const accountNorm = String(accountId ?? "").trim().toLowerCase();
-  const tickerList = tickers
-    .map((ticker) => String(ticker ?? "").trim().toUpperCase())
-    .filter(Boolean);
-
-  if (!accountNorm || tickerList.length === 0) {
-    throw new Error("삭제할 종목을 선택하세요.");
-  }
-
-  const db = await getMongoDb();
-  const result = await db.collection<StockMetaDoc>("stock_meta").deleteMany({
-    account_id: accountNorm,
-    ticker: { $in: tickerList },
-    is_deleted: true,
+  const payload = await fetchFastApiJson<{ deleted_count: number }>("/internal/stocks/deleted", {
+    method: "DELETE",
+    body: JSON.stringify({
+      account_id: accountId,
+      tickers,
+    }),
   });
-
-  return result.deletedCount;
+  return Number(payload.deleted_count ?? 0);
 }
 
 export type { DeletedStocksAccountItem, DeletedStocksRowItem, DeletedStocksTableData };

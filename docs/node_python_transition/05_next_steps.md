@@ -54,11 +54,16 @@
 - `summary`
 - `dashboard`
 - `market`
+- `snapshots`
+- `stocks`
+- `cash`
+- `note`
+- `import`
 
 다음 목표:
 
 - `Next = 인증/프론트`, `FastAPI = 내부 도메인 API` 구조를 유지한다.
-- 남은 API 중 FastAPI로 옮길 가치가 큰 대상(`snapshots`, `stocks`, `cash`, `note`, `import`)의 우선순위를 정한다.
+- 남은 작업은 FastAPI 이관이 아니라 완성도 보정과 운영 회귀 확인이다.
 
 검증 후보:
 
@@ -68,6 +73,12 @@
 - `GET/POST /internal/summary`
 - `GET /internal/dashboard`
 - `GET /internal/market`
+- `GET /internal/snapshots`
+- `GET/PATCH/DELETE /internal/stocks`
+- `GET/POST /internal/cash`
+- `GET/PATCH /internal/note`
+- `POST /internal/import/preview`
+- `POST /internal/import/save`
 
 필수 환경변수:
 
@@ -77,4 +88,4 @@
 ## 작업자가 이어서 할 때 첫 문장
 
 다음 작업자는 이 폴더를 읽은 뒤,
-`전역 UI는 Tabler 기준으로 표준화하고, 화면별 임시 커스텀을 늘리지 말며, 이제는 Node로 옮긴 화면의 완성도 보정과 배포 정리, 남은 Python 런타임 의존 판단에 집중한다.`
+`전역 UI는 Tabler 기준으로 표준화하고, 화면별 임시 커스텀을 늘리지 말며, 이제는 Node/FastAPI 구조의 완성도 보정과 운영 배포 회귀 확인, 남은 Python 런타임 의존 판단에 집중한다.`

@@ -67,7 +67,7 @@
 - `주별(/weekly)`의 집계 정확도 2차 보정
 - `AI용 요약`의 Python 생성 로직을 Node로 완전 치환할지 판단
 - 시스템 배치/요약/캐시 업데이트의 Python 런타임 의존 축소 여부 판단
-- FastAPI 내부 API 골격 추가와 `system` API 이관 시작
+- FastAPI 내부 API 골격을 추가했다.
 
 ## 현재 상태 한 줄 요약
 
@@ -111,8 +111,7 @@
 - 컬럼 수가 많은 화면(`weekly`, `stocks`, `market`)은 최대폭, 그 외 화면은 고정폭 기준을 사용한다.
 - FastAPI를 도입하면 `Next가 인증과 프론트`, `FastAPI가 내부 도메인 API`를 맡는 구조로 간다.
 - FastAPI 내부 API 연동을 위해 `FASTAPI_INTERNAL_URL`, `FASTAPI_INTERNAL_TOKEN` 환경변수가 필요하다.
-- FastAPI 내부 API 연동을 위해 `FASTAPI_INTERNAL_URL`, `FASTAPI_INTERNAL_TOKEN` 환경변수가 필요하다.
-- `system`, `weekly`, `rank`, `summary`, `dashboard`, `market`은 FastAPI 내부 API로 이관을 완료했다.
+- `system`, `weekly`, `rank`, `summary`, `dashboard`, `market`, `snapshots`, `stocks`, `cash`, `note`, `import`는 FastAPI 내부 API로 이관을 완료했다.
 - 현재 구조는 `Next = 인증/프론트/BFF`, `FastAPI = Python 친화 내부 도메인 API` 기준으로 정리됐다.
 
 ## 이번 턴의 환경 제약
