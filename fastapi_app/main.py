@@ -1,4 +1,7 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from utils.env import load_env_if_present
 
@@ -16,7 +19,24 @@ from .routes.weekly import router as weekly_router
 
 load_env_if_present()
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(title="Momentum ETF Internal API")
+
+
+@app.exception_handler(ValueError)
+async def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
+    """클라이언트 입력 오류 → 400."""
+    return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+
+@app.exception_handler(RuntimeError)
+async def runtime_error_handler(_request: Request, exc: RuntimeError) -> JSONResponse:
+    """서버 내부 오류 → 500. 스택트레이스는 로그에만 남긴다."""
+    logger.exception("RuntimeError in request handler")
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
 app.include_router(cash_router)
 app.include_router(dashboard_router)
 app.include_router(import_router)
