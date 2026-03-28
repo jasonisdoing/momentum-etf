@@ -54,6 +54,21 @@ function loadAppEnv() {
   }
 }
 
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value || !String(value).trim()) {
+    throw new Error(`${name} 환경변수가 필요합니다.`);
+  }
+}
+
+function validateStartEnv() {
+  requireEnv("AUTH_SESSION_SECRET");
+  requireEnv("GOOGLE_CLIENT_ID");
+  requireEnv("GOOGLE_CLIENT_SECRET");
+  requireEnv("AUTH_ALLOWED_EMAILS");
+  requireEnv("APP_BASE_URL");
+}
+
 function main() {
   const nextCommand = process.argv[2];
   const nextArgs = process.argv.slice(3);
@@ -63,6 +78,10 @@ function main() {
   }
 
   loadAppEnv();
+
+  if (nextCommand === "start") {
+    validateStartEnv();
+  }
 
   const child = spawn("next", [nextCommand, ...nextArgs], {
     stdio: "inherit",

@@ -1,0 +1,15 @@
+from fastapi import FastAPI
+
+from utils.env import load_env_if_present
+
+from .routes.system import router as system_router
+
+load_env_if_present()
+
+app = FastAPI(title="Momentum ETF Internal API")
+app.include_router(system_router)
+
+
+@app.get("/internal/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
