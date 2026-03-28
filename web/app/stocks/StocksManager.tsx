@@ -563,7 +563,7 @@ export function StocksManager() {
                       <tr key={row.ticker}>
                         <td className="text-secondary">
                           <button
-                            className="btn btn-link btn-sm p-0 stocksEditLink"
+                            className="btn btn-link btn-sm p-0 appEditLink"
                             type="button"
                             onClick={() => openEditModal(row)}
                           >

@@ -390,7 +390,7 @@ export function WeeklyManager() {
                       <tr key={row.week_date} className={row.week_date === activeWeekDate ? "tableRowSelected" : undefined}>
                         <td className="text-secondary">
                           <button
-                            className="btn btn-link btn-sm p-0 stocksEditLink"
+                            className="btn btn-link btn-sm p-0 appEditLink"
                             type="button"
                             onClick={() => openEditModal(row)}
                           >

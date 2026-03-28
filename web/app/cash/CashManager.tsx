@@ -265,7 +265,7 @@ export function CashManager() {
                     <td>
                       <button
                         type="button"
-                        className="buttonLink"
+                        className="btn btn-link btn-sm p-0 appEditLink"
                         onClick={() => openEditModal(account)}
                       >
                         Edit
