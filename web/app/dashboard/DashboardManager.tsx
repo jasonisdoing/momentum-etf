@@ -115,14 +115,18 @@ let sparklineCounter = 0;
 function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?: string }) {
   const [id] = useState(() => `spark-${++sparklineCounter}`);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      if (w > 0) setWidth(Math.floor(w));
+      const rect = entries[0]?.contentRect;
+      const nextWidth = Math.floor(rect?.width ?? 0);
+      const nextHeight = Math.floor(rect?.height ?? 0);
+      if (nextWidth > 0 && nextHeight > 0) {
+        setSize({ width: nextWidth, height: nextHeight });
+      }
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -130,9 +134,14 @@ function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?
 
   if (data.length < 2) return null;
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 80, minWidth: 0 }}>
-      {width > 0 ? (
-        <AreaChart data={data} width={width} height={Math.max(80, width > 0 ? 86 : 80)} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 96, minWidth: 0 }}>
+      {size.width > 0 && size.height > 0 ? (
+        <AreaChart
+          data={data}
+          width={size.width}
+          height={size.height}
+          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+        >
           <defs>
             <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity={0.2} />
@@ -157,33 +166,37 @@ function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?
 
 function DashboardDonutChart({ buckets }: { buckets: DashboardBucketItem[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState(0);
+  const [size, setSize] = useState({ width: 0, height: 0 });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const observer = new ResizeObserver((entries) => {
-      const nextWidth = Math.floor(entries[0]?.contentRect.width ?? 0);
-      if (nextWidth > 0) {
-        setSize(Math.min(nextWidth, 420));
+      const rect = entries[0]?.contentRect;
+      const nextWidth = Math.floor(rect?.width ?? 0);
+      const nextHeight = Math.floor(rect?.height ?? 0);
+      if (nextWidth > 0 && nextHeight > 0) {
+        setSize({ width: nextWidth, height: nextHeight });
       }
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
+  const chartSize = size.width > 0 && size.height > 0 ? Math.min(size.width, size.height, 560) : 0;
+
   return (
-    <div ref={containerRef} style={{ width: "100%", maxWidth: 420, minWidth: 0, aspectRatio: "1 / 1" }}>
-      {size > 0 ? (
-        <PieChart width={size} height={size} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 360 }}>
+      {chartSize > 0 ? (
+        <PieChart width={chartSize} height={chartSize} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
           <Pie
             data={buckets}
             dataKey="weight_pct"
             nameKey="label"
             cx="50%"
             cy="50%"
-            innerRadius={size * 0.2}
-            outerRadius={size * 0.28}
+            innerRadius={chartSize * 0.28}
+            outerRadius={chartSize * 0.44}
             paddingAngle={2}
             strokeWidth={0}
           >
@@ -295,13 +308,13 @@ function DashboardMetricCard({
           </div>
         ) : (
           <div className="d-flex align-items-baseline gap-2">
-            <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "1.1rem" }}>
+            <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "1.32rem" }}>
               {mask(item.value, item.kind)}
             </div>
             {item.sub_value !== undefined && item.sub_kind ? (
               <span
                 className={getSignedClass(item.sub_value)}
-                style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}
+                style={{ fontSize: "0.94rem", fontWeight: 600, whiteSpace: "nowrap" }}
               >
                 {formatMetricValue(item.sub_value, item.sub_kind)}
               </span>
@@ -430,12 +443,12 @@ export function DashboardManager() {
             <h3 className="card-title">포트폴리오 구성 비중</h3>
           </div>
           <div className="card-body dashboardOverviewChartBody" style={{ paddingTop: "0.9rem", paddingBottom: "0.9rem" }}>
-            <div className="d-flex align-items-center justify-content-center flex-grow-1" style={{ overflow: "visible" }}>
+            <div className="dashboardOverviewChartCanvas">
               <DashboardDonutChart buckets={buckets} />
             </div>
               <div className="row mt-2 g-2">
                 {buckets.map((bucket, index) => (
-                  <div key={bucket.label} className="col-6 col-lg-4">
+                  <div key={bucket.label} className="col-6">
                   <div className="d-flex align-items-center gap-2" style={{ minWidth: 0 }}>
                     <span
                       style={{
@@ -449,7 +462,7 @@ export function DashboardManager() {
                     <span
                         className="text-secondary"
                         style={{
-                          fontSize: "0.84rem",
+                          fontSize: "0.9rem",
                           minWidth: 0,
                           overflow: "hidden",
                           textOverflow: "ellipsis",
