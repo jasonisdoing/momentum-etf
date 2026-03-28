@@ -759,6 +759,61 @@ a {
   gap: 16px;
 }
 
+.dashboardOverviewGrid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+.dashboardOverviewMetric,
+.dashboardOverviewChartCard {
+  min-width: 0;
+}
+
+.dashboardMetricCard {
+  height: 100%;
+  min-height: 10.75rem;
+}
+
+.dashboardMetricCardBody {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.35rem;
+}
+
+.dashboardMetricCardBodyTextOnly {
+  justify-content: center;
+}
+
+.dashboardMetricCardSparkline {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: flex-end;
+  min-height: 0;
+}
+
+.dashboardOverviewChartBody {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.5rem;
+}
+
+@media (min-width: 1200px) {
+  .dashboardOverviewGrid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.35fr);
+    grid-template-rows: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .dashboardOverviewChartCard {
+    grid-column: 3;
+    grid-row: 1 / span 3;
+    height: 100%;
+  }
+}
+
 .panel {
   padding: 18px;
   border-radius: 20px;

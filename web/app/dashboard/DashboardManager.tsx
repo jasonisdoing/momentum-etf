@@ -130,9 +130,9 @@ function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?
 
   if (data.length < 2) return null;
   return (
-    <div ref={containerRef} style={{ width: "100%", height: 40, marginTop: 8, minWidth: 0 }}>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 80, minWidth: 0 }}>
       {width > 0 ? (
-        <AreaChart data={data} width={width} height={40} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+        <AreaChart data={data} width={width} height={Math.max(80, width > 0 ? 86 : 80)} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={color} stopOpacity={0.2} />
@@ -181,7 +181,8 @@ type DashboardRenderableMetricItem = {
 };
 
 const DASHBOARD_ROW1_LABELS = ["총 자산", "투자 원금", "금일 손익", "금주 손익"] as const;
-const DASHBOARD_ROW2_LABELS = ["누적 손익", "현금 잔고", "현금 비중", "수익/손실 종목 수"] as const;
+const DASHBOARD_ROW2_LABELS = ["누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
+const DASHBOARD_LEFT_LABELS = ["총 자산", "투자 원금", "누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
 
 function orderMetricItems(
   items: DashboardRenderableMetricItem[],
@@ -191,6 +192,84 @@ function orderMetricItems(
   return labels
     .map((label) => itemMap.get(label))
     .filter((item): item is DashboardRenderableMetricItem => item !== undefined);
+}
+
+function DashboardMetricCard({
+  item,
+  hideMoney,
+  periodMonths,
+  sparklines,
+}: {
+  item: DashboardRenderableMetricItem;
+  hideMoney: boolean;
+  periodMonths: number;
+  sparklines: Record<string, SparklinePoint[]>;
+}) {
+  const highlighted = shouldHighlight(item.label);
+  const signClass = highlighted ? getSignedClass(item.value) : "";
+  const sparkData = sparklines[item.label];
+  const sparkColor = highlighted ? (item.value >= 0 ? "#2fb344" : "#d63939") : "#206bc4";
+  const changePct = calcChangePct(sparkData, periodMonths);
+
+  function mask(value: number, kind: "money" | "percent" | "count" = "money"): string {
+    if (hideMoney && kind === "money") return "••••••";
+    return formatMetricValue(value, kind);
+  }
+
+  return (
+    <div className="card card-sm dashboardMetricCard">
+      <div
+        className={`card-body ${sparkData ? "dashboardMetricCardBody" : "dashboardMetricCardBody dashboardMetricCardBodyTextOnly"}`}
+        style={{ overflow: "hidden", paddingTop: "0.85rem", paddingBottom: "0.85rem" }}
+      >
+        <div className="d-flex align-items-center justify-content-between">
+          <div className="subheader">{item.label}</div>
+          {changePct !== null ? (
+            <span
+              className={changePct >= 0 ? "text-success" : "text-danger"}
+              style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
+            >
+              {changePct >= 0 ? "+" : ""}
+              {changePct.toFixed(1)}%
+              {changePct >= 0 ? " \u2197" : " \u2198"}
+            </span>
+          ) : null}
+        </div>
+        {item.sub_value !== undefined && item.sub_kind === "count" ? (
+          <div className="d-flex align-items-baseline gap-1" style={{ whiteSpace: "nowrap" }}>
+            <span className="h1 mb-0 text-success" style={{ fontSize: "1.1rem" }}>
+              {formatMetricValue(item.value, item.kind)}
+            </span>
+            <span className="text-secondary" style={{ fontSize: "1rem", fontWeight: 600 }}>
+              /
+            </span>
+            <span className="h1 mb-0 text-danger" style={{ fontSize: "1.1rem" }}>
+              {formatMetricValue(item.sub_value, item.sub_kind)}
+            </span>
+          </div>
+        ) : (
+          <div className="d-flex align-items-baseline gap-2">
+            <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "1.1rem" }}>
+              {mask(item.value, item.kind)}
+            </div>
+            {item.sub_value !== undefined && item.sub_kind ? (
+              <span
+                className={getSignedClass(item.sub_value)}
+                style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                {formatMetricValue(item.sub_value, item.sub_kind)}
+              </span>
+            ) : null}
+          </div>
+        )}
+        {sparkData ? (
+          <div className="dashboardMetricCardSparkline">
+            <Sparkline data={sparkData} color={sparkColor} />
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export function DashboardManager() {
@@ -246,8 +325,8 @@ export function DashboardManager() {
     kind: item.kind as "money" | "percent" | "count",
     sub_kind: item.sub_kind as "money" | "percent" | "count" | undefined,
   }));
-  const metricRow1 = orderMetricItems(dashboardMetricItems, DASHBOARD_ROW1_LABELS);
-  const metricRow2 = orderMetricItems(dashboardMetricItems, DASHBOARD_ROW2_LABELS);
+  const leftMetricItems = orderMetricItems(dashboardMetricItems, DASHBOARD_LEFT_LABELS);
+  const holdingsStatusMetric = dashboardMetricItems.find((item) => item.label === "수익/손실 종목 수");
   const buckets = data?.buckets ?? [];
   const accounts = data?.accounts ?? [];
   const sparklines = data?.sparklines ?? {};
@@ -276,6 +355,19 @@ export function DashboardManager() {
               <option key={opt.months} value={opt.months}>지난 {opt.label}</option>
             ))}
           </select>
+          {holdingsStatusMetric && holdingsStatusMetric.sub_value !== undefined ? (
+            <div
+              className="text-secondary"
+              style={{ fontSize: "0.85rem", fontWeight: 600, whiteSpace: "nowrap" }}
+            >
+              수익/손실 종목 수{" "}
+              <span className="text-success">{formatMetricValue(holdingsStatusMetric.value, holdingsStatusMetric.kind)}</span>
+              <span className="text-secondary">/</span>
+              <span className="text-danger">
+                {formatMetricValue(holdingsStatusMetric.sub_value, holdingsStatusMetric.sub_kind ?? "count")}
+              </span>
+            </div>
+          ) : null}
           <button
             type="button"
             className={`btn btn-sm ${hideMoney ? "btn-primary" : "btn-outline-secondary"}`}
@@ -286,95 +378,26 @@ export function DashboardManager() {
         </div>
       </div>
 
-      {/* 핵심 지표 — 2줄 4칸 반응형 카드 */}
-      {[metricRow1, metricRow2].map((items, rowIndex) => (
-        <div key={`metric-row-${rowIndex}`} className="row row-cards">
-          {items.map((item) => {
-            const highlighted = shouldHighlight(item.label);
-            const signClass = highlighted ? getSignedClass(item.value) : "";
-            const sparkData = sparklines[item.label];
-            const sparkColor = highlighted ? (item.value >= 0 ? "#2fb344" : "#d63939") : "#206bc4";
-            const changePct = calcChangePct(sparkData, periodMonths);
-            const subValue = item.sub_value;
-            const subKind = item.sub_kind;
-            return (
-              <div key={`${rowIndex}-${item.label}`} className="col-12 col-sm-6 col-xl-3">
-                <div className="card card-sm">
-                  <div className="card-body" style={{ overflow: "hidden" }}>
-                    <div className="d-flex align-items-center justify-content-between">
-                      <div className="subheader">{item.label}</div>
-                      {changePct !== null ? (
-                        <span
-                          className={changePct >= 0 ? "text-success" : "text-danger"}
-                          style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
-                        >
-                          {changePct >= 0 ? "+" : ""}{changePct.toFixed(1)}%
-                          {changePct >= 0 ? " \u2197" : " \u2198"}
-                        </span>
-                      ) : null}
-                    </div>
-                    {subValue !== undefined && subKind === "count" ? (
-                      <div className="d-flex align-items-baseline gap-1" style={{ whiteSpace: "nowrap" }}>
-                        <span className="h1 mb-0 text-success" style={{ fontSize: "1.1rem" }}>
-                          {formatMetricValue(item.value, item.kind)}
-                        </span>
-                        <span className="text-secondary" style={{ fontSize: "1rem", fontWeight: 600 }}>/</span>
-                        <span className="h1 mb-0 text-danger" style={{ fontSize: "1.1rem" }}>
-                          {formatMetricValue(subValue, subKind)}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="d-flex align-items-baseline gap-2">
-                        <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "1.1rem" }}>
-                          {mask(item.value, item.kind)}
-                        </div>
-                        {subValue !== undefined && subKind ? (
-                          <span
-                            className={getSignedClass(subValue)}
-                            style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}
-                          >
-                            {formatMetricValue(subValue, subKind)}
-                          </span>
-                        ) : null}
-                      </div>
-                    )}
-                    {sparkData ? <Sparkline data={sparkData} color={sparkColor} /> : null}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ))}
-
-      {/* 포트폴리오 구성 비중 */}
-      <div className="row row-cards">
-        <div className="col-12">
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">포트폴리오 구성 비중</h3>
-            </div>
-            <div className="card-body d-flex align-items-center justify-content-center" style={{ overflow: "visible" }}>
-              <div style={{ width: "100%", maxWidth: 520, aspectRatio: "1" }}>
+      <div className="dashboardOverviewGrid">
+        <div className="card dashboardOverviewChartCard">
+          <div className="card-header">
+            <h3 className="card-title">포트폴리오 구성 비중</h3>
+          </div>
+          <div className="card-body dashboardOverviewChartBody" style={{ paddingTop: "0.9rem", paddingBottom: "0.9rem" }}>
+            <div className="d-flex align-items-center justify-content-center flex-grow-1" style={{ overflow: "visible" }}>
+              <div style={{ width: "100%", maxWidth: 420, aspectRatio: "1" }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <PieChart margin={{ top: 28, right: 28, bottom: 28, left: 28 }}>
+                  <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
                     <Pie
                       data={buckets}
                       dataKey="weight_pct"
                       nameKey="label"
                       cx="50%"
                       cy="50%"
-                      innerRadius="38%"
-                      outerRadius="60%"
+                      innerRadius="40%"
+                      outerRadius="56%"
                       paddingAngle={2}
                       strokeWidth={0}
-                      label={(props: PieLabelRenderProps & { label?: string; weight_pct?: number }) => {
-                        const lbl = String(props.label ?? "");
-                        const pct = Number(props.weight_pct ?? 0);
-                        return `${lbl.replace(/^\d+\.\s*/, "")} ${pct.toFixed(1)}%`;
-                      }}
-                      labelLine
-                      style={{ fontSize: "0.72rem" }}
                     >
                       {buckets.map((_, i) => (
                         <Cell key={i} fill={BUCKET_COLORS[i % BUCKET_COLORS.length]} />
@@ -388,8 +411,48 @@ export function DashboardManager() {
                 </ResponsiveContainer>
               </div>
             </div>
+              <div className="row mt-2 g-2">
+                {buckets.map((bucket, index) => (
+                  <div key={bucket.label} className="col-6 col-lg-4">
+                  <div className="d-flex align-items-center gap-2" style={{ minWidth: 0 }}>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: "50%",
+                        backgroundColor: BUCKET_COLORS[index % BUCKET_COLORS.length],
+                        flex: "0 0 auto",
+                      }}
+                    />
+                    <span
+                        className="text-secondary"
+                        style={{
+                          fontSize: "0.84rem",
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {bucket.label.replace(/^\d+\.\s*/, "")} {bucket.weight_pct.toFixed(1)}%
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
+
+        {leftMetricItems.map((item) => (
+          <div key={`left-${item.label}`} className="dashboardOverviewMetric">
+            <DashboardMetricCard
+              item={item}
+              hideMoney={hideMoney}
+              periodMonths={periodMonths}
+              sparklines={sparklines}
+            />
+          </div>
+        ))}
       </div>
 
       {/* 계좌별 요약 */}
