@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   IconCash,
+  IconFlask2,
   IconChevronDown,
   IconFileImport,
   IconMoodSmile,
@@ -39,13 +40,14 @@ const navGroups = [
   },
   {
     id: "momentum-etf",
-    title: "Momentum ETF",
+    title: "ETF",
     icon: IconListDetails,
     items: [
       { href: "/rank", label: "순위", icon: IconMedal2 },
       { href: "/stocks", label: "종목 관리", icon: IconListDetails },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
       { href: "/summary", label: "AI용 요약", icon: IconSparkles },
+      { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
   },
   {
