@@ -9,6 +9,9 @@ import {
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import { AppModal } from "../components/AppModal";
+import { useToast } from "../components/ToastProvider";
+
 type StocksAccountItem = {
   account_id: string;
   order: number;
@@ -106,11 +109,11 @@ export function StocksManager() {
   const [deletedRows, setDeletedRows] = useState<DeletedStocksRowItem[]>([]);
   const [selectedDeletedTickers, setSelectedDeletedTickers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [editingRow, setEditingRow] = useState<ActiveStocksRowItem | null>(null);
   const [editingBucketId, setEditingBucketId] = useState<number>(1);
+  const toast = useToast();
 
   async function load(mode: ViewMode, accountId?: string) {
     setLoading(true);
@@ -162,7 +165,6 @@ export function StocksManager() {
       return;
     }
     setViewMode(nextMode);
-    setNotice(null);
     void load(nextMode, selectedAccountId);
   }
 
@@ -170,7 +172,6 @@ export function StocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/stocks", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -197,7 +198,7 @@ export function StocksManager() {
         );
         const targetRow = activeRows.find((row) => row.ticker === ticker);
         const label = targetRow ? `${targetRow.name}(${targetRow.ticker})` : ticker;
-        setNotice(`${label} 변경 완료`);
+        toast.success(`[Momentum ETF-종목 관리] ${label} 변경 완료`);
       } catch (updateError) {
         setError(updateError instanceof Error ? updateError.message : "버킷 변경에 실패했습니다.");
       }
@@ -208,7 +209,6 @@ export function StocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/stocks", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -224,7 +224,7 @@ export function StocksManager() {
         setActiveRows((current) => current.filter((row) => row.ticker !== ticker));
         const targetRow = activeRows.find((row) => row.ticker === ticker);
         const label = targetRow ? `${targetRow.name}(${targetRow.ticker})` : ticker;
-        setNotice(`${label} 삭제 완료`);
+        toast.success(`[Momentum ETF-종목 관리] ${label} 삭제 완료`);
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
@@ -251,7 +251,6 @@ export function StocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/stocks", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -276,7 +275,7 @@ export function StocksManager() {
               : row,
           ),
         );
-        setNotice(`${editingRow.name}(${editingRow.ticker}) 변경 완료`);
+        toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 변경 완료`);
         setEditingRow(null);
       } catch (updateError) {
         setError(updateError instanceof Error ? updateError.message : "버킷 변경에 실패했습니다.");
@@ -292,7 +291,6 @@ export function StocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/stocks", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -306,7 +304,7 @@ export function StocksManager() {
           throw new Error(payload.error ?? "종목 삭제에 실패했습니다.");
         }
         setActiveRows((current) => current.filter((row) => row.ticker !== editingRow.ticker));
-        setNotice(`${editingRow.name}(${editingRow.ticker}) 삭제 완료`);
+        toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 삭제 완료`);
         setEditingRow(null);
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
@@ -336,7 +334,6 @@ export function StocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/deleted", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -354,7 +351,7 @@ export function StocksManager() {
           current.filter((row) => !selectedDeletedTickerSet.has(row.ticker.trim().toUpperCase())),
         );
         setSelectedDeletedTickers([]);
-        setNotice(`${restoredCount}개 종목 복구 완료`);
+        toast.success(`[Momentum ETF-종목 관리] ${restoredCount}개 종목 복구 완료`);
       } catch (restoreError) {
         setError(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
       }
@@ -365,7 +362,6 @@ export function StocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/deleted", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -383,7 +379,7 @@ export function StocksManager() {
           current.filter((row) => !selectedDeletedTickerSet.has(row.ticker.trim().toUpperCase())),
         );
         setSelectedDeletedTickers([]);
-        setNotice(`${deletedCount}개 종목 영구 삭제 완료`);
+        toast.success(`[Momentum ETF-종목 관리] ${deletedCount}개 종목 영구 삭제 완료`);
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
       }
@@ -392,10 +388,9 @@ export function StocksManager() {
 
   return (
     <div className="appPageStack appPageStackFill">
-      {error || notice ? (
+      {error ? (
         <div className="appBannerStack">
           {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
-          {notice ? <div className="alert alert-success mb-0">{notice}</div> : null}
         </div>
       ) : null}
 
@@ -654,62 +649,57 @@ export function StocksManager() {
           </div>
         </div>
       </section>
-      {editingRow ? (
-        <>
-          <div className="modal modal-blur fade show d-block" role="dialog" aria-modal="true">
-            <div className="modal-dialog modal-dialog-centered">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">종목 편집</h5>
-                  <button type="button" className="btn-close" aria-label="Close" onClick={closeEditModal} />
-                </div>
-                <div className="modal-body">
-                  <div className="mb-3">
-                    <label className="form-label">티커</label>
-                    <div className="form-control-plaintext appCodeText">{editingRow.ticker}</div>
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">종목명</label>
-                    <div className="form-control-plaintext">{editingRow.name}</div>
-                  </div>
-                  <div className="mb-3">
-                    <label className="form-label">버킷</label>
-                    <select
-                      className="form-select"
-                      value={editingBucketId}
-                      onChange={(event) => setEditingBucketId(Number(event.target.value))}
-                      disabled={isPending}
-                    >
-                      {BUCKET_OPTIONS.map((bucket) => (
-                        <option key={bucket.id} value={bucket.id}>
-                          {bucket.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="row g-2 text-secondary small">
-                    <div className="col-6">상장일: {editingRow.listing_date}</div>
-                    <div className="col-6">추가일자: {editingRow.added_date}</div>
-                  </div>
-                </div>
-                <div className="modal-footer">
-                  <button type="button" className="btn me-auto btn-outline-danger" onClick={handleDeleteFromModal} disabled={isPending}>
-                    <IconTrash size={16} stroke={1.9} />
-                    <span>삭제</span>
-                  </button>
-                  <button type="button" className="btn btn-link link-secondary" onClick={closeEditModal} disabled={isPending}>
-                    취소
-                  </button>
-                  <button type="button" className="btn btn-primary" onClick={handleSaveFromModal} disabled={isPending}>
-                    저장
-                  </button>
-                </div>
-              </div>
+      <AppModal
+        open={Boolean(editingRow)}
+        title="종목 편집"
+        onClose={closeEditModal}
+        footer={
+          <>
+            <button type="button" className="btn me-auto btn-outline-danger" onClick={handleDeleteFromModal} disabled={isPending}>
+              <IconTrash size={16} stroke={1.9} />
+              <span>삭제</span>
+            </button>
+            <button type="button" className="btn btn-link link-secondary" onClick={closeEditModal} disabled={isPending}>
+              취소
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleSaveFromModal} disabled={isPending}>
+              저장
+            </button>
+          </>
+        }
+      >
+        {editingRow ? (
+          <>
+            <div className="mb-3">
+              <label className="form-label">티커</label>
+              <div className="form-control-plaintext appCodeText">{editingRow.ticker}</div>
             </div>
-          </div>
-          <div className="modal-backdrop fade show" />
-        </>
-      ) : null}
+            <div className="mb-3">
+              <label className="form-label">종목명</label>
+              <div className="form-control-plaintext">{editingRow.name}</div>
+            </div>
+            <div className="mb-3">
+              <label className="form-label">버킷</label>
+              <select
+                className="form-select"
+                value={editingBucketId}
+                onChange={(event) => setEditingBucketId(Number(event.target.value))}
+                disabled={isPending}
+              >
+                {BUCKET_OPTIONS.map((bucket) => (
+                  <option key={bucket.id} value={bucket.id}>
+                    {bucket.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="row g-2 text-secondary small">
+              <div className="col-6">상장일: {editingRow.listing_date}</div>
+              <div className="col-6">추가일자: {editingRow.added_date}</div>
+            </div>
+          </>
+        ) : null}
+      </AppModal>
     </div>
   );
 }

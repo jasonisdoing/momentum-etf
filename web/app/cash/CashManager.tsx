@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useTransition } from "react";
 
+import { useToast } from "../components/ToastProvider";
+
 type CashAccountItem = {
   account_id: string;
   order: number;
@@ -72,10 +74,10 @@ export function CashManager() {
   const [accounts, setAccounts] = useState<CashAccountItem[]>([]);
   const [rates, setRates] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const latestUpdatedAt = getLatestUpdatedAt(accounts);
+  const toast = useToast();
 
   useEffect(() => {
     let alive = true;
@@ -145,7 +147,6 @@ export function CashManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
 
         const payloadAccounts = accounts.map((account) => {
           const rate = rates[account.currency] ?? 0;
@@ -177,7 +178,7 @@ export function CashManager() {
         if (!response.ok) {
           throw new Error(payload.error ?? "저장에 실패했습니다.");
         }
-        setNotice("저장 완료");
+        toast.success("[자산-자산 관리] 저장 완료");
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : "저장에 실패했습니다.");
       }
@@ -198,10 +199,9 @@ export function CashManager() {
 
   return (
     <div className="appPageStack">
-      {error || notice || (rates.AUD ?? 0) <= 0 ? (
+      {error || (rates.AUD ?? 0) <= 0 ? (
         <div className="appBannerStack">
           {error ? <div className="bannerError">{error}</div> : null}
-          {notice ? <div className="bannerSuccess">{notice}</div> : null}
           {(rates.AUD ?? 0) <= 0 ? (
             <div className="bannerWarn">AUD/KRW 환율을 불러오지 못했습니다. 호주 계좌 저장 전에 확인이 필요합니다.</div>
           ) : null}

@@ -68,6 +68,15 @@
 - `/api/import/preview`, `/api/import/save` 추가
 - Node `종목 관리(/stocks)` 실기능 구현
 - `/api/stocks` 추가
+- Node `시스템정보(/system)` 1차 조회 화면 구현
+- `/api/system` 추가
+- Node `메모(/note)` 1차 저장 화면 구현
+- `/api/note` 추가
+- Node `AI용 요약(/summary)` 1차 화면 구현
+- `/api/summary` 추가
+- `scripts/generate_ai_summary.py` 추가
+- Node `주별(/weekly)` 실기능 구현
+- `/api/weekly` 추가
 - 루트 `/` 를 앱 런처형 홈으로 교체
 - 상단 공통 환율 바 추가
 - Node 1차 메뉴 `/dashboard`, `/import`, `/stocks`, `/cash`, `/snapshots`, `/market`를 모두 실제 데이터 기반으로 확인
@@ -82,6 +91,10 @@
 - `벌크 입력`은 Python과 동일하게 계좌별 완전 교체, 최초 매수일 유지 규칙을 따른다.
 - Node 인증을 `Google OAuth + 허용 이메일 화이트리스트` 방식으로 전환했다.
 - `web/` 개발 서버는 루트 `.env`에서 Google OAuth 인증 설정도 함께 읽는다.
+- 주요 화면은 `PageFrame > appPageStack > appSection > appCard` 구조로 표준화하기 시작했다.
+- `/stocks` 티커 컬럼은 고정폭 식별자 폰트(`appCodeText`)를 사용한다.
+- `주별`의 `이번주 데이터 집계` 버튼은 Python 호출이 아니라 Node에서 직접 처리한다.
+- `주별` 집계는 최신 `daily_snapshots` 기준 금액과 환율을 즉시 반영하고, 계산 컬럼은 Node에서 다시 계산한다.
 
 ## 이번 턴에서 막힌 지점
 
@@ -89,6 +102,6 @@
 
 ## 다음 검증 우선순위
 
-1. `삭제된 종목` Node 이관
-2. `주별` Node 이관
+1. `주별` 집계 정확도 보정
+2. 전역 Tabler 표준화 지속
 3. 필요 시 하이브리드/운영 회귀 확인

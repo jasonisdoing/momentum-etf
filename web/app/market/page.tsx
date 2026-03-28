@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function MarketPage() {
   return (
-    <PageFrame title="ETF 마켓">
+    <PageFrame title="ETF 마켓" fullWidth>
       <MarketManager />
     </PageFrame>
   );

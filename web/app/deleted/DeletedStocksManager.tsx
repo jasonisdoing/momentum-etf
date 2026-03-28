@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import { useToast } from "../components/ToastProvider";
+
 type DeletedStocksAccountItem = {
   account_id: string;
   order: number;
@@ -66,9 +68,9 @@ export function DeletedStocksManager() {
   const [rows, setRows] = useState<DeletedStocksRowItem[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
+  const toast = useToast();
 
   async function load(accountId?: string) {
     setLoading(true);
@@ -131,7 +133,6 @@ export function DeletedStocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/deleted", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -147,7 +148,7 @@ export function DeletedStocksManager() {
         const restoredCount = Number(payload.restored_count ?? 0);
         setRows((current) => current.filter((row) => !selectedTickerSet.has(row.ticker.trim().toUpperCase())));
         setSelectedTickers([]);
-        setNotice(`${restoredCount}개 종목 복구 완료`);
+        toast.success(`[Momentum ETF-삭제된 종목] ${restoredCount}개 종목 복구 완료`);
       } catch (restoreError) {
         setError(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
       }
@@ -158,7 +159,6 @@ export function DeletedStocksManager() {
     startTransition(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/deleted", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -174,7 +174,7 @@ export function DeletedStocksManager() {
         const deletedCount = Number(payload.deleted_count ?? 0);
         setRows((current) => current.filter((row) => !selectedTickerSet.has(row.ticker.trim().toUpperCase())));
         setSelectedTickers([]);
-        setNotice(`${deletedCount}개 종목 영구 삭제 완료`);
+        toast.success(`[Momentum ETF-삭제된 종목] ${deletedCount}개 종목 영구 삭제 완료`);
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
       }
@@ -195,10 +195,9 @@ export function DeletedStocksManager() {
 
   return (
     <div className="appPageStack">
-      {error || notice ? (
+      {error ? (
         <div className="appBannerStack">
           {error ? <div className="bannerError">{error}</div> : null}
-          {notice ? <div className="bannerSuccess">{notice}</div> : null}
         </div>
       ) : null}
       <section className="appSection">

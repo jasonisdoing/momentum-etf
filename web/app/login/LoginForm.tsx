@@ -16,7 +16,7 @@ export function LoginForm() {
   return (
     <div className="loginCard">
       <div className="loginHeader">
-        <h1>Momentum ETF</h1>
+        <h1>Jason 투자</h1>
       </div>
 
       {error ? <div className="bannerError">{error}</div> : null}

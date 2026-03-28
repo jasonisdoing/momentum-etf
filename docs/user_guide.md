@@ -15,7 +15,8 @@
 
 **웹 실행**
 ```bash
-./.venv/bin/python run.py
+cd web
+npm run dev
 ```
 
 현재 운영 계좌:

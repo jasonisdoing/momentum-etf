@@ -4,11 +4,20 @@ type PageFrameProps = {
   title: string;
   children: ReactNode;
   fullHeight?: boolean;
+  fullWidth?: boolean;
 };
 
-export function PageFrame({ title, children, fullHeight = false }: PageFrameProps) {
+export function PageFrame({ title, children, fullHeight = false, fullWidth = false }: PageFrameProps) {
+  const frameClassName = [
+    "pageFrame",
+    fullHeight ? "pageFrameFullHeight" : "",
+    fullWidth ? "pageFrameFullWidth" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <main className={fullHeight ? "pageFrame pageFrameFullHeight" : "pageFrame"}>
+    <main className={frameClassName}>
       <div className="pageFrameTitle">
         <h1>{title}</h1>
       </div>

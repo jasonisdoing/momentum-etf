@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react";
 
+import { useToast } from "../components/ToastProvider";
+
 type ParsedImportRow = {
   account_name: string;
   account_id: string;
@@ -35,15 +37,14 @@ export function BulkImportManager() {
   const [accountCount, setAccountCount] = useState(0);
   const [rowCount, setRowCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [isParsing, startParsing] = useTransition();
   const [isSaving, startSaving] = useTransition();
+  const toast = useToast();
 
   function handleParse() {
     startParsing(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/import/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -56,7 +57,7 @@ export function BulkImportManager() {
         setRows(payload.rows ?? []);
         setAccountCount(payload.account_count ?? 0);
         setRowCount(payload.row_count ?? 0);
-        setNotice("파싱 완료");
+        toast.success("[자산-벌크 입력] 파싱 완료");
       } catch (parseError) {
         setRows([]);
         setAccountCount(0);
@@ -70,7 +71,6 @@ export function BulkImportManager() {
     startSaving(async () => {
       try {
         setError(null);
-        setNotice(null);
         const response = await fetch("/api/import/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -80,7 +80,7 @@ export function BulkImportManager() {
         if (!response.ok) {
           throw new Error(payload.error ?? "벌크 입력 반영에 실패했습니다.");
         }
-        setNotice(`총 ${formatCount(payload.updated_accounts)}개 계좌 업데이트 완료`);
+        toast.success(`[자산-벌크 입력] 총 ${formatCount(payload.updated_accounts)}개 계좌 업데이트 완료`);
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : "벌크 입력 반영에 실패했습니다.");
       }
@@ -89,10 +89,9 @@ export function BulkImportManager() {
 
   return (
     <div className="appPageStack">
-      {error || notice ? (
+      {error ? (
         <div className="appBannerStack">
           {error ? <div className="bannerError prelineText">{error}</div> : null}
-          {notice ? <div className="bannerSuccess">{notice}</div> : null}
         </div>
       ) : null}
       <section className="appSection">
