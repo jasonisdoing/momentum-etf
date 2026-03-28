@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Area, AreaChart, Cell, Pie, PieChart, type PieLabelRenderProps, ResponsiveContainer, Tooltip } from "recharts";
+import { Area, AreaChart, Cell, Pie, PieChart, Tooltip } from "recharts";
 
 import { AppLoadingState } from "../components/AppLoadingState";
 
@@ -150,6 +150,52 @@ function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?
           />
           <Tooltip content={<SparklineTooltip />} cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: "3 3" }} />
         </AreaChart>
+      ) : null}
+    </div>
+  );
+}
+
+function DashboardDonutChart({ buckets }: { buckets: DashboardBucketItem[] }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = Math.floor(entries[0]?.contentRect.width ?? 0);
+      if (nextWidth > 0) {
+        setSize(Math.min(nextWidth, 420));
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <div ref={containerRef} style={{ width: "100%", maxWidth: 420, minWidth: 0, aspectRatio: "1 / 1" }}>
+      {size > 0 ? (
+        <PieChart width={size} height={size} margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
+          <Pie
+            data={buckets}
+            dataKey="weight_pct"
+            nameKey="label"
+            cx="50%"
+            cy="50%"
+            innerRadius={size * 0.2}
+            outerRadius={size * 0.28}
+            paddingAngle={2}
+            strokeWidth={0}
+          >
+            {buckets.map((_, i) => (
+              <Cell key={i} fill={BUCKET_COLORS[i % BUCKET_COLORS.length]} />
+            ))}
+          </Pie>
+          <Tooltip
+            formatter={(value) => `${Number(value).toFixed(2)}%`}
+            contentStyle={{ fontSize: "0.82rem", borderRadius: 6 }}
+          />
+        </PieChart>
       ) : null}
     </div>
   );
@@ -385,31 +431,7 @@ export function DashboardManager() {
           </div>
           <div className="card-body dashboardOverviewChartBody" style={{ paddingTop: "0.9rem", paddingBottom: "0.9rem" }}>
             <div className="d-flex align-items-center justify-content-center flex-grow-1" style={{ overflow: "visible" }}>
-              <div style={{ width: "100%", maxWidth: 420, aspectRatio: "1" }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart margin={{ top: 8, right: 8, bottom: 8, left: 8 }}>
-                    <Pie
-                      data={buckets}
-                      dataKey="weight_pct"
-                      nameKey="label"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius="40%"
-                      outerRadius="56%"
-                      paddingAngle={2}
-                      strokeWidth={0}
-                    >
-                      {buckets.map((_, i) => (
-                        <Cell key={i} fill={BUCKET_COLORS[i % BUCKET_COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip
-                      formatter={(value) => `${Number(value).toFixed(2)}%`}
-                      contentStyle={{ fontSize: "0.82rem", borderRadius: 6 }}
-                    />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+              <DashboardDonutChart buckets={buckets} />
             </div>
               <div className="row mt-2 g-2">
                 {buckets.map((bucket, index) => (
