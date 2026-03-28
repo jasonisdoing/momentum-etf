@@ -10,6 +10,7 @@ import {
   IconFileImport,
   IconMoodSmile,
   IconHome,
+  IconMedal2,
   IconListDetails,
   IconMenu2,
   IconNotebook,
@@ -41,11 +42,17 @@ const navGroups = [
     title: "Momentum ETF",
     icon: IconListDetails,
     items: [
+      { href: "/rank", label: "순위", icon: IconMedal2 },
       { href: "/stocks", label: "종목 관리", icon: IconListDetails },
-      { href: "/market", label: "ETF 마켓", icon: IconTrendingUp },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
       { href: "/summary", label: "AI용 요약", icon: IconSparkles },
     ],
+  },
+  {
+    id: "info",
+    title: "정보",
+    icon: IconTrendingUp,
+    items: [{ href: "/market", label: "ETF 마켓", icon: IconTrendingUp }],
   },
   {
     id: "system",

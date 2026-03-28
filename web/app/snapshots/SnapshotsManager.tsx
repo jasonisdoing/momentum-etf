@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { type GridColDef } from "@mui/x-data-grid";
+
+import { AppDataGrid } from "../components/AppDataGrid";
 
 type SnapshotAccountItem = {
   account_id: string;
@@ -27,6 +30,9 @@ type SnapshotListResponse = {
   snapshots?: SnapshotListItem[];
   error?: string;
 };
+
+type SnapshotGridRow = SnapshotListItem & { id: string };
+type SnapshotDetailGridRow = SnapshotAccountItem & { id: string };
 
 function formatKrw(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -79,18 +85,110 @@ export function SnapshotsManager() {
     () => snapshots.find((snapshot) => snapshot.id === selectedId) ?? snapshots[0] ?? null,
     [selectedId, snapshots],
   );
-
-  if (loading) {
-    return (
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-            <p>스냅샷 목록을 불러오는 중...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
+  const listRows = useMemo<SnapshotGridRow[]>(
+    () => snapshots.map((snapshot) => ({ ...snapshot, id: snapshot.id })),
+    [snapshots],
+  );
+  const detailRows = useMemo<SnapshotDetailGridRow[]>(
+    () =>
+      (selectedSnapshot?.accounts ?? []).map((account) => ({
+        ...account,
+        id: `${selectedSnapshot?.id ?? "snapshot"}-${account.account_id}`,
+      })),
+    [selectedSnapshot],
+  );
+  const listColumns = useMemo<GridColDef<SnapshotGridRow>[]>(
+    () => [
+      { field: "snapshot_date", headerName: "날짜", minWidth: 120, width: 120 },
+      {
+        field: "total_assets",
+        headerName: "총 자산",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.total_assets),
+      },
+      {
+        field: "total_principal",
+        headerName: "원금",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.total_principal),
+      },
+      {
+        field: "cash_balance",
+        headerName: "현금",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.cash_balance),
+      },
+      {
+        field: "valuation_krw",
+        headerName: "평가액",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.valuation_krw),
+      },
+      {
+        field: "account_count",
+        headerName: "계좌수",
+        minWidth: 88,
+        width: 88,
+        align: "right",
+        headerAlign: "right",
+      },
+    ],
+    [],
+  );
+  const detailColumns = useMemo<GridColDef<SnapshotDetailGridRow>[]>(
+    () => [
+      { field: "account_name", headerName: "계좌", minWidth: 180, flex: 1 },
+      {
+        field: "total_assets",
+        headerName: "총 자산",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.total_assets),
+      },
+      {
+        field: "total_principal",
+        headerName: "원금",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.total_principal),
+      },
+      {
+        field: "cash_balance",
+        headerName: "현금",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.cash_balance),
+      },
+      {
+        field: "valuation_krw",
+        headerName: "평가액",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.row.valuation_krw),
+      },
+    ],
+    [],
+  );
 
   return (
     <div className="appPageStack">
@@ -102,47 +200,14 @@ export function SnapshotsManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBody">
-            <div className="tableWrap">
-              <table className="erpTable snapshotsTable">
-                <thead>
-                  <tr>
-                    <th>날짜</th>
-                    <th>총 자산</th>
-                    <th>원금</th>
-                    <th>현금</th>
-                    <th>평가액</th>
-                    <th>계좌수</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {snapshots.length === 0 ? (
-                    <tr>
-                      <td colSpan={6}>
-                        <div className="tableEmpty">저장된 스냅샷이 없습니다.</div>
-                      </td>
-                    </tr>
-                  ) : (
-                    snapshots.map((snapshot) => {
-                      const isSelected = snapshot.id === selectedSnapshot?.id;
-                      return (
-                        <tr
-                          key={snapshot.id}
-                          className={isSelected ? "tableRowSelected" : undefined}
-                          onClick={() => setSelectedId(snapshot.id)}
-                        >
-                          <td>{snapshot.snapshot_date}</td>
-                          <td>{formatKrw(snapshot.total_assets)}</td>
-                          <td>{formatKrw(snapshot.total_principal)}</td>
-                          <td>{formatKrw(snapshot.cash_balance)}</td>
-                          <td>{formatKrw(snapshot.valuation_krw)}</td>
-                          <td>{snapshot.account_count}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <AppDataGrid
+              rows={listRows}
+              columns={listColumns}
+              loading={loading}
+              minHeight="22rem"
+              getRowClassName={(params) => (params.row.id === selectedSnapshot?.id ? "tableRowSelected" : "")}
+              onRowClick={(params) => setSelectedId(String(params.id))}
+            />
           </div>
         </div>
       </section>
@@ -156,38 +221,7 @@ export function SnapshotsManager() {
             </div>
           </div>
           <div className="card-body appCardBodyTight">
-            <div className="tableWrap">
-              <table className="erpTable">
-                <thead>
-                  <tr>
-                    <th>계좌</th>
-                    <th>총 자산</th>
-                    <th>원금</th>
-                    <th>현금</th>
-                    <th>평가액</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {selectedSnapshot?.accounts.length ? (
-                    selectedSnapshot.accounts.map((account) => (
-                      <tr key={`${selectedSnapshot.id}-${account.account_id}`}>
-                        <td>{account.account_name}</td>
-                        <td>{formatKrw(account.total_assets)}</td>
-                        <td>{formatKrw(account.total_principal)}</td>
-                        <td>{formatKrw(account.cash_balance)}</td>
-                        <td>{formatKrw(account.valuation_krw)}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={5}>
-                        <div className="tableEmpty">선택한 스냅샷의 계좌 상세 데이터가 없습니다.</div>
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <AppDataGrid rows={detailRows} columns={detailColumns} loading={loading} minHeight="20rem" />
           </div>
         </div>
       </section>

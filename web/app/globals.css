@@ -853,6 +853,62 @@ a {
   gap: 8px;
 }
 
+.accountToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 0;
+}
+
+.accountToolbarLeft,
+.accountToolbarRight,
+.accountToolbarOptions,
+.accountToolbarMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.accountToolbarLeft {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.accountToolbarOptions {
+  flex-wrap: nowrap;
+}
+
+.accountToolbarRight {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+
+.accountToolbarMeta {
+  flex-wrap: wrap;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rankToolbarMeta {
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.accountSelect {
+  flex: 0 0 auto;
+  min-width: 220px;
+  max-width: 220px;
+}
+
+.accountSelect .form-select,
+.accountSelect .field,
+.accountSelect select {
+  width: 100%;
+}
+
 .tableMeta {
   display: flex;
   align-items: center;
@@ -985,6 +1041,128 @@ a {
 
 .metricStrong {
   font-weight: 700;
+}
+
+.stocksBucket {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 5.75rem;
+  min-width: 5.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.stocksBucket1 {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.stocksBucket2 {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.stocksBucket3 {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.stocksBucket4 {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.stocksBucket5 {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.rankHeldRow {
+  background: rgba(46, 125, 50, 0.05);
+}
+
+.appDataGridWrap,
+.rankGridWrap {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.appDataGrid,
+.rankDataGrid {
+  min-height: 70vh;
+  border: 0;
+  background: transparent;
+  font-size: 0.95rem;
+}
+
+.appDataGrid .MuiDataGrid-columnHeaders,
+.rankDataGrid .MuiDataGrid-columnHeaders {
+  background: var(--app-table-head-bg);
+  color: var(--app-table-head-color);
+  border-bottom-color: var(--app-table-head-border);
+}
+
+.appDataGrid .MuiDataGrid-columnHeaderTitle,
+.rankDataGrid .MuiDataGrid-columnHeaderTitle {
+  font-weight: 600;
+}
+
+.appDataGrid .MuiDataGrid-cell,
+.rankDataGrid .MuiDataGrid-cell {
+  border-bottom-color: rgba(220, 225, 231, 0.85);
+}
+
+.appDataGrid .MuiDataGrid-cell.appBucketCell,
+.rankDataGrid .MuiDataGrid-cell.rankBucketCell {
+  justify-content: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.appDataGrid .MuiDataGrid-cell.appBucketCell1,
+.rankDataGrid .MuiDataGrid-cell.rankBucketCell1 {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.appDataGrid .MuiDataGrid-cell.appBucketCell2,
+.rankDataGrid .MuiDataGrid-cell.rankBucketCell2 {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.appDataGrid .MuiDataGrid-cell.appBucketCell3,
+.rankDataGrid .MuiDataGrid-cell.rankBucketCell3 {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.appDataGrid .MuiDataGrid-cell.appBucketCell4,
+.rankDataGrid .MuiDataGrid-cell.rankBucketCell4 {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.appDataGrid .MuiDataGrid-cell.appBucketCell5,
+.rankDataGrid .MuiDataGrid-cell.rankBucketCell5 {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.appDataGrid .MuiDataGrid-row.appHeldRow,
+.rankDataGrid .MuiDataGrid-row.rankHeldRow {
+  background: rgba(46, 125, 50, 0.05);
+}
+
+.appDataGrid .MuiDataGrid-row.appHeldRow:hover,
+.rankDataGrid .MuiDataGrid-row.rankHeldRow:hover {
+  background: rgba(46, 125, 50, 0.08);
 }
 
 .tableWrap {
@@ -1325,6 +1503,26 @@ a {
   }
 
   .toolbarActions {
+    width: 100%;
+  }
+
+  .accountToolbar,
+  .accountToolbarLeft,
+  .accountToolbarRight {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .accountToolbarLeft,
+  .accountToolbarRight,
+  .accountToolbarOptions,
+  .accountToolbarMeta {
+    flex-wrap: wrap;
+  }
+
+  .accountSelect {
+    min-width: 0;
+    max-width: none;
     width: 100%;
   }
 

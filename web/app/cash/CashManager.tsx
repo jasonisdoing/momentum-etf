@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { type GridColDef } from "@mui/x-data-grid";
 
+import { AppDataGrid } from "../components/AppDataGrid";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
@@ -25,6 +27,10 @@ type CashAccountsResponse = {
   accounts?: CashAccountItem[];
   rates?: Record<string, number>;
   error?: string;
+};
+
+type CashGridRow = CashAccountItem & {
+  id: string;
 };
 
 function formatUpdatedAt(value: string | null): string {
@@ -86,6 +92,99 @@ export function CashManager() {
   const [isSaving, setIsSaving] = useState(false);
   const latestUpdatedAt = getLatestUpdatedAt(accounts);
   const toast = useToast();
+  const gridRows: CashGridRow[] = accounts.map((account) => ({
+    ...account,
+    id: account.account_id,
+  }));
+  const columns: GridColDef<CashGridRow>[] = [
+    {
+      field: "__edit__",
+      headerName: "",
+      width: 58,
+      sortable: false,
+      filterable: false,
+      disableColumnMenu: true,
+      renderCell: (params) => (
+        <button type="button" className="btn btn-link btn-sm p-0 appEditLink" onClick={() => openEditModal(params.row)}>
+          Edit
+        </button>
+      ),
+    },
+    {
+      field: "name",
+      headerName: "계좌",
+      minWidth: 180,
+      flex: 1,
+      renderCell: (params) => (
+        <div className="tableAccountCell">
+          <strong>
+            {params.row.order}. {params.row.icon} {params.row.name}
+          </strong>
+          <span>{params.row.account_id}</span>
+        </div>
+      ),
+    },
+    {
+      field: "total_principal",
+      headerName: "투자 원금 (KRW)",
+      minWidth: 132,
+      width: 132,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (params) => <span className="tablePlainValue">{formatNumber(params.row.total_principal)}</span>,
+    },
+    {
+      field: "cash_value",
+      headerName: "보유 현금",
+      minWidth: 116,
+      width: 116,
+      align: "right",
+      headerAlign: "right",
+      sortable: false,
+      valueGetter: (_, row) => (row.currency === "KRW" ? row.cash_balance_krw : row.cash_balance_native),
+      renderCell: (params) => (
+        <span className="tablePlainValue">
+          {formatNumber(params.row.currency === "KRW" ? params.row.cash_balance_krw : params.row.cash_balance_native)}
+        </span>
+      ),
+    },
+    {
+      field: "cash_balance_krw",
+      headerName: "저장값 (KRW)",
+      minWidth: 116,
+      width: 116,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (params) => <span className="tablePlainValue">{formatNumber(params.row.cash_balance_krw)}</span>,
+    },
+    { field: "cash_currency", headerName: "현금 통화", minWidth: 92, width: 92 },
+    {
+      field: "intl_shares_value",
+      headerName: "Intl Shares Value",
+      minWidth: 124,
+      width: 124,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (params) => (
+        <span className="tablePlainValue">
+          {params.row.account_id === "aus_account" ? formatNumber(params.row.intl_shares_value) : "-"}
+        </span>
+      ),
+    },
+    {
+      field: "intl_shares_change",
+      headerName: "Intl Shares Change",
+      minWidth: 132,
+      width: 132,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (params) => (
+        <span className="tablePlainValue">
+          {params.row.account_id === "aus_account" ? formatNumber(params.row.intl_shares_change) : "-"}
+        </span>
+      ),
+    },
+  ];
 
   useEffect(() => {
     let alive = true;
@@ -220,18 +319,6 @@ export function CashManager() {
     }
   }
 
-  if (loading) {
-    return (
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-            <p>자산관리 데이터를 불러오는 중...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
-
   return (
     <div className="appPageStack">
       {error || (rates.AUD ?? 0) <= 0 ? (
@@ -245,73 +332,7 @@ export function CashManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBody">
-          <div className="tableWrap">
-            <table className="erpTable">
-              <thead>
-                <tr>
-                  <th />
-                  <th>계좌</th>
-                  <th>투자 원금 (KRW)</th>
-                  <th>보유 현금</th>
-                  <th>저장값 (KRW)</th>
-                  <th>현금 통화</th>
-                  <th>Intl Shares Value</th>
-                  <th>Intl Shares Change</th>
-                </tr>
-              </thead>
-              <tbody>
-                {accounts.map((account) => (
-                  <tr key={account.account_id}>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-link btn-sm p-0 appEditLink"
-                        onClick={() => openEditModal(account)}
-                      >
-                        Edit
-                      </button>
-                    </td>
-                    <td>
-                      <div className="tableAccountCell">
-                        <strong>
-                          {account.order}. {account.icon} {account.name}
-                        </strong>
-                        <span>{account.account_id}</span>
-                      </div>
-                    </td>
-                    <td>
-                      <span className="tablePlainValue">{formatNumber(account.total_principal)}</span>
-                    </td>
-                    <td>
-                      {account.currency === "KRW" ? (
-                        <span className="tablePlainValue">{formatNumber(account.cash_balance_krw)}</span>
-                      ) : (
-                        <span className="tablePlainValue">{formatNumber(account.cash_balance_native)}</span>
-                      )}
-                    </td>
-                    <td>
-                      <span className="tablePlainValue">{formatNumber(account.cash_balance_krw)}</span>
-                    </td>
-                    <td>{account.cash_currency}</td>
-                    <td>
-                      {account.account_id === "aus_account" ? (
-                        <span className="tablePlainValue">{formatNumber(account.intl_shares_value)}</span>
-                      ) : (
-                        <span className="tableMuted">-</span>
-                      )}
-                    </td>
-                    <td>
-                      {account.account_id === "aus_account" ? (
-                        <span className="tablePlainValue">{formatNumber(account.intl_shares_change)}</span>
-                      ) : (
-                        <span className="tableMuted">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <AppDataGrid rows={gridRows} columns={columns} loading={loading} minHeight="26rem" />
           <div className="tableFooterMeta">마지막 저장: {formatUpdatedAt(latestUpdatedAt)}</div>
           </div>
         </div>
