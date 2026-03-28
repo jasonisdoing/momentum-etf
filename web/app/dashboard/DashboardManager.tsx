@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Area, AreaChart, Cell, Pie, PieChart, type PieLabelRenderProps, ResponsiveContainer, Tooltip } from "recharts";
 
 import { AppLoadingState } from "../components/AppLoadingState";
 
@@ -8,6 +9,8 @@ type DashboardMetricItem = {
   label: string;
   value: number;
   kind: "money" | "percent";
+  sub_value?: number;
+  sub_kind?: "money" | "percent";
 };
 
 type DashboardAccountSummaryItem = {
@@ -29,17 +32,31 @@ type DashboardBucketItem = {
 };
 
 type DashboardData = {
-  metrics?: DashboardMetricItem[];
+  metrics_row1?: DashboardMetricItem[];
+  metrics_row2?: DashboardMetricItem[];
   accounts?: DashboardAccountSummaryItem[];
   buckets?: DashboardBucketItem[];
-  stats?: Array<{ label: string; value: number; kind: "money" | "percent" | "count" }>;
+  sparklines?: Record<string, Array<{ date: string; value: number }>>;
   latest_snapshot_date?: string | null;
   weekly_date?: string | null;
   updated_at?: string | null;
   error?: string;
 };
 
+const BUCKET_COLORS = ["#206bc4", "#2fb344", "#f76707", "#d63939", "#ae3ec9", "#667382"];
+
 function formatMoney(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1_0000_0000) {
+    const eok = Math.floor(abs / 1_0000_0000);
+    const man = Math.round((abs % 1_0000_0000) / 1_0000);
+    return man > 0 ? `${sign}${eok}억 ${new Intl.NumberFormat("ko-KR").format(man)}만원` : `${sign}${eok}억원`;
+  }
+  if (abs >= 1_0000) {
+    const man = Math.round(abs / 1_0000);
+    return `${sign}${new Intl.NumberFormat("ko-KR").format(man)}만원`;
+  }
   return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
 }
 
@@ -48,41 +65,132 @@ function formatPercent(value: number): string {
 }
 
 function formatMetricValue(value: number, kind: "money" | "percent" | "count"): string {
-  if (kind === "money") {
-    return formatMoney(value);
-  }
-  if (kind === "percent") {
-    return formatPercent(value);
-  }
+  if (kind === "money") return formatMoney(value);
+  if (kind === "percent") return formatPercent(value);
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
 function formatUpdatedAt(value: string | null | undefined): string {
-  if (!value) {
-    return "-";
-  }
+  if (!value) return "-";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ko-KR", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function getSignedClass(value: number): string | undefined {
-  if (value > 0) {
-    return "metricPositive";
-  }
-  if (value < 0) {
-    return "metricNegative";
-  }
-  return undefined;
+function getSignedClass(value: number): string {
+  if (value > 0) return "text-success";
+  if (value < 0) return "text-danger";
+  return "";
 }
 
-function shouldHighlightMetric(label: string): boolean {
+function shouldHighlight(label: string): boolean {
   return label.includes("손익") || label.includes("수익률");
+}
+
+type SparklinePoint = { date: string; value: number };
+
+function SparklineTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: SparklinePoint }> }) {
+  if (!active || !payload?.[0]) return null;
+  const point = payload[0].payload;
+  return (
+    <div
+      style={{
+        background: "#1e293b",
+        color: "#fff",
+        padding: "4px 8px",
+        borderRadius: 4,
+        fontSize: "0.72rem",
+        lineHeight: 1.4,
+        whiteSpace: "nowrap",
+      }}
+    >
+      <div style={{ fontWeight: 600 }}>{point.date}</div>
+      <div>{new Intl.NumberFormat("ko-KR").format(Math.round(point.value))}</div>
+    </div>
+  );
+}
+
+let sparklineCounter = 0;
+
+function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?: string }) {
+  const [id] = useState(() => `spark-${++sparklineCounter}`);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setWidth(Math.floor(w));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  if (data.length < 2) return null;
+  return (
+    <div ref={containerRef} style={{ width: "100%", height: 40, marginTop: 8, minWidth: 0 }}>
+      {width > 0 ? (
+        <AreaChart data={data} width={width} height={40} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
+          <defs>
+            <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.2} />
+              <stop offset="100%" stopColor={color} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
+          <Area
+            type="monotone"
+            dataKey="value"
+            stroke={color}
+            strokeWidth={1.5}
+            fill={`url(#${id})`}
+            dot={false}
+            isAnimationActive={false}
+          />
+          <Tooltip content={<SparklineTooltip />} cursor={{ stroke: color, strokeWidth: 1, strokeDasharray: "3 3" }} />
+        </AreaChart>
+      ) : null}
+    </div>
+  );
+}
+
+const PERIOD_OPTIONS = [
+  { label: "1달", months: 1 },
+  { label: "3달", months: 3 },
+  { label: "6달", months: 6 },
+  { label: "12달", months: 12 },
+];
+
+function calcChangePct(sparkData: SparklinePoint[] | undefined, months: number): number | null {
+  if (!sparkData || sparkData.length < 2) return null;
+  const weeksBack = Math.round(months * 4.33);
+  const baseIndex = Math.max(0, sparkData.length - 1 - weeksBack);
+  const baseValue = sparkData[baseIndex].value;
+  const currentValue = sparkData[sparkData.length - 1].value;
+  if (baseValue === 0) return null;
+  return ((currentValue - baseValue) / Math.abs(baseValue)) * 100;
+}
+
+type DashboardRenderableMetricItem = {
+  label: string;
+  value: number;
+  kind: "money" | "percent" | "count";
+  sub_value?: number;
+  sub_kind?: "money" | "percent" | "count";
+};
+
+const DASHBOARD_ROW1_LABELS = ["총 자산", "투자 원금", "금일 손익", "금주 손익"] as const;
+const DASHBOARD_ROW2_LABELS = ["누적 손익", "현금 잔고", "현금 비중", "수익/손실 종목 수"] as const;
+
+function orderMetricItems(
+  items: DashboardRenderableMetricItem[],
+  labels: readonly string[],
+): DashboardRenderableMetricItem[] {
+  const itemMap = new Map(items.map((item) => [item.label, item]));
+  return labels
+    .map((label) => itemMap.get(label))
+    .filter((item): item is DashboardRenderableMetricItem => item !== undefined);
 }
 
 export function DashboardManager() {
@@ -90,18 +198,10 @@ export function DashboardManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [hideMoney, setHideMoney] = useState(false);
+  const [periodMonths, setPeriodMonths] = useState(12);
 
-  function formatMoneyDisplay(value: number): string {
-    if (hideMoney) {
-      return "••••••";
-    }
-    return formatMoney(value);
-  }
-
-  function formatMetricDisplay(value: number, kind: "money" | "percent" | "count"): string {
-    if (kind === "money") {
-      return formatMoneyDisplay(value);
-    }
+  function mask(value: number, kind: "money" | "percent" | "count" = "money"): string {
+    if (hideMoney && kind === "money") return "••••••";
     return formatMetricValue(value, kind);
   }
 
@@ -117,24 +217,16 @@ export function DashboardManager() {
         if (!response.ok) {
           throw new Error(payload.error ?? "대시보드 데이터를 불러오지 못했습니다.");
         }
-        if (alive) {
-          setData(payload);
-        }
+        if (alive) setData(payload);
       } catch (loadError) {
-        if (alive) {
-          setError(loadError instanceof Error ? loadError.message : "대시보드 데이터를 불러오지 못했습니다.");
-        }
+        if (alive) setError(loadError instanceof Error ? loadError.message : "대시보드 데이터를 불러오지 못했습니다.");
       } finally {
-        if (alive) {
-          setLoading(false);
-        }
+        if (alive) setLoading(false);
       }
     }
 
     load();
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
   }, []);
 
   if (loading) {
@@ -147,143 +239,195 @@ export function DashboardManager() {
     );
   }
 
+  const row1 = data?.metrics_row1 ?? [];
+  const row2 = data?.metrics_row2 ?? [];
+  const dashboardMetricItems = [...row1, ...row2].map((item) => ({
+    ...item,
+    kind: item.kind as "money" | "percent" | "count",
+    sub_kind: item.sub_kind as "money" | "percent" | "count" | undefined,
+  }));
+  const metricRow1 = orderMetricItems(dashboardMetricItems, DASHBOARD_ROW1_LABELS);
+  const metricRow2 = orderMetricItems(dashboardMetricItems, DASHBOARD_ROW2_LABELS);
+  const buckets = data?.buckets ?? [];
+  const accounts = data?.accounts ?? [];
+  const sparklines = data?.sparklines ?? {};
+
   return (
     <div className="appPageStack">
       {error ? (
         <div className="appBannerStack">
-          <div className="bannerError">{error}</div>
+          <div className="alert alert-danger mb-0">{error}</div>
         </div>
       ) : null}
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>대시보드</h2>
-              <button
-                type="button"
-                className={`toggleButton ${hideMoney ? "toggleButtonActive" : ""}`.trim()}
-                onClick={() => setHideMoney((current) => !current)}
-              >
-                금액 가리기 {hideMoney ? "ON" : "OFF"}
-              </button>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <div className="dashboardMetricGrid">
-              {(data?.metrics ?? []).map((metric) => (
-                <div key={metric.label} className="dashboardMetricCard">
-                  <div className="dashboardMetricLabel">{metric.label}</div>
-                  <div className={shouldHighlightMetric(metric.label) ? getSignedClass(metric.value) : undefined}>
-                    {formatMetricDisplay(metric.value, metric.kind)}
+
+      {/* 헤더 + 기준일 */}
+      <div className="d-flex align-items-center justify-content-between">
+        <div className="text-secondary" style={{ fontSize: "0.82rem" }}>
+          스냅샷 {data?.latest_snapshot_date ?? "-"} · 주별 {data?.weekly_date ?? "-"} · 갱신 {formatUpdatedAt(data?.updated_at)}
+        </div>
+        <div className="d-flex align-items-center gap-2">
+          <select
+            className="form-select form-select-sm"
+            style={{ width: "auto" }}
+            value={periodMonths}
+            onChange={(e) => setPeriodMonths(Number(e.target.value))}
+          >
+            {PERIOD_OPTIONS.map((opt) => (
+              <option key={opt.months} value={opt.months}>지난 {opt.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className={`btn btn-sm ${hideMoney ? "btn-primary" : "btn-outline-secondary"}`}
+            onClick={() => setHideMoney((c) => !c)}
+          >
+            {hideMoney ? "금액 보이기" : "금액 가리기"}
+          </button>
+        </div>
+      </div>
+
+      {/* 핵심 지표 — 2줄 4칸 반응형 카드 */}
+      {[metricRow1, metricRow2].map((items, rowIndex) => (
+        <div key={`metric-row-${rowIndex}`} className="row row-cards">
+          {items.map((item) => {
+            const highlighted = shouldHighlight(item.label);
+            const signClass = highlighted ? getSignedClass(item.value) : "";
+            const sparkData = sparklines[item.label];
+            const sparkColor = highlighted ? (item.value >= 0 ? "#2fb344" : "#d63939") : "#206bc4";
+            const changePct = calcChangePct(sparkData, periodMonths);
+            const subValue = item.sub_value;
+            const subKind = item.sub_kind;
+            return (
+              <div key={`${rowIndex}-${item.label}`} className="col-12 col-sm-6 col-xl-3">
+                <div className="card card-sm">
+                  <div className="card-body" style={{ overflow: "hidden" }}>
+                    <div className="d-flex align-items-center justify-content-between">
+                      <div className="subheader">{item.label}</div>
+                      {changePct !== null ? (
+                        <span
+                          className={changePct >= 0 ? "text-success" : "text-danger"}
+                          style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
+                        >
+                          {changePct >= 0 ? "+" : ""}{changePct.toFixed(1)}%
+                          {changePct >= 0 ? " \u2197" : " \u2198"}
+                        </span>
+                      ) : null}
+                    </div>
+                    {subValue !== undefined && subKind === "count" ? (
+                      <div className="d-flex align-items-baseline gap-1" style={{ whiteSpace: "nowrap" }}>
+                        <span className="h1 mb-0 text-success" style={{ fontSize: "1.1rem" }}>
+                          {formatMetricValue(item.value, item.kind)}
+                        </span>
+                        <span className="text-secondary" style={{ fontSize: "1rem", fontWeight: 600 }}>/</span>
+                        <span className="h1 mb-0 text-danger" style={{ fontSize: "1.1rem" }}>
+                          {formatMetricValue(subValue, subKind)}
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="d-flex align-items-baseline gap-2">
+                        <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "1.1rem" }}>
+                          {mask(item.value, item.kind)}
+                        </div>
+                        {subValue !== undefined && subKind ? (
+                          <span
+                            className={getSignedClass(subValue)}
+                            style={{ fontSize: "0.8rem", fontWeight: 600, whiteSpace: "nowrap" }}
+                          >
+                            {formatMetricValue(subValue, subKind)}
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
+                    {sparkData ? <Sparkline data={sparkData} color={sparkColor} /> : null}
                   </div>
                 </div>
-              ))}
-            </div>
-            <div className="tableFooterMeta">
-              스냅샷 기준일: {data?.latest_snapshot_date ?? "-"} | 주별 기준일: {data?.weekly_date ?? "-"} | 갱신:{" "}
-              {formatUpdatedAt(data?.updated_at)}
-            </div>
-          </div>
+              </div>
+            );
+          })}
         </div>
-      </section>
+      ))}
 
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>포트폴리오 구성 비중</h2>
+      {/* 포트폴리오 구성 비중 */}
+      <div className="row row-cards">
+        <div className="col-12">
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title">포트폴리오 구성 비중</h3>
             </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <div className="dashboardInfoRibbon">
-              {(data?.buckets ?? []).map((bucket) => (
-                <article key={bucket.label} className="dashboardInfoCard">
-                  <div className="dashboardInfoCardLabel">{bucket.label}</div>
-                  <div className="dashboardInfoCardValue">{formatPercent(bucket.weight_pct)}</div>
-                </article>
-              ))}
+            <div className="card-body d-flex align-items-center justify-content-center" style={{ overflow: "visible" }}>
+              <div style={{ width: "100%", maxWidth: 520, aspectRatio: "1" }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart margin={{ top: 28, right: 28, bottom: 28, left: 28 }}>
+                    <Pie
+                      data={buckets}
+                      dataKey="weight_pct"
+                      nameKey="label"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius="38%"
+                      outerRadius="60%"
+                      paddingAngle={2}
+                      strokeWidth={0}
+                      label={(props: PieLabelRenderProps & { label?: string; weight_pct?: number }) => {
+                        const lbl = String(props.label ?? "");
+                        const pct = Number(props.weight_pct ?? 0);
+                        return `${lbl.replace(/^\d+\.\s*/, "")} ${pct.toFixed(1)}%`;
+                      }}
+                      labelLine
+                      style={{ fontSize: "0.72rem" }}
+                    >
+                      {buckets.map((_, i) => (
+                        <Cell key={i} fill={BUCKET_COLORS[i % BUCKET_COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      formatter={(value) => `${Number(value).toFixed(2)}%`}
+                      contentStyle={{ fontSize: "0.82rem", borderRadius: 6 }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>자산/주간 통계</h2>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <div className="dashboardInfoRibbon">
-              {(data?.stats ?? []).map((stat) => (
-                <article key={stat.label} className="dashboardInfoCard">
-                  <div className="dashboardInfoCardLabel">{stat.label}</div>
-                  <div className={`dashboardInfoCardValue ${shouldHighlightMetric(stat.label) ? getSignedClass(stat.value) ?? "" : ""}`.trim()}>
-                    {formatMetricDisplay(stat.value, stat.kind)}
-                  </div>
-                </article>
+      {/* 계좌별 요약 */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">계좌별 요약</h3>
+        </div>
+        <div className="table-responsive">
+          <table className="table table-vcenter card-table">
+            <thead>
+              <tr>
+                <th>계좌</th>
+                <th className="text-end">총 자산</th>
+                <th className="text-end">총 원금</th>
+                <th className="text-end">평가 금액</th>
+                <th className="text-end">현금</th>
+                <th className="text-end">현금 비중</th>
+                <th className="text-end">계좌 손익</th>
+                <th className="text-end">수익률</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map((a) => (
+                <tr key={a.account_id}>
+                  <td className="fw-medium">{a.account_name}</td>
+                  <td className="text-end">{mask(a.total_assets)}</td>
+                  <td className="text-end">{mask(a.total_principal)}</td>
+                  <td className="text-end">{mask(a.valuation_krw)}</td>
+                  <td className="text-end">{mask(a.cash_balance)}</td>
+                  <td className="text-end">{formatPercent(a.cash_ratio)}</td>
+                  <td className={`text-end ${getSignedClass(a.net_profit)}`}>{mask(a.net_profit)}</td>
+                  <td className={`text-end ${getSignedClass(a.net_profit_pct)}`}>{formatPercent(a.net_profit_pct)}</td>
+                </tr>
               ))}
-            </div>
-          </div>
+            </tbody>
+          </table>
         </div>
-      </section>
-
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>계좌별 요약</h2>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <div className="tableWrap">
-              <table className="erpTable dashboardAccountTable">
-                <colgroup>
-                  <col className="dashboardAccountColName" />
-                  <col className="dashboardAccountColValue" />
-                  <col className="dashboardAccountColValue" />
-                  <col className="dashboardAccountColValue" />
-                  <col className="dashboardAccountColValue" />
-                  <col className="dashboardAccountColRatio" />
-                  <col className="dashboardAccountColValue" />
-                  <col className="dashboardAccountColRatio" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>계좌</th>
-                    <th className="tableAlignRight">총 자산</th>
-                    <th className="tableAlignRight">총 원금</th>
-                    <th className="tableAlignRight">평가 금액</th>
-                    <th className="tableAlignRight">현금</th>
-                    <th className="tableAlignRight">현금 비중</th>
-                    <th className="tableAlignRight">계좌 손익</th>
-                    <th className="tableAlignRight">계좌 수익률</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(data?.accounts ?? []).map((account) => (
-                    <tr key={account.account_id}>
-                      <td>{account.account_name}</td>
-                      <td className="tableAlignRight">{formatMoneyDisplay(account.total_assets)}</td>
-                      <td className="tableAlignRight">{formatMoneyDisplay(account.total_principal)}</td>
-                      <td className="tableAlignRight">{formatMoneyDisplay(account.valuation_krw)}</td>
-                      <td className="tableAlignRight">{formatMoneyDisplay(account.cash_balance)}</td>
-                      <td className="tableAlignRight">{formatPercent(account.cash_ratio)}</td>
-                      <td className={`tableAlignRight ${getSignedClass(account.net_profit) ?? ""}`.trim()}>
-                        {formatMoneyDisplay(account.net_profit)}
-                      </td>
-                      <td className={`tableAlignRight ${getSignedClass(account.net_profit_pct) ?? ""}`.trim()}>
-                        {formatPercent(account.net_profit_pct)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      </section>
+      </div>
     </div>
   );
 }

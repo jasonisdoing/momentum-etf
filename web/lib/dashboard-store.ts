@@ -25,10 +25,11 @@ type DashboardBucketItem = {
 };
 
 type DashboardData = {
-  metrics: DashboardMetricItem[];
+  metrics_row1: DashboardMetricItem[];
+  metrics_row2: DashboardMetricItem[];
   accounts: DashboardAccountSummaryItem[];
   buckets: DashboardBucketItem[];
-  stats: Array<{ label: string; value: number; kind: "money" | "percent" | "count" }>;
+  sparklines: Record<string, Array<{ date: string; value: number }>>;
   latest_snapshot_date: string | null;
   weekly_date: string | null;
   updated_at: string | null;

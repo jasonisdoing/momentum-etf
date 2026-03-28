@@ -119,21 +119,52 @@ def load_dashboard_data() -> dict[str, Any]:
     total_assets = sum(account["total_assets"] for account in accounts)
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
-    valuation_amount = sum(account["valuation_krw"] for account in accounts)
     previous_total_assets = normalize_number((previous_snapshot or {}).get("total_assets"))
     daily_profit = total_assets - previous_total_assets if previous_snapshot else 0.0
     daily_return_pct = (daily_profit / previous_total_assets) * 100 if previous_total_assets > 0 else 0.0
 
-    metrics = [
+    metrics_row1 = [
         {"label": "총 자산", "value": total_assets, "kind": "money"},
         {"label": "투자 원금", "value": total_principal, "kind": "money"},
-        {"label": "현금 잔고", "value": total_cash, "kind": "money"},
-        {"label": "금일 손익", "value": daily_profit, "kind": "money"},
-        {"label": "금주 손익", "value": normalize_number((latest_weekly or {}).get("weekly_profit")), "kind": "money"},
+        {
+            "label": "금일 손익",
+            "value": daily_profit,
+            "kind": "money",
+            "sub_value": daily_return_pct,
+            "sub_kind": "percent",
+        },
+        {
+            "label": "금주 손익",
+            "value": normalize_number((latest_weekly or {}).get("weekly_profit")),
+            "kind": "money",
+            "sub_value": normalize_number((latest_weekly or {}).get("weekly_return_pct")),
+            "sub_kind": "percent",
+        },
+    ]
+
+    profit_count = normalize_number((latest_weekly or {}).get("profit_count"))
+    loss_count = normalize_number((latest_weekly or {}).get("loss_count"))
+
+    metrics_row2 = [
         {
             "label": "누적 손익",
             "value": normalize_number((latest_weekly or {}).get("cumulative_profit")),
             "kind": "money",
+            "sub_value": normalize_number((latest_weekly or {}).get("cumulative_return_pct")),
+            "sub_kind": "percent",
+        },
+        {"label": "현금 잔고", "value": total_cash, "kind": "money"},
+        {
+            "label": "현금 비중",
+            "value": (total_cash / total_assets) * 100 if total_assets > 0 else 0.0,
+            "kind": "percent",
+        },
+        {
+            "label": "수익/손실 종목 수",
+            "value": profit_count,
+            "kind": "count",
+            "sub_value": loss_count,
+            "sub_kind": "count",
         },
     ]
 
@@ -146,41 +177,6 @@ def load_dashboard_data() -> dict[str, Any]:
         {"label": "6. 현금", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_cash"))},
     ]
 
-    stats = [
-        {
-            "label": "매입 금액",
-            "value": normalize_number((latest_weekly or {}).get("purchase_amount")),
-            "kind": "money",
-        },
-        {
-            "label": "평가 금액",
-            "value": valuation_amount or normalize_number((latest_weekly or {}).get("valuation_amount")),
-            "kind": "money",
-        },
-        {
-            "label": "현금 비중",
-            "value": (total_cash / total_assets) * 100 if total_assets > 0 else 0.0,
-            "kind": "percent",
-        },
-        {"label": "일간 수익률", "value": daily_return_pct, "kind": "percent"},
-        {
-            "label": "주 수익률",
-            "value": normalize_number((latest_weekly or {}).get("weekly_return_pct")),
-            "kind": "percent",
-        },
-        {
-            "label": "누적 수익률",
-            "value": normalize_number((latest_weekly or {}).get("cumulative_return_pct")),
-            "kind": "percent",
-        },
-        {
-            "label": "수익 종목 수",
-            "value": normalize_number((latest_weekly or {}).get("profit_count")),
-            "kind": "count",
-        },
-        {"label": "손실 종목 수", "value": normalize_number((latest_weekly or {}).get("loss_count")), "kind": "count"},
-    ]
-
     updated_at_candidates = [
         to_iso_string(f"{latest_snapshot.get('snapshot_date')}T00:00:00+09:00")
         if latest_snapshot and latest_snapshot.get("snapshot_date")
@@ -190,11 +186,32 @@ def load_dashboard_data() -> dict[str, Any]:
     ]
     updated_at_values = sorted([value for value in updated_at_candidates if value])
 
+    # 스파크라인용 주별 히스토리 (최근 52주, 오래된 순)
+    calculated_weekly = _calculate_weekly_docs(weekly_docs) if weekly_docs else []
+    sparkline_source = list(reversed(calculated_weekly))[-52:]
+    dates = [str(d.get("week_date") or "") for d in sparkline_source]
+
+    def _spark(values: list[float]) -> list[dict[str, object]]:
+        return [{"date": dt, "value": v} for dt, v in zip(dates, values)]
+
+    sparklines: dict[str, list[dict[str, object]]] = {
+        "총 자산": _spark([normalize_number(d.get("total_assets")) for d in sparkline_source]),
+        "투자 원금": _spark([normalize_number(d.get("total_principal")) for d in sparkline_source]),
+        "누적 손익": _spark([normalize_number(d.get("cumulative_profit")) for d in sparkline_source]),
+        "현금 잔고": _spark(
+            [
+                normalize_number(d.get("total_principal")) - normalize_number(d.get("purchase_amount"))
+                for d in sparkline_source
+            ]
+        ),
+    }
+
     return {
-        "metrics": metrics,
+        "metrics_row1": metrics_row1,
+        "metrics_row2": metrics_row2,
         "accounts": accounts,
         "buckets": buckets,
-        "stats": stats,
+        "sparklines": sparklines,
         "latest_snapshot_date": latest_snapshot.get("snapshot_date") if latest_snapshot else None,
         "weekly_date": (latest_weekly or {}).get("week_date"),
         "updated_at": updated_at_values[-1] if updated_at_values else None,
