@@ -91,6 +91,7 @@ export function CashManager() {
   const [editingAccount, setEditingAccount] = useState<CashAccountItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const latestUpdatedAt = getLatestUpdatedAt(accounts);
+  const showRateWarning = !loading && accounts.some((account) => account.currency === "AUD") && (rates.AUD ?? 0) <= 0;
   const toast = useToast();
   const gridRows: CashGridRow[] = accounts.map((account) => ({
     ...account,
@@ -314,10 +315,10 @@ export function CashManager() {
 
   return (
     <div className="appPageStack">
-      {error || (rates.AUD ?? 0) <= 0 ? (
+      {error || showRateWarning ? (
         <div className="appBannerStack">
           {error ? <div className="bannerError">{error}</div> : null}
-          {(rates.AUD ?? 0) <= 0 ? (
+          {showRateWarning ? (
             <div className="bannerWarn">AUD/KRW 환율을 불러오지 못했습니다. 호주 계좌 저장 전에 확인이 필요합니다.</div>
           ) : null}
         </div>
