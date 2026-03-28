@@ -1154,6 +1154,11 @@ a {
   background: rgba(255, 255, 255, 0.72);
 }
 
+.appDataGridWrapScrollable {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .appDataGrid,
 .rankDataGrid {
   min-height: 70vh;
@@ -1372,7 +1377,7 @@ a {
 
 .tablePlainValue {
   display: inline-block;
-  min-width: 120px;
+  min-width: 104px;
   color: var(--ink);
 }
 
