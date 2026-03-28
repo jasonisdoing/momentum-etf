@@ -8,6 +8,7 @@ import {
   getOAuthStateCookieName,
   getSessionMaxAgeSeconds,
   isAllowedEmail,
+  resolveExternalOrigin,
   verifyOAuthStateToken,
 } from "@/lib/auth";
 
@@ -19,6 +20,11 @@ function buildLoginRedirect(request: NextRequest, message: string): NextResponse
 
 export async function GET(request: NextRequest) {
   try {
+    const origin = resolveExternalOrigin(
+      request.nextUrl.origin,
+      request.headers.get("x-forwarded-proto"),
+      request.headers.get("x-forwarded-host"),
+    );
     const error = request.nextUrl.searchParams.get("error");
     if (error) {
       return buildLoginRedirect(request, "Google 로그인이 취소되었거나 실패했습니다.");
@@ -37,7 +43,7 @@ export async function GET(request: NextRequest) {
       return buildLoginRedirect(request, "Google 로그인 상태가 만료되었습니다.");
     }
 
-    const accessToken = await exchangeGoogleCode(request.nextUrl.origin, code);
+    const accessToken = await exchangeGoogleCode(origin, code);
     const user = await fetchGoogleUserInfo(accessToken);
     const email = String(user.email ?? "").trim().toLowerCase();
     const displayName = String(user.name ?? email).trim();

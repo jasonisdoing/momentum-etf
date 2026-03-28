@@ -8,3 +8,5 @@ beautifulsoup4
 yfinance
 pandas_market_calendars
 slack-sdk
+fastapi
+uvicorn

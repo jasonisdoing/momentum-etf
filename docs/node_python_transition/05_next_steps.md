@@ -2,8 +2,8 @@
 
 ## 바로 다음 액션
 
-하이브리드 1차 배포, `Google OAuth 인증`, `시스템정보/메모/AI용 요약/주별 이관`, `종목 관리/삭제된 종목 통합`, `Tabler 표준화 2차`, `Python UI 제거`까지 끝났다.
-이제 다음 작업은 `전역 Tabler 표준화 지속 + 주별 완성도 보정 + 남은 Python 런타임 의존 정리`다.
+`Google OAuth 인증`, `모든 사용자 메뉴 Node 이관`, `시스템 버튼 이관`, `Python UI 제거`, `Streamlit 흔적 정리`까지 끝났다.
+이제 다음 작업은 `전역 Tabler 표준화 지속 + 주별/스냅샷/대시보드 완성도 보정 + FastAPI 내부 API 순차 이관 + 배포 정리`다.
 
 ## Step 1. 전역 Tabler 표준화 지속
 
@@ -18,19 +18,19 @@
 - 같은 종류의 버튼과 입력 높이가 일관적인가
 - 새 화면도 별도 커스텀 없이 Tabler 조합으로 바로 구성 가능한가
 
-## Step 2. 주별 완성도 보정
+## Step 2. 완성도 보정
 
 목표:
 
-- `주별`은 이미 Node로 옮겼다.
-- 다음은 `이번주 데이터 집계` 결과와 편집 UX의 완성도를 보정한다.
+- `주별`, `스냅샷`, `대시보드`는 이미 Node로 옮겼다.
+- 다음은 계산 정확도와 UX 완성도를 보정한다.
 
 검증 포인트:
 
 - 실제 데이터 조회 성공
 - 저장/수정 액션이 Mongo 반영에 성공
-- Python 기존 규칙과 결과가 얼마나 일치하는가
-- 집계 버튼이 즉시 결과를 반영하는가
+- `주별` 집계 결과가 기존 규칙과 얼마나 일치하는가
+- `스냅샷`, `대시보드`의 테이블/카드 UX가 충분히 정리됐는가
 
 ## Step 3. 로컬 개발 검증
 
@@ -44,24 +44,27 @@
 - Node dev 서버에서 `.env`, `zaccounts`, Mongo 연결이 정상인가
 - 화면 수정이 즉시 반영되는가
 
-## Step 4. 남은 Python 런타임 정리
+## Step 4. FastAPI 내부 API 순차 이관
 
 목표:
 
-- Python UI는 제거됐으므로, 남은 Python 스크립트 호출 의존만 정리한다.
+- `Next = 인증/프론트`, `FastAPI = 내부 도메인 API` 구조로 점진 전환한다.
+- 첫 이관 순서는 `system -> weekly -> summary -> dashboard -> market` 으로 잡는다.
 
 검증 후보:
 
-- `/`
-- `/dashboard`
-- `/import`
-- `/cash`
-- `/snapshots`
-- `/weekly`
-- `/market`
-- `/system`
+- `GET/POST /internal/system`
+- `GET/POST/PATCH /internal/weekly`
+- `GET/POST /internal/summary`
+- `GET /internal/dashboard`
+- `GET /internal/market`
+
+필수 환경변수:
+
+- `FASTAPI_INTERNAL_URL`
+- `FASTAPI_INTERNAL_TOKEN`
 
 ## 작업자가 이어서 할 때 첫 문장
 
 다음 작업자는 이 폴더를 읽은 뒤,
-`전역 UI는 Tabler 기준으로 표준화하고, 화면별 임시 커스텀을 늘리지 말며, 이제는 Node로 옮긴 주별/잔여 화면 완성도와 Python 제거 정리에 집중한다.`
+`전역 UI는 Tabler 기준으로 표준화하고, 화면별 임시 커스텀을 늘리지 말며, 이제는 Node로 옮긴 화면의 완성도 보정과 배포 정리, 남은 Python 런타임 의존 판단에 집중한다.`

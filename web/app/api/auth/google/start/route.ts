@@ -5,13 +5,19 @@ import {
   createOAuthStateToken,
   getOAuthStateCookieName,
   getOAuthStateMaxAgeSeconds,
+  resolveExternalOrigin,
 } from "@/lib/auth";
 
 export async function GET(request: NextRequest) {
   try {
     const nextPath = request.nextUrl.searchParams.get("next") || "/dashboard";
     const stateToken = await createOAuthStateToken(nextPath);
-    const redirectUrl = buildGoogleAuthUrl(request.nextUrl.origin, stateToken);
+    const origin = resolveExternalOrigin(
+      request.nextUrl.origin,
+      request.headers.get("x-forwarded-proto"),
+      request.headers.get("x-forwarded-host"),
+    );
+    const redirectUrl = buildGoogleAuthUrl(origin, stateToken);
 
     const response = NextResponse.redirect(redirectUrl);
     response.cookies.set({

@@ -75,8 +75,13 @@
 - `scripts/generate_ai_summary.py` 추가
 - Node `주별(/weekly)` 실기능 구현
 - `/api/weekly` 추가
+- Node `시스템` 실행 버튼 구현
+- `/api/system`에서 메타데이터/가격 캐시/슬랙 요약 실행 추가
 - 루트 `/` 를 앱 런처형 홈으로 교체
 - 상단 공통 환율 바 추가
+- 상단에 CNN 공포탐욕지수 추가
+- 토스트를 전역 Tabler 토스트로 표준화
+- `stocks`, `weekly`, `cash` 편집 모달을 공통 `AppModal`로 표준화
 - Node 1차 메뉴 `/dashboard`, `/import`, `/stocks`, `/cash`, `/snapshots`, `/market`를 모두 실제 데이터 기반으로 확인
 - 하이브리드 컨테이너 재빌드 및 기동 확인
 - nginx가 컨테이너 재생성 이후 이전 Docker 내부 IP를 계속 바라보며 `502 Bad Gateway`를 내는 문제 확인
@@ -93,6 +98,7 @@
 - `/stocks` 티커 컬럼은 고정폭 식별자 폰트(`appCodeText`)를 사용한다.
 - `주별`의 `이번주 데이터 집계` 버튼은 Python 호출이 아니라 Node에서 직접 처리한다.
 - `주별` 집계는 최신 `daily_snapshots` 기준 금액과 환율을 즉시 반영하고, 계산 컬럼은 Node에서 다시 계산한다.
+- Python UI, `/py` 라우팅, `python_app`, Streamlit 관련 코드/문서 흔적을 제거했다.
 
 ## 이번 턴에서 막힌 지점
 
@@ -101,5 +107,6 @@
 ## 다음 검증 우선순위
 
 1. `주별` 집계 정확도 보정
-2. 전역 Tabler 표준화 지속
-3. 필요 시 하이브리드/운영 회귀 확인
+2. `스냅샷`, `대시보드` UX 완성도 보정
+3. 전역 Tabler 표준화 지속
+4. 운영 배포 회귀 확인

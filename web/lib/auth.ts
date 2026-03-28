@@ -32,6 +32,10 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
+function normalizeOrigin(value: string): string {
+  return value.trim().replace(/\/+$/g, "");
+}
+
 function normalizePath(value: string | null | undefined): string {
   const raw = String(value ?? "").trim();
   if (!raw.startsWith("/") || raw.startsWith("//")) {
@@ -140,8 +144,40 @@ export function getGoogleClientSecret(): string {
   return getRequiredEnv("GOOGLE_CLIENT_SECRET");
 }
 
+export function getAppBaseUrl(): string {
+  const configured = process.env.APP_BASE_URL?.trim();
+  if (configured) {
+    return normalizeOrigin(configured);
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("APP_BASE_URL 환경변수가 필요합니다.");
+  }
+
+  return "http://localhost:3000";
+}
+
+export function resolveExternalOrigin(
+  fallbackOrigin: string,
+  forwardedProto?: string | null,
+  forwardedHost?: string | null,
+): string {
+  const configured = process.env.APP_BASE_URL?.trim();
+  if (configured) {
+    return normalizeOrigin(configured);
+  }
+
+  const proto = String(forwardedProto ?? "").split(",")[0]?.trim();
+  const host = String(forwardedHost ?? "").split(",")[0]?.trim();
+  if (proto && host) {
+    return normalizeOrigin(`${proto}://${host}`);
+  }
+
+  return normalizeOrigin(fallbackOrigin);
+}
+
 export function getGoogleCallbackUrl(origin: string): string {
-  return `${origin}/api/auth/callback/google`;
+  return `${normalizeOrigin(origin)}/api/auth/callback/google`;
 }
 
 export async function createSessionToken(email: string, displayName: string): Promise<string> {
