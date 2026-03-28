@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { type GridColDef, type GridRowSelectionModel } from "@mui/x-data-grid";
 
+import { AppDataGrid } from "../components/AppDataGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { useToast } from "../components/ToastProvider";
 
@@ -63,11 +65,52 @@ function getSignedMetricClass(value: number | null): string | undefined {
   return undefined;
 }
 
+type DeletedStocksGridRow = DeletedStocksRowItem & { id: string };
+
+const columns: GridColDef<DeletedStocksGridRow>[] = [
+  { field: "bucket_name", headerName: "버킷", minWidth: 110, width: 110 },
+  { field: "ticker", headerName: "티커", minWidth: 90, width: 90 },
+  { field: "name", headerName: "종목명", minWidth: 130, flex: 1 },
+  {
+    field: "week_volume",
+    headerName: "주간거래량",
+    minWidth: 110,
+    align: "right",
+    headerAlign: "right",
+    renderCell: (params) => formatNumber(params.value),
+  },
+  ...([1, 2] as const).map((n) => ({
+    field: `return_${n}w` as const,
+    headerName: `${n}주(%)`,
+    minWidth: 86,
+    align: "right" as const,
+    headerAlign: "right" as const,
+    renderCell: (params: { row: DeletedStocksGridRow }) => {
+      const value = params.row[`return_${n}w` as keyof DeletedStocksGridRow] as number | null;
+      return <span className={getSignedMetricClass(value)}>{formatPercent(value)}</span>;
+    },
+  })),
+  ...([1, 3, 6, 12] as const).map((n) => ({
+    field: `return_${n}m` as const,
+    headerName: `${n}달(%)`,
+    minWidth: 86,
+    align: "right" as const,
+    headerAlign: "right" as const,
+    renderCell: (params: { row: DeletedStocksGridRow }) => {
+      const value = params.row[`return_${n}m` as keyof DeletedStocksGridRow] as number | null;
+      return <span className={getSignedMetricClass(value)}>{formatPercent(value)}</span>;
+    },
+  })),
+  { field: "listing_date", headerName: "상장일", minWidth: 100, width: 100 },
+  { field: "deleted_date", headerName: "삭제일", minWidth: 100, width: 100 },
+  { field: "deleted_reason", headerName: "삭제 사유", minWidth: 120, flex: 0.8 },
+];
+
 export function DeletedStocksManager() {
   const [accounts, setAccounts] = useState<DeletedStocksAccountItem[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [rows, setRows] = useState<DeletedStocksRowItem[]>([]);
-  const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [selectionModel, setSelectionModel] = useState<GridRowSelectionModel>({ type: "include", ids: new Set() });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
@@ -88,7 +131,7 @@ export function DeletedStocksManager() {
       setAccounts(payload.accounts ?? []);
       setSelectedAccountId(payload.account_id ?? "");
       setRows(payload.rows ?? []);
-      setSelectedTickers([]);
+      setSelectionModel({ type: "include", ids: new Set() });
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "삭제된 종목 데이터를 불러오지 못했습니다.");
     } finally {
@@ -105,29 +148,18 @@ export function DeletedStocksManager() {
     [accounts, selectedAccountId],
   );
 
-  const selectedTickerSet = useMemo(() => new Set(selectedTickers), [selectedTickers]);
-  const allSelected = rows.length > 0 && selectedTickers.length === rows.length;
+  const selectedTickers = useMemo(
+    () => Array.from(selectionModel.ids) as string[],
+    [selectionModel],
+  );
+
+  const gridRows: DeletedStocksGridRow[] = useMemo(
+    () => rows.map((row) => ({ ...row, id: row.ticker })),
+    [rows],
+  );
 
   function handleAccountChange(nextAccountId: string) {
     void load(nextAccountId);
-  }
-
-  function toggleTicker(ticker: string) {
-    setSelectedTickers((current) => {
-      const normalized = ticker.trim().toUpperCase();
-      if (current.includes(normalized)) {
-        return current.filter((item) => item !== normalized);
-      }
-      return [...current, normalized];
-    });
-  }
-
-  function toggleAll() {
-    if (allSelected) {
-      setSelectedTickers([]);
-      return;
-    }
-    setSelectedTickers(rows.map((row) => row.ticker.trim().toUpperCase()));
   }
 
   function handleRestore() {
@@ -147,8 +179,9 @@ export function DeletedStocksManager() {
           throw new Error(payload.error ?? "종목 복구에 실패했습니다.");
         }
         const restoredCount = Number(payload.restored_count ?? 0);
-        setRows((current) => current.filter((row) => !selectedTickerSet.has(row.ticker.trim().toUpperCase())));
-        setSelectedTickers([]);
+        const removed = new Set(selectedTickers);
+        setRows((current) => current.filter((row) => !removed.has(row.ticker)));
+        setSelectionModel({ type: "include", ids: new Set() });
         toast.success(`[Momentum ETF-삭제된 종목] ${restoredCount}개 종목 복구 완료`);
       } catch (restoreError) {
         setError(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
@@ -173,8 +206,9 @@ export function DeletedStocksManager() {
           throw new Error(payload.error ?? "종목 완전 삭제에 실패했습니다.");
         }
         const deletedCount = Number(payload.deleted_count ?? 0);
-        setRows((current) => current.filter((row) => !selectedTickerSet.has(row.ticker.trim().toUpperCase())));
-        setSelectedTickers([]);
+        const removed = new Set(selectedTickers);
+        setRows((current) => current.filter((row) => !removed.has(row.ticker)));
+        setSelectionModel({ type: "include", ids: new Set() });
         toast.success(`[Momentum ETF-삭제된 종목] ${deletedCount}개 종목 영구 삭제 완료`);
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
@@ -202,124 +236,55 @@ export function DeletedStocksManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBody">
-          <div className="tableToolbar">
-            <div className="toolbarActions">
-              <select
-                className="field compactField"
-                value={selectedAccountId}
-                onChange={(event) => handleAccountChange(event.target.value)}
-              >
-                {accounts.map((account) => (
-                  <option key={account.account_id} value={account.account_id}>
-                    {account.order}. {account.name}
-                  </option>
-                ))}
-              </select>
-              <button className="secondaryButton" type="button" onClick={toggleAll} disabled={rows.length === 0 || isPending}>
-                {allSelected ? "전체 해제" : "전체 선택"}
-              </button>
-              <button
-                className="primaryButton"
-                type="button"
-                onClick={handleRestore}
-                disabled={selectedTickers.length === 0 || isPending}
-              >
-                선택 복구
-              </button>
-              <button
-                className="secondaryButton dangerButton"
-                type="button"
-                onClick={handleHardDelete}
-                disabled={selectedTickers.length === 0 || isPending}
-              >
-                완전 삭제
-              </button>
+            <div className="tableToolbar">
+              <div className="toolbarActions">
+                <select
+                  className="field compactField"
+                  value={selectedAccountId}
+                  onChange={(event) => handleAccountChange(event.target.value)}
+                >
+                  {accounts.map((account) => (
+                    <option key={account.account_id} value={account.account_id}>
+                      {account.order}. {account.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className="btn btn-outline-secondary btn-sm"
+                  type="button"
+                  onClick={handleRestore}
+                  disabled={selectedTickers.length === 0 || isPending}
+                >
+                  선택 복구
+                </button>
+                <button
+                  className="btn btn-outline-danger btn-sm"
+                  type="button"
+                  onClick={handleHardDelete}
+                  disabled={selectedTickers.length === 0 || isPending}
+                >
+                  완전 삭제
+                </button>
+              </div>
+              <div className="tableMeta">
+                {selectedAccount ? (
+                  <span>
+                    {selectedAccount.icon} {selectedAccount.name}
+                  </span>
+                ) : null}
+                <span>총 {new Intl.NumberFormat("ko-KR").format(rows.length)}개 종목</span>
+                <span>선택 {new Intl.NumberFormat("ko-KR").format(selectedTickers.length)}개</span>
+              </div>
             </div>
-            <div className="tableMeta">
-              {selectedAccount ? (
-                <span>
-                  {selectedAccount.icon} {selectedAccount.name}
-                </span>
-              ) : null}
-              <span>총 {new Intl.NumberFormat("ko-KR").format(rows.length)}개 종목</span>
-              <span>선택 {new Intl.NumberFormat("ko-KR").format(selectedTickers.length)}개</span>
-            </div>
-          </div>
-
-          <div className="tableWrap">
-            <table className="erpTable">
-              <thead>
-                <tr>
-                  <th className="tableCheckboxCell">
-                    <input type="checkbox" checked={allSelected} onChange={toggleAll} />
-                  </th>
-                  <th>버킷</th>
-                  <th>티커</th>
-                  <th>종목명</th>
-                  <th className="tableAlignRight">주간거래량</th>
-                  <th className="tableAlignRight">1주(%)</th>
-                  <th className="tableAlignRight">2주(%)</th>
-                  <th className="tableAlignRight">1달(%)</th>
-                  <th className="tableAlignRight">3달(%)</th>
-                  <th className="tableAlignRight">6달(%)</th>
-                  <th className="tableAlignRight">12달(%)</th>
-                  <th>상장일</th>
-                  <th>삭제일</th>
-                  <th>삭제 사유</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={14} className="tableEmpty">
-                      삭제된 종목이 없습니다.
-                    </td>
-                  </tr>
-                ) : (
-                  rows.map((row) => {
-                    const isChecked = selectedTickerSet.has(row.ticker.trim().toUpperCase());
-                    return (
-                      <tr key={row.ticker} className={isChecked ? "tableRowSelected" : undefined}>
-                        <td className="tableCheckboxCell">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => toggleTicker(row.ticker)}
-                            disabled={isPending}
-                          />
-                        </td>
-                        <td>{row.bucket_name}</td>
-                        <td>{row.ticker}</td>
-                        <td>{row.name}</td>
-                        <td className="tableAlignRight">{formatNumber(row.week_volume)}</td>
-                        <td className={`tableAlignRight ${getSignedMetricClass(row.return_1w) ?? ""}`.trim()}>
-                          {formatPercent(row.return_1w)}
-                        </td>
-                        <td className={`tableAlignRight ${getSignedMetricClass(row.return_2w) ?? ""}`.trim()}>
-                          {formatPercent(row.return_2w)}
-                        </td>
-                        <td className={`tableAlignRight ${getSignedMetricClass(row.return_1m) ?? ""}`.trim()}>
-                          {formatPercent(row.return_1m)}
-                        </td>
-                        <td className={`tableAlignRight ${getSignedMetricClass(row.return_3m) ?? ""}`.trim()}>
-                          {formatPercent(row.return_3m)}
-                        </td>
-                        <td className={`tableAlignRight ${getSignedMetricClass(row.return_6m) ?? ""}`.trim()}>
-                          {formatPercent(row.return_6m)}
-                        </td>
-                        <td className={`tableAlignRight ${getSignedMetricClass(row.return_12m) ?? ""}`.trim()}>
-                          {formatPercent(row.return_12m)}
-                        </td>
-                        <td>{row.listing_date}</td>
-                        <td>{row.deleted_date}</td>
-                        <td>{row.deleted_reason}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+            <AppDataGrid
+              rows={gridRows}
+              columns={columns}
+              loading={loading}
+              checkboxSelection
+              rowSelectionModel={selectionModel}
+              onRowSelectionModelChange={setSelectionModel}
+              minHeight="68vh"
+            />
           </div>
         </div>
       </section>

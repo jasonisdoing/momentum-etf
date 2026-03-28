@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { type GridColDef } from "@mui/x-data-grid";
 
 import { AppDataGrid } from "../components/AppDataGrid";
@@ -89,7 +89,7 @@ export function CashManager() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [editingAccount, setEditingAccount] = useState<CashAccountItem | null>(null);
-  const [isSaving, setIsSaving] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const latestUpdatedAt = getLatestUpdatedAt(accounts);
   const showRateWarning = !loading && accounts.some((account) => account.currency === "AUD") && (rates.AUD ?? 0) <= 0;
   const toast = useToast();
@@ -247,70 +247,69 @@ export function CashManager() {
   }
 
   function closeEditModal() {
-    if (isSaving) {
+    if (isPending) {
       return;
     }
     setEditingAccount(null);
   }
 
-  async function handleSave() {
+  function handleSave() {
     if (!editingAccount) {
       return;
     }
 
-    try {
-      setError(null);
-      setIsSaving(true);
+    startTransition(async () => {
+      try {
+        setError(null);
 
-      const rate = rates[editingAccount.currency] ?? 0;
-      const normalizedCashKrw =
-        editingAccount.currency === "KRW"
-          ? Number(editingAccount.cash_balance_krw ?? 0)
-          : Number(editingAccount.cash_balance_native ?? 0) * rate;
-
-      const payloadAccount = {
-        account_id: editingAccount.account_id,
-        total_principal: Number(editingAccount.total_principal ?? 0),
-        cash_balance_krw: normalizedCashKrw,
-        cash_balance_native:
+        const rate = rates[editingAccount.currency] ?? 0;
+        const normalizedCashKrw =
           editingAccount.currency === "KRW"
             ? Number(editingAccount.cash_balance_krw ?? 0)
-            : Number(editingAccount.cash_balance_native ?? 0),
-        cash_currency: editingAccount.cash_currency,
-        intl_shares_value: editingAccount.intl_shares_value,
-        intl_shares_change: editingAccount.intl_shares_change,
-      };
+            : Number(editingAccount.cash_balance_native ?? 0) * rate;
 
-      const response = await fetch("/api/cash/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts: [payloadAccount] }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "저장에 실패했습니다.");
+        const payloadAccount = {
+          account_id: editingAccount.account_id,
+          total_principal: Number(editingAccount.total_principal ?? 0),
+          cash_balance_krw: normalizedCashKrw,
+          cash_balance_native:
+            editingAccount.currency === "KRW"
+              ? Number(editingAccount.cash_balance_krw ?? 0)
+              : Number(editingAccount.cash_balance_native ?? 0),
+          cash_currency: editingAccount.cash_currency,
+          intl_shares_value: editingAccount.intl_shares_value,
+          intl_shares_change: editingAccount.intl_shares_change,
+        };
+
+        const response = await fetch("/api/cash/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accounts: [payloadAccount] }),
+        });
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "저장에 실패했습니다.");
+        }
+
+        const savedAt = new Date().toISOString();
+        setAccounts((current) =>
+          current.map((account) =>
+            account.account_id === editingAccount.account_id
+              ? {
+                  ...account,
+                  ...editingAccount,
+                  cash_balance_krw: normalizedCashKrw,
+                  updated_at: savedAt,
+                }
+              : account,
+          ),
+        );
+        toast.success(`[자산-자산 관리] ${editingAccount.name} 저장 완료`);
+        setEditingAccount(null);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "저장에 실패했습니다.");
       }
-
-      const savedAt = new Date().toISOString();
-      setAccounts((current) =>
-        current.map((account) =>
-          account.account_id === editingAccount.account_id
-            ? {
-                ...account,
-                ...editingAccount,
-                cash_balance_krw: normalizedCashKrw,
-                updated_at: savedAt,
-              }
-            : account,
-        ),
-      );
-      toast.success(`[자산-자산 관리] ${editingAccount.name} 저장 완료`);
-      setEditingAccount(null);
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "저장에 실패했습니다.");
-    } finally {
-      setIsSaving(false);
-    }
+    });
   }
 
   return (
@@ -346,11 +345,11 @@ export function CashManager() {
         onClose={closeEditModal}
         footer={
           <>
-            <button type="button" className="btn btn-outline-secondary" onClick={closeEditModal} disabled={isSaving}>
+            <button type="button" className="btn btn-outline-secondary" onClick={closeEditModal} disabled={isPending}>
               취소
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isSaving || !editingAccount}>
-              {isSaving ? "저장 중..." : "저장"}
+            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isPending || !editingAccount}>
+              {isPending ? "저장 중..." : "저장"}
             </button>
           </>
         }
