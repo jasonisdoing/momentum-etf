@@ -25,8 +25,6 @@ zpools/*/results
 # 노트 파일
 znotes/
 
-# Streamlit secrets
-.streamlit/secrets.toml
 
 # 캐시
 data/*

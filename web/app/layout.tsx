@@ -4,11 +4,12 @@ import type { ReactNode } from "react";
 import "@tabler/core/dist/css/tabler.min.css";
 
 import { AppShell } from "./AppShell";
+import { ToastProvider } from "./components/ToastProvider";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Momentum ETF",
-  description: "Momentum ETF 운영 UI",
+  title: "Jason 투자",
+  description: "Jason 투자 운영 UI",
 };
 
 type RootLayoutProps = {
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="ko">
       <body>
-        <AppShell>{children}</AppShell>
+        <ToastProvider>
+          <AppShell>{children}</AppShell>
+        </ToastProvider>
       </body>
     </html>
   );

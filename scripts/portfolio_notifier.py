@@ -14,7 +14,6 @@ from datetime import datetime
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import warnings
 
 import pytz
 
@@ -27,16 +26,6 @@ from utils.report import format_kr_money
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-# Suppress Streamlit warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="streamlit")
-for _name in [
-    "streamlit",
-    "streamlit.runtime.caching.cache_data_api",
-    "streamlit.runtime.scriptrunner_utils.script_run_context",
-    "streamlit.runtime.state.session_state_proxy",
-]:
-    logging.getLogger(_name).setLevel(logging.ERROR)
 
 
 def get_trend_emoji(val):

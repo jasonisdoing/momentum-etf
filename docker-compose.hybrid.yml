@@ -9,25 +9,10 @@ services:
       - ./zaccounts:/app/zaccounts:ro
     restart: unless-stopped
 
-  python_app:
-    build: .
-    command: python run.py --server.port 8501 --server.baseUrlPath=py
-    env_file:
-      - .env
-    environment:
-      - TZ=Asia/Seoul
-    volumes:
-      - ./logs:/app/logs
-      - ./.streamlit:/app/.streamlit
-      - /etc/localtime:/etc/localtime:ro
-      - /etc/timezone:/etc/timezone:ro
-    restart: unless-stopped
-
   hybrid_proxy:
     image: nginx:1.27-alpine
     depends_on:
       - node_app
-      - python_app
     ports:
       - "8080:80"
     volumes:

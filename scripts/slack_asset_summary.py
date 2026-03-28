@@ -29,25 +29,6 @@ from utils.portfolio_io import (
 )
 from utils.report import format_kr_money
 
-# Suppress Streamlit warnings in non-Streamlit environments
-os.environ["STREAMLIT_GLOBAL_LOG_LEVEL"] = "error"
-logging.getLogger("streamlit").setLevel(logging.ERROR)
-logging.getLogger("streamlit.runtime.caching.cache_data_api").setLevel(logging.ERROR)
-logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
-
-# Silencing the "missing ScriptRunContext" and other Streamlit UserWarnings
-import warnings
-
-warnings.filterwarnings("ignore", category=UserWarning, module="streamlit")
-
-# streamlit.runtime.scriptrunner_utils.script_run_context
-try:
-    from streamlit.runtime.scriptrunner_utils import script_run_context
-
-    script_run_context._LOGGER.setLevel(logging.ERROR)
-except Exception:
-    pass
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 

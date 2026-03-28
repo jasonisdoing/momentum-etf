@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function CashPage() {
   return (
-    <PageFrame title="자산관리">
+    <PageFrame title="자산 관리">
       <CashManager />
     </PageFrame>
   );

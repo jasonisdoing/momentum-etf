@@ -38,6 +38,15 @@
 - 로컬에서 Google 로그인 흐름과 허용 이메일 인증이 성공적으로 동작함을 확인했다.
 - 전역 레이아웃을 Tabler `navbar` 기준으로 재구성하기 시작했다.
 - 전역 본문 폭과 주요 화면 헤더/섹션/폼 밀도를 `Tabler 기준`으로 표준화하는 작업을 시작했다.
+- `PageFrame`, `appPageStack`, `appBannerStack`, `appSection` 기준으로 주요 화면의 타이틀/배너/첫 카드 시작 구조를 공통 패턴으로 정리했다.
+- `/stocks`의 티커 컬럼은 고정폭 식별자 폰트(`appCodeText`) 기준으로 표준화했다.
+- Node `시스템정보(/system)` 1차 조회 화면과 `/api/system`을 구현했다.
+- Node `메모(/note)` 1차 화면과 `/api/note`를 구현했다.
+- Node `AI용 요약(/summary)` 1차 화면과 `/api/summary`를 구현했다.
+- Node `주별(/weekly)` 화면과 `/api/weekly`를 구현했다.
+- `주별`은 조회, 수정, 이번주 데이터 집계를 Node에서 직접 처리하도록 옮겼다.
+- `scripts/generate_ai_summary.py`를 추가해 Python의 AI용 요약 생성 규칙을 Node에서 재사용한다.
+- Python UI는 `/py`에서 더 이상 기능 화면을 제공하지 않고, 종료 안내만 보여주도록 축소했다.
 - 로컬 개발 원칙을 정리했다.
   - 기본 개발은 `npm run dev` + Python 개별 실행
   - Docker 하이브리드 테스트는 프록시/배포 구조 검증이 필요할 때만 수행
@@ -49,19 +58,15 @@
 - 전역 Tabler 표준화 2차 정리
   - 화면별 잔존 커스텀 CSS 축소
   - 페이지 헤더/카드/툴바/테이블 밀도 일관화
-- 남아 있는 Python 메뉴의 Node 이관
-  - `주별`
-  - `시스템정보`
-  - `메모`
-  - `AI용 요약`
+- `주별(/weekly)`의 집계 정확도 2차 보정
+- Python 배포 의존 정리
 
 ## 현재 상태 한 줄 요약
 
-`하이브리드 1차 배포, Google OAuth 인증 전환, 종목 관리/삭제된 종목 통합, Tabler 표준화 1차가 끝났고 이제 남은 화면 이관과 전역 표준화 정리가 다음 단계다.`
+`하이브리드 1차 배포, 주요 메뉴 Node 이관, Python UI 종료 안내 전환까지 끝났고, 남은 작업은 완성도 보정과 배포 정리다.`
 
 ## 지금 시점의 핵심 미해결 기술 이슈
 
-- Node로 아직 옮기지 않은 Python 화면의 저장/조회 규칙을 어떤 순서로 이관할지
 - 로컬 개발 시 Docker 없이도 빠르게 검증하되, 배포 구조 회귀는 어떤 시점에 다시 확인할지
 - Streamlit 제거 시점을 언제로 잡을지
 
@@ -93,7 +98,9 @@
 - Node `종목 관리(/stocks)`는 `등록된 종목 / 삭제된 종목` 토글, 복구, 영구 삭제까지 한 화면에서 처리한다.
 - Node 로그인은 `.streamlit/secrets.toml` 비밀번호 대신 Google OAuth를 사용한다.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_ALLOWED_EMAILS`, `AUTH_SESSION_SECRET`이 Node 인증 필수 설정값이다.
+- `AI용 요약(/summary)`는 Node 화면에서 Python 생성 함수를 직접 호출해 결과 TSV를 만든다.
 - 앞으로 Node UI는 커스텀 테마를 계속 덧붙이지 않고 `Tabler 기본 스타일`로 표준화하는 것을 우선한다.
+- 주요 화면은 `PageFrame > appPageStack > appSection > appCard` 구조로 맞추고, 화면별 임시 여백 보정을 늘리지 않는다.
 
 ## 이번 턴의 환경 제약
 
