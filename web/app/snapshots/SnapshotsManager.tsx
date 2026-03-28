@@ -82,97 +82,115 @@ export function SnapshotsManager() {
 
   if (loading) {
     return (
-      <section className="section">
-        <p>스냅샷 목록을 불러오는 중...</p>
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+            <p>스냅샷 목록을 불러오는 중...</p>
+          </div>
+        </div>
       </section>
     );
   }
 
   return (
-    <>
-      <section className="section">
-        {error ? <div className="bannerError">{error}</div> : null}
-        <div className="tableWrap">
-          <table className="erpTable snapshotsTable">
-            <thead>
-              <tr>
-                <th>날짜</th>
-                <th>총 자산</th>
-                <th>원금</th>
-                <th>현금</th>
-                <th>평가액</th>
-                <th>계좌수</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshots.length === 0 ? (
-                <tr>
-                  <td colSpan={6}>
-                    <div className="tableEmpty">저장된 스냅샷이 없습니다.</div>
-                  </td>
-                </tr>
-              ) : (
-                snapshots.map((snapshot) => {
-                  const isSelected = snapshot.id === selectedSnapshot?.id;
-                  return (
-                    <tr
-                      key={snapshot.id}
-                      className={isSelected ? "tableRowSelected" : undefined}
-                      onClick={() => setSelectedId(snapshot.id)}
-                    >
-                      <td>{snapshot.snapshot_date}</td>
-                      <td>{formatKrw(snapshot.total_assets)}</td>
-                      <td>{formatKrw(snapshot.total_principal)}</td>
-                      <td>{formatKrw(snapshot.cash_balance)}</td>
-                      <td>{formatKrw(snapshot.valuation_krw)}</td>
-                      <td>{snapshot.account_count}</td>
+    <div className="appPageStack">
+      {error ? (
+        <div className="appBannerStack">
+          <div className="bannerError">{error}</div>
+        </div>
+      ) : null}
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+            <div className="tableWrap">
+              <table className="erpTable snapshotsTable">
+                <thead>
+                  <tr>
+                    <th>날짜</th>
+                    <th>총 자산</th>
+                    <th>원금</th>
+                    <th>현금</th>
+                    <th>평가액</th>
+                    <th>계좌수</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {snapshots.length === 0 ? (
+                    <tr>
+                      <td colSpan={6}>
+                        <div className="tableEmpty">저장된 스냅샷이 없습니다.</div>
+                      </td>
                     </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+                  ) : (
+                    snapshots.map((snapshot) => {
+                      const isSelected = snapshot.id === selectedSnapshot?.id;
+                      return (
+                        <tr
+                          key={snapshot.id}
+                          className={isSelected ? "tableRowSelected" : undefined}
+                          onClick={() => setSelectedId(snapshot.id)}
+                        >
+                          <td>{snapshot.snapshot_date}</td>
+                          <td>{formatKrw(snapshot.total_assets)}</td>
+                          <td>{formatKrw(snapshot.total_principal)}</td>
+                          <td>{formatKrw(snapshot.cash_balance)}</td>
+                          <td>{formatKrw(snapshot.valuation_krw)}</td>
+                          <td>{snapshot.account_count}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
 
-      <section className="section">
-        <div className="sectionHeaderCompact">
-          <h2>선택일 계좌별 상세</h2>
-          <span className="tableMuted">{selectedSnapshot?.snapshot_date ?? "-"}</span>
-        </div>
-        <div className="tableWrap">
-          <table className="erpTable">
-            <thead>
-              <tr>
-                <th>계좌</th>
-                <th>총 자산</th>
-                <th>원금</th>
-                <th>현금</th>
-                <th>평가액</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedSnapshot?.accounts.length ? (
-                selectedSnapshot.accounts.map((account) => (
-                  <tr key={`${selectedSnapshot.id}-${account.account_id}`}>
-                    <td>{account.account_name}</td>
-                    <td>{formatKrw(account.total_assets)}</td>
-                    <td>{formatKrw(account.total_principal)}</td>
-                    <td>{formatKrw(account.cash_balance)}</td>
-                    <td>{formatKrw(account.valuation_krw)}</td>
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header appCardHeader">
+            <div className="sectionHeaderCompact w-100">
+              <h2>선택일 계좌별 상세</h2>
+              <span className="tableMuted">{selectedSnapshot?.snapshot_date ?? "-"}</span>
+            </div>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <div className="tableWrap">
+              <table className="erpTable">
+                <thead>
+                  <tr>
+                    <th>계좌</th>
+                    <th>총 자산</th>
+                    <th>원금</th>
+                    <th>현금</th>
+                    <th>평가액</th>
                   </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={5}>
-                    <div className="tableEmpty">선택한 스냅샷의 계좌 상세 데이터가 없습니다.</div>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody>
+                  {selectedSnapshot?.accounts.length ? (
+                    selectedSnapshot.accounts.map((account) => (
+                      <tr key={`${selectedSnapshot.id}-${account.account_id}`}>
+                        <td>{account.account_name}</td>
+                        <td>{formatKrw(account.total_assets)}</td>
+                        <td>{formatKrw(account.total_principal)}</td>
+                        <td>{formatKrw(account.cash_balance)}</td>
+                        <td>{formatKrw(account.valuation_krw)}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5}>
+                        <div className="tableEmpty">선택한 스냅샷의 계좌 상세 데이터가 없습니다.</div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       </section>
-    </>
+    </div>
   );
 }
