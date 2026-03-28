@@ -1221,8 +1221,18 @@ a {
     flex-direction: column;
   }
 
+  .appMain {
+    position: relative;
+  }
+
   .appSidebarDesktop {
     display: none;
+  }
+
+  .appTopHeader {
+    position: sticky;
+    top: 0;
+    z-index: 1050;
   }
 
   .appTopHeaderInner {
@@ -1255,8 +1265,14 @@ a {
     display: block;
   }
 
+  .appMobileMenu {
+    position: sticky;
+    top: var(--app-header-height);
+    z-index: 1040;
+  }
+
   .appContent {
-    padding: 0.25rem 0 1rem;
+    padding: 0.5rem 0 1rem;
   }
 
   .pageFrame {
@@ -1312,6 +1328,11 @@ a {
     min-width: 0;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .appBody {
+    position: relative;
+    z-index: 1;
   }
 }
 
