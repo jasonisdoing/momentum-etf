@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
 import { useToast } from "../components/ToastProvider";
 
 type AccountOption = {
@@ -51,7 +55,9 @@ export function SummaryManager() {
 
       const nextAccounts = payload.accounts ?? [];
       setAccounts(nextAccounts);
-      setSelectedAccountId(payload.account_id ?? nextAccounts[0]?.account_id ?? "");
+      const nextAccountId = payload.account_id ?? nextAccounts[0]?.account_id ?? "";
+      setSelectedAccountId(nextAccountId);
+      writeRememberedMomentumEtfAccountId(nextAccountId);
       setMemoContent(String(payload.content ?? ""));
       setSummaryText("");
       setWarnings([]);
@@ -63,7 +69,7 @@ export function SummaryManager() {
   }
 
   useEffect(() => {
-    void load();
+    void load(readRememberedMomentumEtfAccountId() ?? undefined);
   }, []);
 
   const selectedAccount = useMemo(
@@ -72,6 +78,7 @@ export function SummaryManager() {
   );
 
   function handleAccountChange(nextAccountId: string) {
+    writeRememberedMomentumEtfAccountId(nextAccountId);
     void load(nextAccountId);
   }
 
@@ -123,26 +130,30 @@ export function SummaryManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBody">
-            <div className="tableToolbar">
-              <div className="toolbarActions">
-                <select
-                  className="field compactField"
-                  value={selectedAccountId}
-                  onChange={(event) => handleAccountChange(event.target.value)}
-                >
-                  {accounts.map((account) => (
-                    <option key={account.account_id} value={account.account_id}>
-                      {account.order}. {account.name}
-                    </option>
-                  ))}
-                </select>
+            <div className="accountToolbar">
+              <div className="accountToolbarLeft">
+                <div className="accountSelect">
+                  <select
+                    className="field compactField"
+                    value={selectedAccountId}
+                    onChange={(event) => handleAccountChange(event.target.value)}
+                  >
+                    {accounts.map((account) => (
+                      <option key={account.account_id} value={account.account_id}>
+                        {account.order}. {account.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="tableMeta">
-                {selectedAccount ? (
-                  <span>
-                    {selectedAccount.icon} {selectedAccount.name}
-                  </span>
-                ) : null}
+              <div className="accountToolbarRight">
+                <div className="accountToolbarMeta">
+                  {selectedAccount ? (
+                    <span>
+                      {selectedAccount.icon} {selectedAccount.name}
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </div>
 

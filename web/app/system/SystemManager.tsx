@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { type GridColDef } from "@mui/x-data-grid";
 
+import { AppDataGrid } from "../components/AppDataGrid";
 import { useToast } from "../components/ToastProvider";
 
 type SystemSummaryRow = {
@@ -24,6 +26,9 @@ type SystemResponse = {
   error?: string;
 };
 
+type SystemSummaryGridRow = SystemSummaryRow & { id: string };
+type SystemScheduleGridRow = SystemScheduleRow & { id: string };
+
 function formatCount(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
@@ -37,6 +42,19 @@ export function SystemManager() {
   const [runningAction, setRunningAction] = useState<"meta_all" | "cache_all" | "asset_summary" | null>(null);
   const [isPending, startTransition] = useTransition();
   const toast = useToast();
+  const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
+  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => ({ ...row, id: row.job }));
+  const summaryColumns: GridColDef<SystemSummaryGridRow>[] = [
+    { field: "category", headerName: "구분", minWidth: 160, flex: 1 },
+    { field: "count", headerName: "개수", minWidth: 96, width: 96, align: "right", headerAlign: "right", renderCell: (params) => formatCount(params.row.count) },
+    { field: "target", headerName: "대상", minWidth: 220, flex: 1.2 },
+  ];
+  const scheduleColumns: GridColDef<SystemScheduleGridRow>[] = [
+    { field: "job", headerName: "작업", minWidth: 180, flex: 1 },
+    { field: "target", headerName: "대상", minWidth: 180, flex: 1 },
+    { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 140 },
+    { field: "command", headerName: "실행 명령", minWidth: 320, flex: 1.6, renderCell: (params) => <span className="appCodeText">{params.row.command}</span> },
+  ];
 
   useEffect(() => {
     let alive = true;
@@ -74,18 +92,6 @@ export function SystemManager() {
       alive = false;
     };
   }, []);
-
-  if (loading) {
-    return (
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-            <p>시스템정보 데이터를 불러오는 중...</p>
-          </div>
-        </div>
-      </section>
-    );
-  }
 
   function handleAction(action: "meta_all" | "cache_all" | "asset_summary") {
     startTransition(async () => {
@@ -169,26 +175,7 @@ export function SystemManager() {
             </div>
           </div>
           <div className="card-body appCardBodyTight">
-            <div className="tableWrap">
-              <table className="erpTable">
-                <thead>
-                  <tr>
-                    <th>구분</th>
-                    <th className="tableAlignRight">개수</th>
-                    <th>대상</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summaryRows.map((row) => (
-                    <tr key={row.category}>
-                      <td>{row.category}</td>
-                      <td className="tableAlignRight">{formatCount(row.count)}</td>
-                      <td>{row.target}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <AppDataGrid rows={summaryGridRows} columns={summaryColumns} loading={loading} minHeight="18rem" />
           </div>
         </div>
       </section>
@@ -201,28 +188,7 @@ export function SystemManager() {
             </div>
           </div>
           <div className="card-body appCardBodyTight">
-            <div className="tableWrap">
-              <table className="erpTable">
-                <thead>
-                  <tr>
-                    <th>작업</th>
-                    <th>대상</th>
-                    <th>자동 주기</th>
-                    <th>실행 명령</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {scheduleRows.map((row) => (
-                    <tr key={row.job}>
-                      <td>{row.job}</td>
-                      <td>{row.target}</td>
-                      <td>{row.cadence}</td>
-                      <td className="appCodeText">{row.command}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <AppDataGrid rows={scheduleGridRows} columns={scheduleColumns} loading={loading} minHeight="18rem" />
             {scheduleNote ? <div className="tableFooterMeta">{scheduleNote}</div> : null}
           </div>
         </div>

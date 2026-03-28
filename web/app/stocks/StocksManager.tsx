@@ -8,8 +8,14 @@ import {
   IconTrash,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { type GridColDef, type GridRowSelectionModel } from "@mui/x-data-grid";
 
+import { AppDataGrid } from "../components/AppDataGrid";
 import { AppModal } from "../components/AppModal";
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
 import { useToast } from "../components/ToastProvider";
 
 type StocksAccountItem = {
@@ -67,6 +73,9 @@ type DeletedStocksResponse = {
 };
 
 type ViewMode = "active" | "deleted";
+
+type ActiveStockGridRow = ActiveStocksRowItem & { id: string };
+type DeletedStockGridRow = DeletedStocksRowItem & { id: string };
 
 const BUCKET_OPTIONS = [
   { id: 1, name: "1. 모멘텀" },
@@ -129,7 +138,9 @@ export function StocksManager() {
       }
 
       setAccounts(payload.accounts ?? []);
-      setSelectedAccountId(payload.account_id ?? "");
+      const nextAccountId = payload.account_id ?? "";
+      setSelectedAccountId(nextAccountId);
+      writeRememberedMomentumEtfAccountId(nextAccountId);
       setSelectedDeletedTickers([]);
 
       if (mode === "active") {
@@ -145,7 +156,7 @@ export function StocksManager() {
   }
 
   useEffect(() => {
-    void load(viewMode);
+    void load(viewMode, readRememberedMomentumEtfAccountId() ?? undefined);
   }, []);
 
   const selectedAccount = useMemo(
@@ -155,8 +166,143 @@ export function StocksManager() {
 
   const selectedDeletedTickerSet = useMemo(() => new Set(selectedDeletedTickers), [selectedDeletedTickers]);
   const allDeletedSelected = deletedRows.length > 0 && selectedDeletedTickers.length === deletedRows.length;
+  const activeGridRows = useMemo<ActiveStockGridRow[]>(
+    () => activeRows.map((row) => ({ ...row, id: row.ticker.trim().toUpperCase() })),
+    [activeRows],
+  );
+  const deletedGridRows = useMemo<DeletedStockGridRow[]>(
+    () => deletedRows.map((row) => ({ ...row, id: row.ticker.trim().toUpperCase() })),
+    [deletedRows],
+  );
+  const activeColumns = useMemo<GridColDef<ActiveStockGridRow>[]>(
+    () => [
+      {
+        field: "__edit__",
+        headerName: "",
+        width: 58,
+        sortable: false,
+        filterable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => (
+          <button className="btn btn-link btn-sm p-0 appEditLink" type="button" onClick={() => openEditModal(params.row)}>
+            Edit
+          </button>
+        ),
+      },
+      {
+        field: "bucket_name",
+        headerName: "버킷",
+        width: 112,
+        minWidth: 112,
+        sortable: false,
+        cellClassName: (params) => `appBucketCell appBucketCell${params.row.bucket_id}`,
+      },
+      {
+        field: "ticker",
+        headerName: "티커",
+        width: 98,
+        minWidth: 98,
+        renderCell: (params) => <span className="appCodeText">{params.row.ticker}</span>,
+      },
+      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      {
+        field: "week_volume",
+        headerName: "주간거래량",
+        width: 116,
+        minWidth: 116,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatNumber(params.row.week_volume),
+      },
+      ...(["return_1w", "return_2w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
+        (field) => ({
+          field,
+          headerName:
+            field === "return_1w"
+              ? "1주(%)"
+              : field === "return_2w"
+                ? "2주(%)"
+                : field === "return_1m"
+                  ? "1달(%)"
+                  : field === "return_3m"
+                    ? "3달(%)"
+                    : field === "return_6m"
+                      ? "6달(%)"
+                      : "12달(%)",
+          width: 88,
+          minWidth: 88,
+          align: "right" as const,
+          headerAlign: "right" as const,
+          renderCell: (params: { row: ActiveStockGridRow }) => (
+            <span className={getSignedMetricClass(params.row[field])}>{formatPercent(params.row[field])}</span>
+          ),
+        }),
+      ),
+      { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
+      { field: "added_date", headerName: "추가일자", width: 112, minWidth: 112 },
+    ],
+    [],
+  );
+  const deletedColumns = useMemo<GridColDef<DeletedStockGridRow>[]>(
+    () => [
+      {
+        field: "bucket_name",
+        headerName: "버킷",
+        width: 112,
+        minWidth: 112,
+        sortable: false,
+        cellClassName: (params) => `appBucketCell appBucketCell${params.row.bucket_id}`,
+      },
+      {
+        field: "ticker",
+        headerName: "티커",
+        width: 98,
+        minWidth: 98,
+        renderCell: (params) => <span className="appCodeText">{params.row.ticker}</span>,
+      },
+      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      {
+        field: "week_volume",
+        headerName: "주간거래량",
+        width: 116,
+        minWidth: 116,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatNumber(params.row.week_volume),
+      },
+      ...(["return_1w", "return_2w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
+        (field) => ({
+          field,
+          headerName:
+            field === "return_1w"
+              ? "1주(%)"
+              : field === "return_2w"
+                ? "2주(%)"
+                : field === "return_1m"
+                  ? "1달(%)"
+                  : field === "return_3m"
+                    ? "3달(%)"
+                    : field === "return_6m"
+                      ? "6달(%)"
+                      : "12달(%)",
+          width: 88,
+          minWidth: 88,
+          align: "right" as const,
+          headerAlign: "right" as const,
+          renderCell: (params: { row: DeletedStockGridRow }) => (
+            <span className={getSignedMetricClass(params.row[field])}>{formatPercent(params.row[field])}</span>
+          ),
+        }),
+      ),
+      { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
+      { field: "deleted_date", headerName: "삭제일", width: 112, minWidth: 112 },
+      { field: "deleted_reason", headerName: "삭제 사유", minWidth: 160, flex: 0.7 },
+    ],
+    [],
+  );
 
   function handleAccountChange(nextAccountId: string) {
+    writeRememberedMomentumEtfAccountId(nextAccountId);
     void load(viewMode, nextAccountId);
   }
 
@@ -312,22 +458,16 @@ export function StocksManager() {
     });
   }
 
-  function toggleDeletedTicker(ticker: string) {
-    setSelectedDeletedTickers((current) => {
-      const normalized = ticker.trim().toUpperCase();
-      if (current.includes(normalized)) {
-        return current.filter((item) => item !== normalized);
-      }
-      return [...current, normalized];
-    });
-  }
-
   function toggleAllDeleted() {
     if (allDeletedSelected) {
       setSelectedDeletedTickers([]);
       return;
     }
     setSelectedDeletedTickers(deletedRows.map((row) => row.ticker.trim().toUpperCase()));
+  }
+
+  function handleDeletedSelectionChange(model: GridRowSelectionModel) {
+    setSelectedDeletedTickers(Array.from(model.ids, (item) => String(item).trim().toUpperCase()));
   }
 
   function handleRestoreDeleted() {
@@ -397,9 +537,9 @@ export function StocksManager() {
       <section className="appSection appSectionFill stocksPage">
         <div className="card appCard stocksCard">
           <div className="card-header">
-            <div className="stocksToolbar w-100">
-              <div className="stocksToolbarLeft">
-                <div className="stocksSelect">
+            <div className="accountToolbar w-100">
+              <div className="accountToolbarLeft">
+                <div className="accountSelect">
                   <select
                     className="form-select"
                     aria-label="계좌 선택"
@@ -415,7 +555,7 @@ export function StocksManager() {
                   </select>
                 </div>
 
-                <div className="stocksToolbarModes">
+                <div className="accountToolbarOptions stocksToolbarModes">
                   <button
                     className={
                       viewMode === "active" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"
@@ -439,7 +579,7 @@ export function StocksManager() {
                 </div>
               </div>
 
-              <div className="stocksToolbarRight">
+              <div className="accountToolbarRight">
                 <div className="stocksSummary">
                   {selectedAccount ? (
                     <span className="badge stocksMetricBadge">
@@ -494,158 +634,24 @@ export function StocksManager() {
           </div>
 
           <div className="stocksTableWrap">
-            <table className="table table-vcenter card-table table-nowrap stocksTable">
-              <thead>
-                {viewMode === "active" ? (
-                  <tr>
-                    <th className="w-1"></th>
-                    <th>버킷</th>
-                    <th>티커</th>
-                    <th>종목명</th>
-                    <th className="text-end">주간거래량</th>
-                    <th className="text-end">1주(%)</th>
-                    <th className="text-end">2주(%)</th>
-                    <th className="text-end">1달(%)</th>
-                    <th className="text-end">3달(%)</th>
-                    <th className="text-end">6달(%)</th>
-                    <th className="text-end">12달(%)</th>
-                    <th className="stocksDateCol">상장일</th>
-                    <th className="stocksDateCol">추가일자</th>
-                  </tr>
-                ) : (
-                  <tr>
-                    <th className="stocksCheckboxCell">
-                      <input type="checkbox" checked={allDeletedSelected} onChange={toggleAllDeleted} />
-                    </th>
-                    <th>버킷</th>
-                    <th>티커</th>
-                    <th>종목명</th>
-                    <th className="text-end">주간거래량</th>
-                    <th className="text-end">1주(%)</th>
-                    <th className="text-end">2주(%)</th>
-                    <th className="text-end">1달(%)</th>
-                    <th className="text-end">3달(%)</th>
-                    <th className="text-end">6달(%)</th>
-                    <th className="text-end">12달(%)</th>
-                    <th className="stocksDateCol">상장일</th>
-                    <th className="stocksDateCol">삭제일</th>
-                    <th>삭제 사유</th>
-                  </tr>
-                )}
-              </thead>
-              <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={viewMode === "active" ? 13 : 14} className="stocksEmpty">
-                      데이터를 불러오는 중...
-                    </td>
-                  </tr>
-                ) : null}
-
-                {!loading && viewMode === "active" && activeRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={13} className="stocksEmpty">
-                      등록된 종목이 없습니다.
-                    </td>
-                  </tr>
-                ) : null}
-
-                {!loading && viewMode === "deleted" && deletedRows.length === 0 ? (
-                  <tr>
-                    <td colSpan={14} className="stocksEmpty">
-                      삭제된 종목이 없습니다.
-                    </td>
-                  </tr>
-                ) : null}
-
-                {!loading && viewMode === "active"
-                  ? activeRows.map((row) => (
-                      <tr key={row.ticker}>
-                        <td className="text-secondary">
-                          <button
-                            className="btn btn-link btn-sm p-0 appEditLink"
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                          >
-                            Edit
-                          </button>
-                        </td>
-                        <td>
-                          <span className={getBucketClass(row.bucket_id)}>{row.bucket_name}</span>
-                        </td>
-                        <td className="appCodeText">{row.ticker}</td>
-                        <td>{row.name}</td>
-                        <td className="text-end">{formatNumber(row.week_volume)}</td>
-                        <td className={`text-end ${getSignedMetricClass(row.return_1w)}`.trim()}>
-                          {formatPercent(row.return_1w)}
-                        </td>
-                        <td className={`text-end ${getSignedMetricClass(row.return_2w)}`.trim()}>
-                          {formatPercent(row.return_2w)}
-                        </td>
-                        <td className={`text-end ${getSignedMetricClass(row.return_1m)}`.trim()}>
-                          {formatPercent(row.return_1m)}
-                        </td>
-                        <td className={`text-end ${getSignedMetricClass(row.return_3m)}`.trim()}>
-                          {formatPercent(row.return_3m)}
-                        </td>
-                        <td className={`text-end ${getSignedMetricClass(row.return_6m)}`.trim()}>
-                          {formatPercent(row.return_6m)}
-                        </td>
-                        <td className={`text-end ${getSignedMetricClass(row.return_12m)}`.trim()}>
-                          {formatPercent(row.return_12m)}
-                        </td>
-                        <td className="stocksDateCol">{row.listing_date}</td>
-                        <td className="stocksDateCol">{row.added_date}</td>
-                      </tr>
-                    ))
-                  : null}
-
-                {!loading && viewMode === "deleted"
-                  ? deletedRows.map((row) => {
-                      const isChecked = selectedDeletedTickerSet.has(row.ticker.trim().toUpperCase());
-                      return (
-                        <tr key={row.ticker} className={isChecked ? "stocksSelectedRow" : undefined}>
-                          <td className="stocksCheckboxCell">
-                            <input
-                              type="checkbox"
-                              checked={isChecked}
-                              onChange={() => toggleDeletedTicker(row.ticker)}
-                              disabled={isPending}
-                            />
-                          </td>
-                          <td>
-                            <span className={getBucketClass(row.bucket_id)}>{row.bucket_name}</span>
-                          </td>
-                          <td className="appCodeText">{row.ticker}</td>
-                          <td>{row.name}</td>
-                          <td className="text-end">{formatNumber(row.week_volume)}</td>
-                          <td className={`text-end ${getSignedMetricClass(row.return_1w)}`.trim()}>
-                            {formatPercent(row.return_1w)}
-                          </td>
-                          <td className={`text-end ${getSignedMetricClass(row.return_2w)}`.trim()}>
-                            {formatPercent(row.return_2w)}
-                          </td>
-                          <td className={`text-end ${getSignedMetricClass(row.return_1m)}`.trim()}>
-                            {formatPercent(row.return_1m)}
-                          </td>
-                          <td className={`text-end ${getSignedMetricClass(row.return_3m)}`.trim()}>
-                            {formatPercent(row.return_3m)}
-                          </td>
-                          <td className={`text-end ${getSignedMetricClass(row.return_6m)}`.trim()}>
-                            {formatPercent(row.return_6m)}
-                          </td>
-                          <td className={`text-end ${getSignedMetricClass(row.return_12m)}`.trim()}>
-                            {formatPercent(row.return_12m)}
-                          </td>
-                          <td className="stocksDateCol">{row.listing_date}</td>
-                          <td className="stocksDateCol">{row.deleted_date}</td>
-                          <td className="stocksMuted">{row.deleted_reason}</td>
-                        </tr>
-                      );
-                    })
-                  : null}
-              </tbody>
-            </table>
+            {viewMode === "active" ? (
+              <AppDataGrid
+                rows={activeGridRows}
+                columns={activeColumns}
+                loading={loading}
+                minHeight="68vh"
+              />
+            ) : (
+              <AppDataGrid
+                rows={deletedGridRows}
+                columns={deletedColumns}
+                loading={loading}
+                minHeight="68vh"
+                checkboxSelection
+                rowSelectionModel={{ type: "include", ids: new Set(selectedDeletedTickers) }}
+                onRowSelectionModelChange={handleDeletedSelectionChange}
+              />
+            )}
           </div>
         </div>
       </section>

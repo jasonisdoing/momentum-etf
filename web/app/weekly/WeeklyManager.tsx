@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
+import { type GridColDef } from "@mui/x-data-grid";
 
+import { AppDataGrid } from "../components/AppDataGrid";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
@@ -49,6 +51,10 @@ type WeeklyResponse = {
   editable_fields?: WeeklyEditableField[];
   core_hidden_keys?: string[];
   error?: string;
+};
+
+type WeeklyGridRow = WeeklyRow & {
+  id: string;
 };
 
 type ViewMode = "core" | "full";
@@ -224,6 +230,67 @@ export function WeeklyManager() {
     return COLUMN_DEFS.filter((column) => !coreHiddenKeys.includes(column.key));
   }, [coreHiddenKeys, viewMode]);
 
+  const gridRows = useMemo<WeeklyGridRow[]>(
+    () =>
+      rows.map((row) => ({
+        ...row,
+        id: row.week_date,
+      })),
+    [rows],
+  );
+
+  const gridColumns = useMemo<GridColDef<WeeklyGridRow>[]>(
+    () => [
+      {
+        field: "__edit__",
+        headerName: "",
+        width: 58,
+        sortable: false,
+        filterable: false,
+        disableColumnMenu: true,
+        renderCell: (params) => (
+          <button
+            className="btn btn-link btn-sm p-0 appEditLink"
+            type="button"
+            onClick={() => openEditModal(params.row)}
+          >
+            Edit
+          </button>
+        ),
+      },
+      ...visibleColumns.map<GridColDef<WeeklyGridRow>>((column) => ({
+        field: column.key,
+        headerName: column.label,
+        type: "string",
+        minWidth:
+          column.key === "week_date_display"
+            ? 132
+            : column.key === "memo"
+              ? 320
+              : MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
+                ? 108
+                : 96,
+        flex: column.key === "memo" ? 1.4 : column.key === "week_date_display" ? 0 : undefined,
+        align:
+          MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
+            ? "right"
+            : "left",
+        headerAlign:
+          MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
+            ? "right"
+            : "left",
+        sortable: false,
+        cellClassName: (params) => getColumnCellClass(column.key, params.value as number | string),
+        renderCell: (params) => (
+          <span title={column.key === "memo" ? String(params.value ?? "") : undefined}>
+            {formatCellValue(params.row, column.key)}
+          </span>
+        ),
+      })),
+    ],
+    [visibleColumns],
+  );
+
   function openEditModal(row: WeeklyRow) {
     setEditingRow(row);
     setEditingValues(
@@ -301,20 +368,6 @@ export function WeeklyManager() {
   const leftFields = editableFields.slice(0, halfIndex);
   const rightFields = editableFields.slice(halfIndex);
 
-  if (loading) {
-    return (
-      <div className="appPageStack">
-        <section className="appSection">
-          <div className="card appCard">
-            <div className="card-body appCardBody">
-              <p className="mb-0">주별 데이터를 불러오는 중...</p>
-            </div>
-          </div>
-        </section>
-      </div>
-    );
-  }
-
   return (
     <div className="appPageStack">
       {error ? (
@@ -355,66 +408,13 @@ export function WeeklyManager() {
             </div>
           </div>
           <div className="card-body appCardBodyTight">
-            <div className="tableWrap">
-              <table className="erpTable">
-                <thead>
-                  <tr>
-                    <th className="w-1"></th>
-                    {visibleColumns.map((column) => (
-                      <th
-                        key={column.key}
-                        className={[
-                          column.key === "week_date_display" ? "weeklyDateCell" : "",
-                          column.key === "memo" ? "weeklyMemoCell" : "",
-                          MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
-                            ? "tableAlignRight"
-                            : "",
-                        ]
-                          .filter(Boolean)
-                          .join(" ") || undefined}
-                      >
-                        {column.label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={visibleColumns.length + 1}>
-                        <div className="tableEmpty">저장된 주별 데이터가 없습니다.</div>
-                      </td>
-                    </tr>
-                  ) : (
-                    rows.map((row) => (
-                      <tr key={row.week_date} className={row.week_date === activeWeekDate ? "tableRowSelected" : undefined}>
-                        <td className="text-secondary">
-                          <button
-                            className="btn btn-link btn-sm p-0 appEditLink"
-                            type="button"
-                            onClick={() => openEditModal(row)}
-                          >
-                            Edit
-                          </button>
-                        </td>
-                        {visibleColumns.map((column) => {
-                          const rawValue = row[column.key as keyof WeeklyRow];
-                          return (
-                            <td
-                              key={column.key}
-                              className={getColumnCellClass(column.key, rawValue as number | string)}
-                              title={column.key === "memo" ? String(rawValue ?? "") : undefined}
-                            >
-                              {formatCellValue(row, column.key)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <AppDataGrid
+              rows={gridRows}
+              columns={gridColumns}
+              loading={loading}
+              minHeight="68vh"
+              getRowClassName={(params) => (params.row.week_date === activeWeekDate ? "tableRowSelected" : "")}
+            />
           </div>
         </div>
       </section>
