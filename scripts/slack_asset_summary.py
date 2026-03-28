@@ -146,7 +146,7 @@ def main():
 
         # Load holdings
         try:
-            # We need to mock streamlit session_state/secrets for some utils if they depend on it
+            # 일부 공용 유틸이 환경 설정을 필요로 할 수 있어 예외를 명확히 처리한다.
             df = load_real_holdings_table(account_id, strict_price_cache=True)
         except MissingPriceCacheError as e:
             alert_msg = _build_missing_cache_alert(account_id, e.tickers)

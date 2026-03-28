@@ -1,7 +1,7 @@
 # Node + Python 전환 인수인계 폴더
 
-이 폴더는 Momentum ETF를 `기존 Python(Streamlit)` 단일 앱에서
-`Node.js + TypeScript 프론트엔드`와 `Python 백엔드/기존 화면`이 공존하는 구조로
+이 폴더는 Momentum ETF를 `기존 Python UI` 단일 앱에서
+`Node.js + TypeScript 프론트엔드`와 `Python 백엔드` 구조로
 점진 전환하기 위한 인수인계 문서 세트다.
 
 목표는 다음과 같다.
@@ -28,4 +28,4 @@
 
 ## 현재 한 줄 상태
 
-`Node + Python 하이브리드 1차 배포`, `Google OAuth 인증 전환`, `종목 관리` 1차 이관까지 끝났고, 다음 우선순위는 `삭제된 종목` 이관이다.
+`Node UI 전환`, `Google OAuth 인증`, `Python UI 제거`까지 끝났고, 남은 우선순위는 완성도 보정과 배포 정리다.

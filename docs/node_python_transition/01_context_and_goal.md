@@ -2,13 +2,13 @@
 
 ## 현재 시스템
 
-- 현재 운영 UI는 Python `Streamlit` 기반이다.
+- 현재 운영 UI는 Node.js + TypeScript 기반이다.
 - 데이터/도메인 로직은 Python 코드와 MongoDB 중심으로 구성되어 있다.
-- 현재 배포 구조는 Python 앱 단일 컨테이너 + `nginx-proxy` 기반이다.
+- 현재 배포 구조는 Node 웹 앱 + Python 스크립트 런타임 + `nginx-proxy` 기반이다.
 
 ## 문제 인식
 
-사용자는 현재 Streamlit UI에 제약이 많다고 느끼고 있다.
+사용자는 기존 Python UI에서 생산성 제약이 많다고 느꼈다.
 
 특히 다음 성격의 화면은 Node.js + TypeScript 기반 웹 UI로 옮길 때 장점이 크다고 판단했다.
 
@@ -34,7 +34,7 @@
 
 이번 단계의 진짜 목표는 아래 한 줄이다.
 
-`같은 도메인에서 Node 앱과 Python 앱이 동시에 안정적으로 뜨는지 검증한다.`
+`Node UI 전환을 완료하고, 남은 Python 의존을 런타임 수준으로만 줄인다.`
 
 ## 이번 단계에서 아직 하지 않을 것
 

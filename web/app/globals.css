@@ -1173,6 +1173,17 @@ a {
   text-align: right;
 }
 
+.appEditLink {
+  color: var(--tblr-primary);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.appEditLink:hover {
+  color: var(--tblr-primary);
+  text-decoration: underline;
+}
+
 .bulkGuide {
   display: grid;
   gap: 4px;

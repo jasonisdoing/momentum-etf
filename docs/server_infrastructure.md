@@ -19,7 +19,7 @@ ssh -i {SSH 키 파일 경로} ubuntu@***.***.***.**
 
 | 컨테이너명 | 이미지 | 역할 |
 |------------|--------|------|
-| momentum-etf-app-1 | momentum-etf-app | Streamlit 앱 (포트 80) |
+| momentum-etf-app-1 | momentum-etf-app | Node 웹 앱 (포트 80) |
 | nginx-proxy | nginxproxy/nginx-proxy | 리버스 프록시 (80, 443) |
 | nginx-proxy-acme | nginxproxy/acme-companion | SSL 인증서 자동 갱신 |
 
@@ -68,7 +68,6 @@ location = /robots.txt {
 
 ## 앱 배포 구조
 
-- Streamlit 앱이 컨테이너 내부 포트 80으로 실행
+- Node 웹 앱이 컨테이너 내부 포트 80으로 실행
 - nginx-proxy가 `etf.dojason.com` 요청을 momentum-etf-app-1 컨테이너로 프록시
 - SSL은 acme-companion이 Let's Encrypt 인증서로 자동 처리
-- Streamlit `enableStaticServing = true` 설정으로 `static/` 폴더를 `/app/static/` 경로로 서빙

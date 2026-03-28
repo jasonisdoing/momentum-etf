@@ -68,11 +68,10 @@
 ## 지금 시점의 핵심 미해결 기술 이슈
 
 - 로컬 개발 시 Docker 없이도 빠르게 검증하되, 배포 구조 회귀는 어떤 시점에 다시 확인할지
-- Streamlit 제거 시점을 언제로 잡을지
+- 남은 Python 런타임 의존을 어디까지 줄일지
 
 ## 이번 턴에서 실제 확인한 사실
 
-- Streamlit 1.49.1은 `--server.baseUrlPath`를 지원한다.
 - 초기 공존 검증용 Python 실행 확인을 마쳤다.
 - Next.js 최소 앱은 의존성 설치와 `npm run build`를 통과했다.
 - `npm run start -- --hostname 127.0.0.1 --port 3001` 실행 시 Node 앱이 정상 기동 메시지를 출력했다.
