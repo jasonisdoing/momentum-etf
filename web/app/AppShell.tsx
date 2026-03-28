@@ -342,10 +342,10 @@ export function AppShell({ children }: AppShellProps) {
                   <span className="topbarFxLoading" aria-label="CNN 공포탐욕지수 로딩 중">
                     <span className="topbarSpinner" />
                   </span>
-                ) : fearGreed?.score !== null ? (
+                ) : fearGreed?.score != null ? (
                   <span className="topbarSentimentValue">
-                    <strong>{formatFearGreedScore(fearGreed.score)}</strong>
-                    <span className="topbarSentimentText">({formatFearGreedLabel(fearGreed.label)})</span>
+                    <strong>{formatFearGreedScore(fearGreed?.score)}</strong>
+                    <span className="topbarSentimentText">({formatFearGreedLabel(fearGreed?.label)})</span>
                     {fearGreedDelta !== null ? (
                       <span className={getFxChangeClass(fearGreedDelta)}>
                         {formatFearGreedDelta(fearGreedDelta)}
