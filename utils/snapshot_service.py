@@ -4,13 +4,7 @@ from typing import Any
 
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
-
-
-def _normalize_number(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
+from utils.normalization import normalize_number
 
 
 def load_snapshot_list() -> list[dict[str, Any]]:
@@ -35,10 +29,10 @@ def load_snapshot_list() -> list[dict[str, Any]]:
                     "order": int(
                         account_map.get(str(account.get("account_id") or ""), {}).get("order", 999),
                     ),
-                    "total_assets": _normalize_number(account.get("total_assets")),
-                    "total_principal": _normalize_number(account.get("total_principal")),
-                    "cash_balance": _normalize_number(account.get("cash_balance")),
-                    "valuation_krw": _normalize_number(account.get("valuation_krw")),
+                    "total_assets": normalize_number(account.get("total_assets")),
+                    "total_principal": normalize_number(account.get("total_principal")),
+                    "cash_balance": normalize_number(account.get("cash_balance")),
+                    "valuation_krw": normalize_number(account.get("valuation_krw")),
                 }
                 for account in (doc.get("accounts") or [])
                 if isinstance(account, dict)
@@ -50,10 +44,10 @@ def load_snapshot_list() -> list[dict[str, Any]]:
             {
                 "id": str(doc.get("_id")),
                 "snapshot_date": str(doc.get("snapshot_date") or ""),
-                "total_assets": _normalize_number(doc.get("total_assets")),
-                "total_principal": _normalize_number(doc.get("total_principal")),
-                "cash_balance": _normalize_number(doc.get("cash_balance")),
-                "valuation_krw": _normalize_number(doc.get("valuation_krw")),
+                "total_assets": normalize_number(doc.get("total_assets")),
+                "total_principal": normalize_number(doc.get("total_principal")),
+                "cash_balance": normalize_number(doc.get("cash_balance")),
+                "valuation_krw": normalize_number(doc.get("valuation_krw")),
                 "account_count": len(accounts),
                 "accounts": accounts,
             }

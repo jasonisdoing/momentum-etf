@@ -1,30 +1,13 @@
 from __future__ import annotations
 
-from datetime import date, datetime
 from typing import Any
 
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.normalization import normalize_number, to_iso_string
 
 INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
 INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
-
-
-def _normalize_number(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _to_iso_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, date):
-        return f"{value.isoformat()}T00:00:00+09:00"
-    return str(value)
 
 
 def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -33,10 +16,10 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         week_date = str(doc.get("week_date") or "")
         docs_by_date[week_date] = {
             **doc,
-            "total_expense": _normalize_number(doc.get("withdrawal_personal"))
-            + _normalize_number(doc.get("withdrawal_mom"))
-            + _normalize_number(doc.get("nh_principal_interest")),
-            "total_stocks": _normalize_number(doc.get("profit_count")) + _normalize_number(doc.get("loss_count")),
+            "total_expense": normalize_number(doc.get("withdrawal_personal"))
+            + normalize_number(doc.get("withdrawal_mom"))
+            + normalize_number(doc.get("nh_principal_interest")),
+            "total_stocks": normalize_number(doc.get("profit_count")) + normalize_number(doc.get("loss_count")),
         }
 
     running_total = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
@@ -49,15 +32,15 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
             doc["total_principal"] = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
         else:
-            running_total += _normalize_number(doc.get("deposit_withdrawal"))
+            running_total += normalize_number(doc.get("deposit_withdrawal"))
             doc["total_principal"] = running_total
 
-        running_expense += _normalize_number(doc.get("total_expense"))
+        running_expense += normalize_number(doc.get("total_expense"))
         cumulative_profit = (
-            _normalize_number(doc.get("total_assets")) - _normalize_number(doc.get("total_principal")) - running_expense
+            normalize_number(doc.get("total_assets")) - normalize_number(doc.get("total_principal")) - running_expense
         )
         weekly_profit = cumulative_profit - previous_cumulative_profit
-        total_principal = _normalize_number(doc.get("total_principal"))
+        total_principal = normalize_number(doc.get("total_principal"))
 
         if total_principal > 0:
             weekly_return_pct = (weekly_profit / total_principal) * 100
@@ -108,11 +91,11 @@ def load_dashboard_data() -> dict[str, Any]:
     for config in configs:
         portfolio_account = portfolio_accounts.get(config["account_id"], {})
         snapshot_account = snapshot_accounts.get(config["account_id"], {})
-        total_principal = _normalize_number(
+        total_principal = normalize_number(
             portfolio_account.get("total_principal", snapshot_account.get("total_principal"))
         )
-        cash_balance = _normalize_number(portfolio_account.get("cash_balance", snapshot_account.get("cash_balance")))
-        valuation_krw = _normalize_number(snapshot_account.get("valuation_krw"))
+        cash_balance = normalize_number(portfolio_account.get("cash_balance", snapshot_account.get("cash_balance")))
+        valuation_krw = normalize_number(snapshot_account.get("valuation_krw"))
         total_assets = valuation_krw + cash_balance
         net_profit = total_assets - total_principal
         net_profit_pct = (net_profit / total_principal) * 100 if total_principal > 0 else 0.0
@@ -137,7 +120,7 @@ def load_dashboard_data() -> dict[str, Any]:
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
     valuation_amount = sum(account["valuation_krw"] for account in accounts)
-    previous_total_assets = _normalize_number((previous_snapshot or {}).get("total_assets"))
+    previous_total_assets = normalize_number((previous_snapshot or {}).get("total_assets"))
     daily_profit = total_assets - previous_total_assets if previous_snapshot else 0.0
     daily_return_pct = (daily_profit / previous_total_assets) * 100 if previous_total_assets > 0 else 0.0
 
@@ -146,32 +129,32 @@ def load_dashboard_data() -> dict[str, Any]:
         {"label": "투자 원금", "value": total_principal, "kind": "money"},
         {"label": "현금 잔고", "value": total_cash, "kind": "money"},
         {"label": "금일 손익", "value": daily_profit, "kind": "money"},
-        {"label": "금주 손익", "value": _normalize_number((latest_weekly or {}).get("weekly_profit")), "kind": "money"},
+        {"label": "금주 손익", "value": normalize_number((latest_weekly or {}).get("weekly_profit")), "kind": "money"},
         {
             "label": "누적 손익",
-            "value": _normalize_number((latest_weekly or {}).get("cumulative_profit")),
+            "value": normalize_number((latest_weekly or {}).get("cumulative_profit")),
             "kind": "money",
         },
     ]
 
     buckets = [
-        {"label": "1. 모멘텀", "weight_pct": _normalize_number((latest_weekly or {}).get("bucket_pct_momentum"))},
-        {"label": "2. 혁신기술", "weight_pct": _normalize_number((latest_weekly or {}).get("bucket_pct_innovation"))},
-        {"label": "3. 시장지수", "weight_pct": _normalize_number((latest_weekly or {}).get("bucket_pct_market"))},
-        {"label": "4. 배당방어", "weight_pct": _normalize_number((latest_weekly or {}).get("bucket_pct_dividend"))},
-        {"label": "5. 대체헷지", "weight_pct": _normalize_number((latest_weekly or {}).get("bucket_pct_alternative"))},
-        {"label": "6. 현금", "weight_pct": _normalize_number((latest_weekly or {}).get("bucket_pct_cash"))},
+        {"label": "1. 모멘텀", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_momentum"))},
+        {"label": "2. 혁신기술", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_innovation"))},
+        {"label": "3. 시장지수", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_market"))},
+        {"label": "4. 배당방어", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_dividend"))},
+        {"label": "5. 대체헷지", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_alternative"))},
+        {"label": "6. 현금", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_cash"))},
     ]
 
     stats = [
         {
             "label": "매입 금액",
-            "value": _normalize_number((latest_weekly or {}).get("purchase_amount")),
+            "value": normalize_number((latest_weekly or {}).get("purchase_amount")),
             "kind": "money",
         },
         {
             "label": "평가 금액",
-            "value": valuation_amount or _normalize_number((latest_weekly or {}).get("valuation_amount")),
+            "value": valuation_amount or normalize_number((latest_weekly or {}).get("valuation_amount")),
             "kind": "money",
         },
         {
@@ -182,28 +165,28 @@ def load_dashboard_data() -> dict[str, Any]:
         {"label": "일간 수익률", "value": daily_return_pct, "kind": "percent"},
         {
             "label": "주 수익률",
-            "value": _normalize_number((latest_weekly or {}).get("weekly_return_pct")),
+            "value": normalize_number((latest_weekly or {}).get("weekly_return_pct")),
             "kind": "percent",
         },
         {
             "label": "누적 수익률",
-            "value": _normalize_number((latest_weekly or {}).get("cumulative_return_pct")),
+            "value": normalize_number((latest_weekly or {}).get("cumulative_return_pct")),
             "kind": "percent",
         },
         {
             "label": "수익 종목 수",
-            "value": _normalize_number((latest_weekly or {}).get("profit_count")),
+            "value": normalize_number((latest_weekly or {}).get("profit_count")),
             "kind": "count",
         },
-        {"label": "손실 종목 수", "value": _normalize_number((latest_weekly or {}).get("loss_count")), "kind": "count"},
+        {"label": "손실 종목 수", "value": normalize_number((latest_weekly or {}).get("loss_count")), "kind": "count"},
     ]
 
     updated_at_candidates = [
-        _to_iso_string(f"{latest_snapshot.get('snapshot_date')}T00:00:00+09:00")
+        to_iso_string(f"{latest_snapshot.get('snapshot_date')}T00:00:00+09:00")
         if latest_snapshot and latest_snapshot.get("snapshot_date")
         else None,
-        _to_iso_string((latest_weekly or {}).get("updated_at")),
-        *[_to_iso_string(account.get("updated_at")) for account in portfolio_accounts.values()],
+        to_iso_string((latest_weekly or {}).get("updated_at")),
+        *[to_iso_string(account.get("updated_at")) for account in portfolio_accounts.values()],
     ]
     updated_at_values = sorted([value for value in updated_at_candidates if value])
 

@@ -5,6 +5,7 @@ from typing import Any
 
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.normalization import normalize_nullable_number, normalize_text
 
 BUCKETS: dict[int, str] = {
     1: "1. 모멘텀",
@@ -13,20 +14,6 @@ BUCKETS: dict[int, str] = {
     4: "4. 배당방어",
     5: "5. 대체헷지",
 }
-
-
-def _normalize_number(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _normalize_text(value: Any, fallback: str = "-") -> str:
-    text = str(value or "").strip()
-    return text or fallback
 
 
 def _format_deleted_date(value: Any) -> str:
@@ -93,19 +80,19 @@ def load_active_stocks_table(account_id: str | None = None) -> dict[str, Any]:
     rows = sorted(
         [
             {
-                "ticker": _normalize_text(doc.get("ticker"), ""),
-                "name": _normalize_text(doc.get("name"), ""),
+                "ticker": normalize_text(doc.get("ticker"), ""),
+                "name": normalize_text(doc.get("name"), ""),
                 "bucket_id": int(doc.get("bucket") or 1),
                 "bucket_name": BUCKETS.get(int(doc.get("bucket") or 1), BUCKETS[1]),
-                "added_date": _normalize_text(doc.get("added_date")),
-                "listing_date": _normalize_text(doc.get("listing_date")),
-                "week_volume": _normalize_number(doc.get("1_week_avg_volume")),
-                "return_1w": _normalize_number(doc.get("1_week_earn_rate")),
-                "return_2w": _normalize_number(doc.get("2_week_earn_rate")),
-                "return_1m": _normalize_number(doc.get("1_month_earn_rate")),
-                "return_3m": _normalize_number(doc.get("3_month_earn_rate")),
-                "return_6m": _normalize_number(doc.get("6_month_earn_rate")),
-                "return_12m": _normalize_number(doc.get("12_month_earn_rate")),
+                "added_date": normalize_text(doc.get("added_date"), "-"),
+                "listing_date": normalize_text(doc.get("listing_date"), "-"),
+                "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
+                "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
+                "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
+                "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
+                "return_3m": normalize_nullable_number(doc.get("3_month_earn_rate")),
+                "return_6m": normalize_nullable_number(doc.get("6_month_earn_rate")),
+                "return_12m": normalize_nullable_number(doc.get("12_month_earn_rate")),
             }
             for doc in docs
         ],
@@ -205,20 +192,20 @@ def load_deleted_stocks_table(account_id: str | None = None) -> dict[str, Any]:
     rows = sorted(
         [
             {
-                "ticker": _normalize_text(doc.get("ticker"), ""),
-                "name": _normalize_text(doc.get("name"), ""),
+                "ticker": normalize_text(doc.get("ticker"), ""),
+                "name": normalize_text(doc.get("name"), ""),
                 "bucket_id": int(doc.get("bucket") or 1),
                 "bucket_name": BUCKETS.get(int(doc.get("bucket") or 1), BUCKETS[1]),
-                "listing_date": _normalize_text(doc.get("listing_date")),
-                "week_volume": _normalize_number(doc.get("1_week_avg_volume")),
-                "return_1w": _normalize_number(doc.get("1_week_earn_rate")),
-                "return_2w": _normalize_number(doc.get("2_week_earn_rate")),
-                "return_1m": _normalize_number(doc.get("1_month_earn_rate")),
-                "return_3m": _normalize_number(doc.get("3_month_earn_rate")),
-                "return_6m": _normalize_number(doc.get("6_month_earn_rate")),
-                "return_12m": _normalize_number(doc.get("12_month_earn_rate")),
+                "listing_date": normalize_text(doc.get("listing_date"), "-"),
+                "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
+                "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
+                "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
+                "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
+                "return_3m": normalize_nullable_number(doc.get("3_month_earn_rate")),
+                "return_6m": normalize_nullable_number(doc.get("6_month_earn_rate")),
+                "return_12m": normalize_nullable_number(doc.get("12_month_earn_rate")),
                 "deleted_date": _format_deleted_date(doc.get("deleted_at")),
-                "deleted_reason": _normalize_text(doc.get("deleted_reason")),
+                "deleted_reason": normalize_text(doc.get("deleted_reason"), "-"),
             }
             for doc in docs
         ],

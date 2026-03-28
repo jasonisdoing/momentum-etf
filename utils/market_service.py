@@ -1,42 +1,16 @@
 from __future__ import annotations
 
-from datetime import date, datetime
 from typing import Any
 
 import requests
 
 from utils.db_manager import get_db_connection
-
-
-def _normalize_number(value: Any) -> float:
-    try:
-        return float(value or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _normalize_nullable_number(value: Any) -> float | None:
-    if value in (None, "", "-"):
-        return None
-
-    try:
-        return float(str(value).replace(",", ""))
-    except (TypeError, ValueError):
-        return None
-
-
-def _normalize_text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _to_updated_at_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.isoformat()
-    if isinstance(value, date):
-        return value.isoformat()
-    return str(value)
+from utils.normalization import (
+    normalize_nullable_number,
+    normalize_number,
+    normalize_text,
+    to_iso_string,
+)
 
 
 def _load_kor_etf_realtime_snapshot(tickers: list[str]) -> dict[str, dict[str, float | None]]:
@@ -71,10 +45,10 @@ def _load_kor_etf_realtime_snapshot(tickers: list[str]) -> dict[str, dict[str, f
         if not code or code not in ticker_set:
             continue
 
-        now_val = _normalize_nullable_number(item.get("nowVal"))
-        nav = _normalize_nullable_number(item.get("nav"))
-        change_rate = _normalize_nullable_number(item.get("changeRate"))
-        three_month_earn_rate = _normalize_nullable_number(item.get("threeMonthEarnRate"))
+        now_val = normalize_nullable_number(item.get("nowVal"))
+        nav = normalize_nullable_number(item.get("nav"))
+        change_rate = normalize_nullable_number(item.get("changeRate"))
+        three_month_earn_rate = normalize_nullable_number(item.get("threeMonthEarnRate"))
         deviation = ((now_val / nav) - 1) * 100 if now_val is not None and nav not in (None, 0) else None
 
         snapshot[code] = {
@@ -100,11 +74,11 @@ def load_market_data() -> dict[str, Any]:
 
     normalized_rows = [
         {
-            "ticker": _normalize_text(row.get("티커")),
-            "name": _normalize_text(row.get("종목명")),
-            "listed_at": _normalize_text(row.get("상장일")),
-            "prev_volume": int(_normalize_number(row.get("전일거래량"))),
-            "market_cap": int(_normalize_number(row.get("시가총액"))),
+            "ticker": normalize_text(row.get("티커")),
+            "name": normalize_text(row.get("종목명")),
+            "listed_at": normalize_text(row.get("상장일")),
+            "prev_volume": int(normalize_number(row.get("전일거래량"))),
+            "market_cap": int(normalize_number(row.get("시가총액"))),
         }
         for row in rows
     ]
@@ -112,7 +86,7 @@ def load_market_data() -> dict[str, Any]:
     snapshot = _load_kor_etf_realtime_snapshot([row["ticker"] for row in normalized_rows if row["ticker"]])
 
     return {
-        "updated_at": _to_updated_at_text(doc.get("updated_at")),
+        "updated_at": to_iso_string(doc.get("updated_at")),
         "rows": [
             {
                 **row,
