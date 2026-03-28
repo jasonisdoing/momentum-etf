@@ -14,16 +14,23 @@ export function LoginForm() {
   const error = searchParams.get("error");
 
   return (
-    <div className="loginCard">
-      <div className="loginHeader">
-        <h1>Jason 투자</h1>
+    <div className="container container-tight py-4">
+      <div className="text-center mb-4">
+        <span className="loginBrandMark">Jason 투자</span>
       </div>
+      <div className="card card-md">
+        <div className="card-body">
+          <h2 className="h2 text-center mb-4">로그인</h2>
 
-      {error ? <div className="bannerError">{error}</div> : null}
+          {error ? <div className="alert alert-danger mb-3">{error}</div> : null}
 
-      <Link className="primaryButton loginButton loginGoogleButton" href={buildGoogleLoginHref(nextPath)}>
-        Google로 로그인
-      </Link>
+          <div className="text-muted mb-3">허용된 Google 계정으로 로그인</div>
+
+          <Link className="btn btn-primary w-100" href={buildGoogleLoginHref(nextPath)}>
+            Google로 로그인
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

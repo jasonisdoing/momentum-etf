@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useState } from "react";
 
+import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
 type CashAccountItem = {
@@ -70,12 +71,19 @@ function getLatestUpdatedAt(accounts: CashAccountItem[]): string | null {
   return new Date(Math.max(...timestamps)).toISOString();
 }
 
+function cloneAccount(account: CashAccountItem): CashAccountItem {
+  return {
+    ...account,
+  };
+}
+
 export function CashManager() {
   const [accounts, setAccounts] = useState<CashAccountItem[]>([]);
   const [rates, setRates] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [isPending, startTransition] = useTransition();
+  const [editingAccount, setEditingAccount] = useState<CashAccountItem | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const latestUpdatedAt = getLatestUpdatedAt(accounts);
   const toast = useToast();
 
@@ -112,77 +120,104 @@ export function CashManager() {
     };
   }, []);
 
-  function updateAccount(accountId: string, field: keyof CashAccountItem, rawValue: string) {
-    setAccounts((current) =>
-      current.map((account) => {
-        if (account.account_id !== accountId) {
-          return account;
-        }
+  function updateEditingAccount(field: keyof CashAccountItem, rawValue: string) {
+    setEditingAccount((current) => {
+      if (!current) {
+        return current;
+      }
 
-        const numericValue = rawValue === "" ? null : Number(rawValue);
-        if (field === "cash_balance_native" && account.currency !== "KRW") {
-          const rate = rates[account.currency] ?? 0;
-          return {
-            ...account,
-            cash_balance_native: numericValue,
-            cash_balance_krw: numericValue !== null && rate > 0 ? numericValue * rate : account.cash_balance_krw,
-          };
-        }
-        if (field === "cash_balance_krw" && account.currency === "KRW") {
-          return {
-            ...account,
-            cash_balance_krw: numericValue ?? 0,
-            cash_balance_native: numericValue,
-          };
-        }
+      const numericValue = rawValue === "" ? null : Number(rawValue);
+      if (field === "cash_balance_native" && current.currency !== "KRW") {
+        const rate = rates[current.currency] ?? 0;
         return {
-          ...account,
-          [field]: numericValue,
+          ...current,
+          cash_balance_native: numericValue,
+          cash_balance_krw: numericValue !== null && rate > 0 ? numericValue * rate : current.cash_balance_krw,
         };
-      }),
-    );
+      }
+      if (field === "cash_balance_krw" && current.currency === "KRW") {
+        return {
+          ...current,
+          cash_balance_krw: numericValue ?? 0,
+          cash_balance_native: numericValue,
+        };
+      }
+      return {
+        ...current,
+        [field]: numericValue,
+      };
+    });
   }
 
-  function handleSave() {
-    startTransition(async () => {
-      try {
-        setError(null);
+  function openEditModal(account: CashAccountItem) {
+    setEditingAccount(cloneAccount(account));
+  }
 
-        const payloadAccounts = accounts.map((account) => {
-          const rate = rates[account.currency] ?? 0;
-          const normalizedCashKrw =
-            account.currency === "KRW"
-              ? Number(account.cash_balance_krw ?? 0)
-              : Number(account.cash_balance_native ?? 0) * rate;
+  function closeEditModal() {
+    if (isSaving) {
+      return;
+    }
+    setEditingAccount(null);
+  }
 
-          return {
-            account_id: account.account_id,
-            total_principal: Number(account.total_principal ?? 0),
-            cash_balance_krw: normalizedCashKrw,
-            cash_balance_native:
-              account.currency === "KRW"
-                ? Number(account.cash_balance_krw ?? 0)
-                : Number(account.cash_balance_native ?? 0),
-            cash_currency: account.cash_currency,
-            intl_shares_value: account.intl_shares_value,
-            intl_shares_change: account.intl_shares_change,
-          };
-        });
+  async function handleSave() {
+    if (!editingAccount) {
+      return;
+    }
 
-        const response = await fetch("/api/cash/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accounts: payloadAccounts }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "저장에 실패했습니다.");
-        }
-        toast.success("[자산-자산 관리] 저장 완료");
-      } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "저장에 실패했습니다.");
+    try {
+      setError(null);
+      setIsSaving(true);
+
+      const rate = rates[editingAccount.currency] ?? 0;
+      const normalizedCashKrw =
+        editingAccount.currency === "KRW"
+          ? Number(editingAccount.cash_balance_krw ?? 0)
+          : Number(editingAccount.cash_balance_native ?? 0) * rate;
+
+      const payloadAccount = {
+        account_id: editingAccount.account_id,
+        total_principal: Number(editingAccount.total_principal ?? 0),
+        cash_balance_krw: normalizedCashKrw,
+        cash_balance_native:
+          editingAccount.currency === "KRW"
+            ? Number(editingAccount.cash_balance_krw ?? 0)
+            : Number(editingAccount.cash_balance_native ?? 0),
+        cash_currency: editingAccount.cash_currency,
+        intl_shares_value: editingAccount.intl_shares_value,
+        intl_shares_change: editingAccount.intl_shares_change,
+      };
+
+      const response = await fetch("/api/cash/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accounts: [payloadAccount] }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "저장에 실패했습니다.");
       }
-    });
+
+      const savedAt = new Date().toISOString();
+      setAccounts((current) =>
+        current.map((account) =>
+          account.account_id === editingAccount.account_id
+            ? {
+                ...account,
+                ...editingAccount,
+                cash_balance_krw: normalizedCashKrw,
+                updated_at: savedAt,
+              }
+            : account,
+        ),
+      );
+      toast.success(`[자산-자산 관리] ${editingAccount.name} 저장 완료`);
+      setEditingAccount(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "저장에 실패했습니다.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   if (loading) {
@@ -210,17 +245,11 @@ export function CashManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBody">
-          <div className="tableToolbar">
-            <div />
-            <button className="primaryButton" type="button" onClick={handleSave} disabled={isPending}>
-              {isPending ? "저장 중..." : "전체 계좌 저장"}
-            </button>
-          </div>
-
           <div className="tableWrap">
             <table className="erpTable">
               <thead>
                 <tr>
+                  <th />
                   <th>계좌</th>
                   <th>투자 원금 (KRW)</th>
                   <th>보유 현금</th>
@@ -234,6 +263,15 @@ export function CashManager() {
                 {accounts.map((account) => (
                   <tr key={account.account_id}>
                     <td>
+                      <button
+                        type="button"
+                        className="buttonLink"
+                        onClick={() => openEditModal(account)}
+                      >
+                        Edit
+                      </button>
+                    </td>
+                    <td>
                       <div className="tableAccountCell">
                         <strong>
                           {account.order}. {account.icon} {account.name}
@@ -242,32 +280,14 @@ export function CashManager() {
                       </div>
                     </td>
                     <td>
-                      <input
-                        className="tableField"
-                        type="number"
-                        value={normalizeInputValue(account.total_principal)}
-                        onChange={(event) => updateAccount(account.account_id, "total_principal", event.target.value)}
-                      />
+                      <div className="tableReadonly">{formatNumber(account.total_principal)}</div>
                     </td>
                     <td>
                       {account.currency === "KRW" ? (
-                        <input
-                          className="tableField"
-                          type="number"
-                          value={normalizeInputValue(account.cash_balance_krw)}
-                          onChange={(event) => {
-                            updateAccount(account.account_id, "cash_balance_krw", event.target.value);
-                            updateAccount(account.account_id, "cash_balance_native", event.target.value);
-                          }}
-                        />
+                        <div className="tableReadonly">{formatNumber(account.cash_balance_krw)}</div>
                       ) : (
                         <div className="tableCellStack">
-                          <input
-                            className="tableField"
-                            type="number"
-                            value={normalizeInputValue(account.cash_balance_native)}
-                            onChange={(event) => updateAccount(account.account_id, "cash_balance_native", event.target.value)}
-                          />
+                          <div className="tableReadonly">{formatNumber(account.cash_balance_native)}</div>
                           <span className="tableSubtext">
                             {account.currency}/KRW {formatNumber(rates[account.currency] ?? 0)}
                           </span>
@@ -280,24 +300,14 @@ export function CashManager() {
                     <td>{account.cash_currency}</td>
                     <td>
                       {account.account_id === "aus_account" ? (
-                        <input
-                          className="tableField"
-                          type="number"
-                          value={normalizeInputValue(account.intl_shares_value)}
-                          onChange={(event) => updateAccount(account.account_id, "intl_shares_value", event.target.value)}
-                        />
+                        <div className="tableReadonly">{formatNumber(account.intl_shares_value)}</div>
                       ) : (
                         <span className="tableMuted">-</span>
                       )}
                     </td>
                     <td>
                       {account.account_id === "aus_account" ? (
-                        <input
-                          className="tableField"
-                          type="number"
-                          value={normalizeInputValue(account.intl_shares_change)}
-                          onChange={(event) => updateAccount(account.account_id, "intl_shares_change", event.target.value)}
-                        />
+                        <div className="tableReadonly">{formatNumber(account.intl_shares_change)}</div>
                       ) : (
                         <span className="tableMuted">-</span>
                       )}
@@ -311,6 +321,98 @@ export function CashManager() {
           </div>
         </div>
       </section>
+      <AppModal
+        open={editingAccount !== null}
+        title="자산 관리"
+        subtitle={editingAccount ? `${editingAccount.icon} ${editingAccount.name} · ${editingAccount.account_id}` : undefined}
+        onClose={closeEditModal}
+        footer={
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={closeEditModal} disabled={isSaving}>
+              취소
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isSaving || !editingAccount}>
+              {isSaving ? "저장 중..." : "저장"}
+            </button>
+          </>
+        }
+      >
+        {editingAccount ? (
+          <div className="appPageStack">
+            <div className="row g-3">
+              <div className="col-md-6">
+                <label className="form-label">투자 원금 (KRW)</label>
+                <input
+                  className="form-control"
+                  type="number"
+                  value={normalizeInputValue(editingAccount.total_principal)}
+                  onChange={(event) => updateEditingAccount("total_principal", event.target.value)}
+                />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">현금 통화</label>
+                <input className="form-control" type="text" value={editingAccount.cash_currency} readOnly />
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">
+                  {editingAccount.currency === "KRW" ? "보유 현금 (KRW)" : `보유 현금 (${editingAccount.currency})`}
+                </label>
+                {editingAccount.currency === "KRW" ? (
+                  <input
+                    className="form-control"
+                    type="number"
+                    value={normalizeInputValue(editingAccount.cash_balance_krw)}
+                    onChange={(event) => updateEditingAccount("cash_balance_krw", event.target.value)}
+                  />
+                ) : (
+                  <>
+                    <input
+                      className="form-control"
+                      type="number"
+                      value={normalizeInputValue(editingAccount.cash_balance_native)}
+                      onChange={(event) => updateEditingAccount("cash_balance_native", event.target.value)}
+                    />
+                    <div className="tableFooterMeta text-start mt-1">
+                      {editingAccount.currency}/KRW {formatNumber(rates[editingAccount.currency] ?? 0)}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="col-md-6">
+                <label className="form-label">저장값 (KRW)</label>
+                <input
+                  className="form-control"
+                  type="text"
+                  value={formatNumber(editingAccount.cash_balance_krw)}
+                  readOnly
+                />
+              </div>
+              {editingAccount.account_id === "aus_account" ? (
+                <>
+                  <div className="col-md-6">
+                    <label className="form-label">Intl Shares Value</label>
+                    <input
+                      className="form-control"
+                      type="number"
+                      value={normalizeInputValue(editingAccount.intl_shares_value)}
+                      onChange={(event) => updateEditingAccount("intl_shares_value", event.target.value)}
+                    />
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Intl Shares Change</label>
+                    <input
+                      className="form-control"
+                      type="number"
+                      value={normalizeInputValue(editingAccount.intl_shares_change)}
+                      onChange={(event) => updateEditingAccount("intl_shares_change", event.target.value)}
+                    />
+                  </div>
+                </>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </AppModal>
     </div>
   );
 }
