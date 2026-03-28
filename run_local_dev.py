@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
+ROOT_DIR = Path(__file__).resolve().parent
 WEB_DIR = ROOT_DIR / "web"
 PYTHON_BIN = ROOT_DIR / ".venv" / "bin" / "python"
 
