@@ -50,6 +50,9 @@ export function ToastProvider({ children }: ToastProviderProps) {
       nextIdRef.current += 1;
 
       setToasts((current) => [...current, { id, message, variant }]);
+      window.setTimeout(() => {
+        setToasts((current) => current.filter((toast) => toast.id !== id));
+      }, 10_000);
     },
     [],
   );

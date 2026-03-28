@@ -1,6 +1,7 @@
 :root {
   --app-content-max-width: 1680px;
   --app-page-inset: 0.875rem;
+  --app-header-height: 2.585rem;
   --app-table-head-bg: var(--tblr-bg-surface-secondary, #f6f8fb);
   --app-table-head-color: var(--tblr-secondary-color, #667382);
   --app-table-head-border: var(--tblr-border-color, #dce1e7);
@@ -239,7 +240,8 @@ a {
   position: sticky;
   top: 0;
   z-index: 1020;
-  min-height: 2.6rem;
+  min-height: var(--app-header-height);
+  height: var(--app-header-height);
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid var(--line);
@@ -250,7 +252,8 @@ a {
   align-items: center;
   justify-content: flex-end;
   gap: 0.125rem;
-  min-height: 2.6rem;
+  min-height: var(--app-header-height);
+  height: 100%;
   flex-wrap: nowrap;
 }
 
@@ -263,7 +266,7 @@ a {
 
 .appMobileBrand {
   color: var(--ink);
-  font-size: 0.98rem;
+  font-size: 1.08rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -403,7 +406,7 @@ a {
   flex-wrap: nowrap;
   min-width: 0;
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 13.75px;
   white-space: nowrap;
   line-height: 1;
 }
@@ -416,7 +419,7 @@ a {
 
 .topbarFxItem strong {
   color: var(--ink);
-  font-size: 16.5px;
+  font-size: 18.15px;
   font-weight: 700;
   line-height: 1;
 }
@@ -447,7 +450,7 @@ a {
 
 .topbarSentimentText {
   color: var(--muted);
-  font-size: 12.5px;
+  font-size: 13.75px;
   font-weight: 600;
 }
 
@@ -517,7 +520,7 @@ a {
 
 .appToastViewport {
   position: fixed;
-  top: calc(2.55rem + 0.625rem);
+  top: calc(var(--app-header-height) + 0.625rem);
   right: 1rem;
   z-index: 1200;
   display: flex;
@@ -531,6 +534,20 @@ a {
   pointer-events: auto;
   border: 1px solid var(--tblr-border-color);
   box-shadow: var(--tblr-box-shadow);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.appToast.bg-success-lt {
+  background-color: rgba(var(--tblr-success-rgb), 0.22);
+}
+
+.appToast.bg-danger-lt {
+  background-color: rgba(var(--tblr-danger-rgb), 0.22);
+}
+
+.appToast.bg-warning-lt {
+  background-color: rgba(var(--tblr-warning-rgb), 0.28);
 }
 
 .appToastBody {
@@ -657,56 +674,17 @@ a {
   min-height: 100vh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 1.5rem;
 }
 
-.loginCard {
-  width: min(100%, 420px);
-  display: grid;
-  gap: 14px;
-  padding: 24px;
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel);
-}
-
-.loginHeader h1 {
-  margin: 0 0 8px;
-  font-size: 28px;
-}
-
-.loginHeader p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.loginField {
-  display: grid;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.loginField input {
-  width: 100%;
-  min-height: 40px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.96);
+.loginBrandMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  font-size: 1.5rem;
+  font-weight: 700;
   color: var(--ink);
-  font: inherit;
-}
-
-.loginField input:focus {
-  outline: none;
-  border-color: rgba(31, 107, 70, 0.28);
-  box-shadow: 0 0 0 3px rgba(31, 107, 70, 0.08);
-}
-
-.loginButton {
-  width: 100%;
 }
 
 .route-list {
@@ -1233,7 +1211,7 @@ a {
 
 @media (max-width: 1100px) {
   .appToastViewport {
-    top: calc(3.85rem + 0.5rem);
+    top: calc(var(--app-header-height) + 0.5rem);
     left: 0.75rem;
     right: 0.75rem;
     width: auto;
@@ -1254,12 +1232,13 @@ a {
 
   .appMobileHeader {
     display: flex;
-    min-height: 3.85rem;
+    min-height: var(--app-header-height);
+    height: 100%;
     gap: 0.375rem;
   }
 
   .appMobileBrand {
-    font-size: 1.5rem;
+    font-size: 1.65rem;
     line-height: 1;
   }
 
@@ -1338,14 +1317,14 @@ a {
 
 @media (min-width: 1101px) {
   .appTopHeader {
-    height: 2.35rem;
-    min-height: 2.35rem;
+    height: var(--app-header-height);
+    min-height: var(--app-header-height);
     padding-block: 0 !important;
   }
 
   .appTopHeaderInner {
     height: 100%;
-    min-height: 2.35rem;
+    min-height: var(--app-header-height);
     padding-top: 0 !important;
     padding-bottom: 0 !important;
   }
