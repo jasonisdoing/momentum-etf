@@ -18,7 +18,6 @@
 
 - `infra/hybrid/nginx.conf`
   - 같은 도메인 경로 구조를 흉내 내기 위한 로컬 프록시 설정
-  - `/py/*` -> Python(Streamlit)
   - 나머지 `/` -> Node.js
 
 ## 의도
@@ -37,7 +36,7 @@
 - `http://localhost:8080/cash` -> Node.js
 - `http://localhost:8080/snapshots` -> Node.js
 - `http://localhost:8080/market` -> Node.js
-- `http://localhost:8080/py/...` -> Python(Streamlit)
+- 초기 공존 검증용 라우팅도 함께 확인
 
 ## 이번 턴에서 확인된 결과
 
@@ -54,8 +53,7 @@
 - Python 앱을 `/py` base path로 실행 가능함을 확인
 - Node 앱을 별도 포트에서 실행 가능함을 확인
 - `http://localhost:8080/` 에서 Node 화면 실제 확인
-- `http://localhost:8080/py/` 에서 Streamlit 화면 실제 확인
-- `http://localhost:8080/py/rank` 에서 Streamlit 하위 라우트 실제 확인
+- 초기 공존 검증에서 Python UI 라우팅도 실제로 확인
 - Node `자산관리(/cash)` 실기능 구현
 - `/api/cash/accounts`, `/api/cash/save` 추가
 - Node `스냅샷(/snapshots)` 실기능 구현
@@ -83,9 +81,9 @@
 - 하이브리드 컨테이너 재빌드 및 기동 확인
 - nginx가 컨테이너 재생성 이후 이전 Docker 내부 IP를 계속 바라보며 `502 Bad Gateway`를 내는 문제 확인
 - `resolver 127.0.0.11` + 변수 기반 `proxy_pass`로 nginx가 컨테이너 재생성 이후에도 새 IP를 다시 해석하도록 수정
-- 수정 후 `/dashboard` 와 `/py/` 모두 `200 OK`로 복구 확인
+- 수정 후 주요 라우팅이 `200 OK`로 복구 확인
 - 운영 `https://etf.dojason.com/` 기준 하이브리드 1차 배포 확인
-- 운영 `https://etf.dojason.com/py/` 흰 화면을 `_stcore` 프록시 경로 수정으로 복구 확인
+- 운영 프록시 흰 화면을 `_stcore` 프록시 경로 수정으로 복구 확인
 - 로컬 개발 원칙을 `npm run dev` 중심으로 정리
 - `web/` 개발 서버에서도 저장소 루트 `.env`와 `zaccounts`를 읽도록 경로 보정
 - `벌크 입력`은 Python과 동일하게 계좌별 완전 교체, 최초 매수일 유지 규칙을 따른다.

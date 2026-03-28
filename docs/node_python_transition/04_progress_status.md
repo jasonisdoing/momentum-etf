@@ -12,8 +12,7 @@
 - Node 앱이 별도 포트에서 실제 기동됨을 확인했다.
 - 하이브리드 compose 문법 검증을 통과했다.
 - `http://localhost:8080/` 에서 Node 루트 화면이 실제로 열림을 확인했다.
-- `http://localhost:8080/py/` 에서 Python(Streamlit) 앱이 실제로 열림을 확인했다.
-- `http://localhost:8080/py/rank` 에서 Python 하위 라우트가 실제로 열림을 확인했다.
+- 초기 하이브리드 공존 검증에서 Python UI 라우팅도 실제로 열림을 확인했다.
 - Python 메뉴 재배치를 실제 반영했다.
 - Node `자산관리(/cash)`를 실제 MongoDB 저장/조회 화면으로 구현했고 1차 완료 기준을 통과했다.
 - Node `스냅샷(/snapshots)` 1차 리스트/상세 조회 화면을 구현했다.
@@ -23,10 +22,10 @@
 - 상단 공통 환율 바를 구현했다.
 - 상단 환율 바, 대시보드, 자산관리, ETF 마켓 화면의 ERP 스타일 1차 정리를 마쳤다.
 - nginx가 컨테이너 재생성 뒤 바뀐 Docker 내부 IP를 다시 해석하지 못해 `502 Bad Gateway`가 발생하는 문제를 확인하고 수정했다.
-- `http://localhost:8080/dashboard` 와 `http://localhost:8080/py/` 가 수정 후 다시 `200 OK`로 복구됨을 확인했다.
+- `http://localhost:8080/dashboard` 등 주요 경로가 수정 후 다시 `200 OK`로 복구됨을 확인했다.
 - 하이브리드 컨테이너를 재빌드했고 Node/Python/프록시가 모두 정상 기동함을 확인했다.
 - 운영 배포를 실제로 적용했고 `https://etf.dojason.com/` 기준으로 Node 메뉴들이 정상 노출됨을 확인했다.
-- 운영 `https://etf.dojason.com/py/` 흰 화면 문제를 수정했고 Streamlit 순위 화면이 정상 복구됨을 확인했다.
+- 운영 흰 화면 문제를 수정했고 서비스가 정상 복구됨을 확인했다.
 - Node `벌크 입력(/import)` 1차 화면과 `/api/import/preview`, `/api/import/save`를 구현했다.
 - Node `벌크 입력(/import)`에서 실제 TSV 파싱, 미리보기, Mongo 저장이 성공했고 Python 화면과 반영 결과 일치까지 확인했다.
 - 루트 앱 런처와 상단 메뉴에서 `Python 순위` 연결을 제거하고 Node 이전 메뉴 중심으로 정리했다.
@@ -46,7 +45,7 @@
 - Node `주별(/weekly)` 화면과 `/api/weekly`를 구현했다.
 - `주별`은 조회, 수정, 이번주 데이터 집계를 Node에서 직접 처리하도록 옮겼다.
 - `scripts/generate_ai_summary.py`를 추가해 Python의 AI용 요약 생성 규칙을 Node에서 재사용한다.
-- Python UI는 `/py`에서 더 이상 기능 화면을 제공하지 않고, 종료 안내만 보여주도록 축소했다.
+- Python UI는 제거됐고, 관련 라우팅과 배포 구성도 함께 제거했다.
 - 로컬 개발 원칙을 정리했다.
   - 기본 개발은 `npm run dev` + Python 개별 실행
   - Docker 하이브리드 테스트는 프록시/배포 구조 검증이 필요할 때만 수행
@@ -60,10 +59,11 @@
   - 페이지 헤더/카드/툴바/테이블 밀도 일관화
 - `주별(/weekly)`의 집계 정확도 2차 보정
 - Python 배포 의존 정리
+- AI용 요약 외 Python 런타임 의존 추가 축소
 
 ## 현재 상태 한 줄 요약
 
-`하이브리드 1차 배포, 주요 메뉴 Node 이관, Python UI 종료 안내 전환까지 끝났고, 남은 작업은 완성도 보정과 배포 정리다.`
+`주요 메뉴 Node 이관과 Python UI 제거까지 끝났고, 남은 작업은 완성도 보정과 배포 정리다.`
 
 ## 지금 시점의 핵심 미해결 기술 이슈
 
@@ -73,14 +73,12 @@
 ## 이번 턴에서 실제 확인한 사실
 
 - Streamlit 1.49.1은 `--server.baseUrlPath`를 지원한다.
-- `./.venv/bin/python run.py --server.port 8501 --server.baseUrlPath=py --server.headless true` 실행 시
-  `/py` 경로로 기동 메시지가 출력되었다.
+- 초기 공존 검증용 Python 실행 확인을 마쳤다.
 - Next.js 최소 앱은 의존성 설치와 `npm run build`를 통과했다.
 - `npm run start -- --hostname 127.0.0.1 --port 3001` 실행 시 Node 앱이 정상 기동 메시지를 출력했다.
 - `docker compose -f docker-compose.hybrid.yml config`는 통과했다.
 - `http://localhost:8080/` 경로에서 Node 화면이 실제로 열렸다.
-- `http://localhost:8080/py/` 경로에서 Streamlit 화면이 실제로 열렸다.
-- `http://localhost:8080/py/rank` 경로에서 Streamlit 하위 라우트가 실제로 열렸다.
+- 초기 공존 검증에서 Python UI 라우팅이 실제로 동작함을 확인했다.
 - `http://localhost:8080/dashboard` 경로에서 Node 대시보드가 실제로 열렸다.
 - Node `자산관리(/cash)` API 경로(`/api/cash/accounts`, `/api/cash/save`)를 추가했고 빌드를 통과했다.
 - Node `스냅샷(/snapshots)` API 경로(`/api/snapshots`)를 추가했고 빌드를 통과했다.
@@ -89,14 +87,14 @@
 - Node 자산관리는 Python 기존 화면과 양방향 저장 일치가 실제로 확인되었다.
 - 대시보드 금액 가리기 토글, 상단 환율 바, 루트 앱 런처가 로컬에서 실제 동작한다.
 - nginx 프록시에 Docker DNS 재해석 설정을 추가하면 컨테이너 재생성 이후 `502` 문제를 복구할 수 있다.
-- 하이브리드 컨테이너 재빌드 후 `node_app`, `python_app`, `hybrid_proxy`가 모두 Up 상태로 올라왔다.
-- 운영 `https://etf.dojason.com/py/` 흰 화면의 직접 원인은 `/py/_stcore/*` 프록시 경로 손상이었고, `infra/hybrid/nginx.conf` 수정으로 복구됐다.
+- 하이브리드 컨테이너 재빌드와 프록시 복구 검증을 완료했다.
+- 운영 흰 화면의 직접 원인을 프록시 경로 손상으로 확인했고 수정으로 복구했다.
 - 로컬 `web/` 개발 서버는 기본 포트 `3000`을 사용하며, `8080`은 Docker 하이브리드 프록시 전용 포트다.
 - 로컬 `npm run dev`에서도 저장소 루트 `.env`와 `zaccounts`를 읽도록 Node 경로를 보정했다.
 - Node `벌크 입력(/import)`는 Python과 동일하게 `계좌별 완전 교체`, `최초 매수일 유지` 규칙으로 동작한다.
 - Node `종목 관리(/stocks)`는 계좌 선택, 버킷 변경, 소프트 삭제까지 포함한 1차 기능으로 동작한다.
 - Node `종목 관리(/stocks)`는 `등록된 종목 / 삭제된 종목` 토글, 복구, 영구 삭제까지 한 화면에서 처리한다.
-- Node 로그인은 `.streamlit/secrets.toml` 비밀번호 대신 Google OAuth를 사용한다.
+- Node 로그인은 기존 비밀번호 방식 대신 Google OAuth를 사용한다.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_ALLOWED_EMAILS`, `AUTH_SESSION_SECRET`이 Node 인증 필수 설정값이다.
 - `AI용 요약(/summary)`는 Node 화면에서 Python 생성 함수를 직접 호출해 결과 TSV를 만든다.
 - 앞으로 Node UI는 커스텀 테마를 계속 덧붙이지 않고 `Tabler 기본 스타일`로 표준화하는 것을 우선한다.

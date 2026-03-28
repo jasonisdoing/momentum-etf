@@ -30,7 +30,7 @@
 이 프로젝트는 크게 세 가지 파트로 구성됩니다:
 
 1.  **순위 계산 유틸 (`utils/rankings.py`)**: 계좌 종목, 가격 캐시, 실제 보유 상태를 합쳐 순위 테이블용 데이터를 만듭니다.
-2.  **화면 계층 (`app.py`, `app_pages/`)**: 계좌 선택, `MA_TYPE`, `MA_MONTHS`를 받아 순위/종목 관리 화면을 렌더링합니다.
+2.  **화면 계층 (`web/`)**: Next.js 기반 Node UI가 자산/종목/주별/시스템 화면을 렌더링합니다.
 3.  **서비스 계층 (`services/price_service.py`, `services/reference_data_service.py`)**: 실시간 가격/환율과 저빈도 참조 데이터의 공식 진입점을 제공합니다.
 4.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 실제 보유 데이터와 계좌 메모를 읽습니다.
 
