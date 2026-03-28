@@ -10,13 +10,13 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const nextPath = request.nextUrl.searchParams.get("next") || "/dashboard";
-    const stateToken = await createOAuthStateToken(nextPath);
     const origin = resolveExternalOrigin(
       request.nextUrl.origin,
       request.headers.get("x-forwarded-proto"),
       request.headers.get("x-forwarded-host"),
     );
+    const nextPath = request.nextUrl.searchParams.get("next") || "/dashboard";
+    const stateToken = await createOAuthStateToken(nextPath);
     const redirectUrl = buildGoogleAuthUrl(origin, stateToken);
 
     const response = NextResponse.redirect(redirectUrl);
@@ -31,7 +31,12 @@ export async function GET(request: NextRequest) {
     });
     return response;
   } catch (error) {
-    const loginUrl = new URL("/login", request.url);
+    const origin = resolveExternalOrigin(
+      request.nextUrl.origin,
+      request.headers.get("x-forwarded-proto"),
+      request.headers.get("x-forwarded-host"),
+    );
+    const loginUrl = new URL("/login", origin);
     loginUrl.searchParams.set("error", error instanceof Error ? error.message : "Google 로그인을 시작할 수 없습니다.");
     return NextResponse.redirect(loginUrl);
   }

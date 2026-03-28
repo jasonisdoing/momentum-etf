@@ -12,9 +12,13 @@ import {
   verifyOAuthStateToken,
 } from "@/lib/auth";
 
-function buildLoginRedirect(request: NextRequest, message: string): NextResponse {
-  const loginUrl = new URL("/login", request.url);
+function buildLoginRedirect(origin: string, request: NextRequest, message: string): NextResponse {
+  const loginUrl = new URL("/login", origin);
   loginUrl.searchParams.set("error", message);
+  const nextPath = request.nextUrl.searchParams.get("next");
+  if (nextPath) {
+    loginUrl.searchParams.set("next", nextPath);
+  }
   return NextResponse.redirect(loginUrl);
 }
 
@@ -27,7 +31,7 @@ export async function GET(request: NextRequest) {
     );
     const error = request.nextUrl.searchParams.get("error");
     if (error) {
-      return buildLoginRedirect(request, "Google 로그인이 취소되었거나 실패했습니다.");
+      return buildLoginRedirect(origin, request, "Google 로그인이 취소되었거나 실패했습니다.");
     }
 
     const code = request.nextUrl.searchParams.get("code");
@@ -35,12 +39,12 @@ export async function GET(request: NextRequest) {
     const stateCookie = request.cookies.get(getOAuthStateCookieName())?.value;
 
     if (!code || !state || !stateCookie || state !== stateCookie) {
-      return buildLoginRedirect(request, "Google 로그인 상태 검증에 실패했습니다.");
+      return buildLoginRedirect(origin, request, "Google 로그인 상태 검증에 실패했습니다.");
     }
 
     const verifiedState = await verifyOAuthStateToken(stateCookie);
     if (!verifiedState) {
-      return buildLoginRedirect(request, "Google 로그인 상태가 만료되었습니다.");
+      return buildLoginRedirect(origin, request, "Google 로그인 상태가 만료되었습니다.");
     }
 
     const accessToken = await exchangeGoogleCode(origin, code);
@@ -49,15 +53,15 @@ export async function GET(request: NextRequest) {
     const displayName = String(user.name ?? email).trim();
 
     if (!email || user.email_verified !== true) {
-      return buildLoginRedirect(request, "검증된 Google 이메일이 필요합니다.");
+      return buildLoginRedirect(origin, request, "검증된 Google 이메일이 필요합니다.");
     }
 
     if (!isAllowedEmail(email)) {
-      return buildLoginRedirect(request, "허용되지 않은 계정입니다.");
+      return buildLoginRedirect(origin, request, "허용되지 않은 계정입니다.");
     }
 
     const token = await createSessionToken(email, displayName);
-    const response = NextResponse.redirect(new URL(verifiedState.next_path, request.url));
+    const response = NextResponse.redirect(new URL(verifiedState.next_path, origin));
     response.cookies.set({
       name: getAuthCookieName(),
       value: token,
@@ -78,7 +82,13 @@ export async function GET(request: NextRequest) {
     });
     return response;
   } catch (error) {
+    const origin = resolveExternalOrigin(
+      request.nextUrl.origin,
+      request.headers.get("x-forwarded-proto"),
+      request.headers.get("x-forwarded-host"),
+    );
     return buildLoginRedirect(
+      origin,
       request,
       error instanceof Error ? error.message : "Google 로그인 처리에 실패했습니다.",
     );
