@@ -6,6 +6,8 @@ from typing import Any
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
 from utils.normalization import normalize_nullable_number, normalize_text
+from utils.stock_list_io import add_stock
+from utils.stock_meta_updater import fetch_stock_info
 
 BUCKETS: dict[int, str] = {
     1: "1. 모멘텀",
@@ -44,6 +46,30 @@ def _pick_account_id(accounts: list[dict[str, Any]], account_id: str | None) -> 
     if not target:
         raise RuntimeError("계좌를 찾을 수 없습니다.")
     return target
+
+
+def _normalize_candidate_ticker(ticker: str, country_code: str) -> str:
+    text = str(ticker or "").strip().upper()
+    if not text:
+        raise RuntimeError("티커를 입력하세요.")
+    if ":" in text:
+        text = text.split(":")[-1].strip().upper()
+    if (country_code or "").strip().lower() == "au" and text.endswith(".AX"):
+        text = text[:-3]
+    return text
+
+
+def _load_account_config_map() -> dict[str, dict[str, Any]]:
+    return {config["account_id"]: config for config in load_account_configs()}
+
+
+def _require_account_config(account_id: str) -> dict[str, Any]:
+    account_norm = str(account_id or "").strip().lower()
+    configs = _load_account_config_map()
+    config = configs.get(account_norm)
+    if not config:
+        raise RuntimeError("계좌를 찾을 수 없습니다.")
+    return config
 
 
 def load_active_stocks_table(account_id: str | None = None) -> dict[str, Any]:
@@ -106,6 +132,83 @@ def load_active_stocks_table(account_id: str | None = None) -> dict[str, Any]:
         "accounts": accounts,
         "rows": rows,
         "account_id": target_account_id,
+    }
+
+
+def validate_stock_candidate(account_id: str, ticker: str) -> dict[str, Any]:
+    account = _require_account_config(account_id)
+    account_id_norm = str(account["account_id"]).strip().lower()
+    country_code = str(account.get("country_code") or "").strip().lower()
+    ticker_norm = _normalize_candidate_ticker(ticker, country_code)
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    existing = db.stock_meta.find_one(
+        {
+            "account_id": account_id_norm,
+            "ticker": ticker_norm,
+        },
+        {
+            "name": 1,
+            "listing_date": 1,
+            "is_deleted": 1,
+            "deleted_reason": 1,
+            "bucket": 1,
+        },
+    )
+
+    stock_info = fetch_stock_info(ticker_norm, country_code)
+    if not stock_info or not str(stock_info.get("name") or "").strip():
+        raise RuntimeError("유효한 티커를 찾지 못했습니다.")
+
+    is_deleted = bool(existing and existing.get("is_deleted") is True)
+    is_active = bool(existing and existing.get("is_deleted") is not True)
+    deleted_reason = normalize_text(existing.get("deleted_reason"), "") if existing else ""
+    listing_date = normalize_text(stock_info.get("listing_date") or (existing or {}).get("listing_date"), "-")
+    bucket_id = int((existing or {}).get("bucket") or 1)
+
+    return {
+        "ticker": ticker_norm,
+        "name": normalize_text(stock_info.get("name"), ""),
+        "listing_date": listing_date,
+        "status": "active" if is_active else "deleted" if is_deleted else "new",
+        "is_deleted": is_deleted,
+        "deleted_reason": deleted_reason,
+        "bucket_id": bucket_id,
+        "account_id": account_id_norm,
+        "country_code": country_code,
+    }
+
+
+def add_active_stock(account_id: str, ticker: str, bucket_id: int) -> dict[str, Any]:
+    validated = validate_stock_candidate(account_id, ticker)
+    account_id_norm = str(account_id or "").strip().lower()
+    ticker_norm = str(validated["ticker"]).strip().upper()
+    bucket_value = int(bucket_id or 0)
+    if bucket_value not in BUCKETS:
+        raise RuntimeError("버킷을 선택하세요.")
+
+    created = add_stock(
+        account_id_norm,
+        ticker_norm,
+        name=str(validated["name"]),
+        listing_date=None if validated["listing_date"] == "-" else validated["listing_date"],
+        bucket=bucket_value,
+    )
+    if not created:
+        if validated["status"] == "active":
+            raise RuntimeError("이미 등록된 종목입니다.")
+        raise RuntimeError("종목 추가에 실패했습니다.")
+
+    return {
+        "ticker": ticker_norm,
+        "name": str(validated["name"]),
+        "listing_date": str(validated["listing_date"]),
+        "bucket_id": bucket_value,
+        "bucket_name": BUCKETS[bucket_value],
+        "status": validated["status"],
     }
 
 
