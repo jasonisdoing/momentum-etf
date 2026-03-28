@@ -6,6 +6,7 @@ import {
   readRememberedMomentumEtfAccountId,
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
+import { AppLoadingState } from "../components/AppLoadingState";
 import { useToast } from "../components/ToastProvider";
 
 type AccountOption = {
@@ -138,13 +139,11 @@ export function NoteManager() {
 
   if (loading) {
     return (
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-            <p>메모 데이터를 불러오는 중...</p>
-          </div>
+      <div className="appPageStack">
+        <div className="appPageLoading">
+          <AppLoadingState label="계좌 메모를 불러오는 중..." />
         </div>
-      </section>
+      </div>
     );
   }
 

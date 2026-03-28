@@ -6,6 +6,7 @@ import {
   readRememberedMomentumEtfAccountId,
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
+import { AppLoadingState } from "../components/AppLoadingState";
 import { useToast } from "../components/ToastProvider";
 
 type AccountOption = {
@@ -108,13 +109,11 @@ export function SummaryManager() {
 
   if (loading) {
     return (
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-            <p>AI용 요약 데이터를 불러오는 중...</p>
-          </div>
+      <div className="appPageStack">
+        <div className="appPageLoading">
+          <AppLoadingState label="AI용 요약 데이터를 불러오는 중..." />
         </div>
-      </section>
+      </div>
     );
   }
 

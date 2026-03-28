@@ -115,14 +115,7 @@ export function CashManager() {
       headerName: "계좌",
       minWidth: 180,
       flex: 1,
-      renderCell: (params) => (
-        <div className="tableAccountCell">
-          <strong>
-            {params.row.order}. {params.row.icon} {params.row.name}
-          </strong>
-          <span>{params.row.account_id}</span>
-        </div>
-      ),
+      renderCell: (params) => <strong>{params.row.order}. {params.row.icon} {params.row.name}</strong>,
     },
     {
       field: "total_principal",
@@ -332,8 +325,15 @@ export function CashManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBody">
-            <AppDataGrid rows={gridRows} columns={columns} loading={loading} minHeight="26rem" />
-          <div className="tableFooterMeta">마지막 저장: {formatUpdatedAt(latestUpdatedAt)}</div>
+            <AppDataGrid
+              rows={gridRows}
+              columns={columns}
+              loading={loading}
+              minHeight="26rem"
+              rowHeight={40}
+              fitContentRows
+            />
+            <div className="tableFooterMeta">마지막 저장: {formatUpdatedAt(latestUpdatedAt)}</div>
           </div>
         </div>
       </section>
