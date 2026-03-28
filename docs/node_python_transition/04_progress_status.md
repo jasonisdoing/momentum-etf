@@ -65,13 +65,12 @@
   - 페이지 헤더/카드/툴바/테이블 밀도 일관화
   - 모바일 헤더/메뉴/본문 레이어 완성도 보정
 - `주별(/weekly)`의 집계 정확도 2차 보정
-- `AI용 요약`의 Python 생성 로직을 Node로 완전 치환할지 판단
+- `AI용 요약`의 Python 생성 로직을 FastAPI 내부 서비스 호출 이후에도 더 줄일지 판단
 - 시스템 배치/요약/캐시 업데이트의 Python 런타임 의존 축소 여부 판단
-- FastAPI 내부 API 골격을 추가했다.
 
 ## 현재 상태 한 줄 요약
 
-`모든 사용자 메뉴 이관과 Python UI 제거는 끝났고, 남은 작업은 완성도 보정·배포 정리·Python 런타임 축소다.`
+`모든 사용자 메뉴 이관, Python UI 제거, 내부 API FastAPI 이관은 끝났고, 남은 작업은 완성도 보정·배포 정리·Python 런타임 축소다.`
 
 ## 지금 시점의 핵심 미해결 기술 이슈
 
@@ -104,7 +103,7 @@
 - Node `종목 관리(/stocks)`는 `등록된 종목 / 삭제된 종목` 토글, 복구, 영구 삭제까지 한 화면에서 처리한다.
 - Node 로그인은 기존 비밀번호 방식 대신 Google OAuth를 사용한다.
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `AUTH_ALLOWED_EMAILS`, `AUTH_SESSION_SECRET`이 Node 인증 필수 설정값이다.
-- `AI용 요약(/summary)`는 Node 화면에서 Python 생성 함수를 직접 호출해 결과 TSV를 만든다.
+- `AI용 요약(/summary)`는 Next가 FastAPI 내부 API를 호출하고, FastAPI가 Python 생성 서비스를 재사용하는 구조다.
 - 앞으로 Node UI는 커스텀 테마를 계속 덧붙이지 않고 `Tabler 기본 스타일`로 표준화하는 것을 우선한다.
 - 주요 화면은 `PageFrame > appPageStack > appSection > appCard` 구조로 맞추고, 화면별 임시 여백 보정을 늘리지 않는다.
 - `Edit + 공통 AppModal`은 앞으로 그리드 수정 진입의 기본 표준이다.
