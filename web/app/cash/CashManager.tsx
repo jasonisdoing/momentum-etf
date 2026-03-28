@@ -113,8 +113,8 @@ export function CashManager() {
     {
       field: "name",
       headerName: "계좌",
-      minWidth: 180,
-      flex: 1,
+      minWidth: 146,
+      width: 146,
       renderCell: (params) => <strong>{params.row.order}. {params.row.icon} {params.row.name}</strong>,
     },
     {
@@ -331,6 +331,7 @@ export function CashManager() {
               loading={loading}
               minHeight="26rem"
               rowHeight={40}
+              wrapClassName="appDataGridWrapScrollable"
               fitContentRows
             />
             <div className="tableFooterMeta">마지막 저장: {formatUpdatedAt(latestUpdatedAt)}</div>
