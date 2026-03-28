@@ -191,105 +191,118 @@ export function MarketManager() {
 
   if (loading) {
     return (
-      <section className="section">
-        <p>ETF 마켓 데이터를 불러오는 중...</p>
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+            <p>ETF 마켓 데이터를 불러오는 중...</p>
+          </div>
+        </div>
       </section>
     );
   }
 
   return (
-    <section className="section">
-      {error ? <div className="bannerError">{error}</div> : null}
+    <div className="appPageStack">
+      {error ? (
+        <div className="appBannerStack">
+          <div className="bannerError">{error}</div>
+        </div>
+      ) : null}
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+          <div className="filterBar">
+            <input
+              className="field compactField"
+              type="text"
+              placeholder="티커 또는 종목명 검색"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            <input
+              className="field compactField"
+              type="number"
+              placeholder="최소 시가총액(억)"
+              value={minMarketCap}
+              onChange={(event) => setMinMarketCap(event.target.value)}
+            />
+            <input
+              className="field compactField"
+              type="number"
+              placeholder="최소 전일 거래량(주)"
+              value={minPrevVolume}
+              onChange={(event) => setMinPrevVolume(event.target.value)}
+            />
+          </div>
 
-      <div className="filterBar">
-        <input
-          className="field compactField"
-          type="text"
-          placeholder="티커 또는 종목명 검색"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <input
-          className="field compactField"
-          type="number"
-          placeholder="최소 시가총액(억)"
-          value={minMarketCap}
-          onChange={(event) => setMinMarketCap(event.target.value)}
-        />
-        <input
-          className="field compactField"
-          type="number"
-          placeholder="최소 전일 거래량(주)"
-          value={minPrevVolume}
-          onChange={(event) => setMinPrevVolume(event.target.value)}
-        />
-      </div>
+          <div className="pillRow">
+            {Object.keys(EXCLUSION_KEYWORD_GROUPS).map((group) => {
+              const isActive = excludedGroups.includes(group);
+              return (
+                <button
+                  key={group}
+                  type="button"
+                  className={isActive ? "filterPill filterPillActive" : "filterPill"}
+                  onClick={() => toggleGroup(group)}
+                >
+                  {group}
+                </button>
+              );
+            })}
+          </div>
 
-      <div className="pillRow">
-        {Object.keys(EXCLUSION_KEYWORD_GROUPS).map((group) => {
-          const isActive = excludedGroups.includes(group);
-          return (
-            <button
-              key={group}
-              type="button"
-              className={isActive ? "filterPill filterPillActive" : "filterPill"}
-              onClick={() => toggleGroup(group)}
-            >
-              {group}
-            </button>
-          );
-        })}
-      </div>
+          <div className="tableSummary">
+            <span>총 {formatCount(filteredRows.length)}개</span>
+            <span>전체 {formatCount(rows.length)}개</span>
+            <span>KIS 마스터 갱신 {formatUpdatedAt(updatedAt)}</span>
+            <span>기본 정렬 일간(%) 내림차순</span>
+          </div>
 
-      <div className="tableSummary">
-        <span>총 {formatCount(filteredRows.length)}개</span>
-        <span>전체 {formatCount(rows.length)}개</span>
-        <span>KIS 마스터 갱신 {formatUpdatedAt(updatedAt)}</span>
-        <span>기본 정렬 일간(%) 내림차순</span>
-      </div>
-
-      <div className="tableWrap">
-        <table className="erpTable">
-          <thead>
-            <tr>
-              <th>티커</th>
-              <th>종목명</th>
-              <th>일간(%)</th>
-              <th>현재가</th>
-              <th>Nav</th>
-              <th>괴리율</th>
-              <th>3달(%)</th>
-              <th>상장일</th>
-              <th>전일거래량(주)</th>
-              <th>시가총액(억)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredRows.length === 0 ? (
-              <tr>
-                <td colSpan={10}>
-                  <div className="tableEmpty">조건에 맞는 ETF가 없습니다.</div>
-                </td>
-              </tr>
-            ) : (
-              filteredRows.map((row) => (
-                <tr key={row.ticker}>
-                  <td>{row.ticker}</td>
-                  <td>{row.name}</td>
-                  <td className={getSignedMetricClass(row.daily_change_pct)}>{formatPercent(row.daily_change_pct)}</td>
-                  <td>{formatNullableNumber(row.current_price)}</td>
-                  <td>{formatNullableNumber(row.nav)}</td>
-                  <td className={getDeviationClass(row.deviation)}>{formatPercent(row.deviation)}</td>
-                  <td className={getSignedMetricClass(row.return_3m_pct)}>{formatPercent(row.return_3m_pct)}</td>
-                  <td>{row.listed_at || "-"}</td>
-                  <td>{formatCount(row.prev_volume)}</td>
-                  <td>{formatKrwEok(row.market_cap)}</td>
+          <div className="tableWrap">
+            <table className="erpTable">
+              <thead>
+                <tr>
+                  <th>티커</th>
+                  <th>종목명</th>
+                  <th>일간(%)</th>
+                  <th>현재가</th>
+                  <th>Nav</th>
+                  <th>괴리율</th>
+                  <th>3달(%)</th>
+                  <th>상장일</th>
+                  <th>전일거래량(주)</th>
+                  <th>시가총액(억)</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
+              </thead>
+              <tbody>
+                {filteredRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={10}>
+                      <div className="tableEmpty">조건에 맞는 ETF가 없습니다.</div>
+                    </td>
+                  </tr>
+                ) : (
+                  filteredRows.map((row) => (
+                    <tr key={row.ticker}>
+                      <td>{row.ticker}</td>
+                      <td>{row.name}</td>
+                      <td className={getSignedMetricClass(row.daily_change_pct)}>{formatPercent(row.daily_change_pct)}</td>
+                      <td>{formatNullableNumber(row.current_price)}</td>
+                      <td>{formatNullableNumber(row.nav)}</td>
+                      <td className={getDeviationClass(row.deviation)}>{formatPercent(row.deviation)}</td>
+                      <td className={getSignedMetricClass(row.return_3m_pct)}>{formatPercent(row.return_3m_pct)}</td>
+                      <td>{row.listed_at || "-"}</td>
+                      <td>{formatCount(row.prev_volume)}</td>
+                      <td>{formatKrwEok(row.market_cap)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }

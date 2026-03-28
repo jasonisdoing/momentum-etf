@@ -185,115 +185,132 @@ export function CashManager() {
   }
 
   if (loading) {
-    return <section className="section"><p>자산관리 데이터를 불러오는 중...</p></section>;
+    return (
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+            <p>자산관리 데이터를 불러오는 중...</p>
+          </div>
+        </div>
+      </section>
+    );
   }
 
   return (
-    <section className="section">
-      {error ? <div className="bannerError">{error}</div> : null}
-      {notice ? <div className="bannerSuccess">{notice}</div> : null}
-      {(rates.AUD ?? 0) <= 0 ? (
-        <div className="bannerWarn">AUD/KRW 환율을 불러오지 못했습니다. 호주 계좌 저장 전에 확인이 필요합니다.</div>
+    <div className="appPageStack">
+      {error || notice || (rates.AUD ?? 0) <= 0 ? (
+        <div className="appBannerStack">
+          {error ? <div className="bannerError">{error}</div> : null}
+          {notice ? <div className="bannerSuccess">{notice}</div> : null}
+          {(rates.AUD ?? 0) <= 0 ? (
+            <div className="bannerWarn">AUD/KRW 환율을 불러오지 못했습니다. 호주 계좌 저장 전에 확인이 필요합니다.</div>
+          ) : null}
+        </div>
       ) : null}
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+          <div className="tableToolbar">
+            <div />
+            <button className="primaryButton" type="button" onClick={handleSave} disabled={isPending}>
+              {isPending ? "저장 중..." : "전체 계좌 저장"}
+            </button>
+          </div>
 
-      <div className="tableToolbar">
-        <div />
-        <button className="primaryButton" type="button" onClick={handleSave} disabled={isPending}>
-          {isPending ? "저장 중..." : "전체 계좌 저장"}
-        </button>
-      </div>
-
-      <div className="tableWrap">
-        <table className="erpTable">
-          <thead>
-            <tr>
-              <th>계좌</th>
-              <th>투자 원금 (KRW)</th>
-              <th>보유 현금</th>
-              <th>저장값 (KRW)</th>
-              <th>현금 통화</th>
-              <th>Intl Shares Value</th>
-              <th>Intl Shares Change</th>
-            </tr>
-          </thead>
-          <tbody>
-            {accounts.map((account) => (
-              <tr key={account.account_id}>
-                <td>
-                  <div className="tableAccountCell">
-                    <strong>
-                      {account.order}. {account.icon} {account.name}
-                    </strong>
-                    <span>{account.account_id}</span>
-                  </div>
-                </td>
-                <td>
-                  <input
-                    className="tableField"
-                    type="number"
-                    value={normalizeInputValue(account.total_principal)}
-                    onChange={(event) => updateAccount(account.account_id, "total_principal", event.target.value)}
-                  />
-                </td>
-                <td>
-                  {account.currency === "KRW" ? (
-                    <input
-                      className="tableField"
-                      type="number"
-                      value={normalizeInputValue(account.cash_balance_krw)}
-                      onChange={(event) => {
-                        updateAccount(account.account_id, "cash_balance_krw", event.target.value);
-                        updateAccount(account.account_id, "cash_balance_native", event.target.value);
-                      }}
-                    />
-                  ) : (
-                    <div className="tableCellStack">
+          <div className="tableWrap">
+            <table className="erpTable">
+              <thead>
+                <tr>
+                  <th>계좌</th>
+                  <th>투자 원금 (KRW)</th>
+                  <th>보유 현금</th>
+                  <th>저장값 (KRW)</th>
+                  <th>현금 통화</th>
+                  <th>Intl Shares Value</th>
+                  <th>Intl Shares Change</th>
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.map((account) => (
+                  <tr key={account.account_id}>
+                    <td>
+                      <div className="tableAccountCell">
+                        <strong>
+                          {account.order}. {account.icon} {account.name}
+                        </strong>
+                        <span>{account.account_id}</span>
+                      </div>
+                    </td>
+                    <td>
                       <input
                         className="tableField"
                         type="number"
-                        value={normalizeInputValue(account.cash_balance_native)}
-                        onChange={(event) => updateAccount(account.account_id, "cash_balance_native", event.target.value)}
+                        value={normalizeInputValue(account.total_principal)}
+                        onChange={(event) => updateAccount(account.account_id, "total_principal", event.target.value)}
                       />
-                      <span className="tableSubtext">
-                        {account.currency}/KRW {formatNumber(rates[account.currency] ?? 0)}
-                      </span>
-                    </div>
-                  )}
-                </td>
-                <td>
-                  <div className="tableReadonly">{formatNumber(account.cash_balance_krw)}</div>
-                </td>
-                <td>{account.cash_currency}</td>
-                <td>
-                  {account.account_id === "aus_account" ? (
-                    <input
-                      className="tableField"
-                      type="number"
-                      value={normalizeInputValue(account.intl_shares_value)}
-                      onChange={(event) => updateAccount(account.account_id, "intl_shares_value", event.target.value)}
-                    />
-                  ) : (
-                    <span className="tableMuted">-</span>
-                  )}
-                </td>
-                <td>
-                  {account.account_id === "aus_account" ? (
-                    <input
-                      className="tableField"
-                      type="number"
-                      value={normalizeInputValue(account.intl_shares_change)}
-                      onChange={(event) => updateAccount(account.account_id, "intl_shares_change", event.target.value)}
-                    />
-                  ) : (
-                    <span className="tableMuted">-</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="tableFooterMeta">마지막 저장: {formatUpdatedAt(latestUpdatedAt)}</div>
-    </section>
+                    </td>
+                    <td>
+                      {account.currency === "KRW" ? (
+                        <input
+                          className="tableField"
+                          type="number"
+                          value={normalizeInputValue(account.cash_balance_krw)}
+                          onChange={(event) => {
+                            updateAccount(account.account_id, "cash_balance_krw", event.target.value);
+                            updateAccount(account.account_id, "cash_balance_native", event.target.value);
+                          }}
+                        />
+                      ) : (
+                        <div className="tableCellStack">
+                          <input
+                            className="tableField"
+                            type="number"
+                            value={normalizeInputValue(account.cash_balance_native)}
+                            onChange={(event) => updateAccount(account.account_id, "cash_balance_native", event.target.value)}
+                          />
+                          <span className="tableSubtext">
+                            {account.currency}/KRW {formatNumber(rates[account.currency] ?? 0)}
+                          </span>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <div className="tableReadonly">{formatNumber(account.cash_balance_krw)}</div>
+                    </td>
+                    <td>{account.cash_currency}</td>
+                    <td>
+                      {account.account_id === "aus_account" ? (
+                        <input
+                          className="tableField"
+                          type="number"
+                          value={normalizeInputValue(account.intl_shares_value)}
+                          onChange={(event) => updateAccount(account.account_id, "intl_shares_value", event.target.value)}
+                        />
+                      ) : (
+                        <span className="tableMuted">-</span>
+                      )}
+                    </td>
+                    <td>
+                      {account.account_id === "aus_account" ? (
+                        <input
+                          className="tableField"
+                          type="number"
+                          value={normalizeInputValue(account.intl_shares_change)}
+                          onChange={(event) => updateAccount(account.account_id, "intl_shares_change", event.target.value)}
+                        />
+                      ) : (
+                        <span className="tableMuted">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="tableFooterMeta">마지막 저장: {formatUpdatedAt(latestUpdatedAt)}</div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }

@@ -136,120 +136,154 @@ export function DashboardManager() {
   }, []);
 
   if (loading) {
-    return <section className="section"><p>대시보드 데이터를 불러오는 중...</p></section>;
+    return (
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBody">
+            <p>대시보드 데이터를 불러오는 중...</p>
+          </div>
+        </div>
+      </section>
+    );
   }
 
   return (
-    <>
-      <section className="pageHeaderCompact">
-        <div><h1>대시보드</h1></div>
-        <button
-          type="button"
-          className={`toggleButton ${hideMoney ? "toggleButtonActive" : ""}`.trim()}
-          onClick={() => setHideMoney((current) => !current)}
-        >
-          금액 가리기 {hideMoney ? "ON" : "OFF"}
-        </button>
-      </section>
-
-      <section className="section">
-        {error ? <div className="bannerError">{error}</div> : null}
-        <div className="dashboardMetricGrid">
-          {(data?.metrics ?? []).map((metric) => (
-            <div key={metric.label} className="dashboardMetricCard">
-              <div className="dashboardMetricLabel">{metric.label}</div>
-              <div className={shouldHighlightMetric(metric.label) ? getSignedClass(metric.value) : undefined}>
-                {formatMetricDisplay(metric.value, metric.kind)}
-              </div>
+    <div className="appPageStack">
+      {error ? (
+        <div className="appBannerStack">
+          <div className="bannerError">{error}</div>
+        </div>
+      ) : null}
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header appCardHeader">
+            <div className="sectionHeaderCompact w-100">
+              <h2>대시보드</h2>
+              <button
+                type="button"
+                className={`toggleButton ${hideMoney ? "toggleButtonActive" : ""}`.trim()}
+                onClick={() => setHideMoney((current) => !current)}
+              >
+                금액 가리기 {hideMoney ? "ON" : "OFF"}
+              </button>
             </div>
-          ))}
-        </div>
-        <div className="tableFooterMeta">
-          스냅샷 기준일: {data?.latest_snapshot_date ?? "-"} | 주별 기준일: {data?.weekly_date ?? "-"} | 갱신:{" "}
-          {formatUpdatedAt(data?.updated_at)}
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="sectionHeaderCompact">
-          <h2>포트폴리오 구성 비중</h2>
-        </div>
-        <div className="dashboardInfoRibbon">
-          {(data?.buckets ?? []).map((bucket) => (
-            <article key={bucket.label} className="dashboardInfoCard">
-              <div className="dashboardInfoCardLabel">{bucket.label}</div>
-              <div className="dashboardInfoCardValue">{formatPercent(bucket.weight_pct)}</div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="sectionHeaderCompact">
-          <h2>자산/주간 통계</h2>
-        </div>
-        <div className="dashboardInfoRibbon">
-          {(data?.stats ?? []).map((stat) => (
-            <article key={stat.label} className="dashboardInfoCard">
-              <div className="dashboardInfoCardLabel">{stat.label}</div>
-              <div className={`dashboardInfoCardValue ${shouldHighlightMetric(stat.label) ? getSignedClass(stat.value) ?? "" : ""}`.trim()}>
-                {formatMetricDisplay(stat.value, stat.kind)}
-              </div>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="section">
-        <div className="sectionHeaderCompact">
-          <h2>계좌별 요약</h2>
-        </div>
-        <div className="tableWrap">
-          <table className="erpTable dashboardAccountTable">
-            <colgroup>
-              <col className="dashboardAccountColName" />
-              <col className="dashboardAccountColValue" />
-              <col className="dashboardAccountColValue" />
-              <col className="dashboardAccountColValue" />
-              <col className="dashboardAccountColValue" />
-              <col className="dashboardAccountColRatio" />
-              <col className="dashboardAccountColValue" />
-              <col className="dashboardAccountColRatio" />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>계좌</th>
-                <th className="tableAlignRight">총 자산</th>
-                <th className="tableAlignRight">총 원금</th>
-                <th className="tableAlignRight">평가 금액</th>
-                <th className="tableAlignRight">현금</th>
-                <th className="tableAlignRight">현금 비중</th>
-                <th className="tableAlignRight">계좌 손익</th>
-                <th className="tableAlignRight">계좌 수익률</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(data?.accounts ?? []).map((account) => (
-                <tr key={account.account_id}>
-                  <td>{account.account_name}</td>
-                  <td className="tableAlignRight">{formatMoneyDisplay(account.total_assets)}</td>
-                  <td className="tableAlignRight">{formatMoneyDisplay(account.total_principal)}</td>
-                  <td className="tableAlignRight">{formatMoneyDisplay(account.valuation_krw)}</td>
-                  <td className="tableAlignRight">{formatMoneyDisplay(account.cash_balance)}</td>
-                  <td className="tableAlignRight">{formatPercent(account.cash_ratio)}</td>
-                  <td className={`tableAlignRight ${getSignedClass(account.net_profit) ?? ""}`.trim()}>
-                    {formatMoneyDisplay(account.net_profit)}
-                  </td>
-                  <td className={`tableAlignRight ${getSignedClass(account.net_profit_pct) ?? ""}`.trim()}>
-                    {formatPercent(account.net_profit_pct)}
-                  </td>
-                </tr>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <div className="dashboardMetricGrid">
+              {(data?.metrics ?? []).map((metric) => (
+                <div key={metric.label} className="dashboardMetricCard">
+                  <div className="dashboardMetricLabel">{metric.label}</div>
+                  <div className={shouldHighlightMetric(metric.label) ? getSignedClass(metric.value) : undefined}>
+                    {formatMetricDisplay(metric.value, metric.kind)}
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+            <div className="tableFooterMeta">
+              스냅샷 기준일: {data?.latest_snapshot_date ?? "-"} | 주별 기준일: {data?.weekly_date ?? "-"} | 갱신:{" "}
+              {formatUpdatedAt(data?.updated_at)}
+            </div>
+          </div>
         </div>
       </section>
 
-    </>
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header appCardHeader">
+            <div className="sectionHeaderCompact w-100">
+              <h2>포트폴리오 구성 비중</h2>
+            </div>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <div className="dashboardInfoRibbon">
+              {(data?.buckets ?? []).map((bucket) => (
+                <article key={bucket.label} className="dashboardInfoCard">
+                  <div className="dashboardInfoCardLabel">{bucket.label}</div>
+                  <div className="dashboardInfoCardValue">{formatPercent(bucket.weight_pct)}</div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header appCardHeader">
+            <div className="sectionHeaderCompact w-100">
+              <h2>자산/주간 통계</h2>
+            </div>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <div className="dashboardInfoRibbon">
+              {(data?.stats ?? []).map((stat) => (
+                <article key={stat.label} className="dashboardInfoCard">
+                  <div className="dashboardInfoCardLabel">{stat.label}</div>
+                  <div className={`dashboardInfoCardValue ${shouldHighlightMetric(stat.label) ? getSignedClass(stat.value) ?? "" : ""}`.trim()}>
+                    {formatMetricDisplay(stat.value, stat.kind)}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header appCardHeader">
+            <div className="sectionHeaderCompact w-100">
+              <h2>계좌별 요약</h2>
+            </div>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <div className="tableWrap">
+              <table className="erpTable dashboardAccountTable">
+                <colgroup>
+                  <col className="dashboardAccountColName" />
+                  <col className="dashboardAccountColValue" />
+                  <col className="dashboardAccountColValue" />
+                  <col className="dashboardAccountColValue" />
+                  <col className="dashboardAccountColValue" />
+                  <col className="dashboardAccountColRatio" />
+                  <col className="dashboardAccountColValue" />
+                  <col className="dashboardAccountColRatio" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>계좌</th>
+                    <th className="tableAlignRight">총 자산</th>
+                    <th className="tableAlignRight">총 원금</th>
+                    <th className="tableAlignRight">평가 금액</th>
+                    <th className="tableAlignRight">현금</th>
+                    <th className="tableAlignRight">현금 비중</th>
+                    <th className="tableAlignRight">계좌 손익</th>
+                    <th className="tableAlignRight">계좌 수익률</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(data?.accounts ?? []).map((account) => (
+                    <tr key={account.account_id}>
+                      <td>{account.account_name}</td>
+                      <td className="tableAlignRight">{formatMoneyDisplay(account.total_assets)}</td>
+                      <td className="tableAlignRight">{formatMoneyDisplay(account.total_principal)}</td>
+                      <td className="tableAlignRight">{formatMoneyDisplay(account.valuation_krw)}</td>
+                      <td className="tableAlignRight">{formatMoneyDisplay(account.cash_balance)}</td>
+                      <td className="tableAlignRight">{formatPercent(account.cash_ratio)}</td>
+                      <td className={`tableAlignRight ${getSignedClass(account.net_profit) ?? ""}`.trim()}>
+                        {formatMoneyDisplay(account.net_profit)}
+                      </td>
+                      <td className={`tableAlignRight ${getSignedClass(account.net_profit_pct) ?? ""}`.trim()}>
+                        {formatPercent(account.net_profit_pct)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
