@@ -5,6 +5,7 @@ from typing import Any
 
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.normalization import normalize_nullable_number, normalize_number, to_iso_string
 
 
 def _require_db():
@@ -12,24 +13,6 @@ def _require_db():
     if db is None:
         raise RuntimeError("DB 연결 실패")
     return db
-
-
-def _normalize_number(value: Any) -> float:
-    return float(value or 0)
-
-
-def _normalize_nullable_number(value: Any) -> float | None:
-    if value in (None, ""):
-        return None
-    return float(value)
-
-
-def _to_updated_at_text(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime.datetime):
-        return value.isoformat()
-    return str(value)
 
 
 def _normalize_currency(value: Any, fallback: str) -> str:
@@ -62,21 +45,21 @@ def load_cash_accounts() -> dict[str, list[dict[str, Any]]]:
                 "icon": str(account.get("icon") or ""),
                 "country_code": str(account.get("country_code") or ""),
                 "currency": currency,
-                "total_principal": _normalize_number(account_doc.get("total_principal")),
-                "cash_balance_krw": _normalize_number(account_doc.get("cash_balance")),
-                "cash_balance_native": _normalize_nullable_number(account_doc.get("cash_balance_native")),
+                "total_principal": normalize_number(account_doc.get("total_principal")),
+                "cash_balance_krw": normalize_number(account_doc.get("cash_balance")),
+                "cash_balance_native": normalize_nullable_number(account_doc.get("cash_balance_native")),
                 "cash_currency": cash_currency,
                 "intl_shares_value": (
-                    _normalize_nullable_number(account_doc.get("intl_shares_value"))
+                    normalize_nullable_number(account_doc.get("intl_shares_value"))
                     if account_id == "aus_account"
                     else None
                 ),
                 "intl_shares_change": (
-                    _normalize_nullable_number(account_doc.get("intl_shares_change"))
+                    normalize_nullable_number(account_doc.get("intl_shares_change"))
                     if account_id == "aus_account"
                     else None
                 ),
-                "updated_at": _to_updated_at_text(account_doc.get("updated_at")),
+                "updated_at": to_iso_string(account_doc.get("updated_at")),
             }
         )
 
@@ -102,10 +85,10 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             "account_id": account_id,
             "total_principal": float(update.get("total_principal") or 0),
             "cash_balance": float(update.get("cash_balance_krw") or 0),
-            "cash_balance_native": _normalize_nullable_number(update.get("cash_balance_native")),
+            "cash_balance_native": normalize_nullable_number(update.get("cash_balance_native")),
             "cash_currency": str(update.get("cash_currency") or "").strip().upper(),
-            "intl_shares_value": _normalize_nullable_number(update.get("intl_shares_value")),
-            "intl_shares_change": _normalize_nullable_number(update.get("intl_shares_change")),
+            "intl_shares_value": normalize_nullable_number(update.get("intl_shares_value")),
+            "intl_shares_change": normalize_nullable_number(update.get("intl_shares_change")),
             "updated_at": now,
         }
 

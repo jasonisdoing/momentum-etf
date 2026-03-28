@@ -9,6 +9,7 @@ import pandas as pd
 from services.price_service import get_exchange_rate_series
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.normalization import to_iso_string
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 
 WEEKLY_COLLECTION = "weekly_fund_data"
@@ -157,14 +158,6 @@ def _to_float(value: object) -> float:
     return float(value or 0.0)
 
 
-def _to_iso_string(value: Any) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime.datetime):
-        return value.isoformat()
-    return str(value)
-
-
 def _get_live_exchange_rate() -> float:
     """현재 시점의 USD/KRW 환율을 반환한다."""
     now = pd.Timestamp(_get_now_kst()).tz_localize(None)
@@ -307,7 +300,7 @@ def _doc_to_api_row(doc: dict[str, Any]) -> dict[str, Any]:
         "total_stocks": _to_int(computed_doc.get("total_stocks", 0)),
         "profit_count": _to_int(computed_doc.get("profit_count", 0)),
         "loss_count": _to_int(computed_doc.get("loss_count", 0)),
-        "updated_at": _to_iso_string(computed_doc.get("updated_at")),
+        "updated_at": to_iso_string(computed_doc.get("updated_at")),
     }
 
 
