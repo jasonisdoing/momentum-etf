@@ -6,22 +6,39 @@ import {
   type GridValidRowModel,
 } from "@mui/x-data-grid";
 
+import { AppDataGridLoadingOverlay } from "./AppDataGridLoadingOverlay";
+
 type AppDataGridProps<R extends GridValidRowModel> = DataGridProps<R> & {
   minHeight?: string | number;
   wrapClassName?: string;
+  fitContentRows?: boolean;
+  fitContentMaxRows?: number;
 };
 
 export function AppDataGrid<R extends GridValidRowModel>({
   className,
   wrapClassName,
   minHeight = "24rem",
+  fitContentRows = false,
+  fitContentMaxRows = 8,
   sx,
+  rows,
+  rowHeight = 40,
+  columnHeaderHeight = 40,
   ...props
 }: AppDataGridProps<R>) {
+  const shouldFitContent =
+    fitContentRows && Array.isArray(rows) && rows.length > 0 && rows.length <= fitContentMaxRows;
+  const wrapStyle = shouldFitContent
+    ? {
+        height: columnHeaderHeight + rowHeight * rows.length + 2,
+      }
+    : { minHeight };
+
   return (
     <div
       className={wrapClassName ? `appDataGridWrap ${wrapClassName}` : "appDataGridWrap"}
-      style={{ minHeight }}
+      style={wrapStyle}
     >
       <DataGrid
         className={className ? `appDataGrid ${className}` : "appDataGrid"}
@@ -32,8 +49,12 @@ export function AppDataGrid<R extends GridValidRowModel>({
           noRowsLabel: "데이터가 없습니다.",
           noResultsOverlayLabel: "조건에 맞는 데이터가 없습니다.",
         }}
-        rowHeight={40}
-        columnHeaderHeight={40}
+        slots={{
+          loadingOverlay: AppDataGridLoadingOverlay,
+        }}
+        rows={rows}
+        rowHeight={rowHeight}
+        columnHeaderHeight={columnHeaderHeight}
         sx={{
           border: 0,
           minWidth: 0,

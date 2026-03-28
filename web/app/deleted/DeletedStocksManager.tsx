@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 
+import { AppLoadingState } from "../components/AppLoadingState";
 import { useToast } from "../components/ToastProvider";
 
 type DeletedStocksAccountItem = {
@@ -183,13 +184,11 @@ export function DeletedStocksManager() {
 
   if (loading) {
     return (
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-            <p>삭제된 종목 데이터를 불러오는 중...</p>
-          </div>
+      <div className="appPageStack">
+        <div className="appPageLoading">
+          <AppLoadingState label="삭제된 종목 데이터를 불러오는 중..." />
         </div>
-      </section>
+      </div>
     );
   }
 
