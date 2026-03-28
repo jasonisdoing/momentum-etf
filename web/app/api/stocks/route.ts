@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { loadStocksTable, softDeleteStock, updateStockBucket } from "@/lib/stocks-store";
+import { addStockCandidate, loadStocksTable, softDeleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,6 +32,40 @@ export async function PATCH(request: NextRequest) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "버킷 변경에 실패했습니다." },
+      { status: 400 },
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const payload = (await request.json()) as
+      | {
+          account_id?: string;
+          ticker?: string;
+          action?: "validate";
+        }
+      | {
+          account_id?: string;
+          ticker?: string;
+          bucket_id?: number;
+          action?: "create";
+        };
+
+    if (payload.action === "validate") {
+      const result = await validateStockCandidate(String(payload.account_id ?? ""), String(payload.ticker ?? ""));
+      return NextResponse.json(result);
+    }
+
+    const result = await addStockCandidate(
+      String(payload.account_id ?? ""),
+      String(payload.ticker ?? ""),
+      Number("bucket_id" in payload ? payload.bucket_id ?? 0 : 0),
+    );
+    return NextResponse.json(result);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "종목 추가 처리에 실패했습니다." },
       { status: 400 },
     );
   }

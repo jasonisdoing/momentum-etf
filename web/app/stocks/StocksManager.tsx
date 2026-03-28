@@ -1,11 +1,14 @@
 "use client";
 
 import {
+  IconCircleCheck,
   IconArrowBackUp,
+  IconPlus,
   IconChecks,
   IconLayoutGrid,
   IconPlaylistX,
   IconTrash,
+  IconSearch,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { type GridColDef, type GridRowSelectionModel } from "@mui/x-data-grid";
@@ -76,6 +79,15 @@ type ViewMode = "active" | "deleted";
 
 type ActiveStockGridRow = ActiveStocksRowItem & { id: string };
 type DeletedStockGridRow = DeletedStocksRowItem & { id: string };
+type StockValidationState = {
+  ticker: string;
+  name: string;
+  listing_date: string;
+  status: "active" | "deleted" | "new";
+  is_deleted: boolean;
+  deleted_reason: string;
+  bucket_id: number;
+};
 
 const BUCKET_OPTIONS = [
   { id: 1, name: "1. 모멘텀" },
@@ -122,6 +134,12 @@ export function StocksManager() {
   const [isPending, startTransition] = useTransition();
   const [editingRow, setEditingRow] = useState<ActiveStocksRowItem | null>(null);
   const [editingBucketId, setEditingBucketId] = useState<number>(1);
+  const [editingDeleteReason, setEditingDeleteReason] = useState("");
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addTickerInput, setAddTickerInput] = useState("");
+  const [validatedCandidate, setValidatedCandidate] = useState<StockValidationState | null>(null);
+  const [isValidatingTicker, setIsValidatingTicker] = useState(false);
+  const [addBucketId, setAddBucketId] = useState<number>(1);
   const toast = useToast();
 
   async function load(mode: ViewMode, accountId?: string) {
@@ -380,6 +398,24 @@ export function StocksManager() {
   function openEditModal(row: ActiveStocksRowItem) {
     setEditingRow(row);
     setEditingBucketId(row.bucket_id);
+    setEditingDeleteReason("");
+  }
+
+  function openAddModal() {
+    setIsAddModalOpen(true);
+    setAddTickerInput("");
+    setValidatedCandidate(null);
+    setAddBucketId(1);
+  }
+
+  function closeAddModal() {
+    if (isPending || isValidatingTicker) {
+      return;
+    }
+    setIsAddModalOpen(false);
+    setAddTickerInput("");
+    setValidatedCandidate(null);
+    setAddBucketId(1);
   }
 
   function closeEditModal() {
@@ -387,6 +423,115 @@ export function StocksManager() {
       return;
     }
     setEditingRow(null);
+    setEditingDeleteReason("");
+  }
+
+  async function handleValidateTicker() {
+    try {
+      setError(null);
+      setIsValidatingTicker(true);
+      const response = await fetch("/api/stocks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "validate",
+          account_id: selectedAccountId,
+          ticker: addTickerInput,
+        }),
+      });
+      const payload = (await response.json()) as
+        | ({
+            error?: string;
+          } & StockValidationState)
+        | { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "티커 확인에 실패했습니다.");
+      }
+      setValidatedCandidate({
+        ticker: String((payload as StockValidationState).ticker ?? "").trim().toUpperCase(),
+        name: String((payload as StockValidationState).name ?? "").trim(),
+        listing_date: String((payload as StockValidationState).listing_date ?? "-").trim() || "-",
+        status: (payload as StockValidationState).status,
+        is_deleted: Boolean((payload as StockValidationState).is_deleted),
+        deleted_reason: String((payload as StockValidationState).deleted_reason ?? "").trim(),
+        bucket_id: Number((payload as StockValidationState).bucket_id ?? 1),
+      });
+      setAddBucketId(Number((payload as StockValidationState).bucket_id ?? 1));
+    } catch (validationError) {
+      setValidatedCandidate(null);
+      setError(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
+    } finally {
+      setIsValidatingTicker(false);
+    }
+  }
+
+  function handleAddTickerInputChange(value: string) {
+    setAddTickerInput(value);
+    if (validatedCandidate) {
+      setValidatedCandidate(null);
+    }
+  }
+
+  function handleCreateStock() {
+    if (!validatedCandidate) {
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        setError(null);
+        const response = await fetch("/api/stocks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "create",
+            account_id: selectedAccountId,
+            ticker: validatedCandidate.ticker,
+            bucket_id: addBucketId,
+          }),
+        });
+        const payload = (await response.json()) as {
+          error?: string;
+          ticker?: string;
+          name?: string;
+          listing_date?: string;
+          bucket_id?: number;
+          bucket_name?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "종목 추가에 실패했습니다.");
+        }
+        setActiveRows((current) => [
+          {
+            ticker: String(payload.ticker ?? validatedCandidate.ticker).trim().toUpperCase(),
+            name: String(payload.name ?? validatedCandidate.name).trim(),
+            bucket_id: Number(payload.bucket_id ?? addBucketId),
+            bucket_name:
+              String(payload.bucket_name ?? "").trim() ||
+              BUCKET_OPTIONS.find((bucket) => bucket.id === addBucketId)?.name ||
+              "1. 모멘텀",
+            added_date: new Date().toISOString().slice(0, 10),
+            listing_date: String(payload.listing_date ?? validatedCandidate.listing_date ?? "-").trim() || "-",
+            week_volume: null,
+            return_1w: null,
+            return_2w: null,
+            return_1m: null,
+            return_3m: null,
+            return_6m: null,
+            return_12m: null,
+          },
+          ...current,
+        ]);
+        toast.success(
+          `[ETF-종목 관리] ${validatedCandidate.name}(${validatedCandidate.ticker}) ${
+            validatedCandidate.is_deleted ? "복구 완료" : "추가 완료"
+          }`,
+        );
+        closeAddModal();
+      } catch (createError) {
+        setError(createError instanceof Error ? createError.message : "종목 추가에 실패했습니다.");
+      }
+    });
   }
 
   function handleSaveFromModal() {
@@ -443,6 +588,7 @@ export function StocksManager() {
           body: JSON.stringify({
             account_id: selectedAccountId,
             ticker: editingRow.ticker,
+            reason: editingDeleteReason.trim() || undefined,
           }),
         });
         const payload = (await response.json()) as { error?: string };
@@ -452,6 +598,7 @@ export function StocksManager() {
         setActiveRows((current) => current.filter((row) => row.ticker !== editingRow.ticker));
         toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 삭제 완료`);
         setEditingRow(null);
+        setEditingDeleteReason("");
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
@@ -556,6 +703,10 @@ export function StocksManager() {
                 </div>
 
                 <div className="accountToolbarOptions stocksToolbarModes">
+                  <button className="btn btn-primary" type="button" onClick={openAddModal} disabled={loading || viewMode !== "active"}>
+                    <IconPlus size={16} stroke={1.75} />
+                    <span>종목 추가</span>
+                  </button>
                   <button
                     className={
                       viewMode === "active" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"
@@ -656,6 +807,85 @@ export function StocksManager() {
         </div>
       </section>
       <AppModal
+        open={isAddModalOpen}
+        title="종목 추가"
+        onClose={closeAddModal}
+        footer={
+          <>
+            <button type="button" className="btn btn-link link-secondary" onClick={closeAddModal} disabled={isPending || isValidatingTicker}>
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleCreateStock}
+              disabled={isPending || isValidatingTicker || !validatedCandidate || !addBucketId}
+            >
+              저장
+            </button>
+          </>
+        }
+      >
+        <div className="mb-3">
+          <label className="form-label">티커</label>
+          <div className="d-flex gap-2">
+            <input
+              className="form-control appCodeText"
+              value={addTickerInput}
+              onChange={(event) => handleAddTickerInputChange(event.target.value)}
+              placeholder="예: 069500 / VGS / ASX:VGS"
+              disabled={isPending || isValidatingTicker}
+            />
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => void handleValidateTicker()}
+              disabled={isPending || isValidatingTicker || !addTickerInput.trim()}
+            >
+              <IconSearch size={16} stroke={1.9} />
+              <span>확인</span>
+            </button>
+          </div>
+        </div>
+
+        {validatedCandidate ? (
+          <div className="mb-3">
+            <div className="alert alert-success d-flex flex-column gap-2 mb-0">
+              <div className="d-flex align-items-center gap-2">
+                <IconCircleCheck size={18} stroke={1.9} />
+                <strong>{validatedCandidate.name}</strong>
+              </div>
+              <div className="small">티커: <span className="appCodeText">{validatedCandidate.ticker}</span></div>
+              <div className="small">상장일: {validatedCandidate.listing_date}</div>
+              {validatedCandidate.is_deleted ? (
+                <div className="small text-warning-emphasis">
+                  삭제된 종목 입니다{validatedCandidate.deleted_reason ? ` (${validatedCandidate.deleted_reason})` : ""}.
+                </div>
+              ) : null}
+              {validatedCandidate.status === "active" ? (
+                <div className="small text-danger">이미 등록된 종목입니다. 저장할 수 없습니다.</div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        <div className="mb-0">
+          <label className="form-label">버킷</label>
+          <select
+            className="form-select"
+            value={addBucketId}
+            onChange={(event) => setAddBucketId(Number(event.target.value))}
+            disabled={isPending || isValidatingTicker || !validatedCandidate || validatedCandidate.status === "active"}
+          >
+            {BUCKET_OPTIONS.map((bucket) => (
+              <option key={bucket.id} value={bucket.id}>
+                {bucket.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </AppModal>
+      <AppModal
         open={Boolean(editingRow)}
         title="종목 편집"
         onClose={closeEditModal}
@@ -698,6 +928,16 @@ export function StocksManager() {
                   </option>
                 ))}
               </select>
+            </div>
+            <div className="mb-3">
+              <label className="form-label">삭제 사유</label>
+              <input
+                className="form-control"
+                value={editingDeleteReason}
+                onChange={(event) => setEditingDeleteReason(event.target.value)}
+                placeholder="선택 입력"
+                disabled={isPending}
+              />
             </div>
             <div className="row g-2 text-secondary small">
               <div className="col-6">상장일: {editingRow.listing_date}</div>

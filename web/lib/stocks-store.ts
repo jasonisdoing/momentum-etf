@@ -49,6 +49,27 @@ type StocksTableData = {
   account_id: string;
 };
 
+type StockValidationResult = {
+  ticker: string;
+  name: string;
+  listing_date: string;
+  status: "active" | "deleted" | "new";
+  is_deleted: boolean;
+  deleted_reason: string;
+  bucket_id: number;
+  account_id: string;
+  country_code: string;
+};
+
+type StockCreateResult = {
+  ticker: string;
+  name: string;
+  listing_date: string;
+  bucket_id: number;
+  bucket_name: string;
+  status: "active" | "deleted" | "new";
+};
+
 const BUCKETS: Record<number, string> = {
   1: "1. 모멘텀",
   2: "2. 혁신기술",
@@ -102,4 +123,25 @@ export async function softDeleteStock(accountId: string, ticker: string, reason?
   });
 }
 
-export type { StocksAccountItem, StocksRowItem, StocksTableData };
+export async function validateStockCandidate(accountId: string, ticker: string): Promise<StockValidationResult> {
+  return fetchFastApiJson<StockValidationResult>("/internal/stocks/validate", {
+    method: "POST",
+    body: JSON.stringify({
+      account_id: accountId,
+      ticker,
+    }),
+  });
+}
+
+export async function addStockCandidate(accountId: string, ticker: string, bucketId: number): Promise<StockCreateResult> {
+  return fetchFastApiJson<StockCreateResult>("/internal/stocks", {
+    method: "POST",
+    body: JSON.stringify({
+      account_id: accountId,
+      ticker,
+      bucket_id: bucketId,
+    }),
+  });
+}
+
+export type { StockCreateResult, StockValidationResult, StocksAccountItem, StocksRowItem, StocksTableData };
