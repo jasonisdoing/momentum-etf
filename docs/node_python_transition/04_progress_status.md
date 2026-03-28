@@ -111,6 +111,9 @@
 - 컬럼 수가 많은 화면(`weekly`, `stocks`, `market`)은 최대폭, 그 외 화면은 고정폭 기준을 사용한다.
 - FastAPI를 도입하면 `Next가 인증과 프론트`, `FastAPI가 내부 도메인 API`를 맡는 구조로 간다.
 - FastAPI 내부 API 연동을 위해 `FASTAPI_INTERNAL_URL`, `FASTAPI_INTERNAL_TOKEN` 환경변수가 필요하다.
+- FastAPI 내부 API 연동을 위해 `FASTAPI_INTERNAL_URL`, `FASTAPI_INTERNAL_TOKEN` 환경변수가 필요하다.
+- `system`, `weekly`, `rank`, `summary`, `dashboard`, `market`은 FastAPI 내부 API로 이관을 완료했다.
+- 현재 구조는 `Next = 인증/프론트/BFF`, `FastAPI = Python 친화 내부 도메인 API` 기준으로 정리됐다.
 
 ## 이번 턴의 환경 제약
 

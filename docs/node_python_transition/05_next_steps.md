@@ -44,17 +44,27 @@
 - Node dev 서버에서 `.env`, `zaccounts`, Mongo 연결이 정상인가
 - 화면 수정이 즉시 반영되는가
 
-## Step 4. FastAPI 내부 API 순차 이관
+## Step 4. FastAPI 내부 API 이관 지속
 
-목표:
+현재 완료:
 
-- `Next = 인증/프론트`, `FastAPI = 내부 도메인 API` 구조로 점진 전환한다.
-- 첫 이관 순서는 `system -> weekly -> summary -> dashboard -> market` 으로 잡는다.
+- `system`
+- `weekly`
+- `rank`
+- `summary`
+- `dashboard`
+- `market`
+
+다음 목표:
+
+- `Next = 인증/프론트`, `FastAPI = 내부 도메인 API` 구조를 유지한다.
+- 남은 API 중 FastAPI로 옮길 가치가 큰 대상(`snapshots`, `stocks`, `cash`, `note`, `import`)의 우선순위를 정한다.
 
 검증 후보:
 
 - `GET/POST /internal/system`
 - `GET/POST/PATCH /internal/weekly`
+- `GET /internal/rank`
 - `GET/POST /internal/summary`
 - `GET /internal/dashboard`
 - `GET /internal/market`
