@@ -1031,65 +1031,9 @@ a {
   font-size: 12px;
 }
 
-.dashboardMetricGrid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 8px;
-}
-
-.dashboardMetricCard {
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.74);
-}
-
-.dashboardMetricLabel {
-  margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.dashboardAccountTable {
-  table-layout: fixed;
-}
-
-.dashboardAccountColName {
-  width: 13%;
-}
-
-.dashboardAccountColValue {
-  width: 14%;
-}
-
-.dashboardAccountColRatio {
-  width: 9.5%;
-}
-
-.dashboardInfoRibbon {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
-  gap: 8px;
-}
-
-.dashboardInfoCard {
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.dashboardInfoCardLabel {
-  margin-bottom: 6px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.dashboardInfoCardValue {
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-align: right;
+/* 대시보드 — Tabler row-cards 간격 조정 */
+.row-cards {
+  --tblr-gutter-y: 0.75rem;
 }
 
 .metricPositive {
@@ -1593,14 +1537,6 @@ a {
   }
 
   .filterBar {
-    grid-template-columns: 1fr;
-  }
-
-  .dashboardMetricGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .dashboardTwoColumn {
     grid-template-columns: 1fr;
   }
 
