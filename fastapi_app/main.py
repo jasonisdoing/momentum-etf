@@ -52,4 +52,11 @@ app.include_router(weekly_router)
 
 @app.get("/internal/health")
 def health() -> dict[str, str]:
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is None:
+        return JSONResponse(status_code=503, content={"status": "error", "detail": "DB 연결 실패"})
+
+    db.command("ping")
     return {"status": "ok"}
