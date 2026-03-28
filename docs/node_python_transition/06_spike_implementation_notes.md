@@ -99,8 +99,8 @@
 - `주별`의 `이번주 데이터 집계` 버튼은 Python 호출이 아니라 Node에서 직접 처리한다.
 - `주별` 집계는 최신 `daily_snapshots` 기준 금액과 환율을 즉시 반영하고, 계산 컬럼은 Node에서 다시 계산한다.
 - Python UI, `/py` 라우팅, `python_app`, Streamlit 관련 코드/문서 흔적을 제거했다.
-- 내부 API는 FastAPI 기준으로 분리하기 시작했다.
-  - 완료: `system`, `weekly`, `rank`, `summary`, `dashboard`, `market`
+- 내부 API는 FastAPI 기준으로 분리했다.
+  - 완료: `system`, `weekly`, `rank`, `summary`, `dashboard`, `market`, `snapshots`, `stocks`, `cash`, `note`, `import`
 - 현재 호출 구조는 `브라우저 -> Next -> FastAPI`다.
 - 운영과 로컬 모두 `FASTAPI_INTERNAL_URL`, `FASTAPI_INTERNAL_TOKEN`이 필요하다.
 
@@ -112,6 +112,6 @@
 
 1. `주별` 집계 정확도 보정
 2. `스냅샷`, `대시보드` UX 완성도 보정
-3. 남은 API의 FastAPI 이관 우선순위 결정
+3. 운영 회귀 확인
 4. 전역 Tabler 표준화 지속
 5. 운영 배포 회귀 확인
