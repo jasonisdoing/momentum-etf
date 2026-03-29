@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
       name?: string;
       period_months?: number;
       slippage_pct?: number;
+      country_code?: string;
       benchmark?: {
         ticker?: string;
         name?: string;
@@ -52,8 +53,10 @@ export async function POST(request: NextRequest) {
       }>;
     };
 
+    const countryCode = String(payload.country_code ?? "kor");
+
     if (payload.action === "validate") {
-      const result = await validateBacktestTicker(String(payload.ticker ?? ""));
+      const result = await validateBacktestTicker(String(payload.ticker ?? ""), countryCode);
       return NextResponse.json(result);
     }
 
@@ -90,6 +93,7 @@ export async function POST(request: NextRequest) {
         Number(payload.slippage_pct ?? 0.5),
         normalizedBenchmark,
         normalizedGroups,
+        countryCode,
       );
       return NextResponse.json(result);
     }
