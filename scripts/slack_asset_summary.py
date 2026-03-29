@@ -29,25 +29,6 @@ from utils.portfolio_io import (
 )
 from utils.report import format_kr_money
 
-# Suppress Streamlit warnings in non-Streamlit environments
-os.environ["STREAMLIT_GLOBAL_LOG_LEVEL"] = "error"
-logging.getLogger("streamlit").setLevel(logging.ERROR)
-logging.getLogger("streamlit.runtime.caching.cache_data_api").setLevel(logging.ERROR)
-logging.getLogger("streamlit.runtime.state.session_state_proxy").setLevel(logging.ERROR)
-
-# Silencing the "missing ScriptRunContext" and other Streamlit UserWarnings
-import warnings
-
-warnings.filterwarnings("ignore", category=UserWarning, module="streamlit")
-
-# streamlit.runtime.scriptrunner_utils.script_run_context
-try:
-    from streamlit.runtime.scriptrunner_utils import script_run_context
-
-    script_run_context._LOGGER.setLevel(logging.ERROR)
-except Exception:
-    pass
-
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -130,7 +111,7 @@ def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
     return (
         f"⚠️ 자산 요약 발송 중단 ({account_id})\n"
         f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
-        f"`python scripts/update_price_cache.py {account_id}` 실행 후 다시 시도하세요."
+        f"종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요."
     )
 
 
@@ -165,7 +146,7 @@ def main():
 
         # Load holdings
         try:
-            # We need to mock streamlit session_state/secrets for some utils if they depend on it
+            # 일부 공용 유틸이 환경 설정을 필요로 할 수 있어 예외를 명확히 처리한다.
             df = load_real_holdings_table(account_id, strict_price_cache=True)
         except MissingPriceCacheError as e:
             alert_msg = _build_missing_cache_alert(account_id, e.tickers)

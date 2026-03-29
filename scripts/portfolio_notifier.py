@@ -14,7 +14,6 @@ from datetime import datetime
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import warnings
 
 import pytz
 
@@ -27,16 +26,6 @@ from utils.report import format_kr_money
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
-# Suppress Streamlit warnings
-warnings.filterwarnings("ignore", category=UserWarning, module="streamlit")
-for _name in [
-    "streamlit",
-    "streamlit.runtime.caching.cache_data_api",
-    "streamlit.runtime.scriptrunner_utils.script_run_context",
-    "streamlit.runtime.state.session_state_proxy",
-]:
-    logging.getLogger(_name).setLevel(logging.ERROR)
 
 
 def get_trend_emoji(val):
@@ -60,7 +49,7 @@ def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
     return (
         f"⚠️ 포트폴리오 알림 발송 중단 ({account_id})\n"
         f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
-        f"`python scripts/update_price_cache.py {account_id}` 실행 후 다시 시도하세요."
+        f"종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요."
     )
 
 

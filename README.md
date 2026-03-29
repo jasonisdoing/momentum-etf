@@ -57,14 +57,15 @@ pip install -r requirements.txt
 
 **1. 웹 실행**
 ```bash
-python run.py
+cd web
+npm run dev
 ```
 
 웹에서 다음 기능을 사용합니다.
-* `http://localhost/rank?account=kor_account`
-* `1. 순위`
-* `2. 종목 관리`
-* `3. 삭제된 종목`
+* `http://localhost:3000/`
+* Home
+* 자산 관리 / 벌크 입력 / 스냅샷 / 주별
+* 종목 관리 / ETF 마켓 / 계좌 메모 / AI용 요약 / 정보
 
 현재 기본 계좌 식별자는 다음과 같습니다.
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`

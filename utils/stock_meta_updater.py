@@ -347,6 +347,66 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
         return None
 
 
+def update_single_ticker_metadata(account_id: str, ticker: str) -> None:
+    """단일 종목의 메타데이터를 조회하고 DB에 저장합니다."""
+    logger = get_app_logger()
+    account_norm = (account_id or "").strip().lower()
+    ticker_norm = (ticker or "").strip().upper()
+
+    if not account_norm or not ticker_norm:
+        return
+
+    try:
+        settings = get_account_settings(account_norm)
+        country_code = settings.get("country_code", "kor").lower()
+    except Exception:
+        logger.warning(f"[{account_norm.upper()}/{ticker_norm}] 계정 설정 로드 실패, 기본 국가코드(kor) 사용")
+        country_code = "kor"
+
+    naver_etf_map = {}
+    if country_code == "kor":
+        naver_etf_map = fetch_naver_etf_names_map()
+
+    stock: dict[str, Any] = {"ticker": ticker_norm}
+
+    # 기존 메타 로드
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is not None:
+        existing = db.stock_meta.find_one(
+            {"account_id": account_norm, "ticker": ticker_norm},
+            {"name": 1, "listing_date": 1},
+        )
+        if existing:
+            stock["name"] = existing.get("name") or ""
+            stock["listing_date"] = existing.get("listing_date")
+
+    update_single_stock_metadata(stock, country_code, naver_etf_map, account_norm)
+
+    update_doc = {"ticker": ticker_norm}
+    fields_to_update = [
+        "name",
+        "listing_date",
+        "1_week_avg_volume",
+        "1_week_earn_rate",
+        "2_week_earn_rate",
+        "1_month_earn_rate",
+        "3_month_earn_rate",
+        "6_month_earn_rate",
+        "12_month_earn_rate",
+    ]
+    for f in fields_to_update:
+        if f in stock:
+            update_doc[f] = stock[f]
+
+    try:
+        modified = bulk_update_stocks(account_norm, [update_doc])
+        logger.info(f"[{account_norm.upper()}/{ticker_norm}] 메타데이터 업데이트 완료 ({modified}건)")
+    except Exception as e:
+        logger.error(f"[{account_norm.upper()}/{ticker_norm}] 메타데이터 저장 실패: {e}")
+
+
 def update_single_stock_metadata(
     stock: dict[str, Any], country_code: str, naver_etf_map: dict[str, str], account_norm: str = ""
 ):

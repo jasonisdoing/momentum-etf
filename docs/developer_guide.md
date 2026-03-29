@@ -14,7 +14,7 @@
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
     *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
-    *   `ui.py`: Streamlit 커스텀 컴포넌트 및 스타일링
+    *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 
 ### 데이터 파이프라인 및 캐싱
@@ -40,8 +40,7 @@
 ### 핵심 구조
 | 파일/경로 | 역할 |
 |-----------------|------|
-| `app.py` | `/rank` 라우트와 상단 선택 컨트롤 렌더링 |
-| `app_pages/account_page.py` | 계좌별 순위/종목 관리/삭제 종목/메모 화면 |
+| `web/app/*` | Next.js 기반 사용자 화면과 API 라우트 |
 | `utils/rankings.py` | 순위 계산과 정렬 |
 | `core/strategy/metrics.py` | 이동평균 점수 및 지속일 계산 |
 | `services/price_service.py` | 실시간 가격/환율 조회의 공식 진입점 |
@@ -86,7 +85,7 @@
 
 코드를 수정할 때는 다음 절차를 따르세요.
 
-1.  **로직 수정**: `utils/rankings.py`, `core/strategy/metrics.py`, `app_pages/account_page.py`, `utils/ui.py`를 우선 확인
+1.  **로직 수정**: `utils/rankings.py`, `core/strategy/metrics.py`, `web/app/*`, `web/lib/*`를 우선 확인
     *   가격/환율 문제면 `services/price_service.py`를 함께 확인
     *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
 2.  **검증**:
