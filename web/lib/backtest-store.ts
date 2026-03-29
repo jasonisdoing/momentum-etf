@@ -89,10 +89,10 @@ export async function saveBacktestConfig(
   });
 }
 
-export async function validateBacktestTicker(ticker: string) {
+export async function validateBacktestTicker(ticker: string, countryCode: string = "kor") {
   return fetchFastApiJson<BacktestTickerValidation>("/internal/backtest/validate", {
     method: "POST",
-    body: JSON.stringify({ ticker }),
+    body: JSON.stringify({ ticker, country_code: countryCode }),
   });
 }
 
@@ -108,6 +108,7 @@ export async function runBacktest(
   slippagePct: number,
   benchmark: BacktestTickerItem | null,
   groups: BacktestGroupItem[],
+  countryCode: string = "kor",
 ) {
   return fetchFastApiJson<BacktestRunResult>("/internal/backtest/run", {
     method: "POST",
@@ -116,6 +117,7 @@ export async function runBacktest(
       slippage_pct: slippagePct,
       benchmark,
       groups,
+      country_code: countryCode,
     }),
   });
 }
