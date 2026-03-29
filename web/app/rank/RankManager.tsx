@@ -459,6 +459,14 @@ export function RankManager() {
                 </div>
               </div>
               <div className="accountToolbarRight">
+                {rows.length > 0 ? (
+                  <div className="text-secondary" style={{ fontSize: "0.85rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+                    상승/하락 종목 수{" "}
+                    <span className="text-success">{rows.filter((r) => (r["일간(%)"] ?? 0) > 0).length}</span>
+                    <span className="text-secondary">/</span>
+                    <span className="text-danger">{rows.filter((r) => (r["일간(%)"] ?? 0) < 0).length}</span>
+                  </div>
+                ) : null}
                 <div className="accountToolbarMeta rankToolbarMeta">
                 <span>{selectedAccount ? `${selectedAccount.icon} ${selectedAccount.name}` : ""}</span>
                 {rankingComputedAt ? <span>계산 {formatMetaTime(rankingComputedAt)}</span> : null}
