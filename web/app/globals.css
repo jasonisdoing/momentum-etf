@@ -1405,32 +1405,32 @@ a {
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell1,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell1 {
-  background: var(--bucket-1-bg);
-  color: var(--bucket-1-text);
+  background: var(--bucket-1);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell2,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell2 {
-  background: var(--bucket-2-bg);
-  color: var(--bucket-2-text);
+  background: var(--bucket-2);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell3,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell3 {
-  background: var(--bucket-3-bg);
-  color: var(--bucket-3-text);
+  background: var(--bucket-3);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell4,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell4 {
-  background: var(--bucket-4-bg);
-  color: var(--bucket-4-text);
+  background: var(--bucket-4);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell5,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell5 {
-  background: var(--bucket-5-bg);
-  color: var(--bucket-5-text);
+  background: var(--bucket-5);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-row.appHeldRow,
