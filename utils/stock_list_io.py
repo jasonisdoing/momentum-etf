@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from time import monotonic
 from typing import Any
 
 from utils.db_manager import get_db_connection
@@ -49,8 +50,9 @@ def ensure_stock_meta_readable() -> None:
 # ---------------------------------------------------------------------------
 # 인메모리 캐시 (기존 호환)
 # ---------------------------------------------------------------------------
-_ACCOUNT_STOCKS_CACHE: dict[str, list[dict]] = {}
+_ACCOUNT_STOCKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
 _LISTING_CACHE: dict[tuple[str, str], str | None] = {}
+_CACHE_TTL_SECONDS = 60.0
 
 
 def _invalidate_cache(account_id: str | None = None) -> None:
@@ -71,15 +73,18 @@ def _invalidate_cache(account_id: str | None = None) -> None:
 
 
 def _load_account_stocks_raw(account_id: str) -> list[dict]:
-    """DB에서 해당 계좌의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (캐시 적용)."""
+    """DB에서 해당 계좌의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
     account_norm = (account_id or "").strip().lower()
-    if account_norm in _ACCOUNT_STOCKS_CACHE:
-        return _ACCOUNT_STOCKS_CACHE[account_norm]
+    cached = _ACCOUNT_STOCKS_CACHE.get(account_norm)
+    if cached is not None:
+        cached_at, cached_docs = cached
+        if monotonic() - cached_at < _CACHE_TTL_SECONDS:
+            return cached_docs
 
     coll = _get_collection()
     if coll is None:
         logger.error("MongoDB 연결 실패 — stock_meta 컬렉션을 읽을 수 없습니다.")
-        _ACCOUNT_STOCKS_CACHE[account_norm] = []
+        _ACCOUNT_STOCKS_CACHE[account_norm] = (monotonic(), [])
         return []
 
     try:
@@ -96,11 +101,11 @@ def _load_account_stocks_raw(account_id: str) -> list[dict]:
             doc.pop("updated_at", None)
             doc.pop("is_deleted", None)
             doc.pop("deleted_at", None)
-        _ACCOUNT_STOCKS_CACHE[account_norm] = docs
+        _ACCOUNT_STOCKS_CACHE[account_norm] = (monotonic(), docs)
         return docs
     except Exception as exc:
         logger.error("stock_meta 컬렉션 조회 실패 (account=%s): %s", account_norm, exc)
-        _ACCOUNT_STOCKS_CACHE[account_norm] = []
+        _ACCOUNT_STOCKS_CACHE[account_norm] = (monotonic(), [])
         return []
 
 
