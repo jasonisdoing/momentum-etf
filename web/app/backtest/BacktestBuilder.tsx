@@ -73,7 +73,7 @@ function createGroup(): BacktestGroup {
   const nextNumber = groupCounter++;
   return {
     id: `group-${nextNumber}`,
-    name: `그룹${nextNumber}`,
+    name: "",
     weight: 10,
     tickers: [createTicker()],
   };
