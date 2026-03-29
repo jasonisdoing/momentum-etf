@@ -479,7 +479,16 @@ export function RankManager() {
                 rows={gridRows}
                 columns={columns}
                 loading={loading}
-                getRowClassName={(params) => (params.row.보유 ? "rankHeldRow" : "")}
+                getRowClassName={(params) => {
+                  const classes: string[] = [];
+                  if (params.row.보유) {
+                    classes.push("rankHeldRow");
+                  }
+                  if ((params.row.추세 ?? 0) < 0) {
+                    classes.push("rankNegativeTrendRow");
+                  }
+                  return classes.join(" ");
+                }}
                 minHeight="70vh"
               />
             </div>
