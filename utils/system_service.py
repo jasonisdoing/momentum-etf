@@ -11,7 +11,7 @@ from utils.env import load_env_if_present
 
 load_env_if_present()
 
-SystemAction = Literal["meta_all", "cache_all", "asset_summary"]
+SystemAction = Literal["asset_summary"]
 
 SCHEDULE_ROWS = [
     {
@@ -53,13 +53,9 @@ def load_system_data() -> dict[str, object]:
 
 def trigger_system_action(action: SystemAction) -> str:
     script_by_action = {
-        "meta_all": "scripts/stock_meta_updater.py",
-        "cache_all": "scripts/update_price_cache.py",
         "asset_summary": "scripts/slack_asset_summary.py",
     }
     message_by_action = {
-        "meta_all": "[시스템-정보] 전체 메타데이터 업데이트 시작",
-        "cache_all": "[시스템-정보] 전체 가격 캐시 업데이트 시작",
         "asset_summary": "[시스템-정보] 전체 자산 요약 알림 전송 시작",
     }
 

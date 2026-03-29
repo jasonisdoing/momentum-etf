@@ -144,4 +144,14 @@ export async function addStockCandidate(accountId: string, ticker: string, bucke
   });
 }
 
+export async function refreshSingleStock(accountId: string, ticker: string): Promise<{ ticker: string; account_id: string }> {
+  return fetchFastApiJson<{ ticker: string; account_id: string }>("/internal/stocks/refresh", {
+    method: "POST",
+    body: JSON.stringify({
+      account_id: accountId,
+      ticker,
+    }),
+  });
+}
+
 export type { StockCreateResult, StockValidationResult, StocksAccountItem, StocksRowItem, StocksTableData };

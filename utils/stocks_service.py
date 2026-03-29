@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from typing import Any
 
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
 from utils.normalization import normalize_nullable_number, normalize_text
 from utils.stock_list_io import add_stock
 from utils.stock_meta_updater import fetch_stock_info
@@ -182,6 +184,57 @@ def validate_stock_candidate(account_id: str, ticker: str) -> dict[str, Any]:
     }
 
 
+def refresh_single_stock(account_id: str, ticker: str) -> dict[str, str]:
+    """단일 종목의 메타데이터와 가격 캐시를 갱신합니다."""
+    logger = get_app_logger()
+    account_norm = str(account_id or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    if not account_norm or not ticker_norm:
+        raise RuntimeError("계좌와 티커를 지정하세요.")
+
+    account = _require_account_config(account_norm)
+    country_code = str(account.get("country_code") or "kor").strip().lower()
+
+    # 1) 메타데이터 업데이트
+    from utils.stock_meta_updater import update_single_ticker_metadata
+
+    try:
+        update_single_ticker_metadata(account_norm, ticker_norm)
+    except Exception as e:
+        logger.error(f"[{account_norm.upper()}/{ticker_norm}] 메타데이터 갱신 실패: {e}")
+
+    # 2) 가격 캐시 업데이트
+    from utils.data_loader import fetch_ohlcv
+
+    try:
+        from utils.settings_loader import load_common_settings
+
+        settings = load_common_settings() or {}
+        start_date = settings.get("CACHE_START_DATE", "2024-01-01")
+
+        fetch_ohlcv(
+            ticker_norm,
+            country=country_code,
+            date_range=[start_date, None],
+            update_listing_meta=False,
+            force_refresh=True,
+            account_id=account_norm,
+        )
+    except Exception as e:
+        logger.error(f"[{account_norm.upper()}/{ticker_norm}] 가격 캐시 갱신 실패: {e}")
+
+    return {"ticker": ticker_norm, "account_id": account_norm}
+
+
+def _refresh_single_stock_background(account_id: str, ticker: str) -> None:
+    """백그라운드 스레드에서 단일 종목 메타+캐시를 갱신합니다."""
+    logger = get_app_logger()
+    try:
+        refresh_single_stock(account_id, ticker)
+    except Exception as e:
+        logger.error(f"[{account_id}/{ticker}] 백그라운드 갱신 실패: {e}")
+
+
 def add_active_stock(account_id: str, ticker: str, bucket_id: int) -> dict[str, Any]:
     validated = validate_stock_candidate(account_id, ticker)
     account_id_norm = str(account_id or "").strip().lower()
@@ -201,6 +254,14 @@ def add_active_stock(account_id: str, ticker: str, bucket_id: int) -> dict[str, 
         if validated["status"] == "active":
             raise RuntimeError("이미 등록된 종목입니다.")
         raise RuntimeError("종목 추가에 실패했습니다.")
+
+    # 백그라운드에서 메타데이터 + 가격 캐시 즉시 fetch
+    thread = threading.Thread(
+        target=_refresh_single_stock_background,
+        args=(account_id_norm, ticker_norm),
+        daemon=True,
+    )
+    thread.start()
 
     return {
         "ticker": ticker_norm,
@@ -370,4 +431,14 @@ def hard_delete_stocks(account_id: str, tickers: list[str]) -> int:
             "is_deleted": True,
         }
     )
+
+    # 캐시 도큐먼트도 함께 제거
+    from utils.cache_utils import delete_cached_frame
+
+    for ticker in ticker_list:
+        try:
+            delete_cached_frame(account_norm, ticker)
+        except Exception:
+            pass
+
     return int(result.deleted_count)

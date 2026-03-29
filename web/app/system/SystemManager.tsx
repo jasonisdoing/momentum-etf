@@ -39,7 +39,7 @@ export function SystemManager() {
   const [scheduleNote, setScheduleNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [runningAction, setRunningAction] = useState<"meta_all" | "cache_all" | "asset_summary" | null>(null);
+  const [runningAction, setRunningAction] = useState<"asset_summary" | null>(null);
   const [isPending, startTransition] = useTransition();
   const toast = useToast();
   const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
@@ -93,7 +93,7 @@ export function SystemManager() {
     };
   }, []);
 
-  function handleAction(action: "meta_all" | "cache_all" | "asset_summary") {
+  function handleAction(action: "asset_summary") {
     startTransition(async () => {
       try {
         setError(null);
@@ -135,22 +135,6 @@ export function SystemManager() {
             <div className="tableToolbar">
               <div className="toolbarActions">
                 <button
-                  className="primaryButton"
-                  type="button"
-                  onClick={() => handleAction("meta_all")}
-                  disabled={isPending}
-                >
-                  {runningAction === "meta_all" ? "실행 중..." : "모든 메타데이터 업데이트"}
-                </button>
-                <button
-                  className="secondaryButton"
-                  type="button"
-                  onClick={() => handleAction("cache_all")}
-                  disabled={isPending}
-                >
-                  {runningAction === "cache_all" ? "실행 중..." : "모든 가격 캐시 업데이트"}
-                </button>
-                <button
                   className="secondaryButton"
                   type="button"
                   onClick={() => handleAction("asset_summary")}
@@ -160,7 +144,7 @@ export function SystemManager() {
                 </button>
               </div>
               <div className="tableMeta">
-                <span>백그라운드 작업은 Python 스크립트로 시작된다.</span>
+                <span>메타데이터/가격 캐시는 종목별로 관리됩니다. (종목 편집 모달에서 새로고침 가능)</span>
               </div>
             </div>
           </div>
