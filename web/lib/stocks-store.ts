@@ -1,4 +1,5 @@
 import { fetchFastApiJson } from "./internal-api";
+import { BUCKET_NAME_MAP } from "./bucket-theme";
 
 type StockMetaDoc = {
   account_id?: string;
@@ -70,14 +71,6 @@ type StockCreateResult = {
   status: "active" | "deleted" | "new";
 };
 
-const BUCKETS: Record<number, string> = {
-  1: "1. 모멘텀",
-  2: "2. 혁신기술",
-  3: "3. 시장지수",
-  4: "4. 배당방어",
-  5: "5. 대체헷지",
-};
-
 function normalizeNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === "") {
     return null;
@@ -92,7 +85,9 @@ function normalizeText(value: unknown, fallback = "-"): string {
 }
 
 export function getBucketOptions(): Array<{ id: number; name: string }> {
-  return Object.entries(BUCKETS).map(([id, name]) => ({ id: Number(id), name }));
+  return Object.entries(BUCKET_NAME_MAP)
+    .filter(([id]) => Number(id) >= 1 && Number(id) <= 4)
+    .map(([id, name]) => ({ id: Number(id), name }));
 }
 
 export async function loadStocksTable(accountId?: string): Promise<StocksTableData> {

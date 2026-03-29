@@ -269,7 +269,7 @@ def build_manual_rank_extract_tsv(
                 df_cash = pd.DataFrame(
                     [
                         {
-                            "버킷": "6. 현금",
+                            "버킷": "5. 현금",
                             "티커": "CASH",
                             "종목명": "현금",
                             "현재가": 1.0,
@@ -298,7 +298,7 @@ def build_manual_rank_extract_tsv(
             if total_assets > 0:
                 df_hold["비중(%)"] = ((df_hold["평가금액(KRW)"] / total_assets) * 100.0).round(2)
                 cash_row = {
-                    "버킷": "6. 현금",
+                    "버킷": "5. 현금",
                     "티커": "CASH",
                     "종목명": "현금",
                     "현재가": 1.0,

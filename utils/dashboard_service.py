@@ -168,13 +168,13 @@ def load_dashboard_data() -> dict[str, Any]:
         },
     ]
 
+    momentum_weight_pct = normalize_number((latest_weekly or {}).get("bucket_pct_momentum"))
     buckets = [
-        {"label": "1. 모멘텀", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_momentum"))},
-        {"label": "2. 혁신기술", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_innovation"))},
-        {"label": "3. 시장지수", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_market"))},
-        {"label": "4. 배당방어", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_dividend"))},
-        {"label": "5. 대체헷지", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_alternative"))},
-        {"label": "6. 현금", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_cash"))},
+        {"label": "1. 모멘텀", "weight_pct": momentum_weight_pct},
+        {"label": "2. 시장지수", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_market"))},
+        {"label": "3. 배당방어", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_dividend"))},
+        {"label": "4. 대체헷지", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_alternative"))},
+        {"label": "5. 현금", "weight_pct": normalize_number((latest_weekly or {}).get("bucket_pct_cash"))},
     ]
 
     updated_at_candidates = [

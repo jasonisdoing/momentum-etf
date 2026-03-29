@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/run-next.mjs dev",
+    "prebuild": "cp ../shared/bucket_theme.json lib/bucket_theme.json",
     "build": "next build",
     "start": "node scripts/run-next.mjs start"
   },

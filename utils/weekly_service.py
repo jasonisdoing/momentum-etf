@@ -55,11 +55,10 @@ FIELD_DEFS = [
     {"key": "memo", "label": "비고", "type": "text"},
     {"key": "exchange_rate", "label": "환율", "type": "float"},
     {"key": "bucket_pct_momentum", "label": "1. 모멘텀 (%)", "type": "float"},
-    {"key": "bucket_pct_innovation", "label": "2. 혁신기술 (%)", "type": "float"},
-    {"key": "bucket_pct_market", "label": "3. 시장지수 (%)", "type": "float"},
-    {"key": "bucket_pct_dividend", "label": "4. 배당방어 (%)", "type": "float"},
-    {"key": "bucket_pct_alternative", "label": "5. 대체헷지 (%)", "type": "float"},
-    {"key": "bucket_pct_cash", "label": "6. 현금 (%)", "type": "float"},
+    {"key": "bucket_pct_market", "label": "2. 시장지수 (%)", "type": "float"},
+    {"key": "bucket_pct_dividend", "label": "3. 배당방어 (%)", "type": "float"},
+    {"key": "bucket_pct_alternative", "label": "4. 대체헷지 (%)", "type": "float"},
+    {"key": "bucket_pct_cash", "label": "5. 현금 (%)", "type": "float"},
     {"key": "total_stocks", "label": "총 종목 수", "type": "int"},
     {"key": "profit_count", "label": "수익 종목 수", "type": "int"},
     {"key": "loss_count", "label": "손실 종목 수", "type": "int"},
@@ -115,7 +114,6 @@ def _new_empty_doc(week_date: str) -> dict[str, Any]:
         "memo": "",
         "exchange_rate": 0.0,
         "bucket_pct_momentum": 0.0,
-        "bucket_pct_innovation": 0.0,
         "bucket_pct_market": 0.0,
         "bucket_pct_dividend": 0.0,
         "bucket_pct_alternative": 0.0,
@@ -124,6 +122,23 @@ def _new_empty_doc(week_date: str) -> dict[str, Any]:
         "loss_count": 0,
         "created_at": now,
         "updated_at": now,
+    }
+
+
+def _normalize_bucket_percentages(source: dict[str, Any]) -> dict[str, float]:
+    """구버전 5버킷 데이터를 현재 4버킷 구조로 정규화한다."""
+    momentum = _to_float(source.get("bucket_pct_momentum", 0.0))
+    innovation = _to_float(source.get("bucket_pct_innovation", 0.0))
+    market = _to_float(source.get("bucket_pct_market", 0.0))
+    dividend = _to_float(source.get("bucket_pct_dividend", 0.0))
+    alternative = _to_float(source.get("bucket_pct_alternative", 0.0))
+    cash = _to_float(source.get("bucket_pct_cash", 0.0))
+    return {
+        "bucket_pct_momentum": momentum + innovation,
+        "bucket_pct_market": market,
+        "bucket_pct_dividend": dividend,
+        "bucket_pct_alternative": alternative,
+        "bucket_pct_cash": cash,
     }
 
 
@@ -270,6 +285,7 @@ def _doc_to_api_row(doc: dict[str, Any]) -> dict[str, Any]:
     """MongoDB 문서를 Node UI용 행 스키마로 변환한다."""
     computed_doc = _apply_derived_fields(doc)
     exchange_rate = _to_float(computed_doc.get("exchange_rate", 0.0))
+    bucket_percentages = _normalize_bucket_percentages(computed_doc)
 
     return {
         "week_date": str(computed_doc["week_date"]),
@@ -291,12 +307,7 @@ def _doc_to_api_row(doc: dict[str, Any]) -> dict[str, Any]:
         "memo": str(computed_doc.get("memo", "") or ""),
         "exchange_rate": exchange_rate,
         "exchange_rate_change_pct": 0.0,
-        "bucket_pct_momentum": float(computed_doc.get("bucket_pct_momentum", 0.0) or 0.0),
-        "bucket_pct_innovation": float(computed_doc.get("bucket_pct_innovation", 0.0) or 0.0),
-        "bucket_pct_market": float(computed_doc.get("bucket_pct_market", 0.0) or 0.0),
-        "bucket_pct_dividend": float(computed_doc.get("bucket_pct_dividend", 0.0) or 0.0),
-        "bucket_pct_alternative": float(computed_doc.get("bucket_pct_alternative", 0.0) or 0.0),
-        "bucket_pct_cash": float(computed_doc.get("bucket_pct_cash", 0.0) or 0.0),
+        **bucket_percentages,
         "total_stocks": _to_int(computed_doc.get("total_stocks", 0)),
         "profit_count": _to_int(computed_doc.get("profit_count", 0)),
         "loss_count": _to_int(computed_doc.get("loss_count", 0)),
@@ -338,10 +349,9 @@ def _aggregate_live_summary_into_active_week() -> str:
     live_exchange_rate = _get_live_exchange_rate()
     bucket_totals = {
         "1. 모멘텀": 0.0,
-        "2. 혁신기술": 0.0,
-        "3. 시장지수": 0.0,
-        "4. 배당방어": 0.0,
-        "5. 대체헷지": 0.0,
+        "2. 시장지수": 0.0,
+        "3. 배당방어": 0.0,
+        "4. 대체헷지": 0.0,
     }
     all_missing_tickers: list[str] = []
 
@@ -385,14 +395,12 @@ def _aggregate_live_summary_into_active_week() -> str:
 
     if total_assets > 0:
         bucket_pct_momentum = (bucket_totals["1. 모멘텀"] / total_assets) * 100
-        bucket_pct_innovation = (bucket_totals["2. 혁신기술"] / total_assets) * 100
-        bucket_pct_market = (bucket_totals["3. 시장지수"] / total_assets) * 100
-        bucket_pct_dividend = (bucket_totals["4. 배당방어"] / total_assets) * 100
-        bucket_pct_alternative = (bucket_totals["5. 대체헷지"] / total_assets) * 100
+        bucket_pct_market = (bucket_totals["2. 시장지수"] / total_assets) * 100
+        bucket_pct_dividend = (bucket_totals["3. 배당방어"] / total_assets) * 100
+        bucket_pct_alternative = (bucket_totals["4. 대체헷지"] / total_assets) * 100
         bucket_pct_cash = (total_cash / total_assets) * 100
     else:
         bucket_pct_momentum = 0.0
-        bucket_pct_innovation = 0.0
         bucket_pct_market = 0.0
         bucket_pct_dividend = 0.0
         bucket_pct_alternative = 0.0
@@ -407,7 +415,6 @@ def _aggregate_live_summary_into_active_week() -> str:
                 "valuation_amount": int(round(total_valuation)),
                 "exchange_rate": float(live_exchange_rate),
                 "bucket_pct_momentum": float(bucket_pct_momentum),
-                "bucket_pct_innovation": float(bucket_pct_innovation),
                 "bucket_pct_market": float(bucket_pct_market),
                 "bucket_pct_dividend": float(bucket_pct_dividend),
                 "bucket_pct_alternative": float(bucket_pct_alternative),
@@ -415,7 +422,10 @@ def _aggregate_live_summary_into_active_week() -> str:
                 "profit_count": total_profit_count,
                 "loss_count": total_loss_count,
                 "updated_at": _get_now_kst(),
-            }
+            },
+            "$unset": {
+                "bucket_pct_innovation": "",
+            },
         },
         upsert=False,
     )

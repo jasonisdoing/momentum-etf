@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Area, AreaChart, Cell, Pie, PieChart, Tooltip } from "recharts";
 
+import { BUCKET_COLORS } from "@/lib/bucket-theme";
 import { AppLoadingState } from "../components/AppLoadingState";
 
 type DashboardMetricItem = {
@@ -42,8 +43,6 @@ type DashboardData = {
   updated_at?: string | null;
   error?: string;
 };
-
-const BUCKET_COLORS = ["#206bc4", "#2fb344", "#f76707", "#d63939", "#ae3ec9", "#667382"];
 
 function formatMoney(value: number): string {
   const abs = Math.abs(value);

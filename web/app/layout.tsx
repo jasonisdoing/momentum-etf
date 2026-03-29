@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import "@tabler/core/dist/css/tabler.min.css";
 
 import { AppShell } from "./AppShell";
+import { buildBucketCssVariables } from "../lib/bucket-theme";
 import { ToastProvider } from "./components/ToastProvider";
 import "./globals.css";
 
@@ -20,6 +21,7 @@ export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html lang="ko">
       <body>
+        <style>{buildBucketCssVariables()}</style>
         <ToastProvider>
           <AppShell>{children}</AppShell>
         </ToastProvider>
