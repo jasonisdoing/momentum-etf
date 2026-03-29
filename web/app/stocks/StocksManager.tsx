@@ -696,7 +696,7 @@ export function StocksManager() {
                   >
                     {accounts.map((account) => (
                       <option key={account.account_id} value={account.account_id}>
-                        {account.order}. {account.name}
+                        {account.name}
                       </option>
                     ))}
                   </select>
