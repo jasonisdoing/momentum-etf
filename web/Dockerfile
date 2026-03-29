@@ -5,6 +5,7 @@ WORKDIR /app
 COPY web/package.json web/package-lock.json* ./
 RUN npm install
 
+COPY shared /shared
 COPY web .
 
 RUN npm run build
