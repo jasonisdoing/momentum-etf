@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
 
 import {
@@ -8,6 +9,7 @@ import {
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
 import { AppDataGrid } from "../components/AppDataGrid";
+import { useToast } from "../components/ToastProvider";
 
 type RankAccount = {
   account_id: string;
@@ -54,6 +56,7 @@ type RankResponse = {
   ranking_computed_at?: string | null;
   realtime_fetched_at?: string | null;
   missing_tickers?: string[];
+  missing_ticker_labels?: string[];
   stale_tickers?: string[];
   error?: string;
 };
@@ -124,6 +127,9 @@ function renderSignedPercentCell(params: GridRenderCellParams<RankGridRow, numbe
 }
 
 export function RankManager() {
+  const router = useRouter();
+  const toast = useToast();
+  const lastBlockedToastRef = useRef<string | null>(null);
   const [accounts, setAccounts] = useState<RankAccount[]>(rankToolbarCache?.accounts ?? []);
   const [selectedAccountId, setSelectedAccountId] = useState(
     rankToolbarCache?.account_id ?? readRememberedMomentumEtfAccountId() ?? "",
@@ -134,11 +140,10 @@ export function RankManager() {
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
-  const [latestTradingDay, setLatestTradingDay] = useState<string | null>(null);
-  const [cacheUpdatedAt, setCacheUpdatedAt] = useState<string | null>(null);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
   const [realtimeFetchedAt, setRealtimeFetchedAt] = useState<string | null>(null);
   const [missingTickers, setMissingTickers] = useState<string[]>([]);
+  const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -184,11 +189,10 @@ export function RankManager() {
       };
       setRows(payload.rows ?? []);
       setCacheBlocked(Boolean(payload.cache_blocked));
-      setLatestTradingDay(payload.latest_trading_day ?? null);
-      setCacheUpdatedAt(payload.cache_updated_at ?? null);
       setRankingComputedAt(payload.ranking_computed_at ?? null);
       setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
       setMissingTickers(payload.missing_tickers ?? []);
+      setMissingTickerLabels(payload.missing_ticker_labels ?? []);
       setStaleTickers(payload.stale_tickers ?? []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.");
@@ -366,31 +370,37 @@ export function RankManager() {
     }
 
     const parts: string[] = [];
-    if (latestTradingDay) {
-      parts.push(`최신 거래일 ${latestTradingDay}`);
-    }
-    if (cacheUpdatedAt) {
-      parts.push(`캐시 기준 ${formatMetaTime(cacheUpdatedAt)}`);
-    }
-    if (missingTickers.length > 0) {
+    parts.push("일부 종목의 가격 캐시가 없습니다. 시스템 화면에서 가격 캐시 업데이트를 실행하세요.");
+    if (missingTickerLabels.length > 0) {
+      parts.push(`누락 ${missingTickerLabels.join(", ")}`);
+    } else if (missingTickers.length > 0) {
       parts.push(`누락 ${missingTickers.join(", ")}`);
     }
     if (staleTickers.length > 0) {
       parts.push(`오래된 캐시 ${staleTickers.join(", ")}`);
     }
     return parts.join(" | ");
-  }, [cacheBlocked, cacheUpdatedAt, latestTradingDay, missingTickers, staleTickers]);
+  }, [cacheBlocked, missingTickerLabels, missingTickers, staleTickers]);
+
+  useEffect(() => {
+    if (!blockedMessage) {
+      lastBlockedToastRef.current = null;
+      return;
+    }
+
+    if (lastBlockedToastRef.current === blockedMessage) {
+      return;
+    }
+
+    lastBlockedToastRef.current = blockedMessage;
+    toast.error(`[ETF-순위] ${blockedMessage}`);
+  }, [blockedMessage, toast]);
 
   return (
     <div className="appPageStack">
       {error ? (
         <div className="appBannerStack">
           <div className="bannerError">{error}</div>
-        </div>
-      ) : null}
-      {blockedMessage ? (
-        <div className="appBannerStack">
-          <div className="bannerWarning">{blockedMessage}</div>
         </div>
       ) : null}
 

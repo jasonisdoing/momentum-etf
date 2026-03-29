@@ -29,6 +29,7 @@ def _start_fastapi() -> subprocess.Popen[bytes]:
             "127.0.0.1",
             "--port",
             "8000",
+            "--reload",
         ],
         cwd=ROOT_DIR,
         env=env,
