@@ -45,6 +45,7 @@ type RankData = {
   ranking_computed_at: string | null;
   realtime_fetched_at: string | null;
   missing_tickers: string[];
+  missing_ticker_labels: string[];
   stale_tickers: string[];
 };
 

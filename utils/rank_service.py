@@ -7,6 +7,7 @@ import pandas as pd
 
 from utils.account_registry import load_account_configs, pick_default_account
 from utils.rankings import ALLOWED_MA_TYPES, build_account_rankings, get_account_rank_defaults, get_rank_months_max
+from utils.stock_list_io import get_etfs
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -92,6 +93,27 @@ def _build_accounts_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return payload, default_account
 
 
+def _build_missing_ticker_labels(account_id: str, missing_tickers: list[str]) -> list[str]:
+    if not missing_tickers:
+        return []
+
+    ticker_name_map = {
+        str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
+        for item in get_etfs(account_id)
+        if str(item.get("ticker") or "").strip()
+    }
+
+    labels: list[str] = []
+    for ticker in missing_tickers:
+        normalized_ticker = str(ticker or "").strip().upper()
+        name = ticker_name_map.get(normalized_ticker, "")
+        if name:
+            labels.append(f"{name}({normalized_ticker})")
+        else:
+            labels.append(normalized_ticker)
+    return labels
+
+
 def load_rank_data(
     *,
     account_id: str | None = None,
@@ -125,5 +147,9 @@ def load_rank_data(
         "ranking_computed_at": _serialize_datetime(dataframe.attrs.get("ranking_computed_at")),
         "realtime_fetched_at": _serialize_datetime(dataframe.attrs.get("realtime_fetched_at")),
         "missing_tickers": [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
+        "missing_ticker_labels": _build_missing_ticker_labels(
+            selected_account_id,
+            [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
+        ),
         "stale_tickers": [str(item) for item in (dataframe.attrs.get("stale_tickers") or [])],
     }

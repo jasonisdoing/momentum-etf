@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from utils.env import load_env_if_present
 
+from .routes.backtest import router as backtest_router
 from .routes.cash import router as cash_router
 from .routes.dashboard import router as dashboard_router
 from .routes.import_data import router as import_router
@@ -37,6 +38,7 @@ async def runtime_error_handler(_request: Request, exc: RuntimeError) -> JSONRes
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
+app.include_router(backtest_router)
 app.include_router(cash_router)
 app.include_router(dashboard_router)
 app.include_router(import_router)
