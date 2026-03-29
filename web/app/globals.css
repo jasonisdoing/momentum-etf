@@ -1443,6 +1443,26 @@ a {
   background: rgba(46, 125, 50, 0.14);
 }
 
+.rankNegativeTrendRow {
+  background: rgba(100, 116, 139, 0.1);
+}
+
+.rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow {
+  background: rgba(100, 116, 139, 0.1);
+}
+
+.rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow:hover {
+  background: rgba(100, 116, 139, 0.14);
+}
+
+.rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow {
+  background: rgba(95, 122, 92, 0.14);
+}
+
+.rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow:hover {
+  background: rgba(95, 122, 92, 0.18);
+}
+
 .tableWrap {
   overflow-x: auto;
   border: 1px solid var(--line);
