@@ -28,20 +28,6 @@ def _normalize_code(value: Any, fallback: str) -> str:
     return text or fallback
 
 
-def _st_cache_data(func):
-    """Streamlit 런타임이 있을 때만 @st.cache_data를 적용합니다."""
-    try:
-        from streamlit import runtime
-
-        if runtime.exists():
-            import streamlit as st
-
-            return st.cache_data(ttl=60, show_spinner=False)(func)
-    except Exception:
-        pass
-    return func
-
-
 def _load_account_configs_impl() -> list[dict[str, Any]]:
     """`zsettings/account`에 정의된 계정 정보를 정렬된 리스트로 반환합니다."""
 
@@ -80,7 +66,7 @@ def _load_account_configs_impl() -> list[dict[str, Any]]:
     return configs
 
 
-load_account_configs = _st_cache_data(_load_account_configs_impl)
+load_account_configs = _load_account_configs_impl
 
 
 def pick_default_account(accounts: list[dict[str, Any]]) -> dict[str, Any]:

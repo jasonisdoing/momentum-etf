@@ -1,0 +1,177 @@
+.stocksPage {
+  display: flex;
+  flex-direction: column;
+  padding-top: 0;
+}
+
+.stocksPage .card {
+  border-color: rgba(9, 30, 66, 0.08);
+  box-shadow: 0 1px 2px rgba(9, 30, 66, 0.04);
+}
+
+.stocksCard {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.stocksCard .card-header {
+  flex: 0 0 auto;
+  padding: 0.75rem 1rem;
+}
+
+.stocksToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stocksToolbarLeft,
+.stocksToolbarRight,
+.stocksToolbarModes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.stocksSelect {
+  min-width: 220px;
+}
+
+.stocksSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.stocksMetricBadge {
+  background: #f6f8fb;
+  border: 1px solid rgba(9, 30, 66, 0.08);
+  color: #53627c;
+}
+
+.stocksModeButton.is-active {
+  background: var(--tblr-primary);
+  border-color: var(--tblr-primary);
+  color: #fff;
+}
+
+.stocksTableWrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+
+.stocksTable {
+  min-width: 1180px;
+}
+
+.stocksDateCol {
+  min-width: 96px;
+}
+
+.stocksTable.table > :not(caption) > * > * {
+  padding: 0.55rem 0.75rem;
+}
+
+.stocksTable.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: var(--app-table-head-color);
+  background: var(--app-table-head-bg);
+  border-bottom: 1px solid var(--app-table-head-border);
+}
+
+.stocksTable .table-action-cell {
+  white-space: nowrap;
+}
+
+.stocksSelectedRow {
+  background: rgba(32, 107, 196, 0.08);
+}
+
+.stocksCheckboxCell {
+  width: 42px;
+  text-align: center;
+}
+
+.stocksEmpty {
+  padding: 2rem 1rem !important;
+  text-align: center;
+  color: #6c7a91;
+}
+
+.stocksTable td.stocksPositive,
+.stocksTable .stocksPositive {
+  color: #d63939 !important;
+  font-weight: 600;
+}
+
+.stocksTable td.stocksNegative,
+.stocksTable .stocksNegative {
+  color: #206bc4 !important;
+  font-weight: 600;
+}
+
+.stocksMuted {
+  color: #6c7a91;
+}
+
+.stocksBucket {
+  display: inline-block;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.stocksBucket1 {
+  background: #ffebee;
+  color: #c62828;
+}
+
+.stocksBucket2 {
+  background: #fff3e0;
+  color: #ef6c00;
+}
+
+.stocksBucket3 {
+  background: #f3e5f5;
+  color: #7b1fa2;
+}
+
+.stocksBucket4 {
+  background: #e3f2fd;
+  color: #1565c0;
+}
+
+.stocksBucket5 {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+@media (max-width: 992px) {
+  .stocksToolbar {
+    align-items: stretch;
+  }
+
+  .stocksToolbarLeft,
+  .stocksToolbarRight {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .stocksToolbarModes {
+    width: 100%;
+  }
+
+  .stocksSelect {
+    min-width: 0;
+    width: 100%;
+  }
+}

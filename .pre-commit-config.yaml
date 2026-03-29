@@ -6,6 +6,12 @@ repos:
         entry: ./scripts/update_app_datetime.sh
         language: system
         stages: [pre-commit, pre-push]
+      - id: next-build
+        name: Next build
+        entry: /bin/zsh -lc "cd web && npm run build"
+        language: system
+        pass_filenames: false
+        stages: [pre-commit, pre-push]
 
   - repo: https://github.com/PyCQA/flake8
     rev: 7.3.0

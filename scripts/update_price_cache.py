@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""전체 OHLCV 캐시를 초기화한 뒤 설정된 시작일 이후 데이터를 다시 받아옵니다."""
+"""계좌별 OHLCV 캐시를 종목 단위로 incremental 갱신합니다."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import os
 import signal
 import sys
 import time
-import uuid
 from collections.abc import Callable
 from contextlib import contextmanager
 
@@ -18,12 +17,7 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.cache_utils import (
-    clean_temp_cache_collections,
-    drop_cache_collection,
-    get_cached_date_range,
-    swap_cache_collection,
-)
+from utils.cache_utils import get_cached_date_range
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
@@ -124,7 +118,7 @@ def refresh_cache_for_target(
         ticker: str,
         country_code: str,
         range_start: str,
-        temp_token: str,
+        account_id: str,
     ) -> list[pd.Timestamp]:
         """일시적인 원천 응답 공백을 고려해 티커 단위로 재시도한다."""
         last_error: Exception | None = None
@@ -137,7 +131,7 @@ def refresh_cache_for_target(
                     date_range=[range_start, None],
                     update_listing_meta=False,
                     force_refresh=True,
-                    account_id=temp_token,
+                    account_id=account_id,
                 )
                 if fetched_df is None or fetched_df.empty:
                     raise RuntimeError(f"{ticker} 원천 가격 데이터가 비어 있습니다.")
@@ -145,11 +139,11 @@ def refresh_cache_for_target(
                 unresolved_days = repair_recent_trading_day_gaps(
                     ticker,
                     country_code,
-                    account_id=temp_token,
+                    account_id=account_id,
                     lookback_days=15,
                 )
 
-                cached_range = get_cached_date_range(temp_token, ticker)
+                cached_range = get_cached_date_range(account_id, ticker)
                 if cached_range is None:
                     raise RuntimeError(f"{ticker} 캐시 저장 결과를 확인할 수 없습니다.")
 
@@ -174,15 +168,6 @@ def refresh_cache_for_target(
         raise last_error
 
     with _target_refresh_lock(target_norm):
-        # 임시 컬렉션 정리
-        removed = clean_temp_cache_collections(target_norm, max_age_seconds=3600)
-        if removed:
-            logger.info(
-                ("[%s] 기존 임시 컬렉션 %d개를 삭제했습니다. (1시간 이상 경과분)"),
-                target_norm,
-                removed,
-            )
-
         # 종목 리스트 로드
         try:
             all_etfs_from_file = get_all_etfs_including_deleted(target_norm)
@@ -221,86 +206,80 @@ def refresh_cache_for_target(
             return
 
         target_items = list(all_map.values())
-
-        suffix = f"{os.getpid()}_{int(time.time())}_{uuid.uuid4().hex[:6]}"
-        # 임시 컬렉션 토큰 생성: account_id + _tmp_ + suffix
-        temp_token = f"{target_norm}_tmp_{suffix}"
-        drop_cache_collection(temp_token)
-
         total_tickers = len(target_items)
         failed_tickers: list[str] = []
-        try:
-            for i, etf in enumerate(target_items, 1):
-                ticker = str(etf.get("ticker") or "").strip().upper()
-                name = etf.get("name") or "-"
-                started_at = time.perf_counter()
+        succeeded_count = 0
 
-                if progress_callback:
-                    progress_callback(i, total_tickers, f"{name}({ticker})")
+        for i, etf in enumerate(target_items, 1):
+            ticker = str(etf.get("ticker") or "").strip().upper()
+            name = etf.get("name") or "-"
+            started_at = time.perf_counter()
 
-                logger.info(" -> 가격 캐시 처리 시작: %d/%d - %s(%s)", i, total_tickers, name, ticker)
+            if progress_callback:
+                progress_callback(i, total_tickers, f"{name}({ticker})")
 
-                try:
-                    range_start = start_date or "1990-01-01"
-                    with _ticker_refresh_timeout(PER_TICKER_TIMEOUT_SECONDS):
-                        unresolved_days = _refresh_single_ticker_with_retry(
-                            ticker=ticker,
-                            country_code=country_code,
-                            range_start=range_start,
-                            temp_token=temp_token,
-                        )
+            logger.info(" -> 가격 캐시 처리 시작: %d/%d - %s(%s)", i, total_tickers, name, ticker)
 
-                    if unresolved_days:
-                        unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
-                        logger.warning(
-                            " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s | 소요 %.1fs",
-                            i,
-                            total_tickers,
-                            name,
-                            ticker,
-                            unresolved_text,
-                            time.perf_counter() - started_at,
-                        )
-                    else:
-                        logger.info(
-                            " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) | 소요 %.1fs",
-                            i,
-                            total_tickers,
-                            name,
-                            ticker,
-                            time.perf_counter() - started_at,
-                        )
-                except PykrxDataUnavailableError as e:
-                    failed_tickers.append(ticker)
-                    if _is_today_unavailable_warning(e):
-                        logger.warning(
-                            "%s 당일 데이터 미집계: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
-                        )
-                    else:
-                        logger.error(
-                            "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
-                        )
-                except Exception as e:
-                    failed_tickers.append(ticker)
+            try:
+                range_start = start_date or "1990-01-01"
+                with _ticker_refresh_timeout(PER_TICKER_TIMEOUT_SECONDS):
+                    unresolved_days = _refresh_single_ticker_with_retry(
+                        ticker=ticker,
+                        country_code=country_code,
+                        range_start=range_start,
+                        account_id=target_norm,
+                    )
+
+                if unresolved_days:
+                    unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
+                    logger.warning(
+                        " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s | 소요 %.1fs",
+                        i,
+                        total_tickers,
+                        name,
+                        ticker,
+                        unresolved_text,
+                        time.perf_counter() - started_at,
+                    )
+                else:
+                    logger.info(
+                        " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) | 소요 %.1fs",
+                        i,
+                        total_tickers,
+                        name,
+                        ticker,
+                        time.perf_counter() - started_at,
+                    )
+                succeeded_count += 1
+            except PykrxDataUnavailableError as e:
+                failed_tickers.append(ticker)
+                if _is_today_unavailable_warning(e):
+                    logger.warning(
+                        "%s 당일 데이터 미집계: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
+                    )
+                else:
                     logger.error(
                         "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
                     )
-
-            if failed_tickers:
-                preview = ", ".join(failed_tickers[:10])
-                suffix_text = " ..." if len(failed_tickers) > 10 else ""
-                raise RuntimeError(
-                    f"실패한 티커가 있어 캐시를 교체하지 않습니다: {preview}{suffix_text} (총 {len(failed_tickers)}개)"
+            except Exception as e:
+                failed_tickers.append(ticker)
+                logger.error(
+                    "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
                 )
 
-            swap_cache_collection(target_norm, temp_token)
-            logger.info("-> [%s] 캐시 갱신 완료.", target_norm.upper())
-        except Exception as exc:
-            logger.error("[%s] 캐시 갱신 실패: %s", target_norm.upper(), exc)
-            drop_cache_collection(temp_token)
-            raise
-        finally:
-            drop_cache_collection(temp_token)
+        if failed_tickers:
+            preview = ", ".join(failed_tickers[:10])
+            suffix_text = " ..." if len(failed_tickers) > 10 else ""
+            logger.warning(
+                "[%s] 일부 종목 캐시 갱신 실패: %s%s (총 %d개 실패 / %d개 성공)",
+                target_norm.upper(),
+                preview,
+                suffix_text,
+                len(failed_tickers),
+                succeeded_count,
+            )
+        else:
+            logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:

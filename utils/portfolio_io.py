@@ -152,15 +152,6 @@ def load_real_holdings_table(
     cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
     missing_price_tickers: set[str] = set()
 
-    import streamlit as st
-
-    # Initialize a warnings dict in session_state if it doesn't exist (if running in Streamlit)
-    try:
-        if "cache_warnings" not in st.session_state:
-            st.session_state.cache_warnings = {}  # {account_id: {ticker1, ticker2, ...}}
-    except Exception:
-        pass
-
     def _get_current_price(row):
         ticker = str(row["ticker"]).strip().upper()
         df_cached = cached_frames.get(ticker)
@@ -168,13 +159,6 @@ def load_real_holdings_table(
             msg = f"가격 캐시에 '{ticker}'가 없습니다. 캐시 업데이트를 실행하세요."
             logger.warning(msg)
             missing_price_tickers.add(ticker)
-            # Add to session_state so the UI can display it
-            try:
-                if account_id not in st.session_state.cache_warnings:
-                    st.session_state.cache_warnings[account_id] = set()
-                st.session_state.cache_warnings[account_id].add(ticker)
-            except Exception:
-                pass
             return 0.0
         return float(df_cached["Close"].iloc[-1])
 
@@ -283,6 +267,8 @@ def load_real_holdings_table(
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+    if missing_price_tickers:
+        df_holdings.attrs["missing_price_tickers"] = sorted(missing_price_tickers)
     if strict_price_cache and missing_price_tickers:
         raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
 

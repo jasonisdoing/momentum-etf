@@ -10,6 +10,10 @@ __pycache__/
 venv/
 *.pyc
 
+# Node.js
+web/node_modules/
+web/.next/
+
 # OS
 .DS_Store
 
@@ -21,8 +25,6 @@ zpools/*/results
 # 노트 파일
 znotes/
 
-# Streamlit secrets
-.streamlit/secrets.toml
 
 # 캐시
 data/*

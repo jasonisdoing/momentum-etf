@@ -1,7 +1,5 @@
 pandas
 numpy
-streamlit
-streamlit-authenticator
 pykrx>=1.2.0
 pymongo
 python-dotenv
@@ -10,3 +8,5 @@ beautifulsoup4
 yfinance
 pandas_market_calendars
 slack-sdk
+fastapi
+uvicorn
