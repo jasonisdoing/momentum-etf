@@ -1355,7 +1355,7 @@ a {
 }
 
 .rankHeldRow {
-  background: rgba(46, 125, 50, 0.05);
+  background: rgba(46, 125, 50, 0.1);
 }
 
 .appDataGridWrap,
@@ -1435,12 +1435,12 @@ a {
 
 .appDataGrid .MuiDataGrid-row.appHeldRow,
 .rankDataGrid .MuiDataGrid-row.rankHeldRow {
-  background: rgba(46, 125, 50, 0.05);
+  background: rgba(46, 125, 50, 0.1);
 }
 
 .appDataGrid .MuiDataGrid-row.appHeldRow:hover,
 .rankDataGrid .MuiDataGrid-row.rankHeldRow:hover {
-  background: rgba(46, 125, 50, 0.08);
+  background: rgba(46, 125, 50, 0.14);
 }
 
 .tableWrap {
