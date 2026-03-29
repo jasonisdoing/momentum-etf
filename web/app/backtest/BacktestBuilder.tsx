@@ -784,7 +784,7 @@ export function BacktestBuilder() {
                           type="button"
                           className="btn btn-outline-danger btn-sm"
                           onClick={() => handleDeleteTicker(group.id, ticker.id)}
-                          disabled={group.tickers.length === 1}
+                          disabled={ticker.status === "checking"}
                         >
                           삭제
                         </button>
