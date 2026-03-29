@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { type GridColDef, type GridRowSelectionModel } from "@mui/x-data-grid";
 
+import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { AppDataGrid } from "../components/AppDataGrid";
 import { AppModal } from "../components/AppModal";
 import {
@@ -89,14 +90,6 @@ type StockValidationState = {
   deleted_reason: string;
   bucket_id: number;
 };
-
-const BUCKET_OPTIONS = [
-  { id: 1, name: "1. 모멘텀" },
-  { id: 2, name: "2. 혁신기술" },
-  { id: 3, name: "3. 시장지수" },
-  { id: 4, name: "4. 배당방어" },
-  { id: 5, name: "5. 대체헷지" },
-];
 
 function formatNumber(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) {

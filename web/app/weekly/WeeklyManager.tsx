@@ -34,7 +34,6 @@ type WeeklyRow = {
   exchange_rate: number;
   exchange_rate_change_pct: number;
   bucket_pct_momentum: number;
-  bucket_pct_innovation: number;
   bucket_pct_market: number;
   bucket_pct_dividend: number;
   bucket_pct_alternative: number;
@@ -79,7 +78,6 @@ const PERCENT_KEYS = new Set([
   "cumulative_return_pct",
   "exchange_rate_change_pct",
   "bucket_pct_momentum",
-  "bucket_pct_innovation",
   "bucket_pct_market",
   "bucket_pct_dividend",
   "bucket_pct_alternative",
@@ -106,11 +104,10 @@ const COLUMN_DEFS = [
   { key: "exchange_rate_change_pct", label: "환율(변동)" },
   { key: "exchange_rate", label: "환율" },
   { key: "bucket_pct_momentum", label: "1. 모멘텀" },
-  { key: "bucket_pct_innovation", label: "2. 혁신기술" },
-  { key: "bucket_pct_market", label: "3. 시장지수" },
-  { key: "bucket_pct_dividend", label: "4. 배당방어" },
-  { key: "bucket_pct_alternative", label: "5. 대체헷지" },
-  { key: "bucket_pct_cash", label: "6. 현금" },
+  { key: "bucket_pct_market", label: "2. 시장지수" },
+  { key: "bucket_pct_dividend", label: "3. 배당방어" },
+  { key: "bucket_pct_alternative", label: "4. 대체헷지" },
+  { key: "bucket_pct_cash", label: "5. 현금" },
   { key: "total_stocks", label: "총 종목 수" },
   { key: "profit_count", label: "수익 종목 수" },
   { key: "loss_count", label: "손실 종목 수" },

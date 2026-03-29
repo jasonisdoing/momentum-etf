@@ -1,0 +1,29 @@
+{
+  "buckets": {
+    "1": {
+      "name": "1. 모멘텀",
+      "bg_color": "#d63939",
+      "text_color": "#c62828"
+    },
+    "2": {
+      "name": "2. 시장지수",
+      "bg_color": "#066fd1",
+      "text_color": "#1565c0"
+    },
+    "3": {
+      "name": "3. 배당방어",
+      "bg_color": "#2fb344",
+      "text_color": "#2e7d32"
+    },
+    "4": {
+      "name": "4. 대체헷지",
+      "bg_color": "#f59f00",
+      "text_color": "#b26a00"
+    },
+    "5": {
+      "name": "5. 현금",
+      "bg_color": "#667382",
+      "text_color": "#667382"
+    }
+  }
+}

@@ -9,10 +9,9 @@ from utils.db_manager import get_db_connection
 
 BUCKET_NAME_TO_ID = {
     "1. 모멘텀": 1,
-    "2. 혁신기술": 2,
-    "3. 시장지수": 3,
-    "4. 배당방어": 4,
-    "5. 대체헷지": 5,
+    "2. 시장지수": 2,
+    "3. 배당방어": 3,
+    "4. 대체헷지": 4,
 }
 
 

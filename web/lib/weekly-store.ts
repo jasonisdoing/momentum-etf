@@ -27,7 +27,6 @@ type WeeklyRow = {
   exchange_rate: number;
   exchange_rate_change_pct: number;
   bucket_pct_momentum: number;
-  bucket_pct_innovation: number;
   bucket_pct_market: number;
   bucket_pct_dividend: number;
   bucket_pct_alternative: number;

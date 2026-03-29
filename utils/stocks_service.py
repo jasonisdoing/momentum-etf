@@ -13,10 +13,9 @@ from utils.stock_meta_updater import fetch_stock_info
 
 BUCKETS: dict[int, str] = {
     1: "1. 모멘텀",
-    2: "2. 혁신기술",
-    3: "3. 시장지수",
-    4: "4. 배당방어",
-    5: "5. 대체헷지",
+    2: "2. 시장지수",
+    3: "3. 배당방어",
+    4: "4. 대체헷지",
 }
 
 

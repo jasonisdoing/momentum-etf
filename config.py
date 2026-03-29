@@ -1,5 +1,8 @@
 """프로젝트 전역에서 사용하는 설정 값 정의."""
 
+import json
+from pathlib import Path
+
 CACHE_START_DATE = "2024-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
@@ -7,15 +10,21 @@ SLACK_CHANNEL = "C0A0X2LTS3X"
 # -----------------------------------------------------------------------
 # 버킷(Bucket) 설정 및 스타일링
 # -----------------------------------------------------------------------
+_BUCKET_THEME_PATH = Path(__file__).resolve().parent / "shared" / "bucket_theme.json"
+with _BUCKET_THEME_PATH.open("r", encoding="utf-8") as bucket_theme_file:
+    _BUCKET_THEME = json.load(bucket_theme_file)
+
+BUCKET_THEME = {int(bucket_id): value for bucket_id, value in (_BUCKET_THEME.get("buckets") or {}).items()}
+
 BUCKET_CONFIG = {
-    1: {"name": "1. 모멘텀", "bg_color": "#ffebee", "text_color": "#c62828"},
-    2: {"name": "2. 혁신기술", "bg_color": "#fff3e0", "text_color": "#ef6c00"},
-    3: {"name": "3. 시장지수", "bg_color": "#f3e5f5", "text_color": "#7b1fa2"},
-    4: {"name": "4. 배당방어", "bg_color": "#e3f2fd", "text_color": "#1565c0"},
-    5: {"name": "5. 대체헷지", "bg_color": "#e8f5e9", "text_color": "#2e7d32"},
+    int(bucket_id): value
+    for bucket_id, value in (_BUCKET_THEME.get("buckets") or {}).items()
+    if int(bucket_id) in {1, 2, 3, 4}
 }
+CASH_CONFIG = BUCKET_THEME[5]
 
 BUCKET_MAPPING = {k: v["name"] for k, v in BUCKET_CONFIG.items()}
+ALL_BUCKET_MAPPING = {k: v["name"] for k, v in BUCKET_THEME.items()}
 BUCKET_REVERSE_MAPPING = {v: k for k, v in BUCKET_MAPPING.items()}
 BUCKET_OPTIONS = list(BUCKET_MAPPING.values())
 
