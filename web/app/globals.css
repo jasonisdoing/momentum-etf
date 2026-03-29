@@ -1435,32 +1435,32 @@ a {
 
 .appDataGrid .MuiDataGrid-row.appHeldRow,
 .rankDataGrid .MuiDataGrid-row.rankHeldRow {
-  background: rgba(46, 125, 50, 0.1);
+  background: rgba(102, 204, 102, 0.35);
 }
 
 .appDataGrid .MuiDataGrid-row.appHeldRow:hover,
 .rankDataGrid .MuiDataGrid-row.rankHeldRow:hover {
-  background: rgba(46, 125, 50, 0.14);
+  background: rgba(102, 204, 102, 0.42);
 }
 
 .rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.1);
+  background: rgba(100, 116, 139, 0.3);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.1);
+  background: rgba(100, 116, 139, 0.3);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow:hover {
-  background: rgba(100, 116, 139, 0.14);
+  background: rgba(100, 116, 139, 0.38);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow {
-  background: rgba(95, 122, 92, 0.14);
+  background: rgba(95, 122, 92, 0.38);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow:hover {
-  background: rgba(95, 122, 92, 0.18);
+  background: rgba(95, 122, 92, 0.45);
 }
 
 .tableWrap {
