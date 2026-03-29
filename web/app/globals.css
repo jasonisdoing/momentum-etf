@@ -1456,11 +1456,11 @@ a {
 }
 
 .rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow {
-  background: rgba(95, 122, 92, 0.38);
+  background: rgba(102, 180, 102, 0.38);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow:hover {
-  background: rgba(95, 122, 92, 0.45);
+  background: rgba(102, 180, 102, 0.45);
 }
 
 .tableWrap {
