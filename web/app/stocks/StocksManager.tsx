@@ -9,6 +9,7 @@ import {
   IconPlaylistX,
   IconTrash,
   IconSearch,
+  IconRefresh,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { type GridColDef, type GridRowSelectionModel } from "@mui/x-data-grid";
@@ -140,6 +141,7 @@ export function StocksManager() {
   const [validatedCandidate, setValidatedCandidate] = useState<StockValidationState | null>(null);
   const [isValidatingTicker, setIsValidatingTicker] = useState(false);
   const [addBucketId, setAddBucketId] = useState<number>(1);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const toast = useToast();
 
   async function load(mode: ViewMode, accountId?: string) {
@@ -605,6 +607,34 @@ export function StocksManager() {
     });
   }
 
+  async function handleRefreshFromModal() {
+    if (!editingRow) {
+      return;
+    }
+
+    try {
+      setIsRefreshing(true);
+      setError(null);
+      const response = await fetch("/api/stocks/refresh", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: selectedAccountId,
+          ticker: editingRow.ticker,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "종목 새로고침에 실패했습니다.");
+      }
+      toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 새로고침 완료`);
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "종목 새로고침에 실패했습니다.");
+    } finally {
+      setIsRefreshing(false);
+    }
+  }
+
   function toggleAllDeleted() {
     if (allDeletedSelected) {
       setSelectedDeletedTickers([]);
@@ -891,14 +921,23 @@ export function StocksManager() {
         onClose={closeEditModal}
         footer={
           <>
-            <button type="button" className="btn me-auto btn-outline-danger" onClick={handleDeleteFromModal} disabled={isPending}>
+            <button type="button" className="btn me-auto btn-outline-danger" onClick={handleDeleteFromModal} disabled={isPending || isRefreshing}>
               <IconTrash size={16} stroke={1.9} />
               <span>삭제</span>
             </button>
-            <button type="button" className="btn btn-link link-secondary" onClick={closeEditModal} disabled={isPending}>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => void handleRefreshFromModal()}
+              disabled={isPending || isRefreshing}
+            >
+              <IconRefresh size={16} stroke={1.9} />
+              <span>{isRefreshing ? "새로고침 중..." : "메타/캐시 새로고침"}</span>
+            </button>
+            <button type="button" className="btn btn-link link-secondary" onClick={closeEditModal} disabled={isPending || isRefreshing}>
               취소
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSaveFromModal} disabled={isPending}>
+            <button type="button" className="btn btn-primary" onClick={handleSaveFromModal} disabled={isPending || isRefreshing}>
               저장
             </button>
           </>

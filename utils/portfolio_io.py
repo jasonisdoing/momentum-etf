@@ -267,6 +267,8 @@ def load_real_holdings_table(
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+    if missing_price_tickers:
+        df_holdings.attrs["missing_price_tickers"] = sorted(missing_price_tickers)
     if strict_price_cache and missing_price_tickers:
         raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
 

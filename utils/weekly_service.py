@@ -343,6 +343,7 @@ def _aggregate_live_summary_into_active_week() -> str:
         "4. 배당방어": 0.0,
         "5. 대체헷지": 0.0,
     }
+    all_missing_tickers: list[str] = []
 
     for account in load_account_configs():
         if not account.get("settings", {}).get("show_hold", True):
@@ -358,6 +359,10 @@ def _aggregate_live_summary_into_active_week() -> str:
             account_purchase = 0.0
             account_valuation = 0.0
         else:
+            missing = holdings_df.attrs.get("missing_price_tickers") or []
+            if missing:
+                all_missing_tickers.extend(missing)
+
             account_purchase = float(holdings_df["매입금액(KRW)"].sum())
             account_valuation = float(holdings_df["평가금액(KRW)"].sum())
             total_profit_count += int((holdings_df["평가손익(KRW)"] >= 0).sum())
@@ -370,6 +375,13 @@ def _aggregate_live_summary_into_active_week() -> str:
         total_assets += account_valuation + cash_balance
         total_purchase += account_purchase
         total_valuation += account_valuation
+
+    if all_missing_tickers:
+        joined = ", ".join(all_missing_tickers)
+        raise RuntimeError(
+            f"가격 캐시가 없는 종목이 있어 집계를 중단합니다: {joined}. "
+            "종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요."
+        )
 
     if total_assets > 0:
         bucket_pct_momentum = (bucket_totals["1. 모멘텀"] / total_assets) * 100

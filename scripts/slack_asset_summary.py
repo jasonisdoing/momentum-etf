@@ -111,7 +111,7 @@ def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
     return (
         f"⚠️ 자산 요약 발송 중단 ({account_id})\n"
         f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
-        f"`python scripts/update_price_cache.py {account_id}` 실행 후 다시 시도하세요."
+        f"종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요."
     )
 
 

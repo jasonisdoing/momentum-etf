@@ -370,7 +370,7 @@ export function RankManager() {
     }
 
     const parts: string[] = [];
-    parts.push("일부 종목의 가격 캐시가 없습니다. 시스템 화면에서 가격 캐시 업데이트를 실행하세요.");
+    parts.push("일부 종목의 가격 캐시가 없습니다. 종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요.");
     if (missingTickerLabels.length > 0) {
       parts.push(`누락 ${missingTickerLabels.join(", ")}`);
     } else if (missingTickers.length > 0) {

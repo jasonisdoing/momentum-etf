@@ -9,6 +9,7 @@ from utils.stocks_service import (
     hard_delete_stocks,
     load_active_stocks_table,
     load_deleted_stocks_table,
+    refresh_single_stock,
     restore_deleted_stocks,
     soft_delete_stock,
     update_stock_bucket,
@@ -33,6 +34,11 @@ class StockDeletePayload(BaseModel):
 class DeletedStocksPayload(BaseModel):
     account_id: str
     tickers: list[str]
+
+
+class StockRefreshPayload(BaseModel):
+    account_id: str
+    ticker: str
 
 
 class StockValidationPayload(BaseModel):
@@ -64,6 +70,11 @@ def patch_active_stock(payload: BucketUpdatePayload, _: None = Depends(require_i
 def delete_active_stock(payload: StockDeletePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
     soft_delete_stock(payload.account_id, payload.ticker, payload.reason)
     return {"ok": True}
+
+
+@router.post("/refresh")
+def post_refresh_stock(payload: StockRefreshPayload, _: None = Depends(require_internal_token)) -> dict[str, str]:
+    return refresh_single_stock(payload.account_id, payload.ticker)
 
 
 @router.post("/validate")
