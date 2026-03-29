@@ -2,8 +2,7 @@ import bucketThemeJson from "./bucket_theme.json";
 
 type BucketThemeItem = {
   name: string;
-  bg_color: string;
-  text_color: string;
+  color: string;
 };
 
 type BucketTheme = {
@@ -23,12 +22,11 @@ export const BUCKET_NAME_MAP: Record<number, string> = Object.fromEntries(
   Object.entries(BUCKET_THEME).map(([id, value]) => [Number(id), value.name]),
 ) as Record<number, string>;
 
-export const BUCKET_COLORS = [1, 2, 3, 4, 5].map((id) => BUCKET_THEME[String(id)].text_color);
+export const BUCKET_COLORS = [1, 2, 3, 4, 5].map((id) => BUCKET_THEME[String(id)].color);
 
 export function buildBucketCssVariables(): string {
-  const lines = Object.entries(BUCKET_THEME).flatMap(([id, value]) => [
-    `--bucket-${id}-bg: ${value.bg_color};`,
-    `--bucket-${id}-text: ${value.text_color};`,
-  ]);
+  const lines = Object.entries(BUCKET_THEME).map(
+    ([id, value]) => `--bucket-${id}: ${value.color};`,
+  );
   return `:root { ${lines.join(" ")} }`;
 }
