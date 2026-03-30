@@ -384,6 +384,7 @@ export function RankManager() {
   );
 
   function handleTickerTypeChange(accountId: string) {
+    setSelectedAccountId(accountId);
     writeRememberedTickerType(accountId);
     void load({ ticker_type: accountId, ma_type: maType, ma_months: maMonths });
   }
