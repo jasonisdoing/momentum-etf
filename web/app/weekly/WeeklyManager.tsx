@@ -85,7 +85,8 @@ const PERCENT_KEYS = new Set([
 ]);
 
 const COLUMN_DEFS = [
-  { key: "week_date_display", label: "날짜" },
+  { key: "week_date_display", label: "종료일" },
+  { key: "memo", label: "비고" },
   { key: "withdrawal_personal", label: "개인 인출" },
   { key: "withdrawal_mom", label: "엄마" },
   { key: "nh_principal_interest", label: "농협원리금" },
@@ -100,7 +101,6 @@ const COLUMN_DEFS = [
   { key: "weekly_profit", label: "금주 손익" },
   { key: "weekly_return_pct", label: "주수익률" },
   { key: "cumulative_return_pct", label: "누적 수익률" },
-  { key: "memo", label: "비고" },
   { key: "exchange_rate_change_pct", label: "환율(변동)" },
   { key: "exchange_rate", label: "환율" },
   { key: "bucket_pct_momentum", label: "1. 모멘텀" },
