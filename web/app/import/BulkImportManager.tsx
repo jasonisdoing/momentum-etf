@@ -37,52 +37,53 @@ export function BulkImportManager() {
   const [accountCount, setAccountCount] = useState(0);
   const [rowCount, setRowCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [isParsing, startParsing] = useTransition();
-  const [isSaving, startSaving] = useTransition();
+  const [isPending, startTransition] = useTransition();
   const toast = useToast();
 
-  function handleParse() {
-    startParsing(async () => {
+  function handleApply() {
+    startTransition(async () => {
       try {
         setError(null);
-        const response = await fetch("/api/import/preview", {
+        setRows([]);
+        setAccountCount(0);
+        setRowCount(0);
+
+        // 1. 파싱
+        const previewResponse = await fetch("/api/import/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text: rawText }),
         });
-        const payload = (await response.json()) as PreviewResponse;
-        if (!response.ok) {
-          throw new Error(payload.error ?? "벌크 입력 파싱에 실패했습니다.");
+        const previewPayload = (await previewResponse.json()) as PreviewResponse;
+        if (!previewResponse.ok) {
+          throw new Error(previewPayload.error ?? "벌크 입력 파싱에 실패했습니다.");
         }
-        setRows(payload.rows ?? []);
-        setAccountCount(payload.account_count ?? 0);
-        setRowCount(payload.row_count ?? 0);
-        toast.success("[자산-벌크 입력] 파싱 완료");
-      } catch (parseError) {
-        setRows([]);
-        setAccountCount(0);
-        setRowCount(0);
-        setError(parseError instanceof Error ? parseError.message : "벌크 입력 파싱에 실패했습니다.");
-      }
-    });
-  }
 
-  function handleSave() {
-    startSaving(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/import/save", {
+        const parsedRows = previewPayload.rows ?? [];
+        if (parsedRows.length === 0) {
+          throw new Error("파싱된 데이터가 없습니다. 입력 형식을 확인하세요.");
+        }
+
+        setRows(parsedRows);
+        setAccountCount(previewPayload.account_count ?? 0);
+        setRowCount(previewPayload.row_count ?? 0);
+
+        // 2. 저장
+        const saveResponse = await fetch("/api/import/save", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ rows }),
+          body: JSON.stringify({ rows: parsedRows }),
         });
-        const payload = (await response.json()) as { updated_accounts?: number; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "벌크 입력 반영에 실패했습니다.");
+        const savePayload = (await saveResponse.json()) as { updated_accounts?: number; error?: string };
+        if (!saveResponse.ok) {
+          throw new Error(savePayload.error ?? "벌크 입력 반영에 실패했습니다.");
         }
-        toast.success(`[자산-벌크 입력] 총 ${formatCount(payload.updated_accounts)}개 계좌 업데이트 완료`);
-      } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "벌크 입력 반영에 실패했습니다.");
+
+        toast.success(`[자산-벌크 입력] 총 ${formatCount(savePayload.updated_accounts)}개 계좌 업데이트 완료`);
+      } catch (applyError) {
+        const message = applyError instanceof Error ? applyError.message : "벌크 입력 반영에 실패했습니다.";
+        setError(message);
+        toast.error(`[자산-벌크 입력] ${message}`);
       }
     });
   }
@@ -91,7 +92,7 @@ export function BulkImportManager() {
     <div className="appPageStack">
       {error ? (
         <div className="appBannerStack">
-          {error ? <div className="bannerError prelineText">{error}</div> : null}
+          <div className="bannerError prelineText">{error}</div>
         </div>
       ) : null}
       <section className="appSection">
@@ -105,6 +106,7 @@ export function BulkImportManager() {
 
           <textarea
             className="bulkTextarea"
+            style={{ minHeight: "180px" }}
             value={rawText}
             onChange={(event) => setRawText(event.target.value)}
             placeholder={"1. 국내 계좌\tKRW\t1. 모멘텀\t005930\t삼성전자\t10\t59000"}
@@ -116,11 +118,8 @@ export function BulkImportManager() {
               <span>계좌 {formatCount(accountCount)}</span>
             </div>
             <div className="toolbarActions">
-              <button className="secondaryButton" type="button" onClick={handleParse} disabled={isParsing}>
-                {isParsing ? "파싱 중..." : "파싱 및 확인"}
-              </button>
-              <button className="primaryButton" type="button" onClick={handleSave} disabled={isSaving || rows.length === 0}>
-                {isSaving ? "반영 중..." : "현재 잔고에 반영"}
+              <button className="primaryButton" type="button" onClick={handleApply} disabled={isPending || !rawText.trim()}>
+                {isPending ? "처리 중..." : "현재 잔고에 반영"}
               </button>
             </div>
           </div>
