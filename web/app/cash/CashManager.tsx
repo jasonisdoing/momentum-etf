@@ -358,10 +358,6 @@ export function CashManager() {
                 />
               </div>
               <div className="col-md-6">
-                <label className="form-label">현금 통화</label>
-                <input className="form-control" type="text" value={editingAccount.cash_currency} readOnly />
-              </div>
-              <div className="col-md-6">
                 <label className="form-label">
                   {editingAccount.currency === "KRW" ? "보유 현금 (KRW)" : `보유 현금 (${editingAccount.currency})`}
                 </label>
