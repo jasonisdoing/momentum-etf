@@ -372,6 +372,9 @@ def build_ticker_type_rankings(
     metric_elapsed = 0.0
     process_elapsed = 0.0
 
+    from utils.portfolio_io import load_all_holding_tickers
+    held_tickers = load_all_holding_tickers()
+
     if callable(status_callback):
         status_callback("순위 계산")
 
@@ -428,6 +431,7 @@ def build_ticker_type_rankings(
                 "상장일": etf.get("listing_date", "-"),
                 "추세": score_value,
                 "지속": streak_value,
+                "보유": "보유" if ticker in held_tickers else "",
                 **price_metrics,
             }
         )
