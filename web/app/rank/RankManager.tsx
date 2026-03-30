@@ -502,18 +502,6 @@ export function RankManager() {
                       </div>
                     );
                   })() : null}
-                  {rankingComputedAt ? (
-                    <div className="d-flex align-items-center gap-1">
-                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>계산:</span>
-                      <span style={{ fontWeight: 700 }}>{formatMetaTime(rankingComputedAt)}</span>
-                    </div>
-                  ) : null}
-                  {realtimeFetchedAt ? (
-                    <div className="d-flex align-items-center gap-1">
-                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>실시간:</span>
-                      <span style={{ fontWeight: 700 }}>{formatMetaTime(realtimeFetchedAt)}</span>
-                    </div>
-                  ) : null}
                   <div className="d-flex align-items-center gap-1">
                     <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 개수:</span>
                     <span style={{ fontWeight: 700 }}>{new Intl.NumberFormat("ko-KR").format(rows.length)}개</span>
