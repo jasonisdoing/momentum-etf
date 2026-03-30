@@ -157,6 +157,7 @@ export function NoteManager() {
         return;
       }
     }
+    setSelectedAccountId(nextAccountId);
     writeRememberedMomentumEtfAccountId(nextAccountId);
     void load(nextAccountId);
   }
@@ -198,7 +199,7 @@ export function NoteManager() {
                   >
                     {accounts.map((account) => (
                       <option key={account.account_id} value={account.account_id}>
-                        {account.order}. {account.name}
+                        {account.name}
                       </option>
                     ))}
                   </select>

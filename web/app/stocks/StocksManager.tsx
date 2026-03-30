@@ -368,6 +368,7 @@ export function StocksManager() {
   );
 
   function handleTickerTypeChange(nextAccountId: string) {
+    setSelectedAccountId(nextAccountId);
     writeRememberedTickerType(nextAccountId);
     void load(viewMode, nextAccountId);
   }

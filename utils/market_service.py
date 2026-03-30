@@ -85,11 +85,15 @@ def load_market_data() -> dict[str, Any]:
 
     snapshot = _load_kor_etf_realtime_snapshot([row["ticker"] for row in normalized_rows if row["ticker"]])
 
+    from utils.portfolio_io import load_all_holding_tickers
+    held_tickers = load_all_holding_tickers()
+
     return {
         "updated_at": to_iso_string(doc.get("updated_at")),
         "rows": [
             {
                 **row,
+                "is_held": row["ticker"] in held_tickers,
                 "daily_change_pct": snapshot.get(row["ticker"], {}).get("changeRate"),
                 "current_price": snapshot.get(row["ticker"], {}).get("nowVal"),
                 "nav": snapshot.get(row["ticker"], {}).get("nav"),

@@ -5,6 +5,16 @@ import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
 
 import { AppDataGrid } from "../components/AppDataGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
+
+type AccountConfig = {
+  account_id: string;
+  name: string;
+  icon: string;
+};
 
 type HoldingsRow = {
   account_name: string;
@@ -20,6 +30,13 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
+};
+
+type HoldingsResponse = {
+  accounts?: AccountConfig[];
+  account_id?: string;
+  rows?: HoldingsRow[];
+  error?: string;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -38,29 +55,83 @@ function getBucketCellClass(bucketId: number): string {
   return `appBucketCell appBucketCell${bucketId}`;
 }
 
+// 모듈 수준 캐시 변수로 페이지 이동 간에도 데이터를 유지합니다. (브라우저 새로고침 전까지 유효)
+let holdingsDataCache: Record<string, HoldingsResponse> = {};
+
 export function HoldingsManager() {
-  const [rows, setRows] = useState<HoldingsRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [accounts, setAccounts] = useState<AccountConfig[]>(holdingsDataCache["__ACCOUNTS__"]?.accounts ?? []);
+  const [selectedAccountId, setSelectedAccountId] = useState(readRememberedMomentumEtfAccountId() ?? "");
+  const [rows, setRows] = useState<HoldingsRow[]>(holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]?.rows ?? []);
+  const [loading, setLoading] = useState(!holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        const response = await fetch("/api/holdings", { cache: "no-store" });
-        const payload = (await response.json()) as { rows?: HoldingsRow[]; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "보유 종목을 불러오지 못했습니다.");
-        }
-        setRows(payload.rows ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
-      } finally {
-        setLoading(false);
-      }
+  async function load(accountId: string | null = null, silent = false) {
+    const targetId = accountId ?? selectedAccountId;
+    
+    // 1. 캐시가 있으면 즉시 반영 (Stale-While-Revalidate)
+    const cached = holdingsDataCache[targetId];
+    if (cached) {
+      if (cached.accounts) setAccounts(cached.accounts);
+      if (cached.rows) setRows(cached.rows);
+      // 캐시가 있으면 로딩 바를 굳이 보여주지 않거나, silent로 처리
+    } else if (!silent) {
+      setLoading(true);
     }
-    void load();
+    
+    setError(null);
+
+    try {
+      const search = targetId !== null ? `?account=${encodeURIComponent(targetId)}` : "";
+      const response = await fetch(`/api/holdings${search}`, { cache: "no-store" });
+      const payload = (await response.json()) as HoldingsResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "보유 종목을 불러오지 못했습니다.");
+      }
+
+      // 서버 응답 저장
+      const nextAccounts = payload.accounts ?? [];
+      const nextRows = payload.rows ?? [];
+      const returnedId = payload.account_id ?? "";
+
+      setAccounts(nextAccounts);
+      setRows(nextRows);
+      
+      // 전역 캐시 업데이트
+      holdingsDataCache[returnedId] = payload;
+      holdingsDataCache["__ACCOUNTS__"] = { accounts: nextAccounts };
+
+      if (accountId === null) {
+        setSelectedAccountId(returnedId);
+        writeRememberedMomentumEtfAccountId(returnedId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load(readRememberedMomentumEtfAccountId() ?? "");
   }, []);
+
+  function handleAccountChange(nextId: string) {
+    // 낙관적 업데이트
+    setSelectedAccountId(nextId);
+    writeRememberedMomentumEtfAccountId(nextId);
+
+    // 캐시 확인 및 즉시 반영
+    const cached = holdingsDataCache[nextId];
+    if (cached) {
+      setRows(cached.rows ?? []);
+      // 캐시가 있으면 백그라운드에서만 로드
+      void load(nextId, true);
+    } else {
+      // 캐시가 없으면 로딩 표시와 함께 로드
+      void load(nextId);
+    }
+  }
 
   const gridRows = useMemo<GridRow[]>(
     () => rows.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` })),
@@ -178,6 +249,39 @@ export function HoldingsManager() {
 
       <section className="appSection appSectionFill">
         <div className="card appCard">
+          <div className="card-header">
+            <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="tickerTypeToolbarLeft">
+                <div className="accountSelect">
+                  <select
+                    className="form-select"
+                    style={{ width: "auto", minWidth: "220px", fontWeight: 600 }}
+                    value={selectedAccountId}
+                    onChange={(e) => handleAccountChange(e.target.value)}
+                    disabled={loading}
+                  >
+                    {accounts.map((acc) => (
+                      <option key={acc.account_id} value={acc.account_id}>
+                        {acc.icon} {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="tickerTypeToolbarRight">
+                <div className="stocksSummary d-flex align-items-center gap-3">
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 종목 수:</span>
+                    <span style={{ fontWeight: 700 }}>{rows.length}개</span>
+                  </div>
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 평가액:</span>
+                    <span style={{ fontWeight: 700 }}>{formatKrw(rows.reduce((acc, row) => acc + (row.valuation_krw || 0), 0))}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
           <div className="card-body appCardBodyTight">
             <AppDataGrid
               className="appDataGrid"

@@ -159,10 +159,26 @@ def _get_collection(account_id: str):
 
 
 def get_cache_lookup_keys(account_id: str) -> list[str]:
-    """캐시 조회 시도 순서를 반환한다."""
+    """캐시 조회 시도 순서를 반환한다.
+
+    계좌 ID가 전달되면 해당 계좌의 ticker_codes 설정을 기반으로
+    실제 캐시 컬렉션 키 목록을 반환한다.
+    """
     token = (account_id or "").strip().lower()
     if not token:
         return []
+
+    # 계좌 설정에서 ticker_codes를 읽어 캐시 조회 키로 사용
+    try:
+        from utils.settings_loader import get_account_settings
+
+        settings = get_account_settings(token)
+        ticker_codes = settings.get("ticker_codes")
+        if isinstance(ticker_codes, list) and ticker_codes:
+            return [str(tc).strip().lower() for tc in ticker_codes if str(tc).strip()]
+    except Exception:
+        pass
+
     return [token]
 
 
