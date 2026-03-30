@@ -132,6 +132,7 @@ export function AccountStocksManager() {
   );
 
   function handleAccountChange(nextAccountId: string) {
+    setSelectedAccountId(nextAccountId);
     writeRememberedMomentumEtfAccountId(nextAccountId);
     void load(nextAccountId);
   }
