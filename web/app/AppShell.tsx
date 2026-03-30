@@ -7,17 +7,18 @@ import type { ReactNode } from "react";
 import {
   IconCash,
   IconFlask2,
+  IconBriefcase,
   IconChevronDown,
   IconFileImport,
   IconMoodSmile,
   IconHome,
   IconMedal2,
+  IconList,
   IconListDetails,
   IconMenu2,
   IconNotebook,
   IconReceipt2,
   IconSettings,
-  IconSparkles,
   IconTrendingUp,
   IconX,
 } from "@tabler/icons-react";
@@ -33,6 +34,7 @@ const navGroups = [
     icon: IconCash,
     items: [
       { href: "/cash", label: "자산 관리", icon: IconCash },
+      { href: "/holdings", label: "계좌 상세", icon: IconList },
       { href: "/import", label: "벌크 입력", icon: IconFileImport },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
@@ -45,8 +47,8 @@ const navGroups = [
     items: [
       { href: "/rank", label: "순위", icon: IconMedal2 },
       { href: "/stocks", label: "종목 관리", icon: IconListDetails },
+      { href: "/account-stocks", label: "계좌별 종목", icon: IconBriefcase },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
-      { href: "/summary", label: "AI용 요약", icon: IconSparkles },
       { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
   },

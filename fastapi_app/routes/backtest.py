@@ -41,6 +41,7 @@ class BacktestSavePayload(BaseModel):
 
 class BacktestValidatePayload(BaseModel):
     ticker: str
+    country_code: str = "kor"
 
 
 class BacktestDeletePayload(BaseModel):
@@ -52,6 +53,7 @@ class BacktestRunPayload(BaseModel):
     slippage_pct: float = 0.5
     benchmark: BacktestTickerPayload | None = None
     groups: list[BacktestGroupPayload]
+    country_code: str = "kor"
 
 
 @router.get("")
@@ -82,6 +84,7 @@ def post_run_backtest(payload: BacktestRunPayload, _: None = Depends(require_int
         slippage_pct=payload.slippage_pct,
         benchmark=payload.benchmark.model_dump() if payload.benchmark else None,
         groups=[group.model_dump() for group in payload.groups],
+        country_code=payload.country_code,
     )
 
 
@@ -89,7 +92,7 @@ def post_run_backtest(payload: BacktestRunPayload, _: None = Depends(require_int
 def post_validate_backtest_ticker(
     payload: BacktestValidatePayload, _: None = Depends(require_internal_token)
 ) -> dict[str, Any]:
-    return validate_backtest_ticker(payload.ticker)
+    return validate_backtest_ticker(payload.ticker, payload.country_code)
 
 
 @router.delete("")

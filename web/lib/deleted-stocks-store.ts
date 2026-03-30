@@ -1,4 +1,5 @@
 import { fetchFastApiJson } from "./internal-api";
+import { BUCKET_NAME_MAP } from "./bucket-theme";
 
 type StockMetaDoc = {
   account_id?: string;
@@ -48,14 +49,6 @@ type DeletedStocksTableData = {
   accounts: DeletedStocksAccountItem[];
   rows: DeletedStocksRowItem[];
   account_id: string;
-};
-
-const BUCKETS: Record<number, string> = {
-  1: "1. 모멘텀",
-  2: "2. 혁신기술",
-  3: "3. 시장지수",
-  4: "4. 배당방어",
-  5: "5. 대체헷지",
 };
 
 function normalizeNumber(value: unknown): number | null {

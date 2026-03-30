@@ -12,8 +12,8 @@ from dotenv import load_dotenv
 
 from utils.notification import send_slack_message_v2
 
-# 사용자 계좌, 종목 정보 로드 모듈
-from utils.settings_loader import get_account_order, get_account_settings, list_available_accounts
+# 사용자 종목 타입 정보 로드 모듈
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_etfs
 
 # 환경 변수 로드
@@ -122,36 +122,31 @@ if __name__ == "__main__":
     )
 
     try:
-        accounts = list_available_accounts()
+        ticker_types = list_available_ticker_types()
     except Exception as e:
-        collector.print("계정 정보를 불러오지 못했습니다:", e)
+        collector.print("종목 타입 정보를 불러오지 못했습니다:", e)
         sys.exit(1)
 
-    account_list = []
-    for acc in accounts:
-        order = get_account_order(acc)
-        account_list.append((order, acc))
-
-    account_list.sort(key=lambda x: x[0])
+    type_list = sorted(ticker_types)
 
     all_time_stats = {"kor": {}, "au": {}}
     account_outputs = []
     # 통계용 국가별 정보
-    meta_info = {"kor": {"accounts": set()}, "au": {"accounts": set()}}
+    meta_info = {"kor": {"ticker_types": set()}, "au": {"ticker_types": set()}}
 
     # 다운로드 중복 방지 캐시: {code: (res_str, stats_df)}
     cached_stats = {}
 
-    # 1. 모든 계좌에서 국가별 정보를 먼저 수집
-    for order, acc_id in account_list:
-        settings = get_account_settings(acc_id)
+    # 1. 모든 종목 타입에서 국가별 정보를 먼저 수집
+    for t_id in type_list:
+        settings = get_ticker_type_settings(t_id)
         country = settings.get("country_code", "").lower()
         if country in ["kor", "au"]:
-            meta_info[country]["accounts"].add(acc_id)
-            # 계좌별 출력물 생성 (기존 로직 유지)
-            acc_name = settings.get("name", acc_id)
-            lines = [f"{order}. {acc_name}"]
-            etfs = get_etfs(acc_id)
+            meta_info[country]["ticker_types"].add(t_id)
+            # 타입별 출력물 생성
+            acc_name = settings.get("name", t_id)
+            lines = [f"● {acc_name} ({t_id})"]
+            etfs = get_etfs(t_id)
             if not etfs:
                 lines.append(" - (등록된 종목이 없습니다)")
             else:
@@ -186,8 +181,8 @@ if __name__ == "__main__":
             global_best_sell = global_stats.sort_values(by="Pct_Change_From_Open", ascending=False).iloc[0]
 
             n_stocks = len(stats_dict)
-            n_accs = len(meta_info[c_code]["accounts"])
-            header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_accs}개 계좌)")
+            n_types = len(meta_info[c_code]["ticker_types"])
+            header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_types}개 종목 타입)")
             header_lines.append(
                 f"👉 전체 최적 매수 시간 : {global_best_buy['Time']} (평균 {global_best_buy['Pct_Change_From_Open']:+.3f}%)"
             )
@@ -199,7 +194,7 @@ if __name__ == "__main__":
     for hl in header_lines:
         collector.print(hl)
 
-    # 3. 개별 계좌/종목 결과 출력
+    # 3. 개별 종목 타입 결과 출력
     for out in account_outputs:
         collector.print(out)
 
@@ -207,6 +202,6 @@ if __name__ == "__main__":
     if args.slack:
         full_text = collector.get_full_text()
         # 마크다운 코드 블록으로 감싸서 가독성 확보
-        slack_msg = f"*🕒 국가별/계좌별 최적 매매 시간 분석 요약*\n```\n{full_text}\n```"
+        slack_msg = f"*🕒 국가별/종목 타입별 최적 매매 시간 분석 요약*\n```\n{full_text}\n```"
         send_slack_message_v2(slack_msg)
         print("\n[알림] 분석 결과가 슬랙으로 전송되었습니다.")

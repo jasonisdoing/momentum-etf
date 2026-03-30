@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
   readRememberedMomentumEtfAccountId,
@@ -52,6 +52,53 @@ export function NoteManager() {
   const toast = useToast();
 
   const isDirty = content !== savedContent;
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const contentRef = useRef(content);
+  const selectedAccountIdRef = useRef(selectedAccountId);
+  contentRef.current = content;
+  selectedAccountIdRef.current = selectedAccountId;
+
+  const saveNote = useCallback(
+    async (silent = false) => {
+      const currentContent = contentRef.current;
+      const accountId = selectedAccountIdRef.current;
+      if (!accountId) return;
+      try {
+        setError(null);
+        const response = await fetch("/api/note", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_id: accountId, content: currentContent }),
+        });
+        const payload = (await response.json()) as { updated_at?: string; error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "메모 저장에 실패했습니다.");
+        }
+        setSavedContent(currentContent);
+        setUpdatedAt(payload.updated_at ?? null);
+        if (!silent) {
+          toast.success("[계좌 메모] 저장 완료");
+        }
+      } catch (saveError) {
+        if (!silent) {
+          setError(saveError instanceof Error ? saveError.message : "메모 저장에 실패했습니다.");
+        }
+      }
+    },
+    [toast],
+  );
+
+  // 타이핑 멈춘 후 3초 뒤 자동 저장
+  useEffect(() => {
+    if (!isDirty) return;
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      void saveNote(true);
+    }, 3000);
+    return () => {
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    };
+  }, [content, isDirty, saveNote]);
 
   useEffect(() => {
     function handleBeforeUnload(event: BeforeUnloadEvent) {
@@ -116,24 +163,7 @@ export function NoteManager() {
 
   function handleSave() {
     startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/note", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account_id: selectedAccountId, content }),
-        });
-        const payload = (await response.json()) as { updated_at?: string; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "메모 저장에 실패했습니다.");
-        }
-
-        setSavedContent(content);
-        setUpdatedAt(payload.updated_at ?? null);
-        toast.success("[Momentum ETF-계좌 메모] 메모 저장 완료");
-      } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "메모 저장에 실패했습니다.");
-      }
+      await saveNote(false);
     });
   }
 

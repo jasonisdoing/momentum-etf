@@ -260,7 +260,7 @@ def main():
     # 3. Compose Portfolio Composition (Thread)
     if all_holdings:
         combined_df = pd.concat(all_holdings, ignore_index=True)
-        bucket_cols = ["1. 모멘텀", "2. 혁신기술", "3. 시장지수", "4. 배당방어", "5. 대체헷지"]
+        bucket_cols = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
         comp_details = ["*🏗️ 포트폴리오 구성 비중*"]
 
         for b in bucket_cols:
@@ -269,7 +269,7 @@ def main():
             comp_details.append(f"• {b}: {b_pct:.1f}%")
 
         cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
-        comp_details.append(f"• 6. 현금: {cash_pct:.1f}%")
+        comp_details.append(f"• 5. 현금: {cash_pct:.1f}%")
 
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
 

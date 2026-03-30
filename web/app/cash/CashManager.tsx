@@ -142,15 +142,6 @@ export function CashManager() {
         </span>
       ),
     },
-    {
-      field: "cash_balance_krw",
-      headerName: "저장값 (KRW)",
-      minWidth: 116,
-      flex: 0.9,
-      align: "right",
-      headerAlign: "right",
-      renderCell: (params) => <span className="tablePlainValue">{formatNumber(params.row.cash_balance_krw)}</span>,
-    },
     { field: "cash_currency", headerName: "현금 통화", minWidth: 92, flex: 0.7 },
     {
       field: "intl_shares_value",
@@ -367,10 +358,6 @@ export function CashManager() {
                 />
               </div>
               <div className="col-md-6">
-                <label className="form-label">현금 통화</label>
-                <input className="form-control" type="text" value={editingAccount.cash_currency} readOnly />
-              </div>
-              <div className="col-md-6">
                 <label className="form-label">
                   {editingAccount.currency === "KRW" ? "보유 현금 (KRW)" : `보유 현금 (${editingAccount.currency})`}
                 </label>
@@ -391,15 +378,6 @@ export function CashManager() {
                     />
                   </>
                 )}
-              </div>
-              <div className="col-md-6">
-                <label className="form-label">저장값 (KRW)</label>
-                <input
-                  className="form-control"
-                  type="text"
-                  value={formatNumber(editingAccount.cash_balance_krw)}
-                  readOnly
-                />
               </div>
               {editingAccount.account_id === "aus_account" ? (
                 <>

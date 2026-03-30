@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
-    const accountId = searchParams.get("account_id") ?? undefined;
+    const tickerType = searchParams.get("ticker_type") ?? undefined;
     const maType = searchParams.get("ma_type") ?? undefined;
     const maMonthsRaw = searchParams.get("ma_months");
     const maMonths = maMonthsRaw ? Number(maMonthsRaw) : undefined;
     const data = await loadRankData({
-      account_id: accountId,
+      ticker_type: tickerType,
       ma_type: maType,
       ma_months: maMonths,
     });
