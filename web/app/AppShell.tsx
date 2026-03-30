@@ -19,7 +19,6 @@ import {
   IconNotebook,
   IconReceipt2,
   IconSettings,
-  IconSparkles,
   IconTrendingUp,
   IconX,
 } from "@tabler/icons-react";
@@ -50,7 +49,6 @@ const navGroups = [
       { href: "/stocks", label: "종목 관리", icon: IconListDetails },
       { href: "/account-stocks", label: "계좌별 종목", icon: IconBriefcase },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
-      { href: "/summary", label: "AI용 요약", icon: IconSparkles },
       { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
   },

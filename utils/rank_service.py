@@ -5,9 +5,14 @@ from typing import Any
 
 import pandas as pd
 
-from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
-from utils.rankings import ALLOWED_MA_TYPES, build_ticker_type_rankings, get_ticker_type_rank_defaults, get_rank_months_max
+from utils.rankings import (
+    ALLOWED_MA_TYPES,
+    build_ticker_type_rankings,
+    get_rank_months_max,
+    get_ticker_type_rank_defaults,
+)
 from utils.stock_list_io import get_etfs
+from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -142,7 +147,6 @@ def load_rank_data(
     )
 
     return {
-        "accounts": configs_payload,  # 프론트엔드 하위 호환성을 위해 키를 유지하거나 types로 명확히 함
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_type": selected_ma_type,

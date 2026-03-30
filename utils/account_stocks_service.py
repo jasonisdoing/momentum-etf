@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.price_service import get_realtime_snapshot
 from utils.account_registry import load_account_configs, pick_default_account
 from utils.account_stocks_io import get_account_targets
 from utils.db_manager import get_db_connection
 from utils.normalization import normalize_nullable_number, normalize_text
-from utils.stock_list_io import get_etfs
-from services.price_service import get_realtime_snapshot
-
 
 BUCKETS: dict[int, str] = {
     1: "1. 모멘텀",
