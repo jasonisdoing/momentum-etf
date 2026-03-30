@@ -8,7 +8,7 @@ import { AppLoadingState } from "../components/AppLoadingState";
 import { useToast } from "../components/ToastProvider";
 
 type DeletedStocksAccountItem = {
-  account_id: string;
+  ticker_type: string;
   order: number;
   name: string;
   icon: string;
@@ -32,9 +32,9 @@ type DeletedStocksRowItem = {
 };
 
 type DeletedStocksResponse = {
-  accounts?: DeletedStocksAccountItem[];
+  ticker_types?: DeletedStocksAccountItem[];
   rows?: DeletedStocksRowItem[];
-  account_id?: string;
+  ticker_type?: string;
   error?: string;
 };
 
@@ -107,8 +107,8 @@ const columns: GridColDef<DeletedStocksGridRow>[] = [
 ];
 
 export function DeletedStocksManager() {
-  const [accounts, setAccounts] = useState<DeletedStocksAccountItem[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [ticker_types, setAccounts] = useState<DeletedStocksAccountItem[]>([]);
+  const [selectedTickerType, setSelectedAccountId] = useState("");
   const [rows, setRows] = useState<DeletedStocksRowItem[]>([]);
   const [selectionModel, setSelectionModel] = useState<GridRowSelectionModel>({ type: "include", ids: new Set() });
   const [error, setError] = useState<string | null>(null);
@@ -116,20 +116,20 @@ export function DeletedStocksManager() {
   const [isPending, startTransition] = useTransition();
   const toast = useToast();
 
-  async function load(accountId?: string) {
+  async function load(tickerType?: string) {
     setLoading(true);
     setError(null);
 
     try {
-      const search = accountId ? `?account=${encodeURIComponent(accountId)}` : "";
+      const search = tickerType ? `?type=${encodeURIComponent(tickerType)}` : "";
       const response = await fetch(`/api/deleted${search}`, { cache: "no-store" });
       const payload = (await response.json()) as DeletedStocksResponse;
       if (!response.ok) {
         throw new Error(payload.error ?? "삭제된 종목 데이터를 불러오지 못했습니다.");
       }
 
-      setAccounts(payload.accounts ?? []);
-      setSelectedAccountId(payload.account_id ?? "");
+      setAccounts(payload.ticker_types ?? []);
+      setSelectedAccountId(payload.ticker_type ?? "");
       setRows(payload.rows ?? []);
       setSelectionModel({ type: "include", ids: new Set() });
     } catch (loadError) {
@@ -143,9 +143,9 @@ export function DeletedStocksManager() {
     void load();
   }, []);
 
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.account_id === selectedAccountId) ?? null,
-    [accounts, selectedAccountId],
+  const selectedTickerTypeItem = useMemo(
+    () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
+    [ticker_types, selectedTickerType],
   );
 
   const selectedTickers = useMemo(
@@ -158,7 +158,7 @@ export function DeletedStocksManager() {
     [rows],
   );
 
-  function handleAccountChange(nextAccountId: string) {
+  function handleTickerTypeChange(nextAccountId: string) {
     void load(nextAccountId);
   }
 
@@ -170,7 +170,7 @@ export function DeletedStocksManager() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            account_id: selectedAccountId,
+            ticker_type: selectedTickerType,
             tickers: selectedTickers,
           }),
         });
@@ -197,7 +197,7 @@ export function DeletedStocksManager() {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            account_id: selectedAccountId,
+            ticker_type: selectedTickerType,
             tickers: selectedTickers,
           }),
         });
@@ -240,11 +240,11 @@ export function DeletedStocksManager() {
               <div className="toolbarActions">
                 <select
                   className="field compactField"
-                  value={selectedAccountId}
-                  onChange={(event) => handleAccountChange(event.target.value)}
+                  value={selectedTickerType}
+                  onChange={(event) => handleTickerTypeChange(event.target.value)}
                 >
-                  {accounts.map((account) => (
-                    <option key={account.account_id} value={account.account_id}>
+                  {ticker_types.map((account) => (
+                    <option key={account.ticker_type} value={account.ticker_type}>
                       {account.order}. {account.name}
                     </option>
                   ))}
@@ -267,9 +267,9 @@ export function DeletedStocksManager() {
                 </button>
               </div>
               <div className="tableMeta">
-                {selectedAccount ? (
+                {selectedTickerTypeItem ? (
                   <span>
-                    {selectedAccount.icon} {selectedAccount.name}
+                    {selectedTickerTypeItem.icon} {selectedTickerTypeItem.name}
                   </span>
                 ) : null}
                 <span>총 {new Intl.NumberFormat("ko-KR").format(rows.length)}개 종목</span>

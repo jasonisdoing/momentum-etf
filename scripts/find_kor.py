@@ -13,7 +13,7 @@ from utils.logger import get_app_logger
 find_kor.py
 
 네이버 금융 ETF API를 사용하여 지정된 등락률 이상 상승한 국내 ETF를 찾고,
-현재 국내 계좌들에 등록된 종목 / 삭제된 종목 / 신규 발견 종목으로 분류합니다.
+현재 국내 종목 타입들에 등록된 종목 / 삭제된 종목 / 신규 발견 종목으로 분류합니다.
 
 [사용법]
 python scripts/find_kor.py
@@ -26,7 +26,7 @@ import pandas as pd
 import requests
 from pykrx import stock
 
-from utils.settings_loader import get_account_settings, list_available_accounts
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_deleted_etfs, get_etfs
 
 # --- 설정 ---
@@ -123,16 +123,16 @@ def get_latest_trading_day() -> str:
     return datetime.now().strftime("%Y%m%d")
 
 
-def _load_target_accounts() -> list[str]:
-    """국내 계좌 목록만 동적으로 로드합니다."""
+def _load_target_types() -> list[str]:
+    """국내 종목 타입 목록만 동적으로 로드합니다."""
     targets: list[str] = []
-    for account_id in list_available_accounts():
+    for t_id in list_available_ticker_types():
         try:
-            settings = get_account_settings(account_id)
+            settings = get_ticker_type_settings(t_id)
         except Exception:  # noqa: BLE001
             continue
         if str(settings.get("country_code") or "").strip().lower() == "kor":
-            targets.append(account_id)
+            targets.append(t_id)
     return targets
 
 
@@ -163,14 +163,14 @@ def _print_item(item: dict[str, object], *, is_deleted: bool = False) -> None:
     deleted_infos = item.get("deleted_infos", [])
     parts: list[str] = []
     for info in deleted_infos:
-        account_id = info.get("account_id", "?")
+        type_id = info.get("ticker_type", "?")
         deleted_at = info.get("deleted_at")
         deleted_reason = info.get("deleted_reason") or "사유없음"
         if hasattr(deleted_at, "strftime"):
             deleted_date = deleted_at.strftime("%Y-%m-%d")
         else:
             deleted_date = str(deleted_at or "")[:10]
-        parts.append(f"[{account_id}] {deleted_date} ({deleted_reason})")
+        parts.append(f"[{type_id}] {deleted_date} ({deleted_reason})")
 
     print(f"{base_msg} | 🗑️ 삭제: {' | '.join(parts)}")
 
@@ -194,7 +194,7 @@ def _print_basic_item(item: dict[str, object]) -> None:
 
 
 def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
-    """국내 ETF 상승 종목을 계좌 등록 상태 기준으로 분류해 출력합니다."""
+    """국내 ETF 상승 종목을 종목 타입별 등록 상태 기준으로 분류해 출력합니다."""
     latest_day = get_latest_trading_day()
     print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]} (ETF)")
 
@@ -236,9 +236,9 @@ def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
         print("\n필터링 후 남은 종목이 없습니다.")
         return
 
-    target_accounts = _load_target_accounts()
-    if not target_accounts:
-        print("국내 계좌를 찾지 못했습니다.")
+    target_types = _load_target_types()
+    if not target_types:
+        print("국내 종목 타입을 찾지 못했습니다.")
         return
 
     print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
@@ -250,24 +250,24 @@ def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
     existing_tickers_map: dict[str, list[str]] = defaultdict(list)
     deleted_tickers_map: dict[str, list[dict[str, object]]] = defaultdict(list)
 
-    for account_id in target_accounts:
+    for t_id in target_types:
         try:
-            for item in get_etfs(account_id):
+            for item in get_etfs(t_id):
                 ticker = str(item.get("ticker") or "").strip().upper()
                 if ticker:
-                    existing_tickers_map[ticker].append(account_id)
+                    existing_tickers_map[ticker].append(t_id)
 
-            for item in get_deleted_etfs(account_id):
+            for item in get_deleted_etfs(t_id):
                 ticker = str(item.get("ticker") or "").strip().upper()
                 if not ticker:
                     continue
                 info = dict(item)
-                info["account_id"] = account_id
+                info["ticker_type"] = t_id
                 deleted_tickers_map[ticker].append(info)
         except Exception as exc:  # noqa: BLE001
-            get_app_logger().warning("%s 종목 로드 중 오류 발생: %s", account_id, exc)
+            get_app_logger().warning("%s 종목 로드 중 오류 발생: %s", t_id, exc)
 
-    my_account_list: list[dict[str, object]] = []
+    my_type_list: list[dict[str, object]] = []
     deleted_list: list[dict[str, object]] = []
     new_discovery_list: list[dict[str, object]] = []
 
@@ -275,7 +275,7 @@ def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
         ticker = str(item["티커"]).strip().upper()
         if ticker in existing_tickers_map:
             item["accounts"] = existing_tickers_map[ticker]
-            my_account_list.append(item)
+            my_type_list.append(item)
         elif ticker in deleted_tickers_map:
             item["deleted_infos"] = deleted_tickers_map[ticker]
             deleted_list.append(item)
@@ -283,9 +283,9 @@ def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
             new_discovery_list.append(item)
 
     print()
-    print("--- 계좌 등록 ETF 목록 ---")
-    if my_account_list:
-        for item in sorted(my_account_list, key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
+    print("--- 종목 타입 등록 ETF 목록 ---")
+    if my_type_list:
+        for item in sorted(my_type_list, key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
             _print_item(item)
 
     print()

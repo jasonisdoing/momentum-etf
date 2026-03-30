@@ -1,8 +1,8 @@
 """
-Script to update stock metadata for accounts.
+Script to update stock metadata for ticker types.
 Usage:
   python scripts/stock_meta_updater.py
-  python scripts/stock_meta_updater.py <account_id>
+  python scripts/stock_meta_updater.py <ticker_type>
 """
 
 import sys
@@ -20,7 +20,7 @@ from utils.stock_meta_updater import update_stock_metadata
 
 def main():
     parser = argparse.ArgumentParser(description="Update stock metadata.")
-    parser.add_argument("target", nargs="?", help="Account ID (optional)")
+    parser.add_argument("target", nargs="?", help="Ticker Type ID (optional)")
     args = parser.parse_args()
 
     target = (args.target or "").strip().lower()  # None if not provided
@@ -29,10 +29,10 @@ def main():
 
     try:
         if target:
-            logger.info(f"Target account specified: {target}")
+            logger.info(f"Target ticker type specified: {target}")
             update_stock_metadata(target)
         else:
-            logger.info("No target specified. Updating all configured accounts.")
+            logger.info("No target specified. Updating all configured ticker types.")
             update_stock_metadata(None)
 
     except Exception as e:

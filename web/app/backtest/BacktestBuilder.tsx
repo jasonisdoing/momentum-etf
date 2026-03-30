@@ -54,6 +54,10 @@ type BacktestRunResult = {
 };
 
 const PERIOD_OPTIONS = Array.from({ length: 24 }, (_, index) => index + 1);
+const MARKET_OPTIONS = [
+  { value: "kor", label: "🇰🇷 한국" },
+  { value: "au", label: "🇦🇺 호주" },
+];
 
 let groupCounter = 1;
 let tickerCounter = 1;
@@ -97,6 +101,7 @@ function formatSavedAt(value: string): string {
 export function BacktestBuilder() {
   const toast = useToast();
   const [backtestName, setBacktestName] = useState("");
+  const [countryCode, setCountryCode] = useState("kor");
   const [periodMonths, setPeriodMonths] = useState(12);
   const [slippagePct, setSlippagePct] = useState(0.5);
   const [benchmarkTicker, setBenchmarkTicker] = useState<BacktestTicker>(createTicker());
@@ -109,6 +114,25 @@ export function BacktestBuilder() {
 
   function updateGroup(groupId: string, updater: (group: BacktestGroup) => BacktestGroup) {
     setGroups((current) => current.map((group) => (group.id === groupId ? updater(group) : group)));
+  }
+
+  function handleCountryChange(nextCountry: string) {
+    setCountryCode(nextCountry);
+    setError(null);
+    setRunResult(null);
+    setBenchmarkTicker(createTicker());
+    setGroups((current) =>
+      current.map((group) => ({
+        ...group,
+        tickers: group.tickers.map((ticker) => ({
+          ...ticker,
+          name: "",
+          listingDate: "",
+          status: "idle" as const,
+          message: "",
+        })),
+      })),
+    );
   }
 
   function handleAddGroup() {
@@ -203,6 +227,7 @@ export function BacktestBuilder() {
         body: JSON.stringify({
           action: "validate",
           ticker: tickerValue,
+          country_code: countryCode,
         }),
       });
       const payload = (await response.json()) as {
@@ -414,6 +439,7 @@ export function BacktestBuilder() {
             slippage_pct: slippagePct,
             benchmark,
             groups: normalizedGroups,
+            country_code: countryCode,
           }),
         });
         const payload = (await response.json()) as BacktestRunResult & { error?: string };
@@ -546,6 +572,20 @@ export function BacktestBuilder() {
             <div className="subheader mb-3">백테스트 정보</div>
             <div className="backtestInfoGrid">
               <label className="form-label mb-0">
+                <span className="subheader">마켓</span>
+                <select
+                  className="form-select"
+                  value={countryCode}
+                  onChange={(event) => handleCountryChange(event.target.value)}
+                >
+                  {MARKET_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="form-label mb-0">
                 <span className="subheader">백테스트 제목</span>
                 <input
                   type="text"
@@ -596,7 +636,7 @@ export function BacktestBuilder() {
                   <input
                     type="text"
                     className="form-control"
-                    placeholder="예: 069500"
+                    placeholder="예: 0091P0, VHY"
                     value={benchmarkTicker.ticker}
                     onChange={(event) => {
                       setBenchmarkTicker({
@@ -628,7 +668,7 @@ export function BacktestBuilder() {
                         const response = await fetch("/api/backtest", {
                           method: "POST",
                           headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ action: "validate", ticker: tickerValue }),
+                          body: JSON.stringify({ action: "validate", ticker: tickerValue, country_code: countryCode }),
                         });
                         const payload = (await response.json()) as {
                           ticker?: string;
@@ -759,7 +799,7 @@ export function BacktestBuilder() {
                         <input
                           type="text"
                           className="form-control"
-                          placeholder="예: 069500"
+                          placeholder="예: 0091P0, VHY"
                           value={ticker.ticker}
                           onChange={(event) => handleTickerChange(group.id, ticker.id, event.target.value)}
                         />

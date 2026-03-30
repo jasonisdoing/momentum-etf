@@ -773,9 +773,45 @@ a {
   grid-template-columns: 1fr;
 }
 
+.dashboardOverviewLeft,
+.dashboardOverviewRight {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .dashboardOverviewMetric,
 .dashboardOverviewChartCard {
   min-width: 0;
+}
+
+.dashboardAccountWeightCard {
+  min-width: 0;
+  height: 100%;
+}
+
+.dashboardMiniChartHeader {
+  padding: 0.45rem 0.75rem;
+}
+
+.dashboardMiniChartTitle {
+  font-size: 0.82rem;
+}
+
+.dashboardMiniChartBody {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.2rem;
+  padding: 0.35rem 0.6rem 0.5rem;
+}
+
+.dashboardMiniChartCanvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .dashboardMetricCard {
@@ -1015,14 +1051,16 @@ a {
 
 @media (min-width: 1200px) {
   .dashboardOverviewGrid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.35fr);
-    grid-template-rows: repeat(3, minmax(0, 1fr));
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .dashboardOverviewLeft,
+  .dashboardOverviewRight {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboardOverviewChartCard {
-    grid-column: 3;
-    grid-row: 1 / span 3;
     height: 100%;
   }
 }
@@ -1222,7 +1260,7 @@ a {
 
 .rankToolbarMeta {
   gap: 10px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 500;
 }
 
@@ -1405,62 +1443,62 @@ a {
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell1,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell1 {
-  background: #ffebee;
-  color: #c62828;
+  background: var(--bucket-1);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell2,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell2 {
-  background: #fff3e0;
-  color: #ef6c00;
+  background: var(--bucket-2);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell3,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell3 {
-  background: #f3e5f5;
-  color: #7b1fa2;
+  background: var(--bucket-3);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell4,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell4 {
-  background: #e3f2fd;
-  color: #1565c0;
+  background: var(--bucket-4);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-cell.appBucketCell5,
 .rankDataGrid .MuiDataGrid-cell.rankBucketCell5 {
-  background: #e8f5e9;
-  color: #2e7d32;
+  background: var(--bucket-5);
+  color: #fff;
 }
 
 .appDataGrid .MuiDataGrid-row.appHeldRow,
 .rankDataGrid .MuiDataGrid-row.rankHeldRow {
-  background: rgba(46, 125, 50, 0.1);
+  background: rgba(102, 204, 102, 0.35);
 }
 
 .appDataGrid .MuiDataGrid-row.appHeldRow:hover,
 .rankDataGrid .MuiDataGrid-row.rankHeldRow:hover {
-  background: rgba(46, 125, 50, 0.14);
+  background: rgba(102, 204, 102, 0.42);
 }
 
 .rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.1);
+  background: rgba(100, 116, 139, 0.3);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.1);
+  background: rgba(100, 116, 139, 0.3);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow:hover {
-  background: rgba(100, 116, 139, 0.14);
+  background: rgba(100, 116, 139, 0.38);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow {
-  background: rgba(95, 122, 92, 0.14);
+  background: rgba(102, 180, 102, 0.38);
 }
 
 .rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow:hover {
-  background: rgba(95, 122, 92, 0.18);
+  background: rgba(102, 180, 102, 0.45);
 }
 
 .tableWrap {
@@ -1680,7 +1718,7 @@ a {
 
 .bulkTextarea {
   width: 100%;
-  min-height: 220px;
+  min-height: 65vh;
   resize: vertical;
   padding: 12px 14px;
   border: 1px solid var(--line);

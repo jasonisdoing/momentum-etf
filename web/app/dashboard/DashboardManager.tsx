@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Area, AreaChart, Cell, Pie, PieChart, Tooltip } from "recharts";
 
+import { BUCKET_COLORS } from "@/lib/bucket-theme";
 import { AppLoadingState } from "../components/AppLoadingState";
 
 type DashboardMetricItem = {
@@ -36,14 +37,13 @@ type DashboardData = {
   metrics_row2?: DashboardMetricItem[];
   accounts?: DashboardAccountSummaryItem[];
   buckets?: DashboardBucketItem[];
+  account_buckets?: Record<string, DashboardBucketItem[]>;
   sparklines?: Record<string, Array<{ date: string; value: number }>>;
   latest_snapshot_date?: string | null;
   weekly_date?: string | null;
   updated_at?: string | null;
   error?: string;
 };
-
-const BUCKET_COLORS = ["#206bc4", "#2fb344", "#f76707", "#d63939", "#ae3ec9", "#667382"];
 
 function formatMoney(value: number): string {
   const abs = Math.abs(value);
@@ -183,10 +183,10 @@ function DashboardDonutChart({ buckets }: { buckets: DashboardBucketItem[] }) {
     return () => observer.disconnect();
   }, []);
 
-  const chartSize = size.width > 0 && size.height > 0 ? Math.min(size.width, size.height, 560) : 0;
+  const chartSize = size.width > 0 && size.height > 0 ? Math.min(size.width, size.height, 300) : 0;
 
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 360 }}>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 120 }}>
       {chartSize > 0 ? (
         <PieChart width={chartSize} height={chartSize} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
           <Pie
@@ -195,8 +195,8 @@ function DashboardDonutChart({ buckets }: { buckets: DashboardBucketItem[] }) {
             nameKey="label"
             cx="50%"
             cy="50%"
-            innerRadius={chartSize * 0.28}
-            outerRadius={chartSize * 0.44}
+            innerRadius={chartSize * 0.26}
+            outerRadius={chartSize * 0.46}
             paddingAngle={2}
             strokeWidth={0}
           >
@@ -210,6 +210,40 @@ function DashboardDonutChart({ buckets }: { buckets: DashboardBucketItem[] }) {
           />
         </PieChart>
       ) : null}
+    </div>
+  );
+}
+
+function DashboardBucketLegend({ buckets }: { buckets: DashboardBucketItem[] }) {
+  return (
+    <div className="row g-1">
+      {buckets.map((bucket, index) => (
+        <div key={bucket.label} className="col-6">
+          <div className="d-flex align-items-center gap-1" style={{ minWidth: 0 }}>
+            <span
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                backgroundColor: BUCKET_COLORS[index % BUCKET_COLORS.length],
+                flex: "0 0 auto",
+              }}
+            />
+            <span
+              className="text-secondary"
+              style={{
+                fontSize: "0.72rem",
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {bucket.label.replace(/^\d+\.\s*/, "")} {bucket.weight_pct.toFixed(1)}%
+            </span>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -242,6 +276,14 @@ type DashboardRenderableMetricItem = {
 const DASHBOARD_ROW1_LABELS = ["총 자산", "투자 원금", "금일 손익", "금주 손익"] as const;
 const DASHBOARD_ROW2_LABELS = ["누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
 const DASHBOARD_LEFT_LABELS = ["총 자산", "투자 원금", "누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
+
+const DASHBOARD_ACCOUNT_WEIGHTS: { account_id: string; icon: string; label: string }[] = [
+  { account_id: "kor_account", icon: "🇰🇷", label: "국내 계좌" },
+  { account_id: "isa_account", icon: "🇰🇷", label: "ISA 계좌" },
+  { account_id: "pension_account", icon: "🇰🇷", label: "연금저축 계좌" },
+  { account_id: "core_account", icon: "💼", label: "장기보유 계좌" },
+  { account_id: "aus_account", icon: "🇦🇺", label: "호주 계좌" },
+];
 
 function orderMetricItems(
   items: DashboardRenderableMetricItem[],
@@ -387,6 +429,7 @@ export function DashboardManager() {
   const leftMetricItems = orderMetricItems(dashboardMetricItems, DASHBOARD_LEFT_LABELS);
   const holdingsStatusMetric = dashboardMetricItems.find((item) => item.label === "수익/손실 종목 수");
   const buckets = data?.buckets ?? [];
+  const accountBuckets = data?.account_buckets ?? {};
   const accounts = data?.accounts ?? [];
   const sparklines = data?.sparklines ?? {};
 
@@ -438,56 +481,49 @@ export function DashboardManager() {
       </div>
 
       <div className="dashboardOverviewGrid">
-        <div className="card dashboardOverviewChartCard">
-          <div className="card-header">
-            <h3 className="card-title">포트폴리오 구성 비중</h3>
-          </div>
-          <div className="card-body dashboardOverviewChartBody" style={{ paddingTop: "0.9rem", paddingBottom: "0.9rem" }}>
-            <div className="dashboardOverviewChartCanvas">
-              <DashboardDonutChart buckets={buckets} />
+        <div className="dashboardOverviewLeft">
+          {leftMetricItems.map((item) => (
+            <div key={`left-${item.label}`} className="dashboardOverviewMetric">
+              <DashboardMetricCard
+                item={item}
+                hideMoney={hideMoney}
+                periodMonths={periodMonths}
+                sparklines={sparklines}
+              />
             </div>
-              <div className="row mt-2 g-2">
-                {buckets.map((bucket, index) => (
-                  <div key={bucket.label} className="col-6">
-                  <div className="d-flex align-items-center gap-2" style={{ minWidth: 0 }}>
-                    <span
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: "50%",
-                        backgroundColor: BUCKET_COLORS[index % BUCKET_COLORS.length],
-                        flex: "0 0 auto",
-                      }}
-                    />
-                    <span
-                        className="text-secondary"
-                        style={{
-                          fontSize: "0.9rem",
-                          minWidth: 0,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {bucket.label.replace(/^\d+\.\s*/, "")} {bucket.weight_pct.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          ))}
         </div>
 
-        {leftMetricItems.map((item) => (
-          <div key={`left-${item.label}`} className="dashboardOverviewMetric">
-            <DashboardMetricCard
-              item={item}
-              hideMoney={hideMoney}
-              periodMonths={periodMonths}
-              sparklines={sparklines}
-            />
+        <div className="dashboardOverviewRight">
+          <div className="card dashboardOverviewChartCard">
+            <div className="card-header dashboardMiniChartHeader">
+              <h3 className="card-title dashboardMiniChartTitle">전체 구성 비중</h3>
+            </div>
+            <div className="card-body dashboardMiniChartBody">
+              <div className="dashboardMiniChartCanvas">
+                <DashboardDonutChart buckets={buckets} />
+              </div>
+              <DashboardBucketLegend buckets={buckets} />
+            </div>
           </div>
-        ))}
+
+          {DASHBOARD_ACCOUNT_WEIGHTS.map((config) => {
+            const acctBuckets = accountBuckets[config.account_id] ?? [];
+            return (
+              <div key={config.account_id} className="card dashboardOverviewChartCard">
+                <div className="card-header dashboardMiniChartHeader">
+                  <h3 className="card-title dashboardMiniChartTitle">{config.icon} {config.label}</h3>
+                </div>
+                <div className="card-body dashboardMiniChartBody">
+                  <div className="dashboardMiniChartCanvas">
+                    <DashboardDonutChart buckets={acctBuckets} />
+                  </div>
+                  <DashboardBucketLegend buckets={acctBuckets} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* 계좌별 요약 */}

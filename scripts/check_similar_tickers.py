@@ -1,8 +1,8 @@
 """계좌 내 종목 간 가격 상관관계 분석 스크립트.
 
 사용법:
-    python scripts/check_similar_tickers.py kor_account
-    python scripts/check_similar_tickers.py aus_account --threshold 0.90
+    python scripts/check_similar_tickers.py kor_kr
+    python scripts/check_similar_tickers.py aus --threshold 0.90
 """
 
 from __future__ import annotations
@@ -18,10 +18,9 @@ import pandas as pd
 # 프로젝트 루트를 sys.path에 추가
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from utils.account_registry import get_account_settings
 from utils.data_loader import get_latest_trading_day, prepare_price_data
-from utils.rankings import get_account_rank_defaults
-from utils.settings_loader import list_available_accounts
+from utils.rankings import get_ticker_type_rank_defaults
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_etfs
 
 
@@ -33,20 +32,21 @@ class StockStats(NamedTuple):
 
 
 def load_market_data(
-    account_id: str,
+    ticker_type: str,
 ) -> tuple[pd.DataFrame, dict[str, StockStats], int, int, list[str], list[str]]:
-    """계좌의 전체 종목 종가 데이터와 통계를 로드합니다."""
-    account_settings = get_account_settings(account_id)
-    country_code = str(account_settings.get("country_code") or "").strip().lower()
+    """종목 타입의 전체 종목 종가 데이터와 통계를 로드합니다."""
+    ticker_settings = get_ticker_type_settings(ticker_type)
+    country_code = str(ticker_settings.get("country_code") or "").strip().lower()
     if not country_code:
-        raise ValueError(f"계좌 '{account_id}'의 country_code가 비어 있습니다.")
+        raise ValueError(f"종목 타입 '{ticker_type}'의 country_code가 비어 있습니다.")
 
-    _, ma_month = get_account_rank_defaults(account_id)
+    # ticker_type 기반 랭크 기본값 가져오기
+    _, ma_month = get_ticker_type_rank_defaults(ticker_type)
 
     # 1개월 = 20거래일 기준
     lookback_days = int(ma_month * 20)
 
-    etfs = get_etfs(account_id)
+    etfs = get_etfs(ticker_type)
     tickers = sorted({str(etf["ticker"]).strip().upper() for etf in etfs if etf.get("ticker")})
     ticker_names = {
         str(etf["ticker"]).strip().upper(): etf.get("name", str(etf["ticker"])) for etf in etfs if etf.get("ticker")
@@ -64,7 +64,7 @@ def load_market_data(
         start_date=start_date.strftime("%Y-%m-%d"),
         end_date=end_date.strftime("%Y-%m-%d"),
         warmup_days=30,
-        account_id=account_id,
+        ticker_type=ticker_type,
     )
 
     close_dict: dict[str, pd.Series] = {}
@@ -111,7 +111,7 @@ def load_market_data(
         )
 
     if not close_dict:
-        print(f"[오류] {account_id}: 유효한 가격 데이터가 없습니다.")
+        print(f"[오류] {ticker_type}: 유효한 가격 데이터가 없습니다.")
         sys.exit(1)
 
     prices_df = pd.DataFrame(close_dict)
@@ -193,7 +193,7 @@ def build_similarity_groups(
 
 
 def print_report(
-    account_id: str,
+    ticker_type: str,
     groups: list[tuple[str, list[tuple[str, float]]]],
     stats: dict[str, StockStats],
     threshold: float,
@@ -204,7 +204,7 @@ def print_report(
     """상관관계 및 수익률 비교 리포트를 출력합니다."""
     print()
     print(f"{'=' * 70}")
-    print(f"  📊 상관관계 유사 그룹 분석: {account_id.upper()}")
+    print(f"  📊 상관관계 유사 그룹 분석: {ticker_type.upper()}")
     print(f"  분석 기간: 최근 {ma_month}개월 ({lookback_days} 거래일) | 대상 종목: {total_tickers}개")
     print(f"  기준: 상관계수 ≥ {threshold}")
     print(f"{'=' * 70}")
@@ -248,13 +248,13 @@ def print_report(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="계좌 내 종목 간 가격 상관관계 그룹 분석",
+        description="종목 타입 내 종목 간 가격 상관관계 그룹 분석",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
-        "account",
-        choices=list_available_accounts(),
-        help="분석할 계좌 ID",
+        "ticker_type",
+        choices=list_available_ticker_types(),
+        help="분석할 종목 타입 ID (예: kor_kr, aus)",
     )
     parser.add_argument(
         "--threshold",
@@ -269,18 +269,18 @@ def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    account_id = args.account.lower()
+    ticker_type = args.ticker_type.lower()
     threshold = args.threshold
 
-    print(f"\n[{account_id.upper()}] 가격 데이터 로딩 중...")
-    prices_df, stats, lookback_days, ma_month, missing, short = load_market_data(account_id)
+    print(f"\n[{ticker_type.upper()}] 가격 데이터 로딩 중...")
+    prices_df, stats, lookback_days, ma_month, missing, short = load_market_data(ticker_type)
 
     if missing:
         print(f"\n[오류] 데이터가 없는 {len(missing)}개 종목이 발견되었습니다:")
         for item in missing:
             print(f"  - {item}")
         print("\n모든 종목의 데이터가 필요합니다. 캐시를 갱신해주세요.")
-        print(f"실행: python scripts/update_price_cache.py {account_id}")
+        print(f"실행: python scripts/update_price_cache.py {ticker_type}")
         sys.exit(1)
 
     if short:
@@ -289,11 +289,11 @@ def main() -> None:
             print(f"  - {item}")
         print()
 
-    print(f"[{account_id.upper()}] 유사 그룹 분석 중... ({len(prices_df.columns)}개 종목)")
+    print(f"[{ticker_type.upper()}] 유사 그룹 분석 중... ({len(prices_df.columns)}개 종목)")
     groups = build_similarity_groups(prices_df, stats, threshold=threshold)
 
     print_report(
-        account_id=account_id,
+        ticker_type=ticker_type,
         groups=groups,
         stats=stats,
         threshold=threshold,

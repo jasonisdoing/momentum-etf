@@ -6,10 +6,22 @@ from uuid import uuid4
 
 import pandas as pd
 
+from utils.account_registry import load_account_configs
 from utils.cache_utils import list_available_cache_keys, load_cached_close_series_bulk_with_fallback
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.db_manager import get_db_connection
 from utils.stocks_service import validate_stock_candidate
+
+_COUNTRY_ACCOUNT_MAP: dict[str, str] = {}
+
+
+def _get_account_id_for_country(country_code: str) -> str:
+    if not _COUNTRY_ACCOUNT_MAP:
+        for acc in load_account_configs():
+            cc = str(acc.get("country_code") or "").strip().lower()
+            if cc and cc not in _COUNTRY_ACCOUNT_MAP:
+                _COUNTRY_ACCOUNT_MAP[cc] = str(acc["account_id"])
+    return _COUNTRY_ACCOUNT_MAP.get(country_code, _COUNTRY_ACCOUNT_MAP.get("kor", "kor_account"))
 
 
 def _get_collection():
@@ -19,8 +31,9 @@ def _get_collection():
     return db.backtest_configs
 
 
-def validate_backtest_ticker(ticker: str) -> dict[str, Any]:
-    validated = validate_stock_candidate("kor_account", ticker)
+def validate_backtest_ticker(ticker: str, country_code: str = "kor") -> dict[str, Any]:
+    account_id = _get_account_id_for_country(country_code)
+    validated = validate_stock_candidate(account_id, ticker)
     return {
         "ticker": str(validated["ticker"]),
         "name": str(validated["name"]),
@@ -275,14 +288,16 @@ def delete_backtest_config(config_id: str) -> dict[str, str]:
     return {"config_id": config_id_value}
 
 
-def _resolve_backtest_window(period_months: int) -> tuple[pd.Timestamp, pd.Timestamp, list[pd.Timestamp], pd.Timestamp]:
+def _resolve_backtest_window(
+    period_months: int, country_code: str = "kor"
+) -> tuple[pd.Timestamp, pd.Timestamp, list[pd.Timestamp], pd.Timestamp]:
     today = pd.Timestamp(datetime.now()).normalize()
-    latest_trading_day = get_latest_trading_day("kor").normalize()
+    latest_trading_day = get_latest_trading_day(country_code).normalize()
     start_reference = (today - pd.DateOffset(months=period_months)).normalize()
     trading_days = get_trading_days(
         start_reference.strftime("%Y-%m-%d"),
         latest_trading_day.strftime("%Y-%m-%d"),
-        "kor",
+        country_code,
     )
     evaluation_days = [
         pd.Timestamp(day).normalize() for day in trading_days if pd.Timestamp(day).normalize() > start_reference
@@ -328,6 +343,7 @@ def _build_price_matrix(
     groups: list[dict[str, Any]],
     evaluation_days: list[pd.Timestamp],
     benchmark: dict[str, Any] | None = None,
+    country_code: str = "kor",
 ) -> tuple[dict[str, pd.Series], list[str]]:
     tickers = sorted(
         {
@@ -341,7 +357,6 @@ def _build_price_matrix(
         tickers = sorted(set([*tickers, str(benchmark.get("ticker") or "").strip().upper()]))
     best_series_map: dict[str, pd.Series] = {}
 
-    # 한국 계좌별 캐시에 분산 저장된 종가 시리즈 중 가장 최신까지 이어지는 시계열을 선택한다.
     for cache_key in list_available_cache_keys():
         fetched = load_cached_close_series_bulk_with_fallback(cache_key, tickers)
         if not fetched:
@@ -360,6 +375,27 @@ def _build_price_matrix(
             if candidate_end == current_best_end and len(series) > len(current_best):
                 best_series_map[ticker] = series
 
+    # 실시간 스냅샷으로 캐시에 없는 최신 가격 보충
+    try:
+        from services.price_service import get_realtime_snapshot
+
+        realtime = get_realtime_snapshot(country_code, tickers)
+        today = pd.Timestamp(datetime.now()).normalize()
+        for ticker, entry in realtime.items():
+            now_val = entry.get("nowVal")
+            if now_val is None or float(now_val) <= 0:
+                continue
+            series = best_series_map.get(ticker)
+            if series is None:
+                continue
+            series = series.copy()
+            series.index = pd.to_datetime(series.index).normalize()
+            if today not in series.index:
+                series.loc[today] = float(now_val)
+                best_series_map[ticker] = series.sort_index()
+    except Exception:
+        pass
+
     close_series_map = best_series_map
     missing_cache = sorted([ticker for ticker in tickers if ticker not in close_series_map])
     if missing_cache:
@@ -375,7 +411,7 @@ def _build_price_matrix(
             continue
         source_series = close_series_map[ticker].sort_index()
         source_series.index = pd.to_datetime(source_series.index).normalize()
-        reindexed = pd.to_numeric(source_series, errors="coerce").reindex(evaluation_index)
+        reindexed = pd.to_numeric(source_series, errors="coerce").reindex(evaluation_index).ffill()
 
         listing_date_text = str(item.get("listing_date") or "").strip()
         listing_date = None
@@ -414,6 +450,7 @@ def run_backtest(
     slippage_pct: float,
     benchmark: dict[str, Any] | None,
     groups: list[dict[str, Any]],
+    country_code: str = "kor",
 ) -> dict[str, Any]:
     period_value = int(period_months or 0)
     if period_value < 1 or period_value > 24:
@@ -429,8 +466,10 @@ def run_backtest(
     if abs(total_weight - 100.0) > 0.001:
         raise ValueError("그룹 비중 합계는 100%여야 합니다.")
 
-    _, latest_trading_day, evaluation_days, initial_buy_date = _resolve_backtest_window(period_value)
-    price_matrix, missing_tickers = _build_price_matrix(normalized_groups, evaluation_days, normalized_benchmark)
+    _, latest_trading_day, evaluation_days, initial_buy_date = _resolve_backtest_window(period_value, country_code)
+    price_matrix, missing_tickers = _build_price_matrix(
+        normalized_groups, evaluation_days, normalized_benchmark, country_code
+    )
     if missing_tickers:
         raise RuntimeError(
             f"일부 티커의 가격 캐시가 없습니다: {_format_missing_tickers(normalized_groups, missing_tickers)}"

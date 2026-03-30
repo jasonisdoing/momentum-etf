@@ -23,7 +23,7 @@
 .stocksToolbar {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
   justify-content: space-between;
 }
@@ -33,7 +33,7 @@
 .stocksToolbarModes {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
 }
 
@@ -44,7 +44,7 @@
 .stocksSummary {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
+  gap: 0.4rem;
   align-items: center;
 }
 

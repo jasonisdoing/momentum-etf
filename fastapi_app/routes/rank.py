@@ -10,9 +10,9 @@ router = APIRouter(prefix="/internal/rank", tags=["rank"])
 
 @router.get("")
 def get_rank_data(
-    account_id: str | None = Query(default=None),
+    ticker_type: str | None = Query(default=None),
     ma_type: str | None = Query(default=None),
     ma_months: int | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    return load_rank_data(account_id=account_id, ma_type=ma_type, ma_months=ma_months)
+    return load_rank_data(ticker_type=ticker_type, ma_type=ma_type, ma_months=ma_months)

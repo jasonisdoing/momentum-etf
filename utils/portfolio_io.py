@@ -22,20 +22,20 @@ def _now_kst() -> datetime.datetime:
 class MissingPriceCacheError(RuntimeError):
     """보유 종목의 가격 캐시가 누락된 경우 발생한다."""
 
-    def __init__(self, account_id: str, tickers: list[str]):
-        self.account_id = str(account_id or "").strip()
+    def __init__(self, ticker_type: str, tickers: list[str]):
+        self.ticker_type = str(ticker_type or "").strip()
         self.tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
         joined = ", ".join(self.tickers)
-        super().__init__(f"[{self.account_id}] 가격 캐시 누락: {joined}")
+        super().__init__(f"[{self.ticker_type}] 가격 캐시 누락: {joined}")
 
 
-def load_all_account_holding_tickers() -> set[str]:
+def load_all_holding_tickers() -> set[str]:
     """전체 계좌의 실보유 티커 집합을 반환한다."""
     from utils.settings_loader import list_available_accounts
 
     held_tickers: set[str] = set()
-    for account_id in list_available_accounts():
-        snapshot = load_portfolio_master(account_id)
+    for t_id in list_available_accounts():
+        snapshot = load_portfolio_master(t_id)
         if not snapshot:
             continue
 
@@ -295,7 +295,7 @@ def load_real_holdings_table(
     # -----------------------------------------------------
     intl_val = snapshot.get("intl_shares_value", 0.0)
     intl_change = snapshot.get("intl_shares_change", 0.0)
-    # 계좌코드가 바뀌면 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
+    # 종목 타입이 바뀌어 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
     if account_id == "aus_account" and (intl_val > 0 or intl_change != 0):
         intl_princi = intl_val - intl_change
 
@@ -380,15 +380,14 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
 
     for acc in doc["accounts"]:
         if acc["account_id"] == account_id:
-            # 계좌 단위 딕셔너리 형태로 정규화
             base_principal = acc.get("total_principal", 0.0)
             base_cash = acc.get("cash_balance", 0.0)
             cash_balance_native = acc.get("cash_balance_native")
             cash_currency = str(acc.get("cash_currency") or "").strip().upper()
 
             try:
-                settings = get_account_settings(account_id)
-                account_currency = str(settings.get("currency") or "").strip().upper()
+                account_settings = get_account_settings(account_id)
+                account_currency = str(account_settings.get("currency") or "").strip().upper()
             except Exception:
                 account_currency = ""
             cash_currency = cash_currency or account_currency
