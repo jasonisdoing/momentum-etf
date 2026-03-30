@@ -1576,13 +1576,10 @@ a {
 }
 
 .weeklyDateCell {
-  min-width: 8.5rem;
   white-space: nowrap;
 }
 
 .weeklyMemoCell {
-  min-width: 22rem;
-  max-width: 22rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
