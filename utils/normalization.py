@@ -6,10 +6,15 @@ import datetime as _dt
 from typing import Any
 
 
+import math
+
 def normalize_number(value: Any) -> float:
     """숫자로 변환한다. 실패 시 0.0을 반환한다."""
     try:
-        return float(value or 0)
+        val = float(value or 0)
+        if math.isnan(val):
+            return 0.0
+        return val
     except (TypeError, ValueError):
         return 0.0
 
@@ -19,7 +24,10 @@ def normalize_nullable_number(value: Any) -> float | None:
     if value in (None, "", "-"):
         return None
     try:
-        return float(str(value).replace(",", ""))
+        val = float(str(value).replace(",", ""))
+        if math.isnan(val):
+            return None
+        return val
     except (TypeError, ValueError):
         return None
 
