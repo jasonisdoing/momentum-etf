@@ -1,10 +1,7 @@
 {
     "icon": "🇰🇷",
-    "name": "국내 계좌",
+    "name": "국내상장 국내",
     "country_code": "kor",
-    "ticker_codes": [
-        "kor_kr"
-    ],
     "currency": "KRW",
     "MA_TYPE": "ALMA",
     "MA_MONTHS": 6

@@ -21,6 +21,8 @@ web/.next/
 zresults
 zaccounts/*/results
 zpools/*/results
+ztickers/*/results
+
 
 # 노트 파일
 znotes/

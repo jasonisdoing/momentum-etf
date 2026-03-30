@@ -19,8 +19,7 @@ from services.price_service import get_realtime_snapshot, get_realtime_snapshot_
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
 from utils.data_loader import get_latest_trading_day
 from utils.logger import get_app_logger
-from utils.portfolio_io import load_portfolio_master
-from utils.settings_loader import AccountSettingsError, get_account_settings
+from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
 ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
@@ -92,25 +91,25 @@ def _build_blocked_rankings_result(
     return blocked
 
 
-def get_account_rank_defaults(account_id: str) -> tuple[str, int]:
-    settings = get_account_settings(account_id)
+def get_ticker_type_rank_defaults(ticker_type: str) -> tuple[str, int]:
+    settings = get_ticker_type_settings(ticker_type)
 
     ma_type = str(settings.get("MA_TYPE") or "").strip().upper()
     if not ma_type:
-        raise AccountSettingsError(f"'{account_id}' 설정에 필수 항목 'MA_TYPE'가 누락되었습니다.")
+        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_TYPE'가 누락되었습니다.")
     if ma_type not in ALLOWED_MA_TYPES:
-        raise AccountSettingsError(f"'{account_id}' 설정의 MA_TYPE이 유효하지 않습니다: {ma_type}")
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_TYPE이 유효하지 않습니다: {ma_type}")
 
     ma_months_raw = settings.get("MA_MONTHS")
     if ma_months_raw is None:
-        raise AccountSettingsError(f"'{account_id}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
+        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
 
     try:
         ma_months = int(ma_months_raw)
     except (TypeError, ValueError) as exc:
-        raise AccountSettingsError(f"'{account_id}' 설정의 MA_MONTHS는 정수여야 합니다: {ma_months_raw}") from exc
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_MONTHS는 정수여야 합니다: {ma_months_raw}") from exc
     if ma_months < 1:
-        raise AccountSettingsError(f"'{account_id}' 설정의 MA_MONTHS는 1 이상이어야 합니다: {ma_months}")
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_MONTHS는 1 이상이어야 합니다: {ma_months}")
 
     return ma_type, ma_months
 
@@ -300,28 +299,27 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
     return normalized
 
 
-def build_account_rankings(
-    account_id: str,
+def build_ticker_type_rankings(
+    ticker_type: str,
     *,
     ma_type: str,
     ma_months: int,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
-    held_tickers_override: set[str] | None = None,
     status_callback: Any | None = None,
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
     started_at = perf_counter()
-    settings = get_account_settings(account_id)
+    settings = get_ticker_type_settings(ticker_type)
     country_code = str(settings.get("country_code") or "").strip().lower()
 
-    etfs = get_etfs(account_id)
+    etfs = get_etfs(ticker_type)
     if not etfs:
         return pd.DataFrame()
 
     fetch_started_at = perf_counter()
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
-    cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(account_id, tickers)
+    cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
     latest_trading_day = get_latest_trading_day(country_code).normalize()
     missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
     normalized_cache_updated = {
@@ -338,8 +336,8 @@ def build_account_rankings(
         fetch_elapsed = perf_counter() - fetch_started_at
         total_elapsed = perf_counter() - started_at
         logger.warning(
-            "[rankings] account=%s blocked latest_trading_day=%s missing=%d stale=%d total=%.3fs fetch=%.3fs",
-            account_id,
+            "[rankings] type=%s blocked latest_trading_day=%s missing=%d stale=%d total=%.3fs fetch=%.3fs",
+            ticker_type,
             latest_trading_day.date(),
             len(missing_tickers),
             len(stale_tickers),
@@ -355,7 +353,7 @@ def build_account_rankings(
 
     if callable(status_callback):
         status_callback("기준 종가 캐시 로드")
-    cached_close_series_map = load_cached_close_series_bulk_with_fallback(account_id, tickers)
+    cached_close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     realtime_snapshot = (
@@ -367,22 +365,6 @@ def build_account_rankings(
     realtime_meta = None
     if realtime_snapshot_override is None:
         realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
-
-    if callable(status_callback):
-        status_callback("보유 종목 확인")
-    holdings_started_at = perf_counter()
-    held_tickers: set[str] = set()
-    if held_tickers_override is not None:
-        held_tickers = {str(ticker).strip().upper() for ticker in held_tickers_override if str(ticker or "").strip()}
-    else:
-        portfolio_master = load_portfolio_master(account_id)
-        if portfolio_master:
-            held_tickers = {
-                str(holding.get("ticker") or "").strip().upper()
-                for holding in portfolio_master.get("holdings", [])
-                if str(holding.get("ticker") or "").strip()
-            }
-    holdings_elapsed = perf_counter() - holdings_started_at
 
     ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
     rows: list[dict[str, Any]] = []
@@ -446,7 +428,6 @@ def build_account_rankings(
                 "상장일": etf.get("listing_date", "-"),
                 "추세": score_value,
                 "지속": streak_value,
-                "보유": "보유" if ticker in held_tickers else "",
                 **price_metrics,
             }
         )
@@ -488,19 +469,7 @@ def build_account_rankings(
         ascending=[True, False, True],
         kind="stable",
     ).reset_index(drop=True)
-    # 보유여부 계산 (보유 1, 보유 2, 대기 1, 대기 2...)
-    holding_idx = 0
-    waiting_idx = 0
-    status_values = []
-    for _, row in df.iterrows():
-        if str(row.get("보유", "")).strip() == "보유":
-            holding_idx += 1
-            status_values.append(f"보유 {holding_idx}")
-        else:
-            waiting_idx += 1
-            status_values.append(f"대기 {waiting_idx}")
 
-    df.insert(0, "보유여부", status_values)
     df = df.drop(
         columns=[
             "_missing_trend",
@@ -522,12 +491,11 @@ def build_account_rankings(
     dataframe_elapsed = perf_counter() - dataframe_started_at
     total_elapsed = perf_counter() - started_at
     logger.info(
-        "[rankings] account=%s tickers=%d total=%.3fs fetch=%.3fs holdings=%.3fs preprocess=%.3fs metrics=%.3fs process=%.3fs dataframe=%.3fs",
-        account_id,
+        "[rankings] type=%s tickers=%d total=%.3fs fetch=%.3fs preprocess=%.3fs metrics=%.3fs process=%.3fs dataframe=%.3fs",
+        ticker_type,
         len(tickers),
         total_elapsed,
         fetch_elapsed,
-        holdings_elapsed,
         preprocess_elapsed,
         metric_elapsed,
         process_elapsed,
@@ -538,7 +506,7 @@ def build_account_rankings(
 
 __all__ = [
     "ALLOWED_MA_TYPES",
-    "build_account_rankings",
-    "get_account_rank_defaults",
+    "build_ticker_type_rankings",
+    "get_ticker_type_rank_defaults",
     "get_rank_months_max",
 ]

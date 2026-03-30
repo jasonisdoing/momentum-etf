@@ -52,6 +52,7 @@ def _load_account_configs_impl() -> list[dict[str, Any]]:
 
         configs.append(
             {
+                "ticker_type": account_id,
                 "account_id": account_id,
                 "country_code": country_code,
                 "name": name,

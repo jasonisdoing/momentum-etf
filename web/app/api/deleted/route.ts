@@ -8,8 +8,8 @@ import {
 
 export async function GET(request: NextRequest) {
   try {
-    const accountId = request.nextUrl.searchParams.get("account") ?? undefined;
-    const payload = await loadDeletedStocksTable(accountId);
+    const tickerType = request.nextUrl.searchParams.get("ticker_type") ?? undefined;
+    const payload = await loadDeletedStocksTable(tickerType);
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
@@ -22,12 +22,12 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
-      account_id?: string;
+      ticker_type?: string;
       tickers?: string[];
     };
 
     const restoredCount = await restoreDeletedStocks(
-      String(payload.account_id ?? ""),
+      String(payload.ticker_type ?? ""),
       Array.isArray(payload.tickers) ? payload.tickers : [],
     );
     return NextResponse.json({ ok: true, restored_count: restoredCount });
@@ -42,12 +42,12 @@ export async function PATCH(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
-      account_id?: string;
+      ticker_type?: string;
       tickers?: string[];
     };
 
     const deletedCount = await hardDeleteStocks(
-      String(payload.account_id ?? ""),
+      String(payload.ticker_type ?? ""),
       Array.isArray(payload.tickers) ? payload.tickers : [],
     );
     return NextResponse.json({ ok: true, deleted_count: deletedCount });

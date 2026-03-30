@@ -4,8 +4,8 @@ import { addStockCandidate, loadStocksTable, softDeleteStock, updateStockBucket,
 
 export async function GET(request: NextRequest) {
   try {
-    const accountId = request.nextUrl.searchParams.get("account") ?? undefined;
-    const payload = await loadStocksTable(accountId);
+    const tickerType = request.nextUrl.searchParams.get("ticker_type") ?? undefined;
+    const payload = await loadStocksTable(tickerType);
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
@@ -18,13 +18,13 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
-      account_id?: string;
+      ticker_type?: string;
       ticker?: string;
       bucket_id?: number;
     };
 
     await updateStockBucket(
-      String(payload.account_id ?? ""),
+      String(payload.ticker_type ?? ""),
       String(payload.ticker ?? ""),
       Number(payload.bucket_id ?? 0),
     );
@@ -41,24 +41,24 @@ export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as
       | {
-          account_id?: string;
+          ticker_type?: string;
           ticker?: string;
           action?: "validate";
         }
       | {
-          account_id?: string;
+          ticker_type?: string;
           ticker?: string;
           bucket_id?: number;
           action?: "create";
         };
 
     if (payload.action === "validate") {
-      const result = await validateStockCandidate(String(payload.account_id ?? ""), String(payload.ticker ?? ""));
+      const result = await validateStockCandidate(String(payload.ticker_type ?? ""), String(payload.ticker ?? ""));
       return NextResponse.json(result);
     }
 
     const result = await addStockCandidate(
-      String(payload.account_id ?? ""),
+      String(payload.ticker_type ?? ""),
       String(payload.ticker ?? ""),
       Number("bucket_id" in payload ? payload.bucket_id ?? 0 : 0),
     );
@@ -74,12 +74,12 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
-      account_id?: string;
+      ticker_type?: string;
       ticker?: string;
       reason?: string;
     };
 
-    await softDeleteStock(String(payload.account_id ?? ""), String(payload.ticker ?? ""), payload.reason);
+    await softDeleteStock(String(payload.ticker_type ?? ""), String(payload.ticker ?? ""), payload.reason);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

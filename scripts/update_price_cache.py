@@ -22,7 +22,7 @@ from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_rec
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master
-from utils.settings_loader import get_account_settings, list_available_accounts, load_common_settings
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
 from utils.stock_list_io import get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
@@ -95,13 +95,14 @@ def refresh_cache_for_target(
     target_norm = (target_id or "").strip().lower()
 
     try:
-        if target_norm in list_available_accounts():
-            settings = get_account_settings(target_norm)
+        available_types = list_available_ticker_types()
+        if target_norm in available_types:
+            settings = get_ticker_type_settings(target_norm)
             country_code = settings.get("country_code", "kor").lower()
         else:
             country_code = "kor"
     except Exception:
-        logger.warning(f"대상 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
+        logger.warning(f"대상 종목 타입 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
         country_code = "kor"
 
     logger.info("[%s] 캐시 갱신 시작 (국가설정: %s, 시작일: %s)", target_norm.upper(), country_code, start_date)
@@ -131,7 +132,7 @@ def refresh_cache_for_target(
                     date_range=[range_start, None],
                     update_listing_meta=False,
                     force_refresh=True,
-                    account_id=account_id,
+                    ticker_type=account_id,
                 )
                 if fetched_df is None or fetched_df.empty:
                     raise RuntimeError(f"{ticker} 원천 가격 데이터가 비어 있습니다.")
@@ -139,7 +140,7 @@ def refresh_cache_for_target(
                 unresolved_days = repair_recent_trading_day_gaps(
                     ticker,
                     country_code,
-                    account_id=account_id,
+                    ticker_type=account_id,
                     lookback_days=15,
                 )
 
@@ -178,8 +179,9 @@ def refresh_cache_for_target(
             str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")
         }
 
-        # 계좌 실행 시 portfolio_master 보유 종목도 함께 반영한다.
-        if target_norm in list_available_accounts():
+        # 종목 타입 실행 시 해당 타입의 모든 종목 반영
+        if target_norm in list_available_ticker_types():
+            pass # get_all_etfs_including_deleted가 이미 수행함
             holdings = _collect_portfolio_master_holdings(target_norm)
             for item in holdings:
                 ticker = str(item.get("ticker") or "").strip().upper()
@@ -283,13 +285,13 @@ def refresh_cache_for_target(
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
-    """해당 계정 설정에 정의된 벤치마크 티커들을 수집합니다."""
+    """해당 종목 타입 설정에 정의된 벤치마크 티커들을 수집합니다."""
     tickers = set()
 
     try:
-        if target_id not in list_available_accounts():
+        if target_id not in list_available_ticker_types():
             return []
-        settings = get_account_settings(target_id)
+        settings = get_ticker_type_settings(target_id)
 
         # 'benchmark' (dict, single) 처리
         single_bm = settings.get("benchmark")
@@ -357,15 +359,15 @@ def main():
     start_date = args.start or _determine_start_date()
 
     targets_to_update: list[str] = []
-    available_accounts = list_available_accounts()
-
+    available_types = list_available_ticker_types()
+    
     if not target:
-        targets_to_update = available_accounts
+        targets_to_update = available_types
     else:
-        if target in available_accounts:
+        if target in available_types:
             targets_to_update = [target]
         else:
-            logger.error(f"Target '{target}' is not a valid account ID.")
+            logger.error(f"Target '{target}' is not a valid ticker type ID.")
             return
 
     if not targets_to_update:

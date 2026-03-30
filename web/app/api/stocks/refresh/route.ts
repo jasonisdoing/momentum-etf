@@ -5,11 +5,11 @@ import { refreshSingleStock } from "@/lib/stocks-store";
 export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as {
-      account_id?: string;
+      ticker_type?: string;
       ticker?: string;
     };
 
-    const result = await refreshSingleStock(String(payload.account_id ?? ""), String(payload.ticker ?? ""));
+    const result = await refreshSingleStock(String(payload.ticker_type ?? ""), String(payload.ticker ?? ""));
     return NextResponse.json(result);
   } catch (error) {
     return NextResponse.json(

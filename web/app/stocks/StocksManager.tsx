@@ -1,30 +1,26 @@
 "use client";
 
 import {
-  IconCircleCheck,
   IconArrowBackUp,
   IconPlus,
-  IconChecks,
   IconLayoutGrid,
   IconPlaylistX,
-  IconTrash,
   IconSearch,
-  IconRefresh,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { type GridColDef, type GridRowSelectionModel } from "@mui/x-data-grid";
+import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { AppDataGrid } from "../components/AppDataGrid";
 import { AppModal } from "../components/AppModal";
 import {
-  readRememberedMomentumEtfAccountId,
-  writeRememberedMomentumEtfAccountId,
+  readRememberedTickerType,
+  writeRememberedTickerType,
 } from "../components/account-selection";
 import { useToast } from "../components/ToastProvider";
 
 type StocksAccountItem = {
-  account_id: string;
+  ticker_type: string;
   order: number;
   name: string;
   icon: string;
@@ -38,6 +34,7 @@ type ActiveStocksRowItem = {
   added_date: string;
   listing_date: string;
   week_volume: number | null;
+  return_1d: number | null;
   return_1w: number | null;
   return_2w: number | null;
   return_1m: number | null;
@@ -53,6 +50,7 @@ type DeletedStocksRowItem = {
   bucket_name: string;
   listing_date: string;
   week_volume: number | null;
+  return_1d: number | null;
   return_1w: number | null;
   return_2w: number | null;
   return_1m: number | null;
@@ -64,16 +62,16 @@ type DeletedStocksRowItem = {
 };
 
 type StocksResponse = {
-  accounts?: StocksAccountItem[];
+  ticker_types?: StocksAccountItem[];
   rows?: ActiveStocksRowItem[];
-  account_id?: string;
+  ticker_type?: string;
   error?: string;
 };
 
 type DeletedStocksResponse = {
-  accounts?: StocksAccountItem[];
+  ticker_types?: StocksAccountItem[];
   rows?: DeletedStocksRowItem[];
-  account_id?: string;
+  ticker_type?: string;
   error?: string;
 };
 
@@ -112,13 +110,9 @@ function getSignedMetricClass(value: number | null): string {
   return value > 0 ? "stocksPositive" : "stocksNegative";
 }
 
-function getBucketClass(bucketId: number): string {
-  return `stocksBucket stocksBucket${bucketId}`;
-}
-
 export function StocksManager() {
-  const [accounts, setAccounts] = useState<StocksAccountItem[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [ticker_types, setAccounts] = useState<StocksAccountItem[]>([]);
+  const [selectedTickerType, setSelectedAccountId] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("active");
   const [activeRows, setActiveRows] = useState<ActiveStocksRowItem[]>([]);
   const [deletedRows, setDeletedRows] = useState<DeletedStocksRowItem[]>([]);
@@ -134,15 +128,15 @@ export function StocksManager() {
   const [validatedCandidate, setValidatedCandidate] = useState<StockValidationState | null>(null);
   const [isValidatingTicker, setIsValidatingTicker] = useState(false);
   const [addBucketId, setAddBucketId] = useState<number>(1);
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const toast = useToast();
 
-  async function load(mode: ViewMode, accountId?: string) {
+  async function load(mode: ViewMode, tickerType?: string) {
     setLoading(true);
     setError(null);
 
     try {
-      const search = accountId ? `?account=${encodeURIComponent(accountId)}` : "";
+      const search = tickerType ? `?ticker_type=${encodeURIComponent(tickerType)}` : "";
       const apiPath = mode === "active" ? `/api/stocks${search}` : `/api/deleted${search}`;
       const response = await fetch(apiPath, { cache: "no-store" });
       const payload = (await response.json()) as StocksResponse | DeletedStocksResponse;
@@ -150,10 +144,10 @@ export function StocksManager() {
         throw new Error(payload.error ?? "종목 관리 데이터를 불러오지 못했습니다.");
       }
 
-      setAccounts(payload.accounts ?? []);
-      const nextAccountId = payload.account_id ?? "";
+      setAccounts(payload.ticker_types ?? []);
+      const nextAccountId = payload.ticker_type ?? "";
       setSelectedAccountId(nextAccountId);
-      writeRememberedMomentumEtfAccountId(nextAccountId);
+      writeRememberedTickerType(nextAccountId);
       setSelectedDeletedTickers([]);
 
       if (mode === "active") {
@@ -169,12 +163,12 @@ export function StocksManager() {
   }
 
   useEffect(() => {
-    void load(viewMode, readRememberedMomentumEtfAccountId() ?? undefined);
+    void load(viewMode, readRememberedTickerType() ?? undefined);
   }, []);
 
-  const selectedAccount = useMemo(
-    () => accounts.find((account) => account.account_id === selectedAccountId) ?? null,
-    [accounts, selectedAccountId],
+  const selectedTickerTypeItem = useMemo(
+    () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
+    [ticker_types, selectedTickerType],
   );
 
   const selectedDeletedTickerSet = useMemo(() => new Set(selectedDeletedTickers), [selectedDeletedTickers]);
@@ -187,6 +181,22 @@ export function StocksManager() {
     () => deletedRows.map((row) => ({ ...row, id: row.ticker.trim().toUpperCase() })),
     [deletedRows],
   );
+
+  const toggleSelection = (ticker: string) => {
+    const t = ticker.trim().toUpperCase();
+    setSelectedDeletedTickers(prev => 
+      prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
+    );
+  };
+
+  const toggleAllSelection = () => {
+    if (allDeletedSelected) {
+      setSelectedDeletedTickers([]);
+    } else {
+      setSelectedDeletedTickers(deletedRows.map(r => r.ticker.trim().toUpperCase()));
+    }
+  };
+
   const activeColumns = useMemo<GridColDef<ActiveStockGridRow>[]>(
     () => [
       {
@@ -195,8 +205,7 @@ export function StocksManager() {
         width: 58,
         sortable: false,
         filterable: false,
-        disableColumnMenu: true,
-        renderCell: (params) => (
+        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => (
           <button className="btn btn-link btn-sm p-0 appEditLink" type="button" onClick={() => openEditModal(params.row)}>
             Edit
           </button>
@@ -215,7 +224,7 @@ export function StocksManager() {
         headerName: "티커",
         width: 98,
         minWidth: 98,
-        renderCell: (params) => <span className="appCodeText">{params.row.ticker}</span>,
+        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => <span className="appCodeText">{params.row.ticker}</span>,
       },
       { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
       {
@@ -225,39 +234,72 @@ export function StocksManager() {
         minWidth: 116,
         align: "right",
         headerAlign: "right",
-        renderCell: (params) => formatNumber(params.row.week_volume),
+        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => formatNumber(params.row.week_volume),
       },
-      ...(["return_1w", "return_2w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
+      {
+        field: "return_1d",
+        headerName: "일간(%)",
+        width: 88,
+        minWidth: 88,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => (
+          <span className={getSignedMetricClass(params.row.return_1d)} style={{ fontWeight: 600 }}>
+             {formatPercent(params.row.return_1d)}
+          </span>
+        ),
+      },
+      ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
         (field) => ({
           field,
           headerName:
             field === "return_1w"
               ? "1주(%)"
-              : field === "return_2w"
-                ? "2주(%)"
-                : field === "return_1m"
-                  ? "1달(%)"
-                  : field === "return_3m"
-                    ? "3달(%)"
-                    : field === "return_6m"
-                      ? "6달(%)"
-                      : "12달(%)",
+              : field === "return_1m"
+                ? "1달(%)"
+                : field === "return_3m"
+                  ? "3달(%)"
+                  : field === "return_6m"
+                    ? "6달(%)"
+                    : "12달(%)",
           width: 88,
           minWidth: 88,
           align: "right" as const,
           headerAlign: "right" as const,
-          renderCell: (params: { row: ActiveStockGridRow }) => (
+          renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => (
             <span className={getSignedMetricClass(params.row[field])}>{formatPercent(params.row[field])}</span>
           ),
         }),
       ),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
-      { field: "added_date", headerName: "추가일자", width: 112, minWidth: 112 },
     ],
     [],
   );
   const deletedColumns = useMemo<GridColDef<DeletedStockGridRow>[]>(
     () => [
+      {
+        field: "__selection__",
+        headerName: "",
+        width: 42,
+        sortable: false,
+        filterable: false,
+        renderHeader: () => (
+          <input 
+            type="checkbox" 
+            className="form-check-input"
+            checked={allDeletedSelected} 
+            onChange={toggleAllSelection} 
+          />
+        ),
+        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => (
+          <input 
+            type="checkbox" 
+            className="form-check-input"
+            checked={selectedDeletedTickerSet.has(params.row.ticker.trim().toUpperCase())}
+            onChange={() => toggleSelection(params.row.ticker)}
+          />
+        ),
+      },
       {
         field: "bucket_name",
         headerName: "버킷",
@@ -271,7 +313,7 @@ export function StocksManager() {
         headerName: "티커",
         width: 98,
         minWidth: 98,
-        renderCell: (params) => <span className="appCodeText">{params.row.ticker}</span>,
+        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => <span className="appCodeText">{params.row.ticker}</span>,
       },
       { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
       {
@@ -281,28 +323,39 @@ export function StocksManager() {
         minWidth: 116,
         align: "right",
         headerAlign: "right",
-        renderCell: (params) => formatNumber(params.row.week_volume),
+        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => formatNumber(params.row.week_volume),
       },
-      ...(["return_1w", "return_2w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
+      {
+        field: "return_1d",
+        headerName: "일간(%)",
+        width: 88,
+        minWidth: 88,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => (
+          <span className={getSignedMetricClass(params.row.return_1d)} style={{ fontWeight: 600 }}>
+             {formatPercent(params.row.return_1d)}
+          </span>
+        ),
+      },
+      ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
         (field) => ({
           field,
           headerName:
             field === "return_1w"
               ? "1주(%)"
-              : field === "return_2w"
-                ? "2주(%)"
-                : field === "return_1m"
-                  ? "1달(%)"
-                  : field === "return_3m"
-                    ? "3달(%)"
-                    : field === "return_6m"
-                      ? "6달(%)"
-                      : "12달(%)",
+              : field === "return_1m"
+                ? "1달(%)"
+                : field === "return_3m"
+                  ? "3달(%)"
+                  : field === "return_6m"
+                    ? "6달(%)"
+                    : "12달(%)",
           width: 88,
           minWidth: 88,
           align: "right" as const,
           headerAlign: "right" as const,
-          renderCell: (params: { row: DeletedStockGridRow }) => (
+          renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => (
             <span className={getSignedMetricClass(params.row[field])}>{formatPercent(params.row[field])}</span>
           ),
         }),
@@ -311,11 +364,11 @@ export function StocksManager() {
       { field: "deleted_date", headerName: "삭제일", width: 112, minWidth: 112 },
       { field: "deleted_reason", headerName: "삭제 사유", minWidth: 160, flex: 0.7 },
     ],
-    [],
+    [selectedDeletedTickerSet, allDeletedSelected],
   );
 
-  function handleAccountChange(nextAccountId: string) {
-    writeRememberedMomentumEtfAccountId(nextAccountId);
+  function handleTickerTypeChange(nextAccountId: string) {
+    writeRememberedTickerType(nextAccountId);
     void load(viewMode, nextAccountId);
   }
 
@@ -324,76 +377,19 @@ export function StocksManager() {
       return;
     }
     setViewMode(nextMode);
-    void load(nextMode, selectedAccountId);
-  }
-
-  function handleBucketChange(ticker: string, bucketId: number) {
-    startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/stocks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            account_id: selectedAccountId,
-            ticker,
-            bucket_id: bucketId,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "버킷 변경에 실패했습니다.");
-        }
-        setActiveRows((current) =>
-          current.map((row) =>
-            row.ticker === ticker
-              ? {
-                  ...row,
-                  bucket_id: bucketId,
-                  bucket_name: BUCKET_OPTIONS.find((bucket) => bucket.id === bucketId)?.name ?? row.bucket_name,
-                }
-              : row,
-          ),
-        );
-        const targetRow = activeRows.find((row) => row.ticker === ticker);
-        const label = targetRow ? `${targetRow.name}(${targetRow.ticker})` : ticker;
-        toast.success(`[Momentum ETF-종목 관리] ${label} 변경 완료`);
-      } catch (updateError) {
-        setError(updateError instanceof Error ? updateError.message : "버킷 변경에 실패했습니다.");
-      }
-    });
-  }
-
-  function handleDelete(ticker: string) {
-    startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/stocks", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            account_id: selectedAccountId,
-            ticker,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "종목 삭제에 실패했습니다.");
-        }
-        setActiveRows((current) => current.filter((row) => row.ticker !== ticker));
-        const targetRow = activeRows.find((row) => row.ticker === ticker);
-        const label = targetRow ? `${targetRow.name}(${targetRow.ticker})` : ticker;
-        toast.success(`[Momentum ETF-종목 관리] ${label} 삭제 완료`);
-      } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
-      }
-    });
+    void load(nextMode, selectedTickerType);
   }
 
   function openEditModal(row: ActiveStocksRowItem) {
     setEditingRow(row);
     setEditingBucketId(row.bucket_id);
     setEditingDeleteReason("");
+    setIsEditModalOpen(true);
+  }
+
+  function closeEditModal() {
+    setIsEditModalOpen(false);
+    setEditingRow(null);
   }
 
   function openAddModal() {
@@ -413,14 +409,6 @@ export function StocksManager() {
     setAddBucketId(1);
   }
 
-  function closeEditModal() {
-    if (isPending) {
-      return;
-    }
-    setEditingRow(null);
-    setEditingDeleteReason("");
-  }
-
   async function handleValidateTicker() {
     try {
       setError(null);
@@ -430,14 +418,12 @@ export function StocksManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "validate",
-          account_id: selectedAccountId,
+          ticker_type: selectedTickerType,
           ticker: addTickerInput,
         }),
       });
       const payload = (await response.json()) as
-        | ({
-            error?: string;
-          } & StockValidationState)
+        | ({ error?: string } & StockValidationState)
         | { error?: string };
       if (!response.ok) {
         throw new Error(payload.error ?? "티커 확인에 실패했습니다.");
@@ -460,11 +446,44 @@ export function StocksManager() {
     }
   }
 
-  function handleAddTickerInputChange(value: string) {
-    setAddTickerInput(value);
-    if (validatedCandidate) {
-      setValidatedCandidate(null);
-    }
+  function handleEditSave() {
+    if (!editingRow) return;
+
+    startTransition(async () => {
+      try {
+        setError(null);
+        const isDelete = !!editingDeleteReason.trim();
+        const response = await fetch("/api/stocks", {
+          method: isDelete ? "DELETE" : "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            isDelete
+              ? {
+                  ticker_type: selectedTickerType,
+                  ticker: editingRow.ticker,
+                  reason: editingDeleteReason.trim(),
+                }
+              : {
+                  ticker_type: selectedTickerType,
+                  ticker: editingRow.ticker,
+                  bucket_id: editingBucketId,
+                },
+          ),
+        });
+
+        const payload = (await response.json()) as { error?: string; name?: string; ticker?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "종목 수정에 실패했습니다.");
+        }
+
+        const msgPrefix = isDelete ? "삭제" : "수정";
+        toast.success(`[ETF-종목 관리] ${payload.name || editingRow.name}(${payload.ticker || editingRow.ticker}) ${msgPrefix} 완료`);
+        closeEditModal();
+        void load(viewMode, selectedTickerType);
+      } catch (saveError) {
+        setError(saveError instanceof Error ? saveError.message : "종목 수정에 실패했습니다.");
+      }
+    });
   }
 
   function handleCreateStock() {
@@ -480,7 +499,7 @@ export function StocksManager() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "create",
-            account_id: selectedAccountId,
+            ticker_type: selectedTickerType,
             ticker: validatedCandidate.ticker,
             bucket_id: addBucketId,
           }),
@@ -489,155 +508,17 @@ export function StocksManager() {
           error?: string;
           ticker?: string;
           name?: string;
-          listing_date?: string;
-          bucket_id?: number;
-          bucket_name?: string;
         };
         if (!response.ok) {
           throw new Error(payload.error ?? "종목 추가에 실패했습니다.");
         }
-        setActiveRows((current) => [
-          {
-            ticker: String(payload.ticker ?? validatedCandidate.ticker).trim().toUpperCase(),
-            name: String(payload.name ?? validatedCandidate.name).trim(),
-            bucket_id: Number(payload.bucket_id ?? addBucketId),
-            bucket_name:
-              String(payload.bucket_name ?? "").trim() ||
-              BUCKET_OPTIONS.find((bucket) => bucket.id === addBucketId)?.name ||
-              "1. 모멘텀",
-            added_date: new Date().toISOString().slice(0, 10),
-            listing_date: String(payload.listing_date ?? validatedCandidate.listing_date ?? "-").trim() || "-",
-            week_volume: null,
-            return_1w: null,
-            return_2w: null,
-            return_1m: null,
-            return_3m: null,
-            return_6m: null,
-            return_12m: null,
-          },
-          ...current,
-        ]);
-        toast.success(
-          `[ETF-종목 관리] ${validatedCandidate.name}(${validatedCandidate.ticker}) ${
-            validatedCandidate.is_deleted ? "복구 완료" : "추가 완료"
-          }`,
-        );
+        toast.success(`[ETF-종목 관리] ${payload.name || validatedCandidate.name}(${payload.ticker || validatedCandidate.ticker}) 추가 완료`);
         closeAddModal();
+        void load(viewMode, selectedTickerType);
       } catch (createError) {
         setError(createError instanceof Error ? createError.message : "종목 추가에 실패했습니다.");
       }
     });
-  }
-
-  function handleSaveFromModal() {
-    if (!editingRow) {
-      return;
-    }
-
-    startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/stocks", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            account_id: selectedAccountId,
-            ticker: editingRow.ticker,
-            bucket_id: editingBucketId,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "버킷 변경에 실패했습니다.");
-        }
-        setActiveRows((current) =>
-          current.map((row) =>
-            row.ticker === editingRow.ticker
-              ? {
-                  ...row,
-                  bucket_id: editingBucketId,
-                  bucket_name: BUCKET_OPTIONS.find((bucket) => bucket.id === editingBucketId)?.name ?? row.bucket_name,
-                }
-              : row,
-          ),
-        );
-        toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 변경 완료`);
-        setEditingRow(null);
-      } catch (updateError) {
-        setError(updateError instanceof Error ? updateError.message : "버킷 변경에 실패했습니다.");
-      }
-    });
-  }
-
-  function handleDeleteFromModal() {
-    if (!editingRow) {
-      return;
-    }
-
-    startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/stocks", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            account_id: selectedAccountId,
-            ticker: editingRow.ticker,
-            reason: editingDeleteReason.trim() || undefined,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "종목 삭제에 실패했습니다.");
-        }
-        setActiveRows((current) => current.filter((row) => row.ticker !== editingRow.ticker));
-        toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 삭제 완료`);
-        setEditingRow(null);
-        setEditingDeleteReason("");
-      } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
-      }
-    });
-  }
-
-  async function handleRefreshFromModal() {
-    if (!editingRow) {
-      return;
-    }
-
-    try {
-      setIsRefreshing(true);
-      setError(null);
-      const response = await fetch("/api/stocks/refresh", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          account_id: selectedAccountId,
-          ticker: editingRow.ticker,
-        }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "종목 새로고침에 실패했습니다.");
-      }
-      toast.success(`[Momentum ETF-종목 관리] ${editingRow.name}(${editingRow.ticker}) 새로고침 완료`);
-    } catch (refreshError) {
-      setError(refreshError instanceof Error ? refreshError.message : "종목 새로고침에 실패했습니다.");
-    } finally {
-      setIsRefreshing(false);
-    }
-  }
-
-  function toggleAllDeleted() {
-    if (allDeletedSelected) {
-      setSelectedDeletedTickers([]);
-      return;
-    }
-    setSelectedDeletedTickers(deletedRows.map((row) => row.ticker.trim().toUpperCase()));
-  }
-
-  function handleDeletedSelectionChange(model: GridRowSelectionModel) {
-    setSelectedDeletedTickers(Array.from(model.ids, (item) => String(item).trim().toUpperCase()));
   }
 
   function handleRestoreDeleted() {
@@ -648,7 +529,7 @@ export function StocksManager() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            account_id: selectedAccountId,
+            ticker_type: selectedTickerType,
             tickers: selectedDeletedTickers,
           }),
         });
@@ -656,12 +537,9 @@ export function StocksManager() {
         if (!response.ok) {
           throw new Error(payload.error ?? "종목 복구에 실패했습니다.");
         }
-        const restoredCount = Number(payload.restored_count ?? 0);
-        setDeletedRows((current) =>
-          current.filter((row) => !selectedDeletedTickerSet.has(row.ticker.trim().toUpperCase())),
-        );
+        toast.success(`[Momentum ETF-종목 관리] ${payload.restored_count ?? 0}개 종목 복구 완료`);
         setSelectedDeletedTickers([]);
-        toast.success(`[Momentum ETF-종목 관리] ${restoredCount}개 종목 복구 완료`);
+        void load(viewMode, selectedTickerType);
       } catch (restoreError) {
         setError(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
       }
@@ -676,7 +554,7 @@ export function StocksManager() {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            account_id: selectedAccountId,
+            ticker_type: selectedTickerType,
             tickers: selectedDeletedTickers,
           }),
         });
@@ -684,12 +562,9 @@ export function StocksManager() {
         if (!response.ok) {
           throw new Error(payload.error ?? "종목 완전 삭제에 실패했습니다.");
         }
-        const deletedCount = Number(payload.deleted_count ?? 0);
-        setDeletedRows((current) =>
-          current.filter((row) => !selectedDeletedTickerSet.has(row.ticker.trim().toUpperCase())),
-        );
+        toast.success(`[Momentum ETF-종목 관리] ${payload.deleted_count ?? 0}개 종목 영구 삭제 완료`);
         setSelectedDeletedTickers([]);
-        toast.success(`[Momentum ETF-종목 관리] ${deletedCount}개 종목 영구 삭제 완료`);
+        void load(viewMode, selectedTickerType);
       } catch (deleteError) {
         setError(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
       }
@@ -700,40 +575,39 @@ export function StocksManager() {
     <div className="appPageStack appPageStackFill">
       {error ? (
         <div className="appBannerStack">
-          {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
+          <div className="alert alert-danger mb-0">{error}</div>
         </div>
       ) : null}
 
       <section className="appSection appSectionFill stocksPage">
         <div className="card appCard stocksCard">
           <div className="card-header">
-            <div className="accountToolbar w-100">
-              <div className="accountToolbarLeft">
+            <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="tickerTypeToolbarLeft" style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
                 <div className="accountSelect">
                   <select
                     className="form-select"
+                    style={{ width: "auto", minWidth: "180px", fontWeight: 600 }}
                     aria-label="계좌 선택"
-                    value={selectedAccountId}
-                    onChange={(event) => handleAccountChange(event.target.value)}
+                    value={selectedTickerType}
+                    onChange={(event) => handleTickerTypeChange(event.target.value)}
                     disabled={loading}
                   >
-                    {accounts.map((account) => (
-                      <option key={account.account_id} value={account.account_id}>
+                    {ticker_types.map((account) => (
+                      <option key={account.ticker_type} value={account.ticker_type}>
                         {account.name}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div className="accountToolbarOptions stocksToolbarModes">
-                  <button className="btn btn-primary" type="button" onClick={openAddModal} disabled={loading || viewMode !== "active"}>
-                    <IconPlus size={16} stroke={1.75} />
-                    <span>종목 추가</span>
+                <div className="stocksToolbarModes d-flex gap-1">
+                  <button className="btn btn-primary d-flex align-items-center gap-1" type="button" onClick={openAddModal} disabled={loading || viewMode !== "active"}>
+                    <IconPlus size={18} stroke={2} />
+                    <span style={{ fontWeight: 600 }}>종목 추가</span>
                   </button>
                   <button
-                    className={
-                      viewMode === "active" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"
-                    }
+                    className={viewMode === "active" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"}
                     type="button"
                     onClick={() => handleViewModeChange("active")}
                   >
@@ -741,9 +615,7 @@ export function StocksManager() {
                     <span>등록된 종목</span>
                   </button>
                   <button
-                    className={
-                      viewMode === "deleted" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"
-                    }
+                    className={viewMode === "deleted" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"}
                     type="button"
                     onClick={() => handleViewModeChange("deleted")}
                   >
@@ -753,230 +625,202 @@ export function StocksManager() {
                 </div>
               </div>
 
-              <div className="accountToolbarRight">
-                <div className="stocksSummary">
-                  {selectedAccount ? (
-                    <span className="badge stocksMetricBadge">
-                      {selectedAccount.icon} {selectedAccount.name}
-                    </span>
+              <div className="tickerTypeToolbarRight" style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
+                <div className="stocksSummary d-flex align-items-center gap-3">
+                  {selectedTickerTypeItem ? (
+                    <div className="d-flex align-items-center gap-1">
+                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>계좌명:</span>
+                      <span style={{ fontWeight: 700 }}>{selectedTickerTypeItem.icon} {selectedTickerTypeItem.name}</span>
+                    </div>
                   ) : null}
-                  <span className="badge stocksMetricBadge">
-                    {viewMode === "active"
-                      ? `총 ${new Intl.NumberFormat("ko-KR").format(activeRows.length)}개`
-                      : `총 ${new Intl.NumberFormat("ko-KR").format(deletedRows.length)}개`}
-                  </span>
-                  {viewMode === "deleted" ? (
-                    <span className="badge stocksMetricBadge">
-                      선택 {new Intl.NumberFormat("ko-KR").format(selectedDeletedTickers.length)}개
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 개수:</span>
+                    <span style={{ fontWeight: 700 }}>
+                      {viewMode === "active"
+                        ? `${new Intl.NumberFormat("ko-KR").format(activeRows.length)}개`
+                        : `${new Intl.NumberFormat("ko-KR").format(deletedRows.length)}개`}
                     </span>
+                  </div>
+                  {viewMode === "deleted" && selectedDeletedTickers.length > 0 ? (
+                    <div className="d-flex align-items-center gap-1">
+                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>선택:</span>
+                      <span style={{ fontWeight: 700, color: "var(--tblr-primary)" }}>
+                        {new Intl.NumberFormat("ko-KR").format(selectedDeletedTickers.length)}개
+                      </span>
+                    </div>
                   ) : null}
                 </div>
-
-                {viewMode === "deleted" ? (
-                  <div className="btn-list">
-                    <button
-                      className="btn btn-outline-secondary"
-                      type="button"
-                      onClick={toggleAllDeleted}
-                      disabled={deletedRows.length === 0 || isPending}
-                    >
-                      <IconChecks size={16} stroke={1.75} />
-                      <span>{allDeletedSelected ? "전체 해제" : "전체 선택"}</span>
-                    </button>
-                    <button
-                      className="btn btn-primary"
-                      type="button"
-                      onClick={handleRestoreDeleted}
-                      disabled={selectedDeletedTickers.length === 0 || isPending}
-                    >
-                      <IconArrowBackUp size={16} stroke={1.75} />
-                      <span>선택 복구</span>
-                    </button>
-                    <button
-                      className="btn btn-outline-danger"
-                      type="button"
-                      onClick={handleHardDeleteDeleted}
-                      disabled={selectedDeletedTickers.length === 0 || isPending}
-                    >
-                      <IconTrash size={16} stroke={1.75} />
-                      <span>완전 삭제</span>
-                    </button>
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
 
+          {viewMode === "deleted" && deletedRows.length > 0 && (
+            <div className="card-header bg-light-subtle border-top py-2">
+              <div className="d-flex justify-content-between align-items-center">
+                <div></div>
+                <div className="d-flex gap-2">
+                  <button className="btn btn-sm btn-primary d-flex align-items-center gap-1" onClick={handleRestoreDeleted} disabled={selectedDeletedTickers.length === 0}>
+                    <IconArrowBackUp size={14} />
+                    <span>선택 복구</span>
+                  </button>
+                  <button className="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" onClick={handleHardDeleteDeleted} disabled={selectedDeletedTickers.length === 0}>
+                    <IconSearch size={14} />
+                    <span>영구 삭제</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="stocksTableWrap">
-            {viewMode === "active" ? (
-              <AppDataGrid
-                rows={activeGridRows}
-                columns={activeColumns}
-                loading={loading}
-                minHeight="68vh"
-              />
-            ) : (
-              <AppDataGrid
-                rows={deletedGridRows}
-                columns={deletedColumns}
-                loading={loading}
-                minHeight="68vh"
-                checkboxSelection
-                rowSelectionModel={{ type: "include", ids: new Set(selectedDeletedTickers) }}
-                onRowSelectionModelChange={handleDeletedSelectionChange}
-              />
-            )}
+            <AppDataGrid
+              className="stocksTable"
+              rows={(viewMode === "active" ? activeGridRows : deletedGridRows) as any}
+              columns={(viewMode === "active" ? activeColumns : deletedColumns) as any}
+              loading={loading}
+              minHeight="70vh"
+            />
           </div>
         </div>
       </section>
+
       <AppModal
         open={isAddModalOpen}
-        title="종목 추가"
         onClose={closeAddModal}
+        title="종목 추가"
         footer={
-          <>
-            <button type="button" className="btn btn-link link-secondary" onClick={closeAddModal} disabled={isPending || isValidatingTicker}>
+          <div className="d-flex justify-content-end gap-2 w-100">
+            <button className="btn btn-link link-secondary" type="button" onClick={closeAddModal}>
               취소
             </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              onClick={handleCreateStock}
-              disabled={isPending || isValidatingTicker || !validatedCandidate || !addBucketId}
+            <button 
+              className="btn btn-primary" 
+              type="button" 
+              onClick={handleCreateStock} 
+              disabled={isPending || !validatedCandidate}
+              style={{ minWidth: "100px" }}
             >
               저장
             </button>
-          </>
+          </div>
         }
       >
-        <div className="mb-3">
-          <label className="form-label">티커</label>
-          <div className="d-flex gap-2">
-            <input
-              className="form-control appCodeText"
-              value={addTickerInput}
-              onChange={(event) => handleAddTickerInputChange(event.target.value)}
-              placeholder="예: 069500 / VGS / ASX:VGS"
-              disabled={isPending || isValidatingTicker}
-            />
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => void handleValidateTicker()}
-              disabled={isPending || isValidatingTicker || !addTickerInput.trim()}
-            >
-              <IconSearch size={16} stroke={1.9} />
-              <span>확인</span>
-            </button>
-          </div>
-        </div>
-
-        {validatedCandidate ? (
+        <div className="appModalBody">
           <div className="mb-3">
-            <div className="alert alert-success d-flex flex-column gap-2 mb-0">
-              <div className="d-flex align-items-center gap-2">
-                <IconCircleCheck size={18} stroke={1.9} />
-                <strong>{validatedCandidate.name}</strong>
+            <label className="form-label">티커</label>
+            <div className="row g-2">
+              <div className="col">
+                <input
+                  type="text"
+                  className="form-control"
+                  placeholder="예: 069500 / VGS / ASX:VGS"
+                  value={addTickerInput}
+                  onChange={(e) => {
+                    setAddTickerInput(e.target.value);
+                    if (validatedCandidate) setValidatedCandidate(null);
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && handleValidateTicker()}
+                />
               </div>
-              <div className="small">티커: <span className="appCodeText">{validatedCandidate.ticker}</span></div>
-              <div className="small">상장일: {validatedCandidate.listing_date}</div>
-              {validatedCandidate.is_deleted ? (
-                <div className="small text-warning-emphasis">
-                  삭제된 종목 입니다{validatedCandidate.deleted_reason ? ` (${validatedCandidate.deleted_reason})` : ""}.
-                </div>
-              ) : null}
-              {validatedCandidate.status === "active" ? (
-                <div className="small text-danger">이미 등록된 종목입니다. 저장할 수 없습니다.</div>
-              ) : null}
+              <div className="col-auto">
+                <button
+                  className="btn btn-outline-secondary d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleValidateTicker}
+                  disabled={isValidatingTicker || !addTickerInput.trim()}
+                >
+                  <IconSearch size={16} stroke={1.75} />
+                  <span>확인</span>
+                </button>
+              </div>
             </div>
+            {isValidatingTicker ? (
+              <div className="mt-1 small text-muted">티커 확인 중...</div>
+            ) : validatedCandidate ? (
+              <div className="mt-2 p-2 bg-success-lt rounded border border-success-subtle">
+                <div className="d-flex align-items-center gap-1 text-success fw-bold">
+                  <span className="appCodeText">{validatedCandidate.ticker}</span>
+                  <span>-</span>
+                  <span>{validatedCandidate.name}</span>
+                </div>
+              </div>
+            ) : null}
           </div>
-        ) : null}
 
-        <div className="mb-0">
-          <label className="form-label">버킷</label>
-          <select
-            className="form-select"
-            value={addBucketId}
-            onChange={(event) => setAddBucketId(Number(event.target.value))}
-            disabled={isPending || isValidatingTicker || !validatedCandidate || validatedCandidate.status === "active"}
-          >
-            {BUCKET_OPTIONS.map((bucket) => (
-              <option key={bucket.id} value={bucket.id}>
-                {bucket.name}
-              </option>
-            ))}
-          </select>
+          <div className="mb-3">
+            <label className="form-label">버킷</label>
+            <select 
+              className="form-select" 
+              value={addBucketId} 
+              onChange={(e) => setAddBucketId(Number(e.target.value))}
+            >
+              {BUCKET_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>{opt.name}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </AppModal>
+
+      {/* 종목 수정 모달 */}
       <AppModal
-        open={Boolean(editingRow)}
-        title="종목 편집"
+        open={isEditModalOpen}
         onClose={closeEditModal}
+        title="종목 수정"
         footer={
-          <>
-            <button type="button" className="btn me-auto btn-outline-danger" onClick={handleDeleteFromModal} disabled={isPending || isRefreshing}>
-              <IconTrash size={16} stroke={1.9} />
-              <span>삭제</span>
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-secondary"
-              onClick={() => void handleRefreshFromModal()}
-              disabled={isPending || isRefreshing}
-            >
-              <IconRefresh size={16} stroke={1.9} />
-              <span>{isRefreshing ? "새로고침 중..." : "메타/캐시 새로고침"}</span>
-            </button>
-            <button type="button" className="btn btn-link link-secondary" onClick={closeEditModal} disabled={isPending || isRefreshing}>
+          <div className="d-flex justify-content-end gap-2 w-100">
+            <button className="btn btn-link link-secondary" type="button" onClick={closeEditModal}>
               취소
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSaveFromModal} disabled={isPending || isRefreshing}>
+            <button 
+              className="btn btn-primary" 
+              type="button" 
+              onClick={handleEditSave}
+              style={{ minWidth: "100px" }}
+              disabled={isPending}
+            >
               저장
             </button>
-          </>
+          </div>
         }
       >
-        {editingRow ? (
-          <>
-            <div className="mb-3">
-              <label className="form-label">티커</label>
-              <div className="form-control-plaintext appCodeText">{editingRow.ticker}</div>
-            </div>
-            <div className="mb-3">
-              <label className="form-label">종목명</label>
-              <div className="form-control-plaintext">{editingRow.name}</div>
-            </div>
-            <div className="mb-3">
-              <label className="form-label">버킷</label>
-              <select
-                className="form-select"
-                value={editingBucketId}
-                onChange={(event) => setEditingBucketId(Number(event.target.value))}
-                disabled={isPending}
-              >
-                {BUCKET_OPTIONS.map((bucket) => (
-                  <option key={bucket.id} value={bucket.id}>
-                    {bucket.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="mb-3">
-              <label className="form-label">삭제 사유</label>
-              <input
-                className="form-control"
-                value={editingDeleteReason}
-                onChange={(event) => setEditingDeleteReason(event.target.value)}
-                placeholder="선택 입력"
-                disabled={isPending}
-              />
-            </div>
-            <div className="row g-2 text-secondary small">
-              <div className="col-6">상장일: {editingRow.listing_date}</div>
-              <div className="col-6">추가일자: {editingRow.added_date}</div>
-            </div>
-          </>
-        ) : null}
+        <div className="appModalBody">
+          {editingRow && (
+            <>
+              <div className="mb-3">
+                <div className="fw-bold text-secondary mb-1">대상 종목</div>
+                <div className="appCodeText" style={{ fontSize: "1.2rem" }}>
+                  {editingRow.ticker}
+                </div>
+                <div style={{ fontSize: "1.1rem" }}>{editingRow.name}</div>
+              </div>
+              <div className="mb-3">
+                <label className="form-label">버킷 변경</label>
+                <select
+                  className="form-select"
+                  value={editingBucketId}
+                  onChange={(e) => setEditingBucketId(Number(e.target.value))}
+                >
+                  {BUCKET_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="mb-3">
+                <label className="form-label text-danger">삭제 사유 (삭제 시에만 입력)</label>
+                <textarea
+                  className="form-control"
+                  rows={2}
+                  placeholder="종목을 삭제하려는 경우 사유를 입력하세요. 입력 시 '등록된 종목'에서 제외됩니다."
+                  value={editingDeleteReason}
+                  onChange={(e) => setEditingDeleteReason(e.target.value)}
+                />
+              </div>
+            </>
+          )}
+        </div>
       </AppModal>
     </div>
   );
