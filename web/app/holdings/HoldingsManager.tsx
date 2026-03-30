@@ -55,21 +55,33 @@ function getBucketCellClass(bucketId: number): string {
   return `appBucketCell appBucketCell${bucketId}`;
 }
 
+// 모듈 수준 캐시 변수로 페이지 이동 간에도 데이터를 유지합니다. (브라우저 새로고침 전까지 유효)
+let holdingsDataCache: Record<string, HoldingsResponse> = {};
+
 export function HoldingsManager() {
-  const [accounts, setAccounts] = useState<AccountConfig[]>([]);
+  const [accounts, setAccounts] = useState<AccountConfig[]>(holdingsDataCache["__ACCOUNTS__"]?.accounts ?? []);
   const [selectedAccountId, setSelectedAccountId] = useState(readRememberedMomentumEtfAccountId() ?? "");
-  const [rows, setRows] = useState<HoldingsRow[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [rows, setRows] = useState<HoldingsRow[]>(holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]?.rows ?? []);
+  const [loading, setLoading] = useState(!holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]);
   const [error, setError] = useState<string | null>(null);
 
   async function load(accountId: string | null = null, silent = false) {
-    if (!silent) {
+    const targetId = accountId ?? selectedAccountId;
+    
+    // 1. 캐시가 있으면 즉시 반영 (Stale-While-Revalidate)
+    const cached = holdingsDataCache[targetId];
+    if (cached) {
+      if (cached.accounts) setAccounts(cached.accounts);
+      if (cached.rows) setRows(cached.rows);
+      // 캐시가 있으면 로딩 바를 굳이 보여주지 않거나, silent로 처리
+    } else if (!silent) {
       setLoading(true);
     }
+    
     setError(null);
 
     try {
-      const search = accountId !== null ? `?account=${encodeURIComponent(accountId)}` : "";
+      const search = targetId !== null ? `?account=${encodeURIComponent(targetId)}` : "";
       const response = await fetch(`/api/holdings${search}`, { cache: "no-store" });
       const payload = (await response.json()) as HoldingsResponse;
 
@@ -77,20 +89,26 @@ export function HoldingsManager() {
         throw new Error(payload.error ?? "보유 종목을 불러오지 못했습니다.");
       }
 
-      setAccounts(payload.accounts ?? []);
-      const nextId = payload.account_id ?? "";
+      // 서버 응답 저장
+      const nextAccounts = payload.accounts ?? [];
+      const nextRows = payload.rows ?? [];
+      const returnedId = payload.account_id ?? "";
+
+      setAccounts(nextAccounts);
+      setRows(nextRows);
+      
+      // 전역 캐시 업데이트
+      holdingsDataCache[returnedId] = payload;
+      holdingsDataCache["__ACCOUNTS__"] = { accounts: nextAccounts };
+
       if (accountId === null) {
-        // 초기 로드 시만 서버에서 준 ID로 업데이트 (TOTAL일 수 있음)
-        setSelectedAccountId(nextId);
-        writeRememberedMomentumEtfAccountId(nextId);
+        setSelectedAccountId(returnedId);
+        writeRememberedMomentumEtfAccountId(returnedId);
       }
-      setRows(payload.rows ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
     } finally {
-      if (!silent) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
   }
 
@@ -103,13 +121,16 @@ export function HoldingsManager() {
     setSelectedAccountId(nextId);
     writeRememberedMomentumEtfAccountId(nextId);
 
-    // 실제 데이터 로드
-    void load(nextId, true); // silent로 하면 프로그레스바가 안 보임 (사용자 요청에 따라 결정 가능)
-    // 하지만 사용자가 '프로그레스바가 보여야 하는거 아닌가?'라고 했으므로 
-    // 여기서는 setLoading(true)가 포함된 기본 load를 호출하되, 
-    // 이미 ID는 업데이트된 상태이므로 UI는 드롭다운만 먼저 바뀝니다.
-    setLoading(true);
-    void load(nextId);
+    // 캐시 확인 및 즉시 반영
+    const cached = holdingsDataCache[nextId];
+    if (cached) {
+      setRows(cached.rows ?? []);
+      // 캐시가 있으면 백그라운드에서만 로드
+      void load(nextId, true);
+    } else {
+      // 캐시가 없으면 로딩 표시와 함께 로드
+      void load(nextId);
+    }
   }
 
   const gridRows = useMemo<GridRow[]>(
