@@ -628,12 +628,6 @@ export function StocksManager() {
 
               <div className="tickerTypeToolbarRight" style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
                 <div className="stocksSummary d-flex align-items-center gap-3">
-                  {selectedTickerTypeItem ? (
-                    <div className="d-flex align-items-center gap-1">
-                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>계좌명:</span>
-                      <span style={{ fontWeight: 700 }}>{selectedTickerTypeItem.icon} {selectedTickerTypeItem.name}</span>
-                    </div>
-                  ) : null}
                   <div className="d-flex align-items-center gap-1">
                     <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 개수:</span>
                     <span style={{ fontWeight: 700 }}>

@@ -502,12 +502,6 @@ export function RankManager() {
                       </div>
                     );
                   })() : null}
-                  {selectedTickerTypeItem ? (
-                    <div className="d-flex align-items-center gap-1">
-                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>계좌명:</span>
-                      <span style={{ fontWeight: 700 }}>{selectedTickerTypeItem.icon} {selectedTickerTypeItem.name}</span>
-                    </div>
-                  ) : null}
                   {rankingComputedAt ? (
                     <div className="d-flex align-items-center gap-1">
                       <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>계산:</span>
