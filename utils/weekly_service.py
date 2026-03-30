@@ -272,12 +272,14 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
 
 
 def _ensure_active_week_row() -> str:
-    """활성 주차 데이터가 없으면 빈 행을 생성한다."""
+    """활성 주차 데이터가 없으면 빈 행을 생성한다 (upsert로 중복 방지)."""
     db = _require_db()
     active_week_date = _get_active_week_date()
-    existing = db[WEEKLY_COLLECTION].find_one({"week_date": active_week_date})
-    if not existing:
-        db[WEEKLY_COLLECTION].insert_one(_new_empty_doc(active_week_date))
+    db[WEEKLY_COLLECTION].update_one(
+        {"week_date": active_week_date},
+        {"$setOnInsert": _new_empty_doc(active_week_date)},
+        upsert=True,
+    )
     return active_week_date
 
 
