@@ -5,7 +5,7 @@
     "ticker_codes": [
         "aus"
     ],
-    "currency": "aud",
+    "currency": "AUD",
     "MA_TYPE": "ALMA",
     "MA_MONTHS": 6
 }

@@ -132,7 +132,7 @@ if __name__ == "__main__":
     all_time_stats = {"kor": {}, "au": {}}
     account_outputs = []
     # 통계용 국가별 정보
-    meta_info = {"kor": {"accounts": set()}, "au": {"accounts": set()}}
+    meta_info = {"kor": {"ticker_types": set()}, "au": {"ticker_types": set()}}
 
     # 다운로드 중복 방지 캐시: {code: (res_str, stats_df)}
     cached_stats = {}
@@ -142,7 +142,7 @@ if __name__ == "__main__":
         settings = get_ticker_type_settings(t_id)
         country = settings.get("country_code", "").lower()
         if country in ["kor", "au"]:
-            meta_info[country]["accounts"].add(t_id)
+            meta_info[country]["ticker_types"].add(t_id)
             # 타입별 출력물 생성
             acc_name = settings.get("name", t_id)
             lines = [f"● {acc_name} ({t_id})"]
@@ -181,7 +181,7 @@ if __name__ == "__main__":
             global_best_sell = global_stats.sort_values(by="Pct_Change_From_Open", ascending=False).iloc[0]
 
             n_stocks = len(stats_dict)
-            n_types = len(meta_info[c_code]["accounts"])
+            n_types = len(meta_info[c_code]["ticker_types"])
             header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_types}개 종목 타입)")
             header_lines.append(
                 f"👉 전체 최적 매수 시간 : {global_best_buy['Time']} (평균 {global_best_buy['Pct_Change_From_Open']:+.3f}%)"
