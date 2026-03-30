@@ -8,7 +8,7 @@ from bson import ObjectId
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
-from utils.settings_loader import get_account_settings, get_ticker_type_settings
+from utils.settings_loader import get_account_settings
 
 logger = get_app_logger()
 KST = ZoneInfo("Asia/Seoul")
@@ -29,12 +29,12 @@ class MissingPriceCacheError(RuntimeError):
         super().__init__(f"[{self.ticker_type}] 가격 캐시 누락: {joined}")
 
 
-def load_all_ticker_type_holding_tickers() -> set[str]:
-    """전체 종목 타입의 실보유 티커 집합을 반환한다."""
-    from utils.settings_loader import list_available_ticker_types
+def load_all_holding_tickers() -> set[str]:
+    """전체 계좌의 실보유 티커 집합을 반환한다."""
+    from utils.settings_loader import list_available_accounts
 
     held_tickers: set[str] = set()
-    for t_id in list_available_ticker_types():
+    for t_id in list_available_accounts():
         snapshot = load_portfolio_master(t_id)
         if not snapshot:
             continue
@@ -93,7 +93,7 @@ def _apply_realtime_overlay_to_holdings(
 
 
 def load_real_holdings_table(
-    ticker_type: str,
+    account_id: str,
     *,
     strict_price_cache: bool = False,
     preloaded_exchange_rates: dict[str, Any] | None = None,
@@ -104,7 +104,7 @@ def load_real_holdings_table(
     and calculate display metrics directly from cached price data.
     """
     # 1. Fetch live holdings from master only
-    snapshot = load_portfolio_master(ticker_type)
+    snapshot = load_portfolio_master(account_id)
     if not snapshot or not snapshot.get("holdings"):
         return None
 
@@ -149,7 +149,7 @@ def load_real_holdings_table(
     from utils.cache_utils import load_cached_frames_bulk_with_fallback
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk_with_fallback(ticker_type, tickers)
+    cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
     missing_price_tickers: set[str] = set()
 
     def _get_current_price(row):
@@ -270,11 +270,11 @@ def load_real_holdings_table(
     if missing_price_tickers:
         df_holdings.attrs["missing_price_tickers"] = sorted(missing_price_tickers)
     if strict_price_cache and missing_price_tickers:
-        raise MissingPriceCacheError(ticker_type, sorted(missing_price_tickers))
+        raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
 
     try:
-        ticker_settings = get_ticker_type_settings(ticker_type)
-        account_country = str(ticker_settings.get("country_code") or "").strip().lower()
+        account_settings = get_account_settings(account_id)
+        account_country = str(account_settings.get("country_code") or "").strip().lower()
     except Exception:
         account_country = ""
     if account_country in ("kor", "au"):
@@ -296,7 +296,7 @@ def load_real_holdings_table(
     intl_val = snapshot.get("intl_shares_value", 0.0)
     intl_change = snapshot.get("intl_shares_change", 0.0)
     # 종목 타입이 바뀌어 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
-    if ticker_type == "aus" and (intl_val > 0 or intl_change != 0):
+    if account_id == "aus_account" and (intl_val > 0 or intl_change != 0):
         intl_princi = intl_val - intl_change
 
         intl_princi_krw = intl_princi * aud_krw
@@ -368,8 +368,8 @@ def load_real_holdings_table(
     return df_holdings
 
 
-def load_portfolio_master(ticker_type: str) -> dict[str, Any] | None:
-    """Load the current live balance (master) for a specific ticker type from the consolidated document."""
+def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
+    """Load the current live balance (master) for a specific account from the consolidated document."""
     db = get_db_connection()
     if db is None:
         return None
@@ -379,16 +379,15 @@ def load_portfolio_master(ticker_type: str) -> dict[str, Any] | None:
         return None
 
     for acc in doc["accounts"]:
-        if acc["account_id"] == ticker_type:
-            # Ticker Type 단위 딕셔너리 형태로 정규화
+        if acc["account_id"] == account_id:
             base_principal = acc.get("total_principal", 0.0)
             base_cash = acc.get("cash_balance", 0.0)
             cash_balance_native = acc.get("cash_balance_native")
             cash_currency = str(acc.get("cash_currency") or "").strip().upper()
 
             try:
-                settings = get_ticker_type_settings(ticker_type)
-                account_currency = str(settings.get("currency") or "").strip().upper()
+                account_settings = get_account_settings(account_id)
+                account_currency = str(account_settings.get("currency") or "").strip().upper()
             except Exception:
                 account_currency = ""
             cash_currency = cash_currency or account_currency
@@ -400,7 +399,7 @@ def load_portfolio_master(ticker_type: str) -> dict[str, Any] | None:
             intl_change = acc.get("intl_shares_change", 0.0)
 
             return {
-                "ticker_type": acc["account_id"],
+                "account_id": acc["account_id"],
                 "total_principal": base_principal,
                 "cash_balance": base_cash,
                 "cash_balance_native": cash_balance_native,
@@ -416,7 +415,7 @@ def load_portfolio_master(ticker_type: str) -> dict[str, Any] | None:
 
 
 def save_portfolio_master(
-    ticker_type: str,
+    account_id: str,
     holdings: list[dict[str, Any]],
     total_principal: float | None = None,
     cash_balance: float | None = None,
@@ -439,7 +438,7 @@ def save_portfolio_master(
         found = False
 
         for acc in accounts:
-            if acc["account_id"] == ticker_type:
+            if acc["account_id"] == account_id:
                 if total_principal is not None:
                     acc["total_principal"] = float(total_principal)
                 if cash_balance is not None:
@@ -472,7 +471,7 @@ def save_portfolio_master(
                 h["quantity"] = int(math.floor(float(h.get("quantity", 0.0))))
 
             new_acc = {
-                "account_id": ticker_type,
+                "account_id": account_id,
                 "total_principal": float(total_principal or 0.0),
                 "cash_balance": float(cash_balance or 0.0),
                 "holdings": holdings,
@@ -496,7 +495,7 @@ def save_portfolio_master(
 
 
 def save_daily_snapshot(
-    ticker_type: str,
+    account_id: str,
     total_assets: float,
     total_principal: float,
     cash_balance: float,
@@ -529,7 +528,7 @@ def save_daily_snapshot(
                 "updated_at": _now_kst(),
             }
 
-        if ticker_type == "TOTAL":
+        if account_id == "TOTAL":
             doc["total_assets"] = float(total_assets)
             doc["total_principal"] = float(total_principal)
             doc["cash_balance"] = float(cash_balance)
@@ -540,7 +539,7 @@ def save_daily_snapshot(
             accounts = doc.get("accounts", [])
             found = False
             for acc in accounts:
-                if acc["account_id"] == ticker_type:
+                if acc["account_id"] == account_id:
                     acc["total_assets"] = float(total_assets)
                     acc["total_principal"] = float(total_principal)
                     acc["cash_balance"] = float(cash_balance)
@@ -552,7 +551,7 @@ def save_daily_snapshot(
             if not found:
                 accounts.append(
                     {
-                        "account_id": ticker_type,
+                        "account_id": account_id,
                         "total_assets": float(total_assets),
                         "total_principal": float(total_principal),
                         "cash_balance": float(cash_balance),
@@ -571,8 +570,8 @@ def save_daily_snapshot(
         return False
 
 
-def get_latest_daily_snapshot(ticker_type: str, before_today: bool = True) -> dict[str, Any] | None:
-    """Retrieve the latest daily snapshot for a ticker type from the consolidated documents."""
+def get_latest_daily_snapshot(account_id: str, before_today: bool = True) -> dict[str, Any] | None:
+    """Retrieve the latest daily snapshot for an account from the consolidated documents."""
     db = get_db_connection()
     if db is None:
         return None
@@ -589,11 +588,11 @@ def get_latest_daily_snapshot(ticker_type: str, before_today: bool = True) -> di
             return None
 
         doc = results[0]
-        if ticker_type == "TOTAL":
+        if account_id == "TOTAL":
             return doc
 
         for acc in doc.get("accounts", []):
-            if acc["account_id"] == ticker_type:
+            if acc["account_id"] == account_id:
                 # Add date for context
                 acc["snapshot_date"] = doc["snapshot_date"]
                 return acc
@@ -603,10 +602,10 @@ def get_latest_daily_snapshot(ticker_type: str, before_today: bool = True) -> di
         return None
 
 
-def list_daily_snapshots(ticker_type: str | None = None) -> list[dict[str, Any]]:
+def list_daily_snapshots(account_id: str | None = None) -> list[dict[str, Any]]:
     """
     List daily snapshots.
-    If ticker_type is provided, returns type-specific data flattened.
+    If account_id is provided, returns account-specific data flattened.
     """
     db = get_db_connection()
     if db is None:
@@ -615,16 +614,16 @@ def list_daily_snapshots(ticker_type: str | None = None) -> list[dict[str, Any]]
     try:
         all_docs = list(db.daily_snapshots.find().sort("snapshot_date", -1))
 
-        if not ticker_type:
+        if not account_id:
             return all_docs
 
         flattened = []
         for doc in all_docs:
-            if ticker_type == "TOTAL":
+            if account_id == "TOTAL":
                 flattened.append(doc)
             else:
                 for acc in doc.get("accounts", []):
-                    if acc["account_id"] == ticker_type:
+                    if acc["account_id"] == account_id:
                         acc["_id"] = doc["_id"]  # Keep same ID for deletion if needed
                         acc["snapshot_date"] = doc["snapshot_date"]
                         flattened.append(acc)
