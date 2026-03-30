@@ -2,6 +2,9 @@
     "icon": "🇦🇺",
     "name": "호주 계좌",
     "country_code": "au",
+    "ticker_codes": [
+        "aus"
+    ],
     "currency": "aud",
     "MA_TYPE": "ALMA",
     "MA_MONTHS": 6

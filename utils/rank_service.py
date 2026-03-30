@@ -5,8 +5,8 @@ from typing import Any
 
 import pandas as pd
 
-from utils.account_registry import load_account_configs, pick_default_account
-from utils.rankings import ALLOWED_MA_TYPES, build_account_rankings, get_account_rank_defaults, get_rank_months_max
+from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
+from utils.rankings import ALLOWED_MA_TYPES, build_ticker_type_rankings, get_ticker_type_rank_defaults, get_rank_months_max
 from utils.stock_list_io import get_etfs
 
 
@@ -74,32 +74,32 @@ def _serialize_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
     return rows
 
 
-def _build_accounts_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    accounts = load_account_configs()
-    if not accounts:
-        raise ValueError("사용 가능한 계정이 없습니다.")
+def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    configs = load_ticker_type_configs()
+    if not configs:
+        raise ValueError("사용 가능한 종목 타입이 없습니다.")
 
-    default_account = pick_default_account(accounts)
+    default_config = pick_default_ticker_type(configs)
     payload = [
         {
-            "account_id": str(account["account_id"]),
-            "order": int(account["order"]),
-            "name": str(account["name"]),
-            "icon": str(account.get("icon") or ""),
-            "country_code": str(account.get("country_code") or ""),
+            "ticker_type": str(cfg["ticker_type"]),
+            "order": int(cfg["order"]),
+            "name": str(cfg["name"]),
+            "icon": str(cfg.get("icon") or ""),
+            "country_code": str(cfg.get("country_code") or ""),
         }
-        for account in accounts
+        for cfg in configs
     ]
-    return payload, default_account
+    return payload, default_config
 
 
-def _build_missing_ticker_labels(account_id: str, missing_tickers: list[str]) -> list[str]:
+def _build_missing_ticker_labels(ticker_type: str, missing_tickers: list[str]) -> list[str]:
     if not missing_tickers:
         return []
 
     ticker_name_map = {
         str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
-        for item in get_etfs(account_id)
+        for item in get_etfs(ticker_type)
         if str(item.get("ticker") or "").strip()
     }
 
@@ -116,26 +116,35 @@ def _build_missing_ticker_labels(account_id: str, missing_tickers: list[str]) ->
 
 def load_rank_data(
     *,
-    account_id: str | None = None,
+    ticker_type: str | None = None,
     ma_type: str | None = None,
     ma_months: int | None = None,
 ) -> dict[str, Any]:
-    accounts_payload, default_account = _build_accounts_payload()
-    selected_account_id = str(account_id or default_account["account_id"]).strip().lower()
+    configs_payload, default_config = _build_configs_payload()
+    
+    # 요청받은 ticker_type이 현재 유효한 목록 내에 있는지 검사 (없으면 기본값 사용)
+    target = str(ticker_type or "").strip().lower()
+    available_ids = [str(cfg["ticker_type"]).lower() for cfg in configs_payload]
+    
+    if target and target in available_ids:
+        selected_ticker_type = target
+    else:
+        selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
 
-    default_ma_type, default_ma_months = get_account_rank_defaults(selected_account_id)
+    default_ma_type, default_ma_months = get_ticker_type_rank_defaults(selected_ticker_type)
     selected_ma_type = str(ma_type or default_ma_type).strip().upper()
     selected_ma_months = int(ma_months or default_ma_months)
 
-    dataframe = build_account_rankings(
-        selected_account_id,
+    dataframe = build_ticker_type_rankings(
+        selected_ticker_type,
         ma_type=selected_ma_type,
         ma_months=selected_ma_months,
     )
 
     return {
-        "accounts": accounts_payload,
-        "account_id": selected_account_id,
+        "accounts": configs_payload,  # 프론트엔드 하위 호환성을 위해 키를 유지하거나 types로 명확히 함
+        "ticker_types": configs_payload,
+        "ticker_type": selected_ticker_type,
         "ma_type": selected_ma_type,
         "ma_months": selected_ma_months,
         "ma_type_options": ALLOWED_MA_TYPES,
@@ -148,7 +157,7 @@ def load_rank_data(
         "realtime_fetched_at": _serialize_datetime(dataframe.attrs.get("realtime_fetched_at")),
         "missing_tickers": [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         "missing_ticker_labels": _build_missing_ticker_labels(
-            selected_account_id,
+            selected_ticker_type,
             [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         ),
         "stale_tickers": [str(item) for item in (dataframe.attrs.get("stale_tickers") or [])],

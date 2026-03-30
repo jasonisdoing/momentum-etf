@@ -1,7 +1,7 @@
 import { fetchFastApiJson } from "./internal-api";
 
-type RankAccount = {
-  account_id: string;
+type RankTickerType = {
+  ticker_type: string;
   order: number;
   name: string;
   icon: string;
@@ -9,7 +9,7 @@ type RankAccount = {
 };
 
 type RankRow = {
-  보유여부: string;
+  순번: string;
   버킷: string;
   bucket: number;
   티커: string;
@@ -17,7 +17,6 @@ type RankRow = {
   상장일: string;
   추세: number | null;
   지속: number | null;
-  보유: string;
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
@@ -32,8 +31,8 @@ type RankRow = {
 };
 
 type RankData = {
-  accounts: RankAccount[];
-  account_id: string;
+  ticker_types: RankTickerType[];
+  ticker_type: string;
   ma_type: string;
   ma_months: number;
   ma_type_options: string[];
@@ -50,13 +49,13 @@ type RankData = {
 };
 
 export async function loadRankData(params?: {
-  account_id?: string;
+  ticker_type?: string;
   ma_type?: string;
   ma_months?: number;
 }): Promise<RankData> {
   const search = new URLSearchParams();
-  if (params?.account_id) {
-    search.set("account_id", params.account_id);
+  if (params?.ticker_type) {
+    search.set("ticker_type", params.ticker_type);
   }
   if (params?.ma_type) {
     search.set("ma_type", params.ma_type);
@@ -69,4 +68,4 @@ export async function loadRankData(params?: {
   return fetchFastApiJson<RankData>(`/internal/rank${query}`);
 }
 
-export type { RankAccount, RankData, RankRow };
+export type { RankTickerType, RankData, RankRow };

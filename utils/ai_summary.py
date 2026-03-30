@@ -10,7 +10,7 @@ from utils.account_notes import load_account_note
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
 from utils.portfolio_io import get_latest_daily_snapshot, load_portfolio_master, load_real_holdings_table
-from utils.rankings import build_account_rankings, get_account_rank_defaults
+from utils.rankings import build_ticker_type_rankings, get_ticker_type_rank_defaults
 from utils.stock_list_io import get_etfs
 
 
@@ -225,7 +225,8 @@ def build_manual_rank_extract_tsv(
         country_code = str(account.get("country_code") or "").strip().lower()
         status_placeholder.info(f"데이터 추출 중: {account_name} ({index}/{total_accounts})")
 
-        ma_type, ma_months = get_account_rank_defaults(account_id)
+        # account_id를 ticker_type으로 간주 (마이그레이션 과도기 처리)
+        ma_type, ma_months = get_ticker_type_rank_defaults(account_id)
         account_snapshot = None
         if country_code == "kor":
             account_tickers = {
@@ -235,7 +236,7 @@ def build_manual_rank_extract_tsv(
             }
             account_snapshot = {ticker: kor_snapshot[ticker] for ticker in account_tickers if ticker in kor_snapshot}
 
-        df_rank = build_account_rankings(
+        df_rank = build_ticker_type_rankings(
             account_id,
             ma_type=ma_type,
             ma_months=ma_months,
