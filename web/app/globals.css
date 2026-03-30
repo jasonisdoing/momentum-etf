@@ -1680,7 +1680,7 @@ a {
 
 .bulkTextarea {
   width: 100%;
-  min-height: 440px;
+  min-height: 65vh;
   resize: vertical;
   padding: 12px 14px;
   border: 1px solid var(--line);
