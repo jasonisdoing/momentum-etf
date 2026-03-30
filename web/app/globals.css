@@ -1222,7 +1222,7 @@ a {
 
 .rankToolbarMeta {
   gap: 10px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 500;
 }
 
@@ -1680,7 +1680,7 @@ a {
 
 .bulkTextarea {
   width: 100%;
-  min-height: 220px;
+  min-height: 440px;
   resize: vertical;
   padding: 12px 14px;
   border: 1px solid var(--line);
