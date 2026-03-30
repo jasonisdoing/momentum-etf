@@ -12,6 +12,7 @@ import {
   IconMoodSmile,
   IconHome,
   IconMedal2,
+  IconList,
   IconListDetails,
   IconMenu2,
   IconNotebook,
@@ -33,6 +34,7 @@ const navGroups = [
     icon: IconCash,
     items: [
       { href: "/cash", label: "자산 관리", icon: IconCash },
+      { href: "/holdings", label: "계좌 상세", icon: IconList },
       { href: "/import", label: "벌크 입력", icon: IconFileImport },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
