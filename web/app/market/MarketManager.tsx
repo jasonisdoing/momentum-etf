@@ -16,6 +16,7 @@ type MarketRowItem = {
   return_3m_pct: number | null;
   prev_volume: number;
   market_cap: number;
+  is_held: boolean;
 };
 
 type MarketResponse = {
@@ -328,7 +329,13 @@ export function MarketManager() {
             <span>기본 정렬 일간(%) 내림차순</span>
           </div>
 
-          <AppDataGrid rows={gridRows} columns={columns} loading={loading} minHeight="60vh" />
+          <AppDataGrid
+            rows={gridRows}
+            columns={columns}
+            loading={loading}
+            minHeight="60vh"
+            getRowClassName={(params) => (params.row.is_held ? "appHeldRow" : "")}
+          />
           </div>
         </div>
       </section>
