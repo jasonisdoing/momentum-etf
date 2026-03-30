@@ -773,9 +773,45 @@ a {
   grid-template-columns: 1fr;
 }
 
+.dashboardOverviewLeft,
+.dashboardOverviewRight {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .dashboardOverviewMetric,
 .dashboardOverviewChartCard {
   min-width: 0;
+}
+
+.dashboardAccountWeightCard {
+  min-width: 0;
+  height: 100%;
+}
+
+.dashboardMiniChartHeader {
+  padding: 0.45rem 0.75rem;
+}
+
+.dashboardMiniChartTitle {
+  font-size: 0.82rem;
+}
+
+.dashboardMiniChartBody {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.2rem;
+  padding: 0.35rem 0.6rem 0.5rem;
+}
+
+.dashboardMiniChartCanvas {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .dashboardMetricCard {
@@ -1015,14 +1051,16 @@ a {
 
 @media (min-width: 1200px) {
   .dashboardOverviewGrid {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2.35fr);
-    grid-template-rows: repeat(3, minmax(0, 1fr));
-    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .dashboardOverviewLeft,
+  .dashboardOverviewRight {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboardOverviewChartCard {
-    grid-column: 3;
-    grid-row: 1 / span 3;
     height: 100%;
   }
 }
