@@ -5,6 +5,16 @@ import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
 
 import { AppDataGrid } from "../components/AppDataGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
+
+type AccountConfig = {
+  account_id: string;
+  name: string;
+  icon: string;
+};
 
 type HoldingsRow = {
   account_name: string;
@@ -20,6 +30,13 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
+};
+
+type HoldingsResponse = {
+  accounts?: AccountConfig[];
+  account_id?: string;
+  rows?: HoldingsRow[];
+  error?: string;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -39,28 +56,61 @@ function getBucketCellClass(bucketId: number): string {
 }
 
 export function HoldingsManager() {
+  const [accounts, setAccounts] = useState<AccountConfig[]>([]);
+  const [selectedAccountId, setSelectedAccountId] = useState(readRememberedMomentumEtfAccountId() ?? "");
   const [rows, setRows] = useState<HoldingsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        const response = await fetch("/api/holdings", { cache: "no-store" });
-        const payload = (await response.json()) as { rows?: HoldingsRow[]; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "보유 종목을 불러오지 못했습니다.");
-        }
-        setRows(payload.rows ?? []);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
-      } finally {
+  async function load(accountId: string | null = null, silent = false) {
+    if (!silent) {
+      setLoading(true);
+    }
+    setError(null);
+
+    try {
+      const search = accountId !== null ? `?account=${encodeURIComponent(accountId)}` : "";
+      const response = await fetch(`/api/holdings${search}`, { cache: "no-store" });
+      const payload = (await response.json()) as HoldingsResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "보유 종목을 불러오지 못했습니다.");
+      }
+
+      setAccounts(payload.accounts ?? []);
+      const nextId = payload.account_id ?? "";
+      if (accountId === null) {
+        // 초기 로드 시만 서버에서 준 ID로 업데이트 (TOTAL일 수 있음)
+        setSelectedAccountId(nextId);
+        writeRememberedMomentumEtfAccountId(nextId);
+      }
+      setRows(payload.rows ?? []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
+    } finally {
+      if (!silent) {
         setLoading(false);
       }
     }
-    void load();
+  }
+
+  useEffect(() => {
+    void load(readRememberedMomentumEtfAccountId() ?? "");
   }, []);
+
+  function handleAccountChange(nextId: string) {
+    // 낙관적 업데이트
+    setSelectedAccountId(nextId);
+    writeRememberedMomentumEtfAccountId(nextId);
+
+    // 실제 데이터 로드
+    void load(nextId, true); // silent로 하면 프로그레스바가 안 보임 (사용자 요청에 따라 결정 가능)
+    // 하지만 사용자가 '프로그레스바가 보여야 하는거 아닌가?'라고 했으므로 
+    // 여기서는 setLoading(true)가 포함된 기본 load를 호출하되, 
+    // 이미 ID는 업데이트된 상태이므로 UI는 드롭다운만 먼저 바뀝니다.
+    setLoading(true);
+    void load(nextId);
+  }
 
   const gridRows = useMemo<GridRow[]>(
     () => rows.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` })),
@@ -178,6 +228,39 @@ export function HoldingsManager() {
 
       <section className="appSection appSectionFill">
         <div className="card appCard">
+          <div className="card-header">
+            <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="tickerTypeToolbarLeft">
+                <div className="accountSelect">
+                  <select
+                    className="form-select"
+                    style={{ width: "auto", minWidth: "220px", fontWeight: 600 }}
+                    value={selectedAccountId}
+                    onChange={(e) => handleAccountChange(e.target.value)}
+                    disabled={loading}
+                  >
+                    {accounts.map((acc) => (
+                      <option key={acc.account_id} value={acc.account_id}>
+                        {acc.icon} {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="tickerTypeToolbarRight">
+                <div className="stocksSummary d-flex align-items-center gap-3">
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 종목 수:</span>
+                    <span style={{ fontWeight: 700 }}>{rows.length}개</span>
+                  </div>
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 평가액:</span>
+                    <span style={{ fontWeight: 700 }}>{formatKrw(rows.reduce((acc, row) => acc + (row.valuation_krw || 0), 0))}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
           <div className="card-body appCardBodyTight">
             <AppDataGrid
               className="appDataGrid"
