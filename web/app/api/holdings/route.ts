@@ -18,9 +18,17 @@ type HoldingsRow = {
   valuation_krw: number;
 };
 
-export async function GET() {
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const account = searchParams.get("account");
+
   try {
-    const payload = await fetchFastApiJson<{ rows: HoldingsRow[] }>("/internal/holdings");
+    const search = account ? `?account=${encodeURIComponent(account)}` : "";
+    const payload = await fetchFastApiJson<{
+      accounts?: any[];
+      account_id?: string;
+      rows: HoldingsRow[];
+    }>(`/internal/holdings${search}`);
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(

@@ -13,24 +13,33 @@ from utils.portfolio_io import load_real_holdings_table
 logger = get_app_logger()
 
 
-def load_all_holdings_detail() -> dict[str, Any]:
-    """모든 계좌의 보유 종목을 합산하여 반환한다."""
-    accounts = load_account_configs()
+def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
+    """모든 계좌 또는 특정 계좌의 보유 종목을 반환한다."""
+    all_accounts = load_account_configs()
     rates = get_exchange_rates()
+
+    target_id = str(account_id or "").strip()
+    if target_id.upper() == "TOTAL":
+        target_id = ""
 
     all_rows: list[dict[str, Any]] = []
 
-    for account in accounts:
-        account_id = str(account["account_id"])
-        account_name = str(account.get("name") or account_id)
+    for account in all_accounts:
+        curr_account_id = str(account["account_id"])
+        
+        # 필터링: account_id가 있으면 해당 계좌만, 없으면 전체
+        if target_id and curr_account_id != target_id:
+            continue
+            
+        account_name = str(account.get("name") or curr_account_id)
 
         try:
             df = load_real_holdings_table(
-                account_id,
+                curr_account_id,
                 preloaded_exchange_rates=rates,
             )
         except Exception as exc:
-            logger.warning("holdings 로드 실패 (%s): %s", account_id, exc)
+            logger.warning("holdings 로드 실패 (%s): %s", curr_account_id, exc)
             continue
 
         if df is None or df.empty:
@@ -88,4 +97,18 @@ def load_all_holdings_detail() -> dict[str, Any]:
                 }
             )
 
-    return {"rows": all_rows}
+    return {
+        "accounts": [
+            {"account_id": "", "name": "전체 계좌", "icon": "🌐"},
+            *[
+                {
+                    "account_id": a["account_id"],
+                    "name": a["name"],
+                    "icon": a["icon"],
+                }
+                for a in all_accounts
+            ]
+        ],
+        "account_id": target_id,
+        "rows": all_rows
+    }

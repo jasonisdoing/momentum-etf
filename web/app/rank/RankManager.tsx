@@ -63,6 +63,7 @@ type RankResponse = {
 
 type RankGridRow = RankRow & {
   id: string;
+  displayTrendRank: string;
 };
 
 type RankToolbarCache = {
@@ -211,17 +212,17 @@ export function RankManager() {
   );
 
   const gridRows = useMemo<RankGridRow[]>(() => {
-    let upRank = 0;
-    let downRank = 0;
+    let holdRank = 0;
+    let waitRank = 0;
     return rows.map((row, index) => {
-      const isUp = (row["추세"] ?? 0) > 0;
+      const isHold = Boolean(row["보유"] && String(row["보유"]).trim() !== "");
       let displayTrendRank = "";
-      if (isUp) {
-        upRank++;
-        displayTrendRank = `상승 ${upRank}`;
+      if (isHold) {
+        holdRank++;
+        displayTrendRank = `보유 ${holdRank}`;
       } else {
-        downRank++;
-        displayTrendRank = `하락 ${downRank}`;
+        waitRank++;
+        displayTrendRank = `대기 ${waitRank}`;
       }
       return {
         ...row,
@@ -235,18 +236,18 @@ export function RankManager() {
     () => [
       {
         field: "displayTrendRank",
-        headerName: "추세",
+        headerName: "보유",
         minWidth: 72,
         width: 72,
         align: "center",
         headerAlign: "center",
         renderCell: (params) => {
-          const isUp = String(params.value || "").startsWith("상승");
+          const isHold = String(params.value || "").startsWith("보유");
           return (
             <span
               style={{
                 fontWeight: 700,
-                color: isUp ? "#d63939" : "#206bc4",
+                color: isHold ? "inherit" : "#888888",
               }}
             >
               {String(params.value || "")}
@@ -384,6 +385,7 @@ export function RankManager() {
   );
 
   function handleTickerTypeChange(accountId: string) {
+    setSelectedAccountId(accountId);
     writeRememberedTickerType(accountId);
     void load({ ticker_type: accountId, ma_type: maType, ma_months: maMonths });
   }
@@ -496,7 +498,7 @@ export function RankManager() {
                     return (
                       <div className="d-flex align-items-center gap-1">
                         <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>추세 상승:</span>
-                        <span style={{ fontWeight: 700, color: "#2fb344" }}>{upCount}개 ({upPct}%)</span>
+                        <span style={{ fontWeight: 700, color: "#d63939" }}>{upCount}개 ({upPct}%)</span>
                       </div>
                     );
                   })() : null}
@@ -538,6 +540,9 @@ export function RankManager() {
                   const classes: string[] = [];
                   if ((params.row.추세 ?? 0) < 0) {
                     classes.push("rankNegativeTrendRow");
+                  }
+                  if (String(params.row.displayTrendRank || "").startsWith("보유")) {
+                    classes.push("rankHeldRow");
                   }
                   return classes.join(" ");
                 }}
