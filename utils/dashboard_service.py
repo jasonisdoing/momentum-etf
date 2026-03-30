@@ -4,10 +4,37 @@ from typing import Any
 
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
+from utils.logger import get_app_logger
 from utils.normalization import normalize_number, to_iso_string
+from utils.portfolio_io import load_real_holdings_table
+
+logger = get_app_logger()
 
 INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
 INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
+
+BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
+
+
+def _compute_account_buckets(account_id: str, cash_balance: float) -> list[dict[str, Any]]:
+    """계좌 하나의 버킷별 비중을 계산한다."""
+    bucket_totals: dict[str, float] = {name: 0.0 for name in BUCKET_NAMES}
+
+    try:
+        df = load_real_holdings_table(account_id)
+        if df is not None and not df.empty:
+            for bucket_name in BUCKET_NAMES:
+                bucket_totals[bucket_name] = float(df.loc[df["버킷"] == bucket_name, "평가금액(KRW)"].sum())
+    except Exception as exc:
+        logger.warning("계좌 %s 버킷 계산 실패: %s", account_id, exc)
+
+    total = sum(bucket_totals.values()) + cash_balance
+    if total <= 0:
+        return [{"label": name, "weight_pct": 0.0} for name in BUCKET_NAMES] + [{"label": "5. 현금", "weight_pct": 0.0}]
+
+    result = [{"label": name, "weight_pct": round((val / total) * 100, 2)} for name, val in bucket_totals.items()]
+    result.append({"label": "5. 현금", "weight_pct": round((cash_balance / total) * 100, 2)})
+    return result
 
 
 def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -70,7 +97,9 @@ def load_dashboard_data() -> dict[str, Any]:
     configs = load_account_configs()
     portfolio_doc = db.portfolio_master.find_one({"master_id": "GLOBAL"}) or {}
     snapshot_docs = list(db.daily_snapshots.find().sort("snapshot_date", -1).limit(2))
-    weekly_docs = list(db.weekly_fund_data.find().sort("week_date", -1))
+    weekly_docs = [
+        doc for doc in db.weekly_fund_data.find().sort("week_date", -1) if normalize_number(doc.get("total_assets")) > 0
+    ]
 
     latest_snapshot = snapshot_docs[0] if snapshot_docs else None
     previous_snapshot = snapshot_docs[1] if len(snapshot_docs) > 1 else None
@@ -206,11 +235,18 @@ def load_dashboard_data() -> dict[str, Any]:
         ),
     }
 
+    # 계좌별 버킷 비중 계산
+    account_buckets: dict[str, list[dict[str, Any]]] = {}
+    for account in accounts:
+        aid = account["account_id"]
+        account_buckets[aid] = _compute_account_buckets(aid, account["cash_balance"])
+
     return {
         "metrics_row1": metrics_row1,
         "metrics_row2": metrics_row2,
         "accounts": accounts,
         "buckets": buckets,
+        "account_buckets": account_buckets,
         "sparklines": sparklines,
         "latest_snapshot_date": latest_snapshot.get("snapshot_date") if latest_snapshot else None,
         "weekly_date": (latest_weekly or {}).get("week_date"),
