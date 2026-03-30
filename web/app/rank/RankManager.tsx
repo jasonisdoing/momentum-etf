@@ -498,7 +498,7 @@ export function RankManager() {
                     return (
                       <div className="d-flex align-items-center gap-1">
                         <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>추세 상승:</span>
-                        <span style={{ fontWeight: 700, color: "#2fb344" }}>{upCount}개 ({upPct}%)</span>
+                        <span style={{ fontWeight: 700, color: "#d63939" }}>{upCount}개 ({upPct}%)</span>
                       </div>
                     );
                   })() : null}
