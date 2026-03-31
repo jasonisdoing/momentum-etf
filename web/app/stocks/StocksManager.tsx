@@ -488,13 +488,13 @@ export function StocksManager() {
     }
   }
 
-  function handleEditSave() {
+  function handleEditSave(isForceDelete = false) {
     if (!editingRow) return;
 
     startTransition(async () => {
       try {
         setError(null);
-        const isDelete = !!editingDeleteReason.trim();
+        const isDelete = isForceDelete || !!editingDeleteReason.trim();
         const response = await fetch("/api/stocks", {
           method: isDelete ? "DELETE" : "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -804,19 +804,31 @@ export function StocksManager() {
         onClose={closeEditModal}
         title="종목 수정"
         footer={
-          <div className="d-flex justify-content-end gap-2 w-100">
-            <button className="btn btn-link link-secondary" type="button" onClick={closeEditModal}>
-              취소
-            </button>
-            <button 
-              className="btn btn-primary" 
-              type="button" 
-              onClick={handleEditSave}
-              style={{ minWidth: "100px" }}
+          <div className="d-flex justify-content-between w-100">
+            <button
+              className="btn btn-outline-danger"
+              type="button"
+              onClick={() => {
+                handleEditSave(true);
+              }}
               disabled={isPending}
             >
-              저장
+              종목 삭제
             </button>
+            <div className="d-flex gap-2">
+              <button className="btn btn-link link-secondary" type="button" onClick={closeEditModal}>
+                취소
+              </button>
+              <button 
+                className="btn btn-primary" 
+                type="button" 
+                onClick={() => handleEditSave()}
+                style={{ minWidth: "100px" }}
+                disabled={isPending}
+              >
+                저장
+              </button>
+            </div>
           </div>
         }
       >
@@ -845,11 +857,11 @@ export function StocksManager() {
                 </select>
               </div>
               <div className="mb-3">
-                <label className="form-label text-danger">삭제 사유 (삭제 시에만 입력)</label>
+                <label className="form-label text-secondary">삭제 사유(옵션)</label>
                 <textarea
                   className="form-control"
                   rows={2}
-                  placeholder="종목을 삭제하려는 경우 사유를 입력하세요. 입력 시 '등록된 종목'에서 제외됩니다."
+                  placeholder="삭제 시 참고할 사유가 있다면 입력해주세요 (필수 아님)."
                   value={editingDeleteReason}
                   onChange={(e) => setEditingDeleteReason(e.target.value)}
                 />
