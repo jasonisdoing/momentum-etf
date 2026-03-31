@@ -66,7 +66,7 @@ def format_pct_change(value: Any) -> str:
 
 
 def format_trading_days(days: Any) -> str:
-    """거래일을 '1W 2D' 형식으로 변환한다. (5거래일 = 1주)"""
+    """보유일을 '1W 2D' 형식으로 변환한다. (7일 = 1주, 캘린더 일자 기준)"""
     if days is None:
         return "-"
 
@@ -78,8 +78,8 @@ def format_trading_days(days: Any) -> str:
     if val < 0:
         return "-"
 
-    weeks = val // 5
-    remaining_days = val % 5
+    weeks = val // 7
+    remaining_days = val % 7
 
     parts = []
     if weeks > 0:
