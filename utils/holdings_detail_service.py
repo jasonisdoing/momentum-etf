@@ -22,9 +22,8 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     target_id = str(account_id or "").strip()
     if target_id.upper() == "TOTAL":
         target_id = ""
-    if not target_id and all_accounts:
-        target_id = str(all_accounts[0]["account_id"])
 
+    # target_id가 비어있으면 모든 계좌를 순회하며 데이터를 수집함
     all_rows: list[dict[str, Any]] = []
 
     for account in all_accounts:
@@ -103,9 +102,12 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "current_price": f"{price_prefix}{current_price:,.2f}"
                     if price_prefix
                     else f"{current_price:,.0f}원",
+                    "current_price_num": current_price,
                     "days_held": str(row.get("보유일", "-")),
                     "pnl_krw": pnl,
+                    "pnl_krw_num": pnl,
                     "return_pct": round(ret_pct, 2),
+                    "daily_change_pct": float(row.get("일간(%)") or 0) if row.get("일간(%)") is not None else None,
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
                 }
