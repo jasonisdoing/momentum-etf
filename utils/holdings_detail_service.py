@@ -239,8 +239,6 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
 
 def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     """계좌에 추가할 수 있는 유효한 티커인지 검증한다."""
-    from utils.db_manager import get_db_connection
-
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip().upper()
 
@@ -288,17 +286,6 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
 
     if not validated_res:
         raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {ticker}")
-
-    # 포트폴리오 중복 확인
-    db = get_db_connection()
-    if db is not None:
-        existing = db.holdings.find_one({
-            "account_id": account_id,
-            "ticker": validated_res["ticker"],
-            "is_deleted": {"$ne": True}
-        })
-        if existing:
-            raise RuntimeError(f"이미 포트폴리오에 등록된 종목입니다: {validated_res['ticker']}")
 
     return {
         "ticker": validated_res["ticker"],
