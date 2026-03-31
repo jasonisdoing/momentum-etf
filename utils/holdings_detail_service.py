@@ -7,8 +7,9 @@ from typing import Any
 from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
 from utils.account_registry import load_account_configs
+from utils.cash_service import load_cash_accounts
 from utils.logger import get_app_logger
-from utils.portfolio_io import load_real_holdings_table
+from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
 
 logger = get_app_logger()
 
@@ -21,6 +22,8 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     target_id = str(account_id or "").strip()
     if target_id.upper() == "TOTAL":
         target_id = ""
+    if not target_id and all_accounts:
+        target_id = str(all_accounts[0]["account_id"])
 
     all_rows: list[dict[str, Any]] = []
 
@@ -97,9 +100,13 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 }
             )
 
+    # 현재 계좌의 cash 정보
+    cash_data = load_cash_accounts()
+    cash_accounts = cash_data.get("accounts", [])
+    cash_info = next((c for c in cash_accounts if c["account_id"] == target_id), None)
+
     return {
         "accounts": [
-            {"account_id": "", "name": "전체 계좌", "icon": "🌐"},
             *[
                 {
                     "account_id": a["account_id"],
@@ -110,5 +117,61 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             ]
         ],
         "account_id": target_id,
+        "cash": cash_info,
         "rows": all_rows
     }
+
+
+def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
+    """계좌에서 특정 종목을 삭제한다."""
+    account_id = str(account_id or "").strip()
+    ticker = str(ticker or "").strip()
+    if not account_id or not ticker:
+        raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
+
+    # ASX: 접두어 제거
+    raw_ticker = ticker.replace("ASX:", "")
+
+    master = load_portfolio_master(account_id)
+    if not master:
+        raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
+
+    holdings = master.get("holdings", [])
+    new_holdings = [h for h in holdings if str(h.get("ticker", "")).strip() != raw_ticker]
+
+    if len(new_holdings) == len(holdings):
+        raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
+
+    save_portfolio_master(account_id, new_holdings)
+    return {"deleted": ticker}
+
+
+def update_holding(account_id: str, ticker: str, quantity: int | None = None, average_buy_price: float | None = None) -> dict[str, str]:
+    """계좌의 특정 종목 수량/매입단가를 수정한다."""
+    account_id = str(account_id or "").strip()
+    ticker = str(ticker or "").strip()
+    if not account_id or not ticker:
+        raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
+
+    raw_ticker = ticker.replace("ASX:", "")
+
+    master = load_portfolio_master(account_id)
+    if not master:
+        raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
+
+    holdings = master.get("holdings", [])
+    found = False
+    for h in holdings:
+        if str(h.get("ticker", "")).strip() == raw_ticker:
+            if quantity is not None:
+                h["quantity"] = int(quantity)
+            if average_buy_price is not None:
+                h["average_buy_price"] = float(average_buy_price)
+            found = True
+            break
+
+    if not found:
+        raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
+
+    save_portfolio_master(account_id, holdings)
+    return {"updated": ticker}

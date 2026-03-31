@@ -1,0 +1,622 @@
+"use client";
+
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
+
+import { AppDataGrid } from "../components/AppDataGrid";
+import { AppLoadingState } from "../components/AppLoadingState";
+import { useToast } from "../components/ToastProvider";
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
+
+type AccountConfig = {
+  account_id: string;
+  name: string;
+  icon: string;
+};
+
+type CashInfo = {
+  account_id: string;
+  name: string;
+  icon: string;
+  currency: string;
+  total_principal: number;
+  cash_balance_krw: number;
+  cash_balance_native: number | null;
+  cash_currency: string;
+  intl_shares_value: number | null;
+  intl_shares_change: number | null;
+  updated_at: string | null;
+};
+
+type HoldingsRow = {
+  account_name: string;
+  currency: string;
+  bucket: string;
+  bucket_id: number;
+  ticker: string;
+  name: string;
+  quantity: number;
+  average_buy_price: string;
+  current_price: string;
+  pnl_krw: number;
+  return_pct: number;
+  buy_amount_krw: number;
+  valuation_krw: number;
+};
+
+type HoldingsResponse = {
+  accounts?: AccountConfig[];
+  account_id?: string;
+  cash?: CashInfo;
+  rows?: HoldingsRow[];
+  error?: string;
+};
+
+type GridRow = HoldingsRow & { id: string };
+
+type EditingState = {
+  ticker: string;
+  quantity: string;
+  average_buy_price: string;
+};
+
+type CashEditingState = {
+  total_principal: string;
+  cash_value: string;
+  intl_shares_value: string;
+  intl_shares_change: string;
+};
+
+function formatKrw(value: number): string {
+  return `${new Intl.NumberFormat("ko-KR").format(value)}원`;
+}
+
+function formatNumber(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
+}
+
+function getSignedClass(value: number): string {
+  if (value === 0) return "";
+  return value > 0 ? "metricPositive" : "metricNegative";
+}
+
+function getBucketCellClass(bucketId: number): string {
+  if (!bucketId) return "appBucketCell";
+  return `appBucketCell appBucketCell${bucketId}`;
+}
+
+function parseRawPrice(formatted: string): string {
+  return formatted.replace(/[A$₩원,\s]/g, "");
+}
+
+let holdingsDataCache: Record<string, HoldingsResponse> = {};
+
+export function AssetsManager() {
+  const [accounts, setAccounts] = useState<AccountConfig[]>(holdingsDataCache["__ACCOUNTS__"]?.accounts ?? []);
+  const [selectedAccountId, setSelectedAccountId] = useState(readRememberedMomentumEtfAccountId() ?? "");
+  const [rows, setRows] = useState<HoldingsRow[]>(holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]?.rows ?? []);
+  const [cash, setCash] = useState<CashInfo | null>(null);
+  const [loading, setLoading] = useState(!holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<EditingState | null>(null);
+  const [cashEditing, setCashEditing] = useState<CashEditingState | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const toast = useToast();
+
+  async function load(accountId: string | null = null, silent = false) {
+    const targetId = accountId ?? selectedAccountId;
+
+    const cached = holdingsDataCache[targetId];
+    if (cached) {
+      if (cached.accounts) setAccounts(cached.accounts);
+      if (cached.rows) setRows(cached.rows);
+      if (cached.cash) setCash(cached.cash);
+    } else if (!silent) {
+      setLoading(true);
+    }
+
+    setError(null);
+
+    try {
+      const search = targetId !== null ? `?account=${encodeURIComponent(targetId)}` : "";
+      const response = await fetch(`/api/assets${search}`, { cache: "no-store" });
+      const payload = (await response.json()) as HoldingsResponse;
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "보유 종목을 불러오지 못했습니다.");
+      }
+
+      const nextAccounts = payload.accounts ?? [];
+      const nextRows = payload.rows ?? [];
+      const returnedId = payload.account_id ?? "";
+
+      setAccounts(nextAccounts);
+      setRows(nextRows);
+      setCash(payload.cash ?? null);
+
+      holdingsDataCache[returnedId] = payload;
+      holdingsDataCache["__ACCOUNTS__"] = { accounts: nextAccounts };
+
+      if (accountId === null) {
+        setSelectedAccountId(returnedId);
+        writeRememberedMomentumEtfAccountId(returnedId);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load(readRememberedMomentumEtfAccountId() ?? "");
+  }, []);
+
+  function handleAccountChange(nextId: string) {
+    setSelectedAccountId(nextId);
+    writeRememberedMomentumEtfAccountId(nextId);
+    setEditing(null);
+    setCashEditing(null);
+
+    const cached = holdingsDataCache[nextId];
+    if (cached) {
+      setRows(cached.rows ?? []);
+      setCash(cached.cash ?? null);
+      void load(nextId, true);
+    } else {
+      void load(nextId);
+    }
+  }
+
+  function handleDelete(ticker: string) {
+    if (!confirm(`${ticker} 종목을 삭제하시겠습니까?`)) return;
+
+    startTransition(async () => {
+      try {
+        const params = new URLSearchParams({ account: selectedAccountId, ticker });
+        const response = await fetch(`/api/assets?${params.toString()}`, { method: "DELETE" });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "삭제 실패");
+
+        delete holdingsDataCache[selectedAccountId];
+        await load(selectedAccountId, true);
+        toast.success(`${ticker} 삭제 완료`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "삭제에 실패했습니다.");
+      }
+    });
+  }
+
+  function startEditing(row: GridRow) {
+    setEditing({
+      ticker: row.ticker,
+      quantity: String(row.quantity),
+      average_buy_price: parseRawPrice(row.average_buy_price),
+    });
+  }
+
+  function cancelEditing() {
+    setEditing(null);
+  }
+
+  function handleSave() {
+    if (!editing) return;
+
+    const quantity = parseInt(editing.quantity, 10);
+    const avgPrice = parseFloat(editing.average_buy_price);
+
+    if (Number.isNaN(quantity) || quantity < 0) {
+      setError("수량이 올바르지 않습니다.");
+      return;
+    }
+    if (Number.isNaN(avgPrice) || avgPrice < 0) {
+      setError("매입 단가가 올바르지 않습니다.");
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/assets", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            account_id: selectedAccountId,
+            ticker: editing.ticker,
+            quantity,
+            average_buy_price: avgPrice,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "수정 실패");
+
+        setEditing(null);
+        delete holdingsDataCache[selectedAccountId];
+        await load(selectedAccountId, true);
+        toast.success(`${editing.ticker} 수정 완료`);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "수정에 실패했습니다.");
+      }
+    });
+  }
+
+  // --- Cash editing ---
+  function startCashEditing() {
+    if (!cash) return;
+    const isKrw = cash.currency === "KRW";
+    setCashEditing({
+      total_principal: String(cash.total_principal ?? 0),
+      cash_value: String(isKrw ? (cash.cash_balance_krw ?? 0) : (cash.cash_balance_native ?? 0)),
+      intl_shares_value: String(cash.intl_shares_value ?? 0),
+      intl_shares_change: String(cash.intl_shares_change ?? 0),
+    });
+  }
+
+  function cancelCashEditing() {
+    setCashEditing(null);
+  }
+
+  function handleCashSave() {
+    if (!cash || !cashEditing) return;
+
+    startTransition(async () => {
+      try {
+        const isKrw = cash.currency === "KRW";
+        const cashValue = parseFloat(cashEditing.cash_value) || 0;
+
+        const body: Record<string, unknown> = {
+          account_id: cash.account_id,
+          total_principal: parseFloat(cashEditing.total_principal) || 0,
+          cash_balance_krw: isKrw ? cashValue : 0,
+          cash_balance_native: isKrw ? cashValue : cashValue,
+          cash_currency: cash.cash_currency,
+        };
+
+        if (cash.account_id === "aus_account") {
+          body.intl_shares_value = parseFloat(cashEditing.intl_shares_value) || 0;
+          body.intl_shares_change = parseFloat(cashEditing.intl_shares_change) || 0;
+        }
+
+        const response = await fetch("/api/assets", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "자산 정보 저장 실패");
+
+        setCashEditing(null);
+        delete holdingsDataCache[selectedAccountId];
+        await load(selectedAccountId, true);
+        toast.success("자산 정보 저장 완료");
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "자산 정보 저장에 실패했습니다.");
+      }
+    });
+  }
+
+  const gridRows = useMemo<GridRow[]>(
+    () => rows.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` })),
+    [rows],
+  );
+
+  const columns = useMemo<GridColDef<GridRow>[]>(
+    () => [
+      {
+        field: "__actions__",
+        headerName: "",
+        width: 100,
+        sortable: false,
+        filterable: false,
+        disableColumnMenu: true,
+        renderCell: (params: GridRenderCellParams<GridRow>) => {
+          const isEditing = editing?.ticker === params.row.ticker;
+          if (isEditing) {
+            return (
+              <span className="d-flex gap-1">
+                <button type="button" className="btn btn-link btn-sm p-0 appEditLink" onClick={handleSave} disabled={isPending}>저장</button>
+                <button type="button" className="btn btn-link btn-sm p-0" style={{ color: "#6c757d" }} onClick={cancelEditing} disabled={isPending}>취소</button>
+              </span>
+            );
+          }
+          return (
+            <span className="d-flex gap-1">
+              <button type="button" className="btn btn-link btn-sm p-0 appEditLink" onClick={() => startEditing(params.row)} disabled={isPending}>수정</button>
+              <button type="button" className="btn btn-link btn-sm p-0" style={{ color: "#dc3545" }} onClick={() => handleDelete(params.row.ticker)} disabled={isPending}>삭제</button>
+            </span>
+          );
+        },
+      },
+      { field: "currency", headerName: "환종", minWidth: 70, width: 70, align: "center", headerAlign: "center" },
+      {
+        field: "bucket",
+        headerName: "버킷",
+        minWidth: 108,
+        width: 108,
+        sortable: false,
+        cellClassName: (params) => getBucketCellClass(params.row.bucket_id),
+        renderCell: (params) => <span>{String(params.value ?? "-")}</span>,
+      },
+      {
+        field: "ticker",
+        headerName: "종목코드",
+        minWidth: 110,
+        width: 110,
+        renderCell: (params) => <span className="appCodeText">{String(params.value ?? "-")}</span>,
+      },
+      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      {
+        field: "quantity",
+        headerName: "수량",
+        minWidth: 100,
+        width: 100,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (editing?.ticker === params.row.ticker) {
+            return (
+              <input
+                type="number"
+                className="form-control form-control-sm"
+                style={{ width: "80px", textAlign: "right" }}
+                value={editing.quantity}
+                onChange={(e) => setEditing({ ...editing, quantity: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") cancelEditing(); }}
+              />
+            );
+          }
+          return new Intl.NumberFormat("ko-KR").format(params.value ?? 0);
+        },
+      },
+      {
+        field: "average_buy_price",
+        headerName: "매입 단가",
+        minWidth: 130,
+        width: 130,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (editing?.ticker === params.row.ticker) {
+            return (
+              <input
+                type="number"
+                step="0.0001"
+                className="form-control form-control-sm"
+                style={{ width: "110px", textAlign: "right" }}
+                value={editing.average_buy_price}
+                onChange={(e) => setEditing({ ...editing, average_buy_price: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") handleSave(); if (e.key === "Escape") cancelEditing(); }}
+              />
+            );
+          }
+          return String(params.value ?? "-");
+        },
+      },
+      {
+        field: "current_price",
+        headerName: "현재가",
+        minWidth: 120,
+        width: 120,
+        align: "right",
+        headerAlign: "right",
+      },
+      {
+        field: "pnl_krw",
+        headerName: "평가손익",
+        minWidth: 130,
+        width: 130,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params: GridRenderCellParams<GridRow, number>) => (
+          <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+        ),
+      },
+      {
+        field: "return_pct",
+        headerName: "수익률",
+        minWidth: 90,
+        width: 90,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params: GridRenderCellParams<GridRow, number>) => {
+          const value = params.value ?? 0;
+          return <span className={getSignedClass(value)}>{value > 0 ? "+" : ""}{value.toFixed(2)}%</span>;
+        },
+      },
+      {
+        field: "buy_amount_krw",
+        headerName: "매입 금액",
+        minWidth: 140,
+        width: 140,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.value ?? 0),
+      },
+      {
+        field: "valuation_krw",
+        headerName: "평가 금액",
+        minWidth: 140,
+        width: 140,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatKrw(params.value ?? 0),
+      },
+    ],
+    [editing, isPending],
+  );
+
+  if (loading) {
+    return (
+      <div className="appPageStack">
+        <div className="appPageLoading">
+          <AppLoadingState label="보유 종목을 불러오는 중..." />
+        </div>
+      </div>
+    );
+  }
+
+  const isKrw = cash?.currency === "KRW";
+  const isAus = cash?.account_id === "aus_account";
+  const cashLabel = isKrw ? "보유 현금 (KRW)" : `보유 현금 (${cash?.currency ?? ""})`;
+
+  return (
+    <div className="appPageStack">
+      {error ? (
+        <div className="appBannerStack">
+          <div className="bannerError">{error}</div>
+        </div>
+      ) : null}
+
+      <section className="appSection appSectionFill">
+        <div className="card appCard">
+          <div className="card-header">
+            <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div className="tickerTypeToolbarLeft">
+                <div className="accountSelect">
+                  <select
+                    className="form-select"
+                    style={{ width: "auto", minWidth: "220px", fontWeight: 600 }}
+                    value={selectedAccountId}
+                    onChange={(e) => handleAccountChange(e.target.value)}
+                    disabled={loading}
+                  >
+                    {accounts.map((acc) => (
+                      <option key={acc.account_id} value={acc.account_id}>
+                        {acc.icon} {acc.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <div className="tickerTypeToolbarRight">
+                <div className="stocksSummary d-flex align-items-center gap-3">
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 종목 수:</span>
+                    <span style={{ fontWeight: 700 }}>{rows.length}개</span>
+                  </div>
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 평가액:</span>
+                    <span style={{ fontWeight: 700 }}>{formatKrw(rows.reduce((acc, row) => acc + (row.valuation_krw || 0), 0))}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Cash 인라인 편집 영역 */}
+          {cash ? (
+            <div className="card-body" style={{ borderBottom: "1px solid var(--bs-border-color)", paddingTop: "0.6rem", paddingBottom: "0.6rem" }}>
+              {cashEditing ? (
+                <div className="d-flex align-items-end gap-3 flex-wrap">
+                  <div>
+                    <label className="form-label mb-0" style={{ fontSize: "0.78rem", color: "#6c757d" }}>투자 원금 (KRW)</label>
+                    <input
+                      type="number"
+                      className="form-control form-control-sm"
+                      style={{ width: "140px" }}
+                      value={cashEditing.total_principal}
+                      onChange={(e) => setCashEditing({ ...cashEditing, total_principal: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="form-label mb-0" style={{ fontSize: "0.78rem", color: "#6c757d" }}>{cashLabel}</label>
+                    <input
+                      type="number"
+                      className="form-control form-control-sm"
+                      style={{ width: "140px" }}
+                      value={cashEditing.cash_value}
+                      onChange={(e) => setCashEditing({ ...cashEditing, cash_value: e.target.value })}
+                    />
+                  </div>
+                  {isAus ? (
+                    <>
+                      <div>
+                        <label className="form-label mb-0" style={{ fontSize: "0.78rem", color: "#6c757d" }}>Intl Shares Value</label>
+                        <input
+                          type="number"
+                          className="form-control form-control-sm"
+                          style={{ width: "140px" }}
+                          value={cashEditing.intl_shares_value}
+                          onChange={(e) => setCashEditing({ ...cashEditing, intl_shares_value: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="form-label mb-0" style={{ fontSize: "0.78rem", color: "#6c757d" }}>Intl Shares Change</label>
+                        <input
+                          type="number"
+                          className="form-control form-control-sm"
+                          style={{ width: "140px" }}
+                          value={cashEditing.intl_shares_change}
+                          onChange={(e) => setCashEditing({ ...cashEditing, intl_shares_change: e.target.value })}
+                        />
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="d-flex gap-1">
+                    <button type="button" className="btn btn-sm btn-primary" onClick={handleCashSave} disabled={isPending}>
+                      {isPending ? "저장 중..." : "저장"}
+                    </button>
+                    <button type="button" className="btn btn-sm btn-outline-secondary" onClick={cancelCashEditing} disabled={isPending}>
+                      취소
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="d-flex align-items-center gap-4 flex-wrap">
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem" }}>투자 원금:</span>
+                    <span style={{ fontWeight: 600 }}>{formatNumber(cash.total_principal)}원</span>
+                  </div>
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem" }}>{cashLabel}:</span>
+                    <span style={{ fontWeight: 600 }}>
+                      {formatNumber(isKrw ? cash.cash_balance_krw : cash.cash_balance_native)}
+                      {isKrw ? "원" : ""}
+                    </span>
+                  </div>
+                  {isAus ? (
+                    <>
+                      <div className="d-flex align-items-center gap-1">
+                        <span style={{ color: "#6c757d", fontSize: "0.85rem" }}>Intl Shares:</span>
+                        <span style={{ fontWeight: 600 }}>{formatNumber(cash.intl_shares_value)}</span>
+                      </div>
+                      <div className="d-flex align-items-center gap-1">
+                        <span style={{ color: "#6c757d", fontSize: "0.85rem" }}>Intl Change:</span>
+                        <span style={{ fontWeight: 600 }}>{formatNumber(cash.intl_shares_change)}</span>
+                      </div>
+                    </>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary"
+                    onClick={startCashEditing}
+                    disabled={isPending}
+                  >
+                    자산 정보 수정
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <div className="card-body appCardBodyTight">
+            <AppDataGrid
+              className="appDataGrid"
+              rows={gridRows}
+              columns={columns}
+              loading={loading}
+              getRowClassName={(params) => {
+                const pnl = params.row.pnl_krw ?? 0;
+                return pnl > 0 ? "appHeldRow" : "";
+              }}
+              minHeight="75vh"
+            />
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
