@@ -124,26 +124,39 @@ def load_real_holdings_table(
     )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
-    # Calculate days held
+    # Calculate days held (Snapshots-based Calendar Days)
     try:
         from utils.formatters import format_trading_days
 
-        now = pd.Timestamp.now().normalize()
-        df_holdings["first_buy_date"] = (
-            pd.to_datetime(df_holdings["first_buy_date"], errors="coerce").dt.tz_localize(None).dt.normalize()
-        )
-        df_holdings["first_buy_date"] = df_holdings["first_buy_date"].fillna(now)
+        now = pd.Timestamp.now(KST).normalize().tz_localize(None)
 
-        # Calculate business days
-        bus_days = np.busday_count(
-            df_holdings["first_buy_date"].values.astype("datetime64[D]"), now.to_datetime64().astype("datetime64[D]")
-        )
+        # 1. 어제(직전 거래일 아님, 어제 날짜) 스냅샷 조회
+        prev_snapshot = get_latest_daily_snapshot(account_id, before_today=True)
+        snapshot_holdings = {}
+        if prev_snapshot and "holdings" in prev_snapshot:
+            # {ticker: days_held} 매핑 생성
+            for h in prev_snapshot["holdings"]:
+                t = str(h.get("ticker", "")).strip().upper()
+                if t:
+                    snapshot_holdings[t] = int(h.get("days_held_int", 0))
 
-        # Format the business days using format_trading_days
-        df_holdings["보유일"] = [format_trading_days(max(d, 0)) for d in bus_days]
+        def _calculate_days(row):
+            ticker = str(row.get("ticker", "")).strip().upper()
+            if ticker in snapshot_holdings:
+                # 어제 있었으면 어제 보유일 + 날짜 차이(하루 지나면 +1)
+                prev_days = snapshot_holdings[ticker]
+                # 스냅샷 날짜와 오늘 날짜 차이 계산
+                snap_date = pd.to_datetime(prev_snapshot["snapshot_date"]).normalize().tz_localize(None)
+                delta = (now - snap_date).days
+                return max(prev_days + delta, 1)
+            return 1
+
+        df_holdings["days_held_int"] = df_holdings.apply(_calculate_days, axis=1)
+        df_holdings["보유일"] = df_holdings["days_held_int"].apply(format_trading_days)
     except Exception as e:
-        logger.warning(f"Error calculating dates: {e}")
+        logger.warning(f"Error calculating dates based on snapshot: {e}")
         df_holdings["보유일"] = "-"
+        df_holdings["days_held_int"] = 0
 
     # Fetch prices from price cache and exchange rates
     from utils.cache_utils import load_cached_frames_bulk_with_fallback
@@ -501,6 +514,7 @@ def save_daily_snapshot(
     cash_balance: float,
     valuation_krw: float,
     purchase_amount: float | None = None,
+    holding_details: list[dict[str, Any]] | None = None,
 ) -> bool:
     """
     Save a daily snapshot.
@@ -535,6 +549,7 @@ def save_daily_snapshot(
             doc["valuation_krw"] = float(valuation_krw)
             if purchase_amount is not None:
                 doc["purchase_amount"] = float(purchase_amount)
+            # TOTAL에는 별도 holdings를 저장하지 않음 (계좌별로 저장됨)
         else:
             accounts = doc.get("accounts", [])
             found = False
@@ -546,19 +561,23 @@ def save_daily_snapshot(
                     acc["valuation_krw"] = float(valuation_krw)
                     if purchase_amount is not None:
                         acc["purchase_amount"] = float(purchase_amount)
+                    if holding_details is not None:
+                        acc["holdings"] = holding_details
                     found = True
                     break
+
             if not found:
-                accounts.append(
-                    {
-                        "account_id": account_id,
-                        "total_assets": float(total_assets),
-                        "total_principal": float(total_principal),
-                        "cash_balance": float(cash_balance),
-                        "valuation_krw": float(valuation_krw),
-                        "purchase_amount": float(purchase_amount or 0.0),
-                    }
-                )
+                acc_data = {
+                    "account_id": account_id,
+                    "total_assets": float(total_assets),
+                    "total_principal": float(total_principal),
+                    "cash_balance": float(cash_balance),
+                    "valuation_krw": float(valuation_krw),
+                    "purchase_amount": float(purchase_amount or 0.0),
+                }
+                if holding_details is not None:
+                    acc_data["holdings"] = holding_details
+                accounts.append(acc_data)
             doc["accounts"] = accounts
 
         doc["updated_at"] = _now_kst()
