@@ -784,6 +784,11 @@ export function StocksManager() {
                     이미 등록된 종목입니다.
                   </div>
                 )}
+                {validatedCandidate.status === "deleted" && (
+                  <div className="mt-1 small text-success fw-bold">
+                    삭제된 종목입니다. 다시 추가하시겠습니까?
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
