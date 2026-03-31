@@ -109,6 +109,74 @@ function parseRawPrice(formatted: string): string {
   return formatted.replace(/[A$₩원,\s]/g, "");
 }
 
+/**
+ * IME(한글 등) 입력 시 리렌더링으로 인한 조합 분리를 방지하기 위한 독립형 입력 컴포넌트
+ */
+function StableInlineInput({
+  initialValue,
+  onSave,
+  onCancel,
+  onChange,
+  className,
+  style,
+  placeholder,
+  autoFocus = false,
+  disabled = false,
+}: {
+  initialValue: string;
+  onSave?: (val: string) => void;
+  onCancel?: () => void;
+  onChange?: (val: string) => void;
+  className?: string;
+  style?: React.CSSProperties;
+  placeholder?: string;
+  autoFocus?: boolean;
+  disabled?: boolean;
+}) {
+  const [localValue, setLocalValue] = useState(initialValue);
+
+  // 부모 값이 외부 요인으로 명시적으로 바뀌었을 때만 동기화
+  useEffect(() => {
+    if (initialValue !== localValue) {
+      setLocalValue(initialValue);
+    }
+  }, [initialValue]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "Enter") {
+      onSave?.(localValue);
+    } else if (e.key === "Escape") {
+      setLocalValue(initialValue);
+      onCancel?.();
+    }
+  };
+
+  const handleBlur = () => {
+    if (localValue !== initialValue) {
+      onSave?.(localValue);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      className={className}
+      style={style}
+      placeholder={placeholder}
+      value={localValue}
+      autoFocus={autoFocus}
+      disabled={disabled}
+      onChange={(e) => {
+        setLocalValue(e.target.value);
+        onChange?.(e.target.value);
+      }}
+      onKeyDown={handleKeyDown}
+      onBlur={handleBlur}
+    />
+  );
+}
+
 let holdingsDataCache: Record<string, HoldingsResponse> = {};
 
 export function AssetsManager() {
@@ -284,6 +352,7 @@ export function AssetsManager() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            account_id: selectedAccountId,
             ticker: addingRow.ticker,
             quantity,
             average_buy_price: avgPrice,
@@ -337,6 +406,7 @@ export function AssetsManager() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            account_id: selectedAccountId,
             ticker: editing.ticker,
             quantity,
             average_buy_price: avgPrice,
@@ -487,8 +557,8 @@ export function AssetsManager() {
       {
         field: "ticker",
         headerName: "종목코드",
-        minWidth: 95,
-        width: 95,
+        minWidth: 110,
+        width: 110,
         renderCell: (params: GridRenderCellParams<GridRow>) => {
           if (addingRow && params.row.id === "__adding__") {
             if (addingRow.isValidated) {
@@ -509,17 +579,13 @@ export function AssetsManager() {
             return (
               <div className="d-flex flex-column gap-1">
                 <div className="d-flex gap-1 align-items-center">
-                  <input
-                    type="text"
+                  <StableInlineInput
                     className="form-control form-control-sm"
                     style={{ width: "80px", textAlign: "center" }}
                     placeholder="티커"
-                    value={addingRow.ticker}
-                    onChange={(e) => setAddingRow({ ...addingRow, ticker: e.target.value, validationError: undefined })}
-                    onKeyDown={(e) => {
-                      if (e.nativeEvent.isComposing) return;
-                      if (e.key === "Enter") handleValidateTicker();
-                    }}
+                    initialValue={addingRow.ticker}
+                    onChange={(val) => setAddingRow({ ...addingRow, ticker: val, validationError: undefined })}
+                    onSave={handleValidateTicker}
                     disabled={addingRow.isValidatingTicker}
                   />
                   <button
@@ -683,34 +749,27 @@ export function AssetsManager() {
         renderCell: (params: GridRenderCellParams<GridRow>) => {
           if (addingRow && params.row.id === "__adding__") {
             return (
-              <input
-                type="text"
+              <StableInlineInput
                 className="form-control form-control-sm"
                 placeholder="메모 입력"
-                value={addingRow.memo}
-                onChange={(e) => setAddingRow({ ...addingRow, memo: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
-                  if (e.key === "Enter") handleAddRowSave();
-                  if (e.key === "Escape") handleAddRowCancel();
-                }}
+                initialValue={addingRow.memo}
+                onChange={(val) => setAddingRow({ ...addingRow, memo: val })}
+                onSave={handleAddRowSave}
+                onCancel={handleAddRowCancel}
                 disabled={!addingRow.isValidated || isPending}
               />
             );
           }
           if (editing?.ticker === params.row.ticker) {
             return (
-              <input
-                type="text"
+              <StableInlineInput
                 className="form-control form-control-sm"
                 placeholder="메모 수정"
-                value={editing.memo}
-                onChange={(e) => setEditing({ ...editing, memo: e.target.value })}
-                onKeyDown={(e) => {
-                  if (e.nativeEvent.isComposing) return;
-                  if (e.key === "Enter") handleSave();
-                  if (e.key === "Escape") cancelEditing();
-                }}
+                initialValue={editing.memo}
+                onChange={(val) => setEditing({ ...editing, memo: val })}
+                onSave={handleSave}
+                onCancel={cancelEditing}
+                disabled={isPending}
               />
             );
           }
@@ -890,6 +949,14 @@ export function AssetsManager() {
               rows={gridRows}
               columns={columns}
               loading={loading}
+              initialState={{
+                sorting: {
+                  sortModel: [
+                    { field: "bucket_id", sort: "asc" },
+                    { field: "buy_amount_krw", sort: "desc" },
+                  ],
+                },
+              }}
               getRowClassName={(params) => {
                 const pnl = params.row.pnl_krw ?? 0;
                 return pnl > 0 ? "appHeldRow" : "";

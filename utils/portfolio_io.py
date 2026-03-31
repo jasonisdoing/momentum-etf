@@ -115,9 +115,11 @@ def load_real_holdings_table(
     import numpy as np
 
     # Ensure required columns exist
-    for col in ["ticker", "name", "quantity", "average_buy_price", "currency", "bucket", "first_buy_date"]:
+    for col in ["ticker", "name", "quantity", "average_buy_price", "currency", "bucket", "first_buy_date", "memo"]:
         if col not in df_holdings.columns:
-            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date") else 0
+            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "memo") else 0
+
+    df_holdings["memo"] = df_holdings["memo"].fillna("").astype(str)
 
     df_holdings["quantity"] = (
         pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0).apply(np.floor).astype(int)
@@ -330,6 +332,9 @@ def load_real_holdings_table(
             "평가금액(KRW)": intl_val_krw,
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
+        # Ensure memo is still string after concat
+        df_holdings["memo"] = df_holdings["memo"].fillna("")
+
 
     # Rename columns to match UI
     df_holdings = df_holdings.rename(
