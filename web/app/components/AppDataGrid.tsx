@@ -10,6 +10,7 @@ import { AppDataGridLoadingOverlay } from "./AppDataGridLoadingOverlay";
 
 type AppDataGridProps<R extends GridValidRowModel> = DataGridProps<R> & {
   minHeight?: string | number;
+  maxHeight?: string | number;
   wrapClassName?: string;
   fitContentRows?: boolean;
   fitContentMaxRows?: number;
@@ -19,6 +20,7 @@ export function AppDataGrid<R extends GridValidRowModel>({
   className,
   wrapClassName,
   minHeight = "24rem",
+  maxHeight,
   fitContentRows = false,
   fitContentMaxRows = 8,
   sx,
@@ -33,7 +35,7 @@ export function AppDataGrid<R extends GridValidRowModel>({
     ? {
         height: columnHeaderHeight + rowHeight * rows.length + 2,
       }
-    : { minHeight };
+    : { minHeight, ...(maxHeight ? { maxHeight } : {}) };
 
   return (
     <div

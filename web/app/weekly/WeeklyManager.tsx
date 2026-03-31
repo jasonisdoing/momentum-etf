@@ -431,7 +431,7 @@ export function WeeklyManager() {
               rows={gridRows}
               columns={gridColumns}
               loading={loading}
-              minHeight="68vh"
+              wrapClassName="weeklyGridWrap"
               getRowClassName={(params) => (params.row.week_date === activeWeekDate ? "tableRowSelected" : "")}
             />
           </div>
