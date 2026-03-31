@@ -42,6 +42,7 @@ type HoldingsRow = {
   quantity: number;
   average_buy_price: string;
   current_price: string;
+  days_held: string;
   pnl_krw: number;
   return_pct: number;
   buy_amount_krw: number;
@@ -113,7 +114,6 @@ export function AssetsManager() {
   const [rows, setRows] = useState<HoldingsRow[]>(holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]?.rows ?? []);
   const [cash, setCash] = useState<CashInfo | null>(null);
   const [loading, setLoading] = useState(!holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]);
-  const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
   const [addingRow, setAddingRow] = useState<AddingRowState | null>(null);
   const [cashEditing, setCashEditing] = useState<CashEditingState | null>(null);
@@ -173,7 +173,6 @@ export function AssetsManager() {
     setEditing(null);
     setAddingRow(null);
     setCashEditing(null);
-    setError(null);
 
     const cached = holdingsDataCache[nextId];
     if (cached) {
@@ -248,7 +247,10 @@ export function AssetsManager() {
           name: payload.name ?? "",
           bucketId: payload.bucket_id ?? 1,
           ticker: payload.ticker ?? addingRow.ticker,
+          validationError: undefined,
         } : null);
+        
+        toast.success(`조회 성공: ${payload.name}`);
       } catch (err) {
         const errorMsg = err instanceof Error ? err.message : "검증 중 오류 발생";
         setAddingRow((prev) => prev ? { ...prev, isValidatingTicker: false, validationError: errorMsg } : null);
@@ -399,7 +401,7 @@ export function AssetsManager() {
         await load(selectedAccountId, true);
         toast.success("자산 정보 저장 완료");
       } catch (err) {
-        setError(err instanceof Error ? err.message : "자산 정보 저장에 실패했습니다.");
+        toast.error(err instanceof Error ? err.message : "자산 정보 저장에 실패했습니다.");
       }
     });
   }
@@ -413,13 +415,14 @@ export function AssetsManager() {
             id: "__adding__",
             account_name: accounts.find((a) => a.account_id === selectedAccountId)?.name ?? "",
             currency: "",
-            bucket: "",
-            bucket_id: 0,
+            bucket: addingRow.isValidated ? `Bucket ${addingRow.bucketId}` : "",
+            bucket_id: addingRow.bucketId || 0,
             ticker: addingRow.ticker,
-            name: "",
+            name: addingRow.name || "",
             quantity: parseInt(addingRow.quantity, 10) || 0,
             average_buy_price: addingRow.average_buy_price,
             current_price: "-",
+            days_held: "-",
             pnl_krw: 0,
             return_pct: 0,
             buy_amount_krw: 0,
@@ -498,26 +501,28 @@ export function AssetsManager() {
               );
             }
             return (
-              <div className="d-flex gap-1 align-items-center">
-                <input
-                  type="text"
-                  className="form-control form-control-sm"
-                  style={{ width: "60px", textAlign: "center" }}
-                  placeholder="티커"
-                  value={addingRow.ticker}
-                  onChange={(e) => setAddingRow({ ...addingRow, ticker: e.target.value, validationError: undefined })}
-                  onKeyDown={(e) => { if (e.key === "Enter") handleValidateTicker(); }}
-                  disabled={addingRow.isValidatingTicker}
-                />
-                <button
-                  type="button"
-                  className="btn btn-link btn-sm p-0"
-                  style={{ fontSize: "0.75rem" }}
-                  onClick={handleValidateTicker}
-                  disabled={addingRow.isValidatingTicker || !addingRow.ticker}
-                >
-                  {addingRow.isValidatingTicker ? "확인 중..." : "확인"}
-                </button>
+              <div className="d-flex flex-column gap-1">
+                <div className="d-flex gap-1 align-items-center">
+                  <input
+                    type="text"
+                    className="form-control form-control-sm"
+                    style={{ width: "80px", textAlign: "center" }}
+                    placeholder="티커"
+                    value={addingRow.ticker}
+                    onChange={(e) => setAddingRow({ ...addingRow, ticker: e.target.value, validationError: undefined })}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleValidateTicker(); }}
+                    disabled={addingRow.isValidatingTicker}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-link btn-sm p-0"
+                    style={{ fontSize: "0.75rem" }}
+                    onClick={handleValidateTicker}
+                    disabled={addingRow.isValidatingTicker || !addingRow.ticker}
+                  >
+                    {addingRow.isValidatingTicker ? "확인 중..." : "확인"}
+                  </button>
+                </div>
               </div>
             );
           }
@@ -547,6 +552,7 @@ export function AssetsManager() {
                 value={addingRow.quantity}
                 onChange={(e) => setAddingRow({ ...addingRow, quantity: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") handleAddRowSave(); if (e.key === "Escape") handleAddRowCancel(); }}
+                disabled={!addingRow.isValidated || isPending}
               />
             );
           }
@@ -583,6 +589,7 @@ export function AssetsManager() {
                 value={addingRow.average_buy_price}
                 onChange={(e) => setAddingRow({ ...addingRow, average_buy_price: e.target.value })}
                 onKeyDown={(e) => { if (e.key === "Enter") handleAddRowSave(); if (e.key === "Escape") handleAddRowCancel(); }}
+                disabled={!addingRow.isValidated || isPending}
               />
             );
           }
@@ -609,6 +616,14 @@ export function AssetsManager() {
         width: 120,
         align: "right",
         headerAlign: "right",
+      },
+      {
+        field: "days_held",
+        headerName: "보유일",
+        minWidth: 80,
+        width: 80,
+        align: "center",
+        headerAlign: "center",
       },
       {
         field: "pnl_krw",
@@ -682,12 +697,6 @@ export function AssetsManager() {
 
   return (
     <div className="appPageStack">
-      {error ? (
-        <div className="appBannerStack">
-          <div className="bannerError">{error}</div>
-        </div>
-      ) : null}
-
       <section className="appSection appSectionFill">
         <div className="card appCard">
           <div className="card-header">
