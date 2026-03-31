@@ -19,6 +19,7 @@ type HoldingsRow = {
   valuation_krw: number;
   bucket_id: number;
   bucket: string;
+  memo: string;
 };
 
 type ViewMode = "price" | "valuation";
@@ -34,8 +35,8 @@ export default function HomePage() {
         const res = await fetch("/api/assets");
         if (res.ok) {
           const data = await res.json();
-          // 티커가 있는 실질적인 종목만 표시 (예: 현금성 항목 제외, 단 IS는 포함)
-          const rows = (data.rows || []).filter((r: any) => r.ticker);
+          // 티커가 있고 수량이 0보다 큰 실질적인 종목만 표시
+          const rows = (data.rows || []).filter((r: any) => r.ticker && r.quantity > 0);
           setHoldings(rows);
         }
       } catch (err) {

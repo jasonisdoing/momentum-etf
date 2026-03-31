@@ -110,6 +110,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "daily_change_pct": float(row.get("일간(%)") or 0) if row.get("일간(%)") is not None else None,
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
+                    "memo": str(row.get("memo") or "").strip(),
                 }
             )
 
@@ -159,7 +160,7 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
     return {"deleted": ticker}
 
 
-def update_holding(account_id: str, ticker: str, quantity: int | None = None, average_buy_price: float | None = None) -> dict[str, str]:
+def update_holding(account_id: str, ticker: str, quantity: int | None = None, average_buy_price: float | None = None, memo: str | None = None) -> dict[str, str]:
     """계좌의 특정 종목 수량/매입단가를 수정한다."""
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip()
@@ -180,6 +181,8 @@ def update_holding(account_id: str, ticker: str, quantity: int | None = None, av
                 h["quantity"] = int(quantity)
             if average_buy_price is not None:
                 h["average_buy_price"] = float(average_buy_price)
+            if memo is not None:
+                h["memo"] = str(memo).strip()
             found = True
             break
 
@@ -190,7 +193,7 @@ def update_holding(account_id: str, ticker: str, quantity: int | None = None, av
     return {"updated": ticker}
 
 
-def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: float) -> dict[str, Any]:
+def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: float, memo: str | None = None) -> dict[str, Any]:
     """계좌에 새로운 종목을 추가한다."""
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip()
@@ -231,6 +234,7 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
         "currency": currency,
         "bucket": res.get("bucket_id", 1),
         "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
+        "memo": str(memo or "").strip(),
     }
 
     holdings.append(new_holding)
