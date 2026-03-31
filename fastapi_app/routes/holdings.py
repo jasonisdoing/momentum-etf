@@ -5,7 +5,13 @@ from typing import Any
 from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
-from utils.holdings_detail_service import delete_holding, load_all_holdings_detail, update_holding
+from utils.holdings_detail_service import (
+    add_holding,
+    delete_holding,
+    load_all_holdings_detail,
+    update_holding,
+    validate_ticker_for_account,
+)
 
 router = APIRouter(prefix="/internal/holdings", tags=["holdings"])
 
@@ -37,4 +43,28 @@ def patch_one_holding(
         ticker=body.get("ticker", ""),
         quantity=body.get("quantity"),
         average_buy_price=body.get("average_buy_price"),
+    )
+
+
+@router.post("")
+def post_one_holding(
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    return add_holding(
+        account_id=body.get("account_id", ""),
+        ticker=body.get("ticker", ""),
+        quantity=body.get("quantity", 0),
+        average_buy_price=body.get("average_buy_price", 0),
+    )
+
+
+@router.post("/validate")
+def validate_ticker(
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    return validate_ticker_for_account(
+        account_id=body.get("account_id", ""),
+        ticker=body.get("ticker", ""),
     )

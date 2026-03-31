@@ -97,4 +97,46 @@ export async function PATCH(request: Request) {
   }
 }
 
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const action = body.action ?? "create";
+
+    if (action === "validate") {
+      const payload = await fetchFastApiJson<{ ticker?: string; name?: string; bucket_id?: number; error?: string }>(
+        "/internal/holdings/validate",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            account_id: body.account_id,
+            ticker: body.ticker,
+          }),
+        },
+      );
+      return NextResponse.json(payload);
+    }
+
+    const payload = await fetchFastApiJson<{ added?: string; error?: string }>(
+      "/internal/holdings",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: body.account_id,
+          ticker: body.ticker,
+          quantity: body.quantity,
+          average_buy_price: body.average_buy_price,
+        }),
+      },
+    );
+    return NextResponse.json(payload);
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "요청 처리 중 오류가 발생했습니다." },
+      { status: 400 },
+    );
+  }
+}
+
 export const dynamic = "force-dynamic";
