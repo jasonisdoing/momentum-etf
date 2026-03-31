@@ -22,6 +22,7 @@ import {
   IconTrendingUp,
   IconActivity,
   IconX,
+  IconLayoutDashboard,
 } from "@tabler/icons-react";
 
 import { parseFearGreedSummary } from "@/lib/fear-greed";
@@ -265,6 +266,14 @@ export function AppShell({ children }: AppShellProps) {
               <HomeIcon size={18} stroke={1.9} />
             </span>
             <span className="nav-link-title">{homeItem.label}</span>
+          </Link>
+        </div>
+        <div className="nav-item appSidebarItem">
+          <Link href="/dashboard" className={pathname === "/dashboard" ? "nav-link active" : "nav-link"}>
+            <span className="appSidebarIcon" aria-hidden="true">
+              <IconLayoutDashboard size={18} stroke={1.9} />
+            </span>
+            <span className="nav-link-title">대시보드</span>
           </Link>
         </div>
       </div>
