@@ -45,12 +45,45 @@ export default function HomePage() {
     load();
   }, []);
 
+  const groupings = holdings.reduce((acc, h) => {
+    const key = h.account_name;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(h);
+    return acc;
+  }, {} as Record<string, HoldingsRow[]>);
+
+  // 계좌 그룹 내에서 버킷 순(bucket_id)으로 정렬
+  Object.keys(groupings).forEach((key) => {
+    groupings[key].sort((a, b) => a.bucket_id - b.bucket_id);
+  });
+
+  const accountNames = Object.keys(groupings);
+
+
   return (
     <PageFrame title="Home">
-      <div className="container-fluid py-3">
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <div className="text-secondary small">
-            총 {holdings.length}개 종목
+      <div className="container-fluid pt-1 pb-2">
+        <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+          <div className="d-flex align-items-center flex-wrap gap-3">
+            <div className="text-secondary small fw-bold">
+              총 {accountNames.length}개 계좌, {holdings.length}개 종목
+            </div>
+            <div className="d-flex align-items-center gap-2">
+              {[
+                { id: 1, name: "모멘텀", color: "#1e6bb8", sub: "#e7f1ff" },
+                { id: 2, name: "시장지수", color: "#2fb344", sub: "#eaf8ed" },
+                { id: 3, name: "미국배당", color: "#d63384", sub: "#fbebf3" },
+                { id: 4, name: "대체헷지", color: "#f76707", sub: "#fef0e7" },
+              ].map((b) => (
+                <div 
+                  key={b.id} 
+                  className="bucket-legend-badge" 
+                  style={{ backgroundColor: b.sub, color: b.color }}
+                >
+                  {b.id}. {b.name}
+                </div>
+              ))}
+            </div>
           </div>
           <div className="btn-group shadow-sm">
             <button
@@ -74,7 +107,7 @@ export default function HomePage() {
           <div className="d-flex justify-content-center py-5 mt-5">
             <div className="spinner-border text-primary" role="status"></div>
           </div>
-        ) : holdings.length === 0 ? (
+        ) : accountNames.length === 0 ? (
           <div className="card shadow-sm border-0 rounded-4">
             <div className="card-body py-5 text-center">
               <div className="empty">
@@ -84,10 +117,20 @@ export default function HomePage() {
             </div>
           </div>
         ) : (
-          <div className="row g-2 g-md-3">
-            {holdings.map((h, i) => (
-              <div key={`${h.ticker}-${i}`} className="col-6 col-lg-3">
-                <HoldingCard row={h} viewMode={viewMode} />
+          <div className="account-groups">
+            {accountNames.map((accountName) => (
+              <div key={accountName} className="account-section mb-2">
+                <h2 className="account-header h4 mb-1 d-flex align-items-center">
+                  <span className="account-dot me-2"></span>
+                  {accountName}
+                </h2>
+                <div className="row g-2 g-md-3">
+                  {groupings[accountName].map((h, i) => (
+                    <div key={`${h.ticker}-${i}`} className="col-6 col-lg-3">
+                      <HoldingCard row={h} viewMode={viewMode} />
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
@@ -99,6 +142,31 @@ export default function HomePage() {
           background-color: #f6f8fb !important;
         }
       `}</style>
+
+      <style jsx>{`
+        .account-header {
+          color: #1d273b;
+          font-weight: 800;
+          letter-spacing: -0.02em;
+          font-size: 1.1rem;
+        }
+        .account-dot {
+          display: inline-block;
+          width: 8px;
+          height: 8px;
+          background-color: #206bc4;
+          border-radius: 50%;
+        }
+        .bucket-legend-badge {
+          display: inline-flex;
+          align-items: center;
+          padding: 2px 8px;
+          border-radius: 999px;
+          font-size: 0.72rem;
+          font-weight: 700;
+          letter-spacing: -0.01em;
+        }
+      `}</style>
     </PageFrame>
   );
 }
@@ -108,6 +176,9 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
   const isPositive = (displayPct ?? 0) >= 0;
   const colorClass = isPositive ? "text-danger" : "text-primary";
   const sign = (displayPct ?? 0) > 0 ? "+" : "";
+
+  // 호주 종목은 티커로, 한국 종목은 이름으로 표시
+  const displayTitle = (row.currency === "AUD" && row.ticker !== "IS") ? row.ticker : row.name;
 
   const formatPrice = (val: number, currency: string) => {
     if (currency === "AUD") {
@@ -141,7 +212,7 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
         </div>
       </div>
       <div className="stock-content">
-        <div className="stock-name" title={row.name}>{row.name}</div>
+        <div className="stock-name" title={row.name}>{displayTitle}</div>
       </div>
       <div className="stock-stats text-end">
         <div className="stock-price">
@@ -259,7 +330,7 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
 
 function getTheme(bucketId: number) {
   switch (bucketId) {
-    case 1: return { main: "#1e6bb8", sub: "#e7f1ff" }; 
+    case 1: return { main: "#1e6bb8", sub: "#e7f1ff" };
     case 2: return { main: "#2fb344", sub: "#eaf8ed" };
     case 3: return { main: "#d63384", sub: "#fbebf3" };
     case 4: return { main: "#f76707", sub: "#fef0e7" };
