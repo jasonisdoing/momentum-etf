@@ -1409,6 +1409,15 @@ a {
   overflow-y: hidden;
 }
 
+.weeklyGridWrap {
+  height: calc(100vh - 180px);
+}
+
+.weeklyGridWrap .appDataGrid {
+  min-height: 0;
+  height: 100%;
+}
+
 .appDataGrid,
 .rankDataGrid {
   min-height: 70vh;
