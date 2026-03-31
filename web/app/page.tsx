@@ -227,7 +227,7 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
         <div className="stock-name" title={row.name}>{displayTitle}</div>
       </div>
       <div className="stock-stats text-end">
-        <div className="stock-price">
+        <div className={`stock-price ${colorClass}`} style={{ fontWeight: 700 }}>
           {viewMode === "price" ? formatPrice(row.current_price_num, row.currency) : formatValuation(row.valuation_krw)}
         </div>
         <div className={`stock-change ${colorClass}`}>
