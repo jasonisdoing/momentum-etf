@@ -306,9 +306,9 @@ export function AssetsManager() {
   const columns = useMemo<GridColDef<GridRow>[]>(
     () => [
       {
-        field: "__actions__",
+        field: "__edit__",
         headerName: "",
-        width: 100,
+        width: 58,
         sortable: false,
         filterable: false,
         disableColumnMenu: true,
@@ -323,10 +323,7 @@ export function AssetsManager() {
             );
           }
           return (
-            <span className="d-flex gap-1">
-              <button type="button" className="btn btn-link btn-sm p-0 appEditLink" onClick={() => startEditing(params.row)} disabled={isPending}>수정</button>
-              <button type="button" className="btn btn-link btn-sm p-0" style={{ color: "#dc3545" }} onClick={() => handleDelete(params.row.ticker)} disabled={isPending}>삭제</button>
-            </span>
+            <button type="button" className="btn btn-link btn-sm p-0 appEditLink" onClick={() => startEditing(params.row)} disabled={isPending}>수정</button>
           );
         },
       },
@@ -443,6 +440,17 @@ export function AssetsManager() {
         align: "right",
         headerAlign: "right",
         renderCell: (params) => formatKrw(params.value ?? 0),
+      },
+      {
+        field: "__delete__",
+        headerName: "",
+        width: 58,
+        sortable: false,
+        filterable: false,
+        disableColumnMenu: true,
+        renderCell: (params: GridRenderCellParams<GridRow>) => (
+          <button type="button" className="btn btn-link btn-sm p-0" style={{ color: "#dc3545" }} onClick={() => handleDelete(params.row.ticker)} disabled={isPending}>삭제</button>
+        ),
       },
     ],
     [editing, isPending],
