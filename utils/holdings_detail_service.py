@@ -67,10 +67,20 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
 
             avg_price = float(row.get("평균 매입가") or 0)
             current_price = float(row.get("현재가") or 0)
-            quantity = int(row.get("수량") or 0)
-            buy_amount = int(row.get("매입금액(KRW)") or 0)
-            val_amount = int(row.get("평가금액(KRW)") or 0)
-            pnl = int(row.get("평가손익(KRW)") or 0)
+            # NaN/None 방어 로직 추가
+            def safe_int(val):
+                import pandas as pd
+                if pd.isna(val) or val is None:
+                    return 0
+                try:
+                    return int(float(val))
+                except (ValueError, TypeError):
+                    return 0
+
+            quantity = safe_int(row.get("수량"))
+            buy_amount = safe_int(row.get("매입금액(KRW)"))
+            val_amount = safe_int(row.get("평가금액(KRW)"))
+            pnl = safe_int(row.get("평가손익(KRW)"))
             ret_pct = float(row.get("수익률(%)") or 0)
 
             # 현지 통화 가격 포맷
@@ -93,6 +103,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "current_price": f"{price_prefix}{current_price:,.2f}"
                     if price_prefix
                     else f"{current_price:,.0f}원",
+                    "days_held": str(row.get("보유일", "-")),
                     "pnl_krw": pnl,
                     "return_pct": round(ret_pct, 2),
                     "buy_amount_krw": buy_amount,
@@ -185,7 +196,17 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
     if not account_id or not ticker:
         raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
-    raw_ticker = ticker.replace("ASX:", "")
+    # 1. 티커 검증 및 상세 메타데이터 가져오기 (종목명, 버킷 등)
+    res = validate_ticker_for_account(account_id, ticker)
+    raw_ticker = res["ticker"]
+
+    # 2. 계좌 설정에서 통화 정보 가져오기
+    from utils.settings_loader import get_account_settings
+    try:
+        settings = get_account_settings(account_id)
+        currency = settings.get("currency", "KRW")
+    except Exception:
+        currency = "KRW"
 
     master = load_portfolio_master(account_id)
     if not master:
@@ -198,23 +219,27 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
         if str(h.get("ticker", "")).strip() == raw_ticker:
             raise RuntimeError(f"종목 {ticker}은 이미 등록되어 있습니다.")
 
-    # 새로운 종목 추가
+    # 3. 정석적인 구조로 새로운 종목 구성
+    from datetime import datetime
     new_holding = {
         "ticker": raw_ticker,
+        "name": res["name"],
         "quantity": int(quantity),
         "average_buy_price": float(average_buy_price),
+        "currency": currency,
+        "bucket": res.get("bucket_id", 1),
+        "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
     }
 
     holdings.append(new_holding)
     save_portfolio_master(account_id, holdings)
 
-    return {"added": ticker}
+    return {"added": ticker, "name": res["name"]}
 
 
 def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     """계좌에 추가할 수 있는 유효한 티커인지 검증한다."""
-    from pymongo import MongoClient
-    from config import DB_NAME
+    from utils.db_manager import get_db_connection
 
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip().upper()
@@ -227,55 +252,57 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     if not raw_ticker:
         raise RuntimeError("유효한 티커를 입력하세요.")
 
-    # 계좌 설정 조회
-    all_accounts = load_account_configs()
-    account = next((a for a in all_accounts if str(a.get("account_id")) == account_id), None)
-    if not account:
-        raise RuntimeError("계좌를 찾을 수 없습니다.")
+    from utils.settings_loader import get_account_settings
+    from utils.stocks_service import validate_stock_candidate
 
-    settings = account.get("settings") or {}
-    country_code = str(settings.get("country_code") or "").strip().lower()
-
-    # stock_meta에서 조회
+    # 1. 계좌 설정 로드 (zaccounts/ 하위의 실제 설정 파일 읽기)
     try:
-        client = MongoClient("mongodb://localhost:27017")
-        db = client[DB_NAME]
-        stock_meta = db["stock_meta"]
-
-        # ticker_type 결정 (임시: country_code 기반)
-        if country_code == "kor":
-            ticker_types = ["kr-fund", "kr-stock"]
-        elif country_code == "us":
-            ticker_types = ["us-etf", "us-stock"]
-        elif country_code == "au":
-            ticker_types = ["au-etf", "au-stock"]
-        else:
-            ticker_types = ["kr-fund", "kr-stock"]  # 기본값
-
-        # 등록된 종목 찾기
-        doc = None
-        for tt in ticker_types:
-            doc = stock_meta.find_one({
-                "ticker_type": tt,
-                "ticker": raw_ticker,
-                "is_deleted": {"$ne": True},
-            })
-            if doc:
-                break
-
-        if not doc:
-            raise RuntimeError(f"등록되지 않은 종목입니다: {ticker}")
-
-        return {
-            "ticker": raw_ticker,
-            "name": str(doc.get("name") or ""),
-            "bucket_id": int(doc.get("bucket") or 1),
-        }
-
+        settings = get_account_settings(account_id)
+        # account_settings["settings"]가 아닌 top-level에 있는 경우가 많음
+        inner_settings = settings.get("settings") or settings
     except Exception as e:
-        if "등록되지 않은 종목" in str(e):
-            raise
-        raise RuntimeError(f"티커 검증 중 오류: {e}")
-    finally:
-        if 'client' in locals():
-            client.close()
+        raise RuntimeError(f"계좌 설정을 찾을 수 없습니다: {account_id} ({e})")
+
+    # 2. 계좌의 ticker_types 목록 추출 (실제 필드명인 'ticker_codes' 사용)
+    ticker_types = settings.get("ticker_codes") or []
+    
+    if isinstance(ticker_types, str):
+        ticker_types = [ticker_types]
+
+    if not ticker_types:
+        available_keys = list(settings.keys())
+        raise RuntimeError(f"계좌 설정({account_id})에서 'ticker_codes'를 찾을 수 없습니다. (Keys: {available_keys})")
+
+    # 3. 기존 "종목 추가" 모달과 동일한 검증 엔진 사용
+    last_error = None
+    validated_res = None
+    
+    for tt in ticker_types:
+        try:
+            # StocksManager가 사용하는 동일한 함수 호출
+            validated_res = validate_stock_candidate(tt, ticker)
+            break # 성공하면 루프 중단
+        except Exception as e:
+            last_error = str(e)
+            continue
+
+    if not validated_res:
+        raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {ticker}")
+
+    # 포트폴리오 중복 확인
+    db = get_db_connection()
+    if db is not None:
+        existing = db.holdings.find_one({
+            "account_id": account_id,
+            "ticker": validated_res["ticker"],
+            "is_deleted": {"$ne": True}
+        })
+        if existing:
+            raise RuntimeError(f"이미 포트폴리오에 등록된 종목입니다: {validated_res['ticker']}")
+
+    return {
+        "ticker": validated_res["ticker"],
+        "name": validated_res["name"],
+        "bucket_id": validated_res.get("bucket_id") or 1,
+        "status": "success"
+    }
