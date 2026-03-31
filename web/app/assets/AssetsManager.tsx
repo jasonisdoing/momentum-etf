@@ -47,6 +47,7 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
+  memo: string;
 };
 
 type HoldingsResponse = {
@@ -63,6 +64,7 @@ type EditingState = {
   ticker: string;
   quantity: string;
   average_buy_price: string;
+  memo: string;
 };
 
 type AddingRowState = {
@@ -74,6 +76,7 @@ type AddingRowState = {
   name?: string;
   bucketId?: number;
   isValidated?: boolean;
+  memo: string;
 };
 
 type CashEditingState = {
@@ -208,6 +211,7 @@ export function AssetsManager() {
       ticker: "",
       quantity: "",
       average_buy_price: "",
+      memo: "",
     });
   }
 
@@ -280,10 +284,10 @@ export function AssetsManager() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            account_id: selectedAccountId,
             ticker: addingRow.ticker,
             quantity,
             average_buy_price: avgPrice,
+            memo: addingRow.memo,
           }),
         });
         const payload = await response.json();
@@ -304,6 +308,7 @@ export function AssetsManager() {
       ticker: row.ticker,
       quantity: String(row.quantity),
       average_buy_price: parseRawPrice(row.average_buy_price),
+      memo: row.memo || "",
     });
   }
 
@@ -332,10 +337,10 @@ export function AssetsManager() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            account_id: selectedAccountId,
             ticker: editing.ticker,
             quantity,
             average_buy_price: avgPrice,
+            memo: editing.memo,
           }),
         });
         const payload = await response.json();
@@ -427,6 +432,7 @@ export function AssetsManager() {
             return_pct: 0,
             buy_amount_krw: 0,
             valuation_krw: 0,
+            memo: addingRow.memo,
           } as GridRow,
           ...baseRows,
         ];
@@ -468,12 +474,12 @@ export function AssetsManager() {
           );
         },
       },
-      { field: "currency", headerName: "환종", minWidth: 70, width: 70, align: "center", headerAlign: "center" },
+      { field: "currency", headerName: "환종", minWidth: 60, width: 60, align: "center", headerAlign: "center" },
       {
         field: "bucket",
         headerName: "버킷",
-        minWidth: 108,
-        width: 108,
+        minWidth: 90,
+        width: 90,
         sortable: false,
         cellClassName: (params) => getBucketCellClass(params.row.bucket_id),
         renderCell: (params) => <span>{String(params.value ?? "-")}</span>,
@@ -481,8 +487,8 @@ export function AssetsManager() {
       {
         field: "ticker",
         headerName: "종목코드",
-        minWidth: 110,
-        width: 110,
+        minWidth: 95,
+        width: 95,
         renderCell: (params: GridRenderCellParams<GridRow>) => {
           if (addingRow && params.row.id === "__adding__") {
             if (addingRow.isValidated) {
@@ -493,7 +499,7 @@ export function AssetsManager() {
                     type="button"
                     className="btn btn-link btn-sm p-0"
                     style={{ fontSize: "0.75rem", color: "#6c757d" }}
-                    onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "" })}
+                    onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", memo: "" })}
                   >
                     변경
                   </button>
@@ -510,7 +516,10 @@ export function AssetsManager() {
                     placeholder="티커"
                     value={addingRow.ticker}
                     onChange={(e) => setAddingRow({ ...addingRow, ticker: e.target.value, validationError: undefined })}
-                    onKeyDown={(e) => { if (e.key === "Enter") handleValidateTicker(); }}
+                    onKeyDown={(e) => {
+                      if (e.nativeEvent.isComposing) return;
+                      if (e.key === "Enter") handleValidateTicker();
+                    }}
                     disabled={addingRow.isValidatingTicker}
                   />
                   <button
@@ -529,7 +538,7 @@ export function AssetsManager() {
           return <span className="appCodeText">{String(params.value ?? "-")}</span>;
         },
       },
-      { field: "name", headerName: "종목명", minWidth: 220, flex: 1, renderCell: (params: GridRenderCellParams<GridRow>) => {
+      { field: "name", headerName: "종목명", minWidth: 180, flex: 1, renderCell: (params: GridRenderCellParams<GridRow>) => {
         if (addingRow && params.row.id === "__adding__") {
           return addingRow.name ? <span>{addingRow.name}</span> : <span style={{ color: "#6c757d", fontSize: "0.85rem" }}>―</span>;
         }
@@ -538,8 +547,8 @@ export function AssetsManager() {
       {
         field: "quantity",
         headerName: "수량",
-        minWidth: 100,
-        width: 100,
+        minWidth: 80,
+        width: 80,
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<GridRow>) => {
@@ -574,8 +583,8 @@ export function AssetsManager() {
       {
         field: "average_buy_price",
         headerName: "매입 단가",
-        minWidth: 130,
-        width: 130,
+        minWidth: 110,
+        width: 110,
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<GridRow>) => {
@@ -612,24 +621,24 @@ export function AssetsManager() {
       {
         field: "current_price",
         headerName: "현재가",
-        minWidth: 120,
-        width: 120,
+        minWidth: 100,
+        width: 100,
         align: "right",
         headerAlign: "right",
       },
       {
         field: "days_held",
         headerName: "보유일",
-        minWidth: 80,
-        width: 80,
+        minWidth: 65,
+        width: 65,
         align: "center",
         headerAlign: "center",
       },
       {
         field: "pnl_krw",
         headerName: "평가손익",
-        minWidth: 130,
-        width: 130,
+        minWidth: 120,
+        width: 120,
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<GridRow, number>) => (
@@ -639,8 +648,8 @@ export function AssetsManager() {
       {
         field: "return_pct",
         headerName: "수익률",
-        minWidth: 90,
-        width: 90,
+        minWidth: 80,
+        width: 80,
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<GridRow, number>) => {
@@ -651,8 +660,8 @@ export function AssetsManager() {
       {
         field: "buy_amount_krw",
         headerName: "매입 금액",
-        minWidth: 140,
-        width: 140,
+        minWidth: 120,
+        width: 120,
         align: "right",
         headerAlign: "right",
         renderCell: (params) => formatKrw(params.value ?? 0),
@@ -660,11 +669,53 @@ export function AssetsManager() {
       {
         field: "valuation_krw",
         headerName: "평가 금액",
-        minWidth: 140,
-        width: 140,
+        minWidth: 120,
+        width: 120,
         align: "right",
         headerAlign: "right",
         renderCell: (params) => formatKrw(params.value ?? 0),
+      },
+      {
+        field: "memo",
+        headerName: "메모",
+        minWidth: 200,
+        flex: 1.5,
+        renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (addingRow && params.row.id === "__adding__") {
+            return (
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                placeholder="메모 입력"
+                value={addingRow.memo}
+                onChange={(e) => setAddingRow({ ...addingRow, memo: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === "Enter") handleAddRowSave();
+                  if (e.key === "Escape") handleAddRowCancel();
+                }}
+                disabled={!addingRow.isValidated || isPending}
+              />
+            );
+          }
+          if (editing?.ticker === params.row.ticker) {
+            return (
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                placeholder="메모 수정"
+                value={editing.memo}
+                onChange={(e) => setEditing({ ...editing, memo: e.target.value })}
+                onKeyDown={(e) => {
+                  if (e.nativeEvent.isComposing) return;
+                  if (e.key === "Enter") handleSave();
+                  if (e.key === "Escape") cancelEditing();
+                }}
+              />
+            );
+          }
+          return <span className="text-secondary" style={{ fontSize: "0.85rem" }}>{params.value || "-"}</span>;
+        },
       },
       {
         field: "__delete__",
@@ -726,7 +777,7 @@ export function AssetsManager() {
                 <div className="stocksSummary d-flex align-items-center gap-3">
                   <div className="d-flex align-items-center gap-1">
                     <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 종목 수:</span>
-                    <span style={{ fontWeight: 700 }}>{rows.length}개</span>
+                    <span style={{ fontWeight: 700 }}>{rows.filter(r => r.quantity > 0).length}개</span>
                   </div>
                   <div className="d-flex align-items-center gap-1">
                     <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 평가액:</span>
