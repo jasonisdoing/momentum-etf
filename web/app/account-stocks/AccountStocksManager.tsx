@@ -114,7 +114,25 @@ export function AccountStocksManager() {
       writeRememberedMomentumEtfAccountId(nextAccountId);
       setAvailableTickers(payload.available_tickers ?? []);
 
-      setRows((payload.rows || []).map(r => ({ ...r, id: r.ticker.trim().toUpperCase() })));
+      const sortedRows = (payload.rows || []).map(r => ({ 
+        ...r, 
+        id: r.ticker.trim().toUpperCase() 
+      })).sort((a, b) => {
+        // 1. 버킷 (오름차순)
+        if (a.bucket_id !== b.bucket_id) {
+          return a.bucket_id - b.bucket_id;
+        }
+        // 2. 비중 (내림차순)
+        if (a.ratio !== b.ratio) {
+          return b.ratio - a.ratio;
+        }
+        // 3. 일간(%) (내림차순)
+        const retA = a.return_1d ?? -999;
+        const retB = b.return_1d ?? -999;
+        return retB - retA;
+      });
+
+      setRows(sortedRows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "데이터를 불러오지 못했습니다.");
     } finally {
