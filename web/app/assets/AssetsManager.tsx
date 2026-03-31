@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
+import { IconPlus } from "@tabler/icons-react";
 
 import { AppDataGrid } from "../components/AppDataGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
@@ -63,6 +64,17 @@ type EditingState = {
   average_buy_price: string;
 };
 
+type AddingRowState = {
+  ticker: string;
+  quantity: string;
+  average_buy_price: string;
+  isValidatingTicker?: boolean;
+  validationError?: string;
+  name?: string;
+  bucketId?: number;
+  isValidated?: boolean;
+};
+
 type CashEditingState = {
   total_principal: string;
   cash_value: string;
@@ -103,6 +115,7 @@ export function AssetsManager() {
   const [loading, setLoading] = useState(!holdingsDataCache[readRememberedMomentumEtfAccountId() ?? ""]);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<EditingState | null>(null);
+  const [addingRow, setAddingRow] = useState<AddingRowState | null>(null);
   const [cashEditing, setCashEditing] = useState<CashEditingState | null>(null);
   const [isPending, startTransition] = useTransition();
   const toast = useToast();
@@ -118,8 +131,6 @@ export function AssetsManager() {
     } else if (!silent) {
       setLoading(true);
     }
-
-    setError(null);
 
     try {
       const search = targetId !== null ? `?account=${encodeURIComponent(targetId)}` : "";
@@ -146,7 +157,7 @@ export function AssetsManager() {
         writeRememberedMomentumEtfAccountId(returnedId);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
+      toast.error(err instanceof Error ? err.message : "보유 종목을 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
@@ -160,7 +171,9 @@ export function AssetsManager() {
     setSelectedAccountId(nextId);
     writeRememberedMomentumEtfAccountId(nextId);
     setEditing(null);
+    setAddingRow(null);
     setCashEditing(null);
+    setError(null);
 
     const cached = holdingsDataCache[nextId];
     if (cached) {
@@ -186,7 +199,100 @@ export function AssetsManager() {
         await load(selectedAccountId, true);
         toast.success(`${ticker} 삭제 완료`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "삭제에 실패했습니다.");
+        toast.error(err instanceof Error ? err.message : "삭제에 실패했습니다.");
+      }
+    });
+  }
+
+  function handleAddRowStart() {
+    setAddingRow({
+      ticker: "",
+      quantity: "",
+      average_buy_price: "",
+    });
+  }
+
+  function handleAddRowCancel() {
+    setAddingRow(null);
+  }
+
+  function handleValidateTicker() {
+    if (!addingRow?.ticker) return;
+
+    setAddingRow((prev) => prev ? { ...prev, isValidatingTicker: true, validationError: undefined } : null);
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "validate",
+            account_id: selectedAccountId,
+            ticker: addingRow.ticker,
+          }),
+        });
+        const payload = await response.json();
+
+        if (!response.ok) {
+          const errorMsg = payload.error ?? "검증 실패";
+          setAddingRow((prev) => prev ? { ...prev, isValidatingTicker: false, validationError: errorMsg } : null);
+          toast.error(errorMsg);
+          return;
+        }
+
+        setAddingRow((prev) => prev ? {
+          ...prev,
+          isValidatingTicker: false,
+          isValidated: true,
+          name: payload.name ?? "",
+          bucketId: payload.bucket_id ?? 1,
+          ticker: payload.ticker ?? addingRow.ticker,
+        } : null);
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : "검증 중 오류 발생";
+        setAddingRow((prev) => prev ? { ...prev, isValidatingTicker: false, validationError: errorMsg } : null);
+        toast.error(errorMsg);
+      }
+    });
+  }
+
+  function handleAddRowSave() {
+    if (!addingRow) return;
+
+    const quantity = parseInt(addingRow.quantity, 10);
+    const avgPrice = parseFloat(addingRow.average_buy_price);
+
+    if (Number.isNaN(quantity) || quantity < 0) {
+      toast.error("수량이 올바르지 않습니다.");
+      return;
+    }
+    if (Number.isNaN(avgPrice) || avgPrice < 0) {
+      toast.error("매입 단가가 올바르지 않습니다.");
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const response = await fetch("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            account_id: selectedAccountId,
+            ticker: addingRow.ticker,
+            quantity,
+            average_buy_price: avgPrice,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error ?? "추가 실패");
+
+        setAddingRow(null);
+        delete holdingsDataCache[selectedAccountId];
+        await load(selectedAccountId, true);
+        toast.success(`${addingRow.ticker} 추가 완료`);
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "종목 추가에 실패했습니다.");
       }
     });
   }
@@ -210,11 +316,11 @@ export function AssetsManager() {
     const avgPrice = parseFloat(editing.average_buy_price);
 
     if (Number.isNaN(quantity) || quantity < 0) {
-      setError("수량이 올바르지 않습니다.");
+      toast.error("수량이 올바르지 않습니다.");
       return;
     }
     if (Number.isNaN(avgPrice) || avgPrice < 0) {
-      setError("매입 단가가 올바르지 않습니다.");
+      toast.error("매입 단가가 올바르지 않습니다.");
       return;
     }
 
@@ -238,7 +344,7 @@ export function AssetsManager() {
         await load(selectedAccountId, true);
         toast.success(`${editing.ticker} 수정 완료`);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "수정에 실패했습니다.");
+        toast.error(err instanceof Error ? err.message : "수정에 실패했습니다.");
       }
     });
   }
@@ -299,8 +405,32 @@ export function AssetsManager() {
   }
 
   const gridRows = useMemo<GridRow[]>(
-    () => rows.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` })),
-    [rows],
+    () => {
+      const baseRows = rows.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` }));
+      if (addingRow) {
+        return [
+          {
+            id: "__adding__",
+            account_name: accounts.find((a) => a.account_id === selectedAccountId)?.name ?? "",
+            currency: "",
+            bucket: "",
+            bucket_id: 0,
+            ticker: addingRow.ticker,
+            name: "",
+            quantity: parseInt(addingRow.quantity, 10) || 0,
+            average_buy_price: addingRow.average_buy_price,
+            current_price: "-",
+            pnl_krw: 0,
+            return_pct: 0,
+            buy_amount_krw: 0,
+            valuation_krw: 0,
+          } as GridRow,
+          ...baseRows,
+        ];
+      }
+      return baseRows;
+    },
+    [rows, addingRow, selectedAccountId, accounts],
   );
 
   const columns = useMemo<GridColDef<GridRow>[]>(
@@ -313,6 +443,14 @@ export function AssetsManager() {
         filterable: false,
         disableColumnMenu: true,
         renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (addingRow && params.row.id === "__adding__") {
+            return (
+              <span className="d-flex gap-1">
+                <button type="button" className="btn btn-link btn-sm p-0 appEditLink" onClick={handleAddRowSave} disabled={isPending || !addingRow.isValidated || !addingRow.quantity || !addingRow.average_buy_price}>저장</button>
+                <button type="button" className="btn btn-link btn-sm p-0" style={{ color: "#6c757d" }} onClick={handleAddRowCancel} disabled={isPending}>취소</button>
+              </span>
+            );
+          }
           const isEditing = editing?.ticker === params.row.ticker;
           if (isEditing) {
             return (
@@ -342,9 +480,56 @@ export function AssetsManager() {
         headerName: "종목코드",
         minWidth: 110,
         width: 110,
-        renderCell: (params) => <span className="appCodeText">{String(params.value ?? "-")}</span>,
+        renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (addingRow && params.row.id === "__adding__") {
+            if (addingRow.isValidated) {
+              return (
+                <div className="d-flex gap-2 align-items-center">
+                  <span className="appCodeText" style={{ fontWeight: 600 }}>{addingRow.ticker}</span>
+                  <button
+                    type="button"
+                    className="btn btn-link btn-sm p-0"
+                    style={{ fontSize: "0.75rem", color: "#6c757d" }}
+                    onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "" })}
+                  >
+                    변경
+                  </button>
+                </div>
+              );
+            }
+            return (
+              <div className="d-flex gap-1 align-items-center">
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  style={{ width: "60px", textAlign: "center" }}
+                  placeholder="티커"
+                  value={addingRow.ticker}
+                  onChange={(e) => setAddingRow({ ...addingRow, ticker: e.target.value, validationError: undefined })}
+                  onKeyDown={(e) => { if (e.key === "Enter") handleValidateTicker(); }}
+                  disabled={addingRow.isValidatingTicker}
+                />
+                <button
+                  type="button"
+                  className="btn btn-link btn-sm p-0"
+                  style={{ fontSize: "0.75rem" }}
+                  onClick={handleValidateTicker}
+                  disabled={addingRow.isValidatingTicker || !addingRow.ticker}
+                >
+                  {addingRow.isValidatingTicker ? "확인 중..." : "확인"}
+                </button>
+              </div>
+            );
+          }
+          return <span className="appCodeText">{String(params.value ?? "-")}</span>;
+        },
       },
-      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      { field: "name", headerName: "종목명", minWidth: 220, flex: 1, renderCell: (params: GridRenderCellParams<GridRow>) => {
+        if (addingRow && params.row.id === "__adding__") {
+          return addingRow.name ? <span>{addingRow.name}</span> : <span style={{ color: "#6c757d", fontSize: "0.85rem" }}>―</span>;
+        }
+        return <span>{params.value ?? "-"}</span>;
+      } },
       {
         field: "quantity",
         headerName: "수량",
@@ -353,6 +538,18 @@ export function AssetsManager() {
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (addingRow && params.row.id === "__adding__") {
+            return (
+              <input
+                type="number"
+                className="form-control form-control-sm"
+                style={{ width: "80px", textAlign: "right" }}
+                value={addingRow.quantity}
+                onChange={(e) => setAddingRow({ ...addingRow, quantity: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAddRowSave(); if (e.key === "Escape") handleAddRowCancel(); }}
+              />
+            );
+          }
           if (editing?.ticker === params.row.ticker) {
             return (
               <input
@@ -376,6 +573,19 @@ export function AssetsManager() {
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<GridRow>) => {
+          if (addingRow && params.row.id === "__adding__") {
+            return (
+              <input
+                type="number"
+                step="0.0001"
+                className="form-control form-control-sm"
+                style={{ width: "110px", textAlign: "right" }}
+                value={addingRow.average_buy_price}
+                onChange={(e) => setAddingRow({ ...addingRow, average_buy_price: e.target.value })}
+                onKeyDown={(e) => { if (e.key === "Enter") handleAddRowSave(); if (e.key === "Escape") handleAddRowCancel(); }}
+              />
+            );
+          }
           if (editing?.ticker === params.row.ticker) {
             return (
               <input
@@ -453,7 +663,7 @@ export function AssetsManager() {
         ),
       },
     ],
-    [editing, isPending],
+    [editing, isPending, addingRow],
   );
 
   if (loading) {
@@ -482,7 +692,7 @@ export function AssetsManager() {
         <div className="card appCard">
           <div className="card-header">
             <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="tickerTypeToolbarLeft">
+              <div className="tickerTypeToolbarLeft" style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                 <div className="accountSelect">
                   <select
                     className="form-select"
@@ -498,6 +708,10 @@ export function AssetsManager() {
                     ))}
                   </select>
                 </div>
+                <button className="btn btn-primary d-flex align-items-center gap-1" type="button" onClick={handleAddRowStart} disabled={loading} style={{ fontWeight: 600 }}>
+                  <IconPlus size={18} stroke={2} />
+                  <span>종목 추가</span>
+                </button>
               </div>
               <div className="tickerTypeToolbarRight">
                 <div className="stocksSummary d-flex align-items-center gap-3">
