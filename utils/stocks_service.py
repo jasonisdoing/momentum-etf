@@ -132,6 +132,9 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "return_1d": normalize_nullable_number(
                     realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate") 
                 ),
+                "괴리율": normalize_nullable_number(
+                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
+                ),
                 "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
                 "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
                 "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
@@ -392,6 +395,9 @@ def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
                 "return_1d": normalize_nullable_number(
                     realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate") 
+                ),
+                "괴리율": normalize_nullable_number(
+                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
                 ),
                 "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
                 "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
