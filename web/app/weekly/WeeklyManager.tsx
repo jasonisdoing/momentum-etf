@@ -279,12 +279,12 @@ export function WeeklyManager() {
         type: "string",
         minWidth:
           column.key === "week_date_display"
-            ? 118
+            ? 125
             : column.key === "memo"
               ? 200
               : MONEY_KEYS.has(column.key)
                 ? 92
-                : PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
+                : PERCENT_KEYS.has(column.key)
                   ? 80
                   : 72,
         flex: column.key === "memo" ? 1.4 : column.key === "week_date_display" ? 0 : undefined,
