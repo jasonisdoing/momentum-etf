@@ -48,6 +48,7 @@ type WeeklyResponse = {
   active_week_date?: string;
   rows?: WeeklyRow[];
   editable_fields?: WeeklyEditableField[];
+  read_only_keys?: string[];
   core_hidden_keys?: string[];
   error?: string;
 };
@@ -166,6 +167,18 @@ function getColumnCellClass(key: string, value: number | string): string {
   return classes.join(" ");
 }
 
+function formatReadOnlyValue(field: WeeklyEditableField, value: WeeklyRow | null): string {
+  if (!value) return "-";
+  const raw = value[field.key as keyof WeeklyRow];
+  if (field.type === "text") return String(raw ?? "-");
+  const num = Number(raw ?? 0);
+  if (PERCENT_KEYS.has(field.key)) return formatPercent(num);
+  if (field.key === "exchange_rate") return formatExchangeRate(num);
+  if (MONEY_KEYS.has(field.key)) return formatMoney(num);
+  if (field.type === "float") return num.toFixed(2);
+  return new Intl.NumberFormat("ko-KR").format(num);
+}
+
 function toInputText(field: WeeklyEditableField, value: WeeklyRow | null): string {
   if (!value) {
     return "";
@@ -174,12 +187,16 @@ function toInputText(field: WeeklyEditableField, value: WeeklyRow | null): strin
   if (field.type === "text") {
     return String(raw ?? "");
   }
+  if (field.type === "float") {
+    return Number(raw ?? 0).toFixed(2);
+  }
   return String(raw ?? 0);
 }
 
 export function WeeklyManager() {
   const [rows, setRows] = useState<WeeklyRow[]>([]);
   const [editableFields, setEditableFields] = useState<WeeklyEditableField[]>([]);
+  const [readOnlyKeys, setReadOnlyKeys] = useState<Set<string>>(new Set());
   const [activeWeekDate, setActiveWeekDate] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("core");
   const [coreHiddenKeys, setCoreHiddenKeys] = useState<string[]>([]);
@@ -205,6 +222,7 @@ export function WeeklyManager() {
       }
       setRows(payload.rows ?? []);
       setEditableFields(payload.editable_fields ?? []);
+      setReadOnlyKeys(new Set(payload.read_only_keys ?? []));
       setCoreHiddenKeys(payload.core_hidden_keys ?? []);
       setActiveWeekDate(payload.active_week_date ?? "");
     } catch (loadError) {
@@ -241,7 +259,7 @@ export function WeeklyManager() {
       {
         field: "__edit__",
         headerName: "",
-        width: 58,
+        width: 48,
         sortable: false,
         filterable: false,
         disableColumnMenu: true,
@@ -261,12 +279,14 @@ export function WeeklyManager() {
         type: "string",
         minWidth:
           column.key === "week_date_display"
-            ? 132
+            ? 118
             : column.key === "memo"
-              ? 320
-              : MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
-                ? 108
-                : 96,
+              ? 200
+              : MONEY_KEYS.has(column.key)
+                ? 92
+                : PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
+                  ? 80
+                  : 72,
         flex: column.key === "memo" ? 1.4 : column.key === "week_date_display" ? 0 : undefined,
         align:
           MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
@@ -338,13 +358,15 @@ export function WeeklyManager() {
           body: JSON.stringify({
             week_date: editingRow.week_date,
             ...Object.fromEntries(
-              editableFields.map((field) => {
-                if (field.type === "text") {
-                  return [field.key, editingValues[field.key] ?? ""];
-                }
-                const normalized = Number(editingValues[field.key] ?? 0);
-                return [field.key, Number.isFinite(normalized) ? normalized : 0];
-              }),
+              editableFields
+                .filter((field) => !readOnlyKeys.has(field.key))
+                .map((field) => {
+                  if (field.type === "text") {
+                    return [field.key, editingValues[field.key] ?? ""];
+                  }
+                  const normalized = Number(editingValues[field.key] ?? 0);
+                  return [field.key, Number.isFinite(normalized) ? normalized : 0];
+                }),
             ),
           }),
         });
@@ -436,48 +458,62 @@ export function WeeklyManager() {
         {editingRow ? (
           <div className="row g-3">
             <div className="col-md-6">
-              {leftFields.map((field) => (
-                <div key={field.key} className="mb-3">
-                  <label className="form-label">{field.label}</label>
-                  {field.type === "text" ? (
-                    <input
-                      className="form-control"
-                      value={editingValues[field.key] ?? ""}
-                      onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                    />
-                  ) : (
-                    <input
-                      className="form-control"
-                      type="number"
-                      step={field.type === "float" ? "0.01" : "1"}
-                      value={editingValues[field.key] ?? "0"}
-                      onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                    />
-                  )}
-                </div>
-              ))}
+              {leftFields.map((field) =>
+                readOnlyKeys.has(field.key) ? (
+                  <div key={field.key} className="mb-3">
+                    <label className="form-label text-muted">{field.label}</label>
+                    <div className="form-control-plaintext">{formatReadOnlyValue(field, editingRow)}</div>
+                  </div>
+                ) : (
+                  <div key={field.key} className="mb-3">
+                    <label className="form-label">{field.label}</label>
+                    {field.type === "text" ? (
+                      <input
+                        className="form-control"
+                        value={editingValues[field.key] ?? ""}
+                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
+                      />
+                    ) : (
+                      <input
+                        className="form-control"
+                        type="number"
+                        step={field.type === "float" ? "0.01" : "1"}
+                        value={editingValues[field.key] ?? "0"}
+                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
+                      />
+                    )}
+                  </div>
+                ),
+              )}
             </div>
             <div className="col-md-6">
-              {rightFields.map((field) => (
-                <div key={field.key} className="mb-3">
-                  <label className="form-label">{field.label}</label>
-                  {field.type === "text" ? (
-                    <input
-                      className="form-control"
-                      value={editingValues[field.key] ?? ""}
-                      onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                    />
-                  ) : (
-                    <input
-                      className="form-control"
-                      type="number"
-                      step={field.type === "float" ? "0.01" : "1"}
-                      value={editingValues[field.key] ?? "0"}
-                      onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                    />
-                  )}
-                </div>
-              ))}
+              {rightFields.map((field) =>
+                readOnlyKeys.has(field.key) ? (
+                  <div key={field.key} className="mb-3">
+                    <label className="form-label text-muted">{field.label}</label>
+                    <div className="form-control-plaintext">{formatReadOnlyValue(field, editingRow)}</div>
+                  </div>
+                ) : (
+                  <div key={field.key} className="mb-3">
+                    <label className="form-label">{field.label}</label>
+                    {field.type === "text" ? (
+                      <input
+                        className="form-control"
+                        value={editingValues[field.key] ?? ""}
+                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
+                      />
+                    ) : (
+                      <input
+                        className="form-control"
+                        type="number"
+                        step={field.type === "float" ? "0.01" : "1"}
+                        value={editingValues[field.key] ?? "0"}
+                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
+                      />
+                    )}
+                  </div>
+                ),
+              )}
             </div>
           </div>
         ) : null}
