@@ -733,7 +733,7 @@ export function StocksManager() {
               className="btn btn-primary" 
               type="button" 
               onClick={handleCreateStock} 
-              disabled={isPending || !validatedCandidate}
+              disabled={isPending || !validatedCandidate || validatedCandidate.status === "active"}
               style={{ minWidth: "100px" }}
             >
               저장
@@ -773,12 +773,17 @@ export function StocksManager() {
             {isValidatingTicker ? (
               <div className="mt-1 small text-muted">티커 확인 중...</div>
             ) : validatedCandidate ? (
-              <div className="mt-2 p-2 bg-success-lt rounded border border-success-subtle">
-                <div className="d-flex align-items-center gap-1 text-success fw-bold">
+              <div className={`mt-2 p-2 rounded border ${validatedCandidate.status === "active" ? "bg-danger-lt border-danger-subtle" : "bg-success-lt border-success-subtle"}`}>
+                <div className={`d-flex align-items-center gap-1 fw-bold ${validatedCandidate.status === "active" ? "text-danger" : "text-success"}`}>
                   <span className="appCodeText">{validatedCandidate.ticker}</span>
                   <span>-</span>
                   <span>{validatedCandidate.name}</span>
                 </div>
+                {validatedCandidate.status === "active" && (
+                  <div className="mt-1 small text-danger fw-bold">
+                    이미 등록된 종목입니다.
+                  </div>
+                )}
               </div>
             ) : null}
           </div>
