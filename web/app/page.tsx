@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { PageFrame } from "./components/PageFrame";
+import { AppLoadingState } from "./components/AppLoadingState";
+
 
 type HoldingsRow = {
   account_name: string;
@@ -59,6 +61,15 @@ export default function HomePage() {
 
   const accountNames = Object.keys(groupings);
 
+  if (loading) {
+    return (
+      <PageFrame title="Home">
+        <div className="container-fluid py-5">
+          <AppLoadingState label="보유 종목 데이터를 불러오는 중..." />
+        </div>
+      </PageFrame>
+    );
+  }
 
   return (
     <PageFrame title="Home">
@@ -173,9 +184,9 @@ export default function HomePage() {
 
 function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }) {
   const displayPct = viewMode === "price" ? row.daily_change_pct : row.return_pct;
-  const isPositive = (displayPct ?? 0) >= 0;
-  const colorClass = isPositive ? "text-danger" : "text-primary";
-  const sign = (displayPct ?? 0) > 0 ? "+" : "";
+  const pct = displayPct ?? 0;
+  const colorClass = pct > 0 ? "text-danger" : pct < 0 ? "text-primary" : "text-dark";
+  const sign = pct > 0 ? "+" : "";
 
   // 호주 종목은 티커로, 한국 종목은 이름으로 표시
   const displayTitle = (row.currency === "AUD" && row.ticker !== "IS") ? row.ticker : row.name;

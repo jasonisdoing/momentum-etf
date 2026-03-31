@@ -375,7 +375,11 @@ def load_real_holdings_table(
     metrics_rows = [_build_cached_metrics(ticker) for ticker in df_holdings["티커"].tolist()]
     metrics_df = pd.DataFrame(metrics_rows)
     for col in metrics_df.columns:
-        df_holdings[col] = metrics_df[col]
+        if col == "일간(%)":
+            # 실시간 오버레이가 이미 값을 넣었을 수 있으므로, 비어있는 경우에만 캐시값으로 채움
+            df_holdings[col] = df_holdings.get(col, pd.Series(dtype=float)).fillna(metrics_df[col])
+        else:
+            df_holdings[col] = metrics_df[col]
 
     df_holdings["상태"] = "보유"
     return df_holdings
