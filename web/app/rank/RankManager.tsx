@@ -290,6 +290,25 @@ export function RankManager() {
         headerAlign: "right",
         renderCell: renderSignedPercentCell,
       },
+      ...(selectedTickerTypeItem?.country_code !== "au" ? [
+        {
+          field: "괴리율",
+          headerName: "괴리율",
+          minWidth: 88,
+          width: 88,
+          align: "right",
+          headerAlign: "right",
+          renderCell: (params: GridRenderCellParams<RankGridRow, number | null>) => {
+            const val = params.value ?? 0;
+            const isExtreme = val > 2.0 || val < -2.0;
+            return (
+              <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                {formatPercent(params.value ?? null)}
+              </span>
+            );
+          },
+        } as GridColDef<RankGridRow>
+      ] : []),
       {
         field: "추세",
         headerName: "추세",

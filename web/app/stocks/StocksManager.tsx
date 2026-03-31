@@ -24,6 +24,7 @@ type StocksAccountItem = {
   order: number;
   name: string;
   icon: string;
+  country_code: string;
 };
 
 type ActiveStocksRowItem = {
@@ -41,6 +42,7 @@ type ActiveStocksRowItem = {
   return_3m: number | null;
   return_6m: number | null;
   return_12m: number | null;
+  "괴리율": number | null;
 };
 
 type DeletedStocksRowItem = {
@@ -57,6 +59,7 @@ type DeletedStocksRowItem = {
   return_3m: number | null;
   return_6m: number | null;
   return_12m: number | null;
+  "괴리율": number | null;
   deleted_date: string;
   deleted_reason: string;
 };
@@ -249,6 +252,25 @@ export function StocksManager() {
           </span>
         ),
       },
+      ...(selectedTickerTypeItem?.country_code !== "au" ? [
+        {
+          field: "괴리율",
+          headerName: "괴리율",
+          width: 88,
+          minWidth: 88,
+          align: "right",
+          headerAlign: "right",
+          renderCell: (params: GridRenderCellParams<ActiveStockGridRow, number | null>) => {
+            const val = params.value ?? 0;
+            const isExtreme = val > 2.0 || val < -2.0;
+            return (
+              <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                {formatPercent(params.value ?? null)}
+              </span>
+            );
+          },
+        } as GridColDef<ActiveStockGridRow>
+      ] : []),
       ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
         (field) => ({
           field,
@@ -338,6 +360,25 @@ export function StocksManager() {
           </span>
         ),
       },
+      ...(selectedTickerTypeItem?.country_code !== "au" ? [
+        {
+          field: "괴리율",
+          headerName: "괴리율",
+          width: 88,
+          minWidth: 88,
+          align: "right",
+          headerAlign: "right",
+          renderCell: (params: GridRenderCellParams<DeletedStockGridRow, number | null>) => {
+            const val = params.value ?? 0;
+            const isExtreme = val > 2.0 || val < -2.0;
+            return (
+              <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                {formatPercent(params.value ?? null)}
+              </span>
+            );
+          },
+        } as GridColDef<DeletedStockGridRow>
+      ] : []),
       ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
         (field) => ({
           field,
