@@ -25,7 +25,14 @@ READ_ONLY_FIELDS = {
     "weekly_return_pct",
     "cumulative_return_pct",
     "exchange_rate",
+    "bucket_pct_momentum",
+    "bucket_pct_market",
+    "bucket_pct_dividend",
+    "bucket_pct_alternative",
+    "bucket_pct_cash",
     "total_stocks",
+    "profit_count",
+    "loss_count",
 }
 CORE_VIEW_HIDDEN_KEYS = [
     "withdrawal_personal",
@@ -262,8 +269,8 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
             doc["weekly_return_pct"] = 0.0
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["weekly_return_pct"] = (_to_int(doc.get("weekly_profit", 0)) / total_principal) * 100
-            doc["cumulative_return_pct"] = (_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100
+            doc["weekly_return_pct"] = round((_to_int(doc.get("weekly_profit", 0)) / total_principal) * 100, 2)
+            doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
 
     return [
@@ -304,12 +311,12 @@ def _doc_to_api_row(doc: dict[str, Any]) -> dict[str, Any]:
         "profit_loss": _to_int(computed_doc.get("profit_loss", 0)),
         "cumulative_profit": _to_int(computed_doc.get("cumulative_profit", 0)),
         "weekly_profit": _to_int(computed_doc.get("weekly_profit", 0)),
-        "weekly_return_pct": float(computed_doc.get("weekly_return_pct", 0.0) or 0.0),
-        "cumulative_return_pct": float(computed_doc.get("cumulative_return_pct", 0.0) or 0.0),
+        "weekly_return_pct": round(float(computed_doc.get("weekly_return_pct", 0.0) or 0.0), 2),
+        "cumulative_return_pct": round(float(computed_doc.get("cumulative_return_pct", 0.0) or 0.0), 2),
         "memo": str(computed_doc.get("memo", "") or ""),
-        "exchange_rate": exchange_rate,
+        "exchange_rate": round(exchange_rate, 2),
         "exchange_rate_change_pct": 0.0,
-        **bucket_percentages,
+        **{k: round(v, 2) for k, v in bucket_percentages.items()},
         "total_stocks": _to_int(computed_doc.get("total_stocks", 0)),
         "profit_count": _to_int(computed_doc.get("profit_count", 0)),
         "loss_count": _to_int(computed_doc.get("loss_count", 0)),
@@ -324,7 +331,7 @@ def _build_api_rows(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         current_rate = float(row.get("exchange_rate", 0.0) or 0.0)
         older_rate = float(rows[idx + 1].get("exchange_rate", 0.0) or 0.0) if idx + 1 < len(rows) else 0.0
         if older_rate > 0:
-            row["exchange_rate_change_pct"] = ((current_rate / older_rate) - 1.0) * 100
+            row["exchange_rate_change_pct"] = round(((current_rate / older_rate) - 1.0) * 100, 2)
         else:
             row["exchange_rate_change_pct"] = 0.0
     return rows
@@ -396,17 +403,26 @@ def _aggregate_live_summary_into_active_week() -> str:
         )
 
     if total_assets > 0:
-        bucket_pct_momentum = (bucket_totals["1. 모멘텀"] / total_assets) * 100
-        bucket_pct_market = (bucket_totals["2. 시장지수"] / total_assets) * 100
-        bucket_pct_dividend = (bucket_totals["3. 배당방어"] / total_assets) * 100
-        bucket_pct_alternative = (bucket_totals["4. 대체헷지"] / total_assets) * 100
-        bucket_pct_cash = (total_cash / total_assets) * 100
+        bucket_raw = {
+            "bucket_pct_momentum": (bucket_totals["1. 모멘텀"] / total_assets) * 100,
+            "bucket_pct_market": (bucket_totals["2. 시장지수"] / total_assets) * 100,
+            "bucket_pct_dividend": (bucket_totals["3. 배당방어"] / total_assets) * 100,
+            "bucket_pct_alternative": (bucket_totals["4. 대체헷지"] / total_assets) * 100,
+            "bucket_pct_cash": (total_cash / total_assets) * 100,
+        }
+        bucket_rounded = {k: round(v, 2) for k, v in bucket_raw.items()}
+        diff = round(round(sum(bucket_raw.values()), 2) - sum(bucket_rounded.values()), 2)
+        if diff != 0:
+            largest = max(bucket_rounded, key=lambda k: bucket_rounded[k])
+            bucket_rounded[largest] = round(bucket_rounded[largest] + diff, 2)
     else:
-        bucket_pct_momentum = 0.0
-        bucket_pct_market = 0.0
-        bucket_pct_dividend = 0.0
-        bucket_pct_alternative = 0.0
-        bucket_pct_cash = 0.0
+        bucket_rounded = {
+            "bucket_pct_momentum": 0.0,
+            "bucket_pct_market": 0.0,
+            "bucket_pct_dividend": 0.0,
+            "bucket_pct_alternative": 0.0,
+            "bucket_pct_cash": 0.0,
+        }
 
     db[WEEKLY_COLLECTION].update_one(
         {"week_date": active_week_date},
@@ -415,12 +431,8 @@ def _aggregate_live_summary_into_active_week() -> str:
                 "total_assets": int(round(total_assets)),
                 "purchase_amount": int(round(total_purchase)),
                 "valuation_amount": int(round(total_valuation)),
-                "exchange_rate": float(live_exchange_rate),
-                "bucket_pct_momentum": float(bucket_pct_momentum),
-                "bucket_pct_market": float(bucket_pct_market),
-                "bucket_pct_dividend": float(bucket_pct_dividend),
-                "bucket_pct_alternative": float(bucket_pct_alternative),
-                "bucket_pct_cash": float(bucket_pct_cash),
+                "exchange_rate": round(float(live_exchange_rate), 2),
+                **bucket_rounded,
                 "profit_count": total_profit_count,
                 "loss_count": total_loss_count,
                 "updated_at": _get_now_kst(),
@@ -441,7 +453,8 @@ def load_weekly_table_data() -> dict[str, Any]:
     return {
         "active_week_date": active_week_date,
         "rows": _build_api_rows(weekly_docs),
-        "editable_fields": [field for field in FIELD_DEFS if field["key"] not in READ_ONLY_FIELDS],
+        "editable_fields": FIELD_DEFS,
+        "read_only_keys": list(READ_ONLY_FIELDS),
         "core_hidden_keys": list(CORE_VIEW_HIDDEN_KEYS),
     }
 
