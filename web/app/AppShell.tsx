@@ -34,8 +34,7 @@ const navGroups = [
     title: "자산",
     icon: IconCash,
     items: [
-      { href: "/cash", label: "자산 관리", icon: IconCash },
-      { href: "/holdings", label: "계좌 상세", icon: IconList },
+      { href: "/assets", label: "자산 관리", icon: IconList },
       { href: "/import", label: "벌크 입력", icon: IconFileImport },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
@@ -376,58 +375,76 @@ export function AppShell({ children }: AppShellProps) {
                 )}
               </span>
               <span className="topbarFxItem topbarSentimentItem">
-                <span className="topbarSentimentLabel">
-                  <IconMoodSmile size={15} stroke={1.9} />
-                  CNN:
-                </span>
                 {isFearGreedLoading ? (
-                  <span className="topbarFxLoading" aria-label="CNN 공포탐욕지수 로딩 중">
-                    <span className="topbarSpinner" />
-                  </span>
-                ) : fearGreed?.score != null ? (
+                  <>
+                    <span className="topbarSentimentLabel">
+                      <IconMoodSmile size={15} stroke={1.9} />
+                      CNN:
+                    </span>
+                    <span className="topbarFxLoading" aria-label="CNN 공포탐욕지수 로딩 중">
+                      <span className="topbarSpinner" />
+                    </span>
+                  </>
+                ) : (
                   <a
                     href="https://fear-and-greed.jason.ai.kr"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="topbarSentimentValue"
-                    style={{ color: "inherit", textDecoration: "none" }}
+                    style={{ color: "inherit", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
                   >
-                    <strong>{formatFearGreedScore(fearGreed?.score)}</strong>
-                    <span className="topbarSentimentText">({formatFearGreedLabel(fearGreed?.label)})</span>
-                    {fearGreedDelta !== null ? (
-                      <span className={getFxChangeClass(fearGreedDelta)}>
-                        {formatFearGreedDelta(fearGreedDelta)}
+                    <span className="topbarSentimentLabel">
+                      <IconMoodSmile size={15} stroke={1.9} />
+                      CNN:
+                    </span>
+                    {fearGreed?.score != null ? (
+                      <span className="topbarSentimentValue">
+                        <strong>{formatFearGreedScore(fearGreed?.score)}</strong>
+                        <span className="topbarSentimentText">({formatFearGreedLabel(fearGreed?.label)})</span>
+                        {fearGreedDelta !== null ? (
+                          <span className={getFxChangeClass(fearGreedDelta)}>
+                            {formatFearGreedDelta(fearGreedDelta)}
+                          </span>
+                        ) : null}
                       </span>
-                    ) : null}
+                    ) : (
+                      <strong>-</strong>
+                    )}
                   </a>
-                ) : (
-                  <strong>-</strong>
                 )}
               </span>
               <span className="topbarFxItem topbarSentimentItem">
-                <span className="topbarSentimentLabel">
-                  <IconActivity size={15} stroke={1.9} />
-                  VKOSPI:
-                </span>
                 {isVkospiLoading ? (
-                  <span className="topbarFxLoading" aria-label="VKOSPI 로딩 중">
-                    <span className="topbarSpinner" />
-                  </span>
-                ) : vkospi?.price != null ? (
+                  <>
+                    <span className="topbarSentimentLabel">
+                      <IconActivity size={15} stroke={1.9} />
+                      VKOSPI:
+                    </span>
+                    <span className="topbarFxLoading" aria-label="VKOSPI 로딩 중">
+                      <span className="topbarSpinner" />
+                    </span>
+                  </>
+                ) : (
                   <a
                     href="https://kr.investing.com/indices/kospi-volatility"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="topbarSentimentValue"
-                    style={{ color: "inherit", textDecoration: "none" }}
+                    style={{ color: "inherit", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
                   >
-                    <strong>{vkospi.price.toFixed(2)}</strong>
-                    <span className={getFxChangeClass(vkospi.change_pct)}>
-                      {formatChangePct(vkospi.change_pct)}
+                    <span className="topbarSentimentLabel">
+                      <IconActivity size={15} stroke={1.9} />
+                      VKOSPI:
                     </span>
+                    {vkospi?.price != null ? (
+                      <span className="topbarSentimentValue">
+                        <strong>{vkospi.price.toFixed(2)}</strong>
+                        <span className={getFxChangeClass(vkospi.change_pct)}>
+                          {formatChangePct(vkospi.change_pct)}
+                        </span>
+                      </span>
+                    ) : (
+                      <strong>-</strong>
+                    )}
                   </a>
-                ) : (
-                  <strong>-</strong>
                 )}
               </span>
             </div>
