@@ -847,14 +847,18 @@ export function AssetsManager() {
                 </button>
               </div>
               <div className="tickerTypeToolbarRight">
-                <div className="stocksSummary d-flex align-items-center gap-3">
+                <div className="stocksSummary d-flex align-items-center gap-4">
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 자산:</span>
+                    <span style={{ fontWeight: 700, color: "var(--bs-primary)", fontSize: "1.05rem" }}>{formatKrw(rows.reduce((acc, row) => acc + (row.valuation_krw || 0), 0) + (cash?.cash_balance_krw || 0))}</span>
+                  </div>
+                  <div className="d-flex align-items-center gap-1">
+                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>평가 금액:</span>
+                    <span style={{ fontWeight: 700 }}>{formatKrw(rows.reduce((acc, row) => acc + (row.valuation_krw || 0), 0))}</span>
+                  </div>
                   <div className="d-flex align-items-center gap-1">
                     <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 종목 수:</span>
                     <span style={{ fontWeight: 700 }}>{rows.filter(r => r.quantity > 0).length}개</span>
-                  </div>
-                  <div className="d-flex align-items-center gap-1">
-                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 평가액:</span>
-                    <span style={{ fontWeight: 700 }}>{formatKrw(rows.reduce((acc, row) => acc + (row.valuation_krw || 0), 0))}</span>
                   </div>
                 </div>
               </div>
