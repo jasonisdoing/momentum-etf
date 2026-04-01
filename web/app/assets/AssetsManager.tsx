@@ -499,8 +499,8 @@ export function AssetsManager() {
             id: "__adding__",
             account_name: accounts.find((a) => a.account_id === selectedAccountId)?.name ?? "",
             currency: "",
-            bucket: addingRow.isValidated ? `Bucket ${addingRow.bucketId}` : "",
-            bucket_id: addingRow.bucketId || 0,
+            bucket: "",
+            bucket_id: 0,
             ticker: addingRow.ticker,
             name: addingRow.name || "",
             quantity: parseInt(addingRow.quantity, 10) || 0,
@@ -560,8 +560,14 @@ export function AssetsManager() {
         minWidth: 90,
         width: 90,
         sortable: false,
-        cellClassName: (params) => getBucketCellClass(params.row.bucket_id),
-        renderCell: (params) => <span>{String(params.value ?? "-")}</span>,
+        cellClassName: (params) => {
+          if (params.row.id === "__adding__") return "";
+          return getBucketCellClass(params.row.bucket_id);
+        },
+        renderCell: (params) => {
+          if (params.row.id === "__adding__") return "";
+          return <span>{String(params.value ?? "-")}</span>;
+        },
       },
       {
         field: "ticker",

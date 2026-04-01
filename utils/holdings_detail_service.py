@@ -232,7 +232,6 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
         "quantity": int(quantity),
         "average_buy_price": float(average_buy_price),
         "currency": currency,
-        "bucket": res.get("bucket_id", 1),
         "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
         "memo": str(memo or "").strip(),
     }
