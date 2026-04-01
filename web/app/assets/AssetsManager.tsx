@@ -483,7 +483,16 @@ export function AssetsManager() {
 
   const gridRows = useMemo<GridRow[]>(
     () => {
-      const baseRows = rows.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` }));
+      // MUI Data Grid Community 버전은 다중 정렬을 지원하지 않으므로, 
+      // 데이터를 넘겨주기 전에 미리 버킷(ASC), 평가금액(DESC) 순으로 정렬함
+      const sortedBase = [...rows].sort((a, b) => {
+        if (a.bucket_id !== b.bucket_id) {
+          return a.bucket_id - b.bucket_id;
+        }
+        return (b.valuation_krw || 0) - (a.valuation_krw || 0);
+      });
+
+      const baseRows = sortedBase.map((row, i) => ({ ...row, id: `${row.ticker}-${row.account_name}-${i}` }));
       if (addingRow) {
         return [
           {
@@ -953,7 +962,7 @@ export function AssetsManager() {
                 sorting: {
                   sortModel: [
                     { field: "bucket_id", sort: "asc" },
-                    { field: "buy_amount_krw", sort: "desc" },
+                    { field: "valuation_krw", sort: "desc" },
                   ],
                 },
               }}
