@@ -157,6 +157,15 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, new_holdings)
+    
+    # 변경 사항을 스냅샷에 즉시 동기화
+    try:
+        from utils.snapshot_service import update_today_snapshot_all_accounts
+        update_today_snapshot_all_accounts()
+    except Exception as e:
+        from utils.logger import get_app_logger
+        get_app_logger().warning(f"Failed to update snapshot after deletion: {e}")
+
     return {"deleted": ticker}
 
 
@@ -190,6 +199,15 @@ def update_holding(account_id: str, ticker: str, quantity: int | None = None, av
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, holdings)
+    
+    # 변경 사항을 스냅샷에 즉시 동기화
+    try:
+        from utils.snapshot_service import update_today_snapshot_all_accounts
+        update_today_snapshot_all_accounts()
+    except Exception as e:
+        from utils.logger import get_app_logger
+        get_app_logger().warning(f"Failed to update snapshot after update: {e}")
+
     return {"updated": ticker}
 
 
@@ -238,6 +256,14 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
 
     holdings.append(new_holding)
     save_portfolio_master(account_id, holdings)
+
+    # 변경 사항을 스냅샷에 즉시 동기화
+    try:
+        from utils.snapshot_service import update_today_snapshot_all_accounts
+        update_today_snapshot_all_accounts()
+    except Exception as e:
+        from utils.logger import get_app_logger
+        get_app_logger().warning(f"Failed to update snapshot after addition: {e}")
 
     return {"added": ticker, "name": res["name"]}
 

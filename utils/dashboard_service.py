@@ -16,12 +16,12 @@ INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
 
 
-def _compute_account_buckets(account_id: str, cash_balance: float) -> list[dict[str, Any]]:
+def _compute_account_buckets(account_id: str, cash_balance: float, df_live: pd.DataFrame | None = None) -> list[dict[str, Any]]:
     """계좌 하나의 버킷별 비중을 계산한다."""
     bucket_totals: dict[str, float] = {name: 0.0 for name in BUCKET_NAMES}
 
     try:
-        df = load_real_holdings_table(account_id)
+        df = df_live if df_live is not None else load_real_holdings_table(account_id)
         if df is not None and not df.empty:
             for bucket_name in BUCKET_NAMES:
                 bucket_totals[bucket_name] = float(df.loc[df["버킷"] == bucket_name, "평가금액(KRW)"].sum())
@@ -124,7 +124,10 @@ def load_dashboard_data() -> dict[str, Any]:
             portfolio_account.get("total_principal", snapshot_account.get("total_principal"))
         )
         cash_balance = normalize_number(portfolio_account.get("cash_balance", snapshot_account.get("cash_balance")))
-        valuation_krw = normalize_number(snapshot_account.get("valuation_krw"))
+        # 실시간 평가액 직접 계산 (데이터 정합성 확보)
+        df_live = load_real_holdings_table(config["account_id"])
+        valuation_krw = float(df_live["평가금액(KRW)"].sum()) if df_live is not None else 0.0
+        
         total_assets = valuation_krw + cash_balance
         net_profit = total_assets - total_principal
         net_profit_pct = (net_profit / total_principal) * 100 if total_principal > 0 else 0.0
@@ -142,6 +145,7 @@ def load_dashboard_data() -> dict[str, Any]:
                 "cash_ratio": cash_ratio,
                 "net_profit": net_profit,
                 "net_profit_pct": net_profit_pct,
+                "_df_live": df_live, # 버킷 계산을 위해 임시 보관
             }
         )
 
@@ -239,7 +243,9 @@ def load_dashboard_data() -> dict[str, Any]:
     account_buckets: dict[str, list[dict[str, Any]]] = {}
     for account in accounts:
         aid = account["account_id"]
-        account_buckets[aid] = _compute_account_buckets(aid, account["cash_balance"])
+        # 임시 보관한 실시간 데이터를 넘겨주어 중복 조회를 방지한다.
+        df_live = account.pop("_df_live", None)
+        account_buckets[aid] = _compute_account_buckets(aid, account["cash_balance"], df_live=df_live)
 
     return {
         "metrics_row1": metrics_row1,
