@@ -83,20 +83,34 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
         # 실시간 보유 현황 및 평가액 로드
         try:
             df = load_real_holdings_table(aid)
-            acc_valuation = float(df["평가금액(KRW)"].sum()) if df is not None and not df.empty else 0.0
-            acc_purchase = float(df["매입금액(KRW)"].sum()) if df is not None and not df.empty else 0.0
-            
-            # 보유 종목 상세 (티커, 보유일)
-            holding_details = []
             if df is not None and not df.empty:
+                acc_valuation = float(df["평가금액(KRW)"].sum())
+                acc_purchase = float(df["매입금액(KRW)"].sum())
+                
+                # 보유 종목 상세 (티커, 보유일)
+                holding_details = []
+                import pandas as pd
                 for _, row in df.iterrows():
                     ticker = str(row.get("ticker", row.get("티커", ""))).strip().upper()
-                    if ticker:
+                    if ticker and ticker != "NAN":
+                        # days_held_int가 NaN인 경우를 대비해 안전하게 처리
+                        raw_days = row.get("days_held_int")
+                        try:
+                            days_val = int(raw_days) if pd.notna(raw_days) else 1
+                        except (ValueError, TypeError):
+                            days_val = 1
+
                         holding_details.append({
                             "ticker": ticker,
-                            "days_held_int": int(row.get("days_held_int", 1))
+                            "days_held_int": days_val
                         })
-        except Exception:
+            else:
+                acc_valuation = 0.0
+                acc_purchase = 0.0
+                holding_details = []
+        except Exception as e:
+            from utils.logger import get_app_logger
+            get_app_logger().error(f"Failed to calculate valuation for account {aid}: {e}")
             acc_valuation = 0.0
             acc_purchase = 0.0
             holding_details = []

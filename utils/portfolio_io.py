@@ -186,13 +186,23 @@ def load_real_holdings_table(
 
         def _calculate_days(row):
             ticker = str(row.get("ticker", "")).strip().upper()
+            # 1. 어제 스냅샷이 있으면 연속성 유지
             if ticker in snapshot_holdings:
-                # 어제 있었으면 어제 보유일 + 날짜 차이(하루 지나면 +1)
                 prev_days = snapshot_holdings[ticker]
-                # 스냅샷 날짜와 오늘 날짜 차이 계산
                 snap_date = pd.to_datetime(prev_snapshot["snapshot_date"]).normalize().tz_localize(None)
                 delta = (now - snap_date).days
                 return max(prev_days + delta, 1)
+            
+            # 2. 스냅샷에 없으면 최초 매수일(first_buy_date) 기준 계산
+            first_buy_date = row.get("first_buy_date")
+            if first_buy_date:
+                try:
+                    buy_ts = pd.to_datetime(first_buy_date).normalize().tz_localize(None)
+                    delta = (now - buy_ts).days
+                    return max(delta + 1, 1)
+                except Exception:
+                    pass
+            
             return 1
 
         df_holdings["days_held_int"] = df_holdings.apply(_calculate_days, axis=1)
