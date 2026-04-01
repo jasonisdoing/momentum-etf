@@ -112,6 +112,48 @@ def load_real_holdings_table(
     holdings_list = snapshot["holdings"]
     df_holdings = pd.DataFrame(holdings_list)
 
+    # 4. 동적 버킷 매핑: 개별 항목에 저장된 bucket 대신 종목풀(stock_meta)의 최신 정보를 사용
+    from utils.settings_loader import get_account_settings
+    from utils.db_manager import get_db_connection
+
+    db = get_db_connection()
+    if db is not None and not df_holdings.empty:
+        all_tickers = df_holdings["ticker"].unique().tolist()
+        
+        # 현재 계정의 ticker_type 목록 가져오기
+        ticker_codes = []
+        try:
+            acc_settings = get_account_settings(account_id)
+            ticker_codes = acc_settings.get("ticker_codes", [])
+            if isinstance(ticker_codes, str): ticker_codes = [ticker_codes]
+        except:
+            pass
+
+        bucket_map = {}
+        # 우선순위 1: 현재 계정에 설정된 종목 타입에서 검색
+        if ticker_codes:
+            cursor = db.stock_meta.find(
+                {"ticker": {"$in": all_tickers}, "ticker_type": {"$in": ticker_codes}, "is_deleted": {"$ne": True}},
+                {"ticker": 1, "bucket": 1}
+            )
+            for doc in cursor:
+                if doc["ticker"] not in bucket_map: # 중복 시 첫 번째 발견된 값 유지
+                    bucket_map[doc["ticker"]] = doc.get("bucket", 1)
+
+        # 우선순위 2: 계정에 없으면 시스템 전체 종목풀 검색 (Fallback)
+        missing_tickers = [t for t in all_tickers if t not in bucket_map]
+        if missing_tickers:
+            cursor = db.stock_meta.find(
+                {"ticker": {"$in": missing_tickers}, "is_deleted": {"$ne": True}},
+                {"ticker": 1, "bucket": 1}
+            )
+            for doc in cursor:
+                if doc["ticker"] not in bucket_map:
+                    bucket_map[doc["ticker"]] = doc.get("bucket", 1)
+
+        # 버킷 컬럼 업데이트 (기존 값 무시하고 종목풀 정보로 강제 매핑)
+        df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
+
     import numpy as np
 
     # Ensure required columns exist
