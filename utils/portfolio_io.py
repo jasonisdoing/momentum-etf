@@ -345,6 +345,17 @@ def load_real_holdings_table(
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+
+    # 수익률 계산 (매입 단가 대비 현재가, 소수점 1자리)
+    def _calc_return_pct(row):
+        buy = float(row.get("average_buy_price") or 0)
+        curr = float(row.get("현재가") or 0)
+        if buy > 0:
+            return round(((curr / buy) - 1.0) * 100.0, 1)
+        return 0.0
+
+    df_holdings["return_pct"] = df_holdings.apply(_calc_return_pct, axis=1)
+
     if missing_price_tickers:
         df_holdings.attrs["missing_price_tickers"] = sorted(missing_price_tickers)
     if strict_price_cache and missing_price_tickers:
@@ -416,6 +427,16 @@ def load_real_holdings_table(
     df_holdings["수익률(%)"] = np.where(
         df_holdings["매입금액(KRW)"] > 0, (df_holdings["평가손익(KRW)"] / df_holdings["매입금액(KRW)"]) * 100, 0.0
     ).astype(float)
+
+    # 비중(Portfolio Weight %) 계산
+    # 수치형 변환 보장 (International Shares 추가 등으로 인해 타입이 섞였을 수 있음)
+    vals_for_sum = pd.to_numeric(df_holdings["평가금액(KRW)"], errors="coerce").fillna(0)
+    total_val = vals_for_sum.sum()
+    
+    if total_val > 0:
+        df_holdings["weight_pct"] = (vals_for_sum / total_val * 100).round(1)
+    else:
+        df_holdings["weight_pct"] = 0.0
 
     # 소수점 반올림 및 타입 변환 처리
     price_digits = 2 if account_country in ("us", "au") else 0

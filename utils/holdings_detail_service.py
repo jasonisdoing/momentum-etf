@@ -107,6 +107,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "pnl_krw": pnl,
                     "pnl_krw_num": pnl,
                     "return_pct": round(ret_pct, 2),
+                    "weight_pct": float(row.get("weight_pct") or 0),
                     "daily_change_pct": float(row.get("일간(%)") or 0) if row.get("일간(%)") is not None else None,
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
