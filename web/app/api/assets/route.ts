@@ -16,7 +16,6 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
-  memo?: string;
 };
 
 export async function GET(request: Request) {
@@ -86,10 +85,7 @@ export async function PATCH(request: Request) {
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...body,
-          memo: body.memo,
-        }),
+        body: JSON.stringify(body),
       },
     );
     return NextResponse.json(payload);

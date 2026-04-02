@@ -407,8 +407,10 @@ def load_real_holdings_table(
             "평가금액(KRW)": intl_val_krw,
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
-        # Ensure memo is still string after concat
-        df_holdings["memo"] = df_holdings["memo"].fillna("")
+        # Ensure value columns are numeric after concat
+        for col in ["수량", "평균 매입가", "매입금액(KRW)", "평가금액(KRW)"]:
+            if col in df_holdings.columns:
+                df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0)
 
 
     # Rename columns to match UI
@@ -430,12 +432,13 @@ def load_real_holdings_table(
     ).astype(float)
 
     # 비중(Portfolio Weight %) 계산
-    # 수치형 변환 보장 (International Shares 추가 등으로 인해 타입이 섞였을 수 있음)
+    # 수량이 0인 종목을 포함한 모든 종목의 평가액 합계와 현금을 합산하여 '총 자산' 기준 비중 계산
     vals_for_sum = pd.to_numeric(df_holdings["평가금액(KRW)"], errors="coerce").fillna(0)
-    total_val = vals_for_sum.sum()
+    cash_val = pd.to_numeric(snapshot.get("cash_balance", 0), errors="coerce") or 0
+    total_assets = vals_for_sum.sum() + cash_val
     
-    if total_val > 0:
-        df_holdings["weight_pct"] = (vals_for_sum / total_val * 100).round(1)
+    if total_assets > 0:
+        df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(1)
     else:
         df_holdings["weight_pct"] = 0.0
 

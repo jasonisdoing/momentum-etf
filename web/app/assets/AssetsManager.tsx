@@ -74,7 +74,6 @@ type HoldingsRow = {
   weight_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
-  memo: string;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -88,7 +87,6 @@ type AddingRowState = {
   name?: string;
   bucketId?: number;
   isValidated?: boolean;
-  memo: string;
 };
 
 type CashEditingState = {
@@ -284,7 +282,6 @@ export function AssetsManager() {
           ticker: newRow.ticker.replace("ASX:", ""),
           quantity,
           average_buy_price: avgPrice,
-          memo: newRow.memo,
         }),
       });
       if (!res.ok) throw new Error();
@@ -326,7 +323,6 @@ export function AssetsManager() {
   // 입력 필드 직접 참조를 위한 Ref (상태 엇박자 방지)
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
-  const memoRef = useRef<HTMLInputElement>(null);
 
   const handleAddRowSave = useCallback(() => {
     if (!addingRow?.isValidated) {
@@ -336,7 +332,6 @@ export function AssetsManager() {
 
     const rawQty = qtyRef.current?.value ?? "";
     const rawPrice = priceRef.current?.value ?? "";
-    const rawMemo = memoRef.current?.value ?? "";
 
     const quantity = parseInt(parseRawPrice(rawQty), 10);
     const avgPrice = safeParseFloat(rawPrice);
@@ -364,7 +359,6 @@ export function AssetsManager() {
             ticker: addingRow.ticker,
             quantity,
             average_buy_price: avgPrice,
-            memo: rawMemo,
           }),
         });
         const data = await res.json();
@@ -425,7 +419,7 @@ export function AssetsManager() {
         id: "__adding__", account_name: "", currency: "", bucket: "", bucket_id: 0,
         ticker: addingRow.ticker, name: addingRow.name || "",
         quantity: 0, average_buy_price: 0,
-        current_price: "-", days_held: "-", pnl_krw: 0, return_pct: 0, weight_pct: 0, buy_amount_krw: 0, valuation_krw: 0, memo: "",
+        current_price: "-", days_held: "-", pnl_krw: 0, return_pct: 0, weight_pct: 0, buy_amount_krw: 0, valuation_krw: 0,
       } as GridRow, ...baseRows];
     }
     return baseRows;
@@ -474,7 +468,7 @@ export function AssetsManager() {
         return <span className="appCodeText">{String(p.value)}</span>;
       }
     },
-    { field: "name", headerName: "종목명", minWidth: 150, flex: 1 },
+    { field: "name", headerName: "종목명", minWidth: 300, flex: 2 },
     {
       field: "quantity", headerName: "수량", type: "number", width: 80, 
       editable: true,
@@ -544,31 +538,6 @@ export function AssetsManager() {
     { field: "pnl_krw", headerName: "평가손익", width: 130, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{formatKrw(p?.value ?? 0)}</span> },
     { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
-    {
-      field: "memo", headerName: "메모", minWidth: 150, flex: 1.5, 
-      editable: true,
-      renderCell: (p: any) => {
-        if (!p) return null;
-        if (p.row?.id === "__adding__") {
-          return (
-            <input
-              type="text"
-              ref={memoRef}
-              className="form-control form-control-sm"
-              defaultValue=""
-              placeholder="메모 입력..."
-              disabled={!addingRow?.isValidated}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                  handleAddRowSave();
-                }
-              }}
-            />
-          );
-        }
-        return <span>{p.value}</span>;
-      }
-    }
   ], [addingRow, isPending, rowModesModel, processingId, handleAddRowSave, handleAddRowCancel]);
 
   if (loading && !rows.length) return <div className="appPageStack"><div className="appPageLoading"><AppLoadingState label="보유 종목 로드 중..." /></div></div>;
@@ -582,13 +551,23 @@ export function AssetsManager() {
               <select className="form-select w-auto fw-bold" value={selectedAccountId} onChange={(e) => handleAccountChange(e.target.value)}>
                 {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.icon} {a.name}</option>)}
               </select>
-              <button className="btn btn-primary btn-sm px-3 fw-bold" onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", memo: "" })}><IconPlus size={16} /> 종목 추가</button>
+              <button className="btn btn-primary btn-sm px-3 fw-bold" onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", isValidated: false })}><IconPlus size={16} /> 종목 추가</button>
             </div>
-            <div className="d-flex gap-5 align-items-center">
-              <div className="fw-bold">총 자산: <span className="fw-bold text-primary fs-3 ms-2">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0) + (cash?.cash_balance_krw || 0))}</span></div>
-              <div className="fw-bold">평가액: <span className="fw-bold text-dark fs-4 ms-2">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0))}</span></div>
-              <div className="fw-bold">종목수: <span className="fw-bold text-dark fs-4 ms-2">{rows.filter(r => r.quantity > 0).length}개</span></div>
-            </div>
+            {(() => {
+              const totalValuation = rows.reduce((s, r) => s + (r.valuation_krw || 0), 0);
+              const totalCash = cash?.cash_balance_krw || 0;
+              const totalAssets = totalValuation + totalCash;
+              const valuationPct = totalAssets > 0 ? (totalValuation / totalAssets * 100).toFixed(1) : "0.0";
+              const cashPct = totalAssets > 0 ? (totalCash / totalAssets * 100).toFixed(1) : "0.0";
+              
+              return (
+                <div className="d-flex gap-5 align-items-center">
+                  <div className="fw-bold fs-3">총 자산: <span className="fw-bold text-primary fs-2 ms-2">{formatKrw(totalAssets)}</span></div>
+                  <div className="fw-bold fs-3">평가액: <span className="fw-bold text-dark fs-2 ms-2">{formatKrw(totalValuation)} <span className="text-secondary ms-2">({valuationPct}%)</span></span></div>
+                  <div className="fw-bold fs-3">현금: <span className="fw-bold text-dark fs-2 ms-2">{formatKrw(totalCash)} <span className="text-secondary ms-2">({cashPct}%)</span></span></div>
+                </div>
+              );
+            })()}
           </div>
           {cash && (
             <div className="card-body py-2 border-bottom bg-light">
@@ -600,9 +579,9 @@ export function AssetsManager() {
                 </div>
               ) : (
                 <div className="d-flex gap-5 align-items-center">
-                  <div className="small">투자원금: <b className="ms-1">{formatNumber(cash.total_principal)}원</b></div>
-                  <div className="small">보유현금: <b className="ms-1">{formatPrice(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native, cash.currency)}</b></div>
-                  <button className="btn btn-link btn-sm p-0" onClick={() => { if (cash) setCashEditing({ total_principal: String(cash.total_principal), cash_value: String(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native), intl_shares_value: String(cash.intl_shares_value), intl_shares_change: String(cash.intl_shares_change) }); }}>수정</button>
+                  <div className="fw-bold fs-3">투자원금: <span className="fw-bold text-dark fs-2 ms-2">{formatNumber(cash.total_principal)}원</span></div>
+                  <div className="fw-bold fs-3">보유현금: <span className="fw-bold text-dark fs-2 ms-2">{formatPrice(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native, cash.currency)}</span></div>
+                  <button className="btn btn-outline-secondary btn-sm ms-3 fw-bold" onClick={() => { if (cash) setCashEditing({ total_principal: String(cash.total_principal), cash_value: String(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native), intl_shares_value: String(cash.intl_shares_value), intl_shares_change: String(cash.intl_shares_change) }); }}>정보 수정</button>
                 </div>
               )}
             </div>
