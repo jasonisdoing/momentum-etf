@@ -388,7 +388,6 @@ export function AssetsManager() {
         ];
       }
     },
-    { field: "currency", headerName: "환종", width: 60, align: "center" },
     { field: "bucket", headerName: "버킷", width: 90, cellClassName: (p) => getBucketCellClass(p.row.bucket_id) },
     {
       field: "ticker", headerName: "종목코드", width: 110,
@@ -404,11 +403,12 @@ export function AssetsManager() {
     {
       field: "quantity", headerName: "수량", type: "number", width: 80, editable: true,
       valueFormatter: (p: any) => {
-        if (p.value === null || p.value === undefined) return "";
+        if (!p || p.value === null || p.value === undefined) return "";
         return new Intl.NumberFormat("ko-KR").format(p.value);
       },
-      renderCell: (p) => {
-        if (p.row.id === "__adding__") {
+      renderCell: (p: any) => {
+        if (!p) return null;
+        if (p.row?.id === "__adding__") {
           return (
             <input
               type="number"
@@ -425,11 +425,12 @@ export function AssetsManager() {
     {
       field: "average_buy_price", headerName: "매입 단가", type: "number", width: 110, editable: true,
       valueFormatter: (p: any) => {
-        if (p.value === null || p.value === undefined) return "";
+        if (!p || p.value === null || p.value === undefined) return "";
         return `${new Intl.NumberFormat("ko-KR").format(p.value)}원`;
       },
-      renderCell: (p) => {
-        if (p.row.id === "__adding__") {
+      renderCell: (p: any) => {
+        if (!p) return null;
+        if (p.row?.id === "__adding__") {
           return (
             <input
               type="number"
@@ -443,13 +444,13 @@ export function AssetsManager() {
         return <span>{new Intl.NumberFormat("ko-KR").format(p.value ?? 0)}원</span>;
       }
     },
-    { field: "weight_pct", headerName: "비중", width: 70, renderCell: (p: any) => <span style={{ color: "#0d6efd" }}>{p.value?.toFixed(1)}%</span> },
-    { field: "return_pct", headerName: "수익률", width: 80, renderCell: (p: any) => <span className={getSignedClass(p.value)}>{p.value > 0 ? "+" : ""}{p.value?.toFixed(1)}%</span> },
+    { field: "weight_pct", headerName: "비중", width: 70, renderCell: (p: any) => <span style={{ color: "#0d6efd" }}>{p?.value?.toFixed(1)}%</span> },
+    { field: "return_pct", headerName: "수익률", width: 80, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{(p?.value ?? 0) > 0 ? "+" : ""}{p?.value?.toFixed(1)}%</span> },
     { field: "current_price", headerName: "현재가", width: 110 },
     { field: "days_held", headerName: "보유일", width: 65, align: "center" },
-    { field: "pnl_krw", headerName: "평가손익", width: 130, renderCell: (p: any) => <span className={getSignedClass(p.value)}>{formatKrw(p.value)}</span> },
-    { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p.value) },
-    { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p.value) },
+    { field: "pnl_krw", headerName: "평가손익", width: 130, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{formatKrw(p?.value ?? 0)}</span> },
+    { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
+    { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     {
       field: "memo", headerName: "메모", minWidth: 150, flex: 1.5, editable: true,
       renderCell: (p) => p.row.id === "__adding__" ? <StableInlineInput className="form-control form-control-sm" initialValue={addingRow?.memo ?? ""} onChange={v => setAddingRow(p => p ? {...p, memo: v} : null)} onSave={handleAddRowSave} disabled={!addingRow?.isValidated} /> : <span>{p.value}</span>
