@@ -27,6 +27,7 @@ type MarketResponse = {
 
 type MarketGridRow = MarketRowItem & {
   id: string;
+  row_number: number;
 };
 
 const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
@@ -114,6 +115,7 @@ export function MarketManager() {
   const [minMarketCap, setMinMarketCap] = useState("");
   const [minPrevVolume, setMinPrevVolume] = useState("");
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,6 +138,7 @@ export function MarketManager() {
 
         setRows(payload.rows ?? []);
         setUpdatedAt(payload.updated_at ?? null);
+        setPage(0);
       } catch (loadError) {
         if (alive) {
           setError(loadError instanceof Error ? loadError.message : "ETF 마켓 데이터를 불러오지 못했습니다.");
@@ -190,12 +193,25 @@ export function MarketManager() {
       return left.ticker.localeCompare(right.ticker);
     });
   }, [excludedGroups, minMarketCap, minPrevVolume, query, rows]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [query, minMarketCap, minPrevVolume, excludedGroups]);
+
   const gridRows = useMemo<MarketGridRow[]>(
-    () => filteredRows.map((row) => ({ ...row, id: row.ticker })),
+    () => filteredRows.map((row, index) => ({ ...row, id: row.ticker, row_number: index + 1 })),
     [filteredRows],
   );
   const columns = useMemo<GridColDef<MarketGridRow>[]>(
     () => [
+      {
+        field: "row_number",
+        headerName: "#",
+        minWidth: 72,
+        width: 72,
+        align: "right",
+        headerAlign: "right",
+      },
       { field: "ticker", headerName: "티커", minWidth: 92, width: 92, renderCell: (params) => <span className="appCodeText">{params.row.ticker}</span> },
       { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
       {
@@ -334,6 +350,10 @@ export function MarketManager() {
             columns={columns}
             loading={loading}
             minHeight="60vh"
+            hideFooter={false}
+            pageSizeOptions={[20]}
+            paginationModel={{ page, pageSize: 20 }}
+            onPaginationModelChange={(model) => setPage(model.page)}
             getRowClassName={(params) => (params.row.is_held ? "appHeldRow" : "")}
           />
           </div>
