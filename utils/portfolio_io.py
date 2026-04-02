@@ -439,7 +439,7 @@ def load_real_holdings_table(
         df_holdings["weight_pct"] = 0.0
 
     # 소수점 반올림 및 타입 변환 처리
-    price_digits = 2 if account_country in ("us", "au") else 0
+    price_digits = 4 if account_country in ("us", "au") else 0
     percent_cols = ["수익률(%)", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
     price_cols = ["평균 매입가", "현재가", "Nav", "괴리율"]
     int_cols = ["매입금액(KRW)", "평가금액(KRW)", "평가손익(KRW)"]

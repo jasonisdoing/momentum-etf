@@ -103,6 +103,17 @@ function formatKrw(value: number): string {
   return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
 }
 
+function formatPrice(value: number | null, currency: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (currency === "AUD") {
+    return `A$${new Intl.NumberFormat("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
+  }
+  if (currency === "USD") {
+    return `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
+  }
+  return `${new Intl.NumberFormat("ko-KR").format(value)}원`;
+}
+
 function formatNumber(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
@@ -120,7 +131,8 @@ function getBucketCellClass(bucketId: number): string {
 
 function parseRawPrice(formatted: unknown): string {
   if (formatted === null || formatted === undefined) return "0";
-  return String(formatted).replace(/[A$₩원,\s]/g, "");
+  // A$, $, ₩, 원, 콤마 제거
+  return String(formatted).replace(/A\$|\$|₩|원|,|\s/g, "");
 }
 
 function safeParseFloat(val: unknown): number {
@@ -488,11 +500,11 @@ export function AssetsManager() {
       }
     },
     {
-      field: "average_buy_price", headerName: "매입 단가", type: "number", width: 110, 
+      field: "average_buy_price", headerName: "매입 단가", type: "number", width: 120, 
       editable: true,
       valueFormatter: (p: any) => {
         if (!p || p.value === null || p.value === undefined) return "";
-        return `${new Intl.NumberFormat("ko-KR").format(p.value)}원`;
+        return formatPrice(p.value, p.row?.currency || "KRW");
       },
       renderCell: (p: any) => {
         if (!p) return null;
@@ -508,12 +520,26 @@ export function AssetsManager() {
             />
           );
         }
-        return <span>{new Intl.NumberFormat("ko-KR").format(p.value ?? 0)}원</span>;
-      }
+        return <span>{formatPrice(p.value, p.row?.currency || "KRW")}</span>;
+      },
+      // 수정 모드에서 소수점 정밀도 보장을 위해 step="any" 적용
+      renderEditCell: (p: any) => (
+        <input
+          type="number"
+          step="any"
+          className="form-control form-control-sm h-100"
+          autoFocus
+          value={p.value}
+          onChange={(e) => p.api.setEditCellValue({ id: p.id, field: p.field, value: e.target.value })}
+        />
+      )
     },
     { field: "weight_pct", headerName: "비중", width: 70, renderCell: (p: any) => <span style={{ color: "#0d6efd" }}>{p?.value?.toFixed(1)}%</span> },
     { field: "return_pct", headerName: "수익률", width: 80, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{(p?.value ?? 0) > 0 ? "+" : ""}{p?.value?.toFixed(1)}%</span> },
-    { field: "current_price", headerName: "현재가", width: 110 },
+    { 
+      field: "current_price", headerName: "현재가", width: 110,
+      renderCell: (p: any) => <span>{formatPrice(safeParseFloat(p.value), p.row?.currency || "KRW")}</span>
+    },
     { field: "days_held", headerName: "보유일", width: 65, align: "center" },
     { field: "pnl_krw", headerName: "평가손익", width: 130, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{formatKrw(p?.value ?? 0)}</span> },
     { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
@@ -558,10 +584,10 @@ export function AssetsManager() {
               </select>
               <button className="btn btn-primary btn-sm px-3 fw-bold" onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", memo: "" })}><IconPlus size={16} /> 종목 추가</button>
             </div>
-            <div className="d-flex gap-4 small">
-              <div className="text-muted">총 자산: <span className="fw-bold text-primary fs-6">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0) + (cash?.cash_balance_krw || 0))}</span></div>
-              <div className="text-muted">평가액: <span className="fw-bold text-dark">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0))}</span></div>
-              <div className="text-muted">종목수: <span className="fw-bold text-dark">{rows.length}개</span></div>
+            <div className="d-flex gap-5 align-items-center">
+              <div className="fw-bold">총 자산: <span className="fw-bold text-primary fs-3 ms-2">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0) + (cash?.cash_balance_krw || 0))}</span></div>
+              <div className="fw-bold">평가액: <span className="fw-bold text-dark fs-4 ms-2">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0))}</span></div>
+              <div className="fw-bold">종목수: <span className="fw-bold text-dark fs-4 ms-2">{rows.length}개</span></div>
             </div>
           </div>
           {cash && (
@@ -575,7 +601,7 @@ export function AssetsManager() {
               ) : (
                 <div className="d-flex gap-5 align-items-center">
                   <div className="small">투자원금: <b className="ms-1">{formatNumber(cash.total_principal)}원</b></div>
-                  <div className="small">보유현금: <b className="ms-1">{formatNumber(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native)}원</b></div>
+                  <div className="small">보유현금: <b className="ms-1">{formatPrice(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native, cash.currency)}</b></div>
                   <button className="btn btn-link btn-sm p-0" onClick={() => { if (cash) setCashEditing({ total_principal: String(cash.total_principal), cash_value: String(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native), intl_shares_value: String(cash.intl_shares_value), intl_shares_change: String(cash.intl_shares_change) }); }}>수정</button>
                 </div>
               )}
