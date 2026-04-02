@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition, useCallback } from "react";
+import { useEffect, useMemo, useState, useTransition, useCallback, useRef } from "react";
 import {
   type GridRowModesModel,
   GridRowModes,
@@ -27,6 +27,15 @@ import {
   readRememberedMomentumEtfAccountId,
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
+
+// --- Hooks ---
+function useEffectRef<T>(value: T) {
+  const ref = useRef(value);
+  useEffect(() => {
+    ref.current = value;
+  }, [value]);
+  return ref;
+}
 
 // --- Types ---
 type AccountConfig = {
@@ -277,7 +286,8 @@ export function AssetsManager() {
 
   const handleValidateTicker = (tickerToUse?: string) => {
     const tickerStr = tickerToUse || addingRow?.ticker;
-    if (!tickerStr) return;
+    if (!tickerStr || addingRow?.isValidatingTicker) return; // 중복 요청 차단
+
     setAddingRow(p => p ? { ...p, ticker: tickerStr, isValidatingTicker: true } : null);
     startTransition(async () => {
       try {
@@ -287,18 +297,49 @@ export function AssetsManager() {
           body: JSON.stringify({ action: "validate", account_id: selectedAccountId, ticker: tickerStr }),
         });
         const data = await res.json();
-        if (!res.ok) { toast.error(data.error || "검증 실패"); setAddingRow(p => p ? { ...p, isValidatingTicker: false } : null); return; }
+        if (!res.ok) {
+          toast.error(data.error || "검증 실패");
+          setAddingRow(p => p ? { ...p, isValidatingTicker: false } : null);
+          return;
+        }
         setAddingRow(p => p ? { ...p, isValidatingTicker: false, isValidated: true, name: data.name, bucketId: data.bucket_id, ticker: data.ticker } : null);
         toast.success(`조회 성공: ${data.name}`);
-      } catch { toast.error("오류 발생"); setAddingRow(p => p ? { ...p, isValidatingTicker: false } : null); }
+      } catch {
+        toast.error("오류 발생");
+        setAddingRow(p => p ? { ...p, isValidatingTicker: false } : null);
+      }
     });
   };
 
+  // 입력 필드 직접 참조를 위한 Ref (상태 엇박자 방지)
+  const qtyRef = useRef<HTMLInputElement>(null);
+  const priceRef = useRef<HTMLInputElement>(null);
+  const memoRef = useRef<HTMLInputElement>(null);
+
   const handleAddRowSave = useCallback(() => {
-    if (!addingRow?.isValidated) return;
-    const quantity = parseInt(addingRow.quantity, 10);
-    const avgPrice = safeParseFloat(addingRow.average_buy_price);
-    if (isNaN(quantity) || quantity < 0 || isNaN(avgPrice) || avgPrice < 0) { toast.error("정보를 정확히 입력하세요."); return; }
+    if (!addingRow?.isValidated) {
+      toast.error("먼저 종목 확인 버튼을 눌러주세요.");
+      return;
+    }
+
+    const rawQty = qtyRef.current?.value ?? "";
+    const rawPrice = priceRef.current?.value ?? "";
+    const rawMemo = memoRef.current?.value ?? "";
+
+    const quantity = parseInt(parseRawPrice(rawQty), 10);
+    const avgPrice = safeParseFloat(rawPrice);
+
+    const isQtyValid = !isNaN(quantity) && quantity >= 0 && rawQty !== "";
+    const isPriceValid = !isNaN(avgPrice) && avgPrice >= 0 && rawPrice !== "";
+
+    if (!isQtyValid || !isPriceValid) {
+      const dbg = `[수량:'${rawQty}', 단가:'${rawPrice}']`;
+      let detail = "";
+      if (!isQtyValid) detail += "수량 ";
+      if (!isPriceValid) detail += "단가 ";
+      toast.error(`${detail.trim()} 형식이 올바르지 않습니다. ${dbg}`);
+      return;
+    }
 
     setProcessingId("__adding__");
     startTransition(async () => {
@@ -306,17 +347,28 @@ export function AssetsManager() {
         const res = await fetch("/api/assets", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ account_id: selectedAccountId, ticker: addingRow.ticker, quantity, average_buy_price: avgPrice, memo: addingRow.memo }),
+          body: JSON.stringify({
+            account_id: selectedAccountId,
+            ticker: addingRow.ticker,
+            quantity,
+            average_buy_price: avgPrice,
+            memo: rawMemo,
+          }),
         });
-        if (!res.ok) throw new Error();
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "추가 실패");
+
         setAddingRow(null);
         delete holdingsDataCache[selectedAccountId];
         await load(selectedAccountId, true);
-        toast.success("추가 완료");
-      } catch { toast.error("추가 실패"); }
-      finally { setProcessingId(null); }
+        toast.success(`${addingRow.ticker} 추가 완료`);
+      } catch (err: any) {
+        toast.error(err.message || "종목 추가에 실패했습니다.");
+      } finally {
+        setProcessingId(null);
+      }
     });
-  }, [addingRow, selectedAccountId, load, toast]);
+  }, [addingRow?.isValidated, addingRow?.ticker, selectedAccountId, load, toast]);
 
   const handleAddRowCancel = useCallback(() => setAddingRow(null), []);
 
@@ -360,31 +412,42 @@ export function AssetsManager() {
       return [{
         id: "__adding__", account_name: "", currency: "", bucket: "", bucket_id: 0,
         ticker: addingRow.ticker, name: addingRow.name || "",
-        quantity: parseInt(addingRow.quantity, 10) || 0,
-        average_buy_price: safeParseFloat(addingRow.average_buy_price),
-        current_price: "-", days_held: "-", pnl_krw: 0, return_pct: 0, weight_pct: 0, buy_amount_krw: 0, valuation_krw: 0, memo: addingRow.memo,
+        quantity: 0, average_buy_price: 0,
+        current_price: "-", days_held: "-", pnl_krw: 0, return_pct: 0, weight_pct: 0, buy_amount_krw: 0, valuation_krw: 0, memo: "",
       } as GridRow, ...baseRows];
     }
     return baseRows;
-  }, [rows, addingRow]);
+  }, [rows, addingRow?.ticker, addingRow?.name]);
 
   const columns = useMemo<GridColDef<GridRow>[]>(() => [
     {
       field: "actions", type: "actions", headerName: "작업", width: 100,
       getActions: ({ id, row }) => {
-        if (processingId === id) return [<GridActionsCellItem key="l" icon={<IconLoader2 size={18} style={{ animation: "spin 1s linear infinite" }} />} label="L" disabled />];
+        if (processingId === id) return [<GridActionsCellItem key="l" icon={<IconLoader2 size={18} style={{ animation: "spin 1s linear infinite" }} />} label="처리 중..." disabled />];
         if (id === "__adding__") return [
-          <GridActionsCellItem key="s" icon={<IconCheck size={20} color={addingRow?.isValidated ? "primary" : "disabled"} />} label="S" onClick={handleAddRowSave} disabled={!addingRow?.isValidated || isPending} />,
-          <GridActionsCellItem key="c" icon={<IconX size={20} />} label="C" onClick={handleAddRowCancel} />
+          <GridActionsCellItem
+            key="s"
+            icon={<IconCheck size={20} />}
+            label="저장"
+            color="primary"
+            onClick={handleAddRowSave}
+            disabled={!addingRow?.isValidated || isPending}
+          />,
+          <GridActionsCellItem
+            key="c"
+            icon={<IconX size={20} />}
+            label="취소"
+            onClick={handleAddRowCancel}
+          />
         ];
         if (row.ticker === "IS") return [];
         if (rowModesModel[id]?.mode === GridRowModes.Edit) return [
-          <GridActionsCellItem key="s" icon={<IconDeviceFloppy size={20} />} label="S" color="primary" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View } }))} />,
-          <GridActionsCellItem key="c" icon={<IconX size={20} />} label="C" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))} />
+          <GridActionsCellItem key="s" icon={<IconDeviceFloppy size={20} />} label="저장" color="primary" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View } }))} />,
+          <GridActionsCellItem key="c" icon={<IconX size={20} />} label="취소" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))} />
         ];
         return [
-          <GridActionsCellItem key="e" icon={<IconPencil size={20} />} label="E" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.Edit } }))} />,
-          <GridActionsCellItem key="d" icon={<IconTrash size={20} />} label="D" onClick={() => handleDelete(row.ticker, String(id))} />
+          <GridActionsCellItem key="e" icon={<IconPencil size={20} />} label="수정" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.Edit } }))} />,
+          <GridActionsCellItem key="d" icon={<IconTrash size={20} />} label="삭제" onClick={() => handleDelete(row.ticker, String(id))} />
         ];
       }
     },
@@ -401,7 +464,8 @@ export function AssetsManager() {
     },
     { field: "name", headerName: "종목명", minWidth: 150, flex: 1 },
     {
-      field: "quantity", headerName: "수량", type: "number", width: 80, editable: true,
+      field: "quantity", headerName: "수량", type: "number", width: 80, 
+      editable: true,
       valueFormatter: (p: any) => {
         if (!p || p.value === null || p.value === undefined) return "";
         return new Intl.NumberFormat("ko-KR").format(p.value);
@@ -412,9 +476,10 @@ export function AssetsManager() {
           return (
             <input
               type="number"
+              step="any"
+              ref={qtyRef}
               className="form-control form-control-sm"
-              value={addingRow?.quantity ?? ""}
-              onChange={(e) => setAddingRow(v => v ? { ...v, quantity: e.target.value } : null)}
+              defaultValue=""
               disabled={!addingRow?.isValidated}
             />
           );
@@ -423,7 +488,8 @@ export function AssetsManager() {
       }
     },
     {
-      field: "average_buy_price", headerName: "매입 단가", type: "number", width: 110, editable: true,
+      field: "average_buy_price", headerName: "매입 단가", type: "number", width: 110, 
+      editable: true,
       valueFormatter: (p: any) => {
         if (!p || p.value === null || p.value === undefined) return "";
         return `${new Intl.NumberFormat("ko-KR").format(p.value)}원`;
@@ -434,9 +500,10 @@ export function AssetsManager() {
           return (
             <input
               type="number"
+              step="any"
+              ref={priceRef}
               className="form-control form-control-sm"
-              value={addingRow?.average_buy_price ?? ""}
-              onChange={(e) => setAddingRow(v => v ? { ...v, average_buy_price: e.target.value } : null)}
+              defaultValue=""
               disabled={!addingRow?.isValidated}
             />
           );
@@ -452,8 +519,29 @@ export function AssetsManager() {
     { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     {
-      field: "memo", headerName: "메모", minWidth: 150, flex: 1.5, editable: true,
-      renderCell: (p) => p.row.id === "__adding__" ? <StableInlineInput className="form-control form-control-sm" initialValue={addingRow?.memo ?? ""} onChange={v => setAddingRow(p => p ? {...p, memo: v} : null)} onSave={handleAddRowSave} disabled={!addingRow?.isValidated} /> : <span>{p.value}</span>
+      field: "memo", headerName: "메모", minWidth: 150, flex: 1.5, 
+      editable: true,
+      renderCell: (p: any) => {
+        if (!p) return null;
+        if (p.row?.id === "__adding__") {
+          return (
+            <input
+              type="text"
+              ref={memoRef}
+              className="form-control form-control-sm"
+              defaultValue=""
+              placeholder="메모 입력..."
+              disabled={!addingRow?.isValidated}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                  handleAddRowSave();
+                }
+              }}
+            />
+          );
+        }
+        return <span>{p.value}</span>;
+      }
     }
   ], [addingRow, isPending, rowModesModel, processingId, handleAddRowSave, handleAddRowCancel]);
 
@@ -494,7 +582,17 @@ export function AssetsManager() {
             </div>
           )}
           <div className="card-body p-0" style={{ minHeight: "500px" }}>
-            <AppDataGrid rows={gridRows} columns={columns} loading={loading} editMode="row" rowModesModel={rowModesModel} onRowModesModelChange={setRowModesModel} onRowEditStop={(p, e) => { if (p.reason === GridRowEditStopReasons.rowFocusOut) e.defaultMuiPrevented = true; }} processRowUpdate={processRowUpdate} />
+            <AppDataGrid 
+              rows={gridRows} 
+              columns={columns} 
+              loading={loading} 
+              editMode="row" 
+              rowModesModel={rowModesModel} 
+              onRowModesModelChange={setRowModesModel} 
+              onRowEditStop={(p, e) => { if (p.reason === GridRowEditStopReasons.rowFocusOut) e.defaultMuiPrevented = true; }} 
+              processRowUpdate={processRowUpdate}
+              isCellEditable={(p) => p.row.id !== "__adding__"}
+            />
           </div>
         </div>
       </section>
