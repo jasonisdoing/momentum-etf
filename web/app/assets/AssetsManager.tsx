@@ -587,7 +587,7 @@ export function AssetsManager() {
             <div className="d-flex gap-5 align-items-center">
               <div className="fw-bold">총 자산: <span className="fw-bold text-primary fs-3 ms-2">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0) + (cash?.cash_balance_krw || 0))}</span></div>
               <div className="fw-bold">평가액: <span className="fw-bold text-dark fs-4 ms-2">{formatKrw(rows.reduce((s, r) => s + (r.valuation_krw || 0), 0))}</span></div>
-              <div className="fw-bold">종목수: <span className="fw-bold text-dark fs-4 ms-2">{rows.length}개</span></div>
+              <div className="fw-bold">종목수: <span className="fw-bold text-dark fs-4 ms-2">{rows.filter(r => r.quantity > 0).length}개</span></div>
             </div>
           </div>
           {cash && (
