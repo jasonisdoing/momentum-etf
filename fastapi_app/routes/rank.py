@@ -13,6 +13,7 @@ def get_rank_data(
     ticker_type: str | None = Query(default=None),
     ma_type: str | None = Query(default=None),
     ma_months: int | None = Query(default=None),
+    as_of_date: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    return load_rank_data(ticker_type=ticker_type, ma_type=ma_type, ma_months=ma_months)
+    return load_rank_data(ticker_type=ticker_type, ma_type=ma_type, ma_months=ma_months, as_of_date=as_of_date)
