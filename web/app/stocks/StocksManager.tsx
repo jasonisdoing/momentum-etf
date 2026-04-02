@@ -121,7 +121,6 @@ export function StocksManager() {
   const [activeRows, setActiveRows] = useState<ActiveStocksRowItem[]>([]);
   const [deletedRows, setDeletedRows] = useState<DeletedStocksRowItem[]>([]);
   const [selectedDeletedTickers, setSelectedDeletedTickers] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
   const [editingRow, setEditingRow] = useState<ActiveStocksRowItem | null>(null);
@@ -135,9 +134,12 @@ export function StocksManager() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const toast = useToast();
 
+  function showErrorToast(message: string) {
+    toast.error(`[ETF-종목 관리] ${message}`);
+  }
+
   async function load(mode: ViewMode, tickerType?: string) {
     setLoading(true);
-    setError(null);
 
     try {
       const search = tickerType ? `?ticker_type=${encodeURIComponent(tickerType)}` : "";
@@ -160,7 +162,7 @@ export function StocksManager() {
         setDeletedRows((payload.rows as DeletedStocksRowItem[] | undefined) ?? []);
       }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "종목 관리 데이터를 불러오지 못했습니다.");
+      showErrorToast(loadError instanceof Error ? loadError.message : "종목 관리 데이터를 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
@@ -456,7 +458,6 @@ export function StocksManager() {
 
   async function handleValidateTicker() {
     try {
-      setError(null);
       setIsValidatingTicker(true);
       const response = await fetch("/api/stocks", {
         method: "POST",
@@ -485,7 +486,7 @@ export function StocksManager() {
       setAddBucketId(Number((payload as StockValidationState).bucket_id ?? 1));
     } catch (validationError) {
       setValidatedCandidate(null);
-      setError(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
+      showErrorToast(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
     } finally {
       setIsValidatingTicker(false);
     }
@@ -496,7 +497,6 @@ export function StocksManager() {
 
     startTransition(async () => {
       try {
-        setError(null);
         const isDelete = isForceDelete || !!editingDeleteReason.trim();
         const response = await fetch("/api/stocks", {
           method: isDelete ? "DELETE" : "PATCH",
@@ -526,7 +526,7 @@ export function StocksManager() {
         closeEditModal();
         void load(viewMode, selectedTickerType);
       } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "종목 수정에 실패했습니다.");
+        showErrorToast(saveError instanceof Error ? saveError.message : "종목 수정에 실패했습니다.");
       }
     });
   }
@@ -538,7 +538,6 @@ export function StocksManager() {
 
     startTransition(async () => {
       try {
-        setError(null);
         const response = await fetch("/api/stocks", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -561,7 +560,7 @@ export function StocksManager() {
         closeAddModal();
         void load(viewMode, selectedTickerType);
       } catch (createError) {
-        setError(createError instanceof Error ? createError.message : "종목 추가에 실패했습니다.");
+        showErrorToast(createError instanceof Error ? createError.message : "종목 추가에 실패했습니다.");
       }
     });
   }
@@ -569,7 +568,6 @@ export function StocksManager() {
   function handleRestoreDeleted() {
     startTransition(async () => {
       try {
-        setError(null);
         const response = await fetch("/api/deleted", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -586,7 +584,7 @@ export function StocksManager() {
         setSelectedDeletedTickers([]);
         void load(viewMode, selectedTickerType);
       } catch (restoreError) {
-        setError(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
+        showErrorToast(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
       }
     });
   }
@@ -594,7 +592,6 @@ export function StocksManager() {
   function handleHardDeleteDeleted() {
     startTransition(async () => {
       try {
-        setError(null);
         const response = await fetch("/api/deleted", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
@@ -611,19 +608,13 @@ export function StocksManager() {
         setSelectedDeletedTickers([]);
         void load(viewMode, selectedTickerType);
       } catch (deleteError) {
-        setError(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
+        showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
       }
     });
   }
 
   return (
     <div className="appPageStack appPageStackFill">
-      {error ? (
-        <div className="appBannerStack">
-          <div className="alert alert-danger mb-0">{error}</div>
-        </div>
-      ) : null}
-
       <section className="appSection appSectionFill stocksPage">
         <div className="card appCard stocksCard">
           <div className="card-header">
