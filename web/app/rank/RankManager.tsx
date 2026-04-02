@@ -60,6 +60,7 @@ type RankResponse = {
   ma_months?: number;
   ma_type_options?: string[];
   ma_months_max?: number;
+  as_of_date?: string | null;
   monthly_return_labels?: string[];
   rows?: RankRow[];
   cache_blocked?: boolean;
@@ -88,6 +89,17 @@ type RankToolbarCache = {
 };
 
 let rankToolbarCache: RankToolbarCache | null = null;
+
+function getTodayDateInputValue(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
+function toDateInputValue(value: string | null | undefined): string {
+  if (!value) {
+    return getTodayDateInputValue();
+  }
+  return String(value).slice(0, 10);
+}
 
 function formatNumber(value: number | null, digits = 0): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -153,6 +165,8 @@ export function RankManager() {
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
+  const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
+  const [page, setPage] = useState(0);
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
@@ -163,7 +177,7 @@ export function RankManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function load(next?: { ticker_type?: string; ma_type?: string; ma_months?: number }) {
+  async function load(next?: { ticker_type?: string; ma_type?: string; ma_months?: number; as_of_date?: string }) {
     setLoading(true);
     setError(null);
 
@@ -177,6 +191,9 @@ export function RankManager() {
       }
       if (next?.ma_months) {
         search.set("ma_months", String(next.ma_months));
+      }
+      if (next?.as_of_date) {
+        search.set("as_of_date", next.as_of_date);
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
@@ -194,6 +211,7 @@ export function RankManager() {
       setMaMonths(payload.ma_months ?? 1);
       setMaTypeOptions(payload.ma_type_options ?? []);
       setMaMonthsMax(payload.ma_months_max ?? 12);
+      setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
       setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
       rankToolbarCache = {
         ticker_types: payload.ticker_types ?? [],
@@ -204,6 +222,7 @@ export function RankManager() {
         ma_months_max: payload.ma_months_max ?? 12,
       };
       setRows(payload.rows ?? []);
+      setPage(0);
       setCacheBlocked(Boolean(payload.cache_blocked));
       setRankingComputedAt(payload.ranking_computed_at ?? null);
       setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
@@ -218,7 +237,7 @@ export function RankManager() {
   }
 
   useEffect(() => {
-    void load({ ticker_type: readRememberedTickerType() ?? undefined });
+    void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
 
   const selectedTickerTypeItem = useMemo(
@@ -246,6 +265,10 @@ export function RankManager() {
       };
     });
   }, [rows]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [selectedTickerType, maType, maMonths, metricMode, selectedAsOfDate]);
 
   const columns = useMemo<GridColDef<RankGridRow>[]>(() => {
     const leadingColumns: GridColDef<RankGridRow>[] = [
@@ -461,15 +484,20 @@ export function RankManager() {
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
     writeRememberedTickerType(accountId);
-    void load({ ticker_type: accountId, ma_type: maType, ma_months: maMonths });
+    void load({ ticker_type: accountId, ma_type: maType, ma_months: maMonths, as_of_date: selectedAsOfDate });
   }
 
   function handleMaTypeChange(nextMaType: string) {
-    void load({ ticker_type: selectedTickerType, ma_type: nextMaType, ma_months: maMonths });
+    void load({ ticker_type: selectedTickerType, ma_type: nextMaType, ma_months: maMonths, as_of_date: selectedAsOfDate });
   }
 
   function handleMaMonthsChange(nextMaMonths: number) {
-    void load({ ticker_type: selectedTickerType, ma_type: maType, ma_months: nextMaMonths });
+    void load({ ticker_type: selectedTickerType, ma_type: maType, ma_months: nextMaMonths, as_of_date: selectedAsOfDate });
+  }
+
+  function handleAsOfDateChange(nextAsOfDate: string) {
+    setSelectedAsOfDate(nextAsOfDate);
+    void load({ ticker_type: selectedTickerType, ma_type: maType, ma_months: maMonths, as_of_date: nextAsOfDate });
   }
 
   const blockedMessage = useMemo(() => {
@@ -517,6 +545,14 @@ export function RankManager() {
           <div className="card-header">
             <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div className="tickerTypeToolbarLeft" style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+                <input
+                  className="form-control"
+                  type="date"
+                  style={{ width: "auto", fontWeight: 600 }}
+                  value={selectedAsOfDate}
+                  max={getTodayDateInputValue()}
+                  onChange={(event) => handleAsOfDateChange(event.target.value)}
+                />
                 <select
                   className="form-select"
                   style={{ width: "auto", minWidth: "180px", fontWeight: 600 }}
@@ -608,6 +644,10 @@ export function RankManager() {
                 rows={gridRows}
                 columns={columns}
                 loading={loading}
+                hideFooter={false}
+                pageSizeOptions={[20]}
+                paginationModel={{ page, pageSize: 20 }}
+                onPaginationModelChange={(model) => setPage(model.page)}
                 getRowClassName={(params) => {
                   const classes: string[] = [];
                   if ((params.row.추세 ?? 0) < 0) {

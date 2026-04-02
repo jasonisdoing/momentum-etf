@@ -18,7 +18,7 @@ from config import (
 from core.strategy.metrics import process_ticker_data
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
-from utils.data_loader import get_latest_trading_day
+from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
@@ -93,6 +93,32 @@ def _build_blocked_rankings_result(
     return blocked
 
 
+def _get_latest_trading_day_for_reference(country_code: str, reference_date: pd.Timestamp) -> pd.Timestamp:
+    reference = pd.Timestamp(reference_date).normalize()
+    today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    if reference >= today_korea:
+        return get_latest_trading_day(country_code).normalize()
+
+    start_date = (reference - pd.DateOffset(days=10)).strftime("%Y-%m-%d")
+    end_date = reference.strftime("%Y-%m-%d")
+    trading_days = get_trading_days(start_date, end_date, country_code)
+    if trading_days:
+        return max(trading_days).normalize()
+    return reference
+
+
+def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
+    if close_series is None or close_series.empty:
+        return close_series
+
+    normalized = close_series.copy()
+    normalized.index = pd.to_datetime(normalized.index)
+    sliced = normalized.loc[normalized.index.normalize() <= pd.Timestamp(cutoff_date).normalize()]
+    if sliced.empty:
+        return None
+    return sliced.sort_index()
+
+
 def get_ticker_type_rank_defaults(ticker_type: str) -> tuple[str, int]:
     settings = get_ticker_type_settings(ticker_type)
 
@@ -145,13 +171,21 @@ def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
     return None
 
 
-def get_recent_monthly_return_labels(count: int = MONTHLY_RETURN_LABEL_COUNT) -> list[str]:
-    now_month = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).to_period("M")
-    return [f"{(now_month - offset).strftime('%Y-%m')}(%)" for offset in range(count)]
+def get_recent_monthly_return_labels(
+    count: int = MONTHLY_RETURN_LABEL_COUNT,
+    reference_date: pd.Timestamp | None = None,
+) -> list[str]:
+    base_month = (reference_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).to_period("M")
+    return [f"{(base_month - offset).strftime('%Y-%m')}(%)" for offset in range(count)]
 
 
-def _build_monthly_return_metrics(close_series: pd.Series | None) -> dict[str, float | None]:
-    labels = get_recent_monthly_return_labels()
+def _build_monthly_return_metrics(
+    close_series: pd.Series | None,
+    *,
+    reference_date: pd.Timestamp | None = None,
+    labels: list[str] | None = None,
+) -> dict[str, float | None]:
+    labels = labels or get_recent_monthly_return_labels(reference_date=reference_date)
     empty_metrics = {label: None for label in labels}
     if close_series is None:
         return empty_metrics
@@ -164,7 +198,7 @@ def _build_monthly_return_metrics(close_series: pd.Series | None) -> dict[str, f
     normalized.index = pd.to_datetime(normalized.index)
     normalized = normalized.sort_index()
     month_end_series = normalized.groupby(normalized.index.to_period("M")).last()
-    current_month = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).to_period("M")
+    current_month = (reference_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).to_period("M")
     metrics: dict[str, float | None] = {}
 
     for label in labels:
@@ -191,8 +225,17 @@ def _build_monthly_return_metrics(close_series: pd.Series | None) -> dict[str, f
     return metrics
 
 
-def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> dict[str, Any]:
-    monthly_return_metrics = _build_monthly_return_metrics(close_series)
+def _extract_price_metrics_from_close_series(
+    close_series: pd.Series | None,
+    *,
+    reference_date: pd.Timestamp | None = None,
+    monthly_labels: list[str] | None = None,
+) -> dict[str, Any]:
+    monthly_return_metrics = _build_monthly_return_metrics(
+        close_series,
+        reference_date=reference_date,
+        labels=monthly_labels,
+    )
     empty_result = {
         "현재가": None,
         "괴리율": None,
@@ -342,7 +385,12 @@ def _build_effective_close_series(
     return adjusted.sort_index()
 
 
-def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
+def _normalize_ranking_values(
+    df: pd.DataFrame,
+    country_code: str,
+    *,
+    monthly_labels: list[str] | None = None,
+) -> pd.DataFrame:
     normalized = df.copy()
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
@@ -366,7 +414,7 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
         "11달(%)",
         "12달(%)",
         "고점",
-        *get_recent_monthly_return_labels(),
+        *(monthly_labels or []),
     ]
     one_decimal_columns = ["추세", "RSI"]
 
@@ -396,6 +444,7 @@ def build_ticker_type_rankings(
     *,
     ma_type: str,
     ma_months: int,
+    as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
 ) -> pd.DataFrame:
@@ -411,8 +460,10 @@ def build_ticker_type_rankings(
 
     fetch_started_at = perf_counter()
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
+    selected_as_of_date = (as_of_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).normalize()
     cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
-    latest_trading_day = get_latest_trading_day(country_code).normalize()
+    latest_trading_day = _get_latest_trading_day_for_reference(country_code, selected_as_of_date)
+    monthly_labels = get_recent_monthly_return_labels(reference_date=selected_as_of_date)
     missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
     normalized_cache_updated = {
         ticker: normalized
@@ -448,14 +499,16 @@ def build_ticker_type_rankings(
     cached_close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
     if callable(status_callback):
         status_callback("실시간 가격 조회")
+    today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    realtime_allowed = selected_as_of_date == today_korea and latest_trading_day == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
-        else _load_realtime_snapshot(country_code, tickers)
+        else _load_realtime_snapshot(country_code, tickers) if realtime_allowed else {}
     )
     fetch_elapsed = perf_counter() - fetch_started_at
     realtime_meta = None
-    if realtime_snapshot_override is None:
+    if realtime_allowed and realtime_snapshot_override is None:
         realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
 
     ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
@@ -478,11 +531,16 @@ def build_ticker_type_rankings(
         cached_close_series = cached_close_series_map.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
-        effective_close_series = _build_effective_close_series(cached_close_series, realtime_entry)
+        base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
+        effective_close_series = _build_effective_close_series(base_close_series, realtime_entry)
         preprocess_elapsed += perf_counter() - preprocess_started_at
 
         metric_started_at = perf_counter()
-        price_metrics = _extract_price_metrics_from_close_series(effective_close_series)
+        price_metrics = _extract_price_metrics_from_close_series(
+            effective_close_series,
+            reference_date=selected_as_of_date,
+            monthly_labels=monthly_labels,
+        )
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
@@ -573,7 +631,7 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
-    df = _normalize_ranking_values(df, country_code)
+    df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at
     if realtime_meta:
@@ -584,6 +642,7 @@ def build_ticker_type_rankings(
     if latest_cache_updated_at is not None:
         df.attrs["cache_updated_at"] = latest_cache_updated_at
     df.attrs["latest_trading_day"] = latest_trading_day
+    df.attrs["as_of_date"] = selected_as_of_date
     dataframe_elapsed = perf_counter() - dataframe_started_at
     total_elapsed = perf_counter() - started_at
     logger.info(

@@ -396,6 +396,7 @@ def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "ticker": 1,
                 "name": 1,
                 "bucket": 1,
+                "added_date": 1,
                 "listing_date": 1,
                 "1_week_avg_volume": 1,
                 "1_day_earn_rate": 1,
@@ -428,6 +429,7 @@ def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "name": normalize_text(doc.get("name"), ""),
                 "bucket_id": int(doc.get("bucket") or 1),
                 "bucket_name": BUCKETS.get(int(doc.get("bucket") or 1), BUCKETS[1]),
+                "added_date": normalize_text(doc.get("added_date"), "-"),
                 "listing_date": normalize_text(doc.get("listing_date"), "-"),
                 "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
                 "return_1d": normalize_nullable_number(

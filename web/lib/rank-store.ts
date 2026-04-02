@@ -48,6 +48,7 @@ type RankData = {
   ma_months: number;
   ma_type_options: string[];
   ma_months_max: number;
+  as_of_date: string | null;
   monthly_return_labels: string[];
   rows: RankRow[];
   cache_blocked: boolean;
@@ -64,6 +65,7 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_type?: string;
   ma_months?: number;
+  as_of_date?: string;
 }): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -74,6 +76,9 @@ export async function loadRankData(params?: {
   }
   if (params?.ma_months) {
     search.set("ma_months", String(params.ma_months));
+  }
+  if (params?.as_of_date) {
+    search.set("as_of_date", params.as_of_date);
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

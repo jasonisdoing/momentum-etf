@@ -50,6 +50,7 @@ type DeletedStocksRowItem = {
   name: string;
   bucket_id: number;
   bucket_name: string;
+  added_date: string;
   listing_date: string;
   week_volume: number | null;
   return_1d: number | null;
@@ -294,6 +295,7 @@ export function StocksManager() {
         }),
       ),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
+      { field: "added_date", headerName: "등록일", width: 112, minWidth: 112 },
     ],
     [],
   );
@@ -402,6 +404,7 @@ export function StocksManager() {
         }),
       ),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
+      { field: "added_date", headerName: "등록일", width: 112, minWidth: 112 },
       { field: "deleted_date", headerName: "삭제일", width: 112, minWidth: 112 },
       { field: "deleted_reason", headerName: "삭제 사유", minWidth: 160, flex: 0.7 },
     ],

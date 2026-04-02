@@ -11,10 +11,12 @@ export async function GET(request: NextRequest) {
     const maType = searchParams.get("ma_type") ?? undefined;
     const maMonthsRaw = searchParams.get("ma_months");
     const maMonths = maMonthsRaw ? Number(maMonthsRaw) : undefined;
+    const asOfDate = searchParams.get("as_of_date") ?? undefined;
     const data = await loadRankData({
       ticker_type: tickerType,
       ma_type: maType,
       ma_months: maMonths,
+      as_of_date: asOfDate,
     });
     return NextResponse.json(data);
   } catch (error) {

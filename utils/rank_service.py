@@ -125,6 +125,7 @@ def load_rank_data(
     ticker_type: str | None = None,
     ma_type: str | None = None,
     ma_months: int | None = None,
+    as_of_date: str | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
     
@@ -140,12 +141,23 @@ def load_rank_data(
     default_ma_type, default_ma_months = get_ticker_type_rank_defaults(selected_ticker_type)
     selected_ma_type = str(ma_type or default_ma_type).strip().upper()
     selected_ma_months = int(ma_months or default_ma_months)
+    selected_as_of_date: pd.Timestamp | None = None
+    if as_of_date:
+        try:
+            selected_as_of_date = pd.to_datetime(as_of_date).normalize()
+        except Exception as exc:
+            raise ValueError(f"기준일 형식이 올바르지 않습니다: {as_of_date}") from exc
+        today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+        if selected_as_of_date > today_korea:
+            raise ValueError("기준일은 오늘 이후로 선택할 수 없습니다.")
 
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
         ma_type=selected_ma_type,
         ma_months=selected_ma_months,
+        as_of_date=selected_as_of_date,
     )
+    effective_as_of_date = pd.Timestamp(dataframe.attrs.get("as_of_date")).normalize() if dataframe.attrs.get("as_of_date") is not None else selected_as_of_date
 
     return {
         "ticker_types": configs_payload,
@@ -154,7 +166,8 @@ def load_rank_data(
         "ma_months": selected_ma_months,
         "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
-        "monthly_return_labels": get_recent_monthly_return_labels(),
+        "as_of_date": _serialize_datetime(effective_as_of_date),
+        "monthly_return_labels": get_recent_monthly_return_labels(reference_date=effective_as_of_date),
         "rows": _serialize_rows(dataframe),
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),
