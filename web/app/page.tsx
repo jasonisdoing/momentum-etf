@@ -130,21 +130,68 @@ export default function HomePage() {
           </div>
         ) : (
           <div className="account-groups">
-            {accountNames.map((accountName) => (
-              <div key={accountName} className="account-section mb-2">
-                <h2 className="account-header h4 mb-1 d-flex align-items-center">
-                  <span className="account-dot me-2"></span>
-                  {accountName}
-                </h2>
-                <div className="row g-2 g-md-3">
-                  {groupings[accountName].map((h, i) => (
-                    <div key={`${h.ticker}-${i}`} className="col-6 col-lg-3">
-                      <HoldingCard row={h} viewMode={viewMode} />
+            {accountNames.map((accountName) => {
+              const accountHoldings = groupings[accountName];
+              
+              // 상승/하락 분류 로직
+              const risingHoldings = accountHoldings.filter(h => {
+                const pct = viewMode === "price" ? (h.daily_change_pct ?? 0) : h.return_pct;
+                return pct > 0;
+              });
+              const fallingHoldings = accountHoldings.filter(h => {
+                const pct = viewMode === "price" ? (h.daily_change_pct ?? 0) : h.return_pct;
+                return pct <= 0;
+              });
+
+              return (
+                <div key={accountName} className="account-section mb-4">
+                  <h2 className="account-header h4 mb-3 d-flex align-items-center">
+                    <span className="account-dot me-2"></span>
+                    {accountName}
+                  </h2>
+                  
+                  <div className="row g-3">
+                    {/* 상승 종목 컬럼 */}
+                    <div className="col-12 col-lg-6">
+                      <div className="d-flex align-items-center mb-3">
+                        <div className="badge bg-danger-lt p-1 me-2" style={{ width: "12px", height: "12px", borderRadius: "50%" }}></div>
+                        <h3 className="h4 fw-bold mb-0 text-danger">상승 중 ({risingHoldings.length})</h3>
+                      </div>
+                      <div className="row g-2">
+                        {risingHoldings.length > 0 ? (
+                          risingHoldings.map((h, i) => (
+                            <div key={`${h.ticker}-${i}`} className="col-12 col-md-6">
+                              <HoldingCard row={h} viewMode={viewMode} />
+                            </div>
+                          ))
+                        ) : (
+                          <div className="col-12"><div className="text-secondary small py-2 px-1">상승 중인 종목이 없습니다.</div></div>
+                        )}
+                      </div>
                     </div>
-                  ))}
+
+                    {/* 하락/보합 종목 컬럼 */}
+                    <div className="col-12 col-lg-6">
+                      <div className="d-flex align-items-center mb-3">
+                        <div className="badge bg-primary-lt p-1 me-2" style={{ width: "12px", height: "12px", borderRadius: "50%" }}></div>
+                        <h3 className="h4 fw-bold mb-0 text-primary">하락/보합 ({fallingHoldings.length})</h3>
+                      </div>
+                      <div className="row g-2">
+                        {fallingHoldings.length > 0 ? (
+                          fallingHoldings.map((h, i) => (
+                            <div key={`${h.ticker}-${i}`} className="col-12 col-md-6">
+                              <HoldingCard row={h} viewMode={viewMode} />
+                            </div>
+                          ))
+                        ) : (
+                          <div className="col-12"><div className="text-secondary small py-2 px-1">하락 중인 종목이 없습니다.</div></div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
