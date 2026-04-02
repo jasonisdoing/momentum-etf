@@ -47,6 +47,11 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         if df is None or df.empty:
             continue
 
+        # 수량이 0인 종목 제외 (사용자 요청: 수량 0인 종목은 없는 것으로 간주)
+        df = df[df["수량"] > 0].copy()
+        if df.empty:
+            continue
+
         settings = account.get("settings") or {}
         country_code = str(settings.get("country_code") or "").strip().lower()
         currency = str(settings.get("currency") or "KRW").strip().upper()

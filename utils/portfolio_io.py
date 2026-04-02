@@ -41,7 +41,8 @@ def load_all_holding_tickers() -> set[str]:
 
         for holding in snapshot.get("holdings", []):
             ticker = str(holding.get("ticker") or "").strip().upper()
-            if ticker:
+            qty = float(holding.get("quantity") or 0)
+            if ticker and qty > 0:
                 held_tickers.add(ticker)
 
     return held_tickers
