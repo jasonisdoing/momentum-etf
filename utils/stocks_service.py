@@ -77,6 +77,26 @@ def _require_ticker_type_config(ticker_type: str) -> dict[str, Any]:
     return config
 
 
+def _load_stock_meta_doc(ticker_type: str, ticker: str) -> dict[str, Any] | None:
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    return db.stock_meta.find_one(
+        {
+            "ticker_type": str(ticker_type or "").strip().lower(),
+            "ticker": str(ticker or "").strip().upper(),
+        },
+        {
+            "ticker": 1,
+            "name": 1,
+            "listing_date": 1,
+            "bucket": 1,
+            "is_deleted": 1,
+        },
+    )
+
+
 def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
     ticker_types = _load_ticker_types_payload()
     target_ticker_type = _pick_ticker_type(ticker_types, ticker_type)
@@ -257,7 +277,7 @@ def _refresh_single_stock_background(ticker_type: str, ticker: str) -> None:
 
 def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str, Any]:
     validated = validate_stock_candidate(ticker_type, ticker)
-    ticker_type_norm = str(ticker_type or "").strip().lower()
+    ticker_type_norm = str(validated["ticker_type"]).strip().lower()
     ticker_norm = str(validated["ticker"]).strip().upper()
     bucket_value = int(bucket_id or 0)
     if bucket_value not in BUCKETS:
@@ -271,9 +291,26 @@ def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str,
         bucket=bucket_value,
     )
     if not created:
+        current = _load_stock_meta_doc(ticker_type_norm, ticker_norm)
+        if current and current.get("is_deleted") is not True:
+            if validated["status"] == "active":
+                raise RuntimeError("이미 등록된 종목입니다.")
+
+            return {
+                "ticker": ticker_norm,
+                "name": normalize_text(current.get("name"), str(validated["name"])),
+                "listing_date": normalize_text(
+                    current.get("listing_date"),
+                    str(validated["listing_date"]),
+                ),
+                "bucket_id": int(current.get("bucket") or bucket_value),
+                "bucket_name": BUCKETS.get(int(current.get("bucket") or bucket_value), BUCKETS[bucket_value]),
+                "status": "active",
+            }
+
         if validated["status"] == "active":
             raise RuntimeError("이미 등록된 종목입니다.")
-        raise RuntimeError("종목 추가에 실패했습니다.")
+        raise RuntimeError(f"종목 추가에 실패했습니다: {ticker_norm}")
 
     # 백그라운드에서 메타데이터 + 가격 캐시 즉시 fetch
     thread = threading.Thread(
