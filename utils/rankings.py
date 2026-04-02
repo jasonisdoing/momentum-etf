@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from time import perf_counter
 from typing import Any
@@ -24,6 +25,7 @@ from utils.stock_list_io import get_etfs
 
 ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
 logger = get_app_logger()
+MONTHLY_RETURN_LABEL_COUNT = 13
 
 
 def _calculate_rsi(close_series: pd.Series, period: int = 14) -> float | None:
@@ -143,20 +145,78 @@ def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
     return None
 
 
+def get_recent_monthly_return_labels(count: int = MONTHLY_RETURN_LABEL_COUNT) -> list[str]:
+    now_month = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).to_period("M")
+    return [f"{(now_month - offset).strftime('%Y-%m')}(%)" for offset in range(count)]
+
+
+def _build_monthly_return_metrics(close_series: pd.Series | None) -> dict[str, float | None]:
+    labels = get_recent_monthly_return_labels()
+    empty_metrics = {label: None for label in labels}
+    if close_series is None:
+        return empty_metrics
+
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return empty_metrics
+
+    normalized = series.copy()
+    normalized.index = pd.to_datetime(normalized.index)
+    normalized = normalized.sort_index()
+    month_end_series = normalized.groupby(normalized.index.to_period("M")).last()
+    current_month = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).to_period("M")
+    metrics: dict[str, float | None] = {}
+
+    for label in labels:
+        match = re.fullmatch(r"(\d{4}-\d{2})\(%\)", label)
+        if not match:
+            metrics[label] = None
+            continue
+
+        month_period = pd.Period(match.group(1), freq="M")
+        prev_month_close = month_end_series.get(month_period - 1)
+        if prev_month_close is None or pd.isna(prev_month_close):
+            metrics[label] = None
+            continue
+
+        target_close = normalized.iloc[-1] if month_period == current_month else month_end_series.get(month_period)
+        if target_close is None or pd.isna(target_close):
+            metrics[label] = None
+            continue
+
+        prev_value = float(prev_month_close)
+        target_value = float(target_close)
+        metrics[label] = None if prev_value <= 0 else ((target_value / prev_value) - 1.0) * 100.0
+
+    return metrics
+
+
 def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> dict[str, Any]:
+    monthly_return_metrics = _build_monthly_return_metrics(close_series)
     empty_result = {
         "현재가": None,
         "괴리율": None,
         "일간(%)": None,
         "1주(%)": None,
         "2주(%)": None,
+        "3주(%)": None,
+        "4주(%)": None,
         "1달(%)": None,
+        "2달(%)": None,
         "3달(%)": None,
+        "4달(%)": None,
+        "5달(%)": None,
         "6달(%)": None,
+        "7달(%)": None,
+        "8달(%)": None,
+        "9달(%)": None,
+        "10달(%)": None,
+        "11달(%)": None,
         "12달(%)": None,
         "고점": None,
         "추세(3달)": [],
         "RSI": None,
+        **monthly_return_metrics,
     }
     if close_series is None:
         return empty_result
@@ -182,13 +242,24 @@ def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> 
         "일간(%)": daily_pct,
         "1주(%)": _calc_period_return(series, 5),
         "2주(%)": _calc_period_return(series, 10),
+        "3주(%)": _calc_period_return(series, 15),
+        "4주(%)": _calc_period_return(series, 20),
         "1달(%)": _calc_period_return(series, 20),
+        "2달(%)": _calc_period_return(series, 40),
         "3달(%)": _calc_period_return(series, 60),
+        "4달(%)": _calc_period_return(series, 80),
+        "5달(%)": _calc_period_return(series, 100),
         "6달(%)": _calc_period_return(series, 126),
+        "7달(%)": _calc_period_return(series, 147),
+        "8달(%)": _calc_period_return(series, 168),
+        "9달(%)": _calc_period_return(series, 189),
+        "10달(%)": _calc_period_return(series, 210),
+        "11달(%)": _calc_period_return(series, 231),
         "12달(%)": _calc_period_return(series, 252),
         "고점": drawdown,
         "추세(3달)": series.iloc[-60:].astype(float).tolist(),
         "RSI": _calculate_rsi(series),
+        **monthly_return_metrics,
     }
 
 
@@ -275,7 +346,28 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
     normalized = df.copy()
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
-    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
+    percent_columns = [
+        "괴리율",
+        "일간(%)",
+        "1주(%)",
+        "2주(%)",
+        "3주(%)",
+        "4주(%)",
+        "1달(%)",
+        "2달(%)",
+        "3달(%)",
+        "4달(%)",
+        "5달(%)",
+        "6달(%)",
+        "7달(%)",
+        "8달(%)",
+        "9달(%)",
+        "10달(%)",
+        "11달(%)",
+        "12달(%)",
+        "고점",
+        *get_recent_monthly_return_labels(),
+    ]
     one_decimal_columns = ["추세", "RSI"]
 
     def _round_if_present(column: str, digits: int) -> None:
