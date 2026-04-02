@@ -9,6 +9,7 @@ type RankTickerType = {
 };
 
 type RankRow = {
+  [key: string]: string | number | null;
   순번: string;
   버킷: string;
   bucket: number;
@@ -22,9 +23,19 @@ type RankRow = {
   "일간(%)": number | null;
   "1주(%)": number | null;
   "2주(%)": number | null;
+  "3주(%)": number | null;
+  "4주(%)": number | null;
   "1달(%)": number | null;
+  "2달(%)": number | null;
   "3달(%)": number | null;
+  "4달(%)": number | null;
+  "5달(%)": number | null;
   "6달(%)": number | null;
+  "7달(%)": number | null;
+  "8달(%)": number | null;
+  "9달(%)": number | null;
+  "10달(%)": number | null;
+  "11달(%)": number | null;
   "12달(%)": number | null;
   고점: number | null;
   RSI: number | null;
@@ -37,6 +48,7 @@ type RankData = {
   ma_months: number;
   ma_type_options: string[];
   ma_months_max: number;
+  monthly_return_labels: string[];
   rows: RankRow[];
   cache_blocked: boolean;
   latest_trading_day: string | null;

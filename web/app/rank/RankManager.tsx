@@ -20,6 +20,7 @@ type RankTickerType = {
 };
 
 type RankRow = {
+  [key: string]: string | number | null;
   순번: string;
   버킷: string;
   bucket: number;
@@ -34,9 +35,19 @@ type RankRow = {
   "일간(%)": number | null;
   "1주(%)": number | null;
   "2주(%)": number | null;
+  "3주(%)": number | null;
+  "4주(%)": number | null;
   "1달(%)": number | null;
+  "2달(%)": number | null;
   "3달(%)": number | null;
+  "4달(%)": number | null;
+  "5달(%)": number | null;
   "6달(%)": number | null;
+  "7달(%)": number | null;
+  "8달(%)": number | null;
+  "9달(%)": number | null;
+  "10달(%)": number | null;
+  "11달(%)": number | null;
   "12달(%)": number | null;
   고점: number | null;
   RSI: number | null;
@@ -49,6 +60,7 @@ type RankResponse = {
   ma_months?: number;
   ma_type_options?: string[];
   ma_months_max?: number;
+  monthly_return_labels?: string[];
   rows?: RankRow[];
   cache_blocked?: boolean;
   latest_trading_day?: string | null;
@@ -139,6 +151,8 @@ export function RankManager() {
   const [maMonths, setMaMonths] = useState(rankToolbarCache?.ma_months ?? 1);
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
+  const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
+  const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
@@ -180,6 +194,7 @@ export function RankManager() {
       setMaMonths(payload.ma_months ?? 1);
       setMaTypeOptions(payload.ma_type_options ?? []);
       setMaMonthsMax(payload.ma_months_max ?? 12);
+      setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
       rankToolbarCache = {
         ticker_types: payload.ticker_types ?? [],
         ticker_type: nextAccountId,
@@ -232,8 +247,8 @@ export function RankManager() {
     });
   }, [rows]);
 
-  const columns = useMemo<GridColDef<RankGridRow>[]>(
-    () => [
+  const columns = useMemo<GridColDef<RankGridRow>[]>(() => {
+    const leadingColumns: GridColDef<RankGridRow>[] = [
       {
         field: "displayTrendRank",
         headerName: "보유",
@@ -260,7 +275,6 @@ export function RankManager() {
         headerName: "버킷",
         minWidth: 108,
         width: 108,
-        sortable: false,
         cellClassName: (params) => getBucketCellClass(String(params.value ?? "")),
         renderCell: (params) => <span>{String(params.value ?? "-")}</span>,
       },
@@ -290,25 +304,9 @@ export function RankManager() {
         headerAlign: "right",
         renderCell: renderSignedPercentCell,
       },
-      ...(selectedTickerTypeItem?.country_code !== "au" ? [
-        {
-          field: "괴리율",
-          headerName: "괴리율",
-          minWidth: 88,
-          width: 88,
-          align: "right",
-          headerAlign: "right",
-          renderCell: (params: GridRenderCellParams<RankGridRow, number | null>) => {
-            const val = params.value ?? 0;
-            const isExtreme = val > 2.0 || val < -2.0;
-            return (
-              <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
-                {formatPercent(params.value ?? null)}
-              </span>
-            );
-          },
-        } as GridColDef<RankGridRow>
-      ] : []),
+    ];
+
+    const cumulativeColumns: GridColDef<RankGridRow>[] = [
       {
         field: "추세",
         headerName: "추세",
@@ -318,6 +316,27 @@ export function RankManager() {
         headerAlign: "right",
         renderCell: (params) => formatNumber(params.value ?? null, 1),
       },
+      ...(selectedTickerTypeItem?.country_code !== "au"
+        ? [
+            {
+              field: "괴리율",
+              headerName: "괴리율",
+              minWidth: 88,
+              width: 88,
+              align: "right",
+              headerAlign: "right",
+              renderCell: (params: GridRenderCellParams<RankGridRow, number | null>) => {
+                const val = params.value ?? 0;
+                const isExtreme = val > 2.0 || val < -2.0;
+                return (
+                  <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                    {formatPercent(params.value ?? null)}
+                  </span>
+                );
+              },
+            } as GridColDef<RankGridRow>,
+          ]
+        : []),
       {
         field: "고점",
         headerName: "고점",
@@ -346,8 +365,8 @@ export function RankManager() {
         renderCell: renderSignedPercentCell,
       },
       {
-        field: "1달(%)",
-        headerName: "1달(%)",
+        field: "3주(%)",
+        headerName: "3주(%)",
         minWidth: 88,
         width: 88,
         align: "right",
@@ -355,28 +374,10 @@ export function RankManager() {
         renderCell: renderSignedPercentCell,
       },
       {
-        field: "3달(%)",
-        headerName: "3달(%)",
+        field: "4주(%)",
+        headerName: "4주(%)",
         minWidth: 88,
         width: 88,
-        align: "right",
-        headerAlign: "right",
-        renderCell: renderSignedPercentCell,
-      },
-      {
-        field: "6달(%)",
-        headerName: "6달(%)",
-        minWidth: 88,
-        width: 88,
-        align: "right",
-        headerAlign: "right",
-        renderCell: renderSignedPercentCell,
-      },
-      {
-        field: "12달(%)",
-        headerName: "12달(%)",
-        minWidth: 94,
-        width: 94,
         align: "right",
         headerAlign: "right",
         renderCell: renderSignedPercentCell,
@@ -399,9 +400,63 @@ export function RankManager() {
         headerAlign: "right",
         renderCell: (params) => formatNumber(params.value ?? null, 0),
       },
-    ],
-    [selectedTickerTypeItem?.country_code],
-  );
+      ...[
+        "1달(%)",
+        "2달(%)",
+        "3달(%)",
+        "4달(%)",
+        "5달(%)",
+        "6달(%)",
+        "7달(%)",
+        "8달(%)",
+        "9달(%)",
+        "10달(%)",
+        "11달(%)",
+        "12달(%)",
+      ].map(
+        (field) =>
+          ({
+            field,
+            headerName: field,
+            minWidth: field.length > 6 ? 94 : 88,
+            width: field.length > 6 ? 94 : 88,
+            align: "right",
+            headerAlign: "right",
+            renderCell: renderSignedPercentCell,
+          }) as GridColDef<RankGridRow>,
+      ),
+    ];
+
+    const monthlyColumns: GridColDef<RankGridRow>[] = monthlyReturnLabels.map(
+      (label) =>
+        ({
+          field: label,
+          headerName: label,
+          minWidth: 108,
+          width: 108,
+          align: "right",
+          headerAlign: "right",
+          renderCell: renderSignedPercentCell,
+        }) as GridColDef<RankGridRow>,
+    );
+
+    const monthlyLeadingColumns: GridColDef<RankGridRow>[] = [
+      {
+        field: "추세",
+        headerName: "추세",
+        minWidth: 72,
+        width: 72,
+        align: "right",
+        headerAlign: "right",
+        renderCell: (params) => formatNumber(params.value ?? null, 1),
+      },
+    ];
+
+    return [
+      ...leadingColumns,
+      ...(metricMode === "cumulative" ? cumulativeColumns : [...monthlyLeadingColumns, ...monthlyColumns]),
+    ];
+  }, [metricMode, monthlyReturnLabels, selectedTickerTypeItem?.country_code]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
@@ -507,6 +562,22 @@ export function RankManager() {
                     </option>
                   ))}
                 </select>
+                <div className="btn-group" role="group" aria-label="수익률 보기 방식">
+                  <button
+                    type="button"
+                    className={metricMode === "cumulative" ? "btn btn-primary btn-sm" : "btn btn-outline-primary btn-sm"}
+                    onClick={() => setMetricMode("cumulative")}
+                  >
+                    누적
+                  </button>
+                  <button
+                    type="button"
+                    className={metricMode === "monthly" ? "btn btn-primary btn-sm" : "btn btn-outline-primary btn-sm"}
+                    onClick={() => setMetricMode("monthly")}
+                  >
+                    월별
+                  </button>
+                </div>
               </div>
 
               <div className="tickerTypeToolbarRight" style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>

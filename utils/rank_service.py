@@ -9,6 +9,7 @@ from utils.rankings import (
     ALLOWED_MA_TYPES,
     build_ticker_type_rankings,
     get_rank_months_max,
+    get_recent_monthly_return_labels,
     get_ticker_type_rank_defaults,
 )
 from utils.stock_list_io import get_etfs
@@ -153,6 +154,7 @@ def load_rank_data(
         "ma_months": selected_ma_months,
         "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
+        "monthly_return_labels": get_recent_monthly_return_labels(),
         "rows": _serialize_rows(dataframe),
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),
