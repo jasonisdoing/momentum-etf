@@ -127,11 +127,25 @@ def load_dashboard_data() -> dict[str, Any]:
         # 실시간 평가액 직접 계산 (데이터 정합성 확보)
         df_live = load_real_holdings_table(config["account_id"])
         valuation_krw = float(df_live["평가금액(KRW)"].sum()) if df_live is not None else 0.0
-        
+        previous_snapshot_account = (
+            next(
+                (
+                    account
+                    for account in ((previous_snapshot or {}).get("accounts") or [])
+                    if isinstance(account, dict) and str(account.get("account_id") or "") == config["account_id"]
+                ),
+                {},
+            )
+            if previous_snapshot
+            else {}
+        )
+
         total_assets = valuation_krw + cash_balance
         net_profit = total_assets - total_principal
         net_profit_pct = (net_profit / total_principal) * 100 if total_principal > 0 else 0.0
         cash_ratio = (cash_balance / total_assets) * 100 if total_assets > 0 else 0.0
+        previous_total_assets = normalize_number(previous_snapshot_account.get("total_assets"))
+        daily_profit = total_assets - previous_total_assets if previous_snapshot_account else 0.0
 
         accounts.append(
             {
@@ -145,6 +159,7 @@ def load_dashboard_data() -> dict[str, Any]:
                 "cash_ratio": cash_ratio,
                 "net_profit": net_profit,
                 "net_profit_pct": net_profit_pct,
+                "daily_profit": daily_profit,
                 "_df_live": df_live, # 버킷 계산을 위해 임시 보관
             }
         )
