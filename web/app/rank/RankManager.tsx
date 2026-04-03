@@ -167,7 +167,6 @@ export function RankManager() {
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [nameKeyword, setNameKeyword] = useState("");
-  const [page, setPage] = useState(0);
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
@@ -224,7 +223,6 @@ export function RankManager() {
         ma_months_max: payload.ma_months_max ?? 12,
       };
       setRows(payload.rows ?? []);
-      setPage(0);
       setCacheBlocked(Boolean(payload.cache_blocked));
       setRankingComputedAt(payload.ranking_computed_at ?? null);
       setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
@@ -275,10 +273,6 @@ export function RankManager() {
     }
     return gridRows.filter((row) => String(row.종목명 ?? "").toLowerCase().includes(keyword));
   }, [gridRows, deferredNameKeyword]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [selectedTickerType, maType, maMonths, metricMode, selectedAsOfDate, deferredNameKeyword]);
 
   const columns = useMemo<GridColDef<RankGridRow>[]>(() => {
     const leadingColumns: GridColDef<RankGridRow>[] = [
@@ -559,7 +553,7 @@ export function RankManager() {
       ) : null}
 
       <section className="appSection appSectionFill">
-        <div className="card appCard">
+        <div className="card appCard appTableCardFill">
           <div className="card-header">
             <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div className="tickerTypeToolbarLeft" style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
@@ -663,17 +657,13 @@ export function RankManager() {
             </div>
           </div>
 
-          <div className="card-body appCardBodyTight">
-            <div className="rankGridWrap">
+          <div className="card-body appCardBodyTight appTableCardBodyFill">
+            <div className="appGridFillWrap">
               <AppDataGrid
                 className="rankDataGrid"
                 rows={filteredGridRows}
                 columns={columns}
                 loading={loading}
-                hideFooter={false}
-                pageSizeOptions={[20]}
-                paginationModel={{ page, pageSize: 20 }}
-                onPaginationModelChange={(model) => setPage(model.page)}
                 getRowClassName={(params) => {
                   const classes: string[] = [];
                   if ((params.row.추세 ?? 0) < 0) {
@@ -684,7 +674,7 @@ export function RankManager() {
                   }
                   return classes.join(" ");
                 }}
-                minHeight="70vh"
+                minHeight="100%"
               />
             </div>
           </div>

@@ -1374,6 +1374,46 @@ a {
   font-size: 12px;
 }
 
+.marketTableWrap {
+  overflow: hidden;
+}
+
+.marketTableScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.marketTable {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.95rem;
+}
+
+.marketTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.625rem 0.75rem;
+  background: var(--app-table-head-bg);
+  color: var(--app-table-head-color);
+  border-bottom: 1px solid var(--app-table-head-border);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.marketTable tbody td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(220, 225, 231, 0.85);
+  white-space: nowrap;
+}
+
+.marketCellNum {
+  text-align: right;
+}
+
 /* 대시보드 — Tabler row-cards 간격 조정 */
 .row-cards {
   --tblr-gutter-y: 0.75rem;
@@ -1434,25 +1474,30 @@ a {
 }
 
 .appDataGridWrap,
-.rankGridWrap {
+.rankGridWrap,
+.appGridFillWrap {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.72);
 }
 
+.rankGridWrap,
+.appGridFillWrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.rankGridWrap .appDataGridWrap,
+.appGridFillWrap .appDataGridWrap {
+  flex: 1 1 auto;
+  min-height: 0 !important;
+}
+
 .appDataGridWrapScrollable {
   overflow-x: auto;
   overflow-y: hidden;
-}
-
-.weeklyGridWrap {
-  height: calc(100vh - 180px);
-}
-
-.weeklyGridWrap .appDataGrid {
-  min-height: 0;
-  height: 100%;
 }
 
 .appDataGrid,
@@ -1461,6 +1506,222 @@ a {
   border: 0;
   background: transparent;
   font-size: 0.95rem;
+}
+
+.rankGridWrap .rankDataGrid,
+.appGridFillWrap .appDataGrid,
+.appGridFillWrap .rankDataGrid {
+  min-height: 0;
+  height: 100%;
+}
+
+.appTableCardFill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.appTableCardBodyFill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.appAgGridWrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.appAgGridTheme {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.appAgGridThemeLegacy {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  --ag-background-color: transparent;
+  --ag-foreground-color: var(--ink);
+  --ag-header-background-color: var(--app-table-head-bg);
+  --ag-header-foreground-color: var(--app-table-head-color);
+  --ag-border-color: rgba(220, 225, 231, 0.85);
+  --ag-row-border-color: rgba(220, 225, 231, 0.85);
+  --ag-header-column-resize-handle-color: rgba(32, 107, 196, 0.25);
+  --ag-font-size: 0.95rem;
+  --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+.appAgGridTheme .ag-root-wrapper,
+.appAgGridThemeLegacy .ag-root-wrapper,
+.appAgGridTheme .ag-root-wrapper-body,
+.appAgGridThemeLegacy .ag-root-wrapper-body,
+.appAgGridTheme .ag-root,
+.appAgGridThemeLegacy .ag-root,
+.appAgGridTheme .ag-body-viewport,
+.appAgGridThemeLegacy .ag-body-viewport {
+  min-height: 0;
+}
+
+.appAgGridTheme .ag-header-cell-label {
+  font-weight: 600;
+  justify-content: flex-start;
+}
+
+.appAgGridTheme .ag-cell,
+.appAgGridThemeLegacy .ag-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.appAgGridTheme .ag-cell.ag-right-aligned-cell,
+.appAgGridThemeLegacy .ag-cell.ag-right-aligned-cell {
+  justify-content: flex-end;
+}
+
+.appAgGridTheme .ag-header-cell.ag-right-aligned-header .ag-header-cell-label,
+.appAgGridThemeLegacy .ag-header-cell.ag-right-aligned-header .ag-header-cell-label {
+  justify-content: flex-end;
+}
+
+.appAgGridTheme .ag-cell.ag-right-aligned-cell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.ag-right-aligned-cell .ag-cell-value {
+  text-align: right;
+}
+
+.appAgGridTheme .ag-row.appHeldRow {
+  background: rgba(102, 204, 102, 0.35);
+}
+
+.appAgGridTheme .ag-row.appHeldRow:hover {
+  background: rgba(102, 204, 102, 0.42);
+}
+
+.appAgGridThemeLegacy .ag-row.appHeldRow {
+  background: rgba(102, 204, 102, 0.35);
+}
+
+.appAgGridThemeLegacy .ag-row.appHeldRow:hover {
+  background: rgba(102, 204, 102, 0.42);
+}
+
+.assetsAgGrid {
+  border: 0;
+  background: transparent;
+}
+
+.assetsAgGrid .appAgGridTheme {
+  border-radius: 10px;
+}
+
+.assetsAgGrid .ag-cell-value,
+.assetsAgGrid .ag-group-value {
+  width: 100%;
+}
+
+.assetsAgGrid .ag-cell {
+  overflow: visible;
+}
+
+.assetsAgGrid .ag-cell[col-id="actions"] .ag-cell-value {
+  display: flex;
+  align-items: center;
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell {
+  background: rgba(46, 160, 67, 0.08);
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell:hover {
+  background: rgba(46, 160, 67, 0.14);
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell.assetsDirtyCell {
+  background: rgba(46, 160, 67, 0.22);
+  font-weight: 700;
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell.assetsDirtyCell:hover {
+  background: rgba(46, 160, 67, 0.28);
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell.ag-cell-inline-editing {
+  background: rgba(46, 160, 67, 0.18);
+}
+
+.assetsAgGrid .ag-row.assetsAddingRow {
+  background: rgba(32, 107, 196, 0.06);
+}
+
+.assetsAgGrid .ag-row.assetsAddingRow:hover {
+  background: rgba(32, 107, 196, 0.1);
+}
+
+.assetsAgGrid .ag-row.appHeldRow,
+.assetsAgGrid .ag-row.appHeldRow:hover {
+  background: #ffffff;
+}
+
+.assetsAgGrid .ag-row.assetsEditingRow,
+.assetsAgGrid .ag-row.assetsEditingRow.appHeldRow {
+  background: rgba(32, 107, 196, 0.12);
+}
+
+.assetsAgGrid .ag-row.assetsEditingRow:hover,
+.assetsAgGrid .ag-row.assetsEditingRow.appHeldRow:hover {
+  background: rgba(32, 107, 196, 0.16);
+}
+
+.assetsActionGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.assetsActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
+
+.assetsInlineInput {
+  min-width: 0;
+  height: 2rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.assetsInlineInputTicker {
+  width: 5.25rem;
+}
+
+.assetsTickerLookup {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.assetsInlineButton {
+  white-space: nowrap;
+}
+
+.assetsInlineLinkButton {
+  font-size: 0.82rem;
 }
 
 .appDataGrid .MuiDataGrid-columnHeaders,
