@@ -23,6 +23,8 @@ import {
   IconActivity,
   IconX,
   IconLayoutDashboard,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
 } from "@tabler/icons-react";
 
 import { parseFearGreedSummary } from "@/lib/fear-greed";
@@ -164,6 +166,7 @@ export function AppShell({ children }: AppShellProps) {
   const [vkospi, setVkospi] = useState<VkospiSummary | null>(null);
   const [isVkospiLoading, setIsVkospiLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
   const isLoginPage = pathname === "/login";
 
@@ -322,7 +325,7 @@ export function AppShell({ children }: AppShellProps) {
   );
 
   return (
-    <div className="appLayout">
+    <div className={`appLayout ${isSidebarCollapsed ? "appLayoutSidebarCollapsed" : ""}`.trim()}>
       <aside className="navbar navbar-vertical navbar-expand-lg appSidebar appSidebarDesktop">
         <div className="container-fluid appSidebarInner">
           <Link href="/" className="navbar-brand navbar-brand-autodark appSidebarBrand">
@@ -339,6 +342,20 @@ export function AppShell({ children }: AppShellProps) {
       <div className="appMain">
         <header className="navbar d-print-none appTopHeader">
           <div className="container-fluid appTopHeaderInner">
+            <div className="appHeaderLeft">
+              <button
+                className="btn btn-icon btn-sm appSidebarDesktopToggle"
+                type="button"
+                aria-label={isSidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+                onClick={() => setIsSidebarCollapsed((current) => !current)}
+              >
+                {isSidebarCollapsed ? (
+                  <IconLayoutSidebarLeftExpand size={18} stroke={1.9} />
+                ) : (
+                  <IconLayoutSidebarLeftCollapse size={18} stroke={1.9} />
+                )}
+              </button>
+            </div>
             <div className="appMobileHeader">
               <button
                 className="btn btn-icon btn-sm appSidebarToggle"
