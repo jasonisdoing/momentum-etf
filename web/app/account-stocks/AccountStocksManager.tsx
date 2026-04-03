@@ -20,6 +20,7 @@ type AccountConfig = {
   order: number;
   name: string;
   icon: string;
+  currency: string;
 };
 
 type TickerDef = {
@@ -36,12 +37,15 @@ type TickerDef = {
 
 type TargetItemRow = TickerDef & {
   ratio: number;
+  target_amount?: number | null;
   id: string;
 };
 
 type AccountStocksPayload = {
   accounts: AccountConfig[];
   account_id: string;
+  account_currency?: string;
+  account_total_assets?: number;
   monthly_return_labels?: string[];
   available_tickers: TickerDef[];
   rows: TargetItemRow[];
@@ -65,6 +69,19 @@ function formatPercent(value: number | null): string {
   return `${value.toFixed(2)}%`;
 }
 
+function formatTargetAmount(value: number | null | undefined, currency: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  if (currency === "AUD") {
+    return `A$${new Intl.NumberFormat("en-AU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+  return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
+}
+
 function getSignedMetricClass(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
     return "";
@@ -76,6 +93,7 @@ export function AccountStocksManager() {
   const [accounts, setAccounts] = useState<AccountConfig[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState(readRememberedMomentumEtfAccountId() ?? "");
   const [availableTickers, setAvailableTickers] = useState<TickerDef[]>([]);
+  const [accountCurrency, setAccountCurrency] = useState("KRW");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [rows, setRows] = useState<TargetItemRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +129,7 @@ export function AccountStocksManager() {
       setSelectedAccountId(nextAccountId);
       writeRememberedMomentumEtfAccountId(nextAccountId);
       setAvailableTickers(payload.available_tickers ?? []);
+      setAccountCurrency(String(payload.account_currency ?? "KRW").trim().toUpperCase() || "KRW");
       setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
 
       const sortedRows = (payload.rows || []).map(r => ({ 
@@ -277,6 +296,18 @@ export function AccountStocksManager() {
         ),
       },
       {
+        field: "target_amount",
+        headerName: "목표 금액",
+        width: 140,
+        minWidth: 140,
+        sortable: true,
+        headerAlign: "right",
+        align: "right",
+        renderCell: (params: GridRenderCellParams<TargetItemRow>) => (
+          <span>{formatTargetAmount(params.row.target_amount ?? null, accountCurrency)}</span>
+        ),
+      },
+      {
         field: "return_1d",
         headerName: "일간(%)",
         width: 88,
@@ -304,7 +335,7 @@ export function AccountStocksManager() {
       })),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
     ],
-    [monthlyReturnLabels]
+    [accountCurrency, monthlyReturnLabels]
   );
 
   function openAddModal() {
