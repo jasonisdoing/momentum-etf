@@ -179,6 +179,19 @@ def get_recent_monthly_return_labels(
     return [f"{(base_month - offset).strftime('%Y-%m')}(%)" for offset in range(count)]
 
 
+def build_recent_monthly_return_metrics(
+    close_series: pd.Series | None,
+    *,
+    reference_date: pd.Timestamp | None = None,
+    labels: list[str] | None = None,
+) -> dict[str, float | None]:
+    return _build_monthly_return_metrics(
+        close_series,
+        reference_date=reference_date,
+        labels=labels,
+    )
+
+
 def _build_monthly_return_metrics(
     close_series: pd.Series | None,
     *,
@@ -661,7 +674,9 @@ def build_ticker_type_rankings(
 
 __all__ = [
     "ALLOWED_MA_TYPES",
+    "build_recent_monthly_return_metrics",
     "build_ticker_type_rankings",
     "get_ticker_type_rank_defaults",
     "get_rank_months_max",
+    "get_recent_monthly_return_labels",
 ]
