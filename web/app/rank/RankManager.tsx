@@ -367,7 +367,15 @@ export function RankManager() {
         width: 92,
         align: "right",
         headerAlign: "right",
-        renderCell: renderSignedPercentCell,
+        renderCell: (params: GridRenderCellParams<RankGridRow, number | null>) => {
+          const value = params.value ?? null;
+          const isHighlighted = value !== null && value >= -5;
+          return (
+            <span style={{ color: isHighlighted ? "#198754" : "inherit", fontWeight: isHighlighted ? 700 : 400 }}>
+              {formatPercent(value)}
+            </span>
+          );
+        },
       },
       {
         field: "1주(%)",
