@@ -142,6 +142,42 @@ function formatTargetQuantity(value: number | null | undefined, currency: string
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(value);
 }
 
+function formatExpectedChangeQuantity(
+  targetQuantity: number | null | undefined,
+  currentQuantity: number | null | undefined,
+  currency: string,
+): string {
+  if (
+    targetQuantity === null ||
+    targetQuantity === undefined ||
+    Number.isNaN(targetQuantity) ||
+    currentQuantity === null ||
+    currentQuantity === undefined ||
+    Number.isNaN(currentQuantity)
+  ) {
+    return "-";
+  }
+
+  const changeQuantity = targetQuantity - currentQuantity;
+  const sign = changeQuantity > 0 ? "+" : "";
+  if (currency === "AUD") {
+    return `${sign}${new Intl.NumberFormat("en-AU", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    }).format(changeQuantity)}`;
+  }
+  return `${sign}${new Intl.NumberFormat("ko-KR", {
+    maximumFractionDigits: 0,
+  }).format(changeQuantity)}`;
+}
+
+function getSignedNullableClass(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
+    return "";
+  }
+  return value > 0 ? "metricPositive" : "metricNegative";
+}
+
 function getSignedClass(value: number): string {
   if (value === 0) return "";
   return value > 0 ? "metricPositive" : "metricNegative";
@@ -623,6 +659,26 @@ export function AssetsManager() {
       align: "right",
       headerAlign: "right",
       renderCell: (p: any) => <span>{formatTargetQuantity(p?.value ?? null, p.row?.currency || "KRW")}</span>,
+    },
+    {
+      field: "expected_change_quantity",
+      headerName: "예상변경수량",
+      width: 132,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (p: any) => (
+        <span className={getSignedNullableClass(
+          (p.row?.target_quantity ?? null) !== null && (p.row?.target_quantity ?? null) !== undefined
+            ? (p.row.target_quantity ?? 0) - (p.row?.quantity ?? 0)
+            : null,
+        )}>
+          {formatExpectedChangeQuantity(
+            p.row?.target_quantity ?? null,
+            p.row?.quantity ?? null,
+            p.row?.currency || "KRW",
+          )}
+        </span>
+      ),
     },
     {
       field: "target_amount",
