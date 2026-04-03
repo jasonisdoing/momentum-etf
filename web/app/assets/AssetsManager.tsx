@@ -68,6 +68,7 @@ type HoldingsRow = {
   quantity: number;
   average_buy_price: number;
   current_price: string;
+  current_price_num?: number;
   days_held: string;
   pnl_krw: number;
   return_pct: number;
@@ -80,6 +81,11 @@ type HoldingsRow = {
 };
 
 type GridRow = HoldingsRow & { id: string };
+
+type RowEditDraft = {
+  quantity?: string;
+  average_buy_price?: string;
+};
 
 type AddingRowState = {
   ticker: string;
@@ -201,6 +207,64 @@ function safeParseFloat(val: unknown): number {
   return isNaN(parsed) ? 0 : parsed;
 }
 
+function parseEditableQuantity(value: unknown): number {
+  const parsed = parseInt(parseRawPrice(value), 10);
+  return isNaN(parsed) ? 0 : parsed;
+}
+
+function getPreviewQuantity(row: GridRow, draft?: RowEditDraft): number {
+  if (!draft || draft.quantity === undefined) {
+    return Number(row.quantity ?? 0);
+  }
+  return parseEditableQuantity(draft.quantity);
+}
+
+function getPreviewAverageBuyPrice(row: GridRow, draft?: RowEditDraft): number {
+  if (!draft || draft.average_buy_price === undefined) {
+    return safeParseFloat(row.average_buy_price);
+  }
+  return safeParseFloat(draft.average_buy_price);
+}
+
+function getPreviewValuationKrw(row: GridRow, draft?: RowEditDraft): number {
+  const quantity = getPreviewQuantity(row, draft);
+  if (quantity <= 0) {
+    return 0;
+  }
+
+  const currentQuantity = Number(row.quantity ?? 0);
+  if (currentQuantity > 0) {
+    return (Number(row.valuation_krw ?? 0) / currentQuantity) * quantity;
+  }
+
+  if (row.currency === "KRW") {
+    return Number(row.current_price_num ?? 0) * quantity;
+  }
+
+  return Number(row.valuation_krw ?? 0);
+}
+
+function getPreviewBuyAmountKrw(row: GridRow, draft?: RowEditDraft): number {
+  const quantity = getPreviewQuantity(row, draft);
+  if (quantity <= 0) {
+    return 0;
+  }
+
+  const averageBuyPrice = getPreviewAverageBuyPrice(row, draft);
+  if (row.currency === "KRW") {
+    return averageBuyPrice * quantity;
+  }
+
+  const currentQuantity = Number(row.quantity ?? 0);
+  const currentAverageBuyPrice = safeParseFloat(row.average_buy_price);
+  if (currentQuantity > 0 && currentAverageBuyPrice > 0) {
+    const fxFactor = Number(row.buy_amount_krw ?? 0) / (currentQuantity * currentAverageBuyPrice);
+    return averageBuyPrice * quantity * fxFactor;
+  }
+
+  return Number(row.buy_amount_krw ?? 0);
+}
+
 // --- Components ---
 function StableInlineInput({
   initialValue,
@@ -263,6 +327,7 @@ export function AssetsManager() {
   const [addingRow, setAddingRow] = useState<AddingRowState | null>(null);
   const [cashEditing, setCashEditing] = useState<CashEditingState | null>(null);
   const [rowModesModel, setRowModesModel] = useState<GridRowModesModel>({});
+  const [editDrafts, setEditDrafts] = useState<Record<string, RowEditDraft>>({});
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const toast = useToast();
@@ -303,6 +368,7 @@ export function AssetsManager() {
     setSelectedAccountId(nextId);
     writeRememberedMomentumEtfAccountId(nextId);
     setRowModesModel({});
+    setEditDrafts({});
     setAddingRow(null);
     setCashEditing(null);
     void load(nextId);
@@ -359,6 +425,11 @@ export function AssetsManager() {
       }
 
       delete holdingsDataCache[selectedAccountId];
+      setEditDrafts((prev) => {
+        const nextDrafts = { ...prev };
+        delete nextDrafts[newRow.id];
+        return nextDrafts;
+      });
       startTransition(() => { void load(selectedAccountId, true); });
       toast.success("수정 완료");
       return { ...newRow, quantity, average_buy_price: avgPrice, target_ratio: normalizedTargetRatio };
@@ -545,7 +616,19 @@ export function AssetsManager() {
         if (row.ticker === "IS") return [];
         if (rowModesModel[id]?.mode === GridRowModes.Edit) return [
           <GridActionsCellItem key="s" icon={<IconDeviceFloppy size={20} />} label="저장" color="primary" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View } }))} />,
-          <GridActionsCellItem key="c" icon={<IconX size={20} />} label="취소" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View, ignoreModifications: true } }))} />
+          <GridActionsCellItem
+            key="c"
+            icon={<IconX size={20} />}
+            label="취소"
+            onClick={() => {
+              setEditDrafts((prev) => {
+                const nextDrafts = { ...prev };
+                delete nextDrafts[String(id)];
+                return nextDrafts;
+              });
+              setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.View, ignoreModifications: true } }));
+            }}
+          />
         ];
         return [
           <GridActionsCellItem key="e" icon={<IconPencil size={20} />} label="수정" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.Edit } }))} />,
@@ -587,7 +670,26 @@ export function AssetsManager() {
           );
         }
         return <span>{new Intl.NumberFormat("ko-KR").format(p.value ?? 0)}</span>;
-      }
+      },
+      renderEditCell: (p: any) => (
+        <input
+          type="number"
+          step="1"
+          className="form-control form-control-sm h-100"
+          autoFocus
+          value={p.value}
+          onChange={(e) => {
+            setEditDrafts((prev) => ({
+              ...prev,
+              [String(p.id)]: {
+                ...prev[String(p.id)],
+                quantity: e.target.value,
+              },
+            }));
+            p.api.setEditCellValue({ id: p.id, field: p.field, value: e.target.value });
+          }}
+        />
+      ),
     },
     {
       field: "average_buy_price", headerName: "매입 단가", type: "number", width: 120, 
@@ -620,7 +722,16 @@ export function AssetsManager() {
           className="form-control form-control-sm h-100"
           autoFocus
           value={p.value}
-          onChange={(e) => p.api.setEditCellValue({ id: p.id, field: p.field, value: e.target.value })}
+          onChange={(e) => {
+            setEditDrafts((prev) => ({
+              ...prev,
+              [String(p.id)]: {
+                ...prev[String(p.id)],
+                average_buy_price: e.target.value,
+              },
+            }));
+            p.api.setEditCellValue({ id: p.id, field: p.field, value: e.target.value });
+          }}
         />
       )
     },
@@ -632,8 +743,18 @@ export function AssetsManager() {
       renderCell: (p: any) => <span>{formatPrice(safeParseFloat(p.value), p.row?.currency || "KRW")}</span>
     },
     { field: "pnl_krw", headerName: "평가손익", width: 130, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{formatKrw(p?.value ?? 0)}</span> },
-    { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
-    { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
+    {
+      field: "valuation_krw",
+      headerName: "평가 금액",
+      width: 130,
+      renderCell: (p: any) => formatKrw(getPreviewValuationKrw(p.row, editDrafts[String(p.id)])),
+    },
+    {
+      field: "buy_amount_krw",
+      headerName: "매입 금액",
+      width: 130,
+      renderCell: (p: any) => formatKrw(getPreviewBuyAmountKrw(p.row, editDrafts[String(p.id)])),
+    },
     { field: "days_held", headerName: "보유일", width: 65, align: "center" },
     {
       field: "target_ratio",
@@ -708,7 +829,7 @@ export function AssetsManager() {
       headerAlign: "right",
       renderCell: (p: any) => <span>{formatTargetAmount(p?.value ?? null, p.row?.currency || "KRW")}</span>,
     },
-  ], [addingRow, isPending, rowModesModel, processingId, handleAddRowSave, handleAddRowCancel]);
+  ], [addingRow, isPending, rowModesModel, processingId, handleAddRowSave, handleAddRowCancel, editDrafts]);
 
   if (loading && !rows.length) return <div className="appPageStack"><div className="appPageLoading"><AppLoadingState label="보유 종목 로드 중..." /></div></div>;
 
@@ -765,7 +886,23 @@ export function AssetsManager() {
               loading={loading} 
               editMode="row" 
               rowModesModel={rowModesModel} 
-              onRowModesModelChange={setRowModesModel} 
+              onRowModesModelChange={(model) => {
+                const editingIds = new Set(
+                  Object.entries(model)
+                    .filter(([, value]) => value?.mode === GridRowModes.Edit)
+                    .map(([id]) => id),
+                );
+                setEditDrafts((prev) => {
+                  const nextDrafts: Record<string, RowEditDraft> = {};
+                  for (const [id, draft] of Object.entries(prev)) {
+                    if (editingIds.has(id)) {
+                      nextDrafts[id] = draft;
+                    }
+                  }
+                  return nextDrafts;
+                });
+                setRowModesModel(model);
+              }} 
               onRowEditStop={(p, e) => { if (p.reason === GridRowEditStopReasons.rowFocusOut) e.defaultMuiPrevented = true; }} 
               processRowUpdate={processRowUpdate}
               isCellEditable={(p) => p.row.id !== "__adding__"}
