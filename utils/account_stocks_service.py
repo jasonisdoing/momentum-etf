@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.price_service import get_exchange_rates
 from services.price_service import get_realtime_snapshot
 from utils.account_registry import load_account_configs, pick_default_account
 from utils.account_stocks_io import get_account_targets
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.db_manager import get_db_connection
+from utils.holdings_detail_service import load_all_holdings_detail
 from utils.normalization import normalize_nullable_number, normalize_text
 from utils.rankings import build_recent_monthly_return_metrics, get_recent_monthly_return_labels
 
@@ -32,6 +34,7 @@ def _build_accounts_payload(account_id: str | None) -> tuple[list[dict[str, Any]
             "name": str(acc["name"]),
             "icon": str(acc.get("icon") or ""),
             "country_code": str(acc.get("country_code") or ""),
+            "currency": str(acc.get("settings", {}).get("currency") or "KRW").strip().upper(),
             "ticker_codes": acc.get("settings", {}).get("ticker_codes", []),
         }
         for acc in accounts
@@ -43,12 +46,37 @@ def _build_accounts_payload(account_id: str | None) -> tuple[list[dict[str, Any]
     return payload, selected_account, selected_account_id
 
 
+def _compute_account_total_assets_native(account_id: str, account_currency: str) -> float:
+    holdings_detail = load_all_holdings_detail(account_id=account_id)
+    rows = holdings_detail.get("rows") or []
+    cash_info = holdings_detail.get("cash") or {}
+    total_valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in rows)
+
+    currency = str(account_currency or "KRW").strip().upper() or "KRW"
+    if currency == "KRW":
+        return total_valuation_krw + float(cash_info.get("cash_balance_krw") or 0.0)
+
+    if currency == "AUD":
+        rates = get_exchange_rates()
+        aud_rate = float(((rates or {}).get("AUD") or {}).get("rate") or 0.0)
+        if aud_rate <= 0:
+            raise RuntimeError("AUD 환율을 가져오지 못했습니다.")
+        cash_native = normalize_nullable_number(cash_info.get("cash_balance_native"))
+        if cash_native is None:
+            cash_native = float(cash_info.get("cash_balance_krw") or 0.0) / aud_rate
+        return (total_valuation_krw / aud_rate) + float(cash_native or 0.0)
+
+    return total_valuation_krw
+
+
 def load_account_stocks_data(account_id: str | None) -> dict[str, Any]:
     accounts, selected_account, selected_account_id = _build_accounts_payload(account_id)
-
+    
     ticker_codes = selected_account.get("ticker_codes", [])
     country_code = selected_account.get("country_code", "kor")
+    account_currency = str(selected_account.get("currency") or "KRW").strip().upper() or "KRW"
     monthly_return_labels = get_recent_monthly_return_labels()
+    account_total_assets = _compute_account_total_assets_native(selected_account_id, account_currency)
     
     db = get_db_connection()
     if db is None:
@@ -128,6 +156,7 @@ def load_account_stocks_data(account_id: str | None) -> dict[str, Any]:
         if ticker in target_dict:
             row_item = dict(item)
             row_item["ratio"] = target_dict[ticker]
+            row_item["target_amount"] = round(account_total_assets * (float(row_item["ratio"]) / 100.0), 2)
             rows.append(row_item)
 
     rows = sorted(
@@ -141,6 +170,8 @@ def load_account_stocks_data(account_id: str | None) -> dict[str, Any]:
     return {
         "accounts": accounts,
         "account_id": selected_account_id,
+        "account_currency": account_currency,
+        "account_total_assets": account_total_assets,
         "monthly_return_labels": monthly_return_labels,
         "available_tickers": available_tickers,
         "rows": rows,
