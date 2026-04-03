@@ -130,6 +130,7 @@ export async function POST(request: Request) {
           ticker: body.ticker,
           quantity: body.quantity,
           average_buy_price: body.average_buy_price,
+          target_ratio: body.target_ratio,
           memo: body.memo,
         }),
       },
