@@ -85,6 +85,7 @@ type AddingRowState = {
   ticker: string;
   quantity: string;
   average_buy_price: string;
+  target_ratio: string;
   isValidatingTicker?: boolean;
   validationError?: string;
   name?: string;
@@ -398,6 +399,7 @@ export function AssetsManager() {
   // 입력 필드 직접 참조를 위한 Ref (상태 엇박자 방지)
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
+  const targetRatioRef = useRef<HTMLInputElement>(null);
 
   const handleAddRowSave = useCallback(() => {
     if (!addingRow?.isValidated) {
@@ -407,18 +409,22 @@ export function AssetsManager() {
 
     const rawQty = qtyRef.current?.value ?? "";
     const rawPrice = priceRef.current?.value ?? "";
+    const rawTargetRatio = targetRatioRef.current?.value ?? "0";
 
     const quantity = parseInt(parseRawPrice(rawQty), 10);
     const avgPrice = safeParseFloat(rawPrice);
+    const targetRatio = parseFloat(rawTargetRatio);
 
     const isQtyValid = !isNaN(quantity) && quantity >= 0 && rawQty !== "";
     const isPriceValid = !isNaN(avgPrice) && avgPrice >= 0 && rawPrice !== "";
+    const isTargetRatioValid = !isNaN(targetRatio) && targetRatio >= 0 && targetRatio <= 100;
 
-    if (!isQtyValid || !isPriceValid) {
-      const dbg = `[수량:'${rawQty}', 단가:'${rawPrice}']`;
+    if (!isQtyValid || !isPriceValid || !isTargetRatioValid) {
+      const dbg = `[수량:'${rawQty}', 단가:'${rawPrice}', 목표비중:'${rawTargetRatio}']`;
       let detail = "";
       if (!isQtyValid) detail += "수량 ";
       if (!isPriceValid) detail += "단가 ";
+      if (!isTargetRatioValid) detail += "목표비중 ";
       toast.error(`${detail.trim()} 형식이 올바르지 않습니다. ${dbg}`);
       return;
     }
@@ -434,6 +440,7 @@ export function AssetsManager() {
             ticker: addingRow.ticker,
             quantity,
             average_buy_price: avgPrice,
+            target_ratio: parseFloat(targetRatio.toFixed(1)),
           }),
         });
         const data = await res.json();
@@ -636,9 +643,22 @@ export function AssetsManager() {
       align: "right",
       headerAlign: "right",
       renderCell: (p: any) => (
-        <span style={{ color: "#0d6efd", fontWeight: 700 }}>
-          {p?.value === null || p?.value === undefined ? "-" : `${p.value.toFixed(1)}%`}
-        </span>
+        p.row?.id === "__adding__" ? (
+          <input
+            type="number"
+            step="0.1"
+            min="0"
+            max="100"
+            ref={targetRatioRef}
+            className="form-control form-control-sm"
+            defaultValue={addingRow?.target_ratio ?? "0"}
+            disabled={!addingRow?.isValidated}
+          />
+        ) : (
+          <span style={{ color: "#0d6efd", fontWeight: 700 }}>
+            {p?.value === null || p?.value === undefined ? "-" : `${p.value.toFixed(1)}%`}
+          </span>
+        )
       ),
       renderEditCell: (p: any) => (
         <input
@@ -701,7 +721,7 @@ export function AssetsManager() {
               <select className="form-select w-auto fw-bold" value={selectedAccountId} onChange={(e) => handleAccountChange(e.target.value)}>
                 {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.icon} {a.name}</option>)}
               </select>
-              <button className="btn btn-primary btn-sm px-3 fw-bold" onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", isValidated: false })}><IconPlus size={16} /> 종목 추가</button>
+              <button className="btn btn-primary btn-sm px-3 fw-bold" onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", target_ratio: "0", isValidated: false })}><IconPlus size={16} /> 종목 추가</button>
             </div>
             {(() => {
               const totalValuation = rows.reduce((s, r) => s + (r.valuation_krw || 0), 0);

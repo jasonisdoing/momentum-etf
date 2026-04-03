@@ -342,7 +342,14 @@ def update_holding(
     return {"updated": ticker}
 
 
-def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: float, memo: str | None = None) -> dict[str, Any]:
+def add_holding(
+    account_id: str,
+    ticker: str,
+    quantity: int,
+    average_buy_price: float,
+    memo: str | None = None,
+    target_ratio: float | None = None,
+) -> dict[str, Any]:
     """계좌에 새로운 종목을 추가한다."""
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip()
@@ -387,6 +394,8 @@ def add_holding(account_id: str, ticker: str, quantity: int, average_buy_price: 
 
     holdings.append(new_holding)
     save_portfolio_master(account_id, holdings)
+    if target_ratio is not None:
+        _save_target_ratio(account_id, raw_ticker, float(target_ratio))
 
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
