@@ -412,7 +412,20 @@ export function AssetsManager() {
       id: `${row.ticker}-${row.account_name}-${i}`,
       quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
       average_buy_price: safeParseFloat(row.average_buy_price),
-    })).sort((a, b) => a.bucket_id - b.bucket_id || a.ticker.localeCompare(b.ticker));
+    })).sort((a, b) => {
+      if (a.bucket_id !== b.bucket_id) {
+        return a.bucket_id - b.bucket_id;
+      }
+      if (a.weight_pct !== b.weight_pct) {
+        return b.weight_pct - a.weight_pct;
+      }
+      const dailyA = a.daily_change_pct ?? -999;
+      const dailyB = b.daily_change_pct ?? -999;
+      if (dailyA !== dailyB) {
+        return dailyB - dailyA;
+      }
+      return a.ticker.localeCompare(b.ticker);
+    });
 
     if (addingRow) {
       return [{
