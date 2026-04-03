@@ -7,6 +7,6 @@
         "kor_us"
     ],
     "currency": "KRW",
-    "MA_TYPE": "ALMA",
-    "MA_MONTHS": 6
+    "MA_TYPE": "SMA",
+    "MA_MONTHS": 10
 }
