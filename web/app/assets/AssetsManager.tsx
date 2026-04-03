@@ -581,7 +581,7 @@ export function AssetsManager() {
               step="any"
               ref={qtyRef}
               className="form-control form-control-sm"
-              defaultValue=""
+              defaultValue="0"
               disabled={!addingRow?.isValidated}
             />
           );
@@ -605,7 +605,7 @@ export function AssetsManager() {
               step="any"
               ref={priceRef}
               className="form-control form-control-sm"
-              defaultValue=""
+              defaultValue="0"
               disabled={!addingRow?.isValidated}
             />
           );
