@@ -530,6 +530,7 @@ export function AssetsManager() {
     },
     { field: "weight_pct", headerName: "비중", width: 70, renderCell: (p: any) => <span style={{ color: "#0d6efd" }}>{p?.value?.toFixed(1)}%</span> },
     { field: "return_pct", headerName: "수익률", width: 80, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{(p?.value ?? 0) > 0 ? "+" : ""}{p?.value?.toFixed(1)}%</span> },
+    { field: "daily_change_pct", headerName: "일간(%)", width: 84, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{p?.value === null || p?.value === undefined ? "-" : `${(p?.value ?? 0) > 0 ? "+" : ""}${p?.value?.toFixed(2)}%`}</span> },
     { 
       field: "current_price", headerName: "현재가", width: 110,
       renderCell: (p: any) => <span>{formatPrice(safeParseFloat(p.value), p.row?.currency || "KRW")}</span>
