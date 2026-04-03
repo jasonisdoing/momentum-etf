@@ -616,7 +616,7 @@ export function StocksManager() {
   return (
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill stocksPage">
-        <div className="card appCard stocksCard">
+        <div className="card appCard stocksCard appTableCardFill">
           <div className="card-header">
             <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div className="tickerTypeToolbarLeft" style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
@@ -708,7 +708,7 @@ export function StocksManager() {
               rows={(viewMode === "active" ? activeGridRows : deletedGridRows) as any}
               columns={(viewMode === "active" ? activeColumns : deletedColumns) as any}
               loading={loading}
-              minHeight="70vh"
+              minHeight="100%"
             />
           </div>
         </div>

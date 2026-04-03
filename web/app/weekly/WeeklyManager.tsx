@@ -388,15 +388,15 @@ export function WeeklyManager() {
   const rightFields = editableFields.slice(halfIndex);
 
   return (
-    <div className="appPageStack">
+    <div className="appPageStack appPageStackFill">
       {error ? (
         <div className="appBannerStack">
           {error ? <div className="bannerError">{error}</div> : null}
         </div>
       ) : null}
 
-      <section className="appSection">
-        <div className="card appCard">
+      <section className="appSection appSectionFill">
+        <div className="card appCard appTableCardFill">
           <div className="card-header appCardHeader">
             <div className="sectionHeaderCompact w-100">
               <div className="tableToolbar">
@@ -426,13 +426,14 @@ export function WeeklyManager() {
               </div>
             </div>
           </div>
-          <div className="card-body appCardBodyTight">
+          <div className="card-body appCardBodyTight appTableCardBodyFill">
             <AppDataGrid
               rows={gridRows}
               columns={gridColumns}
               loading={loading}
-              wrapClassName="weeklyGridWrap"
+              wrapClassName="appGridFillWrap"
               getRowClassName={(params) => (params.row.week_date === activeWeekDate ? "tableRowSelected" : "")}
+              minHeight="100%"
             />
           </div>
         </div>
