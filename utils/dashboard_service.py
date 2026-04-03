@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from utils.account_registry import load_account_configs
@@ -14,6 +15,20 @@ INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
 INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
+
+
+def _get_week_start_date_kst() -> str:
+    now = datetime.now().astimezone()
+    week_start = now.date() - timedelta(days=now.weekday())
+    return week_start.isoformat()
+
+
+def _find_latest_snapshot_before_week_start(db: Any) -> dict[str, Any] | None:
+    week_start = _get_week_start_date_kst()
+    return db.daily_snapshots.find_one(
+        {"snapshot_date": {"$lt": week_start}},
+        sort=[("snapshot_date", -1)],
+    )
 
 
 def _compute_account_buckets(account_id: str, cash_balance: float, df_live: pd.DataFrame | None = None) -> list[dict[str, Any]]:
@@ -97,6 +112,7 @@ def load_dashboard_data() -> dict[str, Any]:
     configs = load_account_configs()
     portfolio_doc = db.portfolio_master.find_one({"master_id": "GLOBAL"}) or {}
     snapshot_docs = list(db.daily_snapshots.find().sort("snapshot_date", -1).limit(2))
+    weekly_base_snapshot = _find_latest_snapshot_before_week_start(db)
     weekly_docs = [
         doc for doc in db.weekly_fund_data.find().sort("week_date", -1) if normalize_number(doc.get("total_assets")) > 0
     ]
@@ -113,6 +129,11 @@ def load_dashboard_data() -> dict[str, Any]:
     snapshot_accounts = {
         str(account.get("account_id") or ""): account
         for account in ((latest_snapshot or {}).get("accounts") or [])
+        if isinstance(account, dict)
+    }
+    weekly_base_snapshot_accounts = {
+        str(account.get("account_id") or ""): account
+        for account in ((weekly_base_snapshot or {}).get("accounts") or [])
         if isinstance(account, dict)
     }
 
@@ -139,13 +160,16 @@ def load_dashboard_data() -> dict[str, Any]:
             if previous_snapshot
             else {}
         )
+        weekly_base_snapshot_account = weekly_base_snapshot_accounts.get(config["account_id"], {})
 
         total_assets = valuation_krw + cash_balance
         net_profit = total_assets - total_principal
         net_profit_pct = (net_profit / total_principal) * 100 if total_principal > 0 else 0.0
         cash_ratio = (cash_balance / total_assets) * 100 if total_assets > 0 else 0.0
         previous_total_assets = normalize_number(previous_snapshot_account.get("total_assets"))
+        weekly_base_total_assets = normalize_number(weekly_base_snapshot_account.get("total_assets"))
         daily_profit = total_assets - previous_total_assets if previous_snapshot_account else 0.0
+        weekly_profit = total_assets - weekly_base_total_assets if weekly_base_snapshot_account else 0.0
 
         accounts.append(
             {
@@ -160,6 +184,7 @@ def load_dashboard_data() -> dict[str, Any]:
                 "net_profit": net_profit,
                 "net_profit_pct": net_profit_pct,
                 "daily_profit": daily_profit,
+                "weekly_profit": weekly_profit,
                 "_df_live": df_live, # 버킷 계산을 위해 임시 보관
             }
         )
@@ -168,8 +193,11 @@ def load_dashboard_data() -> dict[str, Any]:
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
     previous_total_assets = normalize_number((previous_snapshot or {}).get("total_assets"))
+    weekly_base_total_assets = normalize_number((weekly_base_snapshot or {}).get("total_assets"))
     daily_profit = total_assets - previous_total_assets if previous_snapshot else 0.0
     daily_return_pct = (daily_profit / previous_total_assets) * 100 if previous_total_assets > 0 else 0.0
+    weekly_profit = total_assets - weekly_base_total_assets if weekly_base_snapshot else 0.0
+    weekly_return_pct = (weekly_profit / weekly_base_total_assets) * 100 if weekly_base_total_assets > 0 else 0.0
 
     metrics_row1 = [
         {"label": "총 자산", "value": total_assets, "kind": "money"},
@@ -183,9 +211,9 @@ def load_dashboard_data() -> dict[str, Any]:
         },
         {
             "label": "금주 손익",
-            "value": normalize_number((latest_weekly or {}).get("weekly_profit")),
+            "value": weekly_profit,
             "kind": "money",
-            "sub_value": normalize_number((latest_weekly or {}).get("weekly_return_pct")),
+            "sub_value": weekly_return_pct,
             "sub_kind": "percent",
         },
     ]
