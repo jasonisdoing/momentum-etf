@@ -13,7 +13,6 @@ from .routes.import_data import router as import_router
 from .routes.market import router as market_router
 from .routes.note import router as note_router
 from .routes.rank import router as rank_router
-from .routes.account_stocks import router as account_stocks_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.system import router as system_router
@@ -47,7 +46,6 @@ app.include_router(import_router)
 app.include_router(market_router)
 app.include_router(note_router)
 app.include_router(rank_router)
-app.include_router(account_stocks_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
 app.include_router(system_router)

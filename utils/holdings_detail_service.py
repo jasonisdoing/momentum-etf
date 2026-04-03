@@ -2,16 +2,125 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
+from utils.account_stocks_io import get_account_targets, save_account_targets
 from utils.account_registry import load_account_configs
 from utils.cash_service import load_cash_accounts
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
 
 logger = get_app_logger()
+
+
+def _normalize_target_ticker(ticker: str) -> str:
+    return str(ticker or "").replace("ASX:", "").strip().upper()
+
+
+def _compute_account_total_assets_native(
+    rows: list[dict[str, Any]],
+    cash_info: dict[str, Any] | None,
+    account_currency: str,
+    rates: dict[str, Any],
+) -> float:
+    total_valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in rows)
+    currency = str(account_currency or "KRW").strip().upper() or "KRW"
+    cash_info = cash_info or {}
+
+    if currency == "KRW":
+        return total_valuation_krw + float(cash_info.get("cash_balance_krw") or 0.0)
+
+    if currency == "AUD":
+        aud_rate = float(((rates or {}).get("AUD") or {}).get("rate") or 0.0)
+        if aud_rate <= 0:
+            raise RuntimeError("AUD 환율을 가져오지 못했습니다.")
+        cash_native = cash_info.get("cash_balance_native")
+        if cash_native in (None, ""):
+            cash_native = float(cash_info.get("cash_balance_krw") or 0.0) / aud_rate
+        return (total_valuation_krw / aud_rate) + float(cash_native or 0.0)
+
+    return total_valuation_krw
+
+
+def _compute_target_quantity(target_amount: float, current_price: float, currency: str) -> float | int | None:
+    if current_price <= 0:
+        return None
+    quantity = target_amount / current_price
+    currency_code = str(currency or "KRW").strip().upper()
+    if currency_code == "AUD":
+        return round(quantity, 4)
+    return max(math.floor(quantity), 0)
+
+
+def _apply_target_metrics(
+    rows: list[dict[str, Any]],
+    account_id: str,
+    cash_info: dict[str, Any] | None,
+    account_currency: str,
+    rates: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if not account_id:
+        return rows
+
+    target_items = get_account_targets(account_id)
+    if not rows:
+        return rows
+
+    target_map = {
+        _normalize_target_ticker(str(item.get("ticker") or "")): float(item.get("ratio") or 0.0)
+        for item in target_items
+    }
+    account_total_assets = _compute_account_total_assets_native(rows, cash_info, account_currency, rates)
+
+    enriched_rows: list[dict[str, Any]] = []
+    for row in rows:
+        target_ratio = target_map.get(_normalize_target_ticker(str(row.get("ticker") or "")))
+        next_row = dict(row)
+        next_row["target_ratio"] = target_ratio
+        if target_ratio is None:
+            next_row["target_amount"] = None
+            next_row["target_quantity"] = None
+        else:
+            target_amount = round(account_total_assets * (target_ratio / 100.0), 2)
+            next_row["target_amount"] = target_amount
+            next_row["target_quantity"] = _compute_target_quantity(
+                target_amount,
+                float(next_row.get("current_price_num") or 0.0),
+                account_currency,
+            )
+        enriched_rows.append(next_row)
+    return enriched_rows
+
+
+def _save_target_ratio(account_id: str, ticker: str, target_ratio: float | None) -> None:
+    normalized_account_id = str(account_id or "").strip().lower()
+    normalized_ticker = _normalize_target_ticker(ticker)
+    if not normalized_account_id or not normalized_ticker:
+        raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
+
+    targets = get_account_targets(normalized_account_id)
+    remaining_items: list[dict[str, Any]] = []
+    found = False
+
+    for item in targets:
+        item_ticker = _normalize_target_ticker(str(item.get("ticker") or ""))
+        if item_ticker == normalized_ticker:
+            found = True
+            if target_ratio is not None and target_ratio > 0:
+                next_item = dict(item)
+                next_item["ticker"] = normalized_ticker
+                next_item["ratio"] = target_ratio
+                remaining_items.append(next_item)
+            continue
+        remaining_items.append(dict(item))
+
+    if not found and target_ratio is not None and target_ratio > 0:
+        remaining_items.append({"ticker": normalized_ticker, "ratio": target_ratio})
+
+    save_account_targets(normalized_account_id, remaining_items)
 
 
 def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
@@ -25,6 +134,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
 
     # target_id가 비어있으면 모든 계좌를 순회하며 데이터를 수집함
     all_rows: list[dict[str, Any]] = []
+    selected_account_currency = "KRW"
 
     for account in all_accounts:
         curr_account_id = str(account["account_id"])
@@ -50,6 +160,8 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         settings = account.get("settings") or {}
         country_code = str(settings.get("country_code") or "").strip().lower()
         currency = str(settings.get("currency") or "KRW").strip().upper()
+        if curr_account_id == target_id:
+            selected_account_currency = currency
 
         for _, row in df.iterrows():
             ticker_raw = str(row.get("티커") or "").strip()
@@ -119,6 +231,14 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     cash_data = load_cash_accounts()
     cash_accounts = cash_data.get("accounts", [])
     cash_info = next((c for c in cash_accounts if c["account_id"] == target_id), None)
+    if target_id:
+        all_rows = _apply_target_metrics(
+            all_rows,
+            account_id=target_id,
+            cash_info=cash_info,
+            account_currency=selected_account_currency,
+            rates=rates,
+        )
 
     return {
         "accounts": [
@@ -158,6 +278,7 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, new_holdings)
+    _save_target_ratio(account_id, raw_ticker, None)
     
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
@@ -170,7 +291,14 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
     return {"deleted": ticker}
 
 
-def update_holding(account_id: str, ticker: str, quantity: int | None = None, average_buy_price: float | None = None, memo: str | None = None) -> dict[str, str]:
+def update_holding(
+    account_id: str,
+    ticker: str,
+    quantity: int | None = None,
+    average_buy_price: float | None = None,
+    memo: str | None = None,
+    target_ratio: float | None = None,
+) -> dict[str, str]:
     """계좌의 특정 종목 수량/매입단가를 수정한다."""
     account_id = str(account_id or "").strip()
     ticker = str(ticker or "").strip()
@@ -200,6 +328,8 @@ def update_holding(account_id: str, ticker: str, quantity: int | None = None, av
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, holdings)
+    if target_ratio is not None:
+        _save_target_ratio(account_id, raw_ticker, float(target_ratio))
     
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
