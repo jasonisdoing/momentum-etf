@@ -23,6 +23,7 @@ type AccountConfig = {
 };
 
 type TickerDef = {
+  [key: string]: string | number | null;
   ticker: string;
   name: string;
   bucket_id: number;
@@ -30,12 +31,7 @@ type TickerDef = {
   added_date: string;
   listing_date: string;
   week_volume: number | null;
-  return_1w: number | null;
   return_1d: number | null;
-  return_1m: number | null;
-  return_3m: number | null;
-  return_6m: number | null;
-  return_12m: number | null;
 };
 
 type TargetItemRow = TickerDef & {
@@ -46,6 +42,7 @@ type TargetItemRow = TickerDef & {
 type AccountStocksPayload = {
   accounts: AccountConfig[];
   account_id: string;
+  monthly_return_labels?: string[];
   available_tickers: TickerDef[];
   rows: TargetItemRow[];
   error?: string;
@@ -72,13 +69,14 @@ function getSignedMetricClass(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
     return "";
   }
-  return value > 0 ? "stocksPositive" : "stocksNegative";
+  return value > 0 ? "metricPositive" : "metricNegative";
 }
 
 export function AccountStocksManager() {
   const [accounts, setAccounts] = useState<AccountConfig[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState(readRememberedMomentumEtfAccountId() ?? "");
   const [availableTickers, setAvailableTickers] = useState<TickerDef[]>([]);
+  const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [rows, setRows] = useState<TargetItemRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -113,6 +111,7 @@ export function AccountStocksManager() {
       setSelectedAccountId(nextAccountId);
       writeRememberedMomentumEtfAccountId(nextAccountId);
       setAvailableTickers(payload.available_tickers ?? []);
+      setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
 
       const sortedRows = (payload.rows || []).map(r => ({ 
         ...r, 
@@ -285,38 +284,27 @@ export function AccountStocksManager() {
         align: "right",
         headerAlign: "right",
         renderCell: (params: GridRenderCellParams<TargetItemRow>) => (
-          <span className={getSignedMetricClass(params.row.return_1d)} style={{ fontWeight: 600 }}>
+          <span className={getSignedMetricClass(params.row.return_1d)}>
              {formatPercent(params.row.return_1d)}
           </span>
         ),
       },
-      ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
-        (field) => ({
-          field,
-          headerName:
-            field === "return_1w"
-              ? "1주(%)"
-              : field === "return_1m"
-                ? "1달(%)"
-                : field === "return_3m"
-                  ? "3달(%)"
-                  : field === "return_6m"
-                    ? "6달(%)"
-                    : "12달(%)",
-          width: 88,
-          minWidth: 88,
-          align: "right" as const,
-          headerAlign: "right" as const,
-          renderCell: (params: GridRenderCellParams<TargetItemRow>) => (
-            <span className={getSignedMetricClass(params.row[field])} style={{ fontWeight: 600 }}>
-                {formatPercent(params.row[field])}
-            </span>
-          ),
-        }),
-      ),
+      ...monthlyReturnLabels.map((label) => ({
+        field: label,
+        headerName: label,
+        width: 108,
+        minWidth: 108,
+        align: "right" as const,
+        headerAlign: "right" as const,
+        renderCell: (params: GridRenderCellParams<TargetItemRow>) => (
+          <span className={getSignedMetricClass((params.row[label] as number | null) ?? null)}>
+            {formatPercent((params.row[label] as number | null) ?? null)}
+          </span>
+        ),
+      })),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
     ],
-    [rows, isPending, selectedAccountId]
+    [monthlyReturnLabels]
   );
 
   function openAddModal() {
