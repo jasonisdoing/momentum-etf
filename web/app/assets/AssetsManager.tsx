@@ -308,8 +308,8 @@ export function AssetsManager() {
     void load(nextId);
   };
 
-  const handleDelete = (ticker: string, id: string) => {
-    if (!confirm(`${ticker} 종목을 삭제하시겠습니까?`)) return;
+  const handleDelete = (ticker: string, name: string, id: string) => {
+    if (!confirm(`${name}(${ticker}) 종목을 삭제하시겠습니까?`)) return;
     setProcessingId(id);
     startTransition(async () => {
       try {
@@ -549,7 +549,7 @@ export function AssetsManager() {
         ];
         return [
           <GridActionsCellItem key="e" icon={<IconPencil size={20} />} label="수정" onClick={() => setRowModesModel(p => ({ ...p, [id]: { mode: GridRowModes.Edit } }))} />,
-          <GridActionsCellItem key="d" icon={<IconTrash size={20} />} label="삭제" onClick={() => handleDelete(row.ticker, String(id))} />
+          <GridActionsCellItem key="d" icon={<IconTrash size={20} />} label="삭제" onClick={() => handleDelete(row.ticker, row.name, String(id))} />
         ];
       }
     },
