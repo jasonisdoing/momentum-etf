@@ -26,6 +26,7 @@ type DashboardAccountSummaryItem = {
   net_profit: number;
   net_profit_pct: number;
   daily_profit: number;
+  weekly_profit: number;
 };
 
 type DashboardBucketItem = {
@@ -545,6 +546,7 @@ export function DashboardManager() {
                 <th className="text-end">계좌 손익</th>
                 <th className="text-end">수익률</th>
                 <th className="text-end">금일 손익</th>
+                <th className="text-end">금주 손익</th>
               </tr>
             </thead>
             <tbody>
@@ -559,6 +561,7 @@ export function DashboardManager() {
                   <td className={`text-end ${getSignedClass(a.net_profit)}`}>{mask(a.net_profit)}</td>
                   <td className={`text-end ${getSignedClass(a.net_profit_pct)}`}>{formatPercent(a.net_profit_pct)}</td>
                   <td className={`text-end ${getSignedClass(a.daily_profit)}`}>{mask(a.daily_profit)}</td>
+                  <td className={`text-end ${getSignedClass(a.weekly_profit)}`}>{mask(a.weekly_profit)}</td>
                 </tr>
               ))}
             </tbody>
