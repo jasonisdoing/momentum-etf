@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
 
 import {
@@ -166,6 +166,7 @@ export function RankManager() {
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
+  const [nameKeyword, setNameKeyword] = useState("");
   const [page, setPage] = useState(0);
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
@@ -176,6 +177,7 @@ export function RankManager() {
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const deferredNameKeyword = useDeferredValue(nameKeyword);
 
   async function load(next?: { ticker_type?: string; ma_type?: string; ma_months?: number; as_of_date?: string }) {
     setLoading(true);
@@ -266,9 +268,17 @@ export function RankManager() {
     });
   }, [rows]);
 
+  const filteredGridRows = useMemo(() => {
+    const keyword = deferredNameKeyword.trim().toLowerCase();
+    if (!keyword) {
+      return gridRows;
+    }
+    return gridRows.filter((row) => String(row.종목명 ?? "").toLowerCase().includes(keyword));
+  }, [gridRows, deferredNameKeyword]);
+
   useEffect(() => {
     setPage(0);
-  }, [selectedTickerType, maType, maMonths, metricMode, selectedAsOfDate]);
+  }, [selectedTickerType, maType, maMonths, metricMode, selectedAsOfDate, deferredNameKeyword]);
 
   const columns = useMemo<GridColDef<RankGridRow>[]>(() => {
     const leadingColumns: GridColDef<RankGridRow>[] = [
@@ -622,13 +632,21 @@ export function RankManager() {
                     월별
                   </button>
                 </div>
+                <input
+                  className="form-control"
+                  type="text"
+                  style={{ width: "200px", fontWeight: 600 }}
+                  value={nameKeyword}
+                  placeholder="종목명 검색"
+                  onChange={(event) => setNameKeyword(event.target.value)}
+                />
               </div>
 
               <div className="tickerTypeToolbarRight" style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
                 <div className="stocksSummary d-flex align-items-center gap-3">
-                  {rows.length > 0 ? (() => {
-                    const upCount = rows.filter((r) => (r["추세"] ?? 0) > 0).length;
-                    const upPct = Math.round((upCount / rows.length) * 100);
+                  {filteredGridRows.length > 0 ? (() => {
+                    const upCount = filteredGridRows.filter((r) => (r["추세"] ?? 0) > 0).length;
+                    const upPct = Math.round((upCount / filteredGridRows.length) * 100);
                     return (
                       <div className="d-flex align-items-center gap-1">
                         <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>추세 상승:</span>
@@ -638,7 +656,7 @@ export function RankManager() {
                   })() : null}
                   <div className="d-flex align-items-center gap-1">
                     <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 개수:</span>
-                    <span style={{ fontWeight: 700 }}>{new Intl.NumberFormat("ko-KR").format(rows.length)}개</span>
+                    <span style={{ fontWeight: 700 }}>{new Intl.NumberFormat("ko-KR").format(filteredGridRows.length)}개</span>
                   </div>
                 </div>
               </div>
@@ -649,7 +667,7 @@ export function RankManager() {
             <div className="rankGridWrap">
               <AppDataGrid
                 className="rankDataGrid"
-                rows={gridRows}
+                rows={filteredGridRows}
                 columns={columns}
                 loading={loading}
                 hideFooter={false}
