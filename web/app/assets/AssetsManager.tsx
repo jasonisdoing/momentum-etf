@@ -548,10 +548,10 @@ export function AssetsManager() {
       field: "current_price", headerName: "현재가", width: 110,
       renderCell: (p: any) => <span>{formatPrice(safeParseFloat(p.value), p.row?.currency || "KRW")}</span>
     },
-    { field: "days_held", headerName: "보유일", width: 65, align: "center" },
     { field: "pnl_krw", headerName: "평가손익", width: 130, renderCell: (p: any) => <span className={getSignedClass(p?.value ?? 0)}>{formatKrw(p?.value ?? 0)}</span> },
-    { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
+    { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
+    { field: "days_held", headerName: "보유일", width: 65, align: "center" },
   ], [addingRow, isPending, rowModesModel, processingId, handleAddRowSave, handleAddRowCancel]);
 
   if (loading && !rows.length) return <div className="appPageStack"><div className="appPageLoading"><AppLoadingState label="보유 종목 로드 중..." /></div></div>;
