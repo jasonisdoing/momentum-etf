@@ -16,6 +16,9 @@ type HoldingsRow = {
   return_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
+  target_ratio?: number | null;
+  target_quantity?: number | null;
+  target_amount?: number | null;
 };
 
 export async function GET(request: Request) {

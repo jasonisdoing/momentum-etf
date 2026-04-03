@@ -74,6 +74,9 @@ type HoldingsRow = {
   weight_pct: number;
   buy_amount_krw: number;
   valuation_krw: number;
+  target_ratio?: number | null;
+  target_quantity?: number | null;
+  target_amount?: number | null;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -115,6 +118,28 @@ function formatPrice(value: number | null, currency: string): string {
 function formatNumber(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatTargetAmount(value: number | null | undefined, currency: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (currency === "AUD") {
+    return `A$${new Intl.NumberFormat("en-AU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+  return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
+}
+
+function formatTargetQuantity(value: number | null | undefined, currency: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (currency === "AUD") {
+    return new Intl.NumberFormat("en-AU", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 4,
+    }).format(value);
+  }
+  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(value);
 }
 
 function getSignedClass(value: number): string {
@@ -266,30 +291,44 @@ export function AssetsManager() {
     if (newRow.id === "__adding__") return newRow;
     const quantity = parseInt(String(newRow.quantity), 10);
     const avgPrice = safeParseFloat(newRow.average_buy_price);
+    const targetRatio = Number(newRow.target_ratio ?? 0);
 
     if (isNaN(quantity) || quantity < 0 || isNaN(avgPrice) || avgPrice < 0) {
       toast.error("입력값이 올바르지 않습니다.");
       throw new Error("Invalid Input");
     }
+    if (Number.isNaN(targetRatio) || targetRatio < 0 || targetRatio > 100) {
+      toast.error("목표비중은 0%에서 100% 사이여야 합니다.");
+      throw new Error("Invalid Target Ratio");
+    }
 
     setProcessingId(newRow.id);
     try {
-      const res = await fetch("/api/assets", {
+      const normalizedTicker = newRow.ticker.replace("ASX:", "");
+      const normalizedTargetRatio = parseFloat(targetRatio.toFixed(1));
+      const holdingsResponse = await fetch("/api/assets", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           account_id: selectedAccountId,
-          ticker: newRow.ticker.replace("ASX:", ""),
+          ticker: normalizedTicker,
           quantity,
           average_buy_price: avgPrice,
+          target_ratio: normalizedTargetRatio,
         }),
       });
-      if (!res.ok) throw new Error();
+      if (!holdingsResponse.ok) {
+        throw new Error("보유 종목 수정에 실패했습니다.");
+      }
+
       delete holdingsDataCache[selectedAccountId];
       startTransition(() => { void load(selectedAccountId, true); });
       toast.success("수정 완료");
-      return { ...newRow, quantity, average_buy_price: avgPrice };
-    } catch { toast.error("수정 실패"); throw new Error("Fail"); }
+      return { ...newRow, quantity, average_buy_price: avgPrice, target_ratio: normalizedTargetRatio };
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "수정 실패");
+      throw new Error("Fail");
+    }
     finally { setProcessingId(null); }
   };
 
@@ -412,6 +451,7 @@ export function AssetsManager() {
       id: `${row.ticker}-${row.account_name}-${i}`,
       quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
       average_buy_price: safeParseFloat(row.average_buy_price),
+      target_ratio: row.target_ratio ?? 0,
     })).sort((a, b) => {
       if (a.bucket_id !== b.bucket_id) {
         return a.bucket_id - b.bucket_id;
@@ -432,7 +472,7 @@ export function AssetsManager() {
         id: "__adding__", account_name: "", currency: "", bucket: "", bucket_id: 0,
         ticker: addingRow.ticker, name: addingRow.name || "",
         quantity: 0, average_buy_price: 0,
-        current_price: "-", days_held: "-", pnl_krw: 0, return_pct: 0, weight_pct: 0, buy_amount_krw: 0, valuation_krw: 0,
+        current_price: "-", days_held: "-", pnl_krw: 0, return_pct: 0, weight_pct: 0, buy_amount_krw: 0, valuation_krw: 0, target_ratio: 0,
       } as GridRow, ...baseRows];
     }
     return baseRows;
@@ -552,14 +592,54 @@ export function AssetsManager() {
     { field: "valuation_krw", headerName: "평가 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     { field: "buy_amount_krw", headerName: "매입 금액", width: 130, renderCell: (p: any) => formatKrw(p?.value ?? 0) },
     { field: "days_held", headerName: "보유일", width: 65, align: "center" },
+    {
+      field: "target_ratio",
+      headerName: "목표비중",
+      width: 92,
+      editable: true,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (p: any) => (
+        <span style={{ color: "#0d6efd", fontWeight: 700 }}>
+          {p?.value === null || p?.value === undefined ? "-" : `${p.value.toFixed(1)}%`}
+        </span>
+      ),
+      renderEditCell: (p: any) => (
+        <input
+          type="number"
+          step="0.1"
+          min="0"
+          max="100"
+          className="form-control form-control-sm h-100"
+          value={p.value ?? 0}
+          onChange={(e) => p.api.setEditCellValue({ id: p.id, field: p.field, value: e.target.value })}
+        />
+      ),
+    },
+    {
+      field: "target_quantity",
+      headerName: "목표수량",
+      width: 120,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (p: any) => <span>{formatTargetQuantity(p?.value ?? null, p.row?.currency || "KRW")}</span>,
+    },
+    {
+      field: "target_amount",
+      headerName: "목표금액",
+      width: 130,
+      align: "right",
+      headerAlign: "right",
+      renderCell: (p: any) => <span>{formatTargetAmount(p?.value ?? null, p.row?.currency || "KRW")}</span>,
+    },
   ], [addingRow, isPending, rowModesModel, processingId, handleAddRowSave, handleAddRowCancel]);
 
   if (loading && !rows.length) return <div className="appPageStack"><div className="appPageLoading"><AppLoadingState label="보유 종목 로드 중..." /></div></div>;
 
   return (
-    <div className="appPageStack">
+    <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
-        <div className="card appCard shadow-sm">
+        <div className="card appCard shadow-sm h-100 d-flex flex-column">
           <div className="card-header d-flex justify-content-between align-items-center bg-white py-3">
             <div className="d-flex gap-2">
               <select className="form-select w-auto fw-bold" value={selectedAccountId} onChange={(e) => handleAccountChange(e.target.value)}>
@@ -571,6 +651,7 @@ export function AssetsManager() {
               const totalValuation = rows.reduce((s, r) => s + (r.valuation_krw || 0), 0);
               const totalCash = cash?.cash_balance_krw || 0;
               const totalAssets = totalValuation + totalCash;
+              const targetRatioTotal = rows.reduce((s, r) => s + (r.target_ratio || 0), 0);
               const valuationPct = totalAssets > 0 ? (totalValuation / totalAssets * 100).toFixed(1) : "0.0";
               const cashPct = totalAssets > 0 ? (totalCash / totalAssets * 100).toFixed(1) : "0.0";
               
@@ -579,6 +660,7 @@ export function AssetsManager() {
                   <div className="fw-bold fs-3">총 자산: <span className="fw-bold text-primary fs-2 ms-2">{formatKrw(totalAssets)}</span></div>
                   <div className="fw-bold fs-3">평가액: <span className="fw-bold text-dark fs-2 ms-2">{formatKrw(totalValuation)} <span className="text-secondary ms-2">({valuationPct}%)</span></span></div>
                   <div className="fw-bold fs-3">현금: <span className="fw-bold text-dark fs-2 ms-2">{formatKrw(totalCash)} <span className="text-secondary ms-2">({cashPct}%)</span></span></div>
+                  <div className="fw-bold fs-3">목표비중합: <span className={`fw-bold fs-2 ms-2 ${Math.abs(targetRatioTotal - 100) < 0.05 ? "text-success" : "text-danger"}`}>{targetRatioTotal.toFixed(1)}%</span></div>
                 </div>
               );
             })()}
@@ -600,7 +682,7 @@ export function AssetsManager() {
               )}
             </div>
           )}
-          <div className="card-body p-0" style={{ minHeight: "500px" }}>
+          <div className="card-body p-0" style={{ minHeight: 0 }}>
             <AppDataGrid 
               rows={gridRows} 
               columns={columns} 
@@ -611,6 +693,7 @@ export function AssetsManager() {
               onRowEditStop={(p, e) => { if (p.reason === GridRowEditStopReasons.rowFocusOut) e.defaultMuiPrevented = true; }} 
               processRowUpdate={processRowUpdate}
               isCellEditable={(p) => p.row.id !== "__adding__"}
+              minHeight="calc(100vh - 15rem)"
             />
           </div>
         </div>
