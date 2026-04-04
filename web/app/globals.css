@@ -1672,6 +1672,24 @@ a {
   background: rgba(32, 107, 196, 0.16);
 }
 
+.assetsDetailFullRow .ag-full-width-row {
+  background: #f8fbff;
+}
+
+.assetsDetailPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fbff;
+}
+
+.assetsDetailGridWrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .rankAgGrid .ag-cell.rankBucketCell {
   justify-content: center;
   font-weight: 600;
