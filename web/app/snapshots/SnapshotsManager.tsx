@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { type GridColDef } from "@mui/x-data-grid";
+import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
+import type { ColDef, GridOptions, RowClassParams } from "ag-grid-community";
 
-import { AppDataGrid } from "../components/AppDataGrid";
+import { AppAgGrid } from "../components/AppAgGrid";
 
 type SnapshotAccountItem = {
   account_id: string;
@@ -22,7 +23,6 @@ type SnapshotListItem = {
   total_principal: number;
   cash_balance: number;
   valuation_krw: number;
-  account_count: number;
   accounts: SnapshotAccountItem[];
 };
 
@@ -31,16 +31,91 @@ type SnapshotListResponse = {
   error?: string;
 };
 
-type SnapshotGridRow = SnapshotListItem & { id: string };
-type SnapshotDetailGridRow = SnapshotAccountItem & { id: string };
+type SnapshotMainRow = SnapshotListItem & { id: string; rowType: "main" };
+type SnapshotDetailRow = {
+  id: string;
+  rowType: "detail";
+  parentId: string;
+  snapshot_date: string;
+  accounts: SnapshotAccountItem[];
+};
+type SnapshotGridRow = SnapshotMainRow | SnapshotDetailRow;
 
 function formatKrw(value: number): string {
-  return new Intl.NumberFormat("ko-KR").format(value);
+  return new Intl.NumberFormat("ko-KR").format(Math.round(value));
 }
+
+function isDetailRow(row: SnapshotGridRow | undefined): row is SnapshotDetailRow {
+  return row?.rowType === "detail";
+}
+
+function SnapshotDetailPanel(params: { data?: SnapshotGridRow }) {
+  const data = params.data;
+  if (!data || !isDetailRow(data)) {
+    return null;
+  }
+
+  return (
+    <div className="snapshotsDetailPanel">
+      <div className="snapshotsDetailPanelHeader">
+        <span className="tableMuted">계좌별 상세</span>
+      </div>
+      <div className="snapshotsDetailTableWrap">
+        <table className="snapshotsDetailTable">
+          <thead>
+            <tr>
+              <th>계좌</th>
+              <th className="tableAlignRight">총 자산</th>
+              <th className="tableAlignRight">원금</th>
+              <th className="tableAlignRight">현금</th>
+              <th className="tableAlignRight">평가액</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.accounts.map((account) => (
+              <tr key={`${data.parentId}-${account.account_id}`}>
+                <td>{account.account_name}</td>
+                <td className="tableAlignRight">{formatKrw(account.total_assets)}</td>
+                <td className="tableAlignRight">{formatKrw(account.total_principal)}</td>
+                <td className="tableAlignRight">{formatKrw(account.cash_balance)}</td>
+                <td className="tableAlignRight">{formatKrw(account.valuation_krw)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+const appGridTheme = themeQuartz
+  .withPart(iconSetQuartzBold)
+  .withParams({
+    accentColor: "#206bc4",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#182433",
+    headerBackgroundColor: "#f8fafc",
+    headerTextColor: "#5b6778",
+    spacing: 8,
+    fontSize: 14,
+    wrapperBorderRadius: 10,
+    rowHeight: 38,
+    headerHeight: 38,
+    cellHorizontalPadding: 12,
+    headerColumnBorder: true,
+    headerColumnBorderHeight: "70%",
+    columnBorder: true,
+    oddRowBackgroundColor: "#fbfdff",
+    headerCellHoverBackgroundColor: "#eef4fb",
+    headerCellMovingBackgroundColor: "#e8f0fb",
+    iconButtonHoverBackgroundColor: "#eef4fb",
+    iconButtonHoverColor: "#206bc4",
+    iconSize: 18,
+  });
 
 export function SnapshotsManager() {
   const [snapshots, setSnapshots] = useState<SnapshotListItem[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -63,7 +138,7 @@ export function SnapshotsManager() {
 
         const nextSnapshots = payload.snapshots ?? [];
         setSnapshots(nextSnapshots);
-        setSelectedId((current) => current ?? nextSnapshots[0]?.id ?? null);
+        setExpandedId((current) => current ?? nextSnapshots[0]?.id ?? null);
       } catch (loadError) {
         if (alive) {
           setError(loadError instanceof Error ? loadError.message : "스냅샷 목록을 불러오지 못했습니다.");
@@ -81,112 +156,109 @@ export function SnapshotsManager() {
     };
   }, []);
 
-  const selectedSnapshot = useMemo(
-    () => snapshots.find((snapshot) => snapshot.id === selectedId) ?? snapshots[0] ?? null,
-    [selectedId, snapshots],
-  );
   const listRows = useMemo<SnapshotGridRow[]>(
-    () => snapshots.map((snapshot) => ({ ...snapshot, id: snapshot.id })),
-    [snapshots],
-  );
-  const detailRows = useMemo<SnapshotDetailGridRow[]>(
     () =>
-      (selectedSnapshot?.accounts ?? []).map((account) => ({
-        ...account,
-        id: `${selectedSnapshot?.id ?? "snapshot"}-${account.account_id}`,
-      })),
-    [selectedSnapshot],
+      snapshots.flatMap((snapshot) => {
+        const mainRow: SnapshotMainRow = { ...snapshot, id: snapshot.id, rowType: "main" };
+        if (snapshot.id !== expandedId) {
+          return [mainRow];
+        }
+
+        const detailRow: SnapshotDetailRow = {
+          id: `${snapshot.id}__detail`,
+          rowType: "detail",
+          parentId: snapshot.id,
+          snapshot_date: snapshot.snapshot_date,
+          accounts: snapshot.accounts,
+        };
+        return [mainRow, detailRow];
+      }),
+    [expandedId, snapshots],
   );
-  const listColumns = useMemo<GridColDef<SnapshotGridRow>[]>(
+
+  const listColumns = useMemo<ColDef<SnapshotGridRow>[]>(
     () => [
-      { field: "snapshot_date", headerName: "날짜", minWidth: 120, width: 120 },
+      {
+        field: "snapshot_date",
+        headerName: "날짜",
+        minWidth: 220,
+        flex: 1.1,
+        cellRenderer: (params: { data?: SnapshotGridRow; value?: string }) => {
+          const data = params.data;
+          if (!data || isDetailRow(data)) {
+            return "";
+          }
+
+          return (
+            <div className="snapshotsExpandCell">
+              <span className="snapshotsExpandIcon" aria-hidden="true">
+                {data.id === expandedId ? "▾" : "▸"}
+              </span>
+              <span>{params.value}</span>
+            </div>
+          );
+        },
+      },
       {
         field: "total_assets",
         headerName: "총 자산",
         minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.total_assets),
+        flex: 1,
+        type: "rightAligned",
+        cellRenderer: (params: { data?: SnapshotGridRow; value: number }) =>
+          params.data && !isDetailRow(params.data) ? formatKrw(params.value) : "",
       },
       {
         field: "total_principal",
         headerName: "원금",
         minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.total_principal),
+        flex: 1,
+        type: "rightAligned",
+        cellRenderer: (params: { data?: SnapshotGridRow; value: number }) =>
+          params.data && !isDetailRow(params.data) ? formatKrw(params.value) : "",
       },
       {
         field: "cash_balance",
         headerName: "현금",
         minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.cash_balance),
+        flex: 1,
+        type: "rightAligned",
+        cellRenderer: (params: { data?: SnapshotGridRow; value: number }) =>
+          params.data && !isDetailRow(params.data) ? formatKrw(params.value) : "",
       },
       {
         field: "valuation_krw",
         headerName: "평가액",
         minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.valuation_krw),
-      },
-      {
-        field: "account_count",
-        headerName: "계좌수",
-        minWidth: 88,
-        width: 88,
-        align: "right",
-        headerAlign: "right",
+        flex: 1,
+        type: "rightAligned",
+        cellRenderer: (params: { data?: SnapshotGridRow; value: number }) =>
+          params.data && !isDetailRow(params.data) ? formatKrw(params.value) : "",
       },
     ],
-    [],
+    [expandedId],
   );
-  const detailColumns = useMemo<GridColDef<SnapshotDetailGridRow>[]>(
-    () => [
-      { field: "account_name", headerName: "계좌", minWidth: 180, flex: 1 },
-      {
-        field: "total_assets",
-        headerName: "총 자산",
-        minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.total_assets),
+
+  const gridOptions = useMemo<GridOptions<SnapshotGridRow>>(
+    () => ({
+      suppressMovableColumns: true,
+      domLayout: "autoHeight",
+      isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
+      fullWidthCellRenderer: SnapshotDetailPanel,
+      getRowHeight: (params) => {
+        if (!isDetailRow(params.data)) {
+          return 38;
+        }
+        return 58 + (params.data.accounts.length + 1) * 38;
       },
-      {
-        field: "total_principal",
-        headerName: "원금",
-        minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.total_principal),
+      onRowClicked: (params) => {
+        const data = params.data;
+        if (!data || isDetailRow(data)) {
+          return;
+        }
+        setExpandedId((current) => (current === data.id ? null : data.id));
       },
-      {
-        field: "cash_balance",
-        headerName: "현금",
-        minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.cash_balance),
-      },
-      {
-        field: "valuation_krw",
-        headerName: "평가액",
-        minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrw(params.row.valuation_krw),
-      },
-    ],
+    }),
     [],
   );
 
@@ -199,29 +271,32 @@ export function SnapshotsManager() {
       ) : null}
       <section className="appSection">
         <div className="card appCard">
-          <div className="card-body appCardBody">
-            <AppDataGrid
-              rows={listRows}
-              columns={listColumns}
-              loading={loading}
-              minHeight="22rem"
-              getRowClassName={(params) => (params.row.id === selectedSnapshot?.id ? "tableRowSelected" : "")}
-              onRowClick={(params) => setSelectedId(String(params.id))}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>선택일 계좌별 상세</h2>
-              <span className="tableMuted">{selectedSnapshot?.snapshot_date ?? "-"}</span>
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <span className="appHeaderMetricValue">일별 스냅샷</span>
+              </div>
+              <div className="appMainHeaderRight">
+                <span className="appHeaderSubtle">날짜 row를 클릭하면 계좌별 상세가 펼쳐집니다.</span>
+              </div>
             </div>
           </div>
-          <div className="card-body appCardBodyTight">
-            <AppDataGrid rows={detailRows} columns={detailColumns} loading={loading} minHeight="20rem" />
+          <div className="card-body appCardBody">
+            <AppAgGrid
+              rowData={listRows}
+              columnDefs={listColumns}
+              loading={loading}
+              minHeight="22rem"
+              theme={appGridTheme}
+              getRowClass={(params: RowClassParams<SnapshotGridRow>) =>
+                isDetailRow(params.data)
+                  ? "snapshotsDetailFullRow"
+                  : params.data?.id === expandedId
+                    ? "tableRowSelected snapshotsExpandedMainRow"
+                    : ""
+              }
+              gridOptions={gridOptions}
+            />
           </div>
         </div>
       </section>

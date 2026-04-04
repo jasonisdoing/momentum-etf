@@ -8,10 +8,6 @@
     "start": "node scripts/run-next.mjs start"
   },
   "dependencies": {
-    "@emotion/react": "^11.14.0",
-    "@emotion/styled": "^11.14.1",
-    "@mui/material": "^7.3.9",
-    "@mui/x-data-grid": "^8.28.1",
     "@tabler/core": "^1.4.0",
     "@tabler/icons-react": "^3.41.0",
     "ag-grid-community": "^35.2.0",

@@ -37,14 +37,14 @@ SCHEDULE_ROWS = [
 
 def load_system_data() -> dict[str, object]:
     accounts = load_account_configs()
-    account_ids = [account["account_id"] for account in accounts]
     return {
         "summary_rows": [
             {
-                "category": "계좌",
-                "count": len(account_ids),
-                "target": ", ".join(account_ids) if account_ids else "-",
+                "category": f"{account.get('icon', '')} {account['name']}".strip(),
+                "count": int(account["order"]),
+                "target": account["account_id"],
             }
+            for account in accounts
         ],
         "schedule_rows": SCHEDULE_ROWS,
         "schedule_note": "자동 주기는 현재 `.github/workflows` 기준입니다.",

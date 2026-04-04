@@ -9,7 +9,7 @@ from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
 from utils.account_stocks_io import get_account_targets, save_account_targets
 from utils.account_registry import load_account_configs
-from utils.cash_service import load_cash_accounts
+from utils.assets_service import load_cash_accounts
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
 

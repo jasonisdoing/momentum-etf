@@ -789,18 +789,6 @@ export function AssetsManager() {
   );
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
-    {
-      colId: "select",
-      headerName: "",
-      width: 52,
-      sortable: false,
-      resizable: false,
-      pinned: "left",
-      checkboxSelection: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
-      headerCheckboxSelection: true,
-      showDisabledCheckboxes: false,
-      cellClass: "assetsSelectCell",
-    },
     { field: "bucket", headerName: "버킷", width: 96, cellClass: (params) => getBucketCellClass(params.data?.bucket_id ?? 0) },
     {
       field: "ticker",
@@ -1028,29 +1016,51 @@ export function AssetsManager() {
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
         <div className="card appCard shadow-sm appTableCardFill">
-          <div className="card-header d-flex justify-content-between align-items-center bg-white py-3 flex-shrink-0">
-            <div className="d-flex gap-2">
+          <div className="card-header flex-shrink-0">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
               <select className="form-select w-auto fw-bold" value={selectedAccountId} onChange={(e) => handleAccountChange(e.target.value)}>
                 {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.icon} {a.name}</option>)}
               </select>
+              </div>
+              {(() => {
+                const totalValuation = rows.reduce((s, r) => s + (r.valuation_krw || 0), 0);
+                const totalCash = cash?.cash_balance_krw || 0;
+                const totalAssets = totalValuation + totalCash;
+                const targetRatioTotal = rows.reduce((s, r) => s + (r.target_ratio || 0), 0);
+                const valuationPct = totalAssets > 0 ? (totalValuation / totalAssets * 100).toFixed(1) : "0.0";
+                const cashPct = totalAssets > 0 ? (totalCash / totalAssets * 100).toFixed(1) : "0.0";
+
+                return (
+                  <div className="appMainHeaderRight">
+                    <div className="appHeaderMetrics">
+                      <div className="appHeaderMetric">
+                        <span>총 자산:</span>
+                        <span className="appHeaderMetricValue is-primary">{formatKrw(totalAssets)}</span>
+                      </div>
+                      <div className="appHeaderMetric">
+                        <span>평가액:</span>
+                        <span className="appHeaderMetricValue">
+                          {formatKrw(totalValuation)} <span className="text-secondary">({valuationPct}%)</span>
+                        </span>
+                      </div>
+                      <div className="appHeaderMetric">
+                        <span>현금:</span>
+                        <span className="appHeaderMetricValue">
+                          {formatKrw(totalCash)} <span className="text-secondary">({cashPct}%)</span>
+                        </span>
+                      </div>
+                      <div className="appHeaderMetric">
+                        <span>목표비중합:</span>
+                        <span className={`appHeaderMetricValue ${Math.abs(targetRatioTotal - 100) < 0.05 ? "is-success" : "is-danger"}`}>
+                          {targetRatioTotal.toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
-            {(() => {
-              const totalValuation = rows.reduce((s, r) => s + (r.valuation_krw || 0), 0);
-              const totalCash = cash?.cash_balance_krw || 0;
-              const totalAssets = totalValuation + totalCash;
-              const targetRatioTotal = rows.reduce((s, r) => s + (r.target_ratio || 0), 0);
-              const valuationPct = totalAssets > 0 ? (totalValuation / totalAssets * 100).toFixed(1) : "0.0";
-              const cashPct = totalAssets > 0 ? (totalCash / totalAssets * 100).toFixed(1) : "0.0";
-              
-              return (
-                <div className="d-flex gap-5 align-items-center">
-                  <div className="fw-bold fs-3">총 자산: <span className="fw-bold text-primary fs-2 ms-2">{formatKrw(totalAssets)}</span></div>
-                  <div className="fw-bold fs-3">평가액: <span className="fw-bold text-dark fs-2 ms-2">{formatKrw(totalValuation)} <span className="text-secondary ms-2">({valuationPct}%)</span></span></div>
-                  <div className="fw-bold fs-3">현금: <span className="fw-bold text-dark fs-2 ms-2">{formatKrw(totalCash)} <span className="text-secondary ms-2">({cashPct}%)</span></span></div>
-                  <div className="fw-bold fs-3">목표비중합: <span className={`fw-bold fs-2 ms-2 ${Math.abs(targetRatioTotal - 100) < 0.05 ? "text-success" : "text-danger"}`}>{targetRatioTotal.toFixed(1)}%</span></div>
-                </div>
-              );
-            })()}
           </div>
           {cash && (
             <div className="px-3 py-2 border-bottom bg-light flex-shrink-0">
@@ -1061,32 +1071,46 @@ export function AssetsManager() {
                   <div className="d-flex gap-1"><button className="btn btn-primary btn-sm" onClick={handleCashSave}>저장</button><button className="btn btn-outline-secondary btn-sm" onClick={() => setCashEditing(null)}>취소</button></div>
                 </div>
               ) : (
-                <div className="d-flex gap-5 align-items-center">
-                  <div className="fw-bold fs-3">투자원금: <span className="fw-bold text-dark fs-2 ms-2">{formatNumber(cash.total_principal)}원</span></div>
-                  <div className="fw-bold fs-3">보유현금: <span className="fw-bold text-dark fs-2 ms-2">{formatPrice(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native, cash.currency)}</span></div>
-                  <button className="btn btn-outline-secondary btn-sm ms-3 fw-bold" onClick={() => { if (cash) setCashEditing({ total_principal: String(cash.total_principal), cash_value: String(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native), intl_shares_value: String(cash.intl_shares_value), intl_shares_change: String(cash.intl_shares_change) }); }}>정보 수정</button>
-                  <div className="ms-auto d-flex align-items-center gap-2">
-                    <button
-                      className="btn btn-primary btn-sm px-3 fw-bold"
-                      onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", target_ratio: "0", isValidated: false })}
-                      disabled={hasPendingAdd}
-                    >
-                      <IconPlus size={16} /> 추가
-                    </button>
-                    <button
-                      className="btn btn-success btn-sm px-3 fw-bold"
-                      onClick={handleSaveChanges}
-                      disabled={(!hasDirtyChanges && !hasPendingAdd) || savingDirtyRows || processingId === "__deleting__"}
-                    >
-                      {savingDirtyRows ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconCheck size={16} />} 저장
-                    </button>
-                    <button
-                      className="btn btn-outline-danger btn-sm px-3 fw-bold"
-                      onClick={handleDeleteSelected}
-                      disabled={!hasSelectedRows || savingDirtyRows || processingId === "__deleting__"}
-                    >
-                      {processingId === "__deleting__" ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconTrash size={16} />} 삭제
-                    </button>
+                <div className="appMainHeader">
+                  <div className="appMainHeaderLeft">
+                    <div className="appHeaderMetrics">
+                      <div className="appHeaderMetric">
+                        <span>투자원금:</span>
+                        <span className="appHeaderMetricValue">{formatNumber(cash.total_principal)}원</span>
+                      </div>
+                      <div className="appHeaderMetric">
+                        <span>보유현금:</span>
+                        <span className="appHeaderMetricValue">
+                          {formatPrice(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native, cash.currency)}
+                        </span>
+                      </div>
+                    </div>
+                    <button className="btn btn-outline-secondary btn-sm px-3 fw-bold" onClick={() => { if (cash) setCashEditing({ total_principal: String(cash.total_principal), cash_value: String(cash.currency === "KRW" ? cash.cash_balance_krw : cash.cash_balance_native), intl_shares_value: String(cash.intl_shares_value), intl_shares_change: String(cash.intl_shares_change) }); }}>정보 수정</button>
+                  </div>
+                  <div className="appMainHeaderRight">
+                    <div className="appActionHeaderInner">
+                      <button
+                        className="btn btn-primary btn-sm px-3 fw-bold"
+                        onClick={() => setAddingRow({ ticker: "", quantity: "", average_buy_price: "", target_ratio: "0", isValidated: false })}
+                        disabled={hasPendingAdd}
+                      >
+                        <IconPlus size={16} /> 추가
+                      </button>
+                      <button
+                        className="btn btn-success btn-sm px-3 fw-bold"
+                        onClick={handleSaveChanges}
+                        disabled={(!hasDirtyChanges && !hasPendingAdd) || savingDirtyRows || processingId === "__deleting__"}
+                      >
+                        {savingDirtyRows ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconCheck size={16} />} 저장
+                      </button>
+                      <button
+                        className="btn btn-outline-danger btn-sm px-3 fw-bold"
+                        onClick={handleDeleteSelected}
+                        disabled={!hasSelectedRows || savingDirtyRows || processingId === "__deleting__"}
+                      >
+                        {processingId === "__deleting__" ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconTrash size={16} />} 삭제
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1112,11 +1136,28 @@ export function AssetsManager() {
               }}
               gridOptions={{
                 suppressMovableColumns: true,
-                rowSelection: "multiple",
-                suppressRowClickSelection: true,
+                rowSelection: {
+                  mode: "multiRow",
+                  checkboxes: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+                  headerCheckbox: true,
+                  hideDisabledCheckboxes: true,
+                  enableClickSelection: false,
+                  isRowSelectable: (params) =>
+                    Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+                },
+                selectionColumnDef: {
+                  width: 52,
+                  minWidth: 52,
+                  maxWidth: 52,
+                  pinned: "left",
+                  sortable: false,
+                  resizable: false,
+                  suppressMovable: true,
+                  headerName: "",
+                  cellClass: "assetsSelectCell",
+                },
                 ensureDomOrder: true,
                 stopEditingWhenCellsLoseFocus: true,
-                isRowSelectable: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
                 onSelectionChanged: (params) => {
                   setSelectedRowIds(
                     params.api

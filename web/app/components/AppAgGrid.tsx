@@ -44,7 +44,7 @@ export function AppAgGrid<TData>({
           loading={loading}
           theme={theme}
           suppressCellFocus
-          rowSelection="single"
+          rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: false }}
           animateRows={false}
           defaultColDef={{
             sortable: true,

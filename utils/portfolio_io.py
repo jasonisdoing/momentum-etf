@@ -19,6 +19,14 @@ def _now_kst() -> datetime.datetime:
     return datetime.datetime.now(KST)
 
 
+def _round_snapshot_money(value: Any) -> int:
+    """스냅샷 KRW 금액을 정수로 반올림한다."""
+    try:
+        return int(round(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
 class MissingPriceCacheError(RuntimeError):
     """보유 종목의 가격 캐시가 누락된 경우 발생한다."""
 
@@ -630,34 +638,34 @@ def save_daily_snapshot(
         if not doc:
             doc = {
                 "snapshot_date": snapshot_date,
-                "total_assets": 0.0,
-                "total_principal": 0.0,
-                "cash_balance": 0.0,
-                "valuation_krw": 0.0,
-                "purchase_amount": 0.0,
+                "total_assets": 0,
+                "total_principal": 0,
+                "cash_balance": 0,
+                "valuation_krw": 0,
+                "purchase_amount": 0,
                 "accounts": [],
                 "updated_at": _now_kst(),
             }
 
         if account_id == "TOTAL":
-            doc["total_assets"] = float(total_assets)
-            doc["total_principal"] = float(total_principal)
-            doc["cash_balance"] = float(cash_balance)
-            doc["valuation_krw"] = float(valuation_krw)
+            doc["total_assets"] = _round_snapshot_money(total_assets)
+            doc["total_principal"] = _round_snapshot_money(total_principal)
+            doc["cash_balance"] = _round_snapshot_money(cash_balance)
+            doc["valuation_krw"] = _round_snapshot_money(valuation_krw)
             if purchase_amount is not None:
-                doc["purchase_amount"] = float(purchase_amount)
+                doc["purchase_amount"] = _round_snapshot_money(purchase_amount)
             # TOTAL에는 별도 holdings를 저장하지 않음 (계좌별로 저장됨)
         else:
             accounts = doc.get("accounts", [])
             found = False
             for acc in accounts:
                 if acc["account_id"] == account_id:
-                    acc["total_assets"] = float(total_assets)
-                    acc["total_principal"] = float(total_principal)
-                    acc["cash_balance"] = float(cash_balance)
-                    acc["valuation_krw"] = float(valuation_krw)
+                    acc["total_assets"] = _round_snapshot_money(total_assets)
+                    acc["total_principal"] = _round_snapshot_money(total_principal)
+                    acc["cash_balance"] = _round_snapshot_money(cash_balance)
+                    acc["valuation_krw"] = _round_snapshot_money(valuation_krw)
                     if purchase_amount is not None:
-                        acc["purchase_amount"] = float(purchase_amount)
+                        acc["purchase_amount"] = _round_snapshot_money(purchase_amount)
                     if holding_details is not None:
                         acc["holdings"] = holding_details
                     found = True
@@ -666,11 +674,11 @@ def save_daily_snapshot(
             if not found:
                 acc_data = {
                     "account_id": account_id,
-                    "total_assets": float(total_assets),
-                    "total_principal": float(total_principal),
-                    "cash_balance": float(cash_balance),
-                    "valuation_krw": float(valuation_krw),
-                    "purchase_amount": float(purchase_amount or 0.0),
+                    "total_assets": _round_snapshot_money(total_assets),
+                    "total_principal": _round_snapshot_money(total_principal),
+                    "cash_balance": _round_snapshot_money(cash_balance),
+                    "valuation_krw": _round_snapshot_money(valuation_krw),
+                    "purchase_amount": _round_snapshot_money(purchase_amount),
                 }
                 if holding_details is not None:
                     acc_data["holdings"] = holding_details
