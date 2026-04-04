@@ -6,6 +6,7 @@ import pandas as pd
 from bson import ObjectId
 
 from services.price_service import get_exchange_rates, get_realtime_snapshot
+from utils.data_loader import get_latest_trading_day
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings
@@ -25,6 +26,11 @@ def _round_snapshot_money(value: Any) -> int:
         return int(round(float(value or 0)))
     except (TypeError, ValueError):
         return 0
+
+
+def _resolve_snapshot_date() -> str:
+    """한국 기준 최신 거래일을 스냅샷 저장 날짜로 사용한다."""
+    return get_latest_trading_day("kor").normalize().strftime("%Y-%m-%d")
 
 
 class MissingPriceCacheError(RuntimeError):
@@ -630,7 +636,7 @@ def save_daily_snapshot(
     if db is None:
         return False
 
-    snapshot_date = _now_kst().strftime("%Y-%m-%d")
+    snapshot_date = _resolve_snapshot_date()
 
     try:
         # Find existing snapshot for today
