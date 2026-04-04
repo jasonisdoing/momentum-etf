@@ -15,6 +15,7 @@ import type { ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppModal } from "../components/AppModal";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -183,6 +184,8 @@ export function StocksManager() {
   const [addingRow, setAddingRow] = useState<AddingStockRowState | null>(null);
   const [dirtyActiveRowIds, setDirtyActiveRowIds] = useState<string[]>([]);
   const [dirtyActiveCellKeys, setDirtyActiveCellKeys] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState("");
   const toast = useToast();
 
   function showErrorToast(message: string) {
@@ -210,6 +213,8 @@ export function StocksManager() {
       setAddingRow(null);
       setDirtyActiveRowIds([]);
       setDirtyActiveCellKeys([]);
+      setDeleteConfirmOpen(false);
+      setDeleteReason("");
 
       if (mode === "active") {
         setActiveRows((payload.rows as ActiveStocksRowItem[] | undefined) ?? []);
@@ -741,11 +746,21 @@ export function StocksManager() {
     if (!selectedRows.length) {
       return;
     }
-    const summary =
-      selectedRows.length === 1
-        ? `${selectedRows[0].name}(${selectedRows[0].ticker}) 종목을 삭제하시겠습니까?`
-        : `${selectedRows.length}개 종목을 삭제하시겠습니까?`;
-    if (!confirm(summary)) {
+    setDeleteConfirmOpen(true);
+  }
+
+  function handleCloseDeleteConfirm() {
+    if (isPending) {
+      return;
+    }
+    setDeleteConfirmOpen(false);
+    setDeleteReason("");
+  }
+
+  function handleConfirmDeleteActiveSelected() {
+    const selectedRows = activeRows.filter((row) => selectedActiveTickers.includes(normalizeTicker(row.ticker)));
+    if (!selectedRows.length) {
+      setDeleteConfirmOpen(false);
       return;
     }
 
@@ -758,6 +773,7 @@ export function StocksManager() {
             body: JSON.stringify({
               ticker_type: selectedTickerType,
               ticker: row.ticker,
+              reason: deleteReason.trim() || undefined,
             }),
           });
           const payload = (await response.json()) as { error?: string };
@@ -768,6 +784,8 @@ export function StocksManager() {
         setSelectedActiveTickers([]);
         setDirtyActiveRowIds([]);
         setDirtyActiveCellKeys([]);
+        setDeleteConfirmOpen(false);
+        setDeleteReason("");
         void load(viewMode, selectedTickerType);
         toast.success(`[ETF-종목 관리] ${selectedRows.length}개 종목 삭제 완료`);
       } catch (deleteError) {
@@ -1059,6 +1077,49 @@ export function StocksManager() {
           </div>
         </div>
       </section>
+      <AppModal
+        open={deleteConfirmOpen}
+        title="종목 삭제 확인"
+        subtitle="선택 종목은 소프트 삭제되며, 삭제된 종목 탭에서 복구할 수 있습니다."
+        onClose={handleCloseDeleteConfirm}
+        footer={(
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={handleCloseDeleteConfirm} disabled={isPending}>
+              취소
+            </button>
+            <button type="button" className="btn btn-danger" onClick={handleConfirmDeleteActiveSelected} disabled={isPending}>
+              삭제
+            </button>
+          </>
+        )}
+      >
+        <div className="d-flex flex-column gap-3">
+          <div className="fw-semibold">
+            {selectedActiveTickers.length === 1
+              ? `${activeRows.find((row) => selectedActiveTickers.includes(normalizeTicker(row.ticker)))?.name ?? ""}(${selectedActiveTickers[0]}) 종목을 삭제합니다.`
+              : `${selectedActiveTickers.length}개 종목을 삭제합니다.`}
+          </div>
+          <div className="text-secondary small">
+            {selectedActiveTickers.length > 1
+              ? selectedActiveTickers.join(", ")
+              : "삭제 사유는 선택 입력입니다."}
+          </div>
+          <div>
+            <label className="form-label fw-semibold mb-1" htmlFor="stocks-delete-reason">
+              삭제 사유
+            </label>
+            <input
+              id="stocks-delete-reason"
+              className="form-control"
+              type="text"
+              placeholder="예: 리밸런싱 제외, 중복 종목 정리"
+              value={deleteReason}
+              onChange={(event) => setDeleteReason(event.target.value)}
+              disabled={isPending}
+            />
+          </div>
+        </div>
+      </AppModal>
     </div>
   );
 }
