@@ -311,31 +311,54 @@ export function MarketManager() {
       ) : null}
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
-          <div className="card-body appCardBodyTight appTableCardBodyFill">
-            <div className="filterBar">
-              <input
-                className="field compactField"
-                type="text"
-                placeholder="티커 또는 종목명 검색"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-              />
-              <input
-                className="field compactField"
-                type="number"
-                placeholder="최소 시가총액(억)"
-                value={minMarketCap}
-                onChange={(event) => setMinMarketCap(event.target.value)}
-              />
-              <input
-                className="field compactField"
-                type="number"
-                placeholder="최소 전일 거래량(주)"
-                value={minPrevVolume}
-                onChange={(event) => setMinPrevVolume(event.target.value)}
-              />
+          <div className="card-header">
+            <div className="appMainHeader marketMainHeader">
+              <div className="appMainHeaderLeft marketMainHeaderLeft">
+                <input
+                  className="field compactField"
+                  type="text"
+                  placeholder="티커 또는 종목명 검색"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+                <input
+                  className="field compactField"
+                  type="number"
+                  placeholder="최소 시가총액(억)"
+                  value={minMarketCap}
+                  onChange={(event) => setMinMarketCap(event.target.value)}
+                />
+                <input
+                  className="field compactField"
+                  type="number"
+                  placeholder="최소 전일 거래량(주)"
+                  value={minPrevVolume}
+                  onChange={(event) => setMinPrevVolume(event.target.value)}
+                />
+              </div>
+              <div className="appMainHeaderRight marketMainHeaderRight">
+                <div className="appHeaderMetrics">
+                  <div className="appHeaderMetric">
+                    <span>총:</span>
+                    <span className="appHeaderMetricValue">{formatCount(filteredRows.length)}개</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>전체:</span>
+                    <span className="appHeaderMetricValue">{formatCount(rows.length)}개</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>KIS 마스터 갱신:</span>
+                    <span className="appHeaderMetricValue">{formatUpdatedAt(updatedAt)}</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>정렬:</span>
+                    <span className="appHeaderMetricValue">일간(%) 내림차순</span>
+                  </div>
+                </div>
+              </div>
             </div>
-
+          </div>
+          <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">
               {Object.keys(EXCLUSION_KEYWORD_GROUPS).map((group) => {
                 const isActive = excludedGroups.includes(group);
@@ -352,13 +375,6 @@ export function MarketManager() {
               })}
             </div>
 
-            <div className="tableSummary">
-              <span>총 {formatCount(filteredRows.length)}개</span>
-              <span>전체 {formatCount(rows.length)}개</span>
-              <span>KIS 마스터 갱신 {formatUpdatedAt(updatedAt)}</span>
-              <span>기본 정렬 일간(%) 내림차순</span>
-            </div>
-
             <div className="appGridFillWrap" style={{ minHeight: 0 }}>
               <AppAgGrid
                 rowData={gridRows}
@@ -369,7 +385,6 @@ export function MarketManager() {
                 getRowClass={(params: RowClassParams<MarketGridRow>) => (params.data?.is_held ? "appHeldRow" : "")}
                 gridOptions={{
                   suppressMovableColumns: true,
-                  suppressRowClickSelection: true,
                 }}
               />
             </div>

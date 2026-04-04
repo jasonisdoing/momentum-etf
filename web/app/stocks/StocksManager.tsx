@@ -3,16 +3,18 @@
 import {
   IconArrowBackUp,
   IconPlus,
+  IconTrash,
+  IconDeviceFloppy,
   IconLayoutGrid,
   IconPlaylistX,
   IconSearch,
 } from "@tabler/icons-react";
+import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { type GridColDef, type GridRenderCellParams } from "@mui/x-data-grid";
+import type { ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { AppDataGrid } from "../components/AppDataGrid";
-import { AppModal } from "../components/AppModal";
+import { AppAgGrid } from "../components/AppAgGrid";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -92,6 +94,15 @@ type StockValidationState = {
   deleted_reason: string;
   bucket_id: number;
 };
+type AddingStockRowState = {
+  ticker: string;
+  name: string;
+  listing_date: string;
+  bucket_id: number;
+  status: "active" | "deleted" | "new" | null;
+  is_validating: boolean;
+  is_validated: boolean;
+};
 
 function formatNumber(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -111,8 +122,53 @@ function getSignedMetricClass(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
     return "";
   }
-  return value > 0 ? "stocksPositive" : "stocksNegative";
+  return value > 0 ? "metricPositive" : "metricNegative";
 }
+
+function getBucketCellClass(bucketId: number): string {
+  return `appBucketCell appBucketCell${bucketId}`;
+}
+
+function buildDirtyCellKey(rowId: string, field: string): string {
+  return `${rowId}::${field}`;
+}
+
+function normalizeTicker(value: string): string {
+  return String(value || "").trim().toUpperCase();
+}
+
+function getBucketName(bucketId: number): string {
+  return BUCKET_OPTIONS.find((option) => option.id === bucketId)?.name ?? "-";
+}
+
+function getBucketIdByName(bucketName: string): number {
+  return BUCKET_OPTIONS.find((option) => option.name === bucketName)?.id ?? 1;
+}
+
+const stocksGridTheme = themeQuartz
+  .withPart(iconSetQuartzBold)
+  .withParams({
+    accentColor: "#206bc4",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#182433",
+    headerBackgroundColor: "#f8fafc",
+    headerTextColor: "#5b6778",
+    spacing: 8,
+    fontSize: 14,
+    wrapperBorderRadius: 10,
+    rowHeight: 38,
+    headerHeight: 38,
+    cellHorizontalPadding: 12,
+    headerColumnBorder: true,
+    headerColumnBorderHeight: "70%",
+    columnBorder: true,
+    oddRowBackgroundColor: "#fbfdff",
+    headerCellHoverBackgroundColor: "#eef4fb",
+    headerCellMovingBackgroundColor: "#e8f0fb",
+    iconButtonHoverBackgroundColor: "#eef4fb",
+    iconButtonHoverColor: "#206bc4",
+    iconSize: 18,
+  });
 
 export function StocksManager() {
   const [ticker_types, setAccounts] = useState<StocksAccountItem[]>([]);
@@ -120,18 +176,13 @@ export function StocksManager() {
   const [viewMode, setViewMode] = useState<ViewMode>("active");
   const [activeRows, setActiveRows] = useState<ActiveStocksRowItem[]>([]);
   const [deletedRows, setDeletedRows] = useState<DeletedStocksRowItem[]>([]);
+  const [selectedActiveTickers, setSelectedActiveTickers] = useState<string[]>([]);
   const [selectedDeletedTickers, setSelectedDeletedTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [isPending, startTransition] = useTransition();
-  const [editingRow, setEditingRow] = useState<ActiveStocksRowItem | null>(null);
-  const [editingBucketId, setEditingBucketId] = useState<number>(1);
-  const [editingDeleteReason, setEditingDeleteReason] = useState("");
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
-  const [addTickerInput, setAddTickerInput] = useState("");
-  const [validatedCandidate, setValidatedCandidate] = useState<StockValidationState | null>(null);
-  const [isValidatingTicker, setIsValidatingTicker] = useState(false);
-  const [addBucketId, setAddBucketId] = useState<number>(1);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [addingRow, setAddingRow] = useState<AddingStockRowState | null>(null);
+  const [dirtyActiveRowIds, setDirtyActiveRowIds] = useState<string[]>([]);
+  const [dirtyActiveCellKeys, setDirtyActiveCellKeys] = useState<string[]>([]);
   const toast = useToast();
 
   function showErrorToast(message: string) {
@@ -154,7 +205,11 @@ export function StocksManager() {
       const nextAccountId = payload.ticker_type ?? "";
       setSelectedAccountId(nextAccountId);
       writeRememberedTickerType(nextAccountId);
+      setSelectedActiveTickers([]);
       setSelectedDeletedTickers([]);
+      setAddingRow(null);
+      setDirtyActiveRowIds([]);
+      setDirtyActiveCellKeys([]);
 
       if (mode === "active") {
         setActiveRows((payload.rows as ActiveStocksRowItem[] | undefined) ?? []);
@@ -177,81 +232,191 @@ export function StocksManager() {
     [ticker_types, selectedTickerType],
   );
 
-  const selectedDeletedTickerSet = useMemo(() => new Set(selectedDeletedTickers), [selectedDeletedTickers]);
-  const allDeletedSelected = deletedRows.length > 0 && selectedDeletedTickers.length === deletedRows.length;
-  const activeGridRows = useMemo<ActiveStockGridRow[]>(
-    () => activeRows.map((row) => ({ ...row, id: row.ticker.trim().toUpperCase() })),
-    [activeRows],
-  );
+  const activeGridRows = useMemo<ActiveStockGridRow[]>(() => {
+    const baseRows = activeRows.map((row) => ({
+      ...row,
+      id: normalizeTicker(row.ticker),
+    }));
+    if (!addingRow) {
+      return baseRows;
+    }
+    return [
+      {
+        id: "__adding__",
+        ticker: addingRow.ticker,
+        name: addingRow.name,
+        bucket_id: addingRow.bucket_id,
+        bucket_name: getBucketName(addingRow.bucket_id),
+        added_date: "-",
+        listing_date: addingRow.listing_date || "-",
+        week_volume: null,
+        return_1d: null,
+        return_1w: null,
+        return_2w: null,
+        return_1m: null,
+        return_3m: null,
+        return_6m: null,
+        return_12m: null,
+        괴리율: null,
+      },
+      ...baseRows,
+    ];
+  }, [activeRows, addingRow]);
   const deletedGridRows = useMemo<DeletedStockGridRow[]>(
     () => deletedRows.map((row) => ({ ...row, id: row.ticker.trim().toUpperCase() })),
     [deletedRows],
   );
 
-  const toggleSelection = (ticker: string) => {
-    const t = ticker.trim().toUpperCase();
-    setSelectedDeletedTickers(prev => 
-      prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]
-    );
-  };
-
-  const toggleAllSelection = () => {
-    if (allDeletedSelected) {
-      setSelectedDeletedTickers([]);
-    } else {
-      setSelectedDeletedTickers(deletedRows.map(r => r.ticker.trim().toUpperCase()));
-    }
-  };
-
-  const activeColumns = useMemo<GridColDef<ActiveStockGridRow>[]>(
+  const activeColumns = useMemo<ColDef<ActiveStockGridRow>[]>(
     () => [
       {
-        field: "__edit__",
-        headerName: "",
-        width: 58,
-        sortable: false,
-        filterable: false,
-        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => (
-          <button className="btn btn-link btn-sm p-0 appEditLink" type="button" onClick={() => openEditModal(params.row)}>
-            Edit
-          </button>
-        ),
-      },
-      {
-        field: "bucket_name",
+        field: "bucket_id",
         headerName: "버킷",
-        width: 112,
-        minWidth: 112,
+        width: 118,
+        minWidth: 118,
         sortable: false,
-        cellClassName: (params) => `appBucketCell appBucketCell${params.row.bucket_id}`,
+        cellClass: (params) => {
+          if (!params.data) {
+            return "";
+          }
+          const dirtyClass = dirtyActiveCellKeys.includes(buildDirtyCellKey(params.data.id, "bucket_name"))
+            ? " stocksDirtyCell"
+            : "";
+          return `${getBucketCellClass(params.data.bucket_id)}${dirtyClass}`;
+        },
+        editable: (params) => params.data?.id !== "__adding__",
+        cellEditor: "agSelectCellEditor",
+        cellEditorParams: {
+          values: BUCKET_OPTIONS.map((option) => option.name),
+        },
+        valueGetter: (params) => getBucketName(params.data?.bucket_id ?? 1),
+        valueSetter: (params) => {
+          if (!params.data || params.data.id === "__adding__") {
+            return false;
+          }
+          const nextBucketId = getBucketIdByName(String(params.newValue ?? ""));
+          params.data.bucket_id = nextBucketId;
+          params.data.bucket_name = getBucketName(nextBucketId);
+          return true;
+        },
+        cellRenderer: (params: { data?: ActiveStockGridRow }) => {
+          if (params.data?.id === "__adding__") {
+            return (
+              <select
+                className="form-select form-select-sm"
+                value={addingRow?.bucket_id ?? 1}
+                onChange={(event) =>
+                  setAddingRow((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          bucket_id: Number(event.target.value),
+                        }
+                      : null,
+                  )
+                }
+              >
+                {BUCKET_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            );
+          }
+          return getBucketName(params.data?.bucket_id ?? 1);
+        },
       },
       {
         field: "ticker",
         headerName: "티커",
-        width: 98,
-        minWidth: 98,
-        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => <span className="appCodeText">{params.row.ticker}</span>,
+        width: 180,
+        minWidth: 180,
+        cellRenderer: (params: { data?: ActiveStockGridRow }) => (
+          params.data?.id === "__adding__" ? (
+            <div className="stocksTickerLookup">
+              <input
+                type="text"
+                className="form-control form-control-sm"
+                placeholder="예: 069500 / VGS"
+                value={addingRow?.ticker ?? ""}
+                onChange={(event) =>
+                  setAddingRow((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          ticker: event.target.value,
+                          name: "",
+                          listing_date: "-",
+                          status: null,
+                          is_validated: false,
+                        }
+                      : null,
+                  )
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    void handleValidateAddingTicker();
+                  }
+                }}
+              />
+              <button
+                className="btn btn-outline-primary btn-sm"
+                type="button"
+                onClick={() => void handleValidateAddingTicker()}
+                disabled={!addingRow?.ticker.trim() || addingRow.is_validating}
+              >
+                확인
+              </button>
+            </div>
+          ) : (
+            <span className="appCodeText">{params.data?.ticker ?? "-"}</span>
+          )
+        ),
       },
-      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      {
+        field: "name",
+        headerName: "종목명",
+        minWidth: 220,
+        flex: 1,
+        cellRenderer: (params: { data?: ActiveStockGridRow }) => {
+          if (params.data?.id !== "__adding__") {
+            return params.data?.name ?? "-";
+          }
+          if (addingRow?.is_validating) {
+            return <span className="text-muted">티커 확인 중...</span>;
+          }
+          if (addingRow?.status === "active") {
+            return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
+          }
+          if (addingRow?.is_validated) {
+            return (
+              <span className="fw-semibold">
+                {addingRow.name}
+                {addingRow.status === "deleted" ? " (삭제된 종목 재추가)" : ""}
+              </span>
+            );
+          }
+          return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
+        },
+      },
       {
         field: "week_volume",
         headerName: "주간거래량",
         width: 116,
         minWidth: 116,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => formatNumber(params.row.week_volume),
+        type: "rightAligned",
+        valueFormatter: (params) => formatNumber((params.data?.week_volume as number | null) ?? null),
       },
       {
         field: "return_1d",
         headerName: "일간(%)",
         width: 88,
         minWidth: 88,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => (
-          <span className={getSignedMetricClass(params.row.return_1d)} style={{ fontWeight: 600 }}>
-             {formatPercent(params.row.return_1d)}
+        type: "rightAligned",
+        cellRenderer: (params: { data?: ActiveStockGridRow }) => (
+          <span className={getSignedMetricClass(params.data?.return_1d ?? null)} style={{ fontWeight: 600 }}>
+             {formatPercent(params.data?.return_1d ?? null)}
           </span>
         ),
       },
@@ -261,9 +426,8 @@ export function StocksManager() {
           headerName: "괴리율",
           width: 88,
           minWidth: 88,
-          align: "right",
-          headerAlign: "right",
-          renderCell: (params: GridRenderCellParams<ActiveStockGridRow, number | null>) => {
+          type: "rightAligned",
+          cellRenderer: (params: { value?: number | null }) => {
             const val = params.value ?? 0;
             const isExtreme = val > 2.0 || val < -2.0;
             return (
@@ -272,7 +436,7 @@ export function StocksManager() {
               </span>
             );
           },
-        } as GridColDef<ActiveStockGridRow>
+        } as ColDef<ActiveStockGridRow>
       ] : []),
       ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
         (field) => ({
@@ -289,57 +453,37 @@ export function StocksManager() {
                     : "12달(%)",
           width: 88,
           minWidth: 88,
-          align: "right" as const,
-          headerAlign: "right" as const,
-          renderCell: (params: GridRenderCellParams<ActiveStockGridRow>) => (
-            <span className={getSignedMetricClass(params.row[field])}>{formatPercent(params.row[field])}</span>
+          type: "rightAligned" as const,
+          cellRenderer: (params: { data?: ActiveStockGridRow }) => (
+            <span className={getSignedMetricClass((params.data?.[field] as number | null) ?? null)}>
+              {formatPercent((params.data?.[field] as number | null) ?? null)}
+            </span>
           ),
         }),
       ),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
       { field: "added_date", headerName: "등록일", width: 112, minWidth: 112 },
     ],
-    [],
+    [addingRow, dirtyActiveCellKeys, selectedTickerTypeItem?.country_code],
   );
-  const deletedColumns = useMemo<GridColDef<DeletedStockGridRow>[]>(
+  const deletedColumns = useMemo<ColDef<DeletedStockGridRow>[]>(
     () => [
-      {
-        field: "__selection__",
-        headerName: "",
-        width: 42,
-        sortable: false,
-        filterable: false,
-        renderHeader: () => (
-          <input 
-            type="checkbox" 
-            className="form-check-input"
-            checked={allDeletedSelected} 
-            onChange={toggleAllSelection} 
-          />
-        ),
-        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => (
-          <input 
-            type="checkbox" 
-            className="form-check-input"
-            checked={selectedDeletedTickerSet.has(params.row.ticker.trim().toUpperCase())}
-            onChange={() => toggleSelection(params.row.ticker)}
-          />
-        ),
-      },
       {
         field: "bucket_name",
         headerName: "버킷",
-        width: 112,
-        minWidth: 112,
+        width: 118,
+        minWidth: 118,
         sortable: false,
-        cellClassName: (params) => `appBucketCell appBucketCell${params.row.bucket_id}`,
+        cellClass: (params) => (params.data ? getBucketCellClass(params.data.bucket_id) : ""),
       },
       {
         field: "ticker",
         headerName: "티커",
         width: 98,
         minWidth: 98,
-        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => <span className="appCodeText">{params.row.ticker}</span>,
+        cellRenderer: (params: { data?: DeletedStockGridRow }) => (
+          <span className="appCodeText">{params.data?.ticker ?? "-"}</span>
+        ),
       },
       { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
       {
@@ -347,20 +491,18 @@ export function StocksManager() {
         headerName: "주간거래량",
         width: 116,
         minWidth: 116,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => formatNumber(params.row.week_volume),
+        type: "rightAligned",
+        valueFormatter: (params) => formatNumber((params.data?.week_volume as number | null) ?? null),
       },
       {
         field: "return_1d",
         headerName: "일간(%)",
         width: 88,
         minWidth: 88,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => (
-          <span className={getSignedMetricClass(params.row.return_1d)} style={{ fontWeight: 600 }}>
-             {formatPercent(params.row.return_1d)}
+        type: "rightAligned",
+        cellRenderer: (params: { data?: DeletedStockGridRow }) => (
+          <span className={getSignedMetricClass(params.data?.return_1d ?? null)} style={{ fontWeight: 600 }}>
+             {formatPercent(params.data?.return_1d ?? null)}
           </span>
         ),
       },
@@ -370,9 +512,8 @@ export function StocksManager() {
           headerName: "괴리율",
           width: 88,
           minWidth: 88,
-          align: "right",
-          headerAlign: "right",
-          renderCell: (params: GridRenderCellParams<DeletedStockGridRow, number | null>) => {
+          type: "rightAligned",
+          cellRenderer: (params: { value?: number | null }) => {
             const val = params.value ?? 0;
             const isExtreme = val > 2.0 || val < -2.0;
             return (
@@ -381,7 +522,7 @@ export function StocksManager() {
               </span>
             );
           },
-        } as GridColDef<DeletedStockGridRow>
+        } as ColDef<DeletedStockGridRow>
       ] : []),
       ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
         (field) => ({
@@ -398,10 +539,11 @@ export function StocksManager() {
                     : "12달(%)",
           width: 88,
           minWidth: 88,
-          align: "right" as const,
-          headerAlign: "right" as const,
-          renderCell: (params: GridRenderCellParams<DeletedStockGridRow>) => (
-            <span className={getSignedMetricClass(params.row[field])}>{formatPercent(params.row[field])}</span>
+          type: "rightAligned" as const,
+          cellRenderer: (params: { data?: DeletedStockGridRow }) => (
+            <span className={getSignedMetricClass((params.data?.[field] as number | null) ?? null)}>
+              {formatPercent((params.data?.[field] as number | null) ?? null)}
+            </span>
           ),
         }),
       ),
@@ -410,7 +552,7 @@ export function StocksManager() {
       { field: "deleted_date", headerName: "삭제일", width: 112, minWidth: 112 },
       { field: "deleted_reason", headerName: "삭제 사유", minWidth: 160, flex: 0.7 },
     ],
-    [selectedDeletedTickerSet, allDeletedSelected],
+    [selectedTickerTypeItem?.country_code],
   );
 
   function handleTickerTypeChange(nextAccountId: string) {
@@ -424,48 +566,61 @@ export function StocksManager() {
       return;
     }
     setViewMode(nextMode);
+    setSelectedActiveTickers([]);
     void load(nextMode, selectedTickerType);
   }
 
-  function openEditModal(row: ActiveStocksRowItem) {
-    setEditingRow(row);
-    setEditingBucketId(row.bucket_id);
-    setEditingDeleteReason("");
-    setIsEditModalOpen(true);
-  }
-
-  function closeEditModal() {
-    setIsEditModalOpen(false);
-    setEditingRow(null);
-  }
-
-  function openAddModal() {
-    setIsAddModalOpen(true);
-    setAddTickerInput("");
-    setValidatedCandidate(null);
-    setAddBucketId(1);
-  }
-
-  function closeAddModal() {
-    if (isPending || isValidatingTicker) {
+  function handleAddRow() {
+    if (addingRow) {
       return;
     }
-    setIsAddModalOpen(false);
-    setAddTickerInput("");
-    setValidatedCandidate(null);
-    setAddBucketId(1);
+    setAddingRow({
+      ticker: "",
+      name: "",
+      listing_date: "-",
+      bucket_id: 1,
+      status: null,
+      is_validating: false,
+      is_validated: false,
+    });
   }
 
-  async function handleValidateTicker() {
+  function handleActiveBucketChanged(row: ActiveStockGridRow | undefined, bucketName: string) {
+    if (!row || row.id === "__adding__") {
+      return;
+    }
+    const nextBucketId = getBucketIdByName(bucketName);
+    setActiveRows((prev) =>
+      prev.map((currentRow) =>
+        normalizeTicker(currentRow.ticker) === row.id
+          ? {
+              ...currentRow,
+              bucket_id: nextBucketId,
+              bucket_name: bucketName,
+            }
+          : currentRow,
+      ),
+    );
+    setDirtyActiveRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+    const dirtyCellKey = buildDirtyCellKey(row.id, "bucket_name");
+    setDirtyActiveCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
+  }
+
+  async function handleValidateAddingTicker() {
+    const ticker = normalizeTicker(addingRow?.ticker ?? "");
+    if (!ticker || !selectedTickerType || !addingRow || addingRow.is_validating) {
+      return;
+    }
+
     try {
-      setIsValidatingTicker(true);
+      setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
       const response = await fetch("/api/stocks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "validate",
           ticker_type: selectedTickerType,
-          ticker: addTickerInput,
+          ticker,
         }),
       });
       const payload = (await response.json()) as
@@ -474,93 +629,149 @@ export function StocksManager() {
       if (!response.ok) {
         throw new Error(payload.error ?? "티커 확인에 실패했습니다.");
       }
-      setValidatedCandidate({
-        ticker: String((payload as StockValidationState).ticker ?? "").trim().toUpperCase(),
-        name: String((payload as StockValidationState).name ?? "").trim(),
-        listing_date: String((payload as StockValidationState).listing_date ?? "-").trim() || "-",
-        status: (payload as StockValidationState).status,
-        is_deleted: Boolean((payload as StockValidationState).is_deleted),
-        deleted_reason: String((payload as StockValidationState).deleted_reason ?? "").trim(),
-        bucket_id: Number((payload as StockValidationState).bucket_id ?? 1),
-      });
-      setAddBucketId(Number((payload as StockValidationState).bucket_id ?? 1));
+      const validated = payload as StockValidationState;
+      setAddingRow((prev) =>
+        prev
+          ? {
+              ...prev,
+              ticker: normalizeTicker(validated.ticker),
+              name: String(validated.name ?? "").trim(),
+              listing_date: String(validated.listing_date ?? "-").trim() || "-",
+              bucket_id: Number(validated.bucket_id ?? prev.bucket_id ?? 1),
+              status: validated.status,
+              is_validating: false,
+              is_validated: validated.status !== "active",
+            }
+          : null,
+      );
+      if (validated.status === "active") {
+        showErrorToast("이미 등록된 종목입니다.");
+      } else {
+        toast.success(`[ETF-종목 관리] ${validated.name}(${validated.ticker}) 확인 완료`);
+      }
     } catch (validationError) {
-      setValidatedCandidate(null);
+      setAddingRow((prev) =>
+        prev
+          ? {
+              ...prev,
+              is_validating: false,
+              is_validated: false,
+            }
+          : null,
+      );
       showErrorToast(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
-    } finally {
-      setIsValidatingTicker(false);
     }
   }
 
-  function handleEditSave(isForceDelete = false) {
-    if (!editingRow) return;
+  async function processAddingRow() {
+    if (!addingRow || !addingRow.is_validated) {
+      throw new Error("추가할 종목을 먼저 확인해주세요.");
+    }
 
-    startTransition(async () => {
-      try {
-        const isDelete = isForceDelete || !!editingDeleteReason.trim();
-        const response = await fetch("/api/stocks", {
-          method: isDelete ? "DELETE" : "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(
-            isDelete
-              ? {
-                  ticker_type: selectedTickerType,
-                  ticker: editingRow.ticker,
-                  reason: editingDeleteReason.trim(),
-                }
-              : {
-                  ticker_type: selectedTickerType,
-                  ticker: editingRow.ticker,
-                  bucket_id: editingBucketId,
-                },
-          ),
-        });
-
-        const payload = (await response.json()) as { error?: string; name?: string; ticker?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "종목 수정에 실패했습니다.");
-        }
-
-        const msgPrefix = isDelete ? "삭제" : "수정";
-        toast.success(`[ETF-종목 관리] ${payload.name || editingRow.name}(${payload.ticker || editingRow.ticker}) ${msgPrefix} 완료`);
-        closeEditModal();
-        void load(viewMode, selectedTickerType);
-      } catch (saveError) {
-        showErrorToast(saveError instanceof Error ? saveError.message : "종목 수정에 실패했습니다.");
-      }
+    const response = await fetch("/api/stocks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "create",
+        ticker_type: selectedTickerType,
+        ticker: addingRow.ticker,
+        bucket_id: addingRow.bucket_id,
+      }),
     });
+    const payload = (await response.json()) as {
+      error?: string;
+      ticker?: string;
+      name?: string;
+    };
+    if (!response.ok) {
+      throw new Error(payload.error ?? "종목 추가에 실패했습니다.");
+    }
+    toast.success(`[ETF-종목 관리] ${payload.name || addingRow.name}(${payload.ticker || addingRow.ticker}) 추가 완료`);
   }
 
-  function handleCreateStock() {
-    if (!validatedCandidate) {
+  async function processDirtyRows() {
+    const dirtyRows = activeRows.filter((row) => dirtyActiveRowIds.includes(normalizeTicker(row.ticker)));
+    for (const row of dirtyRows) {
+      const response = await fetch("/api/stocks", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker_type: selectedTickerType,
+          ticker: row.ticker,
+          bucket_id: row.bucket_id,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? `${row.name} 버킷 저장에 실패했습니다.`);
+      }
+    }
+  }
+
+  function handleSaveActiveChanges() {
+    if (!selectedTickerType || (dirtyActiveRowIds.length === 0 && !addingRow)) {
       return;
     }
 
     startTransition(async () => {
       try {
-        const response = await fetch("/api/stocks", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "create",
-            ticker_type: selectedTickerType,
-            ticker: validatedCandidate.ticker,
-            bucket_id: addBucketId,
-          }),
-        });
-        const payload = (await response.json()) as {
-          error?: string;
-          ticker?: string;
-          name?: string;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "종목 추가에 실패했습니다.");
+        if (addingRow) {
+          await processAddingRow();
         }
-        toast.success(`[ETF-종목 관리] ${payload.name || validatedCandidate.name}(${payload.ticker || validatedCandidate.ticker}) 추가 완료`);
-        closeAddModal();
+        if (dirtyActiveRowIds.length > 0) {
+          await processDirtyRows();
+        }
+        setAddingRow(null);
+        setDirtyActiveRowIds([]);
+        setDirtyActiveCellKeys([]);
+        setSelectedActiveTickers([]);
         void load(viewMode, selectedTickerType);
-      } catch (createError) {
-        showErrorToast(createError instanceof Error ? createError.message : "종목 추가에 실패했습니다.");
+        toast.success("[ETF-종목 관리] 변경사항 저장 완료");
+      } catch (saveError) {
+        showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
+      }
+    });
+  }
+
+  function handleDeleteActiveSelected() {
+    if (!selectedActiveTickers.length) {
+      return;
+    }
+    const selectedRows = activeRows.filter((row) => selectedActiveTickers.includes(normalizeTicker(row.ticker)));
+    if (!selectedRows.length) {
+      return;
+    }
+    const summary =
+      selectedRows.length === 1
+        ? `${selectedRows[0].name}(${selectedRows[0].ticker}) 종목을 삭제하시겠습니까?`
+        : `${selectedRows.length}개 종목을 삭제하시겠습니까?`;
+    if (!confirm(summary)) {
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        for (const row of selectedRows) {
+          const response = await fetch("/api/stocks", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ticker_type: selectedTickerType,
+              ticker: row.ticker,
+            }),
+          });
+          const payload = (await response.json()) as { error?: string };
+          if (!response.ok) {
+            throw new Error(payload.error ?? `${row.name} 삭제에 실패했습니다.`);
+          }
+        }
+        setSelectedActiveTickers([]);
+        setDirtyActiveRowIds([]);
+        setDirtyActiveCellKeys([]);
+        void load(viewMode, selectedTickerType);
+        toast.success(`[ETF-종목 관리] ${selectedRows.length}개 종목 삭제 완료`);
+      } catch (deleteError) {
+        showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
     });
   }
@@ -618,8 +829,8 @@ export function StocksManager() {
       <section className="appSection appSectionFill stocksPage">
         <div className="card appCard stocksCard appTableCardFill">
           <div className="card-header">
-            <div className="tickerTypeToolbar w-100" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div className="tickerTypeToolbarLeft" style={{ display: "flex", gap: "0.4rem", alignItems: "center" }}>
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
                 <div className="accountSelect">
                   <select
                     className="form-select"
@@ -637,13 +848,9 @@ export function StocksManager() {
                   </select>
                 </div>
 
-                <div className="stocksToolbarModes d-flex gap-1">
-                  <button className="btn btn-primary d-flex align-items-center gap-1" type="button" onClick={openAddModal} disabled={loading || viewMode !== "active"}>
-                    <IconPlus size={18} stroke={2} />
-                    <span style={{ fontWeight: 600 }}>종목 추가</span>
-                  </button>
+                <div className="appSegmentedToggle appSegmentedToggleCompact">
                   <button
-                    className={viewMode === "active" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"}
+                    className={viewMode === "active" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                     type="button"
                     onClick={() => handleViewModeChange("active")}
                   >
@@ -651,7 +858,7 @@ export function StocksManager() {
                     <span>등록된 종목</span>
                   </button>
                   <button
-                    className={viewMode === "deleted" ? "btn stocksModeButton is-active" : "btn btn-outline-secondary stocksModeButton"}
+                    className={viewMode === "deleted" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                     type="button"
                     onClick={() => handleViewModeChange("deleted")}
                   >
@@ -661,20 +868,36 @@ export function StocksManager() {
                 </div>
               </div>
 
-              <div className="tickerTypeToolbarRight" style={{ display: "flex", alignItems: "center", gap: "1.25rem" }}>
-                <div className="stocksSummary d-flex align-items-center gap-3">
-                  <div className="d-flex align-items-center gap-1">
-                    <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>총 개수:</span>
-                    <span style={{ fontWeight: 700 }}>
+              <div className="appMainHeaderRight">
+                <div className="appHeaderMetrics">
+                  <div className="appHeaderMetric">
+                    <span>총 개수:</span>
+                    <span className="appHeaderMetricValue">
                       {viewMode === "active"
                         ? `${new Intl.NumberFormat("ko-KR").format(activeRows.length)}개`
                         : `${new Intl.NumberFormat("ko-KR").format(deletedRows.length)}개`}
                     </span>
                   </div>
+                  {viewMode === "active" && selectedActiveTickers.length > 0 ? (
+                    <div className="appHeaderMetric">
+                      <span>선택:</span>
+                      <span className="appHeaderMetricValue is-primary">
+                        {new Intl.NumberFormat("ko-KR").format(selectedActiveTickers.length)}개
+                      </span>
+                    </div>
+                  ) : null}
+                  {viewMode === "active" && dirtyActiveRowIds.length > 0 ? (
+                    <div className="appHeaderMetric">
+                      <span>변경:</span>
+                      <span className="appHeaderMetricValue is-success">
+                        {new Intl.NumberFormat("ko-KR").format(dirtyActiveRowIds.length)}개
+                      </span>
+                    </div>
+                  ) : null}
                   {viewMode === "deleted" && selectedDeletedTickers.length > 0 ? (
-                    <div className="d-flex align-items-center gap-1">
-                      <span style={{ color: "#6c757d", fontSize: "0.85rem", fontWeight: 600 }}>선택:</span>
-                      <span style={{ fontWeight: 700, color: "var(--tblr-primary)" }}>
+                    <div className="appHeaderMetric">
+                      <span>선택:</span>
+                      <span className="appHeaderMetricValue is-primary">
                         {new Intl.NumberFormat("ko-KR").format(selectedDeletedTickers.length)}개
                       </span>
                     </div>
@@ -685,195 +908,157 @@ export function StocksManager() {
           </div>
 
           {viewMode === "deleted" && deletedRows.length > 0 && (
-            <div className="card-header bg-light-subtle border-top py-2">
-              <div className="d-flex justify-content-between align-items-center">
-                <div></div>
-                <div className="d-flex gap-2">
-                  <button className="btn btn-sm btn-primary d-flex align-items-center gap-1" onClick={handleRestoreDeleted} disabled={selectedDeletedTickers.length === 0}>
+            <div className="card-header appActionHeader bg-light-subtle border-top">
+              <div className="appActionHeaderInner">
+                <button
+                  className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  onClick={handleRestoreDeleted}
+                  disabled={selectedDeletedTickers.length === 0}
+                >
                     <IconArrowBackUp size={14} />
                     <span>선택 복구</span>
-                  </button>
-                  <button className="btn btn-sm btn-outline-danger d-flex align-items-center gap-1" onClick={handleHardDeleteDeleted} disabled={selectedDeletedTickers.length === 0}>
+                </button>
+                <button
+                  className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  onClick={handleHardDeleteDeleted}
+                  disabled={selectedDeletedTickers.length === 0}
+                >
                     <IconSearch size={14} />
                     <span>영구 삭제</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="stocksTableWrap">
-            <AppDataGrid
-              className="stocksTable"
-              rows={(viewMode === "active" ? activeGridRows : deletedGridRows) as any}
-              columns={(viewMode === "active" ? activeColumns : deletedColumns) as any}
-              loading={loading}
-              minHeight="100%"
-            />
-          </div>
-        </div>
-      </section>
-
-      <AppModal
-        open={isAddModalOpen}
-        onClose={closeAddModal}
-        title="종목 추가"
-        footer={
-          <div className="d-flex justify-content-end gap-2 w-100">
-            <button className="btn btn-link link-secondary" type="button" onClick={closeAddModal}>
-              취소
-            </button>
-            <button 
-              className="btn btn-primary" 
-              type="button" 
-              onClick={handleCreateStock} 
-              disabled={isPending || !validatedCandidate || validatedCandidate.status === "active"}
-              style={{ minWidth: "100px" }}
-            >
-              저장
-            </button>
-          </div>
-        }
-      >
-        <div className="appModalBody">
-          <div className="mb-3">
-            <label className="form-label">티커</label>
-            <div className="row g-2">
-              <div className="col">
-                <input
-                  type="text"
-                  className="form-control"
-                  placeholder="예: 069500 / VGS / ASX:VGS"
-                  value={addTickerInput}
-                  onChange={(e) => {
-                    setAddTickerInput(e.target.value);
-                    if (validatedCandidate) setValidatedCandidate(null);
-                  }}
-                  onKeyDown={(e) => e.key === "Enter" && handleValidateTicker()}
-                />
-              </div>
-              <div className="col-auto">
-                <button
-                  className="btn btn-outline-secondary d-flex align-items-center gap-1"
-                  type="button"
-                  onClick={handleValidateTicker}
-                  disabled={isValidatingTicker || !addTickerInput.trim()}
-                >
-                  <IconSearch size={16} stroke={1.75} />
-                  <span>확인</span>
                 </button>
               </div>
             </div>
-            {isValidatingTicker ? (
-              <div className="mt-1 small text-muted">티커 확인 중...</div>
-            ) : validatedCandidate ? (
-              <div className={`mt-2 p-2 rounded border ${validatedCandidate.status === "active" ? "bg-danger-lt border-danger-subtle" : "bg-success-lt border-success-subtle"}`}>
-                <div className={`d-flex align-items-center gap-1 fw-bold ${validatedCandidate.status === "active" ? "text-danger" : "text-success"}`}>
-                  <span className="appCodeText">{validatedCandidate.ticker}</span>
-                  <span>-</span>
-                  <span>{validatedCandidate.name}</span>
-                </div>
-                {validatedCandidate.status === "active" && (
-                  <div className="mt-1 small text-danger fw-bold">
-                    이미 등록된 종목입니다.
-                  </div>
-                )}
-                {validatedCandidate.status === "deleted" && (
-                  <div className="mt-1 small text-success fw-bold">
-                    삭제된 종목입니다. 다시 추가하시겠습니까?
-                  </div>
-                )}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="mb-3">
-            <label className="form-label">버킷</label>
-            <select 
-              className="form-select" 
-              value={addBucketId} 
-              onChange={(e) => setAddBucketId(Number(e.target.value))}
-            >
-              {BUCKET_OPTIONS.map((opt) => (
-                <option key={opt.id} value={opt.id}>{opt.name}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      </AppModal>
-
-      {/* 종목 수정 모달 */}
-      <AppModal
-        open={isEditModalOpen}
-        onClose={closeEditModal}
-        title="종목 수정"
-        footer={
-          <div className="d-flex justify-content-between w-100">
-            <button
-              className="btn btn-outline-danger"
-              type="button"
-              onClick={() => {
-                handleEditSave(true);
-              }}
-              disabled={isPending}
-            >
-              종목 삭제
-            </button>
-            <div className="d-flex gap-2">
-              <button className="btn btn-link link-secondary" type="button" onClick={closeEditModal}>
-                취소
-              </button>
-              <button 
-                className="btn btn-primary" 
-                type="button" 
-                onClick={() => handleEditSave()}
-                style={{ minWidth: "100px" }}
-                disabled={isPending}
-              >
-                저장
-              </button>
-            </div>
-          </div>
-        }
-      >
-        <div className="appModalBody">
-          {editingRow && (
-            <>
-              <div className="mb-3">
-                <div className="fw-bold text-secondary mb-1">대상 종목</div>
-                <div className="appCodeText" style={{ fontSize: "1.2rem" }}>
-                  {editingRow.ticker}
-                </div>
-                <div style={{ fontSize: "1.1rem" }}>{editingRow.name}</div>
-              </div>
-              <div className="mb-3">
-                <label className="form-label">버킷 변경</label>
-                <select
-                  className="form-select"
-                  value={editingBucketId}
-                  onChange={(e) => setEditingBucketId(Number(e.target.value))}
-                >
-                  {BUCKET_OPTIONS.map((opt) => (
-                    <option key={opt.id} value={opt.id}>
-                      {opt.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="mb-3">
-                <label className="form-label text-secondary">삭제 사유(옵션)</label>
-                <textarea
-                  className="form-control"
-                  rows={2}
-                  placeholder="삭제 시 참고할 사유가 있다면 입력해주세요 (필수 아님)."
-                  value={editingDeleteReason}
-                  onChange={(e) => setEditingDeleteReason(e.target.value)}
-                />
-              </div>
-            </>
           )}
+
+          {viewMode === "active" && (
+            <div className="card-header appActionHeader bg-light-subtle border-top">
+              <div className="appActionHeaderInner">
+                <button
+                  className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleAddRow}
+                  disabled={loading || Boolean(addingRow)}
+                >
+                  <IconPlus size={16} stroke={2} />
+                  <span>추가</span>
+                </button>
+                <button
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleSaveActiveChanges}
+                  disabled={loading || isPending || (!addingRow && dirtyActiveRowIds.length === 0)}
+                >
+                  <IconDeviceFloppy size={16} stroke={2} />
+                  <span>저장</span>
+                </button>
+                <button
+                  className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleDeleteActiveSelected}
+                  disabled={loading || isPending || selectedActiveTickers.length === 0}
+                >
+                  <IconTrash size={16} stroke={2} />
+                  <span>삭제</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="card-body p-0 appTableCardBodyFill">
+            {viewMode === "active" ? (
+              <AppAgGrid<ActiveStockGridRow>
+                className="stocksAgGrid"
+                rowData={activeGridRows}
+                columnDefs={activeColumns}
+                loading={loading}
+                minHeight="100%"
+                theme={stocksGridTheme}
+                gridOptions={{
+                  suppressMovableColumns: true,
+                  rowSelection: {
+                    mode: "multiRow",
+                    checkboxes: (params) => params.data?.id !== "__adding__",
+                    headerCheckbox: true,
+                    hideDisabledCheckboxes: true,
+                    enableClickSelection: false,
+                  },
+                  selectionColumnDef: {
+                    width: 52,
+                    minWidth: 52,
+                    maxWidth: 52,
+                    pinned: "left",
+                    sortable: false,
+                    resizable: false,
+                    suppressMovable: true,
+                    headerName: "",
+                    cellClass: "stocksSelectCell",
+                  },
+                  onSelectionChanged: (params: {
+                    api: { getSelectedRows: () => ActiveStockGridRow[] };
+                  }) => {
+                    setSelectedActiveTickers(
+                      params.api
+                        .getSelectedRows()
+                        .map((row) => row.id)
+                        .filter((rowId) => rowId !== "__adding__"),
+                    );
+                  },
+                  onCellValueChanged: (params: {
+                    data?: ActiveStockGridRow;
+                    newValue?: unknown;
+                    oldValue?: unknown;
+                    colDef: { field?: string };
+                  }) => {
+                    if (!params.data || params.data.id === "__adding__" || params.newValue === params.oldValue) {
+                      return;
+                    }
+                    handleActiveBucketChanged(params.data, String(params.newValue ?? ""));
+                  },
+                }}
+              />
+            ) : (
+              <AppAgGrid<DeletedStockGridRow>
+                className="stocksAgGrid"
+                rowData={deletedGridRows}
+                columnDefs={deletedColumns}
+                loading={loading}
+                minHeight="100%"
+                theme={stocksGridTheme}
+                gridOptions={{
+                  suppressMovableColumns: true,
+                  rowSelection: {
+                    mode: "multiRow",
+                    checkboxes: true,
+                    headerCheckbox: true,
+                    hideDisabledCheckboxes: true,
+                    enableClickSelection: false,
+                  },
+                  selectionColumnDef: {
+                    width: 52,
+                    minWidth: 52,
+                    maxWidth: 52,
+                    pinned: "left",
+                    sortable: false,
+                    resizable: false,
+                    suppressMovable: true,
+                    headerName: "",
+                    cellClass: "stocksSelectCell",
+                  },
+                  onSelectionChanged: (params: {
+                    api: { getSelectedRows: () => DeletedStockGridRow[] };
+                  }) => {
+                    setSelectedDeletedTickers(
+                      params.api
+                        .getSelectedRows()
+                        .map((row) => row.ticker.trim().toUpperCase()),
+                    );
+                  },
+                }}
+              />
+            )}
+          </div>
         </div>
-      </AppModal>
+      </section>
     </div>
   );
 }

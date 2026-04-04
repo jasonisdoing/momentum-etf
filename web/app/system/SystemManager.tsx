@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { type GridColDef } from "@mui/x-data-grid";
+import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
+import type { ColDef } from "ag-grid-community";
 
-import { AppDataGrid } from "../components/AppDataGrid";
+import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 
 type SystemSummaryRow = {
@@ -33,6 +34,59 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
+const appGridTheme = themeQuartz
+  .withPart(iconSetQuartzBold)
+  .withParams({
+    accentColor: "#206bc4",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#182433",
+    headerBackgroundColor: "#f8fafc",
+    headerTextColor: "#5b6778",
+    spacing: 8,
+    fontSize: 14,
+    wrapperBorderRadius: 10,
+    rowHeight: 38,
+    headerHeight: 38,
+    cellHorizontalPadding: 12,
+    headerColumnBorder: true,
+    headerColumnBorderHeight: "70%",
+    columnBorder: true,
+    oddRowBackgroundColor: "#fbfdff",
+    headerCellHoverBackgroundColor: "#eef4fb",
+    headerCellMovingBackgroundColor: "#e8f0fb",
+    iconButtonHoverBackgroundColor: "#eef4fb",
+    iconButtonHoverColor: "#206bc4",
+    iconSize: 18,
+  });
+
+const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
+  {
+    field: "count",
+    headerName: "순서",
+    minWidth: 72,
+    width: 72,
+    type: "rightAligned",
+    cellRenderer: (params: { value: number }) => formatCount(params.value),
+  },
+  { field: "target", headerName: "계좌 ID", minWidth: 200, flex: 1 },
+  { field: "category", headerName: "계좌", minWidth: 200, flex: 1.2 },
+];
+
+const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
+  { field: "job", headerName: "작업", minWidth: 180, flex: 1 },
+  { field: "target", headerName: "대상", minWidth: 180, flex: 1 },
+  { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 140 },
+  {
+    field: "command",
+    headerName: "실행 명령",
+    minWidth: 320,
+    flex: 1.6,
+    cellRenderer: (params: { value: string }) => (
+      <span className="appCodeText">{params.value}</span>
+    ),
+  },
+];
+
 export function SystemManager() {
   const [summaryRows, setSummaryRows] = useState<SystemSummaryRow[]>([]);
   const [scheduleRows, setScheduleRows] = useState<SystemScheduleRow[]>([]);
@@ -44,17 +98,6 @@ export function SystemManager() {
   const toast = useToast();
   const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => ({ ...row, id: row.job }));
-  const summaryColumns: GridColDef<SystemSummaryGridRow>[] = [
-    { field: "category", headerName: "구분", minWidth: 160, flex: 1 },
-    { field: "count", headerName: "개수", minWidth: 96, width: 96, align: "right", headerAlign: "right", renderCell: (params) => formatCount(params.row.count) },
-    { field: "target", headerName: "대상", minWidth: 220, flex: 1.2 },
-  ];
-  const scheduleColumns: GridColDef<SystemScheduleGridRow>[] = [
-    { field: "job", headerName: "작업", minWidth: 180, flex: 1 },
-    { field: "target", headerName: "대상", minWidth: 180, flex: 1 },
-    { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 140 },
-    { field: "command", headerName: "실행 명령", minWidth: 320, flex: 1.6, renderCell: (params) => <span className="appCodeText">{params.row.command}</span> },
-  ];
 
   useEffect(() => {
     let alive = true;
@@ -126,53 +169,72 @@ export function SystemManager() {
 
       <section className="appSection">
         <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>수동 실행</h2>
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <span className="appHeaderMetricValue">수동 실행</span>
+              </div>
+              <div className="appMainHeaderRight">
+                <span className="appHeaderSubtle">메타데이터/가격 캐시는 종목별로 관리됩니다. (종목 편집 모달에서 새로고침 가능)</span>
+              </div>
             </div>
           </div>
-          <div className="card-body appCardBody">
-            <div className="tableToolbar">
-              <div className="toolbarActions">
+          <div className="card-header appActionHeader bg-light-subtle border-top">
+            <div className="appActionHeaderInner">
                 <button
-                  className="secondaryButton"
+                  className="btn btn-primary btn-sm px-3 fw-bold"
                   type="button"
                   onClick={() => handleAction("asset_summary")}
                   disabled={isPending}
                 >
                   {runningAction === "asset_summary" ? "실행 중..." : "전체 자산 요약 알림 전송"}
                 </button>
-              </div>
-              <div className="tableMeta">
-                <span>메타데이터/가격 캐시는 종목별로 관리됩니다. (종목 편집 모달에서 새로고침 가능)</span>
+            </div>
+          </div>
+          <div className="card-body appCardBody" />
+        </div>
+      </section>
+
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <span className="appHeaderMetricValue">계좌 요약</span>
               </div>
             </div>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <AppAgGrid
+              rowData={summaryGridRows}
+              columnDefs={summaryColumns}
+              loading={loading}
+              minHeight="18rem"
+              theme={appGridTheme}
+              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
+            />
           </div>
         </div>
       </section>
 
       <section className="appSection">
         <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>계좌 요약</h2>
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <span className="appHeaderMetricValue">자동 작업</span>
+              </div>
             </div>
           </div>
           <div className="card-body appCardBodyTight">
-            <AppDataGrid rows={summaryGridRows} columns={summaryColumns} loading={loading} minHeight="18rem" />
-          </div>
-        </div>
-      </section>
-
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <h2>자동 작업</h2>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <AppDataGrid rows={scheduleGridRows} columns={scheduleColumns} loading={loading} minHeight="18rem" />
+            <AppAgGrid
+              rowData={scheduleGridRows}
+              columnDefs={scheduleColumns}
+              loading={loading}
+              minHeight="18rem"
+              theme={appGridTheme}
+              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
+            />
             {scheduleNote ? <div className="tableFooterMeta">{scheduleNote}</div> : null}
           </div>
         </div>

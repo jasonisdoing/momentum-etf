@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { type GridColDef } from "@mui/x-data-grid";
+import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
+import type { ColDef } from "ag-grid-community";
+import { IconCheck, IconLoader2 } from "@tabler/icons-react";
 
-import { AppDataGrid } from "../components/AppDataGrid";
-import { AppModal } from "../components/AppModal";
+import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 
 type WeeklyEditableField = {
@@ -114,6 +115,31 @@ const COLUMN_DEFS = [
   { key: "loss_count", label: "손실 종목 수" },
 ] as const;
 
+const weeklyGridTheme = themeQuartz
+  .withPart(iconSetQuartzBold)
+  .withParams({
+    accentColor: "#206bc4",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#182433",
+    headerBackgroundColor: "#f8fafc",
+    headerTextColor: "#5b6778",
+    spacing: 8,
+    fontSize: 14,
+    wrapperBorderRadius: 10,
+    rowHeight: 38,
+    headerHeight: 38,
+    cellHorizontalPadding: 12,
+    headerColumnBorder: true,
+    headerColumnBorderHeight: "70%",
+    columnBorder: true,
+    oddRowBackgroundColor: "#fbfdff",
+    headerCellHoverBackgroundColor: "#eef4fb",
+    headerCellMovingBackgroundColor: "#e8f0fb",
+    iconButtonHoverBackgroundColor: "#eef4fb",
+    iconButtonHoverColor: "#206bc4",
+    iconSize: 18,
+  });
+
 function formatMoney(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(Math.round(value));
 }
@@ -167,30 +193,25 @@ function getColumnCellClass(key: string, value: number | string): string {
   return classes.join(" ");
 }
 
-function formatReadOnlyValue(field: WeeklyEditableField, value: WeeklyRow | null): string {
-  if (!value) return "-";
-  const raw = value[field.key as keyof WeeklyRow];
-  if (field.type === "text") return String(raw ?? "-");
-  const num = Number(raw ?? 0);
-  if (PERCENT_KEYS.has(field.key)) return formatPercent(num);
-  if (field.key === "exchange_rate") return formatExchangeRate(num);
-  if (MONEY_KEYS.has(field.key)) return formatMoney(num);
-  if (field.type === "float") return num.toFixed(2);
-  return new Intl.NumberFormat("ko-KR").format(num);
+function buildDirtyCellKey(rowId: string, field: string): string {
+  return `${rowId}::${field}`;
 }
 
-function toInputText(field: WeeklyEditableField, value: WeeklyRow | null): string {
-  if (!value) {
-    return "";
+function parseWeeklyCellValue(field: WeeklyEditableField | undefined, newValue: unknown, oldValue: unknown) {
+  if (!field) {
+    return newValue;
   }
-  const raw = value[field.key as keyof WeeklyRow];
   if (field.type === "text") {
-    return String(raw ?? "");
+    return String(newValue ?? "");
   }
-  if (field.type === "float") {
-    return Number(raw ?? 0).toFixed(2);
+  const parsed = Number(newValue);
+  if (!Number.isFinite(parsed)) {
+    return oldValue;
   }
-  return String(raw ?? 0);
+  if (field.type === "int") {
+    return Math.trunc(parsed);
+  }
+  return parsed;
 }
 
 export function WeeklyManager() {
@@ -202,8 +223,8 @@ export function WeeklyManager() {
   const [coreHiddenKeys, setCoreHiddenKeys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editingRow, setEditingRow] = useState<WeeklyRow | null>(null);
-  const [editingValues, setEditingValues] = useState<Record<string, string>>({});
+  const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
+  const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [isPending, startTransition] = useTransition();
   const toast = useToast();
 
@@ -225,6 +246,8 @@ export function WeeklyManager() {
       setReadOnlyKeys(new Set(payload.read_only_keys ?? []));
       setCoreHiddenKeys(payload.core_hidden_keys ?? []);
       setActiveWeekDate(payload.active_week_date ?? "");
+      setDirtyRowIds([]);
+      setDirtyCellKeys([]);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "주별 데이터를 불러오지 못했습니다.");
     } finally {
@@ -254,78 +277,58 @@ export function WeeklyManager() {
     [rows],
   );
 
-  const gridColumns = useMemo<GridColDef<WeeklyGridRow>[]>(
+  const editableFieldMap = useMemo(
+    () => new Map(editableFields.map((field) => [field.key, field])),
+    [editableFields],
+  );
+
+  const gridColumns = useMemo<ColDef<WeeklyGridRow>[]>(
     () => [
-      {
-        field: "__edit__",
-        headerName: "",
-        width: 48,
-        sortable: false,
-        filterable: false,
-        disableColumnMenu: true,
-        renderCell: (params) => (
-          <button
-            className="btn btn-link btn-sm p-0 appEditLink"
-            type="button"
-            onClick={() => openEditModal(params.row)}
-          >
-            Edit
-          </button>
-        ),
-      },
-      ...visibleColumns.map<GridColDef<WeeklyGridRow>>((column) => ({
+      ...visibleColumns.map<ColDef<WeeklyGridRow>>((column) => ({
         field: column.key,
         headerName: column.label,
-        type: "string",
+        type:
+          MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
+            ? "rightAligned"
+            : undefined,
         minWidth:
           column.key === "week_date_display"
             ? 125
             : column.key === "memo"
               ? 200
-              : MONEY_KEYS.has(column.key)
-                ? 92
-                : PERCENT_KEYS.has(column.key)
-                  ? 80
-                  : 72,
+                : MONEY_KEYS.has(column.key)
+                  ? 92
+                  : PERCENT_KEYS.has(column.key)
+                    ? 80
+                    : 72,
         flex: column.key === "memo" ? 1.4 : column.key === "week_date_display" ? 0 : undefined,
-        align:
-          MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
-            ? "right"
-            : "left",
-        headerAlign:
-          MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
-            ? "right"
-            : "left",
         sortable: false,
-        cellClassName: (params) => getColumnCellClass(column.key, params.value as number | string),
-        renderCell: (params) => (
+        editable: () => editableFieldMap.has(column.key) && !readOnlyKeys.has(column.key),
+        valueParser: (params) =>
+          parseWeeklyCellValue(
+            editableFieldMap.get(column.key),
+            params.newValue,
+            params.oldValue,
+          ),
+        cellClass: (params) => {
+          const classes = getColumnCellClass(column.key, params.value as number | string);
+          const editableClasses =
+            editableFieldMap.has(column.key) && !readOnlyKeys.has(column.key)
+              ? dirtyCellKeys.includes(buildDirtyCellKey(params.data?.id ?? "", column.key))
+                ? " weeklyEditableCell weeklyDirtyCell"
+                : " weeklyEditableCell"
+              : "";
+          return `${classes}${editableClasses}`.trim();
+        },
+        cellRenderer: (params: { data?: WeeklyGridRow; value?: unknown }) => (
           <span title={column.key === "memo" ? String(params.value ?? "") : undefined}>
-            {formatCellValue(params.row, column.key)}
+            {params.data ? formatCellValue(params.data, column.key) : "-"}
           </span>
         ),
       })),
     ],
-    [visibleColumns],
+    [dirtyCellKeys, editableFieldMap, readOnlyKeys, visibleColumns],
   );
-
-  function openEditModal(row: WeeklyRow) {
-    setEditingRow(row);
-    setEditingValues(
-      Object.fromEntries(editableFields.map((field) => [field.key, toInputText(field, row)])),
-    );
-  }
-
-  function closeEditModal() {
-    if (isPending) {
-      return;
-    }
-    setEditingRow(null);
-    setEditingValues({});
-  }
-
-  function updateFieldValue(key: string, value: string) {
-    setEditingValues((current) => ({ ...current, [key]: value }));
-  }
 
   function handleAggregate() {
     startTransition(async () => {
@@ -345,47 +348,39 @@ export function WeeklyManager() {
   }
 
   function handleSave() {
-    if (!editingRow) {
+    if (dirtyRowIds.length === 0) {
       return;
     }
 
     startTransition(async () => {
       try {
         setError(null);
-        const response = await fetch("/api/weekly", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            week_date: editingRow.week_date,
-            ...Object.fromEntries(
-              editableFields
-                .filter((field) => !readOnlyKeys.has(field.key))
-                .map((field) => {
-                  if (field.type === "text") {
-                    return [field.key, editingValues[field.key] ?? ""];
-                  }
-                  const normalized = Number(editingValues[field.key] ?? 0);
-                  return [field.key, Number.isFinite(normalized) ? normalized : 0];
-                }),
-            ),
-          }),
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "주별 데이터 저장에 실패했습니다.");
+        const dirtyRows = rows.filter((row) => dirtyRowIds.includes(row.week_date));
+        for (const row of dirtyRows) {
+          const response = await fetch("/api/weekly", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              week_date: row.week_date,
+              ...Object.fromEntries(
+                editableFields
+                  .filter((field) => !readOnlyKeys.has(field.key))
+                  .map((field) => [field.key, row[field.key as keyof WeeklyRow]]),
+              ),
+            }),
+          });
+          const payload = (await response.json()) as { error?: string };
+          if (!response.ok) {
+            throw new Error(payload.error ?? "주별 데이터 저장에 실패했습니다.");
+          }
         }
         await load({ silent: true });
-        toast.success(`[자산-주별] ${editingRow.week_date_display} 저장 완료`);
-        closeEditModal();
+        toast.success("[자산-주별] 변경사항 저장 완료");
       } catch (saveError) {
         setError(saveError instanceof Error ? saveError.message : "주별 데이터 저장에 실패했습니다.");
       }
     });
   }
-
-  const halfIndex = Math.ceil(editableFields.length / 2);
-  const leftFields = editableFields.slice(0, halfIndex);
-  const rightFields = editableFields.slice(halfIndex);
 
   return (
     <div className="appPageStack appPageStackFill">
@@ -397,128 +392,102 @@ export function WeeklyManager() {
 
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
-          <div className="card-header appCardHeader">
-            <div className="sectionHeaderCompact w-100">
-              <div className="tableToolbar">
-                <div className="toolbarActions">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
                   <button
                     type="button"
-                    className={`btn btn-sm ${viewMode === "core" ? "btn-primary" : "btn-outline-secondary"}`}
+                    className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                     onClick={() => setViewMode("core")}
                   >
                     핵심만 보기
                   </button>
                   <button
                     type="button"
-                    className={`btn btn-sm ${viewMode === "full" ? "btn-primary" : "btn-outline-secondary"}`}
+                    className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                     onClick={() => setViewMode("full")}
                   >
                     전체 보기
                   </button>
-                  <button type="button" className="btn btn-sm btn-success" onClick={handleAggregate} disabled={isPending}>
-                    {isPending ? "집계 중..." : "이번주 데이터 집계"}
-                  </button>
                 </div>
-                <div className="tableMeta">
-                  <span>활성 주차 {activeWeekDate || "-"}</span>
-                  <span>행 {rows.length}</span>
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm px-3 fw-bold"
+                  onClick={handleAggregate}
+                  disabled={isPending}
+                >
+                  {isPending ? "집계 중..." : "이번주 데이터 집계"}
+                </button>
+              </div>
+              <div className="appMainHeaderRight">
+                <div className="appHeaderMetrics">
+                  <div className="appHeaderMetric">
+                    <span>활성 주차:</span>
+                    <span className="appHeaderMetricValue">{activeWeekDate || "-"}</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>행:</span>
+                    <span className="appHeaderMetricValue">{rows.length}</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
+          <div className="card-header appActionHeader bg-light-subtle border-top">
+            <div className="appActionHeaderInner">
+              <button
+                type="button"
+                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                onClick={handleSave}
+                disabled={isPending || dirtyRowIds.length === 0}
+              >
+                {isPending ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconCheck size={16} />}
+                <span>저장</span>
+              </button>
+            </div>
+          </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
-            <AppDataGrid
-              rows={gridRows}
-              columns={gridColumns}
+            <AppAgGrid<WeeklyGridRow>
+              rowData={gridRows}
+              columnDefs={gridColumns}
               loading={loading}
-              wrapClassName="appGridFillWrap"
-              getRowClassName={(params) => (params.row.week_date === activeWeekDate ? "tableRowSelected" : "")}
               minHeight="100%"
+              className="weeklyAgGrid"
+              theme={weeklyGridTheme}
+              getRowClass={(params) => (params.data?.week_date === activeWeekDate ? "tableRowSelected" : "")}
+              gridOptions={{
+                suppressMovableColumns: true,
+                onCellValueChanged: (params: {
+                  data?: WeeklyGridRow;
+                  colDef: { field?: string };
+                  newValue?: unknown;
+                  oldValue?: unknown;
+                }) => {
+                  if (!params.data || !params.colDef.field || params.newValue === params.oldValue) {
+                    return;
+                  }
+                  const rowId = params.data.id;
+                  const field = params.colDef.field;
+                  setRows((current) =>
+                    current.map((row) =>
+                      row.week_date === rowId
+                        ? {
+                            ...row,
+                            [field]: params.data?.[field as keyof WeeklyGridRow] ?? row[field as keyof WeeklyRow],
+                          }
+                        : row,
+                    ),
+                  );
+                  setDirtyRowIds((prev) => (prev.includes(rowId) ? prev : [...prev, rowId]));
+                  const dirtyCellKey = buildDirtyCellKey(rowId, field);
+                  setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
+                },
+              }}
             />
           </div>
         </div>
       </section>
-
-      <AppModal
-        open={Boolean(editingRow)}
-        title={editingRow?.week_date_display ?? ""}
-        subtitle="주별 데이터 수정"
-        size="xl"
-        onClose={closeEditModal}
-        footer={
-          <>
-            <button type="button" className="btn btn-outline-secondary" onClick={closeEditModal} disabled={isPending}>
-              취소
-            </button>
-            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isPending}>
-              {isPending ? "저장 중..." : "저장"}
-            </button>
-          </>
-        }
-      >
-        {editingRow ? (
-          <div className="row g-3">
-            <div className="col-md-6">
-              {leftFields.map((field) =>
-                readOnlyKeys.has(field.key) ? (
-                  <div key={field.key} className="mb-3">
-                    <label className="form-label text-muted">{field.label}</label>
-                    <div className="form-control-plaintext">{formatReadOnlyValue(field, editingRow)}</div>
-                  </div>
-                ) : (
-                  <div key={field.key} className="mb-3">
-                    <label className="form-label">{field.label}</label>
-                    {field.type === "text" ? (
-                      <input
-                        className="form-control"
-                        value={editingValues[field.key] ?? ""}
-                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                      />
-                    ) : (
-                      <input
-                        className="form-control"
-                        type="number"
-                        step={field.type === "float" ? "0.01" : "1"}
-                        value={editingValues[field.key] ?? "0"}
-                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                      />
-                    )}
-                  </div>
-                ),
-              )}
-            </div>
-            <div className="col-md-6">
-              {rightFields.map((field) =>
-                readOnlyKeys.has(field.key) ? (
-                  <div key={field.key} className="mb-3">
-                    <label className="form-label text-muted">{field.label}</label>
-                    <div className="form-control-plaintext">{formatReadOnlyValue(field, editingRow)}</div>
-                  </div>
-                ) : (
-                  <div key={field.key} className="mb-3">
-                    <label className="form-label">{field.label}</label>
-                    {field.type === "text" ? (
-                      <input
-                        className="form-control"
-                        value={editingValues[field.key] ?? ""}
-                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                      />
-                    ) : (
-                      <input
-                        className="form-control"
-                        type="number"
-                        step={field.type === "float" ? "0.01" : "1"}
-                        value={editingValues[field.key] ?? "0"}
-                        onChange={(event) => updateFieldValue(field.key, event.target.value)}
-                      />
-                    )}
-                  </div>
-                ),
-              )}
-            </div>
-          </div>
-        ) : null}
-      </AppModal>
     </div>
   );
 }

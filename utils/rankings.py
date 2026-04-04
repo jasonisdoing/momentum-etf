@@ -513,7 +513,7 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    realtime_allowed = selected_as_of_date == today_korea and latest_trading_day == today_korea
+    realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
