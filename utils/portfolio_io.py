@@ -626,6 +626,8 @@ def save_daily_snapshot(
     valuation_krw: float,
     purchase_amount: float | None = None,
     holding_details: list[dict[str, Any]] | None = None,
+    cash_balance_native: float | None = None,
+    cash_currency: str | None = None,
 ) -> bool:
     """
     Save a daily snapshot.
@@ -674,6 +676,10 @@ def save_daily_snapshot(
                         acc["purchase_amount"] = _round_snapshot_money(purchase_amount)
                     if holding_details is not None:
                         acc["holdings"] = holding_details
+                    if cash_balance_native is not None:
+                        acc["cash_balance_native"] = float(cash_balance_native)
+                    if cash_currency is not None:
+                        acc["cash_currency"] = str(cash_currency).strip().upper()
                     found = True
                     break
 
@@ -688,6 +694,10 @@ def save_daily_snapshot(
                 }
                 if holding_details is not None:
                     acc_data["holdings"] = holding_details
+                if cash_balance_native is not None:
+                    acc_data["cash_balance_native"] = float(cash_balance_native)
+                if cash_currency is not None:
+                    acc_data["cash_currency"] = str(cash_currency).strip().upper()
                 accounts.append(acc_data)
             doc["accounts"] = accounts
 
