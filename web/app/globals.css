@@ -1563,6 +1563,12 @@ a {
   text-align: right;
 }
 
+.appAgGridTheme .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell-value {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
 .appAgGridTheme .ag-row.appHeldRow {
   background: rgba(102, 204, 102, 0.35);
 }

@@ -43,6 +43,8 @@ export function AppAgGrid<TData>({
           columnDefs={columnDefs}
           loading={loading}
           theme={theme}
+          enableCellTextSelection
+          ensureDomOrder
           suppressCellFocus
           rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: false }}
           animateRows={false}
