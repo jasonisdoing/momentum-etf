@@ -970,7 +970,7 @@ export function StocksManager() {
                 className="stocksAgGrid"
                 rowData={activeGridRows}
                 columnDefs={activeColumns}
-                loading={loading}
+                loading={loading || isPending}
                 minHeight="100%"
                 theme={stocksGridTheme}
                 gridOptions={{
@@ -1021,7 +1021,7 @@ export function StocksManager() {
                 className="stocksAgGrid"
                 rowData={deletedGridRows}
                 columnDefs={deletedColumns}
-                loading={loading}
+                loading={loading || isPending}
                 minHeight="100%"
                 theme={stocksGridTheme}
                 gridOptions={{

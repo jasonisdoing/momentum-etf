@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, GridOptions, RowClassParams } from "ag-grid-community";
-import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
@@ -1034,14 +1034,14 @@ function AccountHoldingsDetailPanel({
             onClick={() => void handleSaveChanges()}
             disabled={(!hasDirtyChanges && !hasPendingAdd) || savingDirtyRows || processingId === "__deleting__"}
           >
-            {savingDirtyRows ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconCheck size={16} />} 저장
+            <IconCheck size={16} /> 저장
           </button>
           <button
             className="btn btn-outline-danger btn-sm px-3 fw-bold"
             onClick={() => void handleDeleteSelected()}
             disabled={!hasSelectedRows || savingDirtyRows || processingId === "__deleting__"}
           >
-            {processingId === "__deleting__" ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconTrash size={16} />} 삭제
+            <IconTrash size={16} /> 삭제
           </button>
         </div>
       </div>
@@ -1049,7 +1049,7 @@ function AccountHoldingsDetailPanel({
         <AppAgGrid
           rowData={gridRows}
           columnDefs={columns}
-          loading={false}
+          loading={savingDirtyRows || processingId === "__deleting__"}
           minHeight="100%"
           className="assetsAgGrid assetsChildAgGrid"
           theme={assetsGridTheme}
@@ -1560,7 +1560,7 @@ export function AssetsManager() {
                 onClick={() => void handleSaveParents()}
                 disabled={!parentDirtyAccountIds.length || savingParents}
               >
-                {savingParents ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconCheck size={16} />} 저장
+                <IconCheck size={16} /> 저장
               </button>
             </div>
           </div>
@@ -1568,7 +1568,7 @@ export function AssetsManager() {
             <AppAgGrid
               rowData={parentRows}
               columnDefs={parentColumns}
-              loading={loading}
+              loading={loading || savingParents}
               minHeight="100%"
               className="assetsAgGrid assetsParentAgGrid"
               theme={assetsGridTheme}

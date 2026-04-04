@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef } from "ag-grid-community";
-import { IconCheck, IconLoader2 } from "@tabler/icons-react";
+import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
@@ -442,7 +442,7 @@ export function WeeklyManager() {
                 onClick={handleSave}
                 disabled={isPending || dirtyRowIds.length === 0}
               >
-                {isPending ? <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <IconCheck size={16} />}
+                <IconCheck size={16} />
                 <span>저장</span>
               </button>
             </div>
@@ -451,7 +451,7 @@ export function WeeklyManager() {
             <AppAgGrid<WeeklyGridRow>
               rowData={gridRows}
               columnDefs={gridColumns}
-              loading={loading}
+              loading={loading || isPending}
               minHeight="100%"
               className="weeklyAgGrid"
               theme={weeklyGridTheme}
