@@ -45,6 +45,19 @@ function formatKrw(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(Math.round(value));
 }
 
+function formatSnapshotDate(value: string): string {
+  const text = String(value || "").trim();
+  if (!text) {
+    return "-";
+  }
+  const date = new Date(`${text}T00:00:00+09:00`);
+  if (Number.isNaN(date.getTime())) {
+    return text;
+  }
+  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+  return `${text} (${weekdays[date.getDay()]})`;
+}
+
 function isDetailRow(row: SnapshotGridRow | undefined): row is SnapshotDetailRow {
   return row?.rowType === "detail";
 }
@@ -194,7 +207,7 @@ export function SnapshotsManager() {
               <span className="snapshotsExpandIcon" aria-hidden="true">
                 {data.id === expandedId ? "▾" : "▸"}
               </span>
-              <span>{params.value}</span>
+              <span>{formatSnapshotDate(params.value ?? "")}</span>
             </div>
           );
         },
