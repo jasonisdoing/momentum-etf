@@ -33,6 +33,8 @@ def load_snapshot_list() -> list[dict[str, Any]]:
                     "total_assets": normalize_number(account.get("total_assets")),
                     "total_principal": normalize_number(account.get("total_principal")),
                     "cash_balance": normalize_number(account.get("cash_balance")),
+                    "cash_balance_native": normalize_number(account.get("cash_balance_native")),
+                    "cash_currency": str(account.get("cash_currency") or "").strip().upper(),
                     "valuation_krw": normalize_number(account.get("valuation_krw")),
                 }
                 for account in (doc.get("accounts") or [])
@@ -78,12 +80,12 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
         m_data = load_portfolio_master(aid)
         acc_principal = normalize_number(m_data.get("total_principal")) if m_data else 0.0
         acc_cash = normalize_number(m_data.get("cash_balance")) if m_data else 0.0
+        cash_balance_native = normalize_number(m_data.get("cash_balance_native")) if m_data else 0.0
+        cash_currency = str(m_data.get("cash_currency") or "").strip().upper() if m_data else ""
 
         if m_data:
-            cash_currency = str(m_data.get("cash_currency") or "").strip().upper()
-            cash_balance_native = m_data.get("cash_balance_native")
             if cash_currency and cash_currency != "KRW" and acc_cash <= 0:
-                native_cash = normalize_number(cash_balance_native)
+                native_cash = cash_balance_native
                 if native_cash > 0:
                     rate_info = (exchange_rates or {}).get(cash_currency)
                     rate = normalize_number((rate_info or {}).get("rate"))
@@ -139,6 +141,8 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             "total_assets": acc_total_assets,
             "total_principal": acc_principal,
             "cash_balance": acc_cash,
+            "cash_balance_native": cash_balance_native,
+            "cash_currency": cash_currency,
             "valuation_krw": acc_valuation,
             "purchase_amount": acc_purchase,
             "holding_details": holding_details
@@ -152,7 +156,9 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             acc_cash,
             acc_valuation,
             purchase_amount=acc_purchase,
-            holding_details=holding_details
+            holding_details=holding_details,
+            cash_balance_native=cash_balance_native if cash_currency and cash_currency != "KRW" else None,
+            cash_currency=cash_currency if cash_currency and cash_currency != "KRW" else None,
         )
 
     # 전체 통합 데이터 저장
