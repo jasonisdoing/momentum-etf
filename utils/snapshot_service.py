@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.price_service import get_exchange_rates
 from utils.account_registry import load_account_configs
 from utils.db_manager import get_db_connection
 from utils.normalization import normalize_number
@@ -64,6 +65,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
     from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_daily_snapshot
 
     configs = load_account_configs()
+    exchange_rates = get_exchange_rates()
     account_summaries = []
     global_principal = 0.0
     global_cash = 0.0
@@ -76,6 +78,18 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
         m_data = load_portfolio_master(aid)
         acc_principal = normalize_number(m_data.get("total_principal")) if m_data else 0.0
         acc_cash = normalize_number(m_data.get("cash_balance")) if m_data else 0.0
+
+        if m_data:
+            cash_currency = str(m_data.get("cash_currency") or "").strip().upper()
+            cash_balance_native = m_data.get("cash_balance_native")
+            if cash_currency and cash_currency != "KRW" and acc_cash <= 0:
+                native_cash = normalize_number(cash_balance_native)
+                if native_cash > 0:
+                    rate_info = (exchange_rates or {}).get(cash_currency)
+                    rate = normalize_number((rate_info or {}).get("rate"))
+                    if rate <= 0:
+                        raise RuntimeError(f"{cash_currency} 환율을 가져오지 못했습니다.")
+                    acc_cash = native_cash * rate
 
         global_principal += acc_principal
         global_cash += acc_cash
