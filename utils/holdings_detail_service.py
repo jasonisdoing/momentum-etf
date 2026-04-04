@@ -127,6 +127,13 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     """모든 계좌 또는 특정 계좌의 보유 종목을 반환한다."""
     all_accounts = load_account_configs()
     rates = get_exchange_rates()
+    cash_data = load_cash_accounts()
+    cash_accounts = cash_data.get("accounts", [])
+    cash_map = {
+        str(account.get("account_id") or ""): account
+        for account in cash_accounts
+        if isinstance(account, dict)
+    }
 
     target_id = str(account_id or "").strip()
     if target_id.upper() == "TOTAL":
@@ -134,7 +141,9 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
 
     # target_id가 비어있으면 모든 계좌를 순회하며 데이터를 수집함
     all_rows: list[dict[str, Any]] = []
+    account_summaries: list[dict[str, Any]] = []
     selected_account_currency = "KRW"
+    selected_cash_info: dict[str, Any] | None = None
 
     for account in all_accounts:
         curr_account_id = str(account["account_id"])
@@ -160,8 +169,12 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         settings = account.get("settings") or {}
         country_code = str(settings.get("country_code") or "").strip().lower()
         currency = str(settings.get("currency") or "KRW").strip().upper()
+        cash_info = cash_map.get(curr_account_id)
         if curr_account_id == target_id:
             selected_account_currency = currency
+            selected_cash_info = cash_info
+
+        account_rows: list[dict[str, Any]] = []
 
         for _, row in df.iterrows():
             ticker_raw = str(row.get("티커") or "").strip()
@@ -201,8 +214,9 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             elif row_currency == "USD":
                 price_prefix = "$"
 
-            all_rows.append(
+            account_rows.append(
                 {
+                    "account_id": curr_account_id,
                     "account_name": account_name,
                     "currency": row_currency,
                     "bucket": bucket_name,
@@ -227,18 +241,41 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 }
             )
 
-    # 현재 계좌의 cash 정보
-    cash_data = load_cash_accounts()
-    cash_accounts = cash_data.get("accounts", [])
-    cash_info = next((c for c in cash_accounts if c["account_id"] == target_id), None)
-    if target_id:
-        all_rows = _apply_target_metrics(
-            all_rows,
-            account_id=target_id,
+        account_rows = _apply_target_metrics(
+            account_rows,
+            account_id=curr_account_id,
             cash_info=cash_info,
-            account_currency=selected_account_currency,
+            account_currency=currency,
             rates=rates,
         )
+        all_rows.extend(account_rows)
+
+        valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in account_rows)
+        cash_balance_krw = float((cash_info or {}).get("cash_balance_krw") or 0.0)
+        target_ratio_total = sum(float(row.get("target_ratio") or 0.0) for row in account_rows)
+        account_summaries.append(
+            {
+                "account_id": curr_account_id,
+                "order": int(account["order"]),
+                "name": account_name,
+                "icon": str(account.get("icon") or ""),
+                "currency": currency,
+                "total_principal": float((cash_info or {}).get("total_principal") or 0.0),
+                "cash_balance_krw": cash_balance_krw,
+                "cash_balance_native": (cash_info or {}).get("cash_balance_native"),
+                "cash_currency": str((cash_info or {}).get("cash_currency") or currency).strip().upper(),
+                "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
+                "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
+                "updated_at": (cash_info or {}).get("updated_at"),
+                "valuation_krw": valuation_krw,
+                "total_assets_krw": valuation_krw + cash_balance_krw,
+                "holdings_count": len(account_rows),
+                "target_ratio_total": target_ratio_total,
+            }
+        )
+
+    if target_id:
+        account_summaries = [row for row in account_summaries if str(row.get("account_id") or "") == target_id]
 
     return {
         "accounts": [
@@ -252,8 +289,9 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             ]
         ],
         "account_id": target_id,
-        "cash": cash_info,
-        "rows": all_rows
+        "cash": selected_cash_info,
+        "rows": all_rows,
+        "account_summaries": sorted(account_summaries, key=lambda row: int(row.get("order") or 0)),
     }
 
 
