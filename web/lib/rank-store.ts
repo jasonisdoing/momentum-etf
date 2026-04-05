@@ -8,6 +8,14 @@ type RankTickerType = {
   country_code: string;
 };
 
+type RankMaRule = {
+  order: number;
+  ma_type: string;
+  ma_months: number;
+  ma_days: number;
+  score_column: string;
+};
+
 type RankRow = {
   [key: string]: string | number | null;
   순번: string;
@@ -16,8 +24,7 @@ type RankRow = {
   티커: string;
   종목명: string;
   상장일: string;
-  추세: number | null;
-  지속: number | null;
+  점수: number | null;
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
@@ -44,8 +51,7 @@ type RankRow = {
 type RankData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
-  ma_type: string;
-  ma_months: number;
+  ma_rules: RankMaRule[];
   ma_type_options: string[];
   ma_months_max: number;
   as_of_date: string | null;
@@ -63,26 +69,23 @@ type RankData = {
 
 export async function loadRankData(params?: {
   ticker_type?: string;
-  ma_type?: string;
-  ma_months?: number;
+  ma_rule_overrides?: RankMaRule[];
   as_of_date?: string;
 }): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
   }
-  if (params?.ma_type) {
-    search.set("ma_type", params.ma_type);
-  }
-  if (params?.ma_months) {
-    search.set("ma_months", String(params.ma_months));
-  }
   if (params?.as_of_date) {
     search.set("as_of_date", params.as_of_date);
+  }
+  for (const rule of params?.ma_rule_overrides ?? []) {
+    search.set(`rule${rule.order}_ma_type`, rule.ma_type);
+    search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";
   return fetchFastApiJson<RankData>(`/internal/rank${query}`);
 }
 
-export type { RankTickerType, RankData, RankRow };
+export type { RankTickerType, RankMaRule, RankData, RankRow };

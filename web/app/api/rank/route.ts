@@ -8,14 +8,26 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const tickerType = searchParams.get("ticker_type") ?? undefined;
-    const maType = searchParams.get("ma_type") ?? undefined;
-    const maMonthsRaw = searchParams.get("ma_months");
-    const maMonths = maMonthsRaw ? Number(maMonthsRaw) : undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
+    const maRuleOverrides = Array.from({ length: 2 }, (_, index) => index + 1)
+      .map((order) => {
+        const maType = searchParams.get(`rule${order}_ma_type`);
+        const maMonthsRaw = searchParams.get(`rule${order}_ma_months`);
+        if (!maType && !maMonthsRaw) {
+          return null;
+        }
+        return {
+          order,
+          ma_type: maType ?? "",
+          ma_months: maMonthsRaw ? Number(maMonthsRaw) : 0,
+          ma_days: 0,
+          score_column: `추세${order}`,
+        };
+      })
+      .filter((rule): rule is NonNullable<typeof rule> => rule !== null);
     const data = await loadRankData({
       ticker_type: tickerType,
-      ma_type: maType,
-      ma_months: maMonths,
+      ma_rule_overrides: maRuleOverrides,
       as_of_date: asOfDate,
     });
     return NextResponse.json(data);
