@@ -19,7 +19,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.data_loader import get_latest_trading_day, prepare_price_data
-from utils.rankings import get_ticker_type_rank_defaults
+from utils.rankings import get_ticker_type_ma_rules
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_etfs
 
@@ -40,8 +40,8 @@ def load_market_data(
     if not country_code:
         raise ValueError(f"종목 타입 '{ticker_type}'의 country_code가 비어 있습니다.")
 
-    # ticker_type 기반 랭크 기본값 가져오기
-    _, ma_month = get_ticker_type_rank_defaults(ticker_type)
+    ma_rules = get_ticker_type_ma_rules(ticker_type)
+    ma_month = max(int(rule["ma_months"]) for rule in ma_rules)
 
     # 1개월 = 20거래일 기준
     lookback_days = int(ma_month * 20)

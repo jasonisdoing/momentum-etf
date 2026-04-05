@@ -7,10 +7,10 @@ import pandas as pd
 
 from utils.rankings import (
     ALLOWED_MA_TYPES,
+    build_effective_ma_rules,
     build_ticker_type_rankings,
     get_rank_months_max,
     get_recent_monthly_return_labels,
-    get_ticker_type_rank_defaults,
 )
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
@@ -123,24 +123,21 @@ def _build_missing_ticker_labels(ticker_type: str, missing_tickers: list[str]) -
 def load_rank_data(
     *,
     ticker_type: str | None = None,
-    ma_type: str | None = None,
-    ma_months: int | None = None,
+    ma_rule_overrides: list[dict[str, Any]] | None = None,
     as_of_date: str | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
-    
+
     # 요청받은 ticker_type이 현재 유효한 목록 내에 있는지 검사 (없으면 기본값 사용)
     target = str(ticker_type or "").strip().lower()
     available_ids = [str(cfg["ticker_type"]).lower() for cfg in configs_payload]
-    
+
     if target and target in available_ids:
         selected_ticker_type = target
     else:
         selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
 
-    default_ma_type, default_ma_months = get_ticker_type_rank_defaults(selected_ticker_type)
-    selected_ma_type = str(ma_type or default_ma_type).strip().upper()
-    selected_ma_months = int(ma_months or default_ma_months)
+    ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_overrides)
     selected_as_of_date: pd.Timestamp | None = None
     if as_of_date:
         try:
@@ -153,17 +150,19 @@ def load_rank_data(
 
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
-        ma_type=selected_ma_type,
-        ma_months=selected_ma_months,
+        ma_rules=ma_rules,
         as_of_date=selected_as_of_date,
     )
-    effective_as_of_date = pd.Timestamp(dataframe.attrs.get("as_of_date")).normalize() if dataframe.attrs.get("as_of_date") is not None else selected_as_of_date
+    effective_as_of_date = (
+        pd.Timestamp(dataframe.attrs.get("as_of_date")).normalize()
+        if dataframe.attrs.get("as_of_date") is not None
+        else selected_as_of_date
+    )
 
     return {
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
-        "ma_type": selected_ma_type,
-        "ma_months": selected_ma_months,
+        "ma_rules": ma_rules,
         "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
         "as_of_date": _serialize_datetime(effective_as_of_date),

@@ -19,6 +19,14 @@ type RankTickerType = {
   country_code: string;
 };
 
+type RankMaRule = {
+  order: number;
+  ma_type: string;
+  ma_months: number;
+  ma_days: number;
+  score_column: string;
+};
+
 type RankRow = {
   [key: string]: string | number | null;
   순번: string;
@@ -27,8 +35,7 @@ type RankRow = {
   티커: string;
   종목명: string;
   상장일: string;
-  추세: number | null;
-  지속: number | null;
+  점수: number | null;
   보유: string;
   현재가: number | null;
   "괴리율": number | null;
@@ -56,8 +63,7 @@ type RankRow = {
 type RankResponse = {
   ticker_types?: RankTickerType[];
   ticker_type?: string;
-  ma_type?: string;
-  ma_months?: number;
+  ma_rules?: RankMaRule[];
   ma_type_options?: string[];
   ma_months_max?: number;
   as_of_date?: string | null;
@@ -107,8 +113,7 @@ const rankGridTheme = themeQuartz
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
   ticker_type: string;
-  ma_type: string;
-  ma_months: number;
+  ma_rules: RankMaRule[];
   ma_type_options: string[];
   ma_months_max: number;
 };
@@ -183,8 +188,7 @@ export function RankManager() {
   const [selectedTickerType, setSelectedAccountId] = useState(
     rankToolbarCache?.ticker_type ?? readRememberedTickerType() ?? "",
   );
-  const [maType, setMaType] = useState(rankToolbarCache?.ma_type ?? "");
-  const [maMonths, setMaMonths] = useState(rankToolbarCache?.ma_months ?? 1);
+  const [maRules, setMaRules] = useState<RankMaRule[]>(rankToolbarCache?.ma_rules ?? []);
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
@@ -202,7 +206,7 @@ export function RankManager() {
   const [error, setError] = useState<string | null>(null);
   const deferredNameKeyword = useDeferredValue(nameKeyword);
 
-  async function load(next?: { ticker_type?: string; ma_type?: string; ma_months?: number; as_of_date?: string }) {
+  async function load(next?: { ticker_type?: string; ma_rule_overrides?: RankMaRule[]; as_of_date?: string }) {
     setLoading(true);
     setError(null);
 
@@ -211,14 +215,12 @@ export function RankManager() {
       if (next?.ticker_type) {
         search.set("ticker_type", next.ticker_type);
       }
-      if (next?.ma_type) {
-        search.set("ma_type", next.ma_type);
-      }
-      if (next?.ma_months) {
-        search.set("ma_months", String(next.ma_months));
-      }
       if (next?.as_of_date) {
         search.set("as_of_date", next.as_of_date);
+      }
+      for (const rule of next?.ma_rule_overrides ?? []) {
+        search.set(`rule${rule.order}_ma_type`, rule.ma_type);
+        search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
@@ -232,8 +234,7 @@ export function RankManager() {
       const nextAccountId = payload.ticker_type ?? "";
       setSelectedAccountId(nextAccountId);
       writeRememberedTickerType(nextAccountId);
-      setMaType(payload.ma_type ?? "");
-      setMaMonths(payload.ma_months ?? 1);
+      setMaRules(payload.ma_rules ?? []);
       setMaTypeOptions(payload.ma_type_options ?? []);
       setMaMonthsMax(payload.ma_months_max ?? 12);
       setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
@@ -241,8 +242,7 @@ export function RankManager() {
       rankToolbarCache = {
         ticker_types: payload.ticker_types ?? [],
         ticker_type: nextAccountId,
-        ma_type: payload.ma_type ?? "",
-        ma_months: payload.ma_months ?? 1,
+        ma_rules: payload.ma_rules ?? [],
         ma_type_options: payload.ma_type_options ?? [],
         ma_months_max: payload.ma_months_max ?? 12,
       };
@@ -297,6 +297,11 @@ export function RankManager() {
     }
     return gridRows.filter((row) => String(row.종목명 ?? "").toLowerCase().includes(keyword));
   }, [gridRows, deferredNameKeyword]);
+
+  const maRuleSummary = useMemo(
+    () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
+    [maRules],
+  );
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
@@ -359,13 +364,24 @@ export function RankManager() {
 
     const cumulativeColumns: ColDef<RankGridRow>[] = [
       {
-        field: "추세",
-        headerName: "추세",
+        field: "점수",
+        headerName: "점수",
         minWidth: 72,
         width: 72,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
+      ...maRules.map(
+        (rule) =>
+          ({
+            field: rule.score_column,
+            headerName: `추세${rule.order}`,
+            minWidth: 112,
+            width: 112,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+          }) as ColDef<RankGridRow>,
+      ),
       ...(selectedTickerTypeItem?.country_code !== "au"
         ? [
             {
@@ -442,14 +458,6 @@ export function RankManager() {
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
-      {
-        field: "지속",
-        headerName: "지속",
-        minWidth: 66,
-        width: 66,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 0),
-      },
       ...[
         "1달(%)",
         "2달(%)",
@@ -490,38 +498,53 @@ export function RankManager() {
 
     const monthlyLeadingColumns: ColDef<RankGridRow>[] = [
       {
-        field: "추세",
-        headerName: "추세",
+        field: "점수",
+        headerName: "점수",
         minWidth: 72,
         width: 72,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
+      ...maRules.map(
+        (rule) =>
+          ({
+            field: rule.score_column,
+            headerName: `추세${rule.order}`,
+            minWidth: 112,
+            width: 112,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+          }) as ColDef<RankGridRow>,
+      ),
     ];
 
     return [
       ...leadingColumns,
       ...(metricMode === "cumulative" ? cumulativeColumns : [...monthlyLeadingColumns, ...monthlyColumns]),
     ];
-  }, [metricMode, monthlyReturnLabels, selectedTickerTypeItem?.country_code]);
+  }, [maRules, metricMode, monthlyReturnLabels, selectedTickerTypeItem?.country_code]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
     writeRememberedTickerType(accountId);
-    void load({ ticker_type: accountId, ma_type: maType, ma_months: maMonths, as_of_date: selectedAsOfDate });
+    void load({ ticker_type: accountId, as_of_date: selectedAsOfDate });
   }
 
-  function handleMaTypeChange(nextMaType: string) {
-    void load({ ticker_type: selectedTickerType, ma_type: nextMaType, ma_months: maMonths, as_of_date: selectedAsOfDate });
+  function handleMaRuleTypeChange(order: number, nextMaType: string) {
+    const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_type: nextMaType } : rule));
+    setMaRules(nextRules);
+    void load({ ticker_type: selectedTickerType, ma_rule_overrides: nextRules, as_of_date: selectedAsOfDate });
   }
 
-  function handleMaMonthsChange(nextMaMonths: number) {
-    void load({ ticker_type: selectedTickerType, ma_type: maType, ma_months: nextMaMonths, as_of_date: selectedAsOfDate });
+  function handleMaRuleMonthsChange(order: number, nextMaMonths: number) {
+    const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_months: nextMaMonths } : rule));
+    setMaRules(nextRules);
+    void load({ ticker_type: selectedTickerType, ma_rule_overrides: nextRules, as_of_date: selectedAsOfDate });
   }
 
   function handleAsOfDateChange(nextAsOfDate: string) {
     setSelectedAsOfDate(nextAsOfDate);
-    void load({ ticker_type: selectedTickerType, ma_type: maType, ma_months: maMonths, as_of_date: nextAsOfDate });
+    void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: nextAsOfDate });
   }
 
   const blockedMessage = useMemo(() => {
@@ -595,33 +618,39 @@ export function RankManager() {
                   )}
                 </select>
 
-                <select
-                  className="form-select"
-                  style={{ width: "auto", fontWeight: 600 }}
-                  value={maType}
-                  onChange={(event) => handleMaTypeChange(event.target.value)}
-                  disabled={maTypeOptions.length === 0}
-                >
-                  {maTypeOptions.map((option) => (
-                    <option key={option} value={option}>
-                      MA: {option}
-                    </option>
-                  ))}
-                </select>
-
-                <select
-                  className="form-select"
-                  style={{ width: "auto", fontWeight: 600 }}
-                  value={String(maMonths)}
-                  onChange={(event) => handleMaMonthsChange(Number(event.target.value))}
-                  disabled={maTypeOptions.length === 0}
-                >
-                  {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                    <option key={month} value={month}>
-                      {month}개월
-                    </option>
-                  ))}
-                </select>
+                {maRules.map((rule) => (
+                  <div key={rule.order} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span className="appCodeText" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+                      {`추세${rule.order}:`}
+                    </span>
+                    <select
+                      className="form-select"
+                      style={{ width: "auto", fontWeight: 600 }}
+                      value={rule.ma_type}
+                      onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
+                      disabled={maTypeOptions.length === 0}
+                    >
+                      {maTypeOptions.map((option) => (
+                        <option key={`${rule.order}-${option}`} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                    <select
+                      className="form-select"
+                      style={{ width: "auto", fontWeight: 600 }}
+                      value={String(rule.ma_months)}
+                      onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
+                      disabled={maTypeOptions.length === 0}
+                    >
+                      {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
+                        <option key={`${rule.order}-${month}`} value={month}>
+                          {month}개월
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
                 <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
                   <button
                     type="button"
@@ -651,15 +680,19 @@ export function RankManager() {
               <div className="appMainHeaderRight">
                 <div className="appHeaderMetrics">
                   {filteredGridRows.length > 0 ? (() => {
-                    const upCount = filteredGridRows.filter((r) => (r["추세"] ?? 0) > 0).length;
+                    const upCount = filteredGridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
                     const upPct = Math.round((upCount / filteredGridRows.length) * 100);
                     return (
                       <div className="appHeaderMetric">
-                        <span>추세 상승:</span>
+                        <span>점수 양수:</span>
                         <span className="appHeaderMetricValue is-danger">{upCount}개 ({upPct}%)</span>
                       </div>
                     );
                   })() : null}
+                  <div className="appHeaderMetric">
+                    <span>기준:</span>
+                    <span className="appHeaderMetricValue">{maRuleSummary.join(" / ") || "-"}</span>
+                  </div>
                   <div className="appHeaderMetric">
                     <span>총 개수:</span>
                     <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(filteredGridRows.length)}개</span>
@@ -679,7 +712,7 @@ export function RankManager() {
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  if ((params.data?.추세 ?? 0) < 0) {
+                  if ((params.data?.점수 ?? 0) < 0) {
                     classes.push("rankNegativeTrendRow");
                   }
                   if (String(params.data?.displayTrendRank || "").startsWith("보유")) {

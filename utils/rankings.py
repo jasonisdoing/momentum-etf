@@ -28,6 +28,107 @@ logger = get_app_logger()
 MONTHLY_RETURN_LABEL_COUNT = 13
 
 
+def _build_ma_rule_score_column(order: int) -> str:
+    return f"추세{order}"
+
+
+def _normalize_ma_rules(ticker_type: str, ma_rules_raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(ma_rules_raw, list) or not ma_rules_raw:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES는 1개 이상의 배열이어야 합니다.")
+    normalized_rules: list[dict[str, Any]] = []
+    seen_orders: set[int] = set()
+
+    for index, raw_rule in enumerate(ma_rules_raw, start=1):
+        if not isinstance(raw_rule, dict):
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES[{index}]는 객체여야 합니다.")
+
+        order_raw = raw_rule.get("order")
+        if order_raw is None:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'order'가 누락되었습니다."
+            )
+        try:
+            order = int(order_raw)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] order는 정수여야 합니다: {order_raw}"
+            ) from exc
+        if order < 1:
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES[{index}] order는 1 이상이어야 합니다: {order}")
+        if order in seen_orders:
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES order가 중복되었습니다: {order}")
+        seen_orders.add(order)
+
+        ma_type = str(raw_rule.get("MA_TYPE") or "").strip().upper()
+        if not ma_type:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'MA_TYPE'가 누락되었습니다."
+            )
+        if ma_type not in ALLOWED_MA_TYPES:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_TYPE이 유효하지 않습니다: {ma_type}"
+            )
+
+        ma_months_raw = raw_rule.get("MA_MONTHS")
+        if ma_months_raw is None:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'MA_MONTHS'가 누락되었습니다."
+            )
+        try:
+            ma_months = int(ma_months_raw)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_MONTHS는 정수여야 합니다: {ma_months_raw}"
+            ) from exc
+        if ma_months < 1:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_MONTHS는 1 이상이어야 합니다: {ma_months}"
+            )
+
+        normalized_rules.append(
+            {
+                "order": order,
+                "ma_type": ma_type,
+                "ma_months": ma_months,
+                "ma_days": int(ma_months) * int(TRADING_DAYS_PER_MONTH),
+                "score_column": _build_ma_rule_score_column(order),
+            }
+        )
+
+    return sorted(normalized_rules, key=lambda item: int(item["order"]))
+
+
+def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
+    settings = get_ticker_type_settings(ticker_type)
+    ma_rules_raw = settings.get("MA_RULES")
+    if ma_rules_raw is None:
+        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_RULES'가 누락되었습니다.")
+    return _normalize_ma_rules(ticker_type, ma_rules_raw)
+
+
+def build_effective_ma_rules(
+    ticker_type: str,
+    overrides: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    base_rules = get_ticker_type_ma_rules(ticker_type)
+    if not overrides:
+        return base_rules
+
+    override_map = {int(rule["order"]): rule for rule in overrides if rule.get("order") is not None}
+    raw_rules: list[dict[str, Any]] = []
+    for rule in base_rules:
+        order = int(rule["order"])
+        override = override_map.get(order) or {}
+        raw_rules.append(
+            {
+                "order": order,
+                "MA_TYPE": override.get("ma_type", rule["ma_type"]),
+                "MA_MONTHS": override.get("ma_months", rule["ma_months"]),
+            }
+        )
+    return _normalize_ma_rules(ticker_type, raw_rules)
+
+
 def _calculate_rsi(close_series: pd.Series, period: int = 14) -> float | None:
     series = pd.to_numeric(close_series, errors="coerce").dropna()
     if len(series) < period + 1:
@@ -117,29 +218,6 @@ def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.
     if sliced.empty:
         return None
     return sliced.sort_index()
-
-
-def get_ticker_type_rank_defaults(ticker_type: str) -> tuple[str, int]:
-    settings = get_ticker_type_settings(ticker_type)
-
-    ma_type = str(settings.get("MA_TYPE") or "").strip().upper()
-    if not ma_type:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_TYPE'가 누락되었습니다.")
-    if ma_type not in ALLOWED_MA_TYPES:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_TYPE이 유효하지 않습니다: {ma_type}")
-
-    ma_months_raw = settings.get("MA_MONTHS")
-    if ma_months_raw is None:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
-
-    try:
-        ma_months = int(ma_months_raw)
-    except (TypeError, ValueError) as exc:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_MONTHS는 정수여야 합니다: {ma_months_raw}") from exc
-    if ma_months < 1:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_MONTHS는 1 이상이어야 합니다: {ma_months}")
-
-    return ma_type, ma_months
 
 
 def get_rank_months_max() -> int:
@@ -429,7 +507,11 @@ def _normalize_ranking_values(
         "고점",
         *(monthly_labels or []),
     ]
-    one_decimal_columns = ["추세", "RSI"]
+    one_decimal_columns = ["RSI"]
+    score_columns = ["점수"]
+    score_columns.extend(
+        str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
+    )
 
     def _round_if_present(column: str, digits: int) -> None:
         if column not in normalized.columns:
@@ -438,16 +520,14 @@ def _normalize_ranking_values(
         normalized[column] = series.round(digits)
 
     _round_if_present("현재가", price_digits)
-    _round_if_present("지속", 0)
-
     for column in percent_columns:
         _round_if_present(column, 2)
 
     for column in one_decimal_columns:
         _round_if_present(column, 1)
 
-    if "지속" in normalized.columns:
-        normalized["지속"] = pd.to_numeric(normalized["지속"], errors="coerce").astype("Int64")
+    for column in score_columns:
+        _round_if_present(column, 1)
 
     return normalized
 
@@ -455,8 +535,7 @@ def _normalize_ranking_values(
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
-    ma_type: str,
-    ma_months: int,
+    ma_rules: list[dict[str, Any]] | None = None,
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
@@ -517,20 +596,23 @@ def build_ticker_type_rankings(
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
-        else _load_realtime_snapshot(country_code, tickers) if realtime_allowed else {}
+        else _load_realtime_snapshot(country_code, tickers)
+        if realtime_allowed
+        else {}
     )
     fetch_elapsed = perf_counter() - fetch_started_at
     realtime_meta = None
     if realtime_allowed and realtime_snapshot_override is None:
         realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
 
-    ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
+    effective_ma_rules = ma_rules or get_ticker_type_ma_rules(ticker_type)
     rows: list[dict[str, Any]] = []
     preprocess_elapsed = 0.0
     metric_elapsed = 0.0
     process_elapsed = 0.0
 
     from utils.portfolio_io import load_all_holding_tickers
+
     held_tickers = load_all_holding_tickers()
 
     if callable(status_callback):
@@ -558,30 +640,38 @@ def build_ticker_type_rankings(
         metric_elapsed += perf_counter() - metric_started_at
 
         score_value = None
-        streak_value: int | None = None
+        ma_rule_scores = {str(rule["score_column"]): None for rule in effective_ma_rules}
 
         if effective_close_series is not None and not effective_close_series.empty:
             process_started_at = perf_counter()
-            processed = process_ticker_data(
-                ticker,
-                None,
-                ma_days=ma_days,
-                precomputed_entry={"close": effective_close_series, "open": effective_close_series},
-                ma_type=ma_type,
-                enable_data_sufficiency_check=False,
-            )
-            process_elapsed += perf_counter() - process_started_at
-            if processed is not None:
+            rule_scores: list[float] = []
+            for rule in effective_ma_rules:
+                processed = process_ticker_data(
+                    ticker,
+                    None,
+                    ma_days=int(rule["ma_days"]),
+                    precomputed_entry={"close": effective_close_series, "open": effective_close_series},
+                    ma_type=str(rule["ma_type"]),
+                    enable_data_sufficiency_check=False,
+                )
+                if processed is None:
+                    break
+
                 score_series = processed.get("ma_score")
-                streak_series = processed.get("buy_signal_days")
-                if isinstance(score_series, pd.Series) and not score_series.empty:
-                    score_raw = score_series.iloc[-1]
-                    if pd.notna(score_raw):
-                        score_value = float(score_raw)
-                if isinstance(streak_series, pd.Series) and not streak_series.empty:
-                    streak_raw = streak_series.iloc[-1]
-                    if pd.notna(streak_raw):
-                        streak_value = int(streak_raw)
+                if not isinstance(score_series, pd.Series) or score_series.empty:
+                    break
+
+                score_raw = score_series.iloc[-1]
+                if pd.isna(score_raw):
+                    break
+
+                rule_score = float(score_raw)
+                ma_rule_scores[str(rule["score_column"])] = rule_score
+                rule_scores.append(rule_score)
+
+            process_elapsed += perf_counter() - process_started_at
+            if len(rule_scores) == len(effective_ma_rules):
+                score_value = sum(rule_scores)
         elif effective_close_series is not None and len(effective_close_series.index) >= MIN_TRADING_DAYS:
             pass
 
@@ -592,9 +682,9 @@ def build_ticker_type_rankings(
                 "티커": ticker,
                 "종목명": etf.get("name", ""),
                 "상장일": etf.get("listing_date", "-"),
-                "추세": score_value,
-                "지속": streak_value,
+                "점수": score_value,
                 "보유": "보유" if ticker in held_tickers else "",
+                **ma_rule_scores,
                 **price_metrics,
             }
         )
@@ -613,7 +703,7 @@ def build_ticker_type_rankings(
         return float(value)
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        trend = row.get("추세")
+        trend = row.get("점수")
         return (
             1 if trend is None or pd.isna(trend) else 0,
             _to_sortable_score(trend),
@@ -656,6 +746,7 @@ def build_ticker_type_rankings(
         df.attrs["cache_updated_at"] = latest_cache_updated_at
     df.attrs["latest_trading_day"] = latest_trading_day
     df.attrs["as_of_date"] = selected_as_of_date
+    df.attrs["ma_rules"] = effective_ma_rules
     dataframe_elapsed = perf_counter() - dataframe_started_at
     total_elapsed = perf_counter() - started_at
     logger.info(
@@ -675,8 +766,9 @@ def build_ticker_type_rankings(
 __all__ = [
     "ALLOWED_MA_TYPES",
     "build_recent_monthly_return_metrics",
+    "build_effective_ma_rules",
     "build_ticker_type_rankings",
-    "get_ticker_type_rank_defaults",
     "get_rank_months_max",
     "get_recent_monthly_return_labels",
+    "get_ticker_type_ma_rules",
 ]
