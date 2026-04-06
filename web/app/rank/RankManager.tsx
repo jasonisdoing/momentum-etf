@@ -30,6 +30,8 @@ type RankMaRule = {
 type RankRow = {
   [key: string]: string | number | null;
   순번: string;
+  순위: number | null;
+  이전순위: number | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -74,6 +76,7 @@ type RankResponse = {
   cache_updated_at?: string | null;
   ranking_computed_at?: string | null;
   realtime_fetched_at?: string | null;
+  previous_trading_day?: string | null;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -82,7 +85,6 @@ type RankResponse = {
 
 type RankGridRow = RankRow & {
   id: string;
-  displayTrendRank: string;
 };
 
 const rankGridTheme = themeQuartz
@@ -269,26 +271,14 @@ export function RankManager() {
     [ticker_types, selectedTickerType],
   );
 
-  const gridRows = useMemo<RankGridRow[]>(() => {
-    let holdRank = 0;
-    let waitRank = 0;
-    return rows.map((row, index) => {
-      const isHold = Boolean(row["보유"] && String(row["보유"]).trim() !== "");
-      let displayTrendRank = "";
-      if (isHold) {
-        holdRank++;
-        displayTrendRank = `보유 ${holdRank}`;
-      } else {
-        waitRank++;
-        displayTrendRank = `대기 ${waitRank}`;
-      }
-      return {
+  const gridRows = useMemo<RankGridRow[]>(
+    () =>
+      rows.map((row, index) => ({
         ...row,
-        displayTrendRank,
         id: `${row.티커}-${row.순번 || "none"}-${index}`,
-      };
-    });
-  }, [rows]);
+      })),
+    [rows],
+  );
 
   const filteredGridRows = useMemo(() => {
     const keyword = deferredNameKeyword.trim().toLowerCase();
@@ -306,21 +296,43 @@ export function RankManager() {
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
       {
-        field: "displayTrendRank",
-        headerName: "보유",
+        field: "순위",
+        headerName: "순위",
         minWidth: 72,
         width: 72,
         cellStyle: { textAlign: "center" },
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const isHold = String(params.value || "").startsWith("보유");
+        cellRenderer: (params: { value: number | null | undefined }) => {
           return (
-            <span
-              style={{
-                fontWeight: 700,
-                color: isHold ? "inherit" : "#888888",
-              }}
-            >
-              {String(params.value || "")}
+            <span style={{ fontWeight: 700 }}>{params.value == null ? "-" : formatNumber(params.value, 0)}</span>
+          );
+        },
+      },
+      {
+        field: "이전순위",
+        headerName: "이전순위",
+        minWidth: 98,
+        width: 98,
+        cellStyle: { textAlign: "center" },
+        sortable: false,
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          const currentRank = params.data?.순위 ?? null;
+          const previousRank = params.value ?? null;
+          if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
+            return <span style={{ color: "#98a2b3", fontWeight: 600 }}>-</span>;
+          }
+
+          if (currentRank === previousRank) {
+            return (
+              <span style={{ color: "#98a2b3", fontWeight: 600 }}>
+                {previousRank} -
+              </span>
+            );
+          }
+
+          const isRise = currentRank < previousRank;
+          return (
+            <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
+              {previousRank} {isRise ? "▲" : "▼"}
             </span>
           );
         },
@@ -715,7 +727,7 @@ export function RankManager() {
                   if ((params.data?.점수 ?? 0) < 0) {
                     classes.push("rankNegativeTrendRow");
                   }
-                  if (String(params.data?.displayTrendRank || "").startsWith("보유")) {
+                  if (String(params.data?.보유 || "").trim() !== "") {
                     classes.push("rankHeldRow");
                   }
                   return classes.join(" ");
