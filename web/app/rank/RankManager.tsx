@@ -33,6 +33,7 @@ type RankRow = {
   순위: number | null;
   이전순위: number | null;
   추천: string | null;
+  추천요약: string | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -346,6 +347,25 @@ export function RankManager() {
         },
       },
       {
+        field: "추천요약",
+        headerName: "중복",
+        minWidth: 92,
+        width: 92,
+        sortable: false,
+        cellStyle: { textAlign: "center" },
+        cellRenderer: (params: { value: string | null | undefined }) => {
+          const value = String(params.value ?? "").trim();
+          if (!value) {
+            return "";
+          }
+          return (
+            <span style={{ color: "#182433", fontWeight: 400 }} title={value}>
+              {value}
+            </span>
+          );
+        },
+      },
+      {
         field: "버킷",
         headerName: "버킷",
         minWidth: 108,
@@ -519,9 +539,9 @@ export function RankManager() {
 
     const duplicateColumn: ColDef<RankGridRow> = {
       field: "추천",
-      headerName: "중복",
-      minWidth: 320,
-      width: 320,
+      headerName: "중복상세",
+      minWidth: 340,
+      width: 340,
       sortable: false,
       cellRenderer: (params: { value: string | null | undefined }) => {
         const value = String(params.value ?? "").trim();
