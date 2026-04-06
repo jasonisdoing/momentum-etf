@@ -355,10 +355,8 @@ function StableInlineInput({
   const [localValue, setLocalValue] = useState(initialValue);
 
   useEffect(() => {
-    if (initialValue !== localValue) {
-      setLocalValue(initialValue);
-    }
-  }, [initialValue, localValue]);
+    setLocalValue(initialValue);
+  }, [initialValue]);
 
   return (
     <input
@@ -369,11 +367,22 @@ function StableInlineInput({
       value={localValue}
       autoFocus={autoFocus}
       disabled={disabled}
+      onMouseDown={(event) => {
+        event.stopPropagation();
+      }}
+      onClick={(event) => {
+        event.stopPropagation();
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+      }}
       onChange={(event) => {
+        event.stopPropagation();
         setLocalValue(event.target.value);
         onChange?.(event.target.value);
       }}
       onKeyDown={(event) => {
+        event.stopPropagation();
         if (event.nativeEvent.isComposing) return;
         if (event.key === "Enter") {
           onSave?.(localValue);
@@ -751,9 +760,28 @@ function AccountHoldingsDetailPanel({
               <StableInlineInput
                 className="form-control form-control-sm assetsInlineInput assetsInlineInputTicker"
                 initialValue={addingRow?.ticker ?? ""}
+                onChange={(value) =>
+                  setAddingRow((previous) =>
+                    previous
+                      ? {
+                          ...previous,
+                          ticker: value,
+                        }
+                      : null,
+                  )
+                }
                 onSave={handleValidateTicker}
               />
-              <button className="btn btn-outline-primary btn-sm assetsInlineButton" onClick={() => void handleValidateTicker()}>
+              <button
+                className="btn btn-outline-primary btn-sm assetsInlineButton"
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleValidateTicker();
+                }}
+              >
                 확인
               </button>
             </div>
