@@ -532,6 +532,45 @@ def _normalize_ranking_values(
     return normalized
 
 
+def _calculate_signed_percentile_score(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    result = pd.Series(index=series.index, dtype=float)
+
+    positive_mask = numeric > 0
+    negative_mask = numeric < 0
+    zero_mask = numeric == 0
+
+    if positive_mask.any():
+        positive_values = numeric[positive_mask]
+        result.loc[positive_mask] = positive_values.rank(method="average", pct=True) * 100.0
+
+    if negative_mask.any():
+        negative_values = numeric[negative_mask].abs()
+        result.loc[negative_mask] = -(negative_values.rank(method="average", pct=True) * 100.0)
+
+    if zero_mask.any():
+        result.loc[zero_mask] = 0.0
+
+    return result
+
+
+def _build_composite_score(df: pd.DataFrame, ma_rules: list[dict[str, Any]]) -> pd.Series:
+    score_columns = [str(rule["score_column"]) for rule in ma_rules]
+    if not score_columns:
+        return pd.Series(index=df.index, dtype=float)
+
+    normalized_parts = []
+    valid_mask = pd.Series(True, index=df.index, dtype=bool)
+    for column in score_columns:
+        part = _calculate_signed_percentile_score(df[column])
+        normalized_parts.append(part)
+        valid_mask &= part.notna()
+
+    composite = pd.concat(normalized_parts, axis=1).sum(axis=1, min_count=len(score_columns))
+    composite.loc[~valid_mask] = pd.NA
+    return composite
+
+
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
@@ -639,12 +678,10 @@ def build_ticker_type_rankings(
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
-        score_value = None
         ma_rule_scores = {str(rule["score_column"]): None for rule in effective_ma_rules}
 
         if effective_close_series is not None and not effective_close_series.empty:
             process_started_at = perf_counter()
-            rule_scores: list[float] = []
             for rule in effective_ma_rules:
                 processed = process_ticker_data(
                     ticker,
@@ -667,11 +704,8 @@ def build_ticker_type_rankings(
 
                 rule_score = float(score_raw)
                 ma_rule_scores[str(rule["score_column"])] = rule_score
-                rule_scores.append(rule_score)
 
             process_elapsed += perf_counter() - process_started_at
-            if len(rule_scores) == len(effective_ma_rules):
-                score_value = sum(rule_scores)
         elif effective_close_series is not None and len(effective_close_series.index) >= MIN_TRADING_DAYS:
             pass
 
@@ -682,7 +716,7 @@ def build_ticker_type_rankings(
                 "티커": ticker,
                 "종목명": etf.get("name", ""),
                 "상장일": etf.get("listing_date", "-"),
-                "점수": score_value,
+                "점수": None,
                 "보유": "보유" if ticker in held_tickers else "",
                 **ma_rule_scores,
                 **price_metrics,
@@ -693,6 +727,8 @@ def build_ticker_type_rankings(
     df = pd.DataFrame(rows)
     if df.empty:
         return df
+
+    df["점수"] = _build_composite_score(df, effective_ma_rules)
 
     realtime_active = bool(realtime_snapshot)
     ranking_computed_at = datetime.now()
