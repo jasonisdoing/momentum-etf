@@ -318,12 +318,12 @@ export function RankManager() {
           const currentRank = params.data?.순위 ?? null;
           const previousRank = params.value ?? null;
           if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
-            return <span style={{ color: "#98a2b3", fontWeight: 600 }}>-</span>;
+            return <span style={{ fontWeight: 600 }}>-</span>;
           }
 
           if (currentRank === previousRank) {
             return (
-              <span style={{ color: "#98a2b3", fontWeight: 600 }}>
+              <span style={{ fontWeight: 600 }}>
                 {previousRank} -
               </span>
             );
@@ -354,7 +354,7 @@ export function RankManager() {
           <span className="appCodeText">{String(params.value ?? "-")}</span>
         ),
       },
-      { field: "종목명", headerName: "종목명", minWidth: 220, flex: 1 },
+      { field: "종목명", headerName: "종목명", minWidth: 260, flex: 1.2 },
       {
         field: "현재가",
         headerName: "현재가",
