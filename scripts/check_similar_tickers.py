@@ -138,7 +138,7 @@ def build_similarity_groups(
     for i in range(len(columns)):
         for j in range(i + 1, len(columns)):
             t_i, t_j = columns[i], columns[j]
-            if abs(corr_matrix.loc[t_i, t_j]) >= threshold:
+            if float(corr_matrix.loc[t_i, t_j]) >= threshold:
                 adj[t_i].add(t_j)
                 adj[t_j].add(t_i)
 
@@ -182,7 +182,7 @@ def build_similarity_groups(
         members = []
         for member in group_stats[1:]:
             corr = float(corr_matrix.loc[leader.ticker, member.ticker])
-            if abs(corr) >= threshold:
+            if corr >= threshold:
                 members.append((member.ticker, corr))
 
         if members:

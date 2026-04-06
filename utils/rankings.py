@@ -11,6 +11,8 @@ import pandas as pd
 from config import (
     BUCKET_MAPPING,
     CACHE_START_DATE,
+    RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS,
+    RANK_RECOMMEND_SIMILARITY_THRESHOLD,
     MARKET_SCHEDULES,
     MIN_TRADING_DAYS,
     TRADING_DAYS_PER_MONTH,
@@ -571,6 +573,50 @@ def _build_composite_score(df: pd.DataFrame, ma_rules: list[dict[str, Any]]) -> 
     return composite
 
 
+def _build_similarity_exclusion_map(
+    close_series_map: dict[str, pd.Series],
+    ranked_tickers: list[str],
+    ticker_name_map: dict[str, str],
+    *,
+    lookback_days: int = RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS,
+    threshold: float = RANK_RECOMMEND_SIMILARITY_THRESHOLD,
+) -> dict[str, str]:
+    eligible_series: dict[str, pd.Series] = {}
+    for ticker, series in close_series_map.items():
+        normalized = pd.to_numeric(series, errors="coerce").dropna()
+        if len(normalized) < 20:
+            continue
+        eligible_series[ticker] = normalized.tail(lookback_days)
+
+    if len(eligible_series) < 2:
+        return {}
+
+    prices_df = pd.DataFrame(eligible_series).dropna(how="all")
+    returns_df = prices_df.pct_change().dropna()
+    if returns_df.empty or len(returns_df.columns) < 2:
+        return {}
+
+    corr_matrix = returns_df.corr()
+    exclusion_map: dict[str, str] = {}
+    excluded: set[str] = set()
+
+    for leader in ranked_tickers:
+        if leader in excluded or leader not in corr_matrix.columns:
+            continue
+        leader_name = str(ticker_name_map.get(leader, leader)).strip() or leader
+        for candidate in ranked_tickers:
+            if candidate == leader or candidate in excluded or candidate not in corr_matrix.columns:
+                continue
+            correlation = corr_matrix.loc[leader, candidate]
+            if pd.isna(correlation):
+                continue
+            if float(correlation) >= threshold:
+                exclusion_map[candidate] = f"{leader_name}({leader}) 중복"
+                excluded.add(candidate)
+
+    return exclusion_map
+
+
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
@@ -646,6 +692,7 @@ def build_ticker_type_rankings(
 
     effective_ma_rules = ma_rules or get_ticker_type_ma_rules(ticker_type)
     rows: list[dict[str, Any]] = []
+    effective_close_series_map: dict[str, pd.Series] = {}
     preprocess_elapsed = 0.0
     metric_elapsed = 0.0
     process_elapsed = 0.0
@@ -667,6 +714,8 @@ def build_ticker_type_rankings(
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
         effective_close_series = _build_effective_close_series(base_close_series, realtime_entry)
+        if effective_close_series is not None and not effective_close_series.empty:
+            effective_close_series_map[ticker] = effective_close_series
         preprocess_elapsed += perf_counter() - preprocess_started_at
 
         metric_started_at = perf_counter()
@@ -770,6 +819,19 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
+    ranked_tickers = [str(item).strip().upper() for item in df["티커"].tolist()]
+    ticker_name_map = {
+        str(row["티커"]).strip().upper(): str(row["종목명"]).strip()
+        for _, row in df[["티커", "종목명"]].iterrows()
+    }
+    similarity_exclusion_map = _build_similarity_exclusion_map(
+        effective_close_series_map,
+        ranked_tickers,
+        ticker_name_map,
+        lookback_days=60,
+        threshold=0.9,
+    )
+    df["추천"] = df["티커"].map(lambda ticker: similarity_exclusion_map.get(str(ticker).strip().upper(), ""))
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

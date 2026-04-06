@@ -32,6 +32,7 @@ type RankRow = {
   순번: string;
   순위: number | null;
   이전순위: number | null;
+  추천: string | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -334,6 +335,24 @@ export function RankManager() {
           return (
             <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
               {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
+            </span>
+          );
+        },
+      },
+      {
+        field: "추천",
+        headerName: "추천",
+        minWidth: 220,
+        width: 220,
+        sortable: false,
+        cellRenderer: (params: { value: string | null | undefined }) => {
+          const value = String(params.value ?? "").trim();
+          if (!value) {
+            return "";
+          }
+          return (
+            <span className="rankNameCellText" style={{ color: "#d63939", fontWeight: 700 }} title={value}>
+              {value}
             </span>
           );
         },
