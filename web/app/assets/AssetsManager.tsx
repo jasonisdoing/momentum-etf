@@ -32,6 +32,7 @@ type HoldingsRow = {
   target_ratio?: number | null;
   target_quantity?: number | null;
   target_amount?: number | null;
+  sort_order?: number | null;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -109,8 +110,8 @@ const assetsGridTheme = themeQuartz.withPart(iconSetQuartzBold).withParams({
   iconSize: 18,
 });
 
-function buildGridRowId(row: Pick<HoldingsRow, "ticker" | "account_id">, index: number): string {
-  return `${row.account_id}-${row.ticker}-${index}`;
+function buildGridRowId(row: Pick<HoldingsRow, "ticker" | "account_id">): string {
+  return `${row.account_id}-${row.ticker}`;
 }
 
 function buildDirtyCellKey(rowId: string, field: string): string {
@@ -331,6 +332,37 @@ function formatAccountCash(summary: AccountSummary): string {
   return formatKrw(summary.cash_balance_krw);
 }
 
+
+function reorderRowsByTickers(rows: HoldingsRow[], orderedTickers: string[]): HoldingsRow[] {
+  const normalizedTickers = orderedTickers.map((ticker) => String(ticker || "").trim().toUpperCase());
+  const rowMap = new Map(
+    rows
+      .filter((row) => String(row.ticker || "").trim().toUpperCase() !== "IS")
+      .map((row) => [String(row.ticker || "").trim().toUpperCase(), row] as const),
+  );
+  const orderedRows: HoldingsRow[] = [];
+  const seen = new Set<string>();
+
+  for (const ticker of normalizedTickers) {
+    const row = rowMap.get(ticker);
+    if (!row || seen.has(ticker)) {
+      continue;
+    }
+    orderedRows.push({ ...row });
+    seen.add(ticker);
+  }
+
+  const remainingRows = rows.filter((row) => {
+    const ticker = String(row.ticker || "").trim().toUpperCase();
+    return ticker === "IS" || !seen.has(ticker);
+  });
+
+  return [...orderedRows, ...remainingRows.map((row) => ({ ...row }))].map((row, index) => ({
+    ...row,
+    sort_order: index,
+  }));
+}
+
 const ASSETS_WEIGHT_TEXT_COLOR = "#7952b3";
 
 function StableInlineInput({
@@ -419,19 +451,40 @@ function AccountHoldingsDetailPanel({
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [processingId, setProcessingId] = useState<string | null>(null);
-  const [savingDirtyRows, setSavingDirtyRows] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
   const targetRatioRef = useRef<HTMLInputElement>(null);
+  const rowsRef = useRef<HoldingsRow[]>(initialRows);
+  const childSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const childSavingRowIdsRef = useRef<Set<string>>(new Set());
+  const childQueuedRowIdsRef = useRef<Set<string>>(new Set());
+  const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reorderSavingRef = useRef(false);
+  const reorderQueuedRef = useRef(false);
 
   useEffect(() => {
     setRows(initialRows);
+    rowsRef.current = initialRows;
     setDirtyRowIds([]);
     setDirtyCellKeys([]);
     setSelectedRowIds([]);
     setEditingRowId(null);
     setAddingRow(null);
   }, [initialRows]);
+
+  useEffect(() => {
+    rowsRef.current = rows;
+  }, [rows]);
+
+  useEffect(() => {
+    return () => {
+      childSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+      childSaveTimersRef.current.clear();
+      if (reorderSaveTimerRef.current) {
+        clearTimeout(reorderSaveTimerRef.current);
+      }
+    };
+  }, []);
 
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) => Boolean(row && row.id !== "__adding__" && row.ticker !== "IS"),
@@ -442,25 +495,11 @@ function AccountHoldingsDetailPanel({
     const baseRows = rows
       .map((row, index) => ({
         ...row,
-        id: buildGridRowId(row, index),
+        id: buildGridRowId(row),
         quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
         average_buy_price: safeParseFloat(row.average_buy_price),
         target_ratio: row.target_ratio ?? 0,
-      }))
-      .sort((left, right) => {
-        if (left.bucket_id !== right.bucket_id) {
-          return left.bucket_id - right.bucket_id;
-        }
-        if (left.weight_pct !== right.weight_pct) {
-          return right.weight_pct - left.weight_pct;
-        }
-        const leftDaily = left.daily_change_pct ?? -999;
-        const rightDaily = right.daily_change_pct ?? -999;
-        if (leftDaily !== rightDaily) {
-          return rightDaily - leftDaily;
-        }
-        return left.ticker.localeCompare(right.ticker);
-      });
+      }));
 
     if (!addingRow) {
       return baseRows;
@@ -491,7 +530,6 @@ function AccountHoldingsDetailPanel({
     ];
   }, [addingRow, rows, summary.account_id, summary.currency, summary.name]);
 
-  const hasDirtyChanges = dirtyRowIds.length > 0;
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
 
@@ -622,34 +660,135 @@ function AccountHoldingsDetailPanel({
     }
   }, [summary.account_id]);
 
-  const handleSaveChanges = useCallback(async () => {
-    if ((!dirtyRowIds.length && !addingRow) || savingDirtyRows) {
+  const clearDirtyRowState = useCallback((rowId: string) => {
+    setDirtyRowIds((previous) => previous.filter((id) => id !== rowId));
+    setDirtyCellKeys((previous) => previous.filter((key) => !key.startsWith(`${rowId}::`)));
+  }, []);
+
+  const silentlySaveRow = useCallback(async (rowId: string) => {
+    if (childSavingRowIdsRef.current.has(rowId)) {
+      childQueuedRowIdsRef.current.add(rowId);
       return;
     }
 
-    setSavingDirtyRows(true);
+    const sourceRow = rowsRef.current.find((row) => buildGridRowId(row) === rowId);
+    if (!sourceRow) {
+      clearDirtyRowState(rowId);
+      return;
+    }
+
+    childSavingRowIdsRef.current.add(rowId);
     try {
-      if (addingRow) {
-        setProcessingId("__adding__");
-        await processAddingRow();
-      }
-
-      const dirtyRows = gridRows.filter((row) => dirtyRowIds.includes(row.id) && row.id !== "__adding__");
-      for (const row of dirtyRows) {
-        setProcessingId(row.id);
-        await processRowUpdate(row);
-      }
-
-      await onReload();
-      toast.success("변경사항 저장 완료");
+      await processRowUpdate({
+        ...sourceRow,
+        id: rowId,
+        quantity: typeof sourceRow.quantity === "number" ? sourceRow.quantity : parseInt(String(sourceRow.quantity), 10) || 0,
+        average_buy_price: safeParseFloat(sourceRow.average_buy_price),
+        target_ratio: sourceRow.target_ratio ?? 0,
+      });
+      clearDirtyRowState(rowId);
     } catch (error) {
       await onReload();
       toast.error(error instanceof Error ? error.message : "변경사항 저장에 실패했습니다.");
     } finally {
-      setProcessingId(null);
-      setSavingDirtyRows(false);
+      childSavingRowIdsRef.current.delete(rowId);
+      if (childQueuedRowIdsRef.current.has(rowId)) {
+        childQueuedRowIdsRef.current.delete(rowId);
+        const nextTimer = setTimeout(() => {
+          childSaveTimersRef.current.delete(rowId);
+          void silentlySaveRow(rowId);
+        }, 400);
+        childSaveTimersRef.current.set(rowId, nextTimer);
+      }
     }
-  }, [addingRow, dirtyRowIds, gridRows, onReload, processAddingRow, processRowUpdate, savingDirtyRows, toast]);
+  }, [clearDirtyRowState, onReload, processRowUpdate, toast]);
+
+  const scheduleSilentRowSave = useCallback((rowId: string) => {
+    const currentTimer = childSaveTimersRef.current.get(rowId);
+    if (currentTimer) {
+      clearTimeout(currentTimer);
+    }
+    const nextTimer = setTimeout(() => {
+      childSaveTimersRef.current.delete(rowId);
+      void silentlySaveRow(rowId);
+    }, 700);
+    childSaveTimersRef.current.set(rowId, nextTimer);
+  }, [silentlySaveRow]);
+
+  const persistRowOrder = useCallback(async (orderedRows: HoldingsRow[]) => {
+    const orderedTickers = orderedRows
+      .map((row) => String(row.ticker || "").trim().toUpperCase())
+      .filter((ticker) => ticker && ticker !== "IS");
+
+    if (!orderedTickers.length) {
+      return;
+    }
+
+    if (reorderSavingRef.current) {
+      reorderQueuedRef.current = true;
+      return;
+    }
+
+    reorderSavingRef.current = true;
+    try {
+      const response = await fetch("/api/assets", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reorder",
+          account_id: summary.account_id,
+          ordered_tickers: orderedTickers,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "순서 저장에 실패했습니다.");
+      }
+    } catch (error) {
+      await onReload();
+      toast.error(error instanceof Error ? error.message : "순서 저장에 실패했습니다.");
+    } finally {
+      reorderSavingRef.current = false;
+      if (reorderQueuedRef.current) {
+        reorderQueuedRef.current = false;
+        const nextRows = rowsRef.current;
+        const nextTimer = setTimeout(() => {
+          reorderSaveTimerRef.current = null;
+          void persistRowOrder(nextRows);
+        }, 400);
+        reorderSaveTimerRef.current = nextTimer;
+      }
+    }
+  }, [onReload, summary.account_id, toast]);
+
+  const scheduleSilentReorderSave = useCallback((orderedRows: HoldingsRow[]) => {
+    if (reorderSaveTimerRef.current) {
+      clearTimeout(reorderSaveTimerRef.current);
+    }
+    const nextTimer = setTimeout(() => {
+      reorderSaveTimerRef.current = null;
+      void persistRowOrder(orderedRows);
+    }, 700);
+    reorderSaveTimerRef.current = nextTimer;
+  }, [persistRowOrder]);
+
+  const handleSaveChanges = useCallback(async () => {
+    if (!addingRow) {
+      return;
+    }
+
+    try {
+      setProcessingId("__adding__");
+      await processAddingRow();
+      await onReload();
+      toast.success("종목 추가 완료");
+    } catch (error) {
+      await onReload();
+      toast.error(error instanceof Error ? error.message : "종목 추가에 실패했습니다.");
+    } finally {
+      setProcessingId(null);
+    }
+  }, [addingRow, onReload, processAddingRow, toast]);
 
   const handleDeleteSelected = useCallback(async () => {
     if (!selectedRowIds.length) {
@@ -696,8 +835,8 @@ function AccountHoldingsDetailPanel({
     }
 
     setRows((previous) =>
-      previous.map((currentRow, index) => {
-        if (buildGridRowId(currentRow, index) !== row.id) {
+      previous.map((currentRow) => {
+        if (buildGridRowId(currentRow) !== row.id) {
           return currentRow;
         }
         return {
@@ -713,9 +852,23 @@ function AccountHoldingsDetailPanel({
       const dirtyCellKey = buildDirtyCellKey(row.id, field);
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
-  }, [isEditableHoldingRow]);
+    scheduleSilentRowSave(row.id);
+  }, [isEditableHoldingRow, scheduleSilentRowSave]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
+    {
+      colId: "drag",
+      headerName: "",
+      width: 42,
+      maxWidth: 42,
+      pinned: "left",
+      sortable: false,
+      resizable: false,
+      suppressMovable: true,
+      rowDrag: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+      cellClass: "assetsDragCell",
+      valueGetter: () => "",
+    },
     {
       field: "bucket",
       headerName: "버킷",
@@ -1067,14 +1220,14 @@ function AccountHoldingsDetailPanel({
           <button
             className="btn btn-success btn-sm px-3 fw-bold"
             onClick={() => void handleSaveChanges()}
-            disabled={(!hasDirtyChanges && !hasPendingAdd) || savingDirtyRows || processingId === "__deleting__"}
+            disabled={!hasPendingAdd || processingId === "__adding__" || processingId === "__deleting__"}
           >
             <IconCheck size={16} /> 저장
           </button>
           <button
             className="btn btn-outline-danger btn-sm px-3 fw-bold"
             onClick={() => void handleDeleteSelected()}
-            disabled={!hasSelectedRows || savingDirtyRows || processingId === "__deleting__"}
+            disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
           >
             <IconTrash size={16} /> 삭제
           </button>
@@ -1084,7 +1237,7 @@ function AccountHoldingsDetailPanel({
         <AppAgGrid
           rowData={gridRows}
           columnDefs={columns}
-          loading={savingDirtyRows || processingId === "__deleting__"}
+          loading={processingId === "__adding__" || processingId === "__deleting__"}
           minHeight="100%"
           className="assetsAgGrid assetsChildAgGrid"
           theme={assetsGridTheme}
@@ -1102,6 +1255,8 @@ function AccountHoldingsDetailPanel({
             suppressMovableColumns: true,
             ensureDomOrder: true,
             stopEditingWhenCellsLoseFocus: true,
+            rowDragManaged: true,
+            animateRows: true,
             rowSelection: {
               mode: "multiRow",
               checkboxes: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
@@ -1144,6 +1299,27 @@ function AccountHoldingsDetailPanel({
               }
               handleCellValueChanged(params.data, params.colDef.field);
             },
+            onRowDragEnd: (params) => {
+              const orderedTickers: string[] = [];
+              params.api.forEachNode((node) => {
+                const ticker = String(node.data?.ticker || "").trim().toUpperCase();
+                if (!ticker || ticker === "IS") {
+                  return;
+                }
+                orderedTickers.push(ticker);
+              });
+              if (!orderedTickers.length) {
+                return;
+              }
+              setRows((previous) => {
+                const nextRows = reorderRowsByTickers(previous, orderedTickers);
+                rowsRef.current = nextRows;
+                return nextRows;
+              });
+              const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
+              rowsRef.current = nextRows;
+              scheduleSilentReorderSave(nextRows);
+            },
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
               assetsEditingRow: (params) => Boolean(params.data?.id && params.data.id === editingRowId),
@@ -1161,10 +1337,12 @@ export function AssetsManager() {
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [parentDirtyAccountIds, setParentDirtyAccountIds] = useState<string[]>([]);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
-  const [savingParents, setSavingParents] = useState(false);
+  const summariesRef = useRef<AccountSummary[]>([]);
+  const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
+  const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1177,7 +1355,6 @@ export function AssetsManager() {
       setAllRows(payload.rows ?? []);
       setSummaries(payload.account_summaries ?? []);
       setExpandedId((current) => current ?? payload.account_summaries?.[0]?.account_id ?? null);
-      setParentDirtyAccountIds([]);
       setParentDirtyCellKeys([]);
       setEditingParentId(null);
     } catch (error) {
@@ -1190,6 +1367,17 @@ export function AssetsManager() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    summariesRef.current = summaries;
+  }, [summaries]);
+
+  useEffect(() => {
+    return () => {
+      parentSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+      parentSaveTimersRef.current.clear();
+    };
+  }, []);
 
   const groupedRows = useMemo(() => {
     const grouped = new Map<string, HoldingsRow[]>();
@@ -1245,6 +1433,76 @@ export function AssetsManager() {
     [summaries],
   );
 
+  const isDirtyParentCell = useCallback(
+    (rowId: string | undefined, field: string) => Boolean(rowId && parentDirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
+    [parentDirtyCellKeys],
+  );
+
+  const clearDirtyParentState = useCallback((accountId: string) => {
+    setParentDirtyCellKeys((previous) => previous.filter((key) => !key.startsWith(`${accountId}::`)));
+  }, []);
+
+  const silentlySaveParent = useCallback(async (accountId: string) => {
+    if (parentSavingAccountIdsRef.current.has(accountId)) {
+      parentQueuedAccountIdsRef.current.add(accountId);
+      return;
+    }
+
+    const summary = summariesRef.current.find((item) => item.account_id === accountId);
+    if (!summary) {
+      clearDirtyParentState(accountId);
+      return;
+    }
+
+    parentSavingAccountIdsRef.current.add(accountId);
+    try {
+      const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
+      const response = await fetch("/api/assets", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: summary.account_id,
+          total_principal: summary.total_principal,
+          cash_balance_krw: isAud ? 0 : summary.cash_balance_krw,
+          cash_balance_native: isAud ? summary.cash_balance_native : summary.cash_balance_krw,
+          cash_currency: summary.cash_currency,
+          intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
+          intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error || "계좌 저장에 실패했습니다.");
+      }
+      clearDirtyParentState(accountId);
+    } catch (error) {
+      await load();
+      toast.error(error instanceof Error ? error.message : "계좌 저장에 실패했습니다.");
+    } finally {
+      parentSavingAccountIdsRef.current.delete(accountId);
+      if (parentQueuedAccountIdsRef.current.has(accountId)) {
+        parentQueuedAccountIdsRef.current.delete(accountId);
+        const nextTimer = setTimeout(() => {
+          parentSaveTimersRef.current.delete(accountId);
+          void silentlySaveParent(accountId);
+        }, 400);
+        parentSaveTimersRef.current.set(accountId, nextTimer);
+      }
+    }
+  }, [clearDirtyParentState, load, toast]);
+
+  const scheduleSilentParentSave = useCallback((accountId: string) => {
+    const currentTimer = parentSaveTimersRef.current.get(accountId);
+    if (currentTimer) {
+      clearTimeout(currentTimer);
+    }
+    const nextTimer = setTimeout(() => {
+      parentSaveTimersRef.current.delete(accountId);
+      void silentlySaveParent(accountId);
+    }, 700);
+    parentSaveTimersRef.current.set(accountId, nextTimer);
+  }, [silentlySaveParent]);
+
   const handleParentCellValueChanged = useCallback((row: ParentGridRow | undefined, field: string | undefined) => {
     if (!row || isDetailRow(row) || !field) {
       return;
@@ -1269,54 +1527,10 @@ export function AssetsManager() {
         };
       }),
     );
-    setParentDirtyAccountIds((previous) => (previous.includes(row.account_id) ? previous : [...previous, row.account_id]));
     const dirtyCellKey = buildDirtyCellKey(row.account_id, field);
     setParentDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
-  }, []);
-
-  const isDirtyParentCell = useCallback(
-    (rowId: string | undefined, field: string) => Boolean(rowId && parentDirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
-    [parentDirtyCellKeys],
-  );
-
-  const handleSaveParents = useCallback(async () => {
-    if (!parentDirtyAccountIds.length || savingParents) {
-      return;
-    }
-
-    setSavingParents(true);
-    try {
-      const dirtySummaries = summaries.filter((summary) => parentDirtyAccountIds.includes(summary.account_id));
-      for (const summary of dirtySummaries) {
-        const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
-        const response = await fetch("/api/assets", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            account_id: summary.account_id,
-            total_principal: summary.total_principal,
-            cash_balance_krw: isAud ? 0 : summary.cash_balance_krw,
-            cash_balance_native: isAud ? summary.cash_balance_native : summary.cash_balance_krw,
-            cash_currency: summary.cash_currency,
-            intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
-            intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
-          }),
-        });
-        const payload = await response.json();
-        if (!response.ok) {
-          throw new Error(payload.error || "계좌 저장에 실패했습니다.");
-        }
-      }
-
-      await load();
-      toast.success("계좌 정보 저장 완료");
-    } catch (error) {
-      await load();
-      toast.error(error instanceof Error ? error.message : "계좌 저장에 실패했습니다.");
-    } finally {
-      setSavingParents(false);
-    }
-  }, [load, parentDirtyAccountIds, savingParents, summaries, toast]);
+    scheduleSilentParentSave(row.account_id);
+  }, [scheduleSilentParentSave]);
 
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
@@ -1588,22 +1802,11 @@ export function AssetsManager() {
               </div>
             </div>
           </div>
-          <div className="appActionHeader flex-shrink-0">
-            <div className="appActionHeaderInner">
-              <button
-                className="btn btn-success btn-sm px-3 fw-bold"
-                onClick={() => void handleSaveParents()}
-                disabled={!parentDirtyAccountIds.length || savingParents}
-              >
-                <IconCheck size={16} /> 저장
-              </button>
-            </div>
-          </div>
           <div className="card-body p-2 appTableCardBodyFill">
             <AppAgGrid
               rowData={parentRows}
               columnDefs={parentColumns}
-              loading={loading || savingParents}
+              loading={loading}
               minHeight="100%"
               className="assetsAgGrid assetsParentAgGrid"
               theme={assetsGridTheme}

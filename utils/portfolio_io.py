@@ -124,7 +124,11 @@ def load_real_holdings_table(
         return None
 
     # 3. Build holdings dataframe from raw master data
-    holdings_list = snapshot["holdings"]
+    holdings_list = list(snapshot["holdings"])
+    for index, holding in enumerate(holdings_list):
+        if "sort_order" not in holding:
+            holding["sort_order"] = index
+    holdings_list.sort(key=lambda holding: int(holding.get("sort_order", 0)))
     df_holdings = pd.DataFrame(holdings_list)
 
     # 4. 동적 버킷 및 명칭 매핑: 개별 항목에 저장된 정보 대신 종목풀(stock_meta)의 최신 정보를 사용

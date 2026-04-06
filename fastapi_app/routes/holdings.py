@@ -9,6 +9,7 @@ from utils.holdings_detail_service import (
     add_holding,
     delete_holding,
     load_all_holdings_detail,
+    reorder_holdings,
     update_holding,
     validate_ticker_for_account,
 )
@@ -45,6 +46,17 @@ def patch_one_holding(
         average_buy_price=body.get("average_buy_price"),
         memo=body.get("memo"),
         target_ratio=body.get("target_ratio"),
+    )
+
+
+@router.patch("/order")
+def patch_holdings_order(
+    body: dict[str, Any] = Body(...),
+    _: None = Depends(require_internal_token),
+) -> dict[str, Any]:
+    return reorder_holdings(
+        account_id=body.get("account_id", ""),
+        ordered_tickers=body.get("ordered_tickers", []),
     )
 
 
