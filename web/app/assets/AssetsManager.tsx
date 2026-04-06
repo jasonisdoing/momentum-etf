@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, GridOptions, RowClassParams } from "ag-grid-community";
-import { IconCheck, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
@@ -760,6 +760,7 @@ function AccountHoldingsDetailPanel({
               <StableInlineInput
                 className="form-control form-control-sm assetsInlineInput assetsInlineInputTicker"
                 initialValue={addingRow?.ticker ?? ""}
+                disabled={addingRow?.isValidatingTicker}
                 onChange={(value) =>
                   setAddingRow((previous) =>
                     previous
@@ -773,7 +774,8 @@ function AccountHoldingsDetailPanel({
                 onSave={handleValidateTicker}
               />
               <button
-                className="btn btn-outline-primary btn-sm assetsInlineButton"
+                className="btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
+                disabled={addingRow?.isValidatingTicker}
                 onMouseDown={(event) => {
                   event.stopPropagation();
                 }}
@@ -782,7 +784,10 @@ function AccountHoldingsDetailPanel({
                   void handleValidateTicker();
                 }}
               >
-                확인
+                {addingRow?.isValidatingTicker ? (
+                  <IconLoader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
+                ) : null}
+                {addingRow?.isValidatingTicker ? "확인중" : "확인"}
               </button>
             </div>
           );
