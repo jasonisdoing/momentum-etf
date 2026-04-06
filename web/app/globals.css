@@ -1751,6 +1751,25 @@ a {
   background: rgba(102, 180, 102, 0.45);
 }
 
+.rankAgGrid .ag-cell-value,
+.rankAgGrid .ag-group-value {
+  width: 100%;
+  min-width: 0;
+}
+
+.rankAgGrid .rankNameCellText {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankAgGrid .ag-cell[col-id="종목명"] {
+  overflow: hidden;
+}
+
 .stocksAgGrid {
   border: 0;
   background: transparent;
