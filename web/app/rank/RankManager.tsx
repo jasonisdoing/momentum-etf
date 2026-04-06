@@ -195,7 +195,7 @@ export function RankManager() {
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
-  const [dedupeEnabled, setDedupeEnabled] = useState(true);
+  const [dedupeEnabled, setDedupeEnabled] = useState(false);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [nameKeyword, setNameKeyword] = useState("");
