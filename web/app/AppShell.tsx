@@ -8,7 +8,6 @@ import {
   IconCash,
   IconFlask2,
   IconChevronDown,
-  IconFileImport,
   IconMoodSmile,
   IconHome,
   IconMedal2,
@@ -37,9 +36,8 @@ const navGroups = [
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
-      { href: "/import", label: "벌크 입력", icon: IconFileImport },
-      { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
+      { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
     ],
   },
   {
