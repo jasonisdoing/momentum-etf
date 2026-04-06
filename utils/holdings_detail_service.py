@@ -20,6 +20,16 @@ def _normalize_target_ticker(ticker: str) -> str:
     return str(ticker or "").replace("ASX:", "").strip().upper()
 
 
+def _assign_sort_order(holdings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """보유 종목 배열에 순서를 다시 부여한다."""
+    normalized_holdings: list[dict[str, Any]] = []
+    for index, holding in enumerate(holdings):
+        next_holding = dict(holding)
+        next_holding["sort_order"] = index
+        normalized_holdings.append(next_holding)
+    return normalized_holdings
+
+
 def _compute_account_total_assets_native(
     rows: list[dict[str, Any]],
     cash_info: dict[str, Any] | None,
@@ -238,6 +248,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "buy_amount_krw": buy_amount,
                     "valuation_krw": val_amount,
                     "memo": str(row.get("memo") or "").strip(),
+                    "sort_order": safe_int(row.get("sort_order")),
                 }
             )
 
@@ -315,7 +326,7 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
     if len(new_holdings) == len(holdings):
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
-    save_portfolio_master(account_id, new_holdings)
+    save_portfolio_master(account_id, _assign_sort_order(new_holdings))
     _save_target_ratio(account_id, raw_ticker, None)
     
     # 변경 사항을 스냅샷에 즉시 동기화
@@ -365,7 +376,7 @@ def update_holding(
     if not found:
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
-    save_portfolio_master(account_id, holdings)
+    save_portfolio_master(account_id, _assign_sort_order(holdings))
     if target_ratio is not None:
         _save_target_ratio(account_id, raw_ticker, float(target_ratio))
     
@@ -420,6 +431,7 @@ def add_holding(
 
     # 3. 정석적인 구조로 새로운 종목 구성
     from datetime import datetime
+    next_sort_order = max((int(h.get("sort_order") or 0) for h in holdings), default=-1) + 1
     new_holding = {
         "ticker": raw_ticker,
         "name": res["name"],
@@ -428,10 +440,11 @@ def add_holding(
         "currency": currency,
         "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
         "memo": str(memo or "").strip(),
+        "sort_order": next_sort_order,
     }
 
     holdings.append(new_holding)
-    save_portfolio_master(account_id, holdings)
+    save_portfolio_master(account_id, _assign_sort_order(holdings))
     if target_ratio is not None:
         _save_target_ratio(account_id, raw_ticker, float(target_ratio))
 
@@ -444,6 +457,61 @@ def add_holding(
         get_app_logger().warning(f"Failed to update snapshot after addition: {e}")
 
     return {"added": ticker, "name": res["name"]}
+
+
+def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, Any]:
+    """계좌 보유 종목의 사용자 지정 순서를 저장한다."""
+    normalized_account_id = str(account_id or "").strip()
+    if not normalized_account_id:
+        raise RuntimeError("계좌 ID가 필요합니다.")
+
+    normalized_tickers = [_normalize_target_ticker(ticker) for ticker in ordered_tickers]
+    normalized_tickers = [ticker for ticker in normalized_tickers if ticker]
+    if not normalized_tickers:
+        raise RuntimeError("정렬할 종목코드가 필요합니다.")
+
+    master = load_portfolio_master(normalized_account_id)
+    if not master:
+        raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
+
+    holdings = [dict(holding) for holding in (master.get("holdings") or [])]
+    if not holdings:
+        raise RuntimeError("정렬할 종목이 없습니다.")
+
+    holding_map = {
+        _normalize_target_ticker(str(holding.get("ticker") or "")): holding
+        for holding in holdings
+    }
+    missing_tickers = [ticker for ticker in normalized_tickers if ticker not in holding_map]
+    if missing_tickers:
+        joined = ", ".join(missing_tickers)
+        raise RuntimeError(f"순서를 저장할 종목을 찾을 수 없습니다: {joined}")
+
+    ordered_holdings: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for ticker in normalized_tickers:
+        if ticker in seen:
+            continue
+        ordered_holdings.append(holding_map[ticker])
+        seen.add(ticker)
+
+    for holding in holdings:
+        ticker = _normalize_target_ticker(str(holding.get("ticker") or ""))
+        if ticker not in seen:
+            ordered_holdings.append(holding)
+
+    save_portfolio_master(normalized_account_id, _assign_sort_order(ordered_holdings))
+
+    try:
+        from utils.snapshot_service import update_today_snapshot_all_accounts
+
+        update_today_snapshot_all_accounts()
+    except Exception as e:
+        from utils.logger import get_app_logger
+
+        get_app_logger().warning(f"Failed to update snapshot after reorder: {e}")
+
+    return {"reordered": len(ordered_holdings)}
 
 
 def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
