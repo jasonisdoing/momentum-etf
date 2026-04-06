@@ -1774,7 +1774,7 @@ export function AssetsManager() {
       stopEditingWhenCellsLoseFocus: true,
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
       fullWidthCellRenderer: DetailRenderer,
-      getRowHeight: (params) => (isDetailRow(params.data) ? 648 : 38),
+      getRowHeight: (params) => (isDetailRow(params.data) ? 532 : 38),
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data)) {
           return;
