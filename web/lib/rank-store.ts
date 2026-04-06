@@ -19,6 +19,8 @@ type RankMaRule = {
 type RankRow = {
   [key: string]: string | number | null;
   순번: string;
+  순위: number | null;
+  이전순위: number | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -62,6 +64,7 @@ type RankData = {
   cache_updated_at: string | null;
   ranking_computed_at: string | null;
   realtime_fetched_at: string | null;
+  previous_trading_day: string | null;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];

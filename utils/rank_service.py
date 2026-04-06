@@ -12,6 +12,7 @@ from utils.rankings import (
     get_rank_months_max,
     get_recent_monthly_return_labels,
 )
+from utils.data_loader import get_trading_days
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 
@@ -120,6 +121,35 @@ def _build_missing_ticker_labels(ticker_type: str, missing_tickers: list[str]) -
     return labels
 
 
+def _get_previous_trading_day(country_code: str, reference_date: pd.Timestamp | None) -> pd.Timestamp | None:
+    if reference_date is None:
+        return None
+
+    reference = pd.Timestamp(reference_date).normalize()
+    search_start = reference - pd.DateOffset(days=15)
+    trading_days = get_trading_days(
+        search_start.strftime("%Y-%m-%d"),
+        reference.strftime("%Y-%m-%d"),
+        country_code,
+    )
+    previous_days = [pd.Timestamp(day).normalize() for day in trading_days if pd.Timestamp(day).normalize() < reference]
+    if not previous_days:
+        return None
+    return max(previous_days)
+
+
+def _build_rank_map(dataframe: pd.DataFrame) -> dict[str, int]:
+    rank_map: dict[str, int] = {}
+    if dataframe.empty:
+        return rank_map
+
+    for index, row in enumerate(dataframe.to_dict(orient="records"), start=1):
+        ticker = str(row.get("티커") or "").strip().upper()
+        if ticker:
+            rank_map[ticker] = index
+    return rank_map
+
+
 def load_rank_data(
     *,
     ticker_type: str | None = None,
@@ -136,6 +166,8 @@ def load_rank_data(
         selected_ticker_type = target
     else:
         selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
+    selected_config = next((cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None)
+    country_code = str(selected_config.get("country_code") or "") if selected_config else ""
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_overrides)
     selected_as_of_date: pd.Timestamp | None = None
@@ -158,6 +190,27 @@ def load_rank_data(
         if dataframe.attrs.get("as_of_date") is not None
         else selected_as_of_date
     )
+    current_rank_map = _build_rank_map(dataframe)
+    previous_rank_map: dict[str, int] = {}
+    previous_trading_day = _get_previous_trading_day(country_code, pd.Timestamp(dataframe.attrs.get("latest_trading_day")))
+    if previous_trading_day is not None:
+        previous_dataframe = build_ticker_type_rankings(
+            selected_ticker_type,
+            ma_rules=ma_rules,
+            as_of_date=previous_trading_day,
+        )
+        previous_rank_map = _build_rank_map(previous_dataframe)
+
+    if not dataframe.empty:
+        dataframe_attrs = dict(dataframe.attrs)
+        enriched_rows: list[dict[str, Any]] = []
+        for row in dataframe.to_dict(orient="records"):
+            ticker = str(row.get("티커") or "").strip().upper()
+            row["순위"] = current_rank_map.get(ticker)
+            row["이전순위"] = previous_rank_map.get(ticker)
+            enriched_rows.append(row)
+        dataframe = pd.DataFrame(enriched_rows)
+        dataframe.attrs.update(dataframe_attrs)
 
     return {
         "ticker_types": configs_payload,
@@ -173,6 +226,7 @@ def load_rank_data(
         "cache_updated_at": _serialize_datetime(dataframe.attrs.get("cache_updated_at")),
         "ranking_computed_at": _serialize_datetime(dataframe.attrs.get("ranking_computed_at")),
         "realtime_fetched_at": _serialize_datetime(dataframe.attrs.get("realtime_fetched_at")),
+        "previous_trading_day": _serialize_datetime(previous_trading_day),
         "missing_tickers": [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         "missing_ticker_labels": _build_missing_ticker_labels(
             selected_ticker_type,
