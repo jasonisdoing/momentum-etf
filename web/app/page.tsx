@@ -10,17 +10,21 @@ type HoldingsRow = {
   currency: string;
   ticker: string;
   name: string;
+  quantity: number;
   current_price: string;
   current_price_num: number;
   pnl_krw: number;
   pnl_krw_num: number;
   return_pct: number;
   daily_change_pct: number | null;
+  buy_amount_krw: number;
   valuation_krw: number;
   bucket_id: number;
   bucket: string;
   memo: string;
 };
+
+type AggregatedHoldingRow = HoldingsRow;
 
 type ViewMode = "price" | "valuation";
 
@@ -48,19 +52,77 @@ export default function HomePage() {
     load();
   }, []);
 
-  const groupings = holdings.reduce((acc, h) => {
-    const key = h.account_name;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(h);
-    return acc;
-  }, {} as Record<string, HoldingsRow[]>);
+  const accountNames = [...new Set(holdings.map((h) => h.account_name))];
 
-  // 계좌 그룹 내에서 버킷 순(bucket_id)으로 정렬
-  Object.keys(groupings).forEach((key) => {
-    groupings[key].sort((a, b) => a.bucket_id - b.bucket_id);
-  });
+  const aggregatedHoldings = Array.from(
+    holdings.reduce((acc, row) => {
+      const key = `${row.currency}:${row.ticker}`;
+      const existing = acc.get(key);
 
-  const accountNames = Object.keys(groupings);
+      if (!existing) {
+        acc.set(key, { ...row });
+        return acc;
+      }
+
+      const nextBuyAmount = existing.buy_amount_krw + row.buy_amount_krw;
+      const nextValuation = existing.valuation_krw + row.valuation_krw;
+      const nextPnl = existing.pnl_krw + row.pnl_krw;
+      const weightedDailyChange =
+        existing.daily_change_pct !== null && row.daily_change_pct !== null
+          ? (
+              ((existing.daily_change_pct * existing.valuation_krw) + (row.daily_change_pct * row.valuation_krw)) /
+              Math.max(nextValuation, 1)
+            )
+          : (existing.daily_change_pct ?? row.daily_change_pct);
+
+      // 동일 티커가 여러 계좌에 있으면 현재가는 하나만 유지하고 평가금/손익만 합산한다.
+      acc.set(key, {
+        ...existing,
+        quantity: existing.quantity + row.quantity,
+        buy_amount_krw: nextBuyAmount,
+        valuation_krw: nextValuation,
+        pnl_krw: nextPnl,
+        pnl_krw_num: nextPnl,
+        return_pct: nextBuyAmount > 0 ? Number(((nextPnl / nextBuyAmount) * 100).toFixed(2)) : 0,
+        daily_change_pct:
+          weightedDailyChange === null ? null : Number(weightedDailyChange.toFixed(2)),
+        bucket_id: row.valuation_krw > existing.valuation_krw ? row.bucket_id : existing.bucket_id,
+        bucket: row.valuation_krw > existing.valuation_krw ? row.bucket : existing.bucket,
+        memo: existing.memo || row.memo,
+        account_name: accountNames.join(", "),
+      });
+      return acc;
+    }, new Map<string, AggregatedHoldingRow>()).values(),
+  );
+
+  const risingHoldings = aggregatedHoldings
+    .filter((h) => {
+      const pct = viewMode === "price" ? (h.daily_change_pct ?? 0) : h.return_pct;
+      return pct >= 0;
+    })
+    .sort((a, b) => b.valuation_krw - a.valuation_krw);
+
+  const fallingHoldings = aggregatedHoldings
+    .filter((h) => {
+      const pct = viewMode === "price" ? (h.daily_change_pct ?? 0) : h.return_pct;
+      return pct < 0;
+    })
+    .sort((a, b) => b.valuation_krw - a.valuation_krw);
+
+  const bucketOrder = [1, 2, 3, 4];
+  const holdingsByBucket = bucketOrder
+    .map((bucketId) => {
+      const bucketRising = risingHoldings.filter((h) => h.bucket_id === bucketId);
+      const bucketFalling = fallingHoldings.filter((h) => h.bucket_id === bucketId);
+      const bucketName = aggregatedHoldings.find((h) => h.bucket_id === bucketId)?.bucket ?? `${bucketId}. 기타`;
+      return {
+        bucketId,
+        bucketName,
+        rising: bucketRising,
+        falling: bucketFalling,
+      };
+    })
+    .filter((bucket) => bucket.rising.length > 0 || bucket.falling.length > 0);
 
   if (loading) {
     return (
@@ -78,7 +140,7 @@ export default function HomePage() {
         <div className="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
           <div className="d-flex align-items-center flex-wrap gap-3">
             <div className="text-secondary small fw-bold">
-              총 {accountNames.length}개 계좌, {holdings.length}개 종목
+              총 {accountNames.length}개 계좌, {aggregatedHoldings.length}개 종목
             </div>
             <div className="d-flex align-items-center gap-2">
               {[
@@ -119,7 +181,7 @@ export default function HomePage() {
           <div className="d-flex justify-content-center py-5 mt-5">
             <div className="spinner-border text-primary" role="status"></div>
           </div>
-        ) : accountNames.length === 0 ? (
+        ) : aggregatedHoldings.length === 0 ? (
           <div className="card shadow-sm border-0 rounded-4">
             <div className="card-body py-5 text-center">
               <div className="empty">
@@ -129,69 +191,62 @@ export default function HomePage() {
             </div>
           </div>
         ) : (
-          <div className="account-groups">
-            {accountNames.map((accountName) => {
-              const accountHoldings = groupings[accountName];
-              
-              // 상승/보합/하락 분류 로직 (보합 포함)
-              const risingHoldings = accountHoldings.filter(h => {
-                const pct = viewMode === "price" ? (h.daily_change_pct ?? 0) : h.return_pct;
-                return pct >= 0;
-              });
-              const fallingHoldings = accountHoldings.filter(h => {
-                const pct = viewMode === "price" ? (h.daily_change_pct ?? 0) : h.return_pct;
-                return pct < 0;
-              });
-
-              return (
-                <div key={accountName} className="account-section mb-4">
-                  <h2 className="account-header h4 mb-3 d-flex align-items-center">
-                    <span className="account-dot me-2"></span>
-                    {accountName}
-                  </h2>
-                  
-                  <div className="row g-3">
-                    {/* 상승 종목 컬럼 */}
-                    <div className="col-12 col-lg-6">
-                      <div className="d-flex align-items-center mb-3">
-                        <div className="badge bg-danger-lt p-1 me-2" style={{ width: "12px", height: "12px", borderRadius: "50%" }}></div>
-                        <h3 className="h4 fw-bold mb-0 text-danger">상승 ({risingHoldings.length})</h3>
-                      </div>
-                      <div className="row g-2">
-                        {risingHoldings.length > 0 ? (
-                          risingHoldings.map((h, i) => (
-                            <div key={`${h.ticker}-${i}`} className="col-12 col-md-6">
-                              <HoldingCard row={h} viewMode={viewMode} />
-                            </div>
-                          ))
-                        ) : (
-                          <div className="col-12"><div className="text-secondary small py-2 px-1">해당하는 종목이 없습니다.</div></div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* 하락 종목 컬럼 */}
-                    <div className="col-12 col-lg-6">
-                      <div className="d-flex align-items-center mb-3">
-                        <div className="badge bg-primary-lt p-1 me-2" style={{ width: "12px", height: "12px", borderRadius: "50%" }}></div>
-                        <h3 className="h4 fw-bold mb-0 text-primary">하락 중 ({fallingHoldings.length})</h3>
-                      </div>
-                      <div className="row g-2">
-                        {fallingHoldings.length > 0 ? (
-                          fallingHoldings.map((h, i) => (
-                            <div key={`${h.ticker}-${i}`} className="col-12 col-md-6">
-                              <HoldingCard row={h} viewMode={viewMode} />
-                            </div>
-                          ))
-                        ) : (
-                          <div className="col-12"><div className="text-secondary small py-2 px-1">하락 중인 종목이 없습니다.</div></div>
-                        )}
-                      </div>
+          <div className="row g-3">
+            <div className="col-12 col-lg-6">
+              <div className="d-flex align-items-center mb-3">
+                <div className="badge bg-danger-lt p-1 me-2" style={{ width: "12px", height: "12px", borderRadius: "50%" }}></div>
+                <h3 className="h4 fw-bold mb-0 text-danger">상승 ({risingHoldings.length})</h3>
+              </div>
+              <div className="account-groups">
+                {holdingsByBucket.map((bucket) => (
+                  <div key={`rising-${bucket.bucketId}`} className="account-section mb-4">
+                    <h2 className="account-header h4 mb-3 d-flex align-items-center">
+                      <span className="account-dot me-2" style={{ backgroundColor: getTheme(bucket.bucketId).main }}></span>
+                      {bucket.bucketName}
+                    </h2>
+                    <div className="row g-2">
+                      {bucket.rising.length > 0 ? (
+                        bucket.rising.map((h) => (
+                          <div key={h.ticker} className="col-12 col-md-6">
+                            <HoldingCard row={h} viewMode={viewMode} />
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-12"><div className="text-secondary small py-2 px-1">해당하는 종목이 없습니다.</div></div>
+                      )}
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            </div>
+
+            <div className="col-12 col-lg-6">
+              <div className="d-flex align-items-center mb-3">
+                <div className="badge bg-primary-lt p-1 me-2" style={{ width: "12px", height: "12px", borderRadius: "50%" }}></div>
+                <h3 className="h4 fw-bold mb-0 text-primary">하락 중 ({fallingHoldings.length})</h3>
+              </div>
+              <div className="account-groups">
+                {holdingsByBucket.map((bucket) => (
+                  <div key={`falling-${bucket.bucketId}`} className="account-section mb-4">
+                    <h2 className="account-header h4 mb-3 d-flex align-items-center">
+                      <span className="account-dot me-2" style={{ backgroundColor: getTheme(bucket.bucketId).main }}></span>
+                      {bucket.bucketName}
+                    </h2>
+                    <div className="row g-2">
+                      {bucket.falling.length > 0 ? (
+                        bucket.falling.map((h) => (
+                          <div key={h.ticker} className="col-12 col-md-6">
+                            <HoldingCard row={h} viewMode={viewMode} />
+                          </div>
+                        ))
+                      ) : (
+                        <div className="col-12"><div className="text-secondary small py-2 px-1">하락 중인 종목이 없습니다.</div></div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -213,7 +268,6 @@ export default function HomePage() {
           display: inline-block;
           width: 8px;
           height: 8px;
-          background-color: #206bc4;
           border-radius: 50%;
         }
         .bucket-legend-badge {
