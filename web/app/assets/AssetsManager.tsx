@@ -451,6 +451,7 @@ function AccountHoldingsDetailPanel({
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [isReorderDirty, setIsReorderDirty] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
   const targetRatioRef = useRef<HTMLInputElement>(null);
@@ -470,6 +471,7 @@ function AccountHoldingsDetailPanel({
     setSelectedRowIds([]);
     setEditingRowId(null);
     setAddingRow(null);
+    setIsReorderDirty(false);
   }, [initialRows]);
 
   useEffect(() => {
@@ -532,6 +534,7 @@ function AccountHoldingsDetailPanel({
 
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
+  const hasPendingSave = hasPendingAdd || dirtyRowIds.length > 0 || isReorderDirty;
 
   const isDirtyEditableCell = useCallback(
     (rowId: string | undefined, field: string) => Boolean(rowId && dirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
@@ -744,8 +747,8 @@ function AccountHoldingsDetailPanel({
       if (!response.ok) {
         throw new Error(payload.error || "순서 저장에 실패했습니다.");
       }
+      setIsReorderDirty(false);
     } catch (error) {
-      await onReload();
       toast.error(error instanceof Error ? error.message : "순서 저장에 실패했습니다.");
     } finally {
       reorderSavingRef.current = false;
@@ -772,23 +775,66 @@ function AccountHoldingsDetailPanel({
     reorderSaveTimerRef.current = nextTimer;
   }, [persistRowOrder]);
 
+  const flushPendingSaves = useCallback(() => {
+    childSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+    childSaveTimersRef.current.clear();
+    if (reorderSaveTimerRef.current) {
+      clearTimeout(reorderSaveTimerRef.current);
+      reorderSaveTimerRef.current = null;
+    }
+  }, []);
+
   const handleSaveChanges = useCallback(async () => {
-    if (!addingRow) {
+    if (processingId === "__adding__" || processingId === "__deleting__") {
       return;
     }
 
+    flushPendingSaves();
+
     try {
-      setProcessingId("__adding__");
-      await processAddingRow();
-      await onReload();
-      toast.success("종목 추가 완료");
+      const dirtyRows = rowsRef.current
+        .map((row) => ({
+          ...row,
+          id: buildGridRowId(row),
+          quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
+          average_buy_price: safeParseFloat(row.average_buy_price),
+          target_ratio: row.target_ratio ?? 0,
+        }))
+        .filter((row) => dirtyRowIds.includes(row.id));
+
+      for (const row of dirtyRows) {
+        await processRowUpdate(row);
+        clearDirtyRowState(row.id);
+      }
+
+      if (isReorderDirty) {
+        await persistRowOrder(rowsRef.current);
+      }
+
+      if (addingRow) {
+        setProcessingId("__adding__");
+        await processAddingRow();
+        await onReload();
+        toast.success("종목 추가 완료");
+      }
     } catch (error) {
-      await onReload();
-      toast.error(error instanceof Error ? error.message : "종목 추가에 실패했습니다.");
+      toast.error(error instanceof Error ? error.message : "변경사항 저장에 실패했습니다.");
     } finally {
       setProcessingId(null);
     }
-  }, [addingRow, onReload, processAddingRow, toast]);
+  }, [
+    addingRow,
+    clearDirtyRowState,
+    dirtyRowIds,
+    flushPendingSaves,
+    isReorderDirty,
+    onReload,
+    persistRowOrder,
+    processAddingRow,
+    processRowUpdate,
+    processingId,
+    toast,
+  ]);
 
   const handleDeleteSelected = useCallback(async () => {
     if (!selectedRowIds.length) {
@@ -1220,7 +1266,7 @@ function AccountHoldingsDetailPanel({
           <button
             className="btn btn-success btn-sm px-3 fw-bold"
             onClick={() => void handleSaveChanges()}
-            disabled={!hasPendingAdd || processingId === "__adding__" || processingId === "__deleting__"}
+            disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
           >
             <IconCheck size={16} /> 저장
           </button>
@@ -1318,6 +1364,7 @@ function AccountHoldingsDetailPanel({
               });
               const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
               rowsRef.current = nextRows;
+              setIsReorderDirty(true);
               scheduleSilentReorderSave(nextRows);
             },
             rowClassRules: {
