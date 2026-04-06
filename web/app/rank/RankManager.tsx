@@ -324,15 +324,16 @@ export function RankManager() {
           if (currentRank === previousRank) {
             return (
               <span style={{ fontWeight: 600 }}>
-                {previousRank} -
+                {currentRank}(-)
               </span>
             );
           }
 
           const isRise = currentRank < previousRank;
+          const delta = Math.abs(currentRank - previousRank);
           return (
             <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
-              {previousRank} {isRise ? "▲" : "▼"}
+              {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
             </span>
           );
         },
@@ -354,7 +355,20 @@ export function RankManager() {
           <span className="appCodeText">{String(params.value ?? "-")}</span>
         ),
       },
-      { field: "종목명", headerName: "종목명", minWidth: 260, flex: 1.2 },
+      {
+        field: "종목명",
+        headerName: "종목명",
+        minWidth: 260,
+        flex: 1.2,
+        cellRenderer: (params: { value: string | null | undefined }) => {
+          const value = String(params.value ?? "-");
+          return (
+            <span className="rankNameCellText" title={value}>
+              {value}
+            </span>
+          );
+        },
+      },
       {
         field: "현재가",
         headerName: "현재가",
