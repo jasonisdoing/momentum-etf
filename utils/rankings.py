@@ -11,6 +11,7 @@ import pandas as pd
 from config import (
     BUCKET_MAPPING,
     CACHE_START_DATE,
+    RANK_RECOMMEND_HOLDING_REPLACE_GAP_PCT,
     RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS,
     RANK_RECOMMEND_SIMILARITY_THRESHOLD,
     MARKET_SCHEDULES,
@@ -577,9 +578,11 @@ def _build_similarity_exclusion_map(
     close_series_map: dict[str, pd.Series],
     ranked_tickers: list[str],
     ticker_name_map: dict[str, str],
+    held_tickers: set[str],
     *,
     lookback_days: int = RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS,
     threshold: float = RANK_RECOMMEND_SIMILARITY_THRESHOLD,
+    holding_replace_gap_pct: float = RANK_RECOMMEND_HOLDING_REPLACE_GAP_PCT,
 ) -> dict[str, str]:
     eligible_series: dict[str, pd.Series] = {}
     for ticker, series in close_series_map.items():
@@ -598,21 +601,46 @@ def _build_similarity_exclusion_map(
 
     corr_matrix = returns_df.corr()
     exclusion_map: dict[str, str] = {}
-    excluded: set[str] = set()
+    assigned: set[str] = set()
+    rank_index_map = {ticker: index for index, ticker in enumerate(ranked_tickers)}
+    total_ranked = max(len(ranked_tickers), 1)
+
+    def _rank_percentile(ticker: str) -> float:
+        index = rank_index_map.get(ticker, total_ranked - 1)
+        return ((index + 1) / total_ranked) * 100.0
+
+    def _choose_representative(group_tickers: list[str], top_ticker: str) -> str:
+        held_group = [ticker for ticker in group_tickers if ticker in held_tickers]
+        if not held_group:
+            return top_ticker
+
+        held_representative = min(held_group, key=lambda ticker: rank_index_map.get(ticker, total_ranked))
+        percentile_gap = _rank_percentile(held_representative) - _rank_percentile(top_ticker)
+        if percentile_gap >= holding_replace_gap_pct:
+            return top_ticker
+        return held_representative
 
     for leader in ranked_tickers:
-        if leader in excluded or leader not in corr_matrix.columns:
+        if leader in assigned or leader not in corr_matrix.columns:
             continue
-        leader_name = str(ticker_name_map.get(leader, leader)).strip() or leader
+
+        similar_group = [leader]
         for candidate in ranked_tickers:
-            if candidate == leader or candidate in excluded or candidate not in corr_matrix.columns:
+            if candidate == leader or candidate in assigned or candidate not in corr_matrix.columns:
                 continue
             correlation = corr_matrix.loc[leader, candidate]
             if pd.isna(correlation):
                 continue
             if float(correlation) >= threshold:
-                exclusion_map[candidate] = f"{leader_name}({leader}) 중복"
-                excluded.add(candidate)
+                similar_group.append(candidate)
+
+        representative = _choose_representative(similar_group, leader)
+        representative_name = str(ticker_name_map.get(representative, representative)).strip() or representative
+        for member in similar_group:
+            assigned.add(member)
+            if member == representative:
+                continue
+            exclusion_map[member] = f"{representative_name}({representative}) 중복"
 
     return exclusion_map
 
@@ -828,8 +856,7 @@ def build_ticker_type_rankings(
         effective_close_series_map,
         ranked_tickers,
         ticker_name_map,
-        lookback_days=60,
-        threshold=0.9,
+        {str(ticker).strip().upper() for ticker in held_tickers},
     )
     df["추천"] = df["티커"].map(lambda ticker: similarity_exclusion_map.get(str(ticker).strip().upper(), ""))
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
