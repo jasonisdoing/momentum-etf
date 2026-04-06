@@ -7,12 +7,12 @@
         {
             "order": 1,
             "MA_TYPE": "SMA",
-            "MA_MONTHS": 12
+            "MA_MONTHS": 10
         },
         {
             "order": 2,
             "MA_TYPE": "ALMA",
-            "MA_MONTHS": 6
+            "MA_MONTHS": 10
         }
     ]
 }
