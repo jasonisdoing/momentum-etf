@@ -331,6 +331,8 @@ function formatAccountCash(summary: AccountSummary): string {
   return formatKrw(summary.cash_balance_krw);
 }
 
+const ASSETS_WEIGHT_TEXT_COLOR = "#7952b3";
+
 function StableInlineInput({
   initialValue,
   onSave,
@@ -879,15 +881,6 @@ function AccountHoldingsDetailPanel({
       },
     },
     {
-      field: "weight_pct",
-      headerName: "비중",
-      width: 80,
-      type: "rightAligned",
-      cellRenderer: (params: { value?: number }) => (
-        <span style={{ color: "#0d6efd", fontWeight: 700 }}>{(params.value ?? 0).toFixed(1)}%</span>
-      ),
-    },
-    {
       field: "return_pct",
       headerName: "수익률",
       width: 88,
@@ -946,7 +939,15 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow }) =>
         params.data ? formatKrw(getPreviewBuyAmountKrw(params.data)) : "-",
     },
-    { field: "days_held", headerName: "보유일", width: 76 },
+    {
+      field: "weight_pct",
+      headerName: "비중",
+      width: 80,
+      type: "rightAligned",
+      cellRenderer: (params: { value?: number }) => (
+        <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>{(params.value ?? 0).toFixed(1)}%</span>
+      ),
+    },
     {
       field: "target_ratio",
       headerName: "목표비중",
@@ -988,7 +989,7 @@ function AccountHoldingsDetailPanel({
           );
         }
         return (
-          <span style={{ color: "#0d6efd", fontWeight: 700 }}>
+          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
             {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
           </span>
         );
@@ -1041,6 +1042,7 @@ function AccountHoldingsDetailPanel({
         return <span>{formatTargetAmount(getPreviewTargetAmount(params.data, summary, rows), params.data.currency || "KRW")}</span>;
       },
     },
+    { field: "days_held", headerName: "보유일", width: 76 },
   ], [addingRow, handleValidateTicker, isDirtyEditableCell, isEditableHoldingRow, processingId, rows, summary]);
 
   return (
