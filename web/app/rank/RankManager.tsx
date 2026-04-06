@@ -195,6 +195,7 @@ export function RankManager() {
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
+  const [dedupeEnabled, setDedupeEnabled] = useState(true);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [nameKeyword, setNameKeyword] = useState("");
@@ -283,11 +284,16 @@ export function RankManager() {
 
   const filteredGridRows = useMemo(() => {
     const keyword = deferredNameKeyword.trim().toLowerCase();
-    if (!keyword) {
-      return gridRows;
-    }
-    return gridRows.filter((row) => String(row.종목명 ?? "").toLowerCase().includes(keyword));
-  }, [gridRows, deferredNameKeyword]);
+    return gridRows.filter((row) => {
+      if (dedupeEnabled && String(row.추천 ?? "").trim()) {
+        return false;
+      }
+      if (!keyword) {
+        return true;
+      }
+      return String(row.종목명 ?? "").toLowerCase().includes(keyword);
+    });
+  }, [gridRows, deferredNameKeyword, dedupeEnabled]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -335,24 +341,6 @@ export function RankManager() {
           return (
             <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
               {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
-            </span>
-          );
-        },
-      },
-      {
-        field: "추천",
-        headerName: "추천",
-        minWidth: 220,
-        width: 220,
-        sortable: false,
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = String(params.value ?? "").trim();
-          if (!value) {
-            return "";
-          }
-          return (
-            <span className="rankNameCellText" style={{ color: "#d63939", fontWeight: 700 }} title={value}>
-              {value}
             </span>
           );
         },
@@ -529,6 +517,25 @@ export function RankManager() {
       ),
     ];
 
+    const duplicateColumn: ColDef<RankGridRow> = {
+      field: "추천",
+      headerName: "중복",
+      minWidth: 320,
+      width: 320,
+      sortable: false,
+      cellRenderer: (params: { value: string | null | undefined }) => {
+        const value = String(params.value ?? "").trim();
+        if (!value) {
+          return "";
+        }
+        return (
+          <span className="rankNameCellText" style={{ color: "#d63939", fontWeight: 700 }} title={value}>
+            {value}
+          </span>
+        );
+      },
+    };
+
     const monthlyColumns: ColDef<RankGridRow>[] = monthlyReturnLabels.map(
       (label) =>
         ({
@@ -565,7 +572,9 @@ export function RankManager() {
 
     return [
       ...leadingColumns,
-      ...(metricMode === "cumulative" ? cumulativeColumns : [...monthlyLeadingColumns, ...monthlyColumns]),
+      ...(metricMode === "cumulative"
+        ? [...cumulativeColumns, duplicateColumn]
+        : [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]),
     ];
   }, [maRules, metricMode, monthlyReturnLabels, selectedTickerTypeItem?.country_code]);
 
@@ -712,6 +721,17 @@ export function RankManager() {
                     월별
                   </button>
                 </div>
+                <label className="form-check form-switch mb-0" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    checked={dedupeEnabled}
+                    onChange={(event) => setDedupeEnabled(event.target.checked)}
+                  />
+                  <span className="appCodeText" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+                    중복제거
+                  </span>
+                </label>
                 <input
                   className="form-control"
                   type="text"
