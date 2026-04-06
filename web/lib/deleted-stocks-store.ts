@@ -22,7 +22,7 @@ type StockMetaDoc = {
 };
 
 type DeletedStocksAccountItem = {
-  account_id: string;
+  ticker_type: string;
   order: number;
   name: string;
   icon: string;
@@ -46,9 +46,9 @@ type DeletedStocksRowItem = {
 };
 
 type DeletedStocksTableData = {
-  accounts: DeletedStocksAccountItem[];
+  ticker_types: DeletedStocksAccountItem[];
   rows: DeletedStocksRowItem[];
-  account_id: string;
+  ticker_type: string;
 };
 
 function normalizeNumber(value: unknown): number | null {
@@ -80,28 +80,28 @@ function formatDeletedDate(value: Date | string | undefined): string {
   return text.slice(0, 10);
 }
 
-export async function loadDeletedStocksTable(accountId?: string): Promise<DeletedStocksTableData> {
+export async function loadDeletedStocksTable(tickerType?: string): Promise<DeletedStocksTableData> {
   return fetchFastApiJson<DeletedStocksTableData>(
-    `/internal/stocks/deleted${accountId ? `?account_id=${encodeURIComponent(accountId)}` : ""}`,
+    `/internal/stocks/deleted${tickerType ? `?ticker_type=${encodeURIComponent(tickerType)}` : ""}`,
   );
 }
 
-export async function restoreDeletedStocks(accountId: string, tickers: string[]): Promise<number> {
+export async function restoreDeletedStocks(tickerType: string, tickers: string[]): Promise<number> {
   const payload = await fetchFastApiJson<{ restored_count: number }>("/internal/stocks/deleted", {
     method: "PATCH",
     body: JSON.stringify({
-      account_id: accountId,
+      ticker_type: tickerType,
       tickers,
     }),
   });
   return Number(payload.restored_count ?? 0);
 }
 
-export async function hardDeleteStocks(accountId: string, tickers: string[]): Promise<number> {
+export async function hardDeleteStocks(tickerType: string, tickers: string[]): Promise<number> {
   const payload = await fetchFastApiJson<{ deleted_count: number }>("/internal/stocks/deleted", {
     method: "DELETE",
     body: JSON.stringify({
-      account_id: accountId,
+      ticker_type: tickerType,
       tickers,
     }),
   });

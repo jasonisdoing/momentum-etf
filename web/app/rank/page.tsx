@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function RankPage() {
   return (
-    <PageFrame title="순위" fullWidth>
+    <PageFrame title="순위" fullHeight fullWidth>
       <RankManager />
     </PageFrame>
   );

@@ -66,12 +66,28 @@ a {
 .appSidebar {
   width: 11rem;
   min-width: 11rem;
-  position: relative;
-  inset: auto;
+  position: sticky;
+  top: 0;
+  height: 100vh;
   flex: 0 0 11rem;
   border-right: 1px solid rgba(255, 255, 255, 0.06);
   background: #1f2937;
   z-index: 1035;
+  overflow-y: auto;
+  transition:
+    width 180ms ease,
+    min-width 180ms ease,
+    flex-basis 180ms ease,
+    border-color 180ms ease;
+}
+
+.appLayoutSidebarCollapsed > .navbar-vertical.appSidebar,
+.appLayoutSidebarCollapsed .appSidebar {
+  width: 0;
+  min-width: 0;
+  flex-basis: 0;
+  border-right-color: transparent;
+  overflow: hidden;
 }
 
 .appSidebarInner {
@@ -81,6 +97,12 @@ a {
   gap: 0.375rem;
   min-height: 100vh;
   padding: 0.625rem 0.375rem 0.75rem;
+  transition: opacity 120ms ease;
+}
+
+.appLayoutSidebarCollapsed .appSidebarInner {
+  opacity: 0;
+  pointer-events: none;
 }
 
 .appSidebarBrand {
@@ -234,6 +256,7 @@ a {
   flex: 1 1 auto;
   flex-direction: column;
   min-width: 0;
+  transition: width 180ms ease;
 }
 
 .appTopHeader {
@@ -250,11 +273,18 @@ a {
 .appTopHeaderInner {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 0.125rem;
   min-height: var(--app-header-height);
   height: 100%;
   flex-wrap: nowrap;
+}
+
+.appHeaderLeft {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-width: 0;
 }
 
 .appMobileHeader {
@@ -272,6 +302,13 @@ a {
 }
 
 .appSidebarToggle {
+  border-color: var(--line);
+}
+
+.appSidebarDesktopToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border-color: var(--line);
 }
 
@@ -546,16 +583,6 @@ a {
   color: var(--muted);
   font-size: 0.92rem;
   line-height: 1.35;
-}
-
-.appDataGridOverlay {
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-start;
-  width: 100%;
-  height: 100%;
-  padding: 0.375rem 0.75rem 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.78) 22%, rgba(255, 255, 255, 0.42) 100%);
 }
 
 @keyframes appLoadingBarSlide {
@@ -1337,6 +1364,46 @@ a {
   font-size: 12px;
 }
 
+.marketTableWrap {
+  overflow: hidden;
+}
+
+.marketTableScroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.marketTable {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.95rem;
+}
+
+.marketTable thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.625rem 0.75rem;
+  background: var(--app-table-head-bg);
+  color: var(--app-table-head-color);
+  border-bottom: 1px solid var(--app-table-head-border);
+  text-align: center;
+  white-space: nowrap;
+}
+
+.marketTable tbody td {
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid rgba(220, 225, 231, 0.85);
+  white-space: nowrap;
+}
+
+.marketCellNum {
+  text-align: right;
+}
+
 /* 대시보드 — Tabler row-cards 간격 조정 */
 .row-cards {
   --tblr-gutter-y: 0.75rem;
@@ -1396,109 +1463,467 @@ a {
   background: rgba(46, 125, 50, 0.1);
 }
 
-.appDataGridWrap,
-.rankGridWrap {
+.rankGridWrap,
+.appGridFillWrap {
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.72);
 }
 
-.appDataGridWrapScrollable {
-  overflow-x: auto;
-  overflow-y: hidden;
+.rankGridWrap,
+.appGridFillWrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
-.appDataGrid,
-.rankDataGrid {
-  min-height: 70vh;
+.appTableCardFill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.appTableCardBodyFill {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.appAgGridWrap {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.appAgGridTheme {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.appAgGridThemeLegacy {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  --ag-background-color: transparent;
+  --ag-foreground-color: var(--ink);
+  --ag-header-background-color: var(--app-table-head-bg);
+  --ag-header-foreground-color: var(--app-table-head-color);
+  --ag-border-color: rgba(220, 225, 231, 0.85);
+  --ag-row-border-color: rgba(220, 225, 231, 0.85);
+  --ag-header-column-resize-handle-color: rgba(32, 107, 196, 0.25);
+  --ag-font-size: 0.95rem;
+  --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+.appAgGridTheme .ag-root-wrapper,
+.appAgGridThemeLegacy .ag-root-wrapper,
+.appAgGridTheme .ag-root-wrapper-body,
+.appAgGridThemeLegacy .ag-root-wrapper-body,
+.appAgGridTheme .ag-root,
+.appAgGridThemeLegacy .ag-root,
+.appAgGridTheme .ag-body-viewport,
+.appAgGridThemeLegacy .ag-body-viewport {
+  min-height: 0;
+}
+
+.appAgGridTheme .ag-header-cell-label {
+  font-weight: 600;
+  justify-content: center;
+}
+
+.appAgGridTheme .ag-cell,
+.appAgGridThemeLegacy .ag-cell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.appAgGridTheme .ag-cell.ag-right-aligned-cell,
+.appAgGridThemeLegacy .ag-cell.ag-right-aligned-cell {
+  justify-content: flex-end;
+}
+
+.appAgGridTheme .ag-header-cell.ag-right-aligned-header .ag-header-cell-label,
+.appAgGridThemeLegacy .ag-header-cell.ag-right-aligned-header .ag-header-cell-label {
+  justify-content: center;
+}
+
+.appAgGridTheme .ag-cell.ag-right-aligned-cell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.ag-right-aligned-cell .ag-cell-value {
+  text-align: right;
+}
+
+.appAgGridTheme .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell-value {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.appAgGridTheme .ag-row.appHeldRow {
+  background: rgba(102, 204, 102, 0.35);
+}
+
+.appAgGridTheme .ag-row.appHeldRow:hover {
+  background: rgba(102, 204, 102, 0.42);
+}
+
+.appAgGridThemeLegacy .ag-row.appHeldRow {
+  background: rgba(102, 204, 102, 0.35);
+}
+
+.appAgGridThemeLegacy .ag-row.appHeldRow:hover {
+  background: rgba(102, 204, 102, 0.42);
+}
+
+.assetsAgGrid {
   border: 0;
   background: transparent;
-  font-size: 0.95rem;
 }
 
-.appDataGrid .MuiDataGrid-columnHeaders,
-.rankDataGrid .MuiDataGrid-columnHeaders {
-  background: var(--app-table-head-bg);
-  color: var(--app-table-head-color);
-  border-bottom-color: var(--app-table-head-border);
+.assetsAgGrid .appAgGridTheme {
+  border-radius: 10px;
 }
 
-.appDataGrid .MuiDataGrid-columnHeaderTitle,
-.rankDataGrid .MuiDataGrid-columnHeaderTitle {
-  font-weight: 600;
+.assetsAgGrid .ag-cell-value,
+.assetsAgGrid .ag-group-value {
+  width: 100%;
 }
 
-.appDataGrid .MuiDataGrid-cell,
-.rankDataGrid .MuiDataGrid-cell {
-  border-bottom-color: rgba(220, 225, 231, 0.85);
+.assetsAgGrid .ag-cell {
+  overflow: visible;
 }
 
-.appDataGrid .MuiDataGrid-cell.appBucketCell,
-.rankDataGrid .MuiDataGrid-cell.rankBucketCell {
+.assetsAgGrid .ag-cell.appBucketCell {
   justify-content: center;
   font-weight: 600;
   white-space: nowrap;
 }
 
-.appDataGrid .MuiDataGrid-cell.appBucketCell1,
-.rankDataGrid .MuiDataGrid-cell.rankBucketCell1 {
+.assetsAgGrid .ag-cell.appBucketCell1 {
   background: var(--bucket-1);
   color: #fff;
 }
 
-.appDataGrid .MuiDataGrid-cell.appBucketCell2,
-.rankDataGrid .MuiDataGrid-cell.rankBucketCell2 {
+.assetsAgGrid .ag-cell.appBucketCell2 {
   background: var(--bucket-2);
   color: #fff;
 }
 
-.appDataGrid .MuiDataGrid-cell.appBucketCell3,
-.rankDataGrid .MuiDataGrid-cell.rankBucketCell3 {
+.assetsAgGrid .ag-cell.appBucketCell3 {
   background: var(--bucket-3);
   color: #fff;
 }
 
-.appDataGrid .MuiDataGrid-cell.appBucketCell4,
-.rankDataGrid .MuiDataGrid-cell.rankBucketCell4 {
+.assetsAgGrid .ag-cell.appBucketCell4 {
   background: var(--bucket-4);
   color: #fff;
 }
 
-.appDataGrid .MuiDataGrid-cell.appBucketCell5,
-.rankDataGrid .MuiDataGrid-cell.rankBucketCell5 {
+.assetsAgGrid .ag-cell.appBucketCell5 {
   background: var(--bucket-5);
   color: #fff;
 }
 
-.appDataGrid .MuiDataGrid-row.appHeldRow,
-.rankDataGrid .MuiDataGrid-row.rankHeldRow {
+.assetsAgGrid .ag-cell.assetsEditableCell {
+  background: rgba(46, 160, 67, 0.08);
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell:hover {
+  background: rgba(46, 160, 67, 0.14);
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell.assetsDirtyCell {
+  background: rgba(46, 160, 67, 0.22);
+  font-weight: 700;
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell.assetsDirtyCell:hover {
+  background: rgba(46, 160, 67, 0.28);
+}
+
+.assetsAgGrid .ag-cell.assetsEditableCell.ag-cell-inline-editing {
+  background: rgba(46, 160, 67, 0.18);
+}
+
+.assetsAgGrid .ag-row.assetsAddingRow {
+  background: rgba(32, 107, 196, 0.06);
+}
+
+.assetsAgGrid .ag-row.assetsAddingRow:hover {
+  background: rgba(32, 107, 196, 0.1);
+}
+
+.assetsAgGrid .ag-row.appHeldRow,
+.assetsAgGrid .ag-row.appHeldRow:hover {
+  background: #ffffff;
+}
+
+.assetsAgGrid .ag-row.assetsEditingRow,
+.assetsAgGrid .ag-row.assetsEditingRow.appHeldRow {
+  background: rgba(32, 107, 196, 0.12);
+}
+
+.assetsAgGrid .ag-row.assetsEditingRow:hover,
+.assetsAgGrid .ag-row.assetsEditingRow.appHeldRow:hover {
+  background: rgba(32, 107, 196, 0.16);
+}
+
+.assetsDetailFullRow .ag-full-width-row {
+  background: #f8fbff;
+}
+
+.assetsDetailPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fbff;
+}
+
+.assetsDetailGridWrap {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.rankAgGrid .ag-cell.rankBucketCell {
+  justify-content: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rankAgGrid .ag-cell.rankBucketCell1 {
+  background: var(--bucket-1);
+  color: #fff;
+}
+
+.rankAgGrid .ag-cell.rankBucketCell2 {
+  background: var(--bucket-2);
+  color: #fff;
+}
+
+.rankAgGrid .ag-cell.rankBucketCell3 {
+  background: var(--bucket-3);
+  color: #fff;
+}
+
+.rankAgGrid .ag-cell.rankBucketCell4 {
+  background: var(--bucket-4);
+  color: #fff;
+}
+
+.rankAgGrid .ag-cell.rankBucketCell5 {
+  background: var(--bucket-5);
+  color: #fff;
+}
+
+.rankAgGrid .ag-row.rankHeldRow {
   background: rgba(102, 204, 102, 0.35);
 }
 
-.appDataGrid .MuiDataGrid-row.appHeldRow:hover,
-.rankDataGrid .MuiDataGrid-row.rankHeldRow:hover {
+.rankAgGrid .ag-row.rankHeldRow:hover {
   background: rgba(102, 204, 102, 0.42);
+}
+
+.rankAgGrid .ag-row.rankNegativeTrendRow {
+  background: rgba(100, 116, 139, 0.3);
+}
+
+.rankAgGrid .ag-row.rankNegativeTrendRow:hover {
+  background: rgba(100, 116, 139, 0.38);
+}
+
+.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow {
+  background: rgba(102, 180, 102, 0.38);
+}
+
+.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow:hover {
+  background: rgba(102, 180, 102, 0.45);
+}
+
+.rankAgGrid .ag-cell-value,
+.rankAgGrid .ag-group-value {
+  width: 100%;
+  min-width: 0;
+}
+
+.rankAgGrid .rankNameCellText {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rankAgGrid .ag-cell[col-id="종목명"] {
+  overflow: hidden;
+}
+
+.stocksAgGrid {
+  border: 0;
+  background: transparent;
+}
+
+.stocksAgGrid .appAgGridTheme {
+  border-radius: 10px;
+}
+
+.stocksAgGrid .ag-cell-value,
+.stocksAgGrid .ag-group-value {
+  width: 100%;
+}
+
+.stocksAgGrid .ag-cell.appBucketCell {
+  justify-content: center;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.stocksAgGrid .ag-cell.appBucketCell1 {
+  background: var(--bucket-1);
+  color: #fff;
+}
+
+.stocksAgGrid .ag-cell.appBucketCell2 {
+  background: var(--bucket-2);
+  color: #fff;
+}
+
+.stocksAgGrid .ag-cell.appBucketCell3 {
+  background: var(--bucket-3);
+  color: #fff;
+}
+
+.stocksAgGrid .ag-cell.appBucketCell4 {
+  background: var(--bucket-4);
+  color: #fff;
+}
+
+.stocksAgGrid .ag-cell.appBucketCell5 {
+  background: var(--bucket-5);
+  color: #fff;
+}
+
+.stocksAgGrid .ag-cell.stocksDirtyCell {
+  box-shadow: inset 0 0 0 2px rgba(46, 160, 67, 0.45);
+  font-weight: 700;
+}
+
+.stocksAgGrid .ag-row.ag-row-selected {
+  background: rgba(32, 107, 196, 0.08);
+}
+
+.stocksAgGrid .ag-row.ag-row-selected:hover {
+  background: rgba(32, 107, 196, 0.12);
+}
+
+.weeklyAgGrid {
+  border: 0;
+  background: transparent;
+}
+
+.weeklyAgGrid .appAgGridTheme {
+  border-radius: 10px;
+}
+
+.weeklyAgGrid .ag-cell-value,
+.weeklyAgGrid .ag-group-value {
+  width: 100%;
+}
+
+.weeklyAgGrid .ag-cell.weeklyDateCell {
+  white-space: nowrap;
+}
+
+.weeklyAgGrid .ag-cell.weeklyMemoCell .ag-cell-value {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weeklyAgGrid .ag-cell.weeklyEditableCell {
+  background: rgba(46, 160, 67, 0.08);
+}
+
+.weeklyAgGrid .ag-cell.weeklyEditableCell:hover {
+  background: rgba(46, 160, 67, 0.14);
+}
+
+.weeklyAgGrid .ag-cell.weeklyEditableCell.weeklyDirtyCell {
+  background: rgba(46, 160, 67, 0.22);
+  font-weight: 700;
+}
+
+.weeklyAgGrid .ag-cell.weeklyEditableCell.weeklyDirtyCell:hover {
+  background: rgba(46, 160, 67, 0.28);
+}
+
+.weeklyAgGrid .ag-cell.weeklyEditableCell.ag-cell-inline-editing {
+  background: rgba(46, 160, 67, 0.18);
+}
+
+.weeklyAgGrid .ag-row.tableRowSelected {
+  background: rgba(31, 107, 70, 0.08);
+}
+
+.weeklyAgGrid .ag-row.tableRowSelected:hover {
+  background: rgba(31, 107, 70, 0.12);
+}
+
+.assetsActionGroup {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.assetsActionButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+}
+
+.assetsInlineInput {
+  min-width: 0;
+  height: 2rem;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.84rem;
+  line-height: 1.2;
+}
+
+.assetsInlineInputTicker {
+  width: 5.25rem;
+}
+
+.assetsTickerLookup {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.assetsInlineButton {
+  white-space: nowrap;
+}
+
+.assetsInlineLinkButton {
+  font-size: 0.82rem;
 }
 
 .rankNegativeTrendRow {
   background: rgba(100, 116, 139, 0.3);
-}
-
-.rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.3);
-}
-
-.rankDataGrid .MuiDataGrid-row.rankNegativeTrendRow:hover {
-  background: rgba(100, 116, 139, 0.38);
-}
-
-.rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow {
-  background: rgba(102, 180, 102, 0.38);
-}
-
-.rankDataGrid .MuiDataGrid-row.rankHeldRow.rankNegativeTrendRow:hover {
-  background: rgba(102, 180, 102, 0.45);
 }
 
 .tableWrap {
@@ -1519,6 +1944,174 @@ a {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 1rem;
+}
+
+.appCard > .card-header {
+  padding: 0.375rem 1rem;
+}
+
+.appMainHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 42px;
+}
+
+.appMainHeaderLeft,
+.appMainHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.appMainHeaderLeft {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.appMainHeaderRight {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+  margin-left: auto;
+}
+
+.appMainHeader .form-select,
+.appMainHeader .form-control,
+.appMainHeader .field,
+.appMainHeader .btn,
+.appSegmentedToggleButton,
+.appActionHeaderInner .btn {
+  min-height: 36px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.appMainHeader .form-select,
+.appMainHeader .form-control,
+.appMainHeader .field {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+.appSegmentedToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  padding: 0.25rem;
+  border: 1px solid rgba(9, 30, 66, 0.1);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.appSegmentedToggleButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-width: 0;
+  padding: 0.5rem 0.9rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #5b6778;
+  box-shadow: none;
+}
+
+.appSegmentedToggleButton:hover {
+  background: #eef4fb;
+  color: #206bc4;
+}
+
+.appSegmentedToggleButton.is-active {
+  background: var(--tblr-primary);
+  color: #fff;
+}
+
+.appHeaderMetrics {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem 1.25rem;
+  flex-wrap: wrap;
+}
+
+.appHeaderMetric {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #6c7a91;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.appHeaderMetricValue {
+  color: #182433;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.appHeaderMetricValue.is-primary {
+  color: var(--tblr-primary);
+}
+
+.appHeaderMetricValue.is-success {
+  color: #2e7d32;
+}
+
+.appHeaderMetricValue.is-danger {
+  color: #d63939;
+}
+
+.appHeaderSubtle {
+  color: #6c7a91;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.appActionHeader {
+  flex: 0 0 auto;
+  padding: 0.5rem 1rem;
+}
+
+.appActionHeaderInner {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.marketMainHeader {
+  flex-wrap: nowrap;
+}
+
+.marketMainHeaderLeft {
+  flex: 1 1 auto;
+  flex-wrap: nowrap;
+}
+
+.marketMainHeaderLeft .field {
+  margin-top: 0;
+}
+
+.marketMainHeaderLeft .field:first-child {
+  flex: 1 1 22rem;
+}
+
+.marketMainHeaderLeft .field:not(:first-child) {
+  flex: 0 0 13rem;
+}
+
+.marketMainHeaderRight {
+  flex-wrap: nowrap;
+}
+
+.marketMainHeaderRight .appHeaderMetrics {
+  flex-wrap: nowrap;
 }
 
 .appCardHeaderStack {
@@ -1551,7 +2144,7 @@ a {
   top: 0;
   z-index: 1;
   padding: 10px 12px;
-  text-align: left;
+  text-align: center;
   font-size: 13px;
   font-weight: 600;
   color: var(--app-table-head-color);
@@ -1591,6 +2184,89 @@ a {
 
 .tableRowSelected {
   background: rgba(31, 107, 70, 0.08);
+}
+
+.snapshotsExpandedMainRow {
+  cursor: pointer;
+}
+
+.snapshotsDetailFullRow .ag-full-width-row {
+  background: #f8fbff;
+}
+
+.snapshotsExpandCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.snapshotsExpandIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.snapshotsDetailPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  background: #f8fbff;
+}
+
+.snapshotsDetailPanelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.snapshotsDetailTableWrap {
+  overflow: hidden;
+  border: 1px solid rgba(220, 225, 231, 0.85);
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.snapshotsDetailTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.95rem;
+}
+
+.snapshotsDetailTable th,
+.snapshotsDetailTable td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(220, 225, 231, 0.85);
+  border-right: 1px solid rgba(220, 225, 231, 0.85);
+  white-space: nowrap;
+}
+
+.snapshotsDetailTable th:first-child,
+.snapshotsDetailTable td:first-child {
+  width: 21.57%;
+  min-width: 220px;
+}
+
+.snapshotsDetailTable th {
+  background: #f8fafc;
+  color: var(--app-table-head-color);
+  font-weight: 600;
+  text-align: center;
+}
+
+.snapshotsDetailTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.snapshotsDetailTable th:last-child,
+.snapshotsDetailTable td:last-child {
+  border-right: 0;
 }
 
 .tableAccountCell {
@@ -1675,6 +2351,10 @@ a {
 .erpTable thead th.tableAlignRight,
 .erpTable tbody td.tableAlignRight {
   text-align: right;
+}
+
+.erpTable thead th.tableAlignRight {
+  text-align: center;
 }
 
 .cashHint {
@@ -1768,6 +2448,10 @@ a {
     justify-content: space-between;
   }
 
+  .appHeaderLeft {
+    display: none;
+  }
+
   .appMobileHeader {
     display: flex;
     min-height: var(--app-header-height);
@@ -1853,6 +2537,30 @@ a {
     flex-wrap: wrap;
   }
 
+  .appMainHeader,
+  .appMainHeaderLeft,
+  .appMainHeaderRight,
+  .appHeaderMetrics {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .appActionHeaderInner {
+    justify-content: flex-start;
+  }
+
+  .marketMainHeader,
+  .marketMainHeaderLeft,
+  .marketMainHeaderRight,
+  .marketMainHeaderRight .appHeaderMetrics {
+    flex-wrap: wrap;
+  }
+
+  .marketMainHeaderLeft .field:first-child,
+  .marketMainHeaderLeft .field:not(:first-child) {
+    flex: 1 1 100%;
+  }
+
   .accountSelect {
     min-width: 0;
     max-width: none;
@@ -1888,6 +2596,10 @@ a {
     min-height: var(--app-header-height);
     padding-top: 0 !important;
     padding-bottom: 0 !important;
+  }
+
+  .appMobileHeader {
+    display: none;
   }
 }
 

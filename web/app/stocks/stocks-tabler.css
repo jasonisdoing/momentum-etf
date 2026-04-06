@@ -1,6 +1,8 @@
 .stocksPage {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  min-height: 0;
   padding-top: 0;
 }
 
@@ -9,15 +11,9 @@
   box-shadow: 0 1px 2px rgba(9, 30, 66, 0.04);
 }
 
-.stocksCard {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 .stocksCard .card-header {
   flex: 0 0 auto;
-  padding: 0.75rem 1rem;
+  padding: 0.5rem 1rem;
 }
 
 .stocksToolbar {
@@ -37,6 +33,14 @@
   align-items: center;
 }
 
+.stocksToolbarModes {
+  gap: 0;
+  padding: 0.25rem;
+  border: 1px solid rgba(9, 30, 66, 0.1);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
 .stocksSelect {
   min-width: 220px;
 }
@@ -54,17 +58,45 @@
   color: #53627c;
 }
 
+.stocksModeButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-width: 150px;
+  padding: 0.6rem 1rem;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #5b6778;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.stocksModeButton:hover {
+  background: #eef4fb;
+  color: #206bc4;
+}
+
 .stocksModeButton.is-active {
   background: var(--tblr-primary);
-  border-color: var(--tblr-primary);
   color: #fff;
 }
 
 .stocksTableWrap {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
-  overflow-x: auto;
+}
+
+.stocksTickerLookup {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+}
+
+.stocksTickerLookup .form-control {
+  min-width: 0;
 }
 
 .stocksTable {
@@ -86,6 +118,7 @@
   color: var(--app-table-head-color);
   background: var(--app-table-head-bg);
   border-bottom: 1px solid var(--app-table-head-border);
+  text-align: center;
 }
 
 .stocksTable .table-action-cell {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from time import perf_counter
 from typing import Any
@@ -17,13 +18,115 @@ from config import (
 from core.strategy.metrics import process_ticker_data
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
-from utils.data_loader import get_latest_trading_day
+from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
 ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
 logger = get_app_logger()
+MONTHLY_RETURN_LABEL_COUNT = 13
+
+
+def _build_ma_rule_score_column(order: int) -> str:
+    return f"추세{order}"
+
+
+def _normalize_ma_rules(ticker_type: str, ma_rules_raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(ma_rules_raw, list) or not ma_rules_raw:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES는 1개 이상의 배열이어야 합니다.")
+    normalized_rules: list[dict[str, Any]] = []
+    seen_orders: set[int] = set()
+
+    for index, raw_rule in enumerate(ma_rules_raw, start=1):
+        if not isinstance(raw_rule, dict):
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES[{index}]는 객체여야 합니다.")
+
+        order_raw = raw_rule.get("order")
+        if order_raw is None:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'order'가 누락되었습니다."
+            )
+        try:
+            order = int(order_raw)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] order는 정수여야 합니다: {order_raw}"
+            ) from exc
+        if order < 1:
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES[{index}] order는 1 이상이어야 합니다: {order}")
+        if order in seen_orders:
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES order가 중복되었습니다: {order}")
+        seen_orders.add(order)
+
+        ma_type = str(raw_rule.get("MA_TYPE") or "").strip().upper()
+        if not ma_type:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'MA_TYPE'가 누락되었습니다."
+            )
+        if ma_type not in ALLOWED_MA_TYPES:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_TYPE이 유효하지 않습니다: {ma_type}"
+            )
+
+        ma_months_raw = raw_rule.get("MA_MONTHS")
+        if ma_months_raw is None:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'MA_MONTHS'가 누락되었습니다."
+            )
+        try:
+            ma_months = int(ma_months_raw)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_MONTHS는 정수여야 합니다: {ma_months_raw}"
+            ) from exc
+        if ma_months < 1:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_MONTHS는 1 이상이어야 합니다: {ma_months}"
+            )
+
+        normalized_rules.append(
+            {
+                "order": order,
+                "ma_type": ma_type,
+                "ma_months": ma_months,
+                "ma_days": int(ma_months) * int(TRADING_DAYS_PER_MONTH),
+                "score_column": _build_ma_rule_score_column(order),
+            }
+        )
+
+    return sorted(normalized_rules, key=lambda item: int(item["order"]))
+
+
+def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
+    settings = get_ticker_type_settings(ticker_type)
+    ma_rules_raw = settings.get("MA_RULES")
+    if ma_rules_raw is None:
+        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_RULES'가 누락되었습니다.")
+    return _normalize_ma_rules(ticker_type, ma_rules_raw)
+
+
+def build_effective_ma_rules(
+    ticker_type: str,
+    overrides: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    base_rules = get_ticker_type_ma_rules(ticker_type)
+    if not overrides:
+        return base_rules
+
+    override_map = {int(rule["order"]): rule for rule in overrides if rule.get("order") is not None}
+    raw_rules: list[dict[str, Any]] = []
+    for rule in base_rules:
+        order = int(rule["order"])
+        override = override_map.get(order) or {}
+        raw_rules.append(
+            {
+                "order": order,
+                "MA_TYPE": override.get("ma_type", rule["ma_type"]),
+                "MA_MONTHS": override.get("ma_months", rule["ma_months"]),
+            }
+        )
+    return _normalize_ma_rules(ticker_type, raw_rules)
 
 
 def _calculate_rsi(close_series: pd.Series, period: int = 14) -> float | None:
@@ -91,27 +194,30 @@ def _build_blocked_rankings_result(
     return blocked
 
 
-def get_ticker_type_rank_defaults(ticker_type: str) -> tuple[str, int]:
-    settings = get_ticker_type_settings(ticker_type)
+def _get_latest_trading_day_for_reference(country_code: str, reference_date: pd.Timestamp) -> pd.Timestamp:
+    reference = pd.Timestamp(reference_date).normalize()
+    today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    if reference >= today_korea:
+        return get_latest_trading_day(country_code).normalize()
 
-    ma_type = str(settings.get("MA_TYPE") or "").strip().upper()
-    if not ma_type:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_TYPE'가 누락되었습니다.")
-    if ma_type not in ALLOWED_MA_TYPES:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_TYPE이 유효하지 않습니다: {ma_type}")
+    start_date = (reference - pd.DateOffset(days=10)).strftime("%Y-%m-%d")
+    end_date = reference.strftime("%Y-%m-%d")
+    trading_days = get_trading_days(start_date, end_date, country_code)
+    if trading_days:
+        return max(trading_days).normalize()
+    return reference
 
-    ma_months_raw = settings.get("MA_MONTHS")
-    if ma_months_raw is None:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
 
-    try:
-        ma_months = int(ma_months_raw)
-    except (TypeError, ValueError) as exc:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_MONTHS는 정수여야 합니다: {ma_months_raw}") from exc
-    if ma_months < 1:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_MONTHS는 1 이상이어야 합니다: {ma_months}")
+def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
+    if close_series is None or close_series.empty:
+        return close_series
 
-    return ma_type, ma_months
+    normalized = close_series.copy()
+    normalized.index = pd.to_datetime(normalized.index)
+    sliced = normalized.loc[normalized.index.normalize() <= pd.Timestamp(cutoff_date).normalize()]
+    if sliced.empty:
+        return None
+    return sliced.sort_index()
 
 
 def get_rank_months_max() -> int:
@@ -143,20 +249,108 @@ def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
     return None
 
 
-def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> dict[str, Any]:
+def get_recent_monthly_return_labels(
+    count: int = MONTHLY_RETURN_LABEL_COUNT,
+    reference_date: pd.Timestamp | None = None,
+) -> list[str]:
+    base_month = (reference_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).to_period("M")
+    return [f"{(base_month - offset).strftime('%Y-%m')}(%)" for offset in range(count)]
+
+
+def build_recent_monthly_return_metrics(
+    close_series: pd.Series | None,
+    *,
+    reference_date: pd.Timestamp | None = None,
+    labels: list[str] | None = None,
+) -> dict[str, float | None]:
+    return _build_monthly_return_metrics(
+        close_series,
+        reference_date=reference_date,
+        labels=labels,
+    )
+
+
+def _build_monthly_return_metrics(
+    close_series: pd.Series | None,
+    *,
+    reference_date: pd.Timestamp | None = None,
+    labels: list[str] | None = None,
+) -> dict[str, float | None]:
+    labels = labels or get_recent_monthly_return_labels(reference_date=reference_date)
+    empty_metrics = {label: None for label in labels}
+    if close_series is None:
+        return empty_metrics
+
+    series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if series.empty:
+        return empty_metrics
+
+    normalized = series.copy()
+    normalized.index = pd.to_datetime(normalized.index)
+    normalized = normalized.sort_index()
+    month_end_series = normalized.groupby(normalized.index.to_period("M")).last()
+    current_month = (reference_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).to_period("M")
+    metrics: dict[str, float | None] = {}
+
+    for label in labels:
+        match = re.fullmatch(r"(\d{4}-\d{2})\(%\)", label)
+        if not match:
+            metrics[label] = None
+            continue
+
+        month_period = pd.Period(match.group(1), freq="M")
+        prev_month_close = month_end_series.get(month_period - 1)
+        if prev_month_close is None or pd.isna(prev_month_close):
+            metrics[label] = None
+            continue
+
+        target_close = normalized.iloc[-1] if month_period == current_month else month_end_series.get(month_period)
+        if target_close is None or pd.isna(target_close):
+            metrics[label] = None
+            continue
+
+        prev_value = float(prev_month_close)
+        target_value = float(target_close)
+        metrics[label] = None if prev_value <= 0 else ((target_value / prev_value) - 1.0) * 100.0
+
+    return metrics
+
+
+def _extract_price_metrics_from_close_series(
+    close_series: pd.Series | None,
+    *,
+    reference_date: pd.Timestamp | None = None,
+    monthly_labels: list[str] | None = None,
+) -> dict[str, Any]:
+    monthly_return_metrics = _build_monthly_return_metrics(
+        close_series,
+        reference_date=reference_date,
+        labels=monthly_labels,
+    )
     empty_result = {
         "현재가": None,
         "괴리율": None,
         "일간(%)": None,
         "1주(%)": None,
         "2주(%)": None,
+        "3주(%)": None,
+        "4주(%)": None,
         "1달(%)": None,
+        "2달(%)": None,
         "3달(%)": None,
+        "4달(%)": None,
+        "5달(%)": None,
         "6달(%)": None,
+        "7달(%)": None,
+        "8달(%)": None,
+        "9달(%)": None,
+        "10달(%)": None,
+        "11달(%)": None,
         "12달(%)": None,
         "고점": None,
         "추세(3달)": [],
         "RSI": None,
+        **monthly_return_metrics,
     }
     if close_series is None:
         return empty_result
@@ -182,13 +376,24 @@ def _extract_price_metrics_from_close_series(close_series: pd.Series | None) -> 
         "일간(%)": daily_pct,
         "1주(%)": _calc_period_return(series, 5),
         "2주(%)": _calc_period_return(series, 10),
+        "3주(%)": _calc_period_return(series, 15),
+        "4주(%)": _calc_period_return(series, 20),
         "1달(%)": _calc_period_return(series, 20),
+        "2달(%)": _calc_period_return(series, 40),
         "3달(%)": _calc_period_return(series, 60),
+        "4달(%)": _calc_period_return(series, 80),
+        "5달(%)": _calc_period_return(series, 100),
         "6달(%)": _calc_period_return(series, 126),
+        "7달(%)": _calc_period_return(series, 147),
+        "8달(%)": _calc_period_return(series, 168),
+        "9달(%)": _calc_period_return(series, 189),
+        "10달(%)": _calc_period_return(series, 210),
+        "11달(%)": _calc_period_return(series, 231),
         "12달(%)": _calc_period_return(series, 252),
         "고점": drawdown,
         "추세(3달)": series.iloc[-60:].astype(float).tolist(),
         "RSI": _calculate_rsi(series),
+        **monthly_return_metrics,
     }
 
 
@@ -271,12 +476,42 @@ def _build_effective_close_series(
     return adjusted.sort_index()
 
 
-def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFrame:
+def _normalize_ranking_values(
+    df: pd.DataFrame,
+    country_code: str,
+    *,
+    monthly_labels: list[str] | None = None,
+) -> pd.DataFrame:
     normalized = df.copy()
 
     price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
-    percent_columns = ["괴리율", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
-    one_decimal_columns = ["추세", "RSI"]
+    percent_columns = [
+        "괴리율",
+        "일간(%)",
+        "1주(%)",
+        "2주(%)",
+        "3주(%)",
+        "4주(%)",
+        "1달(%)",
+        "2달(%)",
+        "3달(%)",
+        "4달(%)",
+        "5달(%)",
+        "6달(%)",
+        "7달(%)",
+        "8달(%)",
+        "9달(%)",
+        "10달(%)",
+        "11달(%)",
+        "12달(%)",
+        "고점",
+        *(monthly_labels or []),
+    ]
+    one_decimal_columns = ["RSI"]
+    score_columns = ["점수"]
+    score_columns.extend(
+        str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
+    )
 
     def _round_if_present(column: str, digits: int) -> None:
         if column not in normalized.columns:
@@ -285,25 +520,62 @@ def _normalize_ranking_values(df: pd.DataFrame, country_code: str) -> pd.DataFra
         normalized[column] = series.round(digits)
 
     _round_if_present("현재가", price_digits)
-    _round_if_present("지속", 0)
-
     for column in percent_columns:
         _round_if_present(column, 2)
 
     for column in one_decimal_columns:
         _round_if_present(column, 1)
 
-    if "지속" in normalized.columns:
-        normalized["지속"] = pd.to_numeric(normalized["지속"], errors="coerce").astype("Int64")
+    for column in score_columns:
+        _round_if_present(column, 1)
 
     return normalized
+
+
+def _calculate_signed_percentile_score(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    result = pd.Series(index=series.index, dtype=float)
+
+    positive_mask = numeric > 0
+    negative_mask = numeric < 0
+    zero_mask = numeric == 0
+
+    if positive_mask.any():
+        positive_values = numeric[positive_mask]
+        result.loc[positive_mask] = positive_values.rank(method="average", pct=True) * 100.0
+
+    if negative_mask.any():
+        negative_values = numeric[negative_mask].abs()
+        result.loc[negative_mask] = -(negative_values.rank(method="average", pct=True) * 100.0)
+
+    if zero_mask.any():
+        result.loc[zero_mask] = 0.0
+
+    return result
+
+
+def _build_composite_score(df: pd.DataFrame, ma_rules: list[dict[str, Any]]) -> pd.Series:
+    score_columns = [str(rule["score_column"]) for rule in ma_rules]
+    if not score_columns:
+        return pd.Series(index=df.index, dtype=float)
+
+    normalized_parts = []
+    valid_mask = pd.Series(True, index=df.index, dtype=bool)
+    for column in score_columns:
+        part = _calculate_signed_percentile_score(df[column])
+        normalized_parts.append(part)
+        valid_mask &= part.notna()
+
+    composite = pd.concat(normalized_parts, axis=1).sum(axis=1, min_count=len(score_columns))
+    composite.loc[~valid_mask] = pd.NA
+    return composite
 
 
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
-    ma_type: str,
-    ma_months: int,
+    ma_rules: list[dict[str, Any]] | None = None,
+    as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
 ) -> pd.DataFrame:
@@ -319,8 +591,10 @@ def build_ticker_type_rankings(
 
     fetch_started_at = perf_counter()
     tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if str(item.get("ticker") or "").strip()]
+    selected_as_of_date = (as_of_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).normalize()
     cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
-    latest_trading_day = get_latest_trading_day(country_code).normalize()
+    latest_trading_day = _get_latest_trading_day_for_reference(country_code, selected_as_of_date)
+    monthly_labels = get_recent_monthly_return_labels(reference_date=selected_as_of_date)
     missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
     normalized_cache_updated = {
         ticker: normalized
@@ -356,23 +630,28 @@ def build_ticker_type_rankings(
     cached_close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
     if callable(status_callback):
         status_callback("실시간 가격 조회")
+    today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    realtime_allowed = selected_as_of_date == today_korea
     realtime_snapshot = (
         realtime_snapshot_override
         if realtime_snapshot_override is not None
         else _load_realtime_snapshot(country_code, tickers)
+        if realtime_allowed
+        else {}
     )
     fetch_elapsed = perf_counter() - fetch_started_at
     realtime_meta = None
-    if realtime_snapshot_override is None:
+    if realtime_allowed and realtime_snapshot_override is None:
         realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
 
-    ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
+    effective_ma_rules = ma_rules or get_ticker_type_ma_rules(ticker_type)
     rows: list[dict[str, Any]] = []
     preprocess_elapsed = 0.0
     metric_elapsed = 0.0
     process_elapsed = 0.0
 
     from utils.portfolio_io import load_all_holding_tickers
+
     held_tickers = load_all_holding_tickers()
 
     if callable(status_callback):
@@ -386,39 +665,47 @@ def build_ticker_type_rankings(
         cached_close_series = cached_close_series_map.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
-        effective_close_series = _build_effective_close_series(cached_close_series, realtime_entry)
+        base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
+        effective_close_series = _build_effective_close_series(base_close_series, realtime_entry)
         preprocess_elapsed += perf_counter() - preprocess_started_at
 
         metric_started_at = perf_counter()
-        price_metrics = _extract_price_metrics_from_close_series(effective_close_series)
+        price_metrics = _extract_price_metrics_from_close_series(
+            effective_close_series,
+            reference_date=selected_as_of_date,
+            monthly_labels=monthly_labels,
+        )
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
-        score_value = None
-        streak_value: int | None = None
+        ma_rule_scores = {str(rule["score_column"]): None for rule in effective_ma_rules}
 
         if effective_close_series is not None and not effective_close_series.empty:
             process_started_at = perf_counter()
-            processed = process_ticker_data(
-                ticker,
-                None,
-                ma_days=ma_days,
-                precomputed_entry={"close": effective_close_series, "open": effective_close_series},
-                ma_type=ma_type,
-                enable_data_sufficiency_check=False,
-            )
-            process_elapsed += perf_counter() - process_started_at
-            if processed is not None:
+            for rule in effective_ma_rules:
+                processed = process_ticker_data(
+                    ticker,
+                    None,
+                    ma_days=int(rule["ma_days"]),
+                    precomputed_entry={"close": effective_close_series, "open": effective_close_series},
+                    ma_type=str(rule["ma_type"]),
+                    enable_data_sufficiency_check=False,
+                )
+                if processed is None:
+                    break
+
                 score_series = processed.get("ma_score")
-                streak_series = processed.get("buy_signal_days")
-                if isinstance(score_series, pd.Series) and not score_series.empty:
-                    score_raw = score_series.iloc[-1]
-                    if pd.notna(score_raw):
-                        score_value = float(score_raw)
-                if isinstance(streak_series, pd.Series) and not streak_series.empty:
-                    streak_raw = streak_series.iloc[-1]
-                    if pd.notna(streak_raw):
-                        streak_value = int(streak_raw)
+                if not isinstance(score_series, pd.Series) or score_series.empty:
+                    break
+
+                score_raw = score_series.iloc[-1]
+                if pd.isna(score_raw):
+                    break
+
+                rule_score = float(score_raw)
+                ma_rule_scores[str(rule["score_column"])] = rule_score
+
+            process_elapsed += perf_counter() - process_started_at
         elif effective_close_series is not None and len(effective_close_series.index) >= MIN_TRADING_DAYS:
             pass
 
@@ -429,9 +716,9 @@ def build_ticker_type_rankings(
                 "티커": ticker,
                 "종목명": etf.get("name", ""),
                 "상장일": etf.get("listing_date", "-"),
-                "추세": score_value,
-                "지속": streak_value,
+                "점수": None,
                 "보유": "보유" if ticker in held_tickers else "",
+                **ma_rule_scores,
                 **price_metrics,
             }
         )
@@ -440,6 +727,8 @@ def build_ticker_type_rankings(
     df = pd.DataFrame(rows)
     if df.empty:
         return df
+
+    df["점수"] = _build_composite_score(df, effective_ma_rules)
 
     realtime_active = bool(realtime_snapshot)
     ranking_computed_at = datetime.now()
@@ -450,7 +739,7 @@ def build_ticker_type_rankings(
         return float(value)
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        trend = row.get("추세")
+        trend = row.get("점수")
         return (
             1 if trend is None or pd.isna(trend) else 0,
             _to_sortable_score(trend),
@@ -481,7 +770,7 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
-    df = _normalize_ranking_values(df, country_code)
+    df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at
     if realtime_meta:
@@ -492,6 +781,8 @@ def build_ticker_type_rankings(
     if latest_cache_updated_at is not None:
         df.attrs["cache_updated_at"] = latest_cache_updated_at
     df.attrs["latest_trading_day"] = latest_trading_day
+    df.attrs["as_of_date"] = selected_as_of_date
+    df.attrs["ma_rules"] = effective_ma_rules
     dataframe_elapsed = perf_counter() - dataframe_started_at
     total_elapsed = perf_counter() - started_at
     logger.info(
@@ -510,7 +801,10 @@ def build_ticker_type_rankings(
 
 __all__ = [
     "ALLOWED_MA_TYPES",
+    "build_recent_monthly_return_metrics",
+    "build_effective_ma_rules",
     "build_ticker_type_rankings",
-    "get_ticker_type_rank_defaults",
     "get_rank_months_max",
+    "get_recent_monthly_return_labels",
+    "get_ticker_type_ma_rules",
 ]

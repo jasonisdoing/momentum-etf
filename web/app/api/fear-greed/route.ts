@@ -1,36 +1,31 @@
 import { NextResponse } from "next/server";
 
-import { parseFearGreedSummary } from "@/lib/fear-greed";
-
 export const dynamic = "force-dynamic";
 
-const CNN_FEAR_GREED_URL = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata";
-
 export async function GET() {
+  const internalToken = process.env.FASTAPI_INTERNAL_TOKEN || "";
+  const baseUrl = process.env.FASTAPI_INTERNAL_URL || "http://127.0.0.1:8000";
+
   try {
-    const response = await fetch(CNN_FEAR_GREED_URL, {
+    const response = await fetch(`${baseUrl}/internal/market/fear-greed`, {
       cache: "no-store",
       headers: {
-        Accept: "application/json,text/plain,*/*",
-        Referer: "https://edition.cnn.com/",
-        "User-Agent":
-          "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+        "X-Internal-Token": internalToken,
       },
     });
 
     if (!response.ok) {
-      throw new Error(`CNN 공포탐욕지수 조회 실패: ${response.status}`);
+        return NextResponse.json({ error: "CNN 공포탐욕지수 데이터를 가져오지 못했습니다." }, { status: response.status });
     }
 
-    const payload = (await response.json()) as unknown;
-    const summary = parseFearGreedSummary(payload);
-    return NextResponse.json(summary);
+    const data = await response.json();
+    return NextResponse.json(data);
   } catch (error) {
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "CNN 공포탐욕지수를 불러오지 못했습니다.",
+        error: error instanceof Error ? error.message : "CNN 공포탐욕지수 데이터 요청 중 오류 발생",
       },
-      { status: 503 },
+      { status: 500 },
     );
   }
 }
