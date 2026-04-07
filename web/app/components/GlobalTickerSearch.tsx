@@ -288,7 +288,7 @@ export function GlobalTickerSearch() {
                       recentSearches.map((item) => (
                         <div key={`${item.ticker_type}-${item.ticker}`} className="globalTickerSearchChip">
                           <button type="button" className="globalTickerSearchChipLabel" onClick={() => navigateToTicker(item)}>
-                            {item.name}
+                            {`${item.name}(${item.ticker})`}
                           </button>
                           <button
                             type="button"
