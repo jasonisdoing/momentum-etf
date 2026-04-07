@@ -98,7 +98,7 @@ HIGH_POINT_GREEN_THRESHOLD = -5
 # lookback_days는 짧을수록 최근 흐름, 길수록 장기 테마 유사성을 더 강하게 반영합니다.
 # 실전 조정은 lookback_days 60~120, threshold 0.90~0.98 범위에서 시작하는 편이 무난합니다.
 RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS = 30
-RANK_RECOMMEND_SIMILARITY_THRESHOLD = 0.95
+RANK_RECOMMEND_SIMILARITY_THRESHOLD = 0.92
 # 유사 그룹 내에 보유 종목이 있으면 우선 대표로 유지합니다.
 # 다만 현재 그룹 1위보다 순위 백분위가 이 값 이상 뒤처지면 대표를 교체합니다.
 # 값은 퍼센트포인트(%p) 기준이며, 0이면 항상 보유 우선, 클수록 교체가 덜 발생합니다.
