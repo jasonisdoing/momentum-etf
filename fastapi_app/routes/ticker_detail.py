@@ -4,12 +4,33 @@ import pandas as pd
 from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
+from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
+
+
+def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None, float | None]:
+    if close_series is None or close_series.empty:
+        return None, None
+
+    numeric_series = pd.to_numeric(close_series, errors="coerce").dropna()
+    if numeric_series.empty:
+        return None, None
+
+    current_price = float(numeric_series.iloc[-1])
+    if len(numeric_series) < 2:
+        return current_price, None
+
+    previous_close = float(numeric_series.iloc[-2])
+    if previous_close == 0:
+        return current_price, None
+
+    change_pct = round(((current_price / previous_close) - 1.0) * 100.0, 2)
+    return current_price, change_pct
 
 
 @router.get("/tickers")
@@ -34,6 +55,61 @@ def get_all_tickers(
                     "country_code": country_code,
                 })
     return result
+
+
+@router.get("/search-data")
+def get_ticker_search_data(
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """전역 티커 검색용 메타데이터와 급상승 목록을 반환합니다."""
+
+    configs = load_ticker_type_configs()
+    ticker_items: list[dict[str, object]] = []
+    top_movers_by_type: list[dict[str, object]] = []
+
+    for config in configs:
+        ticker_type = config["ticker_type"]
+        country_code = config.get("country_code", "")
+        ticker_type_name = str(config.get("name") or ticker_type).strip()
+        etfs = get_etfs(ticker_type)
+        tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")]
+        close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+        ticker_type_items: list[dict[str, object]] = []
+
+        for etf in etfs:
+            ticker = str(etf.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+
+            current_price, change_pct = _build_price_snapshot(close_series_map.get(ticker))
+            item = {
+                "ticker": ticker,
+                "name": str(etf.get("name") or "").strip(),
+                "ticker_type": ticker_type,
+                "country_code": country_code,
+                "current_price": current_price,
+                "change_pct": change_pct,
+            }
+            ticker_items.append(item)
+            ticker_type_items.append(item)
+
+        top_movers = sorted(
+            [item for item in ticker_type_items if item.get("change_pct") is not None],
+            key=lambda item: float(item["change_pct"]),
+            reverse=True,
+        )[:5]
+        top_movers_by_type.append(
+            {
+                "ticker_type": ticker_type,
+                "label": ticker_type_name,
+                "items": top_movers,
+            }
+        )
+
+    return {
+        "tickers": ticker_items,
+        "top_movers_by_type": top_movers_by_type,
+    }
 
 
 @router.get("")
