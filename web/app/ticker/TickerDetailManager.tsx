@@ -13,6 +13,7 @@ import {
 import type {
   IChartApi,
   LineData,
+  Logical,
   Time,
   MouseEventParams,
 } from "lightweight-charts";
@@ -64,6 +65,13 @@ type CrosshairInfo = {
   low: number | null;
   close: number | null;
   change_pct: number | null;
+};
+
+type ChartRangeBadge = {
+  text: string;
+  left: number;
+  top: number;
+  tone: "high" | "low";
 };
 
 // --- 상수 ---
@@ -216,6 +224,34 @@ function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
   }));
 }
 
+function formatTickerPrice(value: number | null, countryCode: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+
+  if (countryCode === "au") {
+    return `A$${new Intl.NumberFormat("en-AU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
+  return `${new Intl.NumberFormat("ko-KR", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(value)}원`;
+}
+
+function buildRangeBadgeText(
+  anchorPrice: number,
+  currentPrice: number,
+  date: string,
+  countryCode: string,
+): string {
+  const pct = anchorPrice === 0 ? null : ((currentPrice / anchorPrice) - 1) * 100;
+  return `${formatTickerPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
+}
+
 function getInitialVisibleLogicalRange(
   data: PriceRow[],
   interval: ChartInterval,
@@ -282,6 +318,7 @@ export function TickerDetailManager() {
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [crosshairInfo, setCrosshairInfo] = useState<CrosshairInfo | null>(null);
+  const [chartBadges, setChartBadges] = useState<ChartRangeBadge[]>([]);
 
   // --- 종목 목록 로드 ---
 
@@ -402,6 +439,7 @@ export function TickerDetailManager() {
     if (!chartContainerRef.current || chartRows.length === 0) return;
     if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
     setCrosshairInfo(null);
+    setChartBadges([]);
 
     const container = chartContainerRef.current;
     const chart = createChart(container, {
@@ -426,6 +464,66 @@ export function TickerDetailManager() {
         .filter((r) => r.open !== null && r.high !== null && r.low !== null && r.close !== null)
         .map((r) => ({ time: r.date as Time, open: r.open!, high: r.high!, low: r.low!, close: r.close! })),
     );
+
+    function updateRangeBadges(logicalRange?: { from: number; to: number } | null) {
+      const safeFrom = logicalRange ? Math.max(Math.floor(logicalRange.from), 0) : 0;
+      const safeTo = logicalRange ? Math.min(Math.ceil(logicalRange.to), chartRows.length - 1) : chartRows.length - 1;
+      const visibleRows = chartRows.slice(safeFrom, safeTo + 1).filter(
+        (row) => row.high !== null && row.low !== null && row.close !== null,
+      );
+
+      if (visibleRows.length === 0) {
+        setChartBadges([]);
+        return;
+      }
+
+      const currentRow = visibleRows[visibleRows.length - 1];
+      if (currentRow.close === null) {
+        setChartBadges([]);
+        return;
+      }
+
+      let highRow = visibleRows[0];
+      let lowRow = visibleRows[0];
+      for (const row of visibleRows) {
+        if ((row.high ?? Number.NEGATIVE_INFINITY) > (highRow.high ?? Number.NEGATIVE_INFINITY)) {
+          highRow = row;
+        }
+        if ((row.low ?? Number.POSITIVE_INFINITY) < (lowRow.low ?? Number.POSITIVE_INFINITY)) {
+          lowRow = row;
+        }
+      }
+
+      const highIndex = chartRows.findIndex((row) => row.date === highRow.date);
+      const lowIndex = chartRows.findIndex((row) => row.date === lowRow.date);
+      const highX = chart.timeScale().logicalToCoordinate(highIndex as Logical);
+      const lowX = chart.timeScale().logicalToCoordinate(lowIndex as Logical);
+      const highY = candleSeries.priceToCoordinate(highRow.high!);
+      const lowY = candleSeries.priceToCoordinate(lowRow.low!);
+
+      if (highX === null || lowX === null || highY === null || lowY === null) {
+        setChartBadges([]);
+        return;
+      }
+
+      const chartWidth = container.clientWidth;
+      const clampLeft = (value: number, width = 240) => Math.max(12, Math.min(value, chartWidth - width - 12));
+
+      setChartBadges([
+        {
+          tone: "high",
+          text: buildRangeBadgeText(highRow.high!, currentRow.close, highRow.date, selectedTicker?.country_code ?? "kor"),
+          left: clampLeft(highX - 72),
+          top: Math.max(highY - 34, 10),
+        },
+        {
+          tone: "low",
+          text: buildRangeBadgeText(lowRow.low!, currentRow.close, lowRow.date, selectedTicker?.country_code ?? "kor"),
+          left: clampLeft(lowX - 72),
+          top: Math.min(lowY + 12, 394),
+        },
+      ]);
+    }
 
     const volumeSeries = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "volume" });
     chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
@@ -455,8 +553,15 @@ export function TickerDetailManager() {
       if (row) setCrosshairInfo({ open: row.open, high: row.high, low: row.low, close: row.close, change_pct: row.change_pct });
     });
 
+    chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+      updateRangeBadges(range);
+    });
+
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
+      for (const entry of entries) {
+        chart.applyOptions({ width: entry.contentRect.width });
+        updateRangeBadges(chart.timeScale().getVisibleLogicalRange());
+      }
     });
     observer.observe(container);
     const initialVisibleRange = getInitialVisibleLogicalRange(chartRows, chartInterval);
@@ -465,8 +570,14 @@ export function TickerDetailManager() {
     } else {
       chart.timeScale().fitContent();
     }
+    updateRangeBadges(chart.timeScale().getVisibleLogicalRange());
 
-    return () => { observer.disconnect(); chart.remove(); chartRef.current = null; };
+    return () => {
+      observer.disconnect();
+      setChartBadges([]);
+      chart.remove();
+      chartRef.current = null;
+    };
   }, [chartInterval, chartRows, dateRowMap]);
 
   const displayInfo = crosshairInfo ?? lastInfo;
@@ -606,7 +717,18 @@ export function TickerDetailManager() {
                         ) : null
                       ))}
                     </div>
-                    <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                    <div className="tickerDetailChartWrap">
+                      <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                      {chartBadges.map((badge, index) => (
+                        <div
+                          key={`${badge.tone}-${index}`}
+                          className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
+                          style={{ left: badge.left, top: badge.top }}
+                        >
+                          {badge.text}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
 

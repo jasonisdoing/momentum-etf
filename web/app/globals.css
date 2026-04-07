@@ -1762,6 +1762,30 @@ a {
   font-size: 13px;
 }
 
+.tickerDetailChartWrap {
+  position: relative;
+}
+
+.tickerDetailChartBadge {
+  position: absolute;
+  z-index: 2;
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.tickerDetailChartBadge.is-high {
+  color: #ef5350;
+}
+
+.tickerDetailChartBadge.is-low {
+  color: #2f6fed;
+}
+
 .appAgGridWrap {
   display: flex;
   flex: 1 1 auto;
