@@ -52,6 +52,8 @@ type MonthlyPriceRow = {
   change_pct: number | null;
 };
 
+type ChartInterval = "day" | "week" | "month";
+
 type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
@@ -67,8 +69,6 @@ type CrosshairInfo = {
 };
 
 // --- 상수 ---
-
-const MONTHS_OPTIONS = [3, 6, 12, 24, 36];
 
 const MA_PERIODS = [
   { period: 5, color: "#2196F3", label: "5" },
@@ -137,39 +137,40 @@ function calculateMA(data: PriceRow[], period: number): LineData[] {
   return result;
 }
 
-function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
-  const monthlyRows: MonthlyPriceRow[] = [];
-  let currentMonth = "";
-  let currentRow: MonthlyPriceRow | null = null;
-  let previousMonthClose: number | null = null;
+function getWeekBucketStart(value: string): string {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  const day = date.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  date.setDate(date.getDate() + diff);
+  return date.toISOString().slice(0, 10);
+}
+
+function aggregatePriceRows(data: PriceRow[], bucket: "week" | "month"): PriceRow[] {
+  const aggregatedRows: PriceRow[] = [];
+  let currentKey = "";
+  let currentRow: PriceRow | null = null;
+  let previousClose: number | null = null;
 
   for (const row of data) {
-    const month = row.date.slice(0, 7);
-    if (!month) {
+    const nextKey = bucket === "week" ? getWeekBucketStart(row.date) : row.date.slice(0, 7);
+    if (!nextKey) {
       continue;
     }
 
-    if (month !== currentMonth) {
+    if (nextKey !== currentKey) {
       if (currentRow) {
-        if (currentRow.close !== null && previousMonthClose !== null && previousMonthClose !== 0) {
-          currentRow.change_pct = Number((((currentRow.close - previousMonthClose) / previousMonthClose) * 100).toFixed(2));
+        if (currentRow.close !== null && previousClose !== null && previousClose !== 0) {
+          currentRow.change_pct = Number((((currentRow.close - previousClose) / previousClose) * 100).toFixed(2));
         }
         if (currentRow.close !== null) {
-          previousMonthClose = currentRow.close;
+          previousClose = currentRow.close;
         }
-        monthlyRows.push(currentRow);
+        aggregatedRows.push(currentRow);
       }
 
-      currentMonth = month;
-      currentRow = {
-        month,
-        open: row.open,
-        high: row.high,
-        low: row.low,
-        close: row.close,
-        volume: row.volume,
-        change_pct: null,
-      };
+      currentKey = nextKey;
+      currentRow = { ...row };
       continue;
     }
 
@@ -192,16 +193,29 @@ function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
     if (row.volume !== null) {
       currentRow.volume = (currentRow.volume ?? 0) + row.volume;
     }
+    currentRow.date = row.date;
   }
 
   if (currentRow) {
-    if (currentRow.close !== null && previousMonthClose !== null && previousMonthClose !== 0) {
-      currentRow.change_pct = Number((((currentRow.close - previousMonthClose) / previousMonthClose) * 100).toFixed(2));
+    if (currentRow.close !== null && previousClose !== null && previousClose !== 0) {
+      currentRow.change_pct = Number((((currentRow.close - previousClose) / previousClose) * 100).toFixed(2));
     }
-    monthlyRows.push(currentRow);
+    aggregatedRows.push(currentRow);
   }
 
-  return monthlyRows;
+  return aggregatedRows;
+}
+
+function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
+  return aggregatePriceRows(data, "month").map((row) => ({
+    month: row.date.slice(0, 7),
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+    volume: row.volume,
+    change_pct: row.change_pct,
+  }));
 }
 
 // --- 컴포넌트 ---
@@ -229,14 +243,12 @@ export function TickerDetailManager() {
   // 현재 선택된 종목
   const [selectedTicker, setSelectedTicker] = useState<TickerItem | null>(null);
 
-  // 기간
-  const [months, setMonths] = useState(12);
-
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [chartInterval, setChartInterval] = useState<ChartInterval>("day");
 
   // 차트
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
@@ -271,7 +283,7 @@ export function TickerDetailManager() {
     if (qTickerType) {
       const item: TickerItem = { ticker: qTicker, name: qName, ticker_type: qTickerType, country_code: qCountryCode };
       setSelectedTicker(item);
-      void loadTickerData(item, months);
+      void loadTickerData(item);
       return;
     }
 
@@ -282,7 +294,7 @@ export function TickerDetailManager() {
     const matches = allTickers.filter((item) => item.ticker.toLowerCase() === qTicker.toLowerCase());
     if (matches.length === 1) {
       setSelectedTicker(matches[0]);
-      void loadTickerData(matches[0], months);
+      void loadTickerData(matches[0]);
       return;
     }
 
@@ -330,7 +342,7 @@ export function TickerDetailManager() {
 
   // --- 데이터 로드 ---
 
-  async function loadTickerData(item: TickerItem, m: number) {
+  async function loadTickerData(item: TickerItem) {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -343,7 +355,6 @@ export function TickerDetailManager() {
         ticker: item.ticker,
         ticker_type: item.ticker_type,
         country_code: item.country_code || "kor",
-        months: String(m),
       });
       const response = await fetch(`/api/ticker-detail?${search.toString()}`, {
         cache: "no-store",
@@ -369,7 +380,7 @@ export function TickerDetailManager() {
     setSearchInput("");
     setShowDropdown(false);
     setHighlightIndex(-1);
-    void loadTickerData(item, months);
+    void loadTickerData(item);
     // URL 업데이트
     const params = new URLSearchParams({
       ticker: item.ticker,
@@ -402,30 +413,36 @@ export function TickerDetailManager() {
     }
   }
 
-  function handleMonthsChange(next: number) {
-    setMonths(next);
-    if (selectedTicker) loadTickerData(selectedTicker, next);
-  }
-
   // --- 차트 관련 ---
 
   const priceDigits = selectedTicker?.country_code === "au" ? 2 : 0;
 
+  const chartRows = useMemo(() => {
+    if (chartInterval === "week") {
+      return aggregatePriceRows(rows, "week");
+    }
+    if (chartInterval === "month") {
+      return aggregatePriceRows(rows, "month");
+    }
+    return rows;
+  }, [chartInterval, rows]);
+
   const dateRowMap = useMemo(() => {
     const map = new Map<string, PriceRow>();
-    for (const row of rows) map.set(row.date, row);
+    for (const row of chartRows) map.set(row.date, row);
     return map;
-  }, [rows]);
+  }, [chartRows]);
 
   const lastInfo = useMemo<CrosshairInfo | null>(() => {
-    if (rows.length === 0) return null;
-    const last = rows[rows.length - 1];
+    if (chartRows.length === 0) return null;
+    const last = chartRows[chartRows.length - 1];
     return { open: last.open, high: last.high, low: last.low, close: last.close, change_pct: last.change_pct };
-  }, [rows]);
+  }, [chartRows]);
 
   useEffect(() => {
-    if (!chartContainerRef.current || rows.length === 0) return;
+    if (!chartContainerRef.current || chartRows.length === 0) return;
     if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
+    setCrosshairInfo(null);
 
     const container = chartContainerRef.current;
     const chart = createChart(container, {
@@ -445,7 +462,7 @@ export function TickerDetailManager() {
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
     });
     candleSeries.setData(
-      rows
+      chartRows
         .filter((r) => r.open !== null && r.high !== null && r.low !== null && r.close !== null)
         .map((r) => ({ time: r.date as Time, open: r.open!, high: r.high!, low: r.low!, close: r.close! })),
     );
@@ -453,18 +470,18 @@ export function TickerDetailManager() {
     const volumeSeries = chart.addSeries(HistogramSeries, { priceFormat: { type: "volume" }, priceScaleId: "volume" });
     chart.priceScale("volume").applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     volumeSeries.setData(
-      rows
+      chartRows
         .filter((r) => r.volume !== null && r.close !== null)
         .map((r, i) => {
-          const prevClose = i > 0 ? rows[i - 1].close : null;
+          const prevClose = i > 0 ? chartRows[i - 1].close : null;
           const isUp = prevClose !== null && r.close !== null ? r.close >= prevClose : true;
           return { time: r.date as Time, value: r.volume!, color: isUp ? "rgba(38, 166, 154, 0.3)" : "rgba(239, 83, 80, 0.3)" };
         }),
     );
 
     for (const ma of MA_PERIODS) {
-      if (rows.length < ma.period) continue;
-      const maData = calculateMA(rows, ma.period);
+      if (chartRows.length < ma.period) continue;
+      const maData = calculateMA(chartRows, ma.period);
       if (maData.length === 0) continue;
       chart.addSeries(LineSeries, {
         color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
@@ -484,7 +501,7 @@ export function TickerDetailManager() {
     chart.timeScale().fitContent();
 
     return () => { observer.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [rows, dateRowMap]);
+  }, [chartRows, dateRowMap]);
 
   const displayInfo = crosshairInfo ?? lastInfo;
 
@@ -632,20 +649,6 @@ export function TickerDetailManager() {
                   </span>
                 ) : null}
 
-                {selectedTicker ? (
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="조회 기간">
-                    {MONTHS_OPTIONS.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        className={months === m ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => handleMonthsChange(m)}
-                      >
-                        {m >= 12 ? `${m / 12}년` : `${m}개월`}
-                      </button>
-                    ))}
-                  </div>
-                ) : null}
               </div>
             </div>
           </div>
@@ -666,9 +669,25 @@ export function TickerDetailManager() {
                 ) : rows.length > 0 ? (
                   <div style={{ flexShrink: 0 }}>
                     <div style={{ display: "flex", gap: 12, padding: "8px 16px 0", flexWrap: "wrap", alignItems: "center" }}>
+                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
+                        {[
+                          { value: "day", label: "일" },
+                          { value: "week", label: "주" },
+                          { value: "month", label: "월" },
+                        ].map((option) => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={chartInterval === option.value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                            onClick={() => setChartInterval(option.value as ChartInterval)}
+                          >
+                            {option.label}
+                          </button>
+                        ))}
+                      </div>
                       <span style={{ fontSize: 12, color: "#5b6778", fontWeight: 600 }}>이동평균선</span>
                       {MA_PERIODS.map((ma) => (
-                        rows.length >= ma.period ? (
+                        chartRows.length >= ma.period ? (
                           <span key={ma.period} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
                             <span style={{ width: 14, height: 2, backgroundColor: ma.color, display: "inline-block" }} />
                             <span style={{ color: ma.color, fontWeight: 600 }}>{ma.label}</span>

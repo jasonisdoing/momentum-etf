@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.data_loader import fetch_ohlcv
+from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
@@ -40,13 +41,17 @@ def get_ticker_detail(
     ticker: str = Query(...),
     ticker_type: str = Query(...),
     country_code: str = Query(default="kor"),
-    months: int = Query(default=12),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
+    settings = load_common_settings()
+    cache_start_date = str(settings.get("CACHE_START_DATE") or "").strip()
+    if not cache_start_date:
+        raise RuntimeError("CACHE_START_DATE 설정이 필요합니다.")
+
     df = fetch_ohlcv(
         ticker,
         country=country_code,
-        months_back=months,
+        date_range=[cache_start_date, None],
         ticker_type=ticker_type,
     )
 
