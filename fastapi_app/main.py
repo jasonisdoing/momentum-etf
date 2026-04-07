@@ -15,6 +15,7 @@ from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.system import router as system_router
+from .routes.ticker_detail import router as ticker_detail_router
 from .routes.weekly import router as weekly_router
 
 load_env_if_present()
@@ -47,6 +48,7 @@ app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
 app.include_router(system_router)
+app.include_router(ticker_detail_router)
 app.include_router(weekly_router)
 
 
