@@ -883,20 +883,62 @@ function AccountHoldingsDetailPanel({
     {
       field: "ticker",
       headerName: "종목코드",
-      width: 118,
+      width: 98,
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         const row = params.data;
         if (!row) {
           return null;
         }
         if (row.id === "__adding__") {
-          if (addingRow?.isValidated) {
-            return (
-              <div className="d-flex gap-2 align-items-center">
-                <span>{addingRow.ticker}</span>
-                <button
-                  className="btn btn-sm btn-link p-0 assetsInlineLinkButton"
-                  onClick={() =>
+          return (
+            <StableInlineInput
+              className="form-control form-control-sm assetsInlineInput assetsInlineInputTicker"
+              initialValue={addingRow?.ticker ?? ""}
+              disabled={addingRow?.isValidatingTicker || addingRow?.isValidated}
+              onChange={(value) =>
+                setAddingRow((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        ticker: value,
+                      }
+                    : null,
+                )
+              }
+              onSave={handleValidateTicker}
+            />
+          );
+        }
+        return <span className="appCodeText">{params.value}</span>;
+      },
+    },
+    {
+      field: "name",
+      headerName: "종목명",
+      minWidth: 248,
+      flex: 1.35,
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
+        if (params.data?.id === "__adding__") {
+          return (
+            <div className="assetsNameLookup">
+              <span className="assetsNameLookupStatus">
+                {addingRow?.isValidated
+                  ? String(addingRow.name || "-")
+                  : "종목코드를 입력한 뒤 확인하세요."}
+              </span>
+              <button
+                className={
+                  addingRow?.isValidated
+                    ? "btn btn-sm btn-link p-0 assetsInlineLinkButton"
+                    : "btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
+                }
+                disabled={addingRow?.isValidatingTicker}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (addingRow?.isValidated) {
                     setAddingRow((previous) =>
                       previous
                         ? {
@@ -906,61 +948,21 @@ function AccountHoldingsDetailPanel({
                             name: "",
                           }
                         : null,
-                    )
+                    );
+                    return;
                   }
-                >
-                  변경
-                </button>
-              </div>
-            );
-          }
-
-          return (
-            <div className="assetsTickerLookup">
-              <StableInlineInput
-                className="form-control form-control-sm assetsInlineInput assetsInlineInputTicker"
-                initialValue={addingRow?.ticker ?? ""}
-                disabled={addingRow?.isValidatingTicker}
-                onChange={(value) =>
-                  setAddingRow((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          ticker: value,
-                        }
-                      : null,
-                  )
-                }
-                onSave={handleValidateTicker}
-              />
-              <button
-                className="btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
-                disabled={addingRow?.isValidatingTicker}
-                onMouseDown={(event) => {
-                  event.stopPropagation();
-                }}
-                onClick={(event) => {
-                  event.stopPropagation();
                   void handleValidateTicker();
                 }}
               >
-                {addingRow?.isValidatingTicker ? (
+                {!addingRow?.isValidated && addingRow?.isValidatingTicker ? (
                   <IconLoader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
                 ) : null}
-                {addingRow?.isValidatingTicker ? "확인중" : "확인"}
+                {addingRow?.isValidated ? "변경" : addingRow?.isValidatingTicker ? "확인중" : "확인"}
               </button>
             </div>
           );
         }
-        return <span className="appCodeText">{params.value}</span>;
-      },
-    },
-    {
-      field: "name",
-      headerName: "종목명",
-      minWidth: 280,
-      flex: 1.6,
-      cellRenderer: (params: { value?: string | null }) => {
+
         const value = String(params.value ?? "-");
         return (
           <span className="assetsNameCellText" title={value}>
@@ -985,7 +987,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "current_price",
       headerName: "현재가",
-      width: 116,
+      width: 104,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: string }) => (
         <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
@@ -994,7 +996,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "quantity",
       headerName: "수량",
-      width: 88,
+      width: 80,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1035,7 +1037,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "average_buy_price",
       headerName: "매입 단가",
-      width: 128,
+      width: 112,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1088,7 +1090,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "pnl_krw",
       headerName: "평가손익",
-      width: 136,
+      width: 124,
       type: "rightAligned",
       cellRenderer: (params: { value?: number }) => (
         <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
@@ -1097,7 +1099,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "valuation_krw",
       headerName: "평가 금액",
-      width: 136,
+      width: 124,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow }) =>
         params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
@@ -1119,7 +1121,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "target_ratio",
       headerName: "목표비중",
-      width: 100,
+      width: 88,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
