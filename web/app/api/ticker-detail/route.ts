@@ -10,7 +10,6 @@ export async function GET(request: NextRequest) {
     const ticker = searchParams.get("ticker");
     const tickerType = searchParams.get("ticker_type");
     const countryCode = searchParams.get("country_code") ?? undefined;
-    const months = searchParams.get("months") ? Number(searchParams.get("months")) : undefined;
 
     if (!ticker || !tickerType) {
       return NextResponse.json({ error: "ticker, ticker_type 파라미터가 필요합니다." }, { status: 400 });
@@ -20,7 +19,6 @@ export async function GET(request: NextRequest) {
       ticker,
       ticker_type: tickerType,
       country_code: countryCode,
-      months,
     });
     return NextResponse.json(data);
   } catch (error) {
