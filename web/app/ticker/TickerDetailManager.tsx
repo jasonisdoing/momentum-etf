@@ -618,7 +618,7 @@ export function TickerDetailManager() {
         cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
       },
       { field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode) },
       { field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
@@ -626,7 +626,7 @@ export function TickerDetailManager() {
       { field: "volume", headerName: "거래량", minWidth: 118, flex: 1.2, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
     ],
-    [priceDigits],
+    [selectedCountryCode],
   );
 
   const monthlyColumns = useMemo<ColDef[]>(
@@ -639,7 +639,7 @@ export function TickerDetailManager() {
         cellStyle: { fontWeight: 600 },
       },
       { field: "close", headerName: "월말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode) },
       { field: "change_pct", headerName: "월간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
@@ -647,7 +647,7 @@ export function TickerDetailManager() {
       { field: "volume", headerName: "월간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
     ],
-    [priceDigits],
+    [selectedCountryCode],
   );
 
   const displayTitle = selectedTicker
