@@ -501,8 +501,31 @@ function AccountHoldingsDetailPanel({
   );
 
   const handleValidateTicker = useCallback(async (tickerToUse?: string) => {
-    const ticker = tickerToUse || addingRow?.ticker;
+    const ticker = String(tickerToUse || addingRow?.ticker || "").trim().toUpperCase();
     if (!ticker || addingRow?.isValidatingTicker) {
+      return;
+    }
+
+    const normalizedTicker = ticker.replace(/^ASX:/, "");
+    const hasDuplicate = rows.some(
+      (row) => String(row.ticker || "").trim().toUpperCase().replace(/^ASX:/, "") === normalizedTicker,
+    );
+
+    if (hasDuplicate) {
+      const message = "이미 해당 계좌에 추가된 종목입니다.";
+      setAddingRow((previous) =>
+        previous
+          ? {
+              ...previous,
+              ticker,
+              name: message,
+              bucketId: undefined,
+              isValidated: false,
+              isValidatingTicker: false,
+            }
+          : null,
+      );
+      toast.error(message);
       return;
     }
 
@@ -511,6 +534,9 @@ function AccountHoldingsDetailPanel({
         ? {
             ...previous,
             ticker,
+            name: "",
+            bucketId: undefined,
+            isValidated: false,
             isValidatingTicker: true,
           }
         : null,
@@ -548,13 +574,14 @@ function AccountHoldingsDetailPanel({
         previous
           ? {
               ...previous,
+              name: previous.name || "",
               isValidatingTicker: false,
             }
           : null,
       );
       toast.error(error instanceof Error ? error.message : "검증 실패");
     }
-  }, [addingRow?.isValidatingTicker, addingRow?.ticker, summary.account_id, toast]);
+  }, [addingRow?.isValidatingTicker, addingRow?.ticker, rows, summary.account_id, toast]);
 
   const processAddingRow = useCallback(async () => {
     if (!addingRow?.isValidated) {
@@ -924,7 +951,7 @@ function AccountHoldingsDetailPanel({
               <span className="assetsNameLookupStatus">
                 {addingRow?.isValidated
                   ? String(addingRow.name || "-")
-                  : "종목코드를 입력한 뒤 확인하세요."}
+                  : String(addingRow?.name || "종목코드를 입력한 뒤 확인하세요.")}
               </span>
               <button
                 className={
