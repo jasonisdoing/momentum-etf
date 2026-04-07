@@ -5,9 +5,10 @@ type PageFrameProps = {
   children: ReactNode;
   fullHeight?: boolean;
   fullWidth?: boolean;
+  titleRight?: ReactNode;
 };
 
-export function PageFrame({ title, children, fullHeight = false, fullWidth = false }: PageFrameProps) {
+export function PageFrame({ title, children, fullHeight = false, fullWidth = false, titleRight }: PageFrameProps) {
   const frameClassName = [
     "pageFrame",
     fullHeight ? "pageFrameFullHeight" : "",
@@ -20,6 +21,7 @@ export function PageFrame({ title, children, fullHeight = false, fullWidth = fal
     <main className={frameClassName}>
       <div className="pageFrameTitle">
         <h1>{title}</h1>
+        {titleRight ? <div className="pageFrameTitleRight">{titleRight}</div> : null}
       </div>
       <div className={fullHeight ? "pageFrameBody pageFrameBodyFullHeight" : "pageFrameBody"}>{children}</div>
     </main>
