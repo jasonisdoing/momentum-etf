@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 export default function WeeklyPage() {
   return (
-    <PageFrame title="주별" fullWidth>
+    <PageFrame title="주별" fullHeight fullWidth>
       <WeeklyManager />
     </PageFrame>
   );

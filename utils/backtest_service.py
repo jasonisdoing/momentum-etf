@@ -12,16 +12,13 @@ from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.db_manager import get_db_connection
 from utils.stocks_service import validate_stock_candidate
 
-_COUNTRY_ACCOUNT_MAP: dict[str, str] = {}
-
-
-def _get_account_id_for_country(country_code: str) -> str:
-    if not _COUNTRY_ACCOUNT_MAP:
-        for acc in load_account_configs():
-            cc = str(acc.get("country_code") or "").strip().lower()
-            if cc and cc not in _COUNTRY_ACCOUNT_MAP:
-                _COUNTRY_ACCOUNT_MAP[cc] = str(acc["account_id"])
-    return _COUNTRY_ACCOUNT_MAP.get(country_code, _COUNTRY_ACCOUNT_MAP.get("kor", "kor_account"))
+def _get_ticker_type_for_country(country_code: str) -> str:
+    """국가 코드를 백테스트용 기본 종목 타입으로 변환합니다."""
+    cc = str(country_code or "").strip().lower()
+    if cc == "au":
+        return "aus"
+    # 한국의 경우 기본적으로 kor_kr 타입을 사용
+    return "kor_kr"
 
 
 def _get_collection():
@@ -32,8 +29,8 @@ def _get_collection():
 
 
 def validate_backtest_ticker(ticker: str, country_code: str = "kor") -> dict[str, Any]:
-    account_id = _get_account_id_for_country(country_code)
-    validated = validate_stock_candidate(account_id, ticker)
+    ticker_type = _get_ticker_type_for_country(country_code)
+    validated = validate_stock_candidate(ticker_type, ticker)
     return {
         "ticker": str(validated["ticker"]),
         "name": str(validated["name"]),

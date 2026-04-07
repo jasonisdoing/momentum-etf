@@ -7,9 +7,7 @@ import type { ReactNode } from "react";
 import {
   IconCash,
   IconFlask2,
-  IconBriefcase,
   IconChevronDown,
-  IconFileImport,
   IconMoodSmile,
   IconHome,
   IconMedal2,
@@ -20,7 +18,11 @@ import {
   IconReceipt2,
   IconSettings,
   IconTrendingUp,
+  IconActivity,
   IconX,
+  IconLayoutDashboard,
+  IconLayoutSidebarLeftCollapse,
+  IconLayoutSidebarLeftExpand,
 } from "@tabler/icons-react";
 
 import { parseFearGreedSummary } from "@/lib/fear-greed";
@@ -33,11 +35,9 @@ const navGroups = [
     title: "자산",
     icon: IconCash,
     items: [
-      { href: "/cash", label: "자산 관리", icon: IconCash },
-      { href: "/holdings", label: "계좌 상세", icon: IconList },
-      { href: "/import", label: "벌크 입력", icon: IconFileImport },
-      { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
+      { href: "/assets", label: "자산 관리", icon: IconList },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
+      { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
     ],
   },
   {
@@ -47,7 +47,6 @@ const navGroups = [
     items: [
       { href: "/rank", label: "순위", icon: IconMedal2 },
       { href: "/stocks", label: "종목 관리", icon: IconListDetails },
-      { href: "/account-stocks", label: "계좌별 종목", icon: IconBriefcase },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
       { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
@@ -80,6 +79,12 @@ type FearGreedSummary = {
   score: number | null;
   label: string | null;
   previous_close_score: number | null;
+  updated_at?: string | null;
+};
+
+type VkospiSummary = {
+  price: number;
+  change_pct: number;
   updated_at?: string | null;
 };
 
@@ -138,23 +143,7 @@ async function loadFearGreedSummary(): Promise<FearGreedSummary | null> {
   if (apiResponse.ok) {
     return (await apiResponse.json()) as FearGreedSummary;
   }
-
-  const browserResponse = await fetch("https://production.dataviz.cnn.io/index/fearandgreed/graphdata", {
-    cache: "no-store",
-  });
-
-  if (!browserResponse.ok) {
-    return null;
-  }
-
-  const payload = (await browserResponse.json()) as unknown;
-  const summary = parseFearGreedSummary(payload);
-
-  if (summary.score === null || !summary.label) {
-    return null;
-  }
-
-  return summary;
+  return null;
 }
 
 function getDefaultOpenGroups(pathname: string | null) {
@@ -170,7 +159,10 @@ export function AppShell({ children }: AppShellProps) {
   const [isFxLoading, setIsFxLoading] = useState(true);
   const [fearGreed, setFearGreed] = useState<FearGreedSummary | null>(null);
   const [isFearGreedLoading, setIsFearGreedLoading] = useState(true);
+  const [vkospi, setVkospi] = useState<VkospiSummary | null>(null);
+  const [isVkospiLoading, setIsVkospiLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
   const isLoginPage = pathname === "/login";
 
@@ -188,18 +180,24 @@ export function AppShell({ children }: AppShellProps) {
         }
         if (alive) {
           setIsFearGreedLoading(true);
+          setIsVkospiLoading(true);
         }
-        const [fxResponse, fearGreedSummary] = await Promise.all([
+        const [fxResponse, fearGreedSummary, vkospiResponse] = await Promise.all([
           fetch("/api/fx", { cache: "no-store" }),
           loadFearGreedSummary().catch(() => null),
+          fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
         ]);
 
         const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
+        const vkospiPayload = vkospiResponse?.ok ? ((await vkospiResponse.json()) as VkospiSummary) : null;
+
         if (alive) {
           setFx(payload);
           setIsFxLoading(false);
           setFearGreed(fearGreedSummary);
           setIsFearGreedLoading(false);
+          setVkospi(vkospiPayload);
+          setIsVkospiLoading(false);
         }
       } catch {
         if (alive) {
@@ -207,6 +205,8 @@ export function AppShell({ children }: AppShellProps) {
           setIsFxLoading(false);
           setFearGreed(null);
           setIsFearGreedLoading(false);
+          setVkospi(null);
+          setIsVkospiLoading(false);
         }
       }
     }
@@ -267,6 +267,14 @@ export function AppShell({ children }: AppShellProps) {
             <span className="nav-link-title">{homeItem.label}</span>
           </Link>
         </div>
+        <div className="nav-item appSidebarItem">
+          <Link href="/dashboard" className={pathname === "/dashboard" ? "nav-link active" : "nav-link"}>
+            <span className="appSidebarIcon" aria-hidden="true">
+              <IconLayoutDashboard size={18} stroke={1.9} />
+            </span>
+            <span className="nav-link-title">대시보드</span>
+          </Link>
+        </div>
       </div>
       {navGroups.map((group) => {
         const isExpanded = openGroups[group.id] ?? false;
@@ -313,7 +321,7 @@ export function AppShell({ children }: AppShellProps) {
   );
 
   return (
-    <div className="appLayout">
+    <div className={`appLayout ${isSidebarCollapsed ? "appLayoutSidebarCollapsed" : ""}`.trim()}>
       <aside className="navbar navbar-vertical navbar-expand-lg appSidebar appSidebarDesktop">
         <div className="container-fluid appSidebarInner">
           <Link href="/" className="navbar-brand navbar-brand-autodark appSidebarBrand">
@@ -330,6 +338,20 @@ export function AppShell({ children }: AppShellProps) {
       <div className="appMain">
         <header className="navbar d-print-none appTopHeader">
           <div className="container-fluid appTopHeaderInner">
+            <div className="appHeaderLeft">
+              <button
+                className="btn btn-icon btn-sm appSidebarDesktopToggle"
+                type="button"
+                aria-label={isSidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
+                onClick={() => setIsSidebarCollapsed((current) => !current)}
+              >
+                {isSidebarCollapsed ? (
+                  <IconLayoutSidebarLeftExpand size={18} stroke={1.9} />
+                ) : (
+                  <IconLayoutSidebarLeftCollapse size={18} stroke={1.9} />
+                )}
+              </button>
+            </div>
             <div className="appMobileHeader">
               <button
                 className="btn btn-icon btn-sm appSidebarToggle"
@@ -344,29 +366,6 @@ export function AppShell({ children }: AppShellProps) {
               </Link>
             </div>
             <div className="topbarFx">
-              <span className="topbarFxItem topbarSentimentItem">
-                <span className="topbarSentimentLabel">
-                  <IconMoodSmile size={15} stroke={1.9} />
-                  CNN:
-                </span>
-                {isFearGreedLoading ? (
-                  <span className="topbarFxLoading" aria-label="CNN 공포탐욕지수 로딩 중">
-                    <span className="topbarSpinner" />
-                  </span>
-                ) : fearGreed?.score != null ? (
-                  <span className="topbarSentimentValue">
-                    <strong>{formatFearGreedScore(fearGreed?.score)}</strong>
-                    <span className="topbarSentimentText">({formatFearGreedLabel(fearGreed?.label)})</span>
-                    {fearGreedDelta !== null ? (
-                      <span className={getFxChangeClass(fearGreedDelta)}>
-                        {formatFearGreedDelta(fearGreedDelta)}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : (
-                  <strong>-</strong>
-                )}
-              </span>
               <span className="topbarFxItem">
                 USD/KRW:{" "}
                 {isFxLoading ? (
@@ -395,6 +394,79 @@ export function AppShell({ children }: AppShellProps) {
                       {formatChangePct(fx?.AUD?.change_pct)}
                     </span>
                   </>
+                )}
+              </span>
+              <span className="topbarFxItem topbarSentimentItem">
+                {isFearGreedLoading ? (
+                  <>
+                    <span className="topbarSentimentLabel">
+                      <IconMoodSmile size={15} stroke={1.9} />
+                      CNN:
+                    </span>
+                    <span className="topbarFxLoading" aria-label="CNN 공포탐욕지수 로딩 중">
+                      <span className="topbarSpinner" />
+                    </span>
+                  </>
+                ) : (
+                  <a
+                    href="https://fear-and-greed.jason.ai.kr"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "inherit", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <span className="topbarSentimentLabel">
+                      <IconMoodSmile size={15} stroke={1.9} />
+                      CNN:
+                    </span>
+                    {fearGreed?.score != null ? (
+                      <span className="topbarSentimentValue">
+                        <strong>{formatFearGreedScore(fearGreed?.score)}</strong>
+                        <span className="topbarSentimentText">({formatFearGreedLabel(fearGreed?.label)})</span>
+                        {fearGreedDelta !== null ? (
+                          <span className={getFxChangeClass(fearGreedDelta)}>
+                            {formatFearGreedDelta(fearGreedDelta)}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <strong>-</strong>
+                    )}
+                  </a>
+                )}
+              </span>
+              <span className="topbarFxItem topbarSentimentItem">
+                {isVkospiLoading ? (
+                  <>
+                    <span className="topbarSentimentLabel">
+                      <IconActivity size={15} stroke={1.9} />
+                      VKOSPI:
+                    </span>
+                    <span className="topbarFxLoading" aria-label="VKOSPI 로딩 중">
+                      <span className="topbarSpinner" />
+                    </span>
+                  </>
+                ) : (
+                  <a
+                    href="https://kr.investing.com/indices/kospi-volatility"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: "inherit", textDecoration: "none", display: "flex", alignItems: "center", gap: "4px" }}
+                  >
+                    <span className="topbarSentimentLabel">
+                      <IconActivity size={15} stroke={1.9} />
+                      VKOSPI:
+                    </span>
+                    {vkospi?.price != null ? (
+                      <span className="topbarSentimentValue">
+                        <strong>{vkospi.price.toFixed(2)}</strong>
+                        <span className={getFxChangeClass(vkospi.change_pct)}>
+                          {formatChangePct(vkospi.change_pct)}
+                        </span>
+                      </span>
+                    ) : (
+                      <strong>-</strong>
+                    )}
+                  </a>
                 )}
               </span>
             </div>

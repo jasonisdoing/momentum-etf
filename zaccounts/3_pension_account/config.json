@@ -5,7 +5,5 @@
     "ticker_codes": [
         "kor_us"
     ],
-    "currency": "KRW",
-    "MA_TYPE": "ALMA",
-    "MA_MONTHS": 6
+    "currency": "KRW"
 }

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
-from utils.cash_service import load_cash_accounts, save_cash_accounts
+from utils.assets_service import load_cash_accounts, save_cash_accounts
 
 router = APIRouter(prefix="/internal/cash", tags=["cash"])
 
