@@ -1447,6 +1447,7 @@ export function AssetsManager() {
   const [loading, setLoading] = useState(true);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
+  const [previewTargetRatioTotals, setPreviewTargetRatioTotals] = useState<Record<string, number>>({});
   const summariesRef = useRef<AccountSummary[]>([]);
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
@@ -1463,6 +1464,7 @@ export function AssetsManager() {
       setAllRows(payload.rows ?? []);
       setSummaries(payload.account_summaries ?? []);
       setExpandedId((current) => current ?? payload.account_summaries?.[0]?.account_id ?? null);
+      setPreviewTargetRatioTotals({});
       setParentDirtyCellKeys([]);
       setEditingParentId(null);
     } catch (error) {
@@ -1641,22 +1643,14 @@ export function AssetsManager() {
   }, [scheduleSilentParentSave]);
 
   const handlePreviewTargetRatioTotalChange = useCallback((accountId: string, total: number) => {
-    setSummaries((previous) => {
-      let changed = false;
-      const next = previous.map((summary) => {
-        if (summary.account_id !== accountId) {
-          return summary;
-        }
-        if (Math.abs(Number(summary.target_ratio_total ?? 0) - total) < 0.05) {
-          return summary;
-        }
-        changed = true;
-        return {
-          ...summary,
-          target_ratio_total: total,
-        };
-      });
-      return changed ? next : previous;
+    setPreviewTargetRatioTotals((previous) => {
+      if (Math.abs(Number(previous[accountId] ?? NaN) - total) < 0.05) {
+        return previous;
+      }
+      return {
+        ...previous,
+        [accountId]: total,
+      };
     });
   }, []);
 
@@ -1781,7 +1775,8 @@ export function AssetsManager() {
         if (!params.data || isDetailRow(params.data)) {
           return "";
         }
-        const value = Number(params.value ?? 0);
+        const previewValue = previewTargetRatioTotals[params.data.account_id];
+        const value = Number(previewValue ?? params.value ?? 0);
         const colorClass = Math.abs(value - 100) < 0.05 ? "is-success" : "is-danger";
         return <span className={`appHeaderMetricValue ${colorClass}`}>{value.toFixed(1)}%</span>;
       },
@@ -1853,7 +1848,7 @@ export function AssetsManager() {
         return <span className={getSignedNullableClass(params.value)}>{formatPrice(params.value, "AUD")}</span>;
       },
     },
-  ], [expandedId, isDirtyParentCell]);
+  ], [expandedId, isDirtyParentCell, previewTargetRatioTotals]);
 
   const gridOptions = useMemo<GridOptions<ParentGridRow>>(
     () => ({
