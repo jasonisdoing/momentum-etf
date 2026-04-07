@@ -33,6 +33,8 @@ type HoldingsRow = {
   target_quantity?: number | null;
   target_amount?: number | null;
   sort_order?: number | null;
+  original_quantity?: number;
+  original_average_buy_price?: number;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -252,7 +254,7 @@ function getPreviewValuationKrw(row: GridRow): number {
   if (quantity <= 0) {
     return 0;
   }
-  const currentQuantity = Number(row.quantity ?? 0);
+  const currentQuantity = Number(row.original_quantity ?? row.quantity ?? 0);
   if (currentQuantity > 0) {
     return (Number(row.valuation_krw ?? 0) / currentQuantity) * quantity;
   }
@@ -271,8 +273,8 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
   if (row.currency === "KRW") {
     return averageBuyPrice * quantity;
   }
-  const currentQuantity = Number(row.quantity ?? 0);
-  const currentAverageBuyPrice = safeParseFloat(row.average_buy_price);
+  const currentQuantity = Number(row.original_quantity ?? row.quantity ?? 0);
+  const currentAverageBuyPrice = Number(row.original_average_buy_price ?? safeParseFloat(row.average_buy_price));
   if (currentQuantity > 0 && currentAverageBuyPrice > 0) {
     const fxFactor = Number(row.buy_amount_krw ?? 0) / (currentQuantity * currentAverageBuyPrice);
     return averageBuyPrice * quantity * fxFactor;
@@ -454,13 +456,24 @@ function AccountHoldingsDetailPanel({
   summary,
   initialRows,
   onReload,
+  onPreviewTargetRatioTotalChange,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
   onReload: () => Promise<void>;
+  onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
 }) {
   const toast = useToast();
-  const [rows, setRows] = useState<HoldingsRow[]>(initialRows);
+  const hydrateRows = useCallback(
+    (sourceRows: HoldingsRow[]) =>
+      sourceRows.map((row) => ({
+        ...row,
+        original_quantity: Number(row.original_quantity ?? row.quantity ?? 0),
+        original_average_buy_price: Number(row.original_average_buy_price ?? safeParseFloat(row.average_buy_price)),
+      })),
+    [],
+  );
+  const [rows, setRows] = useState<HoldingsRow[]>(() => hydrateRows(initialRows));
   const [addingRow, setAddingRow] = useState<AddingRowState | null>(null);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
@@ -480,19 +493,27 @@ function AccountHoldingsDetailPanel({
   const reorderQueuedRef = useRef(false);
 
   useEffect(() => {
-    setRows(initialRows);
-    rowsRef.current = initialRows;
+    const nextRows = hydrateRows(initialRows);
+    setRows(nextRows);
+    rowsRef.current = nextRows;
     setDirtyRowIds([]);
     setDirtyCellKeys([]);
     setSelectedRowIds([]);
     setEditingRowId(null);
     setAddingRow(null);
     setIsReorderDirty(false);
-  }, [initialRows]);
+  }, [hydrateRows, initialRows]);
 
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  useEffect(() => {
+    const previewTargetRatioTotal = rows.reduce((sum, row) => {
+      return sum + Number(row.target_ratio ?? 0);
+    }, 0);
+    onPreviewTargetRatioTotalChange(summary.account_id, parseFloat(previewTargetRatioTotal.toFixed(1)));
+  }, [onPreviewTargetRatioTotalChange, rows, summary.account_id]);
 
   useEffect(() => {
     return () => {
@@ -1600,15 +1621,42 @@ export function AssetsManager() {
     scheduleSilentParentSave(row.account_id);
   }, [scheduleSilentParentSave]);
 
+  const handlePreviewTargetRatioTotalChange = useCallback((accountId: string, total: number) => {
+    setSummaries((previous) => {
+      let changed = false;
+      const next = previous.map((summary) => {
+        if (summary.account_id !== accountId) {
+          return summary;
+        }
+        if (Math.abs(Number(summary.target_ratio_total ?? 0) - total) < 0.05) {
+          return summary;
+        }
+        changed = true;
+        return {
+          ...summary,
+          target_ratio_total: total,
+        };
+      });
+      return changed ? next : previous;
+    });
+  }, []);
+
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
       const data = params.data;
       if (!data || !isDetailRow(data)) {
         return null;
       }
-      return <AccountHoldingsDetailPanel summary={data.summary} initialRows={data.rows} onReload={load} />;
+      return (
+        <AccountHoldingsDetailPanel
+          summary={data.summary}
+          initialRows={data.rows}
+          onReload={load}
+          onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
+        />
+      );
     },
-    [load],
+    [handlePreviewTargetRatioTotalChange, load],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
