@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import {
   IconCash,
   IconFlask2,
+  IconChartLine,
   IconChevronDown,
   IconMoodSmile,
   IconHome,
@@ -29,6 +30,14 @@ import { parseFearGreedSummary } from "@/lib/fear-greed";
 
 const homeItem = { href: "/", label: "Home", icon: IconHome };
 
+function isNavItemActive(itemHref: string, currentPathname: string | null): boolean {
+  if (!currentPathname) return false;
+  if (itemHref === currentPathname) return true;
+  // /ticker → /ticker/XXX 같은 동적 라우트 매칭
+  if (itemHref !== "/" && currentPathname.startsWith(itemHref + "/")) return true;
+  return false;
+}
+
 const navGroups = [
   {
     id: "assets",
@@ -46,6 +55,7 @@ const navGroups = [
     icon: IconListDetails,
     items: [
       { href: "/rank", label: "순위", icon: IconMedal2 },
+      { href: "/ticker", label: "개별종목", icon: IconChartLine },
       { href: "/stocks", label: "종목 관리", icon: IconListDetails },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
       { href: "/backtest", label: "백테스트", icon: IconFlask2 },
@@ -225,7 +235,7 @@ export function AppShell({ children }: AppShellProps) {
     setOpenGroups((current) => {
       const next = { ...current };
       for (const group of navGroups) {
-        if (group.items.some((item) => item.href === pathname)) {
+        if (group.items.some((item) => isNavItemActive(item.href, pathname))) {
           next[group.id] = true;
         }
       }
@@ -278,7 +288,7 @@ export function AppShell({ children }: AppShellProps) {
       </div>
       {navGroups.map((group) => {
         const isExpanded = openGroups[group.id] ?? false;
-        const hasActiveChild = group.items.some((item) => item.href === pathname);
+        const hasActiveChild = group.items.some((item) => isNavItemActive(item.href, pathname));
         const GroupIcon = group.icon;
         return (
           <div key={group.id} className="appSidebarGroup">
@@ -300,7 +310,7 @@ export function AppShell({ children }: AppShellProps) {
             </button>
             <div className={`navbar-nav appSidebarNav appSidebarSubnav ${isExpanded ? "is-open" : ""}`.trim()}>
               {group.items.map((item) => {
-                const isActive = pathname === item.href;
+                const isActive = isNavItemActive(item.href, pathname);
                 const Icon = item.icon;
                 return (
                   <div key={item.href} className="nav-item appSidebarItem">

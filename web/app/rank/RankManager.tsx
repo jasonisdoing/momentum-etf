@@ -378,21 +378,34 @@ export function RankManager() {
         headerName: "티커",
         minWidth: 92,
         width: 92,
-        cellRenderer: (params: { value: string | null | undefined }) => (
-          <span className="appCodeText">{String(params.value ?? "-")}</span>
-        ),
+        cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+          const value = String(params.value ?? "-");
+          const name = params.data?.종목명 ?? "";
+          const tickerType = selectedTickerType;
+          const country = selectedTickerTypeItem?.country_code ?? "kor";
+          const href = `/ticker?ticker=${encodeURIComponent(value)}&ticker_type=${encodeURIComponent(tickerType)}&country_code=${encodeURIComponent(country)}&name=${encodeURIComponent(name)}`;
+          return (
+            <a href={href} className="appCodeText" style={{ color: "#206bc4", textDecoration: "none" }}>
+              {value}
+            </a>
+          );
+        },
       },
       {
         field: "종목명",
         headerName: "종목명",
         minWidth: 260,
         flex: 1.2,
-        cellRenderer: (params: { value: string | null | undefined }) => {
+        cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           const value = String(params.value ?? "-");
+          const ticker = params.data?.티커 ?? "";
+          const tickerType = selectedTickerType;
+          const country = selectedTickerTypeItem?.country_code ?? "kor";
+          const href = `/ticker?ticker=${encodeURIComponent(ticker)}&ticker_type=${encodeURIComponent(tickerType)}&country_code=${encodeURIComponent(country)}&name=${encodeURIComponent(value)}`;
           return (
-            <span className="rankNameCellText" title={value}>
+            <a href={href} className="rankNameCellText" style={{ color: "inherit", textDecoration: "none" }} title={value}>
               {value}
-            </span>
+            </a>
           );
         },
       },
@@ -596,7 +609,7 @@ export function RankManager() {
         ? [...cumulativeColumns, duplicateColumn]
         : [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]),
     ];
-  }, [maRules, metricMode, monthlyReturnLabels, selectedTickerTypeItem?.country_code]);
+  }, [maRules, metricMode, monthlyReturnLabels, selectedTickerType, selectedTickerTypeItem?.country_code]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
