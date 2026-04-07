@@ -30,8 +30,6 @@ type HoldingsRow = {
   buy_amount_krw: number;
   valuation_krw: number;
   target_ratio?: number | null;
-  target_quantity?: number | null;
-  target_amount?: number | null;
   sort_order?: number | null;
   original_quantity?: number;
   original_average_buy_price?: number;
@@ -154,55 +152,6 @@ function formatNumber(value: number | null | undefined): string {
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
 }
 
-function formatTargetAmount(value: number | null | undefined, currency: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return `A$${new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-  return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
-}
-
-function formatTargetQuantity(value: number | null | undefined, currency: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 4,
-    }).format(value);
-  }
-  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatExpectedChangeQuantity(
-  targetQuantity: number | null | undefined,
-  currentQuantity: number | null | undefined,
-  currency: string,
-): string {
-  if (
-    targetQuantity === null ||
-    targetQuantity === undefined ||
-    Number.isNaN(targetQuantity) ||
-    currentQuantity === null ||
-    currentQuantity === undefined ||
-    Number.isNaN(currentQuantity)
-  ) {
-    return "-";
-  }
-
-  const changeQuantity = targetQuantity - currentQuantity;
-  const sign = changeQuantity > 0 ? "+" : "";
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return `${sign}${new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 4,
-    }).format(changeQuantity)}`;
-  }
-  return `${sign}${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(changeQuantity)}`;
-}
-
 function getSignedClass(value: number): string {
   if (value === 0 || Number.isNaN(value)) return "";
   return value > 0 ? "metricPositive" : "metricNegative";
@@ -231,13 +180,6 @@ function safeParseFloat(value: unknown): number {
 function parseEditableQuantity(value: unknown): number {
   const parsed = parseInt(parseRawPrice(value), 10);
   return Number.isNaN(parsed) ? 0 : parsed;
-}
-
-function roundTargetQuantity(quantity: number, currency: string): number {
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return Math.round(quantity * 10000) / 10000;
-  }
-  return Math.max(Math.floor(quantity), 0);
 }
 
 function getCurrentPriceNumber(row: GridRow): number {
@@ -289,14 +231,6 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
   return Number(row.buy_amount_krw ?? 0);
 }
 
-function getPreviewTargetRatio(row: GridRow): number | null {
-  const parsed = Number(row.target_ratio ?? null);
-  if (Number.isNaN(parsed) || parsed < 0) {
-    return 0;
-  }
-  return parsed;
-}
-
 function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: AccountSummary): number {
   if (String(row.ticker || "").trim().toUpperCase() === "IS") {
     return 0;
@@ -325,38 +259,6 @@ function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: Account
   }
   const rowValuation = getPreviewValuationKrw({ ...targetRow, id: rowId });
   return (rowValuation / denominator) * 100;
-}
-
-function computeAccountTotalAssetsNative(summary: AccountSummary, rows: HoldingsRow[]): number {
-  const currency = String(summary.currency || "KRW").trim().toUpperCase();
-  if (currency === "AUD") {
-    const holdingsNative = rows.reduce((sum, row) => {
-      return sum + getCurrentPriceNumber(row as GridRow) * Number(row.quantity ?? 0);
-    }, 0);
-    return holdingsNative + Number(summary.cash_balance_native ?? 0);
-  }
-  return rows.reduce((sum, row) => sum + Number(row.valuation_krw ?? 0), 0) + Number(summary.cash_balance_krw ?? 0);
-}
-
-function getPreviewTargetAmount(row: GridRow, summary: AccountSummary, rows: HoldingsRow[]): number | null {
-  const targetRatio = getPreviewTargetRatio(row);
-  if (targetRatio === null) {
-    return null;
-  }
-  const totalAssetsNative = computeAccountTotalAssetsNative(summary, rows);
-  return Math.round(totalAssetsNative * (targetRatio / 100) * 100) / 100;
-}
-
-function getPreviewTargetQuantity(row: GridRow, summary: AccountSummary, rows: HoldingsRow[]): number | null {
-  const targetAmount = getPreviewTargetAmount(row, summary, rows);
-  if (targetAmount === null) {
-    return null;
-  }
-  const currentPrice = getCurrentPriceNumber(row);
-  if (currentPrice <= 0) {
-    return null;
-  }
-  return roundTargetQuantity(targetAmount / currentPrice, row.currency);
 }
 
 function isDetailRow(row: ParentGridRow | undefined): row is Extract<ParentGridRow, { rowType: "detail" }> {
@@ -1259,53 +1161,6 @@ function AccountHoldingsDetailPanel({
             {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
           </span>
         );
-      },
-    },
-    {
-      field: "target_quantity",
-      headerName: "목표수량",
-      width: 124,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-        return (
-          <span>{formatTargetQuantity(getPreviewTargetQuantity(params.data, summary, rows), params.data.currency || "KRW")}</span>
-        );
-      },
-    },
-    {
-      colId: "expected_change_quantity",
-      headerName: "예상변경수량",
-      width: 138,
-      type: "rightAligned",
-      sortable: false,
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-        const targetQuantity = getPreviewTargetQuantity(params.data, summary, rows);
-        const currentQuantity = getPreviewQuantity(params.data);
-        return (
-          <span className={getSignedNullableClass(
-            targetQuantity === null || targetQuantity === undefined ? null : targetQuantity - currentQuantity,
-          )}>
-            {formatExpectedChangeQuantity(targetQuantity, currentQuantity, params.data.currency || "KRW")}
-          </span>
-        );
-      },
-    },
-    {
-      field: "target_amount",
-      headerName: "목표금액",
-      width: 136,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-        return <span>{formatTargetAmount(getPreviewTargetAmount(params.data, summary, rows), params.data.currency || "KRW")}</span>;
       },
     },
     { field: "days_held", headerName: "보유일", width: 76 },
