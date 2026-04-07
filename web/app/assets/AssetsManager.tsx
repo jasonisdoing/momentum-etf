@@ -290,18 +290,26 @@ function getPreviewTargetRatio(row: GridRow): number | null {
   return parsed;
 }
 
-function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[]): number {
+function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: AccountSummary): number {
   if (String(row.ticker || "").trim().toUpperCase() === "IS") {
     return 0;
   }
   const rowId = buildGridRowId(row);
-  const totalValuation = rows.reduce((sum, currentRow) => {
-    if (String(currentRow.ticker || "").trim().toUpperCase() === "IS") {
+  const previewTotalValuation = rows.reduce((sum, currentRow) => {
+    return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
+  }, 0);
+  const previewIsValuation = rows.reduce((sum, currentRow) => {
+    if (String(currentRow.ticker || "").trim().toUpperCase() !== "IS") {
       return sum;
     }
     return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
   }, 0);
-  if (totalValuation <= 0) {
+  const currency = String(summary.currency || "KRW").trim().toUpperCase();
+  const denominator =
+    currency === "AUD"
+      ? Number(summary.cash_balance_krw ?? 0) + previewTotalValuation - previewIsValuation
+      : Number(summary.cash_balance_krw ?? 0) + previewTotalValuation;
+  if (denominator <= 0) {
     return 0;
   }
   const targetRow = rows.find((currentRow) => buildGridRowId(currentRow) === rowId);
@@ -309,7 +317,7 @@ function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[]): number {
     return 0;
   }
   const rowValuation = getPreviewValuationKrw({ ...targetRow, id: rowId });
-  return (rowValuation / totalValuation) * 100;
+  return (rowValuation / denominator) * 100;
 }
 
 function computeAccountTotalAssetsNative(summary: AccountSummary, rows: HoldingsRow[]): number {
@@ -1202,7 +1210,7 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow }) =>
         params.data ? (
           <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
-            {getPreviewWeightPct(params.data, rows).toFixed(1)}%
+            {getPreviewWeightPct(params.data, rows, summary).toFixed(1)}%
           </span>
         ) : (
           "-"
