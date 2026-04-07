@@ -1492,6 +1492,39 @@ a {
   min-height: 0;
 }
 
+.tickerDetailTables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0.75rem;
+}
+
+.tickerDetailTablePanel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tickerDetailTableHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0 0.25rem;
+  flex: 0 0 auto;
+}
+
+.tickerDetailTableTitle {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.tickerDetailTableMeta {
+  font-size: 13px;
+}
+
 .appAgGridWrap {
   display: flex;
   flex: 1 1 auto;
@@ -1523,6 +1556,12 @@ a {
   --ag-header-column-resize-handle-color: rgba(32, 107, 196, 0.25);
   --ag-font-size: 0.95rem;
   --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+@media (max-width: 991.98px) {
+  .tickerDetailTables {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .appAgGridTheme .ag-root-wrapper,
