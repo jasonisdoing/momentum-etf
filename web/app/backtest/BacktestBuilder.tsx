@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
@@ -98,7 +98,16 @@ function formatSavedAt(value: string): string {
   }).format(date);
 }
 
-export function BacktestBuilder() {
+export function BacktestBuilder({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: {
+    marketLabel: string;
+    groupCount: number;
+    totalWeight: number;
+    resultLabel: string;
+  }) => void;
+}) {
   const toast = useToast();
   const [backtestName, setBacktestName] = useState("");
   const [countryCode, setCountryCode] = useState("kor");
@@ -540,6 +549,15 @@ export function BacktestBuilder() {
   }
 
   const totalWeight = getTotalWeight(groups);
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      marketLabel: countryCode === "au" ? "호주" : "한국",
+      groupCount: groups.length,
+      totalWeight,
+      resultLabel: runResult ? `완료 · ${runResult.latest_trading_day}` : "준비 중",
+    });
+  }, [countryCode, groups.length, onHeaderSummaryChange, runResult, totalWeight]);
 
   return (
     <div className="appPageStack">

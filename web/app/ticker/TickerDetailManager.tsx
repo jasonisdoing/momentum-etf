@@ -293,7 +293,16 @@ function getInitialVisibleLogicalRange(
 
 // --- 컴포넌트 ---
 
-export function TickerDetailManager() {
+export function TickerDetailManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: {
+    displayTitle: string;
+    priceText: string;
+    changeText: string;
+    changeClassName: string;
+  }) => void;
+}) {
   const searchParams = useSearchParams();
 
   // URL query params
@@ -654,6 +663,15 @@ export function TickerDetailManager() {
     ? (selectedTicker.name ? `${selectedTicker.name}(${selectedTicker.ticker})` : selectedTicker.ticker)
     : null;
 
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      displayTitle: displayTitle ?? "",
+      priceText: displayInfo?.close != null ? formatTickerPrice(displayInfo.close, selectedCountryCode) : "",
+      changeText: displayInfo?.change_pct != null ? formatPercent(displayInfo.change_pct) : "",
+      changeClassName: displayInfo?.change_pct != null ? getSignedClass(displayInfo.change_pct) : "",
+    });
+  }, [displayInfo?.change_pct, displayInfo?.close, displayTitle, onHeaderSummaryChange, selectedCountryCode]);
+
   return (
     <div className="appPageStack appPageStackFill">
       {error ? (
@@ -664,33 +682,6 @@ export function TickerDetailManager() {
 
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
-          {/* 상단 헤더 */}
-          <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                {/* 선택된 종목 정보 */}
-                {displayTitle ? (
-                  <span style={{ fontWeight: 700, fontSize: "1em", whiteSpace: "nowrap" }}>
-                    {displayTitle}
-                  </span>
-                ) : null}
-
-                {displayInfo?.close != null ? (
-                  <span style={{ fontSize: "1.1em", fontWeight: 700 }}>
-                    {formatTickerPrice(displayInfo.close, selectedCountryCode)}
-                    {displayInfo.change_pct != null ? (
-                      <span className={getSignedClass(displayInfo.change_pct)} style={{ marginLeft: 8, fontSize: "0.85em" }}>
-                        {formatPercent(displayInfo.change_pct)}
-                      </span>
-                    ) : null}
-                  </span>
-                ) : null}
-
-              </div>
-            </div>
-          </div>
-
-          {/* 차트 + 일별 테이블 */}
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             {!selectedTicker && !loading ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "#5b6778" }}>
