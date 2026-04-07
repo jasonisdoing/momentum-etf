@@ -99,6 +99,14 @@ function formatPercent(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+function formatDateWithWeekday(value: string): string {
+  if (!value) return "-";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+  return `${value}(${weekdays[date.getDay()]})`;
+}
+
 function getSignedClass(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) return "";
   return value > 0 ? "metricPositive" : "metricNegative";
@@ -410,20 +418,27 @@ export function TickerDetailManager() {
 
   const columns = useMemo<ColDef[]>(
     () => [
-      { field: "date", headerName: "날짜", minWidth: 120, width: 120, cellStyle: { fontWeight: 600 } },
-      { field: "close", headerName: "종가", minWidth: 110, width: 110, type: "rightAligned",
+      {
+        field: "date",
+        headerName: "날짜",
+        minWidth: 150,
+        flex: 1.35,
+        cellStyle: { fontWeight: 600 },
+        cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
+      },
+      { field: "close", headerName: "종가", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
-      { field: "change_pct", headerName: "등락률", minWidth: 100, width: 100, type: "rightAligned",
+      { field: "change_pct", headerName: "등락률", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
         ) },
-      { field: "volume", headerName: "거래량", minWidth: 120, width: 120, type: "rightAligned",
+      { field: "volume", headerName: "거래량", minWidth: 140, flex: 1.35, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
-      { field: "open", headerName: "시가", minWidth: 110, width: 110, type: "rightAligned",
+      { field: "open", headerName: "시가", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
-      { field: "high", headerName: "고가", minWidth: 110, width: 110, type: "rightAligned",
+      { field: "high", headerName: "고가", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
-      { field: "low", headerName: "저가", minWidth: 110, width: 110, type: "rightAligned",
+      { field: "low", headerName: "저가", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
     ],
     [priceDigits],
