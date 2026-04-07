@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { type GridColDef } from "@mui/x-data-grid";
+import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
+import type { ColDef, RowClassParams } from "ag-grid-community";
 
-import { AppDataGrid } from "../components/AppDataGrid";
+import { AppAgGrid } from "../components/AppAgGrid";
 
 type MarketRowItem = {
   ticker: string;
@@ -26,7 +27,7 @@ type MarketResponse = {
 };
 
 type MarketGridRow = MarketRowItem & {
-  id: string;
+  row_number: number;
 };
 
 const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
@@ -42,6 +43,31 @@ const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
 };
 
 const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "레버리지", "선물", "채권(모든종류)", "혼합", "리츠"];
+
+const marketGridTheme = themeQuartz
+  .withPart(iconSetQuartzBold)
+  .withParams({
+    accentColor: "#206bc4",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#182433",
+    headerBackgroundColor: "#f8fafc",
+    headerTextColor: "#5b6778",
+    spacing: 8,
+    fontSize: 14,
+    wrapperBorderRadius: 10,
+    rowHeight: 38,
+    headerHeight: 38,
+    cellHorizontalPadding: 12,
+    headerColumnBorder: true,
+    headerColumnBorderHeight: "70%",
+    columnBorder: true,
+    oddRowBackgroundColor: "#fbfdff",
+    headerCellHoverBackgroundColor: "#eef4fb",
+    headerCellMovingBackgroundColor: "#e8f0fb",
+    iconButtonHoverBackgroundColor: "#eef4fb",
+    iconButtonHoverColor: "#206bc4",
+    iconSize: 18,
+  });
 
 function formatKrwEok(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -112,7 +138,7 @@ export function MarketManager() {
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [minMarketCap, setMinMarketCap] = useState("");
-  const [minPrevVolume, setMinPrevVolume] = useState("");
+  const [minPrevVolume, setMinPrevVolume] = useState("100000");
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -147,7 +173,7 @@ export function MarketManager() {
       }
     }
 
-    load();
+    void load();
     return () => {
       alive = false;
     };
@@ -159,108 +185,112 @@ export function MarketManager() {
     const marketCapFilter = Number(minMarketCap || 0);
     const volumeFilter = Number(minPrevVolume || 0);
 
-    return rows.filter((row) => {
-      if (
-        normalizedQuery &&
-        !row.ticker.toUpperCase().includes(normalizedQuery) &&
-        !row.name.toUpperCase().includes(normalizedQuery)
-      ) {
-        return false;
-      }
+    return rows
+      .filter((row) => {
+        if (
+          normalizedQuery &&
+          !row.ticker.toUpperCase().includes(normalizedQuery) &&
+          !row.name.toUpperCase().includes(normalizedQuery)
+        ) {
+          return false;
+        }
 
-      if (expandedKeywords.some((keyword) => row.name.includes(keyword))) {
-        return false;
-      }
+        if (expandedKeywords.some((keyword) => row.name.includes(keyword))) {
+          return false;
+        }
 
-      if (marketCapFilter > 0 && row.market_cap < marketCapFilter) {
-        return false;
-      }
+        if (marketCapFilter > 0 && row.market_cap < marketCapFilter) {
+          return false;
+        }
 
-      if (volumeFilter > 0 && row.prev_volume < volumeFilter) {
-        return false;
-      }
+        if (volumeFilter > 0 && row.prev_volume < volumeFilter) {
+          return false;
+        }
 
-      return true;
-    }).sort((left, right) => {
-      const leftValue = left.daily_change_pct ?? Number.NEGATIVE_INFINITY;
-      const rightValue = right.daily_change_pct ?? Number.NEGATIVE_INFINITY;
-      if (leftValue !== rightValue) {
-        return rightValue - leftValue;
-      }
-      return left.ticker.localeCompare(right.ticker);
-    });
+        return true;
+      })
+      .sort((left, right) => {
+        const leftValue = left.daily_change_pct ?? Number.NEGATIVE_INFINITY;
+        const rightValue = right.daily_change_pct ?? Number.NEGATIVE_INFINITY;
+        if (leftValue !== rightValue) {
+          return rightValue - leftValue;
+        }
+        return left.ticker.localeCompare(right.ticker);
+      });
   }, [excludedGroups, minMarketCap, minPrevVolume, query, rows]);
+
   const gridRows = useMemo<MarketGridRow[]>(
-    () => filteredRows.map((row) => ({ ...row, id: row.ticker })),
+    () => filteredRows.map((row, index) => ({ ...row, row_number: index + 1 })),
     [filteredRows],
   );
-  const columns = useMemo<GridColDef<MarketGridRow>[]>(
+
+  const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
-      { field: "ticker", headerName: "티커", minWidth: 92, width: 92, renderCell: (params) => <span className="appCodeText">{params.row.ticker}</span> },
+      { field: "row_number", headerName: "#", width: 72, maxWidth: 80 },
+      {
+        field: "ticker",
+        headerName: "티커",
+        width: 104,
+        cellRenderer: (params: { value: string }) => <span className="appCodeText">{params.value}</span>,
+      },
       { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
       {
         field: "daily_change_pct",
         headerName: "일간(%)",
-        minWidth: 92,
-        width: 92,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => <span className={getSignedMetricClass(params.row.daily_change_pct)}>{formatPercent(params.row.daily_change_pct)}</span>,
+        width: 112,
+        type: "rightAligned",
+        sort: "desc",
+        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
+        ),
       },
       {
         field: "current_price",
         headerName: "현재가",
-        minWidth: 108,
-        width: 108,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatNullableNumber(params.row.current_price),
+        width: 110,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
       },
       {
         field: "nav",
         headerName: "Nav",
-        minWidth: 108,
-        width: 108,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatNullableNumber(params.row.nav),
+        width: 110,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNullableNumber(params.value),
       },
       {
         field: "deviation",
         headerName: "괴리율",
-        minWidth: 92,
-        width: 92,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => <span className={getDeviationClass(params.row.deviation)}>{formatPercent(params.row.deviation)}</span>,
+        width: 96,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
+        ),
       },
       {
         field: "return_3m_pct",
         headerName: "3달(%)",
-        minWidth: 92,
-        width: 92,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => <span className={getSignedMetricClass(params.row.return_3m_pct)}>{formatPercent(params.row.return_3m_pct)}</span>,
+        width: 96,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
+        ),
       },
-      { field: "listed_at", headerName: "상장일", minWidth: 112, width: 112 },
+      { field: "listed_at", headerName: "상장일", width: 112 },
       {
         field: "prev_volume",
         headerName: "전일거래량(주)",
-        minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatCount(params.row.prev_volume),
+        width: 128,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number }) => formatCount(params.value),
       },
       {
         field: "market_cap",
         headerName: "시가총액(억)",
-        minWidth: 120,
-        width: 120,
-        align: "right",
-        headerAlign: "right",
-        renderCell: (params) => formatKrwEok(params.row.market_cap),
+        width: 128,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number }) => formatKrwEok(params.value),
       },
     ],
     [],
@@ -273,69 +303,91 @@ export function MarketManager() {
   }
 
   return (
-    <div className="appPageStack">
+    <div className="appPageStack appPageStackFill">
       {error ? (
         <div className="appBannerStack">
           <div className="bannerError">{error}</div>
         </div>
       ) : null}
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBody">
-          <div className="filterBar">
-            <input
-              className="field compactField"
-              type="text"
-              placeholder="티커 또는 종목명 검색"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <input
-              className="field compactField"
-              type="number"
-              placeholder="최소 시가총액(억)"
-              value={minMarketCap}
-              onChange={(event) => setMinMarketCap(event.target.value)}
-            />
-            <input
-              className="field compactField"
-              type="number"
-              placeholder="최소 전일 거래량(주)"
-              value={minPrevVolume}
-              onChange={(event) => setMinPrevVolume(event.target.value)}
-            />
+      <section className="appSection appSectionFill">
+        <div className="card appCard appTableCardFill">
+          <div className="card-header">
+            <div className="appMainHeader marketMainHeader">
+              <div className="appMainHeaderLeft marketMainHeaderLeft">
+                <input
+                  className="field compactField"
+                  type="text"
+                  placeholder="티커 또는 종목명 검색"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                />
+                <input
+                  className="field compactField"
+                  type="number"
+                  placeholder="최소 시가총액(억)"
+                  value={minMarketCap}
+                  onChange={(event) => setMinMarketCap(event.target.value)}
+                />
+                <input
+                  className="field compactField"
+                  type="number"
+                  placeholder="최소 전일 거래량(주)"
+                  value={minPrevVolume}
+                  onChange={(event) => setMinPrevVolume(event.target.value)}
+                />
+              </div>
+              <div className="appMainHeaderRight marketMainHeaderRight">
+                <div className="appHeaderMetrics">
+                  <div className="appHeaderMetric">
+                    <span>총:</span>
+                    <span className="appHeaderMetricValue">{formatCount(filteredRows.length)}개</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>전체:</span>
+                    <span className="appHeaderMetricValue">{formatCount(rows.length)}개</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>KIS 마스터 갱신:</span>
+                    <span className="appHeaderMetricValue">{formatUpdatedAt(updatedAt)}</span>
+                  </div>
+                  <div className="appHeaderMetric">
+                    <span>정렬:</span>
+                    <span className="appHeaderMetricValue">일간(%) 내림차순</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
+          <div className="card-body appCardBodyTight appTableCardBodyFill">
+            <div className="pillRow">
+              {Object.keys(EXCLUSION_KEYWORD_GROUPS).map((group) => {
+                const isActive = excludedGroups.includes(group);
+                return (
+                  <button
+                    key={group}
+                    type="button"
+                    className={isActive ? "filterPill filterPillActive" : "filterPill"}
+                    onClick={() => toggleGroup(group)}
+                  >
+                    {group}
+                  </button>
+                );
+              })}
+            </div>
 
-          <div className="pillRow">
-            {Object.keys(EXCLUSION_KEYWORD_GROUPS).map((group) => {
-              const isActive = excludedGroups.includes(group);
-              return (
-                <button
-                  key={group}
-                  type="button"
-                  className={isActive ? "filterPill filterPillActive" : "filterPill"}
-                  onClick={() => toggleGroup(group)}
-                >
-                  {group}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="tableSummary">
-            <span>총 {formatCount(filteredRows.length)}개</span>
-            <span>전체 {formatCount(rows.length)}개</span>
-            <span>KIS 마스터 갱신 {formatUpdatedAt(updatedAt)}</span>
-            <span>기본 정렬 일간(%) 내림차순</span>
-          </div>
-
-          <AppDataGrid
-            rows={gridRows}
-            columns={columns}
-            loading={loading}
-            minHeight="60vh"
-            getRowClassName={(params) => (params.row.is_held ? "appHeldRow" : "")}
-          />
+            <div className="appGridFillWrap" style={{ minHeight: 0 }}>
+              <AppAgGrid
+                rowData={gridRows}
+                columnDefs={columns}
+                loading={loading}
+                minHeight="100%"
+                theme={marketGridTheme}
+                getRowClass={(params: RowClassParams<MarketGridRow>) => (params.data?.is_held ? "appHeldRow" : "")}
+                gridOptions={{
+                  suppressMovableColumns: true,
+                }}
+              />
+            </div>
           </div>
         </div>
       </section>

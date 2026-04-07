@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import "@tabler/core/dist/css/tabler.min.css";
-
 import { AppShell } from "./AppShell";
 import { buildBucketCssVariables } from "../lib/bucket-theme";
 import { ToastProvider } from "./components/ToastProvider";

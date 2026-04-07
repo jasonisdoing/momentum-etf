@@ -6,6 +6,7 @@ import pandas as pd
 from bson import ObjectId
 
 from services.price_service import get_exchange_rates, get_realtime_snapshot
+from utils.data_loader import get_latest_trading_day
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings
@@ -17,6 +18,19 @@ KST = ZoneInfo("Asia/Seoul")
 def _now_kst() -> datetime.datetime:
     """KST 기준 현재 시각을 반환한다."""
     return datetime.datetime.now(KST)
+
+
+def _round_snapshot_money(value: Any) -> int:
+    """스냅샷 KRW 금액을 정수로 반올림한다."""
+    try:
+        return int(round(float(value or 0)))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _resolve_snapshot_date() -> str:
+    """한국 기준 최신 거래일을 스냅샷 저장 날짜로 사용한다."""
+    return get_latest_trading_day("kor").normalize().strftime("%Y-%m-%d")
 
 
 class MissingPriceCacheError(RuntimeError):
@@ -41,7 +55,8 @@ def load_all_holding_tickers() -> set[str]:
 
         for holding in snapshot.get("holdings", []):
             ticker = str(holding.get("ticker") or "").strip().upper()
-            if ticker:
+            qty = float(holding.get("quantity") or 0)
+            if ticker and qty > 0:
                 held_tickers.add(ticker)
 
     return held_tickers
@@ -109,41 +124,123 @@ def load_real_holdings_table(
         return None
 
     # 3. Build holdings dataframe from raw master data
-    holdings_list = snapshot["holdings"]
+    holdings_list = list(snapshot["holdings"])
+    for index, holding in enumerate(holdings_list):
+        if "sort_order" not in holding:
+            holding["sort_order"] = index
+    holdings_list.sort(key=lambda holding: int(holding.get("sort_order", 0)))
     df_holdings = pd.DataFrame(holdings_list)
+
+    # 4. 동적 버킷 및 명칭 매핑: 개별 항목에 저장된 정보 대신 종목풀(stock_meta)의 최신 정보를 사용
+    from utils.db_manager import get_db_connection
+    from utils.settings_loader import get_account_settings
+
+    db = get_db_connection()
+    if db is not None and not df_holdings.empty:
+        all_tickers = df_holdings["ticker"].unique().tolist()
+        
+        # 현재 계정의 ticker_type 목록 가져오기
+        ticker_codes = []
+        try:
+            acc_settings = get_account_settings(account_id)
+            ticker_codes = acc_settings.get("ticker_codes", [])
+            if isinstance(ticker_codes, str): ticker_codes = [ticker_codes]
+        except:
+            pass
+
+        bucket_map = {}
+        name_map = {}
+        # 우선순위 1: 현재 계정에 설정된 종목 타입에서 검색
+        if ticker_codes:
+            cursor = db.stock_meta.find(
+                {"ticker": {"$in": all_tickers}, "ticker_type": {"$in": ticker_codes}, "is_deleted": {"$ne": True}},
+                {"ticker": 1, "bucket": 1, "name": 1}
+            )
+            for doc in cursor:
+                t = doc["ticker"]
+                if t not in bucket_map: 
+                    bucket_map[t] = doc.get("bucket", 1)
+                if t not in name_map:
+                    name_map[t] = doc.get("name")
+
+        # 우선순위 2: 계정에 없으면 시스템 전체 종목풀 검색 (Fallback)
+        missing_tickers = [t for t in all_tickers if t not in bucket_map]
+        if missing_tickers:
+            cursor = db.stock_meta.find(
+                {"ticker": {"$in": missing_tickers}, "is_deleted": {"$ne": True}},
+                {"ticker": 1, "bucket": 1, "name": 1}
+            )
+            for doc in cursor:
+                t = doc["ticker"]
+                if t not in bucket_map:
+                    bucket_map[t] = doc.get("bucket", 1)
+                if t not in name_map:
+                    name_map[t] = doc.get("name")
+
+        # 데이터 업데이트 (종목풀 정보 우선 적용)
+        df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
+        df_holdings["name"] = df_holdings.apply(
+            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])), 
+            axis=1
+        )
 
     import numpy as np
 
     # Ensure required columns exist
-    for col in ["ticker", "name", "quantity", "average_buy_price", "currency", "bucket", "first_buy_date"]:
+    for col in ["ticker", "name", "quantity", "average_buy_price", "currency", "bucket", "first_buy_date", "memo"]:
         if col not in df_holdings.columns:
-            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date") else 0
+            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "memo") else 0
+
+    df_holdings["memo"] = df_holdings["memo"].fillna("").astype(str)
 
     df_holdings["quantity"] = (
         pd.to_numeric(df_holdings["quantity"], errors="coerce").fillna(0.0).apply(np.floor).astype(int)
     )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
-    # Calculate days held
+    # Calculate days held (Snapshots-based Calendar Days)
     try:
         from utils.formatters import format_trading_days
 
-        now = pd.Timestamp.now().normalize()
-        df_holdings["first_buy_date"] = (
-            pd.to_datetime(df_holdings["first_buy_date"], errors="coerce").dt.tz_localize(None).dt.normalize()
-        )
-        df_holdings["first_buy_date"] = df_holdings["first_buy_date"].fillna(now)
+        now = pd.Timestamp.now(KST).normalize().tz_localize(None)
 
-        # Calculate business days
-        bus_days = np.busday_count(
-            df_holdings["first_buy_date"].values.astype("datetime64[D]"), now.to_datetime64().astype("datetime64[D]")
-        )
+        # 1. 어제(직전 거래일 아님, 어제 날짜) 스냅샷 조회
+        prev_snapshot = get_latest_daily_snapshot(account_id, before_today=True)
+        snapshot_holdings = {}
+        if prev_snapshot and "holdings" in prev_snapshot:
+            # {ticker: days_held} 매핑 생성
+            for h in prev_snapshot["holdings"]:
+                t = str(h.get("ticker", "")).strip().upper()
+                if t:
+                    snapshot_holdings[t] = int(h.get("days_held_int", 0))
 
-        # Format the business days using format_trading_days
-        df_holdings["보유일"] = [format_trading_days(max(d, 0)) for d in bus_days]
+        def _calculate_days(row):
+            ticker = str(row.get("ticker", "")).strip().upper()
+            # 1. 어제 스냅샷이 있으면 연속성 유지
+            if ticker in snapshot_holdings:
+                prev_days = snapshot_holdings[ticker]
+                snap_date = pd.to_datetime(prev_snapshot["snapshot_date"]).normalize().tz_localize(None)
+                delta = (now - snap_date).days
+                return max(prev_days + delta, 1)
+            
+            # 2. 스냅샷에 없으면 최초 매수일(first_buy_date) 기준 계산
+            first_buy_date = row.get("first_buy_date")
+            if first_buy_date:
+                try:
+                    buy_ts = pd.to_datetime(first_buy_date).normalize().tz_localize(None)
+                    delta = (now - buy_ts).days
+                    return max(delta + 1, 1)
+                except Exception:
+                    pass
+            
+            return 1
+
+        df_holdings["days_held_int"] = df_holdings.apply(_calculate_days, axis=1)
+        df_holdings["보유일"] = df_holdings["days_held_int"].apply(format_trading_days)
     except Exception as e:
-        logger.warning(f"Error calculating dates: {e}")
+        logger.warning(f"Error calculating dates based on snapshot: {e}")
         df_holdings["보유일"] = "-"
+        df_holdings["days_held_int"] = 0
 
     # Fetch prices from price cache and exchange rates
     from utils.cache_utils import load_cached_frames_bulk_with_fallback
@@ -267,6 +364,17 @@ def load_real_holdings_table(
         }
 
     df_holdings["현재가"] = df_holdings.apply(_get_current_price, axis=1)
+
+    # 수익률 계산 (매입 단가 대비 현재가, 소수점 1자리)
+    def _calc_return_pct(row):
+        buy = float(row.get("average_buy_price") or 0)
+        curr = float(row.get("현재가") or 0)
+        if buy > 0:
+            return round(((curr / buy) - 1.0) * 100.0, 1)
+        return 0.0
+
+    df_holdings["return_pct"] = df_holdings.apply(_calc_return_pct, axis=1)
+
     if missing_price_tickers:
         df_holdings.attrs["missing_price_tickers"] = sorted(missing_price_tickers)
     if strict_price_cache and missing_price_tickers:
@@ -317,6 +425,11 @@ def load_real_holdings_table(
             "평가금액(KRW)": intl_val_krw,
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
+        # Ensure value columns are numeric after concat
+        for col in ["수량", "평균 매입가", "매입금액(KRW)", "평가금액(KRW)"]:
+            if col in df_holdings.columns:
+                df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0)
+
 
     # Rename columns to match UI
     df_holdings = df_holdings.rename(
@@ -336,8 +449,19 @@ def load_real_holdings_table(
         df_holdings["매입금액(KRW)"] > 0, (df_holdings["평가손익(KRW)"] / df_holdings["매입금액(KRW)"]) * 100, 0.0
     ).astype(float)
 
+    # 비중(Portfolio Weight %) 계산
+    # 수량이 0인 종목을 포함한 모든 종목의 평가액 합계와 현금을 합산하여 '총 자산' 기준 비중 계산
+    vals_for_sum = pd.to_numeric(df_holdings["평가금액(KRW)"], errors="coerce").fillna(0)
+    cash_val = pd.to_numeric(snapshot.get("cash_balance", 0), errors="coerce") or 0
+    total_assets = vals_for_sum.sum() + cash_val
+    
+    if total_assets > 0:
+        df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(1)
+    else:
+        df_holdings["weight_pct"] = 0.0
+
     # 소수점 반올림 및 타입 변환 처리
-    price_digits = 2 if account_country in ("us", "au") else 0
+    price_digits = 4 if account_country in ("us", "au") else 0
     percent_cols = ["수익률(%)", "일간(%)", "1주(%)", "2주(%)", "1달(%)", "3달(%)", "6달(%)", "12달(%)", "고점"]
     price_cols = ["평균 매입가", "현재가", "Nav", "괴리율"]
     int_cols = ["매입금액(KRW)", "평가금액(KRW)", "평가손익(KRW)"]
@@ -362,7 +486,11 @@ def load_real_holdings_table(
     metrics_rows = [_build_cached_metrics(ticker) for ticker in df_holdings["티커"].tolist()]
     metrics_df = pd.DataFrame(metrics_rows)
     for col in metrics_df.columns:
-        df_holdings[col] = metrics_df[col]
+        if col == "일간(%)":
+            # 실시간 오버레이가 이미 값을 넣었을 수 있으므로, 비어있는 경우에만 캐시값으로 채움
+            df_holdings[col] = df_holdings.get(col, pd.Series(dtype=float)).fillna(metrics_df[col])
+        else:
+            df_holdings[col] = metrics_df[col]
 
     df_holdings["상태"] = "보유"
     return df_holdings
@@ -501,6 +629,9 @@ def save_daily_snapshot(
     cash_balance: float,
     valuation_krw: float,
     purchase_amount: float | None = None,
+    holding_details: list[dict[str, Any]] | None = None,
+    cash_balance_native: float | None = None,
+    cash_currency: str | None = None,
 ) -> bool:
     """
     Save a daily snapshot.
@@ -511,7 +642,7 @@ def save_daily_snapshot(
     if db is None:
         return False
 
-    snapshot_date = _now_kst().strftime("%Y-%m-%d")
+    snapshot_date = _resolve_snapshot_date()
 
     try:
         # Find existing snapshot for today
@@ -519,46 +650,59 @@ def save_daily_snapshot(
         if not doc:
             doc = {
                 "snapshot_date": snapshot_date,
-                "total_assets": 0.0,
-                "total_principal": 0.0,
-                "cash_balance": 0.0,
-                "valuation_krw": 0.0,
-                "purchase_amount": 0.0,
+                "total_assets": 0,
+                "total_principal": 0,
+                "cash_balance": 0,
+                "valuation_krw": 0,
+                "purchase_amount": 0,
                 "accounts": [],
                 "updated_at": _now_kst(),
             }
 
         if account_id == "TOTAL":
-            doc["total_assets"] = float(total_assets)
-            doc["total_principal"] = float(total_principal)
-            doc["cash_balance"] = float(cash_balance)
-            doc["valuation_krw"] = float(valuation_krw)
+            doc["total_assets"] = _round_snapshot_money(total_assets)
+            doc["total_principal"] = _round_snapshot_money(total_principal)
+            doc["cash_balance"] = _round_snapshot_money(cash_balance)
+            doc["valuation_krw"] = _round_snapshot_money(valuation_krw)
             if purchase_amount is not None:
-                doc["purchase_amount"] = float(purchase_amount)
+                doc["purchase_amount"] = _round_snapshot_money(purchase_amount)
+            # TOTAL에는 별도 holdings를 저장하지 않음 (계좌별로 저장됨)
         else:
             accounts = doc.get("accounts", [])
             found = False
             for acc in accounts:
                 if acc["account_id"] == account_id:
-                    acc["total_assets"] = float(total_assets)
-                    acc["total_principal"] = float(total_principal)
-                    acc["cash_balance"] = float(cash_balance)
-                    acc["valuation_krw"] = float(valuation_krw)
+                    acc["total_assets"] = _round_snapshot_money(total_assets)
+                    acc["total_principal"] = _round_snapshot_money(total_principal)
+                    acc["cash_balance"] = _round_snapshot_money(cash_balance)
+                    acc["valuation_krw"] = _round_snapshot_money(valuation_krw)
                     if purchase_amount is not None:
-                        acc["purchase_amount"] = float(purchase_amount)
+                        acc["purchase_amount"] = _round_snapshot_money(purchase_amount)
+                    if holding_details is not None:
+                        acc["holdings"] = holding_details
+                    if cash_balance_native is not None:
+                        acc["cash_balance_native"] = float(cash_balance_native)
+                    if cash_currency is not None:
+                        acc["cash_currency"] = str(cash_currency).strip().upper()
                     found = True
                     break
+
             if not found:
-                accounts.append(
-                    {
-                        "account_id": account_id,
-                        "total_assets": float(total_assets),
-                        "total_principal": float(total_principal),
-                        "cash_balance": float(cash_balance),
-                        "valuation_krw": float(valuation_krw),
-                        "purchase_amount": float(purchase_amount or 0.0),
-                    }
-                )
+                acc_data = {
+                    "account_id": account_id,
+                    "total_assets": _round_snapshot_money(total_assets),
+                    "total_principal": _round_snapshot_money(total_principal),
+                    "cash_balance": _round_snapshot_money(cash_balance),
+                    "valuation_krw": _round_snapshot_money(valuation_krw),
+                    "purchase_amount": _round_snapshot_money(purchase_amount),
+                }
+                if holding_details is not None:
+                    acc_data["holdings"] = holding_details
+                if cash_balance_native is not None:
+                    acc_data["cash_balance_native"] = float(cash_balance_native)
+                if cash_currency is not None:
+                    acc_data["cash_currency"] = str(cash_currency).strip().upper()
+                accounts.append(acc_data)
             doc["accounts"] = accounts
 
         doc["updated_at"] = _now_kst()

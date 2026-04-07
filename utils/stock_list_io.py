@@ -17,15 +17,26 @@ logger = get_app_logger()
 # ---------------------------------------------------------------------------
 _COLLECTION_NAME = "stock_meta"
 _INDEX_ENSURED = False
+_LEGACY_INDEX_DROPPED = False
 
 
 def _get_collection():
     """stock_meta 컬렉션 핸들을 반환하고, 최초 호출 시 인덱스를 보장한다."""
-    global _INDEX_ENSURED
+    global _INDEX_ENSURED, _LEGACY_INDEX_DROPPED
     db = get_db_connection()
     if db is None:
         return None
     coll = db[_COLLECTION_NAME]
+    if not _LEGACY_INDEX_DROPPED:
+        try:
+            index_info = coll.index_information()
+            legacy_index = index_info.get("account_ticker_unique")
+            legacy_keys = legacy_index.get("key") if isinstance(legacy_index, dict) else None
+            if legacy_keys == [("account_id", 1), ("ticker", 1)]:
+                coll.drop_index("account_ticker_unique")
+            _LEGACY_INDEX_DROPPED = True
+        except Exception:
+            pass
     if not _INDEX_ENSURED:
         try:
             coll.create_index(

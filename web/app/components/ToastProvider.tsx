@@ -53,7 +53,7 @@ export function ToastProvider({ children }: ToastProviderProps) {
       if (variant !== "error") {
         window.setTimeout(() => {
           setToasts((current) => current.filter((toast) => toast.id !== id));
-        }, 10_000);
+        }, 3_000);
       }
     },
     [],

@@ -123,7 +123,7 @@ def main():
         logger.error("No account configurations found.")
         return
 
-    all_holdings = []
+    all_holdings_dict = {}
     account_summaries = []
     global_principal = 0.0
     global_cash = 0.0
@@ -162,7 +162,7 @@ def main():
         acc_valuation = 0.0
         acc_purchase = 0.0
         if df is not None and not df.empty:
-            all_holdings.append(df)
+            all_holdings_dict[account_id] = df
             acc_valuation = df["평가금액(KRW)"].sum()
             acc_purchase = df["매입금액(KRW)"].sum()
 
@@ -258,8 +258,8 @@ def main():
     send_slack_message_v2("\n\n".join(acc_details), thread_ts=main_ts)
 
     # 3. Compose Portfolio Composition (Thread)
-    if all_holdings:
-        combined_df = pd.concat(all_holdings, ignore_index=True)
+    if all_holdings_dict:
+        combined_df = pd.concat(all_holdings_dict.values(), ignore_index=True)
         bucket_cols = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
         comp_details = ["*🏗️ 포트폴리오 구성 비중*"]
 
@@ -284,6 +284,18 @@ def main():
     # 5. Save Snapshots for next time (Consolidated)
     # Save individual accounts first, then TOTAL (which updates the same document for today)
     for acc in account_summaries:
+        # 계좌별 실보유 종목 추출 (티커, 보유주수 정수값)
+        holding_list = []
+        target_df = all_holdings_dict.get(acc["account_id"])
+        if target_df is not None:
+            for _, row in target_df.iterrows():
+                ticker = str(row.get("티커", "")).strip().upper()
+                if ticker and ticker != "IS": # International Shares 등 가상 종목 제외
+                    holding_list.append({
+                        "ticker": ticker,
+                        "days_held_int": int(row.get("days_held_int", 1))
+                    })
+
         save_daily_snapshot(
             acc["account_id"],
             acc["total_assets"],
@@ -291,6 +303,7 @@ def main():
             acc["cash"],
             acc["valuation"],
             acc.get("valuation", 0.0) - acc.get("stock_profit", 0.0),
+            holding_details=holding_list
         )
 
     save_daily_snapshot(

@@ -33,7 +33,7 @@ from utils.stock_list_io import get_deleted_etfs, get_etfs
 MIN_CHANGE_PCT = 3.0
 EXCLUDE_KEYWORDS = ["레버리지", "채권", "커버드콜", "인버스", "ETN"]
 INCLUDE_KEYWORDS: list[str] = []
-MIN_VOLUME = 0
+MIN_VOLUME = 20000
 
 
 def fetch_naver_etf_data(min_change_pct: float) -> pd.DataFrame | None:

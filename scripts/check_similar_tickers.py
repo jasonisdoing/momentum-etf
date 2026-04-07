@@ -19,7 +19,7 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from utils.data_loader import get_latest_trading_day, prepare_price_data
-from utils.rankings import get_ticker_type_rank_defaults
+from utils.rankings import get_ticker_type_ma_rules
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_etfs
 
@@ -40,8 +40,8 @@ def load_market_data(
     if not country_code:
         raise ValueError(f"종목 타입 '{ticker_type}'의 country_code가 비어 있습니다.")
 
-    # ticker_type 기반 랭크 기본값 가져오기
-    _, ma_month = get_ticker_type_rank_defaults(ticker_type)
+    ma_rules = get_ticker_type_ma_rules(ticker_type)
+    ma_month = max(int(rule["ma_months"]) for rule in ma_rules)
 
     # 1개월 = 20거래일 기준
     lookback_days = int(ma_month * 20)
@@ -138,7 +138,7 @@ def build_similarity_groups(
     for i in range(len(columns)):
         for j in range(i + 1, len(columns)):
             t_i, t_j = columns[i], columns[j]
-            if abs(corr_matrix.loc[t_i, t_j]) >= threshold:
+            if float(corr_matrix.loc[t_i, t_j]) >= threshold:
                 adj[t_i].add(t_j)
                 adj[t_j].add(t_i)
 
@@ -182,7 +182,7 @@ def build_similarity_groups(
         members = []
         for member in group_stats[1:]:
             corr = float(corr_matrix.loc[leader.ticker, member.ticker])
-            if abs(corr) >= threshold:
+            if corr >= threshold:
                 members.append((member.ticker, corr))
 
         if members:
