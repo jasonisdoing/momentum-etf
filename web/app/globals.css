@@ -380,6 +380,8 @@ a {
 .pageFrameTitle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   min-height: 1.5rem;
   padding-inline: var(--app-page-inset);
   margin-bottom: 0.375rem;
@@ -391,6 +393,13 @@ a {
   line-height: 1.2;
   font-weight: 600;
   color: var(--muted);
+}
+
+.pageFrameTitleRight {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .pageFrameBody {
@@ -1523,6 +1532,7 @@ a {
 }
 
 .rankToolbarMeta {
+  justify-content: flex-end;
   gap: 10px;
   font-size: 16px;
   font-weight: 500;
@@ -1846,6 +1856,16 @@ a {
 }
 
 @media (max-width: 991.98px) {
+  .pageFrameTitle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pageFrameTitleRight {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .tickerDetailTables {
     grid-template-columns: minmax(0, 1fr);
   }

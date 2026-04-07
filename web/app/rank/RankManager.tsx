@@ -122,6 +122,13 @@ type RankToolbarCache = {
   ma_months_max: number;
 };
 
+type RankHeaderSummary = {
+  upCount: number;
+  upPct: number;
+  totalCount: number;
+  ruleSummary: string;
+};
+
 let rankToolbarCache: RankToolbarCache | null = null;
 
 function getTodayDateInputValue(): string {
@@ -185,7 +192,7 @@ function renderSignedPercentCell(value: number | null) {
   return <span className={getSignedClass(value ?? null)}>{formatPercent(value ?? null)}</span>;
 }
 
-export function RankManager() {
+export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
@@ -661,6 +668,22 @@ export function RankManager() {
     toast.error(`[ETF-순위] ${blockedMessage}`);
   }, [blockedMessage, toast]);
 
+  const headerSummary = useMemo<RankHeaderSummary>(() => {
+    const totalCount = filteredGridRows.length;
+    const upCount = filteredGridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
+    const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
+    return {
+      upCount,
+      upPct,
+      totalCount,
+      ruleSummary: maRuleSummary.join(" / ") || "-",
+    };
+  }, [filteredGridRows, maRuleSummary]);
+
+  useEffect(() => {
+    onHeaderSummaryChange?.(headerSummary);
+  }, [headerSummary, onHeaderSummaryChange]);
+
   return (
     <div className="appPageStack appPageStackFill">
       {error ? (
@@ -770,28 +793,6 @@ export function RankManager() {
                 />
               </div>
 
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  {filteredGridRows.length > 0 ? (() => {
-                    const upCount = filteredGridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
-                    const upPct = Math.round((upCount / filteredGridRows.length) * 100);
-                    return (
-                      <div className="appHeaderMetric">
-                        <span>점수 양수:</span>
-                        <span className="appHeaderMetricValue is-danger">{upCount}개 ({upPct}%)</span>
-                      </div>
-                    );
-                  })() : null}
-                  <div className="appHeaderMetric">
-                    <span>기준:</span>
-                    <span className="appHeaderMetricValue">{maRuleSummary.join(" / ") || "-"}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>총 개수:</span>
-                    <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(filteredGridRows.length)}개</span>
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
 
