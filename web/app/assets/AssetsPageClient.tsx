@@ -27,8 +27,16 @@ function formatNumber(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
+function formatPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
 export function AssetsPageClient() {
   const [summary, setSummary] = useState<AssetsHeaderSummary>(DEFAULT_SUMMARY);
+  const cashRatio = useMemo(
+    () => (summary.totalAssets > 0 ? (summary.totalCash / summary.totalAssets) * 100 : 0),
+    [summary.totalAssets, summary.totalCash],
+  );
 
   const titleRight = useMemo(
     () => (
@@ -43,7 +51,9 @@ export function AssetsPageClient() {
         </div>
         <div className="appHeaderMetric">
           <span>현금:</span>
-          <span className="appHeaderMetricValue">{formatKrw(summary.totalCash)}</span>
+          <span className="appHeaderMetricValue">
+            {formatKrw(summary.totalCash)}({formatPercent(cashRatio)})
+          </span>
         </div>
         <div className="appHeaderMetric">
           <span>계좌수:</span>
@@ -51,7 +61,7 @@ export function AssetsPageClient() {
         </div>
       </div>
     ),
-    [summary],
+    [cashRatio, summary],
   );
 
   return (
