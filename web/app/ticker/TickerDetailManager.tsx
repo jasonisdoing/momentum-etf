@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   createChart,
   ColorType,
@@ -12,8 +12,6 @@ import {
 } from "lightweight-charts";
 import type {
   IChartApi,
-  CandlestickData,
-  HistogramData,
   LineData,
   Time,
   MouseEventParams,
@@ -221,7 +219,6 @@ function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
 // --- 컴포넌트 ---
 
 export function TickerDetailManager() {
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // URL query params
@@ -232,13 +229,6 @@ export function TickerDetailManager() {
 
   // 전체 종목 목록
   const [allTickers, setAllTickers] = useState<TickerItem[]>([]);
-
-  // 검색 입력
-  const [searchInput, setSearchInput] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [highlightIndex, setHighlightIndex] = useState(-1);
-  const searchRef = useRef<HTMLDivElement | null>(null);
-  const inputRef = useRef<HTMLInputElement | null>(null);
 
   // 현재 선택된 종목
   const [selectedTicker, setSelectedTicker] = useState<TickerItem | null>(null);
@@ -309,37 +299,6 @@ export function TickerDetailManager() {
     setError(`${qTicker} 티커를 찾지 못했습니다.`);
   }, [allTickers, qTicker, qTickerType, qCountryCode, qName]);
 
-  // 클릭 외부 감지 → 드롭다운 닫기
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
-        setShowDropdown(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  // --- 검색 필터 ---
-
-  const filteredTickers = useMemo(() => {
-    const q = searchInput.trim().toLowerCase();
-    if (!q) return [];
-    return allTickers
-      .filter((t) => t.ticker.toLowerCase().includes(q) || t.name.toLowerCase().includes(q))
-      .slice(0, 20);
-  }, [searchInput, allTickers]);
-
-  // 정확한 티커 매칭 시 자동 선택
-  useEffect(() => {
-    const q = searchInput.trim();
-    if (!q) return;
-    const exactMatch = allTickers.find((t) => t.ticker.toLowerCase() === q.toLowerCase());
-    if (exactMatch && filteredTickers.length <= 1) {
-      selectTicker(exactMatch);
-    }
-  }, [filteredTickers]);
-
   // --- 데이터 로드 ---
 
   async function loadTickerData(item: TickerItem) {
@@ -374,44 +333,6 @@ export function TickerDetailManager() {
   }
 
   // --- 핸들러 ---
-
-  function selectTicker(item: TickerItem) {
-    setSelectedTicker(item);
-    setSearchInput("");
-    setShowDropdown(false);
-    setHighlightIndex(-1);
-    void loadTickerData(item);
-    // URL 업데이트
-    const params = new URLSearchParams({
-      ticker: item.ticker,
-    });
-    router.replace(`/ticker?${params.toString()}`);
-  }
-
-  function handleSearchInputChange(value: string) {
-    setSearchInput(value);
-    setShowDropdown(true);
-    setHighlightIndex(-1);
-  }
-
-  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setHighlightIndex((prev) => Math.min(prev + 1, filteredTickers.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setHighlightIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      if (highlightIndex >= 0 && highlightIndex < filteredTickers.length) {
-        selectTicker(filteredTickers[highlightIndex]);
-      } else if (filteredTickers.length === 1) {
-        selectTicker(filteredTickers[0]);
-      }
-    } else if (e.key === "Escape") {
-      setShowDropdown(false);
-    }
-  }
 
   // --- 차트 관련 ---
 
@@ -578,61 +499,6 @@ export function TickerDetailManager() {
           <div className="card-header">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                {/* 종목 검색 자동완성 */}
-                <div ref={searchRef} style={{ position: "relative" }}>
-                  <input
-                    ref={inputRef}
-                    className="form-control"
-                    type="text"
-                    style={{ width: "280px", fontWeight: 600 }}
-                    value={searchInput}
-                    placeholder="티커 또는 종목명 검색"
-                    onChange={(e) => handleSearchInputChange(e.target.value)}
-                    onFocus={() => { if (searchInput.trim()) setShowDropdown(true); }}
-                    onKeyDown={handleSearchKeyDown}
-                  />
-                  {showDropdown && filteredTickers.length > 0 ? (
-                    <div style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      zIndex: 1000,
-                      backgroundColor: "#fff",
-                      border: "1px solid #e6e8ec",
-                      borderRadius: 8,
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.12)",
-                      maxHeight: 320,
-                      overflowY: "auto",
-                      marginTop: 4,
-                    }}>
-                      {filteredTickers.map((item, idx) => (
-                        <button
-                          key={`${item.ticker_type}-${item.ticker}`}
-                          type="button"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 8,
-                            width: "100%",
-                            padding: "8px 12px",
-                            border: "none",
-                            backgroundColor: idx === highlightIndex ? "#eef4fb" : "transparent",
-                            cursor: "pointer",
-                            textAlign: "left",
-                            fontSize: 14,
-                          }}
-                          onMouseEnter={() => setHighlightIndex(idx)}
-                          onMouseDown={(e) => { e.preventDefault(); selectTicker(item); }}
-                        >
-                          <span className="appCodeText" style={{ fontWeight: 700, minWidth: 72 }}>{item.ticker}</span>
-                          <span style={{ color: "#182433", flex: 1 }}>{item.name}</span>
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-
                 {/* 선택된 종목 정보 */}
                 {displayTitle ? (
                   <span style={{ fontWeight: 700, fontSize: "1em", whiteSpace: "nowrap" }}>
