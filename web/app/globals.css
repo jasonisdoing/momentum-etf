@@ -1770,20 +1770,46 @@ a {
   position: absolute;
   z-index: 2;
   max-width: 15rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 15rem;
+  overflow: visible;
   pointer-events: none;
   font-size: 0.9rem;
   font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
 }
 
 .tickerDetailChartBadge.is-high {
   color: #ef5350;
+  align-items: center;
 }
 
 .tickerDetailChartBadge.is-low {
   color: #2f6fed;
+  align-items: center;
+}
+
+.tickerDetailChartBadgeText {
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickerDetailChartBadgeArrow {
+  position: absolute;
+  font-size: 1rem;
+  line-height: 1;
+  transform: translateX(-50%);
+}
+
+.tickerDetailChartBadge.is-high .tickerDetailChartBadgeArrow {
+  bottom: -0.9rem;
+}
+
+.tickerDetailChartBadge.is-low .tickerDetailChartBadgeArrow {
+  top: -0.9rem;
 }
 
 .appAgGridWrap {

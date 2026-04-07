@@ -71,6 +71,7 @@ type ChartRangeBadge = {
   text: string;
   left: number;
   top: number;
+  anchorLeft: number;
   tone: "high" | "low";
 };
 
@@ -264,7 +265,7 @@ function getInitialVisibleLogicalRange(
   if (interval === "month") {
     return {
       from: -3,
-      to: lastIndex + 0.5,
+      to: lastIndex + 3.5,
     };
   }
 
@@ -286,7 +287,7 @@ function getInitialVisibleLogicalRange(
   const visibleStartIndex = data.findIndex((row) => row.date >= startDateText);
   return {
     from: Math.max((visibleStartIndex >= 0 ? visibleStartIndex : 0) - 1, -1),
-    to: lastIndex + 0.5,
+    to: lastIndex + 2.5,
   };
 }
 
@@ -448,7 +449,7 @@ export function TickerDetailManager() {
       layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#5b6778", fontSize: 12 },
       grid: { vertLines: { color: "#f0f2f5" }, horzLines: { color: "#f0f2f5" } },
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.05, bottom: 0.25 } },
+      rightPriceScale: { borderColor: "#e6e8ec", scaleMargins: { top: 0.12, bottom: 0.25 } },
       timeScale: { borderColor: "#e6e8ec", timeVisible: false },
     });
     chartRef.current = chart;
@@ -507,20 +508,24 @@ export function TickerDetailManager() {
       }
 
       const chartWidth = container.clientWidth;
-      const clampLeft = (value: number, width = 240) => Math.max(12, Math.min(value, chartWidth - width - 12));
+      const badgeWidth = 240;
+      const clampLeft = (value: number, width = badgeWidth) => Math.max(12, Math.min(value, chartWidth - width - 12));
+      const getBadgeLeft = (anchorX: number) => clampLeft(anchorX - badgeWidth / 2);
 
       setChartBadges([
         {
           tone: "high",
           text: buildRangeBadgeText(highRow.high!, currentRow.close, highRow.date, selectedTicker?.country_code ?? "kor"),
-          left: clampLeft(highX - 72),
-          top: Math.max(highY - 34, 10),
+          left: getBadgeLeft(highX),
+          top: Math.max(highY - 78, 10),
+          anchorLeft: Math.max(10, Math.min(highX - getBadgeLeft(highX), badgeWidth - 10)),
         },
         {
           tone: "low",
           text: buildRangeBadgeText(lowRow.low!, currentRow.close, lowRow.date, selectedTicker?.country_code ?? "kor"),
-          left: clampLeft(lowX - 72),
-          top: Math.min(lowY + 12, 394),
+          left: getBadgeLeft(lowX),
+          top: Math.min(lowY + 40, 382),
+          anchorLeft: Math.max(10, Math.min(lowX - getBadgeLeft(lowX), badgeWidth - 10)),
         },
       ]);
     }
@@ -725,7 +730,9 @@ export function TickerDetailManager() {
                           className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
                           style={{ left: badge.left, top: badge.top }}
                         >
-                          {badge.text}
+                          {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
+                          <span className="tickerDetailChartBadgeText">{badge.text}</span>
+                          {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
                         </div>
                       ))}
                     </div>
