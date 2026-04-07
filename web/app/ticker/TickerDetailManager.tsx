@@ -460,6 +460,7 @@ export function TickerDetailManager() {
       upColor: "#26a69a", downColor: "#ef5350",
       borderUpColor: "#26a69a", borderDownColor: "#ef5350",
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      priceFormat: { type: "price", precision: 0, minMove: 1 },
     });
     candleSeries.setData(
       chartRows
@@ -485,6 +486,7 @@ export function TickerDetailManager() {
       if (maData.length === 0) continue;
       chart.addSeries(LineSeries, {
         color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
+        priceFormat: { type: "price", precision: 0, minMove: 1 },
       }).setData(maData);
     }
 
