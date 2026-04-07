@@ -1062,6 +1062,28 @@ function AccountHoldingsDetailPanel({
       },
     },
     {
+      field: "daily_change_pct",
+      headerName: "일간(%)",
+      width: 92,
+      type: "rightAligned",
+      cellRenderer: (params: { value?: number | null }) => (
+        <span className={getSignedClass(params.value ?? 0)}>
+          {params.value === null || params.value === undefined
+            ? "-"
+            : `${(params.value ?? 0) > 0 ? "+" : ""}${params.value.toFixed(2)}%`}
+        </span>
+      ),
+    },
+    {
+      field: "current_price",
+      headerName: "현재가",
+      width: 116,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: string }) => (
+        <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
+      ),
+    },
+    {
       field: "quantity",
       headerName: "수량",
       width: 88,
@@ -1153,28 +1175,6 @@ function AccountHoldingsDetailPanel({
           {(params.value ?? 0) > 0 ? "+" : ""}
           {(params.value ?? 0).toFixed(2)}%
         </span>
-      ),
-    },
-    {
-      field: "daily_change_pct",
-      headerName: "일간(%)",
-      width: 92,
-      type: "rightAligned",
-      cellRenderer: (params: { value?: number | null }) => (
-        <span className={getSignedClass(params.value ?? 0)}>
-          {params.value === null || params.value === undefined
-            ? "-"
-            : `${(params.value ?? 0) > 0 ? "+" : ""}${params.value.toFixed(2)}%`}
-        </span>
-      ),
-    },
-    {
-      field: "current_price",
-      headerName: "현재가",
-      width: 116,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: string }) => (
-        <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
       ),
     },
     {
