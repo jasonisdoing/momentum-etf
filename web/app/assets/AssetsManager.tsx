@@ -1195,14 +1195,6 @@ function AccountHoldingsDetailPanel({
         params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
     },
     {
-      field: "buy_amount_krw",
-      headerName: "매입 금액",
-      width: 136,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) =>
-        params.data ? formatKrw(getPreviewBuyAmountKrw(params.data)) : "-",
-    },
-    {
       field: "weight_pct",
       headerName: "비중",
       width: 80,
