@@ -1696,6 +1696,25 @@ a {
   min-height: 0;
 }
 
+.assetsChildAgGrid .ag-cell-value,
+.assetsChildAgGrid .ag-group-value {
+  width: 100%;
+  min-width: 0;
+}
+
+.assetsChildAgGrid .assetsNameCellText {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assetsChildAgGrid .ag-cell[col-id="name"] {
+  overflow: hidden;
+}
+
 .rankAgGrid .ag-cell.rankBucketCell {
   justify-content: center;
   font-weight: 600;

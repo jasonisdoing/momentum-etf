@@ -1033,7 +1033,20 @@ function AccountHoldingsDetailPanel({
         return <span className="appCodeText">{params.value}</span>;
       },
     },
-    { field: "name", headerName: "종목명", minWidth: 280, flex: 1.6 },
+    {
+      field: "name",
+      headerName: "종목명",
+      minWidth: 280,
+      flex: 1.6,
+      cellRenderer: (params: { value?: string | null }) => {
+        const value = String(params.value ?? "-");
+        return (
+          <span className="assetsNameCellText" title={value}>
+            {value}
+          </span>
+        );
+      },
+    },
     {
       field: "quantity",
       headerName: "수량",
