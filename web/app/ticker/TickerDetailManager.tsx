@@ -412,7 +412,9 @@ export function TickerDetailManager() {
 
   // --- 차트 관련 ---
 
+  const selectedCountryCode = selectedTicker?.country_code ?? "kor";
   const priceDigits = selectedTicker?.country_code === "au" ? 2 : 0;
+  const priceMinMove = priceDigits > 0 ? 0.01 : 1;
 
   const chartRows = useMemo(() => {
     if (chartInterval === "week") {
@@ -458,7 +460,11 @@ export function TickerDetailManager() {
       upColor: "#26a69a", downColor: "#ef5350",
       borderUpColor: "#26a69a", borderDownColor: "#ef5350",
       wickUpColor: "#26a69a", wickDownColor: "#ef5350",
-      priceFormat: { type: "price", precision: 0, minMove: 1 },
+      priceFormat: {
+        type: "custom",
+        minMove: priceMinMove,
+        formatter: (price: number) => formatTickerPrice(price, selectedCountryCode),
+      },
     });
     candleSeries.setData(
       chartRows
@@ -548,7 +554,11 @@ export function TickerDetailManager() {
       if (maData.length === 0) continue;
       chart.addSeries(LineSeries, {
         color: ma.color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false, crosshairMarkerVisible: false,
-        priceFormat: { type: "price", precision: 0, minMove: 1 },
+        priceFormat: {
+          type: "custom",
+          minMove: priceMinMove,
+          formatter: (price: number) => formatTickerPrice(price, selectedCountryCode),
+        },
       }).setData(maData);
     }
 
@@ -583,7 +593,7 @@ export function TickerDetailManager() {
       chart.remove();
       chartRef.current = null;
     };
-  }, [chartInterval, chartRows, dateRowMap]);
+  }, [chartInterval, chartRows, dateRowMap, priceMinMove, selectedCountryCode]);
 
   const displayInfo = crosshairInfo ?? lastInfo;
 
@@ -667,7 +677,7 @@ export function TickerDetailManager() {
 
                 {displayInfo?.close != null ? (
                   <span style={{ fontSize: "1.1em", fontWeight: 700 }}>
-                    {formatNumber(displayInfo.close, priceDigits)}
+                    {formatTickerPrice(displayInfo.close, selectedCountryCode)}
                     {displayInfo.change_pct != null ? (
                       <span className={getSignedClass(displayInfo.change_pct)} style={{ marginLeft: 8, fontSize: "0.85em" }}>
                         {formatPercent(displayInfo.change_pct)}
