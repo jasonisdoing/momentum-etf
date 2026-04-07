@@ -142,9 +142,7 @@ export function TickerDetailManager() {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // 현재 선택된 종목
-  const [selectedTicker, setSelectedTicker] = useState<TickerItem | null>(
-    qTicker ? { ticker: qTicker, name: qName, ticker_type: qTickerType, country_code: qCountryCode } : null,
-  );
+  const [selectedTicker, setSelectedTicker] = useState<TickerItem | null>(null);
 
   // 기간
   const [months, setMonths] = useState(12);
@@ -178,12 +176,41 @@ export function TickerDetailManager() {
 
   // URL에서 ticker가 있으면 자동 조회
   useEffect(() => {
-    if (qTicker && qTickerType) {
+    if (!qTicker) {
+      setSelectedTicker(null);
+      setRows([]);
+      setError(null);
+      return;
+    }
+
+    if (qTickerType) {
       const item: TickerItem = { ticker: qTicker, name: qName, ticker_type: qTickerType, country_code: qCountryCode };
       setSelectedTicker(item);
-      loadTickerData(item, months);
+      void loadTickerData(item, months);
+      return;
     }
-  }, [qTicker, qTickerType]);
+
+    if (allTickers.length === 0) {
+      return;
+    }
+
+    const matches = allTickers.filter((item) => item.ticker.toLowerCase() === qTicker.toLowerCase());
+    if (matches.length === 1) {
+      setSelectedTicker(matches[0]);
+      void loadTickerData(matches[0], months);
+      return;
+    }
+
+    setRows([]);
+    if (matches.length > 1) {
+      setSelectedTicker(null);
+      setError(`동일한 티커 ${qTicker}가 여러 종목 타입에 등록되어 있습니다.`);
+      return;
+    }
+
+    setSelectedTicker(null);
+    setError(`${qTicker} 티커를 찾지 못했습니다.`);
+  }, [allTickers, qTicker, qTickerType, qCountryCode, qName]);
 
   // 클릭 외부 감지 → 드롭다운 닫기
   useEffect(() => {
@@ -257,13 +284,10 @@ export function TickerDetailManager() {
     setSearchInput("");
     setShowDropdown(false);
     setHighlightIndex(-1);
-    loadTickerData(item, months);
+    void loadTickerData(item, months);
     // URL 업데이트
     const params = new URLSearchParams({
       ticker: item.ticker,
-      ticker_type: item.ticker_type,
-      country_code: item.country_code,
-      name: item.name,
     });
     router.replace(`/ticker?${params.toString()}`);
   }
