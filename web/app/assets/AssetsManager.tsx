@@ -288,6 +288,22 @@ function getPreviewTargetRatio(row: GridRow): number | null {
   return parsed;
 }
 
+function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[]): number {
+  const rowId = buildGridRowId(row);
+  const totalValuation = rows.reduce((sum, currentRow) => {
+    return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
+  }, 0);
+  if (totalValuation <= 0) {
+    return 0;
+  }
+  const targetRow = rows.find((currentRow) => buildGridRowId(currentRow) === rowId);
+  if (!targetRow) {
+    return 0;
+  }
+  const rowValuation = getPreviewValuationKrw({ ...targetRow, id: rowId });
+  return (rowValuation / totalValuation) * 100;
+}
+
 function computeAccountTotalAssetsNative(summary: AccountSummary, rows: HoldingsRow[]): number {
   const currency = String(summary.currency || "KRW").trim().toUpperCase();
   if (currency === "AUD") {
@@ -1143,9 +1159,14 @@ function AccountHoldingsDetailPanel({
       headerName: "비중",
       width: 80,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number }) => (
-        <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>{(params.value ?? 0).toFixed(1)}%</span>
-      ),
+      cellRenderer: (params: { data?: GridRow }) =>
+        params.data ? (
+          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
+            {getPreviewWeightPct(params.data, rows).toFixed(1)}%
+          </span>
+        ) : (
+          "-"
+        ),
     },
     {
       field: "target_ratio",
