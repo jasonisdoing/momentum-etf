@@ -291,8 +291,14 @@ function getPreviewTargetRatio(row: GridRow): number | null {
 }
 
 function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[]): number {
+  if (String(row.ticker || "").trim().toUpperCase() === "IS") {
+    return 0;
+  }
   const rowId = buildGridRowId(row);
   const totalValuation = rows.reduce((sum, currentRow) => {
+    if (String(currentRow.ticker || "").trim().toUpperCase() === "IS") {
+      return sum;
+    }
     return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
   }, 0);
   if (totalValuation <= 0) {
