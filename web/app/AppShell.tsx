@@ -27,6 +27,7 @@ import {
 } from "@tabler/icons-react";
 
 import { parseFearGreedSummary } from "@/lib/fear-greed";
+import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
 const homeItem = { href: "/", label: "Home", icon: IconHome };
 
@@ -376,6 +377,9 @@ export function AppShell({ children }: AppShellProps) {
               </Link>
             </div>
             <div className="topbarFx">
+              <span className="topbarFxItem topbarTickerSearchItem">
+                <GlobalTickerSearch />
+              </span>
               <span className="topbarFxItem">
                 USD/KRW:{" "}
                 {isFxLoading ? (
