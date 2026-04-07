@@ -78,6 +78,13 @@ type HoldingsResponse = {
   error?: string;
 };
 
+type AssetsHeaderSummary = {
+  totalAssets: number;
+  totalValuation: number;
+  totalCash: number;
+  accountCount: number;
+};
+
 type AddingRowState = {
   ticker: string;
   quantity: string;
@@ -505,6 +512,7 @@ function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
+  const detailTotalAssetsNative = useMemo(() => computeAccountTotalAssetsNative(summary, rows), [rows, summary]);
 
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
@@ -1307,6 +1315,28 @@ function AccountHoldingsDetailPanel({
 
   return (
     <div className="assetsDetailPanel">
+      <div className="assetsDetailHeader">
+        <div className="assetsDetailHeaderTitle">
+          <span>{summary.icon}</span>
+          <span>{summary.name}</span>
+        </div>
+        <div className="appHeaderMetrics">
+          <div className="appHeaderMetric">
+            <span>총 자산:</span>
+            <span className="appHeaderMetricValue is-primary">
+              {formatTargetAmount(detailTotalAssetsNative, summary.currency)}
+            </span>
+          </div>
+          <div className="appHeaderMetric">
+            <span>평가액:</span>
+            <span className="appHeaderMetricValue">{formatKrw(summary.valuation_krw)}</span>
+          </div>
+          <div className="appHeaderMetric">
+            <span>현금:</span>
+            <span className="appHeaderMetricValue">{formatAccountCash(summary)}</span>
+          </div>
+        </div>
+      </div>
       <div className="appActionHeader">
         <div className="appActionHeaderInner">
           <button
@@ -1439,7 +1469,7 @@ function AccountHoldingsDetailPanel({
   );
 }
 
-export function AssetsManager() {
+export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: AssetsHeaderSummary) => void }) {
   const toast = useToast();
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
@@ -1542,6 +1572,15 @@ export function AssetsManager() {
     () => summaries.reduce((sum, summary) => sum + Number(summary.cash_balance_krw ?? 0), 0),
     [summaries],
   );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      totalAssets,
+      totalValuation,
+      totalCash,
+      accountCount: summaries.length,
+    });
+  }, [onHeaderSummaryChange, summaries.length, totalAssets, totalCash, totalValuation]);
 
   const isDirtyParentCell = useCallback(
     (rowId: string | undefined, field: string) => Boolean(rowId && parentDirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
@@ -1905,33 +1944,6 @@ export function AssetsManager() {
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
         <div className="card appCard shadow-sm appTableCardFill">
-          <div className="card-header flex-shrink-0">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">자산 관리</span>
-              </div>
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>총 자산:</span>
-                    <span className="appHeaderMetricValue is-primary">{formatKrw(totalAssets)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>평가액:</span>
-                    <span className="appHeaderMetricValue">{formatKrw(totalValuation)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>현금:</span>
-                    <span className="appHeaderMetricValue">{formatKrw(totalCash)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>계좌수:</span>
-                    <span className="appHeaderMetricValue">{formatNumber(summaries.length)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
           <div className="card-body p-2 appTableCardBodyFill">
             <AppAgGrid
               rowData={parentRows}
