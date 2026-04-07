@@ -2079,6 +2079,15 @@ a {
   width: 100%;
 }
 
+.stocksAgGrid .ag-cell.stocksNameColumn {
+  overflow: hidden;
+}
+
+.stocksAgGrid .ag-cell.stocksNameColumn .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
 .stocksAgGrid .ag-cell.appBucketCell {
   justify-content: center;
   font-weight: 600;

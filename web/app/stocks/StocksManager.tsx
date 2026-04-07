@@ -12,6 +12,7 @@ import {
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { ColDef } from "ag-grid-community";
+import { useRouter } from "next/navigation";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -172,6 +173,7 @@ const stocksGridTheme = themeQuartz
   });
 
 export function StocksManager() {
+  const router = useRouter();
   const [ticker_types, setAccounts] = useState<StocksAccountItem[]>([]);
   const [selectedTickerType, setSelectedAccountId] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("active");
@@ -187,6 +189,14 @@ export function StocksManager() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteReason, setDeleteReason] = useState("");
   const toast = useToast();
+
+  function moveToTickerDetail(ticker: string | null | undefined) {
+    const normalizedTicker = String(ticker ?? "").trim().toUpperCase();
+    if (!normalizedTicker) {
+      return;
+    }
+    router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+  }
 
   function showErrorToast(message: string) {
     toast.error(`[ETF-종목 관리] ${message}`);
@@ -335,15 +345,14 @@ export function StocksManager() {
       {
         field: "ticker",
         headerName: "티커",
-        width: 180,
-        minWidth: 180,
+        width: 124,
+        minWidth: 124,
         cellRenderer: (params: { data?: ActiveStockGridRow }) => (
           params.data?.id === "__adding__" ? (
             <div className="stocksTickerLookup">
               <input
                 type="text"
                 className="form-control form-control-sm"
-                placeholder="예: 069500 / VGS"
                 value={addingRow?.ticker ?? ""}
                 onChange={(event) =>
                   setAddingRow((prev) =>
@@ -375,7 +384,13 @@ export function StocksManager() {
               </button>
             </div>
           ) : (
-            <span className="appCodeText">{params.data?.ticker ?? "-"}</span>
+            <button
+              type="button"
+              className="btn btn-link p-0 appCodeText stocksTickerLink"
+              onClick={() => moveToTickerDetail(params.data?.ticker)}
+            >
+              {params.data?.ticker ?? "-"}
+            </button>
           )
         ),
       },
@@ -384,9 +399,14 @@ export function StocksManager() {
         headerName: "종목명",
         minWidth: 220,
         flex: 1,
+        cellClass: "stocksNameColumn",
         cellRenderer: (params: { data?: ActiveStockGridRow }) => {
           if (params.data?.id !== "__adding__") {
-            return params.data?.name ?? "-";
+            return (
+              <div className="stocksNameCell" title={params.data?.name ?? "-"}>
+                {params.data?.name ?? "-"}
+              </div>
+            );
           }
           if (addingRow?.is_validating) {
             return <span className="text-muted">티커 확인 중...</span>;
@@ -396,7 +416,7 @@ export function StocksManager() {
           }
           if (addingRow?.is_validated) {
             return (
-              <span className="fw-semibold">
+              <span className="fw-semibold stocksNameCell" title={addingRow.name}>
                 {addingRow.name}
                 {addingRow.status === "deleted" ? " (삭제된 종목 재추가)" : ""}
               </span>
@@ -487,10 +507,27 @@ export function StocksManager() {
         width: 98,
         minWidth: 98,
         cellRenderer: (params: { data?: DeletedStockGridRow }) => (
-          <span className="appCodeText">{params.data?.ticker ?? "-"}</span>
+          <button
+            type="button"
+            className="btn btn-link p-0 appCodeText stocksTickerLink"
+            onClick={() => moveToTickerDetail(params.data?.ticker)}
+          >
+            {params.data?.ticker ?? "-"}
+          </button>
         ),
       },
-      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      {
+        field: "name",
+        headerName: "종목명",
+        minWidth: 220,
+        flex: 1,
+        cellClass: "stocksNameColumn",
+        cellRenderer: (params: { data?: DeletedStockGridRow }) => (
+          <div className="stocksNameCell" title={params.data?.name ?? "-"}>
+            {params.data?.name ?? "-"}
+          </div>
+        ),
+      },
       {
         field: "week_volume",
         headerName: "주간거래량",

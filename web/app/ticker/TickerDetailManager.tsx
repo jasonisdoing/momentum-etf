@@ -216,6 +216,44 @@ function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
   }));
 }
 
+function getInitialVisibleLogicalRange(
+  data: PriceRow[],
+  interval: ChartInterval,
+): { from: number; to: number } | null {
+  if (data.length === 0) {
+    return null;
+  }
+
+  const lastIndex = data.length - 1;
+  if (interval === "month") {
+    return {
+      from: -3,
+      to: lastIndex + 0.5,
+    };
+  }
+
+  const lastRow = data[lastIndex];
+
+  const lastDate = new Date(`${lastRow.date}T00:00:00`);
+  if (Number.isNaN(lastDate.getTime())) {
+    return null;
+  }
+
+  const startDate = new Date(lastDate);
+  if (interval === "day") {
+    startDate.setFullYear(startDate.getFullYear() - 1);
+  } else {
+    startDate.setFullYear(startDate.getFullYear() - 2);
+  }
+
+  const startDateText = startDate.toISOString().slice(0, 10);
+  const visibleStartIndex = data.findIndex((row) => row.date >= startDateText);
+  return {
+    from: Math.max((visibleStartIndex >= 0 ? visibleStartIndex : 0) - 1, -1),
+    to: lastIndex + 0.5,
+  };
+}
+
 // --- 컴포넌트 ---
 
 export function TickerDetailManager() {
@@ -421,10 +459,15 @@ export function TickerDetailManager() {
       for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
     });
     observer.observe(container);
-    chart.timeScale().fitContent();
+    const initialVisibleRange = getInitialVisibleLogicalRange(chartRows, chartInterval);
+    if (initialVisibleRange) {
+      chart.timeScale().setVisibleLogicalRange(initialVisibleRange);
+    } else {
+      chart.timeScale().fitContent();
+    }
 
     return () => { observer.disconnect(); chart.remove(); chartRef.current = null; };
-  }, [chartRows, dateRowMap]);
+  }, [chartInterval, chartRows, dateRowMap]);
 
   const displayInfo = crosshairInfo ?? lastInfo;
 
