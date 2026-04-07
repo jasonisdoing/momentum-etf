@@ -2279,17 +2279,29 @@ a {
 }
 
 .assetsInlineInputTicker {
-  width: 5.25rem;
+  width: 4.5rem;
 }
 
-.assetsTickerLookup {
+.assetsNameLookup {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.assetsNameLookupStatus {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tblr-secondary-color);
 }
 
 .assetsInlineButton {
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .assetsInlineLinkButton {
