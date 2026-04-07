@@ -214,7 +214,11 @@ function parseWeeklyCellValue(field: WeeklyEditableField | undefined, newValue: 
   return parsed;
 }
 
-export function WeeklyManager() {
+export function WeeklyManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { activeWeekDate: string; rowCount: number; dirtyCount: number }) => void;
+}) {
   const [rows, setRows] = useState<WeeklyRow[]>([]);
   const [editableFields, setEditableFields] = useState<WeeklyEditableField[]>([]);
   const [readOnlyKeys, setReadOnlyKeys] = useState<Set<string>>(new Set());
@@ -276,6 +280,14 @@ export function WeeklyManager() {
       })),
     [rows],
   );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      activeWeekDate: activeWeekDate || "-",
+      rowCount: rows.length,
+      dirtyCount: dirtyRowIds.length,
+    });
+  }, [activeWeekDate, dirtyRowIds.length, onHeaderSummaryChange, rows.length]);
 
   const editableFieldMap = useMemo(
     () => new Map(editableFields.map((field) => [field.key, field])),
@@ -419,18 +431,6 @@ export function WeeklyManager() {
                 >
                   {isPending ? "집계 중..." : "이번주 데이터 집계"}
                 </button>
-              </div>
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>활성 주차:</span>
-                    <span className="appHeaderMetricValue">{activeWeekDate || "-"}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>행:</span>
-                    <span className="appHeaderMetricValue">{rows.length}</span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

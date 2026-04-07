@@ -172,7 +172,17 @@ const stocksGridTheme = themeQuartz
     iconSize: 18,
   });
 
-export function StocksManager() {
+export function StocksManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: {
+    tickerTypeName: string;
+    viewLabel: string;
+    totalCount: number;
+    selectedCount: number;
+    dirtyCount: number;
+  }) => void;
+}) {
   const router = useRouter();
   const [ticker_types, setAccounts] = useState<StocksAccountItem[]>([]);
   const [selectedTickerType, setSelectedAccountId] = useState("");
@@ -189,6 +199,29 @@ export function StocksManager() {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteReason, setDeleteReason] = useState("");
   const toast = useToast();
+  const selectedTickerTypeMeta = useMemo(
+    () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
+    [selectedTickerType, ticker_types],
+  );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      tickerTypeName: selectedTickerTypeMeta?.name ?? "-",
+      viewLabel: viewMode === "active" ? "등록된 종목" : "삭제된 종목",
+      totalCount: viewMode === "active" ? activeRows.length : deletedRows.length,
+      selectedCount: viewMode === "active" ? selectedActiveTickers.length : selectedDeletedTickers.length,
+      dirtyCount: viewMode === "active" ? dirtyActiveRowIds.length : 0,
+    });
+  }, [
+    activeRows.length,
+    deletedRows.length,
+    dirtyActiveRowIds.length,
+    onHeaderSummaryChange,
+    selectedActiveTickers.length,
+    selectedDeletedTickers.length,
+    selectedTickerTypeMeta?.name,
+    viewMode,
+  ]);
 
   function moveToTickerDetail(ticker: string | null | undefined) {
     const normalizedTicker = String(ticker ?? "").trim().toUpperCase();
@@ -920,43 +953,6 @@ export function StocksManager() {
                     <IconPlaylistX size={16} stroke={1.75} />
                     <span>삭제된 종목</span>
                   </button>
-                </div>
-              </div>
-
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>총 개수:</span>
-                    <span className="appHeaderMetricValue">
-                      {viewMode === "active"
-                        ? `${new Intl.NumberFormat("ko-KR").format(activeRows.length)}개`
-                        : `${new Intl.NumberFormat("ko-KR").format(deletedRows.length)}개`}
-                    </span>
-                  </div>
-                  {viewMode === "active" && selectedActiveTickers.length > 0 ? (
-                    <div className="appHeaderMetric">
-                      <span>선택:</span>
-                      <span className="appHeaderMetricValue is-primary">
-                        {new Intl.NumberFormat("ko-KR").format(selectedActiveTickers.length)}개
-                      </span>
-                    </div>
-                  ) : null}
-                  {viewMode === "active" && dirtyActiveRowIds.length > 0 ? (
-                    <div className="appHeaderMetric">
-                      <span>변경:</span>
-                      <span className="appHeaderMetricValue is-success">
-                        {new Intl.NumberFormat("ko-KR").format(dirtyActiveRowIds.length)}개
-                      </span>
-                    </div>
-                  ) : null}
-                  {viewMode === "deleted" && selectedDeletedTickers.length > 0 ? (
-                    <div className="appHeaderMetric">
-                      <span>선택:</span>
-                      <span className="appHeaderMetricValue is-primary">
-                        {new Intl.NumberFormat("ko-KR").format(selectedDeletedTickers.length)}개
-                      </span>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </div>

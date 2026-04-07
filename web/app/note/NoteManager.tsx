@@ -40,7 +40,11 @@ function formatUpdatedAt(value: string | null): string {
   }).format(date);
 }
 
-export function NoteManager() {
+export function NoteManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { accountLabel: string; saveLabel: string }) => void;
+}) {
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
   const [content, setContent] = useState("");
@@ -150,6 +154,12 @@ export function NoteManager() {
     [accounts, selectedAccountId],
   );
 
+  useEffect(() => {
+    const accountLabel = selectedAccount ? `${selectedAccount.icon} ${selectedAccount.name}` : "-";
+    const saveLabel = isDirty ? "저장되지 않은 변경이 있습니다." : `마지막 저장: ${formatUpdatedAt(updatedAt)}`;
+    onHeaderSummaryChange?.({ accountLabel, saveLabel });
+  }, [isDirty, onHeaderSummaryChange, selectedAccount, updatedAt]);
+
   function handleAccountChange(nextAccountId: string) {
     if (isDirty) {
       const confirmed = window.confirm("저장되지 않은 변경이 있습니다. 이동하면 변경 내용이 사라집니다.");
@@ -203,15 +213,6 @@ export function NoteManager() {
                       </option>
                     ))}
                   </select>
-                </div>
-              </div>
-              <div className="accountToolbarRight">
-                <div className="accountToolbarMeta">
-                  {selectedAccount ? (
-                    <span>
-                      {selectedAccount.icon} {selectedAccount.name}
-                    </span>
-                  ) : null}
                 </div>
               </div>
             </div>

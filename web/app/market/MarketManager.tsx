@@ -133,7 +133,11 @@ function formatUpdatedAt(value: string | null | undefined): string {
   }).format(date);
 }
 
-export function MarketManager() {
+export function MarketManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string }) => void;
+}) {
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -223,6 +227,14 @@ export function MarketManager() {
     () => filteredRows.map((row, index) => ({ ...row, row_number: index + 1 })),
     [filteredRows],
   );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      filteredCount: filteredRows.length,
+      totalCount: rows.length,
+      updatedAt: formatUpdatedAt(updatedAt),
+    });
+  }, [filteredRows.length, onHeaderSummaryChange, rows.length, updatedAt]);
 
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
@@ -335,26 +347,6 @@ export function MarketManager() {
                   value={minPrevVolume}
                   onChange={(event) => setMinPrevVolume(event.target.value)}
                 />
-              </div>
-              <div className="appMainHeaderRight marketMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>총:</span>
-                    <span className="appHeaderMetricValue">{formatCount(filteredRows.length)}개</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>전체:</span>
-                    <span className="appHeaderMetricValue">{formatCount(rows.length)}개</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>KIS 마스터 갱신:</span>
-                    <span className="appHeaderMetricValue">{formatUpdatedAt(updatedAt)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>정렬:</span>
-                    <span className="appHeaderMetricValue">일간(%) 내림차순</span>
-                  </div>
-                </div>
               </div>
             </div>
           </div>

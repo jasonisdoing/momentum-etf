@@ -87,7 +87,11 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   },
 ];
 
-export function SystemManager() {
+export function SystemManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { accountCount: number; scheduleCount: number }) => void;
+}) {
   const [summaryRows, setSummaryRows] = useState<SystemSummaryRow[]>([]);
   const [scheduleRows, setScheduleRows] = useState<SystemScheduleRow[]>([]);
   const [scheduleNote, setScheduleNote] = useState("");
@@ -98,6 +102,13 @@ export function SystemManager() {
   const toast = useToast();
   const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => ({ ...row, id: row.job }));
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      accountCount: summaryRows.length,
+      scheduleCount: scheduleRows.length,
+    });
+  }, [onHeaderSummaryChange, scheduleRows.length, summaryRows.length]);
 
   useEffect(() => {
     let alive = true;
