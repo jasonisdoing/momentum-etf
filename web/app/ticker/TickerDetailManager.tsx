@@ -42,6 +42,16 @@ type PriceRow = {
   change_pct: number | null;
 };
 
+type MonthlyPriceRow = {
+  month: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+  change_pct: number | null;
+};
+
 type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
@@ -125,6 +135,73 @@ function calculateMA(data: PriceRow[], period: number): LineData[] {
     }
   }
   return result;
+}
+
+function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
+  const monthlyRows: MonthlyPriceRow[] = [];
+  let currentMonth = "";
+  let currentRow: MonthlyPriceRow | null = null;
+  let previousMonthClose: number | null = null;
+
+  for (const row of data) {
+    const month = row.date.slice(0, 7);
+    if (!month) {
+      continue;
+    }
+
+    if (month !== currentMonth) {
+      if (currentRow) {
+        if (currentRow.close !== null && previousMonthClose !== null && previousMonthClose !== 0) {
+          currentRow.change_pct = Number((((currentRow.close - previousMonthClose) / previousMonthClose) * 100).toFixed(2));
+        }
+        if (currentRow.close !== null) {
+          previousMonthClose = currentRow.close;
+        }
+        monthlyRows.push(currentRow);
+      }
+
+      currentMonth = month;
+      currentRow = {
+        month,
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume,
+        change_pct: null,
+      };
+      continue;
+    }
+
+    if (!currentRow) {
+      continue;
+    }
+
+    if (currentRow.open === null && row.open !== null) {
+      currentRow.open = row.open;
+    }
+    if (row.high !== null) {
+      currentRow.high = currentRow.high === null ? row.high : Math.max(currentRow.high, row.high);
+    }
+    if (row.low !== null) {
+      currentRow.low = currentRow.low === null ? row.low : Math.min(currentRow.low, row.low);
+    }
+    if (row.close !== null) {
+      currentRow.close = row.close;
+    }
+    if (row.volume !== null) {
+      currentRow.volume = (currentRow.volume ?? 0) + row.volume;
+    }
+  }
+
+  if (currentRow) {
+    if (currentRow.close !== null && previousMonthClose !== null && previousMonthClose !== 0) {
+      currentRow.change_pct = Number((((currentRow.close - previousMonthClose) / previousMonthClose) * 100).toFixed(2));
+    }
+    monthlyRows.push(currentRow);
+  }
+
+  return monthlyRows;
 }
 
 // --- 컴포넌트 ---
@@ -416,7 +493,12 @@ export function TickerDetailManager() {
     [rows],
   );
 
-  const columns = useMemo<ColDef[]>(
+  const monthlyRows = useMemo(
+    () => aggregateMonthlyRows(rows).reverse().map((row, i) => ({ ...row, id: `${row.month}-${i}` })),
+    [rows],
+  );
+
+  const dailyColumns = useMemo<ColDef[]>(
     () => [
       {
         field: "date",
@@ -439,6 +521,33 @@ export function TickerDetailManager() {
       { field: "high", headerName: "고가", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
       { field: "low", headerName: "저가", minWidth: 100, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
+    ],
+    [priceDigits],
+  );
+
+  const monthlyColumns = useMemo<ColDef[]>(
+    () => [
+      {
+        field: "month",
+        headerName: "년월",
+        minWidth: 110,
+        flex: 1.1,
+        cellStyle: { fontWeight: 600 },
+      },
+      { field: "close", headerName: "월말 종가", minWidth: 100, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
+      { field: "change_pct", headerName: "월간 등락률", minWidth: 110, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
+        ) },
+      { field: "volume", headerName: "월간 거래량", minWidth: 140, flex: 1.3, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
+      { field: "open", headerName: "월 시가", minWidth: 100, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
+      { field: "high", headerName: "월 고가", minWidth: 100, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
+      { field: "low", headerName: "월 저가", minWidth: 100, flex: 1, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, priceDigits) },
     ],
     [priceDigits],
@@ -583,25 +692,44 @@ export function TickerDetailManager() {
                   </div>
                 ) : null}
 
-                {/* 일별 테이블 (나머지 공간 채움) */}
+                {/* 일별/월별 테이블 (나머지 공간 채움) */}
                 {selectedTicker ? (
-                  <>
-                    <div style={{ padding: "12px 16px 4px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                      <span style={{ fontWeight: 700, fontSize: 15 }}>일별</span>
-                      <span className="text-muted" style={{ fontSize: 13 }}>
-                        총 {new Intl.NumberFormat("ko-KR").format(rows.length)}일
-                      </span>
+                  <div className="tickerDetailTables">
+                    <div className="tickerDetailTablePanel">
+                      <div className="tickerDetailTableHeader">
+                        <span className="tickerDetailTableTitle">일별</span>
+                        <span className="text-muted tickerDetailTableMeta">
+                          총 {new Intl.NumberFormat("ko-KR").format(rows.length)}일
+                        </span>
+                      </div>
+                      <div className="appGridFillWrap">
+                        <AppAgGrid
+                          rowData={reversedRows}
+                          columnDefs={dailyColumns}
+                          loading={loading}
+                          theme={gridTheme}
+                          gridOptions={{ suppressMovableColumns: true }}
+                        />
+                      </div>
                     </div>
-                    <div className="appGridFillWrap">
-                      <AppAgGrid
-                        rowData={reversedRows}
-                        columnDefs={columns}
-                        loading={loading}
-                        theme={gridTheme}
-                        gridOptions={{ suppressMovableColumns: true }}
-                      />
+                    <div className="tickerDetailTablePanel">
+                      <div className="tickerDetailTableHeader">
+                        <span className="tickerDetailTableTitle">월별</span>
+                        <span className="text-muted tickerDetailTableMeta">
+                          총 {new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월
+                        </span>
+                      </div>
+                      <div className="appGridFillWrap">
+                        <AppAgGrid
+                          rowData={monthlyRows}
+                          columnDefs={monthlyColumns}
+                          loading={loading}
+                          theme={gridTheme}
+                          gridOptions={{ suppressMovableColumns: true }}
+                        />
+                      </div>
                     </div>
-                  </>
+                  </div>
                 ) : null}
               </>
             )}
