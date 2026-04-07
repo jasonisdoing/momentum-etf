@@ -380,10 +380,7 @@ export function RankManager() {
         width: 92,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           const value = String(params.value ?? "-");
-          const name = params.data?.종목명 ?? "";
-          const tickerType = selectedTickerType;
-          const country = selectedTickerTypeItem?.country_code ?? "kor";
-          const href = `/ticker?ticker=${encodeURIComponent(value)}&ticker_type=${encodeURIComponent(tickerType)}&country_code=${encodeURIComponent(country)}&name=${encodeURIComponent(name)}`;
+          const href = `/ticker?ticker=${encodeURIComponent(value)}`;
           return (
             <a href={href} className="appCodeText" style={{ color: "#206bc4", textDecoration: "none" }}>
               {value}
@@ -399,9 +396,7 @@ export function RankManager() {
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           const value = String(params.value ?? "-");
           const ticker = params.data?.티커 ?? "";
-          const tickerType = selectedTickerType;
-          const country = selectedTickerTypeItem?.country_code ?? "kor";
-          const href = `/ticker?ticker=${encodeURIComponent(ticker)}&ticker_type=${encodeURIComponent(tickerType)}&country_code=${encodeURIComponent(country)}&name=${encodeURIComponent(value)}`;
+          const href = `/ticker?ticker=${encodeURIComponent(ticker)}`;
           return (
             <a href={href} className="rankNameCellText" style={{ color: "inherit", textDecoration: "none" }} title={value}>
               {value}
