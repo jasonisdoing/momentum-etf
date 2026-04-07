@@ -2037,6 +2037,23 @@ a {
   background: #f8fbff;
 }
 
+.assetsDetailHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.assetsDetailHeaderTitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--ink);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
 .assetsDetailGridWrap {
   flex: 1 1 auto;
   min-height: 0;
