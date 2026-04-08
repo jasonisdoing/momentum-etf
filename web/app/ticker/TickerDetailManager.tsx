@@ -58,6 +58,8 @@ type TickerDetailResponse = {
   rows: PriceRow[];
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
+  holdings_price_as_of_date?: string | null;
+  holdings_error?: string | null;
   error?: string;
 };
 
@@ -66,9 +68,14 @@ type TickerHoldingRow = {
   name: string;
   contracts: number | null;
   amount: number | null;
+  raw_code?: string | null;
+  raw_name?: string | null;
+  reuters_code?: string | null;
+  yahoo_symbol?: string | null;
   current_price?: number | null;
   previous_close?: number | null;
   change_pct?: number | null;
+  price_currency?: string | null;
   weight: number | null;
 };
 
@@ -248,8 +255,16 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     return "-";
   }
 
-  if (countryCode === "au") {
+  const normalized = String(countryCode || "").trim().toLowerCase();
+  if (normalized === "au" || normalized === "aud") {
     return `A$${new Intl.NumberFormat("en-AU", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
+  if (normalized === "usd") {
+    return `$${new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value)}`;
@@ -332,6 +347,8 @@ export function TickerDetailManager({
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
+  const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
+  const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -366,6 +383,8 @@ export function TickerDetailManager({
       setRows([]);
       setHoldings([]);
       setHoldingsAsOfDate(null);
+      setHoldingsPriceAsOfDate(null);
+      setHoldingsError(null);
       setError(null);
       return;
     }
@@ -391,6 +410,8 @@ export function TickerDetailManager({
     setRows([]);
     setHoldings([]);
     setHoldingsAsOfDate(null);
+    setHoldingsPriceAsOfDate(null);
+    setHoldingsError(null);
     if (matches.length > 1) {
       setSelectedTicker(null);
       setError(`동일한 티커 ${qTicker}가 여러 종목 타입에 등록되어 있습니다.`);
@@ -425,12 +446,16 @@ export function TickerDetailManager({
       setRows(payload.rows);
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
+      setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
+      setHoldingsError(payload.holdings_error ?? null);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "데이터를 불러오지 못했습니다.");
       setRows([]);
       setHoldings([]);
       setHoldingsAsOfDate(null);
+      setHoldingsPriceAsOfDate(null);
+      setHoldingsError(null);
     } finally {
       setLoading(false);
     }
@@ -646,7 +671,40 @@ export function TickerDetailManager({
     if (!holdingsAsOfDate || holdingsAsOfDate.length !== 8) return null;
     return `${holdingsAsOfDate.slice(0, 4)}-${holdingsAsOfDate.slice(4, 6)}-${holdingsAsOfDate.slice(6, 8)}`;
   }, [holdingsAsOfDate]);
+  const holdingsPriceAsOfDateLabel = useMemo(() => {
+    if (!holdingsPriceAsOfDate || holdingsPriceAsOfDate.length !== 8) return null;
+    return `${holdingsPriceAsOfDate.slice(0, 4)}-${holdingsPriceAsOfDate.slice(4, 6)}-${holdingsPriceAsOfDate.slice(6, 8)}`;
+  }, [holdingsPriceAsOfDate]);
   const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
+  const hasKoreanHoldings = useMemo(
+    () => holdingsRows.some((row) => /^\d{6}$/.test(String(row.ticker || "").trim())),
+    [holdingsRows],
+  );
+  const hasForeignHoldings = useMemo(
+    () => holdingsRows.some((row) => !/^\d{6}$/.test(String(row.ticker || "").trim())),
+    [holdingsRows],
+  );
+  const holdingsPanelMeta = useMemo(() => {
+    if (holdingsRows.length === 0) {
+      return "데이터 없음";
+    }
+    if (hasForeignHoldings && !hasKoreanHoldings) {
+      return holdingsPriceAsOfDateLabel ? `해외 가격 기준 ${holdingsPriceAsOfDateLabel}` : "해외 가격 기준 없음";
+    }
+    if (hasForeignHoldings && hasKoreanHoldings) {
+      if (holdingsAsOfDateLabel && holdingsPriceAsOfDateLabel) {
+        return `적용일 ${holdingsAsOfDateLabel}(해외 가격 기준 ${holdingsPriceAsOfDateLabel})`;
+      }
+      if (holdingsAsOfDateLabel) {
+        return `적용일 ${holdingsAsOfDateLabel}`;
+      }
+      return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
+    }
+    if (holdingsAsOfDateLabel) {
+      return `적용일 ${holdingsAsOfDateLabel}`;
+    }
+    return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
+  }, [hasForeignHoldings, hasKoreanHoldings, holdingsAsOfDateLabel, holdingsPriceAsOfDateLabel, holdingsRows.length]);
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
@@ -697,8 +755,8 @@ export function TickerDetailManager({
         {
           field: "ticker",
           headerName: "종목코드",
-          minWidth: 118,
-          flex: 0.9,
+          minWidth: 92,
+          width: 92,
           cellStyle: { fontWeight: 700 },
         },
         {
@@ -727,7 +785,8 @@ export function TickerDetailManager({
           minWidth: 108,
           width: 108,
           type: "rightAligned",
-          cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, "kor"),
+          cellRenderer: (params: { value: number | null; data?: TickerHoldingRow }) =>
+            formatTickerPrice(params.value, String(params.data?.price_currency || "kor")),
         },
         {
           field: "change_pct",
@@ -836,13 +895,7 @@ export function TickerDetailManager({
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
                             <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
-                            <span className="text-muted tickerDetailTableMeta">
-                              {holdingsRows.length > 0
-                                ? holdingsAsOfDateLabel
-                                  ? `적용일 ${holdingsAsOfDateLabel}`
-                                  : `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`
-                                : "캐시 없음"}
-                            </span>
+                            <span className="text-muted tickerDetailTableMeta">{holdingsPanelMeta}</span>
                           </div>
                           {holdingsRows.length > 0 ? (
                             <div className="appGridFillWrap">
@@ -856,7 +909,7 @@ export function TickerDetailManager({
                             </div>
                           ) : (
                             <div className="tickerDetailHoldingsEmpty">
-                              구성종목 캐시가 없습니다.
+                              {holdingsError ?? "구성종목 데이터를 확인할 수 없습니다."}
                             </div>
                           )}
                         </div>
