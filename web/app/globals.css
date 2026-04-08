@@ -2643,6 +2643,44 @@ a {
   flex-wrap: nowrap;
 }
 
+.rankMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.rankMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 10.5rem;
+}
+
+.rankMainHeaderLeft .appLabeledField:nth-child(2) {
+  flex: 0 0 12rem;
+}
+
+.rankRuleFieldRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rankRuleFieldRow .form-select:first-child {
+  min-width: 6.5rem;
+}
+
+.rankRuleFieldRow .form-select:last-child {
+  min-width: 5.5rem;
+}
+
+.rankSwitchField {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+}
+
+.rankSwitchFieldInner {
+  display: inline-flex;
+  align-items: center;
+}
+
 .appCardHeaderStack {
   display: flex;
   flex-wrap: wrap;
@@ -3088,6 +3126,21 @@ a {
   .marketMainHeaderLeft .appLabeledField:first-child,
   .marketMainHeaderLeft .appLabeledField:not(:first-child) {
     flex: 1 1 100%;
+  }
+
+  .rankMainHeaderLeft .appLabeledField:first-child,
+  .rankMainHeaderLeft .appLabeledField:nth-child(2),
+  .rankMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
+  }
+
+  .rankRuleFieldRow {
+    width: 100%;
+  }
+
+  .rankRuleFieldRow .form-select {
+    flex: 1 1 0;
+    min-width: 0;
   }
 
   .accountSelect {

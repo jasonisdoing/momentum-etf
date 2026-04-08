@@ -696,101 +696,110 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         <div className="card appCard appTableCardFill">
           <div className="card-header">
             <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <input
-                  className="form-control"
-                  type="date"
-                  style={{ width: "auto", fontWeight: 600 }}
-                  value={selectedAsOfDate}
-                  max={getTodayDateInputValue()}
-                  onChange={(event) => handleAsOfDateChange(event.target.value)}
-                />
-                <select
-                  className="form-select"
-                  style={{ width: "auto", minWidth: "180px", fontWeight: 600 }}
-                  value={selectedTickerType}
-                  onChange={(event) => handleTickerTypeChange(event.target.value)}
-                  disabled={ticker_types.length === 0}
-                >
-                  {ticker_types.length === 0 ? (
-                    <option value="">종목 타입 불러오는 중...</option>
-                  ) : (
-                    ticker_types.map((account) => (
-                      <option key={account.ticker_type} value={account.ticker_type}>
-                        {account.name}
-                      </option>
-                    ))
-                  )}
-                </select>
+              <div className="appMainHeaderLeft rankMainHeaderLeft">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">기준일</span>
+                  <input
+                    className="form-control"
+                    type="date"
+                    value={selectedAsOfDate}
+                    max={getTodayDateInputValue()}
+                    onChange={(event) => handleAsOfDateChange(event.target.value)}
+                  />
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">종목 타입</span>
+                  <select
+                    className="form-select"
+                    value={selectedTickerType}
+                    onChange={(event) => handleTickerTypeChange(event.target.value)}
+                    disabled={ticker_types.length === 0}
+                  >
+                    {ticker_types.length === 0 ? (
+                      <option value="">종목 타입 불러오는 중...</option>
+                    ) : (
+                      ticker_types.map((account) => (
+                        <option key={account.ticker_type} value={account.ticker_type}>
+                          {account.name}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
 
                 {maRules.map((rule) => (
-                  <div key={rule.order} style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <span className="appCodeText" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
-                      {`추세${rule.order}:`}
-                    </span>
-                    <select
-                      className="form-select"
-                      style={{ width: "auto", fontWeight: 600 }}
-                      value={rule.ma_type}
-                      onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
-                      disabled={maTypeOptions.length === 0}
-                    >
-                      {maTypeOptions.map((option) => (
-                        <option key={`${rule.order}-${option}`} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </select>
-                    <select
-                      className="form-select"
-                      style={{ width: "auto", fontWeight: 600 }}
-                      value={String(rule.ma_months)}
-                      onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
-                      disabled={maTypeOptions.length === 0}
-                    >
-                      {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                        <option key={`${rule.order}-${month}`} value={month}>
-                          {month}개월
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  <label key={rule.order} className="appLabeledField">
+                    <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
+                    <div className="rankRuleFieldRow">
+                      <select
+                        className="form-select"
+                        value={rule.ma_type}
+                        onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
+                        disabled={maTypeOptions.length === 0}
+                      >
+                        {maTypeOptions.map((option) => (
+                          <option key={`${rule.order}-${option}`} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        className="form-select"
+                        value={String(rule.ma_months)}
+                        onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
+                        disabled={maTypeOptions.length === 0}
+                      >
+                        {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
+                          <option key={`${rule.order}-${month}`} value={month}>
+                            {month}개월
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </label>
                 ))}
-                <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
-                  <button
-                    type="button"
-                    className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    onClick={() => setMetricMode("cumulative")}
-                  >
-                    누적
-                  </button>
-                  <button
-                    type="button"
-                    className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    onClick={() => setMetricMode("monthly")}
-                  >
-                    월별
-                  </button>
-                </div>
-                <label className="form-check form-switch mb-0" style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <input
-                    className="form-check-input"
-                    type="checkbox"
-                    checked={dedupeEnabled}
-                    onChange={(event) => setDedupeEnabled(event.target.checked)}
-                  />
-                  <span className="appCodeText" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>
-                    중복제거
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">수익률 보기</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
+                    <button
+                      type="button"
+                      className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("cumulative")}
+                    >
+                      누적
+                    </button>
+                    <button
+                      type="button"
+                      className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("monthly")}
+                    >
+                      월별
+                    </button>
+                  </div>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">중복제거</span>
+                  <span className="rankSwitchField">
+                    <label className="form-check form-switch mb-0 rankSwitchFieldInner">
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={dedupeEnabled}
+                        onChange={(event) => setDedupeEnabled(event.target.checked)}
+                      />
+                    </label>
                   </span>
                 </label>
-                <input
-                  className="form-control"
-                  type="text"
-                  style={{ width: "200px", fontWeight: 600 }}
-                  value={nameKeyword}
-                  placeholder="종목명 검색"
-                  onChange={(event) => setNameKeyword(event.target.value)}
-                />
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">종목명 검색</span>
+                  <input
+                    className="form-control"
+                    type="text"
+                    value={nameKeyword}
+                    placeholder="종목명을 입력"
+                    onChange={(event) => setNameKeyword(event.target.value)}
+                  />
+                </label>
               </div>
 
             </div>
