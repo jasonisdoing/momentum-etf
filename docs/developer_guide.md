@@ -31,6 +31,20 @@
 4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
 5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
+### 종목 캐시 용어
+
+이 프로젝트에서 **종목 캐시**는 다음 두 가지를 합친 상위 개념으로 사용합니다.
+
+1.  **가격 캐시**
+    *   OHLCV, 종가 시계열, 실시간 스냅샷
+    *   `utils/cache_utils.py`, `utils/data_loader.py`, `services/price_service.py`
+2.  **메타 캐시**
+    *   상장일, 배당률, 보수, 순자산총액, ETF 구성종목 같은 저빈도 정보
+    *   Mongo `stock_cache_meta` 컬렉션
+    *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
+
+`stock_meta` 컬렉션은 종목 관리 원본(버킷, 삭제 여부, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다.
+
 ### 서비스 사용 원칙
 
 1.  실시간 가격/환율 조회는 `services/price_service.py`를 먼저 사용합니다.
