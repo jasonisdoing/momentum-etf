@@ -487,11 +487,11 @@ def load_cached_kis_domestic_etf_master() -> tuple[pd.DataFrame, datetime | None
     coll = db[_COLLECTION_NAME]
     doc = coll.find_one({"master_id": _MASTER_ID}, {"_id": 0})
     if not doc:
-        raise RuntimeError("KIS ETF 마스터 캐시가 없습니다. stock_meta_updater를 먼저 실행하세요.")
+        raise RuntimeError("KIS ETF 마스터 캐시가 없습니다. stock_meta_cache_updater를 먼저 실행하세요.")
 
     rows = doc.get("rows")
     if not isinstance(rows, list) or not rows:
-        raise RuntimeError("KIS ETF 마스터 캐시가 비어 있습니다. stock_meta_updater를 다시 실행하세요.")
+        raise RuntimeError("KIS ETF 마스터 캐시가 비어 있습니다. stock_meta_cache_updater를 다시 실행하세요.")
 
     updated_at = doc.get("updated_at")
     if isinstance(updated_at, pd.Timestamp):

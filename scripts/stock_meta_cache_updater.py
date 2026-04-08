@@ -1,8 +1,8 @@
 """
 Script to update stock metadata for ticker types.
 Usage:
-  python scripts/stock_meta_updater.py
-  python scripts/stock_meta_updater.py <ticker_type>
+  python scripts/stock_meta_cache_updater.py
+  python scripts/stock_meta_cache_updater.py <ticker_type>
 """
 
 import sys
