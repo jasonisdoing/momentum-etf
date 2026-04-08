@@ -8,9 +8,6 @@ type StockMetaDoc = {
   bucket?: number;
   added_date?: string;
   listing_date?: string;
-  deleted_reason?: string;
-  deleted_at?: Date | string;
-  is_deleted?: boolean;
   updated_at?: Date | string;
   ["1_week_avg_volume"]?: number;
   ["1_week_earn_rate"]?: number;
@@ -56,8 +53,6 @@ type StockValidationResult = {
   name: string;
   listing_date: string;
   status: "active" | "deleted" | "new";
-  is_deleted: boolean;
-  deleted_reason: string;
   bucket_id: number;
   ticker_type: string;
   country_code: string;
@@ -108,13 +103,12 @@ export async function updateStockBucket(tickerType: string, ticker: string, buck
   });
 }
 
-export async function softDeleteStock(tickerType: string, ticker: string, reason?: string): Promise<void> {
+export async function deleteStock(tickerType: string, ticker: string): Promise<void> {
   await fetchFastApiJson("/internal/stocks", {
     method: "DELETE",
     body: JSON.stringify({
       ticker_type: tickerType,
       ticker,
-      reason,
     }),
   });
 }

@@ -11,6 +11,7 @@ from utils.normalization import normalize_nullable_number, normalize_text
 from utils.stock_list_io import add_stock
 from utils.stock_meta_updater import fetch_stock_info
 from services.price_service import get_realtime_snapshot
+from services.stock_cache_service import delete_stock_cache
 
 BUCKETS: dict[int, str] = {
     1: "1. 모멘텀",
@@ -353,29 +354,36 @@ def update_stock_bucket(ticker_type: str, ticker: str, bucket_id: int) -> None:
         raise RuntimeError("수정할 종목을 찾을 수 없습니다.")
 
 
-def soft_delete_stock(ticker_type: str, ticker: str, reason: str | None = None) -> None:
+def delete_active_stock(ticker_type: str, ticker: str) -> None:
     db = get_db_connection()
     if db is None:
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
 
-    result = db.stock_meta.update_one(
+    type_norm = str(ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+
+    result = db.stock_meta.delete_one(
         {
-            "ticker_type": str(ticker_type or "").strip().lower(),
-            "ticker": str(ticker or "").strip().upper(),
+            "ticker_type": type_norm,
+            "ticker": ticker_norm,
             "is_deleted": {"$ne": True},
-        },
-        {
-            "$set": {
-                "is_deleted": True,
-                "deleted_reason": str(reason or "").strip(),
-                "deleted_at": datetime.now(),
-                "updated_at": datetime.now(),
-            }
         },
     )
 
-    if result.matched_count == 0:
+    if result.deleted_count == 0:
         raise RuntimeError("삭제할 종목을 찾을 수 없습니다.")
+
+    from utils.cache_utils import delete_cached_frame
+
+    try:
+        delete_cached_frame(type_norm, ticker_norm)
+    except Exception:
+        pass
+
+    try:
+        delete_stock_cache(type_norm, ticker_norm)
+    except Exception:
+        pass
 
 
 def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:

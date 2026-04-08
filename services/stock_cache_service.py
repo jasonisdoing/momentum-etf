@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from utils.stock_cache_meta_io import (
+    delete_stock_cache_meta_doc,
     get_stock_cache_meta_doc,
     get_stock_cache_meta_docs,
     upsert_stock_cache_meta_doc,
@@ -81,3 +82,9 @@ def refresh_stock_cache(
         meta_cache=meta_cache,
         holdings_cache=holdings_cache,
     )
+
+
+def delete_stock_cache(ticker_type: str, ticker: str) -> None:
+    """종목 메타 캐시 문서를 삭제한다."""
+
+    delete_stock_cache_meta_doc(ticker_type, ticker)

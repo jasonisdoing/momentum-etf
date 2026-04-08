@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { addStockCandidate, loadStocksTable, softDeleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
+import { addStockCandidate, deleteStock, loadStocksTable, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
 
 export async function GET(request: NextRequest) {
   try {
@@ -76,10 +76,9 @@ export async function DELETE(request: NextRequest) {
     const payload = (await request.json()) as {
       ticker_type?: string;
       ticker?: string;
-      reason?: string;
     };
 
-    await softDeleteStock(String(payload.ticker_type ?? ""), String(payload.ticker ?? ""), payload.reason);
+    await deleteStock(String(payload.ticker_type ?? ""), String(payload.ticker ?? ""));
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

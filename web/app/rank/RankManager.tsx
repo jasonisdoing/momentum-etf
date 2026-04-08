@@ -1,14 +1,18 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
+import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
 type RankTickerType = {
@@ -28,7 +32,7 @@ type RankMaRule = {
 };
 
 type RankRow = {
-  [key: string]: string | number | null;
+  [key: string]: string | number | boolean | null;
   순번: string;
   순위: number | null;
   이전순위: number | null;
@@ -90,6 +94,17 @@ type RankResponse = {
 
 type RankGridRow = RankRow & {
   id: string;
+  __isAddingRow?: boolean;
+};
+
+type RankAddingRowState = {
+  ticker: string;
+  name: string;
+  listing_date: string;
+  bucket: number;
+  status: "active" | "deleted" | "new" | null;
+  is_validating: boolean;
+  is_validated: boolean;
 };
 
 const rankGridTheme = themeQuartz
@@ -177,6 +192,22 @@ function getBucketCellClass(bucketLabel: string): string {
   return `rankBucketCell rankBucketCell${match[1]}`;
 }
 
+function normalizeTicker(value: string): string {
+  return String(value || "").trim().toUpperCase();
+}
+
+function getBucketName(bucketId: number): string {
+  return BUCKET_OPTIONS.find((option) => option.id === bucketId)?.name ?? BUCKET_OPTIONS[0]?.name ?? "-";
+}
+
+function getBucketIdByName(bucketName: string): number {
+  return BUCKET_OPTIONS.find((option) => option.name === bucketName)?.id ?? BUCKET_OPTIONS[0]?.id ?? 1;
+}
+
+function buildDirtyCellKey(rowId: string, field: string): string {
+  return `${rowId}::${field}`;
+}
+
 function formatMetaTime(value: string | null | undefined): string {
   if (!value) {
     return "-";
@@ -213,6 +244,7 @@ function formatAssetInEok(value: number | null): string {
 export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
+  const [isPending, startTransition] = useTransition();
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
   const [selectedTickerType, setSelectedAccountId] = useState(
     rankToolbarCache?.ticker_type ?? readRememberedTickerType() ?? "",
@@ -232,6 +264,11 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   const [missingTickers, setMissingTickers] = useState<string[]>([]);
   const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
+  const [addingRow, setAddingRow] = useState<RankAddingRowState | null>(null);
+  const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
+  const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
+  const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const deferredNameKeyword = useDeferredValue(nameKeyword);
@@ -276,6 +313,11 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         ma_type_options: payload.ma_type_options ?? [],
         ma_months_max: payload.ma_months_max ?? 12,
       };
+      setAddingRow(null);
+      setDirtyRowIds([]);
+      setDirtyCellKeys([]);
+      setSelectedTickers([]);
+      setDeleteConfirmOpen(false);
       setRows(payload.rows ?? []);
       setCacheBlocked(Boolean(payload.cache_blocked));
       setRankingComputedAt(payload.ranking_computed_at ?? null);
@@ -303,7 +345,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
     () =>
       rows.map((row, index) => ({
         ...row,
-        id: `${row.티커}-${row.순번 || "none"}-${index}`,
+        id: normalizeTicker(String(row.티커 ?? `${index}`)),
       })),
     [rows],
   );
@@ -320,6 +362,55 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
       return String(row.종목명 ?? "").toLowerCase().includes(keyword);
     });
   }, [gridRows, deferredNameKeyword, dedupeEnabled]);
+
+  const displayGridRows = useMemo<RankGridRow[]>(() => {
+    if (!addingRow) {
+      return filteredGridRows;
+    }
+    return [
+      {
+        id: "__adding__",
+        __isAddingRow: true,
+        순번: "-",
+        순위: null,
+        이전순위: null,
+        추천: null,
+        추천요약: null,
+        버킷: getBucketName(addingRow.bucket),
+        bucket: addingRow.bucket,
+        티커: addingRow.ticker,
+        종목명: addingRow.name,
+        상장일: addingRow.listing_date || "-",
+        점수: null,
+        보유: "",
+        현재가: null,
+        괴리율: null,
+        "일간(%)": null,
+        "1주(%)": null,
+        "2주(%)": null,
+        "3주(%)": null,
+        "4주(%)": null,
+        "1달(%)": null,
+        "2달(%)": null,
+        "3달(%)": null,
+        "4달(%)": null,
+        "5달(%)": null,
+        "6달(%)": null,
+        "7달(%)": null,
+        "8달(%)": null,
+        "9달(%)": null,
+        "10달(%)": null,
+        "11달(%)": null,
+        "12달(%)": null,
+        고점: null,
+        RSI: null,
+        배당률: null,
+        보수: null,
+        순자산총액: null,
+      },
+      ...filteredGridRows,
+    ];
+  }, [addingRow, filteredGridRows]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -395,8 +486,54 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         headerName: "버킷",
         minWidth: 108,
         width: 108,
-        cellClass: (params) => getBucketCellClass(String(params.value ?? "")),
-        cellRenderer: (params: { value: string | null | undefined }) => <span>{String(params.value ?? "-")}</span>,
+        sortable: false,
+        cellClass: (params) => {
+          const dirtyClass =
+            params.data && dirtyCellKeys.includes(buildDirtyCellKey(params.data.id, "버킷")) ? " rankDirtyCell" : "";
+          return `${getBucketCellClass(String(params.value ?? ""))}${dirtyClass}`;
+        },
+        editable: (params) => !params.data?.__isAddingRow,
+        cellEditor: "agSelectCellEditor",
+        cellEditorParams: {
+          values: BUCKET_OPTIONS.map((option) => option.name),
+        },
+        valueGetter: (params) => getBucketName(Number(params.data?.bucket ?? 1)),
+        valueSetter: (params) => {
+          if (!params.data || params.data.__isAddingRow) {
+            return false;
+          }
+          const nextBucketId = getBucketIdByName(String(params.newValue ?? ""));
+          params.data.bucket = nextBucketId;
+          params.data.버킷 = getBucketName(nextBucketId);
+          return true;
+        },
+        cellRenderer: (params: { data?: RankGridRow }) => {
+          if (params.data?.__isAddingRow) {
+            return (
+              <select
+                className="form-select form-select-sm"
+                value={addingRow?.bucket ?? 1}
+                onChange={(event) =>
+                  setAddingRow((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          bucket: Number(event.target.value),
+                        }
+                      : null,
+                  )
+                }
+              >
+                {BUCKET_OPTIONS.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.name}
+                  </option>
+                ))}
+              </select>
+            );
+          }
+          return <span>{getBucketName(Number(params.data?.bucket ?? 1))}</span>;
+        },
       },
       {
         field: "티커",
@@ -404,6 +541,44 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         minWidth: 92,
         width: 92,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+          if (params.data?.__isAddingRow) {
+            return (
+              <div className="stocksTickerLookup">
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  value={addingRow?.ticker ?? ""}
+                  onChange={(event) =>
+                    setAddingRow((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            ticker: event.target.value,
+                            name: "",
+                            listing_date: "-",
+                            status: null,
+                            is_validated: false,
+                          }
+                        : null,
+                    )
+                  }
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void handleValidateAddingTicker();
+                    }
+                  }}
+                />
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  type="button"
+                  onClick={() => void handleValidateAddingTicker()}
+                  disabled={!addingRow?.ticker.trim() || addingRow?.is_validating}
+                >
+                  확인
+                </button>
+              </div>
+            );
+          }
           const value = String(params.value ?? "-");
           const href = `/ticker?ticker=${encodeURIComponent(value)}`;
           return (
@@ -419,6 +594,22 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         minWidth: 260,
         flex: 1.2,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+          if (params.data?.__isAddingRow) {
+            if (addingRow?.is_validating) {
+              return <span className="text-muted">티커 확인 중...</span>;
+            }
+            if (addingRow?.status === "active") {
+              return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
+            }
+            if (addingRow?.is_validated) {
+              return (
+                <span className="rankNameCellText fw-semibold" title={addingRow.name}>
+                  {addingRow.name}
+                </span>
+              );
+            }
+            return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
+          }
           const value = String(params.value ?? "-");
           const ticker = params.data?.티커 ?? "";
           const href = `/ticker?ticker=${encodeURIComponent(ticker)}`;
@@ -665,7 +856,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
           ? [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]
           : [...monthlyLeadingColumns, ...infoColumns, duplicateColumn]),
     ];
-  }, [maRules, metricMode, monthlyReturnLabels, selectedTickerType, selectedTickerTypeItem?.country_code]);
+  }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, selectedTickerType, selectedTickerTypeItem?.country_code]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
@@ -688,6 +879,159 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   function handleAsOfDateChange(nextAsOfDate: string) {
     setSelectedAsOfDate(nextAsOfDate);
     void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: nextAsOfDate });
+  }
+
+  function showErrorToast(message: string) {
+    toast.error(`[ETF-순위] ${message}`);
+  }
+
+  function handleAddRow() {
+    if (addingRow) {
+      return;
+    }
+    setAddingRow({
+      ticker: "",
+      name: "",
+      listing_date: "-",
+      bucket: 1,
+      status: null,
+      is_validating: false,
+      is_validated: false,
+    });
+  }
+
+  function handleBucketChanged(row: RankGridRow | undefined, bucketName: string) {
+    if (!row || row.__isAddingRow) {
+      return;
+    }
+    const nextBucketId = getBucketIdByName(bucketName);
+    setRows((prev) =>
+      prev.map((currentRow) =>
+        normalizeTicker(String(currentRow.티커 ?? "")) === row.id
+          ? {
+              ...currentRow,
+              bucket: nextBucketId,
+              버킷: getBucketName(nextBucketId),
+            }
+          : currentRow,
+      ),
+    );
+    setDirtyRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+    const dirtyCellKey = buildDirtyCellKey(row.id, "버킷");
+    setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
+  }
+
+  async function handleValidateAddingTicker() {
+    const ticker = normalizeTicker(addingRow?.ticker ?? "");
+    if (!ticker || !selectedTickerType || !addingRow || addingRow.is_validating) {
+      return;
+    }
+
+    try {
+      setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
+      const validated = await validateStockCandidate(selectedTickerType, ticker);
+      setAddingRow((prev) =>
+        prev
+          ? {
+              ...prev,
+              ticker: normalizeTicker(validated.ticker),
+              name: String(validated.name ?? "").trim(),
+              listing_date: String(validated.listing_date ?? "-").trim() || "-",
+              bucket: Number(validated.bucket_id ?? prev.bucket ?? 1),
+              status: validated.status,
+              is_validating: false,
+              is_validated: validated.status !== "active",
+            }
+          : null,
+      );
+      if (validated.status === "active") {
+        showErrorToast("이미 등록된 종목입니다.");
+        return;
+      }
+      toast.success(`[ETF-순위] ${validated.name}(${validated.ticker}) 확인 완료`);
+    } catch (validationError) {
+      setAddingRow((prev) =>
+        prev
+          ? {
+              ...prev,
+              is_validating: false,
+              is_validated: false,
+            }
+          : null,
+      );
+      showErrorToast(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
+    }
+  }
+
+  async function processAddingRow() {
+    if (!addingRow || !addingRow.is_validated) {
+      throw new Error("추가할 종목을 먼저 확인하세요.");
+    }
+
+    const created = await addStockCandidate(selectedTickerType, addingRow.ticker, addingRow.bucket);
+    toast.success(`[ETF-순위] ${created.name}(${created.ticker}) 추가 완료`);
+  }
+
+  async function processDirtyRows() {
+    const dirtyRows = rows.filter((row) => dirtyRowIds.includes(normalizeTicker(String(row.티커 ?? ""))));
+    for (const row of dirtyRows) {
+      await updateStockBucket(selectedTickerType, String(row.티커 ?? ""), Number(row.bucket ?? 1));
+    }
+  }
+
+  function handleSaveChanges() {
+    if (!selectedTickerType || (!addingRow && dirtyRowIds.length === 0)) {
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        if (addingRow) {
+          await processAddingRow();
+        }
+        if (dirtyRowIds.length > 0) {
+          await processDirtyRows();
+        }
+        toast.success("[ETF-순위] 변경사항 저장 완료");
+        void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
+      } catch (saveError) {
+        showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
+      }
+    });
+  }
+
+  function handleDeleteSelected() {
+    if (selectedTickers.length === 0) {
+      return;
+    }
+    setDeleteConfirmOpen(true);
+  }
+
+  function handleCloseDeleteConfirm() {
+    if (isPending) {
+      return;
+    }
+    setDeleteConfirmOpen(false);
+  }
+
+  function handleConfirmDeleteSelected() {
+    if (selectedTickers.length === 0) {
+      setDeleteConfirmOpen(false);
+      return;
+    }
+
+    const selectedRows = rows.filter((row) => selectedTickers.includes(normalizeTicker(String(row.티커 ?? ""))));
+    startTransition(async () => {
+      try {
+        for (const row of selectedRows) {
+          await deleteStock(selectedTickerType, String(row.티커 ?? ""));
+        }
+        toast.success(`[ETF-순위] ${selectedRows.length}개 종목 삭제 완료`);
+        void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
+      } catch (deleteError) {
+        showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
+      }
+    });
   }
 
   const blockedMessage = useMemo(() => {
@@ -862,7 +1206,38 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                   />
                 </label>
               </div>
+            </div>
+          </div>
 
+          <div className="card-header appActionHeader bg-light-subtle border-top">
+            <div className="appActionHeaderInner">
+              <button
+                className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                type="button"
+                onClick={handleAddRow}
+                disabled={loading || isPending || Boolean(addingRow)}
+              >
+                <IconPlus size={16} stroke={2} />
+                <span>추가</span>
+              </button>
+              <button
+                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                type="button"
+                onClick={handleSaveChanges}
+                disabled={loading || isPending || (!addingRow && dirtyRowIds.length === 0)}
+              >
+                <IconDeviceFloppy size={16} stroke={2} />
+                <span>저장</span>
+              </button>
+              <button
+                className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                type="button"
+                onClick={handleDeleteSelected}
+                disabled={loading || isPending || selectedTickers.length === 0}
+              >
+                <IconTrash size={16} stroke={2} />
+                <span>삭제</span>
+              </button>
             </div>
           </div>
 
@@ -870,9 +1245,9 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
             <div className="appGridFillWrap">
               <AppAgGrid
                 className="rankAgGrid"
-                rowData={filteredGridRows}
+                rowData={displayGridRows}
                 columnDefs={columns}
-                loading={loading}
+                loading={loading || isPending}
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
@@ -887,12 +1262,74 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                 minHeight="100%"
                 gridOptions={{
                   suppressMovableColumns: true,
+                  rowSelection: {
+                    mode: "multiRow",
+                    checkboxes: (params) => !params.data?.__isAddingRow,
+                    headerCheckbox: true,
+                    hideDisabledCheckboxes: true,
+                    enableClickSelection: false,
+                  },
+                  selectionColumnDef: {
+                    width: 52,
+                    minWidth: 52,
+                    maxWidth: 52,
+                    pinned: "left",
+                    sortable: false,
+                    resizable: false,
+                    suppressMovable: true,
+                    headerName: "",
+                    cellClass: "stocksSelectCell",
+                  },
+                  onSelectionChanged: (params: { api: { getSelectedRows: () => RankGridRow[] } }) => {
+                    setSelectedTickers(
+                      params.api
+                        .getSelectedRows()
+                        .map((row) => row.id)
+                        .filter((rowId) => rowId !== "__adding__"),
+                    );
+                  },
+                  onCellValueChanged: (params: {
+                    data?: RankGridRow;
+                    newValue?: unknown;
+                    oldValue?: unknown;
+                  }) => {
+                    if (!params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
+                      return;
+                    }
+                    handleBucketChanged(params.data, String(params.newValue ?? ""));
+                  },
                 }}
               />
             </div>
           </div>
         </div>
       </section>
+
+      <AppModal
+        open={deleteConfirmOpen}
+        title="종목 삭제 확인"
+        subtitle="선택 종목은 즉시 영구 삭제됩니다."
+        onClose={handleCloseDeleteConfirm}
+        footer={(
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={handleCloseDeleteConfirm} disabled={isPending}>
+              취소
+            </button>
+            <button type="button" className="btn btn-danger" onClick={handleConfirmDeleteSelected} disabled={isPending}>
+              삭제
+            </button>
+          </>
+        )}
+      >
+        <div className="d-flex flex-column gap-2">
+          <div className="fw-semibold">
+            {selectedTickers.length === 1
+              ? `${rows.find((row) => selectedTickers.includes(normalizeTicker(String(row.티커 ?? ""))))?.종목명 ?? ""}(${selectedTickers[0]}) 종목을 삭제합니다.`
+              : `${selectedTickers.length}개 종목을 삭제합니다.`}
+          </div>
+          <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
+        </div>
+      </AppModal>
     </div>
   );
 }
