@@ -221,6 +221,17 @@ function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width
   if (key === "memo") {
     return { width: 156, minWidth: 140, flex: 1 };
   }
+  if (
+    key === "total_principal" ||
+    key === "total_assets" ||
+    key === "purchase_amount" ||
+    key === "valuation_amount" ||
+    key === "profit_loss" ||
+    key === "cumulative_profit" ||
+    key === "weekly_profit"
+  ) {
+    return { width: 102, minWidth: 98 };
+  }
   if (key === "exchange_rate") {
     return { width: 82, minWidth: 82 };
   }
