@@ -8,11 +8,11 @@ export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams;
     const ticker = searchParams.get("ticker");
-    const tickerType = searchParams.get("ticker_type");
+    const tickerType = searchParams.get("ticker_type") ?? undefined;
     const countryCode = searchParams.get("country_code") ?? undefined;
 
-    if (!ticker || !tickerType) {
-      return NextResponse.json({ error: "ticker, ticker_type 파라미터가 필요합니다." }, { status: 400 });
+    if (!ticker) {
+      return NextResponse.json({ error: "ticker 파라미터가 필요합니다." }, { status: 400 });
     }
 
     const data = await loadTickerDetailData({
