@@ -241,7 +241,7 @@ function formatAssetInEok(value: number | null): string {
   return `${formatNumber(value / 100_000_000, 0)}억`;
 }
 
-export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
+export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const [isPending, startTransition] = useTransition();
