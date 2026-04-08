@@ -2459,6 +2459,44 @@ a {
   min-width: 0;
 }
 
+.appLabeledField {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.appLabeledFieldLabel {
+  color: #5b6778;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.appInlineField {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.appInlineFieldLabel {
+  color: #5b6778;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.appInlineField .field {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .appMainHeaderRight {
   flex: 0 0 auto;
   justify-content: flex-end;
@@ -2581,16 +2619,20 @@ a {
   flex-wrap: nowrap;
 }
 
+.marketMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
 .marketMainHeaderLeft .field {
   margin-top: 0;
 }
 
-.marketMainHeaderLeft .field:first-child {
-  flex: 1 1 22rem;
+.marketMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 1 18rem;
 }
 
-.marketMainHeaderLeft .field:not(:first-child) {
-  flex: 0 0 13rem;
+.marketMainHeaderLeft .appLabeledField:not(:first-child) {
+  flex: 0 0 11rem;
 }
 
 .marketMainHeaderRight {
@@ -3043,8 +3085,8 @@ a {
     flex-wrap: wrap;
   }
 
-  .marketMainHeaderLeft .field:first-child,
-  .marketMainHeaderLeft .field:not(:first-child) {
+  .marketMainHeaderLeft .appLabeledField:first-child,
+  .marketMainHeaderLeft .appLabeledField:not(:first-child) {
     flex: 1 1 100%;
   }
 
