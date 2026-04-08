@@ -272,9 +272,17 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  function clearCacheWarningState() {
+    setCacheBlocked(false);
+    setMissingTickers([]);
+    setMissingTickerLabels([]);
+    setStaleTickers([]);
+  }
+
   async function load(next?: { ticker_type?: string; ma_rule_overrides?: RankMaRule[]; as_of_date?: string }) {
     setLoading(true);
     setError(null);
+    clearCacheWarningState();
 
     try {
       const search = new URLSearchParams();
@@ -1027,6 +1035,11 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         for (const row of selectedRows) {
           await deleteStock(selectedTickerType, String(row.티커 ?? ""));
         }
+        const deletedTickerSet = new Set(selectedRows.map((row) => normalizeTicker(String(row.티커 ?? ""))));
+        setRows((prev) => prev.filter((row) => !deletedTickerSet.has(normalizeTicker(String(row.티커 ?? "")))));
+        setSelectedTickers([]);
+        setDeleteConfirmOpen(false);
+        clearCacheWarningState();
         toast.success(`[ETF-순위] ${selectedRows.length}개 종목 삭제 완료`);
         void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
       } catch (deleteError) {
@@ -1040,8 +1053,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
       return null;
     }
 
-    const parts: string[] = [];
-    parts.push("일부 종목의 가격 캐시가 없습니다. 종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요.");
+    const parts: string[] = ["일부 종목의 가격 캐시가 없습니다."];
     if (missingTickerLabels.length > 0) {
       parts.push(`누락 ${missingTickerLabels.join(", ")}`);
     } else if (missingTickers.length > 0) {
