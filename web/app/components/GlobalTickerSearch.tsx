@@ -3,15 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { IconSearch, IconX } from "@tabler/icons-react";
+import {
+  loadRecentTickerSearches,
+  persistRecentTickerSearch,
+  RECENT_TICKER_SEARCHES_KEY,
+  type RecentTickerSearchItem,
+} from "@/lib/recent-ticker-searches";
 
-type TickerSearchItem = {
-  ticker: string;
-  name: string;
-  ticker_type: string;
-  country_code: string;
-  current_price: number | null;
-  change_pct: number | null;
-};
+type TickerSearchItem = RecentTickerSearchItem;
 
 type TickerSearchPayload = {
   tickers: TickerSearchItem[];
@@ -21,9 +20,6 @@ type TickerSearchPayload = {
     items: TickerSearchItem[];
   }>;
 };
-
-const RECENT_SEARCHES_KEY = "momentum-etf:recent-ticker-searches";
-const RECENT_SEARCHES_LIMIT = 6;
 
 function formatPrice(value: number | null, countryCode: string): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
@@ -99,14 +95,7 @@ export function GlobalTickerSearch() {
     }
 
     try {
-      const raw = window.localStorage.getItem(RECENT_SEARCHES_KEY);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw) as TickerSearchItem[];
-      if (Array.isArray(parsed)) {
-        setRecentSearches(parsed);
-      }
+      setRecentSearches(loadRecentTickerSearches());
     } catch {
       // localStorage 파싱 실패 시 무시합니다.
     }
@@ -152,20 +141,8 @@ export function GlobalTickerSearch() {
       .slice(0, 20);
   }, [allTickers, searchInput]);
 
-  function persistRecentSearches(nextItems: TickerSearchItem[]) {
-    setRecentSearches(nextItems);
-    if (typeof window === "undefined") {
-      return;
-    }
-    window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(nextItems));
-  }
-
   function updateRecentSearches(item: TickerSearchItem) {
-    const nextItems = [
-      item,
-      ...recentSearches.filter((entry) => !(entry.ticker === item.ticker && entry.ticker_type === item.ticker_type)),
-    ].slice(0, RECENT_SEARCHES_LIMIT);
-    persistRecentSearches(nextItems);
+    setRecentSearches(persistRecentTickerSearch(item));
   }
 
   function navigateToTicker(item: TickerSearchItem) {
@@ -180,7 +157,10 @@ export function GlobalTickerSearch() {
     const nextItems = recentSearches.filter(
       (entry) => !(entry.ticker === item.ticker && entry.ticker_type === item.ticker_type),
     );
-    persistRecentSearches(nextItems);
+    setRecentSearches(nextItems);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(RECENT_TICKER_SEARCHES_KEY, JSON.stringify(nextItems));
+    }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {

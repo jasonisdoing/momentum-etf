@@ -21,6 +21,7 @@ import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 
 // --- 타입 ---
 
@@ -443,11 +444,24 @@ export function TickerDetailManager({
       const payload = (await response.json()) as TickerDetailResponse;
       if (!response.ok) throw new Error(payload.error ?? "데이터를 불러오지 못했습니다.");
       if (payload.error) throw new Error(payload.error);
+      const latestRow = payload.rows[payload.rows.length - 1] ?? null;
+      const matchedItem =
+        allTickers.find(
+          (candidate) => candidate.ticker === item.ticker && candidate.ticker_type === item.ticker_type,
+        ) ?? item;
       setRows(payload.rows);
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
       setHoldingsError(payload.holdings_error ?? null);
+      persistRecentTickerSearch({
+        ticker: matchedItem.ticker,
+        name: matchedItem.name,
+        ticker_type: matchedItem.ticker_type,
+        country_code: matchedItem.country_code,
+        current_price: latestRow?.close ?? null,
+        change_pct: latestRow?.change_pct ?? null,
+      });
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "데이터를 불러오지 못했습니다.");
