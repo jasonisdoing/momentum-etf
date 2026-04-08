@@ -3,24 +3,24 @@
 import { useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
-import { RankManager } from "./RankManager";
+import { StocksManager } from "./StocksManager";
 
-type RankHeaderSummary = {
+type StocksHeaderSummary = {
   upCount: number;
   upPct: number;
   totalCount: number;
   ruleSummary: string;
 };
 
-const DEFAULT_SUMMARY: RankHeaderSummary = {
+const DEFAULT_SUMMARY: StocksHeaderSummary = {
   upCount: 0,
   upPct: 0,
   totalCount: 0,
   ruleSummary: "-",
 };
 
-export function RankPageClient() {
-  const [summary, setSummary] = useState<RankHeaderSummary>(DEFAULT_SUMMARY);
+export function StocksPageClient() {
+  const [summary, setSummary] = useState<StocksHeaderSummary>(DEFAULT_SUMMARY);
 
   const titleRight = useMemo(
     () => (
@@ -46,7 +46,7 @@ export function RankPageClient() {
 
   return (
     <PageFrame title="종목 관리" fullHeight fullWidth titleRight={titleRight}>
-      <RankManager onHeaderSummaryChange={setSummary} />
+      <StocksManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );
 }

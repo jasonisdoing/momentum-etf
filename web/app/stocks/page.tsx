@@ -1,7 +1,7 @@
-import { RankPageClient } from "../rank/RankPageClient";
+import { StocksPageClient } from "./StocksPageClient";
 
 export const dynamic = "force-dynamic";
 
 export default function StocksPage() {
-  return <RankPageClient />;
+  return <StocksPageClient />;
 }
