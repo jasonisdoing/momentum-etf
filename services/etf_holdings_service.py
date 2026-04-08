@@ -10,6 +10,7 @@ from pykrx import stock
 from pykrx.website.comm import webio
 
 from utils.db_manager import get_db_connection
+from utils.data_loader import get_trading_days
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -65,6 +66,13 @@ def _to_float(value: Any) -> float | None:
     if pd.isna(parsed):
         return None
     return float(parsed)
+
+
+def _to_int(value: Any) -> int | None:
+    parsed = _to_float(value)
+    if parsed is None:
+        return None
+    return int(parsed)
 
 
 def _install_requests_session(session: requests.Session) -> None:
@@ -208,6 +216,54 @@ def load_korean_etf_holdings_cache(ticker: str) -> dict[str, Any] | None:
     if document is None:
         return None
     return document
+
+
+def fetch_korean_stock_price_snapshot(tickers: list[str], as_of_date: str) -> dict[str, dict[str, Any]]:
+    normalized_date = _normalize_date(as_of_date)
+    if not normalized_date:
+        raise ValueError("현재가 조회 기준일(as_of_date)이 필요합니다.")
+
+    normalized_tickers = [_normalize_ticker(ticker) for ticker in tickers if _normalize_ticker(ticker)]
+    if not normalized_tickers:
+        return {}
+
+    target_date = pd.Timestamp(normalized_date)
+    trading_days = get_trading_days(
+        (target_date - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
+        target_date.strftime("%Y-%m-%d"),
+        "kor",
+    )
+    normalized_trading_days = [pd.Timestamp(day).strftime("%Y%m%d") for day in trading_days]
+    if normalized_date not in normalized_trading_days:
+        raise RuntimeError(f"한국 거래일이 아닌 날짜입니다: {normalized_date}")
+
+    target_index = normalized_trading_days.index(normalized_date)
+    if target_index == 0:
+        raise RuntimeError(f"전일 거래일을 계산할 수 없습니다: {normalized_date}")
+    previous_date = normalized_trading_days[target_index - 1]
+
+    result: dict[str, dict[str, Any]] = {}
+    for ticker in normalized_tickers:
+        df = stock.get_market_ohlcv_by_date(previous_date, normalized_date, ticker)
+        if df is None or df.empty:
+            continue
+        working_df = df.copy().sort_index()
+        if len(working_df) < 2:
+            continue
+
+        previous_close = _to_int(working_df.iloc[-2].get("종가"))
+        current_price = _to_int(working_df.iloc[-1].get("종가"))
+        if previous_close is None or current_price is None or previous_close == 0:
+            continue
+
+        change_pct = round(((current_price / previous_close) - 1.0) * 100.0, 2)
+        result[ticker] = {
+            "current_price": current_price,
+            "previous_close": previous_close,
+            "change_pct": change_pct,
+        }
+
+    return result
 
 
 def sync_korean_etf_holdings_cache(*, ticker: str, etf_name: str, as_of_date: str) -> dict[str, Any]:
