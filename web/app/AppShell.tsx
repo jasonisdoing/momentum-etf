@@ -21,7 +21,6 @@ import {
   IconTrendingUp,
   IconActivity,
   IconX,
-  IconLayoutDashboard,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
 } from "@tabler/icons-react";
@@ -29,7 +28,8 @@ import {
 import { parseFearGreedSummary } from "@/lib/fear-greed";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
-const homeItem = { href: "/", label: "Home", icon: IconHome };
+const homeItem = { href: "/", label: "홈", icon: IconHome };
+const holdingsItem = { href: "/holdings", label: "보유종목", icon: IconActivity };
 
 function isNavItemActive(itemHref: string, currentPathname: string | null): boolean {
   if (!currentPathname) return false;
@@ -259,6 +259,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const HomeIcon = homeItem.icon;
+  const HoldingsIcon = holdingsItem.icon;
   const fearGreedDelta =
     fearGreed?.score !== null &&
     fearGreed?.score !== undefined &&
@@ -279,11 +280,11 @@ export function AppShell({ children }: AppShellProps) {
           </Link>
         </div>
         <div className="nav-item appSidebarItem">
-          <Link href="/dashboard" className={pathname === "/dashboard" ? "nav-link active" : "nav-link"}>
+          <Link href={holdingsItem.href} className={pathname === holdingsItem.href ? "nav-link active" : "nav-link"}>
             <span className="appSidebarIcon" aria-hidden="true">
-              <IconLayoutDashboard size={18} stroke={1.9} />
+              <HoldingsIcon size={18} stroke={1.9} />
             </span>
-            <span className="nav-link-title">대시보드</span>
+            <span className="nav-link-title">{holdingsItem.label}</span>
           </Link>
         </div>
       </div>
