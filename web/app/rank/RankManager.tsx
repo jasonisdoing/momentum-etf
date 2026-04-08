@@ -3,7 +3,7 @@
 import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useDeferredValue, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
@@ -257,7 +257,6 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   const [dedupeEnabled, setDedupeEnabled] = useState(false);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
-  const [nameKeyword, setNameKeyword] = useState("");
   const [rows, setRows] = useState<RankRow[]>([]);
   const [cacheBlocked, setCacheBlocked] = useState(false);
   const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
@@ -272,7 +271,6 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const deferredNameKeyword = useDeferredValue(nameKeyword);
 
   async function load(next?: { ticker_type?: string; ma_rule_overrides?: RankMaRule[]; as_of_date?: string }) {
     setLoading(true);
@@ -351,18 +349,16 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
     [rows],
   );
 
-  const filteredGridRows = useMemo(() => {
-    const keyword = deferredNameKeyword.trim().toLowerCase();
-    return gridRows.filter((row) => {
-      if (dedupeEnabled && String(row.추천 ?? "").trim()) {
-        return false;
-      }
-      if (!keyword) {
+  const filteredGridRows = useMemo(
+    () =>
+      gridRows.filter((row) => {
+        if (dedupeEnabled && String(row.추천 ?? "").trim()) {
+          return false;
+        }
         return true;
-      }
-      return String(row.종목명 ?? "").toLowerCase().includes(keyword);
-    });
-  }, [gridRows, deferredNameKeyword, dedupeEnabled]);
+      }),
+    [gridRows, dedupeEnabled],
+  );
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     if (pageMode !== "manage" || !addingRow) {
@@ -569,14 +565,6 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                     }
                   }}
                 />
-                <button
-                  className="btn btn-outline-primary btn-sm"
-                  type="button"
-                  onClick={() => void handleValidateAddingTicker()}
-                  disabled={!addingRow?.ticker.trim() || addingRow?.is_validating}
-                >
-                  확인
-                </button>
               </div>
             );
           }
@@ -609,7 +597,19 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                 </span>
               );
             }
-            return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
+            return (
+              <div className="rankAddingNameCell">
+                <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  type="button"
+                  onClick={() => void handleValidateAddingTicker()}
+                  disabled={!addingRow?.ticker.trim() || addingRow?.is_validating}
+                >
+                  확인
+                </button>
+              </div>
+            );
           }
           const value = String(params.value ?? "-");
           const ticker = params.data?.티커 ?? "";
@@ -1124,16 +1124,6 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                       ))
                     )}
                   </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목명 검색</span>
-                  <input
-                    className="form-control"
-                    type="text"
-                    value={nameKeyword}
-                    placeholder="종목명을 입력"
-                    onChange={(event) => setNameKeyword(event.target.value)}
-                  />
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">화면 모드</span>
