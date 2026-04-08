@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import type { ColDef, GridOptions, RowClassParams } from "ag-grid-community";
+import type { ColDef, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -92,6 +92,12 @@ type AddingRowState = {
   name?: string;
   bucketId?: number;
   isValidated?: boolean;
+};
+
+type HoldingEditableSnapshot = {
+  quantity: number;
+  average_buy_price: number;
+  target_ratio: number;
 };
 
 const assetsGridTheme = themeQuartz.withPart(iconSetQuartzBold).withParams({
@@ -189,6 +195,35 @@ function safeParseFloat(value: unknown): number {
 function parseEditableQuantity(value: unknown): number {
   const parsed = parseInt(parseRawPrice(value), 10);
   return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price" | "target_ratio">): HoldingEditableSnapshot {
+  return {
+    quantity: parseEditableQuantity(row.quantity),
+    average_buy_price: safeParseFloat(row.average_buy_price),
+    target_ratio: Number(row.target_ratio ?? 0),
+  };
+}
+
+function formatRatioPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "currency">, before: HoldingEditableSnapshot, after: HoldingEditableSnapshot): string | null {
+  const changes: string[] = [];
+  if (before.quantity !== after.quantity) {
+    changes.push(`수량 ${new Intl.NumberFormat("ko-KR").format(before.quantity)}→${new Intl.NumberFormat("ko-KR").format(after.quantity)}`);
+  }
+  if (before.average_buy_price !== after.average_buy_price) {
+    changes.push(`매입단가 ${formatPrice(before.average_buy_price, row.currency)}→${formatPrice(after.average_buy_price, row.currency)}`);
+  }
+  if (before.target_ratio !== after.target_ratio) {
+    changes.push(`목표비중 ${formatRatioPercent(before.target_ratio)}→${formatRatioPercent(after.target_ratio)}`);
+  }
+  if (changes.length === 0) {
+    return null;
+  }
+  return `${row.name} 저장: ${changes.join(", ")}`;
 }
 
 function getCurrentPriceNumber(row: GridRow): number {
@@ -417,6 +452,10 @@ function AccountHoldingsDetailPanel({
   const priceRef = useRef<HTMLInputElement>(null);
   const targetRatioRef = useRef<HTMLInputElement>(null);
   const rowsRef = useRef<HoldingsRow[]>(initialRows);
+  const dirtyRowIdsRef = useRef<string[]>([]);
+  const isReorderDirtyRef = useRef(false);
+  const gridApiRef = useRef<GridApi<GridRow> | null>(null);
+  const lastSavedSnapshotsRef = useRef<Map<string, HoldingEditableSnapshot>>(new Map());
   const childSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const childSavingRowIdsRef = useRef<Set<string>>(new Set());
   const childQueuedRowIdsRef = useRef<Set<string>>(new Set());
@@ -427,6 +466,11 @@ function AccountHoldingsDetailPanel({
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
     rowsRef.current = nextRows;
+    dirtyRowIdsRef.current = [];
+    isReorderDirtyRef.current = false;
+    lastSavedSnapshotsRef.current = new Map(
+      nextRows.map((row) => [buildGridRowId(row), buildHoldingEditableSnapshot(row)]),
+    );
     setDirtyRowIds([]);
     setDirtyCellKeys([]);
     setSelectedRowIds([]);
@@ -440,21 +484,19 @@ function AccountHoldingsDetailPanel({
   }, [rows]);
 
   useEffect(() => {
+    dirtyRowIdsRef.current = dirtyRowIds;
+  }, [dirtyRowIds]);
+
+  useEffect(() => {
+    isReorderDirtyRef.current = isReorderDirty;
+  }, [isReorderDirty]);
+
+  useEffect(() => {
     const previewTargetRatioTotal = rows.reduce((sum, row) => {
       return sum + Number(row.target_ratio ?? 0);
     }, 0);
     onPreviewTargetRatioTotalChange(summary.account_id, parseFloat(previewTargetRatioTotal.toFixed(1)));
   }, [onPreviewTargetRatioTotalChange, rows, summary.account_id]);
-
-  useEffect(() => {
-    return () => {
-      childSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
-      childSaveTimersRef.current.clear();
-      if (reorderSaveTimerRef.current) {
-        clearTimeout(reorderSaveTimerRef.current);
-      }
-    };
-  }, []);
 
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) => Boolean(row && row.id !== "__adding__" && row.ticker !== "IS"),
@@ -659,9 +701,37 @@ function AccountHoldingsDetailPanel({
   }, [summary.account_id]);
 
   const clearDirtyRowState = useCallback((rowId: string) => {
-    setDirtyRowIds((previous) => previous.filter((id) => id !== rowId));
+    setDirtyRowIds((previous) => {
+      const next = previous.filter((id) => id !== rowId);
+      dirtyRowIdsRef.current = next;
+      return next;
+    });
     setDirtyCellKeys((previous) => previous.filter((key) => !key.startsWith(`${rowId}::`)));
   }, []);
+
+  const processReorderUpdate = useCallback(async (orderedRows: HoldingsRow[]) => {
+    const orderedTickers = orderedRows
+      .map((row) => String(row.ticker || "").trim().toUpperCase())
+      .filter((ticker) => ticker && ticker !== "IS");
+
+    if (!orderedTickers.length) {
+      return;
+    }
+
+    const response = await fetch("/api/assets", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "reorder",
+        account_id: summary.account_id,
+        ordered_tickers: orderedTickers,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "순서 저장에 실패했습니다.");
+    }
+  }, [summary.account_id]);
 
   const silentlySaveRow = useCallback(async (rowId: string) => {
     if (childSavingRowIdsRef.current.has(rowId)) {
@@ -677,6 +747,8 @@ function AccountHoldingsDetailPanel({
 
     childSavingRowIdsRef.current.add(rowId);
     try {
+      const previousSnapshot = lastSavedSnapshotsRef.current.get(rowId) ?? buildHoldingEditableSnapshot(sourceRow);
+      const nextSnapshot = buildHoldingEditableSnapshot(sourceRow);
       await processRowUpdate({
         ...sourceRow,
         id: rowId,
@@ -684,6 +756,11 @@ function AccountHoldingsDetailPanel({
         average_buy_price: safeParseFloat(sourceRow.average_buy_price),
         target_ratio: sourceRow.target_ratio ?? 0,
       });
+      lastSavedSnapshotsRef.current.set(rowId, nextSnapshot);
+      const message = buildAutoSaveToastMessage(sourceRow, previousSnapshot, nextSnapshot);
+      if (message) {
+        toast.success(message);
+      }
       clearDirtyRowState(rowId);
     } catch (error) {
       await onReload();
@@ -714,14 +791,6 @@ function AccountHoldingsDetailPanel({
   }, [silentlySaveRow]);
 
   const persistRowOrder = useCallback(async (orderedRows: HoldingsRow[]) => {
-    const orderedTickers = orderedRows
-      .map((row) => String(row.ticker || "").trim().toUpperCase())
-      .filter((ticker) => ticker && ticker !== "IS");
-
-    if (!orderedTickers.length) {
-      return;
-    }
-
     if (reorderSavingRef.current) {
       reorderQueuedRef.current = true;
       return;
@@ -729,20 +798,9 @@ function AccountHoldingsDetailPanel({
 
     reorderSavingRef.current = true;
     try {
-      const response = await fetch("/api/assets", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "reorder",
-          account_id: summary.account_id,
-          ordered_tickers: orderedTickers,
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "순서 저장에 실패했습니다.");
-      }
+      await processReorderUpdate(orderedRows);
       setIsReorderDirty(false);
+      isReorderDirtyRef.current = false;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "순서 저장에 실패했습니다.");
     } finally {
@@ -757,7 +815,7 @@ function AccountHoldingsDetailPanel({
         reorderSaveTimerRef.current = nextTimer;
       }
     }
-  }, [onReload, summary.account_id, toast]);
+  }, [onReload, processReorderUpdate, toast]);
 
   const scheduleSilentReorderSave = useCallback((orderedRows: HoldingsRow[]) => {
     if (reorderSaveTimerRef.current) {
@@ -779,11 +837,39 @@ function AccountHoldingsDetailPanel({
     }
   }, []);
 
+  const flushPendingSavesOnUnmount = useCallback(() => {
+    childSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+    childSaveTimersRef.current.clear();
+    if (reorderSaveTimerRef.current) {
+      clearTimeout(reorderSaveTimerRef.current);
+      reorderSaveTimerRef.current = null;
+    }
+
+    const dirtyRows = rowsRef.current
+      .map((row) => ({ ...row, id: buildGridRowId(row) }))
+      .filter((row) => dirtyRowIdsRef.current.includes(row.id));
+
+    for (const row of dirtyRows) {
+      void processRowUpdate(row).catch(() => undefined);
+    }
+
+    if (isReorderDirtyRef.current) {
+      void processReorderUpdate(rowsRef.current).catch(() => undefined);
+    }
+  }, [processReorderUpdate, processRowUpdate]);
+
+  useEffect(() => {
+    return () => {
+      flushPendingSavesOnUnmount();
+    };
+  }, [flushPendingSavesOnUnmount]);
+
   const handleSaveChanges = useCallback(async () => {
     if (processingId === "__adding__" || processingId === "__deleting__") {
       return;
     }
 
+    gridApiRef.current?.stopEditing();
     flushPendingSaves();
 
     try {
@@ -799,6 +885,7 @@ function AccountHoldingsDetailPanel({
 
       for (const row of dirtyRows) {
         await processRowUpdate(row);
+        lastSavedSnapshotsRef.current.set(row.id, buildHoldingEditableSnapshot(row));
         clearDirtyRowState(row.id);
       }
 
@@ -875,20 +962,24 @@ function AccountHoldingsDetailPanel({
       return;
     }
 
-    setRows((previous) =>
-      previous.map((currentRow) => {
-        if (buildGridRowId(currentRow) !== row.id) {
-          return currentRow;
-        }
-        return {
-          ...currentRow,
-          quantity: parseEditableQuantity(row.quantity),
-          average_buy_price: safeParseFloat(row.average_buy_price),
-          target_ratio: Number(row.target_ratio ?? 0),
-        };
-      }),
-    );
-    setDirtyRowIds((previous) => (previous.includes(row.id) ? previous : [...previous, row.id]));
+    const nextRows = rowsRef.current.map((currentRow) => {
+      if (buildGridRowId(currentRow) !== row.id) {
+        return currentRow;
+      }
+      return {
+        ...currentRow,
+        quantity: parseEditableQuantity(row.quantity),
+        average_buy_price: safeParseFloat(row.average_buy_price),
+        target_ratio: Number(row.target_ratio ?? 0),
+      };
+    });
+    rowsRef.current = nextRows;
+    setRows(nextRows);
+    setDirtyRowIds((previous) => {
+      const next = previous.includes(row.id) ? previous : [...previous, row.id];
+      dirtyRowIdsRef.current = next;
+      return next;
+    });
     if (field) {
       const dirtyCellKey = buildDirtyCellKey(row.id, field);
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
@@ -1322,14 +1413,18 @@ function AccountHoldingsDetailPanel({
                 return;
               }
               setRows((previous) => {
-                const nextRows = reorderRowsByTickers(previous, orderedTickers);
+              const nextRows = reorderRowsByTickers(previous, orderedTickers);
                 rowsRef.current = nextRows;
                 return nextRows;
               });
               const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
               rowsRef.current = nextRows;
               setIsReorderDirty(true);
+              isReorderDirtyRef.current = true;
               scheduleSilentReorderSave(nextRows);
+            },
+            onGridReady: (params) => {
+              gridApiRef.current = params.api;
             },
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
