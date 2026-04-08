@@ -62,6 +62,9 @@ type RankRow = {
   "12달(%)": number | null;
   고점: number | null;
   RSI: number | null;
+  배당률: number | null;
+  보수: number | null;
+  순자산총액: number | null;
 };
 
 type RankResponse = {
@@ -190,6 +193,14 @@ function formatMetaTime(value: string | null | undefined): string {
 
 function renderSignedPercentCell(value: number | null) {
   return <span className={getSignedClass(value ?? null)}>{formatPercent(value ?? null)}</span>;
+}
+
+function formatCurrencyValue(value: number | null, countryCode?: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  const digits = countryCode === "au" ? 2 : 0;
+  return formatNumber(value, digits);
 }
 
 export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
@@ -612,7 +623,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         minWidth: 92,
         width: 92,
         type: "rightAligned",
-        cellRenderer: () => "-",
+        cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
       },
       {
         field: "보수",
@@ -620,7 +631,23 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         minWidth: 92,
         width: 92,
         type: "rightAligned",
-        cellRenderer: () => "-",
+        cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
+      },
+      {
+        field: "순자산총액",
+        headerName: "순자산총액",
+        minWidth: 132,
+        width: 132,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          formatCurrencyValue(params.value ?? null, selectedTickerTypeItem?.country_code),
+      },
+      {
+        field: "상장일",
+        headerName: "상장일",
+        minWidth: 110,
+        width: 110,
+        cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
       },
     ];
 

@@ -65,6 +65,33 @@ def get_stock_cache_meta_doc(ticker_type: str, ticker: str) -> dict[str, Any] | 
     return dict(doc) if isinstance(doc, dict) else None
 
 
+def get_stock_cache_meta_docs(ticker_type: str, tickers: list[str]) -> dict[str, dict[str, Any]]:
+    """종목 메타 캐시 문서를 티커 기준 맵으로 반환한다."""
+    type_norm = (ticker_type or "").strip().lower()
+    normalized_tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
+    if not type_norm:
+        raise ValueError("ticker_type must be provided")
+    if not normalized_tickers:
+        return {}
+
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션을 읽을 수 없습니다.")
+
+    docs = coll.find(
+        {"ticker_type": type_norm, "ticker": {"$in": normalized_tickers}},
+        {"_id": 0},
+    )
+    result: dict[str, dict[str, Any]] = {}
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        ticker_norm = str(doc.get("ticker") or "").strip().upper()
+        if ticker_norm:
+            result[ticker_norm] = dict(doc)
+    return result
+
+
 def upsert_stock_cache_meta_doc(
     ticker_type: str,
     ticker: str,
@@ -113,4 +140,3 @@ def upsert_stock_cache_meta_doc(
         },
         upsert=True,
     )
-

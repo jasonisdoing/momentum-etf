@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from services.stock_cache_service import get_stock_cache_meta_map
 from utils.rankings import (
     ALLOWED_MA_TYPES,
     build_effective_ma_rules,
@@ -79,6 +80,55 @@ def _serialize_rows(df: pd.DataFrame) -> list[dict[str, Any]]:
         row = {str(key): _serialize_value(value) for key, value in record.items()}
         rows.append(row)
     return rows
+
+
+def _format_listed_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    if not normalized:
+        return None
+    if len(normalized) == 10 and normalized[4] == "-" and normalized[7] == "-":
+        return normalized
+    if len(normalized) == 8 and normalized.isdigit():
+        return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:8]}"
+    return normalized
+
+
+def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
+    if dataframe.empty:
+        return dataframe
+
+    tickers = [
+        str(record.get("티커") or "").strip().upper()
+        for record in dataframe.to_dict(orient="records")
+        if str(record.get("티커") or "").strip()
+    ]
+    cache_map = get_stock_cache_meta_map(ticker_type, tickers)
+    if not cache_map:
+        enriched = dataframe.copy()
+        enriched["배당률"] = None
+        enriched["보수"] = None
+        enriched["순자산총액"] = None
+        enriched["상장일"] = None
+        enriched.attrs.update(dict(dataframe.attrs))
+        return enriched
+
+    rows: list[dict[str, Any]] = []
+    for row in dataframe.to_dict(orient="records"):
+        ticker = str(row.get("티커") or "").strip().upper()
+        doc = cache_map.get(ticker, {})
+        meta_cache = doc.get("meta_cache") if isinstance(doc, dict) else {}
+        meta_cache = meta_cache if isinstance(meta_cache, dict) else {}
+        row["배당률"] = meta_cache.get("dividend_yield_ttm")
+        row["보수"] = meta_cache.get("expense_ratio")
+        row["순자산총액"] = meta_cache.get("total_net_assets")
+        row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
+        rows.append(row)
+
+    enriched = pd.DataFrame(rows)
+    enriched.attrs.update(dict(dataframe.attrs))
+    return enriched
 
 
 def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -211,6 +261,8 @@ def load_rank_data(
             enriched_rows.append(row)
         dataframe = pd.DataFrame(enriched_rows)
         dataframe.attrs.update(dataframe_attrs)
+
+    dataframe = _apply_rank_info_cache(dataframe, selected_ticker_type)
 
     return {
         "ticker_types": configs_payload,
