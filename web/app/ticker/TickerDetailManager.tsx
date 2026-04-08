@@ -637,6 +637,10 @@ export function TickerDetailManager({
     () => holdings.map((row, index) => ({ ...row, id: `${row.ticker}-${index}` })),
     [holdings],
   );
+  const showHoldingsWeightColumn = useMemo(
+    () => holdingsRows.some((row) => (row.weight ?? 0) > 0),
+    [holdingsRows],
+  );
 
   const holdingsAsOfDateLabel = useMemo(() => {
     if (!holdingsAsOfDate || holdingsAsOfDate.length !== 8) return null;
@@ -687,48 +691,58 @@ export function TickerDetailManager({
   );
 
   const holdingColumns = useMemo<ColDef[]>(
-    () => [
-      {
-        field: "ticker",
-        headerName: "종목코드",
-        minWidth: 92,
-        width: 92,
-        cellStyle: { fontWeight: 700 },
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 148,
-        flex: 1,
-      },
-      {
-        field: "weight",
-        headerName: "비중",
-        minWidth: 76,
-        width: 76,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatUnsignedPercent(params.value),
-      },
-      {
-        field: "current_price",
-        headerName: "현재가",
-        minWidth: 84,
-        width: 84,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, "kor"),
-      },
-      {
-        field: "change_pct",
-        headerName: "일간(%)",
-        minWidth: 88,
-        width: 88,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => (
-          <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
-        ),
-      },
-    ],
-    [],
+    () => {
+      const columns: ColDef[] = [
+        {
+          field: "ticker",
+          headerName: "종목코드",
+          minWidth: 118,
+          flex: 0.9,
+          cellStyle: { fontWeight: 700 },
+        },
+        {
+          field: "name",
+          headerName: "종목명",
+          minWidth: 148,
+          flex: 1.2,
+        },
+      ];
+
+      if (showHoldingsWeightColumn) {
+        columns.push({
+          field: "weight",
+          headerName: "비중",
+          minWidth: 76,
+          width: 76,
+          type: "rightAligned",
+          cellRenderer: (params: { value: number | null }) => formatUnsignedPercent(params.value),
+        });
+      }
+
+      columns.push(
+        {
+          field: "current_price",
+          headerName: "현재가",
+          minWidth: 84,
+          width: 84,
+          type: "rightAligned",
+          cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, "kor"),
+        },
+        {
+          field: "change_pct",
+          headerName: "일간(%)",
+          minWidth: 88,
+          width: 88,
+          type: "rightAligned",
+          cellRenderer: (params: { value: number | null }) => (
+            <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
+          ),
+        },
+      );
+
+      return columns;
+    },
+    [showHoldingsWeightColumn],
   );
 
   const displayTitle = selectedTicker

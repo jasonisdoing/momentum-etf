@@ -8,6 +8,8 @@ import pandas as pd
 import requests
 from pykrx import stock
 from pykrx.website.comm import webio
+from pykrx.website.krx.etx.core import PDF
+from pykrx.website.krx.etx.wrap import get_etx_isin
 
 from utils.db_manager import get_db_connection
 from utils.data_loader import get_trading_days
@@ -62,6 +64,11 @@ def _normalize_date(value: str | None) -> str | None:
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
+    if isinstance(value, str):
+        normalized = value.replace(",", "").strip()
+        if not normalized or normalized == "-":
+            return None
+        value = normalized
     parsed = pd.to_numeric(pd.Series([value]), errors="coerce").iloc[0]
     if pd.isna(parsed):
         return None
@@ -142,23 +149,31 @@ def fetch_korean_etf_holdings_from_krx(ticker: str, as_of_date: str) -> list[dic
     if not normalized_date:
         raise ValueError("구성종목 조회 기준일(as_of_date)이 필요합니다.")
 
-    df = stock.get_etf_portfolio_deposit_file(normalized_ticker, normalized_date)
+    isin = get_etx_isin(normalized_ticker)
+    df = PDF().fetch(normalized_date, isin)
     if df is None or df.empty:
         raise RuntimeError(f"{normalized_ticker} ETF 구성종목 조회 결과가 비어 있습니다. ({normalized_date})")
 
     working_df = df.copy()
-    working_df.index = working_df.index.map(lambda value: str(value).strip().upper())
+    working_df["raw_code"] = working_df["COMPST_ISU_CD"].map(lambda value: str(value or "").strip().upper())
+    working_df["weight_value"] = working_df["COMPST_RTO"].map(_to_float)
+    working_df = working_df.sort_values(
+        by="weight_value",
+        ascending=False,
+        na_position="last",
+    )
 
     records: list[dict[str, Any]] = []
-    for component_ticker, row in working_df.sort_values("비중", ascending=False).iterrows():
-        contracts = _to_float(row.get("계약수"))
-        amount = _to_float(row.get("금액"))
-        market_cap = _to_float(row.get("시가총액"))
-        weight = _to_float(row.get("비중"))
+    for _, row in working_df.iterrows():
+        raw_code = str(row.get("raw_code") or "").strip().upper()
+        contracts = _to_float(row.get("COMPST_ISU_CU1_SHRS"))
+        amount = _to_float(row.get("VALU_AMT"))
+        market_cap = _to_float(row.get("COMPST_AMT"))
+        weight = _to_float(row.get("COMPST_RTO"))
         records.append(
             {
-                "ticker": component_ticker,
-                "name": str(row.get("구성종목명") or "").strip(),
+                "ticker": raw_code,
+                "name": str(row.get("COMPST_ISU_NM") or "").strip(),
                 "contracts": int(contracts) if contracts is not None else None,
                 "amount": int(amount) if amount is not None else None,
                 "market_cap": int(market_cap) if market_cap is not None else None,
@@ -244,6 +259,8 @@ def fetch_korean_stock_price_snapshot(tickers: list[str], as_of_date: str) -> di
 
     result: dict[str, dict[str, Any]] = {}
     for ticker in normalized_tickers:
+        if not ticker.isdigit() or len(ticker) != 6:
+            continue
         df = stock.get_market_ohlcv_by_date(previous_date, normalized_date, ticker)
         if df is None or df.empty:
             continue

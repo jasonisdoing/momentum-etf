@@ -9,7 +9,7 @@
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
     *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
-    *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중 Mongo 캐시 조회/저장 및 KRX 로그인 세션 기반 수집
+    *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중 Mongo 캐시 조회/저장 및 KRX 로그인 세션 기반 수집. KRX 원본 PDF의 `COMPST_ISU_CD`를 그대로 저장합니다.
     *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시
     *   `fear_greed_service.py`: CNN 공포탐욕지수 연동 및 메모리 캐시
     *   **원칙**: 새로운 시장 지표, 가격 정보, 외부 데이터 크롤링 등은 혼동을 막기 위해 모두 이 폴더에서 각각의 서비스로 관리하고, 자체 캐시 시스템(TTL 등)을 구축합니다.
