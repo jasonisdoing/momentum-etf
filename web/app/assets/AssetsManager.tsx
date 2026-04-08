@@ -162,6 +162,15 @@ function getSignedNullableClass(value: number | null | undefined): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
+function getWeightTextColor(weightPct: number, targetRatio: number | null | undefined): string {
+  if (targetRatio === null || targetRatio === undefined || Number.isNaN(targetRatio) || targetRatio <= 0) {
+    return ASSETS_WEIGHT_TEXT_COLOR;
+  }
+
+  const allowedDelta = targetRatio * 0.1;
+  return Math.abs(weightPct - targetRatio) > allowedDelta ? "#dc3545" : ASSETS_WEIGHT_TEXT_COLOR;
+}
+
 function getBucketCellClass(bucketId: number): string {
   if (!bucketId) return "appBucketCell";
   return `appBucketCell appBucketCell${bucketId}`;
@@ -1136,14 +1145,18 @@ function AccountHoldingsDetailPanel({
       headerName: "비중",
       width: 80,
       type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) =>
-        params.data ? (
-          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
-            {getPreviewWeightPct(params.data, rows, summary).toFixed(1)}%
+      cellRenderer: (params: { data?: GridRow }) => {
+        if (!params.data) {
+          return "-";
+        }
+
+        const weightPct = getPreviewWeightPct(params.data, rows, summary);
+        return (
+          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
+            {weightPct.toFixed(1)}%
           </span>
-        ) : (
-          "-"
-        ),
+        );
+      },
     },
     {
       field: "target_ratio",

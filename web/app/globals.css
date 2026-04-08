@@ -1776,6 +1776,36 @@ a {
   position: relative;
 }
 
+.tickerDetailTopGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.95fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.tickerDetailHoldingsPanel {
+  display: flex;
+  height: 420px;
+  min-height: 0;
+  flex-direction: column;
+}
+
+.tickerDetailHoldingsEmpty {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 1.5rem;
+}
+
 .tickerDetailChartBadge {
   position: absolute;
   z-index: 2;
@@ -1868,6 +1898,18 @@ a {
 
   .tickerDetailTables {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tickerDetailTopGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tickerDetailHoldingsPanel {
+    height: auto;
+  }
+
+  .tickerDetailHoldingsEmpty {
+    min-height: 240px;
   }
 }
 

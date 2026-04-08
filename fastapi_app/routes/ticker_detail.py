@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
+from services.etf_holdings_service import load_korean_etf_holdings
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import load_common_settings
@@ -132,7 +133,7 @@ def get_ticker_detail(
     )
 
     if df is None or df.empty:
-        return {"ticker": ticker, "rows": [], "error": "가격 데이터를 가져오지 못했습니다."}
+        return {"ticker": ticker, "rows": [], "holdings": [], "error": "가격 데이터를 가져오지 못했습니다."}
 
     df = df.sort_index()
 
@@ -170,4 +171,9 @@ def get_ticker_detail(
         if close is not None:
             prev_close = close
 
-    return {"ticker": ticker, "rows": rows}
+    holdings: list[dict[str, object]] = []
+    if str(country_code or "").strip().lower() == "kor":
+        latest_date = pd.Timestamp(df.index[-1]).strftime("%Y%m%d")
+        holdings = load_korean_etf_holdings(ticker, latest_date)
+
+    return {"ticker": ticker, "rows": rows, "holdings": holdings}

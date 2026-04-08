@@ -56,7 +56,16 @@ type ChartInterval = "day" | "week" | "month";
 type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
+  holdings: TickerHoldingRow[];
   error?: string;
+};
+
+type TickerHoldingRow = {
+  ticker: string;
+  name: string;
+  contracts: number | null;
+  amount: number | null;
+  weight: number | null;
 };
 
 type CrosshairInfo = {
@@ -319,6 +328,7 @@ export function TickerDetailManager({
 
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
+  const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -351,6 +361,7 @@ export function TickerDetailManager({
     if (!qTicker) {
       setSelectedTicker(null);
       setRows([]);
+      setHoldings([]);
       setError(null);
       return;
     }
@@ -374,6 +385,7 @@ export function TickerDetailManager({
     }
 
     setRows([]);
+    setHoldings([]);
     if (matches.length > 1) {
       setSelectedTicker(null);
       setError(`동일한 티커 ${qTicker}가 여러 종목 타입에 등록되어 있습니다.`);
@@ -397,8 +409,6 @@ export function TickerDetailManager({
     try {
       const search = new URLSearchParams({
         ticker: item.ticker,
-        ticker_type: item.ticker_type,
-        country_code: item.country_code || "kor",
       });
       const response = await fetch(`/api/ticker-detail?${search.toString()}`, {
         cache: "no-store",
@@ -408,10 +418,12 @@ export function TickerDetailManager({
       if (!response.ok) throw new Error(payload.error ?? "데이터를 불러오지 못했습니다.");
       if (payload.error) throw new Error(payload.error);
       setRows(payload.rows);
+      setHoldings(payload.holdings ?? []);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "데이터를 불러오지 못했습니다.");
       setRows([]);
+      setHoldings([]);
     } finally {
       setLoading(false);
     }
@@ -616,6 +628,11 @@ export function TickerDetailManager({
     [rows],
   );
 
+  const holdingsRows = useMemo(
+    () => holdings.map((row, index) => ({ ...row, id: `${row.ticker}-${index}` })),
+    [holdings],
+  );
+
   const dailyColumns = useMemo<ColDef[]>(
     () => [
       {
@@ -657,6 +674,33 @@ export function TickerDetailManager({
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
     ],
     [selectedCountryCode],
+  );
+
+  const holdingColumns = useMemo<ColDef[]>(
+    () => [
+      {
+        field: "ticker",
+        headerName: "종목코드",
+        minWidth: 92,
+        width: 92,
+        cellStyle: { fontWeight: 700 },
+      },
+      {
+        field: "name",
+        headerName: "종목명",
+        minWidth: 148,
+        flex: 1,
+      },
+      {
+        field: "weight",
+        headerName: "비중",
+        minWidth: 76,
+        width: 76,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatPercent(params.value),
+      },
+    ],
+    [],
   );
 
   const displayTitle = selectedTicker
@@ -723,19 +767,48 @@ export function TickerDetailManager({
                         ) : null
                       ))}
                     </div>
-                    <div className="tickerDetailChartWrap">
-                      <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
-                      {chartBadges.map((badge, index) => (
-                        <div
-                          key={`${badge.tone}-${index}`}
-                          className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
-                          style={{ left: badge.left, top: badge.top }}
-                        >
-                          {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
-                          <span className="tickerDetailChartBadgeText">{badge.text}</span>
-                          {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
+                    <div className={selectedCountryCode === "kor" ? "tickerDetailTopGrid" : ""}>
+                      <div className="tickerDetailChartWrap">
+                        <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                        {chartBadges.map((badge, index) => (
+                          <div
+                            key={`${badge.tone}-${index}`}
+                            className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
+                            style={{ left: badge.left, top: badge.top }}
+                          >
+                            {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
+                            <span className="tickerDetailChartBadgeText">{badge.text}</span>
+                            {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
+                          </div>
+                        ))}
+                      </div>
+                      {selectedCountryCode === "kor" ? (
+                        <div className="tickerDetailHoldingsPanel">
+                          <div className="tickerDetailTableHeader">
+                            <span className="tickerDetailTableTitle">구성종목비중</span>
+                            <span className="text-muted tickerDetailTableMeta">
+                              {holdingsRows.length > 0
+                                ? `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`
+                                : "데이터 확인 불가"}
+                            </span>
+                          </div>
+                          {holdingsRows.length > 0 ? (
+                            <div className="appGridFillWrap">
+                              <AppAgGrid
+                                rowData={holdingsRows}
+                                columnDefs={holdingColumns}
+                                loading={loading}
+                                theme={gridTheme}
+                                gridOptions={{ suppressMovableColumns: true }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="tickerDetailHoldingsEmpty">
+                              구성종목 데이터를 확인할 수 없습니다.
+                            </div>
+                          )}
                         </div>
-                      ))}
+                      ) : null}
                     </div>
                   </div>
                 ) : null}
