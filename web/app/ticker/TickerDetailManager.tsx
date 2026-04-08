@@ -432,6 +432,13 @@ export function TickerDetailManager({
 
     setLoading(true);
     setError(null);
+    setRows([]);
+    setHoldings([]);
+    setHoldingsAsOfDate(null);
+    setHoldingsPriceAsOfDate(null);
+    setHoldingsError(null);
+    setCrosshairInfo(null);
+    setChartBadges([]);
 
     try {
       const search = new URLSearchParams({
@@ -506,7 +513,15 @@ export function TickerDetailManager({
   }, [chartRows]);
 
   useEffect(() => {
-    if (!chartContainerRef.current || chartRows.length === 0) return;
+    if (!chartContainerRef.current || chartRows.length === 0) {
+      if (chartRef.current) {
+        chartRef.current.remove();
+        chartRef.current = null;
+      }
+      setCrosshairInfo(null);
+      setChartBadges([]);
+      return;
+    }
     if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
     setCrosshairInfo(null);
     setChartBadges([]);
