@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 import requests
+import yfinance as yf
 from pykrx import stock
 from pykrx.website.comm import webio
 from pykrx.website.krx.etx.core import PDF
@@ -27,6 +28,7 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
+_YAHOO_IDENTITY_CACHE: dict[str, dict[str, str | None]] = {}
 
 
 def _get_collection():
@@ -86,6 +88,54 @@ def _install_requests_session(session: requests.Session) -> None:
     # pykrx는 requests.get/post를 직접 호출하므로 동일 세션으로 교체한다.
     webio.requests.get = session.get
     webio.requests.post = session.post
+
+
+def _is_korean_stock_code(code: str) -> bool:
+    return code.isdigit() and len(code) == 6
+
+
+def _should_resolve_yahoo_identity(raw_code: str) -> bool:
+    normalized = str(raw_code or "").strip().upper()
+    return normalized.startswith("US") and len(normalized) >= 10
+
+
+def _resolve_yahoo_identity(raw_code: str, raw_name: str) -> dict[str, str | None]:
+    cached = _YAHOO_IDENTITY_CACHE.get(raw_code)
+    if cached is not None:
+        return cached
+
+    search = yf.Search(
+        raw_code,
+        max_results=5,
+        news_count=0,
+        lists_count=0,
+        recommended=0,
+        raise_errors=True,
+    )
+    quotes = getattr(search, "quotes", []) or []
+    equity_quote = next(
+        (
+            quote
+            for quote in quotes
+            if str(quote.get("quoteType") or "").strip().upper() == "EQUITY"
+            and str(quote.get("symbol") or "").strip()
+        ),
+        None,
+    )
+    if equity_quote is None:
+        raise RuntimeError(f"Yahoo 심볼 검색 실패: {raw_code}")
+
+    normalized = {
+        "ticker": str(equity_quote.get("symbol") or "").strip().upper() or raw_code,
+        "name": (
+            str(equity_quote.get("longname") or "").strip()
+            or str(equity_quote.get("shortname") or "").strip()
+            or raw_name
+        ),
+        "yahoo_symbol": str(equity_quote.get("symbol") or "").strip().upper() or None,
+    }
+    _YAHOO_IDENTITY_CACHE[raw_code] = normalized
+    return normalized
 
 
 def resolve_krx_login_credentials() -> tuple[str, str]:
@@ -166,14 +216,30 @@ def fetch_korean_etf_holdings_from_krx(ticker: str, as_of_date: str) -> list[dic
     records: list[dict[str, Any]] = []
     for _, row in working_df.iterrows():
         raw_code = str(row.get("raw_code") or "").strip().upper()
+        raw_name = str(row.get("COMPST_ISU_NM") or "").strip()
         contracts = _to_float(row.get("COMPST_ISU_CU1_SHRS"))
         amount = _to_float(row.get("VALU_AMT"))
         market_cap = _to_float(row.get("COMPST_AMT"))
         weight = _to_float(row.get("COMPST_RTO"))
+        display_ticker = raw_code
+        display_name = raw_name
+        yahoo_symbol: str | None = None
+        if _should_resolve_yahoo_identity(raw_code):
+            try:
+                yahoo_identity = _resolve_yahoo_identity(raw_code, raw_name)
+            except Exception as exc:
+                logger.warning("해외 구성종목 Yahoo 매핑 실패: code=%s name=%s error=%s", raw_code, raw_name, exc)
+            else:
+                display_ticker = str(yahoo_identity.get("ticker") or raw_code)
+                display_name = str(yahoo_identity.get("name") or raw_name)
+                yahoo_symbol = str(yahoo_identity.get("yahoo_symbol") or "").strip().upper() or None
         records.append(
             {
-                "ticker": raw_code,
-                "name": str(row.get("COMPST_ISU_NM") or "").strip(),
+                "ticker": display_ticker,
+                "name": display_name,
+                "raw_code": raw_code,
+                "raw_name": raw_name,
+                "yahoo_symbol": yahoo_symbol,
                 "contracts": int(contracts) if contracts is not None else None,
                 "amount": int(amount) if amount is not None else None,
                 "market_cap": int(market_cap) if market_cap is not None else None,

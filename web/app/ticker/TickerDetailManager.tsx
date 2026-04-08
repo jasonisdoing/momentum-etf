@@ -723,8 +723,8 @@ export function TickerDetailManager({
         {
           field: "current_price",
           headerName: "현재가",
-          minWidth: 84,
-          width: 84,
+          minWidth: 108,
+          width: 108,
           type: "rightAligned",
           cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, "kor"),
         },
