@@ -203,6 +203,13 @@ function formatCurrencyValue(value: number | null, countryCode?: string): string
   return formatNumber(value, digits);
 }
 
+function formatAssetInEok(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return `${formatNumber(value / 100_000_000, 0)}억`;
+}
+
 export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
@@ -639,8 +646,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
         minWidth: 132,
         width: 132,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) =>
-          formatCurrencyValue(params.value ?? null, selectedTickerTypeItem?.country_code),
+        cellRenderer: (params: { value: number | null | undefined }) => formatAssetInEok(params.value ?? null),
       },
       {
         field: "상장일",
