@@ -10,7 +10,7 @@ function buildGoogleLoginHref(nextPath: string): string {
 
 export function LoginForm() {
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/dashboard";
+  const nextPath = searchParams.get("next") || "/";
   const error = searchParams.get("error");
 
   return (

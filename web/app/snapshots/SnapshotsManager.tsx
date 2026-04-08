@@ -126,7 +126,11 @@ const appGridTheme = themeQuartz
     iconSize: 18,
   });
 
-export function SnapshotsManager() {
+export function SnapshotsManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { snapshotCount: number; latestDate: string }) => void;
+}) {
   const [snapshots, setSnapshots] = useState<SnapshotListItem[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -188,6 +192,13 @@ export function SnapshotsManager() {
       }),
     [expandedId, snapshots],
   );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      snapshotCount: snapshots.length,
+      latestDate: snapshots[0]?.snapshot_date ?? "-",
+    });
+  }, [onHeaderSummaryChange, snapshots]);
 
   const listColumns = useMemo<ColDef<SnapshotGridRow>[]>(
     () => [
@@ -284,17 +295,8 @@ export function SnapshotsManager() {
       ) : null}
       <section className="appSection">
         <div className="card appCard">
-          <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">일별 스냅샷</span>
-              </div>
-              <div className="appMainHeaderRight">
-                <span className="appHeaderSubtle">날짜 row를 클릭하면 계좌별 상세가 펼쳐집니다.</span>
-              </div>
-            </div>
-          </div>
           <div className="card-body appCardBody">
+            <div className="tableFooterMeta mb-2">날짜 row를 클릭하면 계좌별 상세가 펼쳐집니다.</div>
             <AppAgGrid
               rowData={listRows}
               columnDefs={listColumns}

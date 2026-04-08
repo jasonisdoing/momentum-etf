@@ -39,7 +39,7 @@ function normalizeOrigin(value: string): string {
 function normalizePath(value: string | null | undefined): string {
   const raw = String(value ?? "").trim();
   if (!raw.startsWith("/") || raw.startsWith("//")) {
-    return "/dashboard";
+    return "/";
   }
   return raw;
 }

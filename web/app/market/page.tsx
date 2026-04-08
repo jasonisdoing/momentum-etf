@@ -1,12 +1,7 @@
-import { PageFrame } from "../components/PageFrame";
-import { MarketManager } from "./MarketManager";
+import { MarketPageClient } from "./MarketPageClient";
 
 export const dynamic = "force-dynamic";
 
 export default function MarketPage() {
-  return (
-    <PageFrame title="ETF 마켓" fullHeight fullWidth>
-      <MarketManager />
-    </PageFrame>
-  );
+  return <MarketPageClient />;
 }

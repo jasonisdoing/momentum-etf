@@ -6,12 +6,12 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from utils.stocks_service import (
     add_active_stock,
+    delete_active_stock as delete_active_stock_entry,
     hard_delete_stocks,
     load_active_stocks_table,
     load_deleted_stocks_table,
     refresh_single_stock,
     restore_deleted_stocks,
-    soft_delete_stock,
     update_stock_bucket,
     validate_stock_candidate,
 )
@@ -28,7 +28,6 @@ class BucketUpdatePayload(BaseModel):
 class StockDeletePayload(BaseModel):
     ticker_type: str
     ticker: str
-    reason: str | None = None
 
 
 class DeletedStocksPayload(BaseModel):
@@ -68,7 +67,7 @@ def patch_active_stock(payload: BucketUpdatePayload, _: None = Depends(require_i
 
 @router.delete("")
 def delete_active_stock(payload: StockDeletePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
-    soft_delete_stock(payload.ticker_type, payload.ticker, payload.reason)
+    delete_active_stock_entry(payload.ticker_type, payload.ticker)
     return {"ok": True}
 
 

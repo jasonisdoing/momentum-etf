@@ -214,7 +214,67 @@ function parseWeeklyCellValue(field: WeeklyEditableField | undefined, newValue: 
   return parsed;
 }
 
-export function WeeklyManager() {
+function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width?: number; minWidth: number; flex?: number } {
+  if (key === "week_date_display") {
+    return { width: 112, minWidth: 112 };
+  }
+  if (key === "memo") {
+    return { width: 156, minWidth: 140, flex: 1 };
+  }
+  if (
+    key === "total_principal" ||
+    key === "total_assets" ||
+    key === "purchase_amount" ||
+    key === "valuation_amount" ||
+    key === "profit_loss" ||
+    key === "cumulative_profit" ||
+    key === "weekly_profit"
+  ) {
+    return { width: 102, minWidth: 98 };
+  }
+  if (key === "exchange_rate") {
+    return { width: 82, minWidth: 82 };
+  }
+  if (key === "exchange_rate_change_pct") {
+    return { width: 94, minWidth: 94 };
+  }
+  if (key === "total_stocks" || key === "profit_count" || key === "loss_count") {
+    return { width: 84, minWidth: 80 };
+  }
+  if (
+    key === "withdrawal_mom" ||
+    key === "total_expense" ||
+    key === "deposit_withdrawal" ||
+    key === "weekly_return_pct" ||
+    key === "bucket_pct_cash"
+  ) {
+    return { width: 88, minWidth: 84 };
+  }
+  if (key === "cumulative_return_pct") {
+    return { width: 96, minWidth: 92 };
+  }
+  if (
+    key === "bucket_pct_momentum" ||
+    key === "bucket_pct_market" ||
+    key === "bucket_pct_dividend" ||
+    key === "bucket_pct_alternative"
+  ) {
+    return { width: 96, minWidth: 92 };
+  }
+  if (PERCENT_KEYS.has(key)) {
+    return { width: 84, minWidth: 80 };
+  }
+  if (MONEY_KEYS.has(key)) {
+    return { width: 88, minWidth: 84 };
+  }
+  return { width: 78, minWidth: 72 };
+}
+
+export function WeeklyManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { activeWeekDate: string; rowCount: number; dirtyCount: number }) => void;
+}) {
   const [rows, setRows] = useState<WeeklyRow[]>([]);
   const [editableFields, setEditableFields] = useState<WeeklyEditableField[]>([]);
   const [readOnlyKeys, setReadOnlyKeys] = useState<Set<string>>(new Set());
@@ -277,6 +337,14 @@ export function WeeklyManager() {
     [rows],
   );
 
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      activeWeekDate: activeWeekDate || "-",
+      rowCount: rows.length,
+      dirtyCount: dirtyRowIds.length,
+    });
+  }, [activeWeekDate, dirtyRowIds.length, onHeaderSummaryChange, rows.length]);
+
   const editableFieldMap = useMemo(
     () => new Map(editableFields.map((field) => [field.key, field])),
     [editableFields],
@@ -285,23 +353,13 @@ export function WeeklyManager() {
   const gridColumns = useMemo<ColDef<WeeklyGridRow>[]>(
     () => [
       ...visibleColumns.map<ColDef<WeeklyGridRow>>((column) => ({
+        ...getWeeklyColumnWidth(column.key),
         field: column.key,
         headerName: column.label,
         type:
           MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
             ? "rightAligned"
             : undefined,
-        minWidth:
-          column.key === "week_date_display"
-            ? 125
-            : column.key === "memo"
-              ? 200
-                : MONEY_KEYS.has(column.key)
-                  ? 92
-                  : PERCENT_KEYS.has(column.key)
-                    ? 80
-                    : 72,
-        flex: column.key === "memo" ? 1.4 : column.key === "week_date_display" ? 0 : undefined,
         sortable: false,
         editable: () => editableFieldMap.has(column.key) && !readOnlyKeys.has(column.key),
         valueParser: (params) =>
@@ -394,43 +452,37 @@ export function WeeklyManager() {
         <div className="card appCard appTableCardFill">
           <div className="card-header">
             <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+              <div className="appMainHeaderLeft weeklyMainHeaderLeft">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">보기 방식</span>
+                  <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+                    <button
+                      type="button"
+                      className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setViewMode("core")}
+                    >
+                      핵심만 보기
+                    </button>
+                    <button
+                      type="button"
+                      className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setViewMode("full")}
+                    >
+                      전체 보기
+                    </button>
+                  </div>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">집계</span>
                   <button
                     type="button"
-                    className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    onClick={() => setViewMode("core")}
+                    className="btn btn-success btn-sm px-3 fw-bold"
+                    onClick={handleAggregate}
+                    disabled={isPending}
                   >
-                    핵심만 보기
+                    {isPending ? "집계 중..." : "이번주 데이터 집계"}
                   </button>
-                  <button
-                    type="button"
-                    className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    onClick={() => setViewMode("full")}
-                  >
-                    전체 보기
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm px-3 fw-bold"
-                  onClick={handleAggregate}
-                  disabled={isPending}
-                >
-                  {isPending ? "집계 중..." : "이번주 데이터 집계"}
-                </button>
-              </div>
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>활성 주차:</span>
-                    <span className="appHeaderMetricValue">{activeWeekDate || "-"}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>행:</span>
-                    <span className="appHeaderMetricValue">{rows.length}</span>
-                  </div>
-                </div>
+                </label>
               </div>
             </div>
           </div>

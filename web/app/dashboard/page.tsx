@@ -1,12 +1,7 @@
-import { PageFrame } from "../components/PageFrame";
-import { DashboardManager } from "./DashboardManager";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
 export default function DashboardPage() {
-  return (
-    <PageFrame title="대시보드">
-      <DashboardManager />
-    </PageFrame>
-  );
+  redirect("/");
 }

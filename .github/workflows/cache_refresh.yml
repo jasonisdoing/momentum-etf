@@ -32,7 +32,7 @@ jobs:
       - name: Run Cache Refresh
         env:
           MONGO_DB_CONNECTION_STRING: ${{ secrets.MONGO_DB_CONNECTION_STRING }}
-        run: python scripts/update_price_cache.py
+        run: python scripts/stock_price_cache_updater.py
 
       - name: Notify Slack on Failure
         if: failure()

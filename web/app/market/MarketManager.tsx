@@ -133,12 +133,16 @@ function formatUpdatedAt(value: string | null | undefined): string {
   }).format(date);
 }
 
-export function MarketManager() {
+export function MarketManager({
+  onHeaderSummaryChange,
+}: {
+  onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string }) => void;
+}) {
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [minMarketCap, setMinMarketCap] = useState("");
-  const [minPrevVolume, setMinPrevVolume] = useState("100000");
+  const [minMarketCap, setMinMarketCap] = useState("1000");
+  const [minPrevVolume, setMinPrevVolume] = useState("500000");
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -223,6 +227,14 @@ export function MarketManager() {
     () => filteredRows.map((row, index) => ({ ...row, row_number: index + 1 })),
     [filteredRows],
   );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      filteredCount: filteredRows.length,
+      totalCount: rows.length,
+      updatedAt: formatUpdatedAt(updatedAt),
+    });
+  }, [filteredRows.length, onHeaderSummaryChange, rows.length, updatedAt]);
 
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
@@ -314,47 +326,36 @@ export function MarketManager() {
           <div className="card-header">
             <div className="appMainHeader marketMainHeader">
               <div className="appMainHeaderLeft marketMainHeaderLeft">
-                <input
-                  className="field compactField"
-                  type="text"
-                  placeholder="티커 또는 종목명 검색"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-                <input
-                  className="field compactField"
-                  type="number"
-                  placeholder="최소 시가총액(억)"
-                  value={minMarketCap}
-                  onChange={(event) => setMinMarketCap(event.target.value)}
-                />
-                <input
-                  className="field compactField"
-                  type="number"
-                  placeholder="최소 전일 거래량(주)"
-                  value={minPrevVolume}
-                  onChange={(event) => setMinPrevVolume(event.target.value)}
-                />
-              </div>
-              <div className="appMainHeaderRight marketMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>총:</span>
-                    <span className="appHeaderMetricValue">{formatCount(filteredRows.length)}개</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>전체:</span>
-                    <span className="appHeaderMetricValue">{formatCount(rows.length)}개</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>KIS 마스터 갱신:</span>
-                    <span className="appHeaderMetricValue">{formatUpdatedAt(updatedAt)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>정렬:</span>
-                    <span className="appHeaderMetricValue">일간(%) 내림차순</span>
-                  </div>
-                </div>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">티커/종목명</span>
+                  <input
+                    className="field compactField"
+                    type="text"
+                    placeholder="티커 또는 종목명을 입력"
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                  />
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">시가총액(억)</span>
+                  <input
+                    className="field compactField"
+                    type="number"
+                    placeholder="최소 시가총액"
+                    value={minMarketCap}
+                    onChange={(event) => setMinMarketCap(event.target.value)}
+                  />
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">거래량(주)</span>
+                  <input
+                    className="field compactField"
+                    type="number"
+                    placeholder="최소 전일 거래량"
+                    value={minPrevVolume}
+                    onChange={(event) => setMinPrevVolume(event.target.value)}
+                  />
+                </label>
               </div>
             </div>
           </div>

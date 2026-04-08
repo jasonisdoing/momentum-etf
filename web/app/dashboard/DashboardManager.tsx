@@ -17,6 +17,7 @@ type DashboardMetricItem = {
 type DashboardAccountSummaryItem = {
   account_id: string;
   account_name: string;
+  account_url?: string | null;
   order: number;
   total_assets: number;
   total_principal: number;
@@ -87,6 +88,24 @@ function getSignedClass(value: number): string {
 
 function shouldHighlight(label: string): boolean {
   return label.includes("손익") || label.includes("수익률");
+}
+
+function renderAccountNameCell(account: DashboardAccountSummaryItem) {
+  if (!account.account_url) {
+    return <span className="fw-medium">{account.account_name}</span>;
+  }
+
+  return (
+    <a
+      href={account.account_url}
+      target="_blank"
+      rel="noreferrer"
+      className="fw-medium"
+      style={{ textDecoration: "underline" }}
+    >
+      {account.account_name}
+    </a>
+  );
 }
 
 type SparklinePoint = { date: string; value: number };
@@ -552,7 +571,7 @@ export function DashboardManager() {
             <tbody>
               {accounts.map((a) => (
                 <tr key={a.account_id}>
-                  <td className="fw-medium">{a.account_name}</td>
+                  <td>{renderAccountNameCell(a)}</td>
                   <td className="text-end">{mask(a.total_assets)}</td>
                   <td className="text-end">{mask(a.total_principal)}</td>
                   <td className="text-end">{mask(a.valuation_krw)}</td>
