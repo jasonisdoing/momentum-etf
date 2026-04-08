@@ -221,7 +221,7 @@ def update_ticker_type_metadata(
             time.sleep(0.2)  # API 호출 속도 조절
 
         except Exception as e:
-            logger.error(f"[{account_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
+            logger.error(f"[{type_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
 
     # 메타데이터가 갱신된 필드만 추출하여 bulk_update 수행 (save_etfs를 쓰면 is_deleted가 리셋되는 버그 방지)
     try:
