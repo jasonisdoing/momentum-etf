@@ -29,6 +29,8 @@ jobs:
               git reset --hard origin/upgrade
             fi
             sudo docker compose up -d --build --remove-orphans
+            sudo docker image prune -af
+            sudo docker builder prune -af
             echo ">>> Oracle VM deployment completed."
 
       - name: Extract APP_VERSION
