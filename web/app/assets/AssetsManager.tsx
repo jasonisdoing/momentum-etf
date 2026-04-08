@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
+import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
@@ -458,6 +459,7 @@ function AccountHoldingsDetailPanel({
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
 }) {
   const toast = useToast();
+  const router = useRouter();
   const hydrateRows = useCallback(
     (sourceRows: HoldingsRow[]) =>
       sourceRows.map((row) => ({
@@ -528,6 +530,16 @@ function AccountHoldingsDetailPanel({
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) => Boolean(row && row.id !== "__adding__" && row.ticker !== "IS"),
     [],
+  );
+  const moveToTickerDetail = useCallback(
+    (ticker: string | null | undefined) => {
+      const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
+      if (!normalizedTicker || normalizedTicker === "IS") {
+        return;
+      }
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+    },
+    [router],
   );
 
   const gridRows = useMemo<GridRow[]>(() => {
@@ -1064,7 +1076,15 @@ function AccountHoldingsDetailPanel({
             />
           );
         }
-        return <span className="appCodeText">{params.value}</span>;
+        return (
+          <button
+            type="button"
+            className="btn btn-link p-0 appCodeText assetsTickerLink"
+            onClick={() => moveToTickerDetail(row.ticker)}
+          >
+            {params.value}
+          </button>
+        );
       },
     },
     {
@@ -1120,9 +1140,14 @@ function AccountHoldingsDetailPanel({
 
         const value = String(params.value ?? "-");
         return (
-          <span className="assetsNameCellText" title={value}>
+          <button
+            type="button"
+            className="btn btn-link p-0 assetsNameCellText assetsTickerLink"
+            title={value}
+            onClick={() => moveToTickerDetail(params.data?.ticker)}
+          >
             {value}
-          </span>
+          </button>
         );
       },
     },

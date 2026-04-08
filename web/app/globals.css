@@ -2148,10 +2148,21 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
 }
 
 .assetsChildAgGrid .ag-cell[col-id="name"] {
   overflow: hidden;
+}
+
+.assetsChildAgGrid .assetsTickerLink {
+  color: #206bc4;
+  text-decoration: none;
+}
+
+.assetsChildAgGrid .assetsTickerLink:hover {
+  color: #174f96;
+  text-decoration: underline;
 }
 
 .rankAgGrid .ag-cell.rankBucketCell {
