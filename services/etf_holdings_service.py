@@ -75,11 +75,20 @@ def _create_naver_session() -> requests.Session:
     return session
 
 
-def _extract_symbol_from_reuters_code(value: str | None) -> str | None:
+def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
     normalized = str(value or "").strip().upper()
     if not normalized:
         return None
-    return normalized.split(".", 1)[0].strip() or None
+    base, dot, suffix = normalized.partition(".")
+    base = base.strip()
+    suffix = suffix.strip()
+    if not base:
+        return None
+    if not dot:
+        return base
+    if suffix == "HK":
+        return f"{base}.HK"
+    return base
 
 
 def _normalize_reference_date(value: str | None) -> str | None:
@@ -127,7 +136,7 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
 
         component_item_code = str(item.get("componentItemCode") or "").strip().upper() or None
         component_reuters_code = str(item.get("componentReutersCode") or "").strip().upper() or None
-        display_ticker = component_item_code or _extract_symbol_from_reuters_code(component_reuters_code) or raw_code
+        display_ticker = component_item_code or extract_yahoo_symbol_from_reuters_code(component_reuters_code) or raw_code
         reference_date = _normalize_reference_date(item.get("referenceDate"))
         if reference_date:
             as_of_date = reference_date
@@ -139,7 +148,7 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
                 "raw_code": raw_code,
                 "raw_name": raw_name,
                 "reuters_code": component_reuters_code,
-                "yahoo_symbol": _extract_symbol_from_reuters_code(component_reuters_code),
+                "yahoo_symbol": extract_yahoo_symbol_from_reuters_code(component_reuters_code),
                 "contracts": _normalize_contracts(item.get("cuUnitQuantity")),
                 "amount": _to_int(item.get("evalAmount")),
                 "weight": _to_float(item.get("weight")),
@@ -221,8 +230,12 @@ def fetch_korean_stock_price_snapshot(tickers: list[str], as_of_date: str) -> di
 
 
 def _fetch_single_foreign_stock_price_snapshot(symbol: str) -> dict[str, Any] | None:
-    ticker = yf.Ticker(symbol)
-    history = ticker.history(period="5d", auto_adjust=False)
+    try:
+        ticker = yf.Ticker(symbol)
+        history = ticker.history(period="5d", auto_adjust=False)
+    except Exception as exc:
+        logger.info("해외 구성종목 가격 조회 실패(%s): %s", symbol, exc)
+        return None
     if history is None or history.empty:
         return None
 
