@@ -202,7 +202,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   const [maRules, setMaRules] = useState<RankMaRule[]>(rankToolbarCache?.ma_rules ?? []);
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
-  const [metricMode, setMetricMode] = useState<"cumulative" | "monthly">("cumulative");
+  const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [dedupeEnabled, setDedupeEnabled] = useState(false);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
@@ -605,11 +605,32 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
       ),
     ];
 
+    const infoColumns: ColDef<RankGridRow>[] = [
+      {
+        field: "배당률",
+        headerName: "배당률",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: () => "-",
+      },
+      {
+        field: "보수",
+        headerName: "보수",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: () => "-",
+      },
+    ];
+
     return [
       ...leadingColumns,
       ...(metricMode === "cumulative"
         ? [...cumulativeColumns, duplicateColumn]
-        : [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]),
+        : metricMode === "monthly"
+          ? [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]
+          : [...monthlyLeadingColumns, ...infoColumns, duplicateColumn]),
     ];
   }, [maRules, metricMode, monthlyReturnLabels, selectedTickerType, selectedTickerTypeItem?.country_code]);
 
@@ -774,6 +795,13 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                       onClick={() => setMetricMode("monthly")}
                     >
                       월별
+                    </button>
+                    <button
+                      type="button"
+                      className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("info")}
+                    >
+                      정보
                     </button>
                   </div>
                 </label>
