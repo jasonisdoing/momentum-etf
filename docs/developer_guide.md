@@ -9,6 +9,7 @@
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
     *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
+    *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중 Mongo 캐시 조회/저장 및 KRX 로그인 세션 기반 수집
     *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시
     *   `fear_greed_service.py`: CNN 공포탐욕지수 연동 및 메모리 캐시
     *   **원칙**: 새로운 시장 지표, 가격 정보, 외부 데이터 크롤링 등은 혼동을 막기 위해 모두 이 폴더에서 각각의 서비스로 관리하고, 자체 캐시 시스템(TTL 등)을 구축합니다.
@@ -26,6 +27,7 @@
 3.  **서비스 오케스트레이션**:
     *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
     *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
+    *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 `etf_holdings_cache` 컬렉션에 날짜별로 저장하고 조회합니다.
 4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
 5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
@@ -36,6 +38,7 @@
 3.  **외부 연동 일원화**: 시장 지표나 새로운 데이터를 외부에서 파싱/API 통신해야 한다면 `services/` 하위에 위치시키며, 무분별한 요청을 방지하기 위한 캐싱 로직을 포함해야 합니다.
 4.  화면 계층과 일반 유틸은 외부 데이터 소스를 직접 호출하지 않고, 가능하면 `services/` 계층을 통해 접근합니다.
 5.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
+6.  한국 ETF 구성종목 비중은 화면 진입 시 실시간 조회하지 않고, 로컬/배치 스크립트가 `etf_holdings_cache`에 저장한 Mongo 캐시만 읽습니다.
 
 ## 2. 순위 화면 정합성 원칙
 

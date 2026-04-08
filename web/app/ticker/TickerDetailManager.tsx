@@ -57,6 +57,7 @@ type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
   holdings: TickerHoldingRow[];
+  holdings_as_of_date?: string | null;
   error?: string;
 };
 
@@ -322,6 +323,7 @@ export function TickerDetailManager({
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
+  const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -355,6 +357,7 @@ export function TickerDetailManager({
       setSelectedTicker(null);
       setRows([]);
       setHoldings([]);
+      setHoldingsAsOfDate(null);
       setError(null);
       return;
     }
@@ -379,6 +382,7 @@ export function TickerDetailManager({
 
     setRows([]);
     setHoldings([]);
+    setHoldingsAsOfDate(null);
     if (matches.length > 1) {
       setSelectedTicker(null);
       setError(`동일한 티커 ${qTicker}가 여러 종목 타입에 등록되어 있습니다.`);
@@ -412,11 +416,13 @@ export function TickerDetailManager({
       if (payload.error) throw new Error(payload.error);
       setRows(payload.rows);
       setHoldings(payload.holdings ?? []);
+      setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "데이터를 불러오지 못했습니다.");
       setRows([]);
       setHoldings([]);
+      setHoldingsAsOfDate(null);
     } finally {
       setLoading(false);
     }
@@ -624,6 +630,11 @@ export function TickerDetailManager({
     [holdings],
   );
 
+  const holdingsAsOfDateLabel = useMemo(() => {
+    if (!holdingsAsOfDate || holdingsAsOfDate.length !== 8) return null;
+    return `${holdingsAsOfDate.slice(0, 4)}-${holdingsAsOfDate.slice(4, 6)}-${holdingsAsOfDate.slice(6, 8)}`;
+  }, [holdingsAsOfDate]);
+
   const dailyColumns = useMemo<ColDef[]>(
     () => [
       {
@@ -786,8 +797,10 @@ export function TickerDetailManager({
                             <span className="tickerDetailTableTitle">구성종목비중</span>
                             <span className="text-muted tickerDetailTableMeta">
                               {holdingsRows.length > 0
-                                ? `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`
-                                : "데이터 확인 불가"}
+                                ? holdingsAsOfDateLabel
+                                  ? `적용일 ${holdingsAsOfDateLabel}`
+                                  : `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`
+                                : "캐시 없음"}
                             </span>
                           </div>
                           {holdingsRows.length > 0 ? (
@@ -802,7 +815,7 @@ export function TickerDetailManager({
                             </div>
                           ) : (
                             <div className="tickerDetailHoldingsEmpty">
-                              구성종목 데이터를 확인할 수 없습니다.
+                              구성종목 캐시가 없습니다.
                             </div>
                           )}
                         </div>
