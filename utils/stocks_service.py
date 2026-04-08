@@ -6,7 +6,7 @@ from utils.ticker_registry import load_ticker_type_configs as load_account_confi
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_nullable_number, normalize_text
-from utils.stock_list_io import add_stock
+from utils.stock_list_io import add_stock, hard_remove_stock
 from utils.stock_meta_updater import fetch_stock_info
 from services.price_service import get_realtime_snapshot
 from services.stock_cache_service import delete_stock_cache
@@ -358,15 +358,7 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
     type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
 
-    result = db.stock_meta.delete_one(
-        {
-            "ticker_type": type_norm,
-            "ticker": ticker_norm,
-            "is_deleted": {"$ne": True},
-        },
-    )
-
-    if result.deleted_count == 0:
+    if not hard_remove_stock(type_norm, ticker_norm):
         raise RuntimeError("삭제할 종목을 찾을 수 없습니다.")
 
     from utils.cache_utils import delete_cached_frame
