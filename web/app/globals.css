@@ -1827,6 +1827,18 @@ a {
   flex-direction: column;
 }
 
+.tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell,
+.tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell .ag-cell-value {
+  display: block;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tickerDetailHoldingsEmpty {
   flex: 1;
   min-height: 0;

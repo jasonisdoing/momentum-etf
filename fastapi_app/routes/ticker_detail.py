@@ -17,18 +17,6 @@ from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
-
-def _is_cash_holding(item: dict[str, object]) -> bool:
-    ticker = str(item.get("ticker") or "").strip().upper()
-    raw_code = str(item.get("raw_code") or "").strip().upper()
-    name = str(item.get("name") or item.get("raw_name") or "").strip()
-    if ticker.startswith("CASH") or ticker.startswith("KRD"):
-        return True
-    if raw_code.startswith("CASH") or raw_code.startswith("KRD"):
-        return True
-    return "현금" in name
-
-
 def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None, float | None]:
     if close_series is None or close_series.empty:
         return None, None
@@ -204,7 +192,7 @@ def get_ticker_detail(
         except Exception as exc:
             holdings_error = str(exc).strip() or "구성종목 데이터를 확인할 수 없습니다."
         else:
-            holdings = [item for item in list(holdings_document.get("holdings") or []) if not _is_cash_holding(item)]
+            holdings = list(holdings_document.get("holdings") or [])
             holdings_as_of_date = str(holdings_document.get("as_of_date") or "").strip() or None
             if holdings and holdings_as_of_date:
                 korean_tickers = [
