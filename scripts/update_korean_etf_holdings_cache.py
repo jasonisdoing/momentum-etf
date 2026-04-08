@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 from collections.abc import Iterable
 
 import pandas as pd
+
+# 프로젝트 루트를 Python 경로에 추가
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.etf_holdings_service import login_krx_session, sync_korean_etf_holdings_cache
 from utils.data_loader import get_trading_days
