@@ -57,7 +57,6 @@ const navGroups = [
     items: [
       { href: "/rank", label: "순위", icon: IconMedal2 },
       { href: "/ticker", label: "개별종목", icon: IconChartLine },
-      { href: "/stocks", label: "종목 관리", icon: IconListDetails },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
       { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
