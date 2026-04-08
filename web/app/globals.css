@@ -2689,6 +2689,14 @@ a {
   flex: 0 0 12rem;
 }
 
+.weeklyMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.weeklyMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 auto;
+}
+
 .appCardHeaderStack {
   display: flex;
   flex-wrap: wrap;
@@ -3153,6 +3161,10 @@ a {
 
   .stocksMainHeaderLeft .appLabeledField:first-child,
   .stocksMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
+  }
+
+  .weeklyMainHeaderLeft .appLabeledField {
     flex: 1 1 100%;
   }
 
