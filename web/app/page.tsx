@@ -258,11 +258,15 @@ export default function HomePage() {
       `}</style>
 
       <style jsx>{`
+        .account-section {
+          margin-bottom: 1rem !important;
+        }
         .account-header {
           color: #1d273b;
           font-weight: 800;
           letter-spacing: -0.02em;
-          font-size: 1.1rem;
+          font-size: 1.02rem;
+          margin-bottom: 0.65rem !important;
         }
         .account-dot {
           display: inline-block;
@@ -340,10 +344,10 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
         .stock-card {
           background-color: ${theme.sub};
           border-radius: 12px;
-          padding: 12px 16px;
+          padding: 8px 12px;
           display: flex;
           align-items: center;
-          gap: 12px;
+          gap: 8px;
           height: 100%;
           border: 1px solid rgba(0,0,0,0.02);
           transition: all 0.2s ease-in-out;
@@ -356,16 +360,16 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
           flex-shrink: 0;
         }
         .stock-icon {
-          width: 40px;
-          height: 40px;
+          width: 32px;
+          height: 32px;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
         }
         .stock-icon-inner {
-          width: 24px;
-          height: 24px;
+          width: 18px;
+          height: 18px;
           border-radius: 50%;
           display: flex;
           align-items: center;
@@ -373,8 +377,8 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
           background-color: white !important;
         }
         .stock-icon-dot {
-          width: 10px;
-          height: 10px;
+          width: 7px;
+          height: 7px;
           border-radius: 50%;
         }
         .stock-content {
@@ -382,10 +386,10 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
           min-width: 0;
         }
         .stock-name {
-          font-size: 0.95rem;
+          font-size: 0.88rem;
           font-weight: 700;
           color: #1d273b;
-          line-height: 1.25;
+          line-height: 1.2;
           display: -webkit-box;
           -webkit-line-clamp: 2;
           -webkit-box-orient: vertical;
@@ -396,16 +400,16 @@ function HoldingCard({ row, viewMode }: { row: HoldingsRow; viewMode: ViewMode }
           flex-shrink: 0;
         }
         .stock-price {
-          font-size: 1.1rem;
+          font-size: 0.98rem;
           font-weight: 800;
           color: #1d273b;
           letter-spacing: -0.02em;
           line-height: 1.1;
         }
         .stock-change {
-          font-size: 0.85rem;
+          font-size: 0.78rem;
           font-weight: 600;
-          margin-top: 2px;
+          margin-top: 1px;
           line-height: 1.1;
         }
 
