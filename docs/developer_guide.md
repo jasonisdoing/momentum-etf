@@ -42,6 +42,7 @@
     *   상장일, 배당률, 보수, 순자산총액, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
+    *   한국 ETF 저빈도 메타는 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`를 조회해 `stock_cache_meta.meta_cache`로 저장합니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 삭제 여부, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다.
 
@@ -53,6 +54,7 @@
 4.  화면 계층과 일반 유틸은 외부 데이터 소스를 직접 호출하지 않고, 가능하면 `services/` 계층을 통해 접근합니다.
 5.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
 6.  한국 ETF 구성종목 비중은 `/ticker` 화면 진입 시 네이버 `ETFComponent` API로 직접 조회합니다. 별도 Mongo 배치 캐시는 사용하지 않습니다.
+7.  배당률, 보수, 순자산총액, 상장일 같은 저빈도 ETF 메타는 실시간 화면 조회보다 `stock_cache_meta.meta_cache`를 우선 사용합니다.
 
 ## 2. 순위 화면 정합성 원칙
 

@@ -8,10 +8,12 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+from services.etf_meta_service import fetch_korean_etf_info_from_naver
+from services.stock_cache_service import refresh_stock_meta_cache
 from utils.data_loader import fetch_pykrx_name
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
-from utils.settings_loader import get_account_settings, list_available_accounts
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
 
 def fetch_naver_etf_names_map() -> dict[str, str]:
@@ -100,26 +102,55 @@ from collections.abc import Callable
 from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_deleted
 
 
-def update_account_metadata(account_id: str, progress_callback: Callable[[int, int, str], None] | None = None):
-    """지정된 계정의 모든 종목에 대한 메타데이터를 업데이트합니다."""
+def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str) -> None:
+    """한국 ETF 저빈도 메타 캐시를 네이버 기준으로 갱신한다."""
+    ticker_type_norm = str(ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    name_norm = str(name or "").strip() or ticker_norm
+    if not ticker_type_norm or not ticker_norm:
+        raise ValueError("ticker_type과 ticker가 필요합니다.")
+
+    etf_info = fetch_korean_etf_info_from_naver(ticker_norm)
+    meta_cache = {
+        "source": str(etf_info.get("source") or "naver_etf_meta"),
+        "updated_at": str(etf_info.get("fetched_at") or ""),
+        "reference_date": etf_info.get("reference_date"),
+        "listed_date": etf_info.get("listed_date"),
+        "dividend_yield_ttm": etf_info.get("dividend_yield_ttm"),
+        "dividend_per_share_ttm": etf_info.get("dividend_per_share_ttm"),
+        "recent_ex_dividend_at": etf_info.get("recent_ex_dividend_at"),
+        "expense_ratio": etf_info.get("expense_ratio"),
+        "total_net_assets": etf_info.get("total_net_assets"),
+        "issue_name": etf_info.get("issue_name"),
+        "base_index": etf_info.get("base_index"),
+    }
+    refresh_stock_meta_cache(
+        ticker_type_norm,
+        ticker_norm,
+        country_code="kor",
+        name=name_norm,
+        meta_cache=meta_cache,
+    )
+
+
+def update_ticker_type_metadata(
+    ticker_type: str, progress_callback: Callable[[int, int, str], None] | None = None
+):
+    """지정된 종목타입의 모든 종목 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
-    account_norm = (account_id or "").strip().lower()
+    type_norm = (ticker_type or "").strip().lower()
 
     try:
-        if account_norm in list_available_accounts():
-            settings = get_account_settings(account_norm)
-            country_code = settings.get("country_code", "kor").lower()
-        else:
-            logger.error(f"대상 ID '{account_norm}'를 찾을 수 없습니다.")
-            return
+        settings = get_ticker_type_settings(type_norm)
+        country_code = str(settings.get("country_code") or "").strip().lower()
     except Exception as e:
-        logger.error(f"대상 설정을 로드할 수 없습니다: {e}")
+        logger.error(f"종목타입 설정을 로드할 수 없습니다 ({type_norm}): {e}")
         return
 
     # 삭제된 종목 포함하여 모든 종목 로드
-    stock_data = get_all_etfs_including_deleted(account_norm)
+    stock_data = get_all_etfs_including_deleted(type_norm)
     if not stock_data:
-        logger.warning(f"'{account_norm}' 계정의 종목 데이터가 비어있습니다.")
+        logger.warning(f"'{type_norm}' 종목타입의 종목 데이터가 비어있습니다.")
         return
 
     updated_count = 0
@@ -129,7 +160,7 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
         ticker_entries.append(stock)
 
     total_count = len(ticker_entries)
-    logger.info(f"[{account_norm.upper()}] 메타데이터 업데이트 시작 (총 {total_count}개 종목)")
+    logger.info(f"[{type_norm.upper()}] 메타데이터 업데이트 시작 (총 {total_count}개 종목)")
 
     if progress_callback:
         progress_callback(0, total_count, "데이터 준비 중...")
@@ -150,7 +181,7 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
             continue
 
         try:
-            update_single_stock_metadata(stock, country_code, naver_etf_map, account_norm)
+            update_single_stock_metadata(stock, country_code, naver_etf_map, type_norm)
 
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
@@ -174,6 +205,14 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
                 if f in stock:
                     update_doc[f] = stock[f]
 
+            if country_code == "kor":
+                try:
+                    _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name))
+                except Exception as meta_cache_error:
+                    logger.error(
+                        f"[{type_norm.upper()}/{ticker}] ETF 메타 캐시 갱신 실패: {meta_cache_error}"
+                    )
+
             updates_for_db.append(update_doc)
 
             if progress_callback:
@@ -187,30 +226,30 @@ def update_account_metadata(account_id: str, progress_callback: Callable[[int, i
     # 메타데이터가 갱신된 필드만 추출하여 bulk_update 수행 (save_etfs를 쓰면 is_deleted가 리셋되는 버그 방지)
     try:
         if updates_for_db:
-            modified = bulk_update_stocks(account_norm, updates_for_db)
-            logger.info(f"[{account_norm.upper()}] {modified}개 메타데이터 변경사항 저장 완료")
+            modified = bulk_update_stocks(type_norm, updates_for_db)
+            logger.info(f"[{type_norm.upper()}] {modified}개 메타데이터 변경사항 저장 완료")
     except Exception as e:
-        logger.error(f"'{account_id}' 설정 저장 실패: {e}")
+        logger.error(f"'{type_norm}' 설정 저장 실패: {e}")
 
 
-def update_stock_metadata(account_id: str | None = None):
+def update_stock_metadata(ticker_type: str | None = None):
     """
-    모든 계정 또는 특정 계정의 종목 메타데이터를 업데이트합니다.
+    모든 종목타입 또는 특정 종목타입의 메타데이터를 업데이트합니다.
     """
     logger = get_app_logger()
 
-    accounts_to_update = []
-    available_accounts = list_available_accounts()
+    ticker_types_to_update: list[str] = []
+    available_ticker_types = list_available_ticker_types()
 
-    if account_id:
-        norm_id = account_id.strip().lower()
-        if norm_id in available_accounts:
-            accounts_to_update.append(norm_id)
+    if ticker_type:
+        type_norm = ticker_type.strip().lower()
+        if type_norm in available_ticker_types:
+            ticker_types_to_update.append(type_norm)
         else:
-            logger.error(f"대상 ID '{account_id}'를 찾을 수 없습니다.")
+            logger.error(f"대상 종목타입 '{ticker_type}'를 찾을 수 없습니다.")
             return
     else:
-        accounts_to_update = available_accounts.copy()
+        ticker_types_to_update = available_ticker_types.copy()
         try:
             logger.info("KIS 국내 ETF 마스터 캐시 갱신을 시작합니다.")
             refreshed_count = refresh_kis_domestic_etf_master_cache()
@@ -218,10 +257,10 @@ def update_stock_metadata(account_id: str | None = None):
         except Exception as exc:
             logger.error("KIS 국내 ETF 마스터 캐시 갱신 실패: %s", exc)
 
-    logger.info(f"메타데이터 업데이트 대상 계정: {accounts_to_update}")
+    logger.info(f"메타데이터 업데이트 대상 종목타입: {ticker_types_to_update}")
 
-    for account in accounts_to_update:
-        update_account_metadata(account)
+    for type_norm in ticker_types_to_update:
+        update_ticker_type_metadata(type_norm)
 
     logger.info("모든 메타데이터 업데이트 작업이 완료되었습니다.")
 
@@ -347,21 +386,20 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
         return None
 
 
-def update_single_ticker_metadata(account_id: str, ticker: str) -> None:
+def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     """단일 종목의 메타데이터를 조회하고 DB에 저장합니다."""
     logger = get_app_logger()
-    account_norm = (account_id or "").strip().lower()
+    type_norm = (ticker_type or "").strip().lower()
     ticker_norm = (ticker or "").strip().upper()
 
-    if not account_norm or not ticker_norm:
+    if not type_norm or not ticker_norm:
         return
 
     try:
-        settings = get_account_settings(account_norm)
-        country_code = settings.get("country_code", "kor").lower()
-    except Exception:
-        logger.warning(f"[{account_norm.upper()}/{ticker_norm}] 계정 설정 로드 실패, 기본 국가코드(kor) 사용")
-        country_code = "kor"
+        settings = get_ticker_type_settings(type_norm)
+        country_code = str(settings.get("country_code") or "").strip().lower()
+    except Exception as exc:
+        raise RuntimeError(f"[{type_norm.upper()}/{ticker_norm}] 종목타입 설정 로드 실패: {exc}") from exc
 
     naver_etf_map = {}
     if country_code == "kor":
@@ -375,14 +413,20 @@ def update_single_ticker_metadata(account_id: str, ticker: str) -> None:
     db = get_db_connection()
     if db is not None:
         existing = db.stock_meta.find_one(
-            {"account_id": account_norm, "ticker": ticker_norm},
+            {"ticker_type": type_norm, "ticker": ticker_norm},
             {"name": 1, "listing_date": 1},
         )
         if existing:
             stock["name"] = existing.get("name") or ""
             stock["listing_date"] = existing.get("listing_date")
 
-    update_single_stock_metadata(stock, country_code, naver_etf_map, account_norm)
+    update_single_stock_metadata(stock, country_code, naver_etf_map, type_norm)
+
+    if country_code == "kor":
+        try:
+            _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
+        except Exception as meta_cache_error:
+            logger.error(f"[{type_norm.upper()}/{ticker_norm}] ETF 메타 캐시 갱신 실패: {meta_cache_error}")
 
     update_doc = {"ticker": ticker_norm}
     fields_to_update = [
@@ -401,10 +445,10 @@ def update_single_ticker_metadata(account_id: str, ticker: str) -> None:
             update_doc[f] = stock[f]
 
     try:
-        modified = bulk_update_stocks(account_norm, [update_doc])
-        logger.info(f"[{account_norm.upper()}/{ticker_norm}] 메타데이터 업데이트 완료 ({modified}건)")
+        modified = bulk_update_stocks(type_norm, [update_doc])
+        logger.info(f"[{type_norm.upper()}/{ticker_norm}] 메타데이터 업데이트 완료 ({modified}건)")
     except Exception as e:
-        logger.error(f"[{account_norm.upper()}/{ticker_norm}] 메타데이터 저장 실패: {e}")
+        logger.error(f"[{type_norm.upper()}/{ticker_norm}] 메타데이터 저장 실패: {e}")
 
 
 def update_single_stock_metadata(

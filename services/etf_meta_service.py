@@ -34,6 +34,15 @@ def _to_float(value: Any) -> float | None:
     return float(parsed)
 
 
+def _normalize_listed_date(value: Any) -> str | None:
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    if len(normalized) == 8 and normalized.isdigit():
+        return f"{normalized[:4]}-{normalized[4:6]}-{normalized[6:8]}"
+    return normalized
+
+
 def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
     if not cache_entry:
         return False
@@ -88,7 +97,7 @@ def fetch_korean_etf_info_from_naver(ticker: str) -> dict[str, Any]:
         "recent_ex_dividend_at": str(dividend_payload.get("recentExDividendAt") or "").strip() or None,
         "expense_ratio": _to_float(base_payload.get("fundPay")),
         "total_net_assets": _to_float(base_payload.get("totalNetAssets")),
-        "listed_date": str(base_payload.get("listedDate") or "").strip() or None,
+        "listed_date": _normalize_listed_date(base_payload.get("listedDate")),
         "issue_name": str(base_payload.get("issueName") or "").strip() or None,
         "base_index": str(base_payload.get("etfBaseIdx") or "").strip() or None,
         "fetched_at": now.isoformat(),
