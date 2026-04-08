@@ -245,6 +245,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
   const [selectedTickerType, setSelectedAccountId] = useState(
     rankToolbarCache?.ticker_type ?? readRememberedTickerType() ?? "",
@@ -364,7 +365,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
   }, [gridRows, deferredNameKeyword, dedupeEnabled]);
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
-    if (!addingRow) {
+    if (pageMode !== "manage" || !addingRow) {
       return filteredGridRows;
     }
     return [
@@ -410,7 +411,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
       },
       ...filteredGridRows,
     ];
-  }, [addingRow, filteredGridRows]);
+  }, [addingRow, filteredGridRows, pageMode]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -492,7 +493,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
             params.data && dirtyCellKeys.includes(buildDirtyCellKey(params.data.id, "버킷")) ? " rankDirtyCell" : "";
           return `${getBucketCellClass(String(params.value ?? ""))}${dirtyClass}`;
         },
-        editable: (params) => !params.data?.__isAddingRow,
+        editable: (params) => pageMode === "manage" && !params.data?.__isAddingRow,
         cellEditor: "agSelectCellEditor",
         cellEditorParams: {
           values: BUCKET_OPTIONS.map((option) => option.name),
@@ -856,7 +857,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
           ? [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]
           : [...monthlyLeadingColumns, ...infoColumns, duplicateColumn]),
     ];
-  }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, selectedTickerType, selectedTickerTypeItem?.country_code]);
+  }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, pageMode, selectedTickerType, selectedTickerTypeItem?.country_code]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
@@ -1124,77 +1125,6 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                     )}
                   </select>
                 </label>
-
-                {maRules.map((rule) => (
-                  <label key={rule.order} className="appLabeledField">
-                    <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
-                    <div className="rankRuleFieldRow">
-                      <select
-                        className="form-select"
-                        value={rule.ma_type}
-                        onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
-                        disabled={maTypeOptions.length === 0}
-                      >
-                        {maTypeOptions.map((option) => (
-                          <option key={`${rule.order}-${option}`} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
-                      <select
-                        className="form-select"
-                        value={String(rule.ma_months)}
-                        onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
-                        disabled={maTypeOptions.length === 0}
-                      >
-                        {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                          <option key={`${rule.order}-${month}`} value={month}>
-                            {month}개월
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </label>
-                ))}
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">수익률 보기</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
-                    <button
-                      type="button"
-                      className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMetricMode("cumulative")}
-                    >
-                      누적
-                    </button>
-                    <button
-                      type="button"
-                      className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMetricMode("monthly")}
-                    >
-                      월별
-                    </button>
-                    <button
-                      type="button"
-                      className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMetricMode("info")}
-                    >
-                      정보
-                    </button>
-                  </div>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">중복제거</span>
-                  <span className="rankSwitchField">
-                    <label className="form-check form-switch mb-0 rankSwitchFieldInner">
-                      <input
-                        className="form-check-input"
-                        type="checkbox"
-                        checked={dedupeEnabled}
-                        onChange={(event) => setDedupeEnabled(event.target.checked)}
-                      />
-                    </label>
-                  </span>
-                </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">종목명 검색</span>
                   <input
@@ -1205,41 +1135,136 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                     onChange={(event) => setNameKeyword(event.target.value)}
                   />
                 </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">화면 모드</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="순위 화면 모드">
+                    <button
+                      type="button"
+                      className={pageMode === "rank" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setPageMode("rank")}
+                    >
+                      순위모드
+                    </button>
+                    <button
+                      type="button"
+                      className={pageMode === "manage" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setPageMode("manage")}
+                    >
+                      관리모드
+                    </button>
+                  </div>
+                </label>
+                {pageMode === "rank" ? (
+                  <>
+                    {maRules.map((rule) => (
+                      <label key={rule.order} className="appLabeledField">
+                        <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
+                        <div className="rankRuleFieldRow">
+                          <select
+                            className="form-select"
+                            value={rule.ma_type}
+                            onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
+                            disabled={maTypeOptions.length === 0}
+                          >
+                            {maTypeOptions.map((option) => (
+                              <option key={`${rule.order}-${option}`} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            className="form-select"
+                            value={String(rule.ma_months)}
+                            onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
+                            disabled={maTypeOptions.length === 0}
+                          >
+                            {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
+                              <option key={`${rule.order}-${month}`} value={month}>
+                                {month}개월
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </label>
+                    ))}
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">수익률 보기</span>
+                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
+                        <button
+                          type="button"
+                          className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode("cumulative")}
+                        >
+                          누적
+                        </button>
+                        <button
+                          type="button"
+                          className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode("monthly")}
+                        >
+                          월별
+                        </button>
+                        <button
+                          type="button"
+                          className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode("info")}
+                        >
+                          정보
+                        </button>
+                      </div>
+                    </label>
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">중복제거</span>
+                      <span className="rankSwitchField">
+                        <label className="form-check form-switch mb-0 rankSwitchFieldInner">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            checked={dedupeEnabled}
+                            onChange={(event) => setDedupeEnabled(event.target.checked)}
+                          />
+                        </label>
+                      </span>
+                    </label>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
 
-          <div className="card-header appActionHeader bg-light-subtle border-top">
-            <div className="appActionHeaderInner">
-              <button
-                className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                type="button"
-                onClick={handleAddRow}
-                disabled={loading || isPending || Boolean(addingRow)}
-              >
-                <IconPlus size={16} stroke={2} />
-                <span>추가</span>
-              </button>
-              <button
-                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                type="button"
-                onClick={handleSaveChanges}
-                disabled={loading || isPending || (!addingRow && dirtyRowIds.length === 0)}
-              >
-                <IconDeviceFloppy size={16} stroke={2} />
-                <span>저장</span>
-              </button>
-              <button
-                className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                type="button"
-                onClick={handleDeleteSelected}
-                disabled={loading || isPending || selectedTickers.length === 0}
-              >
-                <IconTrash size={16} stroke={2} />
-                <span>삭제</span>
-              </button>
+          {pageMode === "manage" ? (
+            <div className="card-header appActionHeader bg-light-subtle border-top">
+              <div className="appActionHeaderInner">
+                <button
+                  className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleAddRow}
+                  disabled={loading || isPending || Boolean(addingRow)}
+                >
+                  <IconPlus size={16} stroke={2} />
+                  <span>추가</span>
+                </button>
+                <button
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleSaveChanges}
+                  disabled={loading || isPending || (!addingRow && dirtyRowIds.length === 0)}
+                >
+                  <IconDeviceFloppy size={16} stroke={2} />
+                  <span>저장</span>
+                </button>
+                <button
+                  className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  type="button"
+                  onClick={handleDeleteSelected}
+                  disabled={loading || isPending || selectedTickers.length === 0}
+                >
+                  <IconTrash size={16} stroke={2} />
+                  <span>삭제</span>
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
 
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="appGridFillWrap">
@@ -1262,25 +1287,33 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                 minHeight="100%"
                 gridOptions={{
                   suppressMovableColumns: true,
-                  rowSelection: {
-                    mode: "multiRow",
-                    checkboxes: (params) => !params.data?.__isAddingRow,
-                    headerCheckbox: true,
-                    hideDisabledCheckboxes: true,
-                    enableClickSelection: false,
-                  },
-                  selectionColumnDef: {
-                    width: 52,
-                    minWidth: 52,
-                    maxWidth: 52,
-                    pinned: "left",
-                    sortable: false,
-                    resizable: false,
-                    suppressMovable: true,
-                    headerName: "",
-                    cellClass: "stocksSelectCell",
-                  },
+                  rowSelection: pageMode === "manage"
+                    ? {
+                        mode: "multiRow",
+                        checkboxes: (params) => !params.data?.__isAddingRow,
+                        headerCheckbox: true,
+                        hideDisabledCheckboxes: true,
+                        enableClickSelection: false,
+                      }
+                    : undefined,
+                  selectionColumnDef: pageMode === "manage"
+                    ? {
+                        width: 52,
+                        minWidth: 52,
+                        maxWidth: 52,
+                        pinned: "left",
+                        sortable: false,
+                        resizable: false,
+                        suppressMovable: true,
+                        headerName: "",
+                        cellClass: "stocksSelectCell",
+                      }
+                    : undefined,
                   onSelectionChanged: (params: { api: { getSelectedRows: () => RankGridRow[] } }) => {
+                    if (pageMode !== "manage") {
+                      setSelectedTickers([]);
+                      return;
+                    }
                     setSelectedTickers(
                       params.api
                         .getSelectedRows()
@@ -1293,7 +1326,7 @@ export function RankManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?:
                     newValue?: unknown;
                     oldValue?: unknown;
                   }) => {
-                    if (!params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
+                    if (pageMode !== "manage" || !params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
                       return;
                     }
                     handleBucketChanged(params.data, String(params.newValue ?? ""));
