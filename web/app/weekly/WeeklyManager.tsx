@@ -452,31 +452,37 @@ export function WeeklyManager({
         <div className="card appCard appTableCardFill">
           <div className="card-header">
             <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+              <div className="appMainHeaderLeft weeklyMainHeaderLeft">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">보기 방식</span>
+                  <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+                    <button
+                      type="button"
+                      className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setViewMode("core")}
+                    >
+                      핵심만 보기
+                    </button>
+                    <button
+                      type="button"
+                      className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setViewMode("full")}
+                    >
+                      전체 보기
+                    </button>
+                  </div>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">집계</span>
                   <button
                     type="button"
-                    className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    onClick={() => setViewMode("core")}
+                    className="btn btn-success btn-sm px-3 fw-bold"
+                    onClick={handleAggregate}
+                    disabled={isPending}
                   >
-                    핵심만 보기
+                    {isPending ? "집계 중..." : "이번주 데이터 집계"}
                   </button>
-                  <button
-                    type="button"
-                    className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    onClick={() => setViewMode("full")}
-                  >
-                    전체 보기
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm px-3 fw-bold"
-                  onClick={handleAggregate}
-                  disabled={isPending}
-                >
-                  {isPending ? "집계 중..." : "이번주 데이터 집계"}
-                </button>
+                </label>
               </div>
             </div>
           </div>
