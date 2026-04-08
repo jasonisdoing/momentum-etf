@@ -2313,6 +2313,14 @@ a {
   white-space: nowrap;
 }
 
+.weeklyAgGrid .ag-cell.tableAlignRight {
+  justify-content: flex-end;
+}
+
+.weeklyAgGrid .ag-cell.tableAlignRight .ag-cell-value {
+  text-align: right;
+}
+
 .weeklyAgGrid .ag-cell.weeklyMemoCell .ag-cell-value {
   white-space: nowrap;
   overflow: hidden;
