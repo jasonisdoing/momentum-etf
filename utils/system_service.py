@@ -16,7 +16,7 @@ SystemAction = Literal["asset_summary"]
 SCHEDULE_ROWS = [
     {
         "job": "종목 메타데이터 업데이트",
-        "target": "모든 계좌",
+        "target": "모든 종목타입",
         "cadence": "매일 09:00 KST",
         "command": "python scripts/stock_meta_cache_updater.py",
     },
