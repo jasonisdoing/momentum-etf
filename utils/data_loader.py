@@ -11,6 +11,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from datetime import datetime, time
 from io import StringIO
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -71,12 +72,6 @@ from utils.stock_list_io import get_etfs_by_country, set_listing_date
 # ... (omitted code)
 
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
-warnings.filterwarnings(
-    "ignore",
-    message=r"\['break_start', 'break_end'\] are discontinued",
-    category=UserWarning,
-    module=r"^pandas_market_calendars\.",
-)
 
 
 class _PykrxLogFilter(logging.Filter):
@@ -380,67 +375,50 @@ def get_today_str() -> str:
 def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Timestamp]:
     """
     지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
-    한국(KRX)는 pandas_market_calendars만 사용합니다.
+    국가별 거래일 파일(zcountry/{country}/market_calendars.json)만 사용합니다.
     """
-    trading_days_ts: list[pd.Timestamp] = []
-
-    def _pmc(country_code: str) -> list[pd.Timestamp]:
-        import pandas_market_calendars as mcal  # type: ignore
-
-        cal_code = {"kor": "XKRX", "us": "NYSE", "au": "XASX"}.get(country_code)
-        if not cal_code:
-            return []
-        try:
-            cal = mcal.get_calendar(cal_code)
-            # 최신 pandas_market_calendars에서는 폐지된 장중 시간대를 새 API로 제거합니다.
-            try:
-                dmt = getattr(cal, "discontinued_market_times", {})
-                for tname in getattr(dmt, "keys", lambda: [])():
-                    try:
-                        cal.remove_time(tname)  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
-            except Exception:
-                # 이전 버전에서는 기존 방식으로 폴백합니다.
-                for tname in ("break_start", "break_end"):
-                    try:
-                        cal.remove_time(tname)  # type: ignore[attr-defined]
-                    except Exception:
-                        pass
-
-            # 가능하다면 날짜만 반환하는 valid_days 결과를 우선 사용합니다.
-            try:
-                days_idx = cal.valid_days(start_date=start_date, end_date=end_date)
-                if days_idx is not None and len(days_idx) > 0:
-                    return [pd.Timestamp(pd.Timestamp(d).date()) for d in days_idx]
-            except Exception:
-                pass
-
-            # 위 단계가 실패하면 schedule 기반으로 폴백하고 폐기 경고를 숨깁니다.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message=r"\['break_start', 'break_end'\] are discontinued",
-                    category=UserWarning,
-                )
-                sched = cal.schedule(start_date=start_date, end_date=end_date)
-            if sched is not None and not sched.empty:
-                return [pd.Timestamp(d.date()) for d in sched.index]
-        except Exception as e:
-            logger.warning("pandas_market_calendars(%s:%s) 조회 실패: %s", country_code, cal_code, e)
-        return []
-
     country_code = (country or "").strip().lower()
+    if not country_code:
+        raise ValueError("거래일 조회 국가 코드가 필요합니다.")
 
-    if country_code in ("kor", "us", "au"):
-        trading_days_ts = _pmc(country_code)
-    else:
-        logger.error("지원하지 않는 국가 코드입니다: %s", country_code)
-        return []
+    calendar_path = Path(__file__).resolve().parents[1] / "zcountry" / country_code / "market_calendars.json"
+    if not calendar_path.exists():
+        raise FileNotFoundError(f"거래일 캘린더 파일이 없습니다: {calendar_path}")
 
-    # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
+    try:
+        payload = json.loads(calendar_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise RuntimeError(f"거래일 캘린더 파일을 읽을 수 없습니다: {calendar_path}") from exc
+
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"거래일 캘린더 파일 형식이 올바르지 않습니다: {calendar_path}")
+
+    raw_start = str(payload.get("start_date") or "").strip()
+    raw_end = str(payload.get("end_date") or "").strip()
+    raw_days = payload.get("trading_days")
+    if not raw_start or not raw_end or not isinstance(raw_days, list):
+        raise RuntimeError(f"거래일 캘린더 필수 필드가 없습니다: {calendar_path}")
+
     start_date_ts = pd.to_datetime(start_date).normalize()
     end_date_ts = pd.to_datetime(end_date).normalize()
+    file_start_ts = pd.to_datetime(raw_start).normalize()
+    file_end_ts = pd.to_datetime(raw_end).normalize()
+    if start_date_ts < file_start_ts or end_date_ts > file_end_ts:
+        raise RuntimeError(
+            "거래일 캘린더 범위를 벗어났습니다: "
+            f"country={country_code}, requested_start={start_date_ts.strftime('%Y-%m-%d')}, "
+            f"requested_end={end_date_ts.strftime('%Y-%m-%d')}, "
+            f"file_start={file_start_ts.strftime('%Y-%m-%d')}, file_end={file_end_ts.strftime('%Y-%m-%d')}"
+        )
+
+    trading_days_ts: list[pd.Timestamp] = []
+    for raw_day in raw_days:
+        normalized_day = str(raw_day or "").strip()
+        if not normalized_day:
+            continue
+        trading_days_ts.append(pd.to_datetime(normalized_day).normalize())
+
+    # 최종적으로 start_date와 end_date 사이의 날짜만 반환하고, 중복 제거 및 정렬합니다.
     final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
 
     return sorted(list(set(final_list)))
