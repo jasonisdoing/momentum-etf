@@ -7,7 +7,6 @@ import type { ReactNode } from "react";
 import {
   IconCash,
   IconFlask2,
-  IconChartLine,
   IconChevronDown,
   IconMoodSmile,
   IconHome,
@@ -56,7 +55,6 @@ const navGroups = [
     icon: IconListDetails,
     items: [
       { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
-      { href: "/ticker", label: "개별종목", icon: IconChartLine },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
       { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
