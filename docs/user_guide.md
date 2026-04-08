@@ -109,10 +109,10 @@ npm run dev
 ./.venv/bin/python scripts/update_korean_etf_holdings_cache.py
 ```
 
-특정 기준일을 지정하려면:
+특정 ETF 하나만 테스트하려면:
 
 ```bash
-./.venv/bin/python scripts/update_korean_etf_holdings_cache.py --date 20250407
+./.venv/bin/python scripts/update_korean_etf_holdings_cache.py --ticker 442580
 ```
 
 필수 환경변수:
