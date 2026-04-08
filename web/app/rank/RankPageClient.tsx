@@ -45,7 +45,7 @@ export function RankPageClient() {
   );
 
   return (
-    <PageFrame title="순위" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="종목 관리" fullHeight fullWidth titleRight={titleRight}>
       <RankManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );
