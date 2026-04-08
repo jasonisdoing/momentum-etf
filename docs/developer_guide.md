@@ -9,7 +9,7 @@
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
     *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
-    *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 실시간 조회합니다. 국내 구성종목은 6자리 종목코드, 해외 구성종목은 `componentReutersCode`에서 추출한 심볼을 표시용 `ticker`로 사용하고, 원본 ISIN은 `raw_code`에 저장합니다. 해외 구성종목 가격 조회는 응답 시점에 Yahoo를 사용하고 서비스 메모리 TTL 캐시를 적용합니다.
+    *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 조회해 메타 캐시에 저장할 형태로 정규화합니다. 국내 구성종목은 6자리 종목코드, 해외 구성종목은 `componentReutersCode`에서 추출한 심볼을 표시용 `ticker`로 사용하고, 원본 ISIN은 `raw_code`에 저장합니다. 해외 구성종목 가격 조회는 응답 시점에 Yahoo를 사용하고 서비스 메모리 TTL 캐시를 적용합니다.
     *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시
     *   `fear_greed_service.py`: CNN 공포탐욕지수 연동 및 메모리 캐시
     *   **원칙**: 새로운 시장 지표, 가격 정보, 외부 데이터 크롤링 등은 혼동을 막기 위해 모두 이 폴더에서 각각의 서비스로 관리하고, 자체 캐시 시스템(TTL 등)을 구축합니다.
@@ -27,7 +27,7 @@
 3.  **서비스 오케스트레이션**:
     *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
     *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
-    *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 실시간 조회하고, 해외 가격은 Yahoo TTL 캐시를 사용해 보조합니다.
+    *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 수집하고, 응답 시점에는 메타 캐시에 저장된 구성종목에 해외 가격만 Yahoo TTL 캐시로 보조합니다.
 4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
 5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
@@ -42,7 +42,7 @@
     *   상장일, 배당률, 보수, 순자산총액, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
-    *   한국 ETF 저빈도 메타는 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`를 조회해 `stock_cache_meta.meta_cache`로 저장합니다.
+    *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 삭제 여부, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다.
 
@@ -53,8 +53,10 @@
 3.  **외부 연동 일원화**: 시장 지표나 새로운 데이터를 외부에서 파싱/API 통신해야 한다면 `services/` 하위에 위치시키며, 무분별한 요청을 방지하기 위한 캐싱 로직을 포함해야 합니다.
 4.  화면 계층과 일반 유틸은 외부 데이터 소스를 직접 호출하지 않고, 가능하면 `services/` 계층을 통해 접근합니다.
 5.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
-6.  한국 ETF 구성종목 비중은 `/ticker` 화면 진입 시 네이버 `ETFComponent` API로 직접 조회합니다. 별도 Mongo 배치 캐시는 사용하지 않습니다.
-7.  배당률, 보수, 순자산총액, 상장일 같은 저빈도 ETF 메타는 실시간 화면 조회보다 `stock_cache_meta.meta_cache`를 우선 사용합니다.
+6.  실시간 가격데이터를 제외한 값은 우선 `종목 캐시`에 저장하고 읽습니다. 화면 진입 시 외부 원천을 다시 호출하지 않고, 캐시된 메타/구성종목을 한꺼번에 읽어 응답 속도를 유지하는 것을 기본 원칙으로 삼습니다.
+7.  한국 ETF 구성종목 비중은 `stock_cache_meta.holdings_cache`를 우선 사용합니다. `/ticker`는 구성종목 목록/비중을 실시간 조회하지 않습니다.
+8.  배당률, 보수, 순자산총액, 상장일 같은 저빈도 ETF 메타는 `stock_cache_meta.meta_cache`를 우선 사용합니다.
+9.  앞으로 새로운 저빈도 항목(예: ETF 메타, 구성종목 속성, 기초지수 관련 부가정보)을 발견하면, 실시간 가격데이터가 아닌 이상 먼저 `stock_cache_meta`에 저장하는 방향을 기본값으로 삼습니다.
 
 ## 2. 순위 화면 정합성 원칙
 

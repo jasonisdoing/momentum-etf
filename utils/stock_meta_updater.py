@@ -8,8 +8,9 @@ import pandas as pd
 import requests
 import yfinance as yf
 
+from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
-from services.stock_cache_service import refresh_stock_meta_cache
+from services.stock_cache_service import refresh_stock_cache
 from utils.data_loader import fetch_pykrx_name
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
@@ -103,7 +104,7 @@ from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_delet
 
 
 def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str) -> None:
-    """한국 ETF 저빈도 메타 캐시를 네이버 기준으로 갱신한다."""
+    """한국 ETF 메타/구성종목 캐시를 네이버 기준으로 함께 갱신한다."""
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
     name_norm = str(name or "").strip() or ticker_norm
@@ -111,6 +112,7 @@ def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str) -> 
         raise ValueError("ticker_type과 ticker가 필요합니다.")
 
     etf_info = fetch_korean_etf_info_from_naver(ticker_norm)
+    holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
     meta_cache = {
         "source": str(etf_info.get("source") or "naver_etf_meta"),
         "updated_at": str(etf_info.get("fetched_at") or ""),
@@ -124,12 +126,20 @@ def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str) -> 
         "issue_name": etf_info.get("issue_name"),
         "base_index": etf_info.get("base_index"),
     }
-    refresh_stock_meta_cache(
+    holdings_cache = {
+        "source": str(holdings_info.get("source") or "naver_etf_component"),
+        "updated_at": str(holdings_info.get("fetched_at") or ""),
+        "reference_date": holdings_info.get("as_of_date"),
+        "holdings_count": holdings_info.get("holdings_count"),
+        "items": list(holdings_info.get("holdings") or []),
+    }
+    refresh_stock_cache(
         ticker_type_norm,
         ticker_norm,
         country_code="kor",
         name=name_norm,
         meta_cache=meta_cache,
+        holdings_cache=holdings_cache,
     )
 
 
