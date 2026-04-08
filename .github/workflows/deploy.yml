@@ -19,6 +19,7 @@ jobs:
           username: ${{ secrets.ORACLE_VM_USERNAME }}
           key: ${{ secrets.ORACLE_VM_SSH_KEY }}
           script: |
+            set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
             if [ ! -d .git ]; then
