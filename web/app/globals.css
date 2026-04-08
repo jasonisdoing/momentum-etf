@@ -1809,11 +1809,12 @@ a {
 
 .tickerDetailChartWrap {
   position: relative;
+  min-width: 0;
 }
 
 .tickerDetailTopGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.75fr) minmax(300px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
   align-items: stretch;
 }
@@ -1822,6 +1823,7 @@ a {
   display: flex;
   height: 420px;
   min-height: 0;
+  min-width: 0;
   flex-direction: column;
 }
 
