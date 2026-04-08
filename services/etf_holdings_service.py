@@ -188,18 +188,56 @@ def fetch_korean_stock_price_snapshot(tickers: list[str], as_of_date: str) -> di
         return {}
 
     target_date = pd.Timestamp(normalized_date)
-    trading_days = get_trading_days(
-        (target_date - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
-        target_date.strftime("%Y-%m-%d"),
-        "kor",
-    )
+    search_start_date = (target_date - pd.Timedelta(days=10)).strftime("%Y-%m-%d")
+    search_end_date = target_date.strftime("%Y-%m-%d")
+    try:
+        trading_days = get_trading_days(
+            search_start_date,
+            search_end_date,
+            "kor",
+        )
+    except Exception as exc:
+        logger.exception(
+            "한국 거래일 조회 실패: as_of_date=%s, search_start=%s, search_end=%s, tickers=%s",
+            normalized_date,
+            search_start_date,
+            search_end_date,
+            normalized_tickers,
+        )
+        raise RuntimeError(
+            "한국 거래일 조회에 실패했습니다: "
+            f"as_of_date={normalized_date}, search_start={search_start_date}, "
+            f"search_end={search_end_date}, original_error={exc}"
+        ) from exc
+
     normalized_trading_days = [pd.Timestamp(day).strftime("%Y%m%d") for day in trading_days]
     if normalized_date not in normalized_trading_days:
-        raise RuntimeError(f"한국 거래일이 아닌 날짜입니다: {normalized_date}")
+        logger.error(
+            "한국 거래일 불일치: as_of_date=%s, search_start=%s, search_end=%s, trading_days=%s, tickers=%s",
+            normalized_date,
+            search_start_date,
+            search_end_date,
+            normalized_trading_days,
+            normalized_tickers,
+        )
+        raise RuntimeError(
+            "한국 거래일 목록에 기준일이 없습니다: "
+            f"as_of_date={normalized_date}, search_start={search_start_date}, "
+            f"search_end={search_end_date}, trading_days={normalized_trading_days}"
+        )
 
     target_index = normalized_trading_days.index(normalized_date)
     if target_index == 0:
-        raise RuntimeError(f"전일 거래일을 계산할 수 없습니다: {normalized_date}")
+        logger.error(
+            "전일 거래일 계산 실패: as_of_date=%s, trading_days=%s, tickers=%s",
+            normalized_date,
+            normalized_trading_days,
+            normalized_tickers,
+        )
+        raise RuntimeError(
+            "전일 거래일을 계산할 수 없습니다: "
+            f"as_of_date={normalized_date}, trading_days={normalized_trading_days}"
+        )
     previous_date = normalized_trading_days[target_index - 1]
 
     result: dict[str, dict[str, Any]] = {}
