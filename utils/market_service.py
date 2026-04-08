@@ -70,7 +70,7 @@ def load_market_data() -> dict[str, Any]:
     doc = db.etf_market_master.find_one({"master_id": "kor_etf_market"}) or {}
     rows = doc.get("rows") or []
     if not rows:
-        raise RuntimeError("ETF 마켓 캐시가 없습니다. stock_meta_updater를 먼저 실행하세요.")
+        raise RuntimeError("ETF 마켓 캐시가 없습니다. stock_meta_cache_updater를 먼저 실행하세요.")
 
     normalized_rows = [
         {

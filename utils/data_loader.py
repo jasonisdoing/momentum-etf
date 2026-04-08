@@ -227,7 +227,7 @@ def format_missing_price_data_guidance(
     ]
     if tickers:
         lines.append(f"누락 티커: {', '.join(tickers)}")
-    lines.append(f"다음을 실행해서 캐시를 업데이트 해주세요. python scripts/update_price_cache.py {cache_target}")
+    lines.append(f"다음을 실행해서 캐시를 업데이트 해주세요. python scripts/stock_price_cache_updater.py {cache_target}")
     return lines
 
 

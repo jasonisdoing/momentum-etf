@@ -280,7 +280,7 @@ def main() -> None:
         for item in missing:
             print(f"  - {item}")
         print("\n모든 종목의 데이터가 필요합니다. 캐시를 갱신해주세요.")
-        print(f"실행: python scripts/update_price_cache.py {ticker_type}")
+        print(f"실행: python scripts/stock_price_cache_updater.py {ticker_type}")
         sys.exit(1)
 
     if short:
