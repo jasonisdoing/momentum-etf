@@ -15,6 +15,9 @@ export type TickerHoldingRow = {
   name: string;
   contracts: number | null;
   amount: number | null;
+  current_price?: number | null;
+  previous_close?: number | null;
+  change_pct?: number | null;
   weight: number | null;
 };
 

@@ -66,6 +66,9 @@ type TickerHoldingRow = {
   name: string;
   contracts: number | null;
   amount: number | null;
+  current_price?: number | null;
+  previous_close?: number | null;
+  change_pct?: number | null;
   weight: number | null;
 };
 
@@ -124,6 +127,11 @@ function formatNumber(value: number | null, digits = 0): string {
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+}
+
+function formatUnsignedPercent(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${value.toFixed(2)}%`;
 }
 
 function formatDateWithWeekday(value: string): string {
@@ -699,7 +707,25 @@ export function TickerDetailManager({
         minWidth: 76,
         width: 76,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatPercent(params.value),
+        cellRenderer: (params: { value: number | null }) => formatUnsignedPercent(params.value),
+      },
+      {
+        field: "current_price",
+        headerName: "현재가",
+        minWidth: 84,
+        width: 84,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, "kor"),
+      },
+      {
+        field: "change_pct",
+        headerName: "일간(%)",
+        minWidth: 88,
+        width: 88,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
+        ),
       },
     ],
     [],
