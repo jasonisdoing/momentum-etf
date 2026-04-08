@@ -2697,6 +2697,21 @@ a {
   flex: 0 0 auto;
 }
 
+.noteMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.noteMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 14rem;
+}
+
+.noteMetaRow {
+  margin-bottom: 0.75rem;
+  color: #6c7a91;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
 .appCardHeaderStack {
   display: flex;
   flex-wrap: wrap;
@@ -3165,6 +3180,10 @@ a {
   }
 
   .weeklyMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
+  }
+
+  .noteMainHeaderLeft .appLabeledField {
     flex: 1 1 100%;
   }
 
