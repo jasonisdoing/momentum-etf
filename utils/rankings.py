@@ -12,8 +12,6 @@ from config import (
     BUCKET_MAPPING,
     CACHE_START_DATE,
     RANK_RECOMMEND_HOLDING_REPLACE_GAP_PCT,
-    RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS,
-    RANK_RECOMMEND_SIMILARITY_THRESHOLD,
     MARKET_SCHEDULES,
     MIN_TRADING_DAYS,
     TRADING_DAYS_PER_MONTH,
@@ -580,8 +578,8 @@ def _build_similarity_exclusion_map(
     ticker_name_map: dict[str, str],
     held_tickers: set[str],
     *,
-    lookback_days: int = RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS,
-    threshold: float = RANK_RECOMMEND_SIMILARITY_THRESHOLD,
+    lookback_days: int,
+    threshold: float,
     holding_replace_gap_pct: float = RANK_RECOMMEND_HOLDING_REPLACE_GAP_PCT,
 ) -> dict[str, dict[str, str]]:
     eligible_series: dict[str, pd.Series] = {}
@@ -661,6 +659,8 @@ def build_ticker_type_rankings(
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
     country_code = str(settings.get("country_code") or "").strip().lower()
+    similarity_lookback_days = int(settings["RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS"])
+    similarity_threshold = float(settings["RANK_RECOMMEND_SIMILARITY_THRESHOLD"])
 
     etfs = get_etfs(ticker_type)
     if not etfs:
@@ -860,6 +860,8 @@ def build_ticker_type_rankings(
         ranked_tickers,
         ticker_name_map,
         {str(ticker).strip().upper() for ticker in held_tickers},
+        lookback_days=similarity_lookback_days,
+        threshold=similarity_threshold,
     )
     df["추천"] = df["티커"].map(lambda ticker: similarity_maps["detail"].get(str(ticker).strip().upper(), ""))
     df["추천요약"] = df["티커"].map(lambda ticker: similarity_maps["summary"].get(str(ticker).strip().upper(), ""))

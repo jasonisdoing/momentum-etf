@@ -42,7 +42,9 @@ npm run dev
   "MA_RULES": [
     { "order": 1, "MA_TYPE": "SMA", "MA_MONTHS": 10 },
     { "order": 2, "MA_TYPE": "ALMA", "MA_MONTHS": 3 }
-  ]
+  ],
+  "RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS": 60,
+  "RANK_RECOMMEND_SIMILARITY_THRESHOLD": 0.95,
 }
 ```
 

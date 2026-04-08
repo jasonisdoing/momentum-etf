@@ -76,7 +76,9 @@
   "MA_RULES": [
     { "order": 1, "MA_TYPE": "SMA", "MA_MONTHS": 10 },
     { "order": 2, "MA_TYPE": "ALMA", "MA_MONTHS": 3 }
-  ]
+  ],
+  "RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS": 60,
+  "RANK_RECOMMEND_SIMILARITY_THRESHOLD": 0.95,
 }
 ```
 
@@ -85,6 +87,7 @@
 검증 원칙(현재 운영):
 
 * 종목풀: `MA_RULES` 필수
+* 종목풀: `RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS`, `RANK_RECOMMEND_SIMILARITY_THRESHOLD` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
