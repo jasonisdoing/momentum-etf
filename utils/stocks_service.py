@@ -1,6 +1,4 @@
 from __future__ import annotations
-
-import threading
 from datetime import datetime
 from typing import Any
 
@@ -267,15 +265,6 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
     return {"ticker": ticker_norm, "ticker_type": type_norm}
 
 
-def _refresh_single_stock_background(ticker_type: str, ticker: str) -> None:
-    """백그라운드 스레드에서 단일 종목 메타+캐시를 갱신합니다."""
-    logger = get_app_logger()
-    try:
-        refresh_single_stock(ticker_type, ticker)
-    except Exception as e:
-        logger.error(f"[{ticker_type}/{ticker}] 백그라운드 갱신 실패: {e}")
-
-
 def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str, Any]:
     validated = validate_stock_candidate(ticker_type, ticker)
     ticker_type_norm = str(validated["ticker_type"]).strip().lower()
@@ -313,13 +302,20 @@ def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str,
             raise RuntimeError("이미 등록된 종목입니다.")
         raise RuntimeError(f"종목 추가에 실패했습니다: {ticker_norm}")
 
-    # 백그라운드에서 메타데이터 + 가격 캐시 즉시 fetch
-    thread = threading.Thread(
-        target=_refresh_single_stock_background,
-        args=(ticker_type_norm, ticker_norm),
-        daemon=True,
-    )
-    thread.start()
+    try:
+        # 추가 성공은 메타/가격 캐시 준비 완료까지 포함한다.
+        refresh_single_stock(ticker_type_norm, ticker_norm)
+    except Exception as refresh_error:
+        db = get_db_connection()
+        if db is not None:
+            db.stock_meta.delete_one(
+                {
+                    "ticker_type": ticker_type_norm,
+                    "ticker": ticker_norm,
+                    "is_deleted": {"$ne": True},
+                }
+            )
+        raise RuntimeError(f"종목 캐시 갱신에 실패해 추가를 취소했습니다: {refresh_error}") from refresh_error
 
     return {
         "ticker": ticker_norm,
