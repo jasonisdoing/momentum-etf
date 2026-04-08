@@ -8,9 +8,6 @@ type StockMetaDoc = {
   bucket?: number;
   added_date?: string;
   listing_date?: string;
-  deleted_reason?: string;
-  deleted_at?: Date | string;
-  is_deleted?: boolean;
   updated_at?: Date | string;
   ["1_week_avg_volume"]?: number;
   ["1_week_earn_rate"]?: number;
@@ -56,8 +53,6 @@ type StockValidationResult = {
   name: string;
   listing_date: string;
   status: "active" | "deleted" | "new";
-  is_deleted: boolean;
-  deleted_reason: string;
   bucket_id: number;
   ticker_type: string;
   country_code: string;
@@ -85,6 +80,22 @@ function normalizeText(value: unknown, fallback = "-"): string {
   return text || fallback;
 }
 
+async function fetchClientJson<T>(input: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const payload = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new Error(payload.error ?? `요청에 실패했습니다. (${response.status})`);
+  }
+  return payload as T;
+}
+
 export function getBucketOptions(): Array<{ id: number; name: string }> {
   return Object.entries(BUCKET_NAME_MAP)
     .filter(([id]) => Number(id) >= 1 && Number(id) <= 4)
@@ -92,12 +103,26 @@ export function getBucketOptions(): Array<{ id: number; name: string }> {
 }
 
 export async function loadStocksTable(tickerType?: string): Promise<StocksTableData> {
+  if (typeof window !== "undefined") {
+    return fetchClientJson<StocksTableData>(`/api/stocks${tickerType ? `?ticker_type=${encodeURIComponent(tickerType)}` : ""}`);
+  }
   return fetchFastApiJson<StocksTableData>(
     `/internal/stocks${tickerType ? `?ticker_type=${encodeURIComponent(tickerType)}` : ""}`,
   );
 }
 
 export async function updateStockBucket(tickerType: string, ticker: string, bucketId: number): Promise<void> {
+  if (typeof window !== "undefined") {
+    await fetchClientJson("/api/stocks", {
+      method: "PATCH",
+      body: JSON.stringify({
+        ticker_type: tickerType,
+        ticker,
+        bucket_id: bucketId,
+      }),
+    });
+    return;
+  }
   await fetchFastApiJson("/internal/stocks", {
     method: "PATCH",
     body: JSON.stringify({
@@ -108,18 +133,37 @@ export async function updateStockBucket(tickerType: string, ticker: string, buck
   });
 }
 
-export async function softDeleteStock(tickerType: string, ticker: string, reason?: string): Promise<void> {
+export async function deleteStock(tickerType: string, ticker: string): Promise<void> {
+  if (typeof window !== "undefined") {
+    await fetchClientJson("/api/stocks", {
+      method: "DELETE",
+      body: JSON.stringify({
+        ticker_type: tickerType,
+        ticker,
+      }),
+    });
+    return;
+  }
   await fetchFastApiJson("/internal/stocks", {
     method: "DELETE",
     body: JSON.stringify({
       ticker_type: tickerType,
       ticker,
-      reason,
     }),
   });
 }
 
 export async function validateStockCandidate(tickerType: string, ticker: string): Promise<StockValidationResult> {
+  if (typeof window !== "undefined") {
+    return fetchClientJson<StockValidationResult>("/api/stocks", {
+      method: "POST",
+      body: JSON.stringify({
+        ticker_type: tickerType,
+        ticker,
+        action: "validate",
+      }),
+    });
+  }
   return fetchFastApiJson<StockValidationResult>("/internal/stocks/validate", {
     method: "POST",
     body: JSON.stringify({
@@ -130,6 +174,17 @@ export async function validateStockCandidate(tickerType: string, ticker: string)
 }
 
 export async function addStockCandidate(tickerType: string, ticker: string, bucketId: number): Promise<StockCreateResult> {
+  if (typeof window !== "undefined") {
+    return fetchClientJson<StockCreateResult>("/api/stocks", {
+      method: "POST",
+      body: JSON.stringify({
+        ticker_type: tickerType,
+        ticker,
+        bucket_id: bucketId,
+        action: "create",
+      }),
+    });
+  }
   return fetchFastApiJson<StockCreateResult>("/internal/stocks", {
     method: "POST",
     body: JSON.stringify({
@@ -141,6 +196,15 @@ export async function addStockCandidate(tickerType: string, ticker: string, buck
 }
 
 export async function refreshSingleStock(tickerType: string, ticker: string): Promise<{ ticker: string; ticker_type: string }> {
+  if (typeof window !== "undefined") {
+    return fetchClientJson<{ ticker: string; ticker_type: string }>("/api/stocks/refresh", {
+      method: "POST",
+      body: JSON.stringify({
+        ticker_type: tickerType,
+        ticker,
+      }),
+    });
+  }
   return fetchFastApiJson<{ ticker: string; ticker_type: string }>("/internal/stocks/refresh", {
     method: "POST",
     body: JSON.stringify({

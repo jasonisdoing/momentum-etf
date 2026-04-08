@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import type { ColDef, GridOptions, RowClassParams } from "ag-grid-community";
+import type { ColDef, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
+import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
@@ -30,8 +31,6 @@ type HoldingsRow = {
   buy_amount_krw: number;
   valuation_krw: number;
   target_ratio?: number | null;
-  target_quantity?: number | null;
-  target_amount?: number | null;
   sort_order?: number | null;
   original_quantity?: number;
   original_average_buy_price?: number;
@@ -78,6 +77,13 @@ type HoldingsResponse = {
   error?: string;
 };
 
+type AssetsHeaderSummary = {
+  totalAssets: number;
+  totalValuation: number;
+  totalCash: number;
+  accountCount: number;
+};
+
 type AddingRowState = {
   ticker: string;
   quantity: string;
@@ -87,6 +93,12 @@ type AddingRowState = {
   name?: string;
   bucketId?: number;
   isValidated?: boolean;
+};
+
+type HoldingEditableSnapshot = {
+  quantity: number;
+  average_buy_price: number;
+  target_ratio: number;
 };
 
 const assetsGridTheme = themeQuartz.withPart(iconSetQuartzBold).withParams({
@@ -147,55 +159,6 @@ function formatNumber(value: number | null | undefined): string {
   return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
 }
 
-function formatTargetAmount(value: number | null | undefined, currency: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return `A$${new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value)}`;
-  }
-  return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
-}
-
-function formatTargetQuantity(value: number | null | undefined, currency: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 4,
-    }).format(value);
-  }
-  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(value);
-}
-
-function formatExpectedChangeQuantity(
-  targetQuantity: number | null | undefined,
-  currentQuantity: number | null | undefined,
-  currency: string,
-): string {
-  if (
-    targetQuantity === null ||
-    targetQuantity === undefined ||
-    Number.isNaN(targetQuantity) ||
-    currentQuantity === null ||
-    currentQuantity === undefined ||
-    Number.isNaN(currentQuantity)
-  ) {
-    return "-";
-  }
-
-  const changeQuantity = targetQuantity - currentQuantity;
-  const sign = changeQuantity > 0 ? "+" : "";
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return `${sign}${new Intl.NumberFormat("en-AU", {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 4,
-    }).format(changeQuantity)}`;
-  }
-  return `${sign}${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(changeQuantity)}`;
-}
-
 function getSignedClass(value: number): string {
   if (value === 0 || Number.isNaN(value)) return "";
   return value > 0 ? "metricPositive" : "metricNegative";
@@ -204,6 +167,15 @@ function getSignedClass(value: number): string {
 function getSignedNullableClass(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) return "";
   return value > 0 ? "metricPositive" : "metricNegative";
+}
+
+function getWeightTextColor(weightPct: number, targetRatio: number | null | undefined): string {
+  if (targetRatio === null || targetRatio === undefined || Number.isNaN(targetRatio) || targetRatio <= 0) {
+    return ASSETS_WEIGHT_TEXT_COLOR;
+  }
+
+  const allowedDelta = targetRatio * 0.1;
+  return Math.abs(weightPct - targetRatio) > allowedDelta ? "#dc3545" : ASSETS_WEIGHT_TEXT_COLOR;
 }
 
 function getBucketCellClass(bucketId: number): string {
@@ -226,11 +198,33 @@ function parseEditableQuantity(value: unknown): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function roundTargetQuantity(quantity: number, currency: string): number {
-  if (String(currency || "KRW").toUpperCase() === "AUD") {
-    return Math.round(quantity * 10000) / 10000;
+function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price" | "target_ratio">): HoldingEditableSnapshot {
+  return {
+    quantity: parseEditableQuantity(row.quantity),
+    average_buy_price: safeParseFloat(row.average_buy_price),
+    target_ratio: Number(row.target_ratio ?? 0),
+  };
+}
+
+function formatRatioPercent(value: number): string {
+  return `${value.toFixed(1)}%`;
+}
+
+function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "currency">, before: HoldingEditableSnapshot, after: HoldingEditableSnapshot): string | null {
+  const changes: string[] = [];
+  if (before.quantity !== after.quantity) {
+    changes.push(`수량 ${new Intl.NumberFormat("ko-KR").format(before.quantity)}→${new Intl.NumberFormat("ko-KR").format(after.quantity)}`);
   }
-  return Math.max(Math.floor(quantity), 0);
+  if (before.average_buy_price !== after.average_buy_price) {
+    changes.push(`매입단가 ${formatPrice(before.average_buy_price, row.currency)}→${formatPrice(after.average_buy_price, row.currency)}`);
+  }
+  if (before.target_ratio !== after.target_ratio) {
+    changes.push(`목표비중 ${formatRatioPercent(before.target_ratio)}→${formatRatioPercent(after.target_ratio)}`);
+  }
+  if (changes.length === 0) {
+    return null;
+  }
+  return `${row.name} 저장: ${changes.join(", ")}`;
 }
 
 function getCurrentPriceNumber(row: GridRow): number {
@@ -282,14 +276,6 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
   return Number(row.buy_amount_krw ?? 0);
 }
 
-function getPreviewTargetRatio(row: GridRow): number | null {
-  const parsed = Number(row.target_ratio ?? null);
-  if (Number.isNaN(parsed) || parsed < 0) {
-    return 0;
-  }
-  return parsed;
-}
-
 function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: AccountSummary): number {
   if (String(row.ticker || "").trim().toUpperCase() === "IS") {
     return 0;
@@ -320,36 +306,29 @@ function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: Account
   return (rowValuation / denominator) * 100;
 }
 
-function computeAccountTotalAssetsNative(summary: AccountSummary, rows: HoldingsRow[]): number {
-  const currency = String(summary.currency || "KRW").trim().toUpperCase();
-  if (currency === "AUD") {
-    const holdingsNative = rows.reduce((sum, row) => {
-      return sum + getCurrentPriceNumber(row as GridRow) * Number(row.quantity ?? 0);
-    }, 0);
-    return holdingsNative + Number(summary.cash_balance_native ?? 0);
-  }
-  return rows.reduce((sum, row) => sum + Number(row.valuation_krw ?? 0), 0) + Number(summary.cash_balance_krw ?? 0);
-}
+function buildSyncedHoldingRows(rows: HoldingsRow[], summary: AccountSummary): HoldingsRow[] {
+  return rows.map((row) => {
+    const previewRow = { ...row, id: buildGridRowId(row) };
+    const quantity = getPreviewQuantity(previewRow);
+    const averageBuyPrice = getPreviewAverageBuyPrice(previewRow);
+    const valuationKrw = Math.round(getPreviewValuationKrw(previewRow));
+    const buyAmountKrw = Math.round(getPreviewBuyAmountKrw(previewRow));
+    const pnlKrw = valuationKrw - buyAmountKrw;
+    const returnPct = buyAmountKrw > 0 ? Number(((pnlKrw / buyAmountKrw) * 100).toFixed(2)) : 0;
+    const weightPct = Number(getPreviewWeightPct(previewRow, rows, summary).toFixed(1));
 
-function getPreviewTargetAmount(row: GridRow, summary: AccountSummary, rows: HoldingsRow[]): number | null {
-  const targetRatio = getPreviewTargetRatio(row);
-  if (targetRatio === null) {
-    return null;
-  }
-  const totalAssetsNative = computeAccountTotalAssetsNative(summary, rows);
-  return Math.round(totalAssetsNative * (targetRatio / 100) * 100) / 100;
-}
-
-function getPreviewTargetQuantity(row: GridRow, summary: AccountSummary, rows: HoldingsRow[]): number | null {
-  const targetAmount = getPreviewTargetAmount(row, summary, rows);
-  if (targetAmount === null) {
-    return null;
-  }
-  const currentPrice = getCurrentPriceNumber(row);
-  if (currentPrice <= 0) {
-    return null;
-  }
-  return roundTargetQuantity(targetAmount / currentPrice, row.currency);
+    return {
+      ...row,
+      quantity,
+      average_buy_price: averageBuyPrice,
+      valuation_krw: valuationKrw,
+      buy_amount_krw: buyAmountKrw,
+      pnl_krw: pnlKrw,
+      pnl_krw_num: pnlKrw,
+      return_pct: returnPct,
+      weight_pct: weightPct,
+    };
+  });
 }
 
 function isDetailRow(row: ParentGridRow | undefined): row is Extract<ParentGridRow, { rowType: "detail" }> {
@@ -470,14 +449,17 @@ function AccountHoldingsDetailPanel({
   summary,
   initialRows,
   onReload,
+  onRowsSync,
   onPreviewTargetRatioTotalChange,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
   onReload: () => Promise<void>;
+  onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
 }) {
   const toast = useToast();
+  const router = useRouter();
   const hydrateRows = useCallback(
     (sourceRows: HoldingsRow[]) =>
       sourceRows.map((row) => ({
@@ -499,17 +481,25 @@ function AccountHoldingsDetailPanel({
   const priceRef = useRef<HTMLInputElement>(null);
   const targetRatioRef = useRef<HTMLInputElement>(null);
   const rowsRef = useRef<HoldingsRow[]>(initialRows);
+  const dirtyRowIdsRef = useRef<string[]>([]);
+  const isReorderDirtyRef = useRef(false);
+  const gridApiRef = useRef<GridApi<GridRow> | null>(null);
+  const lastSavedSnapshotsRef = useRef<Map<string, HoldingEditableSnapshot>>(new Map());
   const childSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const childSavingRowIdsRef = useRef<Set<string>>(new Set());
   const childQueuedRowIdsRef = useRef<Set<string>>(new Set());
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
-
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
     rowsRef.current = nextRows;
+    dirtyRowIdsRef.current = [];
+    isReorderDirtyRef.current = false;
+    lastSavedSnapshotsRef.current = new Map(
+      nextRows.map((row) => [buildGridRowId(row), buildHoldingEditableSnapshot(row)]),
+    );
     setDirtyRowIds([]);
     setDirtyCellKeys([]);
     setSelectedRowIds([]);
@@ -523,25 +513,33 @@ function AccountHoldingsDetailPanel({
   }, [rows]);
 
   useEffect(() => {
+    dirtyRowIdsRef.current = dirtyRowIds;
+  }, [dirtyRowIds]);
+
+  useEffect(() => {
+    isReorderDirtyRef.current = isReorderDirty;
+  }, [isReorderDirty]);
+
+  useEffect(() => {
     const previewTargetRatioTotal = rows.reduce((sum, row) => {
       return sum + Number(row.target_ratio ?? 0);
     }, 0);
     onPreviewTargetRatioTotalChange(summary.account_id, parseFloat(previewTargetRatioTotal.toFixed(1)));
   }, [onPreviewTargetRatioTotalChange, rows, summary.account_id]);
 
-  useEffect(() => {
-    return () => {
-      childSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
-      childSaveTimersRef.current.clear();
-      if (reorderSaveTimerRef.current) {
-        clearTimeout(reorderSaveTimerRef.current);
-      }
-    };
-  }, []);
-
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) => Boolean(row && row.id !== "__adding__" && row.ticker !== "IS"),
     [],
+  );
+  const moveToTickerDetail = useCallback(
+    (ticker: string | null | undefined) => {
+      const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
+      if (!normalizedTicker || normalizedTicker === "IS") {
+        return;
+      }
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+    },
+    [router],
   );
 
   const gridRows = useMemo<GridRow[]>(() => {
@@ -593,8 +591,31 @@ function AccountHoldingsDetailPanel({
   );
 
   const handleValidateTicker = useCallback(async (tickerToUse?: string) => {
-    const ticker = tickerToUse || addingRow?.ticker;
+    const ticker = String(tickerToUse || addingRow?.ticker || "").trim().toUpperCase();
     if (!ticker || addingRow?.isValidatingTicker) {
+      return;
+    }
+
+    const normalizedTicker = ticker.replace(/^ASX:/, "");
+    const hasDuplicate = rows.some(
+      (row) => String(row.ticker || "").trim().toUpperCase().replace(/^ASX:/, "") === normalizedTicker,
+    );
+
+    if (hasDuplicate) {
+      const message = "이미 해당 계좌에 추가된 종목입니다.";
+      setAddingRow((previous) =>
+        previous
+          ? {
+              ...previous,
+              ticker,
+              name: message,
+              bucketId: undefined,
+              isValidated: false,
+              isValidatingTicker: false,
+            }
+          : null,
+      );
+      toast.error(message);
       return;
     }
 
@@ -603,6 +624,9 @@ function AccountHoldingsDetailPanel({
         ? {
             ...previous,
             ticker,
+            name: "",
+            bucketId: undefined,
+            isValidated: false,
             isValidatingTicker: true,
           }
         : null,
@@ -640,13 +664,14 @@ function AccountHoldingsDetailPanel({
         previous
           ? {
               ...previous,
+              name: previous.name || "",
               isValidatingTicker: false,
             }
           : null,
       );
       toast.error(error instanceof Error ? error.message : "검증 실패");
     }
-  }, [addingRow?.isValidatingTicker, addingRow?.ticker, summary.account_id, toast]);
+  }, [addingRow?.isValidatingTicker, addingRow?.ticker, rows, summary.account_id, toast]);
 
   const processAddingRow = useCallback(async () => {
     if (!addingRow?.isValidated) {
@@ -715,9 +740,37 @@ function AccountHoldingsDetailPanel({
   }, [summary.account_id]);
 
   const clearDirtyRowState = useCallback((rowId: string) => {
-    setDirtyRowIds((previous) => previous.filter((id) => id !== rowId));
+    setDirtyRowIds((previous) => {
+      const next = previous.filter((id) => id !== rowId);
+      dirtyRowIdsRef.current = next;
+      return next;
+    });
     setDirtyCellKeys((previous) => previous.filter((key) => !key.startsWith(`${rowId}::`)));
   }, []);
+
+  const processReorderUpdate = useCallback(async (orderedRows: HoldingsRow[]) => {
+    const orderedTickers = orderedRows
+      .map((row) => String(row.ticker || "").trim().toUpperCase())
+      .filter((ticker) => ticker && ticker !== "IS");
+
+    if (!orderedTickers.length) {
+      return;
+    }
+
+    const response = await fetch("/api/assets", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "reorder",
+        account_id: summary.account_id,
+        ordered_tickers: orderedTickers,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "순서 저장에 실패했습니다.");
+    }
+  }, [summary.account_id]);
 
   const silentlySaveRow = useCallback(async (rowId: string) => {
     if (childSavingRowIdsRef.current.has(rowId)) {
@@ -733,6 +786,8 @@ function AccountHoldingsDetailPanel({
 
     childSavingRowIdsRef.current.add(rowId);
     try {
+      const previousSnapshot = lastSavedSnapshotsRef.current.get(rowId) ?? buildHoldingEditableSnapshot(sourceRow);
+      const nextSnapshot = buildHoldingEditableSnapshot(sourceRow);
       await processRowUpdate({
         ...sourceRow,
         id: rowId,
@@ -740,6 +795,11 @@ function AccountHoldingsDetailPanel({
         average_buy_price: safeParseFloat(sourceRow.average_buy_price),
         target_ratio: sourceRow.target_ratio ?? 0,
       });
+      lastSavedSnapshotsRef.current.set(rowId, nextSnapshot);
+      const message = buildAutoSaveToastMessage(sourceRow, previousSnapshot, nextSnapshot);
+      if (message) {
+        toast.success(message);
+      }
       clearDirtyRowState(rowId);
     } catch (error) {
       await onReload();
@@ -770,14 +830,6 @@ function AccountHoldingsDetailPanel({
   }, [silentlySaveRow]);
 
   const persistRowOrder = useCallback(async (orderedRows: HoldingsRow[]) => {
-    const orderedTickers = orderedRows
-      .map((row) => String(row.ticker || "").trim().toUpperCase())
-      .filter((ticker) => ticker && ticker !== "IS");
-
-    if (!orderedTickers.length) {
-      return;
-    }
-
     if (reorderSavingRef.current) {
       reorderQueuedRef.current = true;
       return;
@@ -785,20 +837,9 @@ function AccountHoldingsDetailPanel({
 
     reorderSavingRef.current = true;
     try {
-      const response = await fetch("/api/assets", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "reorder",
-          account_id: summary.account_id,
-          ordered_tickers: orderedTickers,
-        }),
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "순서 저장에 실패했습니다.");
-      }
+      await processReorderUpdate(orderedRows);
       setIsReorderDirty(false);
+      isReorderDirtyRef.current = false;
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "순서 저장에 실패했습니다.");
     } finally {
@@ -813,7 +854,7 @@ function AccountHoldingsDetailPanel({
         reorderSaveTimerRef.current = nextTimer;
       }
     }
-  }, [onReload, summary.account_id, toast]);
+  }, [onReload, processReorderUpdate, toast]);
 
   const scheduleSilentReorderSave = useCallback((orderedRows: HoldingsRow[]) => {
     if (reorderSaveTimerRef.current) {
@@ -835,11 +876,39 @@ function AccountHoldingsDetailPanel({
     }
   }, []);
 
+  const flushPendingSavesOnUnmount = useCallback(() => {
+    childSaveTimersRef.current.forEach((timer) => clearTimeout(timer));
+    childSaveTimersRef.current.clear();
+    if (reorderSaveTimerRef.current) {
+      clearTimeout(reorderSaveTimerRef.current);
+      reorderSaveTimerRef.current = null;
+    }
+
+    const dirtyRows = rowsRef.current
+      .map((row) => ({ ...row, id: buildGridRowId(row) }))
+      .filter((row) => dirtyRowIdsRef.current.includes(row.id));
+
+    for (const row of dirtyRows) {
+      void processRowUpdate(row).catch(() => undefined);
+    }
+
+    if (isReorderDirtyRef.current) {
+      void processReorderUpdate(rowsRef.current).catch(() => undefined);
+    }
+  }, [processReorderUpdate, processRowUpdate]);
+
+  useEffect(() => {
+    return () => {
+      flushPendingSavesOnUnmount();
+    };
+  }, [flushPendingSavesOnUnmount]);
+
   const handleSaveChanges = useCallback(async () => {
     if (processingId === "__adding__" || processingId === "__deleting__") {
       return;
     }
 
+    gridApiRef.current?.stopEditing();
     flushPendingSaves();
 
     try {
@@ -855,6 +924,7 @@ function AccountHoldingsDetailPanel({
 
       for (const row of dirtyRows) {
         await processRowUpdate(row);
+        lastSavedSnapshotsRef.current.set(row.id, buildHoldingEditableSnapshot(row));
         clearDirtyRowState(row.id);
       }
 
@@ -931,26 +1001,31 @@ function AccountHoldingsDetailPanel({
       return;
     }
 
-    setRows((previous) =>
-      previous.map((currentRow) => {
-        if (buildGridRowId(currentRow) !== row.id) {
-          return currentRow;
-        }
-        return {
-          ...currentRow,
-          quantity: parseEditableQuantity(row.quantity),
-          average_buy_price: safeParseFloat(row.average_buy_price),
-          target_ratio: Number(row.target_ratio ?? 0),
-        };
-      }),
-    );
-    setDirtyRowIds((previous) => (previous.includes(row.id) ? previous : [...previous, row.id]));
+    const nextRows = rowsRef.current.map((currentRow) => {
+      if (buildGridRowId(currentRow) !== row.id) {
+        return currentRow;
+      }
+      return {
+        ...currentRow,
+        quantity: parseEditableQuantity(row.quantity),
+        average_buy_price: safeParseFloat(row.average_buy_price),
+        target_ratio: Number(row.target_ratio ?? 0),
+      };
+    });
+    rowsRef.current = nextRows;
+    setRows(nextRows);
+    onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
+    setDirtyRowIds((previous) => {
+      const next = previous.includes(row.id) ? previous : [...previous, row.id];
+      dirtyRowIdsRef.current = next;
+      return next;
+    });
     if (field) {
       const dirtyCellKey = buildDirtyCellKey(row.id, field);
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
     scheduleSilentRowSave(row.id);
-  }, [isEditableHoldingRow, scheduleSilentRowSave]);
+  }, [isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {
@@ -975,20 +1050,70 @@ function AccountHoldingsDetailPanel({
     {
       field: "ticker",
       headerName: "종목코드",
-      width: 118,
+      width: 98,
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         const row = params.data;
         if (!row) {
           return null;
         }
         if (row.id === "__adding__") {
-          if (addingRow?.isValidated) {
-            return (
-              <div className="d-flex gap-2 align-items-center">
-                <span>{addingRow.ticker}</span>
-                <button
-                  className="btn btn-sm btn-link p-0 assetsInlineLinkButton"
-                  onClick={() =>
+          return (
+            <StableInlineInput
+              className="form-control form-control-sm assetsInlineInput assetsInlineInputTicker"
+              initialValue={addingRow?.ticker ?? ""}
+              disabled={addingRow?.isValidatingTicker || addingRow?.isValidated}
+              onChange={(value) =>
+                setAddingRow((previous) =>
+                  previous
+                    ? {
+                        ...previous,
+                        ticker: value,
+                      }
+                    : null,
+                )
+              }
+              onSave={handleValidateTicker}
+            />
+          );
+        }
+        return (
+          <button
+            type="button"
+            className="btn btn-link p-0 appCodeText assetsTickerLink"
+            onClick={() => moveToTickerDetail(row.ticker)}
+          >
+            {params.value}
+          </button>
+        );
+      },
+    },
+    {
+      field: "name",
+      headerName: "종목명",
+      minWidth: 248,
+      flex: 1.35,
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
+        if (params.data?.id === "__adding__") {
+          return (
+            <div className="assetsNameLookup">
+              <span className="assetsNameLookupStatus">
+                {addingRow?.isValidated
+                  ? String(addingRow.name || "-")
+                  : String(addingRow?.name || "종목코드를 입력한 뒤 확인하세요.")}
+              </span>
+              <button
+                className={
+                  addingRow?.isValidated
+                    ? "btn btn-sm btn-link p-0 assetsInlineLinkButton"
+                    : "btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
+                }
+                disabled={addingRow?.isValidatingTicker}
+                onMouseDown={(event) => {
+                  event.stopPropagation();
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  if (addingRow?.isValidated) {
                     setAddingRow((previous) =>
                       previous
                         ? {
@@ -998,66 +1123,31 @@ function AccountHoldingsDetailPanel({
                             name: "",
                           }
                         : null,
-                    )
+                    );
+                    return;
                   }
-                >
-                  변경
-                </button>
-              </div>
-            );
-          }
-
-          return (
-            <div className="assetsTickerLookup">
-              <StableInlineInput
-                className="form-control form-control-sm assetsInlineInput assetsInlineInputTicker"
-                initialValue={addingRow?.ticker ?? ""}
-                disabled={addingRow?.isValidatingTicker}
-                onChange={(value) =>
-                  setAddingRow((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          ticker: value,
-                        }
-                      : null,
-                  )
-                }
-                onSave={handleValidateTicker}
-              />
-              <button
-                className="btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
-                disabled={addingRow?.isValidatingTicker}
-                onMouseDown={(event) => {
-                  event.stopPropagation();
-                }}
-                onClick={(event) => {
-                  event.stopPropagation();
                   void handleValidateTicker();
                 }}
               >
-                {addingRow?.isValidatingTicker ? (
+                {!addingRow?.isValidated && addingRow?.isValidatingTicker ? (
                   <IconLoader2 size={14} style={{ animation: "spin 1s linear infinite" }} />
                 ) : null}
-                {addingRow?.isValidatingTicker ? "확인중" : "확인"}
+                {addingRow?.isValidated ? "변경" : addingRow?.isValidatingTicker ? "확인중" : "확인"}
               </button>
             </div>
           );
         }
-        return <span className="appCodeText">{params.value}</span>;
-      },
-    },
-    {
-      field: "name",
-      headerName: "종목명",
-      minWidth: 280,
-      flex: 1.6,
-      cellRenderer: (params: { value?: string | null }) => {
+
         const value = String(params.value ?? "-");
         return (
-          <span className="assetsNameCellText" title={value}>
+          <button
+            type="button"
+            className="btn btn-link p-0 assetsNameCellText assetsTickerLink"
+            title={value}
+            onClick={() => moveToTickerDetail(params.data?.ticker)}
+          >
             {value}
-          </span>
+          </button>
         );
       },
     },
@@ -1077,7 +1167,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "current_price",
       headerName: "현재가",
-      width: 116,
+      width: 104,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: string }) => (
         <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
@@ -1086,7 +1176,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "quantity",
       headerName: "수량",
-      width: 88,
+      width: 80,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1127,7 +1217,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "average_buy_price",
       headerName: "매입 단가",
-      width: 128,
+      width: 112,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1180,7 +1270,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "pnl_krw",
       headerName: "평가손익",
-      width: 136,
+      width: 124,
       type: "rightAligned",
       cellRenderer: (params: { value?: number }) => (
         <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
@@ -1189,7 +1279,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "valuation_krw",
       headerName: "평가 금액",
-      width: 136,
+      width: 124,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow }) =>
         params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
@@ -1199,19 +1289,23 @@ function AccountHoldingsDetailPanel({
       headerName: "비중",
       width: 80,
       type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) =>
-        params.data ? (
-          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
-            {getPreviewWeightPct(params.data, rows, summary).toFixed(1)}%
+      cellRenderer: (params: { data?: GridRow }) => {
+        if (!params.data) {
+          return "-";
+        }
+
+        const weightPct = getPreviewWeightPct(params.data, rows, summary);
+        return (
+          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
+            {weightPct.toFixed(1)}%
           </span>
-        ) : (
-          "-"
-        ),
+        );
+      },
     },
     {
       field: "target_ratio",
       headerName: "목표비중",
-      width: 100,
+      width: 88,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1253,53 +1347,6 @@ function AccountHoldingsDetailPanel({
             {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
           </span>
         );
-      },
-    },
-    {
-      field: "target_quantity",
-      headerName: "목표수량",
-      width: 124,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-        return (
-          <span>{formatTargetQuantity(getPreviewTargetQuantity(params.data, summary, rows), params.data.currency || "KRW")}</span>
-        );
-      },
-    },
-    {
-      colId: "expected_change_quantity",
-      headerName: "예상변경수량",
-      width: 138,
-      type: "rightAligned",
-      sortable: false,
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-        const targetQuantity = getPreviewTargetQuantity(params.data, summary, rows);
-        const currentQuantity = getPreviewQuantity(params.data);
-        return (
-          <span className={getSignedNullableClass(
-            targetQuantity === null || targetQuantity === undefined ? null : targetQuantity - currentQuantity,
-          )}>
-            {formatExpectedChangeQuantity(targetQuantity, currentQuantity, params.data.currency || "KRW")}
-          </span>
-        );
-      },
-    },
-    {
-      field: "target_amount",
-      headerName: "목표금액",
-      width: 136,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-        return <span>{formatTargetAmount(getPreviewTargetAmount(params.data, summary, rows), params.data.currency || "KRW")}</span>;
       },
     },
     { field: "days_held", headerName: "보유일", width: 76 },
@@ -1421,12 +1468,17 @@ function AccountHoldingsDetailPanel({
               setRows((previous) => {
                 const nextRows = reorderRowsByTickers(previous, orderedTickers);
                 rowsRef.current = nextRows;
+                onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
                 return nextRows;
               });
               const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
               rowsRef.current = nextRows;
               setIsReorderDirty(true);
+              isReorderDirtyRef.current = true;
               scheduleSilentReorderSave(nextRows);
+            },
+            onGridReady: (params) => {
+              gridApiRef.current = params.api;
             },
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
@@ -1439,7 +1491,7 @@ function AccountHoldingsDetailPanel({
   );
 }
 
-export function AssetsManager() {
+export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: AssetsHeaderSummary) => void }) {
   const toast = useToast();
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
@@ -1542,6 +1594,15 @@ export function AssetsManager() {
     () => summaries.reduce((sum, summary) => sum + Number(summary.cash_balance_krw ?? 0), 0),
     [summaries],
   );
+
+  useEffect(() => {
+    onHeaderSummaryChange?.({
+      totalAssets,
+      totalValuation,
+      totalCash,
+      accountCount: summaries.length,
+    });
+  }, [onHeaderSummaryChange, summaries.length, totalAssets, totalCash, totalValuation]);
 
   const isDirtyParentCell = useCallback(
     (rowId: string | undefined, field: string) => Boolean(rowId && parentDirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
@@ -1654,6 +1715,28 @@ export function AssetsManager() {
     });
   }, []);
 
+  const handleChildRowsSync = useCallback((accountId: string, nextRows: HoldingsRow[]) => {
+    setAllRows((previous) => [
+      ...previous.filter((row) => row.account_id !== accountId),
+      ...nextRows,
+    ]);
+
+    const nextValuation = nextRows.reduce((sum, row) => sum + Number(row.valuation_krw ?? 0), 0);
+    setSummaries((previous) =>
+      previous.map((summary) => {
+        if (summary.account_id !== accountId) {
+          return summary;
+        }
+        return {
+          ...summary,
+          valuation_krw: nextValuation,
+          total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
+          holdings_count: nextRows.length,
+        };
+      }),
+    );
+  }, []);
+
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
       const data = params.data;
@@ -1665,11 +1748,12 @@ export function AssetsManager() {
           summary={data.summary}
           initialRows={data.rows}
           onReload={load}
+          onRowsSync={handleChildRowsSync}
           onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
         />
       );
     },
-    [handlePreviewTargetRatioTotalChange, load],
+    [handleChildRowsSync, handlePreviewTargetRatioTotalChange, load],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
@@ -1857,7 +1941,7 @@ export function AssetsManager() {
       stopEditingWhenCellsLoseFocus: true,
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
       fullWidthCellRenderer: DetailRenderer,
-      getRowHeight: (params) => (isDetailRow(params.data) ? 532 : 38),
+      getRowHeight: (params) => (isDetailRow(params.data) ? 722 : 38),
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data)) {
           return;
@@ -1905,33 +1989,6 @@ export function AssetsManager() {
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
         <div className="card appCard shadow-sm appTableCardFill">
-          <div className="card-header flex-shrink-0">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">자산 관리</span>
-              </div>
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>총 자산:</span>
-                    <span className="appHeaderMetricValue is-primary">{formatKrw(totalAssets)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>평가액:</span>
-                    <span className="appHeaderMetricValue">{formatKrw(totalValuation)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>현금:</span>
-                    <span className="appHeaderMetricValue">{formatKrw(totalCash)}</span>
-                  </div>
-                  <div className="appHeaderMetric">
-                    <span>계좌수:</span>
-                    <span className="appHeaderMetricValue">{formatNumber(summaries.length)}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
           <div className="card-body p-2 appTableCardBodyFill">
             <AppAgGrid
               rowData={parentRows}

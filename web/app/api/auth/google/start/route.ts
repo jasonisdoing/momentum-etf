@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       request.headers.get("x-forwarded-proto"),
       request.headers.get("x-forwarded-host"),
     );
-    const nextPath = request.nextUrl.searchParams.get("next") || "/dashboard";
+    const nextPath = request.nextUrl.searchParams.get("next") || "/";
     const stateToken = await createOAuthStateToken(nextPath);
     const redirectUrl = buildGoogleAuthUrl(origin, stateToken);
 

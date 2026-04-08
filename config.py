@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-CACHE_START_DATE = "2024-01-01"
+CACHE_START_DATE = "2020-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
 
@@ -92,13 +92,6 @@ MIN_TRADING_DAYS = 5
 # 이 값 이상이면 녹색(고점 근처), 미만이면 빨간색(낙폭 큼)
 HIGH_POINT_GREEN_THRESHOLD = -5
 
-# 추천 컬럼 유사도 비교 기준
-# 최근 N거래일 일간 수익률로 상관계수를 계산해, 현재 상위 종목과 직접 비교합니다.
-# threshold 이상이면 같은 흐름으로 보고 하위 종목을 "중복" 후보로 표시합니다.
-# lookback_days는 짧을수록 최근 흐름, 길수록 장기 테마 유사성을 더 강하게 반영합니다.
-# 실전 조정은 lookback_days 60~120, threshold 0.90~0.98 범위에서 시작하는 편이 무난합니다.
-RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS = 30
-RANK_RECOMMEND_SIMILARITY_THRESHOLD = 0.92
 # 유사 그룹 내에 보유 종목이 있으면 우선 대표로 유지합니다.
 # 다만 현재 그룹 1위보다 순위 백분위가 이 값 이상 뒤처지면 대표를 교체합니다.
 # 값은 퍼센트포인트(%p) 기준이며, 0이면 항상 보유 우선, 클수록 교체가 덜 발생합니다.

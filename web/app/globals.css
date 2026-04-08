@@ -380,6 +380,8 @@ a {
 .pageFrameTitle {
   display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
   min-height: 1.5rem;
   padding-inline: var(--app-page-inset);
   margin-bottom: 0.375rem;
@@ -391,6 +393,13 @@ a {
   line-height: 1.2;
   font-weight: 600;
   color: var(--muted);
+}
+
+.pageFrameTitleRight {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .pageFrameBody {
@@ -452,6 +461,243 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 2px;
+}
+
+.topbarTickerSearchItem {
+  margin-left: 0;
+}
+
+.globalTickerSearch {
+  position: relative;
+  width: 11rem;
+  max-width: 100%;
+}
+
+.globalTickerSearchTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.globalTickerSearchPanel {
+  position: fixed;
+  top: calc(var(--app-header-height) + 0.5rem);
+  left: 50%;
+  width: min(68rem, calc(100vw - 3rem));
+  transform: translateX(-50%);
+  z-index: 1060;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #fff;
+  box-shadow: 0 24px 56px rgba(15, 23, 42, 0.16);
+  animation: globalTickerSearchPanelIn 180ms ease;
+}
+
+.globalTickerSearchPanelInner {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-height: min(42rem, calc(100vh - var(--app-header-height) - 1.5rem));
+  padding: 0.9rem 0.95rem 1rem;
+  overflow-y: auto;
+}
+
+.globalTickerSearchInputWrap {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 2.6rem;
+  padding: 0 0.75rem;
+  border-radius: 13px;
+  background: #f3f5f8;
+}
+
+.globalTickerSearchInputIcon {
+  color: #8a96a8;
+  flex: 0 0 auto;
+}
+
+.globalTickerSearchInputField {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.96rem;
+  font-weight: 500;
+}
+
+.globalTickerSearchInputField::placeholder {
+  color: #8a96a8;
+}
+
+.globalTickerSearchSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+.globalTickerSearchSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.globalTickerSearchSectionTitle {
+  color: var(--ink);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.globalTickerSearchChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.globalTickerSearchChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.45rem 0.7rem 0.45rem 0.95rem;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: #556173;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.globalTickerSearchChipLabel,
+.globalTickerSearchChipRemove {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+.globalTickerSearchChipLabel {
+  cursor: pointer;
+}
+
+.globalTickerSearchChipRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.globalTickerSearchResults {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.globalTickerSearchTopMoversGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+
+.globalTickerSearchTopMoversColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  min-width: 0;
+}
+
+.globalTickerSearchTopMoversTitle {
+  color: var(--ink);
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.globalTickerSearchResult {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0.65rem 0.6rem;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+.globalTickerSearchResult.is-active,
+.globalTickerSearchResult:hover {
+  background: #eef4fb;
+}
+
+.globalTickerSearchRank {
+  min-width: 1.35rem;
+  color: #2f6fed;
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.globalTickerSearchResultMain {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.globalTickerSearchResultName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.globalTickerSearchResultTicker {
+  margin-top: 0.2rem;
+  color: #738093;
+  font-size: 0.88rem;
+}
+
+.globalTickerSearchResultMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: 0 0 5.2rem;
+  gap: 0.1rem;
+  white-space: nowrap;
+}
+
+.globalTickerSearchResultPrice {
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.globalTickerSearchEmpty {
+  padding: 0.25rem 0.1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+@keyframes globalTickerSearchPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .topbarFxItem strong {
@@ -1286,6 +1532,7 @@ a {
 }
 
 .rankToolbarMeta {
+  justify-content: flex-end;
   gap: 10px;
   font-size: 16px;
   font-weight: 500;
@@ -1492,6 +1739,168 @@ a {
   min-height: 0;
 }
 
+.tickerDetailTables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0.75rem;
+}
+
+.tickerDetailHero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 1rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailHeroTitle {
+  font-size: 1.9rem;
+  line-height: 1.15;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailHeroMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.tickerDetailHeroPrice {
+  font-size: 1.75rem;
+  line-height: 1;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tickerDetailHeroChange {
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.tickerDetailTablePanel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.tickerDetailTableHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0 0 0.25rem;
+  flex: 0 0 auto;
+}
+
+.tickerDetailTableTitle {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.tickerDetailTableMeta {
+  font-size: 13px;
+}
+
+.tickerDetailChartWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.tickerDetailTopGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.tickerDetailHoldingsPanel {
+  display: flex;
+  height: 420px;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell,
+.tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell .ag-cell-value {
+  display: block;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickerDetailHoldingsEmpty {
+  flex: 1;
+  min-height: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #f8fafc;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 1.5rem;
+}
+
+.tickerDetailChartBadge {
+  position: absolute;
+  z-index: 2;
+  max-width: 15rem;
+  width: 15rem;
+  overflow: visible;
+  pointer-events: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.tickerDetailChartBadge.is-high {
+  color: #ef5350;
+  align-items: center;
+}
+
+.tickerDetailChartBadge.is-low {
+  color: #2f6fed;
+  align-items: center;
+}
+
+.tickerDetailChartBadgeText {
+  max-width: 15rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickerDetailChartBadgeArrow {
+  position: absolute;
+  font-size: 1rem;
+  line-height: 1;
+  transform: translateX(-50%);
+}
+
+.tickerDetailChartBadge.is-high .tickerDetailChartBadgeArrow {
+  bottom: -0.9rem;
+}
+
+.tickerDetailChartBadge.is-low .tickerDetailChartBadgeArrow {
+  top: -0.9rem;
+}
+
 .appAgGridWrap {
   display: flex;
   flex: 1 1 auto;
@@ -1523,6 +1932,50 @@ a {
   --ag-header-column-resize-handle-color: rgba(32, 107, 196, 0.25);
   --ag-font-size: 0.95rem;
   --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+}
+
+@media (max-width: 991.98px) {
+  .pageFrameTitle {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .pageFrameTitleRight {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .tickerDetailHero {
+    padding-inline: 0.75rem;
+  }
+
+  .tickerDetailHeroTitle {
+    font-size: 1.5rem;
+  }
+
+  .tickerDetailHeroPrice {
+    font-size: 1.35rem;
+  }
+
+  .tickerDetailHeroChange {
+    font-size: 1rem;
+  }
+
+  .tickerDetailTables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tickerDetailTopGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tickerDetailHoldingsPanel {
+    height: auto;
+  }
+
+  .tickerDetailHoldingsEmpty {
+    min-height: 240px;
+  }
 }
 
 .appAgGridTheme .ag-root-wrapper,
@@ -1709,10 +2162,21 @@ a {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: left;
 }
 
 .assetsChildAgGrid .ag-cell[col-id="name"] {
   overflow: hidden;
+}
+
+.assetsChildAgGrid .assetsTickerLink {
+  color: #206bc4;
+  text-decoration: none;
+}
+
+.assetsChildAgGrid .assetsTickerLink:hover {
+  color: #174f96;
+  text-decoration: underline;
 }
 
 .rankAgGrid .ag-cell.rankBucketCell {
@@ -1789,6 +2253,11 @@ a {
   overflow: hidden;
 }
 
+.rankAgGrid .ag-cell.rankDirtyCell {
+  box-shadow: inset 0 0 0 2px rgba(46, 160, 67, 0.45);
+  font-weight: 700;
+}
+
 .stocksAgGrid {
   border: 0;
   background: transparent;
@@ -1801,6 +2270,15 @@ a {
 .stocksAgGrid .ag-cell-value,
 .stocksAgGrid .ag-group-value {
   width: 100%;
+}
+
+.stocksAgGrid .ag-cell.stocksNameColumn {
+  overflow: hidden;
+}
+
+.stocksAgGrid .ag-cell.stocksNameColumn .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
 }
 
 .stocksAgGrid .ag-cell.appBucketCell {
@@ -1847,6 +2325,16 @@ a {
   background: rgba(32, 107, 196, 0.12);
 }
 
+.tickerDetailNameCell,
+.tickerDetailNameCell .ag-cell-value {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .weeklyAgGrid {
   border: 0;
   background: transparent;
@@ -1863,6 +2351,14 @@ a {
 
 .weeklyAgGrid .ag-cell.weeklyDateCell {
   white-space: nowrap;
+}
+
+.weeklyAgGrid .ag-cell.tableAlignRight {
+  justify-content: flex-end;
+}
+
+.weeklyAgGrid .ag-cell.tableAlignRight .ag-cell-value {
+  text-align: right;
 }
 
 .weeklyAgGrid .ag-cell.weeklyMemoCell .ag-cell-value {
@@ -1924,17 +2420,29 @@ a {
 }
 
 .assetsInlineInputTicker {
-  width: 5.25rem;
+  width: 4.5rem;
 }
 
-.assetsTickerLookup {
+.assetsNameLookup {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-width: 0;
+}
+
+.assetsNameLookupStatus {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--tblr-secondary-color);
 }
 
 .assetsInlineButton {
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .assetsInlineLinkButton {
@@ -1987,6 +2495,44 @@ a {
 }
 
 .appMainHeaderLeft {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.appLabeledField {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.appLabeledFieldLabel {
+  color: #5b6778;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.appInlineField {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.appInlineFieldLabel {
+  color: #5b6778;
+  font-size: 0.86rem;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.appInlineField .field {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -2113,16 +2659,20 @@ a {
   flex-wrap: nowrap;
 }
 
+.marketMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
 .marketMainHeaderLeft .field {
   margin-top: 0;
 }
 
-.marketMainHeaderLeft .field:first-child {
-  flex: 1 1 22rem;
+.marketMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 1 18rem;
 }
 
-.marketMainHeaderLeft .field:not(:first-child) {
-  flex: 0 0 13rem;
+.marketMainHeaderLeft .appLabeledField:not(:first-child) {
+  flex: 0 0 11rem;
 }
 
 .marketMainHeaderRight {
@@ -2131,6 +2681,75 @@ a {
 
 .marketMainHeaderRight .appHeaderMetrics {
   flex-wrap: nowrap;
+}
+
+.rankMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.rankMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 10.5rem;
+}
+
+.rankMainHeaderLeft .appLabeledField:nth-child(2) {
+  flex: 0 0 12rem;
+}
+
+.rankRuleFieldRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.rankRuleFieldRow .form-select:first-child {
+  min-width: 6.5rem;
+}
+
+.rankRuleFieldRow .form-select:last-child {
+  min-width: 5.5rem;
+}
+
+.rankSwitchField {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+}
+
+.rankSwitchFieldInner {
+  display: inline-flex;
+  align-items: center;
+}
+
+.stocksMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.stocksMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 12rem;
+}
+
+.weeklyMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.weeklyMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 auto;
+}
+
+.noteMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.noteMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 14rem;
+}
+
+.noteMetaRow {
+  margin-bottom: 0.75rem;
+  color: #6c7a91;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .appCardHeaderStack {
@@ -2575,8 +3194,36 @@ a {
     flex-wrap: wrap;
   }
 
-  .marketMainHeaderLeft .field:first-child,
-  .marketMainHeaderLeft .field:not(:first-child) {
+  .marketMainHeaderLeft .appLabeledField:first-child,
+  .marketMainHeaderLeft .appLabeledField:not(:first-child) {
+    flex: 1 1 100%;
+  }
+
+  .rankMainHeaderLeft .appLabeledField:first-child,
+  .rankMainHeaderLeft .appLabeledField:nth-child(2),
+  .rankMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
+  }
+
+  .rankRuleFieldRow {
+    width: 100%;
+  }
+
+  .rankRuleFieldRow .form-select {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .stocksMainHeaderLeft .appLabeledField:first-child,
+  .stocksMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
+  }
+
+  .weeklyMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
+  }
+
+  .noteMainHeaderLeft .appLabeledField {
     flex: 1 1 100%;
   }
 
@@ -2595,6 +3242,31 @@ a {
     min-width: 0;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .topbarTickerSearchItem {
+    width: 100%;
+    margin-left: 0;
+    margin-top: 0.25rem;
+  }
+
+  .globalTickerSearch {
+    width: 100%;
+  }
+
+  .globalTickerSearchPanel {
+    left: 0.75rem;
+    right: 0.75rem;
+    width: auto;
+    transform: none;
+  }
+
+  .globalTickerSearchInputField {
+    font-size: 0.9rem;
+  }
+
+  .globalTickerSearchTopMoversGrid {
+    grid-template-columns: 1fr;
   }
 
   .appBody {

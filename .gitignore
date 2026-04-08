@@ -18,9 +18,7 @@ web/.next/
 .DS_Store
 
 # 백테스트 결과
-zresults
 zaccounts/*/results
-zpools/*/results
 ztickers/*/results
 
 

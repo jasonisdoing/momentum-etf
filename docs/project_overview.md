@@ -23,7 +23,7 @@
 *   **🛡️ 데이터 안정성 (Robust Caching)**: **Apache Parquet** 포맷을 도입하여 Numpy 버전 충돌 없는 안정적인 가격 데이터 캐싱을 구현했습니다.
 *   **💻 직관적인 대시보드 (Modern UI)**:
     *   **1. 순위**: 개별 종목의 점수, 규칙별 추세, 현재가, 일간 수익률, RSI, 추세 차트를 확인합니다.
-    *   **2. 종목 관리 / 3. 삭제된 종목 / 4. 메모**: 계좌 종목 유니버스와 메모를 직접 관리합니다.
+    *   **2. 순위(관리모드) / 3. 메모**: 계좌 종목 유니버스 관리와 메모 작업을 수행합니다.
 
 ## 4. 시스템 구조 요약
 
@@ -31,13 +31,26 @@
 
 1.  **순위 계산 유틸 (`utils/rankings.py`)**: 계좌 종목, 가격 캐시, 실제 보유 상태를 합쳐 순위 테이블용 데이터를 만듭니다.
 2.  **화면 계층 (`web/`)**: Next.js 기반 Node UI가 자산/종목/주별/시스템 화면을 렌더링합니다.
-3.  **서비스 계층 (`services/price_service.py`, `services/reference_data_service.py`)**: 실시간 가격/환율과 저빈도 참조 데이터의 공식 진입점을 제공합니다.
-4.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 실제 보유 데이터와 계좌 메모를 읽습니다.
+3.  **서비스 계층 (`services/price_service.py`, `services/reference_data_service.py`, `services/etf_holdings_service.py`)**: 실시간 가격/환율, 저빈도 참조 데이터, 한국 ETF 구성종목 조회의 공식 진입점을 제공합니다.
+4.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/stock_cache_meta_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 종목 메타 캐시, 실제 보유 데이터와 계좌 메모를 읽습니다.
 
 ### 서비스 계층 역할
 
 *   **`services/price_service.py`**: 한국/호주 실시간 가격과 USD/AUD 환율 조회를 통합하고 TTL 캐시를 관리합니다.
 *   **`services/reference_data_service.py`**: KIS 국내 ETF 목록, 종목 메타데이터, 상장일 같은 저빈도 참조 데이터를 읽는 단일 진입점입니다.
+*   **`services/stock_cache_service.py`**: 저빈도 종목 메타 캐시와 ETF 구성종목 캐시를 Mongo `stock_cache_meta` 컬렉션에 저장/조회하는 단일 진입점입니다.
+*   **`services/etf_holdings_service.py`**: 한국 ETF 구성종목을 네이버 `ETFComponent` API로 조회해 메타 캐시 저장 형태로 정규화하고, 응답 시점에는 국내/해외 구성종목 가격만 보조 시세로 붙입니다.
+
+### 종목 캐시 개념
+
+이 프로젝트에서 **종목 캐시**는 다음 둘을 합친 상위 개념입니다.
+
+1.  **가격 캐시**: OHLCV와 실시간 가격 스냅샷
+2.  **메타 캐시**: 상장일, 배당률, 보수, 순자산총액, ETF 구성종목 같은 저빈도 정보
+
+`stock_meta`는 종목 관리 원본, `stock_cache_meta`는 저빈도 메타/구성종목 캐시로 역할을 나눕니다.
+
+핵심 원칙은 **실시간 가격데이터를 제외한 모든 값은 종목 캐시에 저장한다**는 것입니다. 화면은 메타/구성종목을 종목 캐시에서 한꺼번에 읽고, 실시간성이 필요한 가격만 별도 조회해 응답 속도를 유지합니다.
 
 화면 계층과 순위 로직은 가능하면 외부 데이터 소스를 직접 호출하지 않고, 먼저 `services/` 계층을 통해 접근하는 것을 원칙으로 합니다.
 

@@ -1,28 +1,21 @@
 "use client";
 
-import {
-  IconArrowBackUp,
-  IconPlus,
-  IconTrash,
-  IconDeviceFloppy,
-  IconLayoutGrid,
-  IconPlaylistX,
-  IconSearch,
-} from "@tabler/icons-react";
+import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import { useEffect, useMemo, useState, useTransition } from "react";
-import type { ColDef } from "ag-grid-community";
+import type { ColDef, RowClassParams } from "ag-grid-community";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
-import { AppAgGrid } from "../components/AppAgGrid";
-import { AppModal } from "../components/AppModal";
+import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
 } from "../components/account-selection";
+import { AppAgGrid } from "../components/AppAgGrid";
+import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
-type StocksAccountItem = {
+type RankTickerType = {
   ticker_type: string;
   order: number;
   name: string;
@@ -30,123 +23,91 @@ type StocksAccountItem = {
   country_code: string;
 };
 
-type ActiveStocksRowItem = {
-  ticker: string;
-  name: string;
-  bucket_id: number;
-  bucket_name: string;
-  added_date: string;
-  listing_date: string;
-  week_volume: number | null;
-  return_1d: number | null;
-  return_1w: number | null;
-  return_2w: number | null;
-  return_1m: number | null;
-  return_3m: number | null;
-  return_6m: number | null;
-  return_12m: number | null;
-  "괴리율": number | null;
+type RankMaRule = {
+  order: number;
+  ma_type: string;
+  ma_months: number;
+  ma_days: number;
+  score_column: string;
 };
 
-type DeletedStocksRowItem = {
-  ticker: string;
-  name: string;
-  bucket_id: number;
-  bucket_name: string;
-  added_date: string;
-  listing_date: string;
-  week_volume: number | null;
-  return_1d: number | null;
-  return_1w: number | null;
-  return_2w: number | null;
-  return_1m: number | null;
-  return_3m: number | null;
-  return_6m: number | null;
-  return_12m: number | null;
+type RankRow = {
+  [key: string]: string | number | boolean | null;
+  순번: string;
+  순위: number | null;
+  이전순위: number | null;
+  추천: string | null;
+  추천요약: string | null;
+  버킷: string;
+  bucket: number;
+  티커: string;
+  종목명: string;
+  상장일: string;
+  점수: number | null;
+  보유: string;
+  현재가: number | null;
   "괴리율": number | null;
-  deleted_date: string;
-  deleted_reason: string;
+  "일간(%)": number | null;
+  "1주(%)": number | null;
+  "2주(%)": number | null;
+  "3주(%)": number | null;
+  "4주(%)": number | null;
+  "1달(%)": number | null;
+  "2달(%)": number | null;
+  "3달(%)": number | null;
+  "4달(%)": number | null;
+  "5달(%)": number | null;
+  "6달(%)": number | null;
+  "7달(%)": number | null;
+  "8달(%)": number | null;
+  "9달(%)": number | null;
+  "10달(%)": number | null;
+  "11달(%)": number | null;
+  "12달(%)": number | null;
+  고점: number | null;
+  RSI: number | null;
+  배당률: number | null;
+  보수: number | null;
+  순자산총액: number | null;
 };
 
-type StocksResponse = {
-  ticker_types?: StocksAccountItem[];
-  rows?: ActiveStocksRowItem[];
+type RankResponse = {
+  ticker_types?: RankTickerType[];
   ticker_type?: string;
+  ma_rules?: RankMaRule[];
+  ma_type_options?: string[];
+  ma_months_max?: number;
+  as_of_date?: string | null;
+  monthly_return_labels?: string[];
+  rows?: RankRow[];
+  cache_blocked?: boolean;
+  latest_trading_day?: string | null;
+  cache_updated_at?: string | null;
+  ranking_computed_at?: string | null;
+  realtime_fetched_at?: string | null;
+  previous_trading_day?: string | null;
+  missing_tickers?: string[];
+  missing_ticker_labels?: string[];
+  stale_tickers?: string[];
   error?: string;
 };
 
-type DeletedStocksResponse = {
-  ticker_types?: StocksAccountItem[];
-  rows?: DeletedStocksRowItem[];
-  ticker_type?: string;
-  error?: string;
+type RankGridRow = RankRow & {
+  id: string;
+  __isAddingRow?: boolean;
 };
 
-type ViewMode = "active" | "deleted";
-
-type ActiveStockGridRow = ActiveStocksRowItem & { id: string };
-type DeletedStockGridRow = DeletedStocksRowItem & { id: string };
-type StockValidationState = {
+type RankAddingRowState = {
   ticker: string;
   name: string;
   listing_date: string;
-  status: "active" | "deleted" | "new";
-  is_deleted: boolean;
-  deleted_reason: string;
-  bucket_id: number;
-};
-type AddingStockRowState = {
-  ticker: string;
-  name: string;
-  listing_date: string;
-  bucket_id: number;
+  bucket: number;
   status: "active" | "deleted" | "new" | null;
   is_validating: boolean;
   is_validated: boolean;
 };
 
-function formatNumber(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "-";
-  }
-  return new Intl.NumberFormat("ko-KR").format(value);
-}
-
-function formatPercent(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return "-";
-  }
-  return `${value.toFixed(2)}%`;
-}
-
-function getSignedMetricClass(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
-    return "";
-  }
-  return value > 0 ? "metricPositive" : "metricNegative";
-}
-
-function getBucketCellClass(bucketId: number): string {
-  return `appBucketCell appBucketCell${bucketId}`;
-}
-
-function buildDirtyCellKey(rowId: string, field: string): string {
-  return `${rowId}::${field}`;
-}
-
-function normalizeTicker(value: string): string {
-  return String(value || "").trim().toUpperCase();
-}
-
-function getBucketName(bucketId: number): string {
-  return BUCKET_OPTIONS.find((option) => option.id === bucketId)?.name ?? "-";
-}
-
-function getBucketIdByName(bucketName: string): number {
-  return BUCKET_OPTIONS.find((option) => option.name === bucketName)?.id ?? 1;
-}
-
-const stocksGridTheme = themeQuartz
+const rankGridTheme = themeQuartz
   .withPart(iconSetQuartzBold)
   .withParams({
     accentColor: "#206bc4",
@@ -171,65 +132,215 @@ const stocksGridTheme = themeQuartz
     iconSize: 18,
   });
 
-export function StocksManager() {
-  const [ticker_types, setAccounts] = useState<StocksAccountItem[]>([]);
-  const [selectedTickerType, setSelectedAccountId] = useState("");
-  const [viewMode, setViewMode] = useState<ViewMode>("active");
-  const [activeRows, setActiveRows] = useState<ActiveStocksRowItem[]>([]);
-  const [deletedRows, setDeletedRows] = useState<DeletedStocksRowItem[]>([]);
-  const [selectedActiveTickers, setSelectedActiveTickers] = useState<string[]>([]);
-  const [selectedDeletedTickers, setSelectedDeletedTickers] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isPending, startTransition] = useTransition();
-  const [addingRow, setAddingRow] = useState<AddingStockRowState | null>(null);
-  const [dirtyActiveRowIds, setDirtyActiveRowIds] = useState<string[]>([]);
-  const [dirtyActiveCellKeys, setDirtyActiveCellKeys] = useState<string[]>([]);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deleteReason, setDeleteReason] = useState("");
-  const toast = useToast();
+type RankToolbarCache = {
+  ticker_types: RankTickerType[];
+  ticker_type: string;
+  ma_rules: RankMaRule[];
+  ma_type_options: string[];
+  ma_months_max: number;
+};
 
-  function showErrorToast(message: string) {
-    toast.error(`[ETF-종목 관리] ${message}`);
+type RankHeaderSummary = {
+  upCount: number;
+  upPct: number;
+  totalCount: number;
+  ruleSummary: string;
+};
+
+let rankToolbarCache: RankToolbarCache | null = null;
+
+function getTodayDateInputValue(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
+function toDateInputValue(value: string | null | undefined): string {
+  if (!value) {
+    return getTodayDateInputValue();
+  }
+  return String(value).slice(0, 10);
+}
+
+function formatNumber(value: number | null, digits = 0): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return new Intl.NumberFormat("ko-KR", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  }).format(value);
+}
+
+function formatPercent(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return `${value.toFixed(2)}%`;
+}
+
+function getSignedClass(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
+    return "";
+  }
+  return value > 0 ? "metricPositive" : "metricNegative";
+}
+
+function getBucketCellClass(bucketLabel: string): string {
+  const match = /^(\d+)/.exec(String(bucketLabel || "").trim());
+  if (!match) {
+    return "rankBucketCell";
+  }
+  return `rankBucketCell rankBucketCell${match[1]}`;
+}
+
+function normalizeTicker(value: string): string {
+  return String(value || "").trim().toUpperCase();
+}
+
+function getBucketName(bucketId: number): string {
+  return BUCKET_OPTIONS.find((option) => option.id === bucketId)?.name ?? BUCKET_OPTIONS[0]?.name ?? "-";
+}
+
+function getBucketIdByName(bucketName: string): number {
+  return BUCKET_OPTIONS.find((option) => option.name === bucketName)?.id ?? BUCKET_OPTIONS[0]?.id ?? 1;
+}
+
+function buildDirtyCellKey(rowId: string, field: string): string {
+  return `${rowId}::${field}`;
+}
+
+function formatMetaTime(value: string | null | undefined): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
+}
+
+function renderSignedPercentCell(value: number | null) {
+  return <span className={getSignedClass(value ?? null)}>{formatPercent(value ?? null)}</span>;
+}
+
+function formatCurrencyValue(value: number | null, countryCode?: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  const digits = countryCode === "au" ? 2 : 0;
+  return formatNumber(value, digits);
+}
+
+function formatAssetInEok(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return `${formatNumber(value / 100_000_000, 0)}억`;
+}
+
+export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
+  const toast = useToast();
+  const lastBlockedToastRef = useRef<string | null>(null);
+  const [isPending, startTransition] = useTransition();
+  const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
+  const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
+  const [selectedTickerType, setSelectedAccountId] = useState(
+    rankToolbarCache?.ticker_type ?? readRememberedTickerType() ?? "",
+  );
+  const [maRules, setMaRules] = useState<RankMaRule[]>(rankToolbarCache?.ma_rules ?? []);
+  const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
+  const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
+  const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
+  const [dedupeEnabled, setDedupeEnabled] = useState(false);
+  const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
+  const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
+  const [rows, setRows] = useState<RankRow[]>([]);
+  const [cacheBlocked, setCacheBlocked] = useState(false);
+  const [rankingComputedAt, setRankingComputedAt] = useState<string | null>(null);
+  const [realtimeFetchedAt, setRealtimeFetchedAt] = useState<string | null>(null);
+  const [missingTickers, setMissingTickers] = useState<string[]>([]);
+  const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
+  const [staleTickers, setStaleTickers] = useState<string[]>([]);
+  const [addingRow, setAddingRow] = useState<RankAddingRowState | null>(null);
+  const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
+  const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
+  const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  function clearCacheWarningState() {
+    setCacheBlocked(false);
+    setMissingTickers([]);
+    setMissingTickerLabels([]);
+    setStaleTickers([]);
   }
 
-  async function load(mode: ViewMode, tickerType?: string) {
+  async function load(next?: { ticker_type?: string; ma_rule_overrides?: RankMaRule[]; as_of_date?: string }) {
     setLoading(true);
+    setError(null);
+    clearCacheWarningState();
 
     try {
-      const search = tickerType ? `?ticker_type=${encodeURIComponent(tickerType)}` : "";
-      const apiPath = mode === "active" ? `/api/stocks${search}` : `/api/deleted${search}`;
-      const response = await fetch(apiPath, { cache: "no-store" });
-      const payload = (await response.json()) as StocksResponse | DeletedStocksResponse;
+      const search = new URLSearchParams();
+      if (next?.ticker_type) {
+        search.set("ticker_type", next.ticker_type);
+      }
+      if (next?.as_of_date) {
+        search.set("as_of_date", next.as_of_date);
+      }
+      for (const rule of next?.ma_rule_overrides ?? []) {
+        search.set(`rule${rule.order}_ma_type`, rule.ma_type);
+        search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
+      }
+
+      const query = search.size > 0 ? `?${search.toString()}` : "";
+      const response = await fetch(`/api/rank${query}`, { cache: "no-store" });
+      const payload = (await response.json()) as RankResponse;
       if (!response.ok) {
-        throw new Error(payload.error ?? "종목 관리 데이터를 불러오지 못했습니다.");
+        throw new Error(payload.error ?? "순위 데이터를 불러오지 못했습니다.");
       }
 
       setAccounts(payload.ticker_types ?? []);
       const nextAccountId = payload.ticker_type ?? "";
       setSelectedAccountId(nextAccountId);
       writeRememberedTickerType(nextAccountId);
-      setSelectedActiveTickers([]);
-      setSelectedDeletedTickers([]);
+      setMaRules(payload.ma_rules ?? []);
+      setMaTypeOptions(payload.ma_type_options ?? []);
+      setMaMonthsMax(payload.ma_months_max ?? 12);
+      setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
+      setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
+      rankToolbarCache = {
+        ticker_types: payload.ticker_types ?? [],
+        ticker_type: nextAccountId,
+        ma_rules: payload.ma_rules ?? [],
+        ma_type_options: payload.ma_type_options ?? [],
+        ma_months_max: payload.ma_months_max ?? 12,
+      };
       setAddingRow(null);
-      setDirtyActiveRowIds([]);
-      setDirtyActiveCellKeys([]);
+      setDirtyRowIds([]);
+      setDirtyCellKeys([]);
+      setSelectedTickers([]);
       setDeleteConfirmOpen(false);
-      setDeleteReason("");
-
-      if (mode === "active") {
-        setActiveRows((payload.rows as ActiveStocksRowItem[] | undefined) ?? []);
-      } else {
-        setDeletedRows((payload.rows as DeletedStocksRowItem[] | undefined) ?? []);
-      }
+      setRows(payload.rows ?? []);
+      setCacheBlocked(Boolean(payload.cache_blocked));
+      setRankingComputedAt(payload.ranking_computed_at ?? null);
+      setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
+      setMissingTickers(payload.missing_tickers ?? []);
+      setMissingTickerLabels(payload.missing_ticker_labels ?? []);
+      setStaleTickers(payload.stale_tickers ?? []);
     } catch (loadError) {
-      showErrorToast(loadError instanceof Error ? loadError.message : "종목 관리 데이터를 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    void load(viewMode, readRememberedTickerType() ?? undefined);
+    void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
 
   const selectedTickerTypeItem = useMemo(
@@ -237,85 +348,182 @@ export function StocksManager() {
     [ticker_types, selectedTickerType],
   );
 
-  const activeGridRows = useMemo<ActiveStockGridRow[]>(() => {
-    const baseRows = activeRows.map((row) => ({
-      ...row,
-      id: normalizeTicker(row.ticker),
-    }));
-    if (!addingRow) {
-      return baseRows;
+  const gridRows = useMemo<RankGridRow[]>(
+    () =>
+      rows.map((row, index) => ({
+        ...row,
+        id: normalizeTicker(String(row.티커 ?? `${index}`)),
+      })),
+    [rows],
+  );
+
+  const filteredGridRows = useMemo(
+    () =>
+      gridRows.filter((row) => {
+        if (dedupeEnabled && String(row.추천 ?? "").trim()) {
+          return false;
+        }
+        return true;
+      }),
+    [gridRows, dedupeEnabled],
+  );
+
+  const displayGridRows = useMemo<RankGridRow[]>(() => {
+    if (pageMode !== "manage" || !addingRow) {
+      return filteredGridRows;
     }
     return [
       {
         id: "__adding__",
-        ticker: addingRow.ticker,
-        name: addingRow.name,
-        bucket_id: addingRow.bucket_id,
-        bucket_name: getBucketName(addingRow.bucket_id),
-        added_date: "-",
-        listing_date: addingRow.listing_date || "-",
-        week_volume: null,
-        return_1d: null,
-        return_1w: null,
-        return_2w: null,
-        return_1m: null,
-        return_3m: null,
-        return_6m: null,
-        return_12m: null,
+        __isAddingRow: true,
+        순번: "-",
+        순위: null,
+        이전순위: null,
+        추천: null,
+        추천요약: null,
+        버킷: getBucketName(addingRow.bucket),
+        bucket: addingRow.bucket,
+        티커: addingRow.ticker,
+        종목명: addingRow.name,
+        상장일: addingRow.listing_date || "-",
+        점수: null,
+        보유: "",
+        현재가: null,
         괴리율: null,
+        "일간(%)": null,
+        "1주(%)": null,
+        "2주(%)": null,
+        "3주(%)": null,
+        "4주(%)": null,
+        "1달(%)": null,
+        "2달(%)": null,
+        "3달(%)": null,
+        "4달(%)": null,
+        "5달(%)": null,
+        "6달(%)": null,
+        "7달(%)": null,
+        "8달(%)": null,
+        "9달(%)": null,
+        "10달(%)": null,
+        "11달(%)": null,
+        "12달(%)": null,
+        고점: null,
+        RSI: null,
+        배당률: null,
+        보수: null,
+        순자산총액: null,
       },
-      ...baseRows,
+      ...filteredGridRows,
     ];
-  }, [activeRows, addingRow]);
-  const deletedGridRows = useMemo<DeletedStockGridRow[]>(
-    () => deletedRows.map((row) => ({ ...row, id: row.ticker.trim().toUpperCase() })),
-    [deletedRows],
+  }, [addingRow, filteredGridRows, pageMode]);
+
+  const maRuleSummary = useMemo(
+    () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
+    [maRules],
   );
 
-  const activeColumns = useMemo<ColDef<ActiveStockGridRow>[]>(
-    () => [
+  const columns = useMemo<ColDef<RankGridRow>[]>(() => {
+    const leadingColumns: ColDef<RankGridRow>[] = [
       {
-        field: "bucket_id",
-        headerName: "버킷",
-        width: 118,
-        minWidth: 118,
+        field: "순위",
+        headerName: "순위",
+        minWidth: 72,
+        width: 72,
+        cellStyle: { textAlign: "center" },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          return (
+            <span style={{ fontWeight: 700 }}>{params.value == null ? "-" : formatNumber(params.value, 0)}</span>
+          );
+        },
+      },
+      {
+        field: "이전순위",
+        headerName: "이전순위",
+        minWidth: 98,
+        width: 98,
+        cellStyle: { textAlign: "center" },
         sortable: false,
-        cellClass: (params) => {
-          if (!params.data) {
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          const currentRank = params.data?.순위 ?? null;
+          const previousRank = params.value ?? null;
+          if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
+            return <span style={{ fontWeight: 600 }}>-</span>;
+          }
+
+          if (currentRank === previousRank) {
+            return (
+              <span style={{ fontWeight: 600 }}>
+                {currentRank}(-)
+              </span>
+            );
+          }
+
+          const isRise = currentRank < previousRank;
+          const delta = Math.abs(currentRank - previousRank);
+          return (
+            <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
+              {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
+            </span>
+          );
+        },
+      },
+      {
+        field: "추천요약",
+        headerName: "중복",
+        minWidth: 92,
+        width: 92,
+        sortable: false,
+        cellStyle: { textAlign: "center" },
+        cellRenderer: (params: { value: string | null | undefined }) => {
+          const value = String(params.value ?? "").trim();
+          if (!value) {
             return "";
           }
-          const dirtyClass = dirtyActiveCellKeys.includes(buildDirtyCellKey(params.data.id, "bucket_name"))
-            ? " stocksDirtyCell"
-            : "";
-          return `${getBucketCellClass(params.data.bucket_id)}${dirtyClass}`;
+          return (
+            <span style={{ color: "#182433", fontWeight: 400 }} title={value}>
+              {value}
+            </span>
+          );
         },
-        editable: (params) => params.data?.id !== "__adding__",
+      },
+      {
+        field: "버킷",
+        headerName: "버킷",
+        minWidth: 108,
+        width: 108,
+        sortable: false,
+        cellClass: (params) => {
+          const dirtyClass =
+            params.data && dirtyCellKeys.includes(buildDirtyCellKey(params.data.id, "버킷")) ? " rankDirtyCell" : "";
+          return `${getBucketCellClass(String(params.value ?? ""))}${dirtyClass}`;
+        },
+        editable: (params) => pageMode === "manage" && !params.data?.__isAddingRow,
         cellEditor: "agSelectCellEditor",
         cellEditorParams: {
           values: BUCKET_OPTIONS.map((option) => option.name),
         },
-        valueGetter: (params) => getBucketName(params.data?.bucket_id ?? 1),
+        valueGetter: (params) => getBucketName(Number(params.data?.bucket ?? 1)),
         valueSetter: (params) => {
-          if (!params.data || params.data.id === "__adding__") {
+          if (!params.data || params.data.__isAddingRow) {
             return false;
           }
           const nextBucketId = getBucketIdByName(String(params.newValue ?? ""));
-          params.data.bucket_id = nextBucketId;
-          params.data.bucket_name = getBucketName(nextBucketId);
+          params.data.bucket = nextBucketId;
+          params.data.버킷 = getBucketName(nextBucketId);
           return true;
         },
-        cellRenderer: (params: { data?: ActiveStockGridRow }) => {
-          if (params.data?.id === "__adding__") {
+        cellRenderer: (params: { data?: RankGridRow }) => {
+          if (params.data?.__isAddingRow) {
             return (
               <select
                 className="form-select form-select-sm"
-                value={addingRow?.bucket_id ?? 1}
+                value={addingRow?.bucket ?? 1}
                 onChange={(event) =>
                   setAddingRow((prev) =>
                     prev
                       ? {
                           ...prev,
-                          bucket_id: Number(event.target.value),
+                          bucket: Number(event.target.value),
                         }
                       : null,
                   )
@@ -329,250 +537,361 @@ export function StocksManager() {
               </select>
             );
           }
-          return getBucketName(params.data?.bucket_id ?? 1);
+          return <span>{getBucketName(Number(params.data?.bucket ?? 1))}</span>;
         },
       },
       {
-        field: "ticker",
+        field: "티커",
         headerName: "티커",
-        width: 180,
-        minWidth: 180,
-        cellRenderer: (params: { data?: ActiveStockGridRow }) => (
-          params.data?.id === "__adding__" ? (
-            <div className="stocksTickerLookup">
-              <input
-                type="text"
-                className="form-control form-control-sm"
-                placeholder="예: 069500 / VGS"
-                value={addingRow?.ticker ?? ""}
-                onChange={(event) =>
-                  setAddingRow((prev) =>
-                    prev
-                      ? {
-                          ...prev,
-                          ticker: event.target.value,
-                          name: "",
-                          listing_date: "-",
-                          status: null,
-                          is_validated: false,
-                        }
-                      : null,
-                  )
-                }
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    void handleValidateAddingTicker();
+        minWidth: 92,
+        width: 92,
+        cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+          if (params.data?.__isAddingRow) {
+            return (
+              <div className="stocksTickerLookup">
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  value={addingRow?.ticker ?? ""}
+                  onChange={(event) =>
+                    setAddingRow((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            ticker: event.target.value,
+                            name: "",
+                            listing_date: "-",
+                            status: null,
+                            is_validated: false,
+                          }
+                        : null,
+                    )
                   }
-                }}
-              />
-              <button
-                className="btn btn-outline-primary btn-sm"
-                type="button"
-                onClick={() => void handleValidateAddingTicker()}
-                disabled={!addingRow?.ticker.trim() || addingRow.is_validating}
-              >
-                확인
-              </button>
-            </div>
-          ) : (
-            <span className="appCodeText">{params.data?.ticker ?? "-"}</span>
-          )
-        ),
-      },
-      {
-        field: "name",
-        headerName: "종목명",
-        minWidth: 220,
-        flex: 1,
-        cellRenderer: (params: { data?: ActiveStockGridRow }) => {
-          if (params.data?.id !== "__adding__") {
-            return params.data?.name ?? "-";
-          }
-          if (addingRow?.is_validating) {
-            return <span className="text-muted">티커 확인 중...</span>;
-          }
-          if (addingRow?.status === "active") {
-            return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
-          }
-          if (addingRow?.is_validated) {
-            return (
-              <span className="fw-semibold">
-                {addingRow.name}
-                {addingRow.status === "deleted" ? " (삭제된 종목 재추가)" : ""}
-              </span>
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      void handleValidateAddingTicker();
+                    }
+                  }}
+                />
+              </div>
             );
           }
-          return <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>;
+          const value = String(params.value ?? "-");
+          const href = `/ticker?ticker=${encodeURIComponent(value)}`;
+          return (
+            <a href={href} className="appCodeText" style={{ color: "#206bc4", textDecoration: "none" }}>
+              {value}
+            </a>
+          );
         },
       },
       {
-        field: "week_volume",
-        headerName: "주간거래량",
-        width: 116,
-        minWidth: 116,
-        type: "rightAligned",
-        valueFormatter: (params) => formatNumber((params.data?.week_volume as number | null) ?? null),
-      },
-      {
-        field: "return_1d",
-        headerName: "일간(%)",
-        width: 88,
-        minWidth: 88,
-        type: "rightAligned",
-        cellRenderer: (params: { data?: ActiveStockGridRow }) => (
-          <span className={getSignedMetricClass(params.data?.return_1d ?? null)} style={{ fontWeight: 600 }}>
-             {formatPercent(params.data?.return_1d ?? null)}
-          </span>
-        ),
-      },
-      ...(selectedTickerTypeItem?.country_code !== "au" ? [
-        {
-          field: "괴리율",
-          headerName: "괴리율",
-          width: 88,
-          minWidth: 88,
-          type: "rightAligned",
-          cellRenderer: (params: { value?: number | null }) => {
-            const val = params.value ?? 0;
-            const isExtreme = val > 2.0 || val < -2.0;
+        field: "종목명",
+        headerName: "종목명",
+        minWidth: 260,
+        flex: 1.2,
+        cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
+          if (params.data?.__isAddingRow) {
+            if (addingRow?.is_validating) {
+              return <span className="text-muted">티커 확인 중...</span>;
+            }
+            if (addingRow?.status === "active") {
+              return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
+            }
+            if (addingRow?.is_validated) {
+              return (
+                <span className="rankNameCellText fw-semibold" title={addingRow.name}>
+                  {addingRow.name}
+                </span>
+              );
+            }
             return (
-              <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
-                {formatPercent(params.value ?? null)}
-              </span>
+              <div className="rankAddingNameCell">
+                <span className="text-muted">티커 확인 후 종목명이 표시됩니다.</span>
+                <button
+                  className="btn btn-outline-primary btn-sm"
+                  type="button"
+                  onClick={() => void handleValidateAddingTicker()}
+                  disabled={!addingRow?.ticker.trim() || addingRow?.is_validating}
+                >
+                  확인
+                </button>
+              </div>
             );
-          },
-        } as ColDef<ActiveStockGridRow>
-      ] : []),
-      ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
-        (field) => ({
-          field,
-          headerName:
-            field === "return_1w"
-              ? "1주(%)"
-              : field === "return_1m"
-                ? "1달(%)"
-                : field === "return_3m"
-                  ? "3달(%)"
-                  : field === "return_6m"
-                    ? "6달(%)"
-                    : "12달(%)",
-          width: 88,
-          minWidth: 88,
-          type: "rightAligned" as const,
-          cellRenderer: (params: { data?: ActiveStockGridRow }) => (
-            <span className={getSignedMetricClass((params.data?.[field] as number | null) ?? null)}>
-              {formatPercent((params.data?.[field] as number | null) ?? null)}
-            </span>
-          ),
-        }),
-      ),
-      { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
-      { field: "added_date", headerName: "등록일", width: 112, minWidth: 112 },
-    ],
-    [addingRow, dirtyActiveCellKeys, selectedTickerTypeItem?.country_code],
-  );
-  const deletedColumns = useMemo<ColDef<DeletedStockGridRow>[]>(
-    () => [
-      {
-        field: "bucket_name",
-        headerName: "버킷",
-        width: 118,
-        minWidth: 118,
-        sortable: false,
-        cellClass: (params) => (params.data ? getBucketCellClass(params.data.bucket_id) : ""),
+          }
+          const value = String(params.value ?? "-");
+          const ticker = params.data?.티커 ?? "";
+          const href = `/ticker?ticker=${encodeURIComponent(ticker)}`;
+          return (
+            <a href={href} className="rankNameCellText" style={{ color: "inherit", textDecoration: "none" }} title={value}>
+              {value}
+            </a>
+          );
+        },
       },
       {
-        field: "ticker",
-        headerName: "티커",
-        width: 98,
-        minWidth: 98,
-        cellRenderer: (params: { data?: DeletedStockGridRow }) => (
-          <span className="appCodeText">{params.data?.ticker ?? "-"}</span>
-        ),
-      },
-      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
-      {
-        field: "week_volume",
-        headerName: "주간거래량",
-        width: 116,
-        minWidth: 116,
+        field: "현재가",
+        headerName: "현재가",
+        minWidth: 110,
+        width: 110,
         type: "rightAligned",
-        valueFormatter: (params) => formatNumber((params.data?.week_volume as number | null) ?? null),
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          formatNumber(params.value ?? null, selectedTickerTypeItem?.country_code === "au" ? 2 : 0),
       },
       {
-        field: "return_1d",
+        field: "일간(%)",
         headerName: "일간(%)",
-        width: 88,
-        minWidth: 88,
+        minWidth: 96,
+        width: 96,
         type: "rightAligned",
-        cellRenderer: (params: { data?: DeletedStockGridRow }) => (
-          <span className={getSignedMetricClass(params.data?.return_1d ?? null)} style={{ fontWeight: 600 }}>
-             {formatPercent(params.data?.return_1d ?? null)}
-          </span>
-        ),
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
-      ...(selectedTickerTypeItem?.country_code !== "au" ? [
-        {
-          field: "괴리율",
-          headerName: "괴리율",
-          width: 88,
-          minWidth: 88,
-          type: "rightAligned",
-          cellRenderer: (params: { value?: number | null }) => {
-            const val = params.value ?? 0;
-            const isExtreme = val > 2.0 || val < -2.0;
-            return (
-              <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
-                {formatPercent(params.value ?? null)}
-              </span>
-            );
-          },
-        } as ColDef<DeletedStockGridRow>
-      ] : []),
-      ...(["return_1w", "return_1m", "return_3m", "return_6m", "return_12m"] as const).map(
-        (field) => ({
-          field,
-          headerName:
-            field === "return_1w"
-              ? "1주(%)"
-              : field === "return_1m"
-                ? "1달(%)"
-                : field === "return_3m"
-                  ? "3달(%)"
-                  : field === "return_6m"
-                    ? "6달(%)"
-                    : "12달(%)",
-          width: 88,
-          minWidth: 88,
-          type: "rightAligned" as const,
-          cellRenderer: (params: { data?: DeletedStockGridRow }) => (
-            <span className={getSignedMetricClass((params.data?.[field] as number | null) ?? null)}>
-              {formatPercent((params.data?.[field] as number | null) ?? null)}
-            </span>
-          ),
-        }),
-      ),
-      { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
-      { field: "added_date", headerName: "등록일", width: 112, minWidth: 112 },
-      { field: "deleted_date", headerName: "삭제일", width: 112, minWidth: 112 },
-      { field: "deleted_reason", headerName: "삭제 사유", minWidth: 160, flex: 0.7 },
-    ],
-    [selectedTickerTypeItem?.country_code],
-  );
+    ];
 
-  function handleTickerTypeChange(nextAccountId: string) {
-    setSelectedAccountId(nextAccountId);
-    writeRememberedTickerType(nextAccountId);
-    void load(viewMode, nextAccountId);
+    const cumulativeColumns: ColDef<RankGridRow>[] = [
+      {
+        field: "점수",
+        headerName: "점수",
+        minWidth: 72,
+        width: 72,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+      },
+      ...maRules.map(
+        (rule) =>
+          ({
+            field: rule.score_column,
+            headerName: `추세${rule.order}`,
+            minWidth: 112,
+            width: 112,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+          }) as ColDef<RankGridRow>,
+      ),
+      ...(selectedTickerTypeItem?.country_code !== "au"
+        ? [
+            {
+              field: "괴리율",
+              headerName: "괴리율",
+              minWidth: 88,
+              width: 88,
+              type: "rightAligned",
+              cellRenderer: (params: { value: number | null | undefined }) => {
+                const val = params.value ?? 0;
+                const isExtreme = val > 2.0 || val < -2.0;
+                return (
+                  <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                    {formatPercent(params.value ?? null)}
+                  </span>
+                );
+              },
+            } as ColDef<RankGridRow>,
+          ]
+        : []),
+      {
+        field: "고점",
+        headerName: "고점",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          const value = params.value ?? null;
+          const isHighlighted = value !== null && value >= -5;
+          return (
+            <span style={{ color: isHighlighted ? "#7952b3" : "inherit", fontWeight: isHighlighted ? 700 : 400 }}>
+              {formatPercent(value)}
+            </span>
+          );
+        },
+      },
+      {
+        field: "1주(%)",
+        headerName: "1주(%)",
+        minWidth: 88,
+        width: 88,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
+        field: "2주(%)",
+        headerName: "2주(%)",
+        minWidth: 88,
+        width: 88,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
+        field: "3주(%)",
+        headerName: "3주(%)",
+        minWidth: 88,
+        width: 88,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
+        field: "4주(%)",
+        headerName: "4주(%)",
+        minWidth: 88,
+        width: 88,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
+        field: "RSI",
+        headerName: "RSI",
+        minWidth: 74,
+        width: 74,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+      },
+      ...[
+        "1달(%)",
+        "2달(%)",
+        "3달(%)",
+        "4달(%)",
+        "5달(%)",
+        "6달(%)",
+        "7달(%)",
+        "8달(%)",
+        "9달(%)",
+        "10달(%)",
+        "11달(%)",
+        "12달(%)",
+      ].map(
+        (field) =>
+          ({
+            field,
+            headerName: field,
+            minWidth: field.length > 6 ? 94 : 88,
+            width: field.length > 6 ? 94 : 88,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+          }) as ColDef<RankGridRow>,
+      ),
+    ];
+
+    const duplicateColumn: ColDef<RankGridRow> = {
+      field: "추천",
+      headerName: "중복상세",
+      minWidth: 340,
+      width: 340,
+      sortable: false,
+      cellRenderer: (params: { value: string | null | undefined }) => {
+        const value = String(params.value ?? "").trim();
+        if (!value) {
+          return "";
+        }
+        return (
+          <span className="rankNameCellText" style={{ color: "#d63939", fontWeight: 700 }} title={value}>
+            {value}
+          </span>
+        );
+      },
+    };
+
+    const monthlyColumns: ColDef<RankGridRow>[] = monthlyReturnLabels.map(
+      (label) =>
+        ({
+          field: label,
+          headerName: label,
+          minWidth: 108,
+          width: 108,
+          type: "rightAligned",
+          cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+        }) as ColDef<RankGridRow>,
+    );
+
+    const monthlyLeadingColumns: ColDef<RankGridRow>[] = [
+      {
+        field: "점수",
+        headerName: "점수",
+        minWidth: 72,
+        width: 72,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+      },
+      ...maRules.map(
+        (rule) =>
+          ({
+            field: rule.score_column,
+            headerName: `추세${rule.order}`,
+            minWidth: 112,
+            width: 112,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+          }) as ColDef<RankGridRow>,
+      ),
+    ];
+
+    const infoColumns: ColDef<RankGridRow>[] = [
+      {
+        field: "배당률",
+        headerName: "배당률",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
+      },
+      {
+        field: "보수",
+        headerName: "보수",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
+      },
+      {
+        field: "순자산총액",
+        headerName: "순자산총액",
+        minWidth: 132,
+        width: 132,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatAssetInEok(params.value ?? null),
+      },
+      {
+        field: "상장일",
+        headerName: "상장일",
+        minWidth: 110,
+        width: 110,
+        cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
+      },
+    ];
+
+    return [
+      ...leadingColumns,
+      ...(metricMode === "cumulative"
+        ? [...cumulativeColumns, duplicateColumn]
+        : metricMode === "monthly"
+          ? [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]
+          : [...monthlyLeadingColumns, ...infoColumns, duplicateColumn]),
+    ];
+  }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, pageMode, selectedTickerType, selectedTickerTypeItem?.country_code]);
+
+  function handleTickerTypeChange(accountId: string) {
+    setSelectedAccountId(accountId);
+    writeRememberedTickerType(accountId);
+    void load({ ticker_type: accountId, as_of_date: selectedAsOfDate });
   }
 
-  function handleViewModeChange(nextMode: ViewMode) {
-    if (nextMode === viewMode) {
-      return;
-    }
-    setViewMode(nextMode);
-    setSelectedActiveTickers([]);
-    void load(nextMode, selectedTickerType);
+  function handleMaRuleTypeChange(order: number, nextMaType: string) {
+    const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_type: nextMaType } : rule));
+    setMaRules(nextRules);
+    void load({ ticker_type: selectedTickerType, ma_rule_overrides: nextRules, as_of_date: selectedAsOfDate });
+  }
+
+  function handleMaRuleMonthsChange(order: number, nextMaMonths: number) {
+    const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_months: nextMaMonths } : rule));
+    setMaRules(nextRules);
+    void load({ ticker_type: selectedTickerType, ma_rule_overrides: nextRules, as_of_date: selectedAsOfDate });
+  }
+
+  function handleAsOfDateChange(nextAsOfDate: string) {
+    setSelectedAsOfDate(nextAsOfDate);
+    void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: nextAsOfDate });
+  }
+
+  function showErrorToast(message: string) {
+    toast.error(`[ETF-순위] ${message}`);
   }
 
   function handleAddRow() {
@@ -583,32 +902,32 @@ export function StocksManager() {
       ticker: "",
       name: "",
       listing_date: "-",
-      bucket_id: 1,
+      bucket: 1,
       status: null,
       is_validating: false,
       is_validated: false,
     });
   }
 
-  function handleActiveBucketChanged(row: ActiveStockGridRow | undefined, bucketName: string) {
-    if (!row || row.id === "__adding__") {
+  function handleBucketChanged(row: RankGridRow | undefined, bucketName: string) {
+    if (!row || row.__isAddingRow) {
       return;
     }
     const nextBucketId = getBucketIdByName(bucketName);
-    setActiveRows((prev) =>
+    setRows((prev) =>
       prev.map((currentRow) =>
-        normalizeTicker(currentRow.ticker) === row.id
+        normalizeTicker(String(currentRow.티커 ?? "")) === row.id
           ? {
               ...currentRow,
-              bucket_id: nextBucketId,
-              bucket_name: bucketName,
+              bucket: nextBucketId,
+              버킷: getBucketName(nextBucketId),
             }
           : currentRow,
       ),
     );
-    setDirtyActiveRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
-    const dirtyCellKey = buildDirtyCellKey(row.id, "bucket_name");
-    setDirtyActiveCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
+    setDirtyRowIds((prev) => (prev.includes(row.id) ? prev : [...prev, row.id]));
+    const dirtyCellKey = buildDirtyCellKey(row.id, "버킷");
+    setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
   }
 
   async function handleValidateAddingTicker() {
@@ -619,22 +938,7 @@ export function StocksManager() {
 
     try {
       setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
-      const response = await fetch("/api/stocks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "validate",
-          ticker_type: selectedTickerType,
-          ticker,
-        }),
-      });
-      const payload = (await response.json()) as
-        | ({ error?: string } & StockValidationState)
-        | { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "티커 확인에 실패했습니다.");
-      }
-      const validated = payload as StockValidationState;
+      const validated = await validateStockCandidate(selectedTickerType, ticker);
       setAddingRow((prev) =>
         prev
           ? {
@@ -642,7 +946,7 @@ export function StocksManager() {
               ticker: normalizeTicker(validated.ticker),
               name: String(validated.name ?? "").trim(),
               listing_date: String(validated.listing_date ?? "-").trim() || "-",
-              bucket_id: Number(validated.bucket_id ?? prev.bucket_id ?? 1),
+              bucket: Number(validated.bucket_id ?? prev.bucket ?? 1),
               status: validated.status,
               is_validating: false,
               is_validated: validated.status !== "active",
@@ -651,9 +955,9 @@ export function StocksManager() {
       );
       if (validated.status === "active") {
         showErrorToast("이미 등록된 종목입니다.");
-      } else {
-        toast.success(`[ETF-종목 관리] ${validated.name}(${validated.ticker}) 확인 완료`);
+        return;
       }
+      toast.success(`[ETF-순위] ${validated.name}(${validated.ticker}) 확인 완료`);
     } catch (validationError) {
       setAddingRow((prev) =>
         prev
@@ -670,51 +974,22 @@ export function StocksManager() {
 
   async function processAddingRow() {
     if (!addingRow || !addingRow.is_validated) {
-      throw new Error("추가할 종목을 먼저 확인해주세요.");
+      throw new Error("추가할 종목을 먼저 확인하세요.");
     }
 
-    const response = await fetch("/api/stocks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "create",
-        ticker_type: selectedTickerType,
-        ticker: addingRow.ticker,
-        bucket_id: addingRow.bucket_id,
-      }),
-    });
-    const payload = (await response.json()) as {
-      error?: string;
-      ticker?: string;
-      name?: string;
-    };
-    if (!response.ok) {
-      throw new Error(payload.error ?? "종목 추가에 실패했습니다.");
-    }
-    toast.success(`[ETF-종목 관리] ${payload.name || addingRow.name}(${payload.ticker || addingRow.ticker}) 추가 완료`);
+    const created = await addStockCandidate(selectedTickerType, addingRow.ticker, addingRow.bucket);
+    toast.success(`[ETF-순위] ${created.name}(${created.ticker}) 추가 완료`);
   }
 
   async function processDirtyRows() {
-    const dirtyRows = activeRows.filter((row) => dirtyActiveRowIds.includes(normalizeTicker(row.ticker)));
+    const dirtyRows = rows.filter((row) => dirtyRowIds.includes(normalizeTicker(String(row.티커 ?? ""))));
     for (const row of dirtyRows) {
-      const response = await fetch("/api/stocks", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker_type: selectedTickerType,
-          ticker: row.ticker,
-          bucket_id: row.bucket_id,
-        }),
-      });
-      const payload = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? `${row.name} 버킷 저장에 실패했습니다.`);
-      }
+      await updateStockBucket(selectedTickerType, String(row.티커 ?? ""), Number(row.bucket ?? 1));
     }
   }
 
-  function handleSaveActiveChanges() {
-    if (!selectedTickerType || (dirtyActiveRowIds.length === 0 && !addingRow)) {
+  function handleSaveChanges() {
+    if (!selectedTickerType || (!addingRow && dirtyRowIds.length === 0)) {
       return;
     }
 
@@ -723,27 +998,19 @@ export function StocksManager() {
         if (addingRow) {
           await processAddingRow();
         }
-        if (dirtyActiveRowIds.length > 0) {
+        if (dirtyRowIds.length > 0) {
           await processDirtyRows();
         }
-        setAddingRow(null);
-        setDirtyActiveRowIds([]);
-        setDirtyActiveCellKeys([]);
-        setSelectedActiveTickers([]);
-        void load(viewMode, selectedTickerType);
-        toast.success("[ETF-종목 관리] 변경사항 저장 완료");
+        toast.success("[ETF-순위] 변경사항 저장 완료");
+        void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
       }
     });
   }
 
-  function handleDeleteActiveSelected() {
-    if (!selectedActiveTickers.length) {
-      return;
-    }
-    const selectedRows = activeRows.filter((row) => selectedActiveTickers.includes(normalizeTicker(row.ticker)));
-    if (!selectedRows.length) {
+  function handleDeleteSelected() {
+    if (selectedTickers.length === 0) {
       return;
     }
     setDeleteConfirmOpen(true);
@@ -754,208 +1021,227 @@ export function StocksManager() {
       return;
     }
     setDeleteConfirmOpen(false);
-    setDeleteReason("");
   }
 
-  function handleConfirmDeleteActiveSelected() {
-    const selectedRows = activeRows.filter((row) => selectedActiveTickers.includes(normalizeTicker(row.ticker)));
-    if (!selectedRows.length) {
+  function handleConfirmDeleteSelected() {
+    if (selectedTickers.length === 0) {
       setDeleteConfirmOpen(false);
       return;
     }
 
+    const selectedRows = rows.filter((row) => selectedTickers.includes(normalizeTicker(String(row.티커 ?? ""))));
     startTransition(async () => {
       try {
         for (const row of selectedRows) {
-          const response = await fetch("/api/stocks", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ticker_type: selectedTickerType,
-              ticker: row.ticker,
-              reason: deleteReason.trim() || undefined,
-            }),
-          });
-          const payload = (await response.json()) as { error?: string };
-          if (!response.ok) {
-            throw new Error(payload.error ?? `${row.name} 삭제에 실패했습니다.`);
-          }
+          await deleteStock(selectedTickerType, String(row.티커 ?? ""));
         }
-        setSelectedActiveTickers([]);
-        setDirtyActiveRowIds([]);
-        setDirtyActiveCellKeys([]);
+        const deletedTickerSet = new Set(selectedRows.map((row) => normalizeTicker(String(row.티커 ?? ""))));
+        setRows((prev) => prev.filter((row) => !deletedTickerSet.has(normalizeTicker(String(row.티커 ?? "")))));
+        setSelectedTickers([]);
         setDeleteConfirmOpen(false);
-        setDeleteReason("");
-        void load(viewMode, selectedTickerType);
-        toast.success(`[ETF-종목 관리] ${selectedRows.length}개 종목 삭제 완료`);
+        clearCacheWarningState();
+        toast.success(`[ETF-순위] ${selectedRows.length}개 종목 삭제 완료`);
+        void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
     });
   }
 
-  function handleRestoreDeleted() {
-    startTransition(async () => {
-      try {
-        const response = await fetch("/api/deleted", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticker_type: selectedTickerType,
-            tickers: selectedDeletedTickers,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string; restored_count?: number };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "종목 복구에 실패했습니다.");
-        }
-        toast.success(`[Momentum ETF-종목 관리] ${payload.restored_count ?? 0}개 종목 복구 완료`);
-        setSelectedDeletedTickers([]);
-        void load(viewMode, selectedTickerType);
-      } catch (restoreError) {
-        showErrorToast(restoreError instanceof Error ? restoreError.message : "종목 복구에 실패했습니다.");
-      }
-    });
-  }
+  const blockedMessage = useMemo(() => {
+    if (!cacheBlocked) {
+      return null;
+    }
 
-  function handleHardDeleteDeleted() {
-    startTransition(async () => {
-      try {
-        const response = await fetch("/api/deleted", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticker_type: selectedTickerType,
-            tickers: selectedDeletedTickers,
-          }),
-        });
-        const payload = (await response.json()) as { error?: string; deleted_count?: number };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "종목 완전 삭제에 실패했습니다.");
-        }
-        toast.success(`[Momentum ETF-종목 관리] ${payload.deleted_count ?? 0}개 종목 영구 삭제 완료`);
-        setSelectedDeletedTickers([]);
-        void load(viewMode, selectedTickerType);
-      } catch (deleteError) {
-        showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 완전 삭제에 실패했습니다.");
-      }
-    });
-  }
+    const parts: string[] = ["일부 종목의 가격 캐시가 없습니다."];
+    if (missingTickerLabels.length > 0) {
+      parts.push(`누락 ${missingTickerLabels.join(", ")}`);
+    } else if (missingTickers.length > 0) {
+      parts.push(`누락 ${missingTickers.join(", ")}`);
+    }
+    if (staleTickers.length > 0) {
+      parts.push(`오래된 캐시 ${staleTickers.join(", ")}`);
+    }
+    return parts.join(" | ");
+  }, [cacheBlocked, missingTickerLabels, missingTickers, staleTickers]);
+
+  useEffect(() => {
+    if (!blockedMessage) {
+      lastBlockedToastRef.current = null;
+      return;
+    }
+
+    if (lastBlockedToastRef.current === blockedMessage) {
+      return;
+    }
+
+    lastBlockedToastRef.current = blockedMessage;
+    toast.error(`[ETF-순위] ${blockedMessage}`);
+  }, [blockedMessage, toast]);
+
+  const headerSummary = useMemo<RankHeaderSummary>(() => {
+    const totalCount = filteredGridRows.length;
+    const upCount = filteredGridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
+    const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
+    return {
+      upCount,
+      upPct,
+      totalCount,
+      ruleSummary: maRuleSummary.join(" / ") || "-",
+    };
+  }, [filteredGridRows, maRuleSummary]);
+
+  useEffect(() => {
+    onHeaderSummaryChange?.(headerSummary);
+  }, [headerSummary, onHeaderSummaryChange]);
 
   return (
     <div className="appPageStack appPageStackFill">
-      <section className="appSection appSectionFill stocksPage">
-        <div className="card appCard stocksCard appTableCardFill">
+      {error ? (
+        <div className="appBannerStack">
+          <div className="bannerError alert alert-danger mb-0">{error}</div>
+        </div>
+      ) : null}
+
+      <section className="appSection appSectionFill">
+        <div className="card appCard appTableCardFill">
           <div className="card-header">
             <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <div className="accountSelect">
+              <div className="appMainHeaderLeft rankMainHeaderLeft">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">기준일</span>
+                  <input
+                    className="form-control"
+                    type="date"
+                    value={selectedAsOfDate}
+                    max={getTodayDateInputValue()}
+                    onChange={(event) => handleAsOfDateChange(event.target.value)}
+                  />
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">종목 타입</span>
                   <select
                     className="form-select"
-                    style={{ width: "auto", minWidth: "180px", fontWeight: 600 }}
-                    aria-label="계좌 선택"
                     value={selectedTickerType}
                     onChange={(event) => handleTickerTypeChange(event.target.value)}
-                    disabled={loading}
+                    disabled={ticker_types.length === 0}
                   >
-                    {ticker_types.map((account) => (
-                      <option key={account.ticker_type} value={account.ticker_type}>
-                        {account.name}
-                      </option>
-                    ))}
+                    {ticker_types.length === 0 ? (
+                      <option value="">종목 타입 불러오는 중...</option>
+                    ) : (
+                      ticker_types.map((account) => (
+                        <option key={account.ticker_type} value={account.ticker_type}>
+                          {account.name}
+                        </option>
+                      ))
+                    )}
                   </select>
-                </div>
-
-                <div className="appSegmentedToggle appSegmentedToggleCompact">
-                  <button
-                    className={viewMode === "active" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    type="button"
-                    onClick={() => handleViewModeChange("active")}
-                  >
-                    <IconLayoutGrid size={16} stroke={1.75} />
-                    <span>등록된 종목</span>
-                  </button>
-                  <button
-                    className={viewMode === "deleted" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    type="button"
-                    onClick={() => handleViewModeChange("deleted")}
-                  >
-                    <IconPlaylistX size={16} stroke={1.75} />
-                    <span>삭제된 종목</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="appMainHeaderRight">
-                <div className="appHeaderMetrics">
-                  <div className="appHeaderMetric">
-                    <span>총 개수:</span>
-                    <span className="appHeaderMetricValue">
-                      {viewMode === "active"
-                        ? `${new Intl.NumberFormat("ko-KR").format(activeRows.length)}개`
-                        : `${new Intl.NumberFormat("ko-KR").format(deletedRows.length)}개`}
-                    </span>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">화면 모드</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="순위 화면 모드">
+                    <button
+                      type="button"
+                      className={pageMode === "rank" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setPageMode("rank")}
+                    >
+                      순위모드
+                    </button>
+                    <button
+                      type="button"
+                      className={pageMode === "manage" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setPageMode("manage")}
+                    >
+                      관리모드
+                    </button>
                   </div>
-                  {viewMode === "active" && selectedActiveTickers.length > 0 ? (
-                    <div className="appHeaderMetric">
-                      <span>선택:</span>
-                      <span className="appHeaderMetricValue is-primary">
-                        {new Intl.NumberFormat("ko-KR").format(selectedActiveTickers.length)}개
+                </label>
+                {pageMode === "rank" ? (
+                  <>
+                    {maRules.map((rule) => (
+                      <label key={rule.order} className="appLabeledField">
+                        <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
+                        <div className="rankRuleFieldRow">
+                          <select
+                            className="form-select"
+                            value={rule.ma_type}
+                            onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
+                            disabled={maTypeOptions.length === 0}
+                          >
+                            {maTypeOptions.map((option) => (
+                              <option key={`${rule.order}-${option}`} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          <select
+                            className="form-select"
+                            value={String(rule.ma_months)}
+                            onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
+                            disabled={maTypeOptions.length === 0}
+                          >
+                            {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
+                              <option key={`${rule.order}-${month}`} value={month}>
+                                {month}개월
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </label>
+                    ))}
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">수익률 보기</span>
+                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
+                        <button
+                          type="button"
+                          className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode("cumulative")}
+                        >
+                          누적
+                        </button>
+                        <button
+                          type="button"
+                          className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode("monthly")}
+                        >
+                          월별
+                        </button>
+                        <button
+                          type="button"
+                          className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode("info")}
+                        >
+                          정보
+                        </button>
+                      </div>
+                    </label>
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">중복제거</span>
+                      <span className="rankSwitchField">
+                        <label className="form-check form-switch mb-0 rankSwitchFieldInner">
+                          <input
+                            className="form-check-input"
+                            type="checkbox"
+                            checked={dedupeEnabled}
+                            onChange={(event) => setDedupeEnabled(event.target.checked)}
+                          />
+                        </label>
                       </span>
-                    </div>
-                  ) : null}
-                  {viewMode === "active" && dirtyActiveRowIds.length > 0 ? (
-                    <div className="appHeaderMetric">
-                      <span>변경:</span>
-                      <span className="appHeaderMetricValue is-success">
-                        {new Intl.NumberFormat("ko-KR").format(dirtyActiveRowIds.length)}개
-                      </span>
-                    </div>
-                  ) : null}
-                  {viewMode === "deleted" && selectedDeletedTickers.length > 0 ? (
-                    <div className="appHeaderMetric">
-                      <span>선택:</span>
-                      <span className="appHeaderMetricValue is-primary">
-                        {new Intl.NumberFormat("ko-KR").format(selectedDeletedTickers.length)}개
-                      </span>
-                    </div>
-                  ) : null}
-                </div>
+                    </label>
+                  </>
+                ) : null}
               </div>
             </div>
           </div>
 
-          {viewMode === "deleted" && deletedRows.length > 0 && (
-            <div className="card-header appActionHeader bg-light-subtle border-top">
-              <div className="appActionHeaderInner">
-                <button
-                  className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                  onClick={handleRestoreDeleted}
-                  disabled={selectedDeletedTickers.length === 0}
-                >
-                    <IconArrowBackUp size={14} />
-                    <span>선택 복구</span>
-                </button>
-                <button
-                  className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                  onClick={handleHardDeleteDeleted}
-                  disabled={selectedDeletedTickers.length === 0}
-                >
-                    <IconSearch size={14} />
-                    <span>영구 삭제</span>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {viewMode === "active" && (
+          {pageMode === "manage" ? (
             <div className="card-header appActionHeader bg-light-subtle border-top">
               <div className="appActionHeaderInner">
                 <button
                   className="btn btn-primary btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   type="button"
                   onClick={handleAddRow}
-                  disabled={loading || Boolean(addingRow)}
+                  disabled={loading || isPending || Boolean(addingRow)}
                 >
                   <IconPlus size={16} stroke={2} />
                   <span>추가</span>
@@ -963,8 +1249,8 @@ export function StocksManager() {
                 <button
                   className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   type="button"
-                  onClick={handleSaveActiveChanges}
-                  disabled={loading || isPending || (!addingRow && dirtyActiveRowIds.length === 0)}
+                  onClick={handleSaveChanges}
+                  disabled={loading || isPending || (!addingRow && dirtyRowIds.length === 0)}
                 >
                   <IconDeviceFloppy size={16} stroke={2} />
                   <span>저장</span>
@@ -972,49 +1258,65 @@ export function StocksManager() {
                 <button
                   className="btn btn-outline-danger btn-sm px-3 fw-bold d-flex align-items-center gap-1"
                   type="button"
-                  onClick={handleDeleteActiveSelected}
-                  disabled={loading || isPending || selectedActiveTickers.length === 0}
+                  onClick={handleDeleteSelected}
+                  disabled={loading || isPending || selectedTickers.length === 0}
                 >
                   <IconTrash size={16} stroke={2} />
                   <span>삭제</span>
                 </button>
               </div>
             </div>
-          )}
+          ) : null}
 
-          <div className="card-body p-0 appTableCardBodyFill">
-            {viewMode === "active" ? (
-              <AppAgGrid<ActiveStockGridRow>
-                className="stocksAgGrid"
-                rowData={activeGridRows}
-                columnDefs={activeColumns}
+          <div className="card-body appCardBodyTight appTableCardBodyFill">
+            <div className="appGridFillWrap">
+              <AppAgGrid
+                className="rankAgGrid"
+                rowData={displayGridRows}
+                columnDefs={columns}
                 loading={loading || isPending}
+                theme={rankGridTheme}
+                getRowClass={(params: RowClassParams<RankGridRow>) => {
+                  const classes: string[] = [];
+                  if ((params.data?.점수 ?? 0) < 0) {
+                    classes.push("rankNegativeTrendRow");
+                  }
+                  if (String(params.data?.보유 || "").trim() !== "") {
+                    classes.push("rankHeldRow");
+                  }
+                  return classes.join(" ");
+                }}
                 minHeight="100%"
-                theme={stocksGridTheme}
                 gridOptions={{
                   suppressMovableColumns: true,
-                  rowSelection: {
-                    mode: "multiRow",
-                    checkboxes: (params) => params.data?.id !== "__adding__",
-                    headerCheckbox: true,
-                    hideDisabledCheckboxes: true,
-                    enableClickSelection: false,
-                  },
-                  selectionColumnDef: {
-                    width: 52,
-                    minWidth: 52,
-                    maxWidth: 52,
-                    pinned: "left",
-                    sortable: false,
-                    resizable: false,
-                    suppressMovable: true,
-                    headerName: "",
-                    cellClass: "stocksSelectCell",
-                  },
-                  onSelectionChanged: (params: {
-                    api: { getSelectedRows: () => ActiveStockGridRow[] };
-                  }) => {
-                    setSelectedActiveTickers(
+                  rowSelection: pageMode === "manage"
+                    ? {
+                        mode: "multiRow",
+                        checkboxes: (params) => !params.data?.__isAddingRow,
+                        headerCheckbox: true,
+                        hideDisabledCheckboxes: true,
+                        enableClickSelection: false,
+                      }
+                    : undefined,
+                  selectionColumnDef: pageMode === "manage"
+                    ? {
+                        width: 52,
+                        minWidth: 52,
+                        maxWidth: 52,
+                        pinned: "left",
+                        sortable: false,
+                        resizable: false,
+                        suppressMovable: true,
+                        headerName: "",
+                        cellClass: "stocksSelectCell",
+                      }
+                    : undefined,
+                  onSelectionChanged: (params: { api: { getSelectedRows: () => RankGridRow[] } }) => {
+                    if (pageMode !== "manage") {
+                      setSelectedTickers([]);
+                      return;
+                    }
+                    setSelectedTickers(
                       params.api
                         .getSelectedRows()
                         .map((row) => row.id)
@@ -1022,102 +1324,45 @@ export function StocksManager() {
                     );
                   },
                   onCellValueChanged: (params: {
-                    data?: ActiveStockGridRow;
+                    data?: RankGridRow;
                     newValue?: unknown;
                     oldValue?: unknown;
-                    colDef: { field?: string };
                   }) => {
-                    if (!params.data || params.data.id === "__adding__" || params.newValue === params.oldValue) {
+                    if (pageMode !== "manage" || !params.data || params.data.__isAddingRow || params.newValue === params.oldValue) {
                       return;
                     }
-                    handleActiveBucketChanged(params.data, String(params.newValue ?? ""));
+                    handleBucketChanged(params.data, String(params.newValue ?? ""));
                   },
                 }}
               />
-            ) : (
-              <AppAgGrid<DeletedStockGridRow>
-                className="stocksAgGrid"
-                rowData={deletedGridRows}
-                columnDefs={deletedColumns}
-                loading={loading || isPending}
-                minHeight="100%"
-                theme={stocksGridTheme}
-                gridOptions={{
-                  suppressMovableColumns: true,
-                  rowSelection: {
-                    mode: "multiRow",
-                    checkboxes: true,
-                    headerCheckbox: true,
-                    hideDisabledCheckboxes: true,
-                    enableClickSelection: false,
-                  },
-                  selectionColumnDef: {
-                    width: 52,
-                    minWidth: 52,
-                    maxWidth: 52,
-                    pinned: "left",
-                    sortable: false,
-                    resizable: false,
-                    suppressMovable: true,
-                    headerName: "",
-                    cellClass: "stocksSelectCell",
-                  },
-                  onSelectionChanged: (params: {
-                    api: { getSelectedRows: () => DeletedStockGridRow[] };
-                  }) => {
-                    setSelectedDeletedTickers(
-                      params.api
-                        .getSelectedRows()
-                        .map((row) => row.ticker.trim().toUpperCase()),
-                    );
-                  },
-                }}
-              />
-            )}
+            </div>
           </div>
         </div>
       </section>
+
       <AppModal
         open={deleteConfirmOpen}
         title="종목 삭제 확인"
-        subtitle="선택 종목은 소프트 삭제되며, 삭제된 종목 탭에서 복구할 수 있습니다."
+        subtitle="선택 종목은 즉시 영구 삭제됩니다."
         onClose={handleCloseDeleteConfirm}
         footer={(
           <>
             <button type="button" className="btn btn-outline-secondary" onClick={handleCloseDeleteConfirm} disabled={isPending}>
               취소
             </button>
-            <button type="button" className="btn btn-danger" onClick={handleConfirmDeleteActiveSelected} disabled={isPending}>
+            <button type="button" className="btn btn-danger" onClick={handleConfirmDeleteSelected} disabled={isPending}>
               삭제
             </button>
           </>
         )}
       >
-        <div className="d-flex flex-column gap-3">
+        <div className="d-flex flex-column gap-2">
           <div className="fw-semibold">
-            {selectedActiveTickers.length === 1
-              ? `${activeRows.find((row) => selectedActiveTickers.includes(normalizeTicker(row.ticker)))?.name ?? ""}(${selectedActiveTickers[0]}) 종목을 삭제합니다.`
-              : `${selectedActiveTickers.length}개 종목을 삭제합니다.`}
+            {selectedTickers.length === 1
+              ? `${rows.find((row) => selectedTickers.includes(normalizeTicker(String(row.티커 ?? ""))))?.종목명 ?? ""}(${selectedTickers[0]}) 종목을 삭제합니다.`
+              : `${selectedTickers.length}개 종목을 삭제합니다.`}
           </div>
-          <div className="text-secondary small">
-            {selectedActiveTickers.length > 1
-              ? selectedActiveTickers.join(", ")
-              : "삭제 사유는 선택 입력입니다."}
-          </div>
-          <div>
-            <label className="form-label fw-semibold mb-1" htmlFor="stocks-delete-reason">
-              삭제 사유
-            </label>
-            <input
-              id="stocks-delete-reason"
-              className="form-control"
-              type="text"
-              placeholder="예: 리밸런싱 제외, 중복 종목 정리"
-              value={deleteReason}
-              onChange={(event) => setDeleteReason(event.target.value)}
-              disabled={isPending}
-            />
-          </div>
+          <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
         </div>
       </AppModal>
     </div>
