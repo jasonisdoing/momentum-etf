@@ -305,6 +305,31 @@ function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: Account
   return (rowValuation / denominator) * 100;
 }
 
+function buildSyncedHoldingRows(rows: HoldingsRow[], summary: AccountSummary): HoldingsRow[] {
+  return rows.map((row) => {
+    const previewRow = { ...row, id: buildGridRowId(row) };
+    const quantity = getPreviewQuantity(previewRow);
+    const averageBuyPrice = getPreviewAverageBuyPrice(previewRow);
+    const valuationKrw = Math.round(getPreviewValuationKrw(previewRow));
+    const buyAmountKrw = Math.round(getPreviewBuyAmountKrw(previewRow));
+    const pnlKrw = valuationKrw - buyAmountKrw;
+    const returnPct = buyAmountKrw > 0 ? Number(((pnlKrw / buyAmountKrw) * 100).toFixed(2)) : 0;
+    const weightPct = Number(getPreviewWeightPct(previewRow, rows, summary).toFixed(1));
+
+    return {
+      ...row,
+      quantity,
+      average_buy_price: averageBuyPrice,
+      valuation_krw: valuationKrw,
+      buy_amount_krw: buyAmountKrw,
+      pnl_krw: pnlKrw,
+      pnl_krw_num: pnlKrw,
+      return_pct: returnPct,
+      weight_pct: weightPct,
+    };
+  });
+}
+
 function isDetailRow(row: ParentGridRow | undefined): row is Extract<ParentGridRow, { rowType: "detail" }> {
   return row?.rowType === "detail";
 }
@@ -423,11 +448,13 @@ function AccountHoldingsDetailPanel({
   summary,
   initialRows,
   onReload,
+  onRowsSync,
   onPreviewTargetRatioTotalChange,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
   onReload: () => Promise<void>;
+  onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
 }) {
   const toast = useToast();
@@ -975,6 +1002,7 @@ function AccountHoldingsDetailPanel({
     });
     rowsRef.current = nextRows;
     setRows(nextRows);
+    onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
     setDirtyRowIds((previous) => {
       const next = previous.includes(row.id) ? previous : [...previous, row.id];
       dirtyRowIdsRef.current = next;
@@ -985,7 +1013,7 @@ function AccountHoldingsDetailPanel({
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
     scheduleSilentRowSave(row.id);
-  }, [isEditableHoldingRow, scheduleSilentRowSave]);
+  }, [isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {
@@ -1413,8 +1441,9 @@ function AccountHoldingsDetailPanel({
                 return;
               }
               setRows((previous) => {
-              const nextRows = reorderRowsByTickers(previous, orderedTickers);
+                const nextRows = reorderRowsByTickers(previous, orderedTickers);
                 rowsRef.current = nextRows;
+                onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
                 return nextRows;
               });
               const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
@@ -1661,6 +1690,28 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }, []);
 
+  const handleChildRowsSync = useCallback((accountId: string, nextRows: HoldingsRow[]) => {
+    setAllRows((previous) => [
+      ...previous.filter((row) => row.account_id !== accountId),
+      ...nextRows,
+    ]);
+
+    const nextValuation = nextRows.reduce((sum, row) => sum + Number(row.valuation_krw ?? 0), 0);
+    setSummaries((previous) =>
+      previous.map((summary) => {
+        if (summary.account_id !== accountId) {
+          return summary;
+        }
+        return {
+          ...summary,
+          valuation_krw: nextValuation,
+          total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
+          holdings_count: nextRows.length,
+        };
+      }),
+    );
+  }, []);
+
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
       const data = params.data;
@@ -1672,11 +1723,12 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           summary={data.summary}
           initialRows={data.rows}
           onReload={load}
+          onRowsSync={handleChildRowsSync}
           onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
         />
       );
     },
-    [handlePreviewTargetRatioTotalChange, load],
+    [handleChildRowsSync, handlePreviewTargetRatioTotalChange, load],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
