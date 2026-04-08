@@ -214,6 +214,41 @@ function parseWeeklyCellValue(field: WeeklyEditableField | undefined, newValue: 
   return parsed;
 }
 
+function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width?: number; minWidth: number; flex?: number } {
+  if (key === "week_date_display") {
+    return { width: 112, minWidth: 112 };
+  }
+  if (key === "memo") {
+    return { width: 156, minWidth: 140, flex: 1 };
+  }
+  if (key === "exchange_rate") {
+    return { width: 82, minWidth: 82 };
+  }
+  if (key === "exchange_rate_change_pct") {
+    return { width: 94, minWidth: 94 };
+  }
+  if (key === "total_stocks" || key === "profit_count" || key === "loss_count") {
+    return { width: 74, minWidth: 72 };
+  }
+  if (
+    key === "withdrawal_mom" ||
+    key === "total_expense" ||
+    key === "deposit_withdrawal" ||
+    key === "weekly_return_pct" ||
+    key === "cumulative_return_pct" ||
+    key === "bucket_pct_cash"
+  ) {
+    return { width: 88, minWidth: 84 };
+  }
+  if (PERCENT_KEYS.has(key)) {
+    return { width: 84, minWidth: 80 };
+  }
+  if (MONEY_KEYS.has(key)) {
+    return { width: 88, minWidth: 84 };
+  }
+  return { width: 78, minWidth: 72 };
+}
+
 export function WeeklyManager({
   onHeaderSummaryChange,
 }: {
@@ -297,23 +332,13 @@ export function WeeklyManager({
   const gridColumns = useMemo<ColDef<WeeklyGridRow>[]>(
     () => [
       ...visibleColumns.map<ColDef<WeeklyGridRow>>((column) => ({
+        ...getWeeklyColumnWidth(column.key),
         field: column.key,
         headerName: column.label,
         type:
           MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
             ? "rightAligned"
             : undefined,
-        minWidth:
-          column.key === "week_date_display"
-            ? 125
-            : column.key === "memo"
-              ? 200
-                : MONEY_KEYS.has(column.key)
-                  ? 92
-                  : PERCENT_KEYS.has(column.key)
-                    ? 80
-                    : 72,
-        flex: column.key === "memo" ? 1.4 : column.key === "week_date_display" ? 0 : undefined,
         sortable: false,
         editable: () => editableFieldMap.has(column.key) && !readOnlyKeys.has(column.key),
         valueParser: (params) =>
