@@ -239,17 +239,27 @@ function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width
     return { width: 94, minWidth: 94 };
   }
   if (key === "total_stocks" || key === "profit_count" || key === "loss_count") {
-    return { width: 74, minWidth: 72 };
+    return { width: 84, minWidth: 80 };
   }
   if (
     key === "withdrawal_mom" ||
     key === "total_expense" ||
     key === "deposit_withdrawal" ||
     key === "weekly_return_pct" ||
-    key === "cumulative_return_pct" ||
     key === "bucket_pct_cash"
   ) {
     return { width: 88, minWidth: 84 };
+  }
+  if (key === "cumulative_return_pct") {
+    return { width: 96, minWidth: 92 };
+  }
+  if (
+    key === "bucket_pct_momentum" ||
+    key === "bucket_pct_market" ||
+    key === "bucket_pct_dividend" ||
+    key === "bucket_pct_alternative"
+  ) {
+    return { width: 96, minWidth: 92 };
   }
   if (PERCENT_KEYS.has(key)) {
     return { width: 84, minWidth: 80 };
