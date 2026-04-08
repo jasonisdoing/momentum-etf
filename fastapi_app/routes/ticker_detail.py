@@ -212,7 +212,7 @@ def get_ticker_detail(
                     str(item.get("ticker") or "").strip().upper().isdigit()
                     and len(str(item.get("ticker") or "").strip().upper()) == 6
                 )
-                and str(item.get("yahoo_symbol") or "").strip()
+                and str(item.get("yahoo_symbol") or "").strip().upper()
             ]
             price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
             foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
@@ -225,6 +225,7 @@ def get_ticker_detail(
                 else:
                     snapshot = foreign_price_snapshot_map.get(yahoo_symbol or component_ticker, {})
                 enriched_item = dict(item)
+                enriched_item["yahoo_symbol"] = yahoo_symbol or None
                 enriched_item["current_price"] = snapshot.get("current_price")
                 enriched_item["previous_close"] = snapshot.get("previous_close")
                 enriched_item["change_pct"] = snapshot.get("change_pct")
