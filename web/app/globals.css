@@ -2681,6 +2681,14 @@ a {
   align-items: center;
 }
 
+.stocksMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.stocksMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 12rem;
+}
+
 .appCardHeaderStack {
   display: flex;
   flex-wrap: wrap;
@@ -3141,6 +3149,11 @@ a {
   .rankRuleFieldRow .form-select {
     flex: 1 1 0;
     min-width: 0;
+  }
+
+  .stocksMainHeaderLeft .appLabeledField:first-child,
+  .stocksMainHeaderLeft .appLabeledField {
+    flex: 1 1 100%;
   }
 
   .accountSelect {
