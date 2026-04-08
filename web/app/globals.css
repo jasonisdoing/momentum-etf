@@ -1748,6 +1748,41 @@ a {
   padding-top: 0.75rem;
 }
 
+.tickerDetailHero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 1rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailHeroTitle {
+  font-size: 1.9rem;
+  line-height: 1.15;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailHeroMeta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.tickerDetailHeroPrice {
+  font-size: 1.75rem;
+  line-height: 1;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.tickerDetailHeroChange {
+  font-size: 1.25rem;
+  line-height: 1;
+  font-weight: 800;
+}
+
 .tickerDetailTablePanel {
   display: flex;
   flex: 1 1 auto;
@@ -1894,6 +1929,22 @@ a {
   .pageFrameTitleRight {
     width: 100%;
     justify-content: flex-start;
+  }
+
+  .tickerDetailHero {
+    padding-inline: 0.75rem;
+  }
+
+  .tickerDetailHeroTitle {
+    font-size: 1.5rem;
+  }
+
+  .tickerDetailHeroPrice {
+    font-size: 1.35rem;
+  }
+
+  .tickerDetailHeroChange {
+    font-size: 1rem;
   }
 
   .tickerDetailTables {

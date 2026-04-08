@@ -303,14 +303,7 @@ function getInitialVisibleLogicalRange(
 // --- 컴포넌트 ---
 
 export function TickerDetailManager({
-  onHeaderSummaryChange,
 }: {
-  onHeaderSummaryChange?: (summary: {
-    displayTitle: string;
-    priceText: string;
-    changeText: string;
-    changeClassName: string;
-  }) => void;
 }) {
   const searchParams = useSearchParams();
 
@@ -616,8 +609,6 @@ export function TickerDetailManager({
     };
   }, [chartInterval, chartRows, dateRowMap, priceMinMove, selectedCountryCode]);
 
-  const displayInfo = crosshairInfo ?? lastInfo;
-
   const reversedRows = useMemo(
     () => [...rows].reverse().map((r, i) => ({ ...r, id: `${r.date}-${i}` })),
     [rows],
@@ -707,15 +698,6 @@ export function TickerDetailManager({
     ? (selectedTicker.name ? `${selectedTicker.name}(${selectedTicker.ticker})` : selectedTicker.ticker)
     : null;
 
-  useEffect(() => {
-    onHeaderSummaryChange?.({
-      displayTitle: displayTitle ?? "",
-      priceText: displayInfo?.close != null ? formatTickerPrice(displayInfo.close, selectedCountryCode) : "",
-      changeText: displayInfo?.change_pct != null ? formatPercent(displayInfo.change_pct) : "",
-      changeClassName: displayInfo?.change_pct != null ? getSignedClass(displayInfo.change_pct) : "",
-    });
-  }, [displayInfo?.change_pct, displayInfo?.close, displayTitle, onHeaderSummaryChange, selectedCountryCode]);
-
   return (
     <div className="appPageStack appPageStackFill">
       {error ? (
@@ -733,6 +715,22 @@ export function TickerDetailManager({
               </div>
             ) : (
               <>
+                {displayTitle ? (
+                  <div className="tickerDetailHero">
+                    <div className="tickerDetailHeroTitle">{displayTitle}</div>
+                    {lastInfo?.close != null ? (
+                      <div className="tickerDetailHeroMeta">
+                        <span className="tickerDetailHeroPrice">{formatTickerPrice(lastInfo.close, selectedCountryCode)}</span>
+                        {lastInfo?.change_pct != null ? (
+                          <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
+                            {formatPercent(lastInfo.change_pct)}
+                          </span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 {/* 캔들스틱 차트 (고정 높이) */}
                 {loading && rows.length === 0 ? (
                   <div style={{ height: 420, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
