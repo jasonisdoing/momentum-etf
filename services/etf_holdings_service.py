@@ -63,14 +63,6 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
     return now < expires_at
 
 
-def _is_cash_component(raw_code: str, raw_name: str) -> bool:
-    normalized_code = str(raw_code or "").strip().upper()
-    normalized_name = str(raw_name or "").strip()
-    if normalized_code.startswith("KRD") or normalized_code.startswith("CASH"):
-        return True
-    return "현금" in normalized_name
-
-
 def _create_naver_session() -> requests.Session:
     session = requests.Session()
     session.headers.update(
@@ -132,8 +124,6 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
     for item in payload:
         raw_code = str(item.get("componentIsinCode") or item.get("componentItemCode") or "").strip().upper()
         raw_name = str(item.get("componentName") or "").strip()
-        if _is_cash_component(raw_code, raw_name):
-            continue
 
         component_item_code = str(item.get("componentItemCode") or "").strip().upper() or None
         component_reuters_code = str(item.get("componentReutersCode") or "").strip().upper() or None

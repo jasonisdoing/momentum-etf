@@ -771,6 +771,7 @@ export function TickerDetailManager({
           headerName: "종목코드",
           minWidth: 92,
           width: 92,
+          cellClass: "tickerDetailCodeCell",
           cellStyle: { fontWeight: 700 },
         },
         {
@@ -914,6 +915,7 @@ export function TickerDetailManager({
                           {holdingsRows.length > 0 ? (
                             <div className="appGridFillWrap">
                               <AppAgGrid
+                                className="tickerDetailHoldingsGrid"
                                 rowData={holdingsRows}
                                 columnDefs={holdingColumns}
                                 loading={loading}
