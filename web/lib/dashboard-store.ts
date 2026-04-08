@@ -9,6 +9,7 @@ type DashboardMetricItem = {
 type DashboardAccountSummaryItem = {
   account_id: string;
   account_name: string;
+  account_url?: string | null;
   order: number;
   total_assets: number;
   total_principal: number;

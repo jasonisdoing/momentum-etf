@@ -175,6 +175,7 @@ def load_dashboard_data() -> dict[str, Any]:
             {
                 "account_id": config["account_id"],
                 "account_name": config["name"],
+                "account_url": str(config.get("settings", {}).get("URL") or "").strip() or None,
                 "order": config["order"],
                 "total_assets": total_assets,
                 "total_principal": total_principal,
