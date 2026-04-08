@@ -65,8 +65,6 @@ type DeletedStocksRowItem = {
   return_6m: number | null;
   return_12m: number | null;
   "괴리율": number | null;
-  deleted_date: string;
-  deleted_reason: string;
 };
 
 type StocksResponse = {
@@ -92,8 +90,6 @@ type StockValidationState = {
   name: string;
   listing_date: string;
   status: "active" | "deleted" | "new";
-  is_deleted: boolean;
-  deleted_reason: string;
   bucket_id: number;
 };
 type AddingStockRowState = {
@@ -197,7 +193,6 @@ export function StocksManager({
   const [dirtyActiveRowIds, setDirtyActiveRowIds] = useState<string[]>([]);
   const [dirtyActiveCellKeys, setDirtyActiveCellKeys] = useState<string[]>([]);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-  const [deleteReason, setDeleteReason] = useState("");
   const toast = useToast();
   const selectedTickerTypeMeta = useMemo(
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
@@ -257,7 +252,6 @@ export function StocksManager({
       setDirtyActiveRowIds([]);
       setDirtyActiveCellKeys([]);
       setDeleteConfirmOpen(false);
-      setDeleteReason("");
 
       if (mode === "active") {
         setActiveRows((payload.rows as ActiveStocksRowItem[] | undefined) ?? []);
@@ -624,8 +618,6 @@ export function StocksManager({
       ),
       { field: "listing_date", headerName: "상장일", width: 112, minWidth: 112 },
       { field: "added_date", headerName: "등록일", width: 112, minWidth: 112 },
-      { field: "deleted_date", headerName: "삭제일", width: 112, minWidth: 112 },
-      { field: "deleted_reason", headerName: "삭제 사유", minWidth: 160, flex: 0.7 },
     ],
     [selectedTickerTypeItem?.country_code],
   );
@@ -824,7 +816,6 @@ export function StocksManager({
       return;
     }
     setDeleteConfirmOpen(false);
-    setDeleteReason("");
   }
 
   function handleConfirmDeleteActiveSelected() {
@@ -843,7 +834,6 @@ export function StocksManager({
             body: JSON.stringify({
               ticker_type: selectedTickerType,
               ticker: row.ticker,
-              reason: deleteReason.trim() || undefined,
             }),
           });
           const payload = (await response.json()) as { error?: string };
@@ -855,7 +845,6 @@ export function StocksManager({
         setDirtyActiveRowIds([]);
         setDirtyActiveCellKeys([]);
         setDeleteConfirmOpen(false);
-        setDeleteReason("");
         void load(viewMode, selectedTickerType);
         toast.success(`[ETF-종목 관리] ${selectedRows.length}개 종목 삭제 완료`);
       } catch (deleteError) {
@@ -1116,7 +1105,7 @@ export function StocksManager({
       <AppModal
         open={deleteConfirmOpen}
         title="종목 삭제 확인"
-        subtitle="선택 종목은 소프트 삭제되며, 삭제된 종목 탭에서 복구할 수 있습니다."
+        subtitle="선택 종목은 즉시 영구 삭제됩니다."
         onClose={handleCloseDeleteConfirm}
         footer={(
           <>
@@ -1138,21 +1127,7 @@ export function StocksManager({
           <div className="text-secondary small">
             {selectedActiveTickers.length > 1
               ? selectedActiveTickers.join(", ")
-              : "삭제 사유는 선택 입력입니다."}
-          </div>
-          <div>
-            <label className="form-label fw-semibold mb-1" htmlFor="stocks-delete-reason">
-              삭제 사유
-            </label>
-            <input
-              id="stocks-delete-reason"
-              className="form-control"
-              type="text"
-              placeholder="예: 리밸런싱 제외, 중복 종목 정리"
-              value={deleteReason}
-              onChange={(event) => setDeleteReason(event.target.value)}
-              disabled={isPending}
-            />
+              : "삭제된 종목은 복구되지 않으며 즉시 제거됩니다."}
           </div>
         </div>
       </AppModal>
