@@ -918,11 +918,11 @@ export function StocksManager({
         <div className="card appCard stocksCard appTableCardFill">
           <div className="card-header">
             <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <div className="accountSelect">
+              <div className="appMainHeaderLeft stocksMainHeaderLeft">
+                <label className="appLabeledField accountSelect">
+                  <span className="appLabeledFieldLabel">종목 타입</span>
                   <select
                     className="form-select"
-                    style={{ width: "auto", minWidth: "180px", fontWeight: 600 }}
                     aria-label="계좌 선택"
                     value={selectedTickerType}
                     onChange={(event) => handleTickerTypeChange(event.target.value)}
@@ -934,26 +934,29 @@ export function StocksManager({
                       </option>
                     ))}
                   </select>
-                </div>
+                </label>
 
-                <div className="appSegmentedToggle appSegmentedToggleCompact">
-                  <button
-                    className={viewMode === "active" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    type="button"
-                    onClick={() => handleViewModeChange("active")}
-                  >
-                    <IconLayoutGrid size={16} stroke={1.75} />
-                    <span>등록된 종목</span>
-                  </button>
-                  <button
-                    className={viewMode === "deleted" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                    type="button"
-                    onClick={() => handleViewModeChange("deleted")}
-                  >
-                    <IconPlaylistX size={16} stroke={1.75} />
-                    <span>삭제된 종목</span>
-                  </button>
-                </div>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">보기 방식</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact">
+                    <button
+                      className={viewMode === "active" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      type="button"
+                      onClick={() => handleViewModeChange("active")}
+                    >
+                      <IconLayoutGrid size={16} stroke={1.75} />
+                      <span>등록된 종목</span>
+                    </button>
+                    <button
+                      className={viewMode === "deleted" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      type="button"
+                      onClick={() => handleViewModeChange("deleted")}
+                    >
+                      <IconPlaylistX size={16} stroke={1.75} />
+                      <span>삭제된 종목</span>
+                    </button>
+                  </div>
+                </label>
               </div>
             </div>
           </div>
