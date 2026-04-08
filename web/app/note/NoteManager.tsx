@@ -198,10 +198,11 @@ export function NoteManager({
 
       <section className="appSection">
         <div className="card appCard">
-          <div className="card-body appCardBody">
-            <div className="accountToolbar">
-              <div className="accountToolbarLeft">
-                <div className="accountSelect">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft noteMainHeaderLeft">
+                <label className="appLabeledField accountSelect">
+                  <span className="appLabeledFieldLabel">계좌</span>
                   <select
                     className="field compactField"
                     value={selectedAccountId}
@@ -213,8 +214,20 @@ export function NoteManager({
                       </option>
                     ))}
                   </select>
-                </div>
+                </label>
               </div>
+            </div>
+          </div>
+          <div className="card-header appActionHeader bg-light-subtle border-top">
+            <div className="appActionHeaderInner">
+              <button className="btn btn-primary btn-sm px-3 fw-bold" type="button" onClick={handleSave} disabled={isPending}>
+                {isPending ? "저장 중..." : "메모 저장"}
+              </button>
+            </div>
+          </div>
+          <div className="card-body appCardBody">
+            <div className="noteMetaRow">
+              {isDirty ? <span>저장되지 않은 변경이 있습니다.</span> : <span>마지막 저장: {formatUpdatedAt(updatedAt)}</span>}
             </div>
 
             <textarea
@@ -223,17 +236,6 @@ export function NoteManager({
               onChange={(event) => setContent(event.target.value)}
               placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
             />
-
-            <div className="tableToolbar">
-              <div className="tableMeta">
-                {isDirty ? <span>저장되지 않은 변경이 있습니다.</span> : <span>마지막 저장: {formatUpdatedAt(updatedAt)}</span>}
-              </div>
-              <div className="toolbarActions">
-                <button className="primaryButton" type="button" onClick={handleSave} disabled={isPending}>
-                  {isPending ? "저장 중..." : "메모 저장"}
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </section>
