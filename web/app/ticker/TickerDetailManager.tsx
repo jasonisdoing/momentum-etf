@@ -779,6 +779,7 @@ export function TickerDetailManager({
           headerName: "종목명",
           minWidth: 148,
           flex: 1.2,
+          cellClass: "tickerDetailNameCell",
         },
       ];
 
