@@ -15,9 +15,14 @@ export type TickerHoldingRow = {
   name: string;
   contracts: number | null;
   amount: number | null;
+  raw_code?: string | null;
+  raw_name?: string | null;
+  reuters_code?: string | null;
+  yahoo_symbol?: string | null;
   current_price?: number | null;
   previous_close?: number | null;
   change_pct?: number | null;
+  price_currency?: string | null;
   weight: number | null;
 };
 
@@ -26,6 +31,8 @@ export type TickerDetailData = {
   rows: TickerDetailRow[];
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
+  holdings_price_as_of_date?: string | null;
+  holdings_error?: string | null;
   error?: string;
 };
 

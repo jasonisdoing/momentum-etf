@@ -4,7 +4,11 @@ import pandas as pd
 from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
-from services.etf_holdings_service import fetch_korean_stock_price_snapshot, load_korean_etf_holdings_cache
+from services.etf_holdings_service import (
+    fetch_foreign_stock_price_snapshot,
+    fetch_korean_etf_holdings_from_naver,
+    fetch_korean_stock_price_snapshot,
+)
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import load_common_settings
@@ -12,6 +16,17 @@ from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
+
+
+def _is_cash_holding(item: dict[str, object]) -> bool:
+    ticker = str(item.get("ticker") or "").strip().upper()
+    raw_code = str(item.get("raw_code") or "").strip().upper()
+    name = str(item.get("name") or item.get("raw_name") or "").strip()
+    if ticker.startswith("CASH") or ticker.startswith("KRD"):
+        return True
+    if raw_code.startswith("CASH") or raw_code.startswith("KRD"):
+        return True
+    return "현금" in name
 
 
 def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None, float | None]:
@@ -138,6 +153,8 @@ def get_ticker_detail(
             "rows": [],
             "holdings": [],
             "holdings_as_of_date": None,
+            "holdings_price_as_of_date": None,
+            "holdings_error": None,
             "error": "가격 데이터를 가져오지 못했습니다.",
         }
 
@@ -179,24 +196,47 @@ def get_ticker_detail(
 
     holdings: list[dict[str, object]] = []
     holdings_as_of_date: str | None = None
+    holdings_price_as_of_date: str | None = None
+    holdings_error: str | None = None
     if str(country_code or "").strip().lower() == "kor":
-        holdings_document = load_korean_etf_holdings_cache(ticker)
-        if holdings_document is not None:
-            holdings = list(holdings_document.get("holdings") or [])
+        try:
+            holdings_document = fetch_korean_etf_holdings_from_naver(ticker)
+        except Exception as exc:
+            holdings_error = str(exc).strip() or "구성종목 데이터를 확인할 수 없습니다."
+        else:
+            holdings = [item for item in list(holdings_document.get("holdings") or []) if not _is_cash_holding(item)]
             holdings_as_of_date = str(holdings_document.get("as_of_date") or "").strip() or None
             if holdings and holdings_as_of_date:
-                price_snapshot_map = fetch_korean_stock_price_snapshot(
-                    [str(item.get("ticker") or "") for item in holdings],
-                    holdings_as_of_date,
-                )
+                korean_tickers = [
+                    str(item.get("ticker") or "").strip().upper()
+                    for item in holdings
+                    if str(item.get("ticker") or "").strip().upper().isdigit()
+                    and len(str(item.get("ticker") or "").strip().upper()) == 6
+                ]
+                foreign_symbols = [
+                    str(item.get("yahoo_symbol") or "").strip().upper()
+                    for item in holdings
+                    if not (
+                        str(item.get("ticker") or "").strip().upper().isdigit()
+                        and len(str(item.get("ticker") or "").strip().upper()) == 6
+                    )
+                    and str(item.get("yahoo_symbol") or "").strip()
+                ]
+                price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
+                foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
                 enriched_holdings: list[dict[str, object]] = []
                 for item in holdings:
                     component_ticker = str(item.get("ticker") or "").strip().upper()
-                    snapshot = price_snapshot_map.get(component_ticker, {})
+                    yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+                    if component_ticker.isdigit() and len(component_ticker) == 6:
+                        snapshot = price_snapshot_map.get(component_ticker, {})
+                    else:
+                        snapshot = foreign_price_snapshot_map.get(yahoo_symbol or component_ticker, {})
                     enriched_item = dict(item)
                     enriched_item["current_price"] = snapshot.get("current_price")
                     enriched_item["previous_close"] = snapshot.get("previous_close")
                     enriched_item["change_pct"] = snapshot.get("change_pct")
+                    enriched_item["price_currency"] = snapshot.get("price_currency")
                     enriched_holdings.append(enriched_item)
                 holdings = enriched_holdings
 
@@ -205,4 +245,6 @@ def get_ticker_detail(
         "rows": rows,
         "holdings": holdings,
         "holdings_as_of_date": holdings_as_of_date,
+        "holdings_price_as_of_date": holdings_price_as_of_date,
+        "holdings_error": holdings_error,
     }
