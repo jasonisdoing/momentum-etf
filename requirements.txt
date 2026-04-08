@@ -85,7 +85,7 @@ pandas==2.3.2
     #   pandas-market-calendars
     #   pykrx
     #   yfinance
-pandas-market-calendars==5.1.1
+# pandas-market-calendars==5.1.1  # 거래일 캘린더 생성은 수동 작업으로만 사용
     # via -r requirements.in
 peewee==3.18.2
     # via yfinance
