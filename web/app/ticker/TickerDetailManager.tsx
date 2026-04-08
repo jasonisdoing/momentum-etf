@@ -646,6 +646,7 @@ export function TickerDetailManager({
     if (!holdingsAsOfDate || holdingsAsOfDate.length !== 8) return null;
     return `${holdingsAsOfDate.slice(0, 4)}-${holdingsAsOfDate.slice(4, 6)}-${holdingsAsOfDate.slice(6, 8)}`;
   }, [holdingsAsOfDate]);
+  const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
@@ -834,7 +835,7 @@ export function TickerDetailManager({
                       {selectedCountryCode === "kor" ? (
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
-                            <span className="tickerDetailTableTitle">구성종목비중</span>
+                            <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
                             <span className="text-muted tickerDetailTableMeta">
                               {holdingsRows.length > 0
                                 ? holdingsAsOfDateLabel
