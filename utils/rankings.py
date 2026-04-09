@@ -18,7 +18,11 @@ from config import (
 )
 from core.strategy.metrics import process_ticker_data
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
-from utils.cache_utils import load_cached_close_series_bulk_with_fallback, load_cached_updated_at_bulk_with_fallback
+from utils.cache_utils import (
+    load_cached_close_series_bulk_with_fallback,
+    load_cached_frames_bulk_with_fallback,
+    load_cached_updated_at_bulk_with_fallback,
+)
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
@@ -319,6 +323,7 @@ def _build_monthly_return_metrics(
 
 def _extract_price_metrics_from_close_series(
     close_series: pd.Series | None,
+    volume_series: pd.Series | None = None,
     *,
     reference_date: pd.Timestamp | None = None,
     monthly_labels: list[str] | None = None,
@@ -351,6 +356,7 @@ def _extract_price_metrics_from_close_series(
         "고점": None,
         "추세(3달)": [],
         "RSI": None,
+        "전일 거래량(주)": None,
         **monthly_return_metrics,
     }
     if close_series is None:
@@ -371,6 +377,12 @@ def _extract_price_metrics_from_close_series(
     drawdown = None
     if max_price > 0:
         drawdown = (current_price / max_price - 1.0) * 100.0
+
+    previous_volume = None
+    if volume_series is not None:
+        normalized_volume = pd.to_numeric(volume_series, errors="coerce").dropna()
+        if not normalized_volume.empty:
+            previous_volume = float(normalized_volume.iloc[-1])
 
     return {
         "현재가": current_price,
@@ -394,6 +406,7 @@ def _extract_price_metrics_from_close_series(
         "고점": drawdown,
         "추세(3달)": series.iloc[-60:].astype(float).tolist(),
         "RSI": _calculate_rsi(series),
+        "전일 거래량(주)": previous_volume,
         **monthly_return_metrics,
     }
 
@@ -629,6 +642,7 @@ def build_ticker_type_rankings(
     if callable(status_callback):
         status_callback("기준 종가 캐시 로드")
     cached_close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+    cached_frame_map = load_cached_frames_bulk_with_fallback(ticker_type, tickers)
     if callable(status_callback):
         status_callback("실시간 가격 조회")
     today_korea = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
@@ -665,9 +679,18 @@ def build_ticker_type_rankings(
             continue
 
         cached_close_series = cached_close_series_map.get(ticker)
+        cached_frame = cached_frame_map.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
+        base_volume_series = None
+        if cached_frame is not None and not cached_frame.empty and "Volume" in cached_frame.columns:
+            frame_copy = cached_frame.copy()
+            frame_copy.index = pd.to_datetime(frame_copy.index)
+            base_volume_series = pd.to_numeric(frame_copy["Volume"], errors="coerce")
+            base_volume_series = base_volume_series.loc[
+                base_volume_series.index.normalize() <= pd.Timestamp(latest_trading_day).normalize()
+            ].dropna()
         effective_close_series = _build_effective_close_series(base_close_series, realtime_entry)
         if effective_close_series is not None and not effective_close_series.empty:
             effective_close_series_map[ticker] = effective_close_series
@@ -676,6 +699,7 @@ def build_ticker_type_rankings(
         metric_started_at = perf_counter()
         price_metrics = _extract_price_metrics_from_close_series(
             effective_close_series,
+            base_volume_series,
             reference_date=selected_as_of_date,
             monthly_labels=monthly_labels,
         )
