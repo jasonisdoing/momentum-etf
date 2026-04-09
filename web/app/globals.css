@@ -239,6 +239,14 @@ a {
   color: inherit;
 }
 
+.appSidebarEmojiIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 .appSidebarItem .nav-link-title {
   display: block;
   flex: 1 1 auto;
