@@ -99,9 +99,7 @@
   "MA_RULES": [
     { "order": 1, "MA_TYPE": "SMA", "MA_MONTHS": 10 },
     { "order": 2, "MA_TYPE": "ALMA", "MA_MONTHS": 3 }
-  ],
-  "RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS": 60,
-  "RANK_RECOMMEND_SIMILARITY_THRESHOLD": 0.95,
+  ]
 }
 ```
 
@@ -110,7 +108,6 @@
 검증 원칙(현재 운영):
 
 * 종목풀: `MA_RULES` 필수
-* 종목풀: `RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS`, `RANK_RECOMMEND_SIMILARITY_THRESHOLD` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
@@ -132,7 +129,7 @@
 
 ### 핵심 원칙
 1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.
-2.  **실보유 구분**: 별도 추천 상태는 사용하지 않고, 실제 보유 종목만 행 색상으로 표시합니다.
+2.  **실보유 구분**: 실제 보유 종목만 행 색상으로 표시합니다.
 3.  **정렬 규칙**: `점수` 내림차순, `점수` 계산 불가 종목은 맨 아래입니다.
 4.  **계좌 종목 직접 관리**: 계좌가 자신의 종목 유니버스를 직접 보유하며, 별도 종목풀 fallback은 사용하지 않습니다.
 

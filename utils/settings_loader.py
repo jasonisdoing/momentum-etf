@@ -180,40 +180,6 @@ def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
         raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor 또는 au만 허용합니다: {country_code}")
     settings["country_code"] = country_code
 
-    similarity_lookback_days = settings.get("RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS")
-    if similarity_lookback_days is None:
-        raise AccountSettingsError(
-            f"'{path}' 설정 파일에 필수 항목 'RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS'가 누락되었습니다."
-        )
-    try:
-        normalized_lookback_days = int(similarity_lookback_days)
-    except (TypeError, ValueError) as exc:
-        raise AccountSettingsError(
-            f"'{path}' 설정 파일의 RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS는 정수여야 합니다: {similarity_lookback_days}"
-        ) from exc
-    if normalized_lookback_days < 20:
-        raise AccountSettingsError(
-            f"'{path}' 설정 파일의 RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS는 20 이상이어야 합니다: {normalized_lookback_days}"
-        )
-    settings["RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS"] = normalized_lookback_days
-
-    similarity_threshold = settings.get("RANK_RECOMMEND_SIMILARITY_THRESHOLD")
-    if similarity_threshold is None:
-        raise AccountSettingsError(
-            f"'{path}' 설정 파일에 필수 항목 'RANK_RECOMMEND_SIMILARITY_THRESHOLD'가 누락되었습니다."
-        )
-    try:
-        normalized_similarity_threshold = float(similarity_threshold)
-    except (TypeError, ValueError) as exc:
-        raise AccountSettingsError(
-            f"'{path}' 설정 파일의 RANK_RECOMMEND_SIMILARITY_THRESHOLD는 숫자여야 합니다: {similarity_threshold}"
-        ) from exc
-    if not 0 < normalized_similarity_threshold <= 1:
-        raise AccountSettingsError(
-            f"'{path}' 설정 파일의 RANK_RECOMMEND_SIMILARITY_THRESHOLD는 0 초과 1 이하여야 합니다: {normalized_similarity_threshold}"
-        )
-    settings["RANK_RECOMMEND_SIMILARITY_THRESHOLD"] = normalized_similarity_threshold
-
     return settings
 
 

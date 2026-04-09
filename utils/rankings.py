@@ -572,80 +572,6 @@ def _build_composite_score(df: pd.DataFrame, ma_rules: list[dict[str, Any]]) -> 
     return composite
 
 
-def _build_similarity_exclusion_map(
-    close_series_map: dict[str, pd.Series],
-    ranked_tickers: list[str],
-    ticker_name_map: dict[str, str],
-    held_tickers: set[str],
-    *,
-    lookback_days: int,
-    threshold: float,
-    holding_replace_gap_pct: float = RANK_RECOMMEND_HOLDING_REPLACE_GAP_PCT,
-) -> dict[str, dict[str, str]]:
-    eligible_series: dict[str, pd.Series] = {}
-    for ticker, series in close_series_map.items():
-        normalized = pd.to_numeric(series, errors="coerce").dropna()
-        if len(normalized) < 20:
-            continue
-        eligible_series[ticker] = normalized.tail(lookback_days)
-
-    if len(eligible_series) < 2:
-        return {"detail": {}, "summary": {}}
-
-    prices_df = pd.DataFrame(eligible_series).dropna(how="all")
-    returns_df = prices_df.pct_change().dropna()
-    if returns_df.empty or len(returns_df.columns) < 2:
-        return {"detail": {}, "summary": {}}
-
-    corr_matrix = returns_df.corr()
-    exclusion_map: dict[str, str] = {}
-    exclusion_summary_map: dict[str, str] = {}
-    assigned: set[str] = set()
-    rank_index_map = {ticker: index for index, ticker in enumerate(ranked_tickers)}
-    total_ranked = max(len(ranked_tickers), 1)
-
-    def _rank_percentile(ticker: str) -> float:
-        index = rank_index_map.get(ticker, total_ranked - 1)
-        return ((index + 1) / total_ranked) * 100.0
-
-    def _choose_representative(group_tickers: list[str], top_ticker: str) -> str:
-        held_group = [ticker for ticker in group_tickers if ticker in held_tickers]
-        if not held_group:
-            return top_ticker
-
-        held_representative = min(held_group, key=lambda ticker: rank_index_map.get(ticker, total_ranked))
-        percentile_gap = _rank_percentile(held_representative) - _rank_percentile(top_ticker)
-        if percentile_gap >= holding_replace_gap_pct:
-            return top_ticker
-        return held_representative
-
-    for leader in ranked_tickers:
-        if leader in assigned or leader not in corr_matrix.columns:
-            continue
-
-        similar_group = [leader]
-        for candidate in ranked_tickers:
-            if candidate == leader or candidate in assigned or candidate not in corr_matrix.columns:
-                continue
-            correlation = corr_matrix.loc[leader, candidate]
-            if pd.isna(correlation):
-                continue
-            if float(correlation) >= threshold:
-                similar_group.append(candidate)
-
-        representative = _choose_representative(similar_group, leader)
-        representative_name = str(ticker_name_map.get(representative, representative)).strip() or representative
-        representative_rank = rank_index_map.get(representative, 0) + 1
-        for member in similar_group:
-            assigned.add(member)
-            if member == representative:
-                continue
-            exclusion_map[member] = f"{representative_name}({representative}) 중복"
-            exclusion_summary_map[member] = f"{representative_rank}위 중복"
-
-    return {"detail": exclusion_map, "summary": exclusion_summary_map}
-
-
 def build_ticker_type_rankings(
     ticker_type: str,
     *,
@@ -659,8 +585,6 @@ def build_ticker_type_rankings(
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
     country_code = str(settings.get("country_code") or "").strip().lower()
-    similarity_lookback_days = int(settings["RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS"])
-    similarity_threshold = float(settings["RANK_RECOMMEND_SIMILARITY_THRESHOLD"])
 
     etfs = get_etfs(ticker_type)
     if not etfs:
@@ -850,21 +774,6 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
-    ranked_tickers = [str(item).strip().upper() for item in df["티커"].tolist()]
-    ticker_name_map = {
-        str(row["티커"]).strip().upper(): str(row["종목명"]).strip()
-        for _, row in df[["티커", "종목명"]].iterrows()
-    }
-    similarity_maps = _build_similarity_exclusion_map(
-        effective_close_series_map,
-        ranked_tickers,
-        ticker_name_map,
-        {str(ticker).strip().upper() for ticker in held_tickers},
-        lookback_days=similarity_lookback_days,
-        threshold=similarity_threshold,
-    )
-    df["추천"] = df["티커"].map(lambda ticker: similarity_maps["detail"].get(str(ticker).strip().upper(), ""))
-    df["추천요약"] = df["티커"].map(lambda ticker: similarity_maps["summary"].get(str(ticker).strip().upper(), ""))
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

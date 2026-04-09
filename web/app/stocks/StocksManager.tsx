@@ -36,8 +36,6 @@ type RankRow = {
   순번: string;
   순위: number | null;
   이전순위: number | null;
-  추천: string | null;
-  추천요약: string | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -254,7 +252,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
-  const [dedupeEnabled, setDedupeEnabled] = useState(false);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -357,20 +354,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     [rows],
   );
 
-  const filteredGridRows = useMemo(
-    () =>
-      gridRows.filter((row) => {
-        if (dedupeEnabled && String(row.추천 ?? "").trim()) {
-          return false;
-        }
-        return true;
-      }),
-    [gridRows, dedupeEnabled],
-  );
-
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     if (pageMode !== "manage" || !addingRow) {
-      return filteredGridRows;
+      return gridRows;
     }
     return [
       {
@@ -379,8 +365,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순번: "-",
         순위: null,
         이전순위: null,
-        추천: null,
-        추천요약: null,
         버킷: getBucketName(addingRow.bucket),
         bucket: addingRow.bucket,
         티커: addingRow.ticker,
@@ -413,9 +397,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보수: null,
         순자산총액: null,
       },
-      ...filteredGridRows,
+      ...gridRows,
     ];
-  }, [addingRow, filteredGridRows, pageMode]);
+  }, [addingRow, gridRows, pageMode]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -463,25 +447,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return (
             <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
               {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
-            </span>
-          );
-        },
-      },
-      {
-        field: "추천요약",
-        headerName: "중복",
-        minWidth: 92,
-        width: 92,
-        sortable: false,
-        cellStyle: { textAlign: "center" },
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = String(params.value ?? "").trim();
-          if (!value) {
-            return "";
-          }
-          return (
-            <span style={{ color: "#182433", fontWeight: 400 }} title={value}>
-              {value}
             </span>
           );
         },
@@ -770,25 +735,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ),
     ];
 
-    const duplicateColumn: ColDef<RankGridRow> = {
-      field: "추천",
-      headerName: "중복상세",
-      minWidth: 340,
-      width: 340,
-      sortable: false,
-      cellRenderer: (params: { value: string | null | undefined }) => {
-        const value = String(params.value ?? "").trim();
-        if (!value) {
-          return "";
-        }
-        return (
-          <span className="rankNameCellText" style={{ color: "#d63939", fontWeight: 700 }} title={value}>
-            {value}
-          </span>
-        );
-      },
-    };
-
     const monthlyColumns: ColDef<RankGridRow>[] = monthlyReturnLabels.map(
       (label) =>
         ({
@@ -860,10 +806,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     return [
       ...leadingColumns,
       ...(metricMode === "cumulative"
-        ? [...cumulativeColumns, duplicateColumn]
+        ? cumulativeColumns
         : metricMode === "monthly"
-          ? [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]
-          : [...monthlyLeadingColumns, ...infoColumns, duplicateColumn]),
+          ? [...monthlyLeadingColumns, ...monthlyColumns]
+          : [...monthlyLeadingColumns, ...infoColumns]),
     ];
   }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, pageMode, selectedTickerType, selectedTickerTypeItem?.country_code]);
 
@@ -1080,8 +1026,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
-    const totalCount = filteredGridRows.length;
-    const upCount = filteredGridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
+    const totalCount = gridRows.length;
+    const upCount = gridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
     return {
       upCount,
@@ -1089,7 +1035,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       totalCount,
       ruleSummary: maRuleSummary.join(" / ") || "-",
     };
-  }, [filteredGridRows, maRuleSummary]);
+  }, [gridRows, maRuleSummary]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(headerSummary);
@@ -1214,19 +1160,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           정보
                         </button>
                       </div>
-                    </label>
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">중복제거</span>
-                      <span className="rankSwitchField">
-                        <label className="form-check form-switch mb-0 rankSwitchFieldInner">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            checked={dedupeEnabled}
-                            onChange={(event) => setDedupeEnabled(event.target.checked)}
-                          />
-                        </label>
-                      </span>
                     </label>
                   </>
                 ) : null}
