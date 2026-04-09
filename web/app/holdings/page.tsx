@@ -163,13 +163,7 @@ export default function HoldingsPage() {
         if (!params.value) {
           return "-";
         }
-        const ticker = params.data?.ticker ?? "";
-        const href = `/ticker?ticker=${encodeURIComponent(ticker)}`;
-        return (
-          <a href={href} className="holdingsNameMain" style={{ textDecoration: "none" }} title={params.value}>
-            {params.value}
-          </a>
-        );
+        return <span className="holdingsNameMain" title={params.value}>{params.value}</span>;
       },
     },
     {
