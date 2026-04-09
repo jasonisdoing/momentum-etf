@@ -102,6 +102,25 @@ def extract_yahoo_symbol_from_isin(value: str | None) -> str | None:
     return None
 
 
+def extract_yahoo_symbol_from_component_code(
+    component_item_code: str | None,
+    raw_code: str | None,
+) -> str | None:
+    normalized_code = str(component_item_code or "").strip().upper()
+    normalized_raw = str(raw_code or "").strip().upper()
+    if not normalized_code:
+        return None
+
+    if len(normalized_code) == 6 and normalized_code.isdigit() and normalized_raw.startswith("CNE"):
+        if normalized_code.startswith("6"):
+            return f"{normalized_code}.SS"
+        if normalized_code.startswith(("0", "3")):
+            return f"{normalized_code}.SZ"
+        if normalized_code.startswith(("4", "8")):
+            return f"{normalized_code}.BJ"
+    return None
+
+
 def extract_display_ticker_from_symbol(value: str | None) -> str | None:
     normalized = str(value or "").strip().upper()
     if not normalized:
@@ -158,8 +177,10 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
 
         component_item_code = str(item.get("componentItemCode") or "").strip().upper() or None
         component_reuters_code = str(item.get("componentReutersCode") or "").strip().upper() or None
-        yahoo_symbol = extract_yahoo_symbol_from_reuters_code(component_reuters_code) or extract_yahoo_symbol_from_isin(
-            raw_code
+        yahoo_symbol = (
+            extract_yahoo_symbol_from_reuters_code(component_reuters_code)
+            or extract_yahoo_symbol_from_component_code(component_item_code, raw_code)
+            or extract_yahoo_symbol_from_isin(raw_code)
         )
         display_ticker = component_item_code or extract_display_ticker_from_symbol(yahoo_symbol) or raw_code
         reference_date = _normalize_reference_date(item.get("referenceDate"))
