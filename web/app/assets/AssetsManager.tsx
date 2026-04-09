@@ -448,15 +448,19 @@ function StableInlineInput({
 function AccountHoldingsDetailPanel({
   summary,
   initialRows,
+  initialSortState,
   onReload,
   onRowsSync,
   onPreviewTargetRatioTotalChange,
+  onSortStateChange,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
+  initialSortState: ColumnState[];
   onReload: () => Promise<void>;
   onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
+  onSortStateChange: (accountId: string, state: ColumnState[]) => void;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -492,7 +496,6 @@ function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
-  const sortStateRef = useRef<ColumnState[]>([]);
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -509,15 +512,15 @@ function AccountHoldingsDetailPanel({
     setAddingRow(null);
     setIsReorderDirty(false);
     queueMicrotask(() => {
-      if (!gridApiRef.current || sortStateRef.current.length === 0) {
+      if (!gridApiRef.current || initialSortState.length === 0) {
         return;
       }
       gridApiRef.current.applyColumnState({
-        state: sortStateRef.current,
+        state: initialSortState,
         applyOrder: false,
       });
     });
-  }, [hydrateRows, initialRows]);
+  }, [hydrateRows, initialRows, initialSortState]);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -1494,15 +1497,15 @@ function AccountHoldingsDetailPanel({
             },
             onGridReady: (params) => {
               gridApiRef.current = params.api;
-              if (sortStateRef.current.length > 0) {
+              if (initialSortState.length > 0) {
                 params.api.applyColumnState({
-                  state: sortStateRef.current,
+                  state: initialSortState,
                   applyOrder: false,
                 });
               }
             },
             onSortChanged: (params) => {
-              sortStateRef.current = params.api
+              const nextSortState = params.api
                 .getColumnState()
                 .filter((column): column is ColumnState => Boolean(column.sort) && Boolean(column.colId))
                 .map((column) => ({
@@ -1510,6 +1513,7 @@ function AccountHoldingsDetailPanel({
                   sort: column.sort,
                   sortIndex: column.sortIndex,
                 }));
+              onSortStateChange(summary.account_id, nextSortState);
             },
             getRowId: (params) => String(params.data.id),
             rowClassRules: {
@@ -1536,6 +1540,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
   const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
+  const childSortStatesRef = useRef<Record<string, ColumnState[]>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -1769,6 +1774,13 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     );
   }, []);
 
+  const handleChildSortStateChange = useCallback((accountId: string, state: ColumnState[]) => {
+    childSortStatesRef.current = {
+      ...childSortStatesRef.current,
+      [accountId]: state,
+    };
+  }, []);
+
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
       const data = params.data;
@@ -1779,13 +1791,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         <AccountHoldingsDetailPanel
           summary={data.summary}
           initialRows={data.rows}
+          initialSortState={childSortStatesRef.current[data.summary.account_id] ?? []}
           onReload={load}
           onRowsSync={handleChildRowsSync}
           onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
+          onSortStateChange={handleChildSortStateChange}
         />
       );
     },
-    [handleChildRowsSync, handlePreviewTargetRatioTotalChange, load],
+    [handleChildRowsSync, handleChildSortStateChange, handlePreviewTargetRatioTotalChange, load],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
