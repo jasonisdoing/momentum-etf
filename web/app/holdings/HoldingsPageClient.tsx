@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
 import { HoldingsManager } from "./HoldingsManager";
@@ -23,19 +22,7 @@ function formatKrw(value: number): string {
 }
 
 export function HoldingsPageClient() {
-  const router = useRouter();
   const [summary, setSummary] = useState<HoldingsHeaderSummary>(DEFAULT_SUMMARY);
-
-  useEffect(() => {
-    function handlePageShow() {
-      router.refresh();
-    }
-
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
-  }, [router]);
 
   const titleRight = useMemo(
     () => (

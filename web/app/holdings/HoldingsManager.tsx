@@ -3,6 +3,7 @@
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 
@@ -64,6 +65,7 @@ export function HoldingsManager({
 }: {
   onHeaderSummaryChange?: (summary: HoldingsHeaderSummary) => void;
 }) {
+  const router = useRouter();
   const [holdings, setHoldings] = useState<HoldingsRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAmounts, setShowAmounts] = useState(true);
@@ -89,15 +91,6 @@ export function HoldingsManager({
 
   useEffect(() => {
     void loadHoldings();
-
-    function handlePageShow() {
-      void loadHoldings();
-    }
-
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
   }, [loadHoldings]);
 
   const accountNames = [...new Set(holdings.map((h) => h.account_name))];
@@ -163,6 +156,17 @@ export function HoldingsManager({
     });
   }, [accountNames.length, aggregatedHoldings.length, onHeaderSummaryChange, totalValuation]);
 
+  const moveToTickerDetail = useCallback(
+    (ticker: string | null | undefined) => {
+      const normalizedTicker = normalizeDisplayTicker(String(ticker ?? "-"));
+      if (!normalizedTicker || normalizedTicker === "-" || normalizedTicker === "IS") {
+        return;
+      }
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+    },
+    [router],
+  );
+
   const columnDefs = useMemo<ColDef<(AggregatedHoldingRow & { portfolio_weight_pct: number })>[]>(() => [
     {
       headerName: "티커",
@@ -176,11 +180,15 @@ export function HoldingsManager({
         if (normalizedTicker === "IS") {
           return <span className="appCodeText">{normalizedTicker}</span>;
         }
-        const href = `/ticker?ticker=${encodeURIComponent(normalizedTicker)}`;
         return (
-          <a href={href} className="appCodeText" style={{ color: "inherit", textDecoration: "none" }}>
+          <button
+            type="button"
+            className="appCodeText"
+            style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
+            onClick={() => moveToTickerDetail(normalizedTicker)}
+          >
             {normalizedTicker}
-          </a>
+          </button>
         );
       },
     },
@@ -265,7 +273,7 @@ export function HoldingsManager({
         return <span className={getSignedClass(value)}>{formatSignedPercent(value)}</span>;
       },
     },
-  ], [showAmounts]);
+  ], [moveToTickerDetail, showAmounts]);
 
   return (
     <div className="appPageStack appPageStackFill">

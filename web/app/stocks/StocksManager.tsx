@@ -3,6 +3,7 @@
 import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
@@ -240,6 +241,7 @@ function formatAssetInEok(value: number | null): string {
 }
 
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
+  const router = useRouter();
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -340,20 +342,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
 
-  useEffect(() => {
-    function handlePageShow() {
-      void load({
-        ticker_type: selectedTickerType || readRememberedTickerType() || undefined,
-        ma_rule_overrides: maRules,
-        as_of_date: selectedAsOfDate,
-      });
-    }
-
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
-  }, [maRules, selectedAsOfDate, selectedTickerType]);
+  const moveToTickerDetail = useMemo(
+    () => (ticker: string | null | undefined) => {
+      const normalizedTicker = String(ticker ?? "-").trim().toUpperCase();
+      if (!normalizedTicker || normalizedTicker === "-") {
+        return;
+      }
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+    },
+    [router],
+  );
 
   const selectedTickerTypeItem = useMemo(
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
@@ -426,8 +424,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "순위",
         headerName: "순위",
-        minWidth: 72,
-        width: 72,
+        minWidth: 52,
+        width: 52,
         cellStyle: { textAlign: "center" },
         cellRenderer: (params: { value: number | null | undefined }) => {
           return (
@@ -557,11 +555,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          const href = `/ticker?ticker=${encodeURIComponent(value)}`;
           return (
-            <a href={href} className="appCodeText" style={{ color: "inherit", textDecoration: "none" }}>
+            <button
+              type="button"
+              className="appCodeText"
+              style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
+              onClick={() => moveToTickerDetail(value)}
+            >
               {value}
-            </a>
+            </button>
           );
         },
       },
@@ -606,8 +608,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "현재가",
         headerName: "현재가",
-        minWidth: 110,
-        width: 110,
+        minWidth: 96,
+        width: 96,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
           formatNumber(params.value ?? null, selectedTickerTypeItem?.country_code === "au" ? 2 : 0),
@@ -636,8 +638,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ({
             field: rule.score_column,
             headerName: `추세${rule.order}`,
-            minWidth: 112,
-            width: 112,
+            minWidth: 80,
+            width: 80,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
@@ -770,8 +772,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ({
             field: rule.score_column,
             headerName: `추세${rule.order}`,
-            minWidth: 112,
-            width: 112,
+            minWidth: 80,
+            width: 80,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
