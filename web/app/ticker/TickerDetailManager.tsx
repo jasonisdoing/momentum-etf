@@ -873,15 +873,44 @@ export function TickerDetailManager({
               <>
                 {displayTitle ? (
                   <div className="tickerDetailHero">
-                    <div className="tickerDetailHeroTitle">{displayTitle}</div>
-                    {lastInfo?.close != null ? (
-                      <div className="tickerDetailHeroMeta">
+                    <div className="tickerDetailHeroLeft">
+                      <div className="tickerDetailHeroTitle">{displayTitle}</div>
+                      {lastInfo?.close != null ? (
                         <span className="tickerDetailHeroPrice">{formatTickerPrice(lastInfo.close, selectedCountryCode)}</span>
-                        {lastInfo?.change_pct != null ? (
-                          <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
-                            {formatPercent(lastInfo.change_pct)}
-                          </span>
-                        ) : null}
+                      ) : null}
+                      {lastInfo?.change_pct != null ? (
+                        <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
+                          {formatPercent(lastInfo.change_pct)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {rows.length > 0 ? (
+                      <div className="tickerDetailHeroRight">
+                        <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
+                          {[
+                            { value: "day", label: "일" },
+                            { value: "week", label: "주" },
+                            { value: "month", label: "월" },
+                          ].map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={chartInterval === option.value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                              onClick={() => setChartInterval(option.value as ChartInterval)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                        <span style={{ fontSize: 12, color: "#5b6778", fontWeight: 600 }}>이동평균선</span>
+                        {MA_PERIODS.map((ma) => (
+                          chartRows.length >= ma.period ? (
+                            <span key={ma.period} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                              <span style={{ width: 14, height: 2, backgroundColor: ma.color, display: "inline-block" }} />
+                              <span style={{ color: ma.color, fontWeight: 600 }}>{ma.label}</span>
+                            </span>
+                          ) : null
+                        ))}
                       </div>
                     ) : null}
                   </div>
@@ -894,48 +923,7 @@ export function TickerDetailManager({
                   </div>
                 ) : rows.length > 0 ? (
                   <div style={{ flexShrink: 0 }}>
-                    <div style={{ display: "flex", gap: 12, padding: "8px 16px 0", flexWrap: "wrap", alignItems: "center" }}>
-                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
-                        {[
-                          { value: "day", label: "일" },
-                          { value: "week", label: "주" },
-                          { value: "month", label: "월" },
-                        ].map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={chartInterval === option.value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                            onClick={() => setChartInterval(option.value as ChartInterval)}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <span style={{ fontSize: 12, color: "#5b6778", fontWeight: 600 }}>이동평균선</span>
-                      {MA_PERIODS.map((ma) => (
-                        chartRows.length >= ma.period ? (
-                          <span key={ma.period} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                            <span style={{ width: 14, height: 2, backgroundColor: ma.color, display: "inline-block" }} />
-                            <span style={{ color: ma.color, fontWeight: 600 }}>{ma.label}</span>
-                          </span>
-                        ) : null
-                      ))}
-                    </div>
                     <div className={selectedCountryCode === "kor" ? "tickerDetailTopGrid" : ""}>
-                      <div className="tickerDetailChartWrap">
-                        <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
-                        {chartBadges.map((badge, index) => (
-                          <div
-                            key={`${badge.tone}-${index}`}
-                            className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
-                            style={{ left: badge.left, top: badge.top }}
-                          >
-                            {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
-                            <span className="tickerDetailChartBadgeText">{badge.text}</span>
-                            {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
-                          </div>
-                        ))}
-                      </div>
                       {selectedCountryCode === "kor" ? (
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
@@ -960,6 +948,20 @@ export function TickerDetailManager({
                           )}
                         </div>
                       ) : null}
+                      <div className="tickerDetailChartWrap">
+                        <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                        {chartBadges.map((badge, index) => (
+                          <div
+                            key={`${badge.tone}-${index}`}
+                            className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
+                            style={{ left: badge.left, top: badge.top }}
+                          >
+                            {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
+                            <span className="tickerDetailChartBadgeText">{badge.text}</span>
+                            {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : null}

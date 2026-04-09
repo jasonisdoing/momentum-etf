@@ -1758,10 +1758,24 @@ a {
 
 .tickerDetailHero {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.25rem 1rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailHeroLeft {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailHeroRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
