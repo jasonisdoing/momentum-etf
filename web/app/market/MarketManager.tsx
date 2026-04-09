@@ -119,26 +119,10 @@ function getDeviationClass(value: number | null): string | undefined {
   return undefined;
 }
 
-function formatUpdatedAt(value: string | null | undefined): string {
-  if (!value) {
-    return "-";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
-
 export function MarketManager({
   onHeaderSummaryChange,
 }: {
-  onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string }) => void;
+  onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string | null }) => void;
 }) {
   const router = useRouter();
   const [rows, setRows] = useState<MarketRowItem[]>([]);
@@ -235,7 +219,7 @@ export function MarketManager({
     onHeaderSummaryChange?.({
       filteredCount: filteredRows.length,
       totalCount: rows.length,
-      updatedAt: formatUpdatedAt(updatedAt),
+      updatedAt,
     });
   }, [filteredRows.length, onHeaderSummaryChange, rows.length, updatedAt]);
 
