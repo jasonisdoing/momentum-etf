@@ -17,7 +17,7 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.cache_utils import get_cached_date_range
+from utils.cache_utils import get_cached_date_range, set_cache_refresh_completed_at
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
@@ -282,6 +282,8 @@ def refresh_cache_for_target(
             )
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
+
+        set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:

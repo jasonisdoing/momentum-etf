@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import re
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 import pandas as pd
@@ -23,6 +23,7 @@ _COLLECTION_NAME_MAP = {
     "kor": "cache_kor_stocks",
     "us": "cache_us_stocks",
 }
+_REFRESH_STATUS_COLLECTION = "cache_refresh_status"
 
 _TEMP_SUFFIX_SANITIZE = re.compile(r"[^a-z0-9_-]", re.IGNORECASE)
 
@@ -153,6 +154,18 @@ def _get_collection(account_id: str):
     # 보조 인덱스 생성 (존재 시 무시)
     try:
         collection.create_index("ticker", unique=True, name="ticker_unique", background=True)
+    except Exception:
+        pass
+    return collection
+
+
+def _get_refresh_status_collection():
+    db = get_db_connection()
+    if db is None:
+        return None
+    collection = db[_REFRESH_STATUS_COLLECTION]
+    try:
+        collection.create_index("target_id", unique=True, name="target_id_unique", background=True)
     except Exception:
         pass
     return collection
@@ -441,6 +454,110 @@ def load_cached_close_series_bulk(account_id: str, tickers: Iterable[str]) -> di
     return series_map
 
 
+def load_cached_close_series_bulk_before_or_at(
+    account_id: str,
+    tickers: Iterable[str],
+    completed_at: datetime,
+) -> dict[str, pd.Series]:
+    """완료 시각 이하로 저장된 종가 시리즈만 조회한다."""
+    normalized = []
+    for t in tickers:
+        norm = (t or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    collection = _get_collection(account_id)
+    if collection is None:
+        return {}
+
+    series_map: dict[str, pd.Series] = {}
+    collection_name = collection.name
+
+    try:
+        metadata_cursor = collection.find(
+            {
+                "ticker": {"$in": list(set(normalized))},
+                "updated_at": {"$lte": completed_at},
+            },
+            {"_id": 0, "ticker": 1, "updated_at": 1},
+        )
+    except Exception:
+        return {}
+
+    pending_tickers: list[str] = []
+    for doc in metadata_cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+
+        updated_at = doc.get("updated_at") if isinstance(doc.get("updated_at"), datetime) else None
+        cached_series = _get_close_series_memory_cache(collection_name, ticker, updated_at)
+        if cached_series is not None:
+            series_map[ticker] = cached_series
+            continue
+        pending_tickers.append(ticker)
+
+    if not pending_tickers:
+        return series_map
+
+    try:
+        cursor = collection.find(
+            {
+                "ticker": {"$in": pending_tickers},
+                "updated_at": {"$lte": completed_at},
+            },
+            {"_id": 0, "ticker": 1, "updated_at": 1, "close_data": 1, "close_column": 1},
+        )
+    except Exception:
+        return series_map
+
+    fallback_tickers: list[str] = []
+    for doc in cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        close_series = _deserialize_cached_close_series_doc(doc, collection)
+        if close_series is None:
+            fallback_tickers.append(ticker)
+            continue
+        updated_at = doc.get("updated_at") if isinstance(doc.get("updated_at"), datetime) else None
+        _set_close_series_memory_cache(collection_name, ticker, updated_at, close_series)
+        series_map[ticker] = close_series
+
+    if not fallback_tickers:
+        return series_map
+
+    try:
+        fallback_cursor = collection.find(
+            {
+                "ticker": {"$in": fallback_tickers},
+                "updated_at": {"$lte": completed_at},
+            },
+            {"_id": 0, "ticker": 1, "updated_at": 1, "data": 1, "columns": 1},
+        )
+    except Exception:
+        return series_map
+
+    for doc in fallback_cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        close_series = _deserialize_cached_close_series_doc(doc, collection)
+        if close_series is None:
+            continue
+        updated_at = doc.get("updated_at") if isinstance(doc.get("updated_at"), datetime) else None
+        close_column = (
+            _resolve_close_column(doc.get("columns") if isinstance(doc.get("columns"), list) else None) or "Close"
+        )
+        _backfill_close_series_payload(collection, ticker, close_series, close_column)
+        _set_close_series_memory_cache(collection_name, ticker, updated_at, close_series)
+        series_map[ticker] = close_series
+
+    return series_map
+
+
 def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     """계좌 캐시를 조회한다."""
     normalized = []
@@ -520,6 +637,45 @@ def load_cached_updated_at_bulk(account_id: str, tickers: Iterable[str]) -> dict
     return results
 
 
+def load_cached_updated_at_bulk_before_or_at(
+    account_id: str,
+    tickers: Iterable[str],
+    completed_at: datetime,
+) -> dict[str, datetime]:
+    """완료 시각 이하로 저장된 캐시 updated_at 시각을 조회한다."""
+    normalized = []
+    for t in tickers:
+        norm = (t or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    collection = _get_collection(account_id)
+    if collection is None:
+        return {}
+
+    results: dict[str, datetime] = {}
+    try:
+        cursor = collection.find(
+            {
+                "ticker": {"$in": list(set(normalized))},
+                "updated_at": {"$lte": completed_at},
+            },
+            {"_id": 0, "ticker": 1, "updated_at": 1},
+        )
+    except Exception:
+        return {}
+
+    for doc in cursor:
+        ticker = (doc.get("ticker") or "").strip().upper()
+        updated_at = doc.get("updated_at")
+        if ticker and isinstance(updated_at, datetime):
+            results[ticker] = updated_at
+
+    return results
+
+
 def load_cached_updated_at_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, datetime]:
     """계좌 캐시의 updated_at 시각을 조회합니다."""
     normalized = []
@@ -543,6 +699,112 @@ def load_cached_updated_at_bulk_with_fallback(account_id: str, tickers: Iterable
         missing -= set(fetched.keys())
 
     return updated_map
+
+
+def load_cached_updated_at_bulk_before_or_at_with_fallback(
+    account_id: str,
+    tickers: Iterable[str],
+    completed_at: datetime,
+) -> dict[str, datetime]:
+    """계좌 캐시에서 완료 시각 이하의 updated_at만 조회한다."""
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    updated_map: dict[str, datetime] = {}
+    missing = set(normalized)
+
+    for cache_key in get_cache_lookup_keys(account_id):
+        if not missing:
+            break
+        fetched = load_cached_updated_at_bulk_before_or_at(cache_key, missing, completed_at)
+        if not fetched:
+            continue
+        updated_map.update(fetched)
+        missing -= set(fetched.keys())
+
+    return updated_map
+
+
+def load_cached_close_series_bulk_before_or_at_with_fallback(
+    account_id: str,
+    tickers: Iterable[str],
+    completed_at: datetime,
+) -> dict[str, pd.Series]:
+    """계좌 캐시에서 완료 시각 이하의 종가 시리즈만 조회한다."""
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    series_map: dict[str, pd.Series] = {}
+    missing = set(normalized)
+
+    for cache_key in get_cache_lookup_keys(account_id):
+        if not missing:
+            break
+        fetched = load_cached_close_series_bulk_before_or_at(cache_key, missing, completed_at)
+        if not fetched:
+            continue
+        series_map.update(fetched)
+        missing -= set(fetched.keys())
+
+    return series_map
+
+
+def get_cache_refresh_completed_at(target_id: str) -> datetime | None:
+    """지정 대상의 마지막 가격 캐시 완료 시각을 조회한다."""
+    target_norm = (target_id or "").strip().lower()
+    if not target_norm:
+        return None
+
+    collection = _get_refresh_status_collection()
+    if collection is None:
+        return None
+
+    try:
+        doc = collection.find_one({"target_id": target_norm}, {"_id": 0, "completed_at": 1})
+    except Exception:
+        return None
+
+    completed_at = (doc or {}).get("completed_at")
+    return completed_at if isinstance(completed_at, datetime) else None
+
+
+def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> None:
+    """지정 대상의 마지막 가격 캐시 완료 시각을 저장한다."""
+    target_norm = (target_id or "").strip().lower()
+    if not target_norm:
+        raise ValueError("target_id가 필요합니다.")
+
+    collection = _get_refresh_status_collection()
+    if collection is None:
+        raise RuntimeError("캐시 완료 시각 컬렉션을 열 수 없습니다.")
+
+    completed_at_utc = (
+        completed_at.replace(tzinfo=None)
+        if completed_at.tzinfo is None
+        else completed_at.astimezone(timezone.utc).replace(tzinfo=None)
+    )
+
+    collection.update_one(
+        {"target_id": target_norm},
+        {
+            "$set": {
+                "target_id": target_norm,
+                "completed_at": completed_at_utc,
+                "updated_at": datetime.utcnow(),
+            }
+        },
+        upsert=True,
+    )
 
 
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
