@@ -429,7 +429,7 @@ export function TickerDetailManager({
     setHoldingsError(null);
     if (matches.length > 1) {
       setSelectedTicker(null);
-      setError(`동일한 티커 ${qTicker}가 여러 종목 타입에 등록되어 있습니다.`);
+      setError(`동일한 티커 ${qTicker}가 여러 종목풀에 등록되어 있습니다.`);
       return;
     }
 

@@ -1160,7 +1160,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   />
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목 타입</span>
+                  <span className="appLabeledFieldLabel">종목풀</span>
                   <select
                     className="form-select"
                     value={selectedTickerType}
@@ -1168,7 +1168,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     disabled={ticker_types.length === 0}
                   >
                     {ticker_types.length === 0 ? (
-                      <option value="">종목 타입 불러오는 중...</option>
+                      <option value="">종목풀 불러오는 중...</option>
                     ) : (
                       ticker_types.map((account) => (
                         <option key={account.ticker_type} value={account.ticker_type}>

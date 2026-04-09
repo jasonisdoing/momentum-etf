@@ -134,7 +134,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     configs = load_ticker_type_configs()
     if not configs:
-        raise ValueError("사용 가능한 종목 타입이 없습니다.")
+        raise ValueError("사용 가능한 종목풀이 없습니다.")
 
     default_config = pick_default_ticker_type(configs)
     payload = [

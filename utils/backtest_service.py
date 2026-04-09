@@ -13,7 +13,7 @@ from utils.db_manager import get_db_connection
 from utils.stocks_service import validate_stock_candidate
 
 def _get_ticker_type_for_country(country_code: str) -> str:
-    """국가 코드를 백테스트용 기본 종목 타입으로 변환합니다."""
+    """국가 코드를 백테스트용 기본 종목풀로 변환합니다."""
     cc = str(country_code or "").strip().lower()
     if cc == "au":
         return "aus"

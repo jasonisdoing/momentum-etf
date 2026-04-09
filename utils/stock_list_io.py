@@ -84,7 +84,7 @@ def _invalidate_cache(ticker_type: str | None = None) -> None:
 
 
 def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
-    """DB에서 해당 종목 타입의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
+    """DB에서 해당 종목풀의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
     type_norm = (ticker_type or "").strip().lower()
     cached = _TICKER_TYPE_STOCKS_CACHE.get(type_norm)
     if cached is not None:
