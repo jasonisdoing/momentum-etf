@@ -66,6 +66,19 @@ type ParentGridRow =
     })
   | {
       id: string;
+      rowType: "total";
+      name: string;
+      total_assets_krw: number;
+      valuation_krw: number;
+      total_principal: number;
+      cash_edit_value: number;
+      target_ratio_total: number | null;
+      holdings_count: number;
+      intl_shares_value: null;
+      intl_shares_change: null;
+    }
+  | {
+      id: string;
       rowType: "detail";
       parentId: string;
       summary: AccountSummary;
@@ -346,6 +359,10 @@ function buildSyncedHoldingRows(rows: HoldingsRow[], summary: AccountSummary): H
 
 function isDetailRow(row: ParentGridRow | undefined): row is Extract<ParentGridRow, { rowType: "detail" }> {
   return row?.rowType === "detail";
+}
+
+function isTotalRow(row: ParentGridRow | undefined): row is Extract<ParentGridRow, { rowType: "total" }> {
+  return row?.rowType === "total";
 }
 
 function formatAccountCash(summary: AccountSummary): string {
@@ -1731,8 +1748,43 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     return grouped;
   }, [allRows]);
 
+  const totalAssets = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.total_assets_krw ?? 0), 0),
+    [summaries],
+  );
+  const totalValuation = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.valuation_krw ?? 0), 0),
+    [summaries],
+  );
+  const totalCash = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.cash_balance_krw ?? 0), 0),
+    [summaries],
+  );
+  const totalPrincipal = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.total_principal ?? 0), 0),
+    [summaries],
+  );
+  const totalHoldingsCount = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.holdings_count ?? 0), 0),
+    [summaries],
+  );
+
   const parentRows = useMemo<ParentGridRow[]>(() => {
-    return summaries.flatMap((summary) => {
+    const totalRow: ParentGridRow = {
+      id: "__total__",
+      rowType: "total",
+      name: "합계",
+      total_assets_krw: totalAssets,
+      valuation_krw: totalValuation,
+      total_principal: totalPrincipal,
+      cash_edit_value: totalCash,
+      target_ratio_total: null,
+      holdings_count: totalHoldingsCount,
+      intl_shares_value: null,
+      intl_shares_change: null,
+    };
+
+    const detailRows = summaries.flatMap((summary): ParentGridRow[] => {
       const mainRow: ParentGridRow = {
         ...summary,
         id: summary.account_id,
@@ -1747,31 +1799,21 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return [mainRow];
       }
 
+      const detailRow: ParentGridRow = {
+        id: `${summary.account_id}__detail`,
+        rowType: "detail",
+        parentId: summary.account_id,
+        summary,
+        rows: groupedRows.get(summary.account_id) ?? [],
+      };
+
       return [
         mainRow,
-        {
-          id: `${summary.account_id}__detail`,
-          rowType: "detail",
-          parentId: summary.account_id,
-          summary,
-          rows: groupedRows.get(summary.account_id) ?? [],
-        },
+        detailRow,
       ];
     });
-  }, [expandedId, groupedRows, summaries]);
-
-  const totalAssets = useMemo(
-    () => summaries.reduce((sum, summary) => sum + Number(summary.total_assets_krw ?? 0), 0),
-    [summaries],
-  );
-  const totalValuation = useMemo(
-    () => summaries.reduce((sum, summary) => sum + Number(summary.valuation_krw ?? 0), 0),
-    [summaries],
-  );
-  const totalCash = useMemo(
-    () => summaries.reduce((sum, summary) => sum + Number(summary.cash_balance_krw ?? 0), 0),
-    [summaries],
-  );
+    return [totalRow, ...detailRows];
+  }, [expandedId, groupedRows, summaries, totalAssets, totalCash, totalHoldingsCount, totalPrincipal, totalValuation]);
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -1854,7 +1896,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [silentlySaveParent]);
 
   const handleParentCellValueChanged = useCallback((row: ParentGridRow | undefined, field: string | undefined) => {
-    if (!row || isDetailRow(row) || !field) {
+    if (!row || isDetailRow(row) || isTotalRow(row) || !field) {
       return;
     }
 
@@ -1977,6 +2019,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!data || isDetailRow(data)) {
           return "";
         }
+        if (isTotalRow(data)) {
+          return <span className="fw-bold">{data.name}</span>;
+        }
         return (
           <div className="snapshotsExpandCell">
             <span className="snapshotsExpandIcon" aria-hidden="true">
@@ -2011,9 +2056,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       minWidth: 124,
       flex: 1,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data)),
+      editable: (params) => Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data)),
       cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
           return undefined;
         }
         return isDirtyParentCell(params.data.account_id, "total_principal")
@@ -2040,6 +2085,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!params.data || isDetailRow(params.data)) {
           return "";
         }
+        if (isTotalRow(params.data)) {
+          return formatKrw(params.value ?? 0);
+        }
         return formatPrice(params.value ?? 0, params.data.currency);
       },
     },
@@ -2052,6 +2100,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) => {
         if (!params.data || isDetailRow(params.data)) {
           return "";
+        }
+        if (isTotalRow(params.data)) {
+          return "-";
         }
         const previewValue = previewTargetRatioTotals[params.data.account_id];
         const value = Number(previewValue ?? params.value ?? 0);
@@ -2074,9 +2125,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       minWidth: 120,
       flex: 0.9,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === "aus_account"),
+      editable: (params) =>
+        Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === "aus_account"),
       cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
           return undefined;
         }
         return isDirtyParentCell(params.data.account_id, "intl_shares_value")
@@ -2091,7 +2143,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return parsed;
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
           return "-";
         }
         return formatPrice(params.value, "AUD");
@@ -2103,9 +2155,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       minWidth: 124,
       flex: 0.9,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === "aus_account"),
+      editable: (params) =>
+        Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === "aus_account"),
       cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
           return undefined;
         }
         return isDirtyParentCell(params.data.account_id, "intl_shares_change")
@@ -2120,7 +2173,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return parsed;
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
           return "-";
         }
         return <span className={getSignedNullableClass(params.value)}>{formatPrice(params.value, "AUD")}</span>;
@@ -2137,7 +2190,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       fullWidthCellRenderer: DetailRenderer,
       getRowHeight: (params) => (isDetailRow(params.data) ? 722 : 38),
       onCellClicked: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
           return;
         }
         if (params.colDef.field !== "name") {
@@ -2147,7 +2200,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         setExpandedId((current) => (current === accountId ? null : accountId));
       },
       onCellEditingStarted: (params) => {
-        if (params.data && !isDetailRow(params.data)) {
+        if (params.data && !isDetailRow(params.data) && !isTotalRow(params.data)) {
           setEditingParentId(params.data.account_id);
         }
       },
@@ -2161,9 +2214,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         handleParentCellValueChanged(params.data, params.colDef.field);
       },
       rowClassRules: {
-        assetsEditingRow: (params) => Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === editingParentId),
+        assetsEditingRow: (params) =>
+          Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === editingParentId),
         snapshotsExpandedMainRow: (params) =>
-          Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === expandedId),
+          Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === expandedId),
       },
     }),
     [DetailRenderer, editingParentId, expandedId, handleParentCellValueChanged],
