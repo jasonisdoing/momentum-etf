@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import type { ColDef, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
+import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 
@@ -492,6 +492,7 @@ function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
+  const sortStateRef = useRef<ColumnState[]>([]);
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -507,6 +508,15 @@ function AccountHoldingsDetailPanel({
     setEditingRowId(null);
     setAddingRow(null);
     setIsReorderDirty(false);
+    queueMicrotask(() => {
+      if (!gridApiRef.current || sortStateRef.current.length === 0) {
+        return;
+      }
+      gridApiRef.current.applyColumnState({
+        state: sortStateRef.current,
+        applyOrder: false,
+      });
+    });
   }, [hydrateRows, initialRows]);
 
   useEffect(() => {
@@ -1484,6 +1494,22 @@ function AccountHoldingsDetailPanel({
             },
             onGridReady: (params) => {
               gridApiRef.current = params.api;
+              if (sortStateRef.current.length > 0) {
+                params.api.applyColumnState({
+                  state: sortStateRef.current,
+                  applyOrder: false,
+                });
+              }
+            },
+            onSortChanged: (params) => {
+              sortStateRef.current = params.api
+                .getColumnState()
+                .filter((column): column is ColumnState => Boolean(column.sort) && Boolean(column.colId))
+                .map((column) => ({
+                  colId: String(column.colId),
+                  sort: column.sort,
+                  sortIndex: column.sortIndex,
+                }));
             },
             getRowId: (params) => String(params.data.id),
             rowClassRules: {
