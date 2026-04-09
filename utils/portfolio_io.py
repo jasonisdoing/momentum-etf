@@ -410,6 +410,27 @@ def load_real_holdings_table(
         intl_princi_krw = intl_princi * aud_krw
         intl_val_krw = intl_val * aud_krw
 
+        # 전일 intl_shares_value 로드하여 일간(%) 계산
+        intl_daily_pct = None
+        try:
+            from utils.db_manager import get_db_connection as _get_db
+            _db = _get_db()
+            if _db is not None:
+                today = _resolve_snapshot_date()
+                prev_snap = _db.daily_snapshots.find_one(
+                    {"snapshot_date": {"$lt": today}},
+                    sort=[("snapshot_date", -1)],
+                )
+                if prev_snap:
+                    for prev_acc in prev_snap.get("accounts", []):
+                        if prev_acc.get("account_id") == "aus_account":
+                            prev_intl = prev_acc.get("intl_shares_value")
+                            if prev_intl and float(prev_intl) > 0:
+                                intl_daily_pct = (intl_val - float(prev_intl)) / float(prev_intl) * 100.0
+                            break
+        except Exception:
+            pass
+
         # We append a row to df_holdings
         pseudo_row = {
             "ticker": "IS",
@@ -423,6 +444,7 @@ def load_real_holdings_table(
             "현재가": intl_val,
             "매입금액(KRW)": intl_princi_krw,
             "평가금액(KRW)": intl_val_krw,
+            "일간(%)": intl_daily_pct,
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
         # Ensure value columns are numeric after concat
@@ -632,6 +654,7 @@ def save_daily_snapshot(
     holding_details: list[dict[str, Any]] | None = None,
     cash_balance_native: float | None = None,
     cash_currency: str | None = None,
+    intl_shares_value: float | None = None,
 ) -> bool:
     """
     Save a daily snapshot.
@@ -684,6 +707,8 @@ def save_daily_snapshot(
                         acc["cash_balance_native"] = float(cash_balance_native)
                     if cash_currency is not None:
                         acc["cash_currency"] = str(cash_currency).strip().upper()
+                    if intl_shares_value is not None:
+                        acc["intl_shares_value"] = float(intl_shares_value)
                     found = True
                     break
 
@@ -702,6 +727,8 @@ def save_daily_snapshot(
                     acc_data["cash_balance_native"] = float(cash_balance_native)
                 if cash_currency is not None:
                     acc_data["cash_currency"] = str(cash_currency).strip().upper()
+                if intl_shares_value is not None:
+                    acc_data["intl_shares_value"] = float(intl_shares_value)
                 accounts.append(acc_data)
             doc["accounts"] = accounts
 
