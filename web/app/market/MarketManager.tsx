@@ -141,8 +141,8 @@ export function MarketManager({
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
-  const [minMarketCap, setMinMarketCap] = useState("1000");
-  const [minPrevVolume, setMinPrevVolume] = useState("500000");
+  const [minMarketCap, setMinMarketCap] = useState("300");
+  const [minPrevVolume, setMinPrevVolume] = useState("50000");
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
