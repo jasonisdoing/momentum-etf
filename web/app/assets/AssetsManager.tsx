@@ -56,6 +56,11 @@ type AccountSummary = {
   total_assets_krw: number;
   holdings_count: number;
   target_ratio_total: number;
+  cash_ratio: number;
+  net_profit: number;
+  net_profit_pct: number;
+  daily_profit: number;
+  weekly_profit: number;
 };
 
 type ParentGridRow =
@@ -74,8 +79,11 @@ type ParentGridRow =
       cash_edit_value: number;
       target_ratio_total: number | null;
       holdings_count: number;
-      intl_shares_value: null;
-      intl_shares_change: null;
+      cash_ratio: number;
+      net_profit: number;
+      net_profit_pct: number;
+      daily_profit: number;
+      weekly_profit: number;
     }
   | {
       id: string;
@@ -561,6 +569,12 @@ function AccountHoldingsDetailPanel({
     cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
     cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
   });
+  const isAusAccount = String(summary.currency || "KRW").toUpperCase() === "AUD";
+  const intlDraftRef = useRef({
+    intlSharesValue: Number(summary.intl_shares_value ?? 0),
+    intlSharesChange: Number(summary.intl_shares_change ?? 0),
+  });
+  const [intlDirtyFields, setIntlDirtyFields] = useState<string[]>([]);
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -861,6 +875,27 @@ function AccountHoldingsDetailPanel({
     }
   }, [summary]);
 
+  const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number) => {
+    const response = await fetch("/api/assets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: summary.account_id,
+        total_principal: summary.total_principal,
+        cash_balance_krw: summary.cash_balance_krw,
+        cash_balance_native: summary.cash_balance_native,
+        cash_currency: summary.cash_currency,
+        cash_target_ratio: summary.cash_target_ratio,
+        intl_shares_value: intlSharesValue,
+        intl_shares_change: intlSharesChange,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "해외주식 저장에 실패했습니다.");
+    }
+  }, [summary]);
+
   const clearDirtyRowState = useCallback((rowId: string) => {
     setDirtyRowIds((previous) => {
       const next = previous.filter((id) => id !== rowId);
@@ -1025,6 +1060,7 @@ function AccountHoldingsDetailPanel({
     if (isReorderDirtyRef.current) {
       void processReorderUpdate(rowsRef.current).catch(() => undefined);
     }
+
   }, [processCashUpdate, processReorderUpdate, processRowUpdate, summary.account_id]);
 
   useEffect(() => {
@@ -1554,35 +1590,86 @@ function AccountHoldingsDetailPanel({
     <div className="assetsDetailPanel">
       <div className="appActionHeader">
         <div className="appActionHeaderInner">
-          <button
-            className="btn btn-primary btn-sm px-3 fw-bold"
-            onClick={() =>
-              setAddingRow({
-                ticker: "",
-                quantity: "",
-                average_buy_price: "",
-                target_ratio: "0",
-                isValidated: false,
-              })
-            }
-            disabled={hasPendingAdd}
-          >
-            <IconPlus size={16} /> 추가
-          </button>
-          <button
-            className="btn btn-success btn-sm px-3 fw-bold"
-            onClick={() => void handleSaveChanges()}
-            disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
-          >
-            <IconCheck size={16} /> 저장
-          </button>
-          <button
-            className="btn btn-outline-danger btn-sm px-3 fw-bold"
-            onClick={() => void handleDeleteSelected()}
-            disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
-          >
-            <IconTrash size={16} /> 삭제
-          </button>
+          {isAusAccount && (
+            <div className="d-flex align-items-center gap-2">
+              <label className="mb-0 text-muted small fw-bold">Intl Value</label>
+              <input
+                type="text"
+                className={`form-control form-control-sm ${intlDirtyFields.includes("intl_shares_value") ? "assetsDirtyInput" : ""}`}
+                style={{ width: 120, textAlign: "right" }}
+                defaultValue={Number(summary.intl_shares_value ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                onChange={(event) => {
+                  const parsed = parseFloat(event.target.value.replace(/,/g, ""));
+                  if (!Number.isNaN(parsed)) {
+                    intlDraftRef.current.intlSharesValue = parsed;
+                    setIntlDirtyFields((prev) => (prev.includes("intl_shares_value") ? prev : [...prev, "intl_shares_value"]));
+                  }
+                }}
+              />
+              <label className="mb-0 text-muted small fw-bold">Intl Change</label>
+              <input
+                type="text"
+                className={`form-control form-control-sm ${intlDirtyFields.includes("intl_shares_change") ? "assetsDirtyInput" : ""}`}
+                style={{ width: 120, textAlign: "right" }}
+                defaultValue={Number(summary.intl_shares_change ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                onChange={(event) => {
+                  const parsed = parseFloat(event.target.value.replace(/,/g, ""));
+                  if (!Number.isNaN(parsed)) {
+                    intlDraftRef.current.intlSharesChange = parsed;
+                    setIntlDirtyFields((prev) => (prev.includes("intl_shares_change") ? prev : [...prev, "intl_shares_change"]));
+                  }
+                }}
+              />
+              <button
+                className="btn btn-success btn-sm px-2"
+                disabled={intlDirtyFields.length === 0}
+                onClick={async () => {
+                  try {
+                    await processIntlUpdate(intlDraftRef.current.intlSharesValue, intlDraftRef.current.intlSharesChange);
+                    setIntlDirtyFields([]);
+                    await onReload();
+                    toast.success("해외주식 저장 완료");
+                  } catch (error) {
+                    await onReload();
+                    toast.error(error instanceof Error ? error.message : "해외주식 저장에 실패했습니다.");
+                  }
+                }}
+              >
+                저장
+              </button>
+            </div>
+          )}
+          <div className="d-flex align-items-center gap-2 ms-auto">
+            <button
+              className="btn btn-primary btn-sm px-3 fw-bold"
+              onClick={() =>
+                setAddingRow({
+                  ticker: "",
+                  quantity: "",
+                  average_buy_price: "",
+                  target_ratio: "0",
+                  isValidated: false,
+                })
+              }
+              disabled={hasPendingAdd}
+            >
+              <IconPlus size={16} /> 추가
+            </button>
+            <button
+              className="btn btn-success btn-sm px-3 fw-bold"
+              onClick={() => void handleSaveChanges()}
+              disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
+            >
+              <IconCheck size={16} /> 저장
+            </button>
+            <button
+              className="btn btn-outline-danger btn-sm px-3 fw-bold"
+              onClick={() => void handleDeleteSelected()}
+              disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
+            >
+              <IconTrash size={16} /> 삭제
+            </button>
+          </div>
         </div>
       </div>
       <div className="assetsDetailGridWrap">
@@ -1726,14 +1813,35 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/assets", { cache: "no-store" });
+      const [response, dashResponse] = await Promise.all([
+        fetch("/api/assets", { cache: "no-store" }),
+        fetch("/api/dashboard", { cache: "no-store" }).catch(() => null),
+      ]);
       const payload = (await response.json()) as HoldingsResponse;
       if (!response.ok) {
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
+      const dashData = dashResponse?.ok ? await dashResponse.json() : null;
+      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; weekly_profit: number }> = {};
+      if (dashData?.accounts) {
+        for (const a of dashData.accounts) {
+          dashAccounts[a.account_id] = {
+            cash_ratio: a.cash_ratio ?? 0,
+            net_profit: a.net_profit ?? 0,
+            net_profit_pct: a.net_profit_pct ?? 0,
+            daily_profit: a.daily_profit ?? 0,
+            weekly_profit: a.weekly_profit ?? 0,
+          };
+        }
+      }
+      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, weekly_profit: 0 };
+      const mergedSummaries = (payload.account_summaries ?? []).map((s) => ({
+        ...s,
+        ...(dashAccounts[s.account_id] ?? defaultDash),
+      }));
       setAllRows(payload.rows ?? []);
-      setSummaries(payload.account_summaries ?? []);
-      setExpandedId((current) => current ?? payload.account_summaries?.[0]?.account_id ?? null);
+      setSummaries(mergedSummaries);
+      setExpandedId((current) => current);
       setPreviewTargetRatioTotals({});
       setParentDirtyCellKeys([]);
       setEditingParentId(null);
@@ -1803,8 +1911,11 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cash_edit_value: totalCash,
       target_ratio_total: null,
       holdings_count: totalHoldingsCount,
-      intl_shares_value: null,
-      intl_shares_change: null,
+      cash_ratio: totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0,
+      net_profit: totalAssets - totalPrincipal,
+      net_profit_pct: totalPrincipal > 0 ? ((totalAssets - totalPrincipal) / totalPrincipal) * 100 : 0,
+      daily_profit: summaries.reduce((sum, s) => sum + (s.daily_profit ?? 0), 0),
+      weekly_profit: summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
     };
 
     const detailRows = summaries.flatMap((summary): ParentGridRow[] => {
@@ -1936,8 +2047,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           total_principal: Number(row.total_principal ?? summary.total_principal),
           cash_balance_krw: isAud ? summary.cash_balance_krw : cashEditValue,
           cash_balance_native: isAud ? cashEditValue : summary.cash_balance_native,
-          intl_shares_value: row.account_id === "aus_account" ? Number(row.intl_shares_value ?? 0) : summary.intl_shares_value,
-          intl_shares_change: row.account_id === "aus_account" ? Number(row.intl_shares_change ?? 0) : summary.intl_shares_change,
           total_assets_krw: summary.valuation_krw + (isAud ? summary.cash_balance_krw : cashEditValue),
         };
       }),
@@ -1975,7 +2084,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ...summary,
           valuation_krw: nextValuation,
           total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
-          holdings_count: nextRows.length,
+          holdings_count: nextRows.filter((r) => r.ticker !== "IS").length,
         };
       }),
     );
@@ -2065,17 +2174,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
     },
     {
-      field: "valuation_krw",
-      headerName: "평가액",
-      minWidth: 132,
-      flex: 1,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
-    },
-    {
       field: "total_principal",
-      headerName: "원금",
+      headerName: "총 원금",
       minWidth: 124,
       flex: 1,
       type: "rightAligned",
@@ -2099,6 +2199,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
     },
     {
+      field: "valuation_krw",
+      headerName: "평가액",
+      minWidth: 132,
+      flex: 1,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+    },
+    {
       field: "cash_edit_value",
       headerName: "현금",
       minWidth: 124,
@@ -2113,6 +2222,59 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }
         return formatPrice(params.value ?? 0, params.data.currency);
       },
+    },
+    {
+      field: "cash_ratio",
+      headerName: "현금 비중",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
+    },
+    {
+      field: "net_profit",
+      headerName: "계좌 손익",
+      minWidth: 120,
+      flex: 1,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          : "",
+    },
+    {
+      field: "net_profit_pct",
+      headerName: "수익률",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{`${(params.value ?? 0).toFixed(2)}%`}</span>
+          : "",
+    },
+    {
+      field: "daily_profit",
+      headerName: "금일 손익",
+      minWidth: 110,
+      flex: 0.9,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          : "",
+    },
+    {
+      field: "weekly_profit",
+      headerName: "금주 손익",
+      minWidth: 110,
+      flex: 0.9,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          : "",
     },
     {
       field: "target_ratio_total",
@@ -2142,66 +2304,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatNumber(params.value) : "",
     },
-    {
-      field: "intl_shares_value",
-      headerName: "Intl Value",
-      minWidth: 120,
-      flex: 0.9,
-      type: "rightAligned",
-      editable: (params) =>
-        Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === "aus_account"),
-      cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
-          return undefined;
-        }
-        return isDirtyParentCell(params.data.account_id, "intl_shares_value")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
-      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
-          return "-";
-        }
-        return formatPrice(params.value, "AUD");
-      },
-    },
-    {
-      field: "intl_shares_change",
-      headerName: "Intl Change",
-      minWidth: 124,
-      flex: 0.9,
-      type: "rightAligned",
-      editable: (params) =>
-        Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === "aus_account"),
-      cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
-          return undefined;
-        }
-        return isDirtyParentCell(params.data.account_id, "intl_shares_change")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed)) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
-      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data) || params.data.account_id !== "aus_account") {
-          return "-";
-        }
-        return <span className={getSignedNullableClass(params.value)}>{formatPrice(params.value, "AUD")}</span>;
-      },
-    },
   ], [expandedId, isDirtyParentCell, previewTargetRatioTotals]);
 
   const gridOptions = useMemo<GridOptions<ParentGridRow>>(
@@ -2211,7 +2313,13 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       stopEditingWhenCellsLoseFocus: true,
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
       fullWidthCellRenderer: DetailRenderer,
-      getRowHeight: (params) => (isDetailRow(params.data) ? 722 : 38),
+      getRowHeight: (params) => {
+        if (!isDetailRow(params.data)) {
+          return 38;
+        }
+        const rowCount = (params.data.rows?.length ?? 0) + 1;
+        return 50 + 34 + rowCount * 42 + 32;
+      },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
           return;
