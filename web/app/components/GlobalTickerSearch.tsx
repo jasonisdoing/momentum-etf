@@ -54,18 +54,14 @@ function getChangeClass(value: number | null): string {
 }
 
 function formatTopMoversUpdatedAt(value: string | null | undefined, preOpen: boolean): string {
-  if (preOpen) {
-    return "급상승(장개시 이전)";
-  }
-
   const raw = String(value ?? "").trim();
   if (!raw) {
-    return "급상승";
+    return preOpen ? "급상승(장개시 이전)" : "급상승";
   }
 
   const date = new Date(raw);
   if (Number.isNaN(date.getTime())) {
-    return "급상승";
+    return preOpen ? "급상승(장개시 이전)" : "급상승";
   }
 
   const weekday = new Intl.DateTimeFormat("ko-KR", {
@@ -95,7 +91,11 @@ function formatTopMoversUpdatedAt(value: string | null | undefined, preOpen: boo
     .replace(`${dayPeriod ?? ""} `, "")
     .trim();
 
-  return `급상승(${datePart}(${weekday}) ${dayPeriod ?? ""} ${timePart} 기준)`.replace(/\s+/g, " ").trim();
+  const suffix = `${datePart}(${weekday}) ${dayPeriod ?? ""} ${timePart} 기준`.replace(/\s+/g, " ").trim();
+  if (preOpen) {
+    return `급상승(장개시 이전 - ${suffix})`;
+  }
+  return `급상승(${suffix})`;
 }
 
 export function GlobalTickerSearch() {

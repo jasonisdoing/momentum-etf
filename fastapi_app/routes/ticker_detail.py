@@ -44,6 +44,23 @@ def _is_pre_open_top_movers_window() -> bool:
     return now_local.time() < market_open
 
 
+def _is_pre_open_cache_timestamp(value: datetime | None) -> bool:
+    if value is None:
+        return False
+
+    schedule = MARKET_SCHEDULES.get("kor") or {}
+    timezone_name = str(schedule.get("timezone") or "Asia/Seoul").strip() or "Asia/Seoul"
+    market_open = schedule.get("open")
+    if market_open is None:
+        return False
+
+    local_value = value.astimezone(ZoneInfo(timezone_name)) if value.tzinfo else value.replace(
+        tzinfo=timezone.utc,
+    ).astimezone(ZoneInfo(timezone_name))
+    now_local = datetime.now(ZoneInfo(timezone_name))
+    return local_value.date() == now_local.date() and local_value.time() < market_open
+
+
 def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None, float | None]:
     if close_series is None or close_series.empty:
         return None, None
@@ -98,7 +115,7 @@ def get_ticker_search_data(
     ticker_items: list[dict[str, object]] = []
     top_movers_by_type: list[dict[str, object]] = []
     top_movers_updated_at: datetime | None = None
-    top_movers_pre_open = _is_pre_open_top_movers_window()
+    top_movers_pre_open = False
 
     for config in configs:
         ticker_type = config["ticker_type"]
@@ -132,14 +149,11 @@ def get_ticker_search_data(
             ticker_items.append(item)
             ticker_type_items.append(item)
 
-        if top_movers_pre_open:
-            top_movers = []
-        else:
-            top_movers = sorted(
-                [item for item in ticker_type_items if item.get("change_pct") is not None],
-                key=lambda item: float(item["change_pct"]),
-                reverse=True,
-            )[:5]
+        top_movers = sorted(
+            [item for item in ticker_type_items if item.get("change_pct") is not None],
+            key=lambda item: float(item["change_pct"]),
+            reverse=True,
+        )[:5]
         top_movers_by_type.append(
             {
                 "ticker_type": ticker_type,
@@ -148,10 +162,22 @@ def get_ticker_search_data(
             }
         )
 
+    top_movers_pre_open = _is_pre_open_cache_timestamp(top_movers_updated_at) or (
+        top_movers_updated_at is None and _is_pre_open_top_movers_window()
+    )
+    if top_movers_pre_open:
+        top_movers_by_type = [
+            {
+                **item,
+                "items": [],
+            }
+            for item in top_movers_by_type
+        ]
+
     return {
         "tickers": ticker_items,
         "top_movers_by_type": top_movers_by_type,
-        "top_movers_updated_at": None if top_movers_pre_open else _serialize_datetime(top_movers_updated_at),
+        "top_movers_updated_at": _serialize_datetime(top_movers_updated_at),
         "top_movers_pre_open": top_movers_pre_open,
     }
 
