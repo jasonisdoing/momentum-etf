@@ -608,8 +608,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "현재가",
         headerName: "현재가",
-        minWidth: 96,
-        width: 96,
+        minWidth: 88,
+        width: 88,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
           formatNumber(params.value ?? null, selectedTickerTypeItem?.country_code === "au" ? 2 : 0),
@@ -638,8 +638,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ({
             field: rule.score_column,
             headerName: `추세${rule.order}`,
-            minWidth: 80,
-            width: 80,
+            minWidth: 72,
+            width: 72,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
@@ -667,8 +667,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "고점",
         headerName: "고점",
-        minWidth: 92,
-        width: 92,
+        minWidth: 80,
+        width: 80,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => {
           const value = params.value ?? null;
@@ -772,8 +772,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ({
             field: rule.score_column,
             headerName: `추세${rule.order}`,
-            minWidth: 80,
-            width: 80,
+            minWidth: 72,
+            width: 72,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
