@@ -147,6 +147,7 @@ type RankHeaderSummary = {
 };
 
 let rankToolbarCache: RankToolbarCache | null = null;
+const HELD_BONUS_SCORE_STORAGE_KEY = "stocks-held-bonus-score";
 
 function getTodayDateInputValue(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
@@ -240,6 +241,30 @@ function formatAssetInEok(value: number | null): string {
   return `${formatNumber(value / 100_000_000, 0)}억`;
 }
 
+function clampHeldBonusScore(value: number): number {
+  if (Number.isNaN(value) || value < 0) {
+    return 0;
+  }
+  if (value > 50) {
+    return 50;
+  }
+  return Math.round(value / 5) * 5;
+}
+
+function readHeldBonusScore(): number {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  return clampHeldBonusScore(Number(window.localStorage.getItem(HELD_BONUS_SCORE_STORAGE_KEY) ?? "0"));
+}
+
+function writeHeldBonusScore(value: number): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(HELD_BONUS_SCORE_STORAGE_KEY, String(clampHeldBonusScore(value)));
+}
+
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const router = useRouter();
   const toast = useToast();
@@ -254,6 +279,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
+  const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -342,6 +368,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
 
+  useEffect(() => {
+    setHeldBonusScore(readHeldBonusScore());
+  }, []);
+
+  function handleHeldBonusScoreChange(nextValue: number) {
+    const normalized = clampHeldBonusScore(nextValue);
+    setHeldBonusScore(normalized);
+    writeHeldBonusScore(normalized);
+  }
+
   const moveToTickerDetail = useMemo(
     () => (ticker: string | null | undefined) => {
       const normalizedTicker = String(ticker ?? "-").trim().toUpperCase();
@@ -367,9 +403,47 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     [rows],
   );
 
+  const rankedGridRows = useMemo<RankGridRow[]>(() => {
+    if (heldBonusScore <= 0) {
+      return gridRows;
+    }
+
+    return [...gridRows]
+      .map((row, index) => {
+        const baseScore = typeof row.점수 === "number" ? row.점수 : null;
+        const isHeld = String(row.보유 ?? "").trim() !== "";
+        return {
+          ...row,
+          __baseIndex: index,
+          점수: baseScore === null ? null : Number((baseScore + (isHeld ? heldBonusScore : 0)).toFixed(1)),
+        };
+      })
+      .sort((left, right) => {
+        const leftScore = typeof left.점수 === "number" ? left.점수 : null;
+        const rightScore = typeof right.점수 === "number" ? right.점수 : null;
+        if (leftScore === null && rightScore === null) {
+          return Number(left.__baseIndex ?? 0) - Number(right.__baseIndex ?? 0);
+        }
+        if (leftScore === null) {
+          return 1;
+        }
+        if (rightScore === null) {
+          return -1;
+        }
+        if (rightScore !== leftScore) {
+          return rightScore - leftScore;
+        }
+        return Number(left.__baseIndex ?? 0) - Number(right.__baseIndex ?? 0);
+      })
+      .map((row, index) => ({
+        ...row,
+        순위: index + 1,
+      }));
+  }, [gridRows, heldBonusScore]);
+
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     if (pageMode !== "manage" || !addingRow) {
-      return gridRows;
+      return pageMode === "rank" ? rankedGridRows : gridRows;
     }
     return [
       {
@@ -412,7 +486,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       ...gridRows,
     ];
-  }, [addingRow, gridRows, pageMode]);
+  }, [addingRow, gridRows, pageMode, rankedGridRows]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -1147,33 +1221,47 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </label>
                     ))}
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">수익률 보기</span>
-                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
-                        <button
-                          type="button"
-                          className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode("cumulative")}
-                        >
-                          누적
-                        </button>
-                        <button
-                          type="button"
-                          className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode("monthly")}
-                        >
-                          월별
-                        </button>
-                        <button
-                          type="button"
-                          className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode("info")}
-                        >
-                          정보
-                        </button>
-                      </div>
+                      <span className="appLabeledFieldLabel">보유종목점수</span>
+                      <select
+                        className="form-select"
+                        value={String(heldBonusScore)}
+                        onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
+                      >
+                        {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
+                          <option key={score} value={score}>
+                            {score}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </>
                 ) : null}
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">수익률 보기</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
+                    <button
+                      type="button"
+                      className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("cumulative")}
+                    >
+                      누적
+                    </button>
+                    <button
+                      type="button"
+                      className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("monthly")}
+                    >
+                      월별
+                    </button>
+                    <button
+                      type="button"
+                      className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("info")}
+                    >
+                      정보
+                    </button>
+                  </div>
+                </label>
               </div>
             </div>
           </div>
