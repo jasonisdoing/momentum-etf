@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pandas as pd
 from fastapi import APIRouter, Depends, Query
 
@@ -9,13 +11,25 @@ from services.etf_holdings_service import (
     fetch_korean_stock_price_snapshot,
 )
 from services.stock_cache_service import get_stock_cache_meta
-from utils.cache_utils import load_cached_close_series_bulk_with_fallback
+from utils.cache_utils import (
+    load_cached_close_series_bulk_with_fallback,
+    load_cached_updated_at_bulk_with_fallback,
+)
 from utils.data_loader import fetch_ohlcv
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
+
+
+def _serialize_datetime(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.isoformat()
+
 
 def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None, float | None]:
     if close_series is None or close_series.empty:
@@ -70,6 +84,7 @@ def get_ticker_search_data(
     configs = load_ticker_type_configs()
     ticker_items: list[dict[str, object]] = []
     top_movers_by_type: list[dict[str, object]] = []
+    top_movers_updated_at: datetime | None = None
 
     for config in configs:
         ticker_type = config["ticker_type"]
@@ -78,7 +93,13 @@ def get_ticker_search_data(
         etfs = get_etfs(ticker_type)
         tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")]
         close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+        updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
         ticker_type_items: list[dict[str, object]] = []
+
+        if updated_at_map:
+            type_updated_at = max(updated_at_map.values())
+            if top_movers_updated_at is None or type_updated_at > top_movers_updated_at:
+                top_movers_updated_at = type_updated_at
 
         for etf in etfs:
             ticker = str(etf.get("ticker") or "").strip().upper()
@@ -113,6 +134,7 @@ def get_ticker_search_data(
     return {
         "tickers": ticker_items,
         "top_movers_by_type": top_movers_by_type,
+        "top_movers_updated_at": _serialize_datetime(top_movers_updated_at),
     }
 
 

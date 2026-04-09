@@ -19,6 +19,7 @@ type TickerSearchPayload = {
     label: string;
     items: TickerSearchItem[];
   }>;
+  top_movers_updated_at?: string | null;
 };
 
 function formatPrice(value: number | null, countryCode: string): string {
@@ -51,6 +52,47 @@ function getChangeClass(value: number | null): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
+function formatTopMoversUpdatedAt(value: string | null | undefined): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return "급상승";
+  }
+
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    return "급상승";
+  }
+
+  const weekday = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    weekday: "short",
+  }).format(date);
+  const datePart = new Intl.DateTimeFormat("sv-SE", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
+  const dayPeriod = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "numeric",
+    hour12: true,
+  })
+    .formatToParts(date)
+    .find((part) => part.type === "dayPeriod")?.value;
+  const timePart = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  })
+    .format(date)
+    .replace(`${dayPeriod ?? ""} `, "")
+    .trim();
+
+  return `급상승(${datePart}(${weekday}) ${dayPeriod ?? ""} ${timePart} 기준)`.replace(/\s+/g, " ").trim();
+}
+
 export function GlobalTickerSearch() {
   const router = useRouter();
   const pathname = usePathname();
@@ -59,6 +101,7 @@ export function GlobalTickerSearch() {
   const [highlightIndex, setHighlightIndex] = useState(-1);
   const [allTickers, setAllTickers] = useState<TickerSearchItem[]>([]);
   const [topMoversByType, setTopMoversByType] = useState<TickerSearchPayload["top_movers_by_type"]>([]);
+  const [topMoversUpdatedAt, setTopMoversUpdatedAt] = useState<string | null>(null);
   const [recentSearches, setRecentSearches] = useState<TickerSearchItem[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -78,6 +121,7 @@ export function GlobalTickerSearch() {
         }
         setAllTickers(Array.isArray(payload.tickers) ? payload.tickers : []);
         setTopMoversByType(Array.isArray(payload.top_movers_by_type) ? payload.top_movers_by_type : []);
+        setTopMoversUpdatedAt(typeof payload.top_movers_updated_at === "string" ? payload.top_movers_updated_at : null);
       } catch {
         // 전역 검색은 실패 시 조용히 비활성화합니다.
       }
@@ -288,7 +332,7 @@ export function GlobalTickerSearch() {
 
                 <div className="globalTickerSearchSection">
                   <div className="globalTickerSearchSectionHeader">
-                    <div className="globalTickerSearchSectionTitle">급상승</div>
+                    <div className="globalTickerSearchSectionTitle">{formatTopMoversUpdatedAt(topMoversUpdatedAt)}</div>
                   </div>
                   <div className="globalTickerSearchTopMoversGrid">
                     {topMoversByType.map((group) => (
