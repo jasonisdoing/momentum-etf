@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -174,56 +174,53 @@ export function AppShell({ children }: AppShellProps) {
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
   const isLoginPage = pathname === "/login";
 
-  useEffect(() => {
+  const loadTopBarData = useCallback(async () => {
     if (isLoginPage) {
       return;
     }
 
-    let alive = true;
+    try {
+      setIsFxLoading(true);
+      setIsFearGreedLoading(true);
+      setIsVkospiLoading(true);
 
-    async function loadFx() {
-      try {
-        if (alive) {
-          setIsFxLoading(true);
-        }
-        if (alive) {
-          setIsFearGreedLoading(true);
-          setIsVkospiLoading(true);
-        }
-        const [fxResponse, fearGreedSummary, vkospiResponse] = await Promise.all([
-          fetch("/api/fx", { cache: "no-store" }),
-          loadFearGreedSummary().catch(() => null),
-          fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
-        ]);
+      const [fxResponse, fearGreedSummary, vkospiResponse] = await Promise.all([
+        fetch("/api/fx", { cache: "no-store" }),
+        loadFearGreedSummary().catch(() => null),
+        fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
+      ]);
 
-        const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
-        const vkospiPayload = vkospiResponse?.ok ? ((await vkospiResponse.json()) as VkospiSummary) : null;
+      const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
+      const vkospiPayload = vkospiResponse?.ok ? ((await vkospiResponse.json()) as VkospiSummary) : null;
 
-        if (alive) {
-          setFx(payload);
-          setIsFxLoading(false);
-          setFearGreed(fearGreedSummary);
-          setIsFearGreedLoading(false);
-          setVkospi(vkospiPayload);
-          setIsVkospiLoading(false);
-        }
-      } catch {
-        if (alive) {
-          setFx(null);
-          setIsFxLoading(false);
-          setFearGreed(null);
-          setIsFearGreedLoading(false);
-          setVkospi(null);
-          setIsVkospiLoading(false);
-        }
-      }
+      setFx(payload);
+      setIsFxLoading(false);
+      setFearGreed(fearGreedSummary);
+      setIsFearGreedLoading(false);
+      setVkospi(vkospiPayload);
+      setIsVkospiLoading(false);
+    } catch {
+      setFx(null);
+      setIsFxLoading(false);
+      setFearGreed(null);
+      setIsFearGreedLoading(false);
+      setVkospi(null);
+      setIsVkospiLoading(false);
+    }
+  }, [isLoginPage]);
+
+  useEffect(() => {
+    void loadTopBarData();
+
+    function handlePageShow() {
+      void loadTopBarData();
     }
 
-    loadFx();
+    window.addEventListener("pageshow", handlePageShow);
     return () => {
-      alive = false;
+      window.removeEventListener("pageshow", handlePageShow);
     };
-  }, [isLoginPage]);
+  }, [loadTopBarData]);
 
   useEffect(() => {
     setSidebarOpen(false);

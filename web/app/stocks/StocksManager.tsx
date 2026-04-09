@@ -340,6 +340,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
 
+  useEffect(() => {
+    function handlePageShow() {
+      void load({
+        ticker_type: selectedTickerType || readRememberedTickerType() || undefined,
+        ma_rule_overrides: maRules,
+        as_of_date: selectedAsOfDate,
+      });
+    }
+
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, [maRules, selectedAsOfDate, selectedTickerType]);
+
   const selectedTickerTypeItem = useMemo(
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
     [ticker_types, selectedTickerType],
