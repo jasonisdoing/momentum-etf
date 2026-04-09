@@ -544,7 +544,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           const value = String(params.value ?? "-");
           const href = `/ticker?ticker=${encodeURIComponent(value)}`;
           return (
-            <a href={href} className="appCodeText" style={{ color: "#206bc4", textDecoration: "none" }}>
+            <a href={href} className="appCodeText" style={{ color: "inherit", textDecoration: "none" }}>
               {value}
             </a>
           );

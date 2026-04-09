@@ -1157,16 +1157,7 @@ function AccountHoldingsDetailPanel({
         }
 
         const value = String(params.value ?? "-");
-        return (
-          <button
-            type="button"
-            className="btn btn-link p-0 assetsNameCellText assetsTickerLink"
-            title={value}
-            onClick={() => moveToTickerDetail(params.data?.ticker)}
-          >
-            {value}
-          </button>
-        );
+        return <span className="assetsNameCellText" title={value}>{value}</span>;
       },
     },
     {
