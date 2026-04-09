@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { IconSearch, IconX } from "@tabler/icons-react";
+import { AppLoadingState } from "@/app/components/AppLoadingState";
 import {
   loadRecentTickerSearches,
   persistRecentTickerSearch,
@@ -108,11 +109,13 @@ export function GlobalTickerSearch() {
   const [topMoversByType, setTopMoversByType] = useState<TickerSearchPayload["top_movers_by_type"]>([]);
   const [topMoversUpdatedAt, setTopMoversUpdatedAt] = useState<string | null>(null);
   const [topMoversPreOpen, setTopMoversPreOpen] = useState(false);
+  const [topMoversLoading, setTopMoversLoading] = useState(false);
   const [recentSearches, setRecentSearches] = useState<TickerSearchItem[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchSearchData = useCallback(async (signal?: AbortSignal) => {
+    setTopMoversLoading(true);
     try {
       const response = await fetch("/api/ticker-search-data", { cache: "no-store", signal });
       if (!response.ok) {
@@ -128,6 +131,8 @@ export function GlobalTickerSearch() {
         return;
       }
       // 전역 검색은 실패 시 조용히 비활성화합니다.
+    } finally {
+      setTopMoversLoading(false);
     }
   }, []);
 
@@ -344,35 +349,39 @@ export function GlobalTickerSearch() {
                       {formatTopMoversUpdatedAt(topMoversUpdatedAt, topMoversPreOpen)}
                     </div>
                   </div>
-                  <div className="globalTickerSearchTopMoversGrid">
-                    {topMoversByType.map((group) => (
-                      <div key={group.ticker_type} className="globalTickerSearchTopMoversColumn">
-                        <div className="globalTickerSearchTopMoversTitle">{group.label}</div>
-                        <div className="globalTickerSearchResults">
-                          {group.items.map((item, index) => (
-                            <button
-                              key={`${item.ticker_type}-${item.ticker}`}
-                              type="button"
-                              className="globalTickerSearchResult"
-                              onClick={() => navigateToTicker(item)}
-                            >
-                              <div className="globalTickerSearchRank">{index + 1}</div>
-                              <div className="globalTickerSearchResultMain">
-                                <div className="globalTickerSearchResultName">{item.name}</div>
-                                <div className="globalTickerSearchResultTicker">{item.ticker}</div>
-                              </div>
-                              <div className="globalTickerSearchResultMeta">
-                                <div className="globalTickerSearchResultPrice">
-                                  {formatPrice(item.current_price, item.country_code)}
+                  {topMoversLoading ? (
+                    <AppLoadingState compact label="급상승 데이터를 불러오는 중..." />
+                  ) : (
+                    <div className="globalTickerSearchTopMoversGrid">
+                      {topMoversByType.map((group) => (
+                        <div key={group.ticker_type} className="globalTickerSearchTopMoversColumn">
+                          <div className="globalTickerSearchTopMoversTitle">{group.label}</div>
+                          <div className="globalTickerSearchResults">
+                            {group.items.map((item, index) => (
+                              <button
+                                key={`${item.ticker_type}-${item.ticker}`}
+                                type="button"
+                                className="globalTickerSearchResult"
+                                onClick={() => navigateToTicker(item)}
+                              >
+                                <div className="globalTickerSearchRank">{index + 1}</div>
+                                <div className="globalTickerSearchResultMain">
+                                  <div className="globalTickerSearchResultName">{item.name}</div>
+                                  <div className="globalTickerSearchResultTicker">{item.ticker}</div>
                                 </div>
-                                <div className={getChangeClass(item.change_pct)}>{formatChangePct(item.change_pct)}</div>
-                              </div>
-                            </button>
-                          ))}
+                                <div className="globalTickerSearchResultMeta">
+                                  <div className="globalTickerSearchResultPrice">
+                                    {formatPrice(item.current_price, item.country_code)}
+                                  </div>
+                                  <div className={getChangeClass(item.change_pct)}>{formatChangePct(item.change_pct)}</div>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </>
             )}
