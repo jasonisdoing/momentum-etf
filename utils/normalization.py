@@ -43,6 +43,9 @@ def to_iso_string(value: Any) -> str | None:
     if value is None:
         return None
     if isinstance(value, _dt.datetime):
+        if value.tzinfo is None:
+            # Mongo에서 읽힌 naive datetime은 UTC로 간주해 offset을 명시한다.
+            value = value.replace(tzinfo=_dt.timezone.utc)
         return value.isoformat()
     if isinstance(value, _dt.date):
         return value.isoformat()
