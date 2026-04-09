@@ -271,6 +271,13 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
+  if (normalized === "cny") {
+    return `${new Intl.NumberFormat("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)} CNY`;
+  }
+
   return `${new Intl.NumberFormat("ko-KR", {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
