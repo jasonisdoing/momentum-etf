@@ -1237,8 +1237,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   </>
                 ) : null}
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">수익률 보기</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
+                  <span className="appLabeledFieldLabel">컬럼</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
                     <button
                       type="button"
                       className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
