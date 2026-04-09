@@ -20,6 +20,7 @@ type TickerSearchPayload = {
     items: TickerSearchItem[];
   }>;
   top_movers_updated_at?: string | null;
+  top_movers_pre_open?: boolean;
 };
 
 function formatPrice(value: number | null, countryCode: string): string {
@@ -52,7 +53,11 @@ function getChangeClass(value: number | null): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
-function formatTopMoversUpdatedAt(value: string | null | undefined): string {
+function formatTopMoversUpdatedAt(value: string | null | undefined, preOpen: boolean): string {
+  if (preOpen) {
+    return "급상승(장개시 이전)";
+  }
+
   const raw = String(value ?? "").trim();
   if (!raw) {
     return "급상승";
@@ -102,6 +107,7 @@ export function GlobalTickerSearch() {
   const [allTickers, setAllTickers] = useState<TickerSearchItem[]>([]);
   const [topMoversByType, setTopMoversByType] = useState<TickerSearchPayload["top_movers_by_type"]>([]);
   const [topMoversUpdatedAt, setTopMoversUpdatedAt] = useState<string | null>(null);
+  const [topMoversPreOpen, setTopMoversPreOpen] = useState(false);
   const [recentSearches, setRecentSearches] = useState<TickerSearchItem[]>([]);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -122,6 +128,7 @@ export function GlobalTickerSearch() {
         setAllTickers(Array.isArray(payload.tickers) ? payload.tickers : []);
         setTopMoversByType(Array.isArray(payload.top_movers_by_type) ? payload.top_movers_by_type : []);
         setTopMoversUpdatedAt(typeof payload.top_movers_updated_at === "string" ? payload.top_movers_updated_at : null);
+        setTopMoversPreOpen(Boolean(payload.top_movers_pre_open));
       } catch {
         // 전역 검색은 실패 시 조용히 비활성화합니다.
       }
@@ -332,7 +339,9 @@ export function GlobalTickerSearch() {
 
                 <div className="globalTickerSearchSection">
                   <div className="globalTickerSearchSectionHeader">
-                    <div className="globalTickerSearchSectionTitle">{formatTopMoversUpdatedAt(topMoversUpdatedAt)}</div>
+                    <div className="globalTickerSearchSectionTitle">
+                      {formatTopMoversUpdatedAt(topMoversUpdatedAt, topMoversPreOpen)}
+                    </div>
                   </div>
                   <div className="globalTickerSearchTopMoversGrid">
                     {topMoversByType.map((group) => (
