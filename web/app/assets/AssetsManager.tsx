@@ -557,6 +557,10 @@ function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
+  const cashDraftRef = useRef({
+    cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
+    cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
+  });
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -589,6 +593,10 @@ function AccountHoldingsDetailPanel({
 
   useEffect(() => {
     summaryRef.current = summary;
+    cashDraftRef.current = {
+      cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
+      cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
+    };
   }, [summary]);
 
   useEffect(() => {
@@ -998,6 +1006,14 @@ function AccountHoldingsDetailPanel({
       reorderSaveTimerRef.current = null;
     }
 
+    const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
+    if (dirtyRowIdsRef.current.includes(cashRowId)) {
+      void processCashUpdate(
+        cashDraftRef.current.cashBalanceKrw,
+        cashDraftRef.current.cashTargetRatio,
+      ).catch(() => undefined);
+    }
+
     const dirtyRows = rowsRef.current
       .map((row) => ({ ...row, id: buildGridRowId(row) }))
       .filter((row) => dirtyRowIdsRef.current.includes(row.id));
@@ -1009,7 +1025,7 @@ function AccountHoldingsDetailPanel({
     if (isReorderDirtyRef.current) {
       void processReorderUpdate(rowsRef.current).catch(() => undefined);
     }
-  }, [processReorderUpdate, processRowUpdate]);
+  }, [processCashUpdate, processReorderUpdate, processRowUpdate, summary.account_id]);
 
   useEffect(() => {
     return () => {
@@ -1028,7 +1044,10 @@ function AccountHoldingsDetailPanel({
     try {
       const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
       if (dirtyRowIds.includes(cashRowId)) {
-        await processCashUpdate(Number(summary.cash_balance_krw ?? 0), Number(summary.cash_target_ratio ?? 0));
+        await processCashUpdate(
+          cashDraftRef.current.cashBalanceKrw,
+          cashDraftRef.current.cashTargetRatio,
+        );
         clearDirtyRowState(cashRowId);
       }
 
@@ -1125,6 +1144,10 @@ function AccountHoldingsDetailPanel({
     if (isCashGridRow(row)) {
       const nextCashBalance = Math.max(0, Number(row.valuation_krw ?? 0));
       const nextCashTargetRatio = Number(row.target_ratio ?? 0);
+      cashDraftRef.current = {
+        cashBalanceKrw: nextCashBalance,
+        cashTargetRatio: nextCashTargetRatio,
+      };
       setDirtyRowIds((previous) => {
         const next = previous.includes(row.id) ? previous : [...previous, row.id];
         dirtyRowIdsRef.current = next;
