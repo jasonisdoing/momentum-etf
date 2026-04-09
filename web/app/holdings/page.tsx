@@ -140,11 +140,15 @@ export default function HoldingsPage() {
       sortable: true,
       cellClass: "tableAlignCenter holdingsTickerCell",
       cellRenderer: (params: { value?: string | null }) => {
-        const value = String(params.value ?? "-");
-        const href = `/ticker?ticker=${encodeURIComponent(value)}`;
+        const rawTicker = String(params.value ?? "-");
+        const normalizedTicker = normalizeDisplayTicker(rawTicker);
+        if (normalizedTicker === "IS") {
+          return <span className="appCodeText">{normalizedTicker}</span>;
+        }
+        const href = `/ticker?ticker=${encodeURIComponent(normalizedTicker)}`;
         return (
-          <a href={href} className="appCodeText" style={{ color: "#206bc4", textDecoration: "none" }}>
-            {value}
+          <a href={href} className="appCodeText" style={{ color: "inherit", textDecoration: "none" }}>
+            {normalizedTicker}
           </a>
         );
       },
@@ -422,6 +426,14 @@ function formatSignedPercent(value: number | null) {
   }
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
+}
+
+function normalizeDisplayTicker(value: string | null | undefined) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (!raw) {
+    return "-";
+  }
+  return raw.replace(/^ASX:/, "");
 }
 
 function getSignedClass(value: number | null) {
