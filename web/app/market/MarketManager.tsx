@@ -9,6 +9,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 
 type MarketRowItem = {
   ticker: string;
+  ticker_pools: string;
   name: string;
   listed_at: string;
   daily_change_pct: number | null;
@@ -252,6 +253,12 @@ export function MarketManager({
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
       { field: "row_number", headerName: "#", width: 72, maxWidth: 80 },
+      {
+        field: "ticker_pools",
+        headerName: "종목풀",
+        width: 180,
+        cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
+      },
       {
         field: "ticker",
         headerName: "티커",

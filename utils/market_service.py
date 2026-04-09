@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import requests
@@ -11,6 +12,35 @@ from utils.normalization import (
     normalize_text,
     to_iso_string,
 )
+
+_POOL_NAME_PREFIX_PATTERN = re.compile(r"^\d+\.\s*")
+
+
+def _strip_pool_name_prefix(value: str) -> str:
+    return _POOL_NAME_PREFIX_PATTERN.sub("", str(value or "").strip())
+
+
+def _load_ticker_pool_map() -> dict[str, list[str]]:
+    from utils.stock_list_io import get_etfs
+    from utils.ticker_registry import load_ticker_type_configs
+
+    ticker_pool_map: dict[str, list[str]] = {}
+
+    for config in load_ticker_type_configs():
+        ticker_type = str(config.get("ticker_type") or "").strip().lower()
+        pool_name = _strip_pool_name_prefix(str(config.get("name") or ticker_type))
+        if not ticker_type or not pool_name:
+            continue
+
+        for item in get_etfs(ticker_type):
+            ticker = normalize_text(item.get("ticker")).upper()
+            if not ticker:
+                continue
+            ticker_pool_map.setdefault(ticker, [])
+            if pool_name not in ticker_pool_map[ticker]:
+                ticker_pool_map[ticker].append(pool_name)
+
+    return ticker_pool_map
 
 
 def _load_kor_etf_realtime_snapshot(tickers: list[str]) -> dict[str, dict[str, float | None]]:
@@ -76,6 +106,7 @@ def load_market_data() -> dict[str, Any]:
         {
             "ticker": normalize_text(row.get("티커")),
             "name": normalize_text(row.get("종목명")),
+            "ticker_pools": "",
             "listed_at": normalize_text(row.get("상장일")),
             "prev_volume": int(normalize_number(row.get("전일거래량"))),
             "market_cap": int(normalize_number(row.get("시가총액"))),
@@ -83,6 +114,7 @@ def load_market_data() -> dict[str, Any]:
         for row in rows
     ]
 
+    ticker_pool_map = _load_ticker_pool_map()
     snapshot = _load_kor_etf_realtime_snapshot([row["ticker"] for row in normalized_rows if row["ticker"]])
 
     from utils.portfolio_io import load_all_holding_tickers
@@ -93,6 +125,7 @@ def load_market_data() -> dict[str, Any]:
         "rows": [
             {
                 **row,
+                "ticker_pools": ", ".join(ticker_pool_map.get(row["ticker"], [])),
                 "is_held": row["ticker"] in held_tickers,
                 "daily_change_pct": snapshot.get(row["ticker"], {}).get("changeRate"),
                 "current_price": snapshot.get(row["ticker"], {}).get("nowVal"),
