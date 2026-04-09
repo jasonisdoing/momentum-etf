@@ -63,7 +63,7 @@ const navGroups = [
     id: "info",
     title: "정보",
     icon: IconTrendingUp,
-    items: [{ href: "/market", label: "🇰🇷 ETF 마켓", icon: IconTrendingUp }],
+    items: [{ href: "/market", label: "ETF 마켓", icon: "🇰🇷" }],
   },
   {
     id: "system",
@@ -312,7 +312,11 @@ export function AppShell({ children }: AppShellProps) {
                   <div key={item.href} className="nav-item appSidebarItem">
                     <Link href={item.href} className={isActive ? "nav-link active" : "nav-link"}>
                       <span className="appSidebarIcon" aria-hidden="true">
-                        <Icon size={18} stroke={1.9} />
+                        {typeof Icon === "string" ? (
+                          <span className="appSidebarEmojiIcon">{Icon}</span>
+                        ) : (
+                          <Icon size={18} stroke={1.9} />
+                        )}
                       </span>
                       <span className="nav-link-title">{item.label}</span>
                     </Link>
