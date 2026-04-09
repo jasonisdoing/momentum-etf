@@ -30,7 +30,7 @@ def _format_deleted_date(value: Any) -> str:
 def _load_ticker_types_payload() -> list[dict[str, Any]]:
     configs = load_account_configs()
     if not configs:
-        raise RuntimeError("종목 타입 설정이 없습니다.")
+        raise RuntimeError("종목풀 설정이 없습니다.")
     return [
         {
             "ticker_type": config["ticker_type"],
@@ -72,7 +72,7 @@ def _require_ticker_type_config(ticker_type: str) -> dict[str, Any]:
     configs = _load_account_config_map()
     config = configs.get(type_norm)
     if not config:
-        raise RuntimeError("종목 타입을 찾을 수 없습니다.")
+        raise RuntimeError("종목풀을 찾을 수 없습니다.")
     return config
 
 

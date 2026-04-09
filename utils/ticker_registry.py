@@ -1,4 +1,4 @@
-"""종목 타입(ticker_type) 설정 메타데이터 로더."""
+"""종목풀(ticker_type) 설정 메타데이터 로더."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _normalize_code(value: Any, fallback: str) -> str:
 
 
 def load_ticker_type_configs() -> list[dict[str, Any]]:
-    """`ztickers`에 정의된 종목 타입 정보를 정렬된 리스트로 반환합니다."""
+    """`ztickers`에 정의된 종목풀 정보를 정렬된 리스트로 반환합니다."""
 
     from utils.settings_loader import parse_ticker_dir_name, get_ticker_dir
 
@@ -35,7 +35,7 @@ def load_ticker_type_configs() -> list[dict[str, Any]]:
         try:
             settings = get_ticker_type_settings(t_id)
         except AccountSettingsError as exc:
-            logger.warning("종목 타입 설정 로딩 실패(%s): %s", t_id, exc)
+            logger.warning("종목풀 설정 로딩 실패(%s): %s", t_id, exc)
             continue
 
         country_code = _normalize_code(settings.get("country_code"), "")
@@ -66,10 +66,10 @@ def load_ticker_type_configs() -> list[dict[str, Any]]:
 
 
 def pick_default_ticker_type(types: list[dict[str, Any]]) -> dict[str, Any]:
-    """기본으로 선택할 종목 타입을 결정합니다."""
+    """기본으로 선택할 종목풀을 결정합니다."""
 
     if not types:
-        raise ValueError("선택 가능한 종목 타입이 없습니다.")
+        raise ValueError("선택 가능한 종목풀이 없습니다.")
 
     for t in types:
         if t.get("is_default"):

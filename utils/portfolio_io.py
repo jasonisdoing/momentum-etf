@@ -150,7 +150,7 @@ def load_real_holdings_table(
 
         bucket_map = {}
         name_map = {}
-        # 우선순위 1: 현재 계정에 설정된 종목 타입에서 검색
+        # 우선순위 1: 현재 계정에 설정된 종목풀에서 검색
         if ticker_codes:
             cursor = db.stock_meta.find(
                 {"ticker": {"$in": all_tickers}, "ticker_type": {"$in": ticker_codes}, "is_deleted": {"$ne": True}},
@@ -403,7 +403,7 @@ def load_real_holdings_table(
     # -----------------------------------------------------
     intl_val = snapshot.get("intl_shares_value", 0.0)
     intl_change = snapshot.get("intl_shares_change", 0.0)
-    # 종목 타입이 바뀌어 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
+    # 종목풀이 바뀌어 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
     if account_id == "aus_account" and (intl_val > 0 or intl_change != 0):
         intl_princi = intl_val - intl_change
 

@@ -13,7 +13,7 @@ from utils.logger import get_app_logger
 find_kor.py
 
 네이버 금융 ETF API를 사용하여 지정된 등락률 이상 상승한 국내 ETF를 찾고,
-현재 국내 종목 타입들에 등록된 종목 / 삭제된 종목 / 신규 발견 종목으로 분류합니다.
+현재 국내 종목풀들에 등록된 종목 / 삭제된 종목 / 신규 발견 종목으로 분류합니다.
 
 [사용법]
 python scripts/find_kor.py
@@ -124,7 +124,7 @@ def get_latest_trading_day() -> str:
 
 
 def _load_target_types() -> list[str]:
-    """국내 종목 타입 목록만 동적으로 로드합니다."""
+    """국내 종목풀 목록만 동적으로 로드합니다."""
     targets: list[str] = []
     for t_id in list_available_ticker_types():
         try:
@@ -194,7 +194,7 @@ def _print_basic_item(item: dict[str, object]) -> None:
 
 
 def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
-    """국내 ETF 상승 종목을 종목 타입별 등록 상태 기준으로 분류해 출력합니다."""
+    """국내 ETF 상승 종목을 종목풀별 등록 상태 기준으로 분류해 출력합니다."""
     latest_day = get_latest_trading_day()
     print(f"기준일: {latest_day[:4]}-{latest_day[4:6]}-{latest_day[6:]} (ETF)")
 
@@ -238,7 +238,7 @@ def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
 
     target_types = _load_target_types()
     if not target_types:
-        print("국내 종목 타입을 찾지 못했습니다.")
+        print("국내 종목풀을 찾지 못했습니다.")
         return
 
     print(f"등락률 {min_change_pct:.2f}% 이상 상승한 종목 {len(top_gainers)}개를 찾았습니다.")
@@ -283,7 +283,7 @@ def find_top_gainers(min_change_pct: float = MIN_CHANGE_PCT) -> None:
             new_discovery_list.append(item)
 
     print()
-    print("--- 종목 타입 등록 ETF 목록 ---")
+    print("--- 종목풀 등록 ETF 목록 ---")
     if my_type_list:
         for item in sorted(my_type_list, key=lambda row: float(row.get("등락률", 0.0)), reverse=True):
             _print_item(item)

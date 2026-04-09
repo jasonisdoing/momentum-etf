@@ -102,7 +102,7 @@ def refresh_cache_for_target(
         else:
             country_code = "kor"
     except Exception:
-        logger.warning(f"대상 종목 타입 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
+        logger.warning(f"대상 종목풀 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
         country_code = "kor"
 
     logger.info("[%s] 캐시 갱신 시작 (국가설정: %s, 시작일: %s)", target_norm.upper(), country_code, start_date)
@@ -179,7 +179,7 @@ def refresh_cache_for_target(
             str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")
         }
 
-        # 종목 타입 실행 시 해당 타입의 모든 종목 반영
+        # 종목풀 실행 시 해당 종목풀의 모든 종목 반영
         if target_norm in list_available_ticker_types():
             pass # get_all_etfs_including_deleted가 이미 수행함
             holdings = _collect_portfolio_master_holdings(target_norm)
@@ -287,7 +287,7 @@ def refresh_cache_for_target(
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
-    """해당 종목 타입 설정에 정의된 벤치마크 티커들을 수집합니다."""
+    """해당 종목풀 설정에 정의된 벤치마크 티커들을 수집합니다."""
     tickers = set()
 
     try:
@@ -369,7 +369,7 @@ def main():
         if target in available_types:
             targets_to_update = [target]
         else:
-            logger.error(f"Target '{target}' is not a valid ticker type ID.")
+            logger.error(f"Target '{target}' is not a valid ticker pool ID.")
             return
 
     if not targets_to_update:
