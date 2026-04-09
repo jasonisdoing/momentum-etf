@@ -41,7 +41,7 @@ export function MarketPageClient() {
   );
 
   return (
-    <PageFrame title="ETF 마켓" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="🇰🇷 ETF 마켓" fullHeight fullWidth titleRight={titleRight}>
       <MarketManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );

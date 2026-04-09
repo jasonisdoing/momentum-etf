@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
+import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 
@@ -138,6 +139,7 @@ export function MarketManager({
 }: {
   onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string }) => void;
 }) {
+  const router = useRouter();
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -236,6 +238,17 @@ export function MarketManager({
     });
   }, [filteredRows.length, onHeaderSummaryChange, rows.length, updatedAt]);
 
+  const moveToTickerDetail = useCallback(
+    (ticker: string) => {
+      const normalizedTicker = String(ticker || "").trim().toUpperCase();
+      if (!normalizedTicker) {
+        return;
+      }
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+    },
+    [router],
+  );
+
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
       { field: "row_number", headerName: "#", width: 72, maxWidth: 80 },
@@ -243,7 +256,19 @@ export function MarketManager({
         field: "ticker",
         headerName: "티커",
         width: 104,
-        cellRenderer: (params: { value: string }) => <span className="appCodeText">{params.value}</span>,
+        cellRenderer: (params: { value: string }) => {
+          const value = String(params.value ?? "-");
+          return (
+            <button
+              type="button"
+              className="appCodeText"
+              style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
+              onClick={() => moveToTickerDetail(value)}
+            >
+              {value}
+            </button>
+          );
+        },
       },
       { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
       {
@@ -305,7 +330,7 @@ export function MarketManager({
         cellRenderer: (params: { value: number }) => formatKrwEok(params.value),
       },
     ],
-    [],
+    [moveToTickerDetail],
   );
 
   function toggleGroup(group: string) {
