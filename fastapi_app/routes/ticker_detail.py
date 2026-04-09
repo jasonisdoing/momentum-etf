@@ -14,7 +14,10 @@ from services.etf_holdings_service import (
 from services.stock_cache_service import get_stock_cache_meta
 from config import MARKET_SCHEDULES
 from utils.cache_utils import (
+    get_cache_refresh_completed_at,
+    load_cached_close_series_bulk_before_or_at_with_fallback,
     load_cached_close_series_bulk_with_fallback,
+    load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
 from utils.data_loader import fetch_ohlcv
@@ -123,12 +126,26 @@ def get_ticker_search_data(
         ticker_type_name = str(config.get("name") or ticker_type).strip()
         etfs = get_etfs(ticker_type)
         tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")]
-        close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
-        updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
+        completed_at = get_cache_refresh_completed_at(ticker_type)
+        if completed_at is not None:
+            close_series_map = load_cached_close_series_bulk_before_or_at_with_fallback(
+                ticker_type,
+                tickers,
+                completed_at,
+            )
+            updated_at_map = load_cached_updated_at_bulk_before_or_at_with_fallback(
+                ticker_type,
+                tickers,
+                completed_at,
+            )
+            type_updated_at = completed_at
+        else:
+            close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+            updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
+            type_updated_at = max(updated_at_map.values()) if updated_at_map else None
         ticker_type_items: list[dict[str, object]] = []
 
-        if updated_at_map:
-            type_updated_at = max(updated_at_map.values())
+        if type_updated_at is not None:
             if top_movers_updated_at is None or type_updated_at > top_movers_updated_at:
                 top_movers_updated_at = type_updated_at
 
