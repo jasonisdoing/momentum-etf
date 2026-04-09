@@ -263,7 +263,8 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
 
         valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in account_rows)
         cash_balance_krw = float((cash_info or {}).get("cash_balance_krw") or 0.0)
-        target_ratio_total = sum(float(row.get("target_ratio") or 0.0) for row in account_rows)
+        cash_target_ratio = float((cash_info or {}).get("cash_target_ratio") or 0.0)
+        target_ratio_total = sum(float(row.get("target_ratio") or 0.0) for row in account_rows) + cash_target_ratio
         account_summaries.append(
             {
                 "account_id": curr_account_id,
@@ -275,6 +276,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "cash_balance_krw": cash_balance_krw,
                 "cash_balance_native": (cash_info or {}).get("cash_balance_native"),
                 "cash_currency": str((cash_info or {}).get("cash_currency") or currency).strip().upper(),
+                "cash_target_ratio": cash_target_ratio,
                 "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
                 "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
                 "updated_at": (cash_info or {}).get("updated_at"),
