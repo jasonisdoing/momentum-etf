@@ -585,13 +585,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          const ticker = params.data?.티커 ?? "";
-          const href = `/ticker?ticker=${encodeURIComponent(ticker)}`;
-          return (
-            <a href={href} className="rankNameCellText" style={{ color: "inherit", textDecoration: "none" }} title={value}>
-              {value}
-            </a>
-          );
+          return <span className="rankNameCellText" title={value}>{value}</span>;
         },
       },
       {
