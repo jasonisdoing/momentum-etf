@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
 import { StocksManager } from "./StocksManager";
@@ -21,19 +20,7 @@ const DEFAULT_SUMMARY: StocksHeaderSummary = {
 };
 
 export function StocksPageClient() {
-  const router = useRouter();
   const [summary, setSummary] = useState<StocksHeaderSummary>(DEFAULT_SUMMARY);
-
-  useEffect(() => {
-    function handlePageShow() {
-      router.refresh();
-    }
-
-    window.addEventListener("pageshow", handlePageShow);
-    return () => {
-      window.removeEventListener("pageshow", handlePageShow);
-    };
-  }, [router]);
 
   const titleRight = useMemo(
     () => (
