@@ -1174,6 +1174,71 @@ function AccountHoldingsDetailPanel({
       ),
     },
     {
+      field: "weight_pct",
+      headerName: "비중",
+      width: 80,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow }) => {
+        if (!params.data) {
+          return "-";
+        }
+
+        const weightPct = getPreviewWeightPct(params.data, rows, summary);
+        return (
+          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
+            {weightPct.toFixed(1)}%
+          </span>
+        );
+      },
+    },
+    {
+      field: "target_ratio",
+      headerName: "목표비중",
+      width: 88,
+      type: "rightAligned",
+      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
+      cellClass: (params) => {
+        if (!isEditableHoldingRow(params.data)) {
+          return undefined;
+        }
+        return isDirtyEditableCell(params.data?.id, "target_ratio")
+          ? "assetsEditableCell assetsDirtyCell"
+          : "assetsEditableCell";
+      },
+      valueParser: (params) => {
+        const parsed = Number(params.newValue);
+        if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+          return params.oldValue;
+        }
+        return parsed;
+      },
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        const row = params.data;
+        if (!row) {
+          return null;
+        }
+        if (row.id === "__adding__") {
+          return (
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="100"
+              ref={targetRatioRef}
+              className="form-control form-control-sm assetsInlineInput"
+              defaultValue={addingRow?.target_ratio ?? "0"}
+              disabled={!addingRow?.isValidated}
+            />
+          );
+        }
+        return (
+          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
+            {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
+          </span>
+        );
+      },
+    },
+    {
       field: "quantity",
       headerName: "수량",
       width: 80,
@@ -1283,71 +1348,6 @@ function AccountHoldingsDetailPanel({
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow }) =>
         params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
-    },
-    {
-      field: "weight_pct",
-      headerName: "비중",
-      width: 80,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-
-        const weightPct = getPreviewWeightPct(params.data, rows, summary);
-        return (
-          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
-            {weightPct.toFixed(1)}%
-          </span>
-        );
-      },
-    },
-    {
-      field: "target_ratio",
-      headerName: "목표비중",
-      width: 88,
-      type: "rightAligned",
-      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
-      cellClass: (params) => {
-        if (!isEditableHoldingRow(params.data)) {
-          return undefined;
-        }
-        return isDirtyEditableCell(params.data?.id, "target_ratio")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = Number(params.newValue);
-        if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
-      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
-        const row = params.data;
-        if (!row) {
-          return null;
-        }
-        if (row.id === "__adding__") {
-          return (
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              max="100"
-              ref={targetRatioRef}
-              className="form-control form-control-sm assetsInlineInput"
-              defaultValue={addingRow?.target_ratio ?? "0"}
-              disabled={!addingRow?.isValidated}
-            />
-          );
-        }
-        return (
-          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
-            {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
-          </span>
-        );
-      },
     },
     { field: "days_held", headerName: "보유일", width: 76 },
   ], [addingRow, handleValidateTicker, isDirtyEditableCell, isEditableHoldingRow, processingId, rows, summary]);
