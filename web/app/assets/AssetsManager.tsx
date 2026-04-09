@@ -48,6 +48,7 @@ type AccountSummary = {
   cash_balance_krw: number;
   cash_balance_native: number | null;
   cash_currency: string;
+  cash_target_ratio: number;
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;
@@ -94,6 +95,8 @@ type AddingRowState = {
   bucketId?: number;
   isValidated?: boolean;
 };
+
+const CASH_ROW_TICKER = "__CASH__";
 
 type HoldingEditableSnapshot = {
   quantity: number;
@@ -244,6 +247,9 @@ function getPreviewAverageBuyPrice(row: GridRow): number {
 }
 
 function getPreviewValuationKrw(row: GridRow): number {
+  if (String(row.ticker || "").trim().toUpperCase() === CASH_ROW_TICKER) {
+    return Number(row.valuation_krw ?? 0);
+  }
   const quantity = getPreviewQuantity(row);
   if (quantity <= 0) {
     return 0;
@@ -259,6 +265,9 @@ function getPreviewValuationKrw(row: GridRow): number {
 }
 
 function getPreviewBuyAmountKrw(row: GridRow): number {
+  if (String(row.ticker || "").trim().toUpperCase() === CASH_ROW_TICKER) {
+    return Number(row.buy_amount_krw ?? 0);
+  }
   const quantity = getPreviewQuantity(row);
   if (quantity <= 0) {
     return 0;
@@ -277,10 +286,10 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
 }
 
 function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: AccountSummary): number {
-  if (String(row.ticker || "").trim().toUpperCase() === "IS") {
+  const normalizedTicker = String(row.ticker || "").trim().toUpperCase();
+  if (normalizedTicker === "IS") {
     return 0;
   }
-  const rowId = buildGridRowId(row);
   const previewTotalValuation = rows.reduce((sum, currentRow) => {
     return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
   }, 0);
@@ -298,6 +307,10 @@ function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: Account
   if (denominator <= 0) {
     return 0;
   }
+  if (normalizedTicker === CASH_ROW_TICKER) {
+    return (Number(summary.cash_balance_krw ?? 0) / denominator) * 100;
+  }
+  const rowId = buildGridRowId(row);
   const targetRow = rows.find((currentRow) => buildGridRowId(currentRow) === rowId);
   if (!targetRow) {
     return 0;
@@ -341,6 +354,35 @@ function formatAccountCash(summary: AccountSummary): string {
     return formatPrice(summary.cash_balance_native, "AUD");
   }
   return formatKrw(summary.cash_balance_krw);
+}
+
+function buildCashGridRow(summary: AccountSummary): GridRow {
+  const cashValue = Number(summary.cash_balance_krw ?? 0);
+  return {
+    id: `${summary.account_id}-${CASH_ROW_TICKER}`,
+    account_id: summary.account_id,
+    account_name: summary.name,
+    currency: "KRW",
+    bucket: "",
+    bucket_id: 0,
+    ticker: CASH_ROW_TICKER,
+    name: "현금",
+    quantity: 0,
+    average_buy_price: 0,
+    current_price: "-",
+    current_price_num: 0,
+    days_held: "-",
+    pnl_krw: 0,
+    return_pct: 0,
+    weight_pct: 0,
+    daily_change_pct: null,
+    buy_amount_krw: cashValue,
+    valuation_krw: cashValue,
+    target_ratio: Number(summary.cash_target_ratio ?? 0),
+    sort_order: -1,
+    original_quantity: 0,
+    original_average_buy_price: 0,
+  };
 }
 
 
@@ -451,6 +493,7 @@ function AccountHoldingsDetailPanel({
   initialSortState,
   onReload,
   onRowsSync,
+  onCashSync,
   onPreviewTargetRatioTotalChange,
   onSortStateChange,
 }: {
@@ -459,6 +502,7 @@ function AccountHoldingsDetailPanel({
   initialSortState: ColumnState[];
   onReload: () => Promise<void>;
   onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
+  onCashSync: (accountId: string, cashBalanceKrw: number, cashTargetRatio: number) => void;
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
   onSortStateChange: (accountId: string, state: ColumnState[]) => void;
 }) {
@@ -541,18 +585,23 @@ function AccountHoldingsDetailPanel({
   useEffect(() => {
     const previewTargetRatioTotal = rows.reduce((sum, row) => {
       return sum + Number(row.target_ratio ?? 0);
-    }, 0);
+    }, 0) + Number(summary.cash_target_ratio ?? 0);
     onPreviewTargetRatioTotalChange(summary.account_id, parseFloat(previewTargetRatioTotal.toFixed(1)));
-  }, [onPreviewTargetRatioTotalChange, rows, summary.account_id]);
+  }, [onPreviewTargetRatioTotalChange, rows, summary.account_id, summary.cash_target_ratio]);
 
   const isEditableHoldingRow = useCallback(
-    (row: GridRow | undefined | null) => Boolean(row && row.id !== "__adding__" && row.ticker !== "IS"),
+    (row: GridRow | undefined | null) =>
+      Boolean(row && row.id !== "__adding__" && row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER),
+    [],
+  );
+  const isCashGridRow = useCallback(
+    (row: GridRow | undefined | null) => Boolean(row && row.ticker === CASH_ROW_TICKER),
     [],
   );
   const moveToTickerDetail = useCallback(
     (ticker: string | null | undefined) => {
-      const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
-      if (!normalizedTicker || normalizedTicker === "IS") {
+    const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
+      if (!normalizedTicker || normalizedTicker === "IS" || normalizedTicker === CASH_ROW_TICKER) {
         return;
       }
       router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
@@ -561,6 +610,7 @@ function AccountHoldingsDetailPanel({
   );
 
   const gridRows = useMemo<GridRow[]>(() => {
+    const cashRow = buildCashGridRow(summary);
     const baseRows = rows
       .map((row, index) => ({
         ...row,
@@ -571,10 +621,11 @@ function AccountHoldingsDetailPanel({
       }));
 
     if (!addingRow) {
-      return baseRows;
+      return [cashRow, ...baseRows];
     }
 
     return [
+      cashRow,
       {
         id: "__adding__",
         account_id: summary.account_id,
@@ -597,7 +648,7 @@ function AccountHoldingsDetailPanel({
       } as GridRow,
       ...baseRows,
     ];
-  }, [addingRow, rows, summary.account_id, summary.currency, summary.name]);
+  }, [addingRow, rows, summary]);
 
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
@@ -757,6 +808,34 @@ function AccountHoldingsDetailPanel({
     }
   }, [summary.account_id]);
 
+  const processCashUpdate = useCallback(async (cashBalanceKrw: number, cashTargetRatio: number) => {
+    const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
+    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
+    const currentCashNative = Number(summary.cash_balance_native ?? 0);
+    const nextCashNative =
+      isAud && currentCashKrw > 0 && currentCashNative > 0
+        ? (cashBalanceKrw / currentCashKrw) * currentCashNative
+        : (isAud ? currentCashNative : cashBalanceKrw);
+    const response = await fetch("/api/assets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: summary.account_id,
+        total_principal: summary.total_principal,
+        cash_balance_krw: cashBalanceKrw,
+        cash_balance_native: nextCashNative,
+        cash_currency: summary.cash_currency,
+        cash_target_ratio: cashTargetRatio,
+        intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
+        intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "현금 저장에 실패했습니다.");
+    }
+  }, [summary]);
+
   const clearDirtyRowState = useCallback((rowId: string) => {
     setDirtyRowIds((previous) => {
       const next = previous.filter((id) => id !== rowId);
@@ -769,7 +848,7 @@ function AccountHoldingsDetailPanel({
   const processReorderUpdate = useCallback(async (orderedRows: HoldingsRow[]) => {
     const orderedTickers = orderedRows
       .map((row) => String(row.ticker || "").trim().toUpperCase())
-      .filter((ticker) => ticker && ticker !== "IS");
+      .filter((ticker) => ticker && ticker !== "IS" && ticker !== CASH_ROW_TICKER);
 
     if (!orderedTickers.length) {
       return;
@@ -930,6 +1009,12 @@ function AccountHoldingsDetailPanel({
     flushPendingSaves();
 
     try {
+      const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
+      if (dirtyRowIds.includes(cashRowId)) {
+        await processCashUpdate(Number(summary.cash_balance_krw ?? 0), Number(summary.cash_target_ratio ?? 0));
+        clearDirtyRowState(cashRowId);
+      }
+
       const dirtyRows = rowsRef.current
         .map((row) => ({
           ...row,
@@ -970,8 +1055,10 @@ function AccountHoldingsDetailPanel({
     onReload,
     persistRowOrder,
     processAddingRow,
+    processCashUpdate,
     processRowUpdate,
     processingId,
+    summary,
     toast,
   ]);
 
@@ -1015,7 +1102,42 @@ function AccountHoldingsDetailPanel({
   }, [gridRows, onReload, selectedRowIds, summary.account_id, toast]);
 
   const handleCellValueChanged = useCallback((row: GridRow | undefined, field: string | undefined) => {
-    if (!row || !isEditableHoldingRow(row)) {
+    if (!row) {
+      return;
+    }
+    if (isCashGridRow(row)) {
+      const nextCashBalance = Math.max(0, Number(row.valuation_krw ?? 0));
+      const nextCashTargetRatio = Number(row.target_ratio ?? 0);
+      setDirtyRowIds((previous) => {
+        const next = previous.includes(row.id) ? previous : [...previous, row.id];
+        dirtyRowIdsRef.current = next;
+        return next;
+      });
+      if (field) {
+        const dirtyCellKey = buildDirtyCellKey(row.id, field);
+        setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
+      }
+      onCashSync(summary.account_id, nextCashBalance, nextCashTargetRatio);
+      const timerKey = row.id;
+      const currentTimer = childSaveTimersRef.current.get(timerKey);
+      if (currentTimer) {
+        clearTimeout(currentTimer);
+      }
+      const nextTimer = setTimeout(async () => {
+        childSaveTimersRef.current.delete(timerKey);
+        try {
+          await processCashUpdate(nextCashBalance, nextCashTargetRatio);
+          clearDirtyRowState(timerKey);
+          toast.success("현금 저장 완료");
+        } catch (error) {
+          await onReload();
+          toast.error(error instanceof Error ? error.message : "현금 저장에 실패했습니다.");
+        }
+      }, 700);
+      childSaveTimersRef.current.set(timerKey, nextTimer);
+      return;
+    }
+    if (!isEditableHoldingRow(row)) {
       return;
     }
 
@@ -1043,7 +1165,7 @@ function AccountHoldingsDetailPanel({
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
     scheduleSilentRowSave(row.id);
-  }, [isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
+  }, [clearDirtyRowState, isCashGridRow, isEditableHoldingRow, onCashSync, onReload, onRowsSync, processCashUpdate, scheduleSilentRowSave, summary, toast]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {
@@ -1055,7 +1177,8 @@ function AccountHoldingsDetailPanel({
       sortable: false,
       resizable: false,
       suppressMovable: true,
-      rowDrag: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+      rowDrag: (params) =>
+        Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
       cellClass: "assetsDragCell",
       valueGetter: () => "",
     },
@@ -1095,13 +1218,15 @@ function AccountHoldingsDetailPanel({
           );
         }
         return (
-          <button
-            type="button"
-            className="btn btn-link p-0 appCodeText assetsTickerLink"
-            onClick={() => moveToTickerDetail(row.ticker)}
-          >
-            {params.value}
-          </button>
+          row.ticker === CASH_ROW_TICKER ? <span>-</span> : (
+            <button
+              type="button"
+              className="btn btn-link p-0 appCodeText assetsTickerLink"
+              onClick={() => moveToTickerDetail(row.ticker)}
+            >
+              {params.value}
+            </button>
+          )
         );
       },
     },
@@ -1205,9 +1330,10 @@ function AccountHoldingsDetailPanel({
       headerName: "목표비중",
       width: 88,
       type: "rightAligned",
-      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
+      editable: (params) =>
+        Boolean(params.data && processingId !== params.data?.id && (isEditableHoldingRow(params.data) || isCashGridRow(params.data))),
       cellClass: (params) => {
-        if (!isEditableHoldingRow(params.data)) {
+        if (!isEditableHoldingRow(params.data) && !isCashGridRow(params.data)) {
           return undefined;
         }
         return isDirtyEditableCell(params.data?.id, "target_ratio")
@@ -1273,6 +1399,9 @@ function AccountHoldingsDetailPanel({
         if (!row) {
           return null;
         }
+        if (row.ticker === CASH_ROW_TICKER) {
+          return <span>-</span>;
+        }
         if (row.id === "__adding__") {
           return (
             <input
@@ -1314,6 +1443,9 @@ function AccountHoldingsDetailPanel({
         if (!row) {
           return null;
         }
+        if (row.ticker === CASH_ROW_TICKER) {
+          return <span>-</span>;
+        }
         if (row.id === "__adding__") {
           return (
             <input
@@ -1334,7 +1466,8 @@ function AccountHoldingsDetailPanel({
       headerName: "수익률",
       width: 88,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number }) => (
+      cellRenderer: (params: { data?: GridRow; value?: number }) => (
+        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
         <span className={getSignedClass(params.value ?? 0)}>
           {(params.value ?? 0) > 0 ? "+" : ""}
           {(params.value ?? 0).toFixed(2)}%
@@ -1346,7 +1479,8 @@ function AccountHoldingsDetailPanel({
       headerName: "평가손익",
       width: 124,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number }) => (
+      cellRenderer: (params: { data?: GridRow; value?: number }) => (
+        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
         <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
       ),
     },
@@ -1355,11 +1489,26 @@ function AccountHoldingsDetailPanel({
       headerName: "평가 금액",
       width: 124,
       type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) =>
-        params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
+      editable: (params) => Boolean(params.data && params.data.ticker === CASH_ROW_TICKER && processingId !== params.data?.id),
+      cellClass: (params) => {
+        if (params.data?.ticker !== CASH_ROW_TICKER) {
+          return undefined;
+        }
+        return isDirtyEditableCell(params.data?.id, "valuation_krw")
+          ? "assetsEditableCell assetsDirtyCell"
+          : "assetsEditableCell";
+      },
+      valueParser: (params) => {
+        const parsed = parseFloat(parseRawPrice(params.newValue));
+        if (Number.isNaN(parsed) || parsed < 0) {
+          return params.oldValue;
+        }
+        return parsed;
+      },
+      cellRenderer: (params: { data?: GridRow }) => (params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"),
     },
     { field: "days_held", headerName: "보유일", width: 76 },
-  ], [addingRow, handleValidateTicker, isDirtyEditableCell, isEditableHoldingRow, processingId]);
+  ], [addingRow, handleValidateTicker, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
 
   return (
     <div className="assetsDetailPanel">
@@ -1422,12 +1571,13 @@ function AccountHoldingsDetailPanel({
             animateRows: true,
             rowSelection: {
               mode: "multiRow",
-              checkboxes: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+              checkboxes: (params) =>
+                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
               headerCheckbox: true,
               hideDisabledCheckboxes: true,
               enableClickSelection: false,
               isRowSelectable: (params) =>
-                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
             },
             selectionColumnDef: {
               width: 52,
@@ -1466,7 +1616,7 @@ function AccountHoldingsDetailPanel({
               const orderedTickers: string[] = [];
               params.api.forEachNode((node) => {
                 const ticker = String(node.data?.ticker || "").trim().toUpperCase();
-                if (!ticker || ticker === "IS") {
+                if (!ticker || ticker === "IS" || ticker === CASH_ROW_TICKER) {
                   return;
                 }
                 orderedTickers.push(ticker);
@@ -1667,6 +1817,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           cash_currency: summary.cash_currency,
           intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
           intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
+          cash_target_ratio: summary.cash_target_ratio,
         }),
       });
       const payload = await response.json();
@@ -1785,6 +1936,28 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           initialSortState={childSortStatesRef.current[data.summary.account_id] ?? []}
           onReload={load}
           onRowsSync={handleChildRowsSync}
+          onCashSync={(accountId, cashBalanceKrw, cashTargetRatio) => {
+            setSummaries((previous) =>
+              previous.map((summary) => {
+                if (summary.account_id !== accountId) {
+                  return summary;
+                }
+                const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
+                const currentCashNative = Number(summary.cash_balance_native ?? 0);
+                const nextCashNative =
+                  String(summary.currency || "KRW").toUpperCase() === "AUD" && currentCashKrw > 0 && currentCashNative > 0
+                    ? (cashBalanceKrw / currentCashKrw) * currentCashNative
+                    : summary.cash_balance_native;
+                return {
+                  ...summary,
+                  cash_balance_krw: cashBalanceKrw,
+                  cash_balance_native: nextCashNative,
+                  cash_target_ratio: cashTargetRatio,
+                  total_assets_krw: Number(summary.valuation_krw ?? 0) + cashBalanceKrw,
+                };
+              }),
+            );
+          }}
           onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
           onSortStateChange={handleChildSortStateChange}
         />
@@ -1863,22 +2036,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       minWidth: 124,
       flex: 1,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data)),
-      cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
-          return undefined;
-        }
-        return isDirtyParentCell(params.data.account_id, "cash_edit_value")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) => {
         if (!params.data || isDetailRow(params.data)) {
           return "";

@@ -49,6 +49,7 @@ def load_cash_accounts() -> dict[str, list[dict[str, Any]]]:
                 "cash_balance_krw": normalize_number(account_doc.get("cash_balance")),
                 "cash_balance_native": normalize_nullable_number(account_doc.get("cash_balance_native")),
                 "cash_currency": cash_currency,
+                "cash_target_ratio": normalize_number(account_doc.get("cash_target_ratio")),
                 "intl_shares_value": (
                     normalize_nullable_number(account_doc.get("intl_shares_value"))
                     if account_id == "aus_account"
@@ -87,6 +88,7 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             "cash_balance": float(update.get("cash_balance_krw") or 0),
             "cash_balance_native": normalize_nullable_number(update.get("cash_balance_native")),
             "cash_currency": str(update.get("cash_currency") or "").strip().upper(),
+            "cash_target_ratio": float(update.get("cash_target_ratio") or 0),
             "intl_shares_value": normalize_nullable_number(update.get("intl_shares_value")),
             "intl_shares_change": normalize_nullable_number(update.get("intl_shares_change")),
             "updated_at": now,
