@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query
+from zoneinfo import ZoneInfo
 
 from fastapi_app.dependencies import require_internal_token
 from services.etf_holdings_service import (
@@ -11,6 +12,7 @@ from services.etf_holdings_service import (
     fetch_korean_stock_price_snapshot,
 )
 from services.stock_cache_service import get_stock_cache_meta
+from config import MARKET_SCHEDULES
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
@@ -29,6 +31,17 @@ def _serialize_datetime(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
+
+
+def _is_pre_open_top_movers_window() -> bool:
+    schedule = MARKET_SCHEDULES.get("kor") or {}
+    timezone_name = str(schedule.get("timezone") or "Asia/Seoul").strip() or "Asia/Seoul"
+    market_open = schedule.get("open")
+    if market_open is None:
+        return False
+
+    now_local = datetime.now(ZoneInfo(timezone_name))
+    return now_local.time() < market_open
 
 
 def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None, float | None]:
@@ -85,6 +98,7 @@ def get_ticker_search_data(
     ticker_items: list[dict[str, object]] = []
     top_movers_by_type: list[dict[str, object]] = []
     top_movers_updated_at: datetime | None = None
+    top_movers_pre_open = _is_pre_open_top_movers_window()
 
     for config in configs:
         ticker_type = config["ticker_type"]
@@ -118,11 +132,14 @@ def get_ticker_search_data(
             ticker_items.append(item)
             ticker_type_items.append(item)
 
-        top_movers = sorted(
-            [item for item in ticker_type_items if item.get("change_pct") is not None],
-            key=lambda item: float(item["change_pct"]),
-            reverse=True,
-        )[:5]
+        if top_movers_pre_open:
+            top_movers = []
+        else:
+            top_movers = sorted(
+                [item for item in ticker_type_items if item.get("change_pct") is not None],
+                key=lambda item: float(item["change_pct"]),
+                reverse=True,
+            )[:5]
         top_movers_by_type.append(
             {
                 "ticker_type": ticker_type,
@@ -134,7 +151,8 @@ def get_ticker_search_data(
     return {
         "tickers": ticker_items,
         "top_movers_by_type": top_movers_by_type,
-        "top_movers_updated_at": _serialize_datetime(top_movers_updated_at),
+        "top_movers_updated_at": None if top_movers_pre_open else _serialize_datetime(top_movers_updated_at),
+        "top_movers_pre_open": top_movers_pre_open,
     }
 
 
