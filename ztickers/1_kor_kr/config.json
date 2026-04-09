@@ -12,7 +12,7 @@
         {
             "order": 2,
             "MA_TYPE": "ALMA",
-            "MA_MONTHS": 10
+            "MA_MONTHS": 3
         }
     ],
     "RANK_RECOMMEND_SIMILARITY_LOOKBACK_DAYS": 60,
