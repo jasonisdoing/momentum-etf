@@ -91,6 +91,28 @@ def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
     return base
 
 
+def extract_yahoo_symbol_from_isin(value: str | None) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    if normalized.startswith("AU") and len(normalized) == 12:
+        asx_code = normalized[8:11].strip().upper()
+        if len(asx_code) == 3 and asx_code.isalpha():
+            return f"{asx_code}.AX"
+    return None
+
+
+def extract_display_ticker_from_symbol(value: str | None) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    if normalized.endswith(".AX"):
+        return normalized[:-3]
+    if normalized.endswith(".HK"):
+        return normalized
+    return normalized
+
+
 def _normalize_reference_date(value: str | None) -> str | None:
     normalized = str(value or "").strip()
     if not normalized:
@@ -136,7 +158,10 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
 
         component_item_code = str(item.get("componentItemCode") or "").strip().upper() or None
         component_reuters_code = str(item.get("componentReutersCode") or "").strip().upper() or None
-        display_ticker = component_item_code or extract_yahoo_symbol_from_reuters_code(component_reuters_code) or raw_code
+        yahoo_symbol = extract_yahoo_symbol_from_reuters_code(component_reuters_code) or extract_yahoo_symbol_from_isin(
+            raw_code
+        )
+        display_ticker = component_item_code or extract_display_ticker_from_symbol(yahoo_symbol) or raw_code
         reference_date = _normalize_reference_date(item.get("referenceDate"))
         if reference_date:
             as_of_date = reference_date
@@ -148,7 +173,7 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
                 "raw_code": raw_code,
                 "raw_name": raw_name,
                 "reuters_code": component_reuters_code,
-                "yahoo_symbol": extract_yahoo_symbol_from_reuters_code(component_reuters_code),
+                "yahoo_symbol": yahoo_symbol,
                 "contracts": _normalize_contracts(item.get("cuUnitQuantity")),
                 "amount": _to_int(item.get("evalAmount")),
                 "weight": _to_float(item.get("weight")),
