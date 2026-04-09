@@ -22,6 +22,8 @@ _NAVER_ETF_COMPONENT_CACHE: dict[str, dict[str, Any]] = {}
 _NAVER_ETF_COMPONENT_TTL_SECONDS = 300
 _FOREIGN_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 _FOREIGN_PRICE_TTL_SECONDS = 300
+_YAHOO_SYMBOL_RESOLUTION_CACHE: dict[str, dict[str, Any]] = {}
+_YAHOO_SYMBOL_RESOLUTION_TTL_SECONDS = 3600
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -121,10 +123,87 @@ def extract_yahoo_symbol_from_component_code(
     return None
 
 
+def _get_preferred_exchanges_from_isin(isin_code: str | None) -> list[str]:
+    normalized = str(isin_code or "").strip().upper()
+    if normalized.startswith("AU"):
+        return ["ASX"]
+    if normalized.startswith("FR"):
+        return ["PAR"]
+    return []
+
+
+def _extract_yahoo_symbol_from_search_result(item: dict[str, Any]) -> str | None:
+    symbol = str(item.get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    return symbol
+
+
+def resolve_yahoo_symbol_from_isin_or_name(
+    raw_code: str | None,
+    raw_name: str | None,
+) -> str | None:
+    queries = [str(raw_code or "").strip().upper(), str(raw_name or "").strip()]
+    queries = [query for query in queries if query]
+    if not queries:
+        return None
+
+    preferred_exchanges = _get_preferred_exchanges_from_isin(raw_code)
+    now = datetime.now()
+    cache_key = f"{str(raw_code or '').strip().upper()}::{str(raw_name or '').strip().upper()}"
+    cached_entry = _YAHOO_SYMBOL_RESOLUTION_CACHE.get(cache_key)
+    if _is_cache_alive(cached_entry, now):
+        return cached_entry.get("data")
+
+    resolved_symbol: str | None = None
+    for query in queries:
+        try:
+            search = yf.Search(query, max_results=10, news_count=0, lists_count=0, recommended=0)
+        except Exception as exc:
+            logger.info("Yahoo 심볼 검색 실패(%s): %s", query, exc)
+            continue
+
+        quotes = list(search.quotes or [])
+        if not quotes:
+            continue
+
+        if preferred_exchanges:
+            for exchange in preferred_exchanges:
+                preferred_match = next(
+                    (
+                        item
+                        for item in quotes
+                        if str(item.get("exchange") or "").strip().upper() == exchange
+                        and _extract_yahoo_symbol_from_search_result(item)
+                    ),
+                    None,
+                )
+                if preferred_match:
+                    resolved_symbol = _extract_yahoo_symbol_from_search_result(preferred_match)
+                    break
+        if resolved_symbol:
+            break
+
+        first_match = next((item for item in quotes if _extract_yahoo_symbol_from_search_result(item)), None)
+        if first_match:
+            resolved_symbol = _extract_yahoo_symbol_from_search_result(first_match)
+            break
+
+    _YAHOO_SYMBOL_RESOLUTION_CACHE[cache_key] = {
+        "data": resolved_symbol,
+        "expires_at": now + timedelta(seconds=_YAHOO_SYMBOL_RESOLUTION_TTL_SECONDS),
+    }
+    return resolved_symbol
+
+
 def extract_display_ticker_from_symbol(value: str | None) -> str | None:
     normalized = str(value or "").strip().upper()
     if not normalized:
         return None
+    if "." in normalized:
+        base, _, suffix = normalized.partition(".")
+        if base.isalpha() and suffix.isalpha():
+            return base
     if normalized.endswith(".AX"):
         return normalized[:-3]
     if normalized.endswith(".HK"):
@@ -181,6 +260,7 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
             extract_yahoo_symbol_from_reuters_code(component_reuters_code)
             or extract_yahoo_symbol_from_component_code(component_item_code, raw_code)
             or extract_yahoo_symbol_from_isin(raw_code)
+            or resolve_yahoo_symbol_from_isin_or_name(raw_code, raw_name)
         )
         display_ticker = component_item_code or extract_display_ticker_from_symbol(yahoo_symbol) or raw_code
         reference_date = _normalize_reference_date(item.get("referenceDate"))
