@@ -68,6 +68,7 @@ type RankRow = {
   배당률: number | null;
   보수: number | null;
   순자산총액: number | null;
+  "전일 거래량(주)": number | null;
 };
 
 type RankResponse = {
@@ -483,6 +484,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         배당률: null,
         보수: null,
         순자산총액: null,
+        "전일 거래량(주)": null,
       },
       ...gridRows,
     ];
@@ -878,6 +880,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 132,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatAssetInEok(params.value ?? null),
+      },
+      {
+        field: "전일 거래량(주)",
+        headerName: "전일 거래량(주)",
+        minWidth: 132,
+        width: 132,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 0),
       },
       {
         field: "상장일",
