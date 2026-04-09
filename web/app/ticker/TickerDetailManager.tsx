@@ -271,6 +271,13 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
+  if (normalized === "eur") {
+    return `€${new Intl.NumberFormat("de-DE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
   if (normalized === "cny") {
     return `${new Intl.NumberFormat("zh-CN", {
       minimumFractionDigits: 2,
