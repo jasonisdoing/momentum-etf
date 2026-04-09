@@ -282,20 +282,27 @@ def get_ticker_detail(
         elif not holdings_as_of_date:
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:
+            def is_korean_six_digit_holding(item: dict[str, object]) -> bool:
+                component_ticker = str(item.get("ticker") or "").strip().upper()
+                raw_code = str(item.get("raw_code") or "").strip().upper()
+                yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+                if not component_ticker.isdigit() or len(component_ticker) != 6:
+                    return False
+                if yahoo_symbol:
+                    return False
+                if raw_code.startswith("CNE"):
+                    return False
+                return True
+
             korean_tickers = [
                 str(item.get("ticker") or "").strip().upper()
                 for item in holdings
-                if str(item.get("ticker") or "").strip().upper().isdigit()
-                and len(str(item.get("ticker") or "").strip().upper()) == 6
+                if is_korean_six_digit_holding(item)
             ]
             foreign_symbols = [
                 str(item.get("yahoo_symbol") or "").strip().upper()
                 for item in holdings
-                if not (
-                    str(item.get("ticker") or "").strip().upper().isdigit()
-                    and len(str(item.get("ticker") or "").strip().upper()) == 6
-                )
-                and str(item.get("yahoo_symbol") or "").strip().upper()
+                if str(item.get("yahoo_symbol") or "").strip().upper()
             ]
             price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
             foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
@@ -303,7 +310,7 @@ def get_ticker_detail(
             for item in holdings:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
                 yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
-                if component_ticker.isdigit() and len(component_ticker) == 6:
+                if is_korean_six_digit_holding(item):
                     snapshot = price_snapshot_map.get(component_ticker, {})
                 else:
                     snapshot = foreign_price_snapshot_map.get(yahoo_symbol or component_ticker, {})
