@@ -404,7 +404,7 @@ def load_real_holdings_table(
     intl_val = snapshot.get("intl_shares_value", 0.0)
     intl_change = snapshot.get("intl_shares_change", 0.0)
     # 종목풀이 바뀌어 여기 조건도 함께 수정해야 International Shares 평가금이 합산됩니다.
-    if account_id == "aus_account" and (intl_val > 0 or intl_change != 0):
+    if account_id == "aus_account":
         intl_princi = intl_val - intl_change
 
         intl_princi_krw = intl_princi * aud_krw

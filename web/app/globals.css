@@ -2150,11 +2150,17 @@ a {
   gap: 0.5rem;
   padding: 0.75rem;
   background: #f8fbff;
+  overflow: hidden;
 }
 
 .assetsDetailGridWrap {
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+}
+
+.assetsChildAgGrid .ag-body-vertical-scroll {
+  display: none !important;
 }
 
 .assetsChildAgGrid .ag-cell-value,
