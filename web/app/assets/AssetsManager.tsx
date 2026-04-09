@@ -248,12 +248,12 @@ function getPreviewValuationKrw(row: GridRow): number {
   if (quantity <= 0) {
     return 0;
   }
+  if (row.currency === "KRW") {
+    return getCurrentPriceNumber(row) * quantity;
+  }
   const currentQuantity = Number(row.original_quantity ?? row.quantity ?? 0);
   if (currentQuantity > 0) {
     return (Number(row.valuation_krw ?? 0) / currentQuantity) * quantity;
-  }
-  if (row.currency === "KRW") {
-    return Number(row.current_price_num ?? 0) * quantity;
   }
   return Number(row.valuation_krw ?? 0);
 }
@@ -481,6 +481,7 @@ function AccountHoldingsDetailPanel({
   const priceRef = useRef<HTMLInputElement>(null);
   const targetRatioRef = useRef<HTMLInputElement>(null);
   const rowsRef = useRef<HoldingsRow[]>(initialRows);
+  const summaryRef = useRef(summary);
   const dirtyRowIdsRef = useRef<string[]>([]);
   const isReorderDirtyRef = useRef(false);
   const gridApiRef = useRef<GridApi<GridRow> | null>(null);
@@ -511,6 +512,10 @@ function AccountHoldingsDetailPanel({
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  useEffect(() => {
+    summaryRef.current = summary;
+  }, [summary]);
 
   useEffect(() => {
     dirtyRowIdsRef.current = dirtyRowIds;
@@ -1183,7 +1188,7 @@ function AccountHoldingsDetailPanel({
           return "-";
         }
 
-        const weightPct = getPreviewWeightPct(params.data, rows, summary);
+        const weightPct = getPreviewWeightPct(params.data, rowsRef.current, summaryRef.current);
         return (
           <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
             {weightPct.toFixed(1)}%
@@ -1350,7 +1355,7 @@ function AccountHoldingsDetailPanel({
         params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
     },
     { field: "days_held", headerName: "보유일", width: 76 },
-  ], [addingRow, handleValidateTicker, isDirtyEditableCell, isEditableHoldingRow, processingId, rows, summary]);
+  ], [addingRow, handleValidateTicker, isDirtyEditableCell, isEditableHoldingRow, processingId]);
 
   return (
     <div className="assetsDetailPanel">
@@ -1480,6 +1485,7 @@ function AccountHoldingsDetailPanel({
             onGridReady: (params) => {
               gridApiRef.current = params.api;
             },
+            getRowId: (params) => String(params.data.id),
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
               assetsEditingRow: (params) => Boolean(params.data?.id && params.data.id === editingRowId),
