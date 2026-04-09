@@ -256,7 +256,8 @@ export function MarketManager({
       {
         field: "ticker_pools",
         headerName: "종목풀",
-        width: 180,
+        width: 108,
+        maxWidth: 116,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
       },
       {
