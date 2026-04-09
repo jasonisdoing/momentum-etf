@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { IconSearch, IconX } from "@tabler/icons-react";
 import {
@@ -112,33 +112,34 @@ export function GlobalTickerSearch() {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-
-    async function fetchSearchData() {
-      try {
-        const response = await fetch("/api/ticker-search-data", { cache: "no-store" });
-        if (!response.ok) {
-          return;
-        }
-        const payload = (await response.json()) as TickerSearchPayload;
-        if (!alive) {
-          return;
-        }
-        setAllTickers(Array.isArray(payload.tickers) ? payload.tickers : []);
-        setTopMoversByType(Array.isArray(payload.top_movers_by_type) ? payload.top_movers_by_type : []);
-        setTopMoversUpdatedAt(typeof payload.top_movers_updated_at === "string" ? payload.top_movers_updated_at : null);
-        setTopMoversPreOpen(Boolean(payload.top_movers_pre_open));
-      } catch {
-        // 전역 검색은 실패 시 조용히 비활성화합니다.
+  const fetchSearchData = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const response = await fetch("/api/ticker-search-data", { cache: "no-store", signal });
+      if (!response.ok) {
+        return;
       }
+      const payload = (await response.json()) as TickerSearchPayload;
+      setAllTickers(Array.isArray(payload.tickers) ? payload.tickers : []);
+      setTopMoversByType(Array.isArray(payload.top_movers_by_type) ? payload.top_movers_by_type : []);
+      setTopMoversUpdatedAt(typeof payload.top_movers_updated_at === "string" ? payload.top_movers_updated_at : null);
+      setTopMoversPreOpen(Boolean(payload.top_movers_pre_open));
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      // 전역 검색은 실패 시 조용히 비활성화합니다.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!panelOpen) {
+      return;
     }
 
-    void fetchSearchData();
-    return () => {
-      alive = false;
-    };
-  }, []);
+    const controller = new AbortController();
+    void fetchSearchData(controller.signal);
+    return () => controller.abort();
+  }, [fetchSearchData, panelOpen]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
