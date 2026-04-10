@@ -1,18 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from fastapi import APIRouter, Depends, Query
-from zoneinfo import ZoneInfo
 
+from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.etf_holdings_service import (
     fetch_foreign_stock_price_snapshot,
     fetch_korean_stock_price_snapshot,
 )
+from services.price_service import get_realtime_snapshot
 from services.stock_cache_service import get_stock_cache_meta
-from config import MARKET_SCHEDULES
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
     load_cached_close_series_bulk_before_or_at_with_fallback,
@@ -306,6 +307,15 @@ def get_ticker_detail(
             ]
             price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
             foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
+
+            # 한국 종목 실시간 가격 오버레이 (네이버 30초 TTL 캐시)
+            realtime_map: dict[str, dict[str, float]] = {}
+            if korean_tickers:
+                try:
+                    realtime_map = get_realtime_snapshot("kor", korean_tickers)
+                except Exception:
+                    pass  # 실시간 데이터 실패 시 pykrx 기반 데이터 유지
+
             enriched_holdings: list[dict[str, object]] = []
             for item in holdings:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
@@ -320,6 +330,14 @@ def get_ticker_detail(
                 enriched_item["previous_close"] = snapshot.get("previous_close")
                 enriched_item["change_pct"] = snapshot.get("change_pct")
                 enriched_item["price_currency"] = snapshot.get("price_currency")
+
+                # 실시간 데이터로 오버레이 (한국 종목만)
+                rt = realtime_map.get(component_ticker, {})
+                if rt.get("nowVal") is not None:
+                    enriched_item["current_price"] = float(rt["nowVal"])
+                if rt.get("changeRate") is not None:
+                    enriched_item["change_pct"] = float(rt["changeRate"])
+
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings
 
