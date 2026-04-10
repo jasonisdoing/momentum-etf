@@ -77,6 +77,77 @@ def _create_naver_session() -> requests.Session:
     return session
 
 
+# Yahoo Finance 에서 쓰는 주요 거래소 접미사 화이트리스트.
+# reuters_code 가 이 중 하나로 끝나면 그대로 Yahoo 심볼로 사용한다.
+# 참고: https://help.yahoo.com/kb/SLN2310.html
+_YAHOO_EXCHANGE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        # 아시아/태평양
+        "T",     # 도쿄 (TSE)
+        "HK",    # 홍콩
+        "SS",    # 상하이
+        "SZ",    # 선전
+        "BJ",    # 베이징
+        "KS",    # 한국 KOSPI
+        "KQ",    # 한국 KOSDAQ
+        "TW",    # 타이완
+        "TWO",   # 타이완 OTC
+        "SI",    # 싱가포르
+        "BK",    # 방콕
+        "JK",    # 자카르타
+        "KL",    # 쿠알라룸푸르
+        "HO",    # 호치민
+        "AX",    # 호주 ASX
+        "NZ",    # 뉴질랜드
+        # 유럽
+        "L",     # 런던
+        "IL",    # 런던 IOB
+        "PA",    # 파리
+        "DE",    # XETRA
+        "F",     # 프랑크푸르트
+        "BE",    # 베를린
+        "DU",    # 뒤셀도르프
+        "HM",    # 함부르크
+        "MU",    # 뮌헨
+        "SG",    # 슈투트가르트
+        "AS",    # 암스테르담
+        "BR",    # 브뤼셀
+        "LS",    # 리스본
+        "MC",    # 마드리드
+        "MI",    # 밀라노
+        "SW",    # 스위스
+        "VX",    # 스위스(VX)
+        "ST",    # 스톡홀름
+        "HE",    # 헬싱키
+        "OL",    # 오슬로
+        "CO",    # 코펜하겐
+        "IC",    # 아이슬란드
+        "IR",    # 아일랜드
+        "VI",    # 빈
+        "PR",    # 프라하
+        "WA",    # 바르샤바
+        "BD",    # 부다페스트
+        "AT",    # 아테네
+        "IS",    # 이스탄불
+        "TA",    # 텔아비브
+        # 아메리카
+        "TO",    # 토론토 TSX
+        "V",     # 토론토 TSX Venture
+        "CN",    # 캐나다 CSE
+        "NE",    # 캐나다 NEO
+        "SA",    # 브라질 B3
+        "MX",    # 멕시코
+        "BA",    # 부에노스아이레스
+        "SN",    # 산티아고
+        # 중동/아프리카
+        "SR",    # 사우디
+        "QA",    # 카타르
+        "JO",    # 요하네스버그
+        "CA",    # 카이로
+    }
+)
+
+
 def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
     normalized = str(value or "").strip().upper()
     if not normalized:
@@ -88,10 +159,8 @@ def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
         return None
     if not dot:
         return base
-    if suffix == "HK":
-        return f"{base}.HK"
-    if suffix == "T":
-        return f"{base}.T"
+    if suffix in _YAHOO_EXCHANGE_SUFFIXES:
+        return f"{base}.{suffix}"
     return base
 
 
