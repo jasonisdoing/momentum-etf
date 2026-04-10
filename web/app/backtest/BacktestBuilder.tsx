@@ -113,6 +113,7 @@ export function BacktestBuilder({
   const [countryCode, setCountryCode] = useState("kor");
   const [periodMonths, setPeriodMonths] = useState(12);
   const [slippagePct, setSlippagePct] = useState(0.5);
+  const [rebalanceFreq, setRebalanceFreq] = useState("monthly");
   const [benchmarkTicker, setBenchmarkTicker] = useState<BacktestTicker>(createTicker());
   const [groups, setGroups] = useState<BacktestGroup[]>([createGroup()]);
   const [runResult, setRunResult] = useState<BacktestRunResult | null>(null);
@@ -338,6 +339,7 @@ export function BacktestBuilder({
     name?: string;
     period_months?: number;
     slippage_pct?: number;
+    rebalance_freq?: string;
     benchmark?: { ticker?: string; name?: string; listing_date?: string } | null;
     groups?: Array<{
       group_id?: string;
@@ -367,6 +369,7 @@ export function BacktestBuilder({
     setBacktestName(String(payload.name ?? ""));
     setPeriodMonths(Number(payload.period_months ?? 12));
     setSlippagePct(Number(payload.slippage_pct ?? 0.5));
+    setRebalanceFreq(String(payload.rebalance_freq ?? "monthly"));
     setBenchmarkTicker(
       payload.benchmark?.ticker
         ? {
@@ -406,6 +409,7 @@ export function BacktestBuilder({
             name: title,
             period_months: periodMonths,
             slippage_pct: slippagePct,
+            rebalance_freq: rebalanceFreq,
             benchmark,
             groups: normalizedGroups,
           }),
@@ -446,6 +450,7 @@ export function BacktestBuilder({
             action: "run",
             period_months: periodMonths,
             slippage_pct: slippagePct,
+            rebalance_freq: rebalanceFreq,
             benchmark,
             groups: normalizedGroups,
             country_code: countryCode,
@@ -497,6 +502,7 @@ export function BacktestBuilder({
           name?: string;
           period_months?: number;
           slippage_pct?: number;
+          rebalance_freq?: string;
           benchmark?: { ticker?: string; name?: string; listing_date?: string } | null;
           groups?: Array<{
             group_id?: string;
@@ -631,6 +637,21 @@ export function BacktestBuilder({
                       최근 {months}달
                     </option>
                   ))}
+                </select>
+              </label>
+              <label className="form-label mb-0">
+                <span className="subheader">리밸런싱 주기</span>
+                <select
+                  className="form-select"
+                  value={rebalanceFreq}
+                  onChange={(event) => {
+                    setRebalanceFreq(event.target.value);
+                    setRunResult(null);
+                  }}
+                >
+                  <option value="daily">매일</option>
+                  <option value="weekly">매주</option>
+                  <option value="monthly">매월</option>
                 </select>
               </label>
               <label className="form-label mb-0">
