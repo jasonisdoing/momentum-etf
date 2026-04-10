@@ -667,18 +667,9 @@ def build_ticker_type_rankings(
             continue
 
         cached_close_series = cached_close_series_map.get(ticker)
-        cached_frame = cached_frame_map.get(ticker)
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
-        base_volume_series = None
-        if cached_frame is not None and not cached_frame.empty and "Volume" in cached_frame.columns:
-            frame_copy = cached_frame.copy()
-            frame_copy.index = pd.to_datetime(frame_copy.index)
-            base_volume_series = pd.to_numeric(frame_copy["Volume"], errors="coerce")
-            base_volume_series = base_volume_series.loc[
-                base_volume_series.index.normalize() <= pd.Timestamp(latest_trading_day).normalize()
-            ].dropna()
         effective_close_series = _build_effective_close_series(base_close_series, realtime_entry)
         if effective_close_series is not None and not effective_close_series.empty:
             effective_close_series_map[ticker] = effective_close_series
