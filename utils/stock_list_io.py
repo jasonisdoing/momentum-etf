@@ -78,6 +78,12 @@ def _invalidate_cache(ticker_type: str | None = None) -> None:
         _LISTING_CACHE.clear()
 
 
+# 외부 모듈(예: stocks_service)에서 stock_meta 를 직접 갱신한 뒤 호출할 수 있도록
+# 공개 alias 를 제공한다.
+def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
+    _invalidate_cache(ticker_type)
+
+
 # ---------------------------------------------------------------------------
 # 내부 로드 (캐시 적용)
 # ---------------------------------------------------------------------------
