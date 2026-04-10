@@ -73,9 +73,9 @@ const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
 ];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
-  { field: "job", headerName: "작업", minWidth: 180, flex: 1 },
-  { field: "target", headerName: "대상", minWidth: 180, flex: 1 },
-  { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 140 },
+  { field: "job", headerName: "작업", minWidth: 140, width: 180 },
+  { field: "target", headerName: "대상", minWidth: 120, width: 140 },
+  { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 180 },
   {
     field: "command",
     headerName: "실행 명령",
@@ -233,7 +233,7 @@ export function SystemManager({
           <div className="card-header">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">자동 작업</span>
+                <span className="appHeaderMetricValue">배치</span>
               </div>
             </div>
           </div>
