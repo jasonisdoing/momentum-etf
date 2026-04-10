@@ -43,14 +43,14 @@ export async function fetchFastApiJson<T>(path: string, init?: RequestInit): Pro
       (error instanceof DOMException && error.name === "AbortError") ||
       (error instanceof Error && error.name === "AbortError") ||
       (error instanceof Error && error.message.includes("fetch failed") && String((error as any).cause).includes("AbortError"));
-      
+
     if (isAbort) {
       try {
         await fetch(`${getFastApiBaseUrl()}/internal/health/report_error`, {
           method: "POST",
           headers: { "X-Internal-Token": getFastApiToken() },
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
       throw new Error(`FastAPI 요청이 ${DEFAULT_TIMEOUT_MS / 1_000}초 내에 응답하지 않았습니다. (${path})`);
     }
     throw error;
@@ -68,14 +68,14 @@ export async function fetchFastApiJson<T>(path: string, init?: RequestInit): Pro
         ? payload.error
         : null) ||
       `FastAPI 요청에 실패했습니다. (${response.status})`;
-      
+
     if (message.includes("NetworkTimeout") || message.includes("timed out") || message.includes("시간 초과") || message.includes("응답하지 않았습니다")) {
       try {
         await fetch(`${getFastApiBaseUrl()}/internal/health/report_error`, {
           method: "POST",
           headers: { "X-Internal-Token": getFastApiToken() },
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     }
     throw new Error(message);
   }

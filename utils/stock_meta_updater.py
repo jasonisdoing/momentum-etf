@@ -204,7 +204,8 @@ def update_ticker_type_metadata(
                 "name",
                 "listing_date",
                 "1_week_avg_volume",
-                "1_week_earn_rate",
+                "volume",
+        "1_week_earn_rate",
                 "2_week_earn_rate",
                 "1_month_earn_rate",
                 "3_month_earn_rate",
@@ -443,6 +444,7 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "name",
         "listing_date",
         "1_week_avg_volume",
+        "volume",
         "1_week_earn_rate",
         "2_week_earn_rate",
         "1_month_earn_rate",
@@ -571,6 +573,10 @@ def update_single_stock_metadata(
             avg_volume = last_week["Volume"].mean()
             if pd.notna(avg_volume):
                 stock["1_week_avg_volume"] = int(avg_volume)
+            
+            non_empty_vols = data["Volume"].dropna()
+            if not non_empty_vols.empty:
+                stock["volume"] = int(non_empty_vols.iloc[-1])
 
         def calc_rate_safe(df, days_lookback):
             if len(df) < days_lookback + 1:
@@ -602,7 +608,8 @@ def update_single_stock_metadata(
             ordered_stock["1_week_avg_volume"] = stock["1_week_avg_volume"]
 
         rate_keys = [
-            "1_week_earn_rate",
+            "volume",
+        "1_week_earn_rate",
             "2_week_earn_rate",
             "1_month_earn_rate",
             "3_month_earn_rate",
