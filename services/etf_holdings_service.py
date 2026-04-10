@@ -90,6 +90,8 @@ def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
         return base
     if suffix == "HK":
         return f"{base}.HK"
+    if suffix == "T":
+        return f"{base}.T"
     return base
 
 
@@ -120,6 +122,9 @@ def extract_yahoo_symbol_from_component_code(
             return f"{normalized_code}.SZ"
         if normalized_code.startswith(("4", "8")):
             return f"{normalized_code}.BJ"
+    # 일본: ISIN 이 JP 로 시작하고 component code 가 4자리 TSE 종목코드인 경우
+    if len(normalized_code) == 4 and normalized_code.isdigit() and normalized_raw.startswith("JP"):
+        return f"{normalized_code}.T"
     return None
 
 
