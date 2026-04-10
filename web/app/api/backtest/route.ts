@@ -36,6 +36,7 @@ export async function POST(request: NextRequest) {
       period_months?: number;
       slippage_pct?: number;
       country_code?: string;
+      rebalance_freq?: string;
       benchmark?: {
         ticker?: string;
         name?: string;
@@ -94,6 +95,7 @@ export async function POST(request: NextRequest) {
         normalizedBenchmark,
         normalizedGroups,
         countryCode,
+        String(payload.rebalance_freq ?? "monthly"),
       );
       return NextResponse.json(result);
     }
@@ -104,6 +106,7 @@ export async function POST(request: NextRequest) {
       Number(payload.slippage_pct ?? 0.5),
       normalizedBenchmark,
       normalizedGroups,
+      String(payload.rebalance_freq ?? "monthly"),
     );
     return NextResponse.json(result);
   } catch (error) {

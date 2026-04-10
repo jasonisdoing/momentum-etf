@@ -19,6 +19,7 @@ type BacktestConfigListItem = {
   period_months: number;
   slippage_pct: number;
   benchmark?: BacktestTickerItem | null;
+  rebalance_freq: string;
   saved_at: string;
 };
 
@@ -28,6 +29,7 @@ type BacktestConfigDetail = {
   period_months: number;
   slippage_pct: number;
   benchmark?: BacktestTickerItem | null;
+  rebalance_freq: string;
   groups: BacktestGroupItem[];
   saved_at: string;
 };
@@ -74,6 +76,7 @@ export async function saveBacktestConfig(
   slippagePct: number,
   benchmark: BacktestTickerItem | null,
   groups: BacktestGroupItem[],
+  rebalanceFreq: string = "monthly",
 ) {
   return fetchFastApiJson<{ config_id: string; name: string; saved_at: string; duplicated?: boolean }>(
     "/internal/backtest",
@@ -85,6 +88,7 @@ export async function saveBacktestConfig(
       slippage_pct: slippagePct,
       benchmark,
       groups,
+      rebalance_freq: rebalanceFreq,
     }),
   });
 }
@@ -109,6 +113,7 @@ export async function runBacktest(
   benchmark: BacktestTickerItem | null,
   groups: BacktestGroupItem[],
   countryCode: string = "kor",
+  rebalanceFreq: string = "monthly",
 ) {
   return fetchFastApiJson<BacktestRunResult>("/internal/backtest/run", {
     method: "POST",
@@ -118,6 +123,7 @@ export async function runBacktest(
       benchmark,
       groups,
       country_code: countryCode,
+      rebalance_freq: rebalanceFreq,
     }),
   });
 }

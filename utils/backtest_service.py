@@ -12,6 +12,59 @@ from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.db_manager import get_db_connection
 from utils.stocks_service import validate_stock_candidate
 
+def _get_weekly_rebalance_dates(
+    evaluation_days: list[pd.Timestamp],
+    country_code: str = "kor",
+) -> set[pd.Timestamp]:
+    rebalance_dates: set[pd.Timestamp] = set()
+    if not evaluation_days:
+        return rebalance_dates
+
+    current_week: int | None = None
+    last_day_of_week: pd.Timestamp | None = None
+
+    for day in evaluation_days:
+        week_key = day.isocalendar()[1]
+        year_key = day.isocalendar()[0]
+        combined = year_key * 100 + week_key
+
+        if combined != current_week:
+            if last_day_of_week is not None:
+                rebalance_dates.add(last_day_of_week)
+            current_week = combined
+
+        last_day_of_week = day
+
+    if last_day_of_week is not None:
+        rebalance_dates.add(last_day_of_week)
+
+    return rebalance_dates
+
+
+def _get_monthly_rebalance_dates(
+    evaluation_days: list[pd.Timestamp],
+) -> set[pd.Timestamp]:
+    rebalance_dates: set[pd.Timestamp] = set()
+    if not evaluation_days:
+        return rebalance_dates
+
+    current_month: str | None = None
+    last_day_of_month: pd.Timestamp | None = None
+
+    for day in evaluation_days:
+        month_key = f"{day.year}-{day.month}"
+        if month_key != current_month:
+            if last_day_of_month is not None:
+                rebalance_dates.add(last_day_of_month)
+            current_month = month_key
+        last_day_of_month = day
+
+    if last_day_of_month is not None:
+        rebalance_dates.add(last_day_of_month)
+
+    return rebalance_dates
+
+
 def _get_ticker_type_for_country(country_code: str) -> str:
     """국가 코드를 백테스트용 기본 종목풀로 변환합니다."""
     cc = str(country_code or "").strip().lower()
@@ -107,12 +160,14 @@ def _build_config_signature(
     slippage_pct: float,
     benchmark: dict[str, Any] | None,
     groups: list[dict[str, Any]],
+    rebalance_freq: str = "monthly",
 ) -> dict[str, Any]:
     return {
         "name": name,
         "period_months": period_months,
         "slippage_pct": slippage_pct,
         "benchmark": _normalize_optional_ticker(benchmark),
+        "rebalance_freq": str(rebalance_freq or "monthly").strip().lower(),
         "groups": [
             {
                 "name": str(group.get("name") or "").strip(),
@@ -137,6 +192,7 @@ def save_backtest_config(
     slippage_pct: float,
     benchmark: dict[str, Any] | None,
     groups: list[dict[str, Any]],
+    rebalance_freq: str = "monthly",
 ) -> dict[str, Any]:
     title = str(name or "").strip()
     if not title:
@@ -158,6 +214,7 @@ def save_backtest_config(
         slippage_value,
         normalized_benchmark,
         normalized_groups,
+        rebalance_freq,
     )
     existing_docs = list(
         _get_collection().find(
@@ -168,6 +225,7 @@ def save_backtest_config(
                 "name": 1,
                 "period_months": 1,
                 "slippage_pct": 1,
+                "rebalance_freq": 1,
                 "groups": 1,
                 "created_at": 1,
                 "updated_at": 1,
@@ -181,6 +239,7 @@ def save_backtest_config(
             _normalize_slippage_pct(existing_doc.get("slippage_pct") or 0.5),
             existing_doc.get("benchmark") if isinstance(existing_doc.get("benchmark"), dict) else None,
             _normalize_groups(list(existing_doc.get("groups") or [])),
+            existing_doc.get("rebalance_freq") or "monthly",
         )
         if existing_signature == target_signature:
             return {
@@ -200,6 +259,7 @@ def save_backtest_config(
         "period_months": period_value,
         "slippage_pct": slippage_value,
         "benchmark": normalized_benchmark,
+        "rebalance_freq": str(rebalance_freq or "monthly").strip().lower(),
         "groups": normalized_groups,
         "created_at": now,
         "updated_at": now,
@@ -226,6 +286,7 @@ def list_backtest_configs() -> dict[str, list[dict[str, Any]]]:
                 "period_months": 1,
                 "slippage_pct": 1,
                 "benchmark": 1,
+                "rebalance_freq": 1,
                 "created_at": 1,
                 "updated_at": 1,
             },
@@ -244,6 +305,7 @@ def list_backtest_configs() -> dict[str, list[dict[str, Any]]]:
                 "benchmark": _normalize_optional_ticker(
                     doc.get("benchmark") if isinstance(doc.get("benchmark"), dict) else None
                 ),
+                "rebalance_freq": str(doc.get("rebalance_freq") or "monthly"),
                 "saved_at": saved_at.isoformat() if isinstance(saved_at, datetime) else str(saved_at or ""),
             }
         )
@@ -268,6 +330,7 @@ def load_backtest_config(config_id: str) -> dict[str, Any]:
         "benchmark": _normalize_optional_ticker(
             doc.get("benchmark") if isinstance(doc.get("benchmark"), dict) else None
         ),
+        "rebalance_freq": str(doc.get("rebalance_freq") or "monthly"),
         "groups": _normalize_groups(list(doc.get("groups") or [])),
         "saved_at": saved_at.isoformat() if isinstance(saved_at, datetime) else str(saved_at or ""),
     }
@@ -448,6 +511,7 @@ def run_backtest(
     benchmark: dict[str, Any] | None,
     groups: list[dict[str, Any]],
     country_code: str = "kor",
+    rebalance_freq: str = "monthly",
 ) -> dict[str, Any]:
     period_value = int(period_months or 0)
     if period_value < 1 or period_value > 24:
@@ -472,18 +536,17 @@ def run_backtest(
             f"일부 티커의 가격 캐시가 없습니다: {_format_missing_tickers(normalized_groups, missing_tickers)}"
         )
 
-    month_end_dates: set[pd.Timestamp] = set()
-    current_month = None
-    current_last_day = None
-    for day in evaluation_days:
-        month_key = f"{day.year}-{day.month}"
-        if month_key != current_month:
-            if current_last_day is not None:
-                month_end_dates.add(current_last_day)
-            current_month = month_key
-        current_last_day = day
-    if current_last_day is not None:
-        month_end_dates.add(current_last_day)
+    if rebalance_freq not in ("daily", "weekly", "monthly"):
+        raise ValueError("리밸런싱 주기는 daily, weekly, monthly 중 하나여야 합니다.")
+
+    if rebalance_freq == "daily":
+        rebalance_dates = set(evaluation_days)
+    elif rebalance_freq == "weekly":
+        rebalance_dates = _get_weekly_rebalance_dates(evaluation_days, country_code)
+    else:
+        rebalance_dates = _get_monthly_rebalance_dates(evaluation_days)
+        
+    rebalance_dates.add(initial_buy_date)
 
     slippage_rate = slippage_value / 100.0
     cash = 1.0
@@ -504,7 +567,7 @@ def run_backtest(
                     raise RuntimeError(f"백테스트 가격 계산에 실패했습니다: {ticker} {day.strftime('%Y-%m-%d')}")
                 position_values[ticker] = current_value * (current_price / previous_price)
 
-        is_trade_day = day == initial_buy_date or day in month_end_dates
+        is_trade_day = day in rebalance_dates
         if is_trade_day:
             total_equity = cash + sum(position_values.values())
             target_weights = _build_target_weights(normalized_groups, day)
