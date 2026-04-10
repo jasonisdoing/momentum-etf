@@ -27,6 +27,11 @@ type HoldingsRow = {
   memo: string;
 };
 
+type AccountSummary = {
+  account_id: string;
+  cash_balance_krw: number;
+};
+
 type AggregatedHoldingRow = HoldingsRow;
 
 type HoldingsHeaderSummary = {
@@ -67,6 +72,7 @@ export function HoldingsManager({
 }) {
   const router = useRouter();
   const [holdings, setHoldings] = useState<HoldingsRow[]>([]);
+  const [totalCashKrw, setTotalCashKrw] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showAmounts, setShowAmounts] = useState(true);
 
@@ -76,14 +82,22 @@ export function HoldingsManager({
       const res = await fetch("/api/assets", { cache: "no-store" });
       if (!res.ok) {
         setHoldings([]);
+        setTotalCashKrw(0);
         return;
       }
       const data = await res.json();
       const rows = (data.rows || []).filter((r: HoldingsRow) => r.ticker && r.quantity > 0);
+      // 계좌별 현금 합산
+      const cashSum = ((data.account_summaries || []) as AccountSummary[]).reduce(
+        (sum: number, acc: AccountSummary) => sum + (acc.cash_balance_krw || 0),
+        0,
+      );
       setHoldings(rows);
+      setTotalCashKrw(cashSum);
     } catch (err) {
       console.error(err);
       setHoldings([]);
+      setTotalCashKrw(0);
     } finally {
       setLoading(false);
     }
@@ -140,13 +154,40 @@ export function HoldingsManager({
     }, new Map<string, AggregatedHoldingRow>()).values(),
   );
 
-  const totalValuation = aggregatedBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
-  const aggregatedHoldings = aggregatedBaseHoldings
+  const holdingsValuation = aggregatedBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
+  const totalValuation = holdingsValuation + totalCashKrw;
+  const aggregatedHoldings: (AggregatedHoldingRow & { portfolio_weight_pct: number })[] = aggregatedBaseHoldings
     .map((row) => ({
       ...row,
       portfolio_weight_pct: totalValuation > 0 ? Number(((row.valuation_krw / totalValuation) * 100).toFixed(1)) : 0,
-    }))
-    .sort((a, b) => b.valuation_krw - a.valuation_krw);
+    }));
+
+  // 현금 행 추가
+  if (totalCashKrw > 0) {
+    aggregatedHoldings.push({
+      account_name: "",
+      currency: "KRW",
+      ticker: "__CASH__",
+      name: "현금",
+      quantity: 0,
+      current_price: "-",
+      current_price_num: 0,
+      days_held: "-",
+      pnl_krw: 0,
+      pnl_krw_num: 0,
+      return_pct: 0,
+      daily_change_pct: null,
+      buy_amount_krw: totalCashKrw,
+      valuation_krw: totalCashKrw,
+      bucket_id: 0,
+      bucket: "",
+      memo: "",
+      portfolio_weight_pct: totalValuation > 0 ? Number(((totalCashKrw / totalValuation) * 100).toFixed(1)) : 0,
+    });
+  }
+
+  // 비중(평가금액) 순 정렬
+  aggregatedHoldings.sort((a, b) => b.valuation_krw - a.valuation_krw);
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -167,6 +208,8 @@ export function HoldingsManager({
     [router],
   );
 
+  const isCashRow = useCallback((row: AggregatedHoldingRow | undefined) => row?.ticker === "__CASH__", []);
+
   const columnDefs = useMemo<ColDef<(AggregatedHoldingRow & { portfolio_weight_pct: number })>[]>(() => [
     {
       headerName: "티커",
@@ -174,8 +217,11 @@ export function HoldingsManager({
       width: 110,
       sortable: true,
       cellClass: "tableAlignCenter holdingsTickerCell",
-      cellRenderer: (params: { value?: string | null }) => {
+      cellRenderer: (params: { value?: string | null; data?: AggregatedHoldingRow }) => {
         const rawTicker = String(params.value ?? "-");
+        if (rawTicker === "__CASH__") {
+          return <span className="appCodeText" style={{ color: "#8b949e" }}>-</span>;
+        }
         const normalizedTicker = normalizeDisplayTicker(rawTicker);
         if (normalizedTicker === "IS") {
           return <span className="appCodeText">{normalizedTicker}</span>;
@@ -198,11 +244,20 @@ export function HoldingsManager({
       flex: 1.4,
       minWidth: 210,
       sortable: true,
-      cellRenderer: (params: { value?: string | null }) => {
+      cellRenderer: (params: { value?: string | null; data?: AggregatedHoldingRow }) => {
         if (!params.value) {
           return "-";
         }
-        return <span className="holdingsNameMain" title={params.value}>{params.value}</span>;
+        const isCash = params.data?.ticker === "__CASH__";
+        return (
+          <span
+            className="holdingsNameMain"
+            title={params.value}
+            style={isCash ? { color: "#8b949e", fontWeight: 500 } : undefined}
+          >
+            {params.value}
+          </span>
+        );
       },
     },
     {
@@ -232,7 +287,7 @@ export function HoldingsManager({
       type: "rightAligned",
       cellRenderer: (params: { data?: AggregatedHoldingRow & { portfolio_weight_pct: number } }) => {
         const row = params.data;
-        if (!row) {
+        if (!row || isCashRow(row)) {
           return "-";
         }
         const value = showAmounts ? formatHoldingPrice(row.current_price_num, row.currency) : "••••";
@@ -244,7 +299,8 @@ export function HoldingsManager({
       field: "daily_change_pct",
       width: 120,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number | null }) => {
+      cellRenderer: (params: { value?: number | null; data?: AggregatedHoldingRow }) => {
+        if (params.data?.ticker === "__CASH__") return "-";
         const value = params.value ?? null;
         return <span className={getSignedClass(value)}>{formatSignedPercent(value)}</span>;
       },
@@ -256,7 +312,7 @@ export function HoldingsManager({
       type: "rightAligned",
       cellRenderer: (params: { data?: AggregatedHoldingRow & { portfolio_weight_pct: number } }) => {
         const row = params.data;
-        if (!row) {
+        if (!row || isCashRow(row)) {
           return "-";
         }
         const value = showAmounts ? formatHoldingsKrw(row.pnl_krw) : "••••";
@@ -268,12 +324,13 @@ export function HoldingsManager({
       field: "return_pct",
       width: 120,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number | null }) => {
+      cellRenderer: (params: { value?: number | null; data?: AggregatedHoldingRow }) => {
+        if (params.data?.ticker === "__CASH__") return "-";
         const value = params.value ?? null;
         return <span className={getSignedClass(value)}>{formatSignedPercent(value)}</span>;
       },
     },
-  ], [moveToTickerDetail, showAmounts]);
+  ], [isCashRow, moveToTickerDetail, showAmounts]);
 
   return (
     <div className="appPageStack appPageStackFill">
@@ -320,7 +377,7 @@ export function HoldingsManager({
                 minHeight="100%"
                 className="holdingsGrid"
                 theme={holdingsGridTheme}
-                getRowClass={(params: RowClassParams<AggregatedHoldingRow & { portfolio_weight_pct: number }>) => `holdingsRow holdingsRowBucket${params.data?.bucket_id ?? 0}`}
+                getRowClass={(params: RowClassParams<AggregatedHoldingRow & { portfolio_weight_pct: number }>) => params.data?.ticker === "__CASH__" ? "holdingsRow holdingsRowCash" : `holdingsRow holdingsRowBucket${params.data?.bucket_id ?? 0}`}
                 gridOptions={{
                   rowHeight: 38,
                   suppressMovableColumns: true,
@@ -357,6 +414,9 @@ export function HoldingsManager({
         .holdingsGrid .holdingsTickerCell {
           font-weight: 600;
           color: #5f6b82;
+        }
+        .holdingsGrid .ag-row.holdingsRowCash .ag-cell {
+          background-color: #f4f5f7;
         }
       `}</style>
 
