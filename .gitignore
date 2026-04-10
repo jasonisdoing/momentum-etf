@@ -31,8 +31,15 @@ znotes/
 # shared → web 복사본 (prebuild에서 자동 생성)
 web/lib/bucket_theme.json
 
+# 에디터/도구 설정
+.matplotlib/
+.vscode/
+
 # Claude
 .claude/
+
+# 임시 파일
+tmp/
 
 # 캐시
 data/*
