@@ -37,6 +37,26 @@ if str(PROJECT_ROOT) not in sys.path:
 MAX_TAIL_LINES = 15
 MAX_TAIL_CHARS = 1500
 
+LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
+
+
+def _acquire_lock(job_name: str) -> Path:
+    """실행 중 락파일 생성. 내용에는 pid 와 시작시각을 기록."""
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    lock_path = LOCK_DIR / f"{job_name}.lock"
+    lock_path.write_text(
+        f"pid={os.getpid()}\nstarted={datetime.now(KST).isoformat()}\n",
+        encoding="utf-8",
+    )
+    return lock_path
+
+
+def _release_lock(lock_path: Path) -> None:
+    try:
+        lock_path.unlink(missing_ok=True)
+    except Exception as exc:  # pragma: no cover
+        print(f"[run_batch] 락 해제 실패: {exc}", file=sys.stderr)
+
 
 def _notify(text: str) -> None:
     """슬랙 전송. 실패해도 배치 결과에 영향 없도록 방어적으로 처리."""
@@ -78,6 +98,8 @@ def main(argv: list[str]) -> int:
 
     print(f"[run_batch] START job={job_name} cmd={' '.join(command)} at={started_at}")
 
+    lock_path = _acquire_lock(job_name)
+
     try:
         result = subprocess.run(
             command,
@@ -88,6 +110,7 @@ def main(argv: list[str]) -> int:
             check=False,
         )
     except FileNotFoundError as exc:
+        _release_lock(lock_path)
         elapsed = time.monotonic() - started_monotonic
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
@@ -99,6 +122,7 @@ def main(argv: list[str]) -> int:
         print(f"[run_batch] FAIL {exc}", file=sys.stderr)
         return 127
     except Exception as exc:
+        _release_lock(lock_path)
         elapsed = time.monotonic() - started_monotonic
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
@@ -109,6 +133,8 @@ def main(argv: list[str]) -> int:
         )
         print(f"[run_batch] EXCEPTION {exc}", file=sys.stderr)
         return 1
+    finally:
+        _release_lock(lock_path)
 
     elapsed = time.monotonic() - started_monotonic
     exit_code = result.returncode
