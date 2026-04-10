@@ -263,6 +263,13 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
 
         valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in account_rows)
         cash_balance_krw = float((cash_info or {}).get("cash_balance_krw") or 0.0)
+        # 호주 계좌: cash_balance_krw가 0이고 cash_balance_native가 있으면 환율 적용하여 KRW 환산
+        if cash_balance_krw == 0.0 and currency == "AUD":
+            cash_native = float((cash_info or {}).get("cash_balance_native") or 0.0)
+            if cash_native > 0:
+                aud_rate = float(((rates or {}).get("AUD") or {}).get("rate") or 0.0)
+                if aud_rate > 0:
+                    cash_balance_krw = round(cash_native * aud_rate, 2)
         cash_target_ratio = float((cash_info or {}).get("cash_target_ratio") or 0.0)
         target_ratio_total = sum(float(row.get("target_ratio") or 0.0) for row in account_rows) + cash_target_ratio
         account_summaries.append(

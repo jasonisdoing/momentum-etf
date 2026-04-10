@@ -573,6 +573,7 @@ function AccountHoldingsDetailPanel({
   const intlDraftRef = useRef({
     intlSharesValue: Number(summary.intl_shares_value ?? 0),
     intlSharesChange: Number(summary.intl_shares_change ?? 0),
+    cashNative: Number(summary.cash_balance_native ?? 0),
   });
   const [intlDirtyFields, setIntlDirtyFields] = useState<string[]>([]);
   useEffect(() => {
@@ -875,15 +876,23 @@ function AccountHoldingsDetailPanel({
     }
   }, [summary]);
 
-  const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number) => {
+  const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number, cashNative?: number) => {
+    const finalCashNative = cashNative ?? Number(summary.cash_balance_native ?? 0);
+    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
+    const currentCashNative = Number(summary.cash_balance_native ?? 0);
+    // AUD 변경 시 KRW도 비율로 환산
+    const nextCashKrw =
+      currentCashNative > 0
+        ? (finalCashNative / currentCashNative) * currentCashKrw
+        : currentCashKrw;
     const response = await fetch("/api/assets", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: summary.account_id,
         total_principal: summary.total_principal,
-        cash_balance_krw: summary.cash_balance_krw,
-        cash_balance_native: summary.cash_balance_native,
+        cash_balance_krw: nextCashKrw,
+        cash_balance_native: finalCashNative,
         cash_currency: summary.cash_currency,
         cash_target_ratio: summary.cash_target_ratio,
         intl_shares_value: intlSharesValue,
@@ -892,7 +901,7 @@ function AccountHoldingsDetailPanel({
     });
     const payload = await response.json();
     if (!response.ok) {
-      throw new Error(payload.error || "해외주식 저장에 실패했습니다.");
+      throw new Error(payload.error || "호주 계좌 저장에 실패했습니다.");
     }
   }, [summary]);
 
@@ -1565,9 +1574,9 @@ function AccountHoldingsDetailPanel({
       headerName: "평가 금액",
       width: 124,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && params.data.ticker === CASH_ROW_TICKER && processingId !== params.data?.id),
+      editable: (params) => Boolean(params.data && params.data.ticker === CASH_ROW_TICKER && !isAusAccount && processingId !== params.data?.id),
       cellClass: (params) => {
-        if (params.data?.ticker !== CASH_ROW_TICKER) {
+        if (params.data?.ticker !== CASH_ROW_TICKER || isAusAccount) {
           return undefined;
         }
         return isDirtyEditableCell(params.data?.id, "valuation_krw")
@@ -1584,7 +1593,7 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow }) => (params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"),
     },
     { field: "days_held", headerName: "보유일", width: 76 },
-  ], [addingRow, handleValidateTicker, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
+  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
 
   return (
     <div className="assetsDetailPanel">
@@ -1620,18 +1629,36 @@ function AccountHoldingsDetailPanel({
                   }
                 }}
               />
+              <label className="mb-0 text-muted small fw-bold">AUD Cash</label>
+              <input
+                type="text"
+                className={`form-control form-control-sm ${intlDirtyFields.includes("cash_native") ? "assetsDirtyInput" : ""}`}
+                style={{ width: 120, textAlign: "right" }}
+                defaultValue={Number(summary.cash_balance_native ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                onChange={(event) => {
+                  const parsed = parseFloat(event.target.value.replace(/,/g, ""));
+                  if (!Number.isNaN(parsed)) {
+                    intlDraftRef.current.cashNative = parsed;
+                    setIntlDirtyFields((prev) => (prev.includes("cash_native") ? prev : [...prev, "cash_native"]));
+                  }
+                }}
+              />
               <button
                 className="btn btn-success btn-sm px-2"
                 disabled={intlDirtyFields.length === 0}
                 onClick={async () => {
                   try {
-                    await processIntlUpdate(intlDraftRef.current.intlSharesValue, intlDraftRef.current.intlSharesChange);
+                    await processIntlUpdate(
+                      intlDraftRef.current.intlSharesValue,
+                      intlDraftRef.current.intlSharesChange,
+                      intlDraftRef.current.cashNative,
+                    );
                     setIntlDirtyFields([]);
                     await onReload();
-                    toast.success("해외주식 저장 완료");
+                    toast.success("호주 계좌 저장 완료");
                   } catch (error) {
                     await onReload();
-                    toast.error(error instanceof Error ? error.message : "해외주식 저장에 실패했습니다.");
+                    toast.error(error instanceof Error ? error.message : "호주 계좌 저장에 실패했습니다.");
                   }
                 }}
               >
