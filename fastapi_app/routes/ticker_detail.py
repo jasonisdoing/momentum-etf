@@ -212,12 +212,19 @@ def get_ticker_detail(
     if not cache_start_date:
         raise RuntimeError("CACHE_START_DATE 설정이 필요합니다.")
 
-    df = fetch_ohlcv(
-        ticker,
-        country=country_code,
-        date_range=[cache_start_date, None],
-        ticker_type=ticker_type,
-    )
+    fetch_error: str | None = None
+    try:
+        df = fetch_ohlcv(
+            ticker,
+            country=country_code,
+            date_range=[cache_start_date, None],
+            ticker_type=ticker_type,
+        )
+    except Exception as exc:
+        # pykrx 가 지원하지 않는 신형 알파벳 포함 ETF 코드(예: 0060H0)나
+        # 원천 API 일시 장애로 예외가 올라올 수 있으므로 500 대신 에러 메시지로 돌려준다.
+        df = None
+        fetch_error = f"가격 데이터를 가져오지 못했습니다: {exc}"
 
     if df is None or df.empty:
         return {
@@ -227,7 +234,7 @@ def get_ticker_detail(
             "holdings_as_of_date": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
-            "error": "가격 데이터를 가져오지 못했습니다.",
+            "error": fetch_error or "가격 데이터를 가져오지 못했습니다.",
         }
 
     df = df.sort_index()
@@ -295,14 +302,28 @@ def get_ticker_detail(
                     return False
                 return True
 
+            # 구성종목이 수천 개인 글로벌 ETF(예: 0060H0) 는 yfinance 호출이 폭주해
+            # 응답이 30초 이상 걸리므로, 비중 상위 종목으로 가격 조회를 제한한다.
+            _HOLDINGS_PRICE_FETCH_LIMIT = 100
+            def _weight_value(item: dict[str, object]) -> float:
+                try:
+                    return float(item.get("weight") or 0.0)
+                except (TypeError, ValueError):
+                    return 0.0
+
+            holdings_for_pricing = sorted(holdings, key=_weight_value, reverse=True)[
+                :_HOLDINGS_PRICE_FETCH_LIMIT
+            ]
+            pricing_ids = {id(item) for item in holdings_for_pricing}
+
             korean_tickers = [
                 str(item.get("ticker") or "").strip().upper()
-                for item in holdings
+                for item in holdings_for_pricing
                 if is_korean_six_digit_holding(item)
             ]
             foreign_symbols = [
                 str(item.get("yahoo_symbol") or "").strip().upper()
-                for item in holdings
+                for item in holdings_for_pricing
                 if str(item.get("yahoo_symbol") or "").strip().upper()
             ]
             price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
@@ -320,7 +341,9 @@ def get_ticker_detail(
             for item in holdings:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
                 yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
-                if is_korean_six_digit_holding(item):
+                if id(item) not in pricing_ids:
+                    snapshot = {}
+                elif is_korean_six_digit_holding(item):
                     snapshot = price_snapshot_map.get(component_ticker, {})
                 else:
                     snapshot = foreign_price_snapshot_map.get(yahoo_symbol or component_ticker, {})

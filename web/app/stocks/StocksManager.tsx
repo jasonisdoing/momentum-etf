@@ -554,7 +554,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         headerName: "버킷",
         minWidth: 108,
         width: 108,
-        sortable: false,
+        sortable: true,
+        comparator: (_a, _b, nodeA, nodeB) => {
+          const aId = Number(nodeA.data?.bucket ?? 0);
+          const bId = Number(nodeB.data?.bucket ?? 0);
+          return aId - bId;
+        },
         cellClass: (params) => {
           const dirtyClass =
             params.data && dirtyCellKeys.includes(buildDirtyCellKey(params.data.id, "버킷")) ? " rankDirtyCell" : "";
