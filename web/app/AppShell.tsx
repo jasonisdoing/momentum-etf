@@ -172,6 +172,7 @@ export function AppShell({ children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
+  const [isDbError, setIsDbError] = useState(false);
   const isLoginPage = pathname === "/login";
 
   const loadTopBarData = useCallback(async () => {
@@ -221,6 +222,66 @@ export function AppShell({ children }: AppShellProps) {
       window.removeEventListener("pageshow", handlePageShow);
     };
   }, [loadTopBarData]);
+
+  useEffect(() => {
+    if (isLoginPage) return;
+
+    if (typeof window !== "undefined") {
+      const originalFetch = window.fetch;
+      window.fetch = async (...args) => {
+        try {
+          const res = await originalFetch(...args);
+          if (!res.ok && res.status >= 500) {
+            try {
+              const clone = res.clone();
+              const text = await clone.text();
+              const isDbErrorMsg = 
+                res.status === 504 || 
+                (res.status === 500 && (
+                  res.url.includes("/api/rank") || 
+                  res.url.includes("/api/dashboard") || 
+                  res.url.includes("/api/assets") ||
+                  text.includes("응답하지 않았습니다") || 
+                  text.includes("NetworkTimeout") || 
+                  text.includes("시간 초과") ||
+                  text.includes("DB 통신 타임아웃") ||
+                  text.includes("몽고디비 데이터베이스")
+                ));
+              if (isDbErrorMsg) {
+                setIsDbError(true);
+              }
+            } catch (e) {
+              // ignore clone errors
+            }
+          }
+          return res;
+        } catch (error) {
+          throw error;
+        }
+      };
+
+      return () => {
+        window.fetch = originalFetch;
+      };
+    }
+  }, [isLoginPage]);
+
+  useEffect(() => {
+    if (isLoginPage) return;
+
+    async function checkHealth() {
+      try {
+        const res = await fetch("/api/health", { cache: "no-store" });
+        setIsDbError(!res.ok);
+      } catch {
+        setIsDbError(true);
+      }
+    }
+
+    void checkHealth();
+    const interval = setInterval(checkHealth, 5_000);
+    return () => clearInterval(interval);
+  }, [isLoginPage]);
 
   useEffect(() => {
     setSidebarOpen(false);
@@ -376,6 +437,11 @@ export function AppShell({ children }: AppShellProps) {
               </Link>
             </div>
             <div className="topbarFx">
+              {isDbError && (
+                <span className="topbarFxItem" style={{ color: "#e03131", fontWeight: 600, background: "#ffe3e3", padding: "2px 8px", borderRadius: "4px" }}>
+                  ⚠️ 몽고디비 이슈
+                </span>
+              )}
               <span className="topbarFxItem topbarTickerSearchItem">
                 <GlobalTickerSearch />
               </span>

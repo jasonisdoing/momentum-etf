@@ -37,9 +37,9 @@ def _build_client(connection_string: str) -> MongoClient:
     min_pool = int(os.environ.get("MONGO_DB_MIN_POOL_SIZE", "0"))
     max_idle = int(os.environ.get("MONGO_DB_MAX_IDLE_TIME_MS", "60000"))
     wait_q_timeout = int(os.environ.get("MONGO_DB_WAIT_QUEUE_TIMEOUT_MS", "15000"))
-    server_selection_timeout = int(os.environ.get("MONGO_DB_SERVER_SELECTION_TIMEOUT_MS", "45000"))
-    connect_timeout = int(os.environ.get("MONGO_DB_CONNECT_TIMEOUT_MS", "45000"))
-    socket_timeout = int(os.environ.get("MONGO_DB_SOCKET_TIMEOUT_MS", "45000"))
+    server_selection_timeout = int(os.environ.get("MONGO_DB_SERVER_SELECTION_TIMEOUT_MS", "10000"))
+    connect_timeout = int(os.environ.get("MONGO_DB_CONNECT_TIMEOUT_MS", "10000"))
+    socket_timeout = int(os.environ.get("MONGO_DB_SOCKET_TIMEOUT_MS", "10000"))
     heartbeat_frequency = int(os.environ.get("MONGO_DB_HEARTBEAT_FREQUENCY_MS", "10000"))
 
     client_kwargs = dict(

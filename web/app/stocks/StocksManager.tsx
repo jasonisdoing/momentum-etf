@@ -359,7 +359,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setMissingTickerLabels(payload.missing_ticker_labels ?? []);
       setStaleTickers(payload.stale_tickers ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.");
+      let msg = loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.";
+      if (msg.includes("Unexpected token") || msg.includes("fetch failed") || msg === "순위 데이터를 불러오지 못했습니다.") {
+        msg = "몽고디비 데이터베이스 응답 지연(타임아웃)으로 인해 순위 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+      }
+      setError(msg);
     } finally {
       setLoading(false);
     }
