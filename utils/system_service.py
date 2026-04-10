@@ -62,6 +62,24 @@ _LABEL_BY_ACTION: dict[str, str] = {
     row["key"]: row["job"] for row in SCHEDULE_ROWS
 }
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
+
+
+def get_running_jobs() -> list[str]:
+    """현재 실행 중인 배치 키 목록을 반환합니다.
+
+    run_batch.py 가 생성한 `logs/cron/<key>.lock` 파일을 스캔합니다.
+    """
+    if not _LOCK_DIR.exists():
+        return []
+    running: list[str] = []
+    for lock_file in _LOCK_DIR.glob("*.lock"):
+        key = lock_file.stem
+        if key in _SCRIPT_BY_ACTION:
+            running.append(key)
+    return sorted(running)
+
 
 def load_system_data() -> dict[str, object]:
     accounts = load_account_configs()
@@ -79,17 +97,29 @@ def load_system_data() -> dict[str, object]:
             "VM 호스트 cron 이 `infra/cron/run_batch.py` 래퍼를 통해 실행하며 "
             "성공/실패 결과를 슬랙으로 알립니다. (정의: `infra/cron/crontab`)"
         ),
+        "running_jobs": get_running_jobs(),
     }
+
+
+class BatchAlreadyRunningError(RuntimeError):
+    """다른 배치가 실행 중일 때 트리거 요청을 거부하기 위한 예외."""
 
 
 def trigger_system_action(action: SystemAction) -> str:
     """배치를 백그라운드로 실행. cron 과 동일하게 run_batch.py 래퍼를 경유해
-    실행 결과를 슬랙으로 알립니다."""
+    실행 결과를 슬랙으로 알립니다. 다른 배치가 실행 중이면 거부합니다."""
 
     if action not in _SCRIPT_BY_ACTION:
         raise ValueError("지원하지 않는 시스템 작업입니다.")
 
-    project_root = Path(__file__).resolve().parents[1]
+    running = get_running_jobs()
+    if running:
+        running_labels = ", ".join(_LABEL_BY_ACTION.get(k, k) for k in running)
+        raise BatchAlreadyRunningError(
+            f"다른 배치가 실행 중입니다: {running_labels}. 완료 후 다시 시도해주세요."
+        )
+
+    project_root = _PROJECT_ROOT
     script_rel = _SCRIPT_BY_ACTION[action]
     wrapper_rel = "infra/cron/run_batch.py"
 

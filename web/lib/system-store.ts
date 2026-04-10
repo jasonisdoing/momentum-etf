@@ -18,6 +18,7 @@ type SystemData = {
   summary_rows: SystemSummaryRow[];
   schedule_rows: SystemScheduleRow[];
   schedule_note: string;
+  running_jobs: string[];
 };
 
 type SystemAction =
