@@ -15,21 +15,27 @@ SystemAction = Literal["asset_summary"]
 
 SCHEDULE_ROWS = [
     {
+        "job": "가격 캐시 업데이트",
+        "target": "모든 종목",
+        "cadence": "매시 정각 KST",
+        "command": "python scripts/stock_price_cache_updater.py",
+    },
+    {
+        "job": "장 시간 분석",
+        "target": "시장 스케줄",
+        "cadence": "매일 07:00 KST",
+        "command": "python scripts/analyze_market_hours.py",
+    },
+    {
         "job": "종목 메타데이터 업데이트",
         "target": "모든 종목타입",
         "cadence": "매일 09:00 KST",
         "command": "python scripts/stock_meta_cache_updater.py",
     },
     {
-        "job": "가격 캐시 업데이트",
-        "target": "모든 계좌",
-        "cadence": "매시 정각 KST",
-        "command": "python scripts/stock_price_cache_updater.py",
-    },
-    {
         "job": "전체 자산 요약 알림",
-        "target": "전체 계좌 요약",
-        "cadence": "매일 11:00, 18:00, 23:00, 06:00 KST",
+        "target": "전체 계좌",
+        "cadence": "매일 09:30, 16:30 KST",
         "command": "python scripts/slack_asset_summary.py",
     },
 ]
@@ -47,7 +53,10 @@ def load_system_data() -> dict[str, object]:
             for account in accounts
         ],
         "schedule_rows": SCHEDULE_ROWS,
-        "schedule_note": "자동 주기는 현재 `.github/workflows` 기준입니다.",
+        "schedule_note": (
+            "VM 호스트 cron 이 `infra/cron/run_batch.py` 래퍼를 통해 실행하며 "
+            "성공/실패 결과를 슬랙으로 알립니다. (정의: `infra/cron/crontab`)"
+        ),
     }
 
 

@@ -26,7 +26,7 @@ export function SystemPageClient() {
           <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.accountCount)}개</span>
         </div>
         <div className="appHeaderMetric">
-          <span>자동 작업:</span>
+          <span>배치:</span>
           <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.scheduleCount)}개</span>
         </div>
       </div>

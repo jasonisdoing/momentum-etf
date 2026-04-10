@@ -27,4 +27,4 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 30 9,16 * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 
 # 매일 07:00 KST - 장 시간 분석 (기존 UTC 22:00)
-0 7 * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py --slack >> logs/cron/market_hours_analysis.log 2>&1
+0 7 * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
