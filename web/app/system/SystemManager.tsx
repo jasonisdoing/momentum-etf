@@ -14,11 +14,18 @@ type SystemSummaryRow = {
 };
 
 type SystemScheduleRow = {
+  key: string;
   job: string;
   target: string;
   cadence: string;
   command: string;
 };
+
+type SystemJobKey =
+  | "cache_refresh"
+  | "market_hours_analysis"
+  | "metadata_updater"
+  | "asset_summary";
 
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];
@@ -28,7 +35,7 @@ type SystemResponse = {
 };
 
 type SystemSummaryGridRow = SystemSummaryRow & { id: string };
-type SystemScheduleGridRow = SystemScheduleRow & { id: string };
+type SystemScheduleGridRow = SystemScheduleRow & { id: string; running: boolean };
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -78,11 +85,19 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 180 },
   {
     field: "command",
-    headerName: "실행 명령",
+    headerName: "실행 명령 (클릭하여 백그라운드 실행)",
     minWidth: 320,
     flex: 1.6,
-    cellRenderer: (params: { value: string }) => (
-      <span className="appCodeText">{params.value}</span>
+    cellStyle: { cursor: "pointer" },
+    tooltipValueGetter: (params) =>
+      params.data?.running
+        ? "실행 중..."
+        : `클릭 시 "${params.data?.job ?? ""}" 배치를 백그라운드로 실행합니다.`,
+    cellRenderer: (params: { value: string; data?: SystemScheduleGridRow }) => (
+      <span className="appCodeText">
+        {params.data?.running ? "▶ 실행 중... " : ""}
+        {params.value}
+      </span>
     ),
   },
 ];
@@ -97,11 +112,15 @@ export function SystemManager({
   const [scheduleNote, setScheduleNote] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [runningAction, setRunningAction] = useState<"asset_summary" | null>(null);
-  const [isPending, startTransition] = useTransition();
+  const [runningJobs, setRunningJobs] = useState<Set<string>>(new Set());
+  const [, startTransition] = useTransition();
   const toast = useToast();
   const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
-  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => ({ ...row, id: row.job }));
+  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => ({
+    ...row,
+    id: row.key,
+    running: runningJobs.has(row.key),
+  }));
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -147,11 +166,18 @@ export function SystemManager({
     };
   }, []);
 
-  function handleAction(action: "asset_summary") {
+  function handleTriggerJob(action: SystemJobKey, label: string) {
+    if (runningJobs.has(action)) {
+      return;
+    }
     startTransition(async () => {
+      setError(null);
+      setRunningJobs((prev) => {
+        const next = new Set(prev);
+        next.add(action);
+        return next;
+      });
       try {
-        setError(null);
-        setRunningAction(action);
         const response = await fetch("/api/system", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -159,13 +185,22 @@ export function SystemManager({
         });
         const payload = (await response.json()) as { message?: string; error?: string };
         if (!response.ok) {
-          throw new Error(payload.error ?? "시스템 작업 실행에 실패했습니다.");
+          throw new Error(payload.error ?? "배치 실행에 실패했습니다.");
         }
-        toast.success(String(payload.message ?? "[시스템-정보] 작업 시작"));
+        toast.success(String(payload.message ?? `[배치] ${label} 실행 시작`));
       } catch (actionError) {
-        setError(actionError instanceof Error ? actionError.message : "시스템 작업 실행에 실패했습니다.");
+        const msg = actionError instanceof Error ? actionError.message : "배치 실행에 실패했습니다.";
+        setError(msg);
+        toast.error(msg);
       } finally {
-        setRunningAction(null);
+        // 백그라운드 실행이므로 트리거 성공 후 짧은 시간만 "실행 중" 표시 유지
+        setTimeout(() => {
+          setRunningJobs((prev) => {
+            const next = new Set(prev);
+            next.delete(action);
+            return next;
+          });
+        }, 3000);
       }
     });
   }
@@ -177,34 +212,6 @@ export function SystemManager({
           <div className="bannerError">{error}</div>
         </div>
       ) : null}
-
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">수동 실행</span>
-              </div>
-              <div className="appMainHeaderRight">
-                <span className="appHeaderSubtle">메타데이터/가격 캐시는 종목별로 관리됩니다. (종목 편집 모달에서 새로고침 가능)</span>
-              </div>
-            </div>
-          </div>
-          <div className="card-header appActionHeader bg-light-subtle border-top">
-            <div className="appActionHeaderInner">
-                <button
-                  className="btn btn-primary btn-sm px-3 fw-bold"
-                  type="button"
-                  onClick={() => handleAction("asset_summary")}
-                  disabled={isPending}
-                >
-                  {runningAction === "asset_summary" ? "실행 중..." : "전체 자산 요약 알림 전송"}
-                </button>
-            </div>
-          </div>
-          <div className="card-body appCardBody" />
-        </div>
-      </section>
 
       <section className="appSection">
         <div className="card appCard">
@@ -244,7 +251,16 @@ export function SystemManager({
               loading={loading}
               minHeight="18rem"
               theme={appGridTheme}
-              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
+              gridOptions={{
+                suppressMovableColumns: true,
+                domLayout: "autoHeight",
+                onCellClicked: (event) => {
+                  if (event.colDef.field !== "command") return;
+                  const row = event.data as SystemScheduleGridRow | undefined;
+                  if (!row?.key) return;
+                  handleTriggerJob(row.key as SystemJobKey, row.job);
+                },
+              }}
             />
             {scheduleNote ? <div className="tableFooterMeta">{scheduleNote}</div> : null}
           </div>
