@@ -89,8 +89,9 @@ def main(argv: list[str]) -> int:
         )
     except FileNotFoundError as exc:
         elapsed = time.monotonic() - started_monotonic
+        app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"❌ *VM 배치 실행 불가*: `{job_name}`\n"
+            f"❌ *[{app_label}] 배치 실행 불가*: `{job_name}`\n"
             f"• 시작: {started_at}\n"
             f"• 소요: {elapsed:.1f}s\n"
             f"• 에러: `{exc}`"
@@ -99,8 +100,9 @@ def main(argv: list[str]) -> int:
         return 127
     except Exception as exc:
         elapsed = time.monotonic() - started_monotonic
+        app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"❌ *VM 배치 예외*: `{job_name}`\n"
+            f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n"
             f"• 시작: {started_at}\n"
             f"• 소요: {elapsed:.1f}s\n"
             f"• 에러: `{exc}`"
@@ -121,9 +123,10 @@ def main(argv: list[str]) -> int:
     emoji = "✅" if success else "❌"
     status = "성공" if success else "실패"
     tail = _format_tail(result.stdout, result.stderr)
+    app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
     _notify(
-        f"{emoji} *VM 배치 {status}*: `{job_name}`\n"
+        f"{emoji} *[{app_label}] 배치 {status}*: `{job_name}`\n"
         f"• 시작: {started_at}\n"
         f"• 소요: {elapsed:.1f}s\n"
         f"• exit: {exit_code}\n"
