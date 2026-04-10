@@ -31,5 +31,8 @@ znotes/
 # shared → web 복사본 (prebuild에서 자동 생성)
 web/lib/bucket_theme.json
 
+# Claude
+.claude/
+
 # 캐시
 data/*
