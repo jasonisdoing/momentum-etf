@@ -38,6 +38,20 @@ async def runtime_error_handler(_request: Request, exc: RuntimeError) -> JSONRes
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
+@app.exception_handler(FileNotFoundError)
+async def file_not_found_handler(_request: Request, exc: FileNotFoundError) -> JSONResponse:
+    """파일 누락 오류 → 500."""
+    logger.exception("FileNotFoundError in request handler")
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """처리되지 않은 예외 → 500. 상세 메시지를 클라이언트에 전달한다."""
+    logger.exception("Unhandled exception in request handler")
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
 app.include_router(backtest_router)
 app.include_router(assets_router)
 app.include_router(holdings_router)
