@@ -364,6 +364,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         msg = "몽고디비 데이터베이스 응답 지연(타임아웃)으로 인해 순위 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
       }
       setError(msg);
+      if (msg.includes("몽고디비 데이터베이스")) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("db_error_occurred"));
+        }
+      }
     } finally {
       setLoading(false);
     }

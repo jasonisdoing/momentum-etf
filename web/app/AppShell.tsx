@@ -226,44 +226,15 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     if (isLoginPage) return;
 
-    if (typeof window !== "undefined") {
-      const originalFetch = window.fetch;
-      window.fetch = async (...args) => {
-        try {
-          const res = await originalFetch(...args);
-          if (!res.ok && res.status >= 500) {
-            try {
-              const clone = res.clone();
-              const text = await clone.text();
-              const isDbErrorMsg = 
-                res.status === 504 || 
-                (res.status === 500 && (
-                  res.url.includes("/api/rank") || 
-                  res.url.includes("/api/dashboard") || 
-                  res.url.includes("/api/assets") ||
-                  text.includes("응답하지 않았습니다") || 
-                  text.includes("NetworkTimeout") || 
-                  text.includes("시간 초과") ||
-                  text.includes("DB 통신 타임아웃") ||
-                  text.includes("몽고디비 데이터베이스")
-                ));
-              if (isDbErrorMsg) {
-                setIsDbError(true);
-              }
-            } catch (e) {
-              // ignore clone errors
-            }
-          }
-          return res;
-        } catch (error) {
-          throw error;
-        }
-      };
+    const errorHandler = () => {
+      setIsDbError(true);
+    };
 
-      return () => {
-        window.fetch = originalFetch;
-      };
-    }
+    window.addEventListener("db_error_occurred", errorHandler);
+
+    return () => {
+      window.removeEventListener("db_error_occurred", errorHandler);
+    };
   }, [isLoginPage]);
 
   useEffect(() => {
@@ -279,8 +250,6 @@ export function AppShell({ children }: AppShellProps) {
     }
 
     void checkHealth();
-    const interval = setInterval(checkHealth, 5_000);
-    return () => clearInterval(interval);
   }, [isLoginPage]);
 
   useEffect(() => {
