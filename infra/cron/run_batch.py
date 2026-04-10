@@ -25,6 +25,9 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+KST = ZoneInfo("Asia/Seoul")
 
 # 프로젝트 루트를 파이썬 경로에 추가 (컨테이너 WORKDIR=/app)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -67,7 +70,7 @@ def main(argv: list[str]) -> int:
     job_name = argv[1]
     command = argv[2:]
 
-    started_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    started_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     started_monotonic = time.monotonic()
 
     env = os.environ.copy()
