@@ -32,6 +32,10 @@ services:
       - mongodb
     volumes:
       - ./zaccounts:/app/zaccounts:ro
+      # cron 래퍼 hotfix 용 bind mount (이미지 재빌드 없이 반영)
+      - ./infra/cron:/app/infra/cron:ro
+      # cron 배치 로그 (호스트에서 tail 가능)
+      - ./logs:/app/logs
     expose:
       - "8000"
     restart: always
