@@ -262,6 +262,7 @@ export function HoldingsManager({
       flex: 1.4,
       minWidth: 210,
       sortable: true,
+      cellClass: "holdingsNameCell",
       cellRenderer: (params: { value?: string | null; data?: AggregatedHoldingRow }) => {
         if (!params.value) {
           return "-";
@@ -406,6 +407,10 @@ export function HoldingsManager({
           font-weight: 600;
           color: #5f6b82;
         }
+        .holdingsGrid .holdingsNameCell {
+          min-width: 0;
+          overflow: hidden;
+        }
         .holdingsGrid .ag-row.holdingsRowCash .ag-cell {
           background-color: #f4f5f7;
         }
@@ -434,6 +439,8 @@ export function HoldingsManager({
 
       <style jsx>{`
         .holdingsNameMain {
+          display: block;
+          width: 100%;
           min-width: 0;
           font-size: 0.95rem;
           font-weight: 700;
