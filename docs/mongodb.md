@@ -96,7 +96,7 @@ brew install autossh
 **SSH 터널을 먼저 띄운다.**
 
 ```bash
-autossh -M 0 -f -N -i ~/DEV/ssh-key-2025-10-09.key \
+autossh -M 0 -N -i ~/DEV/ssh-key-2025-10-09.key \
   -o "ServerAliveInterval=30" -o "ServerAliveCountMax=3" \
   -L 27017:localhost:27017 ubuntu@134.185.109.82
 ```

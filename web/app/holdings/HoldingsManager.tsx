@@ -212,6 +212,24 @@ export function HoldingsManager({
 
   const columnDefs = useMemo<ColDef<(AggregatedHoldingRow & { portfolio_weight_pct: number })>[]>(() => [
     {
+      headerName: "버킷",
+      field: "bucket",
+      width: 108,
+      sortable: true,
+      comparator: (_a, _b, nodeA, nodeB) => {
+        const aId = Number(nodeA.data?.bucket_id ?? 0);
+        const bId = Number(nodeB.data?.bucket_id ?? 0);
+        return aId - bId;
+      },
+      cellClass: (params) => `${getBucketCellClass(String(params.data?.bucket ?? ""))} tableAlignCenter`,
+      cellRenderer: (params: { data?: AggregatedHoldingRow }) => {
+        if (!params.data || isCashRow(params.data)) {
+          return <span style={{ color: "#8b949e" }}>-</span>;
+        }
+        return <span>{params.data.bucket || "-"}</span>;
+      },
+    },
+    {
       headerName: "티커",
       field: "ticker",
       width: 110,
@@ -338,24 +356,7 @@ export function HoldingsManager({
         <div className="card appCard appTableCardFill">
           <div className="card-header">
             <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <div className="holdingsToolbar">
-                  {[
-                    { id: 1, name: "모멘텀", color: "#1e6bb8", sub: "#e7f1ff" },
-                    { id: 2, name: "시장지수", color: "#2fb344", sub: "#eaf8ed" },
-                    { id: 3, name: "미국배당", color: "#d63384", sub: "#fbebf3" },
-                    { id: 4, name: "대체헷지", color: "#f76707", sub: "#fef0e7" },
-                  ].map((b) => (
-                    <div
-                      key={b.id}
-                      className="bucket-legend-badge"
-                      style={{ backgroundColor: b.sub, color: b.color }}
-                    >
-                      {b.id}. {b.name}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <div className="appMainHeaderLeft" />
               <div className="appMainHeaderRight">
                 <button
                   type="button"
@@ -377,7 +378,9 @@ export function HoldingsManager({
                 minHeight="100%"
                 className="holdingsGrid"
                 theme={holdingsGridTheme}
-                getRowClass={(params: RowClassParams<AggregatedHoldingRow & { portfolio_weight_pct: number }>) => params.data?.ticker === "__CASH__" ? "holdingsRow holdingsRowCash" : `holdingsRow holdingsRowBucket${params.data?.bucket_id ?? 0}`}
+                getRowClass={(params: RowClassParams<AggregatedHoldingRow & { portfolio_weight_pct: number }>) =>
+                  params.data?.ticker === "__CASH__" ? "holdingsRow holdingsRowCash" : "holdingsRow"
+                }
                 gridOptions={{
                   rowHeight: 38,
                   suppressMovableColumns: true,
@@ -391,18 +394,6 @@ export function HoldingsManager({
       </section>
 
       <style jsx global>{`
-        .holdingsGrid .ag-row.holdingsRowBucket1 .ag-cell {
-          background-color: #e7f1ff;
-        }
-        .holdingsGrid .ag-row.holdingsRowBucket2 .ag-cell {
-          background-color: #eaf8ed;
-        }
-        .holdingsGrid .ag-row.holdingsRowBucket3 .ag-cell {
-          background-color: #fbebf3;
-        }
-        .holdingsGrid .ag-row.holdingsRowBucket4 .ag-cell {
-          background-color: #fef0e7;
-        }
         .holdingsGrid .ag-cell {
           display: flex;
           align-items: center;
@@ -418,24 +409,30 @@ export function HoldingsManager({
         .holdingsGrid .ag-row.holdingsRowCash .ag-cell {
           background-color: #f4f5f7;
         }
+        .holdingsGrid .rankBucketCell {
+          justify-content: center;
+          font-weight: 600;
+          white-space: nowrap;
+        }
+        .holdingsGrid .rankBucketCell1 {
+          background: var(--bucket-1);
+          color: #fff;
+        }
+        .holdingsGrid .rankBucketCell2 {
+          background: var(--bucket-2);
+          color: #fff;
+        }
+        .holdingsGrid .rankBucketCell3 {
+          background: var(--bucket-3);
+          color: #fff;
+        }
+        .holdingsGrid .rankBucketCell4 {
+          background: var(--bucket-4);
+          color: #fff;
+        }
       `}</style>
 
       <style jsx>{`
-        .holdingsToolbar {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          flex-wrap: wrap;
-        }
-        .bucket-legend-badge {
-          display: inline-flex;
-          align-items: center;
-          padding: 2px 8px;
-          border-radius: 999px;
-          font-size: 0.72rem;
-          font-weight: 700;
-          letter-spacing: -0.01em;
-        }
         .holdingsNameMain {
           min-width: 0;
           font-size: 0.95rem;
@@ -471,6 +468,14 @@ function formatSignedPercent(value: number | null) {
   }
   const sign = value > 0 ? "+" : "";
   return `${sign}${value.toFixed(2)}%`;
+}
+
+function getBucketCellClass(bucketLabel: string): string {
+  const match = /^(\d+)/.exec(String(bucketLabel || "").trim());
+  if (!match) {
+    return "rankBucketCell";
+  }
+  return `rankBucketCell rankBucketCell${match[1]}`;
 }
 
 function normalizeDisplayTicker(value: string | null | undefined) {
