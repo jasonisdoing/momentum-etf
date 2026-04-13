@@ -262,7 +262,21 @@ export function MarketManager({
           );
         },
       },
-      { field: "name", headerName: "종목명", minWidth: 220, flex: 1 },
+      {
+        field: "name",
+        headerName: "종목명",
+        minWidth: 220,
+        flex: 1,
+        cellClass: "marketNameCell",
+        cellRenderer: (params: { value: string | null | undefined }) => {
+          const value = String(params.value ?? "-");
+          return (
+            <span className="marketNameMain" title={value}>
+              {value}
+            </span>
+          );
+        },
+      },
       {
         field: "daily_change_pct",
         headerName: "일간(%)",
@@ -409,6 +423,24 @@ export function MarketManager({
           </div>
         </div>
       </section>
+
+      <style jsx global>{`
+        .marketNameCell {
+          min-width: 0;
+          overflow: hidden;
+        }
+      `}</style>
+
+      <style jsx>{`
+        .marketNameMain {
+          display: block;
+          width: 100%;
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+      `}</style>
     </div>
   );
 }
