@@ -19,7 +19,7 @@ import type {
   MouseEventParams,
 } from "lightweight-charts";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import type { ColDef } from "ag-grid-community";
+import type { ColDef, GridApi, GridReadyEvent } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
@@ -374,6 +374,8 @@ export function TickerDetailManager({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const holdingsGridApiRef = useRef<GridApi<TickerHoldingRow> | null>(null);
+  const addingUsTickersRef = useRef<string[]>([]);
   const [chartInterval, setChartInterval] = useState<ChartInterval>("day");
 
   // 차트
@@ -503,6 +505,14 @@ export function TickerDetailManager({
       setLoading(false);
     }
   }
+
+  useEffect(() => {
+    addingUsTickersRef.current = addingUsTickers;
+    holdingsGridApiRef.current?.refreshCells({
+      force: true,
+      columns: ["ticker"],
+    });
+  }, [addingUsTickers]);
 
   // --- 핸들러 ---
 
@@ -864,7 +874,7 @@ export function TickerDetailManager({
                     <span className="tickerDetailPoolState is-done" title="미국 종목풀에 이미 등록됨" aria-label="미국 종목풀 등록 완료">
                       <IconCheck size={14} stroke={2.2} />
                     </span>
-                  ) : addingUsTickers.includes(ticker) ? (
+                  ) : addingUsTickersRef.current.includes(ticker) ? (
                     <span className="tickerDetailPoolState is-loading" title="미국 종목풀 추가 중" aria-label="미국 종목풀 추가 중">
                       <span className="spinner-border spinner-border-sm" />
                     </span>
@@ -933,7 +943,7 @@ export function TickerDetailManager({
 
       return columns;
     },
-    [addingUsTickers, showHoldingsWeightColumn],
+    [showHoldingsWeightColumn],
   );
 
   const displayTitle = selectedTicker
@@ -1024,7 +1034,13 @@ export function TickerDetailManager({
                                 columnDefs={holdingColumns}
                                 loading={loading}
                                 theme={gridTheme}
-                                gridOptions={{ suppressMovableColumns: true }}
+                                gridOptions={{
+                                  suppressMovableColumns: true,
+                                  getRowId: (params) => String(params.data.id),
+                                  onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
+                                    holdingsGridApiRef.current = event.api;
+                                  },
+                                }}
                               />
                             </div>
                           ) : (
