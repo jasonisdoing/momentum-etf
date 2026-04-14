@@ -229,28 +229,6 @@ export function SystemManager({
           <div className="card-header">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">계좌 요약</span>
-              </div>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <AppAgGrid
-              rowData={summaryGridRows}
-              columnDefs={summaryColumns}
-              loading={loading}
-              minHeight="18rem"
-              theme={appGridTheme}
-              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
                 <span className="appHeaderMetricValue">배치</span>
               </div>
             </div>
@@ -274,6 +252,28 @@ export function SystemManager({
               }}
             />
             {scheduleNote ? <div className="tableFooterMeta">{scheduleNote}</div> : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <span className="appHeaderMetricValue">계좌 요약</span>
+              </div>
+            </div>
+          </div>
+          <div className="card-body appCardBodyTight">
+            <AppAgGrid
+              rowData={summaryGridRows}
+              columnDefs={summaryColumns}
+              loading={loading}
+              minHeight="18rem"
+              theme={appGridTheme}
+              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
+            />
           </div>
         </div>
       </section>

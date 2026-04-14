@@ -21,6 +21,13 @@ SystemAction = Literal[
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 SCHEDULE_ROWS = [
     {
+        "key": "asset_summary",
+        "job": "전체 자산 요약 알림",
+        "target": "전체 계좌",
+        "cadence": "매일 09:30, 16:30 KST",
+        "command": "python scripts/slack_asset_summary.py",
+    },
+    {
         "key": "cache_refresh",
         "job": "가격 캐시 업데이트",
         "target": "모든 종목",
@@ -40,13 +47,6 @@ SCHEDULE_ROWS = [
         "target": "모든 종목타입",
         "cadence": "매일 09:00 KST",
         "command": "python scripts/stock_meta_cache_updater.py",
-    },
-    {
-        "key": "asset_summary",
-        "job": "전체 자산 요약 알림",
-        "target": "전체 계좌",
-        "cadence": "매일 09:30, 16:30 KST",
-        "command": "python scripts/slack_asset_summary.py",
     },
 ]
 
