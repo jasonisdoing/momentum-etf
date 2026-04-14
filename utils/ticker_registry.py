@@ -11,12 +11,6 @@ from utils.settings_loader import (
     list_available_ticker_types,
 )
 
-_ICON_FALLBACKS: dict[str, str] = {
-    "kor": "🇰🇷",
-    "au": "🇦🇺",
-    "us": "🇺🇸",
-}
-
 logger = get_app_logger()
 
 
@@ -42,7 +36,9 @@ def load_ticker_type_configs() -> list[dict[str, Any]]:
         country_code = _normalize_code(settings.get("country_code"), "")
         base_name = settings.get("name") or t_id.upper()
 
-        icon = settings.get("icon") or _ICON_FALLBACKS.get(country_code, "")
+        icon = str(settings.get("icon") or "").strip()
+        if not icon:
+            raise AccountSettingsError(f"종목풀 '{t_id}' 설정에 icon이 필요합니다.")
         is_default = bool(settings.get("default", False))
         
         path = get_ticker_dir(t_id)
