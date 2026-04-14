@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { IconCheck, IconPlus } from "@tabler/icons-react";
 import { useSearchParams } from "next/navigation";
 import {
   createChart,
@@ -21,7 +22,11 @@ import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppModal } from "../components/AppModal";
+import { useToast } from "../components/ToastProvider";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
+import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { addStockCandidate } from "@/lib/stocks-store";
 
 // --- 타입 ---
 
@@ -78,6 +83,13 @@ type TickerHoldingRow = {
   change_pct?: number | null;
   price_currency?: string | null;
   weight: number | null;
+  is_us_pool_candidate?: boolean;
+  in_us_pool?: boolean;
+};
+
+type HoldingsAddModalState = {
+  ticker: string;
+  name: string;
 };
 
 type CrosshairInfo = {
@@ -345,6 +357,7 @@ export function TickerDetailManager({
 }: {
 }) {
   const searchParams = useSearchParams();
+  const toast = useToast();
 
   // URL query params
   const qTicker = searchParams.get("ticker") ?? "";
@@ -364,6 +377,9 @@ export function TickerDetailManager({
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
+  const [addUsModalState, setAddUsModalState] = useState<HoldingsAddModalState | null>(null);
+  const [selectedUsBucketId, setSelectedUsBucketId] = useState<number | "">("");
+  const [addingUsTicker, setAddingUsTicker] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -451,6 +467,8 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
+    setAddUsModalState(null);
+    setSelectedUsBucketId("");
     setCrosshairInfo(null);
     setChartBadges([]);
 
@@ -497,6 +515,70 @@ export function TickerDetailManager({
   }
 
   // --- 핸들러 ---
+
+  function handleOpenAddUsModal(row: TickerHoldingRow) {
+    const ticker = String(row.ticker || "").trim().toUpperCase();
+    if (!ticker) {
+      return;
+    }
+    setSelectedUsBucketId("");
+    setAddUsModalState({
+      ticker,
+      name: String(row.name || "").trim(),
+    });
+  }
+
+  function handleCloseAddUsModal() {
+    if (addingUsTicker) {
+      return;
+    }
+    setAddUsModalState(null);
+    setSelectedUsBucketId("");
+  }
+
+  async function handleConfirmAddUsTicker() {
+    if (!addUsModalState) {
+      return;
+    }
+    const bucketId = Number(selectedUsBucketId || 0);
+    if (!bucketId) {
+      toast.error("버킷을 선택하세요.");
+      return;
+    }
+
+    setAddingUsTicker(true);
+    try {
+      await addStockCandidate("us", addUsModalState.ticker, bucketId);
+      setHoldings((current) =>
+        current.map((row) =>
+          row.ticker === addUsModalState.ticker
+            ? { ...row, in_us_pool: true }
+            : row,
+        ),
+      );
+      toast.success(`${addUsModalState.ticker}를 미국 종목풀에 추가했습니다.`);
+      setAddUsModalState(null);
+      setSelectedUsBucketId("");
+    } catch (addError) {
+      const message = addError instanceof Error ? addError.message : "미국 종목풀 추가에 실패했습니다.";
+      if (message.includes("이미 등록된 종목입니다.")) {
+        setHoldings((current) =>
+          current.map((row) =>
+            row.ticker === addUsModalState.ticker
+              ? { ...row, in_us_pool: true }
+              : row,
+          ),
+        );
+        toast.success(`${addUsModalState.ticker}는 이미 미국 종목풀에 등록되어 있습니다.`);
+        setAddUsModalState(null);
+        setSelectedUsBucketId("");
+        return;
+      }
+      toast.error(message);
+    } finally {
+      setAddingUsTicker(false);
+    }
+  }
 
   // --- 차트 관련 ---
 
@@ -798,10 +880,44 @@ export function TickerDetailManager({
         {
           field: "ticker",
           headerName: "종목코드",
-          minWidth: 92,
-          width: 92,
+          minWidth: 120,
+          width: 120,
           cellClass: "tickerDetailCodeCell",
           cellStyle: { fontWeight: 700 },
+          cellRenderer: (params: { value: string; data?: TickerHoldingRow }) => {
+            const ticker = String(params.value ?? "").trim();
+            const row = params.data;
+            const isUsCandidate = Boolean(row?.is_us_pool_candidate);
+            const inUsPool = Boolean(row?.in_us_pool);
+
+            return (
+              <div className="tickerDetailCodeContent">
+                <span className="tickerDetailCodeText">{ticker || "-"}</span>
+                {isUsCandidate ? (
+                  inUsPool ? (
+                    <span className="tickerDetailPoolState is-done" title="미국 종목풀에 이미 등록됨" aria-label="미국 종목풀 등록 완료">
+                      <IconCheck size={14} stroke={2.2} />
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="tickerDetailPoolState is-add"
+                      title="미국 종목풀에 추가"
+                      aria-label={`${ticker} 미국 종목풀 추가`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (row) {
+                          handleOpenAddUsModal(row);
+                        }
+                      }}
+                    >
+                      <IconPlus size={14} stroke={2.2} />
+                    </button>
+                  )
+                ) : null}
+              </div>
+            );
+          },
         },
         {
           field: "name",
@@ -1010,6 +1126,49 @@ export function TickerDetailManager({
           </div>
         </div>
       </section>
+      <AppModal
+        open={addUsModalState !== null}
+        title="미국 종목풀 추가"
+        subtitle={addUsModalState ? `${addUsModalState.name}(${addUsModalState.ticker})` : undefined}
+        onClose={handleCloseAddUsModal}
+        footer={
+          <>
+            <button type="button" className="btn btn-outline-secondary" onClick={handleCloseAddUsModal} disabled={addingUsTicker}>
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => void handleConfirmAddUsTicker()}
+              disabled={!selectedUsBucketId || addingUsTicker}
+            >
+              {addingUsTicker ? "추가 중..." : "추가"}
+            </button>
+          </>
+        }
+      >
+        <div className="appFormGrid">
+          <label className="appLabeledField">
+            <span className="appLabeledFieldLabel">종목풀</span>
+            <input className="field compactField" type="text" value="미국" readOnly />
+          </label>
+          <label className="appLabeledField">
+            <span className="appLabeledFieldLabel">버킷</span>
+            <select
+              className="field compactField"
+              value={selectedUsBucketId}
+              onChange={(event) => setSelectedUsBucketId(Number(event.target.value) || "")}
+            >
+              <option value="">버킷 선택</option>
+              {BUCKET_OPTIONS.filter((option) => option.id >= 1 && option.id <= 4).map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </AppModal>
     </div>
   );
 }
