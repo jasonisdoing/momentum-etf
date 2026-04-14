@@ -42,6 +42,7 @@ type AccountSummary = {
   account_id: string;
   order: number;
   name: string;
+  account_url?: string | null;
   icon: string;
   currency: string;
   total_principal: number;
@@ -2181,12 +2182,31 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (isTotalRow(data)) {
           return <span className="fw-bold">{data.name}</span>;
         }
+        const label = (
+          <>
+            {data.icon} {params.value}
+          </>
+        );
         return (
           <div className="snapshotsExpandCell">
             <span className="snapshotsExpandIcon" aria-hidden="true">
               {data.account_id === expandedId ? "▾" : "▸"}
             </span>
-            <span>{data.icon} {params.value}</span>
+            {data.account_url ? (
+              <a
+                href={data.account_url}
+                target="_blank"
+                rel="noreferrer"
+                className="assetsInlineLinkButton"
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+              >
+                {label}
+              </a>
+            ) : (
+              <span>{label}</span>
+            )}
           </div>
         );
       },

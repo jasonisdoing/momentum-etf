@@ -277,6 +277,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "account_id": curr_account_id,
                 "order": int(account["order"]),
                 "name": account_name,
+                "account_url": str(settings.get("URL") or "").strip() or None,
                 "icon": str(account.get("icon") or ""),
                 "currency": currency,
                 "total_principal": float((cash_info or {}).get("total_principal") or 0.0),
