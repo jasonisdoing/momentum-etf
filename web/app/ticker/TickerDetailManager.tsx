@@ -269,7 +269,7 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
-  if (normalized === "usd") {
+  if (normalized === "us" || normalized === "usd") {
     return `$${new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
@@ -370,7 +370,7 @@ export function TickerDetailManager({
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
-  const [addingUsTicker, setAddingUsTicker] = useState<string | null>(null);
+  const [addingUsTickers, setAddingUsTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -458,7 +458,7 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
-    setAddingUsTicker(null);
+    setAddingUsTickers([]);
     setCrosshairInfo(null);
     setChartBadges([]);
 
@@ -511,7 +511,9 @@ export function TickerDetailManager({
     if (!ticker) {
       return;
     }
-    setAddingUsTicker(ticker);
+    setAddingUsTickers((current) => (
+      current.includes(ticker) ? current : [...current, ticker]
+    ));
     try {
       await addStockCandidate("us", ticker, 1);
       setHoldings((current) =>
@@ -537,14 +539,17 @@ export function TickerDetailManager({
       }
       toast.error(`${ticker} 미국 종목풀 추가에 실패했습니다. ${message}`);
     } finally {
-      setAddingUsTicker(null);
+      setAddingUsTickers((current) => current.filter((item) => item !== ticker));
     }
   }
 
   // --- 차트 관련 ---
 
   const selectedCountryCode = selectedTicker?.country_code ?? "kor";
-  const priceDigits = selectedTicker?.country_code === "au" ? 2 : 0;
+  const priceDigits =
+    selectedTicker?.country_code === "au" || selectedTicker?.country_code === "us"
+      ? 2
+      : 0;
   const priceMinMove = priceDigits > 0 ? 0.01 : 1;
 
   const chartRows = useMemo(() => {
@@ -859,7 +864,7 @@ export function TickerDetailManager({
                     <span className="tickerDetailPoolState is-done" title="미국 종목풀에 이미 등록됨" aria-label="미국 종목풀 등록 완료">
                       <IconCheck size={14} stroke={2.2} />
                     </span>
-                  ) : addingUsTicker === ticker ? (
+                  ) : addingUsTickers.includes(ticker) ? (
                     <span className="tickerDetailPoolState is-loading" title="미국 종목풀 추가 중" aria-label="미국 종목풀 추가 중">
                       <span className="spinner-border spinner-border-sm" />
                     </span>
@@ -928,7 +933,7 @@ export function TickerDetailManager({
 
       return columns;
     },
-    [addingUsTicker, showHoldingsWeightColumn],
+    [addingUsTickers, showHoldingsWeightColumn],
   );
 
   const displayTitle = selectedTicker
