@@ -41,11 +41,16 @@ def _is_us_pool_candidate(item: dict[str, object]) -> bool:
     component_ticker = str(item.get("ticker") or "").strip().upper()
     raw_code = str(item.get("raw_code") or "").strip().upper()
     yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
-    if not component_ticker or not raw_code.startswith("US"):
+    price_currency = str(item.get("price_currency") or "").strip().upper()
+    if not component_ticker:
         return False
     if ":" in component_ticker:
         return False
+    if raw_code.startswith("KRD"):
+        return False
     if yahoo_symbol and "." in yahoo_symbol:
+        return False
+    if price_currency and price_currency != "USD":
         return False
     return component_ticker.isalpha()
 
