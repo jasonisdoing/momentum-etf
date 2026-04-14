@@ -1861,6 +1861,46 @@ a {
   white-space: nowrap;
 }
 
+.tickerDetailCodeContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.tickerDetailCodeText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickerDetailPoolState {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  flex: 0 0 auto;
+}
+
+.tickerDetailPoolState.is-done {
+  color: #16a34a;
+}
+
+.tickerDetailPoolState.is-add {
+  color: #206bc4;
+}
+
+.tickerDetailPoolState.is-add:hover {
+  background: rgba(32, 107, 196, 0.08);
+}
+
 .tickerDetailHoldingsEmpty {
   flex: 1;
   min-height: 0;

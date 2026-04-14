@@ -29,6 +29,27 @@ from utils.ticker_registry import load_ticker_type_configs
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
 
+def _load_us_pool_ticker_set() -> set[str]:
+    return {
+        str(item.get("ticker") or "").strip().upper()
+        for item in get_etfs("us")
+        if str(item.get("ticker") or "").strip()
+    }
+
+
+def _is_us_pool_candidate(item: dict[str, object]) -> bool:
+    component_ticker = str(item.get("ticker") or "").strip().upper()
+    raw_code = str(item.get("raw_code") or "").strip().upper()
+    yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+    if not component_ticker or not raw_code.startswith("US"):
+        return False
+    if ":" in component_ticker:
+        return False
+    if yahoo_symbol and "." in yahoo_symbol:
+        return False
+    return component_ticker.isalpha()
+
+
 def _serialize_datetime(value: datetime | None) -> str | None:
     if value is None:
         return None
@@ -351,6 +372,7 @@ def get_ticker_detail(
     holdings_as_of_date: str | None = None
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
+    us_pool_tickers: set[str] = set()
     if str(country_code or "").strip().lower() == "kor":
         cache_document = get_stock_cache_meta(ticker_type, ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
@@ -364,6 +386,8 @@ def get_ticker_detail(
         elif not holdings_as_of_date:
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:
+            us_pool_tickers = _load_us_pool_ticker_set()
+
             def is_korean_six_digit_holding(item: dict[str, object]) -> bool:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
                 raw_code = str(item.get("raw_code") or "").strip().upper()
@@ -427,6 +451,8 @@ def get_ticker_detail(
                 enriched_item["previous_close"] = snapshot.get("previous_close")
                 enriched_item["change_pct"] = snapshot.get("change_pct")
                 enriched_item["price_currency"] = snapshot.get("price_currency")
+                enriched_item["is_us_pool_candidate"] = _is_us_pool_candidate(enriched_item)
+                enriched_item["in_us_pool"] = component_ticker in us_pool_tickers
 
                 # 실시간 데이터로 오버레이 (한국 종목만)
                 rt = realtime_map.get(component_ticker, {})
