@@ -2477,6 +2477,17 @@ a {
   font-size: 0.82rem;
 }
 
+.assetsMoveLinkButton {
+  color: #206bc4;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.assetsMoveLinkButton:hover {
+  color: #174e95;
+  text-decoration: underline;
+}
+
 .rankNegativeTrendRow {
   background: rgba(100, 116, 139, 0.3);
 }

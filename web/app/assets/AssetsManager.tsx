@@ -2192,21 +2192,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             <span className="snapshotsExpandIcon" aria-hidden="true">
               {data.account_id === expandedId ? "▾" : "▸"}
             </span>
-            {data.account_url ? (
-              <a
-                href={data.account_url}
-                target="_blank"
-                rel="noreferrer"
-                className="assetsInlineLinkButton"
-                onClick={(event) => {
-                  event.stopPropagation();
-                }}
-              >
-                {label}
-              </a>
-            ) : (
-              <span>{label}</span>
-            )}
+            <span>{label}</span>
           </div>
         );
       },
@@ -2219,6 +2205,37 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+    },
+    {
+      field: "account_url",
+      headerName: "링크",
+      minWidth: 48,
+      maxWidth: 52,
+      editable: false,
+      sortable: false,
+      filter: false,
+      cellRenderer: (params: { data?: ParentGridRow }) => {
+        const data = params.data;
+        if (!data || isDetailRow(data) || isTotalRow(data)) {
+          return "";
+        }
+        if (!data.account_url) {
+          return <span>-</span>;
+        }
+        return (
+          <a
+            href={data.account_url}
+            target="_blank"
+            rel="noreferrer"
+            className="assetsInlineLinkButton assetsMoveLinkButton"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            이동
+          </a>
+        );
+      },
     },
     {
       field: "total_principal",
