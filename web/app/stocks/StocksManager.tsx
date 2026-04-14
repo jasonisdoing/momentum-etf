@@ -291,6 +291,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
   const [addingRow, setAddingRow] = useState<RankAddingRowState | null>(null);
+  const [addingTickerDraft, setAddingTickerDraft] = useState("");
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
@@ -347,6 +348,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ma_months_max: payload.ma_months_max ?? 12,
       };
       setAddingRow(null);
+      setAddingTickerDraft("");
       setDirtyRowIds([]);
       setDirtyCellKeys([]);
       setSelectedTickers([]);
@@ -620,24 +622,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  value={addingRow?.ticker ?? ""}
-                  onChange={(event) =>
-                    setAddingRow((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            ticker: event.target.value,
-                            name: "",
-                            listing_date: "-",
-                            status: null,
-                            is_validated: false,
-                          }
-                        : null,
-                    )
-                  }
+                  value={addingTickerDraft}
+                  onChange={(event) => setAddingTickerDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      void handleValidateAddingTicker();
+                      void handleValidateAddingTicker(event.currentTarget.value);
                     }
                   }}
                 />
@@ -664,13 +653,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         flex: 1.2,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
+            const draftTicker = normalizeTicker(addingTickerDraft);
+            const validatedTicker = normalizeTicker(addingRow?.ticker ?? "");
+            const isDraftDirty = Boolean(draftTicker) && draftTicker !== validatedTicker;
             if (addingRow?.is_validating) {
               return <span className="text-muted">티커 확인 중...</span>;
             }
-            if (addingRow?.status === "active") {
+            if (!isDraftDirty && addingRow?.status === "active") {
               return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
             }
-            if (addingRow?.is_validated) {
+            if (!isDraftDirty && addingRow?.is_validated) {
               return (
                 <span className="rankNameCellText fw-semibold" title={addingRow.name}>
                   {addingRow.name}
@@ -683,8 +675,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <button
                   className="btn btn-outline-primary btn-sm"
                   type="button"
-                  onClick={() => void handleValidateAddingTicker()}
-                  disabled={!addingRow?.ticker.trim() || addingRow?.is_validating}
+                  onClick={() => void handleValidateAddingTicker(addingTickerDraft)}
+                  disabled={!addingTickerDraft.trim() || addingRow?.is_validating}
                 >
                   확인
                 </button>
@@ -920,7 +912,17 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ? [...monthlyLeadingColumns, ...monthlyColumns]
           : [...monthlyLeadingColumns, ...infoColumns]),
     ];
-  }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, pageMode, selectedTickerType, selectedTickerTypeItem?.country_code]);
+  }, [
+    addingRow,
+    addingTickerDraft,
+    dirtyCellKeys,
+    maRules,
+    metricMode,
+    monthlyReturnLabels,
+    pageMode,
+    selectedTickerType,
+    selectedTickerTypeItem?.country_code,
+  ]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
@@ -953,6 +955,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     if (addingRow) {
       return;
     }
+    setAddingTickerDraft("");
     setAddingRow({
       ticker: "",
       name: "",
@@ -985,8 +988,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
   }
 
-  async function handleValidateAddingTicker() {
-    const ticker = normalizeTicker(addingRow?.ticker ?? "");
+  async function handleValidateAddingTicker(tickerInput?: string) {
+    const ticker = normalizeTicker(tickerInput ?? addingTickerDraft ?? addingRow?.ticker ?? "");
     if (!ticker || !selectedTickerType || !addingRow || addingRow.is_validating) {
       return;
     }
@@ -994,6 +997,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     try {
       setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
       const validated = await validateStockCandidate(selectedTickerType, ticker);
+      setAddingTickerDraft(normalizeTicker(validated.ticker));
       setAddingRow((prev) =>
         prev
           ? {
@@ -1018,6 +1022,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         prev
           ? {
               ...prev,
+              ticker,
               is_validating: false,
               is_validated: false,
             }
