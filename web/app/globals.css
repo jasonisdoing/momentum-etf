@@ -1901,6 +1901,16 @@ a {
   background: rgba(32, 107, 196, 0.08);
 }
 
+.tickerDetailPoolState.is-loading {
+  color: #64748b;
+}
+
+.tickerDetailPoolState.is-loading .spinner-border {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 0.12rem;
+}
+
 .tickerDetailHoldingsEmpty {
   flex: 1;
   min-height: 0;
