@@ -1,11 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconPlus } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useRouter } from "next/navigation";
 
+import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppModal } from "../components/AppModal";
+import { useToast } from "../components/ToastProvider";
 
 type MarketRowItem = {
   ticker: string;
@@ -28,8 +33,16 @@ type MarketResponse = {
   error?: string;
 };
 
+type MarketTickerPool = {
+  ticker_type: string;
+  order: number;
+  name: string;
+  icon: string;
+};
+
 type MarketGridRow = MarketRowItem & {
   row_number: number;
+  __selected__?: boolean;
 };
 
 const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
@@ -125,50 +138,54 @@ export function MarketManager({
   onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string | null }) => void;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  const [tickerPools, setTickerPools] = useState<MarketTickerPool[]>([]);
   const [query, setQuery] = useState("");
   const [minMarketCap, setMinMarketCap] = useState("500"); // 시가총액(억)
   const [minPrevVolume, setMinPrevVolume] = useState("100000"); // 거래량(주)
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
+  const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [selectedTickerPool, setSelectedTickerPool] = useState("");
+  const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
+  const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let alive = true;
-
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const response = await fetch("/api/market", { cache: "no-store" });
-        const payload = (await response.json()) as MarketResponse;
-        if (!response.ok) {
-          throw new Error(payload.error ?? "ETF 마켓 데이터를 불러오지 못했습니다.");
-        }
-
-        if (!alive) {
-          return;
-        }
-
-        setRows(payload.rows ?? []);
-        setUpdatedAt(payload.updated_at ?? null);
-      } catch (loadError) {
-        if (alive) {
-          setError(loadError instanceof Error ? loadError.message : "ETF 마켓 데이터를 불러오지 못했습니다.");
-        }
-      } finally {
-        if (alive) {
-          setLoading(false);
-        }
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [marketResponse, stocksPayload] = await Promise.all([
+        fetch("/api/market", { cache: "no-store" }),
+        loadStocksTable().catch(
+          () =>
+            ({
+              ticker_types: [],
+              rows: [],
+              ticker_type: "",
+            }) as { ticker_types: MarketTickerPool[]; rows: unknown[]; ticker_type: string },
+        ),
+      ]);
+      const payload = (await marketResponse.json()) as MarketResponse;
+      if (!marketResponse.ok) {
+        throw new Error(payload.error ?? "ETF 마켓 데이터를 불러오지 못했습니다.");
       }
+      setRows(payload.rows ?? []);
+      setUpdatedAt(payload.updated_at ?? null);
+      setTickerPools(stocksPayload.ticker_types ?? []);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "ETF 마켓 데이터를 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
     }
-
-    void load();
-    return () => {
-      alive = false;
-    };
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const filteredRows = useMemo(() => {
     const normalizedQuery = query.trim().toUpperCase();
@@ -216,6 +233,11 @@ export function MarketManager({
   );
 
   useEffect(() => {
+    const visibleTickers = new Set(gridRows.map((row) => row.ticker));
+    setSelectedTickers((current) => current.filter((ticker) => visibleTickers.has(ticker)));
+  }, [gridRows]);
+
+  useEffect(() => {
     onHeaderSummaryChange?.({
       filteredCount: filteredRows.length,
       totalCount: rows.length,
@@ -233,6 +255,94 @@ export function MarketManager({
     },
     [router],
   );
+
+  const hasSelectedRows = selectedTickers.length > 0;
+  const allVisibleSelected = useMemo(
+    () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
+    [gridRows, selectedTickers],
+  );
+
+  const toggleTickerSelection = useCallback((ticker: string) => {
+    setSelectedTickers((current) =>
+      current.includes(ticker) ? current.filter((item) => item !== ticker) : [...current, ticker],
+    );
+  }, []);
+
+  const toggleSelectAllVisible = useCallback(() => {
+    const visibleTickers = gridRows.map((row) => row.ticker);
+    setSelectedTickers((current) => {
+      if (visibleTickers.length === 0) {
+        return current;
+      }
+      const allSelected = visibleTickers.every((ticker) => current.includes(ticker));
+      if (allSelected) {
+        return current.filter((ticker) => !visibleTickers.includes(ticker));
+      }
+      return [...new Set([...current, ...visibleTickers])];
+    });
+  }, [gridRows]);
+
+  const handleOpenAddModal = useCallback(() => {
+    if (!hasSelectedRows) {
+      return;
+    }
+    setSelectedTickerPool("");
+    setSelectedBucketId("");
+    setAddModalOpen(true);
+  }, [hasSelectedRows]);
+
+  const handleCloseAddModal = useCallback(() => {
+    if (adding) {
+      return;
+    }
+    setAddModalOpen(false);
+  }, [adding]);
+
+  const handleAddSelected = useCallback(async () => {
+    const tickerPool = String(selectedTickerPool || "").trim().toLowerCase();
+    const bucketId = Number(selectedBucketId || 0);
+    if (!tickerPool || !bucketId) {
+      toast.error("종목풀과 버킷을 모두 선택하세요.");
+      return;
+    }
+
+    setAdding(true);
+    let addedCount = 0;
+    let duplicateCount = 0;
+    const failedTickers: string[] = [];
+
+    for (const ticker of selectedTickers) {
+      try {
+        await addStockCandidate(tickerPool, ticker, bucketId);
+        addedCount += 1;
+      } catch (addError) {
+        const message = addError instanceof Error ? addError.message : "종목 추가 처리에 실패했습니다.";
+        if (message.includes("이미 등록된 종목입니다.")) {
+          duplicateCount += 1;
+          continue;
+        }
+        failedTickers.push(ticker);
+      }
+    }
+
+    setAdding(false);
+    setAddModalOpen(false);
+
+    if (addedCount > 0) {
+      toast.success(`종목 ${addedCount}개를 추가했습니다.`);
+    }
+    if (duplicateCount > 0) {
+      toast.error(`이미 등록된 종목 ${duplicateCount}개는 건너뛰었습니다.`);
+    }
+    if (failedTickers.length > 0) {
+      toast.error(`추가 실패: ${failedTickers.join(", ")}`);
+    }
+
+    if (addedCount > 0) {
+      setSelectedTickers([]);
+      await load();
+    }
+  }, [load, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columns = useMemo<ColDef<MarketGridRow>[]>(
     () => [
@@ -335,8 +445,41 @@ export function MarketManager({
         type: "rightAligned",
         cellRenderer: (params: { value: number }) => formatKrwEok(params.value),
       },
+      {
+        field: "__selected__",
+        headerName: "",
+        width: 52,
+        maxWidth: 52,
+        sortable: false,
+        filter: false,
+        suppressHeaderMenuButton: true,
+        suppressColumnsToolPanel: true,
+        headerComponent: () => (
+          <input
+            type="checkbox"
+            aria-label="전체 선택"
+            checked={allVisibleSelected}
+            onChange={() => toggleSelectAllVisible()}
+          />
+        ),
+        cellRenderer: (params: { data?: MarketGridRow }) => {
+          const ticker = String(params.data?.ticker ?? "").trim();
+          if (!ticker) {
+            return null;
+          }
+          return (
+            <input
+              type="checkbox"
+              aria-label={`${ticker} 선택`}
+              checked={selectedTickers.includes(ticker)}
+              onChange={() => toggleTickerSelection(ticker)}
+              onClick={(event) => event.stopPropagation()}
+            />
+          );
+        },
+      },
     ],
-    [moveToTickerDetail],
+    [allVisibleSelected, moveToTickerDetail, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
   );
 
   function toggleGroup(group: string) {
@@ -387,6 +530,17 @@ export function MarketManager({
                     onChange={(event) => setMinPrevVolume(event.target.value)}
                   />
                 </label>
+              </div>
+              <div className="appMainHeaderRight">
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  onClick={handleOpenAddModal}
+                  disabled={!hasSelectedRows}
+                >
+                  <IconPlus size={16} stroke={2} />
+                  추가
+                </button>
               </div>
             </div>
           </div>
@@ -440,7 +594,66 @@ export function MarketManager({
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        .appModalFormStack {
+          display: grid;
+          gap: 0.875rem;
+        }
       `}</style>
+
+      <AppModal
+        open={addModalOpen}
+        title="종목풀 추가"
+        subtitle={`선택한 종목 ${selectedTickers.length}개를 추가합니다.`}
+        onClose={handleCloseAddModal}
+        footer={
+          <>
+            <button type="button" className="btn btn-ghost-secondary" onClick={handleCloseAddModal} disabled={adding}>
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-success"
+              onClick={() => void handleAddSelected()}
+              disabled={!selectedTickerPool || !selectedBucketId || adding}
+            >
+              {adding ? "추가 중..." : "추가"}
+            </button>
+          </>
+        }
+      >
+        <div className="appModalFormStack">
+          <label className="appLabeledField">
+            <span className="appLabeledFieldLabel">종목풀</span>
+            <select
+              className="field compactField"
+              value={selectedTickerPool}
+              onChange={(event) => setSelectedTickerPool(event.target.value)}
+            >
+              <option value="">종목풀 선택</option>
+              {tickerPools.map((pool) => (
+                <option key={pool.ticker_type} value={pool.ticker_type}>
+                  {pool.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="appLabeledField">
+            <span className="appLabeledFieldLabel">버킷</span>
+            <select
+              className="field compactField"
+              value={selectedBucketId}
+              onChange={(event) => setSelectedBucketId(event.target.value ? Number(event.target.value) : "")}
+            >
+              <option value="">버킷 선택</option>
+              {BUCKET_OPTIONS.map((bucket) => (
+                <option key={bucket.id} value={bucket.id}>
+                  {bucket.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </AppModal>
     </div>
   );
 }
