@@ -14,6 +14,7 @@ from utils.settings_loader import (
 _ICON_FALLBACKS: dict[str, str] = {
     "kor": "🇰🇷",
     "au": "🇦🇺",
+    "us": "🇺🇸",
 }
 
 logger = get_app_logger()

@@ -176,8 +176,8 @@ def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
     settings["ticker_type"] = t_id
 
     country_code = str(settings.get("country_code") or "").strip().lower()
-    if country_code not in {"kor", "au"}:
-        raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor 또는 au만 허용합니다: {country_code}")
+    if country_code not in {"kor", "au", "us"}:
+        raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor, au 또는 us만 허용합니다: {country_code}")
     settings["country_code"] = country_code
 
     return settings
@@ -191,6 +191,13 @@ def get_account_precision(account_id: str) -> dict[str, Any]:
     if country_code == "au":
         return {
             "currency": "AUD",
+            "qty_precision": 0,
+            "price_precision": 2,
+        }
+
+    if country_code == "us":
+        return {
+            "currency": "USD",
             "qty_precision": 0,
             "price_precision": 2,
         }
@@ -242,6 +249,12 @@ def get_country_precision(country: str) -> dict[str, Any]:  # pragma: no cover
     if country_code == "au":
         return {
             "currency": "AUD",
+            "qty_precision": 0,
+            "price_precision": 2,
+        }
+    if country_code == "us":
+        return {
+            "currency": "USD",
             "qty_precision": 0,
             "price_precision": 2,
         }
