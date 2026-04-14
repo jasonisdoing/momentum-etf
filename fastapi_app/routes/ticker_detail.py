@@ -21,7 +21,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_ohlcv
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
@@ -83,6 +83,79 @@ def _build_price_snapshot(close_series: pd.Series | None) -> tuple[float | None,
 
     change_pct = round(((current_price / previous_close) - 1.0) * 100.0, 2)
     return current_price, change_pct
+
+
+def _apply_realtime_snapshot_to_dataframe(
+    df: pd.DataFrame,
+    *,
+    ticker: str,
+    country_code: str,
+) -> pd.DataFrame:
+    country = str(country_code or "").strip().lower()
+    if country not in {"kor", "au"}:
+        return df
+
+    try:
+        realtime_map = get_realtime_snapshot(country, [ticker])
+    except Exception:
+        return df
+
+    realtime_entry = realtime_map.get(str(ticker or "").strip().upper()) or {}
+    now_val = realtime_entry.get("nowVal")
+    if now_val is None:
+        return df
+
+    try:
+        realtime_price = float(now_val)
+    except (TypeError, ValueError):
+        return df
+
+    if realtime_price <= 0:
+        return df
+
+    latest_trading_day = get_latest_trading_day(country).normalize()
+    adjusted = df.copy()
+
+    if adjusted.empty:
+        return adjusted
+
+    close_col = "Close" if "Close" in adjusted.columns else "close"
+    open_col = "Open" if "Open" in adjusted.columns else "open"
+    high_col = "High" if "High" in adjusted.columns else "high"
+    low_col = "Low" if "Low" in adjusted.columns else "low"
+    volume_col = "Volume" if "Volume" in adjusted.columns else "volume"
+
+    if adjusted.index.max().normalize() == latest_trading_day:
+        target_index = adjusted.index.max()
+        existing_open = adjusted.at[target_index, open_col] if open_col in adjusted.columns else None
+        existing_high = adjusted.at[target_index, high_col] if high_col in adjusted.columns else None
+        existing_low = adjusted.at[target_index, low_col] if low_col in adjusted.columns else None
+        adjusted.at[target_index, close_col] = realtime_price
+        if open_col in adjusted.columns and pd.isna(existing_open):
+            adjusted.at[target_index, open_col] = realtime_price
+        if high_col in adjusted.columns:
+            try:
+                adjusted.at[target_index, high_col] = max(float(existing_high), realtime_price)
+            except (TypeError, ValueError):
+                adjusted.at[target_index, high_col] = realtime_price
+        if low_col in adjusted.columns:
+            try:
+                adjusted.at[target_index, low_col] = min(float(existing_low), realtime_price)
+            except (TypeError, ValueError):
+                adjusted.at[target_index, low_col] = realtime_price
+    else:
+        new_row: dict[str, object] = {
+            close_col: realtime_price,
+            open_col: realtime_entry.get("open", realtime_price),
+            high_col: realtime_entry.get("high", realtime_price),
+            low_col: realtime_entry.get("low", realtime_price),
+        }
+        if volume_col in adjusted.columns:
+            new_row[volume_col] = realtime_entry.get("volume", 0)
+        adjusted.loc[latest_trading_day] = new_row
+
+    adjusted.sort_index(inplace=True)
+    return adjusted
 
 
 @router.get("/tickers")
@@ -238,6 +311,7 @@ def get_ticker_detail(
         }
 
     df = df.sort_index()
+    df = _apply_realtime_snapshot_to_dataframe(df, ticker=ticker, country_code=country_code)
 
     close_col = "Close" if "Close" in df.columns else "close"
     open_col = "Open" if "Open" in df.columns else "open"
