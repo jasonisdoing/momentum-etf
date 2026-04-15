@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import type { ColDef, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
+import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
 
@@ -42,12 +42,14 @@ type AccountSummary = {
   account_id: string;
   order: number;
   name: string;
+  account_url?: string | null;
   icon: string;
   currency: string;
   total_principal: number;
   cash_balance_krw: number;
   cash_balance_native: number | null;
   cash_currency: string;
+  cash_target_ratio: number;
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;
@@ -55,6 +57,11 @@ type AccountSummary = {
   total_assets_krw: number;
   holdings_count: number;
   target_ratio_total: number;
+  cash_ratio: number;
+  net_profit: number;
+  net_profit_pct: number;
+  daily_profit: number;
+  weekly_profit: number;
 };
 
 type ParentGridRow =
@@ -63,6 +70,22 @@ type ParentGridRow =
       rowType: "main";
       cash_edit_value: number;
     })
+  | {
+      id: string;
+      rowType: "total";
+      name: string;
+      total_assets_krw: number;
+      valuation_krw: number;
+      total_principal: number;
+      cash_edit_value: number;
+      target_ratio_total: number | null;
+      holdings_count: number;
+      cash_ratio: number;
+      net_profit: number;
+      net_profit_pct: number;
+      daily_profit: number;
+      weekly_profit: number;
+    }
   | {
       id: string;
       rowType: "detail";
@@ -94,6 +117,8 @@ type AddingRowState = {
   bucketId?: number;
   isValidated?: boolean;
 };
+
+const CASH_ROW_TICKER = "__CASH__";
 
 type HoldingEditableSnapshot = {
   quantity: number;
@@ -244,21 +269,27 @@ function getPreviewAverageBuyPrice(row: GridRow): number {
 }
 
 function getPreviewValuationKrw(row: GridRow): number {
+  if (String(row.ticker || "").trim().toUpperCase() === CASH_ROW_TICKER) {
+    return Number(row.valuation_krw ?? 0);
+  }
   const quantity = getPreviewQuantity(row);
   if (quantity <= 0) {
     return 0;
+  }
+  if (row.currency === "KRW") {
+    return getCurrentPriceNumber(row) * quantity;
   }
   const currentQuantity = Number(row.original_quantity ?? row.quantity ?? 0);
   if (currentQuantity > 0) {
     return (Number(row.valuation_krw ?? 0) / currentQuantity) * quantity;
   }
-  if (row.currency === "KRW") {
-    return Number(row.current_price_num ?? 0) * quantity;
-  }
   return Number(row.valuation_krw ?? 0);
 }
 
 function getPreviewBuyAmountKrw(row: GridRow): number {
+  if (String(row.ticker || "").trim().toUpperCase() === CASH_ROW_TICKER) {
+    return Number(row.buy_amount_krw ?? 0);
+  }
   const quantity = getPreviewQuantity(row);
   if (quantity <= 0) {
     return 0;
@@ -277,10 +308,10 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
 }
 
 function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: AccountSummary): number {
-  if (String(row.ticker || "").trim().toUpperCase() === "IS") {
+  const normalizedTicker = String(row.ticker || "").trim().toUpperCase();
+  if (normalizedTicker === "IS") {
     return 0;
   }
-  const rowId = buildGridRowId(row);
   const previewTotalValuation = rows.reduce((sum, currentRow) => {
     return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
   }, 0);
@@ -298,6 +329,10 @@ function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: Account
   if (denominator <= 0) {
     return 0;
   }
+  if (normalizedTicker === CASH_ROW_TICKER) {
+    return (Number(summary.cash_balance_krw ?? 0) / denominator) * 100;
+  }
+  const rowId = buildGridRowId(row);
   const targetRow = rows.find((currentRow) => buildGridRowId(currentRow) === rowId);
   if (!targetRow) {
     return 0;
@@ -335,12 +370,45 @@ function isDetailRow(row: ParentGridRow | undefined): row is Extract<ParentGridR
   return row?.rowType === "detail";
 }
 
+function isTotalRow(row: ParentGridRow | undefined): row is Extract<ParentGridRow, { rowType: "total" }> {
+  return row?.rowType === "total";
+}
+
 function formatAccountCash(summary: AccountSummary): string {
   const currency = String(summary.currency || "KRW").trim().toUpperCase();
   if (currency === "AUD") {
     return formatPrice(summary.cash_balance_native, "AUD");
   }
   return formatKrw(summary.cash_balance_krw);
+}
+
+function buildCashGridRow(summary: AccountSummary): GridRow {
+  const cashValue = Number(summary.cash_balance_krw ?? 0);
+  return {
+    id: `${summary.account_id}-${CASH_ROW_TICKER}`,
+    account_id: summary.account_id,
+    account_name: summary.name,
+    currency: "KRW",
+    bucket: "",
+    bucket_id: 0,
+    ticker: CASH_ROW_TICKER,
+    name: "현금",
+    quantity: 0,
+    average_buy_price: 0,
+    current_price: "-",
+    current_price_num: 0,
+    days_held: "-",
+    pnl_krw: 0,
+    return_pct: 0,
+    weight_pct: 0,
+    daily_change_pct: null,
+    buy_amount_krw: cashValue,
+    valuation_krw: cashValue,
+    target_ratio: Number(summary.cash_target_ratio ?? 0),
+    sort_order: -1,
+    original_quantity: 0,
+    original_average_buy_price: 0,
+  };
 }
 
 
@@ -448,15 +516,21 @@ function StableInlineInput({
 function AccountHoldingsDetailPanel({
   summary,
   initialRows,
+  initialSortState,
   onReload,
   onRowsSync,
+  onCashSync,
   onPreviewTargetRatioTotalChange,
+  onSortStateChange,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
+  initialSortState: ColumnState[];
   onReload: () => Promise<void>;
   onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
+  onCashSync: (accountId: string, cashBalanceKrw: number, cashTargetRatio: number) => void;
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
+  onSortStateChange: (accountId: string, state: ColumnState[]) => void;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -481,6 +555,7 @@ function AccountHoldingsDetailPanel({
   const priceRef = useRef<HTMLInputElement>(null);
   const targetRatioRef = useRef<HTMLInputElement>(null);
   const rowsRef = useRef<HoldingsRow[]>(initialRows);
+  const summaryRef = useRef(summary);
   const dirtyRowIdsRef = useRef<string[]>([]);
   const isReorderDirtyRef = useRef(false);
   const gridApiRef = useRef<GridApi<GridRow> | null>(null);
@@ -491,6 +566,17 @@ function AccountHoldingsDetailPanel({
   const reorderSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reorderSavingRef = useRef(false);
   const reorderQueuedRef = useRef(false);
+  const cashDraftRef = useRef({
+    cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
+    cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
+  });
+  const isAusAccount = String(summary.currency || "KRW").toUpperCase() === "AUD";
+  const intlDraftRef = useRef({
+    intlSharesValue: Number(summary.intl_shares_value ?? 0),
+    intlSharesChange: Number(summary.intl_shares_change ?? 0),
+    cashNative: Number(summary.cash_balance_native ?? 0),
+  });
+  const [intlDirtyFields, setIntlDirtyFields] = useState<string[]>([]);
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -506,11 +592,28 @@ function AccountHoldingsDetailPanel({
     setEditingRowId(null);
     setAddingRow(null);
     setIsReorderDirty(false);
-  }, [hydrateRows, initialRows]);
+    queueMicrotask(() => {
+      if (!gridApiRef.current || initialSortState.length === 0) {
+        return;
+      }
+      gridApiRef.current.applyColumnState({
+        state: initialSortState,
+        applyOrder: false,
+      });
+    });
+  }, [hydrateRows, initialRows, initialSortState]);
 
   useEffect(() => {
     rowsRef.current = rows;
   }, [rows]);
+
+  useEffect(() => {
+    summaryRef.current = summary;
+    cashDraftRef.current = {
+      cashBalanceKrw: Number(summary.cash_balance_krw ?? 0),
+      cashTargetRatio: Number(summary.cash_target_ratio ?? 0),
+    };
+  }, [summary]);
 
   useEffect(() => {
     dirtyRowIdsRef.current = dirtyRowIds;
@@ -523,18 +626,23 @@ function AccountHoldingsDetailPanel({
   useEffect(() => {
     const previewTargetRatioTotal = rows.reduce((sum, row) => {
       return sum + Number(row.target_ratio ?? 0);
-    }, 0);
+    }, 0) + Number(summary.cash_target_ratio ?? 0);
     onPreviewTargetRatioTotalChange(summary.account_id, parseFloat(previewTargetRatioTotal.toFixed(1)));
-  }, [onPreviewTargetRatioTotalChange, rows, summary.account_id]);
+  }, [onPreviewTargetRatioTotalChange, rows, summary.account_id, summary.cash_target_ratio]);
 
   const isEditableHoldingRow = useCallback(
-    (row: GridRow | undefined | null) => Boolean(row && row.id !== "__adding__" && row.ticker !== "IS"),
+    (row: GridRow | undefined | null) =>
+      Boolean(row && row.id !== "__adding__" && row.ticker !== "IS" && row.ticker !== CASH_ROW_TICKER),
+    [],
+  );
+  const isCashGridRow = useCallback(
+    (row: GridRow | undefined | null) => Boolean(row && row.ticker === CASH_ROW_TICKER),
     [],
   );
   const moveToTickerDetail = useCallback(
     (ticker: string | null | undefined) => {
-      const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
-      if (!normalizedTicker || normalizedTicker === "IS") {
+    const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
+      if (!normalizedTicker || normalizedTicker === "IS" || normalizedTicker === CASH_ROW_TICKER) {
         return;
       }
       router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
@@ -543,6 +651,7 @@ function AccountHoldingsDetailPanel({
   );
 
   const gridRows = useMemo<GridRow[]>(() => {
+    const cashRow = buildCashGridRow(summary);
     const baseRows = rows
       .map((row, index) => ({
         ...row,
@@ -553,10 +662,11 @@ function AccountHoldingsDetailPanel({
       }));
 
     if (!addingRow) {
-      return baseRows;
+      return [cashRow, ...baseRows];
     }
 
     return [
+      cashRow,
       {
         id: "__adding__",
         account_id: summary.account_id,
@@ -579,7 +689,7 @@ function AccountHoldingsDetailPanel({
       } as GridRow,
       ...baseRows,
     ];
-  }, [addingRow, rows, summary.account_id, summary.currency, summary.name]);
+  }, [addingRow, rows, summary]);
 
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
@@ -739,6 +849,63 @@ function AccountHoldingsDetailPanel({
     }
   }, [summary.account_id]);
 
+  const processCashUpdate = useCallback(async (cashBalanceKrw: number, cashTargetRatio: number) => {
+    const isAud = String(summary.currency || "KRW").toUpperCase() === "AUD";
+    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
+    const currentCashNative = Number(summary.cash_balance_native ?? 0);
+    const nextCashNative =
+      isAud && currentCashKrw > 0 && currentCashNative > 0
+        ? (cashBalanceKrw / currentCashKrw) * currentCashNative
+        : (isAud ? currentCashNative : cashBalanceKrw);
+    const response = await fetch("/api/assets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: summary.account_id,
+        total_principal: summary.total_principal,
+        cash_balance_krw: cashBalanceKrw,
+        cash_balance_native: nextCashNative,
+        cash_currency: summary.cash_currency,
+        cash_target_ratio: cashTargetRatio,
+        intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
+        intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "현금 저장에 실패했습니다.");
+    }
+  }, [summary]);
+
+  const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number, cashNative?: number) => {
+    const finalCashNative = cashNative ?? Number(summary.cash_balance_native ?? 0);
+    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
+    const currentCashNative = Number(summary.cash_balance_native ?? 0);
+    // AUD 변경 시 KRW도 비율로 환산
+    const nextCashKrw =
+      currentCashNative > 0
+        ? (finalCashNative / currentCashNative) * currentCashKrw
+        : currentCashKrw;
+    const response = await fetch("/api/assets", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        account_id: summary.account_id,
+        total_principal: summary.total_principal,
+        cash_balance_krw: nextCashKrw,
+        cash_balance_native: finalCashNative,
+        cash_currency: summary.cash_currency,
+        cash_target_ratio: summary.cash_target_ratio,
+        intl_shares_value: intlSharesValue,
+        intl_shares_change: intlSharesChange,
+      }),
+    });
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "호주 계좌 저장에 실패했습니다.");
+    }
+  }, [summary]);
+
   const clearDirtyRowState = useCallback((rowId: string) => {
     setDirtyRowIds((previous) => {
       const next = previous.filter((id) => id !== rowId);
@@ -751,7 +918,7 @@ function AccountHoldingsDetailPanel({
   const processReorderUpdate = useCallback(async (orderedRows: HoldingsRow[]) => {
     const orderedTickers = orderedRows
       .map((row) => String(row.ticker || "").trim().toUpperCase())
-      .filter((ticker) => ticker && ticker !== "IS");
+      .filter((ticker) => ticker && ticker !== "IS" && ticker !== CASH_ROW_TICKER);
 
     if (!orderedTickers.length) {
       return;
@@ -884,6 +1051,14 @@ function AccountHoldingsDetailPanel({
       reorderSaveTimerRef.current = null;
     }
 
+    const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
+    if (dirtyRowIdsRef.current.includes(cashRowId)) {
+      void processCashUpdate(
+        cashDraftRef.current.cashBalanceKrw,
+        cashDraftRef.current.cashTargetRatio,
+      ).catch(() => undefined);
+    }
+
     const dirtyRows = rowsRef.current
       .map((row) => ({ ...row, id: buildGridRowId(row) }))
       .filter((row) => dirtyRowIdsRef.current.includes(row.id));
@@ -895,7 +1070,8 @@ function AccountHoldingsDetailPanel({
     if (isReorderDirtyRef.current) {
       void processReorderUpdate(rowsRef.current).catch(() => undefined);
     }
-  }, [processReorderUpdate, processRowUpdate]);
+
+  }, [processCashUpdate, processReorderUpdate, processRowUpdate, summary.account_id]);
 
   useEffect(() => {
     return () => {
@@ -912,6 +1088,15 @@ function AccountHoldingsDetailPanel({
     flushPendingSaves();
 
     try {
+      const cashRowId = `${summary.account_id}-${CASH_ROW_TICKER}`;
+      if (dirtyRowIds.includes(cashRowId)) {
+        await processCashUpdate(
+          cashDraftRef.current.cashBalanceKrw,
+          cashDraftRef.current.cashTargetRatio,
+        );
+        clearDirtyRowState(cashRowId);
+      }
+
       const dirtyRows = rowsRef.current
         .map((row) => ({
           ...row,
@@ -952,8 +1137,10 @@ function AccountHoldingsDetailPanel({
     onReload,
     persistRowOrder,
     processAddingRow,
+    processCashUpdate,
     processRowUpdate,
     processingId,
+    summary,
     toast,
   ]);
 
@@ -997,7 +1184,46 @@ function AccountHoldingsDetailPanel({
   }, [gridRows, onReload, selectedRowIds, summary.account_id, toast]);
 
   const handleCellValueChanged = useCallback((row: GridRow | undefined, field: string | undefined) => {
-    if (!row || !isEditableHoldingRow(row)) {
+    if (!row) {
+      return;
+    }
+    if (isCashGridRow(row)) {
+      const nextCashBalance = Math.max(0, Number(row.valuation_krw ?? 0));
+      const nextCashTargetRatio = Number(row.target_ratio ?? 0);
+      cashDraftRef.current = {
+        cashBalanceKrw: nextCashBalance,
+        cashTargetRatio: nextCashTargetRatio,
+      };
+      setDirtyRowIds((previous) => {
+        const next = previous.includes(row.id) ? previous : [...previous, row.id];
+        dirtyRowIdsRef.current = next;
+        return next;
+      });
+      if (field) {
+        const dirtyCellKey = buildDirtyCellKey(row.id, field);
+        setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
+      }
+      onCashSync(summary.account_id, nextCashBalance, nextCashTargetRatio);
+      const timerKey = row.id;
+      const currentTimer = childSaveTimersRef.current.get(timerKey);
+      if (currentTimer) {
+        clearTimeout(currentTimer);
+      }
+      const nextTimer = setTimeout(async () => {
+        childSaveTimersRef.current.delete(timerKey);
+        try {
+          await processCashUpdate(nextCashBalance, nextCashTargetRatio);
+          clearDirtyRowState(timerKey);
+          toast.success("현금 저장 완료");
+        } catch (error) {
+          await onReload();
+          toast.error(error instanceof Error ? error.message : "현금 저장에 실패했습니다.");
+        }
+      }, 700);
+      childSaveTimersRef.current.set(timerKey, nextTimer);
+      return;
+    }
+    if (!isEditableHoldingRow(row)) {
       return;
     }
 
@@ -1025,7 +1251,7 @@ function AccountHoldingsDetailPanel({
       setDirtyCellKeys((previous) => (previous.includes(dirtyCellKey) ? previous : [...previous, dirtyCellKey]));
     }
     scheduleSilentRowSave(row.id);
-  }, [isEditableHoldingRow, onRowsSync, scheduleSilentRowSave, summary]);
+  }, [clearDirtyRowState, isCashGridRow, isEditableHoldingRow, onCashSync, onReload, onRowsSync, processCashUpdate, scheduleSilentRowSave, summary, toast]);
 
   const columns = useMemo<ColDef<GridRow>[]>(() => [
     {
@@ -1037,7 +1263,8 @@ function AccountHoldingsDetailPanel({
       sortable: false,
       resizable: false,
       suppressMovable: true,
-      rowDrag: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+      rowDrag: (params) =>
+        Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
       cellClass: "assetsDragCell",
       valueGetter: () => "",
     },
@@ -1077,13 +1304,15 @@ function AccountHoldingsDetailPanel({
           );
         }
         return (
-          <button
-            type="button"
-            className="btn btn-link p-0 appCodeText assetsTickerLink"
-            onClick={() => moveToTickerDetail(row.ticker)}
-          >
-            {params.value}
-          </button>
+          row.ticker === CASH_ROW_TICKER ? <span>-</span> : (
+            <button
+              type="button"
+              className="btn btn-link p-0 appCodeText assetsTickerLink"
+              onClick={() => moveToTickerDetail(row.ticker)}
+            >
+              {params.value}
+            </button>
+          )
         );
       },
     },
@@ -1139,16 +1368,7 @@ function AccountHoldingsDetailPanel({
         }
 
         const value = String(params.value ?? "-");
-        return (
-          <button
-            type="button"
-            className="btn btn-link p-0 assetsNameCellText assetsTickerLink"
-            title={value}
-            onClick={() => moveToTickerDetail(params.data?.ticker)}
-          >
-            {value}
-          </button>
-        );
+        return <span className="assetsNameCellText" title={value}>{value}</span>;
       },
     },
     {
@@ -1172,6 +1392,72 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow; value?: string }) => (
         <span>{formatPrice(safeParseFloat(params.value), params.data?.currency || "KRW")}</span>
       ),
+    },
+    {
+      field: "weight_pct",
+      headerName: "비중",
+      width: 80,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow }) => {
+        if (!params.data) {
+          return "-";
+        }
+
+        const weightPct = getPreviewWeightPct(params.data, rowsRef.current, summaryRef.current);
+        return (
+          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
+            {weightPct.toFixed(1)}%
+          </span>
+        );
+      },
+    },
+    {
+      field: "target_ratio",
+      headerName: "목표비중",
+      width: 88,
+      type: "rightAligned",
+      editable: (params) =>
+        Boolean(params.data && processingId !== params.data?.id && (isEditableHoldingRow(params.data) || isCashGridRow(params.data))),
+      cellClass: (params) => {
+        if (!isEditableHoldingRow(params.data) && !isCashGridRow(params.data)) {
+          return undefined;
+        }
+        return isDirtyEditableCell(params.data?.id, "target_ratio")
+          ? "assetsEditableCell assetsDirtyCell"
+          : "assetsEditableCell";
+      },
+      valueParser: (params) => {
+        const parsed = Number(params.newValue);
+        if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+          return params.oldValue;
+        }
+        return parsed;
+      },
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        const row = params.data;
+        if (!row) {
+          return null;
+        }
+        if (row.id === "__adding__") {
+          return (
+            <input
+              type="number"
+              step="0.1"
+              min="0"
+              max="100"
+              ref={targetRatioRef}
+              className="form-control form-control-sm assetsInlineInput"
+              defaultValue={addingRow?.target_ratio ?? "0"}
+              disabled={!addingRow?.isValidated}
+            />
+          );
+        }
+        return (
+          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
+            {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
+          </span>
+        );
+      },
     },
     {
       field: "quantity",
@@ -1198,6 +1484,9 @@ function AccountHoldingsDetailPanel({
         const row = params.data;
         if (!row) {
           return null;
+        }
+        if (row.ticker === CASH_ROW_TICKER) {
+          return <span>-</span>;
         }
         if (row.id === "__adding__") {
           return (
@@ -1240,6 +1529,9 @@ function AccountHoldingsDetailPanel({
         if (!row) {
           return null;
         }
+        if (row.ticker === CASH_ROW_TICKER) {
+          return <span>-</span>;
+        }
         if (row.id === "__adding__") {
           return (
             <input
@@ -1260,7 +1552,8 @@ function AccountHoldingsDetailPanel({
       headerName: "수익률",
       width: 88,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number }) => (
+      cellRenderer: (params: { data?: GridRow; value?: number }) => (
+        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
         <span className={getSignedClass(params.value ?? 0)}>
           {(params.value ?? 0) > 0 ? "+" : ""}
           {(params.value ?? 0).toFixed(2)}%
@@ -1272,7 +1565,8 @@ function AccountHoldingsDetailPanel({
       headerName: "평가손익",
       width: 124,
       type: "rightAligned",
-      cellRenderer: (params: { value?: number }) => (
+      cellRenderer: (params: { data?: GridRow; value?: number }) => (
+        params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
         <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
       ),
     },
@@ -1281,110 +1575,129 @@ function AccountHoldingsDetailPanel({
       headerName: "평가 금액",
       width: 124,
       type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) =>
-        params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-",
-    },
-    {
-      field: "weight_pct",
-      headerName: "비중",
-      width: 80,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow }) => {
-        if (!params.data) {
-          return "-";
-        }
-
-        const weightPct = getPreviewWeightPct(params.data, rows, summary);
-        return (
-          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
-            {weightPct.toFixed(1)}%
-          </span>
-        );
-      },
-    },
-    {
-      field: "target_ratio",
-      headerName: "목표비중",
-      width: 88,
-      type: "rightAligned",
-      editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
+      editable: (params) => Boolean(params.data && params.data.ticker === CASH_ROW_TICKER && !isAusAccount && processingId !== params.data?.id),
       cellClass: (params) => {
-        if (!isEditableHoldingRow(params.data)) {
+        if (params.data?.ticker !== CASH_ROW_TICKER || isAusAccount) {
           return undefined;
         }
-        return isDirtyEditableCell(params.data?.id, "target_ratio")
+        return isDirtyEditableCell(params.data?.id, "valuation_krw")
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
       valueParser: (params) => {
-        const parsed = Number(params.newValue);
-        if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
+        const parsed = parseFloat(parseRawPrice(params.newValue));
+        if (Number.isNaN(parsed) || parsed < 0) {
           return params.oldValue;
         }
         return parsed;
       },
-      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
-        const row = params.data;
-        if (!row) {
-          return null;
-        }
-        if (row.id === "__adding__") {
-          return (
-            <input
-              type="number"
-              step="0.1"
-              min="0"
-              max="100"
-              ref={targetRatioRef}
-              className="form-control form-control-sm assetsInlineInput"
-              defaultValue={addingRow?.target_ratio ?? "0"}
-              disabled={!addingRow?.isValidated}
-            />
-          );
-        }
-        return (
-          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
-            {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
-          </span>
-        );
-      },
+      cellRenderer: (params: { data?: GridRow }) => (params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"),
     },
     { field: "days_held", headerName: "보유일", width: 76 },
-  ], [addingRow, handleValidateTicker, isDirtyEditableCell, isEditableHoldingRow, processingId, rows, summary]);
+  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
 
   return (
     <div className="assetsDetailPanel">
       <div className="appActionHeader">
         <div className="appActionHeaderInner">
-          <button
-            className="btn btn-primary btn-sm px-3 fw-bold"
-            onClick={() =>
-              setAddingRow({
-                ticker: "",
-                quantity: "",
-                average_buy_price: "",
-                target_ratio: "0",
-                isValidated: false,
-              })
-            }
-            disabled={hasPendingAdd}
-          >
-            <IconPlus size={16} /> 추가
-          </button>
-          <button
-            className="btn btn-success btn-sm px-3 fw-bold"
-            onClick={() => void handleSaveChanges()}
-            disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
-          >
-            <IconCheck size={16} /> 저장
-          </button>
-          <button
-            className="btn btn-outline-danger btn-sm px-3 fw-bold"
-            onClick={() => void handleDeleteSelected()}
-            disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
-          >
-            <IconTrash size={16} /> 삭제
-          </button>
+          {isAusAccount && (
+            <div className="d-flex align-items-center gap-2">
+              <label className="mb-0 text-muted small fw-bold">Intl Value</label>
+              <input
+                type="text"
+                className={`form-control form-control-sm ${intlDirtyFields.includes("intl_shares_value") ? "assetsDirtyInput" : ""}`}
+                style={{ width: 120, textAlign: "right" }}
+                defaultValue={Number(summary.intl_shares_value ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                onChange={(event) => {
+                  const parsed = parseFloat(event.target.value.replace(/,/g, ""));
+                  if (!Number.isNaN(parsed)) {
+                    intlDraftRef.current.intlSharesValue = parsed;
+                    setIntlDirtyFields((prev) => (prev.includes("intl_shares_value") ? prev : [...prev, "intl_shares_value"]));
+                  }
+                }}
+              />
+              <label className="mb-0 text-muted small fw-bold">Intl Change</label>
+              <input
+                type="text"
+                className={`form-control form-control-sm ${intlDirtyFields.includes("intl_shares_change") ? "assetsDirtyInput" : ""}`}
+                style={{ width: 120, textAlign: "right" }}
+                defaultValue={Number(summary.intl_shares_change ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                onChange={(event) => {
+                  const parsed = parseFloat(event.target.value.replace(/,/g, ""));
+                  if (!Number.isNaN(parsed)) {
+                    intlDraftRef.current.intlSharesChange = parsed;
+                    setIntlDirtyFields((prev) => (prev.includes("intl_shares_change") ? prev : [...prev, "intl_shares_change"]));
+                  }
+                }}
+              />
+              <label className="mb-0 text-muted small fw-bold">AUD Cash</label>
+              <input
+                type="text"
+                className={`form-control form-control-sm ${intlDirtyFields.includes("cash_native") ? "assetsDirtyInput" : ""}`}
+                style={{ width: 120, textAlign: "right" }}
+                defaultValue={Number(summary.cash_balance_native ?? 0).toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                onChange={(event) => {
+                  const parsed = parseFloat(event.target.value.replace(/,/g, ""));
+                  if (!Number.isNaN(parsed)) {
+                    intlDraftRef.current.cashNative = parsed;
+                    setIntlDirtyFields((prev) => (prev.includes("cash_native") ? prev : [...prev, "cash_native"]));
+                  }
+                }}
+              />
+              <button
+                className="btn btn-success btn-sm px-2"
+                disabled={intlDirtyFields.length === 0}
+                onClick={async () => {
+                  try {
+                    await processIntlUpdate(
+                      intlDraftRef.current.intlSharesValue,
+                      intlDraftRef.current.intlSharesChange,
+                      intlDraftRef.current.cashNative,
+                    );
+                    setIntlDirtyFields([]);
+                    await onReload();
+                    toast.success("호주 계좌 저장 완료");
+                  } catch (error) {
+                    await onReload();
+                    toast.error(error instanceof Error ? error.message : "호주 계좌 저장에 실패했습니다.");
+                  }
+                }}
+              >
+                저장
+              </button>
+            </div>
+          )}
+          <div className="d-flex align-items-center gap-2 ms-auto">
+            <button
+              className="btn btn-primary btn-sm px-3 fw-bold"
+              onClick={() =>
+                setAddingRow({
+                  ticker: "",
+                  quantity: "",
+                  average_buy_price: "",
+                  target_ratio: "0",
+                  isValidated: false,
+                })
+              }
+              disabled={hasPendingAdd}
+            >
+              <IconPlus size={16} /> 추가
+            </button>
+            <button
+              className="btn btn-success btn-sm px-3 fw-bold"
+              onClick={() => void handleSaveChanges()}
+              disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
+            >
+              <IconCheck size={16} /> 저장
+            </button>
+            <button
+              className="btn btn-outline-danger btn-sm px-3 fw-bold"
+              onClick={() => void handleDeleteSelected()}
+              disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
+            >
+              <IconTrash size={16} /> 삭제
+            </button>
+          </div>
         </div>
       </div>
       <div className="assetsDetailGridWrap">
@@ -1413,12 +1726,13 @@ function AccountHoldingsDetailPanel({
             animateRows: true,
             rowSelection: {
               mode: "multiRow",
-              checkboxes: (params) => Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+              checkboxes: (params) =>
+                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
               headerCheckbox: true,
               hideDisabledCheckboxes: true,
               enableClickSelection: false,
               isRowSelectable: (params) =>
-                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS"),
+                Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
             },
             selectionColumnDef: {
               width: 52,
@@ -1457,7 +1771,7 @@ function AccountHoldingsDetailPanel({
               const orderedTickers: string[] = [];
               params.api.forEachNode((node) => {
                 const ticker = String(node.data?.ticker || "").trim().toUpperCase();
-                if (!ticker || ticker === "IS") {
+                if (!ticker || ticker === "IS" || ticker === CASH_ROW_TICKER) {
                   return;
                 }
                 orderedTickers.push(ticker);
@@ -1479,7 +1793,25 @@ function AccountHoldingsDetailPanel({
             },
             onGridReady: (params) => {
               gridApiRef.current = params.api;
+              if (initialSortState.length > 0) {
+                params.api.applyColumnState({
+                  state: initialSortState,
+                  applyOrder: false,
+                });
+              }
             },
+            onSortChanged: (params) => {
+              const nextSortState = params.api
+                .getColumnState()
+                .filter((column): column is ColumnState => Boolean(column.sort) && Boolean(column.colId))
+                .map((column) => ({
+                  colId: String(column.colId),
+                  sort: column.sort,
+                  sortIndex: column.sortIndex,
+                }));
+              onSortStateChange(summary.account_id, nextSortState);
+            },
+            getRowId: (params) => String(params.data.id),
             rowClassRules: {
               assetsAddingRow: (params) => params.data?.id === "__adding__",
               assetsEditingRow: (params) => Boolean(params.data?.id && params.data.id === editingRowId),
@@ -1504,18 +1836,40 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
   const parentQueuedAccountIdsRef = useRef<Set<string>>(new Set());
+  const childSortStatesRef = useRef<Record<string, ColumnState[]>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await fetch("/api/assets", { cache: "no-store" });
+      const [response, dashResponse] = await Promise.all([
+        fetch("/api/assets", { cache: "no-store" }),
+        fetch("/api/dashboard", { cache: "no-store" }).catch(() => null),
+      ]);
       const payload = (await response.json()) as HoldingsResponse;
       if (!response.ok) {
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
+      const dashData = dashResponse?.ok ? await dashResponse.json() : null;
+      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; weekly_profit: number }> = {};
+      if (dashData?.accounts) {
+        for (const a of dashData.accounts) {
+          dashAccounts[a.account_id] = {
+            cash_ratio: a.cash_ratio ?? 0,
+            net_profit: a.net_profit ?? 0,
+            net_profit_pct: a.net_profit_pct ?? 0,
+            daily_profit: a.daily_profit ?? 0,
+            weekly_profit: a.weekly_profit ?? 0,
+          };
+        }
+      }
+      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, weekly_profit: 0 };
+      const mergedSummaries = (payload.account_summaries ?? []).map((s) => ({
+        ...s,
+        ...(dashAccounts[s.account_id] ?? defaultDash),
+      }));
       setAllRows(payload.rows ?? []);
-      setSummaries(payload.account_summaries ?? []);
-      setExpandedId((current) => current ?? payload.account_summaries?.[0]?.account_id ?? null);
+      setSummaries(mergedSummaries);
+      setExpandedId((current) => current);
       setPreviewTargetRatioTotals({});
       setParentDirtyCellKeys([]);
       setEditingParentId(null);
@@ -1553,8 +1907,46 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     return grouped;
   }, [allRows]);
 
+  const totalAssets = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.total_assets_krw ?? 0), 0),
+    [summaries],
+  );
+  const totalValuation = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.valuation_krw ?? 0), 0),
+    [summaries],
+  );
+  const totalCash = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.cash_balance_krw ?? 0), 0),
+    [summaries],
+  );
+  const totalPrincipal = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.total_principal ?? 0), 0),
+    [summaries],
+  );
+  const totalHoldingsCount = useMemo(
+    () => summaries.reduce((sum, summary) => sum + Number(summary.holdings_count ?? 0), 0),
+    [summaries],
+  );
+
   const parentRows = useMemo<ParentGridRow[]>(() => {
-    return summaries.flatMap((summary) => {
+    const totalRow: ParentGridRow = {
+      id: "__total__",
+      rowType: "total",
+      name: "합계",
+      total_assets_krw: totalAssets,
+      valuation_krw: totalValuation,
+      total_principal: totalPrincipal,
+      cash_edit_value: totalCash,
+      target_ratio_total: null,
+      holdings_count: totalHoldingsCount,
+      cash_ratio: totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0,
+      net_profit: totalAssets - totalPrincipal,
+      net_profit_pct: totalPrincipal > 0 ? ((totalAssets - totalPrincipal) / totalPrincipal) * 100 : 0,
+      daily_profit: summaries.reduce((sum, s) => sum + (s.daily_profit ?? 0), 0),
+      weekly_profit: summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
+    };
+
+    const detailRows = summaries.flatMap((summary): ParentGridRow[] => {
       const mainRow: ParentGridRow = {
         ...summary,
         id: summary.account_id,
@@ -1569,31 +1961,21 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return [mainRow];
       }
 
+      const detailRow: ParentGridRow = {
+        id: `${summary.account_id}__detail`,
+        rowType: "detail",
+        parentId: summary.account_id,
+        summary,
+        rows: groupedRows.get(summary.account_id) ?? [],
+      };
+
       return [
         mainRow,
-        {
-          id: `${summary.account_id}__detail`,
-          rowType: "detail",
-          parentId: summary.account_id,
-          summary,
-          rows: groupedRows.get(summary.account_id) ?? [],
-        },
+        detailRow,
       ];
     });
-  }, [expandedId, groupedRows, summaries]);
-
-  const totalAssets = useMemo(
-    () => summaries.reduce((sum, summary) => sum + Number(summary.total_assets_krw ?? 0), 0),
-    [summaries],
-  );
-  const totalValuation = useMemo(
-    () => summaries.reduce((sum, summary) => sum + Number(summary.valuation_krw ?? 0), 0),
-    [summaries],
-  );
-  const totalCash = useMemo(
-    () => summaries.reduce((sum, summary) => sum + Number(summary.cash_balance_krw ?? 0), 0),
-    [summaries],
-  );
+    return [totalRow, ...detailRows];
+  }, [expandedId, groupedRows, summaries, totalAssets, totalCash, totalHoldingsCount, totalPrincipal, totalValuation]);
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -1639,6 +2021,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           cash_currency: summary.cash_currency,
           intl_shares_value: summary.account_id === "aus_account" ? summary.intl_shares_value : null,
           intl_shares_change: summary.account_id === "aus_account" ? summary.intl_shares_change : null,
+          cash_target_ratio: summary.cash_target_ratio,
         }),
       });
       const payload = await response.json();
@@ -1675,7 +2058,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [silentlySaveParent]);
 
   const handleParentCellValueChanged = useCallback((row: ParentGridRow | undefined, field: string | undefined) => {
-    if (!row || isDetailRow(row) || !field) {
+    if (!row || isDetailRow(row) || isTotalRow(row) || !field) {
       return;
     }
 
@@ -1692,8 +2075,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           total_principal: Number(row.total_principal ?? summary.total_principal),
           cash_balance_krw: isAud ? summary.cash_balance_krw : cashEditValue,
           cash_balance_native: isAud ? cashEditValue : summary.cash_balance_native,
-          intl_shares_value: row.account_id === "aus_account" ? Number(row.intl_shares_value ?? 0) : summary.intl_shares_value,
-          intl_shares_change: row.account_id === "aus_account" ? Number(row.intl_shares_change ?? 0) : summary.intl_shares_change,
           total_assets_krw: summary.valuation_krw + (isAud ? summary.cash_balance_krw : cashEditValue),
         };
       }),
@@ -1731,10 +2112,17 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ...summary,
           valuation_krw: nextValuation,
           total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
-          holdings_count: nextRows.length,
+          holdings_count: nextRows.filter((r) => r.ticker !== "IS").length,
         };
       }),
     );
+  }, []);
+
+  const handleChildSortStateChange = useCallback((accountId: string, state: ColumnState[]) => {
+    childSortStatesRef.current = {
+      ...childSortStatesRef.current,
+      [accountId]: state,
+    };
   }, []);
 
   const DetailRenderer = useCallback(
@@ -1747,13 +2135,37 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         <AccountHoldingsDetailPanel
           summary={data.summary}
           initialRows={data.rows}
+          initialSortState={childSortStatesRef.current[data.summary.account_id] ?? []}
           onReload={load}
           onRowsSync={handleChildRowsSync}
+          onCashSync={(accountId, cashBalanceKrw, cashTargetRatio) => {
+            setSummaries((previous) =>
+              previous.map((summary) => {
+                if (summary.account_id !== accountId) {
+                  return summary;
+                }
+                const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
+                const currentCashNative = Number(summary.cash_balance_native ?? 0);
+                const nextCashNative =
+                  String(summary.currency || "KRW").toUpperCase() === "AUD" && currentCashKrw > 0 && currentCashNative > 0
+                    ? (cashBalanceKrw / currentCashKrw) * currentCashNative
+                    : summary.cash_balance_native;
+                return {
+                  ...summary,
+                  cash_balance_krw: cashBalanceKrw,
+                  cash_balance_native: nextCashNative,
+                  cash_target_ratio: cashTargetRatio,
+                  total_assets_krw: Number(summary.valuation_krw ?? 0) + cashBalanceKrw,
+                };
+              }),
+            );
+          }}
           onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
+          onSortStateChange={handleChildSortStateChange}
         />
       );
     },
-    [handleChildRowsSync, handlePreviewTargetRatioTotalChange, load],
+    [handleChildRowsSync, handleChildSortStateChange, handlePreviewTargetRatioTotalChange, load],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
@@ -1767,12 +2179,20 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!data || isDetailRow(data)) {
           return "";
         }
+        if (isTotalRow(data)) {
+          return <span className="fw-bold">{data.name}</span>;
+        }
+        const label = (
+          <>
+            {data.icon} {params.value}
+          </>
+        );
         return (
           <div className="snapshotsExpandCell">
             <span className="snapshotsExpandIcon" aria-hidden="true">
               {data.account_id === expandedId ? "▾" : "▸"}
             </span>
-            <span>{data.icon} {params.value}</span>
+            <span>{label}</span>
           </div>
         );
       },
@@ -1787,23 +2207,45 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
     },
     {
-      field: "valuation_krw",
-      headerName: "평가액",
-      minWidth: 132,
-      flex: 1,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+      field: "account_url",
+      headerName: "링크",
+      minWidth: 48,
+      maxWidth: 52,
+      editable: false,
+      sortable: false,
+      filter: false,
+      cellRenderer: (params: { data?: ParentGridRow }) => {
+        const data = params.data;
+        if (!data || isDetailRow(data) || isTotalRow(data)) {
+          return "";
+        }
+        if (!data.account_url) {
+          return <span>-</span>;
+        }
+        return (
+          <a
+            href={data.account_url}
+            target="_blank"
+            rel="noreferrer"
+            className="assetsInlineLinkButton assetsMoveLinkButton"
+            onClick={(event) => {
+              event.stopPropagation();
+            }}
+          >
+            이동
+          </a>
+        );
+      },
     },
     {
       field: "total_principal",
-      headerName: "원금",
+      headerName: "총 원금",
       minWidth: 124,
       flex: 1,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data)),
+      editable: (params) => Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data)),
       cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
           return undefined;
         }
         return isDirtyParentCell(params.data.account_id, "total_principal")
@@ -1821,33 +2263,82 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
     },
     {
+      field: "valuation_krw",
+      headerName: "평가액",
+      minWidth: 132,
+      flex: 1,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+    },
+    {
       field: "cash_edit_value",
       headerName: "현금",
       minWidth: 124,
       flex: 1,
       type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data)),
-      cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
-          return undefined;
-        }
-        return isDirtyParentCell(params.data.account_id, "cash_edit_value")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) => {
         if (!params.data || isDetailRow(params.data)) {
           return "";
         }
+        if (isTotalRow(params.data)) {
+          return formatKrw(params.value ?? 0);
+        }
         return formatPrice(params.value ?? 0, params.data.currency);
       },
+    },
+    {
+      field: "cash_ratio",
+      headerName: "현금 비중",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
+    },
+    {
+      field: "net_profit",
+      headerName: "계좌 손익",
+      minWidth: 120,
+      flex: 1,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          : "",
+    },
+    {
+      field: "net_profit_pct",
+      headerName: "수익률",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{`${(params.value ?? 0).toFixed(2)}%`}</span>
+          : "",
+    },
+    {
+      field: "daily_profit",
+      headerName: "금일 손익",
+      minWidth: 110,
+      flex: 0.9,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          : "",
+    },
+    {
+      field: "weekly_profit",
+      headerName: "금주 손익",
+      minWidth: 110,
+      flex: 0.9,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          : "",
     },
     {
       field: "target_ratio_total",
@@ -1858,6 +2349,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) => {
         if (!params.data || isDetailRow(params.data)) {
           return "";
+        }
+        if (isTotalRow(params.data)) {
+          return "-";
         }
         const previewValue = previewTargetRatioTotals[params.data.account_id];
         const value = Number(previewValue ?? params.value ?? 0);
@@ -1874,64 +2368,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatNumber(params.value) : "",
     },
-    {
-      field: "intl_shares_value",
-      headerName: "Intl Value",
-      minWidth: 120,
-      flex: 0.9,
-      type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === "aus_account"),
-      cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
-          return undefined;
-        }
-        return isDirtyParentCell(params.data.account_id, "intl_shares_value")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed) || parsed < 0) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
-      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
-          return "-";
-        }
-        return formatPrice(params.value, "AUD");
-      },
-    },
-    {
-      field: "intl_shares_change",
-      headerName: "Intl Change",
-      minWidth: 124,
-      flex: 0.9,
-      type: "rightAligned",
-      editable: (params) => Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === "aus_account"),
-      cellClass: (params) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
-          return undefined;
-        }
-        return isDirtyParentCell(params.data.account_id, "intl_shares_change")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => {
-        const parsed = parseFloat(parseRawPrice(params.newValue));
-        if (Number.isNaN(parsed)) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
-      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data) || params.data.account_id !== "aus_account") {
-          return "-";
-        }
-        return <span className={getSignedNullableClass(params.value)}>{formatPrice(params.value, "AUD")}</span>;
-      },
-    },
   ], [expandedId, isDirtyParentCell, previewTargetRatioTotals]);
 
   const gridOptions = useMemo<GridOptions<ParentGridRow>>(
@@ -1941,9 +2377,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       stopEditingWhenCellsLoseFocus: true,
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
       fullWidthCellRenderer: DetailRenderer,
-      getRowHeight: (params) => (isDetailRow(params.data) ? 722 : 38),
+      getRowHeight: (params) => {
+        if (!isDetailRow(params.data)) {
+          return 38;
+        }
+        const rowCount = (params.data.rows?.length ?? 0) + 1;
+        return 50 + 34 + rowCount * 42 + 32;
+      },
       onCellClicked: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
           return;
         }
         if (params.colDef.field !== "name") {
@@ -1953,7 +2395,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         setExpandedId((current) => (current === accountId ? null : accountId));
       },
       onCellEditingStarted: (params) => {
-        if (params.data && !isDetailRow(params.data)) {
+        if (params.data && !isDetailRow(params.data) && !isTotalRow(params.data)) {
           setEditingParentId(params.data.account_id);
         }
       },
@@ -1967,9 +2409,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         handleParentCellValueChanged(params.data, params.colDef.field);
       },
       rowClassRules: {
-        assetsEditingRow: (params) => Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === editingParentId),
+        assetsEditingRow: (params) =>
+          Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === editingParentId),
         snapshotsExpandedMainRow: (params) =>
-          Boolean(params.data && !isDetailRow(params.data) && params.data.account_id === expandedId),
+          Boolean(params.data && !isDetailRow(params.data) && !isTotalRow(params.data) && params.data.account_id === expandedId),
       },
     }),
     [DetailRenderer, editingParentId, expandedId, handleParentCellValueChanged],

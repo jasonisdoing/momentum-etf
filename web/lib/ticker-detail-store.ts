@@ -50,7 +50,7 @@ async function resolveTickerMeta(ticker: string): Promise<TickerMetaItem> {
     throw new Error(`${ticker} 티커를 찾지 못했습니다.`);
   }
   if (matches.length > 1) {
-    throw new Error(`동일한 티커 ${ticker}가 여러 종목 타입에 등록되어 있습니다.`);
+    throw new Error(`동일한 티커 ${ticker}가 여러 종목풀에 등록되어 있습니다.`);
   }
   return matches[0];
 }

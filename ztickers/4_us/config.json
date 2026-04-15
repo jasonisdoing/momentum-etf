@@ -1,8 +1,8 @@
 {
-    "icon": "🇰🇷",
-    "name": "국내상장 해외",
-    "country_code": "kor",
-    "currency": "KRW",
+    "icon": "🇺🇸",
+    "name": "미국",
+    "country_code": "us",
+    "currency": "USD",
     "MA_RULES": [
         {
             "order": 1,

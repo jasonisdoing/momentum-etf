@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from utils.account_registry import load_account_configs
+import pandas as pd
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_number, to_iso_string

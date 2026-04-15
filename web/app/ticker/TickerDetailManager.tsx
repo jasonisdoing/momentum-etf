@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { IconCheck, IconPlus } from "@tabler/icons-react";
 import { useSearchParams } from "next/navigation";
 import {
   createChart,
@@ -18,10 +19,12 @@ import type {
   MouseEventParams,
 } from "lightweight-charts";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
-import type { ColDef } from "ag-grid-community";
+import type { ColDef, GridApi, GridReadyEvent } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { useToast } from "../components/ToastProvider";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
+import { addStockCandidate } from "@/lib/stocks-store";
 
 // --- 타입 ---
 
@@ -78,6 +81,8 @@ type TickerHoldingRow = {
   change_pct?: number | null;
   price_currency?: string | null;
   weight: number | null;
+  is_us_pool_candidate?: boolean;
+  in_us_pool?: boolean;
 };
 
 type CrosshairInfo = {
@@ -264,11 +269,25 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
-  if (normalized === "usd") {
+  if (normalized === "us" || normalized === "usd") {
     return `$${new Intl.NumberFormat("en-US", {
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value)}`;
+  }
+
+  if (normalized === "eur") {
+    return `€${new Intl.NumberFormat("de-DE", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
+  if (normalized === "cny") {
+    return `${new Intl.NumberFormat("zh-CN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)} CNY`;
   }
 
   return `${new Intl.NumberFormat("ko-KR", {
@@ -331,6 +350,7 @@ export function TickerDetailManager({
 }: {
 }) {
   const searchParams = useSearchParams();
+  const toast = useToast();
 
   // URL query params
   const qTicker = searchParams.get("ticker") ?? "";
@@ -350,9 +370,12 @@ export function TickerDetailManager({
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
+  const [addingUsTickers, setAddingUsTickers] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const holdingsGridApiRef = useRef<GridApi<TickerHoldingRow> | null>(null);
+  const addingUsTickersRef = useRef<string[]>([]);
   const [chartInterval, setChartInterval] = useState<ChartInterval>("day");
 
   // 차트
@@ -415,7 +438,7 @@ export function TickerDetailManager({
     setHoldingsError(null);
     if (matches.length > 1) {
       setSelectedTicker(null);
-      setError(`동일한 티커 ${qTicker}가 여러 종목 타입에 등록되어 있습니다.`);
+      setError(`동일한 티커 ${qTicker}가 여러 종목풀에 등록되어 있습니다.`);
       return;
     }
 
@@ -437,6 +460,7 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
+    setAddingUsTickers([]);
     setCrosshairInfo(null);
     setChartBadges([]);
 
@@ -482,12 +506,60 @@ export function TickerDetailManager({
     }
   }
 
+  useEffect(() => {
+    addingUsTickersRef.current = addingUsTickers;
+    holdingsGridApiRef.current?.refreshCells({
+      force: true,
+      columns: ["ticker"],
+    });
+  }, [addingUsTickers]);
+
   // --- 핸들러 ---
+
+  async function handleAddUsTicker(row: TickerHoldingRow) {
+    const ticker = String(row.ticker || "").trim().toUpperCase();
+    if (!ticker) {
+      return;
+    }
+    setAddingUsTickers((current) => (
+      current.includes(ticker) ? current : [...current, ticker]
+    ));
+    try {
+      await addStockCandidate("us", ticker, 1);
+      setHoldings((current) =>
+        current.map((row) =>
+          row.ticker === ticker
+            ? { ...row, in_us_pool: true }
+            : row,
+        ),
+      );
+      toast.success(`${ticker}를 미국 종목풀의 1. 모멘텀에 추가하였습니다.`);
+    } catch (addError) {
+      const message = addError instanceof Error ? addError.message : "미국 종목풀 추가에 실패했습니다.";
+      if (message.includes("이미 등록된 종목입니다.")) {
+        setHoldings((current) =>
+          current.map((row) =>
+            row.ticker === ticker
+              ? { ...row, in_us_pool: true }
+              : row,
+          ),
+        );
+        toast.success(`${ticker}를 미국 종목풀의 1. 모멘텀에 추가하였습니다.`);
+        return;
+      }
+      toast.error(`${ticker} 미국 종목풀 추가에 실패했습니다. ${message}`);
+    } finally {
+      setAddingUsTickers((current) => current.filter((item) => item !== ticker));
+    }
+  }
 
   // --- 차트 관련 ---
 
   const selectedCountryCode = selectedTicker?.country_code ?? "kor";
-  const priceDigits = selectedTicker?.country_code === "au" ? 2 : 0;
+  const priceDigits =
+    selectedTicker?.country_code === "au" || selectedTicker?.country_code === "us"
+      ? 2
+      : 0;
   const priceMinMove = priceDigits > 0 ? 0.01 : 1;
 
   const chartRows = useMemo(() => {
@@ -784,10 +856,48 @@ export function TickerDetailManager({
         {
           field: "ticker",
           headerName: "종목코드",
-          minWidth: 92,
-          width: 92,
+          minWidth: 120,
+          width: 120,
           cellClass: "tickerDetailCodeCell",
           cellStyle: { fontWeight: 700 },
+          cellRenderer: (params: { value: string; data?: TickerHoldingRow }) => {
+            const ticker = String(params.value ?? "").trim();
+            const row = params.data;
+            const isUsCandidate = Boolean(row?.is_us_pool_candidate);
+            const inUsPool = Boolean(row?.in_us_pool);
+
+            return (
+              <div className="tickerDetailCodeContent">
+                <span className="tickerDetailCodeText">{ticker || "-"}</span>
+                {isUsCandidate ? (
+                  inUsPool ? (
+                    <span className="tickerDetailPoolState is-done" title="미국 종목풀에 이미 등록됨" aria-label="미국 종목풀 등록 완료">
+                      <IconCheck size={14} stroke={2.2} />
+                    </span>
+                  ) : addingUsTickersRef.current.includes(ticker) ? (
+                    <span className="tickerDetailPoolState is-loading" title="미국 종목풀 추가 중" aria-label="미국 종목풀 추가 중">
+                      <span className="spinner-border spinner-border-sm" />
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="tickerDetailPoolState is-add"
+                      title="미국 종목풀에 추가"
+                      aria-label={`${ticker} 미국 종목풀 추가`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (row) {
+                          void handleAddUsTicker(row);
+                        }
+                      }}
+                    >
+                      <IconPlus size={14} stroke={2.2} />
+                    </button>
+                  )
+                ) : null}
+              </div>
+            );
+          },
         },
         {
           field: "name",
@@ -859,15 +969,44 @@ export function TickerDetailManager({
               <>
                 {displayTitle ? (
                   <div className="tickerDetailHero">
-                    <div className="tickerDetailHeroTitle">{displayTitle}</div>
-                    {lastInfo?.close != null ? (
-                      <div className="tickerDetailHeroMeta">
+                    <div className="tickerDetailHeroLeft">
+                      <div className="tickerDetailHeroTitle">{displayTitle}</div>
+                      {lastInfo?.close != null ? (
                         <span className="tickerDetailHeroPrice">{formatTickerPrice(lastInfo.close, selectedCountryCode)}</span>
-                        {lastInfo?.change_pct != null ? (
-                          <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
-                            {formatPercent(lastInfo.change_pct)}
-                          </span>
-                        ) : null}
+                      ) : null}
+                      {lastInfo?.change_pct != null ? (
+                        <span className={`tickerDetailHeroChange ${getSignedClass(lastInfo.change_pct)}`}>
+                          {formatPercent(lastInfo.change_pct)}
+                        </span>
+                      ) : null}
+                    </div>
+                    {rows.length > 0 ? (
+                      <div className="tickerDetailHeroRight">
+                        <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
+                          {[
+                            { value: "day", label: "일" },
+                            { value: "week", label: "주" },
+                            { value: "month", label: "월" },
+                          ].map((option) => (
+                            <button
+                              key={option.value}
+                              type="button"
+                              className={chartInterval === option.value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                              onClick={() => setChartInterval(option.value as ChartInterval)}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                        <span style={{ fontSize: 12, color: "#5b6778", fontWeight: 600 }}>이동평균선</span>
+                        {MA_PERIODS.map((ma) => (
+                          chartRows.length >= ma.period ? (
+                            <span key={ma.period} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
+                              <span style={{ width: 14, height: 2, backgroundColor: ma.color, display: "inline-block" }} />
+                              <span style={{ color: ma.color, fontWeight: 600 }}>{ma.label}</span>
+                            </span>
+                          ) : null
+                        ))}
                       </div>
                     ) : null}
                   </div>
@@ -880,48 +1019,7 @@ export function TickerDetailManager({
                   </div>
                 ) : rows.length > 0 ? (
                   <div style={{ flexShrink: 0 }}>
-                    <div style={{ display: "flex", gap: 12, padding: "8px 16px 0", flexWrap: "wrap", alignItems: "center" }}>
-                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
-                        {[
-                          { value: "day", label: "일" },
-                          { value: "week", label: "주" },
-                          { value: "month", label: "월" },
-                        ].map((option) => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={chartInterval === option.value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                            onClick={() => setChartInterval(option.value as ChartInterval)}
-                          >
-                            {option.label}
-                          </button>
-                        ))}
-                      </div>
-                      <span style={{ fontSize: 12, color: "#5b6778", fontWeight: 600 }}>이동평균선</span>
-                      {MA_PERIODS.map((ma) => (
-                        chartRows.length >= ma.period ? (
-                          <span key={ma.period} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                            <span style={{ width: 14, height: 2, backgroundColor: ma.color, display: "inline-block" }} />
-                            <span style={{ color: ma.color, fontWeight: 600 }}>{ma.label}</span>
-                          </span>
-                        ) : null
-                      ))}
-                    </div>
                     <div className={selectedCountryCode === "kor" ? "tickerDetailTopGrid" : ""}>
-                      <div className="tickerDetailChartWrap">
-                        <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
-                        {chartBadges.map((badge, index) => (
-                          <div
-                            key={`${badge.tone}-${index}`}
-                            className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
-                            style={{ left: badge.left, top: badge.top }}
-                          >
-                            {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
-                            <span className="tickerDetailChartBadgeText">{badge.text}</span>
-                            {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
-                          </div>
-                        ))}
-                      </div>
                       {selectedCountryCode === "kor" ? (
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
@@ -936,7 +1034,13 @@ export function TickerDetailManager({
                                 columnDefs={holdingColumns}
                                 loading={loading}
                                 theme={gridTheme}
-                                gridOptions={{ suppressMovableColumns: true }}
+                                gridOptions={{
+                                  suppressMovableColumns: true,
+                                  getRowId: (params) => String(params.data.id),
+                                  onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
+                                    holdingsGridApiRef.current = event.api;
+                                  },
+                                }}
                               />
                             </div>
                           ) : (
@@ -946,6 +1050,20 @@ export function TickerDetailManager({
                           )}
                         </div>
                       ) : null}
+                      <div className="tickerDetailChartWrap">
+                        <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                        {chartBadges.map((badge, index) => (
+                          <div
+                            key={`${badge.tone}-${index}`}
+                            className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
+                            style={{ left: badge.left, top: badge.top }}
+                          >
+                            {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
+                            <span className="tickerDetailChartBadgeText">{badge.text}</span>
+                            {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : null}

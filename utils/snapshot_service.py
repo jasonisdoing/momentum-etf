@@ -135,6 +135,11 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
         global_valuation += acc_valuation
         global_purchase += acc_purchase
 
+        # intl_shares_value 로드 (호주 계좌)
+        intl_shares_value = None
+        if aid == "aus_account" and m_data:
+            intl_shares_value = normalize_number(m_data.get("intl_shares_value"))
+
         # 계좌별 개별 스냅샷 저장 데이터 구성
         account_summaries.append({
             "account_id": aid,
@@ -145,7 +150,8 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             "cash_currency": cash_currency,
             "valuation_krw": acc_valuation,
             "purchase_amount": acc_purchase,
-            "holding_details": holding_details
+            "holding_details": holding_details,
+            "intl_shares_value": intl_shares_value,
         })
 
         # DB에 개별 계좌 데이터로 먼저 저장 (save_daily_snapshot 호출)
@@ -159,6 +165,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             holding_details=holding_details,
             cash_balance_native=cash_balance_native if cash_currency and cash_currency != "KRW" else None,
             cash_currency=cash_currency if cash_currency and cash_currency != "KRW" else None,
+            intl_shares_value=intl_shares_value,
         )
 
     # 전체 통합 데이터 저장

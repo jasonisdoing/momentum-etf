@@ -239,6 +239,14 @@ a {
   color: inherit;
 }
 
+.appSidebarEmojiIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
 .appSidebarItem .nav-link-title {
   display: block;
   flex: 1 1 auto;
@@ -1750,10 +1758,24 @@ a {
 
 .tickerDetailHero {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.25rem 1rem 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailHeroLeft {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailHeroRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
@@ -1837,6 +1859,56 @@ a {
   display: block;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.tickerDetailCodeContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.tickerDetailCodeText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tickerDetailPoolState {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  background: transparent;
+  flex: 0 0 auto;
+}
+
+.tickerDetailPoolState.is-done {
+  color: #16a34a;
+}
+
+.tickerDetailPoolState.is-add {
+  color: #206bc4;
+}
+
+.tickerDetailPoolState.is-add:hover {
+  background: rgba(32, 107, 196, 0.08);
+}
+
+.tickerDetailPoolState.is-loading {
+  color: #64748b;
+}
+
+.tickerDetailPoolState.is-loading .spinner-border {
+  width: 0.8rem;
+  height: 0.8rem;
+  border-width: 0.12rem;
 }
 
 .tickerDetailHoldingsEmpty {
@@ -2142,11 +2214,17 @@ a {
   gap: 0.5rem;
   padding: 0.75rem;
   background: #f8fbff;
+  overflow: hidden;
 }
 
 .assetsDetailGridWrap {
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
+}
+
+.assetsChildAgGrid .ag-body-vertical-scroll {
+  display: none !important;
 }
 
 .assetsChildAgGrid .ag-cell-value,
@@ -2170,13 +2248,13 @@ a {
 }
 
 .assetsChildAgGrid .assetsTickerLink {
-  color: #206bc4;
+  color: inherit;
   text-decoration: none;
 }
 
 .assetsChildAgGrid .assetsTickerLink:hover {
-  color: #174f96;
-  text-decoration: underline;
+  color: inherit;
+  text-decoration: none;
 }
 
 .rankAgGrid .ag-cell.rankBucketCell {
@@ -2447,6 +2525,17 @@ a {
 
 .assetsInlineLinkButton {
   font-size: 0.82rem;
+}
+
+.assetsMoveLinkButton {
+  color: #206bc4;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.assetsMoveLinkButton:hover {
+  color: #174e95;
+  text-decoration: underline;
 }
 
 .rankNegativeTrendRow {

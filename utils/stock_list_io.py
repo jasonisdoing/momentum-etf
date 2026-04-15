@@ -78,13 +78,19 @@ def _invalidate_cache(ticker_type: str | None = None) -> None:
         _LISTING_CACHE.clear()
 
 
+# 외부 모듈(예: stocks_service)에서 stock_meta 를 직접 갱신한 뒤 호출할 수 있도록
+# 공개 alias 를 제공한다.
+def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
+    _invalidate_cache(ticker_type)
+
+
 # ---------------------------------------------------------------------------
 # 내부 로드 (캐시 적용)
 # ---------------------------------------------------------------------------
 
 
 def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
-    """DB에서 해당 종목 타입의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
+    """DB에서 해당 종목풀의 활성(is_deleted!=True) 종목 메타데이터를 로드한다 (TTL 캐시 적용)."""
     type_norm = (ticker_type or "").strip().lower()
     cached = _TICKER_TYPE_STOCKS_CACHE.get(type_norm)
     if cached is not None:

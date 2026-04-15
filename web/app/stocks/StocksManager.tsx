@@ -3,6 +3,7 @@
 import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
@@ -36,8 +37,6 @@ type RankRow = {
   순번: string;
   순위: number | null;
   이전순위: number | null;
-  추천: string | null;
-  추천요약: string | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -69,6 +68,7 @@ type RankRow = {
   배당률: number | null;
   보수: number | null;
   순자산총액: number | null;
+  "전일 거래량(주)": number | null;
 };
 
 type RankResponse = {
@@ -148,6 +148,7 @@ type RankHeaderSummary = {
 };
 
 let rankToolbarCache: RankToolbarCache | null = null;
+const HELD_BONUS_SCORE_STORAGE_KEY = "stocks-held-bonus-score";
 
 function getTodayDateInputValue(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
@@ -241,7 +242,32 @@ function formatAssetInEok(value: number | null): string {
   return `${formatNumber(value / 100_000_000, 0)}억`;
 }
 
+function clampHeldBonusScore(value: number): number {
+  if (Number.isNaN(value) || value < 0) {
+    return 0;
+  }
+  if (value > 50) {
+    return 50;
+  }
+  return Math.round(value / 5) * 5;
+}
+
+function readHeldBonusScore(): number {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  return clampHeldBonusScore(Number(window.localStorage.getItem(HELD_BONUS_SCORE_STORAGE_KEY) ?? "0"));
+}
+
+function writeHeldBonusScore(value: number): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(HELD_BONUS_SCORE_STORAGE_KEY, String(clampHeldBonusScore(value)));
+}
+
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
+  const router = useRouter();
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -254,7 +280,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
-  const [dedupeEnabled, setDedupeEnabled] = useState(false);
+  const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -265,6 +291,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
   const [addingRow, setAddingRow] = useState<RankAddingRowState | null>(null);
+  const [addingTickerDraft, setAddingTickerDraft] = useState("");
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
@@ -321,6 +348,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ma_months_max: payload.ma_months_max ?? 12,
       };
       setAddingRow(null);
+      setAddingTickerDraft("");
       setDirtyRowIds([]);
       setDirtyCellKeys([]);
       setSelectedTickers([]);
@@ -333,7 +361,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setMissingTickerLabels(payload.missing_ticker_labels ?? []);
       setStaleTickers(payload.stale_tickers ?? []);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.");
+      let msg = loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.";
+      if (msg.includes("Unexpected token") || msg.includes("fetch failed") || msg === "순위 데이터를 불러오지 못했습니다.") {
+        msg = "몽고디비 데이터베이스 응답 지연(타임아웃)으로 인해 순위 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+      }
+      setError(msg);
+      if (msg.includes("몽고디비 데이터베이스")) {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("db_error_occurred"));
+        }
+      }
     } finally {
       setLoading(false);
     }
@@ -342,6 +379,27 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   useEffect(() => {
     void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
+
+  useEffect(() => {
+    setHeldBonusScore(readHeldBonusScore());
+  }, []);
+
+  function handleHeldBonusScoreChange(nextValue: number) {
+    const normalized = clampHeldBonusScore(nextValue);
+    setHeldBonusScore(normalized);
+    writeHeldBonusScore(normalized);
+  }
+
+  const moveToTickerDetail = useMemo(
+    () => (ticker: string | null | undefined) => {
+      const normalizedTicker = String(ticker ?? "-").trim().toUpperCase();
+      if (!normalizedTicker || normalizedTicker === "-") {
+        return;
+      }
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
+    },
+    [router],
+  );
 
   const selectedTickerTypeItem = useMemo(
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
@@ -357,20 +415,47 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     [rows],
   );
 
-  const filteredGridRows = useMemo(
-    () =>
-      gridRows.filter((row) => {
-        if (dedupeEnabled && String(row.추천 ?? "").trim()) {
-          return false;
+  const rankedGridRows = useMemo<RankGridRow[]>(() => {
+    if (heldBonusScore <= 0) {
+      return gridRows;
+    }
+
+    return [...gridRows]
+      .map((row, index) => {
+        const baseScore = typeof row.점수 === "number" ? row.점수 : null;
+        const isHeld = String(row.보유 ?? "").trim() !== "";
+        return {
+          ...row,
+          __baseIndex: index,
+          점수: baseScore === null ? null : Number((baseScore + (isHeld ? heldBonusScore : 0)).toFixed(1)),
+        };
+      })
+      .sort((left, right) => {
+        const leftScore = typeof left.점수 === "number" ? left.점수 : null;
+        const rightScore = typeof right.점수 === "number" ? right.점수 : null;
+        if (leftScore === null && rightScore === null) {
+          return Number(left.__baseIndex ?? 0) - Number(right.__baseIndex ?? 0);
         }
-        return true;
-      }),
-    [gridRows, dedupeEnabled],
-  );
+        if (leftScore === null) {
+          return 1;
+        }
+        if (rightScore === null) {
+          return -1;
+        }
+        if (rightScore !== leftScore) {
+          return rightScore - leftScore;
+        }
+        return Number(left.__baseIndex ?? 0) - Number(right.__baseIndex ?? 0);
+      })
+      .map((row, index) => ({
+        ...row,
+        순위: index + 1,
+      }));
+  }, [gridRows, heldBonusScore]);
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     if (pageMode !== "manage" || !addingRow) {
-      return filteredGridRows;
+      return pageMode === "rank" ? rankedGridRows : gridRows;
     }
     return [
       {
@@ -379,8 +464,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순번: "-",
         순위: null,
         이전순위: null,
-        추천: null,
-        추천요약: null,
         버킷: getBucketName(addingRow.bucket),
         bucket: addingRow.bucket,
         티커: addingRow.ticker,
@@ -412,10 +495,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         배당률: null,
         보수: null,
         순자산총액: null,
+        "전일 거래량(주)": null,
       },
-      ...filteredGridRows,
+      ...gridRows,
     ];
-  }, [addingRow, filteredGridRows, pageMode]);
+  }, [addingRow, gridRows, pageMode, rankedGridRows]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -427,8 +511,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "순위",
         headerName: "순위",
-        minWidth: 72,
-        width: 72,
+        minWidth: 52,
+        width: 52,
         cellStyle: { textAlign: "center" },
         cellRenderer: (params: { value: number | null | undefined }) => {
           return (
@@ -468,30 +552,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        field: "추천요약",
-        headerName: "중복",
-        minWidth: 92,
-        width: 92,
-        sortable: false,
-        cellStyle: { textAlign: "center" },
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = String(params.value ?? "").trim();
-          if (!value) {
-            return "";
-          }
-          return (
-            <span style={{ color: "#182433", fontWeight: 400 }} title={value}>
-              {value}
-            </span>
-          );
-        },
-      },
-      {
         field: "버킷",
         headerName: "버킷",
         minWidth: 108,
         width: 108,
-        sortable: false,
+        sortable: true,
+        comparator: (_a, _b, nodeA, nodeB) => {
+          const aId = Number(nodeA.data?.bucket ?? 0);
+          const bId = Number(nodeB.data?.bucket ?? 0);
+          return aId - bId;
+        },
         cellClass: (params) => {
           const dirtyClass =
             params.data && dirtyCellKeys.includes(buildDirtyCellKey(params.data.id, "버킷")) ? " rankDirtyCell" : "";
@@ -552,24 +622,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  value={addingRow?.ticker ?? ""}
-                  onChange={(event) =>
-                    setAddingRow((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            ticker: event.target.value,
-                            name: "",
-                            listing_date: "-",
-                            status: null,
-                            is_validated: false,
-                          }
-                        : null,
-                    )
-                  }
+                  value={addingTickerDraft}
+                  onChange={(event) => setAddingTickerDraft(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
-                      void handleValidateAddingTicker();
+                      void handleValidateAddingTicker(event.currentTarget.value);
                     }
                   }}
                 />
@@ -577,11 +634,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          const href = `/ticker?ticker=${encodeURIComponent(value)}`;
           return (
-            <a href={href} className="appCodeText" style={{ color: "#206bc4", textDecoration: "none" }}>
+            <button
+              type="button"
+              className="appCodeText"
+              style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
+              onClick={() => moveToTickerDetail(value)}
+            >
               {value}
-            </a>
+            </button>
           );
         },
       },
@@ -592,13 +653,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         flex: 1.2,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
+            const draftTicker = normalizeTicker(addingTickerDraft);
+            const validatedTicker = normalizeTicker(addingRow?.ticker ?? "");
+            const isDraftDirty = Boolean(draftTicker) && draftTicker !== validatedTicker;
             if (addingRow?.is_validating) {
               return <span className="text-muted">티커 확인 중...</span>;
             }
-            if (addingRow?.status === "active") {
+            if (!isDraftDirty && addingRow?.status === "active") {
               return <span className="text-danger fw-bold">이미 등록된 종목입니다.</span>;
             }
-            if (addingRow?.is_validated) {
+            if (!isDraftDirty && addingRow?.is_validated) {
               return (
                 <span className="rankNameCellText fw-semibold" title={addingRow.name}>
                   {addingRow.name}
@@ -611,8 +675,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <button
                   className="btn btn-outline-primary btn-sm"
                   type="button"
-                  onClick={() => void handleValidateAddingTicker()}
-                  disabled={!addingRow?.ticker.trim() || addingRow?.is_validating}
+                  onClick={() => void handleValidateAddingTicker(addingTickerDraft)}
+                  disabled={!addingTickerDraft.trim() || addingRow?.is_validating}
                 >
                   확인
                 </button>
@@ -620,20 +684,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          const ticker = params.data?.티커 ?? "";
-          const href = `/ticker?ticker=${encodeURIComponent(ticker)}`;
-          return (
-            <a href={href} className="rankNameCellText" style={{ color: "inherit", textDecoration: "none" }} title={value}>
-              {value}
-            </a>
-          );
+          return <span className="rankNameCellText" title={value}>{value}</span>;
         },
       },
       {
         field: "현재가",
         headerName: "현재가",
-        minWidth: 110,
-        width: 110,
+        minWidth: 88,
+        width: 88,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
           formatNumber(params.value ?? null, selectedTickerTypeItem?.country_code === "au" ? 2 : 0),
@@ -662,8 +720,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ({
             field: rule.score_column,
             headerName: `추세${rule.order}`,
-            minWidth: 112,
-            width: 112,
+            minWidth: 72,
+            width: 72,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
@@ -691,8 +749,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "고점",
         headerName: "고점",
-        minWidth: 92,
-        width: 92,
+        minWidth: 80,
+        width: 80,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => {
           const value = params.value ?? null;
@@ -770,25 +828,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ),
     ];
 
-    const duplicateColumn: ColDef<RankGridRow> = {
-      field: "추천",
-      headerName: "중복상세",
-      minWidth: 340,
-      width: 340,
-      sortable: false,
-      cellRenderer: (params: { value: string | null | undefined }) => {
-        const value = String(params.value ?? "").trim();
-        if (!value) {
-          return "";
-        }
-        return (
-          <span className="rankNameCellText" style={{ color: "#d63939", fontWeight: 700 }} title={value}>
-            {value}
-          </span>
-        );
-      },
-    };
-
     const monthlyColumns: ColDef<RankGridRow>[] = monthlyReturnLabels.map(
       (label) =>
         ({
@@ -815,8 +854,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ({
             field: rule.score_column,
             headerName: `추세${rule.order}`,
-            minWidth: 112,
-            width: 112,
+            minWidth: 72,
+            width: 72,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
@@ -849,6 +888,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: number | null | undefined }) => formatAssetInEok(params.value ?? null),
       },
       {
+        field: "거래량",
+        headerName: "거래량",
+        minWidth: 100,
+        width: 100,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 0),
+      },
+      {
         field: "상장일",
         headerName: "상장일",
         minWidth: 110,
@@ -860,12 +907,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     return [
       ...leadingColumns,
       ...(metricMode === "cumulative"
-        ? [...cumulativeColumns, duplicateColumn]
+        ? cumulativeColumns
         : metricMode === "monthly"
-          ? [...monthlyLeadingColumns, ...monthlyColumns, duplicateColumn]
-          : [...monthlyLeadingColumns, ...infoColumns, duplicateColumn]),
+          ? [...monthlyLeadingColumns, ...monthlyColumns]
+          : [...monthlyLeadingColumns, ...infoColumns]),
     ];
-  }, [addingRow, dirtyCellKeys, maRules, metricMode, monthlyReturnLabels, pageMode, selectedTickerType, selectedTickerTypeItem?.country_code]);
+  }, [
+    addingRow,
+    addingTickerDraft,
+    dirtyCellKeys,
+    maRules,
+    metricMode,
+    monthlyReturnLabels,
+    pageMode,
+    selectedTickerType,
+    selectedTickerTypeItem?.country_code,
+  ]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
@@ -898,6 +955,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     if (addingRow) {
       return;
     }
+    setAddingTickerDraft("");
     setAddingRow({
       ticker: "",
       name: "",
@@ -930,8 +988,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setDirtyCellKeys((prev) => (prev.includes(dirtyCellKey) ? prev : [...prev, dirtyCellKey]));
   }
 
-  async function handleValidateAddingTicker() {
-    const ticker = normalizeTicker(addingRow?.ticker ?? "");
+  async function handleValidateAddingTicker(tickerInput?: string) {
+    const ticker = normalizeTicker(tickerInput ?? addingTickerDraft ?? addingRow?.ticker ?? "");
     if (!ticker || !selectedTickerType || !addingRow || addingRow.is_validating) {
       return;
     }
@@ -939,6 +997,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     try {
       setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
       const validated = await validateStockCandidate(selectedTickerType, ticker);
+      setAddingTickerDraft(normalizeTicker(validated.ticker));
       setAddingRow((prev) =>
         prev
           ? {
@@ -963,6 +1022,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         prev
           ? {
               ...prev,
+              ticker,
               is_validating: false,
               is_validated: false,
             }
@@ -1080,8 +1140,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
-    const totalCount = filteredGridRows.length;
-    const upCount = filteredGridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
+    const totalCount = gridRows.length;
+    const upCount = gridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
     return {
       upCount,
@@ -1089,7 +1149,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       totalCount,
       ruleSummary: maRuleSummary.join(" / ") || "-",
     };
-  }, [filteredGridRows, maRuleSummary]);
+  }, [gridRows, maRuleSummary]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(headerSummary);
@@ -1119,7 +1179,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   />
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목 타입</span>
+                  <span className="appLabeledFieldLabel">종목풀</span>
                   <select
                     className="form-select"
                     value={selectedTickerType}
@@ -1127,7 +1187,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     disabled={ticker_types.length === 0}
                   >
                     {ticker_types.length === 0 ? (
-                      <option value="">종목 타입 불러오는 중...</option>
+                      <option value="">종목풀 불러오는 중...</option>
                     ) : (
                       ticker_types.map((account) => (
                         <option key={account.ticker_type} value={account.ticker_type}>
@@ -1190,46 +1250,47 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </label>
                     ))}
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">수익률 보기</span>
-                      <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="수익률 보기 방식">
-                        <button
-                          type="button"
-                          className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode("cumulative")}
-                        >
-                          누적
-                        </button>
-                        <button
-                          type="button"
-                          className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode("monthly")}
-                        >
-                          월별
-                        </button>
-                        <button
-                          type="button"
-                          className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                          onClick={() => setMetricMode("info")}
-                        >
-                          정보
-                        </button>
-                      </div>
-                    </label>
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">중복제거</span>
-                      <span className="rankSwitchField">
-                        <label className="form-check form-switch mb-0 rankSwitchFieldInner">
-                          <input
-                            className="form-check-input"
-                            type="checkbox"
-                            checked={dedupeEnabled}
-                            onChange={(event) => setDedupeEnabled(event.target.checked)}
-                          />
-                        </label>
-                      </span>
+                      <span className="appLabeledFieldLabel">보유종목점수</span>
+                      <select
+                        className="form-select"
+                        value={String(heldBonusScore)}
+                        onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
+                      >
+                        {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
+                          <option key={score} value={score}>
+                            {score}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </>
                 ) : null}
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">컬럼</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
+                    <button
+                      type="button"
+                      className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("cumulative")}
+                    >
+                      누적
+                    </button>
+                    <button
+                      type="button"
+                      className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("monthly")}
+                    >
+                      월별
+                    </button>
+                    <button
+                      type="button"
+                      className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                      onClick={() => setMetricMode("info")}
+                    >
+                      정보
+                    </button>
+                  </div>
+                </label>
               </div>
             </div>
           </div>

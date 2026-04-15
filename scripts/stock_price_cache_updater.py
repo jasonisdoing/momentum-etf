@@ -17,7 +17,7 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.cache_utils import get_cached_date_range
+from utils.cache_utils import get_cached_date_range, set_cache_refresh_completed_at
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
@@ -102,7 +102,7 @@ def refresh_cache_for_target(
         else:
             country_code = "kor"
     except Exception:
-        logger.warning(f"대상 종목 타입 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
+        logger.warning(f"대상 종목풀 설정을 불러올 수 없어 기본 국가코드(kor)를 사용합니다: {target_norm}")
         country_code = "kor"
 
     logger.info("[%s] 캐시 갱신 시작 (국가설정: %s, 시작일: %s)", target_norm.upper(), country_code, start_date)
@@ -179,7 +179,7 @@ def refresh_cache_for_target(
             str(item.get("ticker") or "").strip().upper(): item for item in all_etfs_from_file if item.get("ticker")
         }
 
-        # 종목 타입 실행 시 해당 타입의 모든 종목 반영
+        # 종목풀 실행 시 해당 종목풀의 모든 종목 반영
         if target_norm in list_available_ticker_types():
             pass # get_all_etfs_including_deleted가 이미 수행함
             holdings = _collect_portfolio_master_holdings(target_norm)
@@ -283,9 +283,11 @@ def refresh_cache_for_target(
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
 
+        set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
+
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
-    """해당 종목 타입 설정에 정의된 벤치마크 티커들을 수집합니다."""
+    """해당 종목풀 설정에 정의된 벤치마크 티커들을 수집합니다."""
     tickers = set()
 
     try:
@@ -367,7 +369,7 @@ def main():
         if target in available_types:
             targets_to_update = [target]
         else:
-            logger.error(f"Target '{target}' is not a valid ticker type ID.")
+            logger.error(f"Target '{target}' is not a valid ticker pool ID.")
             return
 
     if not targets_to_update:

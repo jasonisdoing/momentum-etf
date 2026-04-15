@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
@@ -63,7 +63,7 @@ const navGroups = [
     id: "info",
     title: "정보",
     icon: IconTrendingUp,
-    items: [{ href: "/market", label: "ETF 마켓", icon: IconTrendingUp }],
+    items: [{ href: "/market", label: "ETF 마켓", icon: "🇰🇷" }],
   },
   {
     id: "system",
@@ -172,57 +172,84 @@ export function AppShell({ children }: AppShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
+  const [isDbError, setIsDbError] = useState(false);
   const isLoginPage = pathname === "/login";
 
-  useEffect(() => {
+  const loadTopBarData = useCallback(async () => {
     if (isLoginPage) {
       return;
     }
 
-    let alive = true;
+    try {
+      setIsFxLoading(true);
+      setIsFearGreedLoading(true);
+      setIsVkospiLoading(true);
 
-    async function loadFx() {
+      const [fxResponse, fearGreedSummary, vkospiResponse] = await Promise.all([
+        fetch("/api/fx", { cache: "no-store" }),
+        loadFearGreedSummary().catch(() => null),
+        fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
+      ]);
+
+      const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
+      const vkospiPayload = vkospiResponse?.ok ? ((await vkospiResponse.json()) as VkospiSummary) : null;
+
+      setFx(payload);
+      setIsFxLoading(false);
+      setFearGreed(fearGreedSummary);
+      setIsFearGreedLoading(false);
+      setVkospi(vkospiPayload);
+      setIsVkospiLoading(false);
+    } catch {
+      setFx(null);
+      setIsFxLoading(false);
+      setFearGreed(null);
+      setIsFearGreedLoading(false);
+      setVkospi(null);
+      setIsVkospiLoading(false);
+    }
+  }, [isLoginPage]);
+
+  useEffect(() => {
+    void loadTopBarData();
+
+    function handlePageShow() {
+      void loadTopBarData();
+    }
+
+    window.addEventListener("pageshow", handlePageShow);
+    return () => {
+      window.removeEventListener("pageshow", handlePageShow);
+    };
+  }, [loadTopBarData]);
+
+  useEffect(() => {
+    if (isLoginPage) return;
+
+    const errorHandler = () => {
+      setIsDbError(true);
+    };
+
+    window.addEventListener("db_error_occurred", errorHandler);
+
+    return () => {
+      window.removeEventListener("db_error_occurred", errorHandler);
+    };
+  }, [isLoginPage]);
+
+  useEffect(() => {
+    if (isLoginPage) return;
+
+    async function checkHealth() {
       try {
-        if (alive) {
-          setIsFxLoading(true);
-        }
-        if (alive) {
-          setIsFearGreedLoading(true);
-          setIsVkospiLoading(true);
-        }
-        const [fxResponse, fearGreedSummary, vkospiResponse] = await Promise.all([
-          fetch("/api/fx", { cache: "no-store" }),
-          loadFearGreedSummary().catch(() => null),
-          fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
-        ]);
-
-        const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
-        const vkospiPayload = vkospiResponse?.ok ? ((await vkospiResponse.json()) as VkospiSummary) : null;
-
-        if (alive) {
-          setFx(payload);
-          setIsFxLoading(false);
-          setFearGreed(fearGreedSummary);
-          setIsFearGreedLoading(false);
-          setVkospi(vkospiPayload);
-          setIsVkospiLoading(false);
-        }
+        const res = await fetch("/api/health", { cache: "no-store" });
+        setIsDbError(!res.ok);
       } catch {
-        if (alive) {
-          setFx(null);
-          setIsFxLoading(false);
-          setFearGreed(null);
-          setIsFearGreedLoading(false);
-          setVkospi(null);
-          setIsVkospiLoading(false);
-        }
+        setIsDbError(true);
       }
     }
 
-    loadFx();
-    return () => {
-      alive = false;
-    };
+    void checkHealth();
   }, [isLoginPage]);
 
   useEffect(() => {
@@ -315,7 +342,11 @@ export function AppShell({ children }: AppShellProps) {
                   <div key={item.href} className="nav-item appSidebarItem">
                     <Link href={item.href} className={isActive ? "nav-link active" : "nav-link"}>
                       <span className="appSidebarIcon" aria-hidden="true">
-                        <Icon size={18} stroke={1.9} />
+                        {typeof Icon === "string" ? (
+                          <span className="appSidebarEmojiIcon">{Icon}</span>
+                        ) : (
+                          <Icon size={18} stroke={1.9} />
+                        )}
                       </span>
                       <span className="nav-link-title">{item.label}</span>
                     </Link>
@@ -375,6 +406,11 @@ export function AppShell({ children }: AppShellProps) {
               </Link>
             </div>
             <div className="topbarFx">
+              {isDbError && (
+                <span className="topbarFxItem" style={{ color: "#e03131", fontWeight: 600, background: "#ffe3e3", padding: "2px 8px", borderRadius: "4px" }}>
+                  ⚠️ 몽고디비 이슈
+                </span>
+              )}
               <span className="topbarFxItem topbarTickerSearchItem">
                 <GlobalTickerSearch />
               </span>

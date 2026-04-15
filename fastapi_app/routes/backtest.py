@@ -37,6 +37,7 @@ class BacktestSavePayload(BaseModel):
     slippage_pct: float = 0.5
     benchmark: BacktestTickerPayload | None = None
     groups: list[BacktestGroupPayload]
+    rebalance_freq: str = "monthly"
 
 
 class BacktestValidatePayload(BaseModel):
@@ -54,6 +55,7 @@ class BacktestRunPayload(BaseModel):
     benchmark: BacktestTickerPayload | None = None
     groups: list[BacktestGroupPayload]
     country_code: str = "kor"
+    rebalance_freq: str = "monthly"
 
 
 @router.get("")
@@ -74,6 +76,7 @@ def post_backtest_config(payload: BacktestSavePayload, _: None = Depends(require
         payload.slippage_pct,
         payload.benchmark.model_dump() if payload.benchmark else None,
         [group.model_dump() for group in payload.groups],
+        payload.rebalance_freq,
     )
 
 
@@ -85,6 +88,7 @@ def post_run_backtest(payload: BacktestRunPayload, _: None = Depends(require_int
         benchmark=payload.benchmark.model_dump() if payload.benchmark else None,
         groups=[group.model_dump() for group in payload.groups],
         country_code=payload.country_code,
+        rebalance_freq=payload.rebalance_freq,
     )
 
 

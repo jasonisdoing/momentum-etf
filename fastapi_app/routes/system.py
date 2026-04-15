@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
-from utils.system_service import SystemAction, load_system_data, trigger_system_action
+from utils.system_service import (
+    BatchAlreadyRunningError,
+    SystemAction,
+    load_system_data,
+    trigger_system_action,
+)
 
 router = APIRouter(prefix="/internal/system", tags=["system"])
 
@@ -20,4 +25,7 @@ def get_system_data(_: None = Depends(require_internal_token)) -> dict[str, obje
 
 @router.post("")
 def post_system_action(payload: SystemActionRequest, _: None = Depends(require_internal_token)) -> dict[str, str]:
-    return {"message": trigger_system_action(payload.action)}
+    try:
+        return {"message": trigger_system_action(payload.action)}
+    except BatchAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

@@ -6,6 +6,7 @@
 
 - `zcountry/kor/market_calendars.json`
 - `zcountry/au/market_calendars.json`
+- `zcountry/us/market_calendars.json`
 
 ## 현재 범위
 

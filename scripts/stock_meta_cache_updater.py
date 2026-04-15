@@ -1,5 +1,5 @@
 """
-Script to update stock metadata for ticker types.
+Script to update stock metadata for ticker pools.
 Usage:
   python scripts/stock_meta_cache_updater.py
   python scripts/stock_meta_cache_updater.py <ticker_type>
@@ -20,7 +20,7 @@ from utils.stock_meta_updater import update_stock_metadata
 
 def main():
     parser = argparse.ArgumentParser(description="Update stock metadata.")
-    parser.add_argument("target", nargs="?", help="Ticker Type ID (optional)")
+    parser.add_argument("target", nargs="?", help="Ticker Pool ID (optional)")
     args = parser.parse_args()
 
     target = (args.target or "").strip().lower()  # None if not provided
@@ -29,10 +29,10 @@ def main():
 
     try:
         if target:
-            logger.info(f"Target ticker type specified: {target}")
+            logger.info(f"Target ticker pool specified: {target}")
             update_stock_metadata(target)
         else:
-            logger.info("No target specified. Updating all configured ticker types.")
+            logger.info("No target specified. Updating all configured ticker pools.")
             update_stock_metadata(None)
 
     except Exception as e:
