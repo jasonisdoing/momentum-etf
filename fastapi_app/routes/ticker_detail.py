@@ -13,6 +13,7 @@ from services.etf_holdings_service import (
     fetch_korean_stock_price_snapshot,
 )
 from services.price_service import get_realtime_snapshot
+from services.price_service import get_realtime_snapshot_meta
 from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
@@ -226,23 +227,33 @@ def get_ticker_search_data(
         ticker_type_name = str(config.get("name") or ticker_type).strip()
         etfs = get_etfs(ticker_type)
         tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")]
-        completed_at = get_cache_refresh_completed_at(ticker_type)
-        if completed_at is not None:
-            close_series_map = load_cached_close_series_bulk_before_or_at_with_fallback(
-                ticker_type,
-                tickers,
-                completed_at,
-            )
-            updated_at_map = load_cached_updated_at_bulk_before_or_at_with_fallback(
-                ticker_type,
-                tickers,
-                completed_at,
-            )
-            type_updated_at = completed_at
+        realtime_snapshot_map: dict[str, dict[str, float]] = {}
+        type_updated_at: datetime | None = None
+
+        if country_code in {"kor", "au"}:
+            realtime_snapshot_map = get_realtime_snapshot(country_code, tickers)
+            realtime_meta = get_realtime_snapshot_meta(country_code, tickers) or {}
+            fetched_at = realtime_meta.get("fetched_at")
+            type_updated_at = fetched_at if isinstance(fetched_at, datetime) else None
+            close_series_map = {}
         else:
-            close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
-            updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
-            type_updated_at = max(updated_at_map.values()) if updated_at_map else None
+            completed_at = get_cache_refresh_completed_at(ticker_type)
+            if completed_at is not None:
+                close_series_map = load_cached_close_series_bulk_before_or_at_with_fallback(
+                    ticker_type,
+                    tickers,
+                    completed_at,
+                )
+                updated_at_map = load_cached_updated_at_bulk_before_or_at_with_fallback(
+                    ticker_type,
+                    tickers,
+                    completed_at,
+                )
+                type_updated_at = completed_at
+            else:
+                close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+                updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
+                type_updated_at = max(updated_at_map.values()) if updated_at_map else None
         ticker_type_items: list[dict[str, object]] = []
 
         if type_updated_at is not None:
@@ -254,7 +265,14 @@ def get_ticker_search_data(
             if not ticker:
                 continue
 
-            current_price, change_pct = _build_price_snapshot(close_series_map.get(ticker))
+            realtime_entry = realtime_snapshot_map.get(ticker) or {}
+            if realtime_entry:
+                now_val = realtime_entry.get("nowVal")
+                change_rate = realtime_entry.get("changeRate")
+                current_price = float(now_val) if now_val is not None else None
+                change_pct = float(change_rate) if change_rate is not None else None
+            else:
+                current_price, change_pct = _build_price_snapshot(close_series_map.get(ticker))
             item = {
                 "ticker": ticker,
                 "name": str(etf.get("name") or "").strip(),
