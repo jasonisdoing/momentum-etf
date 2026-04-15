@@ -48,16 +48,16 @@ type MarketGridRow = MarketRowItem & {
 const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
   인버스: ["인버스"],
   "2X": ["2X"],
-  레버리지: ["레버리지"],
   선물: ["선물"],
   "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
   혼합: ["혼합"],
   리츠: ["리츠"],
+  레버리지: ["레버리지"],
   합성: ["합성"],
   커버드콜: ["커버드콜"],
 };
 
-const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "레버리지", "선물", "채권(모든종류)", "혼합", "리츠"];
+const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "선물", "채권(모든종류)", "혼합", "리츠"];
 
 const marketGridTheme = themeQuartz
   .withPart(iconSetQuartzBold)
