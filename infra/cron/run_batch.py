@@ -44,6 +44,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "asset_summary",
     "market_hours_analysis",
 }
+EXIT_ALREADY_NOTIFIED = 66
 
 
 def _acquire_lock(job_name: str) -> Path:
@@ -157,7 +158,10 @@ def main(argv: list[str]) -> int:
     tail = _format_tail(result.stdout, result.stderr)
     app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
-    should_notify = (not success) or (job_name not in SUCCESS_NOTIFICATION_DISABLED_JOBS)
+    already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
+    should_notify = ((not success) and (not already_notified_failure)) or (
+        success and (job_name not in SUCCESS_NOTIFICATION_DISABLED_JOBS)
+    )
     if should_notify:
         _notify(
             f"{emoji} *[{app_label}] 배치 {status}*: `{job_name}`\n"
