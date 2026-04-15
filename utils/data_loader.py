@@ -309,6 +309,34 @@ def _build_market_open_info() -> dict[str, tuple[str, time]]:
 MARKET_OPEN_INFO = _build_market_open_info()
 
 
+def _is_market_day_completed(country_code: str, trading_day: pd.Timestamp) -> bool:
+    """해당 시장의 현지 마감 시간이 지나야 최신 거래일로 인정한다."""
+    country_key = (country_code or "").strip().lower()
+    schedule = (MARKET_SCHEDULES or {}).get(country_key)
+    if not isinstance(schedule, dict):
+        return True
+
+    tz_name = str(schedule.get("timezone") or "").strip() or "UTC"
+    close_time = schedule.get("close") or time(23, 59)
+    close_offset_minutes = int(schedule.get("close_offset_minutes") or 0)
+
+    try:
+        now_local = _now_with_zone(tz_name)
+    except Exception:
+        return True
+
+    trading_day_norm = pd.Timestamp(trading_day).normalize()
+    now_local_day = pd.Timestamp(now_local.date()).normalize()
+    if trading_day_norm < now_local_day:
+        return True
+    if trading_day_norm > now_local_day:
+        return False
+
+    cutoff_minutes = (close_time.hour * 60) + close_time.minute + close_offset_minutes
+    now_minutes = (now_local.hour * 60) + now_local.minute
+    return now_minutes >= cutoff_minutes
+
+
 def _should_skip_today_range(country_code: str, target_end: pd.Timestamp) -> bool:
     if ZoneInfo is None:
         return False
@@ -491,9 +519,13 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         trading_days = get_trading_days(start_date, end_date, country_code)
 
         if trading_days:
-            # 가장 최근 거래일을 반환
-            latest_trading_day = max(trading_days)
-            return latest_trading_day.normalize()
+            normalized_days = sorted(pd.Timestamp(day).normalize() for day in trading_days)
+            latest_trading_day = normalized_days[-1]
+            if _is_market_day_completed(country_code, latest_trading_day):
+                return latest_trading_day
+            if len(normalized_days) >= 2:
+                return normalized_days[-2]
+            return latest_trading_day
     except Exception as e:
         logger.warning("거래일 일괄 조회 중 오류 발생: %s", e)
 
