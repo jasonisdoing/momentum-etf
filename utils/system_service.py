@@ -95,7 +95,8 @@ def load_system_data() -> dict[str, object]:
         "schedule_rows": SCHEDULE_ROWS,
         "schedule_note": (
             "VM 호스트 cron 이 `infra/cron/run_batch.py` 래퍼를 통해 실행하며 "
-            "성공/실패 결과를 슬랙으로 알립니다. (정의: `infra/cron/crontab`)"
+            "실패 결과만 슬랙으로 알립니다. 개별 스크립트가 보내는 본문 알림은 "
+            "별도로 유지됩니다. (정의: `infra/cron/crontab`)"
         ),
         "running_jobs": get_running_jobs(),
     }
@@ -107,7 +108,7 @@ class BatchAlreadyRunningError(RuntimeError):
 
 def trigger_system_action(action: SystemAction) -> str:
     """배치를 백그라운드로 실행. cron 과 동일하게 run_batch.py 래퍼를 경유해
-    실행 결과를 슬랙으로 알립니다. 다른 배치가 실행 중이면 거부합니다."""
+    실패 결과를 슬랙으로 알립니다. 다른 배치가 실행 중이면 거부합니다."""
 
     if action not in _SCRIPT_BY_ACTION:
         raise ValueError("지원하지 않는 시스템 작업입니다.")

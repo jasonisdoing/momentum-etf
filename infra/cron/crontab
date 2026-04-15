@@ -8,7 +8,7 @@
 # 동작 원리:
 #   호스트 cron 이 docker compose exec 로 fastapi_app 컨테이너 안의
 #   infra/cron/run_batch.py 를 호출합니다. 래퍼가 스크립트를 실행하고
-#   결과(성공/실패)를 Slack 으로 전송합니다.
+#   실패 결과를 Slack 으로 전송합니다. (성공 알림은 비활성화)
 #
 # 로그:
 #   logs/cron/<job>.log 에 append 됩니다.
