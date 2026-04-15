@@ -22,7 +22,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
@@ -140,7 +140,8 @@ def _apply_realtime_snapshot_to_dataframe(
     if realtime_price <= 0:
         return df
 
-    latest_trading_day = get_latest_trading_day(country).normalize()
+    target_trading_day = _resolve_realtime_target_trading_day(country)
+    latest_trading_day = (target_trading_day or get_latest_trading_day(country)).normalize()
     adjusted = df.copy()
 
     if adjusted.empty:
@@ -183,6 +184,33 @@ def _apply_realtime_snapshot_to_dataframe(
 
     adjusted.sort_index(inplace=True)
     return adjusted
+
+
+def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | None:
+    country = str(country_code or "").strip().lower()
+    schedule = MARKET_SCHEDULES.get(country)
+    if not isinstance(schedule, dict):
+        return None
+
+    timezone_name = str(schedule.get("timezone") or "").strip() or "UTC"
+    market_open = schedule.get("open")
+    if market_open is None:
+        return None
+
+    now_local = datetime.now(ZoneInfo(timezone_name))
+    if now_local.time() < market_open:
+        return None
+
+    today_local = pd.Timestamp(now_local.date()).normalize()
+    trading_days = get_trading_days(
+        today_local.strftime("%Y-%m-%d"),
+        today_local.strftime("%Y-%m-%d"),
+        country,
+    )
+    if not trading_days:
+        return None
+
+    return pd.Timestamp(trading_days[-1]).normalize()
 
 
 @router.get("/tickers")
