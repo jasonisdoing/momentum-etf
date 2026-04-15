@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 
 from utils.notification import send_slack_message_v2
 
-# 사용자 종목 타입 정보 로드 모듈
+# 사용자 종목풀 정보 로드 모듈
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 from utils.stock_list_io import get_etfs
 
@@ -109,13 +109,8 @@ def get_yfinance_5min_stats(code, name, country="kor", period="1mo"):
 
 
 if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="시장별 최적 매수/매도 시간 분석")
-    parser.add_argument("--slack", action="store_true", help="결과를 슬랙으로 전송합니다.")
-    args = parser.parse_args()
-
-    collector = OutputCollector(slack_mode=args.slack)
+    # 항상 슬랙으로 결과를 전송합니다.
+    collector = OutputCollector(slack_mode=True)
 
     collector.print(
         "[분석 시작] 국가별 최근 1개월 간의 5분봉 데이터를 수집 중입니다. (종목 수가 많아 약 1~2분 소요될 수 있습니다)\n"
@@ -124,7 +119,7 @@ if __name__ == "__main__":
     try:
         ticker_types = list_available_ticker_types()
     except Exception as e:
-        collector.print("종목 타입 정보를 불러오지 못했습니다:", e)
+        collector.print("종목풀 정보를 불러오지 못했습니다:", e)
         sys.exit(1)
 
     type_list = sorted(ticker_types)
@@ -137,7 +132,7 @@ if __name__ == "__main__":
     # 다운로드 중복 방지 캐시: {code: (res_str, stats_df)}
     cached_stats = {}
 
-    # 1. 모든 종목 타입에서 국가별 정보를 먼저 수집
+    # 1. 모든 종목풀에서 국가별 정보를 먼저 수집
     for t_id in type_list:
         settings = get_ticker_type_settings(t_id)
         country = settings.get("country_code", "").lower()
@@ -182,7 +177,7 @@ if __name__ == "__main__":
 
             n_stocks = len(stats_dict)
             n_types = len(meta_info[c_code]["ticker_types"])
-            header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_types}개 종목 타입)")
+            header_lines.append(f"🏆 [{c_name} 평균] 총 {n_stocks}개 종목 평균({n_types}개 종목풀)")
             header_lines.append(
                 f"👉 전체 최적 매수 시간 : {global_best_buy['Time']} (평균 {global_best_buy['Pct_Change_From_Open']:+.3f}%)"
             )
@@ -194,14 +189,13 @@ if __name__ == "__main__":
     for hl in header_lines:
         collector.print(hl)
 
-    # 3. 개별 종목 타입 결과 출력
+    # 3. 개별 종목풀 결과 출력
     for out in account_outputs:
         collector.print(out)
 
-    # 4. 슬랙 전송 (옵션)
-    if args.slack:
-        full_text = collector.get_full_text()
-        # 마크다운 코드 블록으로 감싸서 가독성 확보
-        slack_msg = f"*🕒 국가별/종목 타입별 최적 매매 시간 분석 요약*\n```\n{full_text}\n```"
-        send_slack_message_v2(slack_msg)
-        print("\n[알림] 분석 결과가 슬랙으로 전송되었습니다.")
+    # 4. 슬랙 전송
+    full_text = collector.get_full_text()
+    # 마크다운 코드 블록으로 감싸서 가독성 확보
+    slack_msg = f"*🕒 국가별/종목풀별 최적 매매 시간 분석 요약*\n```\n{full_text}\n```"
+    send_slack_message_v2(slack_msg)
+    print("\n[알림] 분석 결과가 슬랙으로 전송되었습니다.")

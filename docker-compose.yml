@@ -1,12 +1,41 @@
 services:
+  mongodb:
+    image: mongo:7.0
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_DB_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_DB_ROOT_PASSWORD}
+      MONGO_INITDB_DATABASE: ${MONGO_DB_NAME:-momentum_etf_db}
+      MONGO_APP_USER: ${MONGO_DB_USER}
+      MONGO_APP_PASSWORD: ${MONGO_DB_PASSWORD}
+      MONGO_APP_DB: ${MONGO_DB_NAME:-momentum_etf_db}
+    # VM 외부로 27017 을 노출하지 않음 (로컬에서는 SSH 터널로만 접근)
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - ./mongo-data:/data/db
+      - ./infra/mongo-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   fastapi_app:
     build:
       context: .
       dockerfile: Dockerfile.fastapi
     env_file:
       - .env
+    depends_on:
+      - mongodb
     volumes:
       - ./zaccounts:/app/zaccounts:ro
+      # cron 래퍼 hotfix 용 bind mount (이미지 재빌드 없이 반영)
+      - ./infra/cron:/app/infra/cron:ro
+      # cron 배치 로그 (호스트에서 tail 가능)
+      - ./logs:/app/logs
     expose:
       - "8000"
     restart: always
@@ -17,6 +46,7 @@ services:
       dockerfile: web/Dockerfile
     depends_on:
       - fastapi_app
+      - mongodb
     env_file:
       - .env
     environment:

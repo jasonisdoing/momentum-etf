@@ -7,6 +7,7 @@ type SystemSummaryRow = {
 };
 
 type SystemScheduleRow = {
+  key: string;
   job: string;
   target: string;
   cadence: string;
@@ -17,9 +18,14 @@ type SystemData = {
   summary_rows: SystemSummaryRow[];
   schedule_rows: SystemScheduleRow[];
   schedule_note: string;
+  running_jobs: string[];
 };
 
-type SystemAction = "meta_all" | "cache_all" | "asset_summary";
+type SystemAction =
+  | "cache_refresh"
+  | "market_hours_analysis"
+  | "metadata_updater"
+  | "asset_summary";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");

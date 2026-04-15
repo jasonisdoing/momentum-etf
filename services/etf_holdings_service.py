@@ -22,6 +22,8 @@ _NAVER_ETF_COMPONENT_CACHE: dict[str, dict[str, Any]] = {}
 _NAVER_ETF_COMPONENT_TTL_SECONDS = 300
 _FOREIGN_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 _FOREIGN_PRICE_TTL_SECONDS = 300
+_YAHOO_SYMBOL_RESOLUTION_CACHE: dict[str, dict[str, Any]] = {}
+_YAHOO_SYMBOL_RESOLUTION_TTL_SECONDS = 3600
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -75,6 +77,77 @@ def _create_naver_session() -> requests.Session:
     return session
 
 
+# Yahoo Finance 에서 쓰는 주요 거래소 접미사 화이트리스트.
+# reuters_code 가 이 중 하나로 끝나면 그대로 Yahoo 심볼로 사용한다.
+# 참고: https://help.yahoo.com/kb/SLN2310.html
+_YAHOO_EXCHANGE_SUFFIXES: frozenset[str] = frozenset(
+    {
+        # 아시아/태평양
+        "T",     # 도쿄 (TSE)
+        "HK",    # 홍콩
+        "SS",    # 상하이
+        "SZ",    # 선전
+        "BJ",    # 베이징
+        "KS",    # 한국 KOSPI
+        "KQ",    # 한국 KOSDAQ
+        "TW",    # 타이완
+        "TWO",   # 타이완 OTC
+        "SI",    # 싱가포르
+        "BK",    # 방콕
+        "JK",    # 자카르타
+        "KL",    # 쿠알라룸푸르
+        "HO",    # 호치민
+        "AX",    # 호주 ASX
+        "NZ",    # 뉴질랜드
+        # 유럽
+        "L",     # 런던
+        "IL",    # 런던 IOB
+        "PA",    # 파리
+        "DE",    # XETRA
+        "F",     # 프랑크푸르트
+        "BE",    # 베를린
+        "DU",    # 뒤셀도르프
+        "HM",    # 함부르크
+        "MU",    # 뮌헨
+        "SG",    # 슈투트가르트
+        "AS",    # 암스테르담
+        "BR",    # 브뤼셀
+        "LS",    # 리스본
+        "MC",    # 마드리드
+        "MI",    # 밀라노
+        "SW",    # 스위스
+        "VX",    # 스위스(VX)
+        "ST",    # 스톡홀름
+        "HE",    # 헬싱키
+        "OL",    # 오슬로
+        "CO",    # 코펜하겐
+        "IC",    # 아이슬란드
+        "IR",    # 아일랜드
+        "VI",    # 빈
+        "PR",    # 프라하
+        "WA",    # 바르샤바
+        "BD",    # 부다페스트
+        "AT",    # 아테네
+        "IS",    # 이스탄불
+        "TA",    # 텔아비브
+        # 아메리카
+        "TO",    # 토론토 TSX
+        "V",     # 토론토 TSX Venture
+        "CN",    # 캐나다 CSE
+        "NE",    # 캐나다 NEO
+        "SA",    # 브라질 B3
+        "MX",    # 멕시코
+        "BA",    # 부에노스아이레스
+        "SN",    # 산티아고
+        # 중동/아프리카
+        "SR",    # 사우디
+        "QA",    # 카타르
+        "JO",    # 요하네스버그
+        "CA",    # 카이로
+    }
+)
+
+
 def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
     normalized = str(value or "").strip().upper()
     if not normalized:
@@ -86,9 +159,130 @@ def extract_yahoo_symbol_from_reuters_code(value: str | None) -> str | None:
         return None
     if not dot:
         return base
-    if suffix == "HK":
-        return f"{base}.HK"
+    if suffix in _YAHOO_EXCHANGE_SUFFIXES:
+        return f"{base}.{suffix}"
     return base
+
+
+def extract_yahoo_symbol_from_isin(value: str | None) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    if normalized.startswith("AU") and len(normalized) == 12:
+        asx_code = normalized[8:11].strip().upper()
+        if len(asx_code) == 3 and asx_code.isalpha():
+            return f"{asx_code}.AX"
+    return None
+
+
+def extract_yahoo_symbol_from_component_code(
+    component_item_code: str | None,
+    raw_code: str | None,
+) -> str | None:
+    normalized_code = str(component_item_code or "").strip().upper()
+    normalized_raw = str(raw_code or "").strip().upper()
+    if not normalized_code:
+        return None
+
+    if len(normalized_code) == 6 and normalized_code.isdigit() and normalized_raw.startswith("CNE"):
+        if normalized_code.startswith("6"):
+            return f"{normalized_code}.SS"
+        if normalized_code.startswith(("0", "3")):
+            return f"{normalized_code}.SZ"
+        if normalized_code.startswith(("4", "8")):
+            return f"{normalized_code}.BJ"
+    # 일본: ISIN 이 JP 로 시작하고 component code 가 4자리 TSE 종목코드인 경우
+    if len(normalized_code) == 4 and normalized_code.isdigit() and normalized_raw.startswith("JP"):
+        return f"{normalized_code}.T"
+    return None
+
+
+def _get_preferred_exchanges_from_isin(isin_code: str | None) -> list[str]:
+    normalized = str(isin_code or "").strip().upper()
+    if normalized.startswith("AU"):
+        return ["ASX"]
+    if normalized.startswith("FR"):
+        return ["PAR"]
+    return []
+
+
+def _extract_yahoo_symbol_from_search_result(item: dict[str, Any]) -> str | None:
+    symbol = str(item.get("symbol") or "").strip().upper()
+    if not symbol:
+        return None
+    return symbol
+
+
+def resolve_yahoo_symbol_from_isin_or_name(
+    raw_code: str | None,
+    raw_name: str | None,
+) -> str | None:
+    queries = [str(raw_code or "").strip().upper(), str(raw_name or "").strip()]
+    queries = [query for query in queries if query]
+    if not queries:
+        return None
+
+    preferred_exchanges = _get_preferred_exchanges_from_isin(raw_code)
+    now = datetime.now()
+    cache_key = f"{str(raw_code or '').strip().upper()}::{str(raw_name or '').strip().upper()}"
+    cached_entry = _YAHOO_SYMBOL_RESOLUTION_CACHE.get(cache_key)
+    if _is_cache_alive(cached_entry, now):
+        return cached_entry.get("data")
+
+    resolved_symbol: str | None = None
+    for query in queries:
+        try:
+            search = yf.Search(query, max_results=10, news_count=0, lists_count=0, recommended=0)
+        except Exception as exc:
+            logger.info("Yahoo 심볼 검색 실패(%s): %s", query, exc)
+            continue
+
+        quotes = list(search.quotes or [])
+        if not quotes:
+            continue
+
+        if preferred_exchanges:
+            for exchange in preferred_exchanges:
+                preferred_match = next(
+                    (
+                        item
+                        for item in quotes
+                        if str(item.get("exchange") or "").strip().upper() == exchange
+                        and _extract_yahoo_symbol_from_search_result(item)
+                    ),
+                    None,
+                )
+                if preferred_match:
+                    resolved_symbol = _extract_yahoo_symbol_from_search_result(preferred_match)
+                    break
+        if resolved_symbol:
+            break
+
+        first_match = next((item for item in quotes if _extract_yahoo_symbol_from_search_result(item)), None)
+        if first_match:
+            resolved_symbol = _extract_yahoo_symbol_from_search_result(first_match)
+            break
+
+    _YAHOO_SYMBOL_RESOLUTION_CACHE[cache_key] = {
+        "data": resolved_symbol,
+        "expires_at": now + timedelta(seconds=_YAHOO_SYMBOL_RESOLUTION_TTL_SECONDS),
+    }
+    return resolved_symbol
+
+
+def extract_display_ticker_from_symbol(value: str | None) -> str | None:
+    normalized = str(value or "").strip().upper()
+    if not normalized:
+        return None
+    if "." in normalized:
+        base, _, suffix = normalized.partition(".")
+        if base.isalpha() and suffix.isalpha():
+            return base
+    if normalized.endswith(".AX"):
+        return normalized[:-3]
+    if normalized.endswith(".HK"):
+        return normalized
+    return normalized
 
 
 def _normalize_reference_date(value: str | None) -> str | None:
@@ -136,7 +330,13 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
 
         component_item_code = str(item.get("componentItemCode") or "").strip().upper() or None
         component_reuters_code = str(item.get("componentReutersCode") or "").strip().upper() or None
-        display_ticker = component_item_code or extract_yahoo_symbol_from_reuters_code(component_reuters_code) or raw_code
+        yahoo_symbol = (
+            extract_yahoo_symbol_from_reuters_code(component_reuters_code)
+            or extract_yahoo_symbol_from_component_code(component_item_code, raw_code)
+            or extract_yahoo_symbol_from_isin(raw_code)
+            or resolve_yahoo_symbol_from_isin_or_name(raw_code, raw_name)
+        )
+        display_ticker = component_item_code or extract_display_ticker_from_symbol(yahoo_symbol) or raw_code
         reference_date = _normalize_reference_date(item.get("referenceDate"))
         if reference_date:
             as_of_date = reference_date
@@ -148,7 +348,7 @@ def fetch_korean_etf_holdings_from_naver(ticker: str) -> dict[str, Any]:
                 "raw_code": raw_code,
                 "raw_name": raw_name,
                 "reuters_code": component_reuters_code,
-                "yahoo_symbol": extract_yahoo_symbol_from_reuters_code(component_reuters_code),
+                "yahoo_symbol": yahoo_symbol,
                 "contracts": _normalize_contracts(item.get("cuUnitQuantity")),
                 "amount": _to_int(item.get("evalAmount")),
                 "weight": _to_float(item.get("weight")),

@@ -134,7 +134,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
     configs = load_ticker_type_configs()
     if not configs:
-        raise ValueError("사용 가능한 종목 타입이 없습니다.")
+        raise ValueError("사용 가능한 종목풀이 없습니다.")
 
     default_config = pick_default_ticker_type(configs)
     payload = [
@@ -175,7 +175,13 @@ def _get_previous_trading_day(country_code: str, reference_date: pd.Timestamp | 
     if reference_date is None:
         return None
 
-    reference = pd.Timestamp(reference_date).normalize()
+    try:
+        reference = pd.Timestamp(reference_date)
+    except Exception:
+        return None
+    if pd.isna(reference):
+        return None
+    reference = reference.normalize()
     search_start = reference - pd.DateOffset(days=15)
     trading_days = get_trading_days(
         search_start.strftime("%Y-%m-%d"),
@@ -235,14 +241,19 @@ def load_rank_data(
         ma_rules=ma_rules,
         as_of_date=selected_as_of_date,
     )
-    effective_as_of_date = (
-        pd.Timestamp(dataframe.attrs.get("as_of_date")).normalize()
-        if dataframe.attrs.get("as_of_date") is not None
-        else selected_as_of_date
-    )
+    effective_as_of_date = selected_as_of_date
+    raw_as_of_date = dataframe.attrs.get("as_of_date")
+    if raw_as_of_date is not None:
+        try:
+            parsed_as_of_date = pd.Timestamp(raw_as_of_date)
+        except Exception:
+            parsed_as_of_date = None
+        if parsed_as_of_date is not None and not pd.isna(parsed_as_of_date):
+            effective_as_of_date = parsed_as_of_date.normalize()
     current_rank_map = _build_rank_map(dataframe)
     previous_rank_map: dict[str, int] = {}
-    previous_trading_day = _get_previous_trading_day(country_code, pd.Timestamp(dataframe.attrs.get("latest_trading_day")))
+    raw_latest_trading_day = dataframe.attrs.get("latest_trading_day")
+    previous_trading_day = _get_previous_trading_day(country_code, raw_latest_trading_day)
     if previous_trading_day is not None:
         previous_dataframe = build_ticker_type_rankings(
             selected_ticker_type,

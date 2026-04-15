@@ -34,11 +34,11 @@ class StockStats(NamedTuple):
 def load_market_data(
     ticker_type: str,
 ) -> tuple[pd.DataFrame, dict[str, StockStats], int, int, list[str], list[str]]:
-    """종목 타입의 전체 종목 종가 데이터와 통계를 로드합니다."""
+    """종목풀의 전체 종목 종가 데이터와 통계를 로드합니다."""
     ticker_settings = get_ticker_type_settings(ticker_type)
     country_code = str(ticker_settings.get("country_code") or "").strip().lower()
     if not country_code:
-        raise ValueError(f"종목 타입 '{ticker_type}'의 country_code가 비어 있습니다.")
+        raise ValueError(f"종목풀 '{ticker_type}'의 country_code가 비어 있습니다.")
 
     ma_rules = get_ticker_type_ma_rules(ticker_type)
     ma_month = max(int(rule["ma_months"]) for rule in ma_rules)
@@ -248,13 +248,13 @@ def print_report(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="종목 타입 내 종목 간 가격 상관관계 그룹 분석",
+        description="종목풀 내 종목 간 가격 상관관계 그룹 분석",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument(
         "ticker_type",
         choices=list_available_ticker_types(),
-        help="분석할 종목 타입 ID (예: kor_kr, aus)",
+        help="분석할 종목풀 ID (예: kor_kr, aus)",
     )
     parser.add_argument(
         "--threshold",

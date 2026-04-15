@@ -32,7 +32,10 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "순위 데이터를 불러오지 못했습니다.";
+    let message = error instanceof Error ? error.message : "순위 데이터를 불러오지 못했습니다.";
+    if (message.includes("응답하지 않았습니다") || message.includes("fetch failed") || message.includes("timeout")) {
+      message = "몽고디비 데이터베이스 응답 지연(타임아웃)으로 인해 순위 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
+    }
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
