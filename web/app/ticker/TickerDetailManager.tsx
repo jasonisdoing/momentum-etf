@@ -64,7 +64,6 @@ type TickerDetailResponse = {
   holdings_as_of_date?: string | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
-  realtime_price_as_of?: string | null;
   error?: string;
 };
 
@@ -372,7 +371,6 @@ export function TickerDetailManager({
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
-  const [realtimePriceAsOf, setRealtimePriceAsOf] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [addingPoolKeys, setAddingPoolKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -488,7 +486,6 @@ export function TickerDetailManager({
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
-      setRealtimePriceAsOf(payload.realtime_price_as_of ?? null);
       setHoldingsError(payload.holdings_error ?? null);
       persistRecentTickerSearch({
         ticker: matchedItem.ticker,
@@ -779,51 +776,11 @@ export function TickerDetailManager({
     [holdingsRows],
   );
 
-  const holdingsPriceAsOfDateLabel = useMemo(() => {
-    if (!holdingsPriceAsOfDate) return null;
-    // "YYYYMMDD HH:MM" 형식 (14자) 또는 "YYYYMMDD" 형식 (8자)
-    const trimmed = holdingsPriceAsOfDate.trim();
-    if (trimmed.length >= 14) {
-      const datePart = `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
-      const [hh, mm] = trimmed.slice(9).trim().split(":");
-      const hour = parseInt(hh, 10);
-      const ampm = hour < 12 ? "오전" : "오후";
-      const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
-      return `${datePart} ${ampm} ${h12}:${mm}`;
-    }
-    if (trimmed.length === 8) {
-      return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
-    }
-    return null;
-  }, [holdingsPriceAsOfDate]);
   const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
   const holdingsPanelMeta = useMemo(() => {
-    if (holdingsRows.length === 0) {
-      return "데이터 없음";
-    }
-    if (holdingsPriceAsOfDateLabel) {
-      // "N분전" 계산: holdingsPriceAsOfDate에서 파싱
-      let agoText = "";
-      if (holdingsPriceAsOfDate && holdingsPriceAsOfDate.trim().length >= 14) {
-        const t = holdingsPriceAsOfDate.trim();
-        const parsed = new Date(
-          parseInt(t.slice(0, 4)),
-          parseInt(t.slice(4, 6)) - 1,
-          parseInt(t.slice(6, 8)),
-          parseInt(t.slice(9, 11)),
-          parseInt(t.slice(12, 14)),
-        );
-        const diffMin = Math.floor((Date.now() - parsed.getTime()) / 60000);
-        if (diffMin >= 0 && diffMin < 60) {
-          agoText = `(${diffMin}분전)`;
-        } else if (diffMin >= 60 && diffMin < 1440) {
-          agoText = `(${Math.floor(diffMin / 60)}시간전)`;
-        }
-      }
-      return `가격 기준 ${holdingsPriceAsOfDateLabel}${agoText}`;
-    }
+    if (holdingsRows.length === 0) return "데이터 없음";
     return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
-  }, [holdingsRows.length, holdingsPriceAsOfDate, holdingsPriceAsOfDateLabel]);
+  }, [holdingsRows.length]);
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
