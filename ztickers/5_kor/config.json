@@ -1,8 +1,8 @@
 {
-    "icon": "🇺🇸",
-    "name": "미국 개별주",
-    "country_code": "us",
-    "currency": "USD",
+    "icon": "🇰🇷",
+    "name": "한국 개별주",
+    "country_code": "kor",
+    "currency": "KRW",
     "MA_RULES": [
         {
             "order": 1,
