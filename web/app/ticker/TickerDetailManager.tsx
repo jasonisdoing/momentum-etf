@@ -776,10 +776,6 @@ export function TickerDetailManager({
     [holdingsRows],
   );
 
-  const holdingsAsOfDateLabel = useMemo(() => {
-    if (!holdingsAsOfDate || holdingsAsOfDate.length !== 8) return null;
-    return `${holdingsAsOfDate.slice(0, 4)}-${holdingsAsOfDate.slice(4, 6)}-${holdingsAsOfDate.slice(6, 8)}`;
-  }, [holdingsAsOfDate]);
   const holdingsPriceAsOfDateLabel = useMemo(() => {
     if (!holdingsPriceAsOfDate) return null;
     // "YYYYMMDD HH:MM" 형식 (14자) 또는 "YYYYMMDD" 형식 (8자)
@@ -798,35 +794,33 @@ export function TickerDetailManager({
     return null;
   }, [holdingsPriceAsOfDate]);
   const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
-  const hasKoreanHoldings = useMemo(
-    () => holdingsRows.some((row) => /^\d{6}$/.test(String(row.ticker || "").trim())),
-    [holdingsRows],
-  );
-  const hasForeignHoldings = useMemo(
-    () => holdingsRows.some((row) => !/^\d{6}$/.test(String(row.ticker || "").trim())),
-    [holdingsRows],
-  );
   const holdingsPanelMeta = useMemo(() => {
     if (holdingsRows.length === 0) {
       return "데이터 없음";
     }
-    if (hasForeignHoldings && !hasKoreanHoldings) {
-      return holdingsPriceAsOfDateLabel ? `해외 가격 기준 ${holdingsPriceAsOfDateLabel}` : "해외 가격 기준 없음";
-    }
-    if (hasForeignHoldings && hasKoreanHoldings) {
-      if (holdingsAsOfDateLabel && holdingsPriceAsOfDateLabel) {
-        return `적용일 ${holdingsAsOfDateLabel}(해외 가격 기준 ${holdingsPriceAsOfDateLabel})`;
+    if (holdingsPriceAsOfDateLabel) {
+      // "N분전" 계산: holdingsPriceAsOfDate에서 파싱
+      let agoText = "";
+      if (holdingsPriceAsOfDate && holdingsPriceAsOfDate.trim().length >= 14) {
+        const t = holdingsPriceAsOfDate.trim();
+        const parsed = new Date(
+          parseInt(t.slice(0, 4)),
+          parseInt(t.slice(4, 6)) - 1,
+          parseInt(t.slice(6, 8)),
+          parseInt(t.slice(9, 11)),
+          parseInt(t.slice(12, 14)),
+        );
+        const diffMin = Math.floor((Date.now() - parsed.getTime()) / 60000);
+        if (diffMin >= 0 && diffMin < 60) {
+          agoText = `(${diffMin}분전)`;
+        } else if (diffMin >= 60 && diffMin < 1440) {
+          agoText = `(${Math.floor(diffMin / 60)}시간전)`;
+        }
       }
-      if (holdingsAsOfDateLabel) {
-        return `적용일 ${holdingsAsOfDateLabel}`;
-      }
-      return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
-    }
-    if (holdingsAsOfDateLabel) {
-      return `적용일 ${holdingsAsOfDateLabel}`;
+      return `가격 기준 ${holdingsPriceAsOfDateLabel}${agoText}`;
     }
     return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
-  }, [hasForeignHoldings, hasKoreanHoldings, holdingsAsOfDateLabel, holdingsPriceAsOfDateLabel, holdingsRows.length]);
+  }, [holdingsRows.length, holdingsPriceAsOfDate, holdingsPriceAsOfDateLabel]);
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
