@@ -23,6 +23,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_with_fallback,
 )
 from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days
+from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
@@ -35,6 +36,25 @@ def _load_us_pool_ticker_set() -> set[str]:
         str(item.get("ticker") or "").strip().upper()
         for item in get_etfs("us")
         if str(item.get("ticker") or "").strip()
+    }
+
+
+def _load_kor_pool_ticker_set() -> set[str]:
+    return {
+        str(item.get("ticker") or "").strip().upper()
+        for item in get_etfs("kor")
+        if str(item.get("ticker") or "").strip()
+    }
+
+
+def _load_domestic_etf_ticker_set() -> set[str]:
+    df, _ = load_cached_kis_domestic_etf_master()
+    if "티커" not in df.columns:
+        raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
+    return {
+        str(value or "").strip().upper()
+        for value in df["티커"].tolist()
+        if str(value or "").strip()
     }
 
 
@@ -54,6 +74,21 @@ def _is_us_pool_candidate(item: dict[str, object]) -> bool:
     if price_currency and price_currency != "USD":
         return False
     return component_ticker.isalpha()
+
+
+def _is_kor_pool_candidate(item: dict[str, object], domestic_etf_tickers: set[str]) -> bool:
+    component_ticker = str(item.get("ticker") or "").strip().upper()
+    raw_code = str(item.get("raw_code") or "").strip().upper()
+    yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+    if not component_ticker.isdigit() or len(component_ticker) != 6:
+        return False
+    if raw_code.startswith("KRD"):
+        return False
+    if yahoo_symbol:
+        return False
+    if raw_code.startswith("CNE"):
+        return False
+    return component_ticker not in domestic_etf_tickers
 
 
 def _serialize_datetime(value: datetime | None) -> str | None:
@@ -424,6 +459,8 @@ def get_ticker_detail(
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
     us_pool_tickers: set[str] = set()
+    kor_pool_tickers: set[str] = set()
+    domestic_etf_tickers: set[str] = set()
     if str(country_code or "").strip().lower() == "kor":
         cache_document = get_stock_cache_meta(ticker_type, ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
@@ -438,6 +475,8 @@ def get_ticker_detail(
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:
             us_pool_tickers = _load_us_pool_ticker_set()
+            kor_pool_tickers = _load_kor_pool_ticker_set()
+            domestic_etf_tickers = _load_domestic_etf_ticker_set()
 
             def is_korean_six_digit_holding(item: dict[str, object]) -> bool:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
@@ -504,6 +543,11 @@ def get_ticker_detail(
                 enriched_item["price_currency"] = snapshot.get("price_currency")
                 enriched_item["is_us_pool_candidate"] = _is_us_pool_candidate(enriched_item)
                 enriched_item["in_us_pool"] = component_ticker in us_pool_tickers
+                enriched_item["is_kor_pool_candidate"] = _is_kor_pool_candidate(
+                    enriched_item,
+                    domestic_etf_tickers,
+                )
+                enriched_item["in_kor_pool"] = component_ticker in kor_pool_tickers
 
                 # 실시간 데이터로 오버레이 (한국 종목만)
                 rt = realtime_map.get(component_ticker, {})
