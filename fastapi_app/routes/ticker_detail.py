@@ -22,7 +22,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days
+from utils.data_loader import fetch_naver_stock_realtime_snapshot, fetch_ohlcv, get_latest_trading_day, get_trading_days
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
@@ -517,11 +517,11 @@ def get_ticker_detail(
             price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
             foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
 
-            # 한국 종목 실시간 가격 오버레이 (네이버 30초 TTL 캐시)
+            # 한국 구성종목 실시간 가격 오버레이 (개별주 폴링 API 직접 호출)
             realtime_map: dict[str, dict[str, float]] = {}
             if korean_tickers:
                 try:
-                    realtime_map = get_realtime_snapshot("kor", korean_tickers)
+                    realtime_map = fetch_naver_stock_realtime_snapshot(korean_tickers)
                 except Exception:
                     pass  # 실시간 데이터 실패 시 pykrx 기반 데이터 유지
 
