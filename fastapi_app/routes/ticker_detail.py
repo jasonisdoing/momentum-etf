@@ -480,7 +480,8 @@ def get_ticker_detail(
                 yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
                 if not component_ticker.isdigit() or len(component_ticker) != 6:
                     return False
-                if yahoo_symbol:
+                # .KS/.KQ 접미사는 한국 종목 (yfinance 표기)
+                if yahoo_symbol and not yahoo_symbol.endswith((".KS", ".KQ")):
                     return False
                 if raw_code.startswith("CNE"):
                     return False
