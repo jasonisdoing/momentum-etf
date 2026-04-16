@@ -517,7 +517,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  max-height: min(42rem, calc(100vh - var(--app-header-height) - 1.5rem));
+  max-height: min(60rem, calc(100vh - var(--app-header-height) - 1.5rem));
   padding: 0.9rem 0.95rem 1rem;
   overflow-y: auto;
 }
