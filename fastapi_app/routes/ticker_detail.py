@@ -84,7 +84,7 @@ def _is_kor_pool_candidate(item: dict[str, object], domestic_etf_tickers: set[st
         return False
     if raw_code.startswith("KRD"):
         return False
-    if yahoo_symbol:
+    if yahoo_symbol and not yahoo_symbol.endswith((".KS", ".KQ")):
         return False
     if raw_code.startswith("CNE"):
         return False
