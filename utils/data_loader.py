@@ -24,6 +24,8 @@ from config import (
     MIN_TRADING_DAYS,
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
+    TOSS_INVEST_API_BASE_URL,
+    TOSS_INVEST_HEADERS,
 )
 
 # pkg_resources 워닝 억제 (가장 강력한 방법)
@@ -1763,6 +1765,168 @@ def get_cached_au_etf_snapshot_entry(ticker: str) -> dict[str, float] | None:
     if not key:
         return None
     return _AU_QUOTEAPI_SNAPSHOT_CACHE.get(key)
+
+
+# ────────────────────────────────────────────
+# 토스증권 API — 미국 주식 실시간 가격
+# ────────────────────────────────────────────
+
+# symbol → productCode 영구 매핑 캐시 (프로세스 수명 동안 유효)
+_TOSS_SYMBOL_CODE_CACHE: dict[str, str] = {}
+
+
+def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
+    """미국 티커 심볼을 토스 productCode로 변환한다.
+
+    캐시에 없는 심볼만 검색 API를 호출하고, 결과를 영구 캐시에 저장한다.
+    Returns:
+        {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
+    """
+    result: dict[str, str] = {}
+    uncached: list[str] = []
+
+    for sym in symbols:
+        cached_code = _TOSS_SYMBOL_CODE_CACHE.get(sym)
+        if cached_code:
+            result[sym] = cached_code
+        else:
+            uncached.append(sym)
+
+    if not uncached:
+        return result
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 토스 심볼 검색을 건너뜁니다.")
+        return result
+
+    search_url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/search/stocks"
+
+    for sym in uncached:
+        try:
+            resp = requests.post(
+                search_url,
+                headers=TOSS_INVEST_HEADERS,
+                json={"query": sym},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            stocks = (data.get("result") or {}).get("stocks") or []
+
+            # matchType이 EXACT인 첫 번째 결과 사용
+            product_code: str | None = None
+            for stock in stocks:
+                if stock.get("matchType") == "EXACT":
+                    product_code = stock.get("stockCode")
+                    break
+
+            # EXACT 없으면 stockName이 심볼과 동일한 첫 번째 결과
+            if not product_code:
+                for stock in stocks:
+                    if str(stock.get("stockName") or "").strip().upper() == sym:
+                        product_code = stock.get("stockCode")
+                        break
+
+            if product_code:
+                _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
+                result[sym] = product_code
+            else:
+                logger.warning("토스 심볼 매핑 실패: %s (검색 결과 없음)", sym)
+
+        except Exception as exc:
+            logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
+
+    return result
+
+
+def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
+
+    Args:
+        tickers: 미국 주식 티커 리스트 (예: ["TSLA", "AAPL", "NVDA"])
+
+    Returns:
+        티커별 가격 정보 딕셔너리
+        {
+            "TSLA": {"nowVal": 397.27, "changeRate": 1.36, "prevClose": 391.95},
+            ...
+        }
+    """
+    normalized_symbols = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not normalized_symbols:
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 토스 가격 조회를 건너뜁니다.")
+        return {}
+
+    # 1단계: symbol → productCode 매핑
+    symbol_to_code = _resolve_toss_product_codes(normalized_symbols)
+    if not symbol_to_code:
+        return {}
+
+    # code → symbol 역매핑
+    code_to_symbol = {code: sym for sym, code in symbol_to_code.items()}
+
+    # 2단계: productCode로 벌크 가격 조회 (50개씩 청크)
+    price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
+    all_codes = list(symbol_to_code.values())
+    snapshot: dict[str, dict[str, float]] = {}
+
+    chunk_size = 50
+    for i in range(0, len(all_codes), chunk_size):
+        chunk = all_codes[i : i + chunk_size]
+        codes_param = ",".join(chunk)
+
+        try:
+            resp = requests.get(
+                price_url,
+                params={"productCodes": codes_param},
+                headers=TOSS_INVEST_HEADERS,
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("토스 가격 API 실패: %s", exc)
+            continue
+
+        items = data if isinstance(data, list) else (data.get("result") or [])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("code")
+            sym = code_to_symbol.get(code)
+            if not sym:
+                continue
+
+            close_price = item.get("close")
+            if close_price is None:
+                continue
+
+            try:
+                close_val = float(close_price)
+            except (TypeError, ValueError):
+                continue
+
+            entry: dict[str, float] = {"nowVal": close_val}
+
+            base_price = item.get("base")
+            if base_price is not None:
+                try:
+                    base_val = float(base_price)
+                    entry["prevClose"] = base_val
+                    if base_val > 0:
+                        entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+                except (TypeError, ValueError):
+                    pass
+
+            snapshot[sym] = entry
+
+    if snapshot:
+        logger.info("[US] 토스증권 API에서 %d개 종목의 실시간 가격을 조회했습니다.", len(snapshot))
+
+    return snapshot
 
 
 _NAVER_ETF_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}

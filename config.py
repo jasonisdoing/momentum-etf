@@ -46,6 +46,15 @@ AU_QUOTEAPI_HEADERS = {
     "Origin": "https://www.marketindex.com.au",
 }
 
+# 토스증권 API 설정 (미국 주식 실시간)
+TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
+TOSS_INVEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://tossinvest.com/",
+    "Origin": "https://tossinvest.com",
+    "Content-Type": "application/json",
+}
+
 # KIS 종목정보파일 다운로드 URL
 KIS_KOSPI_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip"
 KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip"
