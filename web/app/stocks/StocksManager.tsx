@@ -298,6 +298,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const todayDateInputValue = useMemo(() => getTodayDateInputValue(), []);
 
   function clearCacheWarningState() {
     setCacheBlocked(false);
@@ -379,6 +380,51 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   useEffect(() => {
     void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
+
+  useEffect(() => {
+    if (pageMode !== "rank") {
+      return;
+    }
+    if (selectedAsOfDate !== todayDateInputValue) {
+      return;
+    }
+
+    let active = true;
+
+    const refreshRankData = () => {
+      if (!active) {
+        return;
+      }
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void load({
+        ticker_type: selectedTickerType || undefined,
+        ma_rule_overrides: maRules,
+        as_of_date: selectedAsOfDate,
+      });
+    };
+
+    const intervalId = window.setInterval(refreshRankData, 60_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshRankData();
+      }
+    };
+    const handleWindowFocus = () => {
+      refreshRankData();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+    };
+  }, [load, maRules, pageMode, selectedAsOfDate, selectedTickerType, todayDateInputValue]);
 
   useEffect(() => {
     setHeldBonusScore(readHeldBonusScore());
