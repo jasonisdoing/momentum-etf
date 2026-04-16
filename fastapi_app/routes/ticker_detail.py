@@ -541,10 +541,9 @@ def get_ticker_detail(
                 except Exception:
                     pass
 
-            # 해외 가격 기준 시간: 현재 서버 시각
-            if us_tickers or au_tickers:
-                now_str = datetime.now().strftime("%Y%m%d %H:%M")
-                holdings_price_as_of_date = now_str
+            # 가격 기준 시간: 현재 서버 시각
+            if korean_tickers or us_tickers or au_tickers:
+                holdings_price_as_of_date = datetime.now().strftime("%Y%m%d %H:%M")
 
             enriched_holdings: list[dict[str, object]] = []
             for item in holdings:
