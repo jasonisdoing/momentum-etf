@@ -9,7 +9,7 @@ import os
 import warnings
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -1426,58 +1426,53 @@ def fetch_naver_realtime_price(ticker: str) -> float | None:
     return None
 
 
-def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다."""
+# ─── ETF iNAV 글로벌 캐시 ───
+# etfItemList.nhn은 전체 ETF 목록을 반환하므로 글로벌로 캐시하고 공유한다.
+_ETF_INAV_GLOBAL_CACHE: dict[str, Any] = {}
+_ETF_INAV_GLOBAL_TTL_SECONDS = 30
 
-    normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
-    if not normalized_codes:
-        return {}
+
+def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
+    """네이버 ETF API에서 전체 ETF iNAV 데이터를 가져온다. 글로벌 캐시를 사용한다."""
+
+    now = datetime.now()
+    expires_at = _ETF_INAV_GLOBAL_CACHE.get("expires_at")
+    if isinstance(expires_at, datetime) and now < expires_at:
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     if not requests:
         logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
-        return {}
-
-    url = NAVER_FINANCE_ETF_API_URL
-    headers = NAVER_FINANCE_HEADERS
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(NAVER_FINANCE_ETF_API_URL, headers=NAVER_FINANCE_HEADERS, timeout=5)
         response.raise_for_status()
-    except Exception as exc:
-        logger.warning("네이버 ETF iNAV 조회 실패: %s", exc)
-        return {}
-
-    try:
         payload = response.json()
     except Exception as exc:
-        logger.warning("네이버 ETF iNAV 응답 파싱 실패: %s", exc)
-        return {}
+        logger.warning("네이버 ETF iNAV 조회 실패: %s", exc)
+        # 실패 시 stale 캐시 재사용
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     items = payload.get("result", {}).get("etfItemList")
     if not isinstance(items, list):
-        return {}
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     snapshot: dict[str, dict[str, float]] = {}
-
     for item in items:
         if not isinstance(item, dict):
             continue
 
         code = str(item.get("itemcode") or "").strip().upper()
-        if not code or code not in normalized_codes:
+        if not code:
             continue
 
         nav_raw = item.get("nav")
         price_raw = item.get("nowVal")
-        change_rate_raw = item.get("changeRate")  # 일간 등락률 (%)
-
-        # 추가 정보 파싱 (Open, High, Low, Vol)
+        change_rate_raw = item.get("changeRate")
         open_raw = item.get("openVal")
         high_raw = item.get("highVal")
         low_raw = item.get("lowVal")
         vol_raw = item.get("quant")
-
-        # 종목명, 수익률 등
         name_raw = item.get("itemname")
         return_3m_raw = item.get("threeMonthEarnRate")
 
@@ -1487,35 +1482,30 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         except (TypeError, ValueError):
             continue
 
-        # NAV가 0인 경우 괴리율 계산 불가 처리
         if nav_value <= 0:
             deviation = None
         else:
             deviation = ((price_value / nav_value) - 1.0) * 100.0
 
-        entry = {
+        entry: dict[str, Any] = {
             "nav": nav_value,
             "nowVal": price_value,
             "deviation": deviation,
         }
 
-        # 등락률 파싱
         try:
             entry["changeRate"] = float(str(change_rate_raw).replace(",", ""))
         except (TypeError, ValueError):
             pass
 
-        # 종목명
         if name_raw:
             entry["itemname"] = str(name_raw).strip()
 
-        # 3개월 수익률
         try:
             entry["threeMonthEarnRate"] = float(str(return_3m_raw).replace(",", ""))
         except (TypeError, ValueError):
             pass
 
-        # Optional fields parsing
         try:
             if open_raw:
                 entry["open"] = float(str(open_raw).replace(",", ""))
@@ -1530,11 +1520,34 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
         snapshot[code] = entry
 
+    _ETF_INAV_GLOBAL_CACHE["data"] = snapshot
+    _ETF_INAV_GLOBAL_CACHE["expires_at"] = datetime.now() + timedelta(seconds=_ETF_INAV_GLOBAL_TTL_SECONDS)
     return snapshot
 
 
+def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다. 글로벌 캐시를 사용합니다."""
+
+    normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
+    if not normalized_codes:
+        return {}
+
+    all_data = _fetch_etf_inav_all()
+    return {code: all_data[code] for code in normalized_codes if code in all_data}
+
+
+def _parse_comma_number(value: str | None) -> float | None:
+    """쉼표가 포함된 숫자 문자열을 float로 변환한다."""
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """네이버 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
+    """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
     if not normalized_codes:
@@ -1544,60 +1557,68 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
 
-    # 한 번에 최대 50개까지만 지원하므로 청크로 나눕니다.
+    _NAVER_STOCK_POLLING_URL = "https://stock.naver.com/api/polling/domestic/stock"
+    _NAVER_STOCK_POLLING_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://stock.naver.com/",
+        "Accept": "application/json, text/plain, */*",
+    }
+
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
-        query_str = ",".join([f"SERVICE_ITEM:{code}" for code in chunk])
-        url = f"{NAVER_FINANCE_STOCK_POLLING_URL}?query={query_str}"
+        item_codes = ",".join(chunk)
+        url = f"{_NAVER_STOCK_POLLING_URL}?itemCodes={item_codes}"
 
         try:
-            response = requests.get(url, headers=NAVER_FINANCE_HEADERS, timeout=5)
+            response = requests.get(url, headers=_NAVER_STOCK_POLLING_HEADERS, timeout=5)
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
             logger.warning("네이버 주식 실시간 조회 실패: %s", exc)
             return {}
 
-        result = {}
-        items = data.get("result", {}).get("areas", [])
-        if not items:
-            return {}
-
-        # 폴링 API 응답 구조: result.areas[0].datas 에 리스트로 들어있음
-        datas = items[0].get("datas", [])
+        result: dict[str, dict[str, float]] = {}
+        datas = data.get("datas") or []
         for item in datas:
-            code = str(item.get("cd") or "").strip().upper()
+            code = str(item.get("itemCode") or "").strip().upper()
             if not code:
                 continue
 
-            # nv: 현재가, cv: 전일대비, cr: 등락률
-            price_raw = item.get("nv")
-            change_rate_raw = item.get("cr")
-
-            if price_raw is None:
+            price_value = _parse_comma_number(item.get("closePrice"))
+            if price_value is None:
                 continue
 
-            try:
-                price_value = float(price_raw)
-                entry = {"nowVal": price_value}
-                if change_rate_raw is not None:
-                    entry["changeRate"] = float(change_rate_raw)
+            entry: dict[str, float] = {"nowVal": price_value}
 
-                # 추가 필드 (Open, High, Low, Vol)
-                if item.get("ov"):
-                    entry["open"] = float(item["ov"])
-                if item.get("hv"):
-                    entry["high"] = float(item["hv"])
-                if item.get("lv"):
-                    entry["low"] = float(item["lv"])
-                if item.get("aq"):
-                    entry["volume"] = float(item["aq"])
+            change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
+            if change_rate is not None:
+                # 하락 시 음수로 변환
+                compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
+                if compare_code == "5" and change_rate > 0:
+                    change_rate = -change_rate
+                entry["changeRate"] = change_rate
 
-                result[code] = entry
-            except (TypeError, ValueError):
-                continue
+            open_val = _parse_comma_number(item.get("openPrice"))
+            if open_val is not None:
+                entry["open"] = open_val
+            high_val = _parse_comma_number(item.get("highPrice"))
+            if high_val is not None:
+                entry["high"] = high_val
+            low_val = _parse_comma_number(item.get("lowPrice"))
+            if low_val is not None:
+                entry["low"] = low_val
+            vol_val = _parse_comma_number(item.get("accumulatedTradingVolume"))
+            if vol_val is not None:
+                entry["volume"] = vol_val
+
+            result[code] = entry
 
         return result
 
+    # 청크 단위로 호출 (URL 길이 제한 대비)
     snapshot: dict[str, dict[str, float]] = {}
     chunk_size = 50
     for i in range(0, len(normalized_codes), chunk_size):
