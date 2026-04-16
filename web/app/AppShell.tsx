@@ -63,7 +63,10 @@ const navGroups = [
     id: "info",
     title: "정보",
     icon: IconTrendingUp,
-    items: [{ href: "/market", label: "ETF 마켓", icon: "🇰🇷" }],
+    items: [
+      { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
+      { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
+    ],
   },
   {
     id: "system",
