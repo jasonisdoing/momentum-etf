@@ -414,7 +414,6 @@ def get_ticker_detail(
             "holdings_as_of_date": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
-            "realtime_price_as_of": None,
             "error": fetch_error or "가격 데이터를 가져오지 못했습니다.",
         }
 
@@ -547,10 +546,6 @@ def get_ticker_detail(
                 except Exception:
                     pass
 
-            # 가격 기준 시간: 현재 서버 시각
-            if korean_tickers or us_tickers or au_tickers:
-                holdings_price_as_of_date = datetime.now().strftime("%Y%m%d %H:%M")
-
             enriched_holdings: list[dict[str, object]] = []
             for item in holdings:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
@@ -594,11 +589,6 @@ def get_ticker_detail(
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings
 
-    # 실시간 가격 기준 시간 (헤더 표시용)
-    realtime_price_as_of: str | None = None
-    if rows:
-        realtime_price_as_of = datetime.now().strftime("%Y%m%d %H:%M")
-
     return {
         "ticker": ticker,
         "rows": rows,
@@ -606,5 +596,4 @@ def get_ticker_detail(
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
-        "realtime_price_as_of": realtime_price_as_of,
     }
