@@ -416,6 +416,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     [rows],
   );
 
+  const showDeviationColumn = useMemo(() => {
+    const tickerType = String(selectedTickerTypeItem?.ticker_type || "").trim().toLowerCase();
+    return tickerType === "kor_kr" || tickerType === "kor_us";
+  }, [selectedTickerTypeItem?.ticker_type]);
+
   const rankedGridRows = useMemo<RankGridRow[]>(() => {
     if (heldBonusScore <= 0) {
       return gridRows;
@@ -727,7 +732,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
           }) as ColDef<RankGridRow>,
       ),
-      ...(selectedTickerTypeItem?.country_code !== "au"
+      ...(showDeviationColumn
         ? [
             {
               field: "괴리율",
