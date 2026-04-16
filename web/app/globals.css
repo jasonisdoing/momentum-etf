@@ -3388,3 +3388,17 @@ a {
     font-size: 22px;
   }
 }
+
+/* ─── 한국 개별주 마켓 ─── */
+
+.korMarketStockMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.korMarketStockMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 auto;
+}
+
+.korMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
+  flex: 0 0 9rem;
+}
