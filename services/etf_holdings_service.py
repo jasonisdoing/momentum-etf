@@ -487,7 +487,9 @@ def _fetch_single_foreign_stock_price_snapshot(symbol: str) -> dict[str, Any] | 
     if previous_close is None or current_price is None or previous_close == 0:
         return None
 
-    as_of_date = pd.Timestamp(working_df.index[-1]).strftime("%Y%m%d")
+    last_ts = pd.Timestamp(working_df.index[-1])
+    # yfinance 일봉은 시간이 00:00이므로, 현재 조회 시각을 포함하여 기준 시점을 명확히 한다
+    as_of_date = f"{last_ts.strftime('%Y%m%d')} {datetime.now().strftime('%H:%M')}"
     metadata = getattr(ticker, "history_metadata", None)
     price_currency = None
     if isinstance(metadata, dict):

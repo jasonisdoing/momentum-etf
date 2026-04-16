@@ -8,9 +8,6 @@ from fastapi import APIRouter, Depends, Query
 
 from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
-from services.etf_holdings_service import (
-    fetch_foreign_stock_price_snapshot,
-)
 from services.price_service import get_realtime_snapshot
 from services.price_service import get_realtime_snapshot_meta
 from services.stock_cache_service import get_stock_cache_meta
@@ -21,7 +18,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_naver_stock_realtime_snapshot, fetch_ohlcv, get_latest_trading_day, get_trading_days
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
@@ -503,26 +500,51 @@ def get_ticker_detail(
             ]
             pricing_ids = {id(item) for item in holdings_for_pricing}
 
-            korean_tickers = [
-                str(item.get("ticker") or "").strip().upper()
-                for item in holdings_for_pricing
-                if is_korean_six_digit_holding(item)
-            ]
-            foreign_symbols = [
-                str(item.get("yahoo_symbol") or "").strip().upper()
-                for item in holdings_for_pricing
-                if str(item.get("yahoo_symbol") or "").strip().upper()
-            ]
-            # 한국 구성종목: 네이버 폴링 API로 현재가/등락률 조회
+            korean_tickers: list[str] = []
+            us_tickers: list[str] = []
+            au_tickers: list[str] = []
+            # yahoo_symbol → 원래 ticker/yahoo_symbol 역매핑 (호주 .AX 접미사 제거용)
+            au_symbol_map: dict[str, str] = {}
+
+            for item in holdings_for_pricing:
+                if is_korean_six_digit_holding(item):
+                    korean_tickers.append(str(item.get("ticker") or "").strip().upper())
+                else:
+                    yahoo_sym = str(item.get("yahoo_symbol") or "").strip().upper()
+                    if not yahoo_sym:
+                        continue
+                    if yahoo_sym.endswith(".AX"):
+                        bare = yahoo_sym[:-3]
+                        au_tickers.append(bare)
+                        au_symbol_map[bare] = yahoo_sym
+                    else:
+                        us_tickers.append(yahoo_sym)
+
+            # 통합 가격 조회: get_realtime_snapshot(country, tickers)
             kor_price_map: dict[str, dict[str, float]] = {}
+            us_price_map: dict[str, dict[str, float]] = {}
+            au_price_map: dict[str, dict[str, float]] = {}
+
             if korean_tickers:
                 try:
-                    kor_price_map = fetch_naver_stock_realtime_snapshot(korean_tickers)
+                    kor_price_map = get_realtime_snapshot("kor", korean_tickers)
+                except Exception:
+                    pass
+            if us_tickers:
+                try:
+                    us_price_map = get_realtime_snapshot("us", us_tickers)
+                except Exception:
+                    pass
+            if au_tickers:
+                try:
+                    au_price_map = get_realtime_snapshot("au", au_tickers)
                 except Exception:
                     pass
 
-            # 해외 구성종목: yfinance로 조회
-            foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
+            # 해외 가격 기준 시간: 현재 서버 시각
+            if us_tickers or au_tickers:
+                now_str = datetime.now().strftime("%Y%m%d %H:%M")
+                holdings_price_as_of_date = now_str
 
             enriched_holdings: list[dict[str, object]] = []
             for item in holdings:
@@ -539,15 +561,22 @@ def get_ticker_detail(
                 elif is_korean_six_digit_holding(item):
                     rt = kor_price_map.get(component_ticker, {})
                     enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
-                    enriched_item["previous_close"] = None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
                     enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
                     enriched_item["price_currency"] = "KRW"
+                elif yahoo_symbol.endswith(".AX"):
+                    bare = yahoo_symbol[:-3]
+                    rt = au_price_map.get(bare, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = "AUD"
                 else:
-                    snapshot = foreign_price_snapshot_map.get(yahoo_symbol or component_ticker, {})
-                    enriched_item["current_price"] = snapshot.get("current_price")
-                    enriched_item["previous_close"] = snapshot.get("previous_close")
-                    enriched_item["change_pct"] = snapshot.get("change_pct")
-                    enriched_item["price_currency"] = snapshot.get("price_currency")
+                    rt = us_price_map.get(yahoo_symbol or component_ticker, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = "USD"
 
                 enriched_item["is_us_pool_candidate"] = _is_us_pool_candidate(enriched_item)
                 enriched_item["in_us_pool"] = component_ticker in us_pool_tickers

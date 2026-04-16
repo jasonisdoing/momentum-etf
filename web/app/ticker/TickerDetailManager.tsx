@@ -781,8 +781,21 @@ export function TickerDetailManager({
     return `${holdingsAsOfDate.slice(0, 4)}-${holdingsAsOfDate.slice(4, 6)}-${holdingsAsOfDate.slice(6, 8)}`;
   }, [holdingsAsOfDate]);
   const holdingsPriceAsOfDateLabel = useMemo(() => {
-    if (!holdingsPriceAsOfDate || holdingsPriceAsOfDate.length !== 8) return null;
-    return `${holdingsPriceAsOfDate.slice(0, 4)}-${holdingsPriceAsOfDate.slice(4, 6)}-${holdingsPriceAsOfDate.slice(6, 8)}`;
+    if (!holdingsPriceAsOfDate) return null;
+    // "YYYYMMDD HH:MM" 형식 (14자) 또는 "YYYYMMDD" 형식 (8자)
+    const trimmed = holdingsPriceAsOfDate.trim();
+    if (trimmed.length >= 14) {
+      const datePart = `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
+      const [hh, mm] = trimmed.slice(9).trim().split(":");
+      const hour = parseInt(hh, 10);
+      const ampm = hour < 12 ? "오전" : "오후";
+      const h12 = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+      return `${datePart} ${ampm} ${h12}:${mm}`;
+    }
+    if (trimmed.length === 8) {
+      return `${trimmed.slice(0, 4)}-${trimmed.slice(4, 6)}-${trimmed.slice(6, 8)}`;
+    }
+    return null;
   }, [holdingsPriceAsOfDate]);
   const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
   const hasKoreanHoldings = useMemo(
@@ -1039,7 +1052,7 @@ export function TickerDetailManager({
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
                             <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
-                            <span className="text-muted tickerDetailTableMeta">{holdingsPanelMeta}</span>
+                            <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
                           </div>
                           {holdingsRows.length > 0 ? (
                             <div className="appGridFillWrap">

@@ -10,6 +10,7 @@ from utils.data_loader import (
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
     fetch_naver_stock_realtime_snapshot,
+    fetch_toss_us_stock_snapshot,
     get_latest_trading_day,
 )
 from utils.data_loader import (
@@ -27,6 +28,7 @@ _TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
 _KOR_ACTIVE_TTL_SECONDS = 30
 _AU_ACTIVE_TTL_SECONDS = 60
+_US_ACTIVE_TTL_SECONDS = 60
 _IDLE_TTL_SECONDS = 3600
 _FX_TTL_SECONDS = 3600
 
@@ -246,6 +248,9 @@ def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict
     if country == "au":
         return fetch_au_quoteapi_snapshot(tickers), "au_quoteapi"
 
+    if country == "us":
+        return fetch_toss_us_stock_snapshot(tickers), "toss_invest"
+
     raise ValueError(f"지원하지 않는 country_code입니다: {country}")
 
 
@@ -283,6 +288,8 @@ def _get_realtime_ttl_seconds(country: str) -> int:
             return _KOR_ACTIVE_TTL_SECONDS
         if country == "au":
             return _AU_ACTIVE_TTL_SECONDS
+        if country == "us":
+            return _US_ACTIVE_TTL_SECONDS
     return _IDLE_TTL_SECONDS
 
 
