@@ -1885,6 +1885,40 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [load]);
 
   useEffect(() => {
+    let active = true;
+
+    const refreshAssets = () => {
+      if (!active) {
+        return;
+      }
+      if (document.visibilityState !== "visible") {
+        return;
+      }
+      void load();
+    };
+
+    const intervalId = window.setInterval(refreshAssets, 60_000);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshAssets();
+      }
+    };
+    const handleWindowFocus = () => {
+      refreshAssets();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleWindowFocus);
+
+    return () => {
+      active = false;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleWindowFocus);
+    };
+  }, [load]);
+
+  useEffect(() => {
     summariesRef.current = summaries;
   }, [summaries]);
 

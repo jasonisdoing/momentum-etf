@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { fetchFastApiJson } from "../../../lib/internal-api";
+import { jsonNoStore } from "../../../lib/no-store-response";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,9 @@ type TickerSearchPayload = {
 export async function GET() {
   try {
     const data = await fetchFastApiJson<TickerSearchPayload>("/internal/ticker-detail/search-data");
-    return NextResponse.json(data);
+    return jsonNoStore(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "전역 검색 데이터를 불러오지 못했습니다.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonNoStore({ error: message }, { status: 500 });
   }
 }

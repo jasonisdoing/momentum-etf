@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { loadTickerDetailData } from "../../../lib/ticker-detail-store";
+import { jsonNoStore } from "../../../lib/no-store-response";
 
 export const dynamic = "force-dynamic";
 
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
     const countryCode = searchParams.get("country_code") ?? undefined;
 
     if (!ticker) {
-      return NextResponse.json({ error: "ticker 파라미터가 필요합니다." }, { status: 400 });
+      return jsonNoStore({ error: "ticker 파라미터가 필요합니다." }, { status: 400 });
     }
 
     const data = await loadTickerDetailData({
@@ -20,9 +21,9 @@ export async function GET(request: NextRequest) {
       ticker_type: tickerType,
       country_code: countryCode,
     });
-    return NextResponse.json(data);
+    return jsonNoStore(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "종목 상세 데이터를 불러오지 못했습니다.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return jsonNoStore({ error: message }, { status: 500 });
   }
 }
