@@ -3,6 +3,7 @@
     "name": "한국 개별주",
     "country_code": "kor",
     "currency": "KRW",
+    "holding_bonus_score": 10,
     "MA_RULES": [
         {
             "order": 1,

@@ -22,6 +22,7 @@ type RankTickerType = {
   name: string;
   icon: string;
   country_code: string;
+  holding_bonus_score?: number;
 };
 
 type RankMaRule = {
@@ -148,7 +149,8 @@ type RankHeaderSummary = {
 };
 
 let rankToolbarCache: RankToolbarCache | null = null;
-const HELD_BONUS_SCORE_STORAGE_KEY = "stocks-held-bonus-score";
+ 
+
 
 function getTodayDateInputValue(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
@@ -252,20 +254,6 @@ function clampHeldBonusScore(value: number): number {
   return Math.round(value / 5) * 5;
 }
 
-function readHeldBonusScore(): number {
-  if (typeof window === "undefined") {
-    return 0;
-  }
-  return clampHeldBonusScore(Number(window.localStorage.getItem(HELD_BONUS_SCORE_STORAGE_KEY) ?? "0"));
-}
-
-function writeHeldBonusScore(value: number): void {
-  if (typeof window === "undefined") {
-    return;
-  }
-  window.localStorage.setItem(HELD_BONUS_SCORE_STORAGE_KEY, String(clampHeldBonusScore(value)));
-}
-
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const router = useRouter();
   const toast = useToast();
@@ -356,6 +344,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setDeleteConfirmOpen(false);
       setRows(payload.rows ?? []);
       setCacheBlocked(Boolean(payload.cache_blocked));
+
+      // 선택된 ticker_type의 holding_bonus_score를 기본값으로 설정
+      const currentConfig = (payload.ticker_types ?? []).find(t => t.ticker_type === nextAccountId);
+      if (currentConfig && typeof currentConfig.holding_bonus_score === "number") {
+        setHeldBonusScore(currentConfig.holding_bonus_score);
+      }
+
       setRankingComputedAt(payload.ranking_computed_at ?? null);
       setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
       setMissingTickers(payload.missing_tickers ?? []);
@@ -381,14 +376,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
   }, []);
 
-  useEffect(() => {
-    setHeldBonusScore(readHeldBonusScore());
-  }, []);
+  // 초기 로딩 시 heldBonusScore는 load 함수 내에서 설정됨
+
 
   function handleHeldBonusScoreChange(nextValue: number) {
     const normalized = clampHeldBonusScore(nextValue);
     setHeldBonusScore(normalized);
-    writeHeldBonusScore(normalized);
   }
 
   const moveToTickerDetail = useMemo(
@@ -1256,7 +1249,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </label>
                     ))}
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">보유종목점수</span>
+                      <span className="appLabeledFieldLabel">보유보너스점수</span>
                       <select
                         className="form-select"
                         value={String(heldBonusScore)}

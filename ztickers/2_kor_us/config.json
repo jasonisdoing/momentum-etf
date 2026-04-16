@@ -3,6 +3,7 @@
     "name": "국내상장 해외",
     "country_code": "kor",
     "currency": "KRW",
+    "holding_bonus_score": 10,
     "MA_RULES": [
         {
             "order": 1,

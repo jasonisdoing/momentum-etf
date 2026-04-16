@@ -6,6 +6,7 @@ type RankTickerType = {
   name: string;
   icon: string;
   country_code: string;
+  holding_bonus_score?: number;
 };
 
 type RankMaRule = {
