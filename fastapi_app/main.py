@@ -9,6 +9,7 @@ from .routes.backtest import router as backtest_router
 from .routes.assets import router as assets_router
 from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
+from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.market import router as market_router
 from .routes.note import router as note_router
 from .routes.rank import router as rank_router
@@ -56,6 +57,7 @@ app.include_router(backtest_router)
 app.include_router(assets_router)
 app.include_router(holdings_router)
 app.include_router(dashboard_router)
+app.include_router(kor_market_stocks_router)
 app.include_router(market_router)
 app.include_router(note_router)
 app.include_router(rank_router)
