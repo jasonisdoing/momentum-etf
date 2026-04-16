@@ -150,7 +150,7 @@ def _apply_realtime_snapshot_to_dataframe(
     country_code: str,
 ) -> pd.DataFrame:
     country = str(country_code or "").strip().lower()
-    if country not in {"kor", "au"}:
+    if country not in {"kor", "au", "us"}:
         return df
 
     try:
@@ -229,7 +229,11 @@ def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | No
         return None
 
     now_local = datetime.now(ZoneInfo(timezone_name))
-    if now_local.time() < market_open:
+    # 미국은 프리마켓(4:00 ET)부터 토스 API로 가격 제공, 한국/호주는 장 시작 기준
+    from datetime import time as dt_time
+
+    earliest_time = dt_time(4, 0) if country == "us" else market_open
+    if now_local.time() < earliest_time:
         return None
 
     today_local = pd.Timestamp(now_local.date()).normalize()
@@ -410,6 +414,7 @@ def get_ticker_detail(
             "holdings_as_of_date": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
+            "realtime_price_as_of": None,
             "error": fetch_error or "가격 데이터를 가져오지 못했습니다.",
         }
 
@@ -589,6 +594,11 @@ def get_ticker_detail(
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings
 
+    # 실시간 가격 기준 시간 (헤더 표시용)
+    realtime_price_as_of: str | None = None
+    if rows:
+        realtime_price_as_of = datetime.now().strftime("%Y%m%d %H:%M")
+
     return {
         "ticker": ticker,
         "rows": rows,
@@ -596,4 +606,5 @@ def get_ticker_detail(
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
+        "realtime_price_as_of": realtime_price_as_of,
     }

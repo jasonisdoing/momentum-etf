@@ -64,6 +64,7 @@ type TickerDetailResponse = {
   holdings_as_of_date?: string | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
+  realtime_price_as_of?: string | null;
   error?: string;
 };
 
@@ -371,6 +372,7 @@ export function TickerDetailManager({
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
+  const [realtimePriceAsOf, setRealtimePriceAsOf] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
   const [addingPoolKeys, setAddingPoolKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
@@ -486,6 +488,7 @@ export function TickerDetailManager({
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
+      setRealtimePriceAsOf(payload.realtime_price_as_of ?? null);
       setHoldingsError(payload.holdings_error ?? null);
       persistRecentTickerSearch({
         ticker: matchedItem.ticker,
