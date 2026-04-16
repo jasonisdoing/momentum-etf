@@ -598,9 +598,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   setAddingRow((prev) =>
                     prev
                       ? {
-                          ...prev,
-                          bucket: Number(event.target.value),
-                        }
+                        ...prev,
+                        bucket: Number(event.target.value),
+                      }
                       : null,
                   )
                 }
@@ -734,23 +734,23 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ),
       ...(showDeviationColumn
         ? [
-            {
-              field: "괴리율",
-              headerName: "괴리율",
-              minWidth: 88,
-              width: 88,
-              type: "rightAligned",
-              cellRenderer: (params: { value: number | null | undefined }) => {
-                const val = params.value ?? 0;
-                const isExtreme = val > 2.0 || val < -2.0;
-                return (
-                  <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
-                    {formatPercent(params.value ?? null)}
-                  </span>
-                );
-              },
-            } as ColDef<RankGridRow>,
-          ]
+          {
+            field: "괴리율",
+            headerName: "괴리율",
+            minWidth: 88,
+            width: 88,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => {
+              const val = params.value ?? 0;
+              const isExtreme = val > 2.0 || val < -2.0;
+              return (
+                <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                  {formatPercent(params.value ?? null)}
+                </span>
+              );
+            },
+          } as ColDef<RankGridRow>,
+        ]
         : []),
       {
         field: "고점",
@@ -954,7 +954,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }
 
   function showErrorToast(message: string) {
-    toast.error(`[ETF-순위] ${message}`);
+    toast.error(`[순위] ${message}`);
   }
 
   function handleAddRow() {
@@ -982,10 +982,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       prev.map((currentRow) =>
         normalizeTicker(String(currentRow.티커 ?? "")) === row.id
           ? {
-              ...currentRow,
-              bucket: nextBucketId,
-              버킷: getBucketName(nextBucketId),
-            }
+            ...currentRow,
+            bucket: nextBucketId,
+            버킷: getBucketName(nextBucketId),
+          }
           : currentRow,
       ),
     );
@@ -1007,31 +1007,31 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setAddingRow((prev) =>
         prev
           ? {
-              ...prev,
-              ticker: normalizeTicker(validated.ticker),
-              name: String(validated.name ?? "").trim(),
-              listing_date: String(validated.listing_date ?? "-").trim() || "-",
-              bucket: Number(validated.bucket_id ?? prev.bucket ?? 1),
-              status: validated.status,
-              is_validating: false,
-              is_validated: validated.status !== "active",
-            }
+            ...prev,
+            ticker: normalizeTicker(validated.ticker),
+            name: String(validated.name ?? "").trim(),
+            listing_date: String(validated.listing_date ?? "-").trim() || "-",
+            bucket: Number(validated.bucket_id ?? prev.bucket ?? 1),
+            status: validated.status,
+            is_validating: false,
+            is_validated: validated.status !== "active",
+          }
           : null,
       );
       if (validated.status === "active") {
         showErrorToast("이미 등록된 종목입니다.");
         return;
       }
-      toast.success(`[ETF-순위] ${validated.name}(${validated.ticker}) 확인 완료`);
+      toast.success(`[순위] ${validated.name}(${validated.ticker}) 확인 완료`);
     } catch (validationError) {
       setAddingRow((prev) =>
         prev
           ? {
-              ...prev,
-              ticker,
-              is_validating: false,
-              is_validated: false,
-            }
+            ...prev,
+            ticker,
+            is_validating: false,
+            is_validated: false,
+          }
           : null,
       );
       showErrorToast(validationError instanceof Error ? validationError.message : "티커 확인에 실패했습니다.");
@@ -1044,7 +1044,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
 
     const created = await addStockCandidate(selectedTickerType, addingRow.ticker, addingRow.bucket);
-    toast.success(`[ETF-순위] ${created.name}(${created.ticker}) 추가 완료`);
+    toast.success(`[순위] ${created.name}(${created.ticker}) 추가 완료`);
   }
 
   async function processDirtyRows() {
@@ -1067,7 +1067,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (dirtyRowIds.length > 0) {
           await processDirtyRows();
         }
-        toast.success("[ETF-순위] 변경사항 저장 완료");
+        toast.success("[순위] 변경사항 저장 완료");
         void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
@@ -1106,7 +1106,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         setSelectedTickers([]);
         setDeleteConfirmOpen(false);
         clearCacheWarningState();
-        toast.success(`[ETF-순위] ${selectedRows.length}개 종목 삭제 완료`);
+        toast.success(`[순위] ${selectedRows.length}개 종목 삭제 완료`);
         void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
@@ -1142,7 +1142,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
 
     lastBlockedToastRef.current = blockedMessage;
-    toast.error(`[ETF-순위] ${blockedMessage}`);
+    toast.error(`[순위] ${blockedMessage}`);
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
@@ -1358,25 +1358,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   suppressMovableColumns: true,
                   rowSelection: pageMode === "manage"
                     ? {
-                        mode: "multiRow",
-                        checkboxes: (params) => !params.data?.__isAddingRow,
-                        headerCheckbox: true,
-                        hideDisabledCheckboxes: true,
-                        enableClickSelection: false,
-                      }
+                      mode: "multiRow",
+                      checkboxes: (params) => !params.data?.__isAddingRow,
+                      headerCheckbox: true,
+                      hideDisabledCheckboxes: true,
+                      enableClickSelection: false,
+                    }
                     : undefined,
                   selectionColumnDef: pageMode === "manage"
                     ? {
-                        width: 52,
-                        minWidth: 52,
-                        maxWidth: 52,
-                        pinned: "left",
-                        sortable: false,
-                        resizable: false,
-                        suppressMovable: true,
-                        headerName: "",
-                        cellClass: "stocksSelectCell",
-                      }
+                      width: 52,
+                      minWidth: 52,
+                      maxWidth: 52,
+                      pinned: "left",
+                      sortable: false,
+                      resizable: false,
+                      suppressMovable: true,
+                      headerName: "",
+                      cellClass: "stocksSelectCell",
+                    }
                     : undefined,
                   onSelectionChanged: (params: { api: { getSelectedRows: () => RankGridRow[] } }) => {
                     if (pageMode !== "manage") {
