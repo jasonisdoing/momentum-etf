@@ -24,7 +24,6 @@ from config import (
     MIN_TRADING_DAYS,
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
-    NAVER_FINANCE_STOCK_POLLING_URL,
 )
 
 # pkg_resources 워닝 억제 (가장 강력한 방법)
