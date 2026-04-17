@@ -217,13 +217,12 @@ def update_ticker_type_metadata(
                 if f in stock:
                     update_doc[f] = stock[f]
 
-            if country_code == "kor":
+            # 한국 종목이고 ETF 풀(kor_kr)인 경우에만 상세 캐시(배당률 등) 갱신 시도
+            if country_code == "kor" and type_norm == "kor_kr":
                 try:
                     _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name))
-                except Exception as meta_cache_error:
-                    logger.error(
-                        f"[{type_norm.upper()}/{ticker}] ETF 메타 캐시 갱신 실패: {meta_cache_error}"
-                    )
+                except Exception as e:
+                    logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
 
             updates_for_db.append(update_doc)
 
