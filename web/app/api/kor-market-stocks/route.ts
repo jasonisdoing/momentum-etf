@@ -13,6 +13,8 @@ type KorMarketStocksResponse = {
     rank: number;
     ticker: string;
     name: string;
+    ticker_pools: string;
+    is_held: boolean;
     current_price: number | null;
     change_pct: number | null;
     volume: number | null;
