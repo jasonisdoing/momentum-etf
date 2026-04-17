@@ -1971,41 +1971,51 @@ _pykrx_name_cache: dict[str, str] = {}
 
 def fetch_pykrx_name(ticker: str) -> str:
     """
-    pykrx를 통해 종목의 이름을 가져옵니다. ETF, 일반 주식, ETN을 모두 시도합니다.
-    결과는 단일 실행 내에서 캐시됩니다.
+    한국 종목명을 조회한다. 조회 순서:
+
+    1. 네이버 marketValue 통합 맵(KOSPI/KOSDAQ 일반주)
+    2. pykrx ETF / 일반주 / ETN (네이버에 없는 희귀 종목 폴백)
+    3. `_get_display_name`의 기존 표시명
+
+    프로세스 내 결과 캐시(`_pykrx_name_cache`)를 재사용한다.
     """
     if ticker in _pykrx_name_cache:
         return _pykrx_name_cache[ticker]
 
-    if _stock is None:
-        return ""
-
     name = ""
+
+    # 1. 네이버 marketValue API 통합 맵 우선 조회 (일반주 대부분 커버)
     try:
-        # 1. ETF 이름 조회 시도
-        name_candidate = _stock.get_etf_ticker_name(ticker)
-        if isinstance(name_candidate, str) and name_candidate:
-            name = name_candidate
+        naver_name = fetch_naver_kor_stock_name(ticker)
+        if naver_name:
+            name = naver_name
     except Exception:
         pass
 
-    # 2. ETF 조회가 실패하면 일반 주식으로 간주하고 다시 시도
-    if not name:
+    # 2. pykrx 폴백 (네이버에 없는 ETF/ETN 등)
+    if not name and _stock is not None:
         try:
-            name_candidate = _stock.get_market_ticker_name(ticker)
+            name_candidate = _stock.get_etf_ticker_name(ticker)
             if isinstance(name_candidate, str) and name_candidate:
                 name = name_candidate
         except Exception:
             pass
 
-    # 3. 주식 조회도 실패하면 ETN으로 간주하고 다시 시도
-    if not name:
-        try:
-            name_candidate = _stock.get_etn_ticker_name(ticker)
-            if isinstance(name_candidate, str) and name_candidate:
-                name = name_candidate
-        except Exception:
-            pass
+        if not name:
+            try:
+                name_candidate = _stock.get_market_ticker_name(ticker)
+                if isinstance(name_candidate, str) and name_candidate:
+                    name = name_candidate
+            except Exception:
+                pass
+
+        if not name:
+            try:
+                name_candidate = _stock.get_etn_ticker_name(ticker)
+                if isinstance(name_candidate, str) and name_candidate:
+                    name = name_candidate
+            except Exception:
+                pass
 
     if not name:
         name = _get_display_name("kor", ticker)
@@ -2014,46 +2024,111 @@ def fetch_pykrx_name(ticker: str) -> str:
     return name
 
 
-_naver_market_map: dict[str, str] = {}
+# 한국 코스피/코스닥 종목 정보 통합 맵 (네이버 marketValue API 기반)
+# 구조: {ticker: {"name": str, "market": "KOSPI"|"KOSDAQ"}}
+# 종목명과 마켓 정보를 한 번의 네트워크 순회로 동시에 수집하기 위한 공용 캐시.
+_naver_kor_stock_map: dict[str, dict[str, str]] = {}
 
 
-def fetch_pykrx_market(ticker: str) -> str:
+def _load_naver_kor_stock_map() -> dict[str, dict[str, str]]:
     """
-    네이버 API를 통해 종목의 소속 마켓(KOSPI, KOSDAQ) 정보를 가져옵니다.
-    (함수명은 호환성을 위해 유지하며, 내부 로직은 네이버 API로 교체)
+    네이버 모바일 주식 API(`m.stock.naver.com/api/stocks/marketValue/{KOSPI|KOSDAQ}`)를
+    호출하여 한국 상장 종목 전체의 {ticker: {"name", "market"}} 맵을 구성한다.
+
+    - ETN(`stockEndType == "etn"`)은 제외한다.
+    - 프로세스 수명 동안 1회만 네트워크 호출을 수행하고 결과를 모듈 수준 캐시에 저장한다.
+    """
+
+    if _naver_kor_stock_map:
+        return _naver_kor_stock_map
+
+    try:
+        import time as _time
+
+        import requests
+
+        from config import NAVER_STOCK_MARKET_VALUE_HEADERS, NAVER_STOCK_MARKET_VALUE_URL
+
+        for market in ["KOSPI", "KOSDAQ"]:
+            page = 1
+            page_size = 100
+            while True:
+                try:
+                    url = NAVER_STOCK_MARKET_VALUE_URL.format(market=market)
+                    resp = requests.get(
+                        url,
+                        params={"page": page, "pageSize": page_size},
+                        headers=NAVER_STOCK_MARKET_VALUE_HEADERS,
+                        timeout=10,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception:
+                    break
+
+                stocks = data.get("stocks") or []
+                if not stocks:
+                    break
+
+                for item in stocks:
+                    item_code = str(item.get("itemCode") or "").strip().upper()
+                    if not item_code:
+                        continue
+                    item_name = str(item.get("stockName") or "").strip()
+                    if not item_name:
+                        continue
+                    # ETN 제외
+                    if str(item.get("stockEndType") or "").lower() == "etn":
+                        continue
+                    _naver_kor_stock_map[item_code] = {
+                        "name": item_name,
+                        "market": market,
+                    }
+
+                if len(stocks) < page_size:
+                    break
+                page += 1
+                _time.sleep(0.05)
+    except Exception:
+        pass
+
+    return _naver_kor_stock_map
+
+
+def fetch_naver_kor_stock_map() -> dict[str, dict[str, str]]:
+    """한국 상장 종목의 {ticker: {"name", "market"}} 통합 맵을 반환한다."""
+    return _load_naver_kor_stock_map()
+
+
+def fetch_naver_kor_market(ticker: str) -> str:
+    """
+    네이버 API를 통해 한국 종목의 소속 마켓(KOSPI/KOSDAQ)을 반환한다.
     """
     ticker_norm = str(ticker or "").strip().upper()
     if not ticker_norm:
         return ""
+    entry = _load_naver_kor_stock_map().get(ticker_norm) or {}
+    return str(entry.get("market") or "")
 
-    # 캐시 확인
-    if ticker_norm in _naver_market_map:
-        return _naver_market_map[ticker_norm]
 
-    # 마켓 맵이 비어있으면 초기화 (네이버 API로 목록 로드)
-    if not _naver_market_map:
-        try:
-            import requests
+def fetch_naver_kor_stock_name(ticker: str) -> str:
+    """
+    네이버 marketValue API 기반으로 한국 일반주/ETN 종목명을 반환한다.
+    ETF 이름은 `fetch_naver_etf_names_map()`에 의해 별도로 커버된다.
+    """
+    ticker_norm = str(ticker or "").strip().upper()
+    if not ticker_norm:
+        return ""
+    entry = _load_naver_kor_stock_map().get(ticker_norm) or {}
+    return str(entry.get("name") or "")
 
-            for m in ["KOSPI", "KOSDAQ"]:
-                # 페이지별로 돌며 전체 목록 수집 (단순화를 위해 상위 10페이지 정도만 수집해도 1000개 이상)
-                # 실제로는 데이터가 많으므로 pageSize를 크게 하여 호출
-                for page in range(1, 31):  # 3000개까지 커버
-                    url = f"https://m.stock.naver.com/api/stocks/marketValue/{m}?page={page}&pageSize=100"
-                    resp = requests.get(url, timeout=10)
-                    if resp.status_code != 200:
-                        break
-                    items = resp.json().get("stocks")
-                    if not items:
-                        break
-                    for item in items:
-                        item_code = item.get("itemCode")
-                        if item_code:
-                            _naver_market_map[item_code] = m
-        except Exception:
-            pass
 
-    return _naver_market_map.get(ticker_norm, "")
+# --- Backward-compat alias ---
+# 구 이름 `fetch_pykrx_market`은 내부 구현이 이미 네이버 API로 교체되어 있었음.
+# 신규 코드는 `fetch_naver_kor_market`을 사용한다.
+def fetch_pykrx_market(ticker: str) -> str:
+    """Deprecated alias. `fetch_naver_kor_market` 사용을 권장한다."""
+    return fetch_naver_kor_market(ticker)
 
 
 _etf_name_cache: dict[tuple[str, str], str] = {}
