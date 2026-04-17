@@ -64,7 +64,16 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
     held_tickers = load_all_holding_tickers()
 
     rows: list[dict[str, Any]] = []
-    for idx, item in enumerate(raw_stocks, start=1):
+    filtered_idx = 1
+    for item in raw_stocks:
+        # 종목 유형 필터링 (stockEndType이 'stock'인 것만 포함)
+        stock_type = str(item.get("stockEndType", "")).lower()
+        name = item.get("stockName", "")
+        
+        # ETF, ETN 제외 (필드값 및 명칭 키워드 체크)
+        if stock_type != "stock" or any(k in name.upper() for k in ["ETF", "ETN"]):
+            continue
+
         ticker = item.get("itemCode", "")
         close_price = _parse_number(item.get("closePrice"))
         change_ratio = _parse_float(item.get("fluctuationsRatio"))
@@ -80,9 +89,9 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
 
         rows.append(
             {
-                "rank": idx,
+                "rank": filtered_idx,
                 "ticker": ticker,
-                "name": item.get("stockName", ""),
+                "name": name,
                 "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
                 "is_held": ticker in held_tickers,
                 "current_price": close_price,
@@ -91,6 +100,7 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
                 "market_cap": market_cap_eok,
             }
         )
+        filtered_idx += 1
 
     return {
         "market": market,
