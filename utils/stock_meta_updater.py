@@ -124,8 +124,20 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
                     info = ticker_cat_info.setdefault(ticker_norm, {
                         "best_code": "",
                         "best_name": "",
+                        "name": "",
                         "details": {cat["code"]: "" for cat in NAVER_ETF_CATEGORY_CONFIG}
                     })
+
+                    # 0. 응답에 이름 필드가 있으면 곁다리로 수집 (이름 맵 보완용)
+                    if not info["name"]:
+                        item_name = str(
+                            item.get("itemName")
+                            or item.get("stockName")
+                            or item.get("name")
+                            or ""
+                        ).strip()
+                        if item_name:
+                            info["name"] = item_name
 
                     # 1. 상세 맵 업데이트 (대분류별 중분류명 보존)
                     # 값이 여러 개인 경우 가장 처음 발견된 값만 사용
@@ -144,22 +156,20 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
                 time.sleep(0.05)  # 과도한 호출 방지
 
     # 최종 결과 구성
-    final_map = {}
+    final_map: dict[str, dict[str, Any]] = {}
+    names_collected = 0
     for ticker, info in ticker_cat_info.items():
         final_map[ticker] = {
             "best": info["best_name"],
-            "details": info["details"]
+            "name": info["name"],
+            "details": info["details"],
         }
+        if info["name"]:
+            names_collected += 1
 
     logger.info(
-        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(final_map)}개 "
-        f"(상세 분류 필드 생성 및 우선순위 단일화 병행)"
-    )
-    return final_map
-
-    logger.info(
-        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(final_map)}개 "
-        f"(전체 분류 필드 생성 및 우선순위 단일화 병행)"
+        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(final_map)}개, "
+        f"이름 보완용 수집 {names_collected}건"
     )
     return final_map
 
@@ -330,18 +340,29 @@ def update_ticker_type_metadata(
         progress_callback(0, total_count, "데이터 준비 중...")
 
     # [KOR] 전체 종목(일반주/ETF) 맵 구성하여 루프 내 호출 최소화
-    naver_etf_map = {}
-    naver_kor_stock_map = {}
+    naver_etf_map: dict[str, str] = {}
+    is_naver_source = type_source.lower() == "naver"
     if country_code == "kor":
         logger.info("네이버 API에서 전체 종목 정보들을 수집합니다...")
         naver_etf_map = fetch_naver_etf_names_map()
-        naver_kor_stock_map = fetch_naver_kor_stock_map()
+        # type_source=Naver 풀은 모두 ETF이므로 일반주 맵 프리로드 생략
+        if not is_naver_source:
+            fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
 
     # type_source == "Naver" 인 종목풀만 카테고리(투자국가/섹터/지수) 역인덱스 맵 구성
-    naver_category_map: dict[str, dict[str, str]] = {}
-    if type_source.lower() == "naver":
+    naver_category_map: dict[str, dict[str, Any]] = {}
+    if is_naver_source:
         logger.info(f"[{type_norm.upper()}] 네이버 ETF 카테고리 맵을 구성합니다...")
         naver_category_map = _build_naver_category_map()
+        # 카테고리 API 응답으로 수집한 이름을 ETF 이름 맵에 보완
+        supplemented = 0
+        for t_code, entry in naver_category_map.items():
+            cat_name = str(entry.get("name") or "").strip()
+            if cat_name and not naver_etf_map.get(t_code):
+                naver_etf_map[t_code] = cat_name
+                supplemented += 1
+        if supplemented:
+            logger.info(f"[{type_norm.upper()}] 카테고리 맵으로 ETF 이름 {supplemented}건 보완")
 
     # 업데이트 사항을 모아두기 위한 리스트
     updates_for_db = []
@@ -358,7 +379,6 @@ def update_ticker_type_metadata(
                 naver_etf_map,
                 type_norm,
                 naver_category_map=naver_category_map,
-                naver_kor_stock_map=naver_kor_stock_map,
             )
 
             name = stock.get("name") or "-"
@@ -620,18 +640,12 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
             stock["name"] = existing.get("name") or ""
             stock["listing_date"] = existing.get("listing_date")
 
-    # [KOR] 전체 종목 정보 맵 확보 (일개 종목 업데이트 시에도 정합성 위해 벌크 활용)
-    naver_kor_stock_map = {}
-    if country_code == "kor":
-        naver_kor_stock_map = fetch_naver_kor_stock_map()
-
     update_single_stock_metadata(
         stock,
         country_code,
         naver_etf_map,
         type_norm,
         naver_category_map=naver_category_map,
-        naver_kor_stock_map=naver_kor_stock_map,
     )
 
     if country_code == "kor":
@@ -677,7 +691,6 @@ def update_single_stock_metadata(
     account_norm: str = "",
     *,
     naver_category_map: dict[str, Any] | None = None,
-    naver_kor_stock_map: dict[str, dict[str, str]] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
