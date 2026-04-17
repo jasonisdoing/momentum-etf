@@ -772,12 +772,22 @@ def update_single_stock_metadata(
                 except Exception as e:
                     logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
 
-            hist = t.history(period="max")
-            if not hist.empty:
-                first_date = hist.index.min()
-                listing_date_str = first_date.strftime("%Y-%m-%d")
-                if account_norm:
-                    logger.debug(f"[{account_norm.upper()}/{ticker}] yfinance에서 상장일 획득: {listing_date_str}")
+            # 상장일이 이미 있으면 history 호출 자체를 생략
+            if not stock.get("listing_date"):
+                try:
+                    hist = t.history(period="max", auto_adjust=True)
+                    if hist is not None and not hist.empty:
+                        first_date = hist.index.min()
+                        listing_date_str = first_date.strftime("%Y-%m-%d")
+                        if account_norm:
+                            logger.debug(
+                                f"[{account_norm.upper()}/{ticker}] yfinance 상장일 획득: {listing_date_str}"
+                            )
+                        # period='max' 결과를 아래 수익률 계산에도 재사용 (yf.download 중복 호출 방지)
+                        if isinstance(hist, pd.DataFrame):
+                            data = hist.tail(520).copy()
+                except Exception as e:
+                    logger.warning(f"[{account_norm.upper()}/{ticker}] yfinance history 조회 실패: {e}")
         except Exception as e:
             logger.warning(f"[{account_norm.upper()}/{ticker}] yfinance 메타데이터 조회 조회 실패: {e}")
 
