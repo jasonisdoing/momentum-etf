@@ -480,40 +480,6 @@ def update_stock_metadata(ticker_type: str | None = None):
     logger.info("모든 메타데이터 업데이트 작업이 완료되었습니다.")
 
 
-def _fetch_naver_stock_name_scraping(ticker: str) -> str | None:
-    """
-    네이버 금융 페이지 크롤링을 통해 종목명을 가져옵니다.
-    API나 pykrx에서 조회되지 않는 신규 상장 ETF 등을 위한 폴백입니다.
-    """
-    try:
-        import requests
-        from bs4 import BeautifulSoup
-
-        url = f"https://finance.naver.com/item/main.naver?code={ticker}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36"
-        }
-        resp = requests.get(url, headers=headers, timeout=5)
-        resp.raise_for_status()
-
-        # EUC-KR 디코딩
-        try:
-            html = resp.content.decode("euc-kr")
-        except Exception:
-            html = resp.text
-
-        soup = BeautifulSoup(html, "html.parser")
-        # <div class="wrap_company"><h2><a href="#">종목명</a></h2>...</div>
-        name_tag = soup.select_one(".wrap_company h2 a")
-        if name_tag:
-            return name_tag.text.strip()
-
-    except Exception as e:
-        get_app_logger().debug(f"네이버 금융 크롤링 실패 ({ticker}): {e}")
-
-    return None
-
-
 def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
     """
     단일 종목의 이름과 메타데이터를 조회합니다.
@@ -538,7 +504,7 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
             except Exception:
                 pass
 
-            # 2. 이름 못 찾으면 Naver Map 시도 (비효율적이지만 정확도 높음)
+            # 2. 이름 못 찾으면 Naver ETF 이름 맵 시도 (신규 상장 ETF 대응)
             if not result["name"]:
                 try:
                     naver_map = fetch_naver_etf_names_map()
@@ -547,16 +513,7 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
                 except Exception:
                     pass
 
-            # 3. 그래도 없으면 크롤링 폴백 시도 (0111J0 등 API 누락 대비)
-            if not result["name"]:
-                try:
-                    scraped_name = _fetch_naver_stock_name_scraping(ticker)
-                    if scraped_name:
-                        result["name"] = scraped_name
-                except Exception:
-                    pass
-
-            # 4. 상장일 조회
+            # 3. 상장일 조회
             try:
                 ld = _fetch_naver_listing_date(ticker)
                 if ld:
