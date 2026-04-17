@@ -25,6 +25,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
+import { readRememberedTickerType } from "../components/account-selection";
 
 // --- 타입 ---
 
@@ -439,8 +440,17 @@ export function TickerDetailManager({
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
     if (matches.length > 1) {
+      const rememberedType = readRememberedTickerType();
+      const bestMatch = matches.find((m) => m.ticker_type === rememberedType);
+      
+      if (bestMatch) {
+        setSelectedTicker(bestMatch);
+        void loadTickerData(bestMatch);
+        return;
+      }
+      
       setSelectedTicker(null);
-      setError(`동일한 티커 ${qTicker}가 여러 종목풀에 등록되어 있습니다.`);
+      setError(`동일한 티커 ${qTicker}가 여러 종목풀(${matches.map(m => m.ticker_type).join(", ")})에 등록되어 있습니다.`);
       return;
     }
 

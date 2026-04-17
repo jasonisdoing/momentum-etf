@@ -11,6 +11,10 @@ import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
+import {
+  readRememberedTickerType,
+  writeRememberedTickerType,
+} from "../components/account-selection";
 
 type MarketRowItem = {
   ticker: string;
@@ -313,7 +317,7 @@ export function MarketManager({
     if (!hasSelectedRows) {
       return;
     }
-    setSelectedTickerPool("");
+    setSelectedTickerPool(readRememberedTickerType() || "");
     setSelectedBucketId("");
     setAddModalOpen(true);
   }, [hasSelectedRows]);
@@ -755,7 +759,11 @@ export function MarketManager({
             <select
               className="field compactField"
               value={selectedTickerPool}
-              onChange={(event) => setSelectedTickerPool(event.target.value)}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                setSelectedTickerPool(nextType);
+                if (nextType) writeRememberedTickerType(nextType);
+              }}
             >
               <option value="">종목풀 선택</option>
               {tickerPools.map((pool) => (
