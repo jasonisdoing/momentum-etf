@@ -8,74 +8,23 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
-from services.etf_meta_service import fetch_korean_etf_info_from_naver
-from services.stock_cache_service import refresh_stock_cache
-from utils.data_loader import fetch_ohlcv, fetch_pykrx_market, fetch_pykrx_name
-from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from config import (
     NAVER_ETF_CATEGORY_CONFIG,
     NAVER_ETF_CATEGORY_HEADERS,
     NAVER_ETF_DOMESTIC_URL,
     NAVER_ETF_THEMES_URL,
-    NAVER_STOCK_MARKET_VALUE_HEADERS,
-    NAVER_STOCK_MARKET_VALUE_URL,
 )
+from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
+from services.etf_meta_service import fetch_korean_etf_info_from_naver
+from services.stock_cache_service import refresh_stock_cache
+from utils.data_loader import (
+    fetch_naver_kor_market,
+    fetch_naver_kor_stock_map,
+    fetch_pykrx_name,
+)
+from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
-
-
-def fetch_naver_kor_stock_map() -> dict[str, dict[str, str]]:
-    """
-    네이버 marketValue API를 사용하여 모든 한국 종목(KOSPI, KOSDAQ)의 {티커: {이름, 마켓}} 맵을 생성한다.
-    ETN은 제외한다.
-    """
-    logger = get_app_logger()
-    stock_map = {}
-
-    for market in ["KOSPI", "KOSDAQ"]:
-        page = 1
-        page_size = 100
-        while True:
-            try:
-                url = NAVER_STOCK_MARKET_VALUE_URL.format(market=market)
-                resp = requests.get(
-                    url,
-                    params={"page": page, "pageSize": page_size},
-                    headers=NAVER_STOCK_MARKET_VALUE_HEADERS,
-                    timeout=10,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as exc:
-                logger.warning(f"[Naver 벌크] {market} {page}페이지 조회 실패: {exc}")
-                break
-
-            stocks = data.get("stocks") or []
-            if not stocks:
-                break
-
-            for s in stocks:
-                ticker = str(s.get("itemCode") or "").strip().upper()
-                name = str(s.get("stockName") or "").strip()
-                stock_end_type = str(s.get("stockEndType") or "").lower()
-
-                if not ticker or not name:
-                    continue
-                
-                # ETN 제외 (stockEndType이 'etn'인 경우 제외)
-                if stock_end_type == "etn":
-                    continue
-
-                stock_map[ticker] = {"name": name, "market": market}
-
-            if len(stocks) < page_size:
-                break
-            page += 1
-            time.sleep(0.05)
-
-    logger.info(f"[Naver 벌크] 총 {len(stock_map)}개 한국 종목 정보 맵 생성 완료")
-    return stock_map
 
 
 def _build_naver_category_map() -> dict[str, dict[str, str]]:
@@ -771,25 +720,26 @@ def update_single_stock_metadata(
         if new_name:
             stock["name"] = new_name
         elif not stock.get("name") or stock.get("name") == ticker:
+            # 일반주/ETN은 네이버 marketValue 통합 맵 → pykrx 폴백 순서로 조회
             try:
                 fetched_name = fetch_pykrx_name(ticker)
                 if fetched_name:
                     stock["name"] = fetched_name
                     if account_norm:
-                        logger.info(f"[{account_norm.upper()}/{ticker}] pykrx에서 종목명 획득: {fetched_name}")
+                        logger.info(f"[{account_norm.upper()}/{ticker}] 종목명 획득: {fetched_name}")
             except Exception as e:
-                logger.warning(f"[{account_norm.upper()}/{ticker}] pykrx 종목명 조회 실패: {e}")
+                logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
 
-        # 3. 마켓(KOSPI/KOSDAQ) 조회
+        # 3. 마켓(KOSPI/KOSDAQ) 조회 — 네이버 marketValue 통합 맵 사용
         if not stock.get("market"):
             try:
-                market = fetch_pykrx_market(ticker)
+                market = fetch_naver_kor_market(ticker)
                 if market:
                     stock["market"] = market
                     if account_norm:
-                        logger.info(f"[{account_norm.upper()}/{ticker}] pykrx에서 마켓 정보 획득: {market}")
+                        logger.info(f"[{account_norm.upper()}/{ticker}] 네이버에서 마켓 정보 획득: {market}")
             except Exception as e:
-                logger.warning(f"[{account_norm.upper()}/{ticker}] pykrx 마켓 정보 조회 실패: {e}")
+                logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
     elif country_code in ("us", "au"):
         try:
