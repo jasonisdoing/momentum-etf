@@ -11,6 +11,10 @@ import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
+import {
+  readRememberedTickerType,
+  writeRememberedTickerType,
+} from "../components/account-selection";
 
 type KorMarketStockRow = {
   rank: number;
@@ -230,7 +234,11 @@ export function KorMarketStockManager({
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter((p) => p.name.includes("한국 개별주"));
-    if (stockPools.length === 1) {
+    const remembered = readRememberedTickerType();
+    
+    if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
+      setSelectedTickerPool(remembered);
+    } else if (stockPools.length === 1) {
       setSelectedTickerPool(stockPools[0].ticker_type);
     } else {
       setSelectedTickerPool("");
@@ -496,7 +504,11 @@ export function KorMarketStockManager({
             <select
               className="field compactField"
               value={selectedTickerPool}
-              onChange={(event) => setSelectedTickerPool(event.target.value)}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                setSelectedTickerPool(nextType);
+                if (nextType) writeRememberedTickerType(nextType);
+              }}
             >
               <option value="">종목풀 선택</option>
               {tickerPools

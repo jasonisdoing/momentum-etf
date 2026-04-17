@@ -5,6 +5,10 @@ import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { themeQuartz, iconSetQuartzBold } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
+import {
+  readRememberedMomentumEtfAccountId,
+  writeRememberedMomentumEtfAccountId,
+} from "../components/account-selection";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 type AccountOption = {
@@ -109,7 +113,9 @@ function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
 export function HoldingsDetailsPageClient() {
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<string>("");
+  const [selectedAccount, setSelectedAccount] = useState<string>(
+    readRememberedMomentumEtfAccountId() || "",
+  );
   const [data, setData] = useState<HoldingsComponentsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,7 +129,10 @@ export function HoldingsDetailsPageClient() {
         if (!res.ok) throw new Error("계좌 목록을 불러오지 못했습니다.");
         const list = (await res.json()) as AccountOption[];
         setAccounts(list);
-        if (list.length > 0) setSelectedAccount(list[0].account_id);
+        if (list.length > 0 && !selectedAccount) {
+          setSelectedAccount(list[0].account_id);
+          writeRememberedMomentumEtfAccountId(list[0].account_id);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
       }
@@ -332,7 +341,11 @@ export function HoldingsDetailsPageClient() {
                   <select
                     className="form-select"
                     value={selectedAccount}
-                    onChange={(e) => setSelectedAccount(e.target.value)}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setSelectedAccount(nextId);
+                      writeRememberedMomentumEtfAccountId(nextId);
+                    }}
                     disabled={accounts.length === 0}
                   >
                     {accounts.length === 0 ? (
