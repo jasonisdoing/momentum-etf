@@ -45,12 +45,27 @@ NAVER_ETF_CATEGORY_HEADERS = {
     "Referer": "https://stock.naver.com/",
     "Accept": "application/json, text/plain, */*",
 }
-# 카테고리 대분류 코드: 투자국가(0201) / 섹터(0401) / 지수(0501)
-NAVER_ETF_CATEGORY_UPPER_CODES = {
-    "country": "0201",
-    "sector": "0401",
-    "index": "0501",
-}
+# 네이버 ETF 대분류 설정 (enabled가 True인 것만 수집하며, 코드가 클수록 우선순위가 높음)
+NAVER_ETF_CATEGORY_CONFIG = [
+    {"code": "0803", "name": "국내운용사", "enabled": False},
+    {"code": "0701", "name": "트렌드", "enabled": False},
+    {"code": "0610", "name": "단일종목", "enabled": False},
+    {"code": "0609", "name": "배당", "enabled": True},
+    {"code": "0607", "name": "ESG", "enabled": False},
+    {"code": "0606", "name": "투자전략", "enabled": False},
+    {"code": "0601", "name": "혁신기술", "enabled": True},
+    {"code": "0501", "name": "지수", "enabled": True},
+    {"code": "0401", "name": "섹터", "enabled": True},
+    {"code": "0301", "name": "배율", "enabled": False},
+    {"code": "0201", "name": "투자국가", "enabled": True},
+    {"code": "0108", "name": "단기자금(파킹형)", "enabled": False},
+    {"code": "0106", "name": "통화", "enabled": False},
+    {"code": "0105", "name": "원자재", "enabled": False},
+    {"code": "0104", "name": "멀티에셋", "enabled": False},
+    {"code": "0103", "name": "부동산", "enabled": False},
+    {"code": "0102", "name": "채권", "enabled": False},
+    {"code": "0101", "name": "주식", "enabled": True},
+]
 
 # 호주 MarketIndex QuoteAPI 설정
 AU_QUOTEAPI_URL = "https://quoteapi.com/api/v5/symbols"
