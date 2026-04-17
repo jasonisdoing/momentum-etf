@@ -512,13 +512,27 @@ export function HoldingsManager({
       },
     },
     {
-      headerName: "보유일",
-      field: "days_held",
-      width: 92,
-      cellClass: "tableAlignCenter",
+      headerName: "일간(%)",
+      field: "daily_change_pct",
+      width: 120,
+      type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return (params.data as AggregatedHoldingRow).days_held;
+        const row = params.data as AggregatedHoldingRow;
+        if (row.ticker === "__CASH__") return "-";
+        return <span className={getSignedClass(row.daily_change_pct)}>{formatSignedPercent(row.daily_change_pct)}</span>;
+      },
+    },
+    {
+      headerName: "수익률(%)",
+      field: "return_pct",
+      width: 120,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentRow }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as AggregatedHoldingRow;
+        if (row.ticker === "__CASH__") return "-";
+        return <span className={getSignedClass(row.return_pct)}>{formatSignedPercent(row.return_pct)}</span>;
       },
     },
     {
@@ -546,18 +560,6 @@ export function HoldingsManager({
       },
     },
     {
-      headerName: "일간(%)",
-      field: "daily_change_pct",
-      width: 120,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentRow }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        const row = params.data as AggregatedHoldingRow;
-        if (row.ticker === "__CASH__") return "-";
-        return <span className={getSignedClass(row.daily_change_pct)}>{formatSignedPercent(row.daily_change_pct)}</span>;
-      },
-    },
-    {
       headerName: "평가손익",
       field: "pnl_krw",
       width: 150,
@@ -571,15 +573,13 @@ export function HoldingsManager({
       },
     },
     {
-      headerName: "수익률(%)",
-      field: "return_pct",
-      width: 120,
-      type: "rightAligned",
+      headerName: "보유일",
+      field: "days_held",
+      width: 92,
+      cellClass: "tableAlignCenter",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        const row = params.data as AggregatedHoldingRow;
-        if (row.ticker === "__CASH__") return "-";
-        return <span className={getSignedClass(row.return_pct)}>{formatSignedPercent(row.return_pct)}</span>;
+        return (params.data as AggregatedHoldingRow).days_held;
       },
     },
   ], [isCashRow, isDetailRow, moveToTickerDetail, showAmounts, expandedTicker, handleNameClick]);
