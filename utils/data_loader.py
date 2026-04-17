@@ -1813,16 +1813,19 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
             data = resp.json()
             stocks = (data.get("result") or {}).get("stocks") or []
 
-            # matchType이 EXACT인 첫 번째 결과 사용
+            # 한국 종목(stockCode가 'A'로 시작)을 제외하고 미국 주식만 필터링
+            us_stocks = [s for s in stocks if not str(s.get("stockCode") or "").startswith("A")]
+
+            # matchType이 EXACT인 첫 번째 미국 종목 사용
             product_code: str | None = None
-            for stock in stocks:
+            for stock in us_stocks:
                 if stock.get("matchType") == "EXACT":
                     product_code = stock.get("stockCode")
                     break
 
-            # EXACT 없으면 stockName이 심볼과 동일한 첫 번째 결과
+            # EXACT 없으면 stockName이 심볼과 동일한 첫 번째 미국 종목
             if not product_code:
-                for stock in stocks:
+                for stock in us_stocks:
                     if str(stock.get("stockName") or "").strip().upper() == sym:
                         product_code = stock.get("stockCode")
                         break
@@ -1831,7 +1834,7 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
                 _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
                 result[sym] = product_code
             else:
-                logger.warning("토스 심볼 매핑 실패: %s (검색 결과 없음)", sym)
+                logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
 
         except Exception as exc:
             logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
