@@ -16,6 +16,9 @@ type ComponentSource = {
   etf_ticker: string;
   etf_name: string;
   weight: number;
+  current_price?: number | null;
+  change_pct?: number | null;
+  currency?: string;
 };
 
 type ComponentRow = {
@@ -25,6 +28,7 @@ type ComponentRow = {
   sources: ComponentSource[];
   current_price?: number | null;
   change_pct?: number | null;
+  currency?: string;
 };
 
 type EtfDetail = {
@@ -52,8 +56,11 @@ function formatWeight(w: number): string {
   return `${w.toFixed(2)}%`;
 }
 
-function formatPrice(val: number | null | undefined): string {
+function formatPrice(val: number | null | undefined, currency?: string): string {
   if (val == null) return "-";
+  if (currency === "USD") {
+    return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
   return `${Math.floor(val).toLocaleString()}원`;
 }
 
@@ -176,7 +183,7 @@ export function HoldingsDetailsPageClient() {
       width: 100,
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return <span className="text-muted fw-semibold" style={{ fontFamily: "monospace" }}>{params.value}</span>;
+        return <span className="text-muted fw-semibold" style={{ fontFamily: "monospace", fontSize: "13px" }}>{params.value}</span>;
       },
     },
     {
@@ -221,7 +228,7 @@ export function HoldingsDetailsPageClient() {
         if (!params.data || isDetailRow(params.data)) return null;
         const row = params.data as MainGridRow;
         if (row.ticker === "-") return "-";
-        return formatPrice(params.value);
+        return formatPrice(params.value, row.currency);
       },
     },
     {
@@ -238,22 +245,42 @@ export function HoldingsDetailsPageClient() {
     },
   ], [expandedTicker]);
 
-  // 상세 패널 렌더러
+  // 상세 패널 렌더러 (부모 행과 컬럼/정렬 완벽 정밀 타격)
   const DetailRenderer = useCallback((params: { data?: GridRow }) => {
     if (!params.data || !isDetailRow(params.data)) return null;
+    
     return (
-      <div className="bg-light px-3 py-2 border-bottom" style={{ marginLeft: "40px" }}>
-        <div className="d-flex flex-column gap-1">
-          {params.data.sources.map((src, idx) => (
-            <div key={idx} className="d-flex align-items-center justify-content-between py-1 px-2 bg-white rounded border shadow-sm" style={{ fontSize: "12.5px" }}>
-              <div className="d-flex align-items-center gap-2 text-muted">
-                <span>└ {src.etf_name}</span>
-                <span className="badge bg-secondary-subtle text-secondary py-1 px-2" style={{ fontSize: "10px" }}>{src.etf_ticker}</span>
-              </div>
-              <span className="fw-bold text-primary">{formatWeight(src.weight)}</span>
+      <div className="holdingsDetailNestedRows">
+        {params.data.sources.map((src, idx) => (
+          <div key={idx} className="holdingsDetailRow">
+            {/* 1. 티커 (100px) - 좌측 패딩 12px, 폰트 13px 고정 */}
+            <div className="hdColTicker fw-semibold text-muted" style={{ fontFamily: "monospace", fontSize: "13px" }}>
+              {src.etf_ticker}
             </div>
-          ))}
-        </div>
+            
+            {/* 2. 종목명 (flex:1) - 좌측 패딩 12px */}
+            <div className="hdColName fw-bold text-dark">
+              {src.etf_name}
+            </div>
+            
+            {/* 3. 비중 (90px) - 우측 패딩 12px */}
+            <div className="hdColWeight fw-bold text-primary">
+              {formatWeight(src.weight)}
+            </div>
+            
+            {/* 4. 현재가 (110px) - 우측 패딩 12px */}
+            <div className="hdColPrice">
+              {formatPrice(src.current_price, src.currency)}
+            </div>
+            
+            {/* 5. 일간(%) (100px) - 우측 패딩 12px */}
+            <div className="hdColChange">
+              <span className={getSignedClass(src.change_pct)}>
+                {formatSignedPercent(src.change_pct)}
+              </span>
+            </div>
+          </div>
+        ))}
       </div>
     );
   }, []);
@@ -262,7 +289,8 @@ export function HoldingsDetailsPageClient() {
     getRowId: (params) => (isDetailRow(params.data) ? `detail:${params.data.parentTicker}` : params.data.ticker),
     isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
     fullWidthCellRenderer: DetailRenderer,
-    getRowHeight: (params) => (isDetailRow(params.data) ? 20 + params.data.sources.length * 36 : 38),
+    // 정밀 계산: Padding-top(8) + RowHeight(38) * N + Padding-bottom(8)
+    getRowHeight: (params) => (isDetailRow(params.data) ? 16 + params.data.sources.length * 38 : 38),
     onCellClicked: (params) => {
       if (params.data && !isDetailRow(params.data) && params.colDef.field === "name") {
         const ticker = (params.data as MainGridRow).ticker;
@@ -343,10 +371,43 @@ export function HoldingsDetailsPageClient() {
 
       <style jsx global>{`
         .holdingsDetailFullRow {
-          background-color: transparent !important;
+          background-color: #fbfcfe !important;
           border-bottom: 1px solid #e2e8f0;
         }
-        .bg-light { background-color: #f8fafc !important; }
+        .holdingsDetailNestedRows {
+          background-color: #f1f5f9;
+          padding: 8px 0;
+          box-sizing: border-box;
+        }
+        .holdingsDetailRow {
+          display: flex;
+          align-items: center;
+          height: 38px;
+          border-bottom: 1px solid #e2e8f0;
+          transition: background-color 0.15s;
+          box-sizing: border-box;
+        }
+        .holdingsDetailRow:hover {
+          background-color: #ffffff;
+        }
+        .holdingsDetailRow > div {
+          height: 100%;
+          display: flex;
+          align-items: center;
+          border-right: 1px solid #e2e8f0;
+          box-sizing: border-box;
+          font-size: 14px;
+        }
+        .holdingsDetailRow > div:last-child {
+          border-right: none;
+        }
+        /* 각 컬럼 너비 및 패딩 정밀 동기화 (Ag-Grid 12px 기준) */
+        .hdColTicker { width: 100px; padding-left: 12px; }
+        .hdColName   { flex: 1; min-width: 180px; padding-left: 12px; }
+        .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
+        .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
+        .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
+
         .cursor-pointer { cursor: pointer; }
       `}</style>
     </PageFrame>
