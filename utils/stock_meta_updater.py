@@ -179,14 +179,13 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
                     })
 
                     # 1. 상세 맵 업데이트 (대분류별 중분류명 보존)
-                    # 동일 대분류 내 여러 중분류에 걸릴 경우 슬래시로 합침
-                    existing = info["details"].get(large_code, "")
-                    if middle_name not in existing.split(" / "):
-                        info["details"][large_code] = f"{existing} / {middle_name}".strip(" / ")
+                    # 값이 여러 개인 경우 가장 처음 발견된 값만 사용
+                    if not info["details"].get(large_code):
+                        info["details"][large_code] = middle_name
 
                     # 2. 대표 분류(best) 업데이트 (use가 True인 코드 중 코드가 클수록 우선순위 높음)
                     if large_code in use_codes:
-                        if large_code >= info["best_code"]:
+                        if large_code > info["best_code"]:
                             info["best_code"] = large_code
                             info["best_name"] = middle_name
 
