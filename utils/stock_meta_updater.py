@@ -617,13 +617,16 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     except Exception as exc:
         raise RuntimeError(f"[{type_norm.upper()}/{ticker_norm}] 종목타입 설정 로드 실패: {exc}") from exc
 
-    naver_etf_map = {}
-    if country_code == "kor":
-        naver_etf_map = fetch_naver_etf_names_map()
-
-    naver_category_map: dict[str, dict[str, str]] = {}
+    # 단일 종목 경로는 전체 ETF 이름 맵/카테고리 맵을 스캔하지 않는다.
+    # 이름은 fetch_pykrx_name(네이버 marketValue → pykrx 폴백)으로 충분히 조회되며,
+    # 카테고리(투자국가/섹터/지수)는 배치 업데이트에서 일괄 갱신되는 것이 정상.
+    naver_etf_map: dict[str, str] = {}
+    naver_category_map: dict[str, dict[str, Any]] = {}
     if type_source.lower() == "naver":
-        naver_category_map = _build_naver_category_map()
+        logger.info(
+            f"[{type_norm.upper()}/{ticker_norm}] 단일 업데이트: 카테고리 맵 스캔 생략 "
+            "(전체 업데이트 시 재구성됨)"
+        )
 
     stock: dict[str, Any] = {"ticker": ticker_norm}
 
