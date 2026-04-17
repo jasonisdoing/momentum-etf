@@ -8,6 +8,8 @@ from typing import Any
 import requests
 
 from config import NAVER_FINANCE_HEADERS
+from utils.market_service import load_ticker_pool_map
+from utils.portfolio_io import load_all_holding_tickers
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +59,13 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
     raw_stocks = payload.get("stocks") or []
     total_count = payload.get("totalCount", 0)
 
+    # 종목풀 및 보유 정보 로드
+    ticker_pool_map = load_ticker_pool_map()
+    held_tickers = load_all_holding_tickers()
+
     rows: list[dict[str, Any]] = []
     for idx, item in enumerate(raw_stocks, start=1):
+        ticker = item.get("itemCode", "")
         close_price = _parse_number(item.get("closePrice"))
         change_ratio = _parse_float(item.get("fluctuationsRatio"))
         volume = _parse_number(item.get("accumulatedTradingVolume"))
@@ -74,8 +81,10 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
         rows.append(
             {
                 "rank": idx,
-                "ticker": item.get("itemCode", ""),
+                "ticker": ticker,
                 "name": item.get("stockName", ""),
+                "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
+                "is_held": ticker in held_tickers,
                 "current_price": close_price,
                 "change_pct": change_ratio,
                 "volume": volume,

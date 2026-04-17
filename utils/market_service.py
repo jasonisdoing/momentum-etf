@@ -20,7 +20,7 @@ def _strip_pool_name_prefix(value: str) -> str:
     return _POOL_NAME_PREFIX_PATTERN.sub("", str(value or "").strip())
 
 
-def _load_ticker_pool_map() -> dict[str, list[str]]:
+def load_ticker_pool_map() -> dict[str, list[str]]:
     from utils.stock_list_io import get_etfs
     from utils.ticker_registry import load_ticker_type_configs
 
@@ -114,7 +114,7 @@ def load_market_data() -> dict[str, Any]:
         for row in rows
     ]
 
-    ticker_pool_map = _load_ticker_pool_map()
+    ticker_pool_map = load_ticker_pool_map()
     snapshot = _load_kor_etf_realtime_snapshot([row["ticker"] for row in normalized_rows if row["ticker"]])
 
     from utils.portfolio_io import load_all_holding_tickers
