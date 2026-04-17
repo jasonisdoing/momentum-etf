@@ -166,9 +166,30 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         reverse=True,
     )
 
-    # 수치 반올림
+    # 실시간 가격 정보 추가
+    from services.price_service import get_realtime_snapshot
+    
+    # 조회가 필요한 티커 목록 (현금 제외)
+    tickers_to_fetch = [c["ticker"] for c in sorted_components if c["ticker"] != "-"]
+    
+    # 실시간 스냅샷 조회 (한국 시장 기준)
+    price_map = {}
+    if tickers_to_fetch:
+        try:
+            price_map = get_realtime_snapshot("kor", tickers_to_fetch)
+        except Exception as e:
+            logger.warning(f"보유종목 상세 가격 조회 실패: {e}")
+
+    # 수치 반올림 및 가격 정보 병합
     for comp in sorted_components:
         comp["total_weight"] = round(comp["total_weight"], 2)
+        
+        # 가격 정보 삽입
+        ticker = comp["ticker"]
+        p_data = price_map.get(ticker, {})
+        comp["current_price"] = p_data.get("price")
+        comp["change_pct"] = p_data.get("change_pct")
+
         for src in comp["sources"]:
             src["weight"] = round(src["weight"], 2)
 
