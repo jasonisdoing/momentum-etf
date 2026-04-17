@@ -29,6 +29,7 @@ import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
 const homeItem = { href: "/", label: "홈", icon: IconHome };
 const holdingsItem = { href: "/holdings", label: "보유종목", icon: IconActivity };
+const holdingsDetailsItem = { href: "/holdings_details", label: "보유종목 상세", icon: IconListDetails };
 
 function isNavItemActive(itemHref: string, currentPathname: string | null): boolean {
   if (!currentPathname) return false;
@@ -312,6 +313,14 @@ export function AppShell({ children }: AppShellProps) {
               <HoldingsIcon size={18} stroke={1.9} />
             </span>
             <span className="nav-link-title">{holdingsItem.label}</span>
+          </Link>
+        </div>
+        <div className="nav-item appSidebarItem">
+          <Link href={holdingsDetailsItem.href} className={pathname === holdingsDetailsItem.href ? "nav-link active" : "nav-link"}>
+            <span className="appSidebarIcon" aria-hidden="true">
+              <IconListDetails size={18} stroke={1.9} />
+            </span>
+            <span className="nav-link-title">{holdingsDetailsItem.label}</span>
           </Link>
         </div>
       </div>
