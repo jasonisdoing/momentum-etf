@@ -13,6 +13,12 @@ from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import refresh_stock_cache
 from utils.data_loader import fetch_ohlcv, fetch_pykrx_market, fetch_pykrx_name
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
+from config import (
+    NAVER_ETF_CATEGORY_CONFIG,
+    NAVER_ETF_CATEGORY_HEADERS,
+    NAVER_ETF_DOMESTIC_URL,
+    NAVER_ETF_THEMES_URL,
+)
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
@@ -26,13 +32,6 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
     - 대분류 0201 (투자국가), 0401 (섹터), 0501 (지수)만 대상으로 한다.
     - 동일 대분류 내 여러 중분류에 해당될 경우 첫 번째 값만 보존한다.
     """
-
-    from config import (
-        NAVER_ETF_CATEGORY_HEADERS,
-        NAVER_ETF_CATEGORY_UPPER_CODES,
-        NAVER_ETF_DOMESTIC_URL,
-        NAVER_ETF_THEMES_URL,
-    )
 
     logger = get_app_logger()
     ticker_categories: dict[str, dict[str, str]] = {}
@@ -49,27 +48,31 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
         logger.warning(f"[Naver 카테고리] 테마 목록 조회 실패: {exc}")
         return ticker_categories
 
-    upper_categories: list[dict[str, Any]] = []
-    if isinstance(themes_payload, dict):
-        upper_categories = list(themes_payload.get("upperCategories") or [])
+    # API 응답은 리스트 형태임
+    large_categories: list[dict[str, Any]] = []
+    if isinstance(themes_payload, list):
+        large_categories = themes_payload
+    elif isinstance(themes_payload, dict):
+        # 만약 dict 구조일 경우를 대비한 fallback (upperCategories 등)
+        large_categories = list(themes_payload.get("upperCategories") or themes_payload.get("largeCategories") or [])
 
-    # 대분류 코드 -> 필드명 매핑 (0201/0401/0501만 대상)
-    upper_code_to_field = {
-        NAVER_ETF_CATEGORY_UPPER_CODES["country"]: "category_country",
-        NAVER_ETF_CATEGORY_UPPER_CODES["sector"]: "category_sector",
-        NAVER_ETF_CATEGORY_UPPER_CODES["index"]: "category_index",
-    }
+    # 모든 대분류 코드 목록 (0101~0803 전체)
+    all_codes = {c["code"] for c in NAVER_ETF_CATEGORY_CONFIG}
+    # 활성화된 대분류 코드 세트 (우선순위 전용)
+    enabled_codes = {c["code"] for c in NAVER_ETF_CATEGORY_CONFIG if c.get("enabled")}
 
-    for upper in upper_categories:
-        upper_code = str(upper.get("upperCategoryCode") or "").strip()
-        field_name = upper_code_to_field.get(upper_code)
-        if not field_name:
+    # 티커별로 (최대 활성 코드, 중분류 이름, 대분류별 맵) 저장
+    ticker_cat_info: dict[str, dict[str, Any]] = {}
+
+    for large in large_categories:
+        large_code = str(large.get("largeCategoryCode") or large.get("upperCategoryCode") or "").strip()
+        if large_code not in all_codes:
             continue
 
-        middle_categories = upper.get("middleCategories") or []
+        middle_categories = large.get("middleCategories") or []
         for middle in middle_categories:
-            middle_code = str(middle.get("middleCategoryCode") or "").strip()
-            middle_name = str(middle.get("middleCategoryName") or "").strip()
+            middle_code = str(middle.get("code") or middle.get("middleCategoryCode") or "").strip()
+            middle_name = str(middle.get("name") or middle.get("middleCategoryName") or "").strip()
             if not middle_code or not middle_name:
                 continue
 
@@ -93,7 +96,7 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
                     data = resp.json()
                 except Exception as exc:
                     logger.warning(
-                        f"[Naver 카테고리] 중분류 조회 실패(upper={upper_code}, mid={middle_code}): {exc}"
+                        f"[Naver 카테고리] 중분류 조회 실패(large={large_code}, mid={middle_code}): {exc}"
                     )
                     break
 
@@ -113,20 +116,49 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
                     ticker_norm = str(ticker_raw or "").strip().upper()
                     if not ticker_norm:
                         continue
-                    entry = ticker_categories.setdefault(ticker_norm, {})
-                    # 동일 대분류에 여러 중분류가 겹칠 경우 첫 값만 유지
-                    entry.setdefault(field_name, middle_name)
+
+                    info = ticker_cat_info.setdefault(ticker_norm, {
+                        "best_code": "",
+                        "best_name": "",
+                        "details": {cat["code"]: "" for cat in NAVER_ETF_CATEGORY_CONFIG}
+                    })
+
+                    # 1. 상세 맵 업데이트 (대분류별 중분류명 보존)
+                    # 동일 대분류 내 여러 중분류에 걸릴 경우 슬래시로 합침
+                    existing = info["details"].get(large_code, "")
+                    if middle_name not in existing.split(" / "):
+                        info["details"][large_code] = f"{existing} / {middle_name}".strip(" / ")
+
+                    # 2. 우선순위 (활성화된 코드 중 최대값) 업데이트
+                    if large_code in enabled_codes:
+                        if large_code >= info["best_code"]:
+                            info["best_code"] = large_code
+                            info["best_name"] = middle_name
 
                 if len(items) < page_size:
                     break
                 idx += page_size
                 time.sleep(0.05)  # 과도한 호출 방지
 
+    # 최종 결과 구성
+    final_map = {}
+    for ticker, info in ticker_cat_info.items():
+        final_map[ticker] = {
+            "best": info["best_name"],
+            "details": info["details"]
+        }
+
     logger.info(
-        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(ticker_categories)}개 "
-        f"(투자국가/섹터/지수 대분류만 포함)"
+        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(final_map)}개 "
+        f"(상세 분류 필드 생성 및 우선순위 단일화 병행)"
     )
-    return ticker_categories
+    return final_map
+
+    logger.info(
+        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(final_map)}개 "
+        f"(전체 분류 필드 생성 및 우선순위 단일화 병행)"
+    )
+    return final_map
 
 
 def fetch_naver_etf_names_map() -> dict[str, str]:
@@ -331,16 +363,18 @@ def update_ticker_type_metadata(
                 "market",
                 "1_week_avg_volume",
                 "volume",
-        "1_week_earn_rate",
+                "1_week_earn_rate",
                 "2_week_earn_rate",
                 "1_month_earn_rate",
                 "3_month_earn_rate",
                 "6_month_earn_rate",
                 "12_month_earn_rate",
-                "category_country",
-                "category_sector",
-                "category_index",
+                "etf_category",
             ]
+            # 개별 분류 컬럼들을 업데이트 필드에 추가
+            for cat in NAVER_ETF_CATEGORY_CONFIG:
+                fields_to_update.append(f"cat_{cat['code']}")
+
             for f in fields_to_update:
                 if f in stock:
                     update_doc[f] = stock[f]
@@ -600,10 +634,12 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "3_month_earn_rate",
         "6_month_earn_rate",
         "12_month_earn_rate",
-        "category_country",
-        "category_sector",
-        "category_index",
+        "etf_category",
     ]
+    # 개별 분류 컬럼들을 업데이트 필드에 추가
+    for cat in NAVER_ETF_CATEGORY_CONFIG:
+        fields_to_update.append(f"cat_{cat['code']}")
+
     for f in fields_to_update:
         if f in stock:
             update_doc[f] = stock[f]
@@ -621,7 +657,7 @@ def update_single_stock_metadata(
     naver_etf_map: dict[str, str],
     account_norm: str = "",
     *,
-    naver_category_map: dict[str, dict[str, str]] | None = None,
+    naver_category_map: dict[str, str] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
@@ -630,17 +666,14 @@ def update_single_stock_metadata(
         return
 
     # Naver 카테고리 맵이 제공된 경우 (type_source == "Naver" 종목풀)
-    # 투자국가/섹터/지수 필드를 stock 딕셔너리에 반영한다.
     if naver_category_map:
         ticker_norm = str(ticker).strip().upper()
-        cat_entry = naver_category_map.get(ticker_norm, {})
-        for field in ("category_country", "category_sector", "category_index"):
-            value = cat_entry.get(field)
-            if value:
-                stock[field] = value
-            elif field not in stock:
-                # 카테고리가 없으면 빈 문자열 저장 (기존 값 덮어쓰지 않도록 setdefault)
-                stock[field] = ""
+        entry = naver_category_map.get(ticker_norm, {})
+        stock["etf_category"] = entry.get("best", "")
+        # 개별 대분류 필드들 채우기
+        details = entry.get("details", {})
+        for code, name in details.items():
+            stock[f"cat_{code}"] = name
 
     if country_code == "kor":
         yfinance_ticker = f"{ticker}.KS"
@@ -754,7 +787,7 @@ def update_single_stock_metadata(
             avg_volume = last_week["Volume"].mean()
             if pd.notna(avg_volume):
                 stock["1_week_avg_volume"] = int(avg_volume)
-            
+
             non_empty_vols = data["Volume"].dropna()
             if not non_empty_vols.empty:
                 stock["volume"] = int(non_empty_vols.iloc[-1])
