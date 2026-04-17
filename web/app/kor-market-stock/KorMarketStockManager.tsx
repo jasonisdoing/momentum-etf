@@ -228,14 +228,14 @@ export function KorMarketStockManager({
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
-    
+
     const stockPools = tickerPools.filter((p) => p.name.includes("한국 개별주"));
     if (stockPools.length === 1) {
       setSelectedTickerPool(stockPools[0].ticker_type);
     } else {
       setSelectedTickerPool("");
     }
-    
+
     setSelectedBucketId("");
     setAddModalOpen(true);
   }, [selectedTickers.length, tickerPools]);
