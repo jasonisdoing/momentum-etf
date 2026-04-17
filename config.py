@@ -37,6 +37,21 @@ NAVER_FINANCE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
+# 네이버 ETF 카테고리/테마 API (투자국가/섹터/지수 등 ETF 분류 조회용)
+NAVER_ETF_THEMES_URL = "https://stock.naver.com/api/stockSecurity/etfs/v1/domestic/themes"
+NAVER_ETF_DOMESTIC_URL = "https://stock.naver.com/api/stockSecurity/etfs/v1/domestic"
+NAVER_ETF_CATEGORY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://stock.naver.com/",
+    "Accept": "application/json, text/plain, */*",
+}
+# 카테고리 대분류 코드: 투자국가(0201) / 섹터(0401) / 지수(0501)
+NAVER_ETF_CATEGORY_UPPER_CODES = {
+    "country": "0201",
+    "sector": "0401",
+    "index": "0501",
+}
+
 # 호주 MarketIndex QuoteAPI 설정
 AU_QUOTEAPI_URL = "https://quoteapi.com/api/v5/symbols"
 AU_QUOTEAPI_APP_ID = "af5f4d73c1a54a33"  # marketindex.com.au 제공

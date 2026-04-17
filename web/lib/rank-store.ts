@@ -7,6 +7,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
+  type_source?: string;
 };
 
 type RankMaRule = {
@@ -27,6 +28,9 @@ type RankRow = {
   티커: string;
   종목명: string;
   상장일: string;
+  투자국가: string;
+  섹터: string;
+  지수: string;
   점수: number | null;
   현재가: number | null;
   "괴리율": number | null;
