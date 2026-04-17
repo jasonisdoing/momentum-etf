@@ -34,13 +34,14 @@ type RankMaRule = {
 };
 
 type RankRow = {
-  [key: string]: string | number | boolean | null;
+  [key: string]: string | number | boolean | null | undefined;
   순번: string;
   순위: number | null;
   이전순위: number | null;
   버킷: string;
   bucket: number;
   티커: string;
+  마켓?: string;
   종목명: string;
   상장일: string;
   점수: number | null;
@@ -149,7 +150,7 @@ type RankHeaderSummary = {
 };
 
 let rankToolbarCache: RankToolbarCache | null = null;
- 
+
 
 
 function getTodayDateInputValue(): string {
@@ -609,6 +610,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span>{getBucketName(Number(params.data?.bucket ?? 1))}</span>;
         },
       },
+      ...((selectedTickerTypeItem?.country_code === "kor" || (gridRows[0] as any)?.country_code === "kor")
+        ? [
+          {
+            field: "마켓",
+            headerName: "마켓",
+            minWidth: 80,
+            width: 80,
+            cellStyle: { textAlign: "center" },
+            cellRenderer: (params: { value: string | null | undefined }) => {
+              const val = String(params.value ?? "");
+              let badgeClass = "badge bg-secondary-subtle text-secondary border";
+              if (val === "KOSPI") badgeClass = "badge bg-primary-subtle text-primary border border-primary-subtle";
+              if (val === "KOSDAQ") badgeClass = "badge bg-success-subtle text-success border border-success-subtle";
+
+              return val ? <span className={badgeClass} style={{ fontSize: "11px", padding: "2px 6px" }}>{val}</span> : <span>-</span>;
+            },
+          } as ColDef<RankGridRow>,
+        ]
+        : []),
       {
         field: "티커",
         headerName: "티커",

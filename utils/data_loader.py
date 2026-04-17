@@ -2011,6 +2011,24 @@ def fetch_pykrx_name(ticker: str) -> str:
     return name
 
 
+@functools.lru_cache(maxsize=1000)
+def fetch_pykrx_market(ticker: str) -> str:
+    """
+    pykrx를 통해 종목의 소속 마켓(KOSPI, KOSDAQ, KONEX) 정보를 가져옵니다.
+    """
+    if _stock is None:
+        return ""
+
+    try:
+        market = _stock.get_market_by_ticker(ticker)
+        if isinstance(market, str) and market:
+            return market
+    except Exception:
+        pass
+
+    return ""
+
+
 _etf_name_cache: dict[tuple[str, str], str] = {}
 
 
