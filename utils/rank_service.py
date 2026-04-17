@@ -16,6 +16,7 @@ from utils.rankings import (
 from utils.data_loader import get_trading_days
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
+from config import NAVER_ETF_CATEGORY_CONFIG
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -124,6 +125,13 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["보수"] = meta_cache.get("expense_ratio")
         row["순자산총액"] = meta_cache.get("total_net_assets")
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
+
+        # Naver 상세 분류 정보(cat_*) 추가
+        for cat in NAVER_ETF_CATEGORY_CONFIG:
+            cat_code = cat["code"]
+            cat_name = cat["name"]
+            row[cat_name] = meta_cache.get(f"cat_{cat_code}")
+
         rows.append(row)
 
     enriched = pd.DataFrame(rows)
@@ -298,4 +306,5 @@ def load_rank_data(
             [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         ),
         "stale_tickers": [str(item) for item in (dataframe.attrs.get("stale_tickers") or [])],
+        "naver_category_config": [c for c in NAVER_ETF_CATEGORY_CONFIG if c.get("show")],
     }
