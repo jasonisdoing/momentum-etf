@@ -49,10 +49,22 @@ type ConstituentRow = {
   change_pct: number | null;
 };
 
+type DailyRow = {
+  date: string;
+  close: number | null;
+  change_pct: number | null;
+  volume: number | null;
+};
+
+type DetailData = {
+  constituents: ConstituentRow[];
+  priceRows: DailyRow[];
+};
+
 // 부모 그리드에 올라갈 row 타입: main 행 또는 detail(자식) 행
 type ParentRow =
   | (AggregatedHoldingRow & { rowType: "main" })
-  | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; loading: boolean };
+  | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean };
 
 const holdingsGridTheme = themeQuartz
   .withPart(iconSetQuartzBold)
@@ -86,8 +98,7 @@ function canHaveConstituents(row: AggregatedHoldingRow): boolean {
   return row.currency === "KRW" && row.ticker.length === 6;
 }
 
-// ticker 페이지의 tickerDetailHoldingsPanel 높이와 동일
-const DETAIL_PANEL_HEIGHT = 420;
+const DETAIL_PANEL_HEIGHT = 460;
 const DETAIL_PANEL_PADDING = 12; // fullWidth row 상하 여백
 
 function getDetailRowHeight(_count: number): number {
@@ -115,7 +126,7 @@ export function HoldingsManager({
 
   // 펼쳐진 ticker + 구성종목 캐시
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
-  const constituentsCacheRef = useRef<Map<string, ConstituentRow[] | null>>(new Map());
+  const constituentsCacheRef = useRef<Map<string, DetailData | null>>(new Map());
   const [detailLoading, setDetailLoading] = useState(false);
 
   const constituentColDefs = useMemo<ColDef<ConstituentRow>[]>(() => [
@@ -161,6 +172,45 @@ export function HoldingsManager({
       cellRenderer: (params: { value: number | null }) => (
         <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>
       ),
+    },
+  ], []);
+
+  const dailyColDefs = useMemo<ColDef<DailyRow>[]>(() => [
+    {
+      field: "date",
+      headerName: "날짜",
+      minWidth: 138,
+      flex: 1.45,
+      cellStyle: { fontWeight: 600 },
+      cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
+    },
+    {
+      field: "close",
+      headerName: "종가",
+      minWidth: 84,
+      flex: 0.95,
+      type: "rightAligned",
+      cellRenderer: (params: { value: number | null }) =>
+        params.value != null ? `${Math.floor(params.value).toLocaleString()}원` : "-",
+    },
+    {
+      field: "change_pct",
+      headerName: "등락률",
+      minWidth: 92,
+      flex: 0.95,
+      type: "rightAligned",
+      cellRenderer: (params: { value: number | null }) => (
+        <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>
+      ),
+    },
+    {
+      field: "volume",
+      headerName: "거래량",
+      minWidth: 108,
+      flex: 1.1,
+      type: "rightAligned",
+      cellRenderer: (params: { value: number | null }) =>
+        params.value != null ? new Intl.NumberFormat("ko-KR").format(params.value) : "-",
     },
   ], []);
 
@@ -272,13 +322,13 @@ export function HoldingsManager({
     });
   }, [accountNames.length, aggregatedHoldings.length, onHeaderSummaryChange, totalValuation]);
 
-  // 구성종목 fetch
-  const fetchConstituents = useCallback(async (ticker: string): Promise<ConstituentRow[] | null> => {
+  // 구성종목 + 일별 가격 fetch
+  const fetchConstituents = useCallback(async (ticker: string): Promise<DetailData | null> => {
     const cached = constituentsCacheRef.current.get(ticker);
     if (cached !== undefined) return cached;
     try {
-      const params = new URLSearchParams({ ticker });
-      const res = await fetch(`/api/ticker-detail?${params.toString()}`);
+      const qs = new URLSearchParams({ ticker });
+      const res = await fetch(`/api/ticker-detail?${qs.toString()}`);
       if (!res.ok) {
         constituentsCacheRef.current.set(ticker, null);
         return null;
@@ -293,8 +343,23 @@ export function HoldingsManager({
           current_price: h.current_price ?? null,
           change_pct: h.change_pct ?? null,
         }));
-      constituentsCacheRef.current.set(ticker, items.length > 0 ? items : null);
-      return items.length > 0 ? items : null;
+      // rows는 오름차순(오래된 순)이므로 뒤집어서 최근 10개만 사용
+      const priceRows: DailyRow[] = ([...(data.rows || [])] as { date: string; close?: number | null; change_pct?: number | null; volume?: number | null }[])
+        .reverse()
+        .slice(0, 10)
+        .map((r) => ({
+          date: r.date,
+          close: r.close ?? null,
+          change_pct: r.change_pct ?? null,
+          volume: r.volume ?? null,
+        }));
+      if (items.length === 0) {
+        constituentsCacheRef.current.set(ticker, null);
+        return null;
+      }
+      const result: DetailData = { constituents: items, priceRows };
+      constituentsCacheRef.current.set(ticker, result);
+      return result;
     } catch {
       constituentsCacheRef.current.set(ticker, null);
       return null;
@@ -319,7 +384,7 @@ export function HoldingsManager({
       setDetailLoading(true);
       const result = await fetchConstituents(ticker);
       setDetailLoading(false);
-      if (result && result.length > 0) {
+      if (result && result.constituents.length > 0) {
         setExpandedTicker(ticker);
       }
     },
@@ -343,11 +408,12 @@ export function HoldingsManager({
     for (const row of aggregatedHoldings) {
       result.push({ ...row, rowType: "main" });
       if (expandedTicker === row.ticker) {
-        const constituents = constituentsCacheRef.current.get(row.ticker) ?? [];
+        const cached = constituentsCacheRef.current.get(row.ticker);
         result.push({
           rowType: "detail",
           parentTicker: row.ticker,
-          constituents,
+          constituents: cached?.constituents ?? [],
+          priceRows: cached?.priceRows ?? [],
           loading: detailLoading,
         });
       }
@@ -518,14 +584,15 @@ export function HoldingsManager({
     },
   ], [isCashRow, isDetailRow, moveToTickerDetail, showAmounts, expandedTicker, handleNameClick]);
 
-  // detail(자식) fullWidth renderer — ticker 페이지 tickerDetailHoldingsPanel 구조 그대로 사용
+  // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
   const DetailRenderer = useCallback(
     (params: { data?: ParentRow }) => {
       if (!params.data || !isDetailRow(params.data)) return null;
-      const { constituents } = params.data;
+      const { constituents, priceRows } = params.data;
       return (
-        <div style={{ height: "100%", padding: `${DETAIL_PANEL_PADDING}px 16px`, display: "flex", alignItems: "flex-start" }}>
-          <div className="tickerDetailHoldingsPanel" style={{ width: "50%", minWidth: 440 }}>
+        <div style={{ height: "100%", padding: `${DETAIL_PANEL_PADDING}px 16px`, display: "flex", gap: "1rem", alignItems: "flex-start" }}>
+          {/* 좌: 구성종목 */}
+          <div className="tickerDetailHoldingsPanel" style={{ flex: 1, minWidth: 0, height: DETAIL_PANEL_HEIGHT }}>
             <div className="tickerDetailTableHeader">
               <span className="tickerDetailTableTitle">구성종목</span>
               <span className="tickerDetailTableMeta">상위 {constituents.length}개</span>
@@ -544,10 +611,30 @@ export function HoldingsManager({
               />
             </div>
           </div>
+          {/* 우: 일별 가격 */}
+          <div className="tickerDetailHoldingsPanel" style={{ flex: 1, minWidth: 0, height: DETAIL_PANEL_HEIGHT }}>
+            <div className="tickerDetailTableHeader">
+              <span className="tickerDetailTableTitle">일별</span>
+              <span className="tickerDetailTableMeta">최근 {priceRows.length}일</span>
+            </div>
+            <div className="appGridFillWrap">
+              <AppAgGrid
+                className="tickerDetailHoldingsGrid"
+                rowData={priceRows}
+                columnDefs={dailyColDefs}
+                loading={false}
+                theme={constituentGridTheme}
+                gridOptions={{
+                  suppressMovableColumns: true,
+                  getRowId: (p) => String(p.data.date),
+                }}
+              />
+            </div>
+          </div>
         </div>
       );
     },
-    [isDetailRow, constituentColDefs],
+    [isDetailRow, constituentColDefs, dailyColDefs],
   );
 
   const holdingsGridOptions = useMemo<GridOptions<ParentRow>>(
@@ -740,4 +827,15 @@ function parseHoldingDaysToInt(daysHeld: string): number {
   if (!daysHeld || daysHeld === "-") return 0;
   const match = daysHeld.match(/\d+/);
   return match ? parseInt(match[0], 10) : 0;
+}
+
+function formatDateWithWeekday(dateStr: string): string {
+  if (!dateStr) return "-";
+  try {
+    const d = new Date(`${dateStr}T00:00:00`);
+    const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+    return `${dateStr}(${weekdays[d.getDay()]})`;
+  } catch {
+    return dateStr;
+  }
 }
