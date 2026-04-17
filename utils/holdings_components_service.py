@@ -175,7 +175,8 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     
     def classify_ticker(t: str):
         if not t or t == "-": return
-        if len(t) == 6 and t.isdigit():
+        # 한국 종목은 6자리 (숫자 또는 0015B0 같은 알파뉴메릭 포함)
+        if len(t) == 6:
             kor_tickers.add(t)
         else:
             us_tickers.add(t)
@@ -209,11 +210,15 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         # 구성종목 가격 정보 삽입
         ticker = comp["ticker"]
         p_data = price_map.get(ticker, {})
-        comp["current_price"] = p_data.get("nowVal") or p_data.get("price")
-        comp["change_pct"] = p_data.get("changeRate") or p_data.get("change_pct")
+        comp["current_price"] = p_data.get("nowVal") if p_data.get("nowVal") is not None else p_data.get("price")
+        
+        change_val = p_data.get("changeRate")
+        if change_val is None:
+            change_val = p_data.get("change_pct")
+        comp["change_pct"] = change_val
         
         if ticker != "-":
-            comp["currency"] = "KRW" if len(ticker) == 6 and ticker.isdigit() else "USD"
+            comp["currency"] = "KRW" if len(ticker) == 6 else "USD"
         else:
             comp["currency"] = "KRW"
 
@@ -222,9 +227,14 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
             src["weight"] = round(src["weight"], 2)
             s_ticker = src["etf_ticker"]
             s_p_data = price_map.get(s_ticker, {})
-            src["current_price"] = s_p_data.get("nowVal") or s_p_data.get("price")
-            src["change_pct"] = s_p_data.get("changeRate") or s_p_data.get("change_pct")
-            src["currency"] = "KRW" if len(s_ticker) == 6 and s_ticker.isdigit() else "USD"
+            src["current_price"] = s_p_data.get("nowVal") if s_p_data.get("nowVal") is not None else s_p_data.get("price")
+            
+            s_change_val = s_p_data.get("changeRate")
+            if s_change_val is None:
+                s_change_val = s_p_data.get("change_pct")
+            src["change_pct"] = s_change_val
+            
+            src["currency"] = "KRW" if len(s_ticker) == 6 else "USD"
 
     return {
         "account_id": account_id,
