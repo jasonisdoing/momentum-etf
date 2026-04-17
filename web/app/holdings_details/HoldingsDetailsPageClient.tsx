@@ -1,7 +1,10 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
+import { themeQuartz, iconSetQuartzBold } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
+import { AppAgGrid } from "../components/AppAgGrid";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 type AccountOption = {
@@ -20,6 +23,8 @@ type ComponentRow = {
   name: string;
   total_weight: number;
   sources: ComponentSource[];
+  current_price?: number | null;
+  change_pct?: number | null;
 };
 
 type EtfDetail = {
@@ -38,9 +43,60 @@ type HoldingsComponentsData = {
   etf_details: EtfDetail[];
 };
 
+type MainGridRow = ComponentRow & { rowType: "main" };
+type DetailGridRow = { rowType: "detail"; parentTicker: string; sources: ComponentSource[] };
+type GridRow = MainGridRow | DetailGridRow;
+
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 function formatWeight(w: number): string {
   return `${w.toFixed(2)}%`;
+}
+
+function formatPrice(val: number | null | undefined): string {
+  if (val == null) return "-";
+  return `${Math.floor(val).toLocaleString()}원`;
+}
+
+function formatSignedPercent(val: number | null | undefined): string {
+  if (val == null) return "-";
+  const sign = val > 0 ? "+" : "";
+  return `${sign}${val.toFixed(2)}%`;
+}
+
+function getSignedClass(val: number | null | undefined): string {
+  if (val == null) return "";
+  if (val > 0) return "text-success";
+  if (val < 0) return "text-danger";
+  return "";
+}
+
+const gridTheme = themeQuartz
+  .withPart(iconSetQuartzBold)
+  .withParams({
+    accentColor: "#206bc4",
+    backgroundColor: "#ffffff",
+    foregroundColor: "#182433",
+    headerBackgroundColor: "#f8fafc",
+    headerTextColor: "#5b6778",
+    spacing: 8,
+    fontSize: 14,
+    wrapperBorderRadius: 10,
+    rowHeight: 38,
+    headerHeight: 38,
+    cellHorizontalPadding: 12,
+    headerColumnBorder: true,
+    headerColumnBorderHeight: "70%",
+    columnBorder: true,
+    oddRowBackgroundColor: "#fbfdff",
+    headerCellHoverBackgroundColor: "#eef4fb",
+    headerCellMovingBackgroundColor: "#e8f0fb",
+    iconButtonHoverBackgroundColor: "#eef4fb",
+    iconButtonHoverColor: "#206bc4",
+    iconSize: 18,
+  });
+
+function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
+  return row?.rowType === "detail";
 }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
@@ -50,7 +106,7 @@ export function HoldingsDetailsPageClient() {
   const [data, setData] = useState<HoldingsComponentsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
 
   // 계좌 목록 로드
   useEffect(() => {
@@ -74,7 +130,7 @@ export function HoldingsDetailsPageClient() {
     setIsLoading(true);
     setError(null);
     setData(null);
-    setExpandedRows(new Set());
+    setExpandedTicker(null);
     try {
       const res = await fetch(`/api/holdings-components?account_id=${encodeURIComponent(accountId)}`, {
         cache: "no-store",
@@ -96,14 +152,125 @@ export function HoldingsDetailsPageClient() {
     if (selectedAccount) void loadData(selectedAccount);
   }, [selectedAccount, loadData]);
 
-  function toggleRow(ticker: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev);
-      if (next.has(ticker)) next.delete(ticker);
-      else next.add(ticker);
-      return next;
-    });
-  }
+  // 그리드 데이터 가공
+  const gridRows = useMemo<GridRow[]>(() => {
+    if (!data) return [];
+    const result: GridRow[] = [];
+    for (const comp of data.components) {
+      result.push({ ...comp, rowType: "main" });
+      if (expandedTicker === comp.ticker && comp.sources.length > 0) {
+        result.push({
+          rowType: "detail",
+          parentTicker: comp.ticker,
+          sources: comp.sources,
+        });
+      }
+    }
+    return result;
+  }, [data, expandedTicker]);
+
+  const columnDefs = useMemo<ColDef<GridRow>[]>(() => [
+    {
+      headerName: "티커",
+      field: "ticker",
+      width: 100,
+      cellRenderer: (params: { data?: GridRow; value?: string }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        return <span className="text-muted fw-semibold" style={{ fontFamily: "monospace" }}>{params.value}</span>;
+      },
+    },
+    {
+      headerName: "종목명",
+      field: "name",
+      flex: 1,
+      minWidth: 180,
+      cellRenderer: (params: { data?: GridRow; value?: string }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const mainRow = params.data as MainGridRow;
+        const isExpanded = expandedTicker === mainRow.ticker;
+        const hasSources = mainRow.sources.length > 0;
+        return (
+          <div className={`d-flex align-items-center gap-2 ${hasSources ? "cursor-pointer" : ""}`} style={{ userSelect: "none" }}>
+            {hasSources && (
+              <span className="text-primary d-flex align-items-center" style={{ fontSize: "10px", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>
+                ▶
+              </span>
+            )}
+            <span className="fw-bold text-dark">{params.value}</span>
+          </div>
+        );
+      },
+    },
+    {
+      headerName: "비중",
+      field: "total_weight",
+      width: 90,
+      type: "rightAligned",
+      cellRenderer: (params: { value?: number }) => (
+        <span className="fw-bold" style={{ color: "#206bc4" }}>
+          {params.value != null ? formatWeight(params.value) : "-"}
+        </span>
+      ),
+    },
+    {
+      headerName: "현재가",
+      field: "current_price",
+      width: 110,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as MainGridRow;
+        if (row.ticker === "-") return "-";
+        return formatPrice(params.value);
+      },
+    },
+    {
+      headerName: "일간(%)",
+      field: "change_pct",
+      width: 100,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as MainGridRow;
+        if (row.ticker === "-") return "-";
+        return <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>;
+      },
+    },
+  ], [expandedTicker]);
+
+  // 상세 패널 렌더러
+  const DetailRenderer = useCallback((params: { data?: GridRow }) => {
+    if (!params.data || !isDetailRow(params.data)) return null;
+    return (
+      <div className="bg-light px-3 py-2 border-bottom" style={{ marginLeft: "40px" }}>
+        <div className="d-flex flex-column gap-1">
+          {params.data.sources.map((src, idx) => (
+            <div key={idx} className="d-flex align-items-center justify-content-between py-1 px-2 bg-white rounded border shadow-sm" style={{ fontSize: "12.5px" }}>
+              <div className="d-flex align-items-center gap-2 text-muted">
+                <span>└ {src.etf_name}</span>
+                <span className="badge bg-secondary-subtle text-secondary py-1 px-2" style={{ fontSize: "10px" }}>{src.etf_ticker}</span>
+              </div>
+              <span className="fw-bold text-primary">{formatWeight(src.weight)}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }, []);
+
+  const gridOptions = useMemo<GridOptions<GridRow>>(() => ({
+    getRowId: (params) => (isDetailRow(params.data) ? `detail:${params.data.parentTicker}` : params.data.ticker),
+    isFullWidthRow: (params) => isDetailRow(params.rowNode.data),
+    fullWidthCellRenderer: DetailRenderer,
+    getRowHeight: (params) => (isDetailRow(params.data) ? 20 + params.data.sources.length * 36 : 38),
+    onCellClicked: (params) => {
+      if (params.data && !isDetailRow(params.data) && params.colDef.field === "name") {
+        const ticker = (params.data as MainGridRow).ticker;
+        setExpandedTicker((prev) => (prev === ticker ? null : ticker));
+      }
+    },
+    overlayNoRowsTemplate: '<span class="ag-overlay-no-rows-center">데이터가 없습니다.</span>',
+  }), [DetailRenderer]);
 
   // 헤더 우측 정보
   const titleRight = data ? (
@@ -121,7 +288,6 @@ export function HoldingsDetailsPageClient() {
 
   return (
     <PageFrame title="보유종목 상세" fullHeight fullWidth titleRight={titleRight}>
-      {/* ── 에러 및 로딩 배너 ── */}
       {error && (
         <div className="appBannerStack">
           <div className="bannerError alert alert-danger mb-0">{error}</div>
@@ -136,7 +302,6 @@ export function HoldingsDetailsPageClient() {
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">계좌</span>
                   <select
-                    id="holdings-details-account-select"
                     className="form-select"
                     value={selectedAccount}
                     onChange={(e) => setSelectedAccount(e.target.value)}
@@ -157,75 +322,33 @@ export function HoldingsDetailsPageClient() {
             </div>
           </div>
           
-          <div className="card-table table-responsive">
-            {isLoading && (
-              <div className="pageLoading" style={{ padding: "40px 0", textAlign: "center", color: "#888" }}>
-                불러오는 중...
-              </div>
-            )}
-            
-            {data && !isLoading && data.held_etf_count === 0 && (
-              <div style={{ padding: "40px 0", textAlign: "center", color: "#aaa" }}>
-                이 계좌에 보유 중인 ETF가 없습니다.
-              </div>
-            )}
-
-            {data && !isLoading && data.components.length > 0 && (
-              <table className="table table-vcenter table-hover table-sticky-header mb-0">
-                <thead>
-                  <tr>
-                    <th style={{ width: "40px" }} />
-                    <th style={{ width: "120px" }}>종목코드</th>
-                    <th>종목명</th>
-                    <th style={{ width: "120px", textAlign: "right" }}>합산 비중</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.components.map((row, idx) => {
-                    const isExpanded = expandedRows.has(row.ticker);
-                    return (
-                      <React.Fragment key={row.ticker}>
-                        <tr
-                          style={{ cursor: row.sources.length > 1 ? "pointer" : "default" }}
-                          onClick={() => row.sources.length > 1 && toggleRow(row.ticker)}
-                        >
-                          <td style={{ color: "#aaa", textAlign: "center" }}>
-                            {row.sources.length > 1 ? (isExpanded ? "▾" : "▸") : ""}
-                          </td>
-                          <td style={{ fontFamily: "monospace" }}>{row.ticker}</td>
-                          <td>
-                            <span style={{ fontWeight: idx < 10 ? 600 : 400 }}>{row.name}</span>
-                          </td>
-                          <td style={{ textAlign: "right", fontWeight: idx < 10 ? 600 : 400 }}>
-                            {formatWeight(row.total_weight)}
-                          </td>
-                        </tr>
-                        {/* 출처 ETF 상세 펼침 */}
-                        {isExpanded &&
-                          row.sources.map((src) => (
-                            <tr
-                              key={`${row.ticker}-${src.etf_ticker}`}
-                              style={{ background: "#f8f9fa" }}
-                            >
-                              <td />
-                              <td />
-                              <td style={{ paddingLeft: "32px", color: "#868e96", fontSize: "13px" }}>
-                                └ {src.etf_name}
-                              </td>
-                              <td style={{ textAlign: "right", color: "#868e96", fontSize: "13px" }}>
-                                {formatWeight(src.weight)}
-                              </td>
-                            </tr>
-                          ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+          <div className="card-body appCardBodyTight appTableCardBodyFill">
+            <div className="appGridFillWrap">
+              <AppAgGrid
+                rowData={isLoading ? [] : gridRows}
+                columnDefs={columnDefs}
+                loading={isLoading}
+                theme={gridTheme}
+                minHeight="100%"
+                gridOptions={gridOptions}
+                getRowClass={(params: RowClassParams<GridRow>) => {
+                  if (isDetailRow(params.data)) return "holdingsDetailFullRow";
+                  return "";
+                }}
+              />
+            </div>
           </div>
         </div>
       </section>
+
+      <style jsx global>{`
+        .holdingsDetailFullRow {
+          background-color: transparent !important;
+          border-bottom: 1px solid #e2e8f0;
+        }
+        .bg-light { background-color: #f8fafc !important; }
+        .cursor-pointer { cursor: pointer; }
+      `}</style>
     </PageFrame>
   );
 }
