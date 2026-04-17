@@ -24,6 +24,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   type_source?: string;
+  currency?: string;
 };
 
 type RankMaRule = {
@@ -735,8 +736,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 88,
         width: 88,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) =>
-          formatNumber(params.value ?? null, selectedTickerTypeItem?.country_code === "au" ? 2 : 0),
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+          const decimals = currency === "USD" || currency === "AUD" ? 2 : 0;
+          return formatNumber(params.value ?? null, decimals);
+        },
       },
       {
         field: "일간(%)",
@@ -765,7 +769,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             minWidth: 72,
             width: 72,
             type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+            cellRenderer: (params: { value: number | null | undefined }) => {
+              const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+              const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
+              return formatNumber(params.value ?? null, decimals);
+            },
           }) as ColDef<RankGridRow>,
       ),
       ...(showDeviationColumn
@@ -899,7 +907,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             minWidth: 72,
             width: 72,
             type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
+            cellRenderer: (params: { value: number | null | undefined }) => {
+              const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+              const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
+              return formatNumber(params.value ?? null, decimals);
+            },
           }) as ColDef<RankGridRow>,
       ),
     ];

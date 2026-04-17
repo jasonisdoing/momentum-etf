@@ -488,7 +488,8 @@ def _normalize_ranking_values(
 ) -> pd.DataFrame:
     normalized = df.copy()
 
-    price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
+    country_norm = str(country_code or "").strip().lower()
+    price_digits = 2 if country_norm in ("au", "us") else 0
     percent_columns = [
         "괴리율",
         "일간(%)",

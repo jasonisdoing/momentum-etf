@@ -8,6 +8,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   type_source?: string;
+  currency?: string;
 };
 
 type RankMaRule = {
