@@ -94,6 +94,7 @@ type RankResponse = {
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
+  naver_category_config?: { code: string; name: string; show: boolean; use: boolean }[];
   error?: string;
 };
 
@@ -258,26 +259,6 @@ function clampHeldBonusScore(value: number): number {
   return Math.round(value / 5) * 5;
 }
 
-const NAVER_CATEGORY_NAMES = [
-  "주식",
-  "채권",
-  "부동산",
-  "멀티에셋",
-  "원자재",
-  "통화",
-  "단기자금(파킹형)",
-  "투자국가",
-  "배율",
-  "섹터",
-  "지수",
-  "혁신기술",
-  "투자전략",
-  "ESG",
-  "배당",
-  "단일종목",
-  "트렌드",
-  "국내운용사",
-];
 
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const router = useRouter();
@@ -311,6 +292,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [naverCategoryConfig, setNaverCategoryConfig] = useState<{ code: string; name: string }[]>([]);
   const todayDateInputValue = useMemo(() => getTodayDateInputValue(), []);
 
   function clearCacheWarningState() {
@@ -381,6 +363,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setMissingTickers(payload.missing_tickers ?? []);
       setMissingTickerLabels(payload.missing_ticker_labels ?? []);
       setStaleTickers(payload.stale_tickers ?? []);
+      setNaverCategoryConfig(payload.naver_category_config ?? []);
     } catch (loadError) {
       let msg = loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.";
       if (msg.includes("Unexpected token") || msg.includes("fetch failed") || msg === "순위 데이터를 불러오지 못했습니다.") {
@@ -962,11 +945,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
       },
       ...(String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver"
-        ? NAVER_CATEGORY_NAMES.map(
-          (catName) =>
+        ? naverCategoryConfig.map(
+          (cat) =>
             ({
-              field: catName,
-              headerName: catName,
+              field: cat.name,
+              headerName: cat.name,
               minWidth: 80,
               width: 120,
               cellRenderer: (params: { value: string | null | undefined }) => {
