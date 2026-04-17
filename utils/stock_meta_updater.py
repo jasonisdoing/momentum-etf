@@ -11,7 +11,7 @@ import yfinance as yf
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import refresh_stock_cache
-from utils.data_loader import fetch_pykrx_name
+from utils.data_loader import fetch_ohlcv, fetch_pykrx_market, fetch_pykrx_name
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
@@ -203,6 +203,7 @@ def update_ticker_type_metadata(
             fields_to_update = [
                 "name",
                 "listing_date",
+                "market",
                 "1_week_avg_volume",
                 "volume",
         "1_week_earn_rate",
@@ -226,21 +227,30 @@ def update_ticker_type_metadata(
 
             updates_for_db.append(update_doc)
 
+            # 중간 저장 (20개 단위)
+            if len(updates_for_db) >= 20:
+                try:
+                    modified = bulk_update_stocks(type_norm, updates_for_db)
+                    logger.info(f"[{type_norm.upper()}] 중간 저장 완료 ({idx}/{total_count}, {modified}건)")
+                    updates_for_db.clear()
+                except Exception as e:
+                    logger.error(f"[{type_norm.upper()}] 중간 저장 실패: {e}")
+
             if progress_callback:
                 progress_callback(idx, total_count, f"{name}({ticker})")
             updated_count += 1
-            time.sleep(0.2)  # API 호출 속도 조절
+            time.sleep(0.1)  # 속도 조절
 
         except Exception as e:
             logger.error(f"[{type_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
 
-    # 메타데이터가 갱신된 필드만 추출하여 bulk_update 수행 (save_etfs를 쓰면 is_deleted가 리셋되는 버그 방지)
+    # 남아있는 업데이트 저장
     try:
         if updates_for_db:
             modified = bulk_update_stocks(type_norm, updates_for_db)
-            logger.info(f"[{type_norm.upper()}] {modified}개 메타데이터 변경사항 저장 완료")
+            logger.info(f"[{type_norm.upper()}] 최종 메타데이터 변경사항 저장 완료 ({modified}건)")
     except Exception as e:
-        logger.error(f"'{type_norm}' 설정 저장 실패: {e}")
+        logger.error(f"'{type_norm}' 최종 저장 실패: {e}")
 
 
 def update_stock_metadata(ticker_type: str | None = None):
@@ -443,6 +453,7 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     fields_to_update = [
         "name",
         "listing_date",
+        "market",
         "1_week_avg_volume",
         "volume",
         "1_week_earn_rate",
@@ -505,6 +516,17 @@ def update_single_stock_metadata(
                         logger.info(f"[{account_norm.upper()}/{ticker}] pykrx에서 종목명 획득: {fetched_name}")
             except Exception as e:
                 logger.warning(f"[{account_norm.upper()}/{ticker}] pykrx 종목명 조회 실패: {e}")
+
+        # 3. 마켓(KOSPI/KOSDAQ) 조회
+        if not stock.get("market"):
+            try:
+                market = fetch_pykrx_market(ticker)
+                if market:
+                    stock["market"] = market
+                    if account_norm:
+                        logger.info(f"[{account_norm.upper()}/{ticker}] pykrx에서 마켓 정보 획득: {market}")
+            except Exception as e:
+                logger.warning(f"[{account_norm.upper()}/{ticker}] pykrx 마켓 정보 조회 실패: {e}")
 
     elif country_code in ("us", "au"):
         try:

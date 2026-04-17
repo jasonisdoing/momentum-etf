@@ -721,6 +721,8 @@ def build_ticker_type_rankings(
                 "bucket": int(etf.get("bucket") or 0),
                 "티커": ticker,
                 "종목명": etf.get("name", ""),
+                "마켓": etf.get("market", ""),
+                "country_code": country_code,
                 "상장일": etf.get("listing_date", "-"),
                 "점수": None,
                 "보유": "보유" if ticker in held_tickers else "",
