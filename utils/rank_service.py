@@ -154,6 +154,7 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "country_code": str(cfg.get("country_code") or ""),
             "holding_bonus_score": int(cfg["settings"].get("holding_bonus_score", 0)),
             "type_source": str(cfg["settings"].get("type_source") or ""),
+            "currency": str(cfg["settings"].get("currency") or ""),
         }
         for cfg in configs
     ]
