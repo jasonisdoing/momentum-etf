@@ -1248,22 +1248,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         </div>
                       </label>
                     ))}
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">보유보너스점수</span>
-                      <select
-                        className="form-select"
-                        value={String(heldBonusScore)}
-                        onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
-                      >
-                        {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
-                          <option key={score} value={score}>
-                            {score}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
                   </>
                 ) : null}
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">보유보너스점수</span>
+                  <select
+                    className="form-select"
+                    value={String(heldBonusScore)}
+                    onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
+                  >
+                    {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
+                      <option key={score} value={score}>
+                        {score}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">컬럼</span>
                   <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
