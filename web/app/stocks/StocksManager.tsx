@@ -617,7 +617,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             headerName: "마켓",
             minWidth: 80,
             width: 80,
-            cellStyle: { textAlign: "center" },
+            cellStyle: (params) => {
+              const val = params.value;
+              // KOSPI: 연한 녹색 배경 + 진한 녹색 글자
+              if (val === "KOSPI") return { textAlign: "center", backgroundColor: "#d1e7dd", color: "#0f5132", fontWeight: "bold" };
+              // KOSDAQ: 연한 파란색 배경 + 진한 파란색 글자
+              if (val === "KOSDAQ") return { textAlign: "center", backgroundColor: "#cfe2ff", color: "#084298", fontWeight: "bold" };
+              return { textAlign: "center" };
+            },
           } as ColDef<RankGridRow>,
         ]
         : []),
