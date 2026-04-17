@@ -610,7 +610,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span>{getBucketName(Number(params.data?.bucket ?? 1))}</span>;
         },
       },
-      ...((selectedTickerTypeItem?.country_code === "kor" || (gridRows[0] as any)?.country_code === "kor")
+      ...(selectedTickerType === "kor"
         ? [
           {
             field: "마켓",
