@@ -618,14 +618,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             minWidth: 80,
             width: 80,
             cellStyle: { textAlign: "center" },
-            cellRenderer: (params: { value: string | null | undefined }) => {
-              const val = String(params.value ?? "");
-              let badgeClass = "badge bg-secondary-subtle text-secondary border";
-              if (val === "KOSPI") badgeClass = "badge bg-primary-subtle text-primary border border-primary-subtle";
-              if (val === "KOSDAQ") badgeClass = "badge bg-success-subtle text-success border border-success-subtle";
-
-              return val ? <span className={badgeClass} style={{ fontSize: "11px", padding: "2px 6px" }}>{val}</span> : <span>-</span>;
-            },
           } as ColDef<RankGridRow>,
         ]
         : []),

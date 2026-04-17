@@ -2011,22 +2011,46 @@ def fetch_pykrx_name(ticker: str) -> str:
     return name
 
 
-@functools.lru_cache(maxsize=1000)
+_naver_market_map: dict[str, str] = {}
+
+
 def fetch_pykrx_market(ticker: str) -> str:
     """
-    pykrx를 통해 종목의 소속 마켓(KOSPI, KOSDAQ, KONEX) 정보를 가져옵니다.
+    네이버 API를 통해 종목의 소속 마켓(KOSPI, KOSDAQ) 정보를 가져옵니다.
+    (함수명은 호환성을 위해 유지하며, 내부 로직은 네이버 API로 교체)
     """
-    if _stock is None:
+    ticker_norm = str(ticker or "").strip().upper()
+    if not ticker_norm:
         return ""
 
-    try:
-        market = _stock.get_market_by_ticker(ticker)
-        if isinstance(market, str) and market:
-            return market
-    except Exception:
-        pass
+    # 캐시 확인
+    if ticker_norm in _naver_market_map:
+        return _naver_market_map[ticker_norm]
 
-    return ""
+    # 마켓 맵이 비어있으면 초기화 (네이버 API로 목록 로드)
+    if not _naver_market_map:
+        try:
+            import requests
+
+            for m in ["KOSPI", "KOSDAQ"]:
+                # 페이지별로 돌며 전체 목록 수집 (단순화를 위해 상위 10페이지 정도만 수집해도 1000개 이상)
+                # 실제로는 데이터가 많으므로 pageSize를 크게 하여 호출
+                for page in range(1, 31):  # 3000개까지 커버
+                    url = f"https://m.stock.naver.com/api/stocks/marketValue/{m}?page={page}&pageSize=100"
+                    resp = requests.get(url, timeout=10)
+                    if resp.status_code != 200:
+                        break
+                    items = resp.json().get("stocks")
+                    if not items:
+                        break
+                    for item in items:
+                        item_code = item.get("itemCode")
+                        if item_code:
+                            _naver_market_map[item_code] = m
+        except Exception:
+            pass
+
+    return _naver_market_map.get(ticker_norm, "")
 
 
 _etf_name_cache: dict[tuple[str, str], str] = {}
