@@ -86,20 +86,20 @@ function canHaveConstituents(row: AggregatedHoldingRow): boolean {
   return row.currency === "KRW" && row.ticker.length === 6;
 }
 
-const CONSTITUENT_ROW_HEIGHT = 34;
-const CONSTITUENT_HEADER_HEIGHT = 36;
-const DETAIL_MAX_VISIBLE = 10; // 스크롤 전 최대 표시 행 수
+// ticker 페이지의 tickerDetailHoldingsPanel 높이와 동일
+const DETAIL_PANEL_HEIGHT = 420;
+const DETAIL_PANEL_PADDING = 12; // fullWidth row 상하 여백
 
-function getDetailRowHeight(count: number): number {
-  const visibleRows = Math.min(count, DETAIL_MAX_VISIBLE);
-  return CONSTITUENT_HEADER_HEIGHT + visibleRows * CONSTITUENT_ROW_HEIGHT + 4;
+function getDetailRowHeight(_count: number): number {
+  return DETAIL_PANEL_HEIGHT + DETAIL_PANEL_PADDING * 2;
 }
 
+// ticker 페이지 gridTheme과 동일한 파라미터
 const constituentGridTheme = holdingsGridTheme.withParams({
-  rowHeight: CONSTITUENT_ROW_HEIGHT,
-  headerHeight: CONSTITUENT_HEADER_HEIGHT,
-  wrapperBorderRadius: 0,
-  fontSize: 13,
+  rowHeight: 34,
+  headerHeight: 36,
+  wrapperBorderRadius: 10,
+  fontSize: 14,
 });
 
 export function HoldingsManager({
@@ -518,25 +518,32 @@ export function HoldingsManager({
     },
   ], [isCashRow, isDetailRow, moveToTickerDetail, showAmounts, expandedTicker, handleNameClick]);
 
-  // detail(자식) fullWidth renderer — ticker 페이지 구성종목 테이블과 동일한 AppAgGrid 사용
+  // detail(자식) fullWidth renderer — ticker 페이지 tickerDetailHoldingsPanel 구조 그대로 사용
   const DetailRenderer = useCallback(
     (params: { data?: ParentRow }) => {
       if (!params.data || !isDetailRow(params.data)) return null;
       const { constituents } = params.data;
       return (
-        <div style={{ height: "100%", display: "flex", flexDirection: "column" }}>
-          <AppAgGrid
-            className="holdingsDetailGrid tickerDetailHoldingsGrid"
-            rowData={constituents}
-            columnDefs={constituentColDefs}
-            loading={false}
-            minHeight="100%"
-            theme={constituentGridTheme}
-            gridOptions={{
-              suppressMovableColumns: true,
-              getRowId: (p) => String(p.data.ticker),
-            }}
-          />
+        <div style={{ height: "100%", padding: `${DETAIL_PANEL_PADDING}px 16px`, display: "flex", alignItems: "flex-start" }}>
+          <div className="tickerDetailHoldingsPanel" style={{ width: "50%", minWidth: 440 }}>
+            <div className="tickerDetailTableHeader">
+              <span className="tickerDetailTableTitle">구성종목</span>
+              <span className="tickerDetailTableMeta">상위 {constituents.length}개</span>
+            </div>
+            <div className="appGridFillWrap">
+              <AppAgGrid
+                className="tickerDetailHoldingsGrid"
+                rowData={constituents}
+                columnDefs={constituentColDefs}
+                loading={false}
+                theme={constituentGridTheme}
+                gridOptions={{
+                  suppressMovableColumns: true,
+                  getRowId: (p) => String(p.data.ticker),
+                }}
+              />
+            </div>
+          </div>
         </div>
       );
     },
@@ -635,12 +642,6 @@ export function HoldingsManager({
         .holdingsGrid .ag-row.holdingsDetailFullRow {
           background-color: #ffffff !important;
           border-bottom: 1px solid #d0daea;
-        }
-        /* 구성종목 nested 그리드: 테두리/radius 제거, 좌측 강조선 추가 */
-        .holdingsDetailGrid.appAgGridWrap {
-          border-radius: 0;
-          border: none;
-          border-left: 3px solid #206bc4;
         }
         .holdingsGrid .rankBucketCell {
           justify-content: center;
