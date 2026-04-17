@@ -169,29 +169,62 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     # 실시간 가격 정보 추가
     from services.price_service import get_realtime_snapshot
     
-    # 조회가 필요한 티커 목록 (현금 제외)
-    tickers_to_fetch = [c["ticker"] for c in sorted_components if c["ticker"] != "-"]
+    # 국가별 조회가 필요한 티커 목록 분류 (구성종목 + 소스 ETF)
+    kor_tickers = set()
+    us_tickers = set()
     
-    # 실시간 스냅샷 조회 (한국 시장 기준)
-    price_map = {}
-    if tickers_to_fetch:
+    def classify_ticker(t: str):
+        if not t or t == "-": return
+        if len(t) == 6 and t.isdigit():
+            kor_tickers.add(t)
+        else:
+            us_tickers.add(t)
+
+    for c in sorted_components:
+        classify_ticker(c["ticker"])
+        for src in c["sources"]:
+            classify_ticker(src["etf_ticker"])
+    
+    # 실시간 스냅샷 조회
+    price_map: dict[str, dict[str, Any]] = {}
+    
+    if kor_tickers:
         try:
-            price_map = get_realtime_snapshot("kor", tickers_to_fetch)
+            kor_results = get_realtime_snapshot("kor", list(kor_tickers))
+            price_map.update(kor_results)
         except Exception as e:
-            logger.warning(f"보유종목 상세 가격 조회 실패: {e}")
+            logger.warning(f"보유종목 상세 가격 조회 실패 (kor): {e}")
+            
+    if us_tickers:
+        try:
+            us_results = get_realtime_snapshot("us", list(us_tickers))
+            price_map.update(us_results)
+        except Exception as e:
+            logger.warning(f"보유종목 상세 가격 조회 실패 (us): {e}")
 
     # 수치 반올림 및 가격 정보 병합
     for comp in sorted_components:
         comp["total_weight"] = round(comp["total_weight"], 2)
         
-        # 가격 정보 삽입
+        # 구성종목 가격 정보 삽입
         ticker = comp["ticker"]
         p_data = price_map.get(ticker, {})
-        comp["current_price"] = p_data.get("price")
-        comp["change_pct"] = p_data.get("change_pct")
+        comp["current_price"] = p_data.get("nowVal") or p_data.get("price")
+        comp["change_pct"] = p_data.get("changeRate") or p_data.get("change_pct")
+        
+        if ticker != "-":
+            comp["currency"] = "KRW" if len(ticker) == 6 and ticker.isdigit() else "USD"
+        else:
+            comp["currency"] = "KRW"
 
+        # 소스 ETF 가격 정보 삽입
         for src in comp["sources"]:
             src["weight"] = round(src["weight"], 2)
+            s_ticker = src["etf_ticker"]
+            s_p_data = price_map.get(s_ticker, {})
+            src["current_price"] = s_p_data.get("nowVal") or s_p_data.get("price")
+            src["change_pct"] = s_p_data.get("changeRate") or s_p_data.get("change_pct")
+            src["currency"] = "KRW" if len(s_ticker) == 6 and s_ticker.isdigit() else "USD"
 
     return {
         "account_id": account_id,
