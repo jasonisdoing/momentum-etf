@@ -23,6 +23,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
+  type_source?: string;
 };
 
 type RankMaRule = {
@@ -44,6 +45,9 @@ type RankRow = {
   마켓?: string;
   종목명: string;
   상장일: string;
+  투자국가?: string;
+  섹터?: string;
+  지수?: string;
   점수: number | null;
   보유: string;
   현재가: number | null;
@@ -469,6 +473,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         티커: addingRow.ticker,
         종목명: addingRow.name,
         상장일: addingRow.listing_date || "-",
+        투자국가: "",
+        섹터: "",
+        지수: "",
         점수: null,
         보유: "",
         현재가: null,
@@ -705,6 +712,43 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span className="rankNameCellText" title={value}>{value}</span>;
         },
       },
+      ...(String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver"
+        ? [
+            {
+              field: "투자국가",
+              headerName: "투자국가",
+              minWidth: 110,
+              width: 110,
+              cellStyle: { textAlign: "center" },
+              cellRenderer: (params: { value: string | null | undefined }) => {
+                const value = String(params.value ?? "").trim();
+                return <span title={value}>{value || "-"}</span>;
+              },
+            } as ColDef<RankGridRow>,
+            {
+              field: "섹터",
+              headerName: "섹터",
+              minWidth: 120,
+              width: 120,
+              cellStyle: { textAlign: "center" },
+              cellRenderer: (params: { value: string | null | undefined }) => {
+                const value = String(params.value ?? "").trim();
+                return <span title={value}>{value || "-"}</span>;
+              },
+            } as ColDef<RankGridRow>,
+            {
+              field: "지수",
+              headerName: "지수",
+              minWidth: 140,
+              width: 140,
+              cellStyle: { textAlign: "center" },
+              cellRenderer: (params: { value: string | null | undefined }) => {
+                const value = String(params.value ?? "").trim();
+                return <span title={value}>{value || "-"}</span>;
+              },
+            } as ColDef<RankGridRow>,
+          ]
+        : []),
       {
         field: "현재가",
         headerName: "현재가",
@@ -940,6 +984,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     pageMode,
     selectedTickerType,
     selectedTickerTypeItem?.country_code,
+    selectedTickerTypeItem?.type_source,
   ]);
 
   function handleTickerTypeChange(accountId: string) {
