@@ -22,6 +22,13 @@ jobs:
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
+            # stale rename 유령 컨테이너 선별 제거
+            #   이전 배포가 docker compose recreate 중간에 끊기면
+            #   `<12hex>_momentum-etf-*` 형태의 리네임 유산이 남아 다음 배포에서
+            #   "name is already in use" 충돌을 일으킴. 정상 컨테이너는 건드리지 않음.
+            sudo docker ps -a --format '{{.ID}} {{.Names}}' \
+              | awk '$2 ~ /^[0-9a-f]{12}_momentum-etf-/ { print $1 }' \
+              | xargs -r sudo docker rm -f
             if [ ! -d .git ]; then
               git clone https://github.com/jasonisdoing/momentum-etf.git .
             else
