@@ -13,6 +13,7 @@ from config import (
     CACHE_START_DATE,
     MARKET_SCHEDULES,
     MIN_TRADING_DAYS,
+    NAVER_ETF_CATEGORY_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.metrics import process_ticker_data
@@ -487,7 +488,8 @@ def _normalize_ranking_values(
 ) -> pd.DataFrame:
     normalized = df.copy()
 
-    price_digits = 2 if str(country_code or "").strip().lower() == "au" else 0
+    country_norm = str(country_code or "").strip().lower()
+    price_digits = 2 if country_norm in ("au", "us") else 0
     percent_columns = [
         "괴리율",
         "일간(%)",
@@ -715,20 +717,28 @@ def build_ticker_type_rankings(
         elif effective_close_series is not None and len(effective_close_series.index) >= MIN_TRADING_DAYS:
             pass
 
-        rows.append(
-            {
-                "버킷": BUCKET_MAPPING.get(int(etf.get("bucket") or 0), str(etf.get("bucket") or "")),
-                "bucket": int(etf.get("bucket") or 0),
-                "티커": ticker,
-                "종목명": etf.get("name", ""),
-                "상장일": etf.get("listing_date", "-"),
-                "점수": None,
-                "보유": "보유" if ticker in held_tickers else "",
-                **ma_rule_scores,
-                **price_metrics,
-                "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,
-            }
-        )
+        row = {
+            "버킷": BUCKET_MAPPING.get(int(etf.get("bucket") or 0), str(etf.get("bucket") or "")),
+            "bucket": int(etf.get("bucket") or 0),
+            "티커": ticker,
+            "종목명": etf.get("name", ""),
+            "마켓": etf.get("market", ""),
+            "country_code": country_code,
+            "상장일": etf.get("listing_date", "-"),
+            "분류": etf.get("etf_category", "") or "",
+            "점수": None,
+            "보유": "보유" if ticker in held_tickers else "",
+            **ma_rule_scores,
+            **price_metrics,
+            "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,
+        }
+
+        # 네이버 개별 분류 컬럼 명칭 매핑 (cat_xxxx -> 한글분류명)
+        for cat in NAVER_ETF_CATEGORY_CONFIG:
+            val = etf.get(f"cat_{cat['code']}", "")
+            row[cat["name"]] = val or ""
+
+        rows.append(row)
 
     dataframe_started_at = perf_counter()
     df = pd.DataFrame(rows)

@@ -36,6 +36,13 @@ function formatPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
+  if (countryCode === "us") {
+    return `$${new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
   return `${new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 0 }).format(value)}원`;
 }
 

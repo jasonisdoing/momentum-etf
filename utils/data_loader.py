@@ -9,7 +9,7 @@ import os
 import warnings
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -24,7 +24,8 @@ from config import (
     MIN_TRADING_DAYS,
     NAVER_FINANCE_ETF_API_URL,
     NAVER_FINANCE_HEADERS,
-    NAVER_FINANCE_STOCK_POLLING_URL,
+    TOSS_INVEST_API_BASE_URL,
+    TOSS_INVEST_HEADERS,
 )
 
 # pkg_resources 워닝 억제 (가장 강력한 방법)
@@ -309,6 +310,34 @@ def _build_market_open_info() -> dict[str, tuple[str, time]]:
 MARKET_OPEN_INFO = _build_market_open_info()
 
 
+def _is_market_day_completed(country_code: str, trading_day: pd.Timestamp) -> bool:
+    """해당 시장의 현지 마감 시간이 지나야 최신 거래일로 인정한다."""
+    country_key = (country_code or "").strip().lower()
+    schedule = (MARKET_SCHEDULES or {}).get(country_key)
+    if not isinstance(schedule, dict):
+        return True
+
+    tz_name = str(schedule.get("timezone") or "").strip() or "UTC"
+    close_time = schedule.get("close") or time(23, 59)
+    close_offset_minutes = int(schedule.get("close_offset_minutes") or 0)
+
+    try:
+        now_local = _now_with_zone(tz_name)
+    except Exception:
+        return True
+
+    trading_day_norm = pd.Timestamp(trading_day).normalize()
+    now_local_day = pd.Timestamp(now_local.date()).normalize()
+    if trading_day_norm < now_local_day:
+        return True
+    if trading_day_norm > now_local_day:
+        return False
+
+    cutoff_minutes = (close_time.hour * 60) + close_time.minute + close_offset_minutes
+    now_minutes = (now_local.hour * 60) + now_local.minute
+    return now_minutes >= cutoff_minutes
+
+
 def _should_skip_today_range(country_code: str, target_end: pd.Timestamp) -> bool:
     if ZoneInfo is None:
         return False
@@ -491,9 +520,13 @@ def _get_latest_trading_day_cached(country: str, cache_key: str) -> pd.Timestamp
         trading_days = get_trading_days(start_date, end_date, country_code)
 
         if trading_days:
-            # 가장 최근 거래일을 반환
-            latest_trading_day = max(trading_days)
-            return latest_trading_day.normalize()
+            normalized_days = sorted(pd.Timestamp(day).normalize() for day in trading_days)
+            latest_trading_day = normalized_days[-1]
+            if _is_market_day_completed(country_code, latest_trading_day):
+                return latest_trading_day
+            if len(normalized_days) >= 2:
+                return normalized_days[-2]
+            return latest_trading_day
     except Exception as e:
         logger.warning("거래일 일괄 조회 중 오류 발생: %s", e)
 
@@ -1394,58 +1427,53 @@ def fetch_naver_realtime_price(ticker: str) -> float | None:
     return None
 
 
-def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다."""
+# ─── ETF iNAV 글로벌 캐시 ───
+# etfItemList.nhn은 전체 ETF 목록을 반환하므로 글로벌로 캐시하고 공유한다.
+_ETF_INAV_GLOBAL_CACHE: dict[str, Any] = {}
+_ETF_INAV_GLOBAL_TTL_SECONDS = 30
 
-    normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
-    if not normalized_codes:
-        return {}
+
+def _fetch_etf_inav_all() -> dict[str, dict[str, float]]:
+    """네이버 ETF API에서 전체 ETF iNAV 데이터를 가져온다. 글로벌 캐시를 사용한다."""
+
+    now = datetime.now()
+    expires_at = _ETF_INAV_GLOBAL_CACHE.get("expires_at")
+    if isinstance(expires_at, datetime) and now < expires_at:
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     if not requests:
         logger.debug("requests 라이브러리가 없어 네이버 iNAV 조회를 건너뜁니다.")
-        return {}
-
-    url = NAVER_FINANCE_ETF_API_URL
-    headers = NAVER_FINANCE_HEADERS
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     try:
-        response = requests.get(url, headers=headers, timeout=5)
+        response = requests.get(NAVER_FINANCE_ETF_API_URL, headers=NAVER_FINANCE_HEADERS, timeout=5)
         response.raise_for_status()
-    except Exception as exc:
-        logger.warning("네이버 ETF iNAV 조회 실패: %s", exc)
-        return {}
-
-    try:
         payload = response.json()
     except Exception as exc:
-        logger.warning("네이버 ETF iNAV 응답 파싱 실패: %s", exc)
-        return {}
+        logger.warning("네이버 ETF iNAV 조회 실패: %s", exc)
+        # 실패 시 stale 캐시 재사용
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     items = payload.get("result", {}).get("etfItemList")
     if not isinstance(items, list):
-        return {}
+        return _ETF_INAV_GLOBAL_CACHE.get("data", {})
 
     snapshot: dict[str, dict[str, float]] = {}
-
     for item in items:
         if not isinstance(item, dict):
             continue
 
         code = str(item.get("itemcode") or "").strip().upper()
-        if not code or code not in normalized_codes:
+        if not code:
             continue
 
         nav_raw = item.get("nav")
         price_raw = item.get("nowVal")
-        change_rate_raw = item.get("changeRate")  # 일간 등락률 (%)
-
-        # 추가 정보 파싱 (Open, High, Low, Vol)
+        change_rate_raw = item.get("changeRate")
         open_raw = item.get("openVal")
         high_raw = item.get("highVal")
         low_raw = item.get("lowVal")
         vol_raw = item.get("quant")
-
-        # 종목명, 수익률 등
         name_raw = item.get("itemname")
         return_3m_raw = item.get("threeMonthEarnRate")
 
@@ -1455,35 +1483,30 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
         except (TypeError, ValueError):
             continue
 
-        # NAV가 0인 경우 괴리율 계산 불가 처리
         if nav_value <= 0:
             deviation = None
         else:
             deviation = ((price_value / nav_value) - 1.0) * 100.0
 
-        entry = {
+        entry: dict[str, Any] = {
             "nav": nav_value,
             "nowVal": price_value,
             "deviation": deviation,
         }
 
-        # 등락률 파싱
         try:
             entry["changeRate"] = float(str(change_rate_raw).replace(",", ""))
         except (TypeError, ValueError):
             pass
 
-        # 종목명
         if name_raw:
             entry["itemname"] = str(name_raw).strip()
 
-        # 3개월 수익률
         try:
             entry["threeMonthEarnRate"] = float(str(return_3m_raw).replace(",", ""))
         except (TypeError, ValueError):
             pass
 
-        # Optional fields parsing
         try:
             if open_raw:
                 entry["open"] = float(str(open_raw).replace(",", ""))
@@ -1498,11 +1521,34 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
 
         snapshot[code] = entry
 
+    _ETF_INAV_GLOBAL_CACHE["data"] = snapshot
+    _ETF_INAV_GLOBAL_CACHE["expires_at"] = datetime.now() + timedelta(seconds=_ETF_INAV_GLOBAL_TTL_SECONDS)
     return snapshot
 
 
+def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """네이버 API에서 한국 ETF의 실시간 NAV 정보를 조회합니다. 글로벌 캐시를 사용합니다."""
+
+    normalized_codes = {str(t).strip().upper() for t in tickers if str(t or "").strip()}
+    if not normalized_codes:
+        return {}
+
+    all_data = _fetch_etf_inav_all()
+    return {code: all_data[code] for code in normalized_codes if code in all_data}
+
+
+def _parse_comma_number(value: str | None) -> float | None:
+    """쉼표가 포함된 숫자 문자열을 float로 변환한다."""
+    if value is None:
+        return None
+    try:
+        return float(str(value).replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """네이버 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
+    """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
     if not normalized_codes:
@@ -1512,60 +1558,68 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
 
-    # 한 번에 최대 50개까지만 지원하므로 청크로 나눕니다.
+    _NAVER_STOCK_POLLING_URL = "https://stock.naver.com/api/polling/domestic/stock"
+    _NAVER_STOCK_POLLING_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://stock.naver.com/",
+        "Accept": "application/json, text/plain, */*",
+    }
+
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
-        query_str = ",".join([f"SERVICE_ITEM:{code}" for code in chunk])
-        url = f"{NAVER_FINANCE_STOCK_POLLING_URL}?query={query_str}"
+        item_codes = ",".join(chunk)
+        url = f"{_NAVER_STOCK_POLLING_URL}?itemCodes={item_codes}"
 
         try:
-            response = requests.get(url, headers=NAVER_FINANCE_HEADERS, timeout=5)
+            response = requests.get(url, headers=_NAVER_STOCK_POLLING_HEADERS, timeout=5)
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
             logger.warning("네이버 주식 실시간 조회 실패: %s", exc)
             return {}
 
-        result = {}
-        items = data.get("result", {}).get("areas", [])
-        if not items:
-            return {}
-
-        # 폴링 API 응답 구조: result.areas[0].datas 에 리스트로 들어있음
-        datas = items[0].get("datas", [])
+        result: dict[str, dict[str, float]] = {}
+        datas = data.get("datas") or []
         for item in datas:
-            code = str(item.get("cd") or "").strip().upper()
+            code = str(item.get("itemCode") or "").strip().upper()
             if not code:
                 continue
 
-            # nv: 현재가, cv: 전일대비, cr: 등락률
-            price_raw = item.get("nv")
-            change_rate_raw = item.get("cr")
-
-            if price_raw is None:
+            price_value = _parse_comma_number(item.get("closePrice"))
+            if price_value is None:
                 continue
 
-            try:
-                price_value = float(price_raw)
-                entry = {"nowVal": price_value}
-                if change_rate_raw is not None:
-                    entry["changeRate"] = float(change_rate_raw)
+            entry: dict[str, float] = {"nowVal": price_value}
 
-                # 추가 필드 (Open, High, Low, Vol)
-                if item.get("ov"):
-                    entry["open"] = float(item["ov"])
-                if item.get("hv"):
-                    entry["high"] = float(item["hv"])
-                if item.get("lv"):
-                    entry["low"] = float(item["lv"])
-                if item.get("aq"):
-                    entry["volume"] = float(item["aq"])
+            change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
+            if change_rate is not None:
+                # 하락 시 음수로 변환
+                compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
+                if compare_code == "5" and change_rate > 0:
+                    change_rate = -change_rate
+                entry["changeRate"] = change_rate
 
-                result[code] = entry
-            except (TypeError, ValueError):
-                continue
+            open_val = _parse_comma_number(item.get("openPrice"))
+            if open_val is not None:
+                entry["open"] = open_val
+            high_val = _parse_comma_number(item.get("highPrice"))
+            if high_val is not None:
+                entry["high"] = high_val
+            low_val = _parse_comma_number(item.get("lowPrice"))
+            if low_val is not None:
+                entry["low"] = low_val
+            vol_val = _parse_comma_number(item.get("accumulatedTradingVolume"))
+            if vol_val is not None:
+                entry["volume"] = vol_val
+
+            result[code] = entry
 
         return result
 
+    # 청크 단위로 호출 (URL 길이 제한 대비)
     snapshot: dict[str, dict[str, float]] = {}
     chunk_size = 50
     for i in range(0, len(normalized_codes), chunk_size):
@@ -1713,6 +1767,171 @@ def get_cached_au_etf_snapshot_entry(ticker: str) -> dict[str, float] | None:
     return _AU_QUOTEAPI_SNAPSHOT_CACHE.get(key)
 
 
+# ────────────────────────────────────────────
+# 토스증권 API — 미국 주식 실시간 가격
+# ────────────────────────────────────────────
+
+# symbol → productCode 영구 매핑 캐시 (프로세스 수명 동안 유효)
+_TOSS_SYMBOL_CODE_CACHE: dict[str, str] = {}
+
+
+def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
+    """미국 티커 심볼을 토스 productCode로 변환한다.
+
+    캐시에 없는 심볼만 검색 API를 호출하고, 결과를 영구 캐시에 저장한다.
+    Returns:
+        {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
+    """
+    result: dict[str, str] = {}
+    uncached: list[str] = []
+
+    for sym in symbols:
+        cached_code = _TOSS_SYMBOL_CODE_CACHE.get(sym)
+        if cached_code:
+            result[sym] = cached_code
+        else:
+            uncached.append(sym)
+
+    if not uncached:
+        return result
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 토스 심볼 검색을 건너뜁니다.")
+        return result
+
+    search_url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/search/stocks"
+
+    for sym in uncached:
+        try:
+            resp = requests.post(
+                search_url,
+                headers=TOSS_INVEST_HEADERS,
+                json={"query": sym},
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            stocks = (data.get("result") or {}).get("stocks") or []
+
+            # 한국 종목(stockCode가 'A'로 시작)을 제외하고 미국 주식만 필터링
+            us_stocks = [s for s in stocks if not str(s.get("stockCode") or "").startswith("A")]
+
+            # matchType이 EXACT인 첫 번째 미국 종목 사용
+            product_code: str | None = None
+            for stock in us_stocks:
+                if stock.get("matchType") == "EXACT":
+                    product_code = stock.get("stockCode")
+                    break
+
+            # EXACT 없으면 stockName이 심볼과 동일한 첫 번째 미국 종목
+            if not product_code:
+                for stock in us_stocks:
+                    if str(stock.get("stockName") or "").strip().upper() == sym:
+                        product_code = stock.get("stockCode")
+                        break
+
+            if product_code:
+                _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
+                result[sym] = product_code
+            else:
+                logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
+
+        except Exception as exc:
+            logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
+
+    return result
+
+
+def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
+
+    Args:
+        tickers: 미국 주식 티커 리스트 (예: ["TSLA", "AAPL", "NVDA"])
+
+    Returns:
+        티커별 가격 정보 딕셔너리
+        {
+            "TSLA": {"nowVal": 397.27, "changeRate": 1.36, "prevClose": 391.95},
+            ...
+        }
+    """
+    normalized_symbols = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
+    if not normalized_symbols:
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 토스 가격 조회를 건너뜁니다.")
+        return {}
+
+    # 1단계: symbol → productCode 매핑
+    symbol_to_code = _resolve_toss_product_codes(normalized_symbols)
+    if not symbol_to_code:
+        return {}
+
+    # code → symbol 역매핑
+    code_to_symbol = {code: sym for sym, code in symbol_to_code.items()}
+
+    # 2단계: productCode로 벌크 가격 조회 (50개씩 청크)
+    price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
+    all_codes = list(symbol_to_code.values())
+    snapshot: dict[str, dict[str, float]] = {}
+
+    chunk_size = 50
+    for i in range(0, len(all_codes), chunk_size):
+        chunk = all_codes[i : i + chunk_size]
+        codes_param = ",".join(chunk)
+
+        try:
+            resp = requests.get(
+                price_url,
+                params={"productCodes": codes_param},
+                headers=TOSS_INVEST_HEADERS,
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("토스 가격 API 실패: %s", exc)
+            continue
+
+        items = data if isinstance(data, list) else (data.get("result") or [])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("code")
+            sym = code_to_symbol.get(code)
+            if not sym:
+                continue
+
+            close_price = item.get("close")
+            if close_price is None:
+                continue
+
+            try:
+                close_val = float(close_price)
+            except (TypeError, ValueError):
+                continue
+
+            entry: dict[str, float] = {"nowVal": close_val}
+
+            base_price = item.get("base")
+            if base_price is not None:
+                try:
+                    base_val = float(base_price)
+                    entry["prevClose"] = base_val
+                    if base_val > 0:
+                        entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+                except (TypeError, ValueError):
+                    pass
+
+            snapshot[sym] = entry
+
+    if snapshot:
+        logger.info("[US] 토스증권 API에서 %d개 종목의 실시간 가격을 조회했습니다.", len(snapshot))
+
+    return snapshot
+
+
 _NAVER_ETF_SNAPSHOT_CACHE: dict[str, dict[str, float]] = {}
 _NAVER_ETF_SNAPSHOT_FETCHED_AT: pd.Timestamp | None = None
 
@@ -1752,47 +1971,164 @@ _pykrx_name_cache: dict[str, str] = {}
 
 def fetch_pykrx_name(ticker: str) -> str:
     """
-    pykrx를 통해 종목의 이름을 가져옵니다. ETF, 일반 주식, ETN을 모두 시도합니다.
-    결과는 단일 실행 내에서 캐시됩니다.
+    한국 종목명을 조회한다. 조회 순서:
+
+    1. 네이버 marketValue 통합 맵(KOSPI/KOSDAQ 일반주)
+    2. pykrx ETF / 일반주 / ETN (네이버에 없는 희귀 종목 폴백)
+    3. `_get_display_name`의 기존 표시명
+
+    프로세스 내 결과 캐시(`_pykrx_name_cache`)를 재사용한다.
     """
     if ticker in _pykrx_name_cache:
         return _pykrx_name_cache[ticker]
 
-    if _stock is None:
-        return ""
-
     name = ""
+
+    # 1. 네이버 marketValue API 통합 맵 우선 조회 (일반주 대부분 커버)
     try:
-        # 1. ETF 이름 조회 시도
-        name_candidate = _stock.get_etf_ticker_name(ticker)
-        if isinstance(name_candidate, str) and name_candidate:
-            name = name_candidate
+        naver_name = fetch_naver_kor_stock_name(ticker)
+        if naver_name:
+            name = naver_name
     except Exception:
         pass
 
-    # 2. ETF 조회가 실패하면 일반 주식으로 간주하고 다시 시도
-    if not name:
+    # 2. pykrx 폴백 (네이버에 없는 ETF/ETN 등)
+    if not name and _stock is not None:
         try:
-            name_candidate = _stock.get_market_ticker_name(ticker)
+            name_candidate = _stock.get_etf_ticker_name(ticker)
             if isinstance(name_candidate, str) and name_candidate:
                 name = name_candidate
         except Exception:
             pass
 
-    # 3. 주식 조회도 실패하면 ETN으로 간주하고 다시 시도
-    if not name:
-        try:
-            name_candidate = _stock.get_etn_ticker_name(ticker)
-            if isinstance(name_candidate, str) and name_candidate:
-                name = name_candidate
-        except Exception:
-            pass
+        if not name:
+            try:
+                name_candidate = _stock.get_market_ticker_name(ticker)
+                if isinstance(name_candidate, str) and name_candidate:
+                    name = name_candidate
+            except Exception:
+                pass
+
+        if not name:
+            try:
+                name_candidate = _stock.get_etn_ticker_name(ticker)
+                if isinstance(name_candidate, str) and name_candidate:
+                    name = name_candidate
+            except Exception:
+                pass
 
     if not name:
         name = _get_display_name("kor", ticker)
 
     _pykrx_name_cache[ticker] = name
     return name
+
+
+# 한국 코스피/코스닥 종목 정보 통합 맵 (네이버 marketValue API 기반)
+# 구조: {ticker: {"name": str, "market": "KOSPI"|"KOSDAQ"}}
+# 종목명과 마켓 정보를 한 번의 네트워크 순회로 동시에 수집하기 위한 공용 캐시.
+_naver_kor_stock_map: dict[str, dict[str, str]] = {}
+
+
+def _load_naver_kor_stock_map() -> dict[str, dict[str, str]]:
+    """
+    네이버 모바일 주식 API(`m.stock.naver.com/api/stocks/marketValue/{KOSPI|KOSDAQ}`)를
+    호출하여 한국 상장 종목 전체의 {ticker: {"name", "market"}} 맵을 구성한다.
+
+    - ETN(`stockEndType == "etn"`)은 제외한다.
+    - 프로세스 수명 동안 1회만 네트워크 호출을 수행하고 결과를 모듈 수준 캐시에 저장한다.
+    """
+
+    if _naver_kor_stock_map:
+        return _naver_kor_stock_map
+
+    try:
+        import time as _time
+
+        import requests
+
+        from config import NAVER_STOCK_MARKET_VALUE_HEADERS, NAVER_STOCK_MARKET_VALUE_URL
+
+        for market in ["KOSPI", "KOSDAQ"]:
+            page = 1
+            page_size = 100
+            while True:
+                try:
+                    url = NAVER_STOCK_MARKET_VALUE_URL.format(market=market)
+                    resp = requests.get(
+                        url,
+                        params={"page": page, "pageSize": page_size},
+                        headers=NAVER_STOCK_MARKET_VALUE_HEADERS,
+                        timeout=10,
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                except Exception:
+                    break
+
+                stocks = data.get("stocks") or []
+                if not stocks:
+                    break
+
+                for item in stocks:
+                    item_code = str(item.get("itemCode") or "").strip().upper()
+                    if not item_code:
+                        continue
+                    item_name = str(item.get("stockName") or "").strip()
+                    if not item_name:
+                        continue
+                    # ETN 제외
+                    if str(item.get("stockEndType") or "").lower() == "etn":
+                        continue
+                    _naver_kor_stock_map[item_code] = {
+                        "name": item_name,
+                        "market": market,
+                    }
+
+                if len(stocks) < page_size:
+                    break
+                page += 1
+                _time.sleep(0.05)
+    except Exception:
+        pass
+
+    return _naver_kor_stock_map
+
+
+def fetch_naver_kor_stock_map() -> dict[str, dict[str, str]]:
+    """한국 상장 종목의 {ticker: {"name", "market"}} 통합 맵을 반환한다."""
+    return _load_naver_kor_stock_map()
+
+
+def fetch_naver_kor_market(ticker: str) -> str:
+    """
+    네이버 API를 통해 한국 종목의 소속 마켓(KOSPI/KOSDAQ)을 반환한다.
+    """
+    ticker_norm = str(ticker or "").strip().upper()
+    if not ticker_norm:
+        return ""
+    entry = _load_naver_kor_stock_map().get(ticker_norm) or {}
+    return str(entry.get("market") or "")
+
+
+def fetch_naver_kor_stock_name(ticker: str) -> str:
+    """
+    네이버 marketValue API 기반으로 한국 일반주/ETN 종목명을 반환한다.
+    ETF 이름은 `fetch_naver_etf_names_map()`에 의해 별도로 커버된다.
+    """
+    ticker_norm = str(ticker or "").strip().upper()
+    if not ticker_norm:
+        return ""
+    entry = _load_naver_kor_stock_map().get(ticker_norm) or {}
+    return str(entry.get("name") or "")
+
+
+# --- Backward-compat alias ---
+# 구 이름 `fetch_pykrx_market`은 내부 구현이 이미 네이버 API로 교체되어 있었음.
+# 신규 코드는 `fetch_naver_kor_market`을 사용한다.
+def fetch_pykrx_market(ticker: str) -> str:
+    """Deprecated alias. `fetch_naver_kor_market` 사용을 권장한다."""
+    return fetch_naver_kor_market(ticker)
 
 
 _etf_name_cache: dict[tuple[str, str], str] = {}

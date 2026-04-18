@@ -1,8 +1,9 @@
 {
     "icon": "🇺🇸",
-    "name": "미국",
+    "name": "미국 개별주",
     "country_code": "us",
     "currency": "USD",
+    "holding_bonus_score": 10,
     "MA_RULES": [
         {
             "order": 1,

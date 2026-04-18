@@ -25,6 +25,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
+import { readRememberedTickerType } from "../components/account-selection";
 
 // --- 타입 ---
 
@@ -83,6 +84,8 @@ type TickerHoldingRow = {
   weight: number | null;
   is_us_pool_candidate?: boolean;
   in_us_pool?: boolean;
+  is_kor_pool_candidate?: boolean;
+  in_kor_pool?: boolean;
 };
 
 type CrosshairInfo = {
@@ -370,12 +373,12 @@ export function TickerDetailManager({
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
-  const [addingUsTickers, setAddingUsTickers] = useState<string[]>([]);
+  const [addingPoolKeys, setAddingPoolKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const holdingsGridApiRef = useRef<GridApi<TickerHoldingRow> | null>(null);
-  const addingUsTickersRef = useRef<string[]>([]);
+  const addingPoolKeysRef = useRef<string[]>([]);
   const [chartInterval, setChartInterval] = useState<ChartInterval>("day");
 
   // 차트
@@ -437,8 +440,17 @@ export function TickerDetailManager({
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
     if (matches.length > 1) {
+      const rememberedType = readRememberedTickerType();
+      const bestMatch = matches.find((m) => m.ticker_type === rememberedType);
+      
+      if (bestMatch) {
+        setSelectedTicker(bestMatch);
+        void loadTickerData(bestMatch);
+        return;
+      }
+      
       setSelectedTicker(null);
-      setError(`동일한 티커 ${qTicker}가 여러 종목풀에 등록되어 있습니다.`);
+      setError(`동일한 티커 ${qTicker}가 여러 종목풀(${matches.map(m => m.ticker_type).join(", ")})에 등록되어 있습니다.`);
       return;
     }
 
@@ -460,7 +472,7 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
-    setAddingUsTickers([]);
+    setAddingPoolKeys([]);
     setCrosshairInfo(null);
     setChartBadges([]);
 
@@ -507,49 +519,55 @@ export function TickerDetailManager({
   }
 
   useEffect(() => {
-    addingUsTickersRef.current = addingUsTickers;
+    addingPoolKeysRef.current = addingPoolKeys;
     holdingsGridApiRef.current?.refreshCells({
       force: true,
       columns: ["ticker"],
     });
-  }, [addingUsTickers]);
+  }, [addingPoolKeys]);
 
   // --- 핸들러 ---
 
-  async function handleAddUsTicker(row: TickerHoldingRow) {
+  async function handleAddPoolTicker(row: TickerHoldingRow, targetPool: "us" | "kor") {
     const ticker = String(row.ticker || "").trim().toUpperCase();
     if (!ticker) {
       return;
     }
-    setAddingUsTickers((current) => (
-      current.includes(ticker) ? current : [...current, ticker]
+    const poolKey = `${targetPool}:${ticker}`;
+    setAddingPoolKeys((current) => (
+      current.includes(poolKey) ? current : [...current, poolKey]
     ));
+    const poolName = targetPool === "us" ? "미국 종목풀" : "한국 종목풀";
     try {
-      await addStockCandidate("us", ticker, 1);
+      await addStockCandidate(targetPool, ticker, 1);
       setHoldings((current) =>
         current.map((row) =>
           row.ticker === ticker
-            ? { ...row, in_us_pool: true }
+            ? targetPool === "us"
+              ? { ...row, in_us_pool: true }
+              : { ...row, in_kor_pool: true }
             : row,
         ),
       );
-      toast.success(`${ticker}를 미국 종목풀의 1. 모멘텀에 추가하였습니다.`);
+      toast.success(`${ticker}를 ${poolName}의 1. 모멘텀에 추가하였습니다.`);
     } catch (addError) {
-      const message = addError instanceof Error ? addError.message : "미국 종목풀 추가에 실패했습니다.";
+      const message = addError instanceof Error ? addError.message : `${poolName} 추가에 실패했습니다.`;
       if (message.includes("이미 등록된 종목입니다.")) {
         setHoldings((current) =>
           current.map((row) =>
             row.ticker === ticker
-              ? { ...row, in_us_pool: true }
+              ? targetPool === "us"
+                ? { ...row, in_us_pool: true }
+                : { ...row, in_kor_pool: true }
               : row,
           ),
         );
-        toast.success(`${ticker}를 미국 종목풀의 1. 모멘텀에 추가하였습니다.`);
+        toast.success(`${ticker}를 ${poolName}의 1. 모멘텀에 추가하였습니다.`);
         return;
       }
-      toast.error(`${ticker} 미국 종목풀 추가에 실패했습니다. ${message}`);
+      toast.error(`${ticker} ${poolName} 추가에 실패했습니다. ${message}`);
     } finally {
-      setAddingUsTickers((current) => current.filter((item) => item !== ticker));
+      setAddingPoolKeys((current) => current.filter((item) => item !== poolKey));
     }
   }
 
@@ -768,44 +786,11 @@ export function TickerDetailManager({
     [holdingsRows],
   );
 
-  const holdingsAsOfDateLabel = useMemo(() => {
-    if (!holdingsAsOfDate || holdingsAsOfDate.length !== 8) return null;
-    return `${holdingsAsOfDate.slice(0, 4)}-${holdingsAsOfDate.slice(4, 6)}-${holdingsAsOfDate.slice(6, 8)}`;
-  }, [holdingsAsOfDate]);
-  const holdingsPriceAsOfDateLabel = useMemo(() => {
-    if (!holdingsPriceAsOfDate || holdingsPriceAsOfDate.length !== 8) return null;
-    return `${holdingsPriceAsOfDate.slice(0, 4)}-${holdingsPriceAsOfDate.slice(4, 6)}-${holdingsPriceAsOfDate.slice(6, 8)}`;
-  }, [holdingsPriceAsOfDate]);
   const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
-  const hasKoreanHoldings = useMemo(
-    () => holdingsRows.some((row) => /^\d{6}$/.test(String(row.ticker || "").trim())),
-    [holdingsRows],
-  );
-  const hasForeignHoldings = useMemo(
-    () => holdingsRows.some((row) => !/^\d{6}$/.test(String(row.ticker || "").trim())),
-    [holdingsRows],
-  );
   const holdingsPanelMeta = useMemo(() => {
-    if (holdingsRows.length === 0) {
-      return "데이터 없음";
-    }
-    if (hasForeignHoldings && !hasKoreanHoldings) {
-      return holdingsPriceAsOfDateLabel ? `해외 가격 기준 ${holdingsPriceAsOfDateLabel}` : "해외 가격 기준 없음";
-    }
-    if (hasForeignHoldings && hasKoreanHoldings) {
-      if (holdingsAsOfDateLabel && holdingsPriceAsOfDateLabel) {
-        return `적용일 ${holdingsAsOfDateLabel}(해외 가격 기준 ${holdingsPriceAsOfDateLabel})`;
-      }
-      if (holdingsAsOfDateLabel) {
-        return `적용일 ${holdingsAsOfDateLabel}`;
-      }
-      return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
-    }
-    if (holdingsAsOfDateLabel) {
-      return `적용일 ${holdingsAsOfDateLabel}`;
-    }
+    if (holdingsRows.length === 0) return "데이터 없음";
     return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
-  }, [hasForeignHoldings, hasKoreanHoldings, holdingsAsOfDateLabel, holdingsPriceAsOfDateLabel, holdingsRows.length]);
+  }, [holdingsRows.length]);
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
@@ -865,29 +850,36 @@ export function TickerDetailManager({
             const row = params.data;
             const isUsCandidate = Boolean(row?.is_us_pool_candidate);
             const inUsPool = Boolean(row?.in_us_pool);
+            const isKorCandidate = Boolean(row?.is_kor_pool_candidate);
+            const inKorPool = Boolean(row?.in_kor_pool);
+            const currentPoolKey = isUsCandidate ? `us:${ticker}` : isKorCandidate ? `kor:${ticker}` : "";
+            const isLoading = currentPoolKey ? addingPoolKeysRef.current.includes(currentPoolKey) : false;
+            const isDone = isUsCandidate ? inUsPool : isKorCandidate ? inKorPool : false;
+            const poolName = isUsCandidate ? "미국 종목풀" : isKorCandidate ? "한국 종목풀" : "";
+            const targetPool = isUsCandidate ? "us" : isKorCandidate ? "kor" : null;
 
             return (
               <div className="tickerDetailCodeContent">
                 <span className="tickerDetailCodeText">{ticker || "-"}</span>
-                {isUsCandidate ? (
-                  inUsPool ? (
-                    <span className="tickerDetailPoolState is-done" title="미국 종목풀에 이미 등록됨" aria-label="미국 종목풀 등록 완료">
+                {targetPool ? (
+                  isDone ? (
+                    <span className="tickerDetailPoolState is-done" title={`${poolName}에 이미 등록됨`} aria-label={`${poolName} 등록 완료`}>
                       <IconCheck size={14} stroke={2.2} />
                     </span>
-                  ) : addingUsTickersRef.current.includes(ticker) ? (
-                    <span className="tickerDetailPoolState is-loading" title="미국 종목풀 추가 중" aria-label="미국 종목풀 추가 중">
+                  ) : isLoading ? (
+                    <span className="tickerDetailPoolState is-loading" title={`${poolName} 추가 중`} aria-label={`${poolName} 추가 중`}>
                       <span className="spinner-border spinner-border-sm" />
                     </span>
                   ) : (
                     <button
                       type="button"
                       className="tickerDetailPoolState is-add"
-                      title="미국 종목풀에 추가"
-                      aria-label={`${ticker} 미국 종목풀 추가`}
+                      title={`${poolName}에 추가`}
+                      aria-label={`${ticker} ${poolName} 추가`}
                       onClick={(event) => {
                         event.stopPropagation();
-                        if (row) {
-                          void handleAddUsTicker(row);
+                        if (row && targetPool) {
+                          void handleAddPoolTicker(row, targetPool);
                         }
                       }}
                     >
@@ -1024,7 +1016,7 @@ export function TickerDetailManager({
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
                             <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
-                            <span className="text-muted tickerDetailTableMeta">{holdingsPanelMeta}</span>
+                            <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
                           </div>
                           {holdingsRows.length > 0 ? (
                             <div className="appGridFillWrap">

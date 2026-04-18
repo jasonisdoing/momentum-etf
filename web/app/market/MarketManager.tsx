@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
@@ -11,6 +11,10 @@ import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
+import {
+  readRememberedTickerType,
+  writeRememberedTickerType,
+} from "../components/account-selection";
 
 type MarketRowItem = {
   ticker: string;
@@ -48,16 +52,16 @@ type MarketGridRow = MarketRowItem & {
 const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
   인버스: ["인버스"],
   "2X": ["2X"],
-  레버리지: ["레버리지"],
   선물: ["선물"],
   "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
   혼합: ["혼합"],
   리츠: ["리츠"],
+  레버리지: ["레버리지"],
   합성: ["합성"],
   커버드콜: ["커버드콜"],
 };
 
-const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "레버리지", "선물", "채권(모든종류)", "혼합", "리츠"];
+const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "선물", "채권(모든종류)", "혼합", "리츠"];
 
 const marketGridTheme = themeQuartz
   .withPart(iconSetQuartzBold)
@@ -146,6 +150,8 @@ export function MarketManager({
   const [minMarketCap, setMinMarketCap] = useState("500"); // 시가총액(억)
   const [minPrevVolume, setMinPrevVolume] = useState("100000"); // 거래량(주)
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
+  const [newOnly, setNewOnly] = useState(false);
+  const [newListingDays, setNewListingDays] = useState("14");
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
@@ -153,6 +159,11 @@ export function MarketManager({
   const [adding, setAdding] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const previousMarketFiltersRef = useRef<{
+    minMarketCap: string;
+    minPrevVolume: string;
+    excludedGroups: string[];
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -192,6 +203,12 @@ export function MarketManager({
     const expandedKeywords = excludedGroups.flatMap((group) => EXCLUSION_KEYWORD_GROUPS[group] ?? []);
     const marketCapFilter = Number(minMarketCap || 0);
     const volumeFilter = Number(minPrevVolume || 0);
+    const today = new Date();
+    const todayKst = new Date(today.toLocaleString("en-US", { timeZone: "Asia/Seoul" }));
+    const cutoff = new Date(todayKst);
+    const normalizedNewListingDays = Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14);
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - (normalizedNewListingDays - 1));
 
     return rows
       .filter((row) => {
@@ -203,16 +220,30 @@ export function MarketManager({
           return false;
         }
 
-        if (expandedKeywords.some((keyword) => row.name.includes(keyword))) {
+        if (!newOnly && expandedKeywords.some((keyword) => row.name.includes(keyword))) {
           return false;
         }
 
-        if (marketCapFilter > 0 && row.market_cap < marketCapFilter) {
+        if (!newOnly && marketCapFilter > 0 && row.market_cap < marketCapFilter) {
           return false;
         }
 
-        if (volumeFilter > 0 && row.prev_volume < volumeFilter) {
+        if (!newOnly && volumeFilter > 0 && row.prev_volume < volumeFilter) {
           return false;
+        }
+
+        if (newOnly) {
+          const listedAt = String(row.listed_at || "").trim();
+          if (!listedAt) {
+            return false;
+          }
+          const listedDate = new Date(`${listedAt}T00:00:00+09:00`);
+          if (Number.isNaN(listedDate.getTime())) {
+            return false;
+          }
+          if (listedDate < cutoff) {
+            return false;
+          }
         }
 
         return true;
@@ -225,7 +256,7 @@ export function MarketManager({
         }
         return left.ticker.localeCompare(right.ticker);
       });
-  }, [excludedGroups, minMarketCap, minPrevVolume, query, rows]);
+  }, [excludedGroups, minMarketCap, minPrevVolume, newListingDays, newOnly, query, rows]);
 
   const gridRows = useMemo<MarketGridRow[]>(
     () => filteredRows.map((row, index) => ({ ...row, row_number: index + 1 })),
@@ -286,7 +317,7 @@ export function MarketManager({
     if (!hasSelectedRows) {
       return;
     }
-    setSelectedTickerPool("");
+    setSelectedTickerPool(readRememberedTickerType() || "");
     setSelectedBucketId("");
     setAddModalOpen(true);
   }, [hasSelectedRows]);
@@ -488,6 +519,41 @@ export function MarketManager({
     );
   }
 
+  function toggleNewOnly() {
+    setNewOnly((current) => {
+      if (!current) {
+        previousMarketFiltersRef.current = {
+          minMarketCap,
+          minPrevVolume,
+          excludedGroups,
+        };
+        setMinMarketCap("");
+        setMinPrevVolume("");
+        setExcludedGroups([]);
+        return true;
+      }
+
+      const previous = previousMarketFiltersRef.current;
+      setMinMarketCap(previous?.minMarketCap ?? "500");
+      setMinPrevVolume(previous?.minPrevVolume ?? "100000");
+      setExcludedGroups(previous?.excludedGroups ?? DEFAULT_EXCLUDED_GROUPS);
+      previousMarketFiltersRef.current = null;
+      return false;
+    });
+  }
+
+  function handleNewListingDaysChange(value: string) {
+    if (value === "") {
+      setNewListingDays("");
+      return;
+    }
+    const parsedValue = Number.parseInt(value, 10);
+    if (Number.isNaN(parsedValue)) {
+      return;
+    }
+    setNewListingDays(String(Math.max(1, parsedValue)));
+  }
+
   return (
     <div className="appPageStack appPageStackFill">
       {error ? (
@@ -522,13 +588,40 @@ export function MarketManager({
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">거래량(주)</span>
-                  <input
-                    className="field compactField"
-                    type="number"
-                    placeholder="최소 전일 거래량"
-                    value={minPrevVolume}
-                    onChange={(event) => setMinPrevVolume(event.target.value)}
-                  />
+                  <div className="marketVolumeInlineRow">
+                    <input
+                      className="field compactField marketVolumeInput"
+                      type="number"
+                      placeholder="최소 전일 거래량"
+                      value={minPrevVolume}
+                      onChange={(event) => setMinPrevVolume(event.target.value)}
+                    />
+                    <div className="marketNewOnlyRow">
+                      <button
+                        type="button"
+                        className={newOnly ? "filterPill filterPillActive" : "filterPill"}
+                        onClick={toggleNewOnly}
+                      >
+                        신규
+                      </button>
+                      {newOnly ? (
+                        <div className="marketNewOnlyDaysRow">
+                          <input
+                            className="field compactField marketNewOnlyDaysInput"
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={newListingDays}
+                            onChange={(event) => handleNewListingDaysChange(event.target.value)}
+                            aria-label="신규 ETF 최근 일수"
+                          />
+                          <span className="marketNewOnlyDaysLabel">일</span>
+                        </div>) : null}
+                      {newOnly ? (
+                        <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
+                      ) : null}
+                    </div>
+                  </div>
                 </label>
               </div>
               <div className="appMainHeaderRight">
@@ -594,6 +687,45 @@ export function MarketManager({
           text-overflow: ellipsis;
           white-space: nowrap;
         }
+        .marketVolumeInlineRow {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          flex-wrap: nowrap;
+        }
+        .marketVolumeInput {
+          width: 140px;
+          min-width: 140px;
+          flex: 0 0 140px;
+        }
+        .marketNewOnlyRow {
+          display: flex;
+          align-items: center;
+          gap: 0.625rem;
+          flex-wrap: nowrap;
+          white-space: nowrap;
+        }
+        .marketNewOnlyDaysRow {
+          display: flex;
+          align-items: center;
+          gap: 0.375rem;
+        }
+        .marketNewOnlyDaysInput {
+          width: 76px;
+          min-width: 76px;
+        }
+        .marketNewOnlyDaysLabel {
+          font-size: 0.95rem;
+          font-weight: 600;
+          color: #5b6778;
+          white-space: nowrap;
+        }
+        .marketNewOnlyHint {
+          font-size: 0.95rem;
+          font-weight: 700;
+          color: #206bc4;
+          white-space: nowrap;
+        }
         .appModalFormStack {
           display: grid;
           gap: 0.875rem;
@@ -627,7 +759,11 @@ export function MarketManager({
             <select
               className="field compactField"
               value={selectedTickerPool}
-              onChange={(event) => setSelectedTickerPool(event.target.value)}
+              onChange={(event) => {
+                const nextType = event.target.value;
+                setSelectedTickerPool(nextType);
+                if (nextType) writeRememberedTickerType(nextType);
+              }}
             >
               <option value="">종목풀 선택</option>
               {tickerPools.map((pool) => (

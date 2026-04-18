@@ -1,9 +1,8 @@
 {
     "icon": "🇰🇷",
-    "name": "국내상장 국내",
+    "name": "한국 개별주",
     "country_code": "kor",
     "currency": "KRW",
-    "type_source": "Naver",
     "holding_bonus_score": 10,
     "MA_RULES": [
         {

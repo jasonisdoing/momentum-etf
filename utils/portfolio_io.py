@@ -29,8 +29,8 @@ def _round_snapshot_money(value: Any) -> int:
 
 
 def _resolve_snapshot_date() -> str:
-    """한국 기준 최신 거래일을 스냅샷 저장 날짜로 사용한다."""
-    return get_latest_trading_day("kor").normalize().strftime("%Y-%m-%d")
+    """자산 스냅샷은 시장 거래일이 아니라 KST 달력 날짜를 사용한다."""
+    return _now_kst().strftime("%Y-%m-%d")
 
 
 class MissingPriceCacheError(RuntimeError):
@@ -187,9 +187,19 @@ def load_real_holdings_table(
     import numpy as np
 
     # Ensure required columns exist
-    for col in ["ticker", "name", "quantity", "average_buy_price", "currency", "bucket", "first_buy_date", "memo"]:
+    for col in [
+        "ticker",
+        "name",
+        "quantity",
+        "average_buy_price",
+        "currency",
+        "bucket",
+        "first_buy_date",
+        "last_buy_date",
+        "memo",
+    ]:
         if col not in df_holdings.columns:
-            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "memo") else 0
+            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date", "memo") else 0
 
     df_holdings["memo"] = df_holdings["memo"].fillna("").astype(str)
 
@@ -198,41 +208,23 @@ def load_real_holdings_table(
     )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
-    # Calculate days held (Snapshots-based Calendar Days)
+    # 보유일은 마지막 매수일 기준 경과일로 계산한다.
     try:
         from utils.formatters import format_trading_days
 
         now = pd.Timestamp.now(KST).normalize().tz_localize(None)
 
-        # 1. 어제(직전 거래일 아님, 어제 날짜) 스냅샷 조회
-        prev_snapshot = get_latest_daily_snapshot(account_id, before_today=True)
-        snapshot_holdings = {}
-        if prev_snapshot and "holdings" in prev_snapshot:
-            # {ticker: days_held} 매핑 생성
-            for h in prev_snapshot["holdings"]:
-                t = str(h.get("ticker", "")).strip().upper()
-                if t:
-                    snapshot_holdings[t] = int(h.get("days_held_int", 0))
-
         def _calculate_days(row):
-            ticker = str(row.get("ticker", "")).strip().upper()
-            # 1. 어제 스냅샷이 있으면 연속성 유지
-            if ticker in snapshot_holdings:
-                prev_days = snapshot_holdings[ticker]
-                snap_date = pd.to_datetime(prev_snapshot["snapshot_date"]).normalize().tz_localize(None)
-                delta = (now - snap_date).days
-                return max(prev_days + delta, 1)
-            
-            # 2. 스냅샷에 없으면 최초 매수일(first_buy_date) 기준 계산
-            first_buy_date = row.get("first_buy_date")
-            if first_buy_date:
+            # 기존 데이터 호환을 위해 last_buy_date가 없으면 first_buy_date를 사용한다.
+            last_buy_date = row.get("last_buy_date") or row.get("first_buy_date")
+            if last_buy_date:
                 try:
-                    buy_ts = pd.to_datetime(first_buy_date).normalize().tz_localize(None)
+                    buy_ts = pd.to_datetime(last_buy_date).normalize().tz_localize(None)
                     delta = (now - buy_ts).days
                     return max(delta + 1, 1)
                 except Exception:
                     pass
-            
+
             return 1
 
         df_holdings["days_held_int"] = df_holdings.apply(_calculate_days, axis=1)
