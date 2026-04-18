@@ -38,6 +38,8 @@ jobs:
             sudo docker compose up -d --build --remove-orphans
             sudo docker image prune -af
             sudo docker builder prune -af
+            # 마커 기반 idempotent crontab 설치 (타 앱 cron 항목 보존)
+            bash infra/cron/install.sh
             echo ">>> Oracle VM deployment completed."
 
       - name: Collect Oracle VM disk usage
