@@ -1,7 +1,16 @@
 # momentum-etf VM 배치 스케줄 (타임존: Asia/Seoul)
 #
-# 설치:
-#   crontab /home/ubuntu/apps/momentum-etf/infra/cron/crontab
+# ⚠️ 경고: `crontab <파일>` 로 직접 설치하지 말 것.
+#    이 명령은 사용자 crontab 전체를 덮어써서 같은 VM 에서 돌아가는 다른 앱
+#    (예: leverage-switching) 의 cron 항목을 삭제한다.
+#    반드시 아래 install.sh 로만 설치/재설치 한다. install.sh 는 자기
+#    마커(# >>> momentum-etf >>> ~ # <<< momentum-etf <<<) 블록만 교체하여
+#    다른 앱 항목을 보존하고, 여러 번 실행해도 idempotent 하다.
+#
+# 설치 / 재설치:
+#   bash /home/ubuntu/apps/momentum-etf/infra/cron/install.sh
+# 제거(자기 블록만):
+#   bash /home/ubuntu/apps/momentum-etf/infra/cron/install.sh --uninstall
 # 확인:
 #   crontab -l
 #
