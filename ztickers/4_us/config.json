@@ -8,7 +8,7 @@
         {
             "order": 1,
             "MA_TYPE": "SMA",
-            "MA_MONTHS": 12
+            "MA_MONTHS": 6
         },
         {
             "order": 2,
