@@ -30,13 +30,51 @@ BUCKET_OPTIONS = list(BUCKET_MAPPING.values())
 
 # 네이버 금융 API 설정
 NAVER_FINANCE_ETF_API_URL = "https://finance.naver.com/api/sise/etfItemList.nhn"
-NAVER_FINANCE_STOCK_POLLING_URL = "https://polling.finance.naver.com/api/realtime"
 NAVER_FINANCE_CHART_API_URL = "https://fchart.stock.naver.com/sise.nhn"
 NAVER_FINANCE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://finance.naver.com/sise/etfList.nhn",
     "Accept": "application/json, text/plain, */*",
 }
+
+# 네이버 ETF 카테고리/테마 API (투자국가/섹터/지수 등 ETF 분류 조회용)
+NAVER_ETF_THEMES_URL = "https://stock.naver.com/api/stockSecurity/etfs/v1/domestic/themes"
+NAVER_ETF_DOMESTIC_URL = "https://stock.naver.com/api/stockSecurity/etfs/v1/domestic"
+NAVER_ETF_CATEGORY_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://stock.naver.com/",
+    "Accept": "application/json, text/plain, */*",
+}
+
+# 네이버 벌크 종목 시세 정보 (KOSPI/KOSDAQ)
+NAVER_STOCK_MARKET_VALUE_URL = "https://m.stock.naver.com/api/stocks/marketValue/{market}"
+NAVER_STOCK_MARKET_VALUE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 13_2_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0.3 Mobile/15E148 Safari/04.1",
+    "Referer": "https://m.stock.naver.com/",
+    "Accept": "application/json, text/plain, */*",
+}
+# 네이버 ETF 대분류 설정 (use: 대표 분류용, show: 개별 컬럼 표시용)
+# 코드가 클수록 Representative(Main) 분류를 정할 때 우선순위가 높음
+NAVER_ETF_CATEGORY_CONFIG = [
+    {"code": "0101", "name": "주식", "use": True, "show": True},
+    {"code": "0102", "name": "채권", "use": False, "show": False},
+    {"code": "0103", "name": "부동산", "use": False, "show": False},
+    {"code": "0104", "name": "멀티에셋", "use": False, "show": False},
+    {"code": "0105", "name": "원자재", "use": False, "show": False},
+    {"code": "0106", "name": "통화", "use": False, "show": False},
+    {"code": "0108", "name": "단기자금(파킹형)", "use": False, "show": False},
+    {"code": "0201", "name": "투자국가", "use": True, "show": True},
+    {"code": "0301", "name": "배율", "use": False, "show": False},
+    {"code": "0401", "name": "섹터", "use": True, "show": True},
+    {"code": "0501", "name": "지수", "use": True, "show": True},
+    {"code": "0601", "name": "혁신기술", "use": True, "show": True},
+    {"code": "0606", "name": "투자전략", "use": False, "show": False},
+    {"code": "0607", "name": "ESG", "use": False, "show": True},
+    {"code": "0609", "name": "배당", "use": True, "show": True},
+    {"code": "0610", "name": "단일종목", "use": False, "show": False},
+    {"code": "0701", "name": "트렌드", "use": True, "show": True},
+    {"code": "0803", "name": "국내운용사", "use": False, "show": False},
+]
 
 # 호주 MarketIndex QuoteAPI 설정
 AU_QUOTEAPI_URL = "https://quoteapi.com/api/v5/symbols"
@@ -45,6 +83,15 @@ AU_QUOTEAPI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://www.marketindex.com.au/",
     "Origin": "https://www.marketindex.com.au",
+}
+
+# 토스증권 API 설정 (미국 주식 실시간)
+TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
+TOSS_INVEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://tossinvest.com/",
+    "Origin": "https://tossinvest.com",
+    "Content-Type": "application/json",
 }
 
 # KIS 종목정보파일 다운로드 URL

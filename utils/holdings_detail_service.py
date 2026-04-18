@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import math
 from typing import Any
 
@@ -372,10 +373,14 @@ def update_holding(
 
     holdings = master.get("holdings", [])
     found = False
+    today_str = datetime.now().strftime("%Y-%m-%d")
     for h in holdings:
         if str(h.get("ticker", "")).strip() == raw_ticker:
+            previous_quantity = int(h.get("quantity") or 0)
             if quantity is not None:
                 h["quantity"] = int(quantity)
+                if int(quantity) > previous_quantity:
+                    h["last_buy_date"] = today_str
             if average_buy_price is not None:
                 h["average_buy_price"] = float(average_buy_price)
             if memo is not None:
@@ -449,6 +454,7 @@ def add_holding(
         "average_buy_price": float(average_buy_price),
         "currency": currency,
         "first_buy_date": datetime.now().strftime("%Y-%m-%d"),
+        "last_buy_date": datetime.now().strftime("%Y-%m-%d"),
         "memo": str(memo or "").strip(),
         "sort_order": next_sort_order,
     }

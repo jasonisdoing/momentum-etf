@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { fetchFastApiJson } from "@/lib/internal-api";
+import { jsonNoStore } from "@/lib/no-store-response";
 
 type HoldingsRow = {
   account_name: string;
@@ -32,9 +33,9 @@ export async function GET(request: Request) {
       account_id?: string;
       rows: HoldingsRow[];
     }>(`/internal/holdings${search}`);
-    return NextResponse.json(payload);
+    return jsonNoStore(payload);
   } catch (error) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: error instanceof Error ? error.message : "보유 종목을 불러오지 못했습니다." },
       { status: 400 },
     );
@@ -51,9 +52,9 @@ export async function DELETE(request: Request) {
       `/internal/holdings?account=${encodeURIComponent(account)}&ticker=${encodeURIComponent(ticker)}`,
       { method: "DELETE" },
     );
-    return NextResponse.json(payload);
+    return jsonNoStore(payload);
   } catch (error) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: error instanceof Error ? error.message : "종목 삭제에 실패했습니다." },
       { status: 400 },
     );
@@ -71,9 +72,9 @@ export async function PUT(request: Request) {
         body: JSON.stringify({ accounts: [body] }),
       },
     );
-    return NextResponse.json(payload);
+    return jsonNoStore(payload);
   } catch (error) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: error instanceof Error ? error.message : "자산 정보 저장에 실패했습니다." },
       { status: 400 },
     );
@@ -92,9 +93,9 @@ export async function PATCH(request: Request) {
         body: JSON.stringify(body),
       },
     );
-    return NextResponse.json(payload);
+    return jsonNoStore(payload);
   } catch (error) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: error instanceof Error ? error.message : "종목 수정에 실패했습니다." },
       { status: 400 },
     );
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
           }),
         },
       );
-      return NextResponse.json(payload);
+      return jsonNoStore(payload);
     }
 
     const payload = await fetchFastApiJson<{ added?: string; error?: string }>(
@@ -136,9 +137,9 @@ export async function POST(request: Request) {
         }),
       },
     );
-    return NextResponse.json(payload);
+    return jsonNoStore(payload);
   } catch (error) {
-    return NextResponse.json(
+    return jsonNoStore(
       { error: error instanceof Error ? error.message : "요청 처리 중 오류가 발생했습니다." },
       { status: 400 },
     );

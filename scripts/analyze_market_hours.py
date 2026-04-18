@@ -22,6 +22,8 @@ load_dotenv()
 # yfinance 버전 업데이트 경고숨김 처리
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
+EXIT_ALREADY_NOTIFIED = 66
+
 
 class OutputCollector:
     """print() 출력을 가로채서 문자열로 모으는 헬퍼 클래스"""
@@ -128,6 +130,7 @@ if __name__ == "__main__":
     account_outputs = []
     # 통계용 국가별 정보
     meta_info = {"kor": {"ticker_types": set()}, "au": {"ticker_types": set()}}
+    eligible_ticker_counts = {"kor": 0, "au": 0}
 
     # 다운로드 중복 방지 캐시: {code: (res_str, stats_df)}
     cached_stats = {}
@@ -142,6 +145,7 @@ if __name__ == "__main__":
             acc_name = settings.get("name", t_id)
             lines = [f"● {acc_name} ({t_id})"]
             etfs = get_etfs(t_id)
+            eligible_ticker_counts[country] += len(etfs)
             if not etfs:
                 lines.append(" - (등록된 종목이 없습니다)")
             else:
@@ -161,6 +165,18 @@ if __name__ == "__main__":
                         lines.append(res_str)
             lines.append("")
             account_outputs.append("\n".join(lines))
+
+    total_eligible_tickers = sum(eligible_ticker_counts.values())
+    if total_eligible_tickers == 0:
+        error_message = (
+            "@channel *국가별/종목풀별 최적 매매 시간 분석 실패*\n"
+            "분석 대상 종목풀이 비어 있습니다.\n"
+            f"- 한국 시장 대상 종목 수: {eligible_ticker_counts['kor']}\n"
+            f"- 호주 시장 대상 종목 수: {eligible_ticker_counts['au']}"
+        )
+        send_slack_message_v2(error_message)
+        print("[알림] 빈 종목풀 분석 실패 메시지를 슬랙으로 전송했습니다.")
+        sys.exit(EXIT_ALREADY_NOTIFIED)
 
     # 2. 종합 통계 산출 및 최상단 출력
     header_lines = []

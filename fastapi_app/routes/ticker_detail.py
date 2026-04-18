@@ -8,11 +8,8 @@ from fastapi import APIRouter, Depends, Query
 
 from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
-from services.etf_holdings_service import (
-    fetch_foreign_stock_price_snapshot,
-    fetch_korean_stock_price_snapshot,
-)
 from services.price_service import get_realtime_snapshot
+from services.price_service import get_realtime_snapshot_meta
 from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
@@ -21,7 +18,8 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days
+from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
@@ -34,6 +32,25 @@ def _load_us_pool_ticker_set() -> set[str]:
         str(item.get("ticker") or "").strip().upper()
         for item in get_etfs("us")
         if str(item.get("ticker") or "").strip()
+    }
+
+
+def _load_kor_pool_ticker_set() -> set[str]:
+    return {
+        str(item.get("ticker") or "").strip().upper()
+        for item in get_etfs("kor")
+        if str(item.get("ticker") or "").strip()
+    }
+
+
+def _load_domestic_etf_ticker_set() -> set[str]:
+    df, _ = load_cached_kis_domestic_etf_master()
+    if "티커" not in df.columns:
+        raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
+    return {
+        str(value or "").strip().upper()
+        for value in df["티커"].tolist()
+        if str(value or "").strip()
     }
 
 
@@ -53,6 +70,21 @@ def _is_us_pool_candidate(item: dict[str, object]) -> bool:
     if price_currency and price_currency != "USD":
         return False
     return component_ticker.isalpha()
+
+
+def _is_kor_pool_candidate(item: dict[str, object], domestic_etf_tickers: set[str]) -> bool:
+    component_ticker = str(item.get("ticker") or "").strip().upper()
+    raw_code = str(item.get("raw_code") or "").strip().upper()
+    yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+    if not component_ticker.isdigit() or len(component_ticker) != 6:
+        return False
+    if raw_code.startswith("KRD"):
+        return False
+    if yahoo_symbol and not yahoo_symbol.endswith((".KS", ".KQ")):
+        return False
+    if raw_code.startswith("CNE"):
+        return False
+    return component_ticker not in domestic_etf_tickers
 
 
 def _serialize_datetime(value: datetime | None) -> str | None:
@@ -118,7 +150,7 @@ def _apply_realtime_snapshot_to_dataframe(
     country_code: str,
 ) -> pd.DataFrame:
     country = str(country_code or "").strip().lower()
-    if country not in {"kor", "au"}:
+    if country not in {"kor", "au", "us"}:
         return df
 
     try:
@@ -139,7 +171,8 @@ def _apply_realtime_snapshot_to_dataframe(
     if realtime_price <= 0:
         return df
 
-    latest_trading_day = get_latest_trading_day(country).normalize()
+    target_trading_day = _resolve_realtime_target_trading_day(country)
+    latest_trading_day = (target_trading_day or get_latest_trading_day(country)).normalize()
     adjusted = df.copy()
 
     if adjusted.empty:
@@ -184,6 +217,37 @@ def _apply_realtime_snapshot_to_dataframe(
     return adjusted
 
 
+def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | None:
+    country = str(country_code or "").strip().lower()
+    schedule = MARKET_SCHEDULES.get(country)
+    if not isinstance(schedule, dict):
+        return None
+
+    timezone_name = str(schedule.get("timezone") or "").strip() or "UTC"
+    market_open = schedule.get("open")
+    if market_open is None:
+        return None
+
+    now_local = datetime.now(ZoneInfo(timezone_name))
+    # 미국은 프리마켓(4:00 ET)부터 토스 API로 가격 제공, 한국/호주는 장 시작 기준
+    from datetime import time as dt_time
+
+    earliest_time = dt_time(4, 0) if country == "us" else market_open
+    if now_local.time() < earliest_time:
+        return None
+
+    today_local = pd.Timestamp(now_local.date()).normalize()
+    trading_days = get_trading_days(
+        today_local.strftime("%Y-%m-%d"),
+        today_local.strftime("%Y-%m-%d"),
+        country,
+    )
+    if not trading_days:
+        return None
+
+    return pd.Timestamp(trading_days[-1]).normalize()
+
+
 @router.get("/tickers")
 def get_all_tickers(
     _: None = Depends(require_internal_token),
@@ -226,23 +290,33 @@ def get_ticker_search_data(
         ticker_type_name = str(config.get("name") or ticker_type).strip()
         etfs = get_etfs(ticker_type)
         tickers = [str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")]
-        completed_at = get_cache_refresh_completed_at(ticker_type)
-        if completed_at is not None:
-            close_series_map = load_cached_close_series_bulk_before_or_at_with_fallback(
-                ticker_type,
-                tickers,
-                completed_at,
-            )
-            updated_at_map = load_cached_updated_at_bulk_before_or_at_with_fallback(
-                ticker_type,
-                tickers,
-                completed_at,
-            )
-            type_updated_at = completed_at
+        realtime_snapshot_map: dict[str, dict[str, float]] = {}
+        type_updated_at: datetime | None = None
+
+        if country_code in {"kor", "au"}:
+            realtime_snapshot_map = get_realtime_snapshot(country_code, tickers)
+            realtime_meta = get_realtime_snapshot_meta(country_code, tickers) or {}
+            fetched_at = realtime_meta.get("fetched_at")
+            type_updated_at = fetched_at if isinstance(fetched_at, datetime) else None
+            close_series_map = {}
         else:
-            close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
-            updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
-            type_updated_at = max(updated_at_map.values()) if updated_at_map else None
+            completed_at = get_cache_refresh_completed_at(ticker_type)
+            if completed_at is not None:
+                close_series_map = load_cached_close_series_bulk_before_or_at_with_fallback(
+                    ticker_type,
+                    tickers,
+                    completed_at,
+                )
+                updated_at_map = load_cached_updated_at_bulk_before_or_at_with_fallback(
+                    ticker_type,
+                    tickers,
+                    completed_at,
+                )
+                type_updated_at = completed_at
+            else:
+                close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, tickers)
+                updated_at_map = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
+                type_updated_at = max(updated_at_map.values()) if updated_at_map else None
         ticker_type_items: list[dict[str, object]] = []
 
         if type_updated_at is not None:
@@ -254,7 +328,14 @@ def get_ticker_search_data(
             if not ticker:
                 continue
 
-            current_price, change_pct = _build_price_snapshot(close_series_map.get(ticker))
+            realtime_entry = realtime_snapshot_map.get(ticker) or {}
+            if realtime_entry:
+                now_val = realtime_entry.get("nowVal")
+                change_rate = realtime_entry.get("changeRate")
+                current_price = float(now_val) if now_val is not None else None
+                change_pct = float(change_rate) if change_rate is not None else None
+            else:
+                current_price, change_pct = _build_price_snapshot(close_series_map.get(ticker))
             item = {
                 "ticker": ticker,
                 "name": str(etf.get("name") or "").strip(),
@@ -378,6 +459,8 @@ def get_ticker_detail(
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
     us_pool_tickers: set[str] = set()
+    kor_pool_tickers: set[str] = set()
+    domestic_etf_tickers: set[str] = set()
     if str(country_code or "").strip().lower() == "kor":
         cache_document = get_stock_cache_meta(ticker_type, ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
@@ -392,6 +475,8 @@ def get_ticker_detail(
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:
             us_pool_tickers = _load_us_pool_ticker_set()
+            kor_pool_tickers = _load_kor_pool_ticker_set()
+            domestic_etf_tickers = _load_domestic_etf_ticker_set()
 
             def is_korean_six_digit_holding(item: dict[str, object]) -> bool:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
@@ -399,7 +484,8 @@ def get_ticker_detail(
                 yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
                 if not component_ticker.isdigit() or len(component_ticker) != 6:
                     return False
-                if yahoo_symbol:
+                # .KS/.KQ 접미사는 한국 종목 (yfinance 표기)
+                if yahoo_symbol and not yahoo_symbol.endswith((".KS", ".KQ")):
                     return False
                 if raw_code.startswith("CNE"):
                     return False
@@ -419,52 +505,86 @@ def get_ticker_detail(
             ]
             pricing_ids = {id(item) for item in holdings_for_pricing}
 
-            korean_tickers = [
-                str(item.get("ticker") or "").strip().upper()
-                for item in holdings_for_pricing
-                if is_korean_six_digit_holding(item)
-            ]
-            foreign_symbols = [
-                str(item.get("yahoo_symbol") or "").strip().upper()
-                for item in holdings_for_pricing
-                if str(item.get("yahoo_symbol") or "").strip().upper()
-            ]
-            price_snapshot_map = fetch_korean_stock_price_snapshot(korean_tickers, holdings_as_of_date)
-            foreign_price_snapshot_map, holdings_price_as_of_date = fetch_foreign_stock_price_snapshot(foreign_symbols)
+            korean_tickers: list[str] = []
+            us_tickers: list[str] = []
+            au_tickers: list[str] = []
+            # yahoo_symbol → 원래 ticker/yahoo_symbol 역매핑 (호주 .AX 접미사 제거용)
+            au_symbol_map: dict[str, str] = {}
 
-            # 한국 종목 실시간 가격 오버레이 (네이버 30초 TTL 캐시)
-            realtime_map: dict[str, dict[str, float]] = {}
+            for item in holdings_for_pricing:
+                if is_korean_six_digit_holding(item):
+                    korean_tickers.append(str(item.get("ticker") or "").strip().upper())
+                else:
+                    yahoo_sym = str(item.get("yahoo_symbol") or "").strip().upper()
+                    if not yahoo_sym:
+                        continue
+                    if yahoo_sym.endswith(".AX"):
+                        bare = yahoo_sym[:-3]
+                        au_tickers.append(bare)
+                        au_symbol_map[bare] = yahoo_sym
+                    else:
+                        us_tickers.append(yahoo_sym)
+
+            # 통합 가격 조회: get_realtime_snapshot(country, tickers)
+            kor_price_map: dict[str, dict[str, float]] = {}
+            us_price_map: dict[str, dict[str, float]] = {}
+            au_price_map: dict[str, dict[str, float]] = {}
+
             if korean_tickers:
                 try:
-                    realtime_map = get_realtime_snapshot("kor", korean_tickers)
+                    kor_price_map = get_realtime_snapshot("kor", korean_tickers)
                 except Exception:
-                    pass  # 실시간 데이터 실패 시 pykrx 기반 데이터 유지
+                    pass
+            if us_tickers:
+                try:
+                    us_price_map = get_realtime_snapshot("us", us_tickers)
+                except Exception:
+                    pass
+            if au_tickers:
+                try:
+                    au_price_map = get_realtime_snapshot("au", au_tickers)
+                except Exception:
+                    pass
 
             enriched_holdings: list[dict[str, object]] = []
             for item in holdings:
                 component_ticker = str(item.get("ticker") or "").strip().upper()
                 yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
-                if id(item) not in pricing_ids:
-                    snapshot = {}
-                elif is_korean_six_digit_holding(item):
-                    snapshot = price_snapshot_map.get(component_ticker, {})
-                else:
-                    snapshot = foreign_price_snapshot_map.get(yahoo_symbol or component_ticker, {})
                 enriched_item = dict(item)
                 enriched_item["yahoo_symbol"] = yahoo_symbol or None
-                enriched_item["current_price"] = snapshot.get("current_price")
-                enriched_item["previous_close"] = snapshot.get("previous_close")
-                enriched_item["change_pct"] = snapshot.get("change_pct")
-                enriched_item["price_currency"] = snapshot.get("price_currency")
+
+                if id(item) not in pricing_ids:
+                    enriched_item["current_price"] = None
+                    enriched_item["previous_close"] = None
+                    enriched_item["change_pct"] = None
+                    enriched_item["price_currency"] = None
+                elif is_korean_six_digit_holding(item):
+                    rt = kor_price_map.get(component_ticker, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = "KRW"
+                elif yahoo_symbol.endswith(".AX"):
+                    bare = yahoo_symbol[:-3]
+                    rt = au_price_map.get(bare, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = "AUD"
+                else:
+                    rt = us_price_map.get(yahoo_symbol or component_ticker, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = "USD"
+
                 enriched_item["is_us_pool_candidate"] = _is_us_pool_candidate(enriched_item)
                 enriched_item["in_us_pool"] = component_ticker in us_pool_tickers
-
-                # 실시간 데이터로 오버레이 (한국 종목만)
-                rt = realtime_map.get(component_ticker, {})
-                if rt.get("nowVal") is not None:
-                    enriched_item["current_price"] = float(rt["nowVal"])
-                if rt.get("changeRate") is not None:
-                    enriched_item["change_pct"] = float(rt["changeRate"])
+                enriched_item["is_kor_pool_candidate"] = _is_kor_pool_candidate(
+                    enriched_item,
+                    domestic_etf_tickers,
+                )
+                enriched_item["in_kor_pool"] = component_ticker in kor_pool_tickers
 
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings

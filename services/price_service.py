@@ -10,6 +10,7 @@ from utils.data_loader import (
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
     fetch_naver_stock_realtime_snapshot,
+    fetch_toss_us_stock_snapshot,
     get_latest_trading_day,
 )
 from utils.data_loader import (
@@ -19,53 +20,94 @@ from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
-_PRICE_SERVICE_CACHE: dict[str, dict[str, Any]] = {}
+# ────────────────────────────────────────────
+# 종목별 캐시 (ticker-level cache)
+# ────────────────────────────────────────────
+# key: "{country}:{ticker}" → {"data": {...}, "fetched_at": dt, "expires_at": dt, "source": str}
+_TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
 _KOR_ACTIVE_TTL_SECONDS = 30
 _AU_ACTIVE_TTL_SECONDS = 60
+_US_ACTIVE_TTL_SECONDS = 60
 _IDLE_TTL_SECONDS = 3600
 _FX_TTL_SECONDS = 3600
 
+# 하위 호환: 기존 쿼리 단위 캐시 (환율 전용으로 유지)
+_FX_CACHE: dict[str, dict[str, Any]] = {}
+
 
 def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """국가별 실시간 스냅샷을 반환한다."""
+    """국가별 실시간 스냅샷을 반환한다. 종목별 캐시를 사용한다."""
 
     country = _normalize_country_code(country_code)
     normalized_tickers = _normalize_tickers(tickers)
     if not normalized_tickers:
         return {}
 
-    cache_key = _build_realtime_cache_key(country, normalized_tickers)
-    cached_entry = _PRICE_SERVICE_CACHE.get(cache_key)
     now = datetime.now()
-
-    if _is_cache_alive(cached_entry, now):
-        return _filter_snapshot_data(cached_entry["data"], normalized_tickers)
-
-    try:
-        fetched_data, source = _fetch_realtime_snapshot(country, normalized_tickers)
-    except Exception as exc:
-        stale_data = _reuse_stale_cache(cache_key, normalized_tickers, exc)
-        if stale_data is not None:
-            return stale_data
-        raise
-
     ttl_seconds = _get_realtime_ttl_seconds(country)
-    _store_cache_entry(
-        cache_key=cache_key,
-        data=fetched_data,
-        source=source,
-        ttl_seconds=ttl_seconds,
-        is_stale=False,
-    )
-    return _filter_snapshot_data(fetched_data, normalized_tickers)
+
+    # 캐시 히트/만료 분리
+    cached_result: dict[str, dict[str, float]] = {}
+    expired_tickers: list[str] = []
+
+    for ticker in normalized_tickers:
+        cache_key = f"{country}:{ticker}"
+        entry = _TICKER_PRICE_CACHE.get(cache_key)
+        # expires_at 대신 fetched_at + 현재 TTL로 판단한다.
+        # 장 전에 idle TTL(3600s)로 캐시된 항목도 개장 후 active TTL(30s) 경과 즉시 만료된다.
+        fetched_at = entry.get("fetched_at") if entry else None
+        is_alive = (
+            entry is not None
+            and isinstance(fetched_at, datetime)
+            and (now - fetched_at).total_seconds() < ttl_seconds
+        )
+        if is_alive:
+            cached_result[ticker] = entry["data"]  # type: ignore[index]
+        else:
+            expired_tickers.append(ticker)
+
+    if not expired_tickers:
+        return cached_result
+
+    # 만료 종목만 벌크 조회
+    try:
+        fetched_data, source = _fetch_realtime_snapshot(country, expired_tickers)
+    except Exception as exc:
+        # 조회 실패 시 stale 캐시 재사용
+        stale_result = _reuse_stale_ticker_cache(country, expired_tickers, exc)
+        return {**cached_result, **stale_result}
+
+    # 종목별 캐시 갱신
+    fetched_at = datetime.now()
+    expires_at = fetched_at + timedelta(seconds=ttl_seconds)
+    for ticker, data in fetched_data.items():
+        _TICKER_PRICE_CACHE[f"{country}:{ticker}"] = {
+            "data": data,
+            "fetched_at": fetched_at,
+            "expires_at": expires_at,
+            "source": source,
+            "is_stale": False,
+        }
+
+    # 조회 요청했지만 API 응답에 없는 종목은 stale 캐시 재사용
+    missing_tickers = [t for t in expired_tickers if t not in fetched_data]
+    for ticker in missing_tickers:
+        cache_key = f"{country}:{ticker}"
+        entry = _TICKER_PRICE_CACHE.get(cache_key)
+        if entry and "data" in entry:
+            cached_result[ticker] = entry["data"]
+
+    # 캐시 히트 + 새로 조회한 데이터 병합
+    fetched_filtered = {t: fetched_data[t] for t in expired_tickers if t in fetched_data}
+    return {**cached_result, **fetched_filtered}
 
 
 def get_exchange_rates() -> dict[str, Any]:
     """USD/KRW, AUD/KRW 환율을 반환한다."""
 
     cache_key = "fx:usd_aud"
-    cached_entry = _PRICE_SERVICE_CACHE.get(cache_key)
+    cached_entry = _FX_CACHE.get(cache_key)
     now = datetime.now()
 
     if _is_cache_alive(cached_entry, now):
@@ -74,18 +116,17 @@ def get_exchange_rates() -> dict[str, Any]:
     try:
         rates = _fetch_exchange_rates()
     except Exception as exc:
-        stale_rates = _reuse_stale_exchange_rates(cache_key, exc)
+        stale_rates = _reuse_stale_fx_cache(cache_key, exc)
         if stale_rates is not None:
             return stale_rates
         raise
 
-    _store_cache_entry(
-        cache_key=cache_key,
-        data=rates,
-        source="yfinance",
-        ttl_seconds=_FX_TTL_SECONDS,
-        is_stale=False,
-    )
+    _FX_CACHE[cache_key] = {
+        "data": dict(rates),
+        "fetched_at": now,
+        "expires_at": now + timedelta(seconds=_FX_TTL_SECONDS),
+        "is_stale": False,
+    }
     return dict(rates)
 
 
@@ -109,13 +150,18 @@ def get_exchange_rate_series(
 def clear_price_service_cache() -> None:
     """가격 서비스 메모리 캐시를 초기화한다."""
 
-    _PRICE_SERVICE_CACHE.clear()
+    _TICKER_PRICE_CACHE.clear()
+    _FX_CACHE.clear()
 
 
 def get_realtime_cache_meta(cache_key: str) -> dict[str, Any] | None:
-    """캐시 메타데이터를 반환한다."""
+    """캐시 메타데이터를 반환한다. 하위 호환용."""
 
-    entry = _PRICE_SERVICE_CACHE.get(str(cache_key or "").strip())
+    # 종목별 캐시에서 조회 시도
+    entry = _TICKER_PRICE_CACHE.get(str(cache_key or "").strip())
+    if not entry:
+        # 환율 캐시에서 조회
+        entry = _FX_CACHE.get(str(cache_key or "").strip())
     if not entry:
         return None
     return {
@@ -123,7 +169,7 @@ def get_realtime_cache_meta(cache_key: str) -> dict[str, Any] | None:
         "expires_at": entry.get("expires_at"),
         "is_stale": entry.get("is_stale", False),
         "source": entry.get("source"),
-        "size": len(entry.get("data", {})),
+        "size": 1 if "data" in entry else 0,
     }
 
 
@@ -134,9 +180,43 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
     normalized_tickers = _normalize_tickers(tickers)
     if not normalized_tickers:
         return None
-    cache_key = _build_realtime_cache_key(country, normalized_tickers)
-    return get_realtime_cache_meta(cache_key)
 
+    # 종목별 캐시에서 가장 최근 fetched_at을 찾는다
+    latest_fetched_at: datetime | None = None
+    latest_expires_at: datetime | None = None
+    latest_source: str | None = None
+    is_any_stale = False
+    count = 0
+
+    for ticker in normalized_tickers:
+        entry = _TICKER_PRICE_CACHE.get(f"{country}:{ticker}")
+        if not entry:
+            continue
+        count += 1
+        fetched_at = entry.get("fetched_at")
+        if isinstance(fetched_at, datetime):
+            if latest_fetched_at is None or fetched_at > latest_fetched_at:
+                latest_fetched_at = fetched_at
+                latest_expires_at = entry.get("expires_at")
+                latest_source = entry.get("source")
+        if entry.get("is_stale"):
+            is_any_stale = True
+
+    if count == 0:
+        return None
+
+    return {
+        "fetched_at": latest_fetched_at,
+        "expires_at": latest_expires_at,
+        "is_stale": is_any_stale,
+        "source": latest_source,
+        "size": count,
+    }
+
+
+# ────────────────────────────────────────────
+# 내부 함수
+# ────────────────────────────────────────────
 
 def _normalize_country_code(country_code: str) -> str:
     country = str(country_code or "").strip().lower()
@@ -152,11 +232,6 @@ def _normalize_tickers(tickers: Sequence[str]) -> tuple[str, ...]:
     return tuple(normalized)
 
 
-def _build_realtime_cache_key(country: str, tickers: Sequence[str]) -> str:
-    joined = ",".join(tickers)
-    return f"realtime:{country}:{joined}"
-
-
 def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
     if not cache_entry:
         return False
@@ -164,14 +239,6 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
     if not isinstance(expires_at, datetime):
         return False
     return now < expires_at
-
-
-def _filter_snapshot_data(
-    data: dict[str, dict[str, float]],
-    tickers: Sequence[str],
-) -> dict[str, dict[str, float]]:
-    ticker_set = set(tickers)
-    return {ticker: value for ticker, value in data.items() if ticker in ticker_set}
 
 
 def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict[str, dict[str, float]], str]:
@@ -189,25 +256,32 @@ def _fetch_realtime_snapshot(country: str, tickers: Sequence[str]) -> tuple[dict
     if country == "au":
         return fetch_au_quoteapi_snapshot(tickers), "au_quoteapi"
 
+    if country == "us":
+        return fetch_toss_us_stock_snapshot(tickers), "toss_invest"
+
     raise ValueError(f"지원하지 않는 country_code입니다: {country}")
 
 
-def _reuse_stale_cache(
-    cache_key: str,
+def _reuse_stale_ticker_cache(
+    country: str,
     tickers: Sequence[str],
     exc: Exception,
-) -> dict[str, dict[str, float]] | None:
-    cached_entry = _PRICE_SERVICE_CACHE.get(cache_key)
-    if not cached_entry or "data" not in cached_entry:
-        return None
+) -> dict[str, dict[str, float]]:
+    """조회 실패 시 만료된 종목별 캐시를 재사용한다."""
 
-    cached_entry["is_stale"] = True
-    logger.warning("실시간 가격 조회 실패로 stale 캐시를 재사용합니다. key=%s error=%s", cache_key, exc)
-    return _filter_snapshot_data(cached_entry["data"], tickers)
+    logger.warning("실시간 가격 조회 실패로 stale 캐시를 재사용합니다. country=%s error=%s", country, exc)
+    result: dict[str, dict[str, float]] = {}
+    for ticker in tickers:
+        cache_key = f"{country}:{ticker}"
+        entry = _TICKER_PRICE_CACHE.get(cache_key)
+        if entry and "data" in entry:
+            entry["is_stale"] = True
+            result[ticker] = entry["data"]
+    return result
 
 
-def _reuse_stale_exchange_rates(cache_key: str, exc: Exception) -> dict[str, Any] | None:
-    cached_entry = _PRICE_SERVICE_CACHE.get(cache_key)
+def _reuse_stale_fx_cache(cache_key: str, exc: Exception) -> dict[str, Any] | None:
+    cached_entry = _FX_CACHE.get(cache_key)
     if not cached_entry or "data" not in cached_entry:
         return None
 
@@ -216,30 +290,14 @@ def _reuse_stale_exchange_rates(cache_key: str, exc: Exception) -> dict[str, Any
     return dict(cached_entry["data"])
 
 
-def _store_cache_entry(
-    *,
-    cache_key: str,
-    data: dict[str, Any],
-    source: str,
-    ttl_seconds: int,
-    is_stale: bool,
-) -> None:
-    fetched_at = datetime.now()
-    _PRICE_SERVICE_CACHE[cache_key] = {
-        "data": dict(data),
-        "fetched_at": fetched_at,
-        "expires_at": fetched_at + timedelta(seconds=ttl_seconds),
-        "is_stale": is_stale,
-        "source": source,
-    }
-
-
 def _get_realtime_ttl_seconds(country: str) -> int:
     if _is_market_active(country):
         if country == "kor":
             return _KOR_ACTIVE_TTL_SECONDS
         if country == "au":
             return _AU_ACTIVE_TTL_SECONDS
+        if country == "us":
+            return _US_ACTIVE_TTL_SECONDS
     return _IDLE_TTL_SECONDS
 
 
@@ -316,4 +374,5 @@ __all__ = [
     "get_exchange_rates",
     "get_realtime_cache_meta",
     "get_realtime_snapshot",
+    "get_realtime_snapshot_meta",
 ]

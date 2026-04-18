@@ -9,7 +9,7 @@
 
 동작:
     1) subprocess 로 <command> 를 실행
-    2) 종료 코드/소요시간/마지막 로그 꼬리(15줄)를 슬랙으로 전송
+    2) 실패 시 종료 코드/소요시간/마지막 로그 꼬리(15줄)를 슬랙으로 전송
     3) 프로세스 종료 코드를 그대로 반환
 
 알림 채널:
@@ -38,6 +38,13 @@ MAX_TAIL_LINES = 15
 MAX_TAIL_CHARS = 1500
 
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
+SUCCESS_NOTIFICATION_DISABLED_JOBS = {
+    "cache_refresh",
+    "metadata_updater",
+    "asset_summary",
+    "market_hours_analysis",
+}
+EXIT_ALREADY_NOTIFIED = 66
 
 
 def _acquire_lock(job_name: str) -> Path:
@@ -151,13 +158,18 @@ def main(argv: list[str]) -> int:
     tail = _format_tail(result.stdout, result.stderr)
     app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
-    _notify(
-        f"{emoji} *[{app_label}] 배치 {status}*: `{job_name}`\n"
-        f"• 시작: {started_at}\n"
-        f"• 소요: {elapsed:.1f}s\n"
-        f"• exit: {exit_code}\n"
-        f"```\n{tail}\n```"
+    already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
+    should_notify = ((not success) and (not already_notified_failure)) or (
+        success and (job_name not in SUCCESS_NOTIFICATION_DISABLED_JOBS)
     )
+    if should_notify:
+        _notify(
+            f"{emoji} *[{app_label}] 배치 {status}*: `{job_name}`\n"
+            f"• 시작: {started_at}\n"
+            f"• 소요: {elapsed:.1f}s\n"
+            f"• exit: {exit_code}\n"
+            f"```\n{tail}\n```"
+        )
 
     print(
         f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s"
