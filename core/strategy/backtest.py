@@ -24,6 +24,7 @@ from core.strategy.scoring import (
 )
 from utils.cache_utils import load_cached_frames_bulk_with_fallback
 from utils.data_loader import get_exchange_rate_series, get_trading_days
+from utils.formatters import format_pct_change, format_price, format_trading_days
 from utils.report import render_table_eaw
 from utils.settings_loader import TICKERS_ROOT, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
@@ -451,6 +452,426 @@ def _write_results_file(
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _safe_daily_pct(current_price: float | None, previous_close: float | None) -> float | None:
+    """전일 종가 대비 일간 수익률(%)을 계산한다."""
+    if current_price is None or previous_close is None:
+        return None
+    if previous_close <= 0:
+        return None
+    return ((current_price / previous_close) - 1.0) * 100.0
+
+
+def _format_quantity(value: int | None) -> str:
+    """수량을 표 출력용 문자열로 변환한다."""
+    if value is None:
+        return "-"
+    return f"{int(value):,}"
+
+
+def _format_weight_pct(value: float | None) -> str:
+    """비중(%)을 표 출력용 문자열로 변환한다."""
+    if value is None:
+        return "-"
+    return f"{value:.2f}%"
+
+
+def _format_price_or_dash(value: float | None, country_code: str) -> str:
+    """가격을 국가 통화 형식으로 변환하되 비어 있으면 '-'를 반환한다."""
+    if value is None:
+        return "-"
+    return format_price(value, country_code)
+
+
+def _simulate_one_combo_details(
+    *,
+    initial_cash_local: float,
+    top_n: int,
+    bonus: float,
+    composite_frame: pd.DataFrame,
+    open_frame: pd.DataFrame,
+    close_frame: pd.DataFrame,
+    backtest_days: list[pd.Timestamp],
+    fx_series: pd.Series,
+    ticker_name_map: dict[str, str],
+    country_code: str,
+) -> list[str]:
+    """상위 1개 조합의 거래일별 보유 상세 로그를 생성한다.
+
+    - 거래일 첫날은 초기 현금만 기록한다.
+    - 각 실행일(exec_day)에는 현금 row를 먼저 기록한다.
+    - 그 아래에 보유 종목, 당일 신규매수 종목, 당일 전량매도 종목을 함께 기록한다.
+    - 보유일은 백테스트 거래일 기준으로 마지막 매수 후 경과일로 계산한다.
+    """
+    shares: dict[str, int] = {}
+    avg_costs: dict[str, float] = {}
+    last_buy_indices: dict[str, int] = {}
+    lines: list[str] = []
+
+    headers = [
+        "#",
+        "티커",
+        "종목명",
+        "상태",
+        "보유일",
+        "현재가",
+        "일간(%)",
+        "수량",
+        "금액",
+        "평가손익",
+        "평가(%)",
+        "비중",
+        "문구",
+    ]
+    aligns = [
+        "right",
+        "left",
+        "left",
+        "left",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "left",
+    ]
+
+    cash = float(initial_cash_local)
+    period_start = backtest_days[0]
+    period_end = backtest_days[-1]
+    fx_start = float(fx_series.loc[period_start])
+    initial_cash_krw = initial_cash_local * fx_start
+
+    lines.append("=== 백테스트 상세 ===")
+    lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
+    lines.append(f"TOP_N_HOLD: {top_n}")
+    lines.append(f"HOLDING_BONUS_SCORE: {bonus:g}")
+    lines.append("")
+
+    def _append_day_section(
+        *,
+        day: pd.Timestamp,
+        held_rows: list[dict[str, str]],
+        sold_rows: list[dict[str, str]],
+        cash_local: float,
+        total_equity_local: float,
+        note: str,
+    ) -> None:
+        fx_today = float(fx_series.loc[day])
+        total_equity_krw = total_equity_local * fx_today
+        cash_krw = cash_local * fx_today
+        cash_weight = (cash_local / total_equity_local * 100.0) if total_equity_local > 0 else 0.0
+        day_rows: list[list[str]] = []
+        cash_row = [
+            "1",
+            "CASH",
+            "현금",
+            "현금",
+            "-",
+            "-",
+            "-",
+            "-",
+            format_price(cash_krw, "kor"),
+            "-",
+            "-",
+            _format_weight_pct(cash_weight),
+            note,
+        ]
+        day_rows.append(cash_row)
+
+        for row_index, row in enumerate(held_rows + sold_rows, start=2):
+            day_rows.append(
+                [
+                    str(row_index),
+                    row["ticker"],
+                    row["name"],
+                    row["status"],
+                    row["held_days"],
+                    row["price"],
+                    row["daily_pct"],
+                    row["qty"],
+                    row["amount"],
+                    row["pnl"],
+                    row["pnl_pct"],
+                    row["weight"],
+                    row["message"],
+                ]
+            )
+
+        lines.append(
+            f"[{day.strftime('%Y-%m-%d')}] 총자산 {format_price(total_equity_krw, 'kor')} / "
+            f"현금 {format_price(cash_krw, 'kor')}"
+        )
+        lines.extend(render_table_eaw(headers, day_rows, aligns))
+        lines.append("")
+
+    # 초기일: 현금만 보유
+    _append_day_section(
+        day=period_start,
+        held_rows=[],
+        sold_rows=[],
+        cash_local=cash,
+        total_equity_local=cash,
+        note="초기 자금",
+    )
+
+    for idx, signal_day in enumerate(backtest_days):
+        close_today = close_frame.loc[signal_day]
+        portfolio_value_local = cash + sum(
+            int(shares.get(t, 0)) * float(close_today.get(t, np.nan) or 0.0)
+            for t in shares
+            if not pd.isna(close_today.get(t, np.nan))
+        )
+
+        if idx == len(backtest_days) - 1:
+            break
+
+        exec_idx = idx + 1
+        exec_day = backtest_days[exec_idx]
+        open_exec = open_frame.loc[exec_day]
+        close_exec = close_frame.loc[exec_day]
+
+        composite = composite_frame.loc[signal_day].copy()
+        if bonus:
+            for holding in shares:
+                if holding in composite.index and not pd.isna(composite.loc[holding]):
+                    composite.loc[holding] += bonus
+
+        valid = composite.dropna()
+        if not valid.empty:
+            tradable_mask = open_exec.reindex(valid.index).notna() & (open_exec.reindex(valid.index) > 0)
+            valid = valid[tradable_mask]
+
+        if valid.empty:
+            held_rows: list[dict[str, str]] = []
+            total_equity_close_local = cash + sum(
+                int(shares.get(t, 0)) * float(close_exec.get(t, np.nan) or 0.0)
+                for t in shares
+                if not pd.isna(close_exec.get(t, np.nan))
+            )
+            for ticker in sorted(shares.keys()):
+                qty = int(shares[ticker])
+                current_price = float(close_exec.get(ticker, np.nan)) if not pd.isna(close_exec.get(ticker, np.nan)) else None
+                previous_close = (
+                    float(close_today.get(ticker, np.nan)) if not pd.isna(close_today.get(ticker, np.nan)) else None
+                )
+                amount_local = (current_price * qty) if current_price is not None else 0.0
+                avg_cost = float(avg_costs[ticker])
+                pnl_local = amount_local - (avg_cost * qty)
+                pnl_pct = ((amount_local / (avg_cost * qty) - 1.0) * 100.0) if avg_cost > 0 and qty > 0 else None
+                weight_pct = (
+                    (amount_local / total_equity_close_local) * 100.0 if total_equity_close_local > 0 else None
+                )
+                held_days = format_trading_days(exec_idx - int(last_buy_indices.get(ticker, exec_idx)))
+                held_rows.append(
+                    {
+                        "ticker": ticker,
+                        "name": ticker_name_map.get(ticker, ticker),
+                        "status": "보유",
+                        "held_days": held_days,
+                        "price": _format_price_or_dash(current_price, country_code),
+                        "daily_pct": format_pct_change(_safe_daily_pct(current_price, previous_close)),
+                        "qty": _format_quantity(qty),
+                        "amount": format_price(amount_local * float(fx_series.loc[exec_day]), "kor"),
+                        "pnl": format_price(pnl_local * float(fx_series.loc[exec_day]), "kor"),
+                        "pnl_pct": format_pct_change(pnl_pct),
+                        "weight": _format_weight_pct(weight_pct),
+                        "message": "거래 없음",
+                    }
+                )
+            held_rows.sort(key=lambda row: row["ticker"])
+            _append_day_section(
+                day=exec_day,
+                held_rows=held_rows,
+                sold_rows=[],
+                cash_local=cash,
+                total_equity_local=total_equity_close_local,
+                note="거래 없음",
+            )
+            continue
+
+        target_df = valid.reset_index()
+        target_df.columns = ["ticker", "score"]
+        target_df = target_df.sort_values(
+            by=["score", "ticker"], ascending=[False, True], kind="mergesort"
+        )
+        target_set = set(target_df["ticker"].head(top_n).tolist())
+        current_set = set(shares.keys())
+
+        to_sell = current_set - target_set
+        to_buy = target_set - current_set
+        total_equity_signal = portfolio_value_local
+
+        sold_rows: list[dict[str, str]] = []
+        buy_messages: dict[str, str] = {}
+
+        for ticker in sorted(to_sell):
+            price = float(open_exec.get(ticker, np.nan))
+            if pd.isna(price) or price <= 0:
+                continue
+            qty = int(shares.pop(ticker))
+            avg_cost = float(avg_costs.pop(ticker, 0.0))
+            last_buy_idx = int(last_buy_indices.pop(ticker, exec_idx))
+            proceeds_local = qty * price
+            cash += proceeds_local
+            realized_pnl_local = proceeds_local - (avg_cost * qty)
+            realized_pct = ((price / avg_cost) - 1.0) * 100.0 if avg_cost > 0 else None
+            previous_close = (
+                float(close_today.get(ticker, np.nan)) if not pd.isna(close_today.get(ticker, np.nan)) else None
+            )
+            sold_rows.append(
+                {
+                    "ticker": ticker,
+                    "name": ticker_name_map.get(ticker, ticker),
+                    "status": "전량매도",
+                    "held_days": format_trading_days(exec_idx - last_buy_idx),
+                    "price": _format_price_or_dash(price, country_code),
+                    "daily_pct": format_pct_change(_safe_daily_pct(
+                        float(close_exec.get(ticker, np.nan)) if not pd.isna(close_exec.get(ticker, np.nan)) else None,
+                        previous_close,
+                    )),
+                    "qty": _format_quantity(qty),
+                    "amount": format_price(proceeds_local * float(fx_series.loc[exec_day]), "kor"),
+                    "pnl": format_price(realized_pnl_local * float(fx_series.loc[exec_day]), "kor"),
+                    "pnl_pct": format_pct_change(realized_pct),
+                    "weight": _format_weight_pct(0.0),
+                    "message": "상위 N 제외로 시초가 전량매도",
+                }
+            )
+
+        if to_buy:
+            new_entrants_df = target_df[target_df["ticker"].isin(to_buy)]
+            new_entrants = new_entrants_df["ticker"].tolist()
+            k_new = len(new_entrants)
+            slot_target = total_equity_signal / float(top_n)
+            per_new_budget = min(slot_target, cash / k_new) if (k_new > 0 and cash > 0) else 0.0
+
+            for ticker in new_entrants:
+                price = float(open_exec.get(ticker, np.nan))
+                if pd.isna(price) or price <= 0:
+                    continue
+                buy_budget = min(cash, per_new_budget)
+                if buy_budget <= 0:
+                    continue
+                n_shares = int(buy_budget // price)
+                if n_shares <= 0:
+                    continue
+                cost = n_shares * price
+                cash -= cost
+                shares[ticker] = shares.get(ticker, 0) + n_shares
+                avg_costs[ticker] = price
+                last_buy_indices[ticker] = exec_idx
+                buy_messages[ticker] = "신규 편입"
+
+            for ticker in new_entrants:
+                if cash <= 0:
+                    break
+                price = float(open_exec.get(ticker, np.nan))
+                if pd.isna(price) or price <= 0:
+                    continue
+                current_position_value = shares.get(ticker, 0) * price
+                remaining_slot_budget = max(0.0, slot_target - current_position_value)
+                if remaining_slot_budget <= 0:
+                    continue
+                extra_budget = min(cash, remaining_slot_budget)
+                extra_shares = int(extra_budget // price)
+                if extra_shares <= 0:
+                    continue
+                cost = extra_shares * price
+                old_qty = int(shares.get(ticker, 0))
+                old_avg = float(avg_costs.get(ticker, price))
+                new_qty = old_qty + extra_shares
+                shares[ticker] = new_qty
+                avg_costs[ticker] = ((old_qty * old_avg) + cost) / new_qty if new_qty > 0 else price
+                last_buy_indices[ticker] = exec_idx
+                cash -= cost
+                previous_message = buy_messages.get(ticker, "신규 편입")
+                if "잔액 추가 소진" not in previous_message:
+                    buy_messages[ticker] = f"{previous_message} + 잔액 추가 소진"
+
+        held_rows: list[dict[str, str]] = []
+        total_equity_close_local = cash + sum(
+            int(shares.get(t, 0)) * float(close_exec.get(t, np.nan) or 0.0)
+            for t in shares
+            if not pd.isna(close_exec.get(t, np.nan))
+        )
+        current_rank_map = {ticker: rank for rank, ticker in enumerate(target_df["ticker"].tolist(), start=1)}
+
+        for ticker in sorted(shares.keys(), key=lambda item: (current_rank_map.get(item, 10_000), item)):
+            qty = int(shares[ticker])
+            current_price = float(close_exec.get(ticker, np.nan)) if not pd.isna(close_exec.get(ticker, np.nan)) else None
+            previous_close = (
+                float(close_today.get(ticker, np.nan)) if not pd.isna(close_today.get(ticker, np.nan)) else None
+            )
+            amount_local = (current_price * qty) if current_price is not None else 0.0
+            avg_cost = float(avg_costs[ticker])
+            pnl_local = amount_local - (avg_cost * qty)
+            pnl_pct = ((amount_local / (avg_cost * qty) - 1.0) * 100.0) if avg_cost > 0 and qty > 0 else None
+            weight_pct = (
+                (amount_local / total_equity_close_local) * 100.0 if total_equity_close_local > 0 else None
+            )
+            held_days = format_trading_days(exec_idx - int(last_buy_indices.get(ticker, exec_idx)))
+            held_rows.append(
+                {
+                    "ticker": ticker,
+                    "name": ticker_name_map.get(ticker, ticker),
+                    "status": "신규매수" if ticker in buy_messages else "보유",
+                    "held_days": held_days,
+                    "price": _format_price_or_dash(current_price, country_code),
+                    "daily_pct": format_pct_change(_safe_daily_pct(current_price, previous_close)),
+                    "qty": _format_quantity(qty),
+                    "amount": format_price(amount_local * float(fx_series.loc[exec_day]), "kor"),
+                    "pnl": format_price(pnl_local * float(fx_series.loc[exec_day]), "kor"),
+                    "pnl_pct": format_pct_change(pnl_pct),
+                    "weight": _format_weight_pct(weight_pct),
+                    "message": buy_messages.get(ticker, "기존 보유 유지"),
+                }
+            )
+
+        note = "매도 후 신규 진입 및 잔액 현금 보유" if (to_sell or to_buy) else "거래 없음"
+        _append_day_section(
+            day=exec_day,
+            held_rows=held_rows,
+            sold_rows=sold_rows,
+            cash_local=cash,
+            total_equity_local=total_equity_close_local,
+            note=note,
+        )
+
+    return lines
+
+
+def _write_details_file(
+    *,
+    out_path: Path,
+    pool_id: str,
+    period_start: pd.Timestamp,
+    period_end: pd.Timestamp,
+    top_result: dict[str, Any],
+    detail_lines: list[str],
+) -> None:
+    """상위 1개 조합의 일자별 보유 상세 로그를 기록한다."""
+    lines: list[str] = [
+        f"종목풀: {pool_id}",
+        f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}",
+        "=== 상위 1개 조합 설정 ===",
+        f"TOP_N_HOLD: {top_result['TOP_N_HOLD']}",
+        f"HOLDING_BONUS_SCORE: {top_result['HOLDING_BONUS_SCORE']:g}",
+        f"FIRST_MA_TYPE: {top_result['FIRST_MA_TYPE']}",
+        f"FIRST_MA_MONTHS: {top_result['FIRST_MA_MONTHS']}",
+        f"SECOND_MA_TYPE: {top_result['SECOND_MA_TYPE']}",
+        f"SECOND_MA_MONTHS: {top_result['SECOND_MA_MONTHS']}",
+        f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
+        f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
+        f"MDD_PCT: {top_result['MDD_PCT']:.2f}",
+        "",
+    ]
+    lines.extend(detail_lines)
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ----------------------------- 메인 ----------------------------- #
 
 
@@ -701,5 +1122,42 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         is_final=True,
         **write_kwargs,
     )
+    sorted_results = sorted(results, key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
+    if sorted_results:
+        best_result = sorted_results[0]
+        best_composite = combine_rule_percentiles(
+            [
+                percentile_by_spec_win[(best_result["FIRST_MA_TYPE"], int(best_result["FIRST_MA_MONTHS"]))],
+                percentile_by_spec_win[(best_result["SECOND_MA_TYPE"], int(best_result["SECOND_MA_MONTHS"]))],
+            ],
+            eligibility_win,
+        )
+        ticker_name_map = {
+            str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
+            for item in etfs
+            if item.get("ticker")
+        }
+        detail_lines = _simulate_one_combo_details(
+            initial_cash_local=initial_cash_local,
+            top_n=int(best_result["TOP_N_HOLD"]),
+            bonus=float(best_result["HOLDING_BONUS_SCORE"]),
+            composite_frame=best_composite,
+            open_frame=open_win,
+            close_frame=close_win,
+            backtest_days=backtest_days,
+            fx_series=fx_win,
+            ticker_name_map=ticker_name_map,
+            country_code=country_code,
+        )
+        detail_path = results_dir / f"backtest_details_{today.strftime('%Y-%m-%d')}.log"
+        _write_details_file(
+            out_path=detail_path,
+            pool_id=pool_id,
+            period_start=period_start,
+            period_end=period_end,
+            top_result=best_result,
+            detail_lines=detail_lines,
+        )
+        print(f"[{pool_id}] 상세 결과 저장: {detail_path}", flush=True)
     print(f"[{pool_id}] 결과 저장: {out_path}", flush=True)
     return out_path
