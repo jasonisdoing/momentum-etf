@@ -1,6 +1,7 @@
 """모멘텀 ETF 파라미터 스윕 백테스트 엔진.
 
-``backtest/run.py`` 에서 호출되며, BACKTEST_CONFIG 를 인자로 받아 실행한다.
+``backtest/run.py`` 에서 호출되며, 종목풀별 ``BACKTEST_CONFIG`` 와
+전역 공통값 ``BACKTEST_MONTHS``, ``INITIAL_KRW_AMOUNT`` 를 사용한다.
 멀티프로세스 병렬 실행을 지원하며, 실행 중에도 중간 결과를 파일에 주기적으로 기록한다.
 """
 
@@ -16,6 +17,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from backtest.config import BACKTEST_MONTHS, INITIAL_KRW_AMOUNT
 from config import TRADING_DAYS_PER_MONTH
 from core.strategy.scoring import (
     combine_rule_percentiles,
@@ -898,8 +900,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         )
 
     cfg = config[pool_id]
-    months = int(cfg["BACKTEST_MONTHS"])
-    initial_cash = float(cfg["INITIAL_KRW_AMOUNT"])
+    months = int(BACKTEST_MONTHS)
+    initial_cash = float(INITIAL_KRW_AMOUNT)
 
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
     bonus_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
