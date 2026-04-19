@@ -1,11 +1,14 @@
 """모멘텀 ETF 파라미터 스윕 백테스트 엔진.
 
 ``backtest.py`` 에서 호출되며, BACKTEST_CONFIG 를 인자로 받아 실행한다.
+멀티프로세스 병렬 실행을 지원하며, 실행 중에도 중간 결과를 파일에 주기적으로 기록한다.
 """
 
 from __future__ import annotations
 
 import itertools
+import multiprocessing as mp
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -14,13 +17,16 @@ import numpy as np
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
-from core.strategy.scoring import calculate_maps_score, calculate_signed_percentile_score
+from core.strategy.scoring import (
+    combine_rule_percentiles,
+    compute_eligibility_mask,
+    compute_rule_percentile_frame,
+)
 from utils.cache_utils import load_cached_frames_bulk_with_fallback
 from utils.data_loader import get_trading_days
-from utils.moving_averages import calculate_moving_average
+from utils.report import render_table_eaw
 from utils.settings_loader import TICKERS_ROOT, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
-
 
 # ----------------------------- 헬퍼 ----------------------------- #
 
@@ -53,36 +59,67 @@ def _select_open_column(columns: list[str]) -> str:
     raise ValueError(f"OHLCV 프레임에서 시가 컬럼을 찾을 수 없습니다: {columns}")
 
 
-def _compute_percentile_scores(
-    close_frame: pd.DataFrame,
-    ma_types: list[str],
-    ma_months_list: list[int],
-) -> dict[tuple[str, int], pd.DataFrame]:
-    """(ma_type, ma_months) 별 signed-percentile 점수 프레임을 사전계산."""
-    out: dict[tuple[str, int], pd.DataFrame] = {}
-    for ma_type in ma_types:
-        for months in ma_months_list:
-            days = int(months) * TRADING_DAYS_PER_MONTH
-            ma_cols: dict[str, pd.Series] = {}
-            for ticker in close_frame.columns:
-                series = close_frame[ticker].dropna()
-                if len(series) < days:
-                    ma_cols[ticker] = pd.Series(dtype=float, index=close_frame.index)
-                    continue
-                ma_series = calculate_moving_average(series, days, ma_type)
-                ma_cols[ticker] = ma_series.reindex(close_frame.index)
-            ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
-            # rankings.py 의 점수식과 동일한 공통 함수를 사용 (변경 시 양쪽 동시 반영).
-            trend = pd.DataFrame(
-                {
-                    ticker: calculate_maps_score(close_frame[ticker], ma_frame[ticker])
-                    for ticker in close_frame.columns
-                },
-                index=close_frame.index,
-            )
-            percentile = calculate_signed_percentile_score(trend)
-            out[(ma_type, int(months))] = percentile
-    return out
+# -------------------- 워커 프로세스 (병렬 실행) -------------------- #
+
+
+# 워커 프로세스에서 공유하는 전역 변수.
+# _init_worker() 로 한 번만 초기화되며, 각 워커 프로세스 내에서만 유효하다.
+_W_PCT: dict[tuple[str, int], pd.DataFrame] = {}
+_W_ELIG: pd.DataFrame = pd.DataFrame()
+_W_OPEN: pd.DataFrame = pd.DataFrame()
+_W_CLOSE: pd.DataFrame = pd.DataFrame()
+_W_DAYS: list[pd.Timestamp] = []
+_W_CASH: float = 0.0
+
+
+def _init_worker(
+    pct_specs: dict[tuple[str, int], pd.DataFrame],
+    eligibility_win: pd.DataFrame,
+    open_win: pd.DataFrame,
+    close_win: pd.DataFrame,
+    bt_days: list[pd.Timestamp],
+    init_cash: float,
+) -> None:
+    """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
+    global _W_PCT, _W_ELIG, _W_OPEN, _W_CLOSE, _W_DAYS, _W_CASH  # noqa: PLW0603
+    _W_PCT = pct_specs
+    _W_ELIG = eligibility_win
+    _W_OPEN = open_win
+    _W_CLOSE = close_win
+    _W_DAYS = bt_days
+    _W_CASH = init_cash
+
+
+def _run_single_combo(
+    args: tuple[int, float, str, int, str, int],
+) -> dict[str, Any]:
+    """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
+    top_n, bonus, fma_t, fma_m, sma_t, sma_m = args
+    # 공통 엔진과 동일한 방식으로 규칙별 percentile 합산 + 자격 마스크 적용.
+    composite = combine_rule_percentiles(
+        [_W_PCT[(fma_t, fma_m)], _W_PCT[(sma_t, sma_m)]],
+        _W_ELIG,
+    )
+    total_ret, cagr, mdd = _simulate_one_combo(
+        initial_cash=_W_CASH,
+        top_n=top_n,
+        bonus=bonus,
+        composite_frame=composite,
+        open_frame=_W_OPEN,
+        close_frame=_W_CLOSE,
+        backtest_days=_W_DAYS,
+    )
+    return {
+        "TOP_N_HOLD": top_n,
+        "HOLDING_BONUS_SCORE": bonus,
+        "FIRST_MA_TYPE": fma_t,
+        "FIRST_MA_MONTHS": fma_m,
+        "SECOND_MA_TYPE": sma_t,
+        "SECOND_MA_MONTHS": sma_m,
+        "TOTAL_RETURN_PCT": total_ret,
+        "CAGR_PCT": cagr,
+        "MDD_PCT": mdd,
+    }
 
 
 # --------------------------- 시뮬레이션 --------------------------- #
@@ -93,8 +130,7 @@ def _simulate_one_combo(
     initial_cash: float,
     top_n: int,
     bonus: float,
-    percentile_first: pd.DataFrame,
-    percentile_second: pd.DataFrame,
+    composite_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
     close_frame: pd.DataFrame,
     backtest_days: list[pd.Timestamp],
@@ -125,10 +161,8 @@ def _simulate_one_combo(
 
         exec_day = backtest_days[idx + 1]
 
-        # 점수 계산
-        score_first = percentile_first.loc[signal_day]
-        score_second = percentile_second.loc[signal_day]
-        composite = score_first.add(score_second, fill_value=np.nan)
+        # 점수 계산 (공통 엔진이 만든 composite 프레임에서 해당 일자 행을 사용).
+        composite = composite_frame.loc[signal_day].copy()
 
         if bonus:
             for holding in shares:
@@ -210,11 +244,127 @@ def _simulate_one_combo(
     return float(total_return_pct), float(cagr_pct), float(mdd_pct)
 
 
+# --------------------------- 결과 기록 --------------------------- #
+
+
+def _write_results_file(
+    *,
+    out_path: Path,
+    results: list[dict[str, Any]],
+    pool_id: str,
+    months: int,
+    initial_cash: float,
+    top_n_values: list[int],
+    bonus_values: list[float],
+    first_ma_types: list[str],
+    first_ma_months_list: list[int],
+    second_ma_types: list[str],
+    second_ma_months_list: list[int],
+    total_combos: int,
+    done_count: int,
+    period_start: pd.Timestamp,
+    period_end: pd.Timestamp,
+    started_str: str,
+    elapsed_sec: int,
+    n_workers: int,
+    is_final: bool,
+) -> None:
+    """결과를 로그 파일에 기록한다. 중간/최종 모두 동일 형식."""
+    sorted_results = sorted(results, key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
+
+    lines: list[str] = []
+    h = elapsed_sec // 3600
+    m = (elapsed_sec % 3600) // 60
+    s = elapsed_sec % 60
+
+    if is_final:
+        lines.append(f"실행 시각: {started_str}")
+        lines.append(f"종료 시각: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    else:
+        lines.append(f"실행 시각: {started_str}")
+        lines.append(f"중간 갱신: {time.strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"종목풀: {pool_id}")
+    lines.append(f"경과 시간: {h}시간 {m}분 {s}초")
+    lines.append(f"병렬 워커: {n_workers}")
+    lines.append(f"진행: {done_count}/{total_combos} ({done_count * 100 // total_combos}%)")
+    lines.append("")
+    lines.append("=== 백테스트 설정 ===")
+    lines.append(
+        f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')} ({months} 개월)"
+    )
+    lines.append(
+        f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 x HOLDING_BONUS_SCORE {len(bonus_values)}개 "
+        f"x FIRST_MA_TYPE {len(first_ma_types)}개 x FIRST_MA_MONTHS {len(first_ma_months_list)}개 "
+        f"x SECOND_MA_TYPE {len(second_ma_types)}개 x SECOND_MA_MONTHS {len(second_ma_months_list)}개 "
+        f"= {total_combos}개 조합"
+    )
+    lines.append(f'"INITIAL_KRW_AMOUNT": {int(initial_cash)},')
+    lines.append(f'"TOP_N_HOLD": {top_n_values},')
+    lines.append(f'"HOLDING_BONUS_SCORE": {[int(b) if float(b).is_integer() else b for b in bonus_values]},')
+    lines.append(f'"FIRST_MA_TYPE": {first_ma_types},')
+    lines.append(f'"FIRST_MA_MONTHS": {first_ma_months_list},')
+    lines.append(f'"SECOND_MA_TYPE": {second_ma_types},')
+    lines.append(f'"SECOND_MA_MONTHS": {second_ma_months_list},')
+    lines.append("")
+
+    status_label = "최종 결과" if is_final else f"중간 결과 ({done_count}/{total_combos})"
+    lines.append(f"=== {status_label} - 기간: {months} 개월 | 정렬 기준: CAGR ===")
+
+    # 테이블
+    top_limit = 100
+    top_rows = sorted_results[:top_limit]
+    if not top_rows:
+        lines.append("(결과 없음)")
+        out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        return
+
+    headers = [
+        "TOP_N",
+        "BONUS",
+        "MA1_TYPE",
+        "MA1_M",
+        "MA2_TYPE",
+        "MA2_M",
+        "수익률(%)",
+        "CAGR(%)",
+        "MDD(%)",
+    ]
+    aligns = ["left", "left", "left", "left", "left", "left", "right", "right", "right"]
+    formatted_rows: list[list[str]] = []
+    for r in top_rows:
+        formatted_rows.append(
+            [
+                str(r["TOP_N_HOLD"]),
+                f"{r['HOLDING_BONUS_SCORE']:g}",
+                r["FIRST_MA_TYPE"],
+                str(r["FIRST_MA_MONTHS"]),
+                r["SECOND_MA_TYPE"],
+                str(r["SECOND_MA_MONTHS"]),
+                f"{r['TOTAL_RETURN_PCT']:.2f}",
+                f"{r['CAGR_PCT']:.2f}",
+                f"{r['MDD_PCT']:.2f}",
+            ]
+        )
+    table_lines = render_table_eaw(headers, formatted_rows, aligns)
+    lines.extend(table_lines)
+    if len(sorted_results) > top_limit:
+        lines.append(f"... (완료 {done_count}개 중 상위 {top_limit}개 표시)")
+
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
 # ----------------------------- 메인 ----------------------------- #
+
+
+# 중간 결과 파일 갱신 주기 (초)
+_FLUSH_INTERVAL_SEC = 10
 
 
 def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     """주어진 풀 ID 와 설정으로 파라미터 스윕 백테스트를 실행한다.
+
+    멀티프로세스 병렬 실행을 사용하며, 실행 중 ``_FLUSH_INTERVAL_SEC`` 초마다
+    중간 결과를 로그 파일에 갱신한다.
 
     Args:
         pool_id: 종목풀 식별자 (예: ``"kor_kr"``).
@@ -313,23 +463,27 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     unique_second = set(itertools.product(second_ma_types, second_ma_months_list))
     unique_ma_specs = unique_first | unique_second
 
-    ma_types_needed = sorted({t for t, _ in unique_ma_specs})
-    ma_months_needed_per_type: dict[str, list[int]] = {}
-    for mtype, m in unique_ma_specs:
-        ma_months_needed_per_type.setdefault(mtype, []).append(m)
-    ma_months_needed_per_type = {k: sorted(set(v)) for k, v in ma_months_needed_per_type.items()}
-
     percentile_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
     print(f"[{pool_id}] MA 점수 사전계산: {len(unique_ma_specs)} specs ...", flush=True)
-    for mtype in ma_types_needed:
-        chunk = _compute_percentile_scores(
-            close_frame,
-            [mtype],
-            ma_months_needed_per_type[mtype],
+    for mtype, months in unique_ma_specs:
+        # rankings 와 동일한 공통 엔진 함수를 통해 규칙별 percentile 프레임 생성.
+        percentile_by_spec[(mtype, int(months))] = compute_rule_percentile_frame(
+            close_frame, mtype, int(months)
         )
-        percentile_by_spec.update(chunk)
 
-    # 조합 실행
+    # 자격 마스크도 공통 엔진으로 생성 (MIN_TRADING_DAYS 기준) — rankings 와 동일.
+    eligibility_frame = compute_eligibility_mask(close_frame)
+
+    # 워커에 전달할 데이터를 백테스트 기간으로 미리 슬라이스 (메모리 절감)
+    percentile_by_spec_win = {
+        key: pf.loc[backtest_days]
+        for key, pf in percentile_by_spec.items()
+    }
+    eligibility_win = eligibility_frame.loc[backtest_days]
+    open_win = open_frame.loc[backtest_days]
+    close_win = close_frame.loc[backtest_days]
+
+    # 조합 생성
     combos = list(
         itertools.product(
             top_n_values,
@@ -341,138 +495,90 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         )
     )
     total_combos = len(combos)
-    print(f"[{pool_id}] 백테스트 실행: {total_combos} combos x {len(backtest_days)} days ...", flush=True)
 
-    started_wall = time.time()
-    started_str = time.strftime("%Y-%m-%d %H:%M:%S")
+    # 워커 수 결정 (CPU 코어 - 1, 최소 1)
+    n_workers = max(1, (os.cpu_count() or 2) - 1)
 
-    results: list[dict[str, Any]] = []
-    for i, (top_n, bonus, fma_t, fma_m, sma_t, sma_m) in enumerate(combos, start=1):
-        pf = percentile_by_spec[(fma_t, fma_m)]
-        ps = percentile_by_spec[(sma_t, sma_m)]
-        # 백테스트 기간으로 슬라이스
-        pf_win = pf.loc[backtest_days]
-        ps_win = ps.loc[backtest_days]
-        open_win = open_frame.loc[backtest_days]
-        close_win = close_frame.loc[backtest_days]
-
-        total_ret, cagr, mdd = _simulate_one_combo(
-            initial_cash=initial_cash,
-            top_n=top_n,
-            bonus=bonus,
-            percentile_first=pf_win,
-            percentile_second=ps_win,
-            open_frame=open_win,
-            close_frame=close_win,
-            backtest_days=backtest_days,
-        )
-        results.append(
-            {
-                "TOP_N_HOLD": top_n,
-                "HOLDING_BONUS_SCORE": bonus,
-                "FIRST_MA_TYPE": fma_t,
-                "FIRST_MA_MONTHS": fma_m,
-                "SECOND_MA_TYPE": sma_t,
-                "SECOND_MA_MONTHS": sma_m,
-                "TOTAL_RETURN_PCT": total_ret,
-                "CAGR_PCT": cagr,
-                "MDD_PCT": mdd,
-            }
-        )
-
-        if i % 50 == 0 or i == total_combos:
-            elapsed = time.time() - started_wall
-            print(f"  progress {i}/{total_combos} ({elapsed:.1f}s)", flush=True)
-
-    ended_wall = time.time()
-    ended_str = time.strftime("%Y-%m-%d %H:%M:%S")
-    elapsed_sec = int(ended_wall - started_wall)
-
-    # 정렬
-    results.sort(key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
-
-    # 출력
+    # 결과 파일 경로
     results_dir = pool_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     out_path = results_dir / f"backtest_{today.strftime('%Y-%m-%d')}.log"
 
-    lines: list[str] = []
-    h = elapsed_sec // 3600
-    m = (elapsed_sec % 3600) // 60
-    s = elapsed_sec % 60
-    lines.append(f"실행 시각: {started_str}")
-    lines.append(f"종료 시각: {ended_str}")
-    lines.append(f"종목풀: {pool_id}")
-    lines.append(f"걸린 시간: {h}시간 {m}분 {s}초")
-    lines.append("")
-    lines.append("=== 백테스트 설정 ===")
-    lines.append(
-        f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')} ({months} 개월)"
+    # 결과 파일 기록에 공통으로 쓰는 인자
+    write_kwargs: dict[str, Any] = {
+        "pool_id": pool_id,
+        "months": months,
+        "initial_cash": initial_cash,
+        "top_n_values": top_n_values,
+        "bonus_values": bonus_values,
+        "first_ma_types": first_ma_types,
+        "first_ma_months_list": first_ma_months_list,
+        "second_ma_types": second_ma_types,
+        "second_ma_months_list": second_ma_months_list,
+        "total_combos": total_combos,
+        "period_start": period_start,
+        "period_end": period_end,
+        "n_workers": n_workers,
+    }
+
+    print(
+        f"[{pool_id}] 백테스트 실행: {total_combos} combos x {len(backtest_days)} days "
+        f"(워커 {n_workers}개) ...",
+        flush=True,
     )
-    lines.append(
-        f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 x HOLDING_BONUS_SCORE {len(bonus_values)}개 "
-        f"x FIRST_MA_TYPE {len(first_ma_types)}개 x FIRST_MA_MONTHS {len(first_ma_months_list)}개 "
-        f"x SECOND_MA_TYPE {len(second_ma_types)}개 x SECOND_MA_MONTHS {len(second_ma_months_list)}개 "
-        f"= {total_combos}개 조합"
+
+    started_wall = time.time()
+    started_str = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    # imap_unordered 의 chunksize: 워커당 최소 4개 청크 이상 할당
+    chunksize = max(1, total_combos // (n_workers * 4))
+
+    results: list[dict[str, Any]] = []
+    last_flush_time = started_wall
+
+    with mp.Pool(
+        processes=n_workers,
+        initializer=_init_worker,
+        initargs=(percentile_by_spec_win, eligibility_win, open_win, close_win, backtest_days, initial_cash),
+    ) as pool:
+        for i, result in enumerate(
+            pool.imap_unordered(_run_single_combo, combos, chunksize=chunksize),
+            start=1,
+        ):
+            results.append(result)
+
+            now = time.time()
+
+            # 진행률 출력
+            if i % 50 == 0 or i == total_combos:
+                elapsed = now - started_wall
+                print(f"  progress {i}/{total_combos} ({elapsed:.1f}s)", flush=True)
+
+            # 중간 결과 파일 갱신 (주기적)
+            if i < total_combos and (now - last_flush_time) >= _FLUSH_INTERVAL_SEC:
+                _write_results_file(
+                    out_path=out_path,
+                    results=results,
+                    done_count=i,
+                    started_str=started_str,
+                    elapsed_sec=int(now - started_wall),
+                    is_final=False,
+                    **write_kwargs,
+                )
+                last_flush_time = now
+
+    ended_wall = time.time()
+    elapsed_sec = int(ended_wall - started_wall)
+
+    # 최종 결과 기록
+    _write_results_file(
+        out_path=out_path,
+        results=results,
+        done_count=total_combos,
+        started_str=started_str,
+        elapsed_sec=elapsed_sec,
+        is_final=True,
+        **write_kwargs,
     )
-    lines.append(f'"INITIAL_KRW_AMOUNT": {int(initial_cash)},')
-    lines.append(f'"TOP_N_HOLD": {top_n_values},')
-    lines.append(f'"HOLDING_BONUS_SCORE": {[int(b) if float(b).is_integer() else b for b in bonus_values]},')
-    lines.append(f'"FIRST_MA_TYPE": {first_ma_types},')
-    lines.append(f'"FIRST_MA_MONTHS": {first_ma_months_list},')
-    lines.append(f'"SECOND_MA_TYPE": {second_ma_types},')
-    lines.append(f'"SECOND_MA_MONTHS": {second_ma_months_list},')
-    lines.append("")
-    lines.append(f"=== 결과 - 기간: {months} 개월 | 정렬 기준: CAGR ===")
-
-    # 테이블
-    top_limit = 100
-    top_rows = results[:top_limit]
-    headers = [
-        "TOP_N",
-        "BONUS",
-        "MA1_TYPE",
-        "MA1_M",
-        "MA2_TYPE",
-        "MA2_M",
-        "수익률(%)",
-        "CAGR(%)",
-        "MDD(%)",
-    ]
-    formatted_rows: list[list[str]] = []
-    for r in top_rows:
-        formatted_rows.append(
-            [
-                str(r["TOP_N_HOLD"]),
-                f"{r['HOLDING_BONUS_SCORE']:g}",
-                r["FIRST_MA_TYPE"],
-                str(r["FIRST_MA_MONTHS"]),
-                r["SECOND_MA_TYPE"],
-                str(r["SECOND_MA_MONTHS"]),
-                f"{r['TOTAL_RETURN_PCT']:.2f}",
-                f"{r['CAGR_PCT']:.2f}",
-                f"{r['MDD_PCT']:.2f}",
-            ]
-        )
-    col_widths = [
-        max(len(h), max((len(row[i]) for row in formatted_rows), default=0))
-        for i, h in enumerate(headers)
-    ]
-
-    def _fmt_row(cells: list[str]) -> str:
-        parts = [cells[i].rjust(col_widths[i]) if i >= 6 else cells[i].ljust(col_widths[i]) for i in range(len(cells))]
-        return "| " + " | ".join(parts) + " |"
-
-    sep = "+-" + "-+-".join("-" * w for w in col_widths) + "-+"
-    lines.append(sep)
-    lines.append(_fmt_row(headers))
-    lines.append(sep)
-    for row in formatted_rows:
-        lines.append(_fmt_row(row))
-    lines.append(sep)
-    if total_combos > top_limit:
-        lines.append(f"... (총 {total_combos}개 중 상위 {top_limit}개 표시)")
-
-    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"[{pool_id}] 결과 저장: {out_path}", flush=True)
     return out_path
