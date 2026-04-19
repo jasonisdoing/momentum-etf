@@ -23,6 +23,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
+  top_n_hold?: number;
   type_source?: string;
   currency?: string;
 };
@@ -463,7 +464,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     if (pageMode !== "manage" || !addingRow) {
-      return pageMode === "rank" ? rankedGridRows : gridRows;
+      return rankedGridRows;
     }
     return [
       {
@@ -507,9 +508,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순자산총액: null,
         "전일 거래량(주)": null,
       },
-      ...gridRows,
+      ...rankedGridRows,
     ];
-  }, [addingRow, gridRows, pageMode, rankedGridRows]);
+  }, [addingRow, pageMode, rankedGridRows]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -559,6 +560,26 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
               {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
             </span>
           );
+        },
+      },
+      {
+        colId: "추천",
+        headerName: "✓",
+        headerTooltip: "추천",
+        minWidth: 44,
+        width: 44,
+        sortable: true,
+        filter: false,
+        cellStyle: { textAlign: "center" },
+        valueGetter: (params) => {
+          const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
+          const rank = params.data?.순위 ?? null;
+          if (!topN || rank == null) return 0;
+          return Number(rank) <= topN ? 1 : 0;
+        },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (!params.value) return <span style={{ color: "#adb5bd" }}>-</span>;
+          return <span style={{ fontSize: "1rem" }}>✅</span>;
         },
       },
       {
@@ -992,6 +1013,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerType,
     selectedTickerTypeItem?.country_code,
     selectedTickerTypeItem?.type_source,
+    selectedTickerTypeItem?.top_n_hold,
   ]);
 
   function handleTickerTypeChange(accountId: string) {

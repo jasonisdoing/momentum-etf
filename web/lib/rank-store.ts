@@ -7,6 +7,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
+  top_n_hold?: number;
   type_source?: string;
   currency?: string;
 };
