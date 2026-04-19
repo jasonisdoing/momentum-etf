@@ -410,8 +410,9 @@ def update_ticker_type_metadata(
                 if f in stock:
                     update_doc[f] = stock[f]
 
-            # 한국 종목인 경우에만 상세 캐시(배당률 등) 갱신 시도
-            if country_code == "kor":
+            # 한국 ETF(type_source=Naver)인 경우에만 상세 캐시(배당률 등) 갱신 시도
+            # 한국 개별주는 ETFBase API 대상이 아니므로 건너뜀
+            if country_code == "kor" and is_naver_source:
                 try:
                     # 카테고리 정보만 추출하여 전달
                     cat_info = {f"cat_{c['code']}": stock.get(f"cat_{c['code']}") for c in NAVER_ETF_CATEGORY_CONFIG if f"cat_{c['code']}" in stock}
@@ -608,7 +609,9 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         naver_category_map=naver_category_map,
     )
 
-    if country_code == "kor":
+    # 한국 ETF(type_source=Naver)만 ETF 상세 캐시(배당률 등) 갱신 대상
+    # 한국 개별주(type_source 미설정)는 ETFBase API 대상이 아니므로 건너뜀
+    if country_code == "kor" and type_source.lower() == "naver":
         try:
             _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
         except Exception as meta_cache_error:
