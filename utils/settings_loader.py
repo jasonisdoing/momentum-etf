@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import re
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -17,45 +16,16 @@ class AccountSettingsError(RuntimeError):
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 ACCOUNT_SETTINGS_PATH = PROJECT_ROOT / "accounts.json"
-TICKERS_ROOT = PROJECT_ROOT / "ztickers"
+POOL_SETTINGS_PATH = PROJECT_ROOT / "pools.json"
 logger = get_app_logger()
-TICKER_DIR_PATTERN = re.compile(r"^(?P<order>\d+)_(?P<ticker_type>[a-z0-9_]+)$")
-
-
-def parse_ticker_dir_name(dir_name: str) -> tuple[int, str]:
-    """`<order>_<ticker_type>` 형식의 디렉토리명에서 순번과 타입 코드를 추출합니다."""
-    normalized = (dir_name or "").strip().lower()
-    match = TICKER_DIR_PATTERN.fullmatch(normalized)
-    if not match:
-        raise AccountSettingsError(f"종목타입 디렉토리명은 '<order>_<type>' 형식이어야 합니다: {dir_name}")
-    return int(match.group("order")), match.group("ticker_type")
-
-
-def _iter_ticker_dirs() -> list[tuple[str, Path]]:
-    ticker_dirs: dict[str, Path] = {}
-    if not TICKERS_ROOT.exists():
-        return []
-
-    for item in TICKERS_ROOT.iterdir():
-        if not item.is_dir() or item.name.startswith(".") or item.name.startswith("_"):
-            continue
-
-        config_path = item / "config.json"
-        if not config_path.exists():
-            continue
-
-        _, type_id = parse_ticker_dir_name(item.name)
-        ticker_dirs[type_id] = item
-
-    return sorted(ticker_dirs.items(), key=lambda pair: parse_ticker_dir_name(pair[1].name))
-
-def list_available_ticker_types() -> list[str]:
-    """ztickers 하위의 유효한 종목타입 목록을 반환합니다."""
-    return [t_id for t_id, _ in _iter_ticker_dirs()]
 
 
 def _load_accounts_payload() -> dict[str, Any]:
     return _load_json(ACCOUNT_SETTINGS_PATH)
+
+
+def _load_pools_payload() -> dict[str, Any]:
+    return _load_json(POOL_SETTINGS_PATH)
 
 
 @cache
@@ -97,6 +67,57 @@ def _load_account_configs() -> list[dict[str, Any]]:
         seen_ids.add(account_id)
 
     return sorted(loaded, key=lambda item: (int(item["order"]), str(item["account_id"])))
+
+
+@cache
+def _load_pool_configs() -> list[dict[str, Any]]:
+    payload = _load_pools_payload()
+    pools = payload.get("pools")
+    if not isinstance(pools, list):
+        raise AccountSettingsError(f"'pools.json'의 'pools'는 배열이어야 합니다: {POOL_SETTINGS_PATH}")
+
+    loaded: list[dict[str, Any]] = []
+    seen_types: set[str] = set()
+
+    for raw_entry in pools:
+        if not isinstance(raw_entry, dict):
+            raise AccountSettingsError(f"'pools' 항목은 객체여야 합니다: {POOL_SETTINGS_PATH}")
+
+        ticker_type = str(raw_entry.get("ticker_type") or "").strip().lower()
+        if not ticker_type:
+            raise AccountSettingsError(f"'ticker_type'은 필수입니다: {POOL_SETTINGS_PATH}")
+        if ticker_type in seen_types:
+            raise AccountSettingsError(f"중복된 ticker_type이 있습니다: {ticker_type}")
+
+        order = raw_entry.get("order")
+        if not isinstance(order, int):
+            raise AccountSettingsError(f"종목풀 '{ticker_type}'의 'order'는 정수여야 합니다.")
+
+        country_code = str(raw_entry.get("country_code") or "").strip().lower()
+        if country_code not in {"kor", "au", "us"}:
+            raise AccountSettingsError(f"종목풀 '{ticker_type}'의 country_code는 kor, au, us만 허용합니다: {country_code}")
+
+        icon = str(raw_entry.get("icon") or "").strip()
+        if not icon:
+            raise AccountSettingsError(f"종목풀 '{ticker_type}' 설정에 icon이 필요합니다.")
+
+        loaded.append(
+            {
+                **raw_entry,
+                "ticker_type": ticker_type,
+                "order": order,
+                "country_code": country_code,
+                "icon": icon,
+            }
+        )
+        seen_types.add(ticker_type)
+
+    return sorted(loaded, key=lambda item: (int(item["order"]), str(item["ticker_type"])))
+
+
+def list_available_ticker_types() -> list[str]:
+    """pools.json에 정의된 유효한 종목타입 목록을 반환합니다."""
+    return [str(item["ticker_type"]) for item in _load_pool_configs()]
 
 
 def list_available_accounts() -> list[str]:
@@ -145,31 +166,16 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
     raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정을 찾을 수 없습니다.")
 
 @cache
-def get_ticker_dir(ticker_type: str) -> Path:
-    t_id = (ticker_type or "").strip().lower()
-    dirs = dict(_iter_ticker_dirs())
-    path = dirs.get(t_id)
-    if path is None:
-        raise AccountSettingsError(f"종목타입 '{t_id}'에 해당하는 설정 디렉토리를 찾을 수 없습니다.")
-    return path
-
-@cache
 def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
-    """`ztickers/{order}_{type}/config.json` 파일을 로드합니다."""
+    """pools.json에 정의된 개별 종목풀 설정을 로드합니다."""
     t_id = (ticker_type or "").strip().lower()
     if not t_id:
         raise AccountSettingsError("종목타입을 지정해야 합니다.")
 
-    path = get_ticker_dir(t_id) / "config.json"
-    settings = _load_json(path)
-    settings["ticker_type"] = t_id
-
-    country_code = str(settings.get("country_code") or "").strip().lower()
-    if country_code not in {"kor", "au", "us"}:
-        raise AccountSettingsError(f"'{path}' 설정 파일의 country_code는 kor, au 또는 us만 허용합니다: {country_code}")
-    settings["country_code"] = country_code
-
-    return settings
+    for settings in _load_pool_configs():
+        if settings["ticker_type"] == t_id:
+            return dict(settings)
+    raise AccountSettingsError(f"종목타입 '{t_id}'에 해당하는 설정을 찾을 수 없습니다.")
 
 
 def get_account_precision(account_id: str) -> dict[str, Any]:

@@ -91,10 +91,12 @@
 
 ## 3. 전략 설정 규칙
 
-종목풀 설정 포맷(`ztickers/<order>_<ticker_type>/config.json`):
+종목풀 설정 포맷(`pools.json`):
 
 ```json
 {
+  "order": 1,
+  "ticker_type": "kor_kr",
   "icon": "🇰🇷",
   "name": "국내상장 국내",
   "country_code": "kor",
