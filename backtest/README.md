@@ -2,14 +2,16 @@
 
 ## 실행
 
+특정 종목풀 하나만 실행하려면 파라미터로 넘긴다:
+
 ```bash
 python backtest/run.py kor_kr
 ```
 
-가상환경을 명시하려면 아래처럼 실행한다.
+인자 없이 실행하면 설정된 모든 종목풀을 순차적으로 실행한다:
 
 ```bash
-./.venv/bin/python backtest/run.py kor_kr
+python backtest/run.py
 ```
 
 ## 대상 종목풀

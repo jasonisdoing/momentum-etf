@@ -26,12 +26,20 @@ logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str]) -> int:
+    # 인자가 없으면 설정된 모든 종목풀을 순차적으로 실행
     if len(argv) < 2:
-        logger.error("Usage: python backtest/run.py <pool_id>")
+        pools = sorted(BACKTEST_CONFIG.keys())
+        logger.info("모든 종목풀에 대해 백테스트를 실행합니다: %s", pools)
+        for pool_id in pools:
+            run_backtest(pool_id, BACKTEST_CONFIG)
+        return 0
+
+    pool_id = argv[1].strip().lower()
+    if pool_id not in BACKTEST_CONFIG:
+        logger.error("알 수 없는 pool_id: %s", pool_id)
         logger.error("사용 가능한 pool_id: %s", sorted(BACKTEST_CONFIG.keys()))
         return 2
 
-    pool_id = argv[1].strip().lower()
     run_backtest(pool_id, BACKTEST_CONFIG)
     return 0
 
