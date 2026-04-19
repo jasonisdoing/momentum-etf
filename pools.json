@@ -9,11 +9,11 @@
       "currency": "KRW",
       "type_source": "Naver",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 30,
+      "HOLDING_BONUS_SCORE": 20,
       "FIRST_MA_TYPE": "SMA",
       "FIRST_MA_MONTHS": 12,
       "SECOND_MA_TYPE": "ALMA",
-      "SECOND_MA_MONTHS": 12
+      "SECOND_MA_MONTHS": 9
     },
     {
       "order": 2,
@@ -24,9 +24,9 @@
       "currency": "KRW",
       "type_source": "Naver",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 30,
+      "HOLDING_BONUS_SCORE": 20,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 3,
+      "FIRST_MA_MONTHS": 12,
       "SECOND_MA_TYPE": "ALMA",
       "SECOND_MA_MONTHS": 12
     },
@@ -38,9 +38,9 @@
       "country_code": "au",
       "currency": "AUD",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 30,
+      "HOLDING_BONUS_SCORE": 15,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 6,
+      "FIRST_MA_MONTHS": 9,
       "SECOND_MA_TYPE": "ALMA",
       "SECOND_MA_MONTHS": 12
     },
@@ -52,9 +52,9 @@
       "country_code": "us",
       "currency": "USD",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 20,
+      "HOLDING_BONUS_SCORE": 5,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 6,
+      "FIRST_MA_MONTHS": 9,
       "SECOND_MA_TYPE": "ALMA",
       "SECOND_MA_MONTHS": 12
     },
@@ -66,11 +66,11 @@
       "country_code": "kor",
       "currency": "KRW",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 30,
+      "HOLDING_BONUS_SCORE": 15,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 6,
+      "FIRST_MA_MONTHS": 9,
       "SECOND_MA_TYPE": "ALMA",
-      "SECOND_MA_MONTHS": 9
+      "SECOND_MA_MONTHS": 6
     }
   ]
 }
