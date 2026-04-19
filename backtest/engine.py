@@ -856,6 +856,7 @@ def _simulate_one_combo_details(
             _append_day_section(
                 day=exec_day,
                 held_rows=held_rows,
+                wait_rows=[],
                 sold_rows=[],
                 cash_local=cash,
                 total_equity_local=total_equity_close_local,
