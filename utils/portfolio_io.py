@@ -139,43 +139,18 @@ def load_real_holdings_table(
     if db is not None and not df_holdings.empty:
         all_tickers = df_holdings["ticker"].unique().tolist()
         
-        # 현재 계정의 ticker_type 목록 가져오기
-        ticker_codes = []
-        try:
-            acc_settings = get_account_settings(account_id)
-            ticker_codes = acc_settings.get("ticker_codes", [])
-            if isinstance(ticker_codes, str): ticker_codes = [ticker_codes]
-        except:
-            pass
-
         bucket_map = {}
         name_map = {}
-        # 우선순위 1: 현재 계정에 설정된 종목풀에서 검색
-        if ticker_codes:
-            cursor = db.stock_meta.find(
-                {"ticker": {"$in": all_tickers}, "ticker_type": {"$in": ticker_codes}, "is_deleted": {"$ne": True}},
-                {"ticker": 1, "bucket": 1, "name": 1}
-            )
-            for doc in cursor:
-                t = doc["ticker"]
-                if t not in bucket_map: 
-                    bucket_map[t] = doc.get("bucket", 1)
-                if t not in name_map:
-                    name_map[t] = doc.get("name")
-
-        # 우선순위 2: 계정에 없으면 시스템 전체 종목풀 검색 (Fallback)
-        missing_tickers = [t for t in all_tickers if t not in bucket_map]
-        if missing_tickers:
-            cursor = db.stock_meta.find(
-                {"ticker": {"$in": missing_tickers}, "is_deleted": {"$ne": True}},
-                {"ticker": 1, "bucket": 1, "name": 1}
-            )
-            for doc in cursor:
-                t = doc["ticker"]
-                if t not in bucket_map:
-                    bucket_map[t] = doc.get("bucket", 1)
-                if t not in name_map:
-                    name_map[t] = doc.get("name")
+        cursor = db.stock_meta.find(
+            {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
+            {"ticker": 1, "bucket": 1, "name": 1}
+        )
+        for doc in cursor:
+            t = doc["ticker"]
+            if t not in bucket_map:
+                bucket_map[t] = doc.get("bucket", 1)
+            if t not in name_map:
+                name_map[t] = doc.get("name")
 
         # 데이터 업데이트 (종목풀 정보 우선 적용)
         df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))

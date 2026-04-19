@@ -554,15 +554,12 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     except Exception as e:
         raise RuntimeError(f"계좌 설정을 찾을 수 없습니다: {account_id} ({e})")
 
-    # 2. 계좌의 ticker_types 목록 추출 (실제 필드명인 'ticker_codes' 사용)
-    ticker_types = settings.get("ticker_codes") or []
-    
-    if isinstance(ticker_types, str):
-        ticker_types = [ticker_types]
+    # 2. 전체 종목풀을 대상으로 종목 추가 가능 여부를 검사한다.
+    from utils.settings_loader import list_available_ticker_types
 
+    ticker_types = list_available_ticker_types()
     if not ticker_types:
-        available_keys = list(settings.keys())
-        raise RuntimeError(f"계좌 설정({account_id})에서 'ticker_codes'를 찾을 수 없습니다. (Keys: {available_keys})")
+        raise RuntimeError("사용 가능한 종목풀이 없습니다.")
 
     # 3. 기존 "종목 추가" 모달과 동일한 검증 엔진 사용
     last_error = None
