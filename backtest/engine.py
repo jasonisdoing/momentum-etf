@@ -652,8 +652,8 @@ def _simulate_one_combo_details(
         cash_row = [
             "1",
             "CASH",
-            "현금",
-            "현금",
+            "CASH",
+            "CASH",
             "-",
             "-",
             "-",
@@ -756,7 +756,7 @@ def _simulate_one_combo_details(
                     {
                         "ticker": ticker,
                         "name": ticker_name_map.get(ticker, ticker),
-                        "status": "보유",
+                        "status": "HOLD",
                         "held_days": held_days,
                         "price": _format_price_or_dash(current_price, country_code),
                         "daily_pct": format_pct_change(_safe_daily_pct(current_price, previous_close)),
@@ -828,7 +828,7 @@ def _simulate_one_combo_details(
                 {
                     "ticker": ticker,
                     "name": ticker_name_map.get(ticker, ticker),
-                    "status": "전량매도",
+                    "status": "SELL",
                     "held_days": format_trading_days(exec_idx - last_buy_idx),
                     "price": _format_price_or_dash(price, country_code),
                     "daily_pct": format_pct_change(_safe_daily_pct(
@@ -939,7 +939,7 @@ def _simulate_one_combo_details(
                 {
                     "ticker": ticker,
                     "name": ticker_name_map.get(ticker, ticker),
-                    "status": "신규매수" if ticker in buy_messages else "보유",
+                    "status": "BUY" if ticker in buy_messages else "HOLD",
                     "held_days": held_days,
                     "price": _format_price_or_dash(current_price, country_code),
                     "daily_pct": format_pct_change(_safe_daily_pct(current_price, previous_close)),
