@@ -1126,10 +1126,10 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
 
     percentile_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
     logger.info("[%s] MA 점수 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
-    for mtype, months in unique_ma_specs:
+    for mtype, m_months in unique_ma_specs:
         # rankings 와 동일한 공통 엔진 함수를 통해 규칙별 percentile 프레임 생성.
-        percentile_by_spec[(mtype, int(months))] = compute_rule_percentile_frame(
-            close_frame, mtype, int(months)
+        percentile_by_spec[(mtype, int(m_months))] = compute_rule_percentile_frame(
+            close_frame, mtype, int(m_months)
         )
 
     # 자격 마스크도 공통 엔진으로 생성 (MIN_TRADING_DAYS 기준) — rankings 와 동일.
