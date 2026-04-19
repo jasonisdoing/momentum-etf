@@ -409,7 +409,12 @@ def _simulate_benchmark_buy_and_hold(
     initial_cash_local: float,
     buy_slippage: float,
 ) -> tuple[float, float, float, int]:
-    """벤치마크 1종목을 첫 체결일 시초가에 1회 매수 후 끝까지 보유한다."""
+    """벤치마크 1종목을 첫 체결일 시초가에 1회 매수 후 끝까지 보유한다.
+
+    백테스트는 종목풀의 거래일 캘린더를 기준으로 평가하므로, 벤치마크가 해당 일자에
+    거래되지 않았더라도 가장 최근 유효 종가로 평가한다. 단, 첫 체결일 종가 자체가
+    없으면 시작 기준을 잡을 수 없으므로 즉시 실패시킨다.
+    """
     if len(backtest_days) < 2:
         raise RuntimeError("벤치마크 계산에 필요한 거래일이 부족합니다.")
     if ticker not in open_frame.columns or ticker not in close_frame.columns:
@@ -432,12 +437,23 @@ def _simulate_benchmark_buy_and_hold(
     cash = float(initial_cash_local) - (shares * entry_price)
     value_curve: list[float] = []
     exec_days = backtest_days[1:]
+    close_series = pd.to_numeric(close_frame[ticker], errors="coerce").reindex(exec_days)
+    first_close = float(close_series.iloc[0]) if not pd.isna(close_series.iloc[0]) else np.nan
+    if pd.isna(first_close) or first_close <= 0:
+        raise RuntimeError(
+            f"벤치마크 '{ticker}'의 첫 체결일 종가가 비정상입니다: {first_exec_day.strftime('%Y-%m-%d')}"
+        )
+
+    close_series = close_series.ffill()
+    invalid_days = close_series[close_series.isna() | (close_series <= 0)]
+    if not invalid_days.empty:
+        first_invalid = pd.Timestamp(invalid_days.index[0]).strftime("%Y-%m-%d")
+        raise RuntimeError(
+            f"벤치마크 '{ticker}'의 종가가 비정상입니다: {first_invalid}"
+        )
+
     for exec_day in exec_days:
-        close_price = float(close_frame.at[exec_day, ticker])
-        if pd.isna(close_price) or close_price <= 0:
-            raise RuntimeError(
-                f"벤치마크 '{ticker}'의 종가가 비정상입니다: {exec_day.strftime('%Y-%m-%d')}"
-            )
+        close_price = float(close_series.loc[exec_day])
         fx_today = float(fx_series.loc[exec_day])
         total_value_local = cash + (shares * close_price)
         value_curve.append(total_value_local * fx_today)
