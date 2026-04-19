@@ -68,9 +68,9 @@
       "TOP_N_HOLD": 5,
       "HOLDING_BONUS_SCORE": 15,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 9,
+      "FIRST_MA_MONTHS": 3,
       "SECOND_MA_TYPE": "ALMA",
-      "SECOND_MA_MONTHS": 6
+      "SECOND_MA_MONTHS": 12
     }
   ]
 }
