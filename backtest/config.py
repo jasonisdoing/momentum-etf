@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-BACKTEST_MONTHS = 12
+BACKTEST_MONTHS = 3
 INITIAL_KRW_AMOUNT = 100_000_000
 
 # 슬리피지는 % 단위로 입력한다.
