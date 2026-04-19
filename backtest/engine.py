@@ -1083,7 +1083,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     missing = [t for t in tickers if t not in frames or frames[t] is None or frames[t].empty]
     if missing:
         logger.info(
-            "(캐시 없음, 제외: %s) %s%s",
+            "[%s]   (캐시 없음, 제외: %s) %s%s",
+            pool_id,
             len(missing),
             missing[:10],
             "..." if len(missing) > 10 else "",
@@ -1246,7 +1247,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             # 진행률 출력
             if i % _FLUSH_EVERY_N_RESULTS == 0 or i == total_combos:
                 elapsed = now - started_wall
-                logger.info("progress %s/%s (%.1fs)", i, total_combos, elapsed)
+                logger.info("[%s] progress %s/%s (%.1fs)", pool_id, i, total_combos, elapsed)
 
             # 중간 결과 파일 갱신
             if i < total_combos and i % _FLUSH_EVERY_N_RESULTS == 0:

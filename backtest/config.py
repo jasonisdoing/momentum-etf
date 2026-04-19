@@ -34,7 +34,7 @@ SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
 BACKTEST_CONFIG: dict[str, dict] = {
     "kor_kr": {
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -42,7 +42,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor_us": {
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
-        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -50,7 +50,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "aus": {
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
-        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -58,7 +58,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "us": {
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
-        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -66,7 +66,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor": {
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
+        "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 130, 140, 150, 160, 170, 180, 190, 200],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
