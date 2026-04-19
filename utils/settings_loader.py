@@ -1,9 +1,8 @@
-"""계정별 설정을 파일에서 로드하기 위한 헬퍼 모듈."""
+"""계정/종목풀 설정을 파일에서 로드하기 위한 헬퍼 모듈."""
 
 from __future__ import annotations
 
 import json
-import re
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -15,47 +14,11 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-SETTINGS_ROOT = Path(__file__).resolve().parents[1] / "zaccounts"
-TICKERS_ROOT = Path(__file__).resolve().parents[1] / "ztickers"
-ACCOUNT_SETTINGS_DIR = SETTINGS_ROOT  # Backward compatibility alias
-COMMON_SETTINGS_PATH = SETTINGS_ROOT / "common.py"
-SCHEDULE_CONFIG_PATH = SETTINGS_ROOT / "schedule_config.json"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+ACCOUNT_SETTINGS_PATH = PROJECT_ROOT / "accounts.json"
+TICKERS_ROOT = PROJECT_ROOT / "ztickers"
 logger = get_app_logger()
-ACCOUNT_DIR_PATTERN = re.compile(r"^(?P<order>\d+)_(?P<account>[a-z0-9_]+)$")
 TICKER_DIR_PATTERN = re.compile(r"^(?P<order>\d+)_(?P<ticker_type>[a-z0-9_]+)$")
-
-
-def parse_account_dir_name(dir_name: str) -> tuple[int, str]:
-    """`<order>_<account>` 형식의 디렉토리명에서 순번과 계정 코드를 추출합니다."""
-
-    normalized = (dir_name or "").strip().lower()
-    match = ACCOUNT_DIR_PATTERN.fullmatch(normalized)
-    if not match:
-        raise AccountSettingsError(f"계정 디렉토리명은 '<order>_<account>' 형식이어야 합니다: {dir_name}")
-    return int(match.group("order")), match.group("account")
-
-
-def _iter_account_dirs() -> list[tuple[str, Path]]:
-    account_dirs: dict[str, Path] = {}
-    if not SETTINGS_ROOT.exists():
-        return []
-
-    for item in SETTINGS_ROOT.iterdir():
-        if not item.is_dir() or item.name.startswith(".") or item.name.startswith("_"):
-            continue
-
-        config_path = item / "config.json"
-        if not config_path.exists():
-            continue
-
-        config_data = _load_json(config_path)
-        _, account_id = parse_account_dir_name(item.name)
-        configured = str(config_data.get("account") or "").strip().lower()
-        if configured and configured != account_id:
-            pass  # 기존 검사 완화 (이름 불일치 허용)
-        account_dirs[account_id] = item
-
-    return sorted(account_dirs.items(), key=lambda pair: parse_account_dir_name(pair[1].name))
 
 
 def parse_ticker_dir_name(dir_name: str) -> tuple[int, str]:
@@ -90,11 +53,65 @@ def list_available_ticker_types() -> list[str]:
     return [t_id for t_id, _ in _iter_ticker_dirs()]
 
 
+def _load_accounts_payload() -> dict[str, Any]:
+    return _load_json(ACCOUNT_SETTINGS_PATH)
+
+
+@cache
+def _load_account_configs() -> list[dict[str, Any]]:
+    payload = _load_accounts_payload()
+    accounts = payload.get("accounts")
+    if not isinstance(accounts, list):
+        raise AccountSettingsError(f"'accounts.json'의 'accounts'는 배열이어야 합니다: {ACCOUNT_SETTINGS_PATH}")
+
+    loaded: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for raw_entry in accounts:
+        if not isinstance(raw_entry, dict):
+            raise AccountSettingsError(f"'accounts' 항목은 객체여야 합니다: {ACCOUNT_SETTINGS_PATH}")
+
+        account_id = str(raw_entry.get("account_id") or "").strip().lower()
+        if not account_id:
+            raise AccountSettingsError(f"'account_id'는 필수입니다: {ACCOUNT_SETTINGS_PATH}")
+        if account_id in seen_ids:
+            raise AccountSettingsError(f"중복된 account_id가 있습니다: {account_id}")
+
+        order = raw_entry.get("order")
+        if not isinstance(order, int):
+            raise AccountSettingsError(f"계정 '{account_id}'의 'order'는 정수여야 합니다.")
+
+        country_code = str(raw_entry.get("country_code") or "").strip().lower()
+        if country_code not in {"kor", "au", "us"}:
+            raise AccountSettingsError(f"계정 '{account_id}'의 country_code는 kor, au, us만 허용합니다: {country_code}")
+
+        ticker_codes = raw_entry.get("ticker_codes")
+        if not isinstance(ticker_codes, list) or not ticker_codes:
+            raise AccountSettingsError(f"계정 '{account_id}'의 'ticker_codes'는 비어 있지 않은 배열이어야 합니다.")
+
+        normalized_ticker_codes = [str(code).strip().lower() for code in ticker_codes if str(code).strip()]
+        if len(normalized_ticker_codes) != len(ticker_codes):
+            raise AccountSettingsError(f"계정 '{account_id}'의 'ticker_codes'에 빈 값이 포함되어 있습니다.")
+
+        loaded.append(
+            {
+                **raw_entry,
+                "account_id": account_id,
+                "order": order,
+                "country_code": country_code,
+                "ticker_codes": normalized_ticker_codes,
+            }
+        )
+        seen_ids.add(account_id)
+
+    return sorted(loaded, key=lambda item: (int(item["order"]), str(item["account_id"])))
+
+
 def list_available_accounts() -> list[str]:
     """
-    zaccounts 디렉토리 하위의 유효한 계정(디렉토리 내 config.json 존재) 목록을 반환합니다.
+    accounts.json에 정의된 유효한 계정 목록을 반환합니다.
     """
-    return [account_id for account_id, _ in _iter_account_dirs()]
+    return [str(item["account_id"]) for item in _load_account_configs()]
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -115,45 +132,25 @@ def _load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-@cache
-def get_account_dir(account_id: str) -> Path:
-    """논리 계정 ID에 대응하는 실제 zaccounts 디렉토리를 반환합니다."""
-
-    account = (account_id or "").strip().lower()
-    if not account:
-        raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
-
-    account_dirs = dict(_iter_account_dirs())
-    path = account_dirs.get(account)
-    if path is None:
-        raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정 디렉토리를 찾을 수 없습니다.")
-    return path
-
-
 def get_account_order(account_id: str) -> int:
-    """논리 계정 ID에 대응하는 디렉토리명의 순번을 반환합니다."""
+    """논리 계정 ID에 대응하는 계정 순번을 반환합니다."""
 
-    return parse_account_dir_name(get_account_dir(account_id).name)[0]
+    return int(get_account_settings(account_id)["order"])
 
 
 @cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
-    """`zaccounts/{account}/config.json` 파일을 로드합니다."""
+    """accounts.json에 정의된 개별 계정 설정을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
-    path = get_account_dir(account) / "config.json"
-    logger.debug("계정 설정 로드: %s", path)
-
-    settings = _load_json(path)
-    settings["account"] = account
-
-    if not settings.get("country_code"):
-        settings["country_code"] = "kor"
-
-    return settings
+    logger.debug("계정 설정 로드: %s (%s)", ACCOUNT_SETTINGS_PATH, account)
+    for settings in _load_account_configs():
+        if settings["account_id"] == account:
+            return dict(settings)
+    raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정을 찾을 수 없습니다.")
 
 @cache
 def get_ticker_dir(ticker_type: str) -> Path:

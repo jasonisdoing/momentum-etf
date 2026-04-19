@@ -21,6 +21,7 @@
     *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
     *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
+*   `accounts.json`: 계좌 메타데이터 단일 설정 파일
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.

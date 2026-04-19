@@ -12,7 +12,7 @@
 
 **Momentum ETF**는 계좌 설정을 기반으로 동작하는 **ETF 순위 분석 시스템**입니다.
 현재 운영 모델은 다음과 같습니다.
-* 계좌(`zaccounts/*`): 등록된 전체 종목을 직접 관리하고 비중 조절로 운용
+* 계좌(`accounts.json`): 등록된 전체 종목을 직접 관리하고 비중 조절로 운용
 
 감정이나 직관에 의존하는 투자를 지양하고, **이동평균(MA)**과 **RSI** 등 기술적 지표를 활용하여 **"현재 계좌 종목의 상대 추세 강도를 비교하는"** 데이터 기반의 의사결정을 지원합니다.
 
@@ -52,7 +52,7 @@ pip install -r requirements.txt
 ```
 
 ### 2. 설정
-`config.py` 및 `zaccounts/<account>/config.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
+`config.py` 및 `accounts.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
 
 ### 3. 실행
 
