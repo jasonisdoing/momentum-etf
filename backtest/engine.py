@@ -139,44 +139,63 @@ def _resolve_slippage(pool_id: str) -> tuple[float, float]:
     return buy_ratio, sell_ratio
 
 
+def _combine_rule_percentiles_array(
+    per_rule_arrays: list[np.ndarray],
+    eligibility_mask: np.ndarray,
+) -> np.ndarray:
+    """규칙별 percentile 배열을 합산하고 자격 마스크를 적용한다.
+
+    공통 엔진의 ``combine_rule_percentiles()`` 와 같은 의미를 유지하되,
+    백테스트 워커 내부에서는 DataFrame 대신 ndarray 로 계산한다.
+    """
+    if not per_rule_arrays:
+        return np.full(eligibility_mask.shape, np.nan, dtype=np.float64)
+    composite = per_rule_arrays[0].copy()
+    for rule_values in per_rule_arrays[1:]:
+        composite += rule_values
+    composite[~eligibility_mask] = np.nan
+    return composite
+
+
 # -------------------- 워커 프로세스 (병렬 실행) -------------------- #
 
 
 # 워커 프로세스에서 공유하는 전역 변수.
 # _init_worker() 로 한 번만 초기화되며, 각 워커 프로세스 내에서만 유효하다.
-_W_PCT: dict[tuple[str, int], pd.DataFrame] = {}
-_W_ELIG: pd.DataFrame = pd.DataFrame()
-_W_OPEN: pd.DataFrame = pd.DataFrame()
-_W_CLOSE: pd.DataFrame = pd.DataFrame()
+_W_PCT_VALUES: dict[tuple[str, int], np.ndarray] = {}
+_W_ELIG_VALUES: np.ndarray = np.empty((0, 0), dtype=bool)
 _W_DAYS: list[pd.Timestamp] = []
 _W_CASH_LOCAL: float = 0.0
-_W_FX: pd.Series = pd.Series(dtype=float)
 _W_BUY_SLIPPAGE: float = 0.0
 _W_SELL_SLIPPAGE: float = 0.0
+_W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
+_W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
+_W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
 
 
 def _init_worker(
-    pct_specs: dict[tuple[str, int], pd.DataFrame],
-    eligibility_win: pd.DataFrame,
-    open_win: pd.DataFrame,
-    close_win: pd.DataFrame,
+    pct_specs_values: dict[tuple[str, int], np.ndarray],
+    eligibility_values: np.ndarray,
+    open_values: np.ndarray,
+    close_values: np.ndarray,
     bt_days: list[pd.Timestamp],
     init_cash_local: float,
-    fx_win: pd.Series,
+    fx_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
-    global _W_PCT, _W_ELIG, _W_OPEN, _W_CLOSE, _W_DAYS, _W_CASH_LOCAL, _W_FX, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
-    _W_PCT = pct_specs
-    _W_ELIG = eligibility_win
-    _W_OPEN = open_win
-    _W_CLOSE = close_win
+    global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
+    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES  # noqa: PLW0603
+    _W_PCT_VALUES = pct_specs_values
+    _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
     _W_CASH_LOCAL = init_cash_local
-    _W_FX = fx_win
     _W_BUY_SLIPPAGE = buy_slippage
     _W_SELL_SLIPPAGE = sell_slippage
+    _W_OPEN_VALUES = open_values
+    _W_CLOSE_VALUES = close_values
+    _W_FX_VALUES = fx_values
 
 
 def _run_single_combo(
@@ -185,19 +204,19 @@ def _run_single_combo(
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
     top_n, bonus, fma_t, fma_m, sma_t, sma_m = args
     # 공통 엔진과 동일한 방식으로 규칙별 percentile 합산 + 자격 마스크 적용.
-    composite = combine_rule_percentiles(
-        [_W_PCT[(fma_t, fma_m)], _W_PCT[(sma_t, sma_m)]],
-        _W_ELIG,
+    composite_values = _combine_rule_percentiles_array(
+        [_W_PCT_VALUES[(fma_t, fma_m)], _W_PCT_VALUES[(sma_t, sma_m)]],
+        _W_ELIG_VALUES,
     )
     total_ret, cagr, mdd, trades = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
         bonus=bonus,
-        composite_frame=composite,
-        open_frame=_W_OPEN,
-        close_frame=_W_CLOSE,
+        composite_values=composite_values,
+        open_values=_W_OPEN_VALUES,
+        close_values=_W_CLOSE_VALUES,
         backtest_days=_W_DAYS,
-        fx_series=_W_FX,
+        fx_values=_W_FX_VALUES,
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
     )
@@ -223,11 +242,11 @@ def _simulate_one_combo(
     initial_cash_local: float,
     top_n: int,
     bonus: float,
-    composite_frame: pd.DataFrame,
-    open_frame: pd.DataFrame,
-    close_frame: pd.DataFrame,
+    composite_values: np.ndarray,
+    open_values: np.ndarray,
+    close_values: np.ndarray,
     backtest_days: list[pd.Timestamp],
-    fx_series: pd.Series,
+    fx_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
 ) -> tuple[float, float, float, int]:
@@ -239,7 +258,7 @@ def _simulate_one_combo(
     Returns:
         (total_return_pct, cagr_pct, mdd_pct) — 모두 KRW 기준.
     """
-    shares: dict[str, int] = {}
+    shares = np.zeros(composite_values.shape[1], dtype=np.int64)
     cash = float(initial_cash_local)
 
     value_curve: list[float] = []
@@ -249,88 +268,74 @@ def _simulate_one_combo(
 
     # 첫 거래일은 전일 종가 신호를 사용해 당일 시초가에 첫 진입한다.
     for exec_idx in range(1, len(backtest_days)):
-        signal_day = backtest_days[exec_idx - 1]
-        exec_day = backtest_days[exec_idx]
-        close_today = close_frame.loc[signal_day]
-        portfolio_value_local = cash + sum(
-            int(shares.get(t, 0)) * float(close_today.get(t, np.nan) or 0.0)
-            for t in shares
-            if not pd.isna(close_today.get(t, np.nan))
-        )
+        signal_idx = exec_idx - 1
+        close_today = close_values[signal_idx]
+        priced_mask = ~np.isnan(close_today)
+        portfolio_value_local = cash + float(np.dot(shares[priced_mask], close_today[priced_mask]))
 
-        # 점수 계산 (공통 엔진이 만든 composite 프레임에서 해당 일자 행을 사용).
-        composite = composite_frame.loc[signal_day].copy()
-
+        composite_today = composite_values[signal_idx].copy()
         if bonus:
-            for holding in shares:
-                if holding in composite.index and not pd.isna(composite.loc[holding]):
-                    composite.loc[holding] += bonus
+            held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
+            composite_today[held_bonus_mask] += bonus
 
-        valid = composite.dropna()
-        if valid.empty:
+        open_exec = open_values[exec_idx]
+        valid_mask = ~np.isnan(composite_today) & ~np.isnan(open_exec) & (open_exec > 0)
+        valid_idx = np.flatnonzero(valid_mask)
+        if valid_idx.size == 0:
             continue
 
-        # 체결일 시초가가 존재하는 티커만 대상 후보로 삼는다 (거래정지/데이터 결측 방지).
-        open_exec = open_frame.loc[exec_day]
-        tradable_mask = open_exec.reindex(valid.index).notna() & (
-            open_exec.reindex(valid.index) > 0
-        )
-        valid = valid[tradable_mask]
-        if valid.empty:
+        # 동점 처리: 점수 desc → ticker asc(컬럼 순서가 이미 ticker asc).
+        # 전체 정렬 대신 상위 top_n 후보만 partial sort로 추린 뒤 최종 정렬한다.
+        valid_scores = composite_today[valid_idx]
+        target_count = min(top_n, valid_idx.size)
+        if target_count <= 0:
             continue
-
-        # 동점 처리: 점수 desc → ticker asc
-        target_df = valid.reset_index()
-        target_df.columns = ["ticker", "score"]
-        target_df = target_df.sort_values(
-            by=["score", "ticker"], ascending=[False, True], kind="mergesort"
-        )
-        target_set = set(target_df["ticker"].head(top_n).tolist())
-        current_set = set(shares.keys())
-
-        to_sell = current_set - target_set
-        to_buy = target_set - current_set
+        if target_count < valid_idx.size:
+            top_slice = np.argpartition(-valid_scores, target_count - 1)[:target_count]
+            candidate_idx = valid_idx[top_slice]
+            candidate_scores = valid_scores[top_slice]
+        else:
+            candidate_idx = valid_idx
+            candidate_scores = valid_scores
+        candidate_order = np.lexsort((candidate_idx, -candidate_scores))
+        target_idx = candidate_idx[candidate_order]
+        target_mask = np.zeros_like(valid_mask, dtype=bool)
+        target_mask[target_idx] = True
+        held_mask = shares > 0
+        to_sell_idx = np.flatnonzero(held_mask & ~target_mask)
+        to_buy_idx = target_idx[shares[target_idx] == 0]
 
         # 신호 시점 기준 총 자산 (= 목표 비중 계산용). 매수/매도는 현지 통화로 수행.
         total_equity_signal = portfolio_value_local
 
         # 1) 매도 먼저
-        for ticker in to_sell:
-            raw_open_price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(raw_open_price) or raw_open_price <= 0:
+        for ticker_idx in to_sell_idx:
+            raw_open_price = float(open_exec[ticker_idx])
+            if np.isnan(raw_open_price) or raw_open_price <= 0:
                 # 매도 불가 → 보유 유지
                 continue
             price = raw_open_price * (1.0 - sell_slippage)
-            n = int(shares.pop(ticker))
+            n = int(shares[ticker_idx])
+            shares[ticker_idx] = 0
             cash += n * price
             trade_count += 1
 
         # 2) 매수 (방식 A': 신규 진입 K개에 "slot 상한 ∧ cash/K" 균등 배분 → 잔액은 고점수 순 추가 소진)
-        if not to_buy:
-            close_exec = close_frame.loc[exec_day]
-            portfolio_value_local = cash + sum(
-                int(shares.get(t, 0)) * float(close_exec.get(t, np.nan) or 0.0)
-                for t in shares
-                if not pd.isna(close_exec.get(t, np.nan))
-            )
-            fx_today = float(fx_series.loc[exec_day])
+        if to_buy_idx.size == 0:
+            close_exec = close_values[exec_idx]
+            priced_exec_mask = ~np.isnan(close_exec)
+            portfolio_value_local = cash + float(np.dot(shares[priced_exec_mask], close_exec[priced_exec_mask]))
+            fx_today = float(fx_values[exec_idx])
             value_curve.append(portfolio_value_local * fx_today)
             continue
 
-        # 신규 진입 종목을 점수 내림차순 → 티커 오름차순으로 정렬 (동점 결정론적 처리).
-        new_entrants_df = target_df[target_df["ticker"].isin(to_buy)]
-        new_entrants = new_entrants_df["ticker"].tolist()
-        k_new = len(new_entrants)
-        if k_new == 0:
-            continue
-
         slot_target = total_equity_signal / float(top_n)
-        per_new_budget = min(slot_target, cash / k_new) if cash > 0 else 0.0
+        per_new_budget = min(slot_target, cash / float(to_buy_idx.size)) if cash > 0 else 0.0
 
         # 2-1) 균등 1차 배분
-        for ticker in new_entrants:
-            raw_open_price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(raw_open_price) or raw_open_price <= 0:
+        for ticker_idx in to_buy_idx:
+            raw_open_price = float(open_exec[ticker_idx])
+            if np.isnan(raw_open_price) or raw_open_price <= 0:
                 continue
             price = raw_open_price * (1.0 + buy_slippage)
             buy_budget = min(cash, per_new_budget)
@@ -341,19 +346,19 @@ def _simulate_one_combo(
                 continue
             cost = n_shares * price
             cash -= cost
-            shares[ticker] = shares.get(ticker, 0) + n_shares
+            shares[ticker_idx] += n_shares
             trade_count += 1
 
         # 2-2) 단주 매수로 남은 잔액 → 고점수 신규 종목부터 한 주씩 추가 소진
-        for ticker in new_entrants:
+        for ticker_idx in to_buy_idx:
             if cash <= 0:
                 break
-            raw_open_price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(raw_open_price) or raw_open_price <= 0:
+            raw_open_price = float(open_exec[ticker_idx])
+            if np.isnan(raw_open_price) or raw_open_price <= 0:
                 continue
             price = raw_open_price * (1.0 + buy_slippage)
             # slot_target 을 이미 채웠는지 확인 (몰빵 방지).
-            current_position_value = shares.get(ticker, 0) * price
+            current_position_value = float(shares[ticker_idx]) * price
             remaining_slot_budget = max(0.0, slot_target - current_position_value)
             if remaining_slot_budget <= 0:
                 continue
@@ -363,24 +368,20 @@ def _simulate_one_combo(
                 continue
             cost = extra_shares * price
             cash -= cost
-            shares[ticker] = shares.get(ticker, 0) + extra_shares
+            shares[ticker_idx] += extra_shares
 
-        close_exec = close_frame.loc[exec_day]
-        portfolio_value_local = cash + sum(
-            int(shares.get(t, 0)) * float(close_exec.get(t, np.nan) or 0.0)
-            for t in shares
-            if not pd.isna(close_exec.get(t, np.nan))
-        )
-        fx_today = float(fx_series.loc[exec_day])
+        close_exec = close_values[exec_idx]
+        priced_exec_mask = ~np.isnan(close_exec)
+        portfolio_value_local = cash + float(np.dot(shares[priced_exec_mask], close_exec[priced_exec_mask]))
+        fx_today = float(fx_values[exec_idx])
         value_curve.append(portfolio_value_local * fx_today)
 
     if not value_curve:
         return 0.0, 0.0, 0.0, 0
 
-    exec_days = backtest_days[1 : 1 + len(value_curve)]
-    values = pd.Series(value_curve, index=exec_days)
-    start_val = initial_cash_local * float(fx_series.iloc[0])
-    end_val = values.iloc[-1]
+    values = np.asarray(value_curve, dtype=np.float64)
+    start_val = initial_cash_local * float(fx_values[0])
+    end_val = float(values[-1])
     total_return_pct = (end_val / start_val - 1.0) * 100.0 if start_val > 0 else 0.0
 
     n_days = max(1, len(backtest_days) - 1)
@@ -390,11 +391,10 @@ def _simulate_one_combo(
     else:
         cagr_pct = 0.0
 
-    baseline = pd.Series([start_val], index=[backtest_days[0]])
-    drawdown_base = pd.concat([baseline, values])
-    running_max = drawdown_base.cummax()
+    drawdown_base = np.concatenate(([start_val], values))
+    running_max = np.maximum.accumulate(drawdown_base)
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
-    mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
+    mdd_pct = float(np.min(drawdown)) if drawdown.size else 0.0
 
     return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count)
 
@@ -1315,10 +1315,19 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     eligibility_win = eligibility_frame.loc[backtest_days]
     open_win = open_frame.loc[backtest_days]
     close_win = close_frame.loc[backtest_days]
+    ticker_columns = list(open_win.columns)
+    percentile_by_spec_values = {
+        key: pf.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
+        for key, pf in percentile_by_spec_win.items()
+    }
+    eligibility_values = eligibility_win.reindex(columns=ticker_columns).to_numpy(dtype=bool, copy=True)
+    open_values = open_win.to_numpy(dtype=np.float64, copy=True)
+    close_values = close_win.to_numpy(dtype=np.float64, copy=True)
 
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
     fx_win = fx_series.loc[backtest_days]
+    fx_values = fx_win.to_numpy(dtype=np.float64, copy=True)
     fx_start = float(fx_win.iloc[0])
     if fx_start <= 0:
         raise RuntimeError(f"시작일 환율이 비정상입니다: {fx_start}")
@@ -1428,13 +1437,13 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         processes=n_workers,
         initializer=_init_worker,
         initargs=(
-            percentile_by_spec_win,
-            eligibility_win,
-            open_win,
-            close_win,
+            percentile_by_spec_values,
+            eligibility_values,
+            open_values,
+            close_values,
             backtest_days,
             initial_cash_local,
-            fx_win,
+            fx_values,
             buy_slippage,
             sell_slippage,
         ),
