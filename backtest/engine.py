@@ -213,24 +213,19 @@ def _simulate_one_combo(
     cash = float(initial_cash_local)
 
     value_curve: list[float] = []
+    if len(backtest_days) < 2:
+        return 0.0, 0.0, 0.0
 
-    # 마지막 날 외의 모든 거래일에서 신호 발생 가능
-    for idx, signal_day in enumerate(backtest_days):
+    # 첫 거래일은 전일 종가 신호를 사용해 당일 시초가에 첫 진입한다.
+    for exec_idx in range(1, len(backtest_days)):
+        signal_day = backtest_days[exec_idx - 1]
+        exec_day = backtest_days[exec_idx]
         close_today = close_frame.loc[signal_day]
         portfolio_value_local = cash + sum(
             int(shares.get(t, 0)) * float(close_today.get(t, np.nan) or 0.0)
             for t in shares
             if not pd.isna(close_today.get(t, np.nan))
         )
-        fx_today = float(fx_series.loc[signal_day])
-        portfolio_value = portfolio_value_local * fx_today  # KRW 환산 평가액
-        value_curve.append(portfolio_value)
-
-        # 마지막 거래일에는 체결이 불가 → 관측만.
-        if idx == len(backtest_days) - 1:
-            break
-
-        exec_day = backtest_days[idx + 1]
 
         # 점수 계산 (공통 엔진이 만든 composite 프레임에서 해당 일자 행을 사용).
         composite = composite_frame.loc[signal_day].copy()
@@ -279,6 +274,14 @@ def _simulate_one_combo(
 
         # 2) 매수 (방식 A': 신규 진입 K개에 "slot 상한 ∧ cash/K" 균등 배분 → 잔액은 고점수 순 추가 소진)
         if not to_buy:
+            close_exec = close_frame.loc[exec_day]
+            portfolio_value_local = cash + sum(
+                int(shares.get(t, 0)) * float(close_exec.get(t, np.nan) or 0.0)
+                for t in shares
+                if not pd.isna(close_exec.get(t, np.nan))
+            )
+            fx_today = float(fx_series.loc[exec_day])
+            value_curve.append(portfolio_value_local * fx_today)
             continue
 
         # 신규 진입 종목을 점수 내림차순 → 티커 오름차순으로 정렬 (동점 결정론적 처리).
@@ -326,23 +329,35 @@ def _simulate_one_combo(
             cash -= cost
             shares[ticker] = shares.get(ticker, 0) + extra_shares
 
+        close_exec = close_frame.loc[exec_day]
+        portfolio_value_local = cash + sum(
+            int(shares.get(t, 0)) * float(close_exec.get(t, np.nan) or 0.0)
+            for t in shares
+            if not pd.isna(close_exec.get(t, np.nan))
+        )
+        fx_today = float(fx_series.loc[exec_day])
+        value_curve.append(portfolio_value_local * fx_today)
+
     if not value_curve:
         return 0.0, 0.0, 0.0
 
-    values = pd.Series(value_curve, index=backtest_days[: len(value_curve)])
-    start_val = values.iloc[0]
+    exec_days = backtest_days[1 : 1 + len(value_curve)]
+    values = pd.Series(value_curve, index=exec_days)
+    start_val = initial_cash_local * float(fx_series.iloc[0])
     end_val = values.iloc[-1]
     total_return_pct = (end_val / start_val - 1.0) * 100.0 if start_val > 0 else 0.0
 
-    n_days = max(1, len(values) - 1)
+    n_days = max(1, len(backtest_days) - 1)
     years = n_days / 252.0
     if start_val > 0 and end_val > 0 and years > 0:
         cagr_pct = (pow(end_val / start_val, 1.0 / years) - 1.0) * 100.0
     else:
         cagr_pct = 0.0
 
-    running_max = values.cummax()
-    drawdown = (values / running_max - 1.0) * 100.0
+    baseline = pd.Series([start_val], index=[backtest_days[0]])
+    drawdown_base = pd.concat([baseline, values])
+    running_max = drawdown_base.cummax()
+    drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
 
     return float(total_return_pct), float(cagr_pct), float(mdd_pct)
@@ -517,7 +532,7 @@ def _simulate_one_combo_details(
 ) -> list[str]:
     """상위 1개 조합의 거래일별 보유 상세 로그를 생성한다.
 
-    - 거래일 첫날은 초기 현금만 기록한다.
+    - 첫 체결일은 전 거래일 종가 신호를 사용해 시초가에 진입한다.
     - 각 실행일(exec_day)에는 현금 row를 먼저 기록한다.
     - 그 아래에 보유 종목, 당일 신규매수 종목, 당일 전량매도 종목을 함께 기록한다.
     - 보유일은 백테스트 거래일 기준으로 마지막 매수 후 경과일로 계산한다.
@@ -565,7 +580,7 @@ def _simulate_one_combo_details(
     ]
 
     cash = float(initial_cash_local)
-    period_start = backtest_days[0]
+    period_start = backtest_days[1]
     period_end = backtest_days[-1]
     fx_start = float(fx_series.loc[period_start])
     initial_cash_krw = initial_cash_local * fx_start
@@ -652,19 +667,9 @@ def _simulate_one_combo_details(
         lines.extend(render_table_eaw(headers, day_rows, aligns))
         lines.append("")
 
-    # 초기일: 현금만 보유
-    _append_day_section(
-        day=period_start,
-        held_rows=[],
-        sold_rows=[],
-        cash_local=cash,
-        total_equity_local=cash,
-        valuation_pnl_local=0.0,
-        valuation_cost_local=0.0,
-        note="초기 자금",
-    )
-
-    for idx, signal_day in enumerate(backtest_days):
+    for exec_idx in range(1, len(backtest_days)):
+        signal_day = backtest_days[exec_idx - 1]
+        exec_day = backtest_days[exec_idx]
         close_today = close_frame.loc[signal_day]
         portfolio_value_local = cash + sum(
             int(shares.get(t, 0)) * float(close_today.get(t, np.nan) or 0.0)
@@ -672,11 +677,6 @@ def _simulate_one_combo_details(
             if not pd.isna(close_today.get(t, np.nan))
         )
 
-        if idx == len(backtest_days) - 1:
-            break
-
-        exec_idx = idx + 1
-        exec_day = backtest_days[exec_idx]
         open_exec = open_frame.loc[exec_day]
         close_exec = close_frame.loc[exec_day]
 
@@ -1077,7 +1077,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     if len(backtest_days) < 2:
         raise RuntimeError("백테스트 기간 내 거래일이 부족합니다.")
 
-    period_start = backtest_days[0]
+    period_start = backtest_days[1]
     period_end = backtest_days[-1]
 
     # MA 타입/개월 유니크 집합 → signed percentile 사전계산
@@ -1115,12 +1115,12 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     initial_cash_local = float(initial_cash) / fx_start
     fx_symbol_display = _resolve_fx_symbol(country_code) or "-"
     logger.info(
-        "[%s] 환율: symbol=%s start=%.4f end=%.4f → 초기 현지자본 %,.2f",
+        "[%s] 환율: symbol=%s start=%.4f end=%.4f → 초기 현지자본 %s",
         pool_id,
         fx_symbol_display,
         fx_start,
         float(fx_win.iloc[-1]),
-        initial_cash_local,
+        f"{initial_cash_local:,.2f}",
     )
 
     # 조합 생성
