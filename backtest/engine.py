@@ -18,8 +18,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import BACKTEST_START_DATE, BACKTEST_INITIAL_KRW_AMOUNT, SLIPPAGE_CONFIG
-from config import TRADING_DAYS_PER_MONTH
+from config import BACKTEST_INITIAL_KRW_AMOUNT, BACKTEST_START_DATE, SLIPPAGE_CONFIG, TRADING_DAYS_PER_MONTH
 from core.strategy.scoring import (
     combine_rule_percentiles,
     compute_eligibility_mask,
@@ -291,8 +290,11 @@ def _simulate_one_combo(
             cash += n * price
             trade_count += 1
 
-        # 2) 매수 (방식 A': 신규 진입 K개에 "slot 상한 ∧ cash/K" 균등 배분 → 잔액은 고점수 순 추가 소진)
-        if to_buy_idx.size == 0:
+        # 2) 매수 (방식 S3): 신규 K개에 ``min(현금/K, 총자산/N)`` 씩 균등 단주 매수.
+        #    - 기존 보유 종목 절대 트리밍 없음 (상승 추세 보존).
+        #    - 1/N 슬롯 상한으로 한 종목 몰빵 차단.
+        #    - 잔액은 그대로 현금 보유 (모두 하락 시 자동 현금화).
+        if to_buy_idx.size == 0 or cash <= 0:
             close_exec = close_values[exec_idx]
             priced_exec_mask = ~np.isnan(close_exec)
             portfolio_value_local = cash + float(np.dot(shares[priced_exec_mask], close_exec[priced_exec_mask]))
@@ -301,9 +303,8 @@ def _simulate_one_combo(
             continue
 
         slot_target = total_equity_signal / float(top_n)
-        per_new_budget = min(slot_target, cash / float(to_buy_idx.size)) if cash > 0 else 0.0
+        per_new_budget = min(slot_target, cash / float(to_buy_idx.size))
 
-        # 2-1) 균등 1차 배분
         for ticker_idx in to_buy_idx:
             raw_open_price = float(open_exec[ticker_idx])
             if np.isnan(raw_open_price) or raw_open_price <= 0:
@@ -319,27 +320,6 @@ def _simulate_one_combo(
             cash -= cost
             shares[ticker_idx] += n_shares
             trade_count += 1
-
-        # 2-2) 단주 매수로 남은 잔액 → 고점수 신규 종목부터 한 주씩 추가 소진
-        for ticker_idx in to_buy_idx:
-            if cash <= 0:
-                break
-            raw_open_price = float(open_exec[ticker_idx])
-            if np.isnan(raw_open_price) or raw_open_price <= 0:
-                continue
-            price = raw_open_price * (1.0 + buy_slippage)
-            # slot_target 을 이미 채웠는지 확인 (몰빵 방지).
-            current_position_value = float(shares[ticker_idx]) * price
-            remaining_slot_budget = max(0.0, slot_target - current_position_value)
-            if remaining_slot_budget <= 0:
-                continue
-            extra_budget = min(cash, remaining_slot_budget)
-            extra_shares = int(extra_budget // price)
-            if extra_shares <= 0:
-                continue
-            cost = extra_shares * price
-            cash -= cost
-            shares[ticker_idx] += extra_shares
 
         close_exec = close_values[exec_idx]
         priced_exec_mask = ~np.isnan(close_exec)
@@ -948,57 +928,32 @@ def _simulate_one_combo_details(
                 }
             )
 
-        if to_buy:
+        # 매수 (방식 S3): 신규 K개에 ``min(현금/K, 총자산/N)`` 씩 균등 단주 매수. 끝.
+        if to_buy and cash > 0:
             new_entrants_df = target_df[target_df["ticker"].isin(to_buy)]
             new_entrants = new_entrants_df["ticker"].tolist()
             k_new = len(new_entrants)
-            slot_target = total_equity_signal / float(top_n)
-            per_new_budget = min(slot_target, cash / k_new) if (k_new > 0 and cash > 0) else 0.0
+            if k_new > 0:
+                slot_target = total_equity_signal / float(top_n)
+                per_new_budget = min(slot_target, cash / k_new)
 
-            for ticker in new_entrants:
-                raw_open_price = float(open_exec.get(ticker, np.nan))
-                if pd.isna(raw_open_price) or raw_open_price <= 0:
-                    continue
-                price = raw_open_price * (1.0 + buy_slippage)
-                buy_budget = min(cash, per_new_budget)
-                if buy_budget <= 0:
-                    continue
-                n_shares = int(buy_budget // price)
-                if n_shares <= 0:
-                    continue
-                cost = n_shares * price
-                cash -= cost
-                shares[ticker] = shares.get(ticker, 0) + n_shares
-                avg_costs[ticker] = price
-                last_buy_indices[ticker] = exec_idx
-                buy_messages[ticker] = "신규 편입"
-
-            for ticker in new_entrants:
-                if cash <= 0:
-                    break
-                raw_open_price = float(open_exec.get(ticker, np.nan))
-                if pd.isna(raw_open_price) or raw_open_price <= 0:
-                    continue
-                price = raw_open_price * (1.0 + buy_slippage)
-                current_position_value = shares.get(ticker, 0) * price
-                remaining_slot_budget = max(0.0, slot_target - current_position_value)
-                if remaining_slot_budget <= 0:
-                    continue
-                extra_budget = min(cash, remaining_slot_budget)
-                extra_shares = int(extra_budget // price)
-                if extra_shares <= 0:
-                    continue
-                cost = extra_shares * price
-                old_qty = int(shares.get(ticker, 0))
-                old_avg = float(avg_costs.get(ticker, price))
-                new_qty = old_qty + extra_shares
-                shares[ticker] = new_qty
-                avg_costs[ticker] = ((old_qty * old_avg) + cost) / new_qty if new_qty > 0 else price
-                last_buy_indices[ticker] = exec_idx
-                cash -= cost
-                previous_message = buy_messages.get(ticker, "신규 편입")
-                if "잔액 추가 소진" not in previous_message:
-                    buy_messages[ticker] = f"{previous_message} + 잔액 추가 소진"
+                for ticker in new_entrants:
+                    raw_open_price = float(open_exec.get(ticker, np.nan))
+                    if pd.isna(raw_open_price) or raw_open_price <= 0:
+                        continue
+                    price = raw_open_price * (1.0 + buy_slippage)
+                    buy_budget = min(cash, per_new_budget)
+                    if buy_budget <= 0:
+                        continue
+                    n_shares = int(buy_budget // price)
+                    if n_shares <= 0:
+                        continue
+                    cost = n_shares * price
+                    cash -= cost
+                    shares[ticker] = shares.get(ticker, 0) + n_shares
+                    avg_costs[ticker] = price
+                    last_buy_indices[ticker] = exec_idx
+                    buy_messages[ticker] = "신규 편입"
 
         held_rows: list[dict[str, str]] = []
         total_equity_close_local = cash + sum(
