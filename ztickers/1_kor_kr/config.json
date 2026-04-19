@@ -4,17 +4,10 @@
     "country_code": "kor",
     "currency": "KRW",
     "type_source": "Naver",
-    "holding_bonus_score": 10,
-    "MA_RULES": [
-        {
-            "order": 1,
-            "MA_TYPE": "SMA",
-            "MA_MONTHS": 6
-        },
-        {
-            "order": 2,
-            "MA_TYPE": "ALMA",
-            "MA_MONTHS": 6
-        }
-    ]
+    "TOP_N_HOLD": 5,
+    "HOLDING_BONUS_SCORE": 10,
+    "FIRST_MA_TYPE": "SMA",
+    "FIRST_MA_MONTHS": 6,
+    "SECOND_MA_TYPE": "ALMA",
+    "SECOND_MA_MONTHS": 6
 }

@@ -5,7 +5,6 @@ from fastapi.responses import JSONResponse
 
 from utils.env import load_env_if_present
 
-from .routes.backtest import router as backtest_router
 from .routes.assets import router as assets_router
 from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
@@ -54,7 +53,6 @@ async def generic_exception_handler(_request: Request, exc: Exception) -> JSONRe
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-app.include_router(backtest_router)
 app.include_router(assets_router)
 app.include_router(holdings_router)
 app.include_router(holdings_components_router)
