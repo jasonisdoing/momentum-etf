@@ -399,6 +399,69 @@ def _simulate_one_combo(
     return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count)
 
 
+def _simulate_benchmark_buy_and_hold(
+    *,
+    ticker: str,
+    open_frame: pd.DataFrame,
+    close_frame: pd.DataFrame,
+    backtest_days: list[pd.Timestamp],
+    fx_series: pd.Series,
+    initial_cash_local: float,
+    buy_slippage: float,
+) -> tuple[float, float, float, int]:
+    """벤치마크 1종목을 첫 체결일 시초가에 1회 매수 후 끝까지 보유한다."""
+    if len(backtest_days) < 2:
+        raise RuntimeError("벤치마크 계산에 필요한 거래일이 부족합니다.")
+    if ticker not in open_frame.columns or ticker not in close_frame.columns:
+        raise RuntimeError(f"벤치마크 티커 '{ticker}' 가격 데이터가 없습니다.")
+
+    first_exec_day = backtest_days[1]
+    raw_open_price = float(open_frame.at[first_exec_day, ticker])
+    if pd.isna(raw_open_price) or raw_open_price <= 0:
+        raise RuntimeError(
+            f"벤치마크 '{ticker}'의 첫 체결일({first_exec_day.strftime('%Y-%m-%d')}) 시가가 비정상입니다."
+        )
+
+    entry_price = raw_open_price * (1.0 + buy_slippage)
+    shares = int(initial_cash_local // entry_price)
+    if shares <= 0:
+        raise RuntimeError(
+            f"벤치마크 '{ticker}'를 초기 자금으로 1주도 매수할 수 없습니다."
+        )
+
+    cash = float(initial_cash_local) - (shares * entry_price)
+    value_curve: list[float] = []
+    exec_days = backtest_days[1:]
+    for exec_day in exec_days:
+        close_price = float(close_frame.at[exec_day, ticker])
+        if pd.isna(close_price) or close_price <= 0:
+            raise RuntimeError(
+                f"벤치마크 '{ticker}'의 종가가 비정상입니다: {exec_day.strftime('%Y-%m-%d')}"
+            )
+        fx_today = float(fx_series.loc[exec_day])
+        total_value_local = cash + (shares * close_price)
+        value_curve.append(total_value_local * fx_today)
+
+    values = pd.Series(value_curve, index=exec_days)
+    start_val = initial_cash_local * float(fx_series.iloc[0])
+    end_val = values.iloc[-1]
+    total_return_pct = (end_val / start_val - 1.0) * 100.0 if start_val > 0 else 0.0
+
+    n_days = max(1, len(backtest_days) - 1)
+    years = n_days / 252.0
+    if start_val > 0 and end_val > 0 and years > 0:
+        cagr_pct = (pow(end_val / start_val, 1.0 / years) - 1.0) * 100.0
+    else:
+        cagr_pct = 0.0
+
+    baseline = pd.Series([start_val], index=[backtest_days[0]])
+    drawdown_base = pd.concat([baseline, values])
+    running_max = drawdown_base.cummax()
+    drawdown = (drawdown_base / running_max - 1.0) * 100.0
+    mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
+    return float(total_return_pct), float(cagr_pct), float(mdd_pct), 1
+
+
 # --------------------------- 결과 기록 --------------------------- #
 
 
@@ -406,6 +469,7 @@ def _write_results_file(
     *,
     out_path: Path,
     results: list[dict[str, Any]],
+    benchmark_result: dict[str, Any] | None,
     pool_id: str,
     months: int,
     initial_cash: float,
@@ -426,6 +490,11 @@ def _write_results_file(
 ) -> None:
     """결과를 로그 파일에 기록한다. 중간/최종 모두 동일 형식."""
     sorted_results = sorted(results, key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
+
+    def _render_full_width_row(border_line: str, text: str) -> str:
+        """테이블 전체 너비를 차지하는 단일 텍스트 row를 렌더링한다."""
+        inner_width = len(border_line) - 4
+        return f"| {text.ljust(inner_width)} |"
 
     lines: list[str] = []
     h = elapsed_sec // 3600
@@ -486,7 +555,24 @@ def _write_results_file(
         "Trades",
     ]
     aligns = ["left", "left", "left", "left", "left", "left", "right", "right", "right", "right"]
+    benchmark_metric_row: list[str] | None = None
+    if benchmark_result is not None:
+        benchmark_metric_row = [
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+            "-",
+            f"{benchmark_result['TOTAL_RETURN_PCT']:.2f}",
+            f"{benchmark_result['CAGR_PCT']:.2f}",
+            f"{benchmark_result['MDD_PCT']:.2f}",
+            str(benchmark_result["TRADES"]),
+        ]
+
     formatted_rows: list[list[str]] = []
+    if benchmark_metric_row is not None:
+        formatted_rows.append(benchmark_metric_row)
     for r in top_rows:
         formatted_rows.append(
             [
@@ -503,7 +589,18 @@ def _write_results_file(
             ]
         )
     table_lines = render_table_eaw(headers, formatted_rows, aligns)
-    lines.extend(table_lines)
+    lines.extend(table_lines[:3])
+    next_row_index = 3
+    if benchmark_result is not None:
+        benchmark_config_line = (
+            f'"BENCHMARK": {{"ticker": "{benchmark_result["ticker"]}", '
+            f'"name": "{benchmark_result["name"]}"}}'
+        )
+        lines.append(_render_full_width_row(table_lines[0], benchmark_config_line))
+        lines.append(table_lines[next_row_index])
+        lines.append(table_lines[0])
+        next_row_index += 1
+    lines.extend(table_lines[next_row_index:])
     if len(sorted_results) > top_limit:
         lines.append(f"... (완료 {done_count}개 중 상위 {top_limit}개 표시)")
 
@@ -1227,6 +1324,33 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         sell_slippage * 100.0,
     )
 
+    benchmark_result: dict[str, Any] | None = None
+    benchmark_config = cfg.get("BENCHMARK")
+    if benchmark_config is not None:
+        benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
+        benchmark_name = str(benchmark_config.get("name") or "").strip()
+        if not benchmark_ticker or not benchmark_name:
+            raise ValueError(
+                f"BACKTEST_CONFIG['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
+            )
+        benchmark_total_ret, benchmark_cagr, benchmark_mdd, benchmark_trades = _simulate_benchmark_buy_and_hold(
+            ticker=benchmark_ticker,
+            open_frame=open_win,
+            close_frame=close_win,
+            backtest_days=backtest_days,
+            fx_series=fx_win,
+            initial_cash_local=initial_cash_local,
+            buy_slippage=buy_slippage,
+        )
+        benchmark_result = {
+            "ticker": benchmark_ticker,
+            "name": benchmark_name,
+            "TOTAL_RETURN_PCT": benchmark_total_ret,
+            "CAGR_PCT": benchmark_cagr,
+            "MDD_PCT": benchmark_mdd,
+            "TRADES": benchmark_trades,
+        }
+
     # 조합 생성
     combos = list(
         itertools.product(
@@ -1266,6 +1390,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         "period_start": period_start,
         "period_end": period_end,
         "n_workers": n_workers,
+        "benchmark_result": benchmark_result,
     }
 
     logger.info(

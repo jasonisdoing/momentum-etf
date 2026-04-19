@@ -176,6 +176,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
     },
     "kor_us": {
+        "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -184,6 +185,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
     },
     "aus": {
+        "BENCHMARK": {"ticker": "VOO", "name": "뱅가드 S&P500"},
         "TOP_N_HOLD": [6, 7, 8],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -192,6 +194,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
     },
     "us": {
+        "BENCHMARK": {"ticker": "VOO", "name": "뱅가드 S&P500"},
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -200,6 +203,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24],
     },
     "kor": {
+        "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
