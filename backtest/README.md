@@ -60,6 +60,7 @@ BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 - `backtest/results/<pool>-backtest_<YYYY-MM-DD>.log`
   - 전체 조합 결과를 CAGR 내림차순으로 기록한다.
   - 실행 중에는 100건마다 중간 결과를 갱신한다.
+  - 종목풀 설정에 `BENCHMARK`가 있으면, 결과 테이블 헤더 바로 아래에 벤치마크 설정 1줄과 수익률 비교 1줄을 함께 기록한다.
 - `backtest/results/<pool>-backtest_details_<YYYY-MM-DD>.log`
   - 최종 1등 조합만 다시 1회 시뮬레이션하여 거래일별 상세 보유 내역을 기록한다.
   - 각 거래일 표의 첫 row는 항상 CASH이며, 당일 SELL 종목도 함께 남긴다. 상태값은 CASH, HOLD, BUY, SELL, WAIT 로 표기된다. (WAIT은 TOP_N에 들었으나 현금 부족 등으로 미배분된 종목)
