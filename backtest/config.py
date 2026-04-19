@@ -3,10 +3,36 @@
 from __future__ import annotations
 
 
+BACKTEST_MONTHS = 12
+INITIAL_KRW_AMOUNT = 100_000_000
+
+# 슬리피지는 bp(1bp = 0.01%) 단위로 입력한다.
+SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
+    "kor_kr": {
+        "BUY_BPS": 0.5,
+        "SELL_BPS": 0.5,
+    },
+    "kor_us": {
+        "BUY_BPS": 0.5,
+        "SELL_BPS": 0.5,
+    },
+    "aus": {
+        "BUY_BPS": 1.0,
+        "SELL_BPS": 1.0,
+    },
+    "us": {
+        "BUY_BPS": 0.5,
+        "SELL_BPS": 0.5,
+    },
+    "kor": {
+        "BUY_BPS": 0.5,
+        "SELL_BPS": 0.5,
+    },
+}
+
+
 BACKTEST_CONFIG: dict[str, dict] = {
     "kor_kr": {
-        "BACKTEST_MONTHS": 12,
-        "INITIAL_KRW_AMOUNT": 100_000_000,
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -15,8 +41,6 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     "kor_us": {
-        "BACKTEST_MONTHS": 12,
-        "INITIAL_KRW_AMOUNT": 100_000_000,
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -25,8 +49,6 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     "aus": {
-        "BACKTEST_MONTHS": 12,
-        "INITIAL_KRW_AMOUNT": 100_000_000,
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -35,8 +57,6 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     "us": {
-        "BACKTEST_MONTHS": 12,
-        "INITIAL_KRW_AMOUNT": 100_000_000,
         "TOP_N_HOLD": [3, 4, 5, 6, 7],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],
@@ -45,8 +65,6 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
     },
     "kor": {
-        "BACKTEST_MONTHS": 12,
-        "INITIAL_KRW_AMOUNT": 100_000_000,
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100],
         "FIRST_MA_TYPE": ["SMA"],

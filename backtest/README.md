@@ -31,6 +31,27 @@ python backtest/run.py kor_kr
 
 세부 스윕 범위는 [config.py](/Users/jason/DEV/momentum-etf/backtest/config.py)의 `BACKTEST_CONFIG`에서 관리한다.
 
+공통 전역값은 같은 파일 상단에서 별도로 관리한다.
+
+```python
+BACKTEST_MONTHS = 12
+INITIAL_KRW_AMOUNT = 100_000_000
+```
+
+종목풀별 슬리피지 설정은 같은 파일의 `SLIPPAGE_CONFIG`에서 별도로 관리한다.
+
+```python
+"kor_kr": {
+    "BUY_BPS": 0.0,
+    "SELL_BPS": 0.0,
+}
+```
+
+- `BUY_BPS`: 매수 슬리피지
+- `SELL_BPS`: 매도 슬리피지
+- 단위는 bp(`1bp = 0.01%`)
+- 현재는 **설정만 선언된 상태**이며, 엔진 계산에는 아직 연결하지 않았다.
+
 ## 출력 파일
 
 - `ztickers/<order>_<pool>/results/backtest_<YYYY-MM-DD>.log`
