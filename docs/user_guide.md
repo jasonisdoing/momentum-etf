@@ -29,6 +29,9 @@ npm run dev
 *   `SLACK_BOT_TOKEN`: 알림을 봇을 통해 발송하기 위한 슬랙 봇 토큰
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
+### 계좌 설정 (`accounts.json`)
+계좌 정의는 루트 `accounts.json` 한 파일에서 관리합니다. 각 계좌는 `account_id`, `order`, `name`, `icon`, `country_code`, `ticker_codes`, `currency`를 명시적으로 가져야 하며, 필요하면 `URL`을 함께 설정합니다.
+
 ### 종목풀 설정 (`ztickers/<order>_<ticker_type>/config.json`)
 종목풀은 등록된 전체 종목을 유니버스로 사용합니다. `MA_RULES`의 각 규칙별 추세를 계산한 뒤, 각 규칙을 `0` 기준 상승/하락으로 나누고 구간 내 상대 순위(백분위)를 부호를 유지한 채 합산한 `점수` 내림차순으로 순위를 보여줍니다. 버킷은 분류와 표시용 참고 정보입니다.
 종목풀 `country_code`는 현재 `kor`, `au`, `us`를 사용합니다. 계좌 `country_code`는 `kor` 또는 `au`만 사용합니다.
