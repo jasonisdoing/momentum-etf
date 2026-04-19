@@ -1328,7 +1328,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     value={String(heldBonusScore)}
                     onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
                   >
-                    {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
+                    {Array.from({ length: 41 }, (_, index) => index * 5).map((score) => (
                       <option key={score} value={score}>
                         {score}
                       </option>
