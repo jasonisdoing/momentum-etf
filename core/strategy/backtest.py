@@ -23,7 +23,7 @@ from core.strategy.scoring import (
     compute_rule_percentile_frame,
 )
 from utils.cache_utils import load_cached_frames_bulk_with_fallback
-from utils.data_loader import get_trading_days
+from utils.data_loader import get_exchange_rate_series, get_trading_days
 from utils.report import render_table_eaw
 from utils.settings_loader import TICKERS_ROOT, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
@@ -73,6 +73,47 @@ def _select_open_column(columns: list[str]) -> str:
     raise ValueError(f"OHLCV 프레임에서 시가 컬럼을 찾을 수 없습니다: {columns}")
 
 
+def _resolve_fx_symbol(country_code: str) -> str | None:
+    """country_code → Yahoo Finance FX 심볼. ``kor`` 은 FX 불필요."""
+    code = str(country_code or "").strip().lower()
+    if code in ("kor", "kr"):
+        return None
+    if code == "us":
+        return "KRW=X"
+    if code in ("au", "aus"):
+        return "AUDKRW=X"
+    raise ValueError(f"알 수 없는 country_code 입니다: {country_code!r}")
+
+
+def _load_fx_series(
+    country_code: str,
+    calendar_days: list[pd.Timestamp],
+) -> pd.Series:
+    """백테스트 캘린더에 맞춰 현지화/KRW 환율 시리즈를 생성한다.
+
+    - 국내 풀(kor) 은 전부 1.0 (환전 없음).
+    - 해외 풀은 yfinance 환율을 ffill + bfill 로 거래일에 정렬.
+    """
+    index = pd.DatetimeIndex([pd.Timestamp(d).normalize() for d in calendar_days])
+    symbol = _resolve_fx_symbol(country_code)
+    if symbol is None:
+        return pd.Series(1.0, index=index, dtype=float)
+
+    start = index.min().strftime("%Y-%m-%d")
+    end = index.max().strftime("%Y-%m-%d")
+    raw = get_exchange_rate_series(start, end, symbol=symbol, allow_partial=True)
+    if raw is None or raw.empty:
+        raise RuntimeError(f"환율 데이터를 가져오지 못했습니다: symbol={symbol} {start}~{end}")
+
+    rates = raw.copy()
+    rates.index = pd.to_datetime(rates.index).normalize()
+    rates = rates[~rates.index.duplicated(keep="last")].sort_index()
+    rates = rates.reindex(index).ffill().bfill()
+    if rates.isna().any():
+        raise RuntimeError(f"환율 정렬 후 NaN 이 남았습니다: symbol={symbol}")
+    return rates.astype(float)
+
+
 # -------------------- 워커 프로세스 (병렬 실행) -------------------- #
 
 
@@ -83,7 +124,8 @@ _W_ELIG: pd.DataFrame = pd.DataFrame()
 _W_OPEN: pd.DataFrame = pd.DataFrame()
 _W_CLOSE: pd.DataFrame = pd.DataFrame()
 _W_DAYS: list[pd.Timestamp] = []
-_W_CASH: float = 0.0
+_W_CASH_LOCAL: float = 0.0
+_W_FX: pd.Series = pd.Series(dtype=float)
 
 
 def _init_worker(
@@ -92,16 +134,18 @@ def _init_worker(
     open_win: pd.DataFrame,
     close_win: pd.DataFrame,
     bt_days: list[pd.Timestamp],
-    init_cash: float,
+    init_cash_local: float,
+    fx_win: pd.Series,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
-    global _W_PCT, _W_ELIG, _W_OPEN, _W_CLOSE, _W_DAYS, _W_CASH  # noqa: PLW0603
+    global _W_PCT, _W_ELIG, _W_OPEN, _W_CLOSE, _W_DAYS, _W_CASH_LOCAL, _W_FX  # noqa: PLW0603
     _W_PCT = pct_specs
     _W_ELIG = eligibility_win
     _W_OPEN = open_win
     _W_CLOSE = close_win
     _W_DAYS = bt_days
-    _W_CASH = init_cash
+    _W_CASH_LOCAL = init_cash_local
+    _W_FX = fx_win
 
 
 def _run_single_combo(
@@ -115,13 +159,14 @@ def _run_single_combo(
         _W_ELIG,
     )
     total_ret, cagr, mdd = _simulate_one_combo(
-        initial_cash=_W_CASH,
+        initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
         bonus=bonus,
         composite_frame=composite,
         open_frame=_W_OPEN,
         close_frame=_W_CLOSE,
         backtest_days=_W_DAYS,
+        fx_series=_W_FX,
     )
     return {
         "TOP_N_HOLD": top_n,
@@ -141,32 +186,38 @@ def _run_single_combo(
 
 def _simulate_one_combo(
     *,
-    initial_cash: float,
+    initial_cash_local: float,
     top_n: int,
     bonus: float,
     composite_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
     close_frame: pd.DataFrame,
     backtest_days: list[pd.Timestamp],
+    fx_series: pd.Series,
 ) -> tuple[float, float, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
+    모든 체결/보유/현금은 현지 통화로 관리한다. 평가 일자마다 당일 환율을 곱해
+    KRW 기준 value_curve 를 만들고 총수익률/CAGR/MDD 를 계산한다.
+
     Returns:
-        (total_return_pct, cagr_pct, mdd_pct)
+        (total_return_pct, cagr_pct, mdd_pct) — 모두 KRW 기준.
     """
     shares: dict[str, int] = {}
-    cash = float(initial_cash)
+    cash = float(initial_cash_local)
 
     value_curve: list[float] = []
 
     # 마지막 날 외의 모든 거래일에서 신호 발생 가능
     for idx, signal_day in enumerate(backtest_days):
         close_today = close_frame.loc[signal_day]
-        portfolio_value = cash + sum(
+        portfolio_value_local = cash + sum(
             int(shares.get(t, 0)) * float(close_today.get(t, np.nan) or 0.0)
             for t in shares
             if not pd.isna(close_today.get(t, np.nan))
         )
+        fx_today = float(fx_series.loc[signal_day])
+        portfolio_value = portfolio_value_local * fx_today  # KRW 환산 평가액
         value_curve.append(portfolio_value)
 
         # 마지막 거래일에는 체결이 불가 → 관측만.
@@ -208,8 +259,8 @@ def _simulate_one_combo(
         to_sell = current_set - target_set
         to_buy = target_set - current_set
 
-        # 신호 시점 기준 총 자산 (= 목표 비중 계산용)
-        total_equity_signal = portfolio_value
+        # 신호 시점 기준 총 자산 (= 목표 비중 계산용). 매수/매도는 현지 통화로 수행.
+        total_equity_signal = portfolio_value_local
 
         # 1) 매도 먼저
         for ticker in to_sell:
@@ -497,6 +548,21 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     open_win = open_frame.loc[backtest_days]
     close_win = close_frame.loc[backtest_days]
 
+    # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
+    fx_series = _load_fx_series(country_code, calendar_days)
+    fx_win = fx_series.loc[backtest_days]
+    fx_start = float(fx_win.iloc[0])
+    if fx_start <= 0:
+        raise RuntimeError(f"시작일 환율이 비정상입니다: {fx_start}")
+    # 첫날 KRW 초기자본을 현지통화로 환전해서 보유한다는 가정.
+    initial_cash_local = float(initial_cash) / fx_start
+    fx_symbol_display = _resolve_fx_symbol(country_code) or "-"
+    print(
+        f"[{pool_id}] 환율: symbol={fx_symbol_display} start={fx_start:.4f} "
+        f"end={float(fx_win.iloc[-1]):.4f} → 초기 현지자본 {initial_cash_local:,.2f}",
+        flush=True,
+    )
+
     # 조합 생성
     combos = list(
         itertools.product(
@@ -553,7 +619,15 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     with mp.Pool(
         processes=n_workers,
         initializer=_init_worker,
-        initargs=(percentile_by_spec_win, eligibility_win, open_win, close_win, backtest_days, initial_cash),
+        initargs=(
+            percentile_by_spec_win,
+            eligibility_win,
+            open_win,
+            close_win,
+            backtest_days,
+            initial_cash_local,
+            fx_win,
+        ),
     ) as pool:
         for i, result in enumerate(
             pool.imap_unordered(_run_single_combo, combos, chunksize=chunksize),
