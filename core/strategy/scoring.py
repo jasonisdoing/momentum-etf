@@ -1,6 +1,6 @@
 """RANK 전략 점수 계산 및 정규화 함수.
 
-랭킹(utils/rankings.py)과 백테스트(core/strategy/backtest.py)는 **반드시** 이 모듈의
+랭킹(utils/rankings.py)과 백테스트(backtest/engine.py)는 **반드시** 이 모듈의
 공통 엔진 함수를 통해서만 점수를 계산해야 한다. 점수식이 양쪽으로 갈라지면 백테스트 결과는
 의미가 없어진다.
 

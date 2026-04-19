@@ -1,0 +1,64 @@
+# 백테스트
+
+## 실행
+
+```bash
+python backtest/run.py kor_kr
+```
+
+가상환경을 명시하려면 아래처럼 실행한다.
+
+```bash
+./.venv/bin/python backtest/run.py kor_kr
+```
+
+## 대상 종목풀
+
+- `kor_kr`
+- `kor_us`
+- `aus`
+- `us`
+- `kor`
+
+## 스윕 대상 파라미터
+
+- `TOP_N_HOLD`
+- `HOLDING_BONUS_SCORE`
+- `FIRST_MA_TYPE`
+- `FIRST_MA_MONTHS`
+- `SECOND_MA_TYPE`
+- `SECOND_MA_MONTHS`
+
+세부 스윕 범위는 [config.py](/Users/jason/DEV/momentum-etf/backtest/config.py)의 `BACKTEST_CONFIG`에서 관리한다.
+
+## 출력 파일
+
+- `ztickers/<order>_<pool>/results/backtest_<YYYY-MM-DD>.log`
+  - 전체 조합 결과를 CAGR 내림차순으로 기록한다.
+  - 실행 중에는 100건마다 중간 결과를 갱신한다.
+- `ztickers/<order>_<pool>/results/backtest_details_<YYYY-MM-DD>.log`
+  - 최종 1등 조합만 다시 1회 시뮬레이션하여 거래일별 상세 보유 내역을 기록한다.
+  - 각 거래일 표의 첫 row는 항상 현금이며, 당일 전량매도 종목도 함께 남긴다.
+
+## 현재 백테스트 가정
+
+- 점수 역전 시 다음 거래일 시초가(Open)에 체결
+- 기존 보유 종목은 상위 N에 남아 있으면 비중을 줄이지 않음
+- 신규 진입은 `현금 우선 분할 진입 방식` 사용
+  - 매도 후 확보한 현금으로 신규 진입 종목에 1차 균등 배분
+  - 1차 배분 후 남는 잔액은 점수순으로 추가 소진하되, 종목당 `slot_target` 상한을 넘기지 않음
+- 매수는 단주만 허용하며, 남는 자금은 현금으로 유지
+- 수수료/슬리피지/세금 = 0
+- 상장폐지/거래정지 종목은 풀에 없는 것으로 간주
+- `HOLDING_BONUS_SCORE`는 백테스트 내부에서만 적용
+
+## 모듈 구조
+
+- [run.py](/Users/jason/DEV/momentum-etf/backtest/run.py)
+  - CLI 엔트리 포인트
+- [config.py](/Users/jason/DEV/momentum-etf/backtest/config.py)
+  - 종목풀별 스윕 설정
+- [engine.py](/Users/jason/DEV/momentum-etf/backtest/engine.py)
+  - 조합 실행, 시뮬레이션, 결과 파일 생성
+- [core/strategy/scoring.py](/Users/jason/DEV/momentum-etf/core/strategy/scoring.py)
+  - 랭킹과 백테스트가 공용으로 쓰는 점수 계산 엔진

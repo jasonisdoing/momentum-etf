@@ -1,6 +1,6 @@
 """모멘텀 ETF 파라미터 스윕 백테스트 엔진.
 
-``backtest.py`` 에서 호출되며, BACKTEST_CONFIG 를 인자로 받아 실행한다.
+``backtest/run.py`` 에서 호출되며, BACKTEST_CONFIG 를 인자로 받아 실행한다.
 멀티프로세스 병렬 실행을 지원하며, 실행 중에도 중간 결과를 파일에 주기적으로 기록한다.
 """
 
@@ -875,14 +875,14 @@ def _write_details_file(
 # ----------------------------- 메인 ----------------------------- #
 
 
-# 중간 결과 파일 갱신 주기 (초)
-_FLUSH_INTERVAL_SEC = 10
+# 중간 결과 파일/진행률 갱신 주기 (완료 조합 수)
+_FLUSH_EVERY_N_RESULTS = 100
 
 
 def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     """주어진 풀 ID 와 설정으로 파라미터 스윕 백테스트를 실행한다.
 
-    멀티프로세스 병렬 실행을 사용하며, 실행 중 ``_FLUSH_INTERVAL_SEC`` 초마다
+    멀티프로세스 병렬 실행을 사용하며, 실행 중 ``_FLUSH_EVERY_N_RESULTS`` 건마다
     중간 결과를 로그 파일에 갱신한다.
 
     Args:
@@ -1068,8 +1068,6 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     chunksize = max(1, total_combos // (n_workers * 4))
 
     results: list[dict[str, Any]] = []
-    last_flush_time = started_wall
-
     with mp.Pool(
         processes=n_workers,
         initializer=_init_worker,
@@ -1092,12 +1090,12 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             now = time.time()
 
             # 진행률 출력
-            if i % 50 == 0 or i == total_combos:
+            if i % _FLUSH_EVERY_N_RESULTS == 0 or i == total_combos:
                 elapsed = now - started_wall
                 print(f"  progress {i}/{total_combos} ({elapsed:.1f}s)", flush=True)
 
-            # 중간 결과 파일 갱신 (주기적)
-            if i < total_combos and (now - last_flush_time) >= _FLUSH_INTERVAL_SEC:
+            # 중간 결과 파일 갱신
+            if i < total_combos and i % _FLUSH_EVERY_N_RESULTS == 0:
                 _write_results_file(
                     out_path=out_path,
                     results=results,
@@ -1107,7 +1105,6 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
                     is_final=False,
                     **write_kwargs,
                 )
-                last_flush_time = now
 
     ended_wall = time.time()
     elapsed_sec = int(ended_wall - started_wall)
