@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
+import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
 type HoldingsRow = {
@@ -444,6 +445,16 @@ function reorderRowsByTickers(rows: HoldingsRow[], orderedTickers: string[]): Ho
 
 const ASSETS_WEIGHT_TEXT_COLOR = "#7952b3";
 
+function stopActionButtonMouseDown(event: ReactMouseEvent<HTMLButtonElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+function stopActionButtonClick(event: ReactMouseEvent<HTMLButtonElement>) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function StableInlineInput({
   initialValue,
   onSave,
@@ -549,6 +560,7 @@ function AccountHoldingsDetailPanel({
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedRowIds, setSelectedRowIds] = useState<string[]>([]);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [isReorderDirty, setIsReorderDirty] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
@@ -694,6 +706,10 @@ function AccountHoldingsDetailPanel({
   const hasPendingAdd = Boolean(addingRow);
   const hasSelectedRows = selectedRowIds.length > 0;
   const hasPendingSave = hasPendingAdd || dirtyRowIds.length > 0 || isReorderDirty;
+  const selectedDeletableRows = useMemo(
+    () => gridRows.filter((row) => selectedRowIds.includes(row.id) && row.id !== "__adding__"),
+    [gridRows, selectedRowIds],
+  );
 
   const isDirtyEditableCell = useCallback(
     (rowId: string | undefined, field: string) => Boolean(rowId && dirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
@@ -1144,26 +1160,29 @@ function AccountHoldingsDetailPanel({
     toast,
   ]);
 
-  const handleDeleteSelected = useCallback(async () => {
-    if (!selectedRowIds.length) {
+  const handleDeleteSelected = useCallback(() => {
+    if (!selectedDeletableRows.length) {
       return;
     }
-    const selectedRows = gridRows.filter((row) => selectedRowIds.includes(row.id) && row.id !== "__adding__");
-    if (!selectedRows.length) {
-      return;
-    }
+    setDeleteConfirmOpen(true);
+  }, [selectedDeletableRows.length]);
 
-    const summaryText =
-      selectedRows.length === 1
-        ? `${selectedRows[0].name}(${selectedRows[0].ticker}) 종목을 삭제하시겠습니까?`
-        : `${selectedRows.length}개 종목을 삭제하시겠습니까?`;
-    if (!confirm(summaryText)) {
+  const handleCloseDeleteConfirm = useCallback(() => {
+    if (processingId === "__deleting__") {
+      return;
+    }
+    setDeleteConfirmOpen(false);
+  }, [processingId]);
+
+  const handleConfirmDeleteSelected = useCallback(async () => {
+    if (!selectedDeletableRows.length) {
+      setDeleteConfirmOpen(false);
       return;
     }
 
     setProcessingId("__deleting__");
     try {
-      for (const row of selectedRows) {
+      for (const row of selectedDeletableRows) {
         const params = new URLSearchParams({
           account: summary.account_id,
           ticker: row.ticker.replace("ASX:", ""),
@@ -1174,6 +1193,8 @@ function AccountHoldingsDetailPanel({
           throw new Error(payload.error || "삭제 실패");
         }
       }
+      setDeleteConfirmOpen(false);
+      setSelectedRowIds([]);
       await onReload();
       toast.success("삭제 완료");
     } catch (error) {
@@ -1181,7 +1202,7 @@ function AccountHoldingsDetailPanel({
     } finally {
       setProcessingId(null);
     }
-  }, [gridRows, onReload, selectedRowIds, summary.account_id, toast]);
+  }, [onReload, selectedDeletableRows, summary.account_id, toast]);
 
   const handleCellValueChanged = useCallback((row: GridRow | undefined, field: string | undefined) => {
     if (!row) {
@@ -1645,8 +1666,10 @@ function AccountHoldingsDetailPanel({
                 }}
               />
               <button
+                type="button"
                 className="btn btn-success btn-sm px-2"
                 disabled={intlDirtyFields.length === 0}
+                onMouseDown={stopActionButtonMouseDown}
                 onClick={async () => {
                   try {
                     await processIntlUpdate(
@@ -1669,7 +1692,9 @@ function AccountHoldingsDetailPanel({
           )}
           <div className="d-flex align-items-center gap-2 ms-auto">
             <button
+              type="button"
               className="btn btn-primary btn-sm px-3 fw-bold"
+              onMouseDown={stopActionButtonMouseDown}
               onClick={() =>
                 setAddingRow({
                   ticker: "",
@@ -1684,15 +1709,22 @@ function AccountHoldingsDetailPanel({
               <IconPlus size={16} /> 추가
             </button>
             <button
+              type="button"
               className="btn btn-success btn-sm px-3 fw-bold"
+              onMouseDown={stopActionButtonMouseDown}
               onClick={() => void handleSaveChanges()}
               disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
             >
               <IconCheck size={16} /> 저장
             </button>
             <button
+              type="button"
               className="btn btn-outline-danger btn-sm px-3 fw-bold"
-              onClick={() => void handleDeleteSelected()}
+              onMouseDown={stopActionButtonMouseDown}
+              onClick={(event) => {
+                stopActionButtonClick(event);
+                handleDeleteSelected();
+              }}
               disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
             >
               <IconTrash size={16} /> 삭제
@@ -1700,6 +1732,41 @@ function AccountHoldingsDetailPanel({
           </div>
         </div>
       </div>
+      <AppModal
+        open={deleteConfirmOpen}
+        title="종목 삭제 확인"
+        subtitle="선택 종목은 즉시 영구 삭제됩니다."
+        onClose={handleCloseDeleteConfirm}
+        footer={(
+          <>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={handleCloseDeleteConfirm}
+              disabled={processingId === "__deleting__"}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={() => void handleConfirmDeleteSelected()}
+              disabled={processingId === "__deleting__"}
+            >
+              삭제
+            </button>
+          </>
+        )}
+      >
+        <div className="d-flex flex-column gap-2">
+          <div className="fw-semibold">
+            {selectedDeletableRows.length === 1
+              ? `${selectedDeletableRows[0].name}(${selectedDeletableRows[0].ticker}) 종목을 삭제합니다.`
+              : `${selectedDeletableRows.length}개 종목을 삭제합니다.`}
+          </div>
+          <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
+        </div>
+      </AppModal>
       <div className="assetsDetailGridWrap">
         <AppAgGrid
           rowData={gridRows}
