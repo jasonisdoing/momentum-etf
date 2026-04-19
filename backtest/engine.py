@@ -477,6 +477,13 @@ def _format_weight_pct(value: float | None) -> str:
     return f"{value:.2f}%"
 
 
+def _format_score_value(value: float | None) -> str:
+    """점수/추세 값을 표 출력용 문자열로 변환한다."""
+    if value is None:
+        return "-"
+    return f"{value:.1f}"
+
+
 def _format_price_or_dash(value: float | None, country_code: str) -> str:
     """가격을 국가 통화 형식으로 변환하되 비어 있으면 '-'를 반환한다."""
     if value is None:
@@ -490,6 +497,8 @@ def _simulate_one_combo_details(
     top_n: int,
     bonus: float,
     composite_frame: pd.DataFrame,
+    first_rule_frame: pd.DataFrame,
+    second_rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
     close_frame: pd.DataFrame,
     backtest_days: list[pd.Timestamp],
@@ -522,6 +531,9 @@ def _simulate_one_combo_details(
         "평가손익",
         "평가(%)",
         "비중",
+        "점수",
+        "추세1",
+        "추세2",
         "문구",
     ]
     aligns = [
@@ -529,6 +541,9 @@ def _simulate_one_combo_details(
         "left",
         "left",
         "left",
+        "right",
+        "right",
+        "right",
         "right",
         "right",
         "right",
@@ -579,6 +594,9 @@ def _simulate_one_combo_details(
             "-",
             "-",
             _format_weight_pct(cash_weight),
+            "-",
+            "-",
+            "-",
             note,
         ]
         day_rows.append(cash_row)
@@ -598,6 +616,9 @@ def _simulate_one_combo_details(
                     row["pnl"],
                     row["pnl_pct"],
                     row["weight"],
+                    row["score"],
+                    row["trend1"],
+                    row["trend2"],
                     row["message"],
                 ]
             )
@@ -636,6 +657,8 @@ def _simulate_one_combo_details(
         close_exec = close_frame.loc[exec_day]
 
         composite = composite_frame.loc[signal_day].copy()
+        first_rule_signal = first_rule_frame.loc[signal_day].copy()
+        second_rule_signal = second_rule_frame.loc[signal_day].copy()
         if bonus:
             for holding in shares:
                 if holding in composite.index and not pd.isna(composite.loc[holding]):
@@ -680,6 +703,19 @@ def _simulate_one_combo_details(
                         "pnl": format_price(pnl_local * float(fx_series.loc[exec_day]), "kor"),
                         "pnl_pct": format_pct_change(pnl_pct),
                         "weight": _format_weight_pct(weight_pct),
+                        "score": _format_score_value(
+                            None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
+                        ),
+                        "trend1": _format_score_value(
+                            None
+                            if pd.isna(first_rule_signal.get(ticker, np.nan))
+                            else float(first_rule_signal.get(ticker, np.nan))
+                        ),
+                        "trend2": _format_score_value(
+                            None
+                            if pd.isna(second_rule_signal.get(ticker, np.nan))
+                            else float(second_rule_signal.get(ticker, np.nan))
+                        ),
                         "message": "거래 없음",
                     }
                 )
@@ -739,6 +775,19 @@ def _simulate_one_combo_details(
                     "pnl": format_price(realized_pnl_local * float(fx_series.loc[exec_day]), "kor"),
                     "pnl_pct": format_pct_change(realized_pct),
                     "weight": _format_weight_pct(0.0),
+                    "score": _format_score_value(
+                        None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
+                    ),
+                    "trend1": _format_score_value(
+                        None
+                        if pd.isna(first_rule_signal.get(ticker, np.nan))
+                        else float(first_rule_signal.get(ticker, np.nan))
+                    ),
+                    "trend2": _format_score_value(
+                        None
+                        if pd.isna(second_rule_signal.get(ticker, np.nan))
+                        else float(second_rule_signal.get(ticker, np.nan))
+                    ),
                     "message": "상위 N 제외로 시초가 전량매도",
                 }
             )
@@ -828,6 +877,19 @@ def _simulate_one_combo_details(
                     "pnl": format_price(pnl_local * float(fx_series.loc[exec_day]), "kor"),
                     "pnl_pct": format_pct_change(pnl_pct),
                     "weight": _format_weight_pct(weight_pct),
+                    "score": _format_score_value(
+                        None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
+                    ),
+                    "trend1": _format_score_value(
+                        None
+                        if pd.isna(first_rule_signal.get(ticker, np.nan))
+                        else float(first_rule_signal.get(ticker, np.nan))
+                    ),
+                    "trend2": _format_score_value(
+                        None
+                        if pd.isna(second_rule_signal.get(ticker, np.nan))
+                        else float(second_rule_signal.get(ticker, np.nan))
+                    ),
                     "message": buy_messages.get(ticker, "기존 보유 유지"),
                 }
             )
@@ -914,8 +976,6 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     country_code = str(settings.get("country_code") or "").strip().lower()
     if not country_code:
         raise ValueError(f"'{pool_id}' 설정에 country_code 가 없습니다.")
-
-    pool_dir = _resolve_pool_dir(pool_id)
 
     etfs = get_etfs(pool_id)
     tickers = sorted({str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")})
@@ -1036,9 +1096,9 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     n_workers = max(1, (os.cpu_count() or 2) - 1)
 
     # 결과 파일 경로
-    results_dir = pool_dir / "results"
+    results_dir = Path(__file__).resolve().parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    out_path = results_dir / f"backtest_{today.strftime('%Y-%m-%d')}.log"
+    out_path = results_dir / f"{pool_id}-backtest_{today.strftime('%Y-%m-%d')}.log"
 
     # 결과 파일 기록에 공통으로 쓰는 인자
     write_kwargs: dict[str, Any] = {
@@ -1141,6 +1201,12 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             top_n=int(best_result["TOP_N_HOLD"]),
             bonus=float(best_result["HOLDING_BONUS_SCORE"]),
             composite_frame=best_composite,
+            first_rule_frame=percentile_by_spec_win[
+                (best_result["FIRST_MA_TYPE"], int(best_result["FIRST_MA_MONTHS"]))
+            ],
+            second_rule_frame=percentile_by_spec_win[
+                (best_result["SECOND_MA_TYPE"], int(best_result["SECOND_MA_MONTHS"]))
+            ],
             open_frame=open_win,
             close_frame=close_win,
             backtest_days=backtest_days,
@@ -1148,7 +1214,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             ticker_name_map=ticker_name_map,
             country_code=country_code,
         )
-        detail_path = results_dir / f"backtest_details_{today.strftime('%Y-%m-%d')}.log"
+        detail_path = results_dir / f"{pool_id}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
         _write_details_file(
             out_path=detail_path,
             pool_id=pool_id,
