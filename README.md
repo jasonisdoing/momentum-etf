@@ -31,6 +31,7 @@
 *   **[사용자 가이드 (User Guide)](docs/user_guide.md)**: 설치, 설정, 실행 방법, 결과 해석
 *   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 이동평균 점수 계산 규칙과 정렬 기준
 *   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 화면 구성
+*   **[백테스트 가이드](backtest/README.md)**: 백테스트 실행 방법, 설정, 출력 파일 설명
 
 ## ⚡️ 빠른 시작 (Quick Start)
 
