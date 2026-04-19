@@ -1161,10 +1161,10 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         f"{initial_cash_local:,.2f}",
     )
     logger.info(
-        "[%s] 슬리피지: BUY %.2f% / SELL %.2f%",
+        "[%s] 슬리피지: BUY %.2f%% / SELL %.2f%%",
         pool_id,
-        buy_slippage,
-        sell_slippage,
+        buy_slippage * 100.0,
+        sell_slippage * 100.0,
     )
 
     # 조합 생성
