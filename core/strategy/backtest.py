@@ -32,15 +32,29 @@ from utils.stock_list_io import get_etfs
 
 
 def _resolve_pool_dir(pool_id: str) -> Path:
-    """``ztickers/<order>_<pool_id>/`` 디렉토리를 glob 으로 찾는다."""
-    matches = [p for p in TICKERS_ROOT.glob(f"*_{pool_id}") if p.is_dir()]
+    """``ztickers/<순번>_<pool_id>/`` 디렉토리를 찾는다.
+
+    ``<순번>`` 은 숫자만 허용한다. 예: ``pool_id='us'`` → ``4_us`` 매칭,
+    ``2_kor_us`` 는 접두사가 ``kor_`` 이므로 미매칭.
+    """
+    matches: list[Path] = []
+    for candidate in TICKERS_ROOT.iterdir():
+        if not candidate.is_dir():
+            continue
+        name = candidate.name
+        if "_" not in name:
+            continue
+        prefix, _, suffix = name.partition("_")
+        if suffix == pool_id and prefix.isdigit():
+            matches.append(candidate)
+
     if not matches:
         raise FileNotFoundError(
-            f"ztickers 아래에서 '*_{pool_id}' 디렉토리를 찾을 수 없습니다."
+            f"ztickers 아래에서 '<순번>_{pool_id}' 디렉토리를 찾을 수 없습니다."
         )
     if len(matches) > 1:
         raise RuntimeError(
-            f"'*_{pool_id}' 패턴에 해당하는 디렉토리가 2개 이상 있습니다: {matches}"
+            f"'<순번>_{pool_id}' 패턴에 해당하는 디렉토리가 2개 이상 있습니다: {matches}"
         )
     return matches[0]
 
