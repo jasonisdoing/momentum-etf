@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import itertools
+import logging
 import multiprocessing as mp
 import os
 import time
@@ -30,6 +31,8 @@ from utils.formatters import format_pct_change, format_price, format_trading_day
 from utils.report import render_table_eaw
 from utils.settings_loader import TICKERS_ROOT, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
+
+logger = logging.getLogger(__name__)
 
 # ----------------------------- 헬퍼 ----------------------------- #
 
@@ -491,6 +494,12 @@ def _format_price_or_dash(value: float | None, country_code: str) -> str:
     return format_price(value, country_code)
 
 
+def _format_weekday_kr(day: pd.Timestamp) -> str:
+    """거래일의 한국어 요일을 반환한다."""
+    weekdays = ["월", "화", "수", "목", "금", "토", "일"]
+    return weekdays[int(day.weekday())]
+
+
 def _simulate_one_combo_details(
     *,
     initial_cash_local: float,
@@ -574,12 +583,22 @@ def _simulate_one_combo_details(
         sold_rows: list[dict[str, str]],
         cash_local: float,
         total_equity_local: float,
+        valuation_pnl_local: float,
+        valuation_cost_local: float,
         note: str,
     ) -> None:
         fx_today = float(fx_series.loc[day])
         total_equity_krw = total_equity_local * fx_today
         cash_krw = cash_local * fx_today
         cash_weight = (cash_local / total_equity_local * 100.0) if total_equity_local > 0 else 0.0
+        valuation_pnl_krw = valuation_pnl_local * fx_today
+        valuation_pct = (
+            (valuation_pnl_local / valuation_cost_local) * 100.0 if valuation_cost_local > 0 else 0.0
+        )
+        cumulative_pnl_krw = total_equity_krw - initial_cash_krw
+        cumulative_pct = (
+            (cumulative_pnl_krw / initial_cash_krw) * 100.0 if initial_cash_krw > 0 else 0.0
+        )
         day_rows: list[list[str]] = []
         cash_row = [
             "1",
@@ -624,8 +643,11 @@ def _simulate_one_combo_details(
             )
 
         lines.append(
-            f"[{day.strftime('%Y-%m-%d')}] 총자산 {format_price(total_equity_krw, 'kor')} / "
-            f"현금 {format_price(cash_krw, 'kor')}"
+            f"[{day.strftime('%Y-%m-%d')}({_format_weekday_kr(day)})] "
+            f"총자산 {format_price(total_equity_krw, 'kor')} / "
+            f"현금 {format_price(cash_krw, 'kor')} / "
+            f"평가수익: {format_price(valuation_pnl_krw, 'kor')}({format_pct_change(valuation_pct)}) / "
+            f"누적수익: {format_price(cumulative_pnl_krw, 'kor')}({format_pct_change(cumulative_pct)})"
         )
         lines.extend(render_table_eaw(headers, day_rows, aligns))
         lines.append("")
@@ -637,6 +659,8 @@ def _simulate_one_combo_details(
         sold_rows=[],
         cash_local=cash,
         total_equity_local=cash,
+        valuation_pnl_local=0.0,
+        valuation_cost_local=0.0,
         note="초기 자금",
     )
 
@@ -676,6 +700,8 @@ def _simulate_one_combo_details(
                 for t in shares
                 if not pd.isna(close_exec.get(t, np.nan))
             )
+            valuation_pnl_local = 0.0
+            valuation_cost_local = 0.0
             for ticker in sorted(shares.keys()):
                 qty = int(shares[ticker])
                 current_price = float(close_exec.get(ticker, np.nan)) if not pd.isna(close_exec.get(ticker, np.nan)) else None
@@ -685,6 +711,8 @@ def _simulate_one_combo_details(
                 amount_local = (current_price * qty) if current_price is not None else 0.0
                 avg_cost = float(avg_costs[ticker])
                 pnl_local = amount_local - (avg_cost * qty)
+                valuation_pnl_local += pnl_local
+                valuation_cost_local += avg_cost * qty
                 pnl_pct = ((amount_local / (avg_cost * qty) - 1.0) * 100.0) if avg_cost > 0 and qty > 0 else None
                 weight_pct = (
                     (amount_local / total_equity_close_local) * 100.0 if total_equity_close_local > 0 else None
@@ -726,6 +754,8 @@ def _simulate_one_combo_details(
                 sold_rows=[],
                 cash_local=cash,
                 total_equity_local=total_equity_close_local,
+                valuation_pnl_local=valuation_pnl_local,
+                valuation_cost_local=valuation_cost_local,
                 note="거래 없음",
             )
             continue
@@ -848,6 +878,8 @@ def _simulate_one_combo_details(
             for t in shares
             if not pd.isna(close_exec.get(t, np.nan))
         )
+        valuation_pnl_local = 0.0
+        valuation_cost_local = 0.0
         current_rank_map = {ticker: rank for rank, ticker in enumerate(target_df["ticker"].tolist(), start=1)}
 
         for ticker in sorted(shares.keys(), key=lambda item: (current_rank_map.get(item, 10_000), item)):
@@ -859,6 +891,8 @@ def _simulate_one_combo_details(
             amount_local = (current_price * qty) if current_price is not None else 0.0
             avg_cost = float(avg_costs[ticker])
             pnl_local = amount_local - (avg_cost * qty)
+            valuation_pnl_local += pnl_local
+            valuation_cost_local += avg_cost * qty
             pnl_pct = ((amount_local / (avg_cost * qty) - 1.0) * 100.0) if avg_cost > 0 and qty > 0 else None
             weight_pct = (
                 (amount_local / total_equity_close_local) * 100.0 if total_equity_close_local > 0 else None
@@ -901,6 +935,8 @@ def _simulate_one_combo_details(
             sold_rows=sold_rows,
             cash_local=cash,
             total_equity_local=total_equity_close_local,
+            valuation_pnl_local=valuation_pnl_local,
+            valuation_cost_local=valuation_cost_local,
             note=note,
         )
 
@@ -1004,11 +1040,16 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         raise RuntimeError("거래일 캘린더가 비어 있습니다.")
 
     # OHLCV 캐시 로드
-    print(f"[{pool_id}] OHLCV 캐시 로드: {len(tickers)} tickers ...", flush=True)
+    logger.info("[%s] OHLCV 캐시 로드: %s tickers ...", pool_id, len(tickers))
     frames = load_cached_frames_bulk_with_fallback(pool_id, tickers)
     missing = [t for t in tickers if t not in frames or frames[t] is None or frames[t].empty]
     if missing:
-        print(f"  (캐시 없음, 제외: {len(missing)}) {missing[:10]}{'...' if len(missing) > 10 else ''}", flush=True)
+        logger.info(
+            "(캐시 없음, 제외: %s) %s%s",
+            len(missing),
+            missing[:10],
+            "..." if len(missing) > 10 else "",
+        )
     tickers = [t for t in tickers if t in frames and frames[t] is not None and not frames[t].empty]
     if not tickers:
         raise RuntimeError("캐시된 OHLCV 가 있는 티커가 없습니다.")
@@ -1045,7 +1086,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     unique_ma_specs = unique_first | unique_second
 
     percentile_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
-    print(f"[{pool_id}] MA 점수 사전계산: {len(unique_ma_specs)} specs ...", flush=True)
+    logger.info("[%s] MA 점수 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
     for mtype, months in unique_ma_specs:
         # rankings 와 동일한 공통 엔진 함수를 통해 규칙별 percentile 프레임 생성.
         percentile_by_spec[(mtype, int(months))] = compute_rule_percentile_frame(
@@ -1073,10 +1114,13 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     # 첫날 KRW 초기자본을 현지통화로 환전해서 보유한다는 가정.
     initial_cash_local = float(initial_cash) / fx_start
     fx_symbol_display = _resolve_fx_symbol(country_code) or "-"
-    print(
-        f"[{pool_id}] 환율: symbol={fx_symbol_display} start={fx_start:.4f} "
-        f"end={float(fx_win.iloc[-1]):.4f} → 초기 현지자본 {initial_cash_local:,.2f}",
-        flush=True,
+    logger.info(
+        "[%s] 환율: symbol=%s start=%.4f end=%.4f → 초기 현지자본 %,.2f",
+        pool_id,
+        fx_symbol_display,
+        fx_start,
+        float(fx_win.iloc[-1]),
+        initial_cash_local,
     )
 
     # 조합 생성
@@ -1117,10 +1161,12 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         "n_workers": n_workers,
     }
 
-    print(
-        f"[{pool_id}] 백테스트 실행: {total_combos} combos x {len(backtest_days)} days "
-        f"(워커 {n_workers}개) ...",
-        flush=True,
+    logger.info(
+        "[%s] 백테스트 실행: %s combos x %s days (워커 %s개) ...",
+        pool_id,
+        total_combos,
+        len(backtest_days),
+        n_workers,
     )
 
     started_wall = time.time()
@@ -1154,7 +1200,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             # 진행률 출력
             if i % _FLUSH_EVERY_N_RESULTS == 0 or i == total_combos:
                 elapsed = now - started_wall
-                print(f"  progress {i}/{total_combos} ({elapsed:.1f}s)", flush=True)
+                logger.info("progress %s/%s (%.1fs)", i, total_combos, elapsed)
 
             # 중간 결과 파일 갱신
             if i < total_combos and i % _FLUSH_EVERY_N_RESULTS == 0:
@@ -1223,6 +1269,6 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             top_result=best_result,
             detail_lines=detail_lines,
         )
-        print(f"[{pool_id}] 상세 결과 저장: {detail_path}", flush=True)
-    print(f"[{pool_id}] 결과 저장: {out_path}", flush=True)
+        logger.info("[%s] 상세 결과 저장: %s", pool_id, detail_path)
+    logger.info("[%s] 결과 저장: %s", pool_id, out_path)
     return out_path
