@@ -138,7 +138,7 @@ MIN_TRADING_DAYS = 5
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
 # -----------------------------------------------------------------------
-BACKTEST_START_DATE = "2025-09-01"
+BACKTEST_START_DATE = "2025-05-01"
 BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 
 # 슬리피지는 % 단위로 입력한다.
@@ -171,44 +171,44 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50],
         "FIRST_MA_TYPE": ["SMA"],
-        "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "FIRST_MA_MONTHS": [3, 6, 9, 12],
         "SECOND_MA_TYPE": ["ALMA"],
-        "SECOND_MA_MONTHS": [4, 6, 8, 10, 12],
+        "SECOND_MA_MONTHS": [3, 6, 9, 12],
     },
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50],
         "FIRST_MA_TYPE": ["SMA"],
-        "FIRST_MA_MONTHS": [4, 6, 8, 10, 12],
+        "FIRST_MA_MONTHS": [3, 6, 9, 12],
         "SECOND_MA_TYPE": ["ALMA"],
-        "SECOND_MA_MONTHS": [4, 6, 8, 10, 12],
+        "SECOND_MA_MONTHS": [3, 6, 9, 12],
     },
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
         "TOP_N_HOLD": [7],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50],
         "FIRST_MA_TYPE": ["SMA"],
-        "FIRST_MA_MONTHS": [4, 6, 8, 10, 12],
+        "FIRST_MA_MONTHS": [3, 6, 9, 12],
         "SECOND_MA_TYPE": ["ALMA"],
-        "SECOND_MA_MONTHS": [4, 6, 8, 10, 12],
+        "SECOND_MA_MONTHS": [3, 6, 9, 12],
     },
     "us": {
         "BENCHMARK": {"ticker": "VOO", "name": "뱅가드 S&P500"},
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50],
         "FIRST_MA_TYPE": ["SMA"],
-        "FIRST_MA_MONTHS": [4, 6, 8, 10, 12],
+        "FIRST_MA_MONTHS": [3, 6, 9, 12],
         "SECOND_MA_TYPE": ["ALMA"],
-        "SECOND_MA_MONTHS": [4, 6, 8, 10, 12],
+        "SECOND_MA_MONTHS": [3, 6, 9, 12],
     },
     "kor": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10, 20, 30, 40, 50],
         "FIRST_MA_TYPE": ["SMA"],
-        "FIRST_MA_MONTHS": [4, 6, 8, 10, 12],
+        "FIRST_MA_MONTHS": [3, 6, 9, 12],
         "SECOND_MA_TYPE": ["ALMA"],
-        "SECOND_MA_MONTHS": [4, 6, 8, 10, 12],
+        "SECOND_MA_MONTHS": [3, 6, 9, 12],
     },
 }
