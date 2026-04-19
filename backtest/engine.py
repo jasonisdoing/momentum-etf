@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from backtest.config import BACKTEST_MONTHS, INITIAL_KRW_AMOUNT
+from backtest.config import BACKTEST_MONTHS, INITIAL_KRW_AMOUNT, SLIPPAGE_CONFIG
 from config import TRADING_DAYS_PER_MONTH
 from core.strategy.scoring import (
     combine_rule_percentiles,
@@ -120,6 +120,25 @@ def _load_fx_series(
     return rates.astype(float)
 
 
+def _pct_to_ratio(pct: float) -> float:
+    """% 단위를 비율로 변환한다. 예: 0.5 → 0.005."""
+    return float(pct) / 100.0
+
+
+def _resolve_slippage(pool_id: str) -> tuple[float, float]:
+    """종목풀별 매수/매도 슬리피지 비율을 반환한다."""
+    if pool_id not in SLIPPAGE_CONFIG:
+        raise ValueError(f"SLIPPAGE_CONFIG 에 '{pool_id}' 설정이 없습니다.")
+    config = SLIPPAGE_CONFIG[pool_id]
+    if "BUY_PCT" not in config or "SELL_PCT" not in config:
+        raise ValueError(f"SLIPPAGE_CONFIG['{pool_id}']에 BUY_PCT/SELL_PCT가 모두 필요합니다.")
+    buy_ratio = _pct_to_ratio(float(config["BUY_PCT"]))
+    sell_ratio = _pct_to_ratio(float(config["SELL_PCT"]))
+    if buy_ratio < 0 or sell_ratio < 0:
+        raise ValueError(f"SLIPPAGE_CONFIG['{pool_id}']는 음수일 수 없습니다.")
+    return buy_ratio, sell_ratio
+
+
 # -------------------- 워커 프로세스 (병렬 실행) -------------------- #
 
 
@@ -132,6 +151,8 @@ _W_CLOSE: pd.DataFrame = pd.DataFrame()
 _W_DAYS: list[pd.Timestamp] = []
 _W_CASH_LOCAL: float = 0.0
 _W_FX: pd.Series = pd.Series(dtype=float)
+_W_BUY_SLIPPAGE: float = 0.0
+_W_SELL_SLIPPAGE: float = 0.0
 
 
 def _init_worker(
@@ -142,9 +163,11 @@ def _init_worker(
     bt_days: list[pd.Timestamp],
     init_cash_local: float,
     fx_win: pd.Series,
+    buy_slippage: float,
+    sell_slippage: float,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
-    global _W_PCT, _W_ELIG, _W_OPEN, _W_CLOSE, _W_DAYS, _W_CASH_LOCAL, _W_FX  # noqa: PLW0603
+    global _W_PCT, _W_ELIG, _W_OPEN, _W_CLOSE, _W_DAYS, _W_CASH_LOCAL, _W_FX, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
     _W_PCT = pct_specs
     _W_ELIG = eligibility_win
     _W_OPEN = open_win
@@ -152,6 +175,8 @@ def _init_worker(
     _W_DAYS = bt_days
     _W_CASH_LOCAL = init_cash_local
     _W_FX = fx_win
+    _W_BUY_SLIPPAGE = buy_slippage
+    _W_SELL_SLIPPAGE = sell_slippage
 
 
 def _run_single_combo(
@@ -173,6 +198,8 @@ def _run_single_combo(
         close_frame=_W_CLOSE,
         backtest_days=_W_DAYS,
         fx_series=_W_FX,
+        buy_slippage=_W_BUY_SLIPPAGE,
+        sell_slippage=_W_SELL_SLIPPAGE,
     )
     return {
         "TOP_N_HOLD": top_n,
@@ -200,6 +227,8 @@ def _simulate_one_combo(
     close_frame: pd.DataFrame,
     backtest_days: list[pd.Timestamp],
     fx_series: pd.Series,
+    buy_slippage: float,
+    sell_slippage: float,
 ) -> tuple[float, float, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
@@ -265,10 +294,11 @@ def _simulate_one_combo(
 
         # 1) 매도 먼저
         for ticker in to_sell:
-            price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(price) or price <= 0:
+            raw_open_price = float(open_exec.get(ticker, np.nan))
+            if pd.isna(raw_open_price) or raw_open_price <= 0:
                 # 매도 불가 → 보유 유지
                 continue
+            price = raw_open_price * (1.0 - sell_slippage)
             n = int(shares.pop(ticker))
             cash += n * price
 
@@ -296,9 +326,10 @@ def _simulate_one_combo(
 
         # 2-1) 균등 1차 배분
         for ticker in new_entrants:
-            price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(price) or price <= 0:
+            raw_open_price = float(open_exec.get(ticker, np.nan))
+            if pd.isna(raw_open_price) or raw_open_price <= 0:
                 continue
+            price = raw_open_price * (1.0 + buy_slippage)
             buy_budget = min(cash, per_new_budget)
             if buy_budget <= 0:
                 continue
@@ -313,9 +344,10 @@ def _simulate_one_combo(
         for ticker in new_entrants:
             if cash <= 0:
                 break
-            price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(price) or price <= 0:
+            raw_open_price = float(open_exec.get(ticker, np.nan))
+            if pd.isna(raw_open_price) or raw_open_price <= 0:
                 continue
+            price = raw_open_price * (1.0 + buy_slippage)
             # slot_target 을 이미 채웠는지 확인 (몰빵 방지).
             current_position_value = shares.get(ticker, 0) * price
             remaining_slot_budget = max(0.0, slot_target - current_position_value)
@@ -529,6 +561,8 @@ def _simulate_one_combo_details(
     fx_series: pd.Series,
     ticker_name_map: dict[str, str],
     country_code: str,
+    buy_slippage: float,
+    sell_slippage: float,
 ) -> list[str]:
     """상위 1개 조합의 거래일별 보유 상세 로그를 생성한다.
 
@@ -776,9 +810,10 @@ def _simulate_one_combo_details(
         buy_messages: dict[str, str] = {}
 
         for ticker in sorted(to_sell):
-            price = float(open_exec.get(ticker, np.nan))
-            if pd.isna(price) or price <= 0:
+            raw_open_price = float(open_exec.get(ticker, np.nan))
+            if pd.isna(raw_open_price) or raw_open_price <= 0:
                 continue
+            price = raw_open_price * (1.0 - sell_slippage)
             qty = int(shares.pop(ticker))
             avg_cost = float(avg_costs.pop(ticker, 0.0))
             last_buy_idx = int(last_buy_indices.pop(ticker, exec_idx))
@@ -830,9 +865,10 @@ def _simulate_one_combo_details(
             per_new_budget = min(slot_target, cash / k_new) if (k_new > 0 and cash > 0) else 0.0
 
             for ticker in new_entrants:
-                price = float(open_exec.get(ticker, np.nan))
-                if pd.isna(price) or price <= 0:
+                raw_open_price = float(open_exec.get(ticker, np.nan))
+                if pd.isna(raw_open_price) or raw_open_price <= 0:
                     continue
+                price = raw_open_price * (1.0 + buy_slippage)
                 buy_budget = min(cash, per_new_budget)
                 if buy_budget <= 0:
                     continue
@@ -849,9 +885,10 @@ def _simulate_one_combo_details(
             for ticker in new_entrants:
                 if cash <= 0:
                     break
-                price = float(open_exec.get(ticker, np.nan))
-                if pd.isna(price) or price <= 0:
+                raw_open_price = float(open_exec.get(ticker, np.nan))
+                if pd.isna(raw_open_price) or raw_open_price <= 0:
                     continue
+                price = raw_open_price * (1.0 + buy_slippage)
                 current_position_value = shares.get(ticker, 0) * price
                 remaining_slot_budget = max(0.0, slot_target - current_position_value)
                 if remaining_slot_budget <= 0:
@@ -1000,6 +1037,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     cfg = config[pool_id]
     months = int(BACKTEST_MONTHS)
     initial_cash = float(INITIAL_KRW_AMOUNT)
+    buy_slippage, sell_slippage = _resolve_slippage(pool_id)
 
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
     bonus_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
@@ -1122,6 +1160,12 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         float(fx_win.iloc[-1]),
         f"{initial_cash_local:,.2f}",
     )
+    logger.info(
+        "[%s] 슬리피지: BUY %.2f% / SELL %.2f%",
+        pool_id,
+        buy_slippage,
+        sell_slippage,
+    )
 
     # 조합 생성
     combos = list(
@@ -1187,6 +1231,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             backtest_days,
             initial_cash_local,
             fx_win,
+            buy_slippage,
+            sell_slippage,
         ),
     ) as pool:
         for i, result in enumerate(
@@ -1259,6 +1305,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             fx_series=fx_win,
             ticker_name_map=ticker_name_map,
             country_code=country_code,
+            buy_slippage=buy_slippage,
+            sell_slippage=sell_slippage,
         )
         detail_path = results_dir / f"{pool_id}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
         _write_details_file(
