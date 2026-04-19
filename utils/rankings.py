@@ -17,6 +17,7 @@ from config import (
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.metrics import process_ticker_data
+from core.strategy.scoring import calculate_signed_percentile_score
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
@@ -36,57 +37,71 @@ def _build_ma_rule_score_column(order: int) -> str:
     return f"추세{order}"
 
 
+# MA 규칙은 항상 FIRST(order=1)/SECOND(order=2) 2개 고정이다.
+_MA_ORDER_LABELS: dict[int, str] = {1: "FIRST", 2: "SECOND"}
+_REQUIRED_MA_ORDERS: tuple[int, ...] = (1, 2)
+
+
+def _ma_order_label(order: int) -> str:
+    return _MA_ORDER_LABELS.get(int(order), f"order={int(order)}")
+
+
 def _normalize_ma_rules(ticker_type: str, ma_rules_raw: Any) -> list[dict[str, Any]]:
-    if not isinstance(ma_rules_raw, list) or not ma_rules_raw:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES는 1개 이상의 배열이어야 합니다.")
+    if not isinstance(ma_rules_raw, list) or len(ma_rules_raw) != len(_REQUIRED_MA_ORDERS):
+        raise AccountSettingsError(
+            f"'{ticker_type}' 설정의 MA 규칙은 정확히 {len(_REQUIRED_MA_ORDERS)}개여야 합니다."
+        )
+
     normalized_rules: list[dict[str, Any]] = []
     seen_orders: set[int] = set()
 
-    for index, raw_rule in enumerate(ma_rules_raw, start=1):
+    for raw_rule in ma_rules_raw:
         if not isinstance(raw_rule, dict):
-            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES[{index}]는 객체여야 합니다.")
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 항목은 객체여야 합니다.")
 
         order_raw = raw_rule.get("order")
         if order_raw is None:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'order'가 누락되었습니다."
-            )
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙에 'order'가 누락되었습니다.")
         try:
             order = int(order_raw)
         except (TypeError, ValueError) as exc:
             raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}] order는 정수여야 합니다: {order_raw}"
+                f"'{ticker_type}' 설정의 MA 규칙 order는 정수여야 합니다: {order_raw}"
             ) from exc
-        if order < 1:
-            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES[{index}] order는 1 이상이어야 합니다: {order}")
+        if order not in _REQUIRED_MA_ORDERS:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정의 MA 규칙 order는 {list(_REQUIRED_MA_ORDERS)} 중 하나여야 합니다: {order}"
+            )
         if order in seen_orders:
-            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA_RULES order가 중복되었습니다: {order}")
+            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 order가 중복되었습니다: {order}")
         seen_orders.add(order)
+
+        label = _ma_order_label(order)
 
         ma_type = str(raw_rule.get("MA_TYPE") or "").strip().upper()
         if not ma_type:
             raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'MA_TYPE'가 누락되었습니다."
+                f"'{ticker_type}' 설정의 '{label}_MA_TYPE'이 누락되었습니다."
             )
         if ma_type not in ALLOWED_MA_TYPES:
             raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_TYPE이 유효하지 않습니다: {ma_type}"
+                f"'{ticker_type}' 설정의 '{label}_MA_TYPE'이 유효하지 않습니다: {ma_type}"
             )
 
         ma_months_raw = raw_rule.get("MA_MONTHS")
         if ma_months_raw is None:
             raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}]에 필수 항목 'MA_MONTHS'가 누락되었습니다."
+                f"'{ticker_type}' 설정의 '{label}_MA_MONTHS'가 누락되었습니다."
             )
         try:
             ma_months = int(ma_months_raw)
         except (TypeError, ValueError) as exc:
             raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_MONTHS는 정수여야 합니다: {ma_months_raw}"
+                f"'{ticker_type}' 설정의 '{label}_MA_MONTHS'는 정수여야 합니다: {ma_months_raw}"
             ) from exc
         if ma_months < 1:
             raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA_RULES[{index}] MA_MONTHS는 1 이상이어야 합니다: {ma_months}"
+                f"'{ticker_type}' 설정의 '{label}_MA_MONTHS'는 1 이상이어야 합니다: {ma_months}"
             )
 
         normalized_rules.append(
@@ -99,15 +114,41 @@ def _normalize_ma_rules(ticker_type: str, ma_rules_raw: Any) -> list[dict[str, A
             }
         )
 
+    missing_orders = sorted(set(_REQUIRED_MA_ORDERS) - seen_orders)
+    if missing_orders:
+        raise AccountSettingsError(
+            f"'{ticker_type}' 설정의 MA 규칙에 누락된 order가 있습니다: {missing_orders}"
+        )
+
     return sorted(normalized_rules, key=lambda item: int(item["order"]))
 
 
 def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
+    """종목풀 설정의 FIRST_/SECOND_ MA 파라미터를 내부 규칙 리스트로 변환한다."""
     settings = get_ticker_type_settings(ticker_type)
-    ma_rules_raw = settings.get("MA_RULES")
-    if ma_rules_raw is None:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_RULES'가 누락되었습니다.")
-    return _normalize_ma_rules(ticker_type, ma_rules_raw)
+
+    raw_rules: list[dict[str, Any]] = []
+    for order in _REQUIRED_MA_ORDERS:
+        label = _ma_order_label(order)
+        type_key = f"{label}_MA_TYPE"
+        months_key = f"{label}_MA_MONTHS"
+        if type_key not in settings:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정에 필수 항목 '{type_key}'가 누락되었습니다."
+            )
+        if months_key not in settings:
+            raise AccountSettingsError(
+                f"'{ticker_type}' 설정에 필수 항목 '{months_key}'가 누락되었습니다."
+            )
+        raw_rules.append(
+            {
+                "order": order,
+                "MA_TYPE": settings[type_key],
+                "MA_MONTHS": settings[months_key],
+            }
+        )
+
+    return _normalize_ma_rules(ticker_type, raw_rules)
 
 
 def build_effective_ma_rules(
@@ -538,25 +579,8 @@ def _normalize_ranking_values(
 
 
 def _calculate_signed_percentile_score(series: pd.Series) -> pd.Series:
-    numeric = pd.to_numeric(series, errors="coerce")
-    result = pd.Series(index=series.index, dtype=float)
-
-    positive_mask = numeric > 0
-    negative_mask = numeric < 0
-    zero_mask = numeric == 0
-
-    if positive_mask.any():
-        positive_values = numeric[positive_mask]
-        result.loc[positive_mask] = positive_values.rank(method="average", pct=True) * 100.0
-
-    if negative_mask.any():
-        negative_values = numeric[negative_mask].abs()
-        result.loc[negative_mask] = -(negative_values.rank(method="average", pct=True) * 100.0)
-
-    if zero_mask.any():
-        result.loc[zero_mask] = 0.0
-
-    return result
+    """하위호환용 얇은 래퍼. 실제 로직은 ``core.strategy.scoring`` 에 있다."""
+    return calculate_signed_percentile_score(series)
 
 
 def _build_composite_score(df: pd.DataFrame, ma_rules: list[dict[str, Any]]) -> pd.Series:

@@ -152,7 +152,8 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "name": str(cfg["name"]),
             "icon": str(cfg.get("icon") or ""),
             "country_code": str(cfg.get("country_code") or ""),
-            "holding_bonus_score": int(cfg["settings"].get("holding_bonus_score", 0)),
+            "holding_bonus_score": int(cfg["settings"].get("HOLDING_BONUS_SCORE", 0)),
+            "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
             "type_source": str(cfg["settings"].get("type_source") or ""),
             "currency": str(cfg["settings"].get("currency") or ""),
         }
