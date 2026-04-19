@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
 def main(argv: list[str]) -> int:
     # 인자가 없으면 설정된 모든 종목풀을 순차적으로 실행
     if len(argv) < 2:
-        # ztickers 아래 디렉터리 번호 순서
-        ordered_pools = ["kor_kr", "kor_us", "aus", "us", "kor"]
+        from utils.settings_loader import list_available_ticker_types
+
+        ordered_pools = list_available_ticker_types()
         # BACKTEST_CONFIG에 설정된 것만 필터링하여 실행 (위험 방지)
         pools = [p for p in ordered_pools if p in BACKTEST_CONFIG]
         

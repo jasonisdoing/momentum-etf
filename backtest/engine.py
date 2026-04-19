@@ -29,41 +29,12 @@ from utils.cache_utils import load_cached_frames_bulk_with_fallback
 from utils.data_loader import get_exchange_rate_series, get_trading_days
 from utils.formatters import format_pct_change, format_price, format_trading_days
 from utils.report import render_table_eaw
-from utils.settings_loader import TICKERS_ROOT, get_ticker_type_settings
+from utils.settings_loader import get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
 logger = logging.getLogger(__name__)
 
 # ----------------------------- 헬퍼 ----------------------------- #
-
-
-def _resolve_pool_dir(pool_id: str) -> Path:
-    """``ztickers/<순번>_<pool_id>/`` 디렉토리를 찾는다.
-
-    ``<순번>`` 은 숫자만 허용한다. 예: ``pool_id='us'`` → ``4_us`` 매칭,
-    ``2_kor_us`` 는 접두사가 ``kor_`` 이므로 미매칭.
-    """
-    matches: list[Path] = []
-    for candidate in TICKERS_ROOT.iterdir():
-        if not candidate.is_dir():
-            continue
-        name = candidate.name
-        if "_" not in name:
-            continue
-        prefix, _, suffix = name.partition("_")
-        if suffix == pool_id and prefix.isdigit():
-            matches.append(candidate)
-
-    if not matches:
-        raise FileNotFoundError(
-            f"ztickers 아래에서 '<순번>_{pool_id}' 디렉토리를 찾을 수 없습니다."
-        )
-    if len(matches) > 1:
-        raise RuntimeError(
-            f"'<순번>_{pool_id}' 패턴에 해당하는 디렉토리가 2개 이상 있습니다: {matches}"
-        )
-    return matches[0]
-
 
 def _select_close_column(columns: list[str]) -> str:
     for candidate in ("unadjusted_close", "Close", "close"):
@@ -1392,13 +1363,15 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
     n_workers = max(1, (os.cpu_count() or 2) - 1)
 
-    # 폴더명(순번 포함)을 파일명 접두사로 사용
-    pool_dir_name = _resolve_pool_dir(pool_id).name
+    # 폴더/파일 순번 처리를 위해 pools.json의 order 정보를 접두사로 사용
+    pool_settings = get_ticker_type_settings(pool_id)
+    pool_order = int(pool_settings.get("order", 0))
+    display_prefix = f"{pool_order}_{pool_id}" if pool_order > 0 else pool_id
 
     # 결과 파일 경로
     results_dir = Path(__file__).resolve().parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    out_path = results_dir / f"{pool_dir_name}-backtest_{today.strftime('%Y-%m-%d')}.log"
+    out_path = results_dir / f"{display_prefix}-backtest_{today.strftime('%Y-%m-%d')}.log"
 
     # 결과 파일 기록에 공통으로 쓰는 인자
     write_kwargs: dict[str, Any] = {
@@ -1521,7 +1494,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             buy_slippage=buy_slippage,
             sell_slippage=sell_slippage,
         )
-        detail_path = results_dir / f"{pool_dir_name}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
+        detail_path = results_dir / f"{display_prefix}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
         _write_details_file(
             out_path=detail_path,
             pool_id=pool_id,

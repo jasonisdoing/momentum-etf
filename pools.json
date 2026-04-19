@@ -1,0 +1,76 @@
+{
+  "pools": [
+    {
+      "order": 1,
+      "ticker_type": "kor_kr",
+      "icon": "🇰🇷",
+      "name": "국내상장 국내",
+      "country_code": "kor",
+      "currency": "KRW",
+      "type_source": "Naver",
+      "TOP_N_HOLD": 5,
+      "HOLDING_BONUS_SCORE": 10,
+      "FIRST_MA_TYPE": "SMA",
+      "FIRST_MA_MONTHS": 6,
+      "SECOND_MA_TYPE": "ALMA",
+      "SECOND_MA_MONTHS": 6
+    },
+    {
+      "order": 2,
+      "ticker_type": "kor_us",
+      "icon": "🇰🇷",
+      "name": "국내상장 해외",
+      "country_code": "kor",
+      "currency": "KRW",
+      "type_source": "Naver",
+      "TOP_N_HOLD": 5,
+      "HOLDING_BONUS_SCORE": 10,
+      "FIRST_MA_TYPE": "SMA",
+      "FIRST_MA_MONTHS": 6,
+      "SECOND_MA_TYPE": "ALMA",
+      "SECOND_MA_MONTHS": 6
+    },
+    {
+      "order": 3,
+      "ticker_type": "aus",
+      "icon": "🇦🇺",
+      "name": "호주 계좌",
+      "country_code": "au",
+      "currency": "AUD",
+      "TOP_N_HOLD": 5,
+      "HOLDING_BONUS_SCORE": 10,
+      "FIRST_MA_TYPE": "SMA",
+      "FIRST_MA_MONTHS": 6,
+      "SECOND_MA_TYPE": "ALMA",
+      "SECOND_MA_MONTHS": 6
+    },
+    {
+      "order": 4,
+      "ticker_type": "us",
+      "icon": "🇺🇸",
+      "name": "미국 개별주",
+      "country_code": "us",
+      "currency": "USD",
+      "TOP_N_HOLD": 5,
+      "HOLDING_BONUS_SCORE": 10,
+      "FIRST_MA_TYPE": "SMA",
+      "FIRST_MA_MONTHS": 6,
+      "SECOND_MA_TYPE": "ALMA",
+      "SECOND_MA_MONTHS": 6
+    },
+    {
+      "order": 5,
+      "ticker_type": "kor",
+      "icon": "🇰🇷",
+      "name": "한국 개별주",
+      "country_code": "kor",
+      "currency": "KRW",
+      "TOP_N_HOLD": 5,
+      "HOLDING_BONUS_SCORE": 10,
+      "FIRST_MA_TYPE": "SMA",
+      "FIRST_MA_MONTHS": 6,
+      "SECOND_MA_TYPE": "ALMA",
+      "SECOND_MA_MONTHS": 6
+    }
+  ]
+}
