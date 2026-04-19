@@ -31,13 +31,13 @@ python backtest/run.py
 - `SECOND_MA_TYPE`
 - `SECOND_MA_MONTHS`
 
-세부 스윕 범위는 [config.py](/Users/jason/DEV/momentum-etf/backtest/config.py)의 `BACKTEST_CONFIG`에서 관리한다.
+세부 스윕 범위는 프로젝트 루트의 [config.py](../config.py) 안 `BACKTEST_CONFIG`에서 관리한다.
 
 공통 전역값은 같은 파일 상단에서 별도로 관리한다.
 
 ```python
-BACKTEST_MONTHS = 12
-INITIAL_KRW_AMOUNT = 100_000_000
+BACKTEST_START_DATE = "2023-01-01"
+BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 ```
 
 종목풀별 슬리피지 설정은 같은 파일의 `SLIPPAGE_CONFIG`에서 별도로 관리한다.
@@ -80,11 +80,11 @@ INITIAL_KRW_AMOUNT = 100_000_000
 
 ## 모듈 구조
 
-- [run.py](/Users/jason/DEV/momentum-etf/backtest/run.py)
+- `run.py`
   - CLI 엔트리 포인트
-- [config.py](/Users/jason/DEV/momentum-etf/backtest/config.py)
+- `config.py` (프로젝트 루트)
   - 종목풀별 스윕 설정
-- [engine.py](/Users/jason/DEV/momentum-etf/backtest/engine.py)
+- `engine.py`
   - 조합 실행, 시뮬레이션, 결과 파일 생성
-- [core/strategy/scoring.py](/Users/jason/DEV/momentum-etf/core/strategy/scoring.py)
+- `core/strategy/scoring.py`
   - 랭킹과 백테스트가 공용으로 쓰는 점수 계산 엔진

@@ -1,7 +1,7 @@
 """모멘텀 ETF 파라미터 스윕 백테스트 엔진.
 
 ``backtest/run.py`` 에서 호출되며, 종목풀별 ``BACKTEST_CONFIG`` 와
-전역 공통값 ``BACKTEST_MONTHS``, ``INITIAL_KRW_AMOUNT`` 를 사용한다.
+전역 공통값 ``BACKTEST_START_DATE``, ``BACKTEST_INITIAL_KRW_AMOUNT`` 를 사용한다.
 멀티프로세스 병렬 실행을 지원하며, 실행 중에도 중간 결과를 파일에 주기적으로 기록한다.
 """
 
@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from backtest.config import BACKTEST_MONTHS, INITIAL_KRW_AMOUNT, SLIPPAGE_CONFIG
+from config import BACKTEST_START_DATE, BACKTEST_INITIAL_KRW_AMOUNT, SLIPPAGE_CONFIG
 from config import TRADING_DAYS_PER_MONTH
 from core.strategy.scoring import (
     combine_rule_percentiles,
@@ -449,7 +449,7 @@ def _write_results_file(
         f"x SECOND_MA_TYPE {len(second_ma_types)}개 x SECOND_MA_MONTHS {len(second_ma_months_list)}개 "
         f"= {total_combos}개 조합"
     )
-    lines.append(f'"INITIAL_KRW_AMOUNT": {int(initial_cash)},')
+    lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
     lines.append(f'"HOLDING_BONUS_SCORE": {[int(b) if float(b).is_integer() else b for b in bonus_values]},')
     lines.append(f'"FIRST_MA_TYPE": {first_ma_types},')
@@ -1035,8 +1035,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         )
 
     cfg = config[pool_id]
-    months = int(BACKTEST_MONTHS)
-    initial_cash = float(INITIAL_KRW_AMOUNT)
+    start_target = pd.Timestamp(BACKTEST_START_DATE).normalize()
+    initial_cash = float(BACKTEST_INITIAL_KRW_AMOUNT)
     buy_slippage, sell_slippage = _resolve_slippage(pool_id)
 
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
@@ -1058,7 +1058,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
 
     # 기간 설정
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    start_target = (today - pd.DateOffset(months=months)).normalize()
+    # 로그 출력용으로 근사 개월 수 계산
+    months = int(round((today - start_target).days / 30.436875))
 
     # 워밍업: 최대 MA 개월 + 여유 2개월
     max_ma_months = max(
@@ -1111,10 +1112,17 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     close_frame = pd.DataFrame(close_cols, index=index)
     open_frame = pd.DataFrame(open_cols, index=index)
 
-    # 백테스트 기간: calendar_days 중 start_target 이상인 일자
-    backtest_days = [d for d in calendar_days if d >= start_target]
+    # 1월 1일 시작 설정 시 1월 2일(첫 거래일)부터 매수가 가능하도록, 
+    # start_target 이후의 첫 거래일을 backtest_days[1]로 위치시킨다.
+    # 이를 위해 start_target 이전의 마지막 1거래일을 찾아 backtest_days[0](시그널용)으로 포함한다.
+    first_target_idx = next((i for i, d in enumerate(calendar_days) if d >= start_target), None)
+    if first_target_idx is not None and first_target_idx > 0:
+        backtest_days = calendar_days[first_target_idx - 1 :]
+    else:
+        backtest_days = [d for d in calendar_days if d >= start_target]
+    
     if len(backtest_days) < 2:
-        raise RuntimeError("백테스트 기간 내 거래일이 부족합니다.")
+        raise RuntimeError("백테스트 기간 내 거래일이 부족합니다. (최소 2거래일 필요)")
 
     period_start = backtest_days[1]
     period_end = backtest_days[-1]

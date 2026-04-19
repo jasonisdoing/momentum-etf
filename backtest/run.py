@@ -16,7 +16,7 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-from backtest.config import BACKTEST_CONFIG
+from config import BACKTEST_CONFIG
 from backtest.engine import run_backtest
 from utils.env import load_env_if_present
 
