@@ -271,13 +271,26 @@ def _simulate_one_combo(
             n = int(shares.pop(ticker))
             cash += n * price
 
-        # 2) 매수
-        target_amount = total_equity_signal / float(top_n)
-        for ticker in to_buy:
+        # 2) 매수 (방식 A': 신규 진입 K개에 "slot 상한 ∧ cash/K" 균등 배분 → 잔액은 고점수 순 추가 소진)
+        if not to_buy:
+            continue
+
+        # 신규 진입 종목을 점수 내림차순 → 티커 오름차순으로 정렬 (동점 결정론적 처리).
+        new_entrants_df = target_df[target_df["ticker"].isin(to_buy)]
+        new_entrants = new_entrants_df["ticker"].tolist()
+        k_new = len(new_entrants)
+        if k_new == 0:
+            continue
+
+        slot_target = total_equity_signal / float(top_n)
+        per_new_budget = min(slot_target, cash / k_new) if cash > 0 else 0.0
+
+        # 2-1) 균등 1차 배분
+        for ticker in new_entrants:
             price = float(open_exec.get(ticker, np.nan))
             if pd.isna(price) or price <= 0:
                 continue
-            buy_budget = min(cash, target_amount)
+            buy_budget = min(cash, per_new_budget)
             if buy_budget <= 0:
                 continue
             n_shares = int(buy_budget // price)
@@ -286,6 +299,26 @@ def _simulate_one_combo(
             cost = n_shares * price
             cash -= cost
             shares[ticker] = shares.get(ticker, 0) + n_shares
+
+        # 2-2) 단주 매수로 남은 잔액 → 고점수 신규 종목부터 한 주씩 추가 소진
+        for ticker in new_entrants:
+            if cash <= 0:
+                break
+            price = float(open_exec.get(ticker, np.nan))
+            if pd.isna(price) or price <= 0:
+                continue
+            # slot_target 을 이미 채웠는지 확인 (몰빵 방지).
+            current_position_value = shares.get(ticker, 0) * price
+            remaining_slot_budget = max(0.0, slot_target - current_position_value)
+            if remaining_slot_budget <= 0:
+                continue
+            extra_budget = min(cash, remaining_slot_budget)
+            extra_shares = int(extra_budget // price)
+            if extra_shares <= 0:
+                continue
+            cost = extra_shares * price
+            cash -= cost
+            shares[ticker] = shares.get(ticker, 0) + extra_shares
 
     if not value_curve:
         return 0.0, 0.0, 0.0
