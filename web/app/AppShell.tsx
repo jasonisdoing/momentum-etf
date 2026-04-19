@@ -6,7 +6,6 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   IconCash,
-  IconFlask2,
   IconChevronDown,
   IconMoodSmile,
   IconHome,
@@ -57,7 +56,6 @@ const navGroups = [
     items: [
       { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
       { href: "/note", label: "계좌 메모", icon: IconNotebook },
-      { href: "/backtest", label: "백테스트", icon: IconFlask2 },
     ],
   },
   {
