@@ -189,7 +189,7 @@ def _run_single_combo(
         [_W_PCT[(fma_t, fma_m)], _W_PCT[(sma_t, sma_m)]],
         _W_ELIG,
     )
-    total_ret, cagr, mdd = _simulate_one_combo(
+    total_ret, cagr, mdd, trades = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
         bonus=bonus,
@@ -211,6 +211,7 @@ def _run_single_combo(
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
         "MDD_PCT": mdd,
+        "TRADES": trades,
     }
 
 
@@ -229,7 +230,7 @@ def _simulate_one_combo(
     fx_series: pd.Series,
     buy_slippage: float,
     sell_slippage: float,
-) -> tuple[float, float, float]:
+) -> tuple[float, float, float, int]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
     모든 체결/보유/현금은 현지 통화로 관리한다. 평가 일자마다 당일 환율을 곱해
@@ -242,8 +243,9 @@ def _simulate_one_combo(
     cash = float(initial_cash_local)
 
     value_curve: list[float] = []
+    trade_count = 0
     if len(backtest_days) < 2:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0
 
     # 첫 거래일은 전일 종가 신호를 사용해 당일 시초가에 첫 진입한다.
     for exec_idx in range(1, len(backtest_days)):
@@ -301,6 +303,7 @@ def _simulate_one_combo(
             price = raw_open_price * (1.0 - sell_slippage)
             n = int(shares.pop(ticker))
             cash += n * price
+            trade_count += 1
 
         # 2) 매수 (방식 A': 신규 진입 K개에 "slot 상한 ∧ cash/K" 균등 배분 → 잔액은 고점수 순 추가 소진)
         if not to_buy:
@@ -339,6 +342,7 @@ def _simulate_one_combo(
             cost = n_shares * price
             cash -= cost
             shares[ticker] = shares.get(ticker, 0) + n_shares
+            trade_count += 1
 
         # 2-2) 단주 매수로 남은 잔액 → 고점수 신규 종목부터 한 주씩 추가 소진
         for ticker in new_entrants:
@@ -371,7 +375,7 @@ def _simulate_one_combo(
         value_curve.append(portfolio_value_local * fx_today)
 
     if not value_curve:
-        return 0.0, 0.0, 0.0
+        return 0.0, 0.0, 0.0, 0
 
     exec_days = backtest_days[1 : 1 + len(value_curve)]
     values = pd.Series(value_curve, index=exec_days)
@@ -392,7 +396,7 @@ def _simulate_one_combo(
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
 
-    return float(total_return_pct), float(cagr_pct), float(mdd_pct)
+    return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count)
 
 
 # --------------------------- 결과 기록 --------------------------- #
@@ -479,8 +483,9 @@ def _write_results_file(
         "수익률(%)",
         "CAGR(%)",
         "MDD(%)",
+        "Trades",
     ]
-    aligns = ["left", "left", "left", "left", "left", "left", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "left", "right", "right", "right", "right"]
     formatted_rows: list[list[str]] = []
     for r in top_rows:
         formatted_rows.append(
@@ -494,6 +499,7 @@ def _write_results_file(
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
                 f"{r['MDD_PCT']:.2f}",
+                str(r["TRADES"]),
             ]
         )
     table_lines = render_table_eaw(headers, formatted_rows, aligns)
@@ -629,6 +635,7 @@ def _simulate_one_combo_details(
         *,
         day: pd.Timestamp,
         held_rows: list[dict[str, str]],
+        wait_rows: list[dict[str, str]],
         sold_rows: list[dict[str, str]],
         cash_local: float,
         total_equity_local: float,
@@ -669,7 +676,7 @@ def _simulate_one_combo_details(
         ]
         day_rows.append(cash_row)
 
-        for row_index, row in enumerate(held_rows + sold_rows, start=2):
+        for row_index, row in enumerate(held_rows + wait_rows + sold_rows, start=2):
             day_rows.append(
                 [
                     str(row_index),
@@ -965,10 +972,54 @@ def _simulate_one_combo_details(
                 }
             )
 
+        wait_rows: list[dict[str, str]] = []
+        # 현재 보유 중인 종목을 제외하고 신호 점수순 상위 N개를 대기 종목으로 추출
+        waiting_candidates_df = target_df[~target_df["ticker"].isin(shares.keys())]
+        waiting_tickers = waiting_candidates_df.head(top_n)["ticker"].tolist()
+        
+        for ticker in waiting_tickers:
+            current_price = float(close_exec.get(ticker, np.nan)) if not pd.isna(close_exec.get(ticker, np.nan)) else None
+            previous_close = (
+                float(close_today.get(ticker, np.nan)) if not pd.isna(close_today.get(ticker, np.nan)) else None
+            )
+            # 순위 계산 (전체 target_df 기준)
+            current_rank = next((i for i, t in enumerate(target_df["ticker"], 1) if t == ticker), None)
+            
+            wait_rows.append(
+                {
+                    "ticker": ticker,
+                    "name": ticker_name_map.get(ticker, ticker),
+                    "status": "WAIT",
+                    "held_days": "-",
+                    "price": _format_price_or_dash(current_price, country_code),
+                    "daily_pct": format_pct_change(_safe_daily_pct(current_price, previous_close)),
+                    "qty": "-",
+                    "amount": "-",
+                    "pnl": "-",
+                    "pnl_pct": "-",
+                    "weight": _format_weight_pct(0.0),
+                    "score": _format_score_value(
+                        None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
+                    ),
+                    "trend1": _format_score_value(
+                        None
+                        if pd.isna(first_rule_signal.get(ticker, np.nan))
+                        else float(first_rule_signal.get(ticker, np.nan))
+                    ),
+                    "trend2": _format_score_value(
+                        None
+                        if pd.isna(second_rule_signal.get(ticker, np.nan))
+                        else float(second_rule_signal.get(ticker, np.nan))
+                    ),
+                    "message": f"대기 순위 {current_rank}위" if current_rank else "진입 대기",
+                }
+            )
+
         note = "매도 후 신규 진입 및 잔액 현금 보유" if (to_sell or to_buy) else "거래 없음"
         _append_day_section(
             day=exec_day,
             held_rows=held_rows,
+            wait_rows=wait_rows,
             sold_rows=sold_rows,
             cash_local=cash,
             total_equity_local=total_equity_close_local,
@@ -1192,10 +1243,13 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
     n_workers = max(1, (os.cpu_count() or 2) - 1)
 
+    # 폴더명(순번 포함)을 파일명 접두사로 사용
+    pool_dir_name = _resolve_pool_dir(pool_id).name
+
     # 결과 파일 경로
     results_dir = Path(__file__).resolve().parent / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
-    out_path = results_dir / f"{pool_id}-backtest_{today.strftime('%Y-%m-%d')}.log"
+    out_path = results_dir / f"{pool_dir_name}-backtest_{today.strftime('%Y-%m-%d')}.log"
 
     # 결과 파일 기록에 공통으로 쓰는 인자
     write_kwargs: dict[str, Any] = {
@@ -1317,7 +1371,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             buy_slippage=buy_slippage,
             sell_slippage=sell_slippage,
         )
-        detail_path = results_dir / f"{pool_id}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
+        detail_path = results_dir / f"{pool_dir_name}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
         _write_details_file(
             out_path=detail_path,
             pool_id=pool_id,
