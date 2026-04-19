@@ -6,27 +6,27 @@ from __future__ import annotations
 BACKTEST_MONTHS = 12
 INITIAL_KRW_AMOUNT = 100_000_000
 
-# 슬리피지는 bp(1bp = 0.01%) 단위로 입력한다.
+# 슬리피지는 % 단위로 입력한다.
 SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
     "kor_kr": {
-        "BUY_BPS": 0.5,
-        "SELL_BPS": 0.5,
+        "BUY_PCT": 0.5,
+        "SELL_PCT": 0.5,
     },
     "kor_us": {
-        "BUY_BPS": 0.5,
-        "SELL_BPS": 0.5,
+        "BUY_PCT": 0.5,
+        "SELL_PCT": 0.5,
     },
     "aus": {
-        "BUY_BPS": 1.0,
-        "SELL_BPS": 1.0,
+        "BUY_PCT": 1.0,
+        "SELL_PCT": 1.0,
     },
     "us": {
-        "BUY_BPS": 0.5,
-        "SELL_BPS": 0.5,
+        "BUY_PCT": 0.5,
+        "SELL_PCT": 0.5,
     },
     "kor": {
-        "BUY_BPS": 0.5,
-        "SELL_BPS": 0.5,
+        "BUY_PCT": 0.5,
+        "SELL_PCT": 0.5,
     },
 }
 
