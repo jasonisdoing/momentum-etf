@@ -85,21 +85,12 @@ def _load_account_configs() -> list[dict[str, Any]]:
         if country_code not in {"kor", "au", "us"}:
             raise AccountSettingsError(f"계정 '{account_id}'의 country_code는 kor, au, us만 허용합니다: {country_code}")
 
-        ticker_codes = raw_entry.get("ticker_codes")
-        if not isinstance(ticker_codes, list) or not ticker_codes:
-            raise AccountSettingsError(f"계정 '{account_id}'의 'ticker_codes'는 비어 있지 않은 배열이어야 합니다.")
-
-        normalized_ticker_codes = [str(code).strip().lower() for code in ticker_codes if str(code).strip()]
-        if len(normalized_ticker_codes) != len(ticker_codes):
-            raise AccountSettingsError(f"계정 '{account_id}'의 'ticker_codes'에 빈 값이 포함되어 있습니다.")
-
         loaded.append(
             {
                 **raw_entry,
                 "account_id": account_id,
                 "order": order,
                 "country_code": country_code,
-                "ticker_codes": normalized_ticker_codes,
             }
         )
         seen_ids.add(account_id)

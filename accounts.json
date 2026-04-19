@@ -6,7 +6,6 @@
       "icon": "🇰🇷",
       "name": "국내 계좌",
       "country_code": "kor",
-      "ticker_codes": ["kor_kr", "kor_us"],
       "currency": "KRW"
     },
     {
@@ -15,7 +14,6 @@
       "icon": "🇰🇷",
       "name": "ISA 계좌",
       "country_code": "kor",
-      "ticker_codes": ["kor_us"],
       "currency": "KRW",
       "URL": "https://mablewide.kbsec.com/"
     },
@@ -25,7 +23,6 @@
       "icon": "🇰🇷",
       "name": "연금저축 계좌",
       "country_code": "kor",
-      "ticker_codes": ["kor_us"],
       "currency": "KRW",
       "URL": "https://mablewide.kbsec.com/"
     },
@@ -35,7 +32,6 @@
       "icon": "💼",
       "name": "장기보유 계좌",
       "country_code": "kor",
-      "ticker_codes": ["kor_kr", "kor_us"],
       "currency": "KRW",
       "URL": "https://tossinvest.com/"
     },
@@ -45,7 +41,6 @@
       "icon": "🇦🇺",
       "name": "호주 계좌",
       "country_code": "au",
-      "ticker_codes": ["aus"],
       "currency": "AUD",
       "URL": "https://app.superhero.com.au/"
     }

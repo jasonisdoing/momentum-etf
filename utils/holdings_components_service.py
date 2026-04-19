@@ -49,12 +49,10 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
             "etf_details": [],
         }
 
-    # 해당 계좌에서 사용하는 종목풀(ticker_type) 목록
-    ticker_codes = account_config.get("settings", {}).get("ticker_codes", [])
-    if isinstance(ticker_codes, str):
-        ticker_codes = [ticker_codes]
-    if not ticker_codes:
-        ticker_codes = ["1_kor_kr"]
+    # 전체 종목풀(ticker_type)을 대상으로 구성종목 캐시를 찾는다.
+    ticker_types = [str(config["ticker_type"]).strip().lower() for config in load_ticker_type_configs()]
+    if not ticker_types:
+        raise RuntimeError("사용 가능한 종목풀이 없습니다.")
 
     # 구성종목 통합 합산용 딕셔너리
     merged: dict[str, dict[str, Any]] = {}
@@ -74,9 +72,9 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         valuation = float(row.get("평가금액(KRW)") or 0.0)
         portfolio_weight = valuation / total_valuation
 
-        # 캐시된 구성종목 정보 조회 (계좌에 설정된 모든 ticker_type을 순회하며 찾는다)
+        # 캐시된 구성종목 정보 조회 (전체 ticker_type을 순회하며 찾는다)
         cache_doc = None
-        for t_type in ticker_codes:
+        for t_type in ticker_types:
             cache_doc = get_stock_cache_meta(t_type, ticker)
             if cache_doc and cache_doc.get("holdings_cache", {}).get("items"):
                 break
