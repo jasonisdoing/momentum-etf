@@ -420,16 +420,8 @@ export function HoldingsManager({
       if (!row || !row.ticker) return;
       const normalizedTicker = normalizeDisplayTicker(String(row.ticker ?? "-"));
       if (!normalizedTicker || normalizedTicker === "-" || normalizedTicker === "IS") return;
-      
-      const search = new URLSearchParams();
-      search.set("ticker", normalizedTicker);
-      if (row.name) search.set("name", row.name);
-      if (row.ticker_type) search.set("ticker_type", row.ticker_type);
-      if (row.country_code) search.set("country_code", row.country_code);
-      if (row.is_etf !== undefined) search.set("is_etf", String(row.is_etf));
-      if (row.has_holdings !== undefined) search.set("has_holdings", String(row.has_holdings));
 
-      router.push(`/ticker?${search.toString()}`);
+      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
     },
     [router],
   );
