@@ -8,7 +8,7 @@ def main() -> int:
     load_env_if_present()
     result = aggregate_active_week_data()
     week_date = str(result.get("week_date", "")).strip()
-    print(f"[weekly_aggregate] 활성 주차 집계 완료: {week_date}")
+    print(f"[weekly_aggregate] 주별 데이터 집계 완료: {week_date}")
     return 0
 
 

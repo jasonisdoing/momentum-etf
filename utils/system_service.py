@@ -25,10 +25,10 @@ SystemAction = Literal[
 SCHEDULE_ROWS = [
     {
         "key": "weekly_aggregate",
-        "job": "활성 주차 집계",
+        "job": "주별 데이터 집계",
         "target": "주별 데이터",
         "cadence": "평일 09:35, 16:35 KST",
-        "command": "python scripts/aggregate_active_week_data.py",
+        "command": "python scripts/collect_weekly_data.py",
     },
     {
         "key": "asset_summary",
@@ -66,7 +66,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
-    "weekly_aggregate": "scripts/aggregate_active_week_data.py",
+    "weekly_aggregate": "scripts/collect_weekly_data.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {
