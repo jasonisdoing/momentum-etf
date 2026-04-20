@@ -252,6 +252,11 @@ def _simulate_one_combo(
         valid_mask = ~np.isnan(composite_today) & ~np.isnan(open_exec) & (open_exec > 0)
         valid_idx = np.flatnonzero(valid_mask)
         if valid_idx.size == 0:
+            close_exec = close_values[exec_idx]
+            priced_exec_mask = ~np.isnan(close_exec)
+            portfolio_value_local = cash + float(np.dot(shares[priced_exec_mask], close_exec[priced_exec_mask]))
+            fx_today = float(fx_values[exec_idx])
+            value_curve.append(portfolio_value_local * fx_today)
             continue
 
         # 동점 처리: 점수 desc → ticker asc(컬럼 순서가 이미 ticker asc).
@@ -259,6 +264,11 @@ def _simulate_one_combo(
         valid_scores = composite_today[valid_idx]
         target_count = min(top_n, valid_idx.size)
         if target_count <= 0:
+            close_exec = close_values[exec_idx]
+            priced_exec_mask = ~np.isnan(close_exec)
+            portfolio_value_local = cash + float(np.dot(shares[priced_exec_mask], close_exec[priced_exec_mask]))
+            fx_today = float(fx_values[exec_idx])
+            value_curve.append(portfolio_value_local * fx_today)
             continue
         if target_count < valid_idx.size:
             top_slice = np.argpartition(-valid_scores, target_count - 1)[:target_count]
