@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from utils.account_registry import load_account_configs
 from utils.env import load_env_if_present
@@ -24,18 +27,18 @@ SystemAction = Literal[
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 SCHEDULE_ROWS = [
     {
-        "key": "weekly_aggregate",
-        "job": "주별 데이터 집계",
-        "target": "주별 데이터",
-        "cadence": "평일 09:35, 16:35 KST",
-        "command": "python scripts/collect_weekly_data.py",
-    },
-    {
         "key": "asset_summary",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
         "cadence": "평일 09:30, 16:30 KST",
         "command": "python scripts/slack_asset_summary.py",
+    },
+    {
+        "key": "weekly_aggregate",
+        "job": "주별 데이터 집계",
+        "target": "주별 데이터",
+        "cadence": "평일 09:35, 16:35 KST",
+        "command": "python scripts/collect_weekly_data.py",
     },
     {
         "key": "cache_refresh",
@@ -75,10 +78,81 @@ _LABEL_BY_ACTION: dict[str, str] = {
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
+_LOG_DIR = _PROJECT_ROOT / "logs" / "cron"
 # 락파일이 이 시간(초)보다 오래되면 stale 로 간주하고 삭제한다.
 _STALE_LOCK_SECONDS = 60 * 60  # 1시간
+_RUN_BATCH_START_PATTERN = re.compile(
+    r"^\[run_batch\] START job=(?P<job>[a-z_]+) cmd=.* at=(?P<started_at>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)$"
+)
+_RUN_BATCH_END_PATTERN = re.compile(
+    r"^\[run_batch\] END job=(?P<job>[a-z_]+) status=(?P<status>성공|실패) exit=(?P<exit>\d+) elapsed=(?P<elapsed>[0-9.]+)s(?: at=(?P<ended_at>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST))?$"
+)
 
 _logger = logging.getLogger(__name__)
+
+
+def _parse_kst_datetime(value: str) -> datetime | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d %H:%M:%S KST").replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    except ValueError:
+        return None
+
+
+def _format_elapsed_since(when: datetime | None) -> str:
+    if when is None:
+        return "-"
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+    delta_seconds = max(0, int((now - when).total_seconds()))
+    if delta_seconds < 60:
+        elapsed = "방금전"
+    elif delta_seconds < 3600:
+        elapsed = f"{delta_seconds // 60}분전"
+    elif delta_seconds < 86400:
+        elapsed = f"{delta_seconds // 3600}시간전"
+    else:
+        elapsed = f"{delta_seconds // 86400}일전"
+    weekday = ["월", "화", "수", "목", "금", "토", "일"][when.weekday()]
+    return f"{when.strftime('%Y-%m-%d')}({weekday}) {when.strftime('%H:%M')}({elapsed})"
+
+
+def _read_last_job_run(job_key: str) -> dict[str, str | None]:
+    log_path = _LOG_DIR / f"{job_key}.log"
+    if not log_path.exists():
+        return {"status": None, "display": "-"}
+
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return {"status": None, "display": "-"}
+
+    pending_started_at: str | None = None
+    last_started_at: str | None = None
+    last_status: str | None = None
+
+    for line in lines:
+        start_match = _RUN_BATCH_START_PATTERN.match(line.strip())
+        if start_match and start_match.group("job") == job_key:
+            pending_started_at = start_match.group("started_at")
+            continue
+
+        end_match = _RUN_BATCH_END_PATTERN.match(line.strip())
+        if end_match and end_match.group("job") == job_key:
+            last_status = "success" if end_match.group("status") == "성공" else "failure"
+            last_started_at = pending_started_at
+            pending_started_at = None
+
+    if not last_status or not last_started_at:
+        return {"status": None, "display": "-"}
+
+    started_at = _parse_kst_datetime(last_started_at)
+    icon = "✅" if last_status == "success" else "❌"
+    return {
+        "status": last_status,
+        "display": f"{icon} {_format_elapsed_since(started_at)}",
+    }
 
 
 def get_running_jobs() -> list[str]:
@@ -131,6 +205,10 @@ def load_system_data() -> dict[str, object]:
             "별도로 유지됩니다. (정의: `infra/cron/crontab`)"
         ),
         "running_jobs": get_running_jobs(),
+        "last_run_by_job": {
+            row["key"]: _read_last_job_run(str(row["key"]))
+            for row in SCHEDULE_ROWS
+        },
     }
 
 

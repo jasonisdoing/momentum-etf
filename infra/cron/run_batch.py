@@ -171,8 +171,9 @@ def main(argv: list[str]) -> int:
             f"```\n{tail}\n```"
         )
 
+    ended_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     print(
-        f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s"
+        f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
     )
     return exit_code
 
