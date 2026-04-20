@@ -203,7 +203,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "SECOND_MA_MONTHS": [3, 6, 9, 12],
     },
     "kor": {
-        "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
+        "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20, 25],
         "FIRST_MA_TYPE": ["SMA"],
