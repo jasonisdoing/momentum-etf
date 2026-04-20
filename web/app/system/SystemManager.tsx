@@ -25,7 +25,8 @@ type SystemJobKey =
   | "cache_refresh"
   | "market_hours_analysis"
   | "metadata_updater"
-  | "asset_summary";
+  | "asset_summary"
+  | "weekly_aggregate";
 
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];
