@@ -72,7 +72,7 @@ function formatKrw(value: number | null): string {
 
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 function formatVolume(value: number | null): string {

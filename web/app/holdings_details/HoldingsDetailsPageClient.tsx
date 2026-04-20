@@ -70,14 +70,13 @@ function formatPrice(val: number | null | undefined, currency?: string): string 
 
 function formatSignedPercent(val: number | null | undefined): string {
   if (val == null) return "-";
-  const sign = val > 0 ? "+" : "";
-  return `${sign}${val.toFixed(2)}%`;
+  return `${val.toFixed(2)}%`;
 }
 
 function getSignedClass(val: number | null | undefined): string {
   if (val == null) return "";
-  if (val > 0) return "text-success";
-  if (val < 0) return "text-danger";
+  if (val > 0) return "metricPositive";
+  if (val < 0) return "metricNegative";
   return "";
 }
 

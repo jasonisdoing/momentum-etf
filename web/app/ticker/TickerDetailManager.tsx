@@ -142,7 +142,7 @@ function formatNumber(value: number | null, digits = 0): string {
 
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 function formatUnsignedPercent(value: number | null): string {
