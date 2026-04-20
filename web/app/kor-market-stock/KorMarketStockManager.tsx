@@ -133,6 +133,7 @@ const columnDefs: ColDef<KorMarketStockRow>[] = [
     width: 110,
     minWidth: 96,
     type: "rightAligned",
+    sort: "desc",
     valueFormatter: (p) => formatPercent(p.value),
     cellClassRules: {
       metricPositive: (p) => p.value != null && p.value > 0,
@@ -207,9 +208,22 @@ export function KorMarketStockManager({
     onSummaryChange?.({ market, count: rows.length, totalCount });
   }, [market, rows.length, totalCount, onSummaryChange]);
 
+  const gridRows = useMemo(
+    () =>
+      [...rows].sort((left, right) => {
+        const leftChange = left.change_pct ?? Number.NEGATIVE_INFINITY;
+        const rightChange = right.change_pct ?? Number.NEGATIVE_INFINITY;
+        if (leftChange !== rightChange) {
+          return rightChange - leftChange;
+        }
+        return left.ticker.localeCompare(right.ticker);
+      }),
+    [rows],
+  );
+
   const allVisibleSelected = useMemo(
-    () => rows.length > 0 && rows.every((row) => selectedTickers.includes(row.ticker)),
-    [rows, selectedTickers],
+    () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
+    [gridRows, selectedTickers],
   );
 
   const toggleTickerSelection = useCallback((ticker: string) => {
@@ -219,7 +233,7 @@ export function KorMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const visibleTickers = rows.map((row) => row.ticker);
+    const visibleTickers = gridRows.map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (visibleTickers.length === 0) return current;
       const allSelected = visibleTickers.every((ticker) => current.includes(ticker));
@@ -228,7 +242,7 @@ export function KorMarketStockManager({
       }
       return [...new Set([...current, ...visibleTickers])];
     });
-  }, [rows]);
+  }, [gridRows]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
@@ -345,6 +359,7 @@ export function KorMarketStockManager({
         width: 110,
         minWidth: 96,
         type: "rightAligned",
+        sort: "desc",
         valueFormatter: (p) => formatPercent(p.value),
         cellClassRules: {
           metricPositive: (p) => p.value != null && p.value > 0,
@@ -463,7 +478,7 @@ export function KorMarketStockManager({
 
           <div className="appGridFillWrap">
             <AppAgGrid<KorMarketStockGridRow>
-              rowData={rows}
+              rowData={gridRows}
               columnDefs={columnDefs}
               loading={loading}
               theme={korMarketStockGridTheme}
