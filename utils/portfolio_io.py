@@ -183,18 +183,17 @@ def load_real_holdings_table(
     )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
-    # 보유일은 마지막 매수일 기준 경과일로 계산한다.
+    # 보유일은 연속 보유 시작일(first_buy_date) 기준 경과일로 계산한다.
     try:
         from utils.formatters import format_trading_days
 
         now = pd.Timestamp.now(KST).normalize().tz_localize(None)
 
         def _calculate_days(row):
-            # 기존 데이터 호환을 위해 last_buy_date가 없으면 first_buy_date를 사용한다.
-            last_buy_date = row.get("last_buy_date") or row.get("first_buy_date")
-            if last_buy_date:
+            first_buy_date = row.get("first_buy_date") or row.get("last_buy_date")
+            if first_buy_date:
                 try:
-                    buy_ts = pd.to_datetime(last_buy_date).normalize().tz_localize(None)
+                    buy_ts = pd.to_datetime(first_buy_date).normalize().tz_localize(None)
                     delta = (now - buy_ts).days
                     return max(delta + 1, 1)
                 except Exception:
