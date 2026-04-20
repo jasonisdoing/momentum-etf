@@ -323,6 +323,17 @@ def update_ticker_type_metadata(
 
     # 삭제된 종목 포함하여 모든 종목 로드
     stock_data = get_all_etfs_including_deleted(type_norm)
+    
+    # + 현재 계좌들에 보유 중인 종목들도 캐시/메타 업데이트 대상에 강제 포함
+    from utils.stock_list_io import get_active_holding_tickers
+    active_holdings_by_type = get_active_holding_tickers()
+    active_for_this_type = active_holdings_by_type.get(type_norm, set())
+    
+    existing_tickers = {s.get("ticker", "").upper() for s in stock_data if s.get("ticker")}
+    for t in active_for_this_type:
+        if t not in existing_tickers:
+            stock_data.append({"ticker": t, "type": "etf"})
+
     if not stock_data:
         logger.warning(f"'{type_norm}' 종목타입의 종목 데이터가 비어있습니다.")
         return

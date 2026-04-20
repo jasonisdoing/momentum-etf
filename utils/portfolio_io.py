@@ -170,6 +170,23 @@ def load_real_holdings_table(
         df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
         df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
         df_holdings["has_holdings"] = df_holdings["ticker"].map(lambda t: has_holdings_map.get(t, False))
+        
+        # 계좌의 country_code 찾아와서 부여
+        try:
+            account_info = get_account_settings(account_id)
+            account_country = account_info.get("country_code", "kor")
+        except Exception:
+            account_country = "kor"
+            
+        df_holdings["country_code"] = account_country
+        
+        # ticker_type이 없는 미등록 종목인 경우, 국가 코드를 기반으로 기본값 할당
+        def _fallback_ticker_type(row):
+            if row.get("ticker_type"): return row["ticker_type"]
+            c_code = row.get("country_code", "kor")
+            return "us" if c_code == "us" else "aus" if c_code == "au" else "kor"
+            
+        df_holdings["ticker_type"] = df_holdings.apply(_fallback_ticker_type, axis=1)
 
     import numpy as np
 
@@ -433,6 +450,8 @@ def load_real_holdings_table(
             "일간(%)": intl_daily_pct,
             "is_etf": False,
             "has_holdings": False,
+            "country_code": "au",
+            "ticker_type": "aus",
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
         # Ensure value columns are numeric after concat

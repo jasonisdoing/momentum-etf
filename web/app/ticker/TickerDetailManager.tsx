@@ -90,6 +90,15 @@ type TickerHoldingRow = {
   in_kor_pool?: boolean;
 };
 
+type TickerResolveItem = {
+  ticker: string;
+  name: string;
+  ticker_type: string;
+  country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
+};
+
 type CrosshairInfo = {
   open: number | null;
   high: number | null;
@@ -484,8 +493,30 @@ export function TickerDetailManager({
       return;
     }
 
-    setSelectedTicker(null);
-    setError(`${qTicker} 티커를 찾지 못했습니다.`);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/ticker-resolve?ticker=${encodeURIComponent(qTicker)}`, {
+          cache: "no-store",
+        });
+        const resolved = (await response.json()) as TickerResolveItem & { error?: string };
+        if (!response.ok) {
+          throw new Error(resolved.error || `${qTicker} 티커를 찾지 못했습니다.`);
+        }
+        const resolvedItem: TickerItem = {
+          ticker: resolved.ticker,
+          name: resolved.name,
+          ticker_type: resolved.ticker_type,
+          country_code: resolved.country_code,
+          is_etf: resolved.is_etf,
+          has_holdings: resolved.has_holdings,
+        };
+        setSelectedTicker(resolvedItem);
+        await loadTickerData(resolvedItem);
+      } catch (error) {
+        setSelectedTicker(null);
+        setError(error instanceof Error ? error.message : `${qTicker} 티커를 찾지 못했습니다.`);
+      }
+    })();
   }, [allTickers, qTicker, qTickerType, qCountryCode, qName]);
 
   // --- 데이터 로드 ---
@@ -510,6 +541,12 @@ export function TickerDetailManager({
       const search = new URLSearchParams({
         ticker: item.ticker,
       });
+      if (item.ticker_type) {
+        search.set("ticker_type", item.ticker_type);
+      }
+      if (item.country_code) {
+        search.set("country_code", item.country_code);
+      }
       const response = await fetch(`/api/ticker-detail?${search.toString()}`, {
         cache: "no-store",
         signal: controller.signal,

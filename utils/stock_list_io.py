@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime, timezone
+from functools import lru_cache
 from time import monotonic
 from typing import Any
 
@@ -82,6 +83,7 @@ def _invalidate_cache(ticker_type: str | None = None) -> None:
 # 공개 alias 를 제공한다.
 def invalidate_ticker_type_cache(ticker_type: str | None = None) -> None:
     _invalidate_cache(ticker_type)
+    _build_active_pool_ticker_map.cache_clear()
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +133,57 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types  # noqa: E402
+
+
+@lru_cache(maxsize=1)
+def _build_active_pool_ticker_map() -> dict[str, list[str]]:
+    """활성 종목풀 기준 티커 -> ticker_type 목록 맵을 구성한다."""
+    ticker_map: dict[str, list[str]] = {}
+    for ticker_type in list_available_ticker_types():
+        for item in get_etfs(ticker_type):
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            ticker_map.setdefault(ticker, []).append(ticker_type)
+    return ticker_map
+
+
+@lru_cache(maxsize=1)
+def _load_domestic_etf_ticker_set() -> set[str]:
+    """KIS 국내 ETF 마스터 기준 티커 집합을 반환한다."""
+    from utils.kis_market import load_cached_kis_domestic_etf_master
+
+    df, _ = load_cached_kis_domestic_etf_master()
+    if "티커" not in df.columns:
+        raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
+    return {
+        str(value or "").strip().upper()
+        for value in df["티커"].tolist()
+        if str(value or "").strip()
+    }
+
+
+def infer_ticker_type_for_ticker(ticker: str) -> str:
+    """티커를 기준으로 종목풀(ticker_type)을 추론한다."""
+    ticker_norm = str(ticker or "").strip().upper()
+    if not ticker_norm:
+        raise ValueError("ticker가 필요합니다.")
+
+    active_matches = _build_active_pool_ticker_map().get(ticker_norm, [])
+    if len(active_matches) == 1:
+        return active_matches[0]
+    if len(active_matches) > 1:
+        joined = ", ".join(sorted(active_matches))
+        raise RuntimeError(f"동일한 티커 {ticker_norm}가 여러 종목풀에 등록되어 있습니다: {joined}")
+
+    if ticker_norm.isdigit() and len(ticker_norm) == 6:
+        return "kor_kr" if ticker_norm in _load_domestic_etf_ticker_set() else "kor"
+    if ticker_norm.endswith(".AX"):
+        return "aus"
+    if ticker_norm.isalpha() or "." in ticker_norm:
+        return "us"
+
+    raise RuntimeError(f"{ticker_norm}의 ticker_type을 추론할 수 없습니다.")
 
 
 def get_etfs(ticker_type: str, include_extra_tickers: Iterable[str] | None = None) -> list[dict[str, str]]:
@@ -238,6 +291,40 @@ def get_all_etfs(ticker_type: str) -> list[dict[str, Any]]:
         entry.setdefault("type", "etf")
         results.append(entry)
     return results
+
+
+def get_active_holding_tickers() -> dict[str, set[str]]:
+    """
+    현재 사용자가 포트폴리오(스냅샷)에 보유 중인 종목을 ticker_type 기준으로 분류하여 조회한다.
+
+    반환 형태:
+    {
+        "kor_kr": {"122630", ...},
+        "kor": {"005930", ...},
+        "us": {"AAPL", ...},
+    }
+    """
+    from utils.db_manager import get_db_connection
+    from utils.portfolio_io import _resolve_snapshot_date
+
+    db = get_db_connection()
+    if db is None:
+        return {}
+
+    today = _resolve_snapshot_date()
+    snap = db.daily_snapshots.find_one({"snapshot_date": {"$lte": today}}, sort=[("snapshot_date", -1)])
+    if not snap:
+        return {}
+
+    holdings_by_type: dict[str, set[str]] = {}
+    for acc in snap.get("accounts", []):
+        for h in acc.get("holdings", []):
+            t = str(h.get("ticker") or "").strip().upper()
+            if t and t != "IS" and t != "__CASH__":
+                inferred_type = infer_ticker_type_for_ticker(t)
+                holdings_by_type.setdefault(inferred_type, set()).add(t)
+
+    return holdings_by_type
 
 
 # ---------------------------------------------------------------------------
