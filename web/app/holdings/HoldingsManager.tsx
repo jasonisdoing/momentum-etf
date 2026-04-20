@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 type HoldingsRow = {
   account_name: string;
@@ -116,6 +117,9 @@ const constituentGridTheme = holdingsGridTheme.withParams({
   fontSize: 14,
 });
 
+const HOLDINGS_CACHE_KEY = "momentum-etf:holdings:assets";
+const HOLDINGS_CACHE_TTL_MS = 30_000;
+
 export function HoldingsManager({
   onHeaderSummaryChange,
 }: {
@@ -219,6 +223,22 @@ export function HoldingsManager({
 
   const loadHoldings = useCallback(async () => {
     try {
+      const cached = readSessionTtlCache<{ rows?: HoldingsRow[]; account_summaries?: AccountSummary[] }>(
+        HOLDINGS_CACHE_KEY,
+        HOLDINGS_CACHE_TTL_MS,
+      );
+      if (cached) {
+        const rows = (cached.rows || []).filter((r: HoldingsRow) => r.ticker && r.quantity > 0);
+        const cashSum = ((cached.account_summaries || []) as AccountSummary[]).reduce(
+          (sum: number, acc: AccountSummary) => sum + (acc.cash_balance_krw || 0),
+          0,
+        );
+        setHoldings(rows);
+        setTotalCashKrw(cashSum);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       const res = await fetch("/api/assets", { cache: "no-store" });
       if (!res.ok) {
@@ -227,6 +247,7 @@ export function HoldingsManager({
         return;
       }
       const data = await res.json();
+      writeSessionTtlCache(HOLDINGS_CACHE_KEY, data);
       const rows = (data.rows || []).filter((r: HoldingsRow) => r.ticker && r.quantity > 0);
       const cashSum = ((data.account_summaries || []) as AccountSummary[]).reduce(
         (sum: number, acc: AccountSummary) => sum + (acc.cash_balance_krw || 0),

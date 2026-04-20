@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { themeQuartz, iconSetQuartzBold } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
@@ -9,6 +9,7 @@ import {
   readRememberedMomentumEtfAccountId,
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
+import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
 type AccountOption = {
@@ -23,16 +24,23 @@ type ComponentSource = {
   current_price?: number | null;
   change_pct?: number | null;
   currency?: string;
+  return_pct?: number | null;
+  daily_profit_krw?: number | null;
+  cumulative_profit_krw?: number | null;
 };
 
 type ComponentRow = {
   ticker: string;
   name: string;
+  has_components?: boolean;
   total_weight: number;
   sources: ComponentSource[];
   current_price?: number | null;
   change_pct?: number | null;
   currency?: string;
+  return_pct?: number | null;
+  daily_profit_krw?: number | null;
+  cumulative_profit_krw?: number | null;
 };
 
 type EtfDetail = {
@@ -55,6 +63,11 @@ type MainGridRow = ComponentRow & { rowType: "main" };
 type DetailGridRow = { rowType: "detail"; parentTicker: string; sources: ComponentSource[] };
 type GridRow = MainGridRow | DetailGridRow;
 
+const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY = "momentum-etf:holdings-details:accounts";
+const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:data:";
+const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS = 300_000;
+const HOLDINGS_COMPONENTS_CACHE_TTL_MS = 30_000;
+
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 function formatWeight(w: number): string {
   return `${w.toFixed(2)}%`;
@@ -65,12 +78,21 @@ function formatPrice(val: number | null | undefined, currency?: string): string 
   if (currency === "USD") {
     return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   }
+  if (currency === "AUD") {
+    return `A$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }
   return `${Math.floor(val).toLocaleString()}원`;
 }
 
 function formatSignedPercent(val: number | null | undefined): string {
   if (val == null) return "-";
   return `${val.toFixed(2)}%`;
+}
+
+function formatKrw(val: number | null | undefined): string {
+  if (val == null) return "-";
+  const rounded = Math.round(val);
+  return `${rounded.toLocaleString()}원`;
 }
 
 function getSignedClass(val: number | null | undefined): string {
@@ -119,18 +141,33 @@ export function HoldingsDetailsPageClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+  const requestSequenceRef = useRef(0);
 
   // 계좌 목록 로드
   useEffect(() => {
     async function fetchAccounts() {
       try {
+        const cached = readSessionTtlCache<AccountOption[]>(
+          HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY,
+          HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS,
+        );
+        if (cached && cached.length > 0) {
+          setAccounts(cached);
+          if (!selectedAccount) {
+            setSelectedAccount("TOTAL");
+            writeRememberedMomentumEtfAccountId("TOTAL");
+          }
+          return;
+        }
+
         const res = await fetch("/api/holdings-components/accounts", { cache: "no-store" });
         if (!res.ok) throw new Error("계좌 목록을 불러오지 못했습니다.");
         const list = (await res.json()) as AccountOption[];
+        writeSessionTtlCache(HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY, list);
         setAccounts(list);
         if (list.length > 0 && !selectedAccount) {
-          setSelectedAccount(list[0].account_id);
-          writeRememberedMomentumEtfAccountId(list[0].account_id);
+          setSelectedAccount("TOTAL");
+          writeRememberedMomentumEtfAccountId("TOTAL");
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
@@ -142,6 +179,17 @@ export function HoldingsDetailsPageClient() {
   // 선택된 계좌 데이터 로드
   const loadData = useCallback(async (accountId: string) => {
     if (!accountId) return;
+    const requestSequence = requestSequenceRef.current + 1;
+    requestSequenceRef.current = requestSequence;
+    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${accountId}`;
+    const cached = readSessionTtlCache<HoldingsComponentsData>(cacheKey, HOLDINGS_COMPONENTS_CACHE_TTL_MS);
+    if (cached) {
+      setError(null);
+      setData(cached);
+      setExpandedTicker(null);
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     setError(null);
     setData(null);
@@ -155,11 +203,20 @@ export function HoldingsDetailsPageClient() {
         throw new Error(body.error ?? "데이터를 불러오지 못했습니다.");
       }
       const result = (await res.json()) as HoldingsComponentsData;
+      if (requestSequenceRef.current !== requestSequence) {
+        return;
+      }
+      writeSessionTtlCache(cacheKey, result);
       setData(result);
     } catch (e) {
+      if (requestSequenceRef.current !== requestSequence) {
+        return;
+      }
       setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
     } finally {
-      setIsLoading(false);
+      if (requestSequenceRef.current === requestSequence) {
+        setIsLoading(false);
+      }
     }
   }, []);
 
@@ -173,7 +230,7 @@ export function HoldingsDetailsPageClient() {
     const result: GridRow[] = [];
     for (const comp of data.components) {
       result.push({ ...comp, rowType: "main" });
-      if (expandedTicker === comp.ticker && comp.sources.length > 0) {
+      if (expandedTicker === comp.ticker && comp.has_components === true && comp.sources.length > 0) {
         result.push({
           rowType: "detail",
           parentTicker: comp.ticker,
@@ -203,7 +260,7 @@ export function HoldingsDetailsPageClient() {
         if (!params.data || isDetailRow(params.data)) return null;
         const mainRow = params.data as MainGridRow;
         const isExpanded = expandedTicker === mainRow.ticker;
-        const hasSources = mainRow.sources.length > 0;
+        const hasSources = mainRow.has_components === true && mainRow.sources.length > 0;
         return (
           <div className={`d-flex align-items-center gap-2 ${hasSources ? "cursor-pointer" : ""}`} style={{ userSelect: "none" }}>
             {hasSources && (
@@ -251,6 +308,36 @@ export function HoldingsDetailsPageClient() {
         return <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>;
       },
     },
+    {
+      headerName: "수익률",
+      field: "return_pct",
+      width: 100,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        return <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>;
+      },
+    },
+    {
+      headerName: "금일 손익",
+      field: "daily_profit_krw",
+      width: 140,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
+      },
+    },
+    {
+      headerName: "누적 손익",
+      field: "cumulative_profit_krw",
+      width: 140,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
+      },
+    },
   ], [expandedTicker]);
 
   // 상세 패널 렌더러 (부모 행과 컬럼/정렬 완벽 정밀 타격)
@@ -287,6 +374,24 @@ export function HoldingsDetailsPageClient() {
                 {formatSignedPercent(src.change_pct)}
               </span>
             </div>
+
+            <div className="hdColReturn">
+              <span className={getSignedClass(src.return_pct)}>
+                {formatSignedPercent(src.return_pct)}
+              </span>
+            </div>
+
+            <div className="hdColDailyProfit">
+              <span className={getSignedClass(src.daily_profit_krw)}>
+                {formatKrw(src.daily_profit_krw)}
+              </span>
+            </div>
+
+            <div className="hdColCumulativeProfit">
+              <span className={getSignedClass(src.cumulative_profit_krw)}>
+                {formatKrw(src.cumulative_profit_krw)}
+              </span>
+            </div>
           </div>
         ))}
       </div>
@@ -300,7 +405,12 @@ export function HoldingsDetailsPageClient() {
     // 정밀 계산: Padding-top(8) + RowHeight(38) * N + Padding-bottom(8)
     getRowHeight: (params) => (isDetailRow(params.data) ? 16 + params.data.sources.length * 38 : 38),
     onCellClicked: (params) => {
-      if (params.data && !isDetailRow(params.data) && params.colDef.field === "name") {
+      if (
+        params.data &&
+        !isDetailRow(params.data) &&
+        params.colDef.field === "name" &&
+        params.data.has_components === true
+      ) {
         const ticker = (params.data as MainGridRow).ticker;
         setExpandedTicker((prev) => (prev === ticker ? null : ticker));
       }
@@ -350,11 +460,14 @@ export function HoldingsDetailsPageClient() {
                     {accounts.length === 0 ? (
                       <option value="">계좌 불러오는 중...</option>
                     ) : (
-                      accounts.map((acc) => (
-                        <option key={acc.account_id} value={acc.account_id}>
-                          {acc.name}
-                        </option>
-                      ))
+                      <>
+                        <option value="TOTAL">전체</option>
+                        {accounts.map((acc) => (
+                          <option key={acc.account_id} value={acc.account_id}>
+                            {acc.name}
+                          </option>
+                        ))}
+                      </>
                     )}
                   </select>
                 </label>
@@ -419,6 +532,9 @@ export function HoldingsDetailsPageClient() {
         .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
         .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
         .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
+        .hdColReturn { width: 100px; padding-right: 12px; justify-content: flex-end; }
+        .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
+        .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
 
         .cursor-pointer { cursor: pointer; }
       `}</style>
