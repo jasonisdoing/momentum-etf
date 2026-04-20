@@ -17,14 +17,12 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.account_registry import load_account_configs
 from utils.cache_utils import get_cached_date_range, set_cache_refresh_completed_at
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
-from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
-from utils.stock_list_io import get_all_etfs_including_deleted
+from utils.stock_list_io import get_active_holding_tickers, get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
@@ -311,55 +309,27 @@ def _collect_benchmark_tickers(target_id: str) -> list[str]:
 
 
 def _collect_portfolio_master_holdings(target_id: str) -> list[dict[str, str]]:
-    """portfolio_master의 현재 보유 종목을 캐시 갱신 대상에 추가한다.
-
-    ``target_id`` 는 종목풀의 ``ticker_type`` (예: ``kor_kr``) 이고 portfolio_master 는
-    ``account_id`` (예: ``kor_account``) 로 키잉돼 있어 두 네임스페이스가 다르다.
-    종목풀 ``country_code`` 와 일치하는 **모든 계좌** 의 holdings 를 병합해
-    종목풀에 등록되지 않은 orphan 보유 종목도 캐시 대상에 포함되도록 한다.
-    """
-    try:
-        pool_settings = get_ticker_type_settings(target_id)
-    except Exception:
-        return []
-    pool_country = str(pool_settings.get("country_code") or "").strip().lower()
-    if not pool_country:
-        return []
-
-    try:
-        accounts = load_account_configs()
-    except Exception:
-        return []
-
+    """최신 스냅샷 기준 현재 보유 종목을 지정 종목풀의 캐시 갱신 대상에 추가한다."""
     results: list[dict[str, str]] = []
     seen: set[str] = set()
-    for account in accounts:
-        account_country = str(account.get("country_code") or "").strip().lower()
-        if account_country != pool_country:
+
+    try:
+        active_holdings_by_type = get_active_holding_tickers()
+    except Exception:
+        return []
+
+    for ticker in sorted(active_holdings_by_type.get(target_id, set())):
+        ticker_norm = str(ticker or "").strip().upper()
+        if not ticker_norm or ticker_norm in seen:
             continue
-        account_id = str(account.get("account_id") or "").strip()
-        if not account_id:
-            continue
-        snapshot = load_portfolio_master(account_id)
-        if not snapshot:
-            continue
-        holdings = snapshot.get("holdings")
-        if not isinstance(holdings, list):
-            continue
-        for item in holdings:
-            if not isinstance(item, dict):
-                continue
-            ticker = str(item.get("ticker") or "").strip().upper()
-            if not ticker or ticker in seen:
-                continue
-            seen.add(ticker)
-            results.append(
-                {
-                    "ticker": ticker,
-                    "name": str(item.get("name") or ticker).strip() or ticker,
-                    "type": "etf",
-                }
-            )
+        seen.add(ticker_norm)
+        results.append(
+            {
+                "ticker": ticker_norm,
+                "name": ticker_norm,
+                "type": "etf",
+            }
+        )
     return results
 
 

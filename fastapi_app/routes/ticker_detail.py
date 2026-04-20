@@ -56,6 +56,96 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     }
 
 
+def _lookup_domestic_etf_name(ticker: str) -> str | None:
+    df, _ = load_cached_kis_domestic_etf_master()
+    if "티커" not in df.columns:
+        raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
+    name_column = "종목명" if "종목명" in df.columns else "한글종목명" if "한글종목명" in df.columns else None
+    if name_column is None:
+        raise RuntimeError("KIS ETF 마스터 캐시에 종목명 컬럼이 없습니다.")
+
+    ticker_norm = str(ticker or "").strip().upper()
+    matched = df[df["티커"].astype(str).str.strip().str.upper() == ticker_norm]
+    if matched.empty:
+        return None
+
+    name = str(matched.iloc[0].get(name_column) or "").strip()
+    return name or None
+
+
+def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
+    ticker_key = str(ticker or "").strip().upper()
+    if not ticker_key:
+        raise ValueError("ticker 파라미터가 필요합니다.")
+
+    configs = load_ticker_type_configs()
+    matches: list[dict[str, object]] = []
+    for config in configs:
+        ticker_type = config["ticker_type"]
+        country_code = config.get("country_code", "")
+        for item in get_etfs(ticker_type):
+            item_ticker = str(item.get("ticker") or "").strip().upper()
+            if item_ticker != ticker_key:
+                continue
+            matches.append(
+                {
+                    "ticker": ticker_key,
+                    "name": str(item.get("name") or "").strip() or ticker_key,
+                    "ticker_type": ticker_type,
+                    "country_code": country_code,
+                    "is_etf": bool(item.get("is_etf", False)),
+                    "has_holdings": bool(item.get("has_holdings", False)),
+                }
+            )
+
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise RuntimeError(f"동일한 티커 {ticker_key}가 여러 종목풀에 등록되어 있습니다.")
+
+    if ticker_key.isdigit() and len(ticker_key) == 6:
+        domestic_etf_tickers = _load_domestic_etf_ticker_set()
+        if ticker_key in domestic_etf_tickers:
+            return {
+                "ticker": ticker_key,
+                "name": _lookup_domestic_etf_name(ticker_key) or ticker_key,
+                "ticker_type": "kor_kr",
+                "country_code": "kor",
+                "is_etf": True,
+                "has_holdings": True,
+            }
+        return {
+            "ticker": ticker_key,
+            "name": ticker_key,
+            "ticker_type": "kor",
+            "country_code": "kor",
+            "is_etf": False,
+            "has_holdings": False,
+        }
+
+    if ticker_key.endswith(".AX"):
+        return {
+            "ticker": ticker_key,
+            "name": ticker_key,
+            "ticker_type": "aus",
+            "country_code": "au",
+            "is_etf": True,
+            "has_holdings": False,
+        }
+
+    if ticker_key.isalpha() or "." in ticker_key:
+        return {
+            "ticker": ticker_key,
+            "name": ticker_key,
+            "ticker_type": "us",
+            "country_code": "us",
+            "is_etf": False,
+            "has_holdings": False,
+        }
+
+    raise RuntimeError(f"{ticker_key} 티커를 찾지 못했습니다.")
+
+
 def _is_us_pool_candidate(item: dict[str, object]) -> bool:
     component_ticker = str(item.get("ticker") or "").strip().upper()
     raw_code = str(item.get("raw_code") or "").strip().upper()
@@ -301,6 +391,16 @@ def get_all_tickers(
                     "has_holdings": bool(etf.get("has_holdings", False)),
                 })
     return result
+
+
+@router.get("/resolve")
+def resolve_ticker(
+    ticker: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """직접 진입용 티커 메타데이터를 반환합니다."""
+
+    return _resolve_ticker_meta_item(ticker)
 
 
 @router.get("/search-data")

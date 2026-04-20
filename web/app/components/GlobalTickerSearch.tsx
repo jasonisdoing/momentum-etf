@@ -213,7 +213,13 @@ export function GlobalTickerSearch() {
     setSearchInput("");
     setHighlightIndex(-1);
     setPanelOpen(false);
-    router.push(`/ticker?ticker=${encodeURIComponent(item.ticker)}`);
+    const search = new URLSearchParams({
+      ticker: item.ticker,
+      ticker_type: item.ticker_type,
+      country_code: item.country_code,
+      name: item.name,
+    });
+    router.push(`/ticker?${search.toString()}`);
   }
 
   function removeRecentSearch(item: TickerSearchItem) {

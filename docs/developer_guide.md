@@ -45,6 +45,7 @@
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
     *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
+    *   종목풀에 등록되지 않았더라도 최신 스냅샷에서 현재 보유 중인 티커는 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
 
