@@ -396,7 +396,15 @@ def load_real_holdings_table(
             if _db is not None:
                 today = _resolve_snapshot_date()
                 prev_snap = _db.daily_snapshots.find_one(
-                    {"snapshot_date": {"$lt": today}},
+                    {
+                        "snapshot_date": {"$lt": today},
+                        "accounts": {
+                            "$elemMatch": {
+                                "account_id": "aus_account",
+                                "intl_shares_value": {"$exists": True, "$type": "number", "$gt": 0}
+                            }
+                        }
+                    },
                     sort=[("snapshot_date", -1)],
                 )
                 if prev_snap:
@@ -423,6 +431,8 @@ def load_real_holdings_table(
             "매입금액(KRW)": intl_princi_krw,
             "평가금액(KRW)": intl_val_krw,
             "일간(%)": intl_daily_pct,
+            "is_etf": False,
+            "has_holdings": False,
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
         # Ensure value columns are numeric after concat
