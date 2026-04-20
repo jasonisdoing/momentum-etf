@@ -102,18 +102,20 @@ def compute_trend_frame(
 ) -> pd.DataFrame:
     """[일자 × 티커] 구조의 종가 프레임으로부터 MA 대비 트렌드(%) 프레임을 계산한다.
 
-    각 티커는 ``MA 필요 기간(ma_months * TRADING_DAYS_PER_MONTH)`` 을 만족하지 못하면
-    해당 일자 값이 NaN 으로 남는다. 성숙 이후 구간은 ``calculate_maps_score`` 로 계산한다.
+    각 MA 함수가 ``min_periods=1`` 로 부분 계산을 지원하므로, MA 성숙 기간
+    (``ma_months * TRADING_DAYS_PER_MONTH``) 을 만족하지 못하더라도 가용한 종가로 MA 를
+    계산해 트렌드 값을 반환한다. 랭킹 포함 여부는 ``compute_eligibility_mask`` 가
+    ``MIN_TRADING_DAYS`` 기준으로 따로 판정한다.
     """
     days = _ma_days_from_months(ma_months)
     ma_cols: dict[str, pd.Series] = {}
     for ticker in close_frame.columns:
         series = close_frame[ticker].dropna()
-        if len(series) < days:
+        if series.empty:
             ma_cols[ticker] = pd.Series(np.nan, index=close_frame.index, dtype=float)
-        else:
-            ma_series = calculate_moving_average(series, days, ma_type)
-            ma_cols[ticker] = ma_series.reindex(close_frame.index)
+            continue
+        ma_series = calculate_moving_average(series, days, ma_type)
+        ma_cols[ticker] = ma_series.reindex(close_frame.index)
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     trend = pd.DataFrame(
         {
