@@ -1629,6 +1629,94 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
     return snapshot
 
 
+def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str, float | str]]:
+    """네이버 worldstock 폴링 API에서 해외 종목의 지연 시세를 조회합니다."""
+
+    normalized_codes = [str(code).strip().upper() for code in reuters_codes if str(code or "").strip()]
+    if not normalized_codes:
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 네이버 worldstock 조회를 건너뜁니다.")
+        return {}
+
+    _NAVER_WORLDSTOCK_POLLING_URL = "https://stock.naver.com/api/polling/worldstock/stock"
+    _NAVER_WORLDSTOCK_POLLING_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://stock.naver.com/",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float | str]]:
+        codes = ",".join(chunk)
+        url = f"{_NAVER_WORLDSTOCK_POLLING_URL}?reutersCodes={codes}"
+        try:
+            response = requests.get(url, headers=_NAVER_WORLDSTOCK_POLLING_HEADERS, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.warning("네이버 worldstock 조회 실패: %s", exc)
+            return {}
+
+        result: dict[str, dict[str, float | str]] = {}
+        datas = data.get("datas") or []
+        for item in datas:
+            code = str(item.get("reutersCode") or "").strip().upper()
+            if not code:
+                continue
+
+            price_value = _parse_comma_number(item.get("closePrice"))
+            if price_value is None:
+                continue
+
+            entry: dict[str, float | str] = {"nowVal": price_value}
+
+            prev_close = _parse_comma_number(item.get("compareToPreviousClosePrice"))
+            compare_code = str(((item.get("compareToPreviousPrice") or {}).get("code")) or "").strip()
+            if prev_close is not None:
+                signed_diff = -prev_close if compare_code == "5" and prev_close > 0 else prev_close
+                entry["prevClose"] = price_value - signed_diff
+
+            change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
+            if change_rate is not None:
+                if compare_code == "5" and change_rate > 0:
+                    change_rate = -change_rate
+                entry["changeRate"] = change_rate
+
+            open_val = _parse_comma_number(item.get("openPrice"))
+            if open_val is not None:
+                entry["open"] = open_val
+            high_val = _parse_comma_number(item.get("highPrice"))
+            if high_val is not None:
+                entry["high"] = high_val
+            low_val = _parse_comma_number(item.get("lowPrice"))
+            if low_val is not None:
+                entry["low"] = low_val
+            vol_val = _parse_comma_number(item.get("accumulatedTradingVolume"))
+            if vol_val is not None:
+                entry["volume"] = vol_val
+
+            currency_code = str(((item.get("currencyType") or {}).get("code")) or "").strip().upper()
+            if currency_code:
+                entry["currency"] = currency_code
+
+            result[code] = entry
+
+        return result
+
+    snapshot: dict[str, dict[str, float | str]] = {}
+    chunk_size = 50
+    for i in range(0, len(normalized_codes), chunk_size):
+        chunk = normalized_codes[i : i + chunk_size]
+        snapshot.update(_fetch_chunk(chunk))
+
+    return snapshot
+
+
 def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """호주 MarketIndex QuoteAPI에서 ETF의 실시간 가격 정보를 조회합니다.
 

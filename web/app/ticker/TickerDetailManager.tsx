@@ -286,6 +286,34 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
+  if (normalized === "twd") {
+    return `${new Intl.NumberFormat("zh-TW", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)} TWD`;
+  }
+
+  if (normalized === "hkd") {
+    return `HK$${new Intl.NumberFormat("en-HK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
+  if (normalized === "jpy") {
+    return `¥${new Intl.NumberFormat("ja-JP", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value)}`;
+  }
+
+  if (normalized === "gbp") {
+    return `£${new Intl.NumberFormat("en-GB", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
   if (normalized === "cny") {
     return `${new Intl.NumberFormat("zh-CN", {
       minimumFractionDigits: 2,
