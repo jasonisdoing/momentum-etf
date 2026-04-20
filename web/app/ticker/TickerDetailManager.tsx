@@ -696,9 +696,9 @@ export function TickerDetailManager({
     chartRef.current = chart;
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#26a69a", downColor: "#ef5350",
-      borderUpColor: "#26a69a", borderDownColor: "#ef5350",
-      wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      upColor: "#e03131", downColor: "#206bc4",
+      borderUpColor: "#e03131", borderDownColor: "#206bc4",
+      wickUpColor: "#e03131", wickDownColor: "#206bc4",
       priceFormat: {
         type: "custom",
         minMove: priceMinMove,
@@ -783,7 +783,7 @@ export function TickerDetailManager({
         .map((r, i) => {
           const prevClose = i > 0 ? chartRows[i - 1].close : null;
           const isUp = prevClose !== null && r.close !== null ? r.close >= prevClose : true;
-          return { time: r.date as Time, value: r.volume!, color: isUp ? "rgba(38, 166, 154, 0.3)" : "rgba(239, 83, 80, 0.3)" };
+          return { time: r.date as Time, value: r.volume!, color: isUp ? "rgba(224, 49, 49, 0.32)" : "rgba(32, 107, 196, 0.32)" };
         }),
     );
 
