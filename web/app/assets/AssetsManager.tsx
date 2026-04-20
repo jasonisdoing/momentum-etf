@@ -1401,7 +1401,7 @@ function AccountHoldingsDetailPanel({
         <span className={getSignedClass(params.value ?? 0)}>
           {params.value === null || params.value === undefined
             ? "-"
-            : `${(params.value ?? 0) > 0 ? "+" : ""}${params.value.toFixed(2)}%`}
+            : `${params.value.toFixed(2)}%`}
         </span>
       ),
     },
@@ -1576,7 +1576,6 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow; value?: number }) => (
         params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
         <span className={getSignedClass(params.value ?? 0)}>
-          {(params.value ?? 0) > 0 ? "+" : ""}
           {(params.value ?? 0).toFixed(2)}%
         </span>
       ),

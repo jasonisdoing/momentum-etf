@@ -50,8 +50,7 @@ function formatChangePct(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
   }
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 function getChangeClass(value: number | null): string {

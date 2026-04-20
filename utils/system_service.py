@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -64,20 +66,41 @@ _LABEL_BY_ACTION: dict[str, str] = {
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
+# 락파일이 이 시간(초)보다 오래되면 stale 로 간주하고 삭제한다.
+_STALE_LOCK_SECONDS = 60 * 60  # 1시간
+
+_logger = logging.getLogger(__name__)
 
 
 def get_running_jobs() -> list[str]:
     """현재 실행 중인 배치 키 목록을 반환합니다.
 
     run_batch.py 가 생성한 `logs/cron/<key>.lock` 파일을 스캔합니다.
+    1시간 이상 된 락파일은 비정상 종료로 간주하고 삭제합니다.
     """
     if not _LOCK_DIR.exists():
         return []
+    now = time.time()
     running: list[str] = []
     for lock_file in _LOCK_DIR.glob("*.lock"):
         key = lock_file.stem
-        if key in _SCRIPT_BY_ACTION:
-            running.append(key)
+        if key not in _SCRIPT_BY_ACTION:
+            continue
+        try:
+            mtime = lock_file.stat().st_mtime
+        except FileNotFoundError:
+            continue
+        age = now - mtime
+        if age > _STALE_LOCK_SECONDS:
+            try:
+                lock_file.unlink(missing_ok=True)
+                _logger.warning(
+                    "stale 락파일 제거: %s (age=%.0fs)", lock_file.name, age
+                )
+            except Exception as exc:  # pragma: no cover
+                _logger.warning("stale 락파일 제거 실패: %s (%s)", lock_file.name, exc)
+            continue
+        running.append(key)
     return sorted(running)
 
 

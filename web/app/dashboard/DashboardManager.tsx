@@ -81,8 +81,8 @@ function formatUpdatedAt(value: string | null | undefined): string {
 }
 
 function getSignedClass(value: number): string {
-  if (value > 0) return "text-success";
-  if (value < 0) return "text-danger";
+  if (value > 0) return "metricPositive";
+  if (value < 0) return "metricNegative";
   return "";
 }
 
@@ -348,10 +348,9 @@ function DashboardMetricCard({
           <div className="subheader">{item.label}</div>
           {changePct !== null ? (
             <span
-              className={changePct >= 0 ? "text-success" : "text-danger"}
+              className={changePct >= 0 ? "metricPositive" : "metricNegative"}
               style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
             >
-              {changePct >= 0 ? "+" : ""}
               {changePct.toFixed(1)}%
               {changePct >= 0 ? " \u2197" : " \u2198"}
             </span>
@@ -359,13 +358,13 @@ function DashboardMetricCard({
         </div>
         {item.sub_value !== undefined && item.sub_kind === "count" ? (
           <div className="d-flex align-items-baseline gap-1" style={{ whiteSpace: "nowrap" }}>
-            <span className="h1 mb-0 text-success" style={{ fontSize: "1.1rem" }}>
+            <span className="h1 mb-0 metricPositive" style={{ fontSize: "1.1rem" }}>
               {formatMetricValue(item.value, item.kind)}
             </span>
             <span className="text-secondary" style={{ fontSize: "1rem", fontWeight: 600 }}>
               /
             </span>
-            <span className="h1 mb-0 text-danger" style={{ fontSize: "1.1rem" }}>
+            <span className="h1 mb-0 metricNegative" style={{ fontSize: "1.1rem" }}>
               {formatMetricValue(item.sub_value, item.sub_kind)}
             </span>
           </div>
@@ -484,9 +483,9 @@ export function DashboardManager() {
               style={{ fontSize: "0.85rem", fontWeight: 600, whiteSpace: "nowrap" }}
             >
               수익/손실 종목 수{" "}
-              <span className="text-success">{formatMetricValue(holdingsStatusMetric.value, holdingsStatusMetric.kind)}</span>
+              <span className="metricPositive">{formatMetricValue(holdingsStatusMetric.value, holdingsStatusMetric.kind)}</span>
               <span className="text-secondary">/</span>
-              <span className="text-danger">
+              <span className="metricNegative">
                 {formatMetricValue(holdingsStatusMetric.sub_value, holdingsStatusMetric.sub_kind ?? "count")}
               </span>
             </div>

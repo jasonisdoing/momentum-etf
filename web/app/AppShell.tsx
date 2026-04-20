@@ -109,8 +109,7 @@ function formatChangePct(value: number | undefined): string {
   if (value === undefined || value === null || Number.isNaN(value)) {
     return "";
   }
-  const sign = value > 0 ? "+" : "";
-  return `(${sign}${value.toFixed(2)}%)`;
+  return `(${value.toFixed(2)}%)`;
 }
 
 function getFxChangeClass(value: number | undefined): string | undefined {
