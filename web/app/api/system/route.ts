@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
       "market_hours_analysis",
       "metadata_updater",
       "asset_summary",
+      "weekly_aggregate",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
     }
 
     const message = await triggerSystemAction(
-      actionStr as "cache_refresh" | "market_hours_analysis" | "metadata_updater" | "asset_summary",
+      actionStr as "cache_refresh" | "market_hours_analysis" | "metadata_updater" | "asset_summary" | "weekly_aggregate",
     );
     return NextResponse.json({ message });
   } catch (error) {

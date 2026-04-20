@@ -388,23 +388,6 @@ export function WeeklyManager({
     [dirtyCellKeys, editableFieldMap, readOnlyKeys, visibleColumns],
   );
 
-  function handleAggregate() {
-    startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/weekly", { method: "POST" });
-        const payload = (await response.json()) as { week_date?: string; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "이번주 데이터 집계에 실패했습니다.");
-        }
-        await load({ silent: true });
-        toast.success(`[자산-주별] ${payload.week_date ?? activeWeekDate} 집계 완료`);
-      } catch (aggregateError) {
-        setError(aggregateError instanceof Error ? aggregateError.message : "이번주 데이터 집계에 실패했습니다.");
-      }
-    });
-  }
-
   function handleSave() {
     if (dirtyRowIds.length === 0) {
       return;
@@ -474,14 +457,9 @@ export function WeeklyManager({
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">집계</span>
-                  <button
-                    type="button"
-                    className="btn btn-success btn-sm px-3 fw-bold"
-                    onClick={handleAggregate}
-                    disabled={isPending}
-                  >
-                    {isPending ? "집계 중..." : "이번주 데이터 집계"}
-                  </button>
+                  <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
+                    평일 09:35, 16:35 자동 집계
+                  </span>
                 </label>
               </div>
             </div>

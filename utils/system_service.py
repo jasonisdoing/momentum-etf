@@ -18,10 +18,18 @@ SystemAction = Literal[
     "market_hours_analysis",
     "metadata_updater",
     "asset_summary",
+    "weekly_aggregate",
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 SCHEDULE_ROWS = [
+    {
+        "key": "weekly_aggregate",
+        "job": "활성 주차 집계",
+        "target": "주별 데이터",
+        "cadence": "평일 09:35, 16:35 KST",
+        "command": "python scripts/aggregate_active_week_data.py",
+    },
     {
         "key": "asset_summary",
         "job": "전체 자산 요약 알림",
@@ -58,6 +66,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
+    "weekly_aggregate": "scripts/aggregate_active_week_data.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {
