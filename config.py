@@ -177,7 +177,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
-        "TOP_N_HOLD": [5],
+        "TOP_N_HOLD": [3, 4],
         "HOLDING_BONUS_SCORE": [0, 10, 20],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
