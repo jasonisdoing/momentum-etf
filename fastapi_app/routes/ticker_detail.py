@@ -10,6 +10,8 @@ from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.price_service import get_realtime_snapshot
 from services.price_service import get_realtime_snapshot_meta
+from services.price_service import get_worldstock_snapshot
+from services.price_service import get_yahoo_symbol_snapshot
 from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
@@ -93,6 +95,33 @@ def _serialize_datetime(value: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
+
+
+def _infer_yahoo_symbol_currency(symbol: str) -> str:
+    normalized = str(symbol or "").strip().upper()
+    if normalized.endswith(".TW"):
+        return "TWD"
+    if normalized.endswith(".HK"):
+        return "HKD"
+    if normalized.endswith(".T"):
+        return "JPY"
+    if normalized.endswith(".L"):
+        return "GBP"
+    if normalized.endswith((".KS", ".KQ")):
+        return "KRW"
+    if normalized.endswith(".AX"):
+        return "AUD"
+    return "USD"
+
+
+def _is_worldstock_symbol(symbol: str) -> bool:
+    normalized = str(symbol or "").strip().upper()
+    return normalized.endswith((".T", ".HK"))
+
+
+def _is_yahoo_tw_symbol(symbol: str) -> bool:
+    normalized = str(symbol or "").strip().upper()
+    return normalized.endswith(".TW")
 
 
 def _is_pre_open_top_movers_window() -> bool:
@@ -508,8 +537,8 @@ def get_ticker_detail(
             korean_tickers: list[str] = []
             us_tickers: list[str] = []
             au_tickers: list[str] = []
-            # yahoo_symbol → 원래 ticker/yahoo_symbol 역매핑 (호주 .AX 접미사 제거용)
-            au_symbol_map: dict[str, str] = {}
+            worldstock_codes: list[str] = []
+            yahoo_tw_symbols: list[str] = []
 
             for item in holdings_for_pricing:
                 if is_korean_six_digit_holding(item):
@@ -521,7 +550,10 @@ def get_ticker_detail(
                     if yahoo_sym.endswith(".AX"):
                         bare = yahoo_sym[:-3]
                         au_tickers.append(bare)
-                        au_symbol_map[bare] = yahoo_sym
+                    elif _is_worldstock_symbol(yahoo_sym):
+                        worldstock_codes.append(str(item.get("reuters_code") or yahoo_sym).strip().upper())
+                    elif _is_yahoo_tw_symbol(yahoo_sym):
+                        yahoo_tw_symbols.append(yahoo_sym)
                     else:
                         us_tickers.append(yahoo_sym)
 
@@ -529,6 +561,8 @@ def get_ticker_detail(
             kor_price_map: dict[str, dict[str, float]] = {}
             us_price_map: dict[str, dict[str, float]] = {}
             au_price_map: dict[str, dict[str, float]] = {}
+            worldstock_price_map: dict[str, dict[str, float | str]] = {}
+            yahoo_tw_price_map: dict[str, dict[str, float]] = {}
 
             if korean_tickers:
                 try:
@@ -543,6 +577,16 @@ def get_ticker_detail(
             if au_tickers:
                 try:
                     au_price_map = get_realtime_snapshot("au", au_tickers)
+                except Exception:
+                    pass
+            if worldstock_codes:
+                try:
+                    worldstock_price_map = get_worldstock_snapshot(worldstock_codes)
+                except Exception:
+                    pass
+            if yahoo_tw_symbols:
+                try:
+                    yahoo_tw_price_map = get_yahoo_symbol_snapshot(yahoo_tw_symbols)
                 except Exception:
                     pass
 
@@ -571,6 +615,24 @@ def get_ticker_detail(
                     enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
                     enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
                     enriched_item["price_currency"] = "AUD"
+                elif _is_worldstock_symbol(yahoo_symbol):
+                    lookup_code = str(item.get("reuters_code") or yahoo_symbol).strip().upper()
+                    rt = worldstock_price_map.get(lookup_code, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = str(rt.get("currency") or _infer_yahoo_symbol_currency(yahoo_symbol))
+                elif _is_yahoo_tw_symbol(yahoo_symbol):
+                    rt = yahoo_tw_price_map.get(yahoo_symbol, {})
+                    enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
+                    enriched_item["previous_close"] = float(rt["prevClose"]) if rt.get("prevClose") is not None else None
+                    enriched_item["change_pct"] = float(rt["changeRate"]) if rt.get("changeRate") is not None else None
+                    enriched_item["price_currency"] = _infer_yahoo_symbol_currency(yahoo_symbol)
+                elif "." in yahoo_symbol:
+                    enriched_item["current_price"] = None
+                    enriched_item["previous_close"] = None
+                    enriched_item["change_pct"] = None
+                    enriched_item["price_currency"] = None
                 else:
                     rt = us_price_map.get(yahoo_symbol or component_ticker, {})
                     enriched_item["current_price"] = float(rt["nowVal"]) if rt.get("nowVal") is not None else None
