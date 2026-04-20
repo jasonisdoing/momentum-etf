@@ -21,6 +21,11 @@ type SystemScheduleRow = {
   command: string;
 };
 
+type SystemLastRunInfo = {
+  status?: string | null;
+  display?: string | null;
+};
+
 type SystemJobKey =
   | "cache_refresh"
   | "market_hours_analysis"
@@ -33,6 +38,7 @@ type SystemResponse = {
   schedule_rows?: SystemScheduleRow[];
   schedule_note?: string;
   running_jobs?: string[];
+  last_run_by_job?: Record<string, SystemLastRunInfo>;
   error?: string;
 };
 
@@ -41,6 +47,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
   running: boolean;
   anyRunning: boolean;
+  lastRunDisplay: string;
 };
 
 function formatCount(value: number): string {
@@ -115,6 +122,13 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       </span>
     ),
   },
+  {
+    field: "lastRunDisplay",
+    headerName: "마지막 실행 시간",
+    minWidth: 220,
+    width: 250,
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
 ];
 
 export function SystemManager({
@@ -128,6 +142,7 @@ export function SystemManager({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningJobs, setRunningJobs] = useState<string[]>([]);
+  const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [, startTransition] = useTransition();
   const toast = useToast();
   const runningSet = new Set(runningJobs);
@@ -138,6 +153,7 @@ export function SystemManager({
     id: row.key,
     running: runningSet.has(row.key),
     anyRunning,
+    lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
   }));
 
   useEffect(() => {
@@ -165,6 +181,7 @@ export function SystemManager({
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
+        setLastRunByJob(payload.last_run_by_job ?? {});
         if (initial) setError(null);
       } catch (loadError) {
         if (alive && initial) {
