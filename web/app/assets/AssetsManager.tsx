@@ -2449,7 +2449,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return 38;
         }
         const rowCount = (params.data.rows?.length ?? 0) + 1;
-        return 50 + 34 + rowCount * 42 + 32;
+        return 50 + 34 + rowCount * 42 + 48;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
