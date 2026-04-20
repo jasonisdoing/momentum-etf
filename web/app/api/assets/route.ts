@@ -20,6 +20,9 @@ type HoldingsRow = {
   target_ratio?: number | null;
   target_quantity?: number | null;
   target_amount?: number | null;
+  ticker_type?: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 export async function GET(request: Request) {

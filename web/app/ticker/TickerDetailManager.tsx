@@ -34,6 +34,8 @@ type TickerItem = {
   name: string;
   ticker_type: string;
   country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type PriceRow = {
@@ -1039,8 +1041,8 @@ export function TickerDetailManager({
                   </div>
                 ) : rows.length > 0 ? (
                   <div style={{ flexShrink: 0 }}>
-                    <div className={selectedCountryCode === "kor" ? "tickerDetailTopGrid" : ""}>
-                      {selectedCountryCode === "kor" ? (
+                    <div className={selectedTicker?.has_holdings ? "tickerDetailTopGrid" : ""}>
+                      {selectedTicker?.has_holdings ? (
                         <div className="tickerDetailHoldingsPanel">
                           <div className="tickerDetailTableHeader">
                             <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>

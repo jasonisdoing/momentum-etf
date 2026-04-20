@@ -26,6 +26,9 @@ type HoldingsRow = {
   bucket_id: number;
   bucket: string;
   memo: string;
+  ticker_type?: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type AccountSummary = {
@@ -91,11 +94,10 @@ const holdingsGridTheme = themeQuartz
     iconSize: 18,
   });
 
-// 구성종목이 있을 수 있는 종목인지 판별 (한국 6자리 코드 + 현금 아님)
-// 0113D0, 0091P0 같은 알파뉴메릭 ETF 코드도 포함
+// 구성종목이 있을 수 있는 종목인지 판별 (ETF 및 구성종목 추적 가능 여부)
 function canHaveConstituents(row: AggregatedHoldingRow): boolean {
   if (row.ticker === "__CASH__") return false;
-  return row.currency === "KRW" && row.ticker.length === 6;
+  return row.has_holdings === true;
 }
 
 const DETAIL_PANEL_HEIGHT = 460;
