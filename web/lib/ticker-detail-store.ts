@@ -41,6 +41,8 @@ type TickerMetaItem = {
   name: string;
   ticker_type: string;
   country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 async function resolveTickerMeta(ticker: string): Promise<TickerMetaItem> {

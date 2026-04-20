@@ -695,7 +695,11 @@ def update_single_stock_metadata(
         new_name = naver_etf_map.get(ticker)
         if new_name:
             stock["name"] = new_name
+            stock["is_etf"] = True
+            stock["has_holdings"] = True
         elif not stock.get("name") or stock.get("name") == ticker:
+            stock["is_etf"] = False
+            stock["has_holdings"] = False
             # 일반주/ETN은 네이버 marketValue 통합 맵 → pykrx 폴백 순서로 조회
             try:
                 fetched_name = fetch_pykrx_name(ticker)
@@ -705,6 +709,9 @@ def update_single_stock_metadata(
                         logger.info(f"[{account_norm.upper()}/{ticker}] 종목명 획득: {fetched_name}")
             except Exception as e:
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
+        else:
+            stock["is_etf"] = False
+            stock["has_holdings"] = False
 
         # 3. 마켓(KOSPI/KOSDAQ) 조회 — 네이버 marketValue 통합 맵 사용
         if not stock.get("market"):
@@ -718,6 +725,14 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
     elif country_code in ("us", "au"):
+        # 해외 주식 플래그 설정
+        if country_code == "au":
+            stock["is_etf"] = True
+            stock["has_holdings"] = False
+        else:
+            stock["is_etf"] = False
+            stock["has_holdings"] = False
+
         try:
             t = yf.Ticker(yfinance_ticker)
 

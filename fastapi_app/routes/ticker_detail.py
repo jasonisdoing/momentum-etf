@@ -280,10 +280,10 @@ def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | No
 @router.get("/tickers")
 def get_all_tickers(
     _: None = Depends(require_internal_token),
-) -> list[dict[str, str]]:
+) -> list[dict[str, object]]:
     """전체 종목타입의 활성 종목 목록을 반환합니다."""
     configs = load_ticker_type_configs()
-    result: list[dict[str, str]] = []
+    result: list[dict[str, object]] = []
     for config in configs:
         ticker_type = config["ticker_type"]
         country_code = config.get("country_code", "")
@@ -297,6 +297,8 @@ def get_all_tickers(
                     "name": name,
                     "ticker_type": ticker_type,
                     "country_code": country_code,
+                    "is_etf": bool(etf.get("is_etf", False)),
+                    "has_holdings": bool(etf.get("has_holdings", False)),
                 })
     return result
 
@@ -370,6 +372,8 @@ def get_ticker_search_data(
                 "name": str(etf.get("name") or "").strip(),
                 "ticker_type": ticker_type,
                 "country_code": country_code,
+                "is_etf": bool(etf.get("is_etf", False)),
+                "has_holdings": bool(etf.get("has_holdings", False)),
                 "current_price": current_price,
                 "change_pct": change_pct,
             }

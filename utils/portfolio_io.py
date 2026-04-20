@@ -141,9 +141,12 @@ def load_real_holdings_table(
         
         bucket_map = {}
         name_map = {}
+        type_map = {}
+        is_etf_map = {}
+        has_holdings_map = {}
         cursor = db.stock_meta.find(
             {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
-            {"ticker": 1, "bucket": 1, "name": 1}
+            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1, "has_holdings": 1}
         )
         for doc in cursor:
             t = doc["ticker"]
@@ -151,6 +154,12 @@ def load_real_holdings_table(
                 bucket_map[t] = doc.get("bucket", 1)
             if t not in name_map:
                 name_map[t] = doc.get("name")
+            if t not in type_map:
+                type_map[t] = doc.get("ticker_type")
+            if t not in is_etf_map:
+                is_etf_map[t] = doc.get("is_etf", False)
+            if t not in has_holdings_map:
+                has_holdings_map[t] = doc.get("has_holdings", False)
 
         # 데이터 업데이트 (종목풀 정보 우선 적용)
         df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
@@ -158,6 +167,9 @@ def load_real_holdings_table(
             lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])), 
             axis=1
         )
+        df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
+        df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
+        df_holdings["has_holdings"] = df_holdings["ticker"].map(lambda t: has_holdings_map.get(t, False))
 
     import numpy as np
 
