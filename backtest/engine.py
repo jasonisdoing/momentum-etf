@@ -694,9 +694,10 @@ def _simulate_one_combo_details(
     ]
 
     cash = float(initial_cash_local)
+    signal_start = backtest_days[0]
     period_start = backtest_days[1]
     period_end = backtest_days[-1]
-    fx_start = float(fx_series.loc[period_start])
+    fx_start = float(fx_series.loc[signal_start])
     initial_cash_krw = initial_cash_local * fx_start
 
     lines.append("=== 백테스트 상세 ===")
