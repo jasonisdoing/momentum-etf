@@ -147,7 +147,7 @@ export function MarketManager({
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [tickerPools, setTickerPools] = useState<MarketTickerPool[]>([]);
   const [query, setQuery] = useState("");
-  const [minMarketCap, setMinMarketCap] = useState("500"); // 시가총액(억)
+  const [minMarketCap, setMinMarketCap] = useState("100"); // 시가총액(억)
   const [minPrevVolume, setMinPrevVolume] = useState("100000"); // 거래량(주)
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
   const [newOnly, setNewOnly] = useState(false);
