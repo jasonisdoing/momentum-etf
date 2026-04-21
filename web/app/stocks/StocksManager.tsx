@@ -266,6 +266,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const router = useRouter();
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
+  const addingTickerDraftRef = useRef("");
   const [isPending, startTransition] = useTransition();
   const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
@@ -287,7 +288,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [missingTickerLabels, setMissingTickerLabels] = useState<string[]>([]);
   const [staleTickers, setStaleTickers] = useState<string[]>([]);
   const [addingRow, setAddingRow] = useState<RankAddingRowState | null>(null);
-  const [addingTickerDraft, setAddingTickerDraft] = useState("");
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
@@ -346,7 +346,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ma_months_max: payload.ma_months_max ?? 12,
       };
       setAddingRow(null);
-      setAddingTickerDraft("");
+      addingTickerDraftRef.current = "";
       setDirtyRowIds([]);
       setDirtyCellKeys([]);
       setSelectedTickers([]);
@@ -671,8 +671,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <input
                   type="text"
                   className="form-control form-control-sm"
-                  value={addingTickerDraft}
-                  onChange={(event) => setAddingTickerDraft(event.target.value)}
+                  defaultValue={addingTickerDraftRef.current}
+                  autoFocus
+                  onChange={(event) => {
+                    addingTickerDraftRef.current = event.target.value;
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       void handleValidateAddingTicker(event.currentTarget.value);
@@ -702,7 +705,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         flex: 1.2,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
-            const draftTicker = normalizeTicker(addingTickerDraft);
+            const draftTicker = normalizeTicker(addingTickerDraftRef.current);
             const validatedTicker = normalizeTicker(addingRow?.ticker ?? "");
             const isDraftDirty = Boolean(draftTicker) && draftTicker !== validatedTicker;
             if (addingRow?.is_validating) {
@@ -724,8 +727,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 <button
                   className="btn btn-outline-primary btn-sm"
                   type="button"
-                  onClick={() => void handleValidateAddingTicker(addingTickerDraft)}
-                  disabled={!addingTickerDraft.trim() || addingRow?.is_validating}
+                  onClick={() => void handleValidateAddingTicker(addingTickerDraftRef.current)}
+                  disabled={addingRow?.is_validating}
                 >
                   확인
                 </button>
@@ -1004,7 +1007,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ];
   }, [
     addingRow,
-    addingTickerDraft,
     dirtyCellKeys,
     maRules,
     metricMode,
@@ -1047,7 +1049,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     if (addingRow) {
       return;
     }
-    setAddingTickerDraft("");
+    addingTickerDraftRef.current = "";
     setAddingRow({
       ticker: "",
       name: "",
@@ -1081,7 +1083,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }
 
   async function handleValidateAddingTicker(tickerInput?: string) {
-    const ticker = normalizeTicker(tickerInput ?? addingTickerDraft ?? addingRow?.ticker ?? "");
+    const ticker = normalizeTicker(tickerInput ?? addingTickerDraftRef.current ?? addingRow?.ticker ?? "");
     if (!ticker || !selectedTickerType || !addingRow || addingRow.is_validating) {
       return;
     }
@@ -1089,7 +1091,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     try {
       setAddingRow((prev) => (prev ? { ...prev, ticker, is_validating: true } : null));
       const validated = await validateStockCandidate(selectedTickerType, ticker);
-      setAddingTickerDraft(normalizeTicker(validated.ticker));
+      addingTickerDraftRef.current = normalizeTicker(validated.ticker);
       setAddingRow((prev) =>
         prev
           ? {
@@ -1110,6 +1112,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
       toast.success(`[순위] ${validated.name}(${validated.ticker}) 확인 완료`);
     } catch (validationError) {
+      addingTickerDraftRef.current = ticker;
       setAddingRow((prev) =>
         prev
           ? {
