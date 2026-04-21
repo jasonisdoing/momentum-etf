@@ -238,10 +238,10 @@ def load_real_holdings_table(
         df_holdings["days_held_int"] = 0
 
     # Fetch prices from price cache and exchange rates
-    from utils.cache_utils import load_cached_frames_bulk_with_fallback
+    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    cached_frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
     missing_price_tickers: set[str] = set()
 
     def _get_current_price(row):

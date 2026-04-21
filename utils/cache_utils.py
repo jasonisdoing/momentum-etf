@@ -172,24 +172,46 @@ def _get_refresh_status_collection():
 
 
 def get_cache_lookup_keys(account_id: str) -> list[str]:
-    """캐시 조회 시도 순서를 반환한다.
+    """캐시 조회 키를 반환한다.
 
-    계좌 ID가 전달되면 전체 종목풀(ticker_type) 키 목록을 반환한다.
+    암묵적인 fallback 없이, 전달된 account_id/ticker_type 자신만 조회한다.
     """
     token = (account_id or "").strip().lower()
     if not token:
         return []
-
-    try:
-        from utils.settings_loader import list_available_ticker_types
-
-        ticker_types = list_available_ticker_types()
-        if ticker_types:
-            return [str(ticker_type).strip().lower() for ticker_type in ticker_types if str(ticker_type).strip()]
-    except Exception:
-        pass
-
     return [token]
+
+
+def get_all_ticker_type_lookup_keys() -> list[str]:
+    """모든 종목풀 캐시 키를 명시적으로 반환한다."""
+    from utils.settings_loader import list_available_ticker_types
+
+    return [str(ticker_type).strip().lower() for ticker_type in list_available_ticker_types() if str(ticker_type).strip()]
+
+
+def _load_cached_frames_bulk_from_keys(cache_keys: Iterable[str], tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    frames: dict[str, pd.DataFrame] = {}
+    missing = set(normalized)
+
+    for cache_key in cache_keys:
+        key_norm = str(cache_key or "").strip().lower()
+        if not key_norm or not missing:
+            continue
+        fetched = load_cached_frames_bulk(key_norm, missing)
+        if not fetched:
+            continue
+        frames.update(fetched)
+        missing -= set(fetched.keys())
+
+    return frames
 
 
 def _deserialize_cached_doc(doc: dict[str, Any], collection=None) -> pd.DataFrame | None:
@@ -557,27 +579,15 @@ def load_cached_close_series_bulk_before_or_at(
 
 def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     """계좌 캐시를 조회한다."""
-    normalized = []
-    for ticker in tickers:
-        norm = (ticker or "").strip().upper()
-        if norm:
-            normalized.append(norm)
-    if not normalized:
-        return {}
+    return _load_cached_frames_bulk_from_keys(get_cache_lookup_keys(account_id), tickers)
 
-    frames: dict[str, pd.DataFrame] = {}
-    missing = set(normalized)
 
-    for cache_key in get_cache_lookup_keys(account_id):
-        if not missing:
-            break
-        fetched = load_cached_frames_bulk(cache_key, missing)
-        if not fetched:
-            continue
-        frames.update(fetched)
-        missing -= set(fetched.keys())
+def load_cached_frames_bulk_from_all_ticker_types(tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
+    """모든 종목풀 캐시에서 순서대로 조회한다.
 
-    return frames
+    계좌 보유 화면처럼 종목풀이 섞일 수 있는 경우에만 명시적으로 사용한다.
+    """
+    return _load_cached_frames_bulk_from_keys(get_all_ticker_type_lookup_keys(), tickers)
 
 
 def load_cached_close_series_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.Series]:
