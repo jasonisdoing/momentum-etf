@@ -161,6 +161,19 @@ def load_real_holdings_table(
             if t not in has_holdings_map:
                 has_holdings_map[t] = doc.get("has_holdings", False)
 
+        cache_cursor = db.stock_cache_meta.find(
+            {"ticker": {"$in": all_tickers}},
+            {"ticker": 1, "holdings_cache.items": 1},
+        )
+        for doc in cache_cursor:
+            ticker = str(doc.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            items = (((doc.get("holdings_cache") or {}).get("items")) or [])
+            has_items = bool(items)
+            if has_items:
+                has_holdings_map[ticker] = True
+
         # 데이터 업데이트 (종목풀 정보 우선 적용)
         df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
         df_holdings["name"] = df_holdings.apply(
