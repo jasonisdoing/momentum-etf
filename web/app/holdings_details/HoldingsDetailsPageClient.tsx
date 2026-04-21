@@ -255,20 +255,23 @@ export function HoldingsDetailsPageClient() {
       headerName: "종목명",
       field: "name",
       flex: 1,
-      minWidth: 180,
+      minWidth: 140,
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         const mainRow = params.data as MainGridRow;
         const isExpanded = expandedTicker === mainRow.ticker;
         const hasSources = mainRow.has_components === true && mainRow.sources.length > 0;
         return (
-          <div className={`d-flex align-items-center gap-2 ${hasSources ? "cursor-pointer" : ""}`} style={{ userSelect: "none" }}>
+          <div
+            className={`d-flex align-items-center gap-2 holdingsDetailsNameCell ${hasSources ? "cursor-pointer" : ""}`}
+            style={{ userSelect: "none" }}
+          >
             {hasSources && (
               <span className="text-primary d-flex align-items-center" style={{ fontSize: "10px", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>
                 ▶
               </span>
             )}
-            <span className="fw-bold text-dark">{params.value}</span>
+            <span className="fw-bold text-dark holdingsDetailsNameText">{params.value}</span>
           </div>
         );
       },
@@ -528,13 +531,29 @@ export function HoldingsDetailsPageClient() {
         }
         /* 각 컬럼 너비 및 패딩 정밀 동기화 (Ag-Grid 12px 기준) */
         .hdColTicker { width: 100px; padding-left: 12px; }
-        .hdColName   { flex: 1; min-width: 180px; padding-left: 12px; }
+        .hdColName   { flex: 1; min-width: 0; padding-left: 12px; overflow: hidden; }
         .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
         .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
         .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColReturn { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
+        .holdingsDetailsNameCell {
+          width: 100%;
+          min-width: 0;
+          overflow: hidden;
+        }
+        .holdingsDetailsNameText {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+          display: inline-block;
+        }
+        .hdColName {
+          white-space: nowrap;
+          text-overflow: ellipsis;
+        }
 
         .cursor-pointer { cursor: pointer; }
       `}</style>
