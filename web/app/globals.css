@@ -3204,6 +3204,12 @@ a {
   }
 }
 
+@media (max-width: 1280px) {
+  .topbarTickerSearchItem {
+    display: none;
+  }
+}
+
 @media (max-width: 0px) {
   .pageHeaderCompact h1 {
     font-size: 22px;
