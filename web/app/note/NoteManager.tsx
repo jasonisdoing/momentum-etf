@@ -7,6 +7,7 @@ import {
   writeRememberedMomentumEtfAccountId,
 } from "../components/account-selection";
 import { AppLoadingState } from "../components/AppLoadingState";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { useToast } from "../components/ToastProvider";
 
 type AccountOption = {
@@ -199,24 +200,26 @@ export function NoteManager({
       <section className="appSection">
         <div className="card appCard">
           <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft noteMainHeaderLeft">
-                <label className="appLabeledField accountSelect">
-                  <span className="appLabeledFieldLabel">계좌</span>
-                  <select
-                    className="field compactField"
-                    value={selectedAccountId}
-                    onChange={(event) => handleAccountChange(event.target.value)}
-                  >
-                    {accounts.map((account) => (
-                      <option key={account.account_id} value={account.account_id}>
-                        {account.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft noteMainHeaderLeft">
+                  <label className="appLabeledField accountSelect">
+                    <span className="appLabeledFieldLabel">계좌</span>
+                    <select
+                      className="field compactField"
+                      value={selectedAccountId}
+                      onChange={(event) => handleAccountChange(event.target.value)}
+                    >
+                      {accounts.map((account) => (
+                        <option key={account.account_id} value={account.account_id}>
+                          {account.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
               </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
           <div className="card-header appActionHeader bg-light-subtle border-top">
             <div className="appActionHeaderInner">

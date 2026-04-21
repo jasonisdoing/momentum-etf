@@ -2527,6 +2527,18 @@ a {
   width: 100%;
 }
 
+.appResponsiveFiltersToggleWrap {
+  display: flex;
+  justify-content: flex-start;
+  width: 100%;
+}
+
+.appResponsiveFiltersToggle {
+  min-height: 32px;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
 .marketMainHeader {
   flex-wrap: nowrap;
 }

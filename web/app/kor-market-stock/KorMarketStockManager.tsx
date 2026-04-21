@@ -10,6 +10,7 @@ import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { useToast } from "../components/ToastProvider";
 import {
   readRememberedTickerType,
@@ -422,51 +423,53 @@ export function KorMarketStockManager({
       <div className="card appCard appTableCardFill">
         {/* 메인 헤더 */}
         <div className="card-header">
-          <div className="appMainHeader">
-            <div className="appMainHeaderLeft korMarketStockMainHeaderLeft">
-              <label className="appLabeledField">
-                <span className="appLabeledFieldLabel">마켓</span>
-                <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="마켓 선택">
-                  {MARKET_OPTIONS.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMarket(opt)}
-                    >
-                      {opt === "KOSPI" ? "코스피" : "코스닥"}
-                    </button>
-                  ))}
-                </div>
-              </label>
+          <ResponsiveFiltersSection>
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft korMarketStockMainHeaderLeft">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">마켓</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="마켓 선택">
+                    {MARKET_OPTIONS.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setMarket(opt)}
+                      >
+                        {opt === "KOSPI" ? "코스피" : "코스닥"}
+                      </button>
+                    ))}
+                  </div>
+                </label>
 
-              <label className="appLabeledField">
-                <span className="appLabeledFieldLabel">시가총액 상위</span>
-                <select
-                  className="form-select"
-                  value={limit}
-                  onChange={(e) => setLimit(Number(e.target.value) as (typeof LIMIT_OPTIONS)[number])}
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">시가총액 상위</span>
+                  <select
+                    className="form-select"
+                    value={limit}
+                    onChange={(e) => setLimit(Number(e.target.value) as (typeof LIMIT_OPTIONS)[number])}
+                  >
+                    {LIMIT_OPTIONS.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}개
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div className="appMainHeaderRight">
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  onClick={handleOpenAddModal}
+                  disabled={selectedTickers.length === 0}
                 >
-                  {LIMIT_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}개
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <IconPlus size={16} stroke={2} />
+                  추가
+                </button>
+              </div>
             </div>
-            <div className="appMainHeaderRight">
-              <button
-                type="button"
-                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                onClick={handleOpenAddModal}
-                disabled={selectedTickers.length === 0}
-              >
-                <IconPlus size={16} stroke={2} />
-                추가
-              </button>
-            </div>
-          </div>
+          </ResponsiveFiltersSection>
         </div>
 
         <div className="card-body appCardBodyTight appTableCardBodyFill">
