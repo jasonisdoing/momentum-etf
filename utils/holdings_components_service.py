@@ -42,6 +42,23 @@ def _infer_price_country_code(ticker: str) -> str:
     return "us"
 
 
+def _is_hidden_component_ticker(ticker: Any) -> bool:
+    return _normalize_ticker(str(ticker or "")) == "IS"
+
+
+def _renormalize_component_weights(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    total_weight_sum = sum(_safe_float(component.get("total_weight")) for component in components)
+    if total_weight_sum <= 0.0:
+        return components
+
+    scale = 100.0 / total_weight_sum
+    for component in components:
+        component["total_weight"] = _safe_float(component.get("total_weight")) * scale
+        for source in component.get("sources", []):
+            source["weight"] = _safe_float(source.get("weight")) * scale
+    return components
+
+
 def _append_account_components(
     *,
     account_id: str,
@@ -291,7 +308,9 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
             etf_details=etf_details,
         )
 
-    if not etf_details:
+    filtered_etf_details = [detail for detail in etf_details if not _is_hidden_component_ticker(detail.get("ticker"))]
+
+    if not filtered_etf_details:
         return {
             "account_id": "TOTAL" if is_total else account_id_norm,
             "account_name": "전체" if is_total else account_name,
@@ -300,9 +319,14 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
             "etf_details": [],
         }
 
+    visible_components = [
+        component for component in merged.values() if not _is_hidden_component_ticker(component.get("ticker"))
+    ]
+    visible_components = _renormalize_component_weights(visible_components)
+
     # 비중 순 정렬
     sorted_components = sorted(
-        (component for component in merged.values() if float(component.get("total_weight") or 0.0) >= 0.01),
+        (component for component in visible_components if float(component.get("total_weight") or 0.0) >= 0.01),
         key=lambda x: x["total_weight"],
         reverse=True,
     )
@@ -401,7 +425,7 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     return {
         "account_id": "TOTAL" if is_total else account_id_norm,
         "account_name": "전체" if is_total else account_name,
-        "held_etf_count": len(etf_details),
+        "held_etf_count": len(filtered_etf_details),
         "components": sorted_components,
-        "etf_details": sorted(etf_details, key=lambda x: (str(x.get("account_name") or ""), x["ticker"])),
+        "etf_details": sorted(filtered_etf_details, key=lambda x: (str(x.get("account_name") or ""), x["ticker"])),
     }
