@@ -306,9 +306,10 @@ export function HoldingsManager({
     }, new Map<string, HoldingsRow>()).values(),
   );
 
-  const holdingsValuation = aggregatedBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
+  const visibleBaseHoldings = aggregatedBaseHoldings.filter((row) => normalizeDisplayTicker(row.ticker) !== "IS");
+  const holdingsValuation = visibleBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
   const totalValuation = holdingsValuation + totalCashKrw;
-  const aggregatedHoldings: AggregatedHoldingRow[] = aggregatedBaseHoldings.map((row) => ({
+  const aggregatedHoldings: AggregatedHoldingRow[] = visibleBaseHoldings.map((row) => ({
     ...row,
     portfolio_weight_pct: totalValuation > 0 ? Number(((row.valuation_krw / totalValuation) * 100).toFixed(1)) : 0,
   }));
