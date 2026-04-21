@@ -27,12 +27,12 @@ logger = get_app_logger()
 # key: "{country}:{ticker}" → {"data": {...}, "fetched_at": dt, "expires_at": dt, "source": str}
 _TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
-_KOR_ACTIVE_TTL_SECONDS = 30
+_KOR_ACTIVE_TTL_SECONDS = 60
 _AU_ACTIVE_TTL_SECONDS = 60
 _US_ACTIVE_TTL_SECONDS = 60
 _WORLDSTOCK_TTL_SECONDS = 900
 _YAHOO_SYMBOL_TTL_SECONDS = 900
-_IDLE_TTL_SECONDS = 3600
+_IDLE_TTL_SECONDS = 60
 _FX_TTL_SECONDS = 3600
 
 # 하위 호환: 기존 쿼리 단위 캐시 (환율 전용으로 유지)
@@ -394,14 +394,7 @@ def _reuse_stale_fx_cache(cache_key: str, exc: Exception) -> dict[str, Any] | No
 
 
 def _get_realtime_ttl_seconds(country: str) -> int:
-    if _is_market_active(country):
-        if country == "kor":
-            return _KOR_ACTIVE_TTL_SECONDS
-        if country == "au":
-            return _AU_ACTIVE_TTL_SECONDS
-        if country == "us":
-            return _US_ACTIVE_TTL_SECONDS
-    return _IDLE_TTL_SECONDS
+    return 60
 
 
 def _is_market_active(country: str) -> bool:
