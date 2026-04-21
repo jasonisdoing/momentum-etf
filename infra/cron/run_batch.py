@@ -47,6 +47,16 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
 EXIT_ALREADY_NOTIFIED = 66
 
 
+def _append_log_line(job_name: str, text: str) -> None:
+    """배치 로그를 logs/cron/<job>.log 에 항상 추가한다."""
+    LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOCK_DIR / f"{job_name}.log"
+    with log_path.open("a", encoding="utf-8") as handle:
+        handle.write(text)
+        if not text.endswith("\n"):
+            handle.write("\n")
+
+
 def _acquire_lock(job_name: str) -> Path:
     """실행 중 락파일 생성. 내용에는 pid 와 시작시각을 기록."""
     LOCK_DIR.mkdir(parents=True, exist_ok=True)
@@ -103,7 +113,9 @@ def main(argv: list[str]) -> int:
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
 
-    print(f"[run_batch] START job={job_name} cmd={' '.join(command)} at={started_at}")
+    start_line = f"[run_batch] START job={job_name} cmd={' '.join(command)} at={started_at}"
+    print(start_line)
+    _append_log_line(job_name, start_line)
 
     lock_path = _acquire_lock(job_name)
 
@@ -119,6 +131,8 @@ def main(argv: list[str]) -> int:
     except FileNotFoundError as exc:
         _release_lock(lock_path)
         elapsed = time.monotonic() - started_monotonic
+        fail_line = f"[run_batch] FAIL {exc}"
+        _append_log_line(job_name, fail_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
             f"❌ *[{app_label}] 배치 실행 불가*: `{job_name}`\n"
@@ -126,11 +140,13 @@ def main(argv: list[str]) -> int:
             f"• 소요: {elapsed:.1f}s\n"
             f"• 에러: `{exc}`"
         )
-        print(f"[run_batch] FAIL {exc}", file=sys.stderr)
+        print(fail_line, file=sys.stderr)
         return 127
     except Exception as exc:
         _release_lock(lock_path)
         elapsed = time.monotonic() - started_monotonic
+        exception_line = f"[run_batch] EXCEPTION {exc}"
+        _append_log_line(job_name, exception_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
             f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n"
@@ -138,7 +154,7 @@ def main(argv: list[str]) -> int:
             f"• 소요: {elapsed:.1f}s\n"
             f"• 에러: `{exc}`"
         )
-        print(f"[run_batch] EXCEPTION {exc}", file=sys.stderr)
+        print(exception_line, file=sys.stderr)
         return 1
     finally:
         _release_lock(lock_path)
@@ -150,8 +166,10 @@ def main(argv: list[str]) -> int:
     # 원본 출력은 그대로 stdout/stderr 로 흘려서 cron 로그파일에도 남김
     if result.stdout:
         sys.stdout.write(result.stdout)
+        _append_log_line(job_name, result.stdout)
     if result.stderr:
         sys.stderr.write(result.stderr)
+        _append_log_line(job_name, result.stderr)
 
     emoji = "✅" if success else "❌"
     status = "성공" if success else "실패"
@@ -172,9 +190,11 @@ def main(argv: list[str]) -> int:
         )
 
     ended_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-    print(
+    end_line = (
         f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
     )
+    print(end_line)
+    _append_log_line(job_name, end_line)
     return exit_code
 
 
