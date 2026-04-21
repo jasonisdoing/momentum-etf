@@ -11,9 +11,9 @@
       "TOP_N_HOLD": 5,
       "HOLDING_BONUS_SCORE": 20,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 6,
+      "FIRST_MA_MONTHS": 4,
       "SECOND_MA_TYPE": "ALMA",
-      "SECOND_MA_MONTHS": 10
+      "SECOND_MA_MONTHS": 8
     },
     {
       "order": 2,
@@ -26,7 +26,7 @@
       "TOP_N_HOLD": 3,
       "HOLDING_BONUS_SCORE": 20,
       "FIRST_MA_TYPE": "SMA",
-      "FIRST_MA_MONTHS": 8,
+      "FIRST_MA_MONTHS": 7,
       "SECOND_MA_TYPE": "ALMA",
       "SECOND_MA_MONTHS": 12
     },
