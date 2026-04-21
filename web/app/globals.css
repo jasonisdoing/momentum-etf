@@ -2527,16 +2527,19 @@ a {
   width: 100%;
 }
 
-.appResponsiveFiltersToggleWrap {
-  display: flex;
-  justify-content: flex-start;
-  width: 100%;
+.appResponsiveFiltersField {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
 }
 
 .appResponsiveFiltersToggle {
   min-height: 32px;
   font-size: 0.88rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .marketMainHeader {
