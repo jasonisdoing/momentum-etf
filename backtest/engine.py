@@ -18,7 +18,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import BACKTEST_INITIAL_KRW_AMOUNT, BACKTEST_START_DATE, SLIPPAGE_CONFIG, TRADING_DAYS_PER_MONTH
+from config import (
+    BACKTEST_INITIAL_KRW_AMOUNT,
+    BACKTEST_START_DATE,
+    SLIPPAGE_CONFIG,
+    TRADING_DAYS_PER_MONTH,
+)
 from core.strategy.scoring import (
     combine_rule_percentiles,
     compute_eligibility_mask,
@@ -107,6 +112,21 @@ def _resolve_slippage(pool_id: str) -> tuple[float, float]:
     if buy_ratio < 0 or sell_ratio < 0:
         raise ValueError(f"SLIPPAGE_CONFIG['{pool_id}']는 음수일 수 없습니다.")
     return buy_ratio, sell_ratio
+
+
+def _should_include_latest_day(open_frame: pd.DataFrame, latest_day: pd.Timestamp, today: pd.Timestamp) -> bool:
+    """오늘 거래일은 Open 데이터가 실제로 있는 경우에만 백테스트 말일에 포함한다."""
+    normalized_latest = pd.Timestamp(latest_day).normalize()
+    normalized_today = pd.Timestamp(today).normalize()
+    if normalized_latest != normalized_today:
+        return True
+    if normalized_latest not in open_frame.index:
+        return False
+    latest_open_row = open_frame.loc[normalized_latest]
+    if isinstance(latest_open_row, pd.DataFrame):
+        latest_open_row = latest_open_row.iloc[0]
+    valid_open = pd.to_numeric(latest_open_row, errors="coerce")
+    return bool(((~valid_open.isna()) & (valid_open > 0)).any())
 
 
 def _combine_rule_percentiles_array(
@@ -1225,6 +1245,17 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     
     if len(backtest_days) < 2:
         raise RuntimeError("백테스트 기간 내 거래일이 부족합니다. (최소 2거래일 필요)")
+
+    if not _should_include_latest_day(open_frame, backtest_days[-1], today):
+        excluded_day = backtest_days[-1]
+        backtest_days = backtest_days[:-1]
+        logger.info(
+            "[%s] 마지막 거래일 %s은 Open 데이터가 없어 백테스트에서 제외합니다.",
+            pool_id,
+            excluded_day.strftime("%Y-%m-%d"),
+        )
+    if len(backtest_days) < 2:
+        raise RuntimeError("백테스트 기간 내 확정 거래일이 부족합니다. (최소 2거래일 필요)")
 
     period_start = backtest_days[1]
     period_end = backtest_days[-1]

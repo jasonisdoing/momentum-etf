@@ -169,7 +169,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [10, 20],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -178,7 +178,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
         "TOP_N_HOLD": [4, 5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [10, 20],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -187,7 +187,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
         "TOP_N_HOLD": [7],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [10, 20],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -196,7 +196,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "us": {
         "BENCHMARK": {"ticker": "VOO", "name": "뱅가드 S&P500"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [10, 20],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
@@ -205,7 +205,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [10, 20],
         "FIRST_MA_TYPE": ["SMA"],
         "FIRST_MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "SECOND_MA_TYPE": ["ALMA"],
