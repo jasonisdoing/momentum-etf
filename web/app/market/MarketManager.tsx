@@ -9,6 +9,7 @@ import { useRouter } from "next/navigation";
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 import {
@@ -564,78 +565,80 @@ export function MarketManager({
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-header">
-            <div className="appMainHeader marketMainHeader">
-              <div className="appMainHeaderLeft marketMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">티커/종목명</span>
-                  <input
-                    className="field compactField"
-                    type="text"
-                    placeholder="티커 또는 종목명을 입력"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">시가총액(억)</span>
-                  <input
-                    className="field compactField"
-                    type="number"
-                    placeholder="최소 시가총액"
-                    value={minMarketCap}
-                    onChange={(event) => setMinMarketCap(event.target.value)}
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">거래량(주)</span>
-                  <div className="marketVolumeInlineRow">
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader marketMainHeader">
+                <div className="appMainHeaderLeft marketMainHeaderLeft">
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">티커/종목명</span>
                     <input
-                      className="field compactField marketVolumeInput"
-                      type="number"
-                      placeholder="최소 전일 거래량"
-                      value={minPrevVolume}
-                      onChange={(event) => setMinPrevVolume(event.target.value)}
+                      className="field compactField"
+                      type="text"
+                      placeholder="티커 또는 종목명을 입력"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
                     />
-                    <div className="marketNewOnlyRow">
-                      <button
-                        type="button"
-                        className={newOnly ? "filterPill filterPillActive" : "filterPill"}
-                        onClick={toggleNewOnly}
-                      >
-                        신규
-                      </button>
-                      {newOnly ? (
-                        <div className="marketNewOnlyDaysRow">
-                          <input
-                            className="field compactField marketNewOnlyDaysInput"
-                            type="number"
-                            min={1}
-                            step={1}
-                            value={newListingDays}
-                            onChange={(event) => handleNewListingDaysChange(event.target.value)}
-                            aria-label="신규 ETF 최근 일수"
-                          />
-                          <span className="marketNewOnlyDaysLabel">일</span>
-                        </div>) : null}
-                      {newOnly ? (
-                        <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
-                      ) : null}
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">시가총액(억)</span>
+                    <input
+                      className="field compactField"
+                      type="number"
+                      placeholder="최소 시가총액"
+                      value={minMarketCap}
+                      onChange={(event) => setMinMarketCap(event.target.value)}
+                    />
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">거래량(주)</span>
+                    <div className="marketVolumeInlineRow">
+                      <input
+                        className="field compactField marketVolumeInput"
+                        type="number"
+                        placeholder="최소 전일 거래량"
+                        value={minPrevVolume}
+                        onChange={(event) => setMinPrevVolume(event.target.value)}
+                      />
+                      <div className="marketNewOnlyRow">
+                        <button
+                          type="button"
+                          className={newOnly ? "filterPill filterPillActive" : "filterPill"}
+                          onClick={toggleNewOnly}
+                        >
+                          신규
+                        </button>
+                        {newOnly ? (
+                          <div className="marketNewOnlyDaysRow">
+                            <input
+                              className="field compactField marketNewOnlyDaysInput"
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={newListingDays}
+                              onChange={(event) => handleNewListingDaysChange(event.target.value)}
+                              aria-label="신규 ETF 최근 일수"
+                            />
+                            <span className="marketNewOnlyDaysLabel">일</span>
+                          </div>) : null}
+                        {newOnly ? (
+                          <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                </label>
+                  </label>
+                </div>
+                <div className="appMainHeaderRight">
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                    onClick={handleOpenAddModal}
+                    disabled={!hasSelectedRows}
+                  >
+                    <IconPlus size={16} stroke={2} />
+                    추가
+                  </button>
+                </div>
               </div>
-              <div className="appMainHeaderRight">
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                  onClick={handleOpenAddModal}
-                  disabled={!hasSelectedRows}
-                >
-                  <IconPlus size={16} stroke={2} />
-                  추가
-                </button>
-              </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">

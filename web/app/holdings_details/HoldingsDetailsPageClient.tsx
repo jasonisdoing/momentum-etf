@@ -5,6 +5,7 @@ import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { themeQuartz, iconSetQuartzBold } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import {
   readRememberedMomentumEtfAccountId,
   writeRememberedMomentumEtfAccountId,
@@ -446,36 +447,38 @@ export function HoldingsDetailsPageClient() {
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft rankMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">계좌</span>
-                  <select
-                    className="form-select"
-                    value={selectedAccount}
-                    onChange={(e) => {
-                      const nextId = e.target.value;
-                      setSelectedAccount(nextId);
-                      writeRememberedMomentumEtfAccountId(nextId);
-                    }}
-                    disabled={accounts.length === 0}
-                  >
-                    {accounts.length === 0 ? (
-                      <option value="">계좌 불러오는 중...</option>
-                    ) : (
-                      <>
-                        <option value="TOTAL">전체</option>
-                        {accounts.map((acc) => (
-                          <option key={acc.account_id} value={acc.account_id}>
-                            {acc.name}
-                          </option>
-                        ))}
-                      </>
-                    )}
-                  </select>
-                </label>
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft rankMainHeaderLeft">
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">계좌</span>
+                    <select
+                      className="form-select"
+                      value={selectedAccount}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setSelectedAccount(nextId);
+                        writeRememberedMomentumEtfAccountId(nextId);
+                      }}
+                      disabled={accounts.length === 0}
+                    >
+                      {accounts.length === 0 ? (
+                        <option value="">계좌 불러오는 중...</option>
+                      ) : (
+                        <>
+                          <option value="TOTAL">전체</option>
+                          {accounts.map((acc) => (
+                            <option key={acc.account_id} value={acc.account_id}>
+                              {acc.name}
+                            </option>
+                          ))}
+                        </>
+                      )}
+                    </select>
+                  </label>
+                </div>
               </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
           
           <div className="card-body appCardBodyTight appTableCardBodyFill">

@@ -13,6 +13,7 @@ import {
   writeRememberedTickerType,
 } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
 
@@ -1261,133 +1262,135 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft rankMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">기준일</span>
-                  <input
-                    className="form-control"
-                    type="date"
-                    value={selectedAsOfDate}
-                    max={getTodayDateInputValue()}
-                    onChange={(event) => handleAsOfDateChange(event.target.value)}
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목풀</span>
-                  <select
-                    className="form-select"
-                    value={selectedTickerType}
-                    onChange={(event) => handleTickerTypeChange(event.target.value)}
-                    disabled={ticker_types.length === 0}
-                  >
-                    {ticker_types.length === 0 ? (
-                      <option value="">종목풀 불러오는 중...</option>
-                    ) : (
-                      ticker_types.map((account) => (
-                        <option key={account.ticker_type} value={account.ticker_type}>
-                          {account.name}
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft rankMainHeaderLeft">
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">기준일</span>
+                    <input
+                      className="form-control"
+                      type="date"
+                      value={selectedAsOfDate}
+                      max={getTodayDateInputValue()}
+                      onChange={(event) => handleAsOfDateChange(event.target.value)}
+                    />
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">종목풀</span>
+                    <select
+                      className="form-select"
+                      value={selectedTickerType}
+                      onChange={(event) => handleTickerTypeChange(event.target.value)}
+                      disabled={ticker_types.length === 0}
+                    >
+                      {ticker_types.length === 0 ? (
+                        <option value="">종목풀 불러오는 중...</option>
+                      ) : (
+                        ticker_types.map((account) => (
+                          <option key={account.ticker_type} value={account.ticker_type}>
+                            {account.name}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">화면 모드</span>
+                    <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="순위 화면 모드">
+                      <button
+                        type="button"
+                        className={pageMode === "rank" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setPageMode("rank")}
+                      >
+                        순위모드
+                      </button>
+                      <button
+                        type="button"
+                        className={pageMode === "manage" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setPageMode("manage")}
+                      >
+                        관리모드
+                      </button>
+                    </div>
+                  </label>
+                  {pageMode === "rank" ? (
+                    <>
+                      {maRules.map((rule) => (
+                        <label key={rule.order} className="appLabeledField">
+                          <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
+                          <div className="rankRuleFieldRow">
+                            <select
+                              className="form-select"
+                              value={rule.ma_type}
+                              onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
+                              disabled={maTypeOptions.length === 0}
+                            >
+                              {maTypeOptions.map((option) => (
+                                <option key={`${rule.order}-${option}`} value={option}>
+                                  {option}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              className="form-select"
+                              value={String(rule.ma_months)}
+                              onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
+                              disabled={maTypeOptions.length === 0}
+                            >
+                              {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
+                                <option key={`${rule.order}-${month}`} value={month}>
+                                  {month}개월
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </label>
+                      ))}
+                    </>
+                  ) : null}
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">보유보너스점수</span>
+                    <select
+                      className="form-select"
+                      value={String(heldBonusScore)}
+                      onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
+                    >
+                      {Array.from({ length: 41 }, (_, index) => index * 5).map((score) => (
+                        <option key={score} value={score}>
+                          {score}
                         </option>
-                      ))
-                    )}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">화면 모드</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="순위 화면 모드">
-                    <button
-                      type="button"
-                      className={pageMode === "rank" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setPageMode("rank")}
-                    >
-                      순위모드
-                    </button>
-                    <button
-                      type="button"
-                      className={pageMode === "manage" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setPageMode("manage")}
-                    >
-                      관리모드
-                    </button>
-                  </div>
-                </label>
-                {pageMode === "rank" ? (
-                  <>
-                    {maRules.map((rule) => (
-                      <label key={rule.order} className="appLabeledField">
-                        <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
-                        <div className="rankRuleFieldRow">
-                          <select
-                            className="form-select"
-                            value={rule.ma_type}
-                            onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
-                            disabled={maTypeOptions.length === 0}
-                          >
-                            {maTypeOptions.map((option) => (
-                              <option key={`${rule.order}-${option}`} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                          </select>
-                          <select
-                            className="form-select"
-                            value={String(rule.ma_months)}
-                            onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
-                            disabled={maTypeOptions.length === 0}
-                          >
-                            {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                              <option key={`${rule.order}-${month}`} value={month}>
-                                {month}개월
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                      </label>
-                    ))}
-                  </>
-                ) : null}
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">보유보너스점수</span>
-                  <select
-                    className="form-select"
-                    value={String(heldBonusScore)}
-                    onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
-                  >
-                    {Array.from({ length: 41 }, (_, index) => index * 5).map((score) => (
-                      <option key={score} value={score}>
-                        {score}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">컬럼</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
-                    <button
-                      type="button"
-                      className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMetricMode("cumulative")}
-                    >
-                      누적
-                    </button>
-                    <button
-                      type="button"
-                      className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMetricMode("monthly")}
-                    >
-                      월별
-                    </button>
-                    <button
-                      type="button"
-                      className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMetricMode("info")}
-                    >
-                      정보
-                    </button>
-                  </div>
-                </label>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">컬럼</span>
+                    <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
+                      <button
+                        type="button"
+                        className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setMetricMode("cumulative")}
+                      >
+                        누적
+                      </button>
+                      <button
+                        type="button"
+                        className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setMetricMode("monthly")}
+                      >
+                        월별
+                      </button>
+                      <button
+                        type="button"
+                        className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setMetricMode("info")}
+                      >
+                        정보
+                      </button>
+                    </div>
+                  </label>
+                </div>
               </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
 
           {pageMode === "manage" ? (

@@ -6,6 +6,7 @@ import type { ColDef } from "ag-grid-community";
 import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { useToast } from "../components/ToastProvider";
 
 type WeeklyEditableField = {
@@ -434,35 +435,37 @@ export function WeeklyManager({
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft weeklyMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">보기 방식</span>
-                  <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
-                    <button
-                      type="button"
-                      className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setViewMode("core")}
-                    >
-                      핵심만 보기
-                    </button>
-                    <button
-                      type="button"
-                      className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setViewMode("full")}
-                    >
-                      전체 보기
-                    </button>
-                  </div>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">집계</span>
-                  <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
-                    평일 09:35, 16:35 주별 데이터 자동 집계
-                  </span>
-                </label>
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft weeklyMainHeaderLeft">
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">보기 방식</span>
+                    <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+                      <button
+                        type="button"
+                        className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setViewMode("core")}
+                      >
+                        핵심만 보기
+                      </button>
+                      <button
+                        type="button"
+                        className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setViewMode("full")}
+                      >
+                        전체 보기
+                      </button>
+                    </div>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">집계</span>
+                    <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
+                      평일 09:35, 16:35 주별 데이터 자동 집계
+                    </span>
+                  </label>
+                </div>
               </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
           <div className="card-header appActionHeader bg-light-subtle border-top">
             <div className="appActionHeaderInner">
