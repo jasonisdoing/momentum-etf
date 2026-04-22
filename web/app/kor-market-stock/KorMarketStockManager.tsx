@@ -94,7 +94,7 @@ function formatMarketCap(value: number | null): string {
 }
 
 const MARKET_OPTIONS = ["KOSPI", "KOSDAQ"] as const;
-const LIMIT_OPTIONS = [30, 50, 100] as const;
+const LIMIT_OPTIONS = [30, 50, 60, 70, 80, 90, 100] as const;
 
 const columnDefs: ColDef<KorMarketStockRow>[] = [
   {
