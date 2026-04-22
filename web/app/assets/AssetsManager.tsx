@@ -1611,7 +1611,9 @@ function AccountHoldingsDetailPanel({
         }
         return parsed;
       },
-      cellRenderer: (params: { data?: GridRow }) => (params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"),
+      cellRenderer: (params: { data?: GridRow }) => (
+        <span className="appGridNumericValue">{params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"}</span>
+      ),
     },
     { field: "days_held", headerName: "보유일", width: 76 },
   ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
