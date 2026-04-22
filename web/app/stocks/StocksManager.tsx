@@ -377,7 +377,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ? currentConfig.holding_bonus_score
           : payload.held_bonus_score;
 
-      if (typeof configuredHeldBonusScore === "number") {
+      if (typeof next?.held_bonus_score === "number") {
+        setHeldBonusScore(next.held_bonus_score);
+      } else if (typeof configuredHeldBonusScore === "number") {
         setHeldBonusScore(configuredHeldBonusScore);
       }
 
