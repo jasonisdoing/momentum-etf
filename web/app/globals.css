@@ -1882,6 +1882,15 @@ a {
   -webkit-user-select: text;
 }
 
+.appGridNumericValue {
+  display: flex;
+  width: 100%;
+  justify-content: flex-end;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
 .appAgGridTheme .ag-row.appHeldRow {
   background: rgba(102, 204, 102, 0.35);
 }
