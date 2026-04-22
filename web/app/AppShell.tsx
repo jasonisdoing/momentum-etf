@@ -13,7 +13,6 @@ import {
   IconList,
   IconListDetails,
   IconMenu2,
-  IconNotebook,
   IconReceipt2,
   IconSettings,
   IconTrendingUp,
@@ -55,7 +54,6 @@ const navGroups = [
     icon: IconListDetails,
     items: [
       { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
-      { href: "/note", label: "계좌 메모", icon: IconNotebook },
     ],
   },
   {

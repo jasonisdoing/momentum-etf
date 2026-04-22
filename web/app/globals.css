@@ -2020,6 +2020,30 @@ a {
   overflow: hidden;
 }
 
+.assetsNoteSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.assetsNoteSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.assetsNoteSectionHeader .noteMetaRow {
+  margin-bottom: 0;
+}
+
+.assetsNoteTextarea {
+  min-height: 8.5rem;
+  max-height: 14rem;
+  margin-bottom: 0;
+}
+
 .assetsChildAgGrid .ag-body-vertical-scroll {
   display: none !important;
 }
