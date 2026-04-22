@@ -35,17 +35,24 @@ def _parse_float(value: str | None) -> float | None:
         return None
 
 
-def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, Any]:
+def load_kor_stock_market(
+    market: str = "KOSPI",
+    limit: int = 50,
+    min_market_cap: int = 1000,
+) -> dict[str, Any]:
     """네이버 API에서 시가총액 상위 종목 리스트를 가져온다.
 
     Args:
         market: "KOSPI" 또는 "KOSDAQ"
         limit: 가져올 종목 수 (최대 100)
+        min_market_cap: 최소 시가총액(억)
     """
     if market not in ("KOSPI", "KOSDAQ"):
         raise ValueError(f"지원하지 않는 마켓입니다: {market}")
+    if min_market_cap < 0:
+        raise ValueError(f"최소 시가총액은 음수일 수 없습니다: {min_market_cap}")
 
-    page_size = min(limit, 100)
+    page_size = 100
     url = f"{_NAVER_STOCK_LIST_URL}/{market}?page=1&pageSize={page_size}"
 
     try:
@@ -64,12 +71,11 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
     held_tickers = load_all_holding_tickers()
 
     rows: list[dict[str, Any]] = []
-    filtered_idx = 1
     for item in raw_stocks:
         # 종목 유형 필터링 (stockEndType이 'stock'인 것만 포함)
         stock_type = str(item.get("stockEndType", "")).lower()
         name = item.get("stockName", "")
-        
+
         # ETF, ETN 제외 (필드값 및 명칭 키워드 체크)
         if stock_type != "stock" or any(k in name.upper() for k in ["ETF", "ETN"]):
             continue
@@ -81,6 +87,8 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
         # 시가총액은 백만 원 단위 → 억 단위로 변환
         market_cap_million = _parse_number(item.get("marketValue"))
         market_cap_eok = round(market_cap_million / 100) if market_cap_million else None
+        if market_cap_eok is None or market_cap_eok < min_market_cap:
+            continue
 
         compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
         # code "5"=하락 → 등락률을 음수로
@@ -89,7 +97,7 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
 
         rows.append(
             {
-                "rank": filtered_idx,
+                "rank": 0,
                 "ticker": ticker,
                 "name": name,
                 "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
@@ -100,7 +108,9 @@ def load_kor_stock_market(market: str = "KOSPI", limit: int = 50) -> dict[str, A
                 "market_cap": market_cap_eok,
             }
         )
-        filtered_idx += 1
+    rows = rows[: min(limit, 100)]
+    for idx, row in enumerate(rows, start=1):
+        row["rank"] = idx
 
     return {
         "market": market,
