@@ -138,7 +138,7 @@ def load_real_holdings_table(
     db = get_db_connection()
     if db is not None and not df_holdings.empty:
         all_tickers = df_holdings["ticker"].unique().tolist()
-        
+
         bucket_map = {}
         name_map = {}
         type_map = {}
@@ -177,28 +177,28 @@ def load_real_holdings_table(
         # 데이터 업데이트 (종목풀 정보 우선 적용)
         df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
         df_holdings["name"] = df_holdings.apply(
-            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])), 
+            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])),
             axis=1
         )
         df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
         df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
         df_holdings["has_holdings"] = df_holdings["ticker"].map(lambda t: has_holdings_map.get(t, False))
-        
+
         # 계좌의 country_code 찾아와서 부여
         try:
             account_info = get_account_settings(account_id)
             account_country = account_info.get("country_code", "kor")
         except Exception:
             account_country = "kor"
-            
+
         df_holdings["country_code"] = account_country
-        
+
         # ticker_type이 없는 미등록 종목인 경우, 국가 코드를 기반으로 기본값 할당
         def _fallback_ticker_type(row):
             if row.get("ticker_type"): return row["ticker_type"]
             c_code = row.get("country_code", "kor")
             return "us" if c_code == "us" else "aus" if c_code == "au" else "kor"
-            
+
         df_holdings["ticker_type"] = df_holdings.apply(_fallback_ticker_type, axis=1)
 
     import numpy as np
@@ -454,7 +454,7 @@ def load_real_holdings_table(
             "quantity": 1,
             "average_buy_price": intl_princi,
             "currency": "AUD",
-            "bucket": 3,  # "3. 시장지수"
+            "bucket": 2,  # "2. 시장지수"
             "first_buy_date": pd.Timestamp.now().normalize(),
             "보유일": "-",
             "현재가": intl_val,
@@ -496,7 +496,7 @@ def load_real_holdings_table(
     vals_for_sum = pd.to_numeric(df_holdings["평가금액(KRW)"], errors="coerce").fillna(0)
     cash_val = pd.to_numeric(snapshot.get("cash_balance", 0), errors="coerce") or 0
     total_assets = vals_for_sum.sum() + cash_val
-    
+
     if total_assets > 0:
         df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(1)
     else:
