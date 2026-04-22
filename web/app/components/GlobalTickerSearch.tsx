@@ -318,7 +318,11 @@ export function GlobalTickerSearch() {
                     </button>
                   ))}
                   {filteredTickers.length === 0 ? (
-                    <div className="globalTickerSearchEmpty">검색 결과가 없습니다.</div>
+                    topMoversLoading ? (
+                      <div className="globalTickerSearchEmpty">검색 데이터를 불러오는 중...</div>
+                    ) : (
+                      <div className="globalTickerSearchEmpty">검색 결과가 없습니다.</div>
+                    )
                   ) : null}
                 </div>
               </div>
