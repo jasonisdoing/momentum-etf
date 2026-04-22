@@ -18,7 +18,6 @@ import type {
   Time,
   MouseEventParams,
 } from "lightweight-charts";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, GridApi, GridReadyEvent } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -26,6 +25,7 @@ import { useToast } from "../components/ToastProvider";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
 import { readRememberedTickerType } from "../components/account-selection";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 // --- 타입 ---
 
@@ -124,25 +124,10 @@ const MA_PERIODS = [
   { period: 120, color: "#9C27B0", label: "120" },
 ];
 
-const gridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 34,
-    headerHeight: 36,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-  });
+const gridTheme = createAppGridTheme({
+  rowHeight: 34,
+  headerHeight: 36,
+});
 
 // --- 유틸 ---
 

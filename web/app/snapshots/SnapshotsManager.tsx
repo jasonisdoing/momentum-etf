@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, GridOptions, RowClassParams } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 type SnapshotAccountItem = {
   account_id: string;
@@ -101,30 +101,7 @@ function SnapshotDetailPanel(params: { data?: SnapshotGridRow }) {
   );
 }
 
-const appGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const appGridTheme = createAppGridTheme();
 
 export function SnapshotsManager({
   onHeaderSummaryChange,

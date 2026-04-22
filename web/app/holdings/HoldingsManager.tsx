@@ -1,12 +1,12 @@
 "use client";
 
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import type { GridOptions } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 type HoldingsRow = {
@@ -71,30 +71,7 @@ type ParentRow =
   | (AggregatedHoldingRow & { rowType: "main" })
   | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean };
 
-const holdingsGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const holdingsGridTheme = createAppGridTheme();
 
 // 구성종목이 있을 수 있는 종목인지 판별 (ETF 및 구성종목 추적 가능 여부)
 function canHaveConstituents(row: AggregatedHoldingRow): boolean {
@@ -110,7 +87,7 @@ function getDetailRowHeight(_count: number): number {
 }
 
 // ticker 페이지 gridTheme과 동일한 파라미터
-const constituentGridTheme = holdingsGridTheme.withParams({
+const constituentGridTheme = createAppGridTheme({
   rowHeight: 34,
   headerHeight: 36,
   wrapperBorderRadius: 10,

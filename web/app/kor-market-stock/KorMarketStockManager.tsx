@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { IconPlus } from "@tabler/icons-react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
@@ -12,6 +12,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -41,30 +42,7 @@ type KorMarketStocksResponse = {
   error?: string;
 };
 
-const korMarketStockGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const korMarketStockGridTheme = createAppGridTheme();
 
 function formatKrw(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -94,79 +72,18 @@ function formatMarketCap(value: number | null): string {
 }
 
 const MARKET_OPTIONS = ["KOSPI", "KOSDAQ"] as const;
-const LIMIT_OPTIONS = [30, 50, 60, 70, 80, 90, 100] as const;
-
-const columnDefs: ColDef<KorMarketStockRow>[] = [
-  {
-    headerName: "#",
-    field: "rank",
-    width: 64,
-    minWidth: 56,
-    maxWidth: 76,
-    sortable: false,
-    resizable: false,
-    cellStyle: { textAlign: "center", color: "#8896a6" },
-  },
-  {
-    headerName: "티커",
-    field: "ticker",
-    width: 100,
-    minWidth: 84,
-    cellStyle: { fontFamily: "var(--font-mono, monospace)", fontSize: "13px" },
-  },
-  {
-    headerName: "종목명",
-    field: "name",
-    flex: 1,
-    minWidth: 180,
-  },
-  {
-    headerName: "현재가",
-    field: "current_price",
-    width: 130,
-    minWidth: 108,
-    type: "rightAligned",
-    valueFormatter: (p) => formatKrw(p.value),
-  },
-  {
-    headerName: "등락률",
-    field: "change_pct",
-    width: 110,
-    minWidth: 96,
-    type: "rightAligned",
-    sort: "desc",
-    valueFormatter: (p) => formatPercent(p.value),
-    cellClassRules: {
-      metricPositive: (p) => p.value != null && p.value > 0,
-      metricNegative: (p) => p.value != null && p.value < 0,
-    },
-  },
-  {
-    headerName: "거래량",
-    field: "volume",
-    width: 140,
-    minWidth: 120,
-    type: "rightAligned",
-    valueFormatter: (p) => formatVolume(p.value),
-  },
-  {
-    headerName: "시가총액",
-    field: "market_cap",
-    width: 160,
-    minWidth: 140,
-    type: "rightAligned",
-    valueFormatter: (p) => formatMarketCap(p.value),
-  },
-];
+const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
+const KOSDAQ_LIMIT_OPTIONS = [150, 100, 50] as const;
 
 export function KorMarketStockManager({
   onSummaryChange,
 }: {
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
+  const router = useRouter();
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
-  const [limit, setLimit] = useState<(typeof LIMIT_OPTIONS)[number]>(100);
-  const [minMarketCap, setMinMarketCap] = useState("1000");
+  const [limit, setLimit] = useState<number>(200);
+  const [minMarketCapJo, setMinMarketCapJo] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -180,13 +97,13 @@ export function KorMarketStockManager({
 
   const toast = useToast();
 
-  const load = useCallback(async (m: string, l: number, minCapText: string) => {
+  const load = useCallback(async (m: string, l: number, minCapJoText: string) => {
     setLoading(true);
     setError(null);
     try {
-      const minCap = String(minCapText || "").trim() || "0";
+      const minCapJo = String(minCapJoText || "").trim() || "0";
       const [resp, stocksPayload] = await Promise.all([
-        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}&min_market_cap=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
+        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as KorMarketStocksResponse;
@@ -204,8 +121,19 @@ export function KorMarketStockManager({
   }, []);
 
   useEffect(() => {
-    load(market, limit, minMarketCap);
-  }, [market, limit, minMarketCap, load]);
+    load(market, limit, minMarketCapJo);
+  }, [market, limit, minMarketCapJo, load]);
+
+  const limitOptions = useMemo<number[]>(
+    () => (market === "KOSPI" ? [...KOSPI_LIMIT_OPTIONS] : [...KOSDAQ_LIMIT_OPTIONS]),
+    [market],
+  );
+
+  useEffect(() => {
+    if (!limitOptions.includes(limit)) {
+      setLimit(limitOptions[0]);
+    }
+  }, [limit, limitOptions]);
 
   useEffect(() => {
     onSummaryChange?.({ market, count: rows.length, totalCount });
@@ -214,10 +142,10 @@ export function KorMarketStockManager({
   const gridRows = useMemo(
     () =>
       [...rows].sort((left, right) => {
-        const leftChange = left.change_pct ?? Number.NEGATIVE_INFINITY;
-        const rightChange = right.change_pct ?? Number.NEGATIVE_INFINITY;
-        if (leftChange !== rightChange) {
-          return rightChange - leftChange;
+        const leftMarketCap = left.market_cap ?? Number.NEGATIVE_INFINITY;
+        const rightMarketCap = right.market_cap ?? Number.NEGATIVE_INFINITY;
+        if (leftMarketCap !== rightMarketCap) {
+          return rightMarketCap - leftMarketCap;
         }
         return left.ticker.localeCompare(right.ticker);
       }),
@@ -312,9 +240,9 @@ export function KorMarketStockManager({
 
     if (addedCount > 0) {
       setSelectedTickers([]);
-      await load(market, limit, minMarketCap);
+      await load(market, limit, minMarketCapJo);
     }
-  }, [load, market, limit, minMarketCap, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, market, limit, minMarketCapJo, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<KorMarketStockGridRow>[]>(
     () => [
@@ -324,7 +252,7 @@ export function KorMarketStockManager({
         width: 64,
         minWidth: 56,
         maxWidth: 76,
-        sortable: false,
+        sortable: true,
         resizable: false,
         cellStyle: { textAlign: "center", color: "#8896a6" } as CellStyle,
       },
@@ -340,7 +268,12 @@ export function KorMarketStockManager({
         field: "ticker",
         width: 100,
         minWidth: 84,
-        cellStyle: { fontFamily: "var(--font-mono, monospace)", fontSize: "13px" } as CellStyle,
+        cellStyle: {
+          fontFamily: "var(--font-mono, monospace)",
+          fontSize: "13px",
+          cursor: "pointer",
+        } as CellStyle,
+        cellClass: "korMarketStockTickerCell",
       },
       {
         headerName: "종목명",
@@ -362,7 +295,6 @@ export function KorMarketStockManager({
         width: 110,
         minWidth: 96,
         type: "rightAligned",
-        sort: "desc",
         valueFormatter: (p) => formatPercent(p.value),
         cellClassRules: {
           metricPositive: (p) => p.value != null && p.value > 0,
@@ -383,6 +315,7 @@ export function KorMarketStockManager({
         width: 160,
         minWidth: 140,
         type: "rightAligned",
+        sort: "desc",
         valueFormatter: (p) => formatMarketCap(p.value),
       },
       {
@@ -417,7 +350,7 @@ export function KorMarketStockManager({
         },
       },
     ],
-    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, router, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
   );
 
   return (
@@ -449,24 +382,24 @@ export function KorMarketStockManager({
                   <select
                     className="form-select"
                     value={limit}
-                    onChange={(e) => setLimit(Number(e.target.value) as (typeof LIMIT_OPTIONS)[number])}
+                    onChange={(e) => setLimit(Number(e.target.value))}
                   >
-                    {LIMIT_OPTIONS.map((opt) => (
+                    {limitOptions.map((opt) => (
                       <option key={opt} value={opt}>
-                        {opt}개
+                        {market} {opt}
                       </option>
                     ))}
                   </select>
                 </label>
 
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">최소 시가총액(억)</span>
+                  <span className="appLabeledFieldLabel">최소 시가총액(조)</span>
                   <input
                     className="form-control"
                     inputMode="numeric"
-                    value={minMarketCap}
-                    onChange={(e) => setMinMarketCap(e.target.value.replace(/[^\d]/g, ""))}
-                    placeholder="최소 시가총액"
+                    value={minMarketCapJo}
+                    onChange={(e) => setMinMarketCapJo(e.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="최소 시가총액(조)"
                   />
                 </label>
               </div>
@@ -503,6 +436,12 @@ export function KorMarketStockManager({
               gridOptions={{
                 overlayNoRowsTemplate: '<span style="color:#667382;">데이터 없음</span>',
                 suppressMovableColumns: true,
+                onCellClicked: (params) => {
+                  if (params.colDef.field !== "ticker") return;
+                  const ticker = String(params.data?.ticker ?? "").trim();
+                  if (!ticker) return;
+                  router.push(`/ticker?ticker=${encodeURIComponent(ticker)}`);
+                },
               }}
             />
           </div>

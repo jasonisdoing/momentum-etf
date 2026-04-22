@@ -1,7 +1,6 @@
 "use client";
 
 import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
@@ -16,6 +15,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 type RankTickerType = {
   ticker_type: string;
@@ -117,30 +117,7 @@ type RankAddingRowState = {
   is_validated: boolean;
 };
 
-const rankGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const rankGridTheme = createAppGridTheme();
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
