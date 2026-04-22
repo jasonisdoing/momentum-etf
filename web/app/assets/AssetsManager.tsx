@@ -67,33 +67,33 @@ type AccountSummary = {
 
 type ParentGridRow =
   | (AccountSummary & {
-      id: string;
-      rowType: "main";
-      cash_edit_value: number;
-    })
+    id: string;
+    rowType: "main";
+    cash_edit_value: number;
+  })
   | {
-      id: string;
-      rowType: "total";
-      name: string;
-      total_assets_krw: number;
-      valuation_krw: number;
-      total_principal: number;
-      cash_edit_value: number;
-      target_ratio_total: number | null;
-      holdings_count: number;
-      cash_ratio: number;
-      net_profit: number;
-      net_profit_pct: number;
-      daily_profit: number;
-      weekly_profit: number;
-    }
+    id: string;
+    rowType: "total";
+    name: string;
+    total_assets_krw: number;
+    valuation_krw: number;
+    total_principal: number;
+    cash_edit_value: number;
+    target_ratio_total: number | null;
+    holdings_count: number;
+    cash_ratio: number;
+    net_profit: number;
+    net_profit_pct: number;
+    daily_profit: number;
+    weekly_profit: number;
+  }
   | {
-      id: string;
-      rowType: "detail";
-      parentId: string;
-      summary: AccountSummary;
-      rows: HoldingsRow[];
-    };
+    id: string;
+    rowType: "detail";
+    parentId: string;
+    summary: AccountSummary;
+    rows: HoldingsRow[];
+  };
 
 type HoldingsResponse = {
   rows?: HoldingsRow[];
@@ -662,7 +662,7 @@ function AccountHoldingsDetailPanel({
   );
   const moveToTickerDetail = useCallback(
     (ticker: string | null | undefined) => {
-    const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
+      const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
       if (!normalizedTicker || normalizedTicker === "IS" || normalizedTicker === CASH_ROW_TICKER) {
         return;
       }
@@ -741,13 +741,13 @@ function AccountHoldingsDetailPanel({
       setAddingRow((previous) =>
         previous
           ? {
-              ...previous,
-              ticker,
-              name: message,
-              bucketId: undefined,
-              isValidated: false,
-              isValidatingTicker: false,
-            }
+            ...previous,
+            ticker,
+            name: message,
+            bucketId: undefined,
+            isValidated: false,
+            isValidatingTicker: false,
+          }
           : null,
       );
       toast.error(message);
@@ -757,13 +757,13 @@ function AccountHoldingsDetailPanel({
     setAddingRow((previous) =>
       previous
         ? {
-            ...previous,
-            ticker,
-            name: "",
-            bucketId: undefined,
-            isValidated: false,
-            isValidatingTicker: true,
-          }
+          ...previous,
+          ticker,
+          name: "",
+          bucketId: undefined,
+          isValidated: false,
+          isValidatingTicker: true,
+        }
         : null,
     );
 
@@ -784,13 +784,13 @@ function AccountHoldingsDetailPanel({
       setAddingRow((previous) =>
         previous
           ? {
-              ...previous,
-              ticker: payload.ticker,
-              name: payload.name,
-              bucketId: payload.bucket_id,
-              isValidated: true,
-              isValidatingTicker: false,
-            }
+            ...previous,
+            ticker: payload.ticker,
+            name: payload.name,
+            bucketId: payload.bucket_id,
+            isValidated: true,
+            isValidatingTicker: false,
+          }
           : null,
       );
       toast.success(`조회 성공: ${payload.name}`);
@@ -798,10 +798,10 @@ function AccountHoldingsDetailPanel({
       setAddingRow((previous) =>
         previous
           ? {
-              ...previous,
-              name: previous.name || "",
-              isValidatingTicker: false,
-            }
+            ...previous,
+            name: previous.name || "",
+            isValidatingTicker: false,
+          }
           : null,
       );
       toast.error(error instanceof Error ? error.message : "검증 실패");
@@ -1323,9 +1323,9 @@ function AccountHoldingsDetailPanel({
                 setAddingRow((previous) =>
                   previous
                     ? {
-                        ...previous,
-                        ticker: value,
-                      }
+                      ...previous,
+                      ticker: value,
+                    }
                     : null,
                 )
               }
@@ -1376,11 +1376,11 @@ function AccountHoldingsDetailPanel({
                     setAddingRow((previous) =>
                       previous
                         ? {
-                            ...previous,
-                            ticker: "",
-                            isValidated: false,
-                            name: "",
-                          }
+                          ...previous,
+                          ticker: "",
+                          isValidated: false,
+                          name: "",
+                        }
                         : null,
                     );
                     return;
@@ -1584,9 +1584,9 @@ function AccountHoldingsDetailPanel({
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number }) => (
         params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-        <span className={getSignedClass(params.value ?? 0)}>
-          {(params.value ?? 0).toFixed(2)}%
-        </span>
+          <span className={getSignedClass(params.value ?? 0)}>
+            {(params.value ?? 0).toFixed(2)}%
+          </span>
       ),
     },
     {
@@ -1596,7 +1596,7 @@ function AccountHoldingsDetailPanel({
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number }) => (
         params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-        <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
       ),
     },
     {
@@ -1903,7 +1903,7 @@ function AccountHoldingsDetailPanel({
             {noteLoading ? (
               <span className="text-muted small">계좌 메모를 불러오는 중...</span>
             ) : (
-              <span className="text-muted small">마지막 저장: {formatNoteUpdatedAt(noteUpdatedAt)}</span>
+              <span className="text-muted small">메모 저장: {formatNoteUpdatedAt(noteUpdatedAt)}</span>
             )}
           </div>
           <button
