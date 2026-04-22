@@ -219,11 +219,70 @@ def _build_rank_map(dataframe: pd.DataFrame) -> dict[str, int]:
     return rank_map
 
 
+def _normalize_score_value(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(score):
+        return None
+    return score
+
+
+def _build_bonus_adjusted_rows(
+    dataframe: pd.DataFrame,
+    held_bonus_score: int,
+) -> list[dict[str, Any]]:
+    rows_with_index: list[dict[str, Any]] = []
+    for index, row in enumerate(dataframe.to_dict(orient="records")):
+        score = _normalize_score_value(row.get("점수"))
+        is_held = str(row.get("보유") or "").strip() != ""
+        adjusted_score = score
+        if score is not None and is_held:
+            adjusted_score = round(score + held_bonus_score, 1)
+        rows_with_index.append(
+            {
+                **row,
+                "점수": adjusted_score,
+                "__base_index": index,
+            }
+        )
+
+    rows_with_index.sort(
+        key=lambda row: (
+            1 if row.get("점수") is None else 0,
+            -(float(row["점수"]) if row.get("점수") is not None else 0.0),
+            int(row["__base_index"]),
+        )
+    )
+
+    ranked_rows: list[dict[str, Any]] = []
+    for rank, row in enumerate(rows_with_index, start=1):
+        normalized = dict(row)
+        normalized.pop("__base_index", None)
+        normalized["순위"] = rank
+        ranked_rows.append(normalized)
+    return ranked_rows
+
+
+def _build_rank_map_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
+    rank_map: dict[str, int] = {}
+    for row in rows:
+        ticker = str(row.get("티커") or "").strip().upper()
+        rank = row.get("순위")
+        if ticker and isinstance(rank, int):
+            rank_map[ticker] = rank
+    return rank_map
+
+
 def load_rank_data(
     *,
     ticker_type: str | None = None,
     ma_rule_overrides: list[dict[str, Any]] | None = None,
     as_of_date: str | None = None,
+    held_bonus_score: int | None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -263,7 +322,12 @@ def load_rank_data(
             parsed_as_of_date = None
         if parsed_as_of_date is not None and not pd.isna(parsed_as_of_date):
             effective_as_of_date = parsed_as_of_date.normalize()
-    current_rank_map = _build_rank_map(dataframe)
+    if held_bonus_score is None:
+        raise ValueError("보유보너스점수 값이 필요합니다.")
+
+    bonus_score = int(held_bonus_score)
+    current_rows = _build_bonus_adjusted_rows(dataframe, bonus_score)
+    current_rank_map = _build_rank_map_from_rows(current_rows)
     previous_rank_map: dict[str, int] = {}
     raw_latest_trading_day = dataframe.attrs.get("latest_trading_day")
     previous_trading_day = _get_previous_trading_day(country_code, raw_latest_trading_day)
@@ -273,12 +337,13 @@ def load_rank_data(
             ma_rules=ma_rules,
             as_of_date=previous_trading_day,
         )
-        previous_rank_map = _build_rank_map(previous_dataframe)
+        previous_rows = _build_bonus_adjusted_rows(previous_dataframe, bonus_score)
+        previous_rank_map = _build_rank_map_from_rows(previous_rows)
 
-    if not dataframe.empty:
+    if current_rows:
         dataframe_attrs = dict(dataframe.attrs)
         enriched_rows: list[dict[str, Any]] = []
-        for row in dataframe.to_dict(orient="records"):
+        for row in current_rows:
             ticker = str(row.get("티커") or "").strip().upper()
             row["순위"] = current_rank_map.get(ticker)
             row["이전순위"] = previous_rank_map.get(ticker)
@@ -300,6 +365,7 @@ def load_rank_data(
             reference_date=effective_as_of_date,
         ),
         "rows": _serialize_rows(dataframe),
+        "held_bonus_score": bonus_score,
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),
         "cache_updated_at": _serialize_datetime(dataframe.attrs.get("cache_updated_at")),

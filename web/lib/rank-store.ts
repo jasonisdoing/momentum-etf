@@ -71,6 +71,7 @@ type RankData = {
   ranking_computed_at: string | null;
   realtime_fetched_at: string | null;
   previous_trading_day: string | null;
+  held_bonus_score: number;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];
@@ -80,6 +81,7 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_overrides?: RankMaRule[];
   as_of_date?: string;
+  held_bonus_score?: number;
 }): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -87,6 +89,9 @@ export async function loadRankData(params?: {
   }
   if (params?.as_of_date) {
     search.set("as_of_date", params.as_of_date);
+  }
+  if (typeof params?.held_bonus_score === "number") {
+    search.set("held_bonus_score", String(params.held_bonus_score));
   }
   for (const rule of params?.ma_rule_overrides ?? []) {
     search.set(`rule${rule.order}_ma_type`, rule.ma_type);

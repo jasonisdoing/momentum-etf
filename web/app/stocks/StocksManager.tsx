@@ -94,6 +94,7 @@ type RankResponse = {
   ranking_computed_at?: string | null;
   realtime_fetched_at?: string | null;
   previous_trading_day?: string | null;
+  held_bonus_score?: number;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -268,6 +269,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const addingTickerDraftRef = useRef("");
+  const loadSequenceRef = useRef(0);
   const [isPending, startTransition] = useTransition();
   const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
@@ -305,7 +307,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setStaleTickers([]);
   }
 
-  async function load(next?: { ticker_type?: string; ma_rule_overrides?: RankMaRule[]; as_of_date?: string }) {
+  async function load(next?: {
+    ticker_type?: string;
+    ma_rule_overrides?: RankMaRule[];
+    as_of_date?: string;
+    held_bonus_score?: number;
+    bootstrap?: boolean;
+  }) {
+    const requestSequence = ++loadSequenceRef.current;
     setLoading(true);
     setError(null);
     clearCacheWarningState();
@@ -318,6 +327,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.as_of_date) {
         search.set("as_of_date", next.as_of_date);
       }
+      if (typeof next?.held_bonus_score === "number") {
+        search.set("held_bonus_score", String(next.held_bonus_score));
+      }
       for (const rule of next?.ma_rule_overrides ?? []) {
         search.set(`rule${rule.order}_ma_type`, rule.ma_type);
         search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
@@ -328,6 +340,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       const payload = (await response.json()) as RankResponse;
       if (!response.ok) {
         throw new Error(payload.error ?? "순위 데이터를 불러오지 못했습니다.");
+      }
+      if (requestSequence !== loadSequenceRef.current) {
+        return;
       }
 
       setAccounts(payload.ticker_types ?? []);
@@ -357,8 +372,27 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
       // 선택된 ticker_type의 holding_bonus_score를 기본값으로 설정
       const currentConfig = (payload.ticker_types ?? []).find(t => t.ticker_type === nextAccountId);
-      if (currentConfig && typeof currentConfig.holding_bonus_score === "number") {
-        setHeldBonusScore(currentConfig.holding_bonus_score);
+      const configuredHeldBonusScore =
+        currentConfig && typeof currentConfig.holding_bonus_score === "number"
+          ? currentConfig.holding_bonus_score
+          : payload.held_bonus_score;
+
+      if (typeof configuredHeldBonusScore === "number") {
+        setHeldBonusScore(configuredHeldBonusScore);
+      }
+
+      if (
+        next?.bootstrap &&
+        typeof configuredHeldBonusScore === "number" &&
+        configuredHeldBonusScore !== payload.held_bonus_score
+      ) {
+        void load({
+          ticker_type: nextAccountId,
+          ma_rule_overrides: payload.ma_rules ?? next?.ma_rule_overrides,
+          as_of_date: toDateInputValue(payload.as_of_date),
+          held_bonus_score: configuredHeldBonusScore,
+        });
+        return;
       }
 
       setRankingComputedAt(payload.ranking_computed_at ?? null);
@@ -368,6 +402,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setStaleTickers(payload.stale_tickers ?? []);
       setNaverCategoryConfig(payload.naver_category_config ?? []);
     } catch (loadError) {
+      if (requestSequence !== loadSequenceRef.current) {
+        return;
+      }
       let msg = loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.";
       if (msg.includes("Unexpected token") || msg.includes("fetch failed") || msg === "순위 데이터를 불러오지 못했습니다.") {
         msg = "몽고디비 데이터베이스 응답 지연(타임아웃)으로 인해 순위 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.";
@@ -379,12 +416,19 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }
       }
     } finally {
-      setLoading(false);
+      if (requestSequence === loadSequenceRef.current) {
+        setLoading(false);
+      }
     }
   }
 
   useEffect(() => {
-    void load({ ticker_type: readRememberedTickerType() ?? undefined, as_of_date: getTodayDateInputValue() });
+    void load({
+      ticker_type: readRememberedTickerType() ?? undefined,
+      as_of_date: getTodayDateInputValue(),
+      held_bonus_score: heldBonusScore,
+      bootstrap: true,
+    });
   }, []);
 
   // 초기 로딩 시 heldBonusScore는 load 함수 내에서 설정됨
@@ -393,6 +437,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   function handleHeldBonusScoreChange(nextValue: number) {
     const normalized = clampHeldBonusScore(nextValue);
     setHeldBonusScore(normalized);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_overrides: maRules,
+      as_of_date: selectedAsOfDate,
+      held_bonus_score: normalized,
+    });
   }
 
   const moveToTickerDetail = useMemo(
@@ -425,47 +475,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     return tickerType === "kor_kr" || tickerType === "kor_us";
   }, [selectedTickerTypeItem?.ticker_type]);
 
-  const rankedGridRows = useMemo<RankGridRow[]>(() => {
-    if (heldBonusScore <= 0) {
-      return gridRows;
-    }
-
-    return [...gridRows]
-      .map((row, index) => {
-        const baseScore = typeof row.점수 === "number" ? row.점수 : null;
-        const isHeld = String(row.보유 ?? "").trim() !== "";
-        return {
-          ...row,
-          __baseIndex: index,
-          점수: baseScore === null ? null : Number((baseScore + (isHeld ? heldBonusScore : 0)).toFixed(1)),
-        };
-      })
-      .sort((left, right) => {
-        const leftScore = typeof left.점수 === "number" ? left.점수 : null;
-        const rightScore = typeof right.점수 === "number" ? right.점수 : null;
-        if (leftScore === null && rightScore === null) {
-          return Number(left.__baseIndex ?? 0) - Number(right.__baseIndex ?? 0);
-        }
-        if (leftScore === null) {
-          return 1;
-        }
-        if (rightScore === null) {
-          return -1;
-        }
-        if (rightScore !== leftScore) {
-          return rightScore - leftScore;
-        }
-        return Number(left.__baseIndex ?? 0) - Number(right.__baseIndex ?? 0);
-      })
-      .map((row, index) => ({
-        ...row,
-        순위: index + 1,
-      }));
-  }, [gridRows, heldBonusScore]);
-
   const displayGridRows = useMemo<RankGridRow[]>(() => {
     if (pageMode !== "manage" || !addingRow) {
-      return rankedGridRows;
+      return gridRows;
     }
     return [
       {
@@ -509,9 +521,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순자산총액: null,
         "전일 거래량(주)": null,
       },
-      ...rankedGridRows,
+      ...gridRows,
     ];
-  }, [addingRow, pageMode, rankedGridRows]);
+  }, [addingRow, gridRows, pageMode]);
 
   const maRuleSummary = useMemo(
     () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
@@ -1022,24 +1034,44 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
     writeRememberedTickerType(accountId);
-    void load({ ticker_type: accountId, as_of_date: selectedAsOfDate });
+    void load({
+      ticker_type: accountId,
+      as_of_date: selectedAsOfDate,
+      held_bonus_score: heldBonusScore,
+      bootstrap: true,
+    });
   }
 
   function handleMaRuleTypeChange(order: number, nextMaType: string) {
     const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_type: nextMaType } : rule));
     setMaRules(nextRules);
-    void load({ ticker_type: selectedTickerType, ma_rule_overrides: nextRules, as_of_date: selectedAsOfDate });
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_overrides: nextRules,
+      as_of_date: selectedAsOfDate,
+      held_bonus_score: heldBonusScore,
+    });
   }
 
   function handleMaRuleMonthsChange(order: number, nextMaMonths: number) {
     const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_months: nextMaMonths } : rule));
     setMaRules(nextRules);
-    void load({ ticker_type: selectedTickerType, ma_rule_overrides: nextRules, as_of_date: selectedAsOfDate });
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_overrides: nextRules,
+      as_of_date: selectedAsOfDate,
+      held_bonus_score: heldBonusScore,
+    });
   }
 
   function handleAsOfDateChange(nextAsOfDate: string) {
     setSelectedAsOfDate(nextAsOfDate);
-    void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: nextAsOfDate });
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_overrides: maRules,
+      as_of_date: nextAsOfDate,
+      held_bonus_score: heldBonusScore,
+    });
   }
 
   function showErrorToast(message: string) {
@@ -1158,7 +1190,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           await processDirtyRows();
         }
         toast.success("[순위] 변경사항 저장 완료");
-        void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
+        void load({
+          ticker_type: selectedTickerType,
+          ma_rule_overrides: maRules,
+          as_of_date: selectedAsOfDate,
+          held_bonus_score: heldBonusScore,
+        });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
       }
@@ -1197,7 +1234,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         setDeleteConfirmOpen(false);
         clearCacheWarningState();
         toast.success(`[순위] ${selectedRows.length}개 종목 삭제 완료`);
-        void load({ ticker_type: selectedTickerType, ma_rule_overrides: maRules, as_of_date: selectedAsOfDate });
+        void load({
+          ticker_type: selectedTickerType,
+          ma_rule_overrides: maRules,
+          as_of_date: selectedAsOfDate,
+          held_bonus_score: heldBonusScore,
+        });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
       }
