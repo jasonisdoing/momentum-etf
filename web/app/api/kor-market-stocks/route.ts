@@ -24,9 +24,16 @@ type KorMarketStocksResponse = {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const market = searchParams.get("market") ?? "KOSPI";
-  const limit = searchParams.get("limit") ?? "50";
-  const minMarketCap = searchParams.get("min_market_cap") ?? "1000";
+  const market = searchParams.get("market");
+  const limit = searchParams.get("limit");
+  const minMarketCap = searchParams.get("min_market_cap");
+
+  if (!market || !limit || !minMarketCap) {
+    return jsonNoStore(
+      { error: "market, limit, min_market_cap 쿼리 파라미터가 모두 필요합니다." },
+      { status: 400 },
+    );
+  }
 
   try {
     const data = await fetchFastApiJson<KorMarketStocksResponse>(

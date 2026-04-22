@@ -530,6 +530,7 @@ def get_ticker_detail(
         df = fetch_ohlcv(
             ticker,
             country=country_code,
+            months_back=None,
             date_range=[cache_start_date, None],
             ticker_type=ticker_type,
         )

@@ -36,9 +36,9 @@ def _parse_float(value: str | None) -> float | None:
 
 
 def load_kor_stock_market(
-    market: str = "KOSPI",
-    limit: int = 50,
-    min_market_cap: int = 1000,
+    market: str,
+    limit: int,
+    min_market_cap: int,
 ) -> dict[str, Any]:
     """네이버 API에서 시가총액 상위 종목 리스트를 가져온다.
 

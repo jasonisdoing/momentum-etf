@@ -165,7 +165,7 @@ export function KorMarketStockManager({
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
-  const [limit, setLimit] = useState<(typeof LIMIT_OPTIONS)[number]>(50);
+  const [limit, setLimit] = useState<(typeof LIMIT_OPTIONS)[number]>(100);
   const [minMarketCap, setMinMarketCap] = useState("1000");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
