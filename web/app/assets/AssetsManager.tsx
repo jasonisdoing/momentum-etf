@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
 import { useRouter } from "next/navigation";
@@ -11,6 +10,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 type HoldingsRow = {
   account_id: string;
@@ -127,28 +127,7 @@ type HoldingEditableSnapshot = {
   target_ratio: number;
 };
 
-const assetsGridTheme = themeQuartz.withPart(iconSetQuartzBold).withParams({
-  accentColor: "#206bc4",
-  backgroundColor: "#ffffff",
-  foregroundColor: "#182433",
-  headerBackgroundColor: "#f8fafc",
-  headerTextColor: "#5b6778",
-  spacing: 8,
-  fontSize: 14,
-  wrapperBorderRadius: 10,
-  rowHeight: 38,
-  headerHeight: 38,
-  cellHorizontalPadding: 12,
-  headerColumnBorder: true,
-  headerColumnBorderHeight: "70%",
-  columnBorder: true,
-  oddRowBackgroundColor: "#fbfdff",
-  headerCellHoverBackgroundColor: "#eef4fb",
-  headerCellMovingBackgroundColor: "#e8f0fb",
-  iconButtonHoverBackgroundColor: "#eef4fb",
-  iconButtonHoverColor: "#206bc4",
-  iconSize: 18,
-});
+const assetsGridTheme = createAppGridTheme();
 
 function buildGridRowId(row: Pick<HoldingsRow, "ticker" | "account_id">): string {
   return `${row.account_id}-${row.ticker}`;

@@ -2,10 +2,10 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
-import { themeQuartz, iconSetQuartzBold } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   readRememberedMomentumEtfAccountId,
   writeRememberedMomentumEtfAccountId,
@@ -103,30 +103,7 @@ function getSignedClass(val: number | null | undefined): string {
   return "";
 }
 
-const gridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const gridTheme = createAppGridTheme();
 
 function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
   return row?.rowType === "detail";

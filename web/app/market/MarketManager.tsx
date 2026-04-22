@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useRouter } from "next/navigation";
 
@@ -12,6 +11,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -64,30 +64,7 @@ const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
 
 const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "선물", "채권(모든종류)", "혼합", "리츠", "레버리지"];
 
-const marketGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const marketGridTheme = createAppGridTheme();
 
 function formatKrwEok(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
