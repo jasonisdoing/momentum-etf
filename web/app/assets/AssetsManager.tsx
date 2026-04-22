@@ -522,38 +522,76 @@ function StableInlineInput({
 function AccountHoldingsDetailPanel({
   summary,
   initialRows,
-  initialSortState,
-  onReload,
   onRowsSync,
   onCashSync,
-  onPreviewTargetRatioTotalChange,
   onSortStateChange,
-  noteContent,
-  noteLoading,
-  noteSaving,
-  noteUpdatedAt,
-  noteError,
-  onNoteChange,
-  onSaveNote,
+  onReload,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
-  initialSortState: ColumnState[];
-  onReload: () => Promise<void>;
   onRowsSync: (accountId: string, rows: HoldingsRow[]) => void;
-  onCashSync: (accountId: string, cashBalanceKrw: number, cashTargetRatio: number) => void;
-  onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
-  onSortStateChange: (accountId: string, state: ColumnState[]) => void;
-  noteContent: string;
-  noteLoading: boolean;
-  noteSaving: boolean;
-  noteUpdatedAt: string | null;
-  noteError: string | null;
-  onNoteChange: (val: string) => void;
-  onSaveNote: () => Promise<void>;
+  onCashSync: (accountId: string, balance: number, targetRatio: number) => void;
+  onSortStateChange: (accountId: string, sortState: ColumnState[]) => void;
+  onReload: () => Promise<void>;
 }) {
   const toast = useToast();
   const router = useRouter();
+  const [noteContent, setNoteContent] = useState("");
+  const [savedNoteContent, setSavedNoteContent] = useState("");
+  const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+
+  const loadNote = useCallback(async () => {
+    try {
+      setNoteLoading(true);
+      setNoteError(null);
+      const response = await fetch(`/api/note?account=${encodeURIComponent(summary.account_id)}`, {
+        cache: "no-store",
+      });
+      const payload = (await response.json()) as { content?: string; updated_at?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "메모를 불러오지 못했습니다.");
+      }
+      const nextContent = String(payload.content ?? "");
+      setNoteContent(nextContent);
+      setSavedNoteContent(nextContent);
+      setNoteUpdatedAt(payload.updated_at ?? null);
+    } catch (error) {
+      setNoteError(error instanceof Error ? error.message : "메모 로딩 실패");
+    } finally {
+      setNoteLoading(false);
+    }
+  }, [summary.account_id]);
+
+  useEffect(() => {
+    void loadNote();
+  }, [loadNote]);
+
+  const handleSaveNote = useCallback(async () => {
+    try {
+      setNoteSaving(true);
+      setNoteError(null);
+      const response = await fetch("/api/note", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: summary.account_id, content: noteContent }),
+      });
+      const payload = (await response.json()) as { updated_at?: string; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "메모 저장에 실패했습니다.");
+      }
+      setSavedNoteContent(noteContent);
+      setNoteUpdatedAt(payload.updated_at ?? null);
+      toast.success(`[${summary.name}] 메모 저장 완료`);
+    } catch (error) {
+      setNoteError(error instanceof Error ? error.message : "메모 저장 실패");
+    } finally {
+      setNoteSaving(false);
+    }
+  }, [summary.account_id, summary.name, noteContent, toast]);
+
   const hydrateRows = useCallback(
     (sourceRows: HoldingsRow[]) =>
       sourceRows.map((row) => ({
@@ -563,6 +601,7 @@ function AccountHoldingsDetailPanel({
       })),
     [],
   );
+
   const [rows, setRows] = useState<HoldingsRow[]>(() => hydrateRows(initialRows));
   const [addingRow, setAddingRow] = useState<AddingRowState | null>(null);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -614,15 +653,15 @@ function AccountHoldingsDetailPanel({
     setAddingRow(null);
     setIsReorderDirty(false);
     queueMicrotask(() => {
-      if (!gridApiRef.current || initialSortState.length === 0) {
+      if (!gridApiRef.current) {
         return;
       }
       gridApiRef.current.applyColumnState({
-        state: initialSortState,
+        state: [],
         applyOrder: false,
       });
     });
-  }, [hydrateRows, initialRows, initialSortState]);
+  }, [hydrateRows, initialRows]);
 
   useEffect(() => {
     rowsRef.current = rows;
@@ -643,13 +682,6 @@ function AccountHoldingsDetailPanel({
   useEffect(() => {
     isReorderDirtyRef.current = isReorderDirty;
   }, [isReorderDirty]);
-
-  useEffect(() => {
-    const previewTargetRatioTotal = rows.reduce((sum, row) => {
-      return sum + Number(row.target_ratio ?? 0);
-    }, 0) + Number(summary.cash_target_ratio ?? 0);
-    onPreviewTargetRatioTotalChange(summary.account_id, parseFloat(previewTargetRatioTotal.toFixed(1)));
-  }, [onPreviewTargetRatioTotalChange, rows, summary.account_id, summary.cash_target_ratio]);
 
   const isEditableHoldingRow = useCallback(
     (row: GridRow | undefined | null) =>
@@ -1046,7 +1078,7 @@ function AccountHoldingsDetailPanel({
         reorderSaveTimerRef.current = nextTimer;
       }
     }
-  }, [onReload, processReorderUpdate, toast]);
+  }, [processReorderUpdate, toast]);
 
   const scheduleSilentReorderSave = useCallback((orderedRows: HoldingsRow[]) => {
     if (reorderSaveTimerRef.current) {
@@ -1870,23 +1902,6 @@ function AccountHoldingsDetailPanel({
             },
             onGridReady: (params) => {
               gridApiRef.current = params.api;
-              if (initialSortState.length > 0) {
-                params.api.applyColumnState({
-                  state: initialSortState,
-                  applyOrder: false,
-                });
-              }
-            },
-            onSortChanged: (params) => {
-              const nextSortState = params.api
-                .getColumnState()
-                .filter((column): column is ColumnState => Boolean(column.sort) && Boolean(column.colId))
-                .map((column) => ({
-                  colId: String(column.colId),
-                  sort: column.sort,
-                  sortIndex: column.sortIndex,
-                }));
-              onSortStateChange(summary.account_id, nextSortState);
             },
             getRowId: (params) => String(params.data.id),
             rowClassRules: {
@@ -1910,7 +1925,7 @@ function AccountHoldingsDetailPanel({
             type="button"
             className="btn btn-primary btn-sm px-3 fw-bold d-inline-flex align-items-center gap-1"
             onMouseDown={stopActionButtonMouseDown}
-            onClick={() => void onSaveNote()}
+            onClick={() => void handleSaveNote()}
             disabled={noteLoading || noteSaving}
             style={{ minHeight: "36px", fontSize: "0.95rem" }}
           >
@@ -1930,7 +1945,7 @@ function AccountHoldingsDetailPanel({
           className="form-control assetsNoteTextarea"
           style={{ fontSize: "0.9rem", minHeight: "120px" }}
           value={noteContent}
-          onChange={(event) => onNoteChange(event.target.value)}
+          onChange={(event) => setNoteContent(event.target.value)}
           placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
           disabled={noteLoading}
         />
@@ -1944,16 +1959,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [noteContent, setNoteContent] = useState("");
-  const [savedNoteContent, setSavedNoteContent] = useState("");
-  const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
-  const [noteLoading, setNoteLoading] = useState(false);
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteError, setNoteError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
-  const [previewTargetRatioTotals, setPreviewTargetRatioTotals] = useState<Record<string, number>>({});
   const summariesRef = useRef<AccountSummary[]>([]);
   const parentSaveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const parentSavingAccountIdsRef = useRef<Set<string>>(new Set());
@@ -1991,8 +1999,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }));
       setAllRows(payload.rows ?? []);
       setSummaries(mergedSummaries);
-      setExpandedId((current) => current);
-      setPreviewTargetRatioTotals({});
       setParentDirtyCellKeys([]);
       setEditingParentId(null);
     } catch (error) {
@@ -2048,10 +2054,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const totalHoldingsCount = useMemo(
     () => summaries.reduce((sum, summary) => sum + Number(summary.holdings_count ?? 0), 0),
     [summaries],
-  );
-  const expandedSummary = useMemo(
-    () => summaries.find((summary) => summary.account_id === expandedId) ?? null,
-    [expandedId, summaries],
   );
 
   const parentRows = useMemo<ParentGridRow[]>(() => {
@@ -2111,55 +2113,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       accountCount: summaries.length,
     });
   }, [onHeaderSummaryChange, summaries.length, totalAssets, totalCash, totalValuation]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function loadNoteForExpandedAccount() {
-      if (!expandedSummary) {
-        setNoteContent("");
-        setSavedNoteContent("");
-        setNoteUpdatedAt(null);
-        setNoteError(null);
-        setNoteLoading(false);
-        return;
-      }
-
-      try {
-        setNoteLoading(true);
-        setNoteError(null);
-        const response = await fetch(`/api/note?account=${encodeURIComponent(expandedSummary.account_id)}`, {
-          cache: "no-store",
-        });
-        const payload = (await response.json()) as { content?: string; updated_at?: string | null; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "계좌 메모를 불러오지 못했습니다.");
-        }
-        if (cancelled) {
-          return;
-        }
-        const nextContent = String(payload.content ?? "");
-        setNoteContent(nextContent);
-        setSavedNoteContent(nextContent);
-        setNoteUpdatedAt(payload.updated_at ?? null);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        setNoteError(error instanceof Error ? error.message : "계좌 메모를 불러오지 못했습니다.");
-      } finally {
-        if (!cancelled) {
-          setNoteLoading(false);
-        }
-      }
-    }
-
-    void loadNoteForExpandedAccount();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [expandedSummary]);
 
   const isDirtyParentCell = useCallback(
     (rowId: string | undefined, field: string) => Boolean(rowId && parentDirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
@@ -2259,18 +2212,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     scheduleSilentParentSave(row.account_id);
   }, [scheduleSilentParentSave]);
 
-  const handlePreviewTargetRatioTotalChange = useCallback((accountId: string, total: number) => {
-    setPreviewTargetRatioTotals((previous) => {
-      if (Math.abs(Number(previous[accountId] ?? NaN) - total) < 0.05) {
-        return previous;
-      }
-      return {
-        ...previous,
-        [accountId]: total,
-      };
-    });
-  }, []);
-
   const handleChildRowsSync = useCallback((accountId: string, nextRows: HoldingsRow[]) => {
     setAllRows((previous) => [
       ...previous.filter((row) => row.account_id !== accountId),
@@ -2300,36 +2241,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     };
   }, []);
 
-  const handleSaveNote = useCallback(async () => {
-    if (!expandedSummary) {
-      return;
-    }
-
-    try {
-      setNoteSaving(true);
-      setNoteError(null);
-      const response = await fetch("/api/note", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          account_id: expandedSummary.account_id,
-          content: noteContent,
-        }),
-      });
-      const payload = (await response.json()) as { updated_at?: string | null; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "계좌 메모 저장에 실패했습니다.");
-      }
-      setSavedNoteContent(noteContent);
-      setNoteUpdatedAt(payload.updated_at ?? null);
-      toast.success(`[${expandedSummary.name}] 메모 저장 완료`);
-    } catch (error) {
-      setNoteError(error instanceof Error ? error.message : "계좌 메모 저장에 실패했습니다.");
-    } finally {
-      setNoteSaving(false);
-    }
-  }, [expandedSummary, noteContent, toast]);
-
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
       const data = params.data;
@@ -2340,8 +2251,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         <AccountHoldingsDetailPanel
           summary={data.summary}
           initialRows={data.rows}
-          initialSortState={childSortStatesRef.current[data.summary.account_id] ?? []}
-          onReload={load}
           onRowsSync={handleChildRowsSync}
           onCashSync={(accountId, cashBalanceKrw, cashTargetRatio) => {
             setSummaries((previous) =>
@@ -2365,19 +2274,12 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
               }),
             );
           }}
-          onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
           onSortStateChange={handleChildSortStateChange}
-          noteContent={noteContent}
-          noteLoading={noteLoading}
-          noteSaving={noteSaving}
-          noteUpdatedAt={noteUpdatedAt}
-          noteError={noteError}
-          onNoteChange={setNoteContent}
-          onSaveNote={handleSaveNote}
+          onReload={load}
         />
       );
     },
-    [handleChildRowsSync, handleChildSortStateChange, handlePreviewTargetRatioTotalChange, handleSaveNote, load, noteContent, noteError, noteLoading, noteSaving, noteUpdatedAt],
+    [handleChildRowsSync, handleChildSortStateChange, load],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
@@ -2565,8 +2467,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (isTotalRow(params.data)) {
           return "-";
         }
-        const previewValue = previewTargetRatioTotals[params.data.account_id];
-        const value = Number(previewValue ?? params.value ?? 0);
+        const value = Number(params.value ?? 0);
         const colorClass = Math.abs(value - 100) < 0.05 ? "is-success" : "is-danger";
         return <span className={`appHeaderMetricValue ${colorClass}`}>{value.toFixed(1)}%</span>;
       },
@@ -2580,7 +2481,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatNumber(params.value) : "",
     },
-  ], [expandedId, isDirtyParentCell, previewTargetRatioTotals]);
+  ], [expandedId, isDirtyParentCell]);
 
   const gridOptions = useMemo<GridOptions<ParentGridRow>>(
     () => ({
@@ -2641,7 +2542,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     );
   }
 
-  const isNoteDirty = noteContent !== savedNoteContent;
 
   return (
     <div className="appPageStack appPageStackFill">
