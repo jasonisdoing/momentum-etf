@@ -8,6 +8,7 @@ import pandas as pd
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.rankings import (
     ALLOWED_MA_TYPES,
+    MONTHLY_RETURN_LABEL_COUNT,
     build_effective_ma_rules,
     build_ticker_type_rankings,
     get_rank_months_max,
@@ -294,7 +295,10 @@ def load_rank_data(
         "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
         "as_of_date": _serialize_datetime(effective_as_of_date),
-        "monthly_return_labels": get_recent_monthly_return_labels(reference_date=effective_as_of_date),
+        "monthly_return_labels": get_recent_monthly_return_labels(
+            MONTHLY_RETURN_LABEL_COUNT,
+            reference_date=effective_as_of_date,
+        ),
         "rows": _serialize_rows(dataframe),
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),

@@ -128,6 +128,7 @@ def refresh_cache_for_target(
                 fetched_df = fetch_ohlcv(
                     ticker,
                     country=country_code,
+                    months_back=None,
                     date_range=[range_start, None],
                     update_listing_meta=False,
                     force_refresh=True,

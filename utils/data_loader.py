@@ -555,7 +555,7 @@ def get_next_trading_day(
     country: str,
     reference_date: pd.Timestamp | None = None,
     *,
-    search_horizon_days: int = 30,
+    search_horizon_days: int,
 ) -> pd.Timestamp | None:
     """reference_date 이후의 다음 거래일을 반환한다."""
 
@@ -573,11 +573,11 @@ def get_next_trading_day(
 
 def fetch_ohlcv(
     ticker: str,
-    country: str = "kor",
-    months_back: int = None,
+    country: str,
+    *,
+    months_back: int | None,
     date_range: list[str | None] | None = None,
     base_date: pd.Timestamp | None = None,
-    *,
     ticker_type: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
@@ -599,7 +599,8 @@ def fetch_ohlcv(
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
-        months_back = months_back or 3  # months_back의 기본값은 3개월
+        if months_back is None:
+            raise ValueError("date_range가 없으면 months_back 값이 필요합니다.")
         start_dt = now - pd.DateOffset(months=int(months_back))
         end_dt = now
 
@@ -1031,7 +1032,7 @@ def repair_recent_trading_day_gaps(
     country: str,
     *,
     ticker_type: str,
-    lookback_days: int = 15,
+    lookback_days: int,
 ) -> list[pd.Timestamp]:
     """최근 거래일 구간의 내부 누락 일봉을 다시 조회해 캐시에 병합한다."""
 
@@ -1110,9 +1111,9 @@ def repair_recent_trading_day_gaps(
 def fetch_ohlcv_for_tickers(
     tickers: list[str],
     country: str,
-    date_range: list[str] | None = None,
-    warmup_days: int = 0,
     *,
+    warmup_days: int,
+    date_range: list[str] | None = None,
     ticker_type: str | None = None,
     allow_remote_fetch: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
@@ -1333,7 +1334,13 @@ def fetch_ohlcv_for_tickers(
                 missing.append(tkr)
                 continue
             ticker_date_range = [ticker_start.strftime("%Y-%m-%d"), adjusted_date_range[1]]
-            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range, ticker_type=ticker_type)
+            df = fetch_ohlcv(
+                ticker=tkr,
+                country=country,
+                months_back=None,
+                date_range=ticker_date_range,
+                ticker_type=ticker_type,
+            )
             if df is None or df.empty:
                 # 실시간 데이터로 대체 시도
                 if is_today and tkr in realtime_data:
@@ -1376,7 +1383,7 @@ def prepare_price_data(
     country: str,
     start_date: str,
     end_date: str,
-    warmup_days: int = 0,
+    warmup_days: int,
     ticker_type: str | None = None,
     allow_remote_fetch: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:

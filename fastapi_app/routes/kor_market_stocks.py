@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
@@ -10,9 +12,9 @@ router = APIRouter(prefix="/internal/kor-market-stocks", tags=["kor-market-stock
 
 @router.get("")
 def get_kor_market_stocks(
-    market: str = Query("KOSPI", pattern="^(KOSPI|KOSDAQ)$"),
-    limit: int = Query(50, ge=1, le=100),
-    min_market_cap: int = Query(1000, ge=0),
+    market: Annotated[str, Query(pattern="^(KOSPI|KOSDAQ)$")],
+    limit: Annotated[int, Query(ge=1, le=100)],
+    min_market_cap: Annotated[int, Query(ge=0)],
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     return load_kor_stock_market(market=market, limit=limit, min_market_cap=min_market_cap)

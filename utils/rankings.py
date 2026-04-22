@@ -29,6 +29,7 @@ from utils.stock_list_io import get_etfs
 ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
 logger = get_app_logger()
 MONTHLY_RETURN_LABEL_COUNT = 13
+RSI_PERIOD = 14
 
 
 def _build_ma_rule_score_column(order: int) -> str:
@@ -172,7 +173,7 @@ def build_effective_ma_rules(
     return _normalize_ma_rules(ticker_type, raw_rules)
 
 
-def _calculate_rsi(close_series: pd.Series, period: int = 14) -> float | None:
+def _calculate_rsi(close_series: pd.Series, period: int) -> float | None:
     series = pd.to_numeric(close_series, errors="coerce").dropna()
     if len(series) < period + 1:
         return None
@@ -293,7 +294,7 @@ def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
 
 
 def get_recent_monthly_return_labels(
-    count: int = MONTHLY_RETURN_LABEL_COUNT,
+    count: int,
     reference_date: pd.Timestamp | None = None,
 ) -> list[str]:
     base_month = (reference_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).to_period("M")
@@ -319,7 +320,10 @@ def _build_monthly_return_metrics(
     reference_date: pd.Timestamp | None = None,
     labels: list[str] | None = None,
 ) -> dict[str, float | None]:
-    labels = labels or get_recent_monthly_return_labels(reference_date=reference_date)
+    labels = labels or get_recent_monthly_return_labels(
+        MONTHLY_RETURN_LABEL_COUNT,
+        reference_date=reference_date,
+    )
     empty_metrics = {label: None for label in labels}
     if close_series is None:
         return empty_metrics
@@ -435,7 +439,7 @@ def _extract_price_metrics_from_close_series(
         "12달(%)": _calc_period_return(series, 252),
         "고점": drawdown,
         "추세(3달)": series.iloc[-60:].astype(float).tolist(),
-        "RSI": _calculate_rsi(series),
+        "RSI": _calculate_rsi(series, RSI_PERIOD),
         **monthly_return_metrics,
     }
 
@@ -678,7 +682,7 @@ def build_ticker_type_rankings(
     selected_as_of_date = (as_of_date or pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None)).normalize()
     cache_updated_map_raw = load_cached_updated_at_bulk_with_fallback(ticker_type, tickers)
     latest_trading_day = _get_latest_trading_day_for_reference(country_code, selected_as_of_date)
-    monthly_labels = get_recent_monthly_return_labels(reference_date=selected_as_of_date)
+    monthly_labels = get_recent_monthly_return_labels(MONTHLY_RETURN_LABEL_COUNT, reference_date=selected_as_of_date)
     missing_tickers = sorted({ticker for ticker in tickers if ticker not in cache_updated_map_raw})
     normalized_cache_updated = {
         ticker: normalized

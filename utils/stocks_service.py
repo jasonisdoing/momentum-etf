@@ -254,6 +254,7 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
         fetch_ohlcv(
             ticker_norm,
             country=country_code,
+            months_back=None,
             date_range=[start_date, None],
             update_listing_meta=False,
             force_refresh=True,
