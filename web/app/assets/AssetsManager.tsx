@@ -215,6 +215,22 @@ function formatRatioPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function formatNoteUpdatedAt(value: string | null): string {
+  if (!value) {
+    return "아직 저장된 메모가 없습니다.";
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+}
+
 function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "currency">, before: HoldingEditableSnapshot, after: HoldingEditableSnapshot): string | null {
   const changes: string[] = [];
   if (before.quantity !== after.quantity) {
@@ -512,6 +528,13 @@ function AccountHoldingsDetailPanel({
   onCashSync,
   onPreviewTargetRatioTotalChange,
   onSortStateChange,
+  noteContent,
+  noteLoading,
+  noteSaving,
+  noteUpdatedAt,
+  noteError,
+  onNoteChange,
+  onSaveNote,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
@@ -521,6 +544,13 @@ function AccountHoldingsDetailPanel({
   onCashSync: (accountId: string, cashBalanceKrw: number, cashTargetRatio: number) => void;
   onPreviewTargetRatioTotalChange: (accountId: string, total: number) => void;
   onSortStateChange: (accountId: string, state: ColumnState[]) => void;
+  noteContent: string;
+  noteLoading: boolean;
+  noteSaving: boolean;
+  noteUpdatedAt: string | null;
+  noteError: string | null;
+  onNoteChange: (val: string) => void;
+  onSaveNote: () => Promise<void>;
 }) {
   const toast = useToast();
   const router = useRouter();
@@ -1866,6 +1896,45 @@ function AccountHoldingsDetailPanel({
           }}
         />
       </div>
+
+      <div className="assetsNoteSection mt-3 pt-3 border-top">
+        <div className="assetsNoteSectionHeader">
+          <div className="noteMetaRow">
+            {noteLoading ? (
+              <span className="text-muted small">계좌 메모를 불러오는 중...</span>
+            ) : (
+              <span className="text-muted small">마지막 저장: {formatNoteUpdatedAt(noteUpdatedAt)}</span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm px-3 fw-bold d-inline-flex align-items-center gap-1"
+            onMouseDown={stopActionButtonMouseDown}
+            onClick={() => void onSaveNote()}
+            disabled={noteLoading || noteSaving}
+            style={{ minHeight: "36px", fontSize: "0.95rem" }}
+          >
+            {noteSaving ? (
+              <>
+                <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> 저장 중...
+              </>
+            ) : (
+              <>
+                <IconCheck size={16} /> 메모 저장
+              </>
+            )}
+          </button>
+        </div>
+        {noteError ? <div className="bannerError mb-2">{noteError}</div> : null}
+        <textarea
+          className="form-control assetsNoteTextarea"
+          style={{ fontSize: "0.9rem", minHeight: "120px" }}
+          value={noteContent}
+          onChange={(event) => onNoteChange(event.target.value)}
+          placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
+          disabled={noteLoading}
+        />
+      </div>
     </div>
   );
 }
@@ -1875,6 +1944,12 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [noteContent, setNoteContent] = useState("");
+  const [savedNoteContent, setSavedNoteContent] = useState("");
+  const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
@@ -1974,6 +2049,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     () => summaries.reduce((sum, summary) => sum + Number(summary.holdings_count ?? 0), 0),
     [summaries],
   );
+  const expandedSummary = useMemo(
+    () => summaries.find((summary) => summary.account_id === expandedId) ?? null,
+    [expandedId, summaries],
+  );
 
   const parentRows = useMemo<ParentGridRow[]>(() => {
     const totalRow: ParentGridRow = {
@@ -2032,6 +2111,55 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       accountCount: summaries.length,
     });
   }, [onHeaderSummaryChange, summaries.length, totalAssets, totalCash, totalValuation]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadNoteForExpandedAccount() {
+      if (!expandedSummary) {
+        setNoteContent("");
+        setSavedNoteContent("");
+        setNoteUpdatedAt(null);
+        setNoteError(null);
+        setNoteLoading(false);
+        return;
+      }
+
+      try {
+        setNoteLoading(true);
+        setNoteError(null);
+        const response = await fetch(`/api/note?account=${encodeURIComponent(expandedSummary.account_id)}`, {
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as { content?: string; updated_at?: string | null; error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "계좌 메모를 불러오지 못했습니다.");
+        }
+        if (cancelled) {
+          return;
+        }
+        const nextContent = String(payload.content ?? "");
+        setNoteContent(nextContent);
+        setSavedNoteContent(nextContent);
+        setNoteUpdatedAt(payload.updated_at ?? null);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setNoteError(error instanceof Error ? error.message : "계좌 메모를 불러오지 못했습니다.");
+      } finally {
+        if (!cancelled) {
+          setNoteLoading(false);
+        }
+      }
+    }
+
+    void loadNoteForExpandedAccount();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedSummary]);
 
   const isDirtyParentCell = useCallback(
     (rowId: string | undefined, field: string) => Boolean(rowId && parentDirtyCellKeys.includes(buildDirtyCellKey(rowId, field))),
@@ -2172,6 +2300,36 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     };
   }, []);
 
+  const handleSaveNote = useCallback(async () => {
+    if (!expandedSummary) {
+      return;
+    }
+
+    try {
+      setNoteSaving(true);
+      setNoteError(null);
+      const response = await fetch("/api/note", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: expandedSummary.account_id,
+          content: noteContent,
+        }),
+      });
+      const payload = (await response.json()) as { updated_at?: string | null; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "계좌 메모 저장에 실패했습니다.");
+      }
+      setSavedNoteContent(noteContent);
+      setNoteUpdatedAt(payload.updated_at ?? null);
+      toast.success(`[${expandedSummary.name}] 메모 저장 완료`);
+    } catch (error) {
+      setNoteError(error instanceof Error ? error.message : "계좌 메모 저장에 실패했습니다.");
+    } finally {
+      setNoteSaving(false);
+    }
+  }, [expandedSummary, noteContent, toast]);
+
   const DetailRenderer = useCallback(
     (params: { data?: ParentGridRow }) => {
       const data = params.data;
@@ -2209,10 +2367,17 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }}
           onPreviewTargetRatioTotalChange={handlePreviewTargetRatioTotalChange}
           onSortStateChange={handleChildSortStateChange}
+          noteContent={noteContent}
+          noteLoading={noteLoading}
+          noteSaving={noteSaving}
+          noteUpdatedAt={noteUpdatedAt}
+          noteError={noteError}
+          onNoteChange={setNoteContent}
+          onSaveNote={handleSaveNote}
         />
       );
     },
-    [handleChildRowsSync, handleChildSortStateChange, handlePreviewTargetRatioTotalChange, load],
+    [handleChildRowsSync, handleChildSortStateChange, handlePreviewTargetRatioTotalChange, handleSaveNote, load, noteContent, noteError, noteLoading, noteSaving, noteUpdatedAt],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
@@ -2429,7 +2594,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return 38;
         }
         const rowCount = (params.data.rows?.length ?? 0) + 1;
-        return 50 + 34 + rowCount * 42 + 48;
+        // 기본 테이블 높이 + 메모 섹션(약 220px) 추가
+        return 50 + 34 + rowCount * 42 + 48 + 220;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
@@ -2475,6 +2641,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     );
   }
 
+  const isNoteDirty = noteContent !== savedNoteContent;
+
   return (
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
@@ -2498,12 +2666,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           </div>
         </div>
       </section>
-      <div
-        dangerouslySetInnerHTML={{
-          __html:
-            "<style>.assetsInlineLinkButton{font-weight:700;text-decoration:none;} .css-label{font-size:0.7rem;color:#666;display:block;margin-bottom:2px;} @keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}</style>",
-        }}
-      />
     </div>
   );
 }
