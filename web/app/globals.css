@@ -2662,14 +2662,6 @@ a {
   flex: 0 0 auto;
 }
 
-.noteMainHeaderLeft .appLabeledField {
-  width: auto;
-}
-
-.noteMainHeaderLeft .appLabeledField:first-child {
-  flex: 0 0 14rem;
-}
-
 .noteMetaRow {
   margin-bottom: 0.75rem;
   color: #6c7a91;
@@ -2956,26 +2948,6 @@ a {
   margin: 0;
 }
 
-.bulkTextarea {
-  width: 100%;
-  min-height: 65vh;
-  resize: vertical;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--ink);
-  font: inherit;
-  line-height: 1.5;
-  margin-bottom: 12px;
-}
-
-.bulkTextarea:focus {
-  outline: none;
-  border-color: rgba(31, 107, 70, 0.28);
-  box-shadow: 0 0 0 3px rgba(31, 107, 70, 0.08);
-}
-
 .prelineText {
   white-space: pre-line;
 }
@@ -3153,10 +3125,6 @@ a {
   }
 
   .weeklyMainHeaderLeft .appLabeledField {
-    flex: 1 1 100%;
-  }
-
-  .noteMainHeaderLeft .appLabeledField {
     flex: 1 1 100%;
   }
 
