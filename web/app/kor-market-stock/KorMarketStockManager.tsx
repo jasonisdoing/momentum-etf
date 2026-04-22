@@ -166,6 +166,7 @@ export function KorMarketStockManager({
 }) {
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
   const [limit, setLimit] = useState<(typeof LIMIT_OPTIONS)[number]>(50);
+  const [minMarketCap, setMinMarketCap] = useState("1000");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -179,12 +180,13 @@ export function KorMarketStockManager({
 
   const toast = useToast();
 
-  const load = useCallback(async (m: string, l: number) => {
+  const load = useCallback(async (m: string, l: number, minCapText: string) => {
     setLoading(true);
     setError(null);
     try {
+      const minCap = String(minCapText || "").trim() || "0";
       const [resp, stocksPayload] = await Promise.all([
-        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}`, { cache: "no-store" }),
+        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}&min_market_cap=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as KorMarketStocksResponse;
@@ -202,8 +204,8 @@ export function KorMarketStockManager({
   }, []);
 
   useEffect(() => {
-    load(market, limit);
-  }, [market, limit, load]);
+    load(market, limit, minMarketCap);
+  }, [market, limit, minMarketCap, load]);
 
   useEffect(() => {
     onSummaryChange?.({ market, count: rows.length, totalCount });
@@ -250,7 +252,7 @@ export function KorMarketStockManager({
 
     const stockPools = tickerPools.filter((p) => p.name.includes("한국 개별주"));
     const remembered = readRememberedTickerType();
-    
+
     if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
     } else if (stockPools.length === 1) {
@@ -310,9 +312,9 @@ export function KorMarketStockManager({
 
     if (addedCount > 0) {
       setSelectedTickers([]);
-      await load(market, limit);
+      await load(market, limit, minMarketCap);
     }
-  }, [load, market, limit, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, market, limit, minMarketCap, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<KorMarketStockGridRow>[]>(
     () => [
@@ -455,6 +457,17 @@ export function KorMarketStockManager({
                       </option>
                     ))}
                   </select>
+                </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">최소 시가총액(억)</span>
+                  <input
+                    className="form-control"
+                    inputMode="numeric"
+                    value={minMarketCap}
+                    onChange={(e) => setMinMarketCap(e.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="최소 시가총액"
+                  />
                 </label>
               </div>
               <div className="appMainHeaderRight">

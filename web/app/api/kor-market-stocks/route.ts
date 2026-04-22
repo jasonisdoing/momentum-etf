@@ -26,10 +26,11 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const market = searchParams.get("market") ?? "KOSPI";
   const limit = searchParams.get("limit") ?? "50";
+  const minMarketCap = searchParams.get("min_market_cap") ?? "1000";
 
   try {
     const data = await fetchFastApiJson<KorMarketStocksResponse>(
-      `/internal/kor-market-stocks?market=${encodeURIComponent(market)}&limit=${encodeURIComponent(limit)}`,
+      `/internal/kor-market-stocks?market=${encodeURIComponent(market)}&limit=${encodeURIComponent(limit)}&min_market_cap=${encodeURIComponent(minMarketCap)}`,
     );
     return jsonNoStore(data);
   } catch (error) {
