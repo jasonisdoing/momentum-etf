@@ -20,7 +20,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days
+from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days, fetch_naver_etf_inav_snapshot
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
 from utils.stock_list_io import get_etfs
@@ -202,6 +202,42 @@ def _infer_yahoo_symbol_currency(symbol: str) -> str:
     if normalized.endswith(".AX"):
         return "AUD"
     return "USD"
+
+
+def _build_korean_etf_info_payload(
+    *,
+    ticker: str,
+    cache_document: dict[str, object] | None,
+    latest_row: dict[str, object] | None,
+) -> dict[str, object] | None:
+    if not isinstance(cache_document, dict):
+        return None
+
+    meta_cache = dict(cache_document.get("meta_cache") or {})
+    if not meta_cache:
+        return None
+
+    inav_snapshot = fetch_naver_etf_inav_snapshot([ticker]).get(str(ticker or "").strip().upper(), {})
+    nav_value = inav_snapshot.get("nav")
+    deviation_value = inav_snapshot.get("deviation")
+
+    market_cap_krw = None
+    total_net_assets = meta_cache.get("total_net_assets")
+    if total_net_assets is not None:
+        try:
+            market_cap_krw = float(total_net_assets) * 100_000_000
+        except (TypeError, ValueError):
+            market_cap_krw = None
+
+    return {
+        "nav": float(nav_value) if nav_value is not None else None,
+        "deviation": float(deviation_value) if deviation_value is not None else None,
+        "expense_ratio": float(meta_cache["expense_ratio"]) if meta_cache.get("expense_ratio") is not None else None,
+        "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"]) if meta_cache.get("dividend_yield_ttm") is not None else None,
+        "total_net_assets_eok": float(total_net_assets) if total_net_assets is not None else None,
+        "market_cap_krw": market_cap_krw,
+        "volume": int(latest_row["volume"]) if latest_row and latest_row.get("volume") is not None else None,
+    }
 
 
 def _is_worldstock_symbol(symbol: str) -> bool:
@@ -592,12 +628,18 @@ def get_ticker_detail(
     holdings_as_of_date: str | None = None
     holdings_price_as_of_date: str | None = None
     holdings_error: str | None = None
+    etf_info: dict[str, object] | None = None
     us_pool_tickers: set[str] = set()
     kor_pool_tickers: set[str] = set()
     domestic_etf_tickers: set[str] = set()
     if str(country_code or "").strip().lower() == "kor":
         cache_document = get_stock_cache_meta(ticker_type, ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
+        etf_info = _build_korean_etf_info_payload(
+            ticker=ticker,
+            cache_document=cache_document if isinstance(cache_document, dict) else None,
+            latest_row=rows[-1] if rows else None,
+        )
         holdings = list(holdings_cache.get("items") or [])
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
         if not holdings:
@@ -759,6 +801,7 @@ def get_ticker_detail(
     return {
         "ticker": ticker,
         "rows": rows,
+        "etf_info": etf_info,
         "holdings": holdings,
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
