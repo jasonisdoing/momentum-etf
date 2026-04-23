@@ -201,6 +201,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "FIRST_MA_MONTHS": [6, 7, 8, 9],
         "SECOND_MA_TYPE": ["ALMA"],
         "SECOND_MA_MONTHS": [6, 7, 8, 9],
+        "RSI_LIMIT": [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90],
     },
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
@@ -210,5 +211,6 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "FIRST_MA_MONTHS": [6, 7, 8, 9],
         "SECOND_MA_TYPE": ["ALMA"],
         "SECOND_MA_MONTHS": [6, 7, 8, 9],
+        "RSI_LIMIT": [80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90],
     },
 }

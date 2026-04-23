@@ -44,6 +44,7 @@ const navGroups = [
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
+      { href: "/daily", label: "일별", icon: IconReceipt2 },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
     ],

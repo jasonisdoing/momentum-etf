@@ -9,15 +9,15 @@ import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
-type WeeklyEditableField = {
+type DailyEditableField = {
   key: string;
   label: string;
   type: "int" | "float" | "text";
 };
 
-type WeeklyRow = {
-  week_date: string;
-  week_date_display: string;
+type DailyRow = {
+  date: string;
+  date_display: string;
   withdrawal_personal: number;
   withdrawal_mom: number;
   nh_principal_interest: number;
@@ -29,8 +29,6 @@ type WeeklyRow = {
   valuation_amount: number;
   profit_loss: number;
   cumulative_profit: number;
-  weekly_profit: number;
-  weekly_return_pct: number;
   cumulative_return_pct: number;
   memo: string;
   exchange_rate: number;
@@ -46,16 +44,16 @@ type WeeklyRow = {
   updated_at: string | null;
 };
 
-type WeeklyResponse = {
-  active_week_date?: string;
-  rows?: WeeklyRow[];
-  editable_fields?: WeeklyEditableField[];
+type DailyResponse = {
+  latest_date?: string;
+  rows?: DailyRow[];
+  editable_fields?: DailyEditableField[];
   read_only_keys?: string[];
   core_hidden_keys?: string[];
   error?: string;
 };
 
-type WeeklyGridRow = WeeklyRow & {
+type DailyGridRow = DailyRow & {
   id: string;
 };
 
@@ -73,11 +71,9 @@ const MONEY_KEYS = new Set([
   "valuation_amount",
   "profit_loss",
   "cumulative_profit",
-  "weekly_profit",
 ]);
 
 const PERCENT_KEYS = new Set([
-  "weekly_return_pct",
   "cumulative_return_pct",
   "exchange_rate_change_pct",
   "bucket_pct_momentum",
@@ -88,7 +84,7 @@ const PERCENT_KEYS = new Set([
 ]);
 
 const COLUMN_DEFS = [
-  { key: "week_date_display", label: "종료일" },
+  { key: "date_display", label: "일자" },
   { key: "memo", label: "비고" },
   { key: "withdrawal_personal", label: "개인 인출" },
   { key: "withdrawal_mom", label: "엄마" },
@@ -101,8 +97,6 @@ const COLUMN_DEFS = [
   { key: "valuation_amount", label: "평가 금액" },
   { key: "profit_loss", label: "평가 손익" },
   { key: "cumulative_profit", label: "누적 손익" },
-  { key: "weekly_profit", label: "금주 손익" },
-  { key: "weekly_return_pct", label: "주수익률" },
   { key: "cumulative_return_pct", label: "누적 수익률" },
   { key: "exchange_rate_change_pct", label: "환율(변동)" },
   { key: "exchange_rate", label: "환율" },
@@ -116,7 +110,7 @@ const COLUMN_DEFS = [
   { key: "loss_count", label: "손실 종목 수" },
 ] as const;
 
-const weeklyGridTheme = createAppGridTheme();
+const dailyGridTheme = createAppGridTheme();
 
 function formatMoney(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(Math.round(value));
@@ -137,9 +131,9 @@ function getSignedClass(value: number): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
-function formatCellValue(row: WeeklyRow, key: (typeof COLUMN_DEFS)[number]["key"]): string {
-  const value = row[key as keyof WeeklyRow];
-  if (key === "week_date_display" || key === "memo") {
+function formatCellValue(row: DailyRow, key: (typeof COLUMN_DEFS)[number]["key"]): string {
+  const value = row[key as keyof DailyRow];
+  if (key === "date_display" || key === "memo") {
     return String(value ?? "-");
   }
   if (key === "exchange_rate") {
@@ -153,7 +147,7 @@ function formatCellValue(row: WeeklyRow, key: (typeof COLUMN_DEFS)[number]["key"
 
 function getColumnCellClass(key: string, value: number | string): string {
   const classes: string[] = [];
-  if (key === "week_date_display") {
+  if (key === "date_display") {
     classes.push("weeklyDateCell");
   }
   if (key === "memo") {
@@ -162,7 +156,7 @@ function getColumnCellClass(key: string, value: number | string): string {
   if (MONEY_KEYS.has(key) || PERCENT_KEYS.has(key) || key === "exchange_rate") {
     classes.push("tableAlignRight");
   }
-  if (typeof value === "number" && (key === "profit_loss" || key === "cumulative_profit" || key === "weekly_profit" || PERCENT_KEYS.has(key))) {
+  if (typeof value === "number" && (key === "profit_loss" || key === "cumulative_profit" || PERCENT_KEYS.has(key))) {
     const signedClass = getSignedClass(value);
     if (signedClass) {
       classes.push(signedClass);
@@ -175,7 +169,7 @@ function buildDirtyCellKey(rowId: string, field: string): string {
   return `${rowId}::${field}`;
 }
 
-function parseWeeklyCellValue(field: WeeklyEditableField | undefined, newValue: unknown, oldValue: unknown) {
+function parseDailyCellValue(field: DailyEditableField | undefined, newValue: unknown, oldValue: unknown) {
   if (!field) {
     return newValue;
   }
@@ -192,9 +186,9 @@ function parseWeeklyCellValue(field: WeeklyEditableField | undefined, newValue: 
   return parsed;
 }
 
-function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width?: number; minWidth: number; flex?: number } {
-  if (key === "week_date_display") {
-    return { width: 112, minWidth: 112 };
+function getDailyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width?: number; minWidth: number; flex?: number } {
+  if (key === "date_display") {
+    return { width: 132, minWidth: 132 };
   }
   if (key === "memo") {
     return { width: 156, minWidth: 140, flex: 1 };
@@ -205,8 +199,7 @@ function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width
     key === "purchase_amount" ||
     key === "valuation_amount" ||
     key === "profit_loss" ||
-    key === "cumulative_profit" ||
-    key === "weekly_profit"
+    key === "cumulative_profit"
   ) {
     return { width: 102, minWidth: 98 };
   }
@@ -223,7 +216,6 @@ function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width
     key === "withdrawal_mom" ||
     key === "total_expense" ||
     key === "deposit_withdrawal" ||
-    key === "weekly_return_pct" ||
     key === "bucket_pct_cash"
   ) {
     return { width: 88, minWidth: 84 };
@@ -248,15 +240,15 @@ function getWeeklyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width
   return { width: 78, minWidth: 72 };
 }
 
-export function WeeklyManager({
+export function DailyManager({
   onHeaderSummaryChange,
 }: {
-  onHeaderSummaryChange?: (summary: { activeWeekDate: string; rowCount: number; dirtyCount: number }) => void;
+  onHeaderSummaryChange?: (summary: { latestDate: string; rowCount: number; dirtyCount: number }) => void;
 }) {
-  const [rows, setRows] = useState<WeeklyRow[]>([]);
-  const [editableFields, setEditableFields] = useState<WeeklyEditableField[]>([]);
+  const [rows, setRows] = useState<DailyRow[]>([]);
+  const [editableFields, setEditableFields] = useState<DailyEditableField[]>([]);
   const [readOnlyKeys, setReadOnlyKeys] = useState<Set<string>>(new Set());
-  const [activeWeekDate, setActiveWeekDate] = useState("");
+  const [latestDate, setLatestDate] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("core");
   const [coreHiddenKeys, setCoreHiddenKeys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -274,20 +266,20 @@ export function WeeklyManager({
     setError(null);
 
     try {
-      const response = await fetch("/api/weekly", { cache: "no-store" });
-      const payload = (await response.json()) as WeeklyResponse;
+      const response = await fetch("/api/daily", { cache: "no-store" });
+      const payload = (await response.json()) as DailyResponse;
       if (!response.ok) {
-        throw new Error(payload.error ?? "주별 데이터를 불러오지 못했습니다.");
+        throw new Error(payload.error ?? "일별 데이터를 불러오지 못했습니다.");
       }
       setRows(payload.rows ?? []);
       setEditableFields(payload.editable_fields ?? []);
       setReadOnlyKeys(new Set(payload.read_only_keys ?? []));
       setCoreHiddenKeys(payload.core_hidden_keys ?? []);
-      setActiveWeekDate(payload.active_week_date ?? "");
+      setLatestDate(payload.latest_date ?? "");
       setDirtyRowIds([]);
       setDirtyCellKeys([]);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "주별 데이터를 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : "일별 데이터를 불러오지 못했습니다.");
     } finally {
       if (!silent) {
         setLoading(false);
@@ -306,32 +298,32 @@ export function WeeklyManager({
     return COLUMN_DEFS.filter((column) => !coreHiddenKeys.includes(column.key));
   }, [coreHiddenKeys, viewMode]);
 
-  const gridRows = useMemo<WeeklyGridRow[]>(
+  const gridRows = useMemo<DailyGridRow[]>(
     () =>
       rows.map((row) => ({
         ...row,
-        id: row.week_date,
+        id: row.date,
       })),
     [rows],
   );
 
   useEffect(() => {
     onHeaderSummaryChange?.({
-      activeWeekDate: activeWeekDate || "-",
+      latestDate: latestDate || "-",
       rowCount: rows.length,
       dirtyCount: dirtyRowIds.length,
     });
-  }, [activeWeekDate, dirtyRowIds.length, onHeaderSummaryChange, rows.length]);
+  }, [dirtyRowIds.length, latestDate, onHeaderSummaryChange, rows.length]);
 
   const editableFieldMap = useMemo(
     () => new Map(editableFields.map((field) => [field.key, field])),
     [editableFields],
   );
 
-  const gridColumns = useMemo<ColDef<WeeklyGridRow>[]>(
+  const gridColumns = useMemo<ColDef<DailyGridRow>[]>(
     () => [
-      ...visibleColumns.map<ColDef<WeeklyGridRow>>((column) => ({
-        ...getWeeklyColumnWidth(column.key),
+      ...visibleColumns.map<ColDef<DailyGridRow>>((column) => ({
+        ...getDailyColumnWidth(column.key),
         field: column.key,
         headerName: column.label,
         type:
@@ -340,12 +332,7 @@ export function WeeklyManager({
             : undefined,
         sortable: false,
         editable: () => editableFieldMap.has(column.key) && !readOnlyKeys.has(column.key),
-        valueParser: (params) =>
-          parseWeeklyCellValue(
-            editableFieldMap.get(column.key),
-            params.newValue,
-            params.oldValue,
-          ),
+        valueParser: (params) => parseDailyCellValue(editableFieldMap.get(column.key), params.newValue, params.oldValue),
         cellClass: (params) => {
           const classes = getColumnCellClass(column.key, params.value as number | string);
           const editableClasses =
@@ -356,7 +343,7 @@ export function WeeklyManager({
               : "";
           return `${classes}${editableClasses}`.trim();
         },
-        cellRenderer: (params: { data?: WeeklyGridRow; value?: unknown }) => (
+        cellRenderer: (params: { data?: DailyGridRow; value?: unknown }) => (
           <span title={column.key === "memo" ? String(params.value ?? "") : undefined}>
             {params.data ? formatCellValue(params.data, column.key) : "-"}
           </span>
@@ -374,29 +361,29 @@ export function WeeklyManager({
     startTransition(async () => {
       try {
         setError(null);
-        const dirtyRows = rows.filter((row) => dirtyRowIds.includes(row.week_date));
+        const dirtyRows = rows.filter((row) => dirtyRowIds.includes(row.date));
         for (const row of dirtyRows) {
-          const response = await fetch("/api/weekly", {
+          const response = await fetch("/api/daily", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              week_date: row.week_date,
+              date: row.date,
               ...Object.fromEntries(
                 editableFields
                   .filter((field) => !readOnlyKeys.has(field.key))
-                  .map((field) => [field.key, row[field.key as keyof WeeklyRow]]),
+                  .map((field) => [field.key, row[field.key as keyof DailyRow]]),
               ),
             }),
           });
           const payload = (await response.json()) as { error?: string };
           if (!response.ok) {
-            throw new Error(payload.error ?? "주별 데이터 저장에 실패했습니다.");
+            throw new Error(payload.error ?? "일별 데이터 저장에 실패했습니다.");
           }
         }
         await load({ silent: true });
-        toast.success("[자산-주별] 변경사항 저장 완료");
+        toast.success("[자산-일별] 변경사항 저장 완료");
       } catch (saveError) {
-        setError(saveError instanceof Error ? saveError.message : "주별 데이터 저장에 실패했습니다.");
+        setError(saveError instanceof Error ? saveError.message : "일별 데이터 저장에 실패했습니다.");
       }
     });
   }
@@ -405,7 +392,7 @@ export function WeeklyManager({
     <div className="appPageStack appPageStackFill">
       {error ? (
         <div className="appBannerStack">
-          {error ? <div className="bannerError">{error}</div> : null}
+          <div className="bannerError">{error}</div>
         </div>
       ) : null}
 
@@ -417,7 +404,7 @@ export function WeeklyManager({
                 <div className="appMainHeaderLeft weeklyMainHeaderLeft">
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">보기 방식</span>
-                    <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+                    <div className="appSegmentedToggle" role="group" aria-label="일별 보기 방식">
                       <button
                         type="button"
                         className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
@@ -435,9 +422,9 @@ export function WeeklyManager({
                     </div>
                   </label>
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">집계</span>
+                    <span className="appLabeledFieldLabel">원장 상태</span>
                     <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
-                      평일 09:35, 16:35 일별 원장 기준 주별 자동 집계
+                      기존 주별 종료일 스냅샷을 일별 원장 시드로 조회
                     </span>
                   </label>
                 </div>
@@ -458,18 +445,18 @@ export function WeeklyManager({
             </div>
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
-            <AppAgGrid<WeeklyGridRow>
+            <AppAgGrid<DailyGridRow>
               rowData={gridRows}
               columnDefs={gridColumns}
               loading={loading || isPending}
               minHeight="100%"
               className="weeklyAgGrid"
-              theme={weeklyGridTheme}
-              getRowClass={(params) => (params.data?.week_date === activeWeekDate ? "tableRowSelected" : "")}
+              theme={dailyGridTheme}
+              getRowClass={(params) => (params.data?.date === latestDate ? "tableRowSelected" : "")}
               gridOptions={{
                 suppressMovableColumns: true,
                 onCellValueChanged: (params: {
-                  data?: WeeklyGridRow;
+                  data?: DailyGridRow;
                   colDef: { field?: string };
                   newValue?: unknown;
                   oldValue?: unknown;
@@ -481,10 +468,10 @@ export function WeeklyManager({
                   const field = params.colDef.field;
                   setRows((current) =>
                     current.map((row) =>
-                      row.week_date === rowId
+                      row.date === rowId
                         ? {
                             ...row,
-                            [field]: params.data?.[field as keyof WeeklyGridRow] ?? row[field as keyof WeeklyRow],
+                            [field]: params.data?.[field as keyof DailyGridRow] ?? row[field as keyof DailyRow],
                           }
                         : row,
                     ),

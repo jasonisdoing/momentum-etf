@@ -155,6 +155,11 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "country_code": str(cfg.get("country_code") or ""),
             "holding_bonus_score": int(cfg["settings"].get("HOLDING_BONUS_SCORE", 0)),
             "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
+            "rsi_limit": (
+                float(cfg["settings"]["RSI_LIMIT"])
+                if "RSI_LIMIT" in cfg["settings"] and cfg["settings"]["RSI_LIMIT"] is not None
+                else None
+            ),
             "type_source": str(cfg["settings"].get("type_source") or ""),
             "currency": str(cfg["settings"].get("currency") or ""),
         }

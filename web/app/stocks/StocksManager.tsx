@@ -25,6 +25,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   top_n_hold?: number;
+  rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
 };
@@ -213,6 +214,21 @@ function formatMetaTime(value: string | null | undefined): string {
 
 function renderSignedPercentCell(value: number | null) {
   return <span className={getSignedClass(value ?? null)}>{formatPercent(value ?? null)}</span>;
+}
+
+function renderRsiCell(value: number | null, rsiLimit?: number | null) {
+  const formatted = formatNumber(value, 1);
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return formatted;
+  }
+  if (rsiLimit == null || Number.isNaN(rsiLimit) || value < rsiLimit) {
+    return formatted;
+  }
+  return (
+    <span style={{ color: "#d63939", fontWeight: 700 }}>
+      ⚠️ {formatted}
+    </span>
+  );
 }
 
 function formatCurrencyValue(value: number | null, countryCode?: string): string {
@@ -566,8 +582,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         valueGetter: (params) => {
           const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
           const rank = params.data?.순위 ?? null;
-          if (!topN || rank == null) return 0;
-          return Number(rank) <= topN ? 1 : 0;
+          if (!topN || rank == null || Number(rank) > topN) return 0;
+          const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
+          if (configuredRsiLimit == null) {
+            return 1;
+          }
+          const rsi = params.data?.RSI ?? null;
+          if (typeof rsi !== "number" || Number.isNaN(rsi)) {
+            return 1;
+          }
+          return rsi <= configuredRsiLimit ? 1 : 0;
         },
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (!params.value) return <span style={{ color: "#adb5bd" }}>-</span>;
@@ -792,6 +816,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             },
           }) as ColDef<RankGridRow>,
       ),
+      {
+        field: "RSI",
+        headerName: "RSI",
+        minWidth: 86,
+        width: 86,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
+      },
       ...(showDeviationColumn
         ? [
           {
@@ -860,14 +893,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
-      {
-        field: "RSI",
-        headerName: "RSI",
-        minWidth: 74,
-        width: 74,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
-      },
       ...[
         "1달(%)",
         "2달(%)",
@@ -930,6 +955,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             },
           }) as ColDef<RankGridRow>,
       ),
+      {
+        field: "RSI",
+        headerName: "RSI",
+        minWidth: 86,
+        width: 86,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
+      },
     ];
 
     const infoColumns: ColDef<RankGridRow>[] = [
@@ -1260,13 +1294,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const totalCount = gridRows.length;
     const upCount = gridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
+    const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
+    const ruleSummaryParts = [...maRuleSummary];
+    if (configuredRsiLimit != null && !Number.isNaN(configuredRsiLimit)) {
+      ruleSummaryParts.push(`RSI ${formatNumber(configuredRsiLimit, 0)}`);
+    }
     return {
       upCount,
       upPct,
       totalCount,
-      ruleSummary: maRuleSummary.join(" / ") || "-",
+      ruleSummary: ruleSummaryParts.join(" / ") || "-",
     };
-  }, [gridRows, maRuleSummary]);
+  }, [gridRows, maRuleSummary, selectedTickerTypeItem?.rsi_limit]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(headerSummary);

@@ -8,6 +8,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   top_n_hold?: number;
+  rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
 };

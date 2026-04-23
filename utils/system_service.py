@@ -17,11 +17,11 @@ from utils.env import load_env_if_present
 load_env_if_present()
 
 SystemAction = Literal[
+    "data_aggregate",
     "cache_refresh",
     "market_hours_analysis",
     "metadata_updater",
     "asset_summary",
-    "weekly_aggregate",
 ]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
@@ -34,11 +34,11 @@ SCHEDULE_ROWS = [
         "command": "python scripts/slack_asset_summary.py",
     },
     {
-        "key": "weekly_aggregate",
-        "job": "주별 데이터 집계",
-        "target": "주별 데이터",
-        "cadence": "평일 09:35, 16:35 KST",
-        "command": "python scripts/collect_weekly_data.py",
+        "key": "data_aggregate",
+        "job": "데이터 집계",
+        "target": "일별/주별 데이터",
+        "cadence": "평일 09:32, 16:32 KST",
+        "command": "python scripts/collect_data.py",
     },
     {
         "key": "cache_refresh",
@@ -65,11 +65,11 @@ SCHEDULE_ROWS = [
 
 # action 키 → 실행할 스크립트 경로
 _SCRIPT_BY_ACTION: dict[str, str] = {
+    "data_aggregate": "scripts/collect_data.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
-    "weekly_aggregate": "scripts/collect_weekly_data.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {

@@ -15,11 +15,13 @@
     *   `fear_greed_service.py`: CNN 공포탐욕지수 연동 및 메모리 캐시
     *   **원칙**: 새로운 시장 지표, 가격 정보, 외부 데이터 크롤링 등은 혼동을 막기 위해 모두 이 폴더에서 각각의 서비스로 관리하고, 자체 캐시 시스템(TTL 등)을 구축합니다.
 *   `utils/rankings.py`: 순위 테이블 계산 전용 유틸
-*   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
+*   `scripts/`: 데이터 수집, 캐시 갱신, 일별 원장 시드/집계 생성 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
     *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
     *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
+    *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
+    *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   `accounts.json`: 계좌 메타데이터 단일 설정 파일
 
@@ -32,6 +34,15 @@
     *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 수집하고, 응답 시점에는 메타 캐시에 저장된 구성종목에 해외 가격만 Yahoo TTL 캐시로 보조합니다.
 4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
 5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
+
+### 일별 원장 원칙
+
+*   `daily_fund_data`는 앞으로 일/주/월 집계의 기준이 될 일별 원장 컬렉션입니다.
+*   현재 초기 단계에서는 기존 `weekly_fund_data`의 종료일 row를 `daily_fund_data.date`로 시드 이관해 sparse 일별 원장으로 사용합니다.
+*   이 시드 데이터는 과거 일별 복원값이 아니라, **주별 종료일 스냅샷을 일별 원장에 옮긴 값**으로 취급합니다.
+*   초기 시드는 명시 스크립트 `./.venv/bin/python scripts/seed_daily_fund_data.py`로만 생성합니다. 런타임에서 자동 시드를 만들지 않습니다.
+*   통합 데이터 집계는 `./.venv/bin/python scripts/collect_data.py`가 담당하며, 미래 `daily_fund_data` row를 먼저 정리한 뒤 오늘 row를 upsert 하고 이어서 `daily_fund_data`에서 주별 마지막 영업일 snapshot을 읽어 `weekly_fund_data`를 다시 생성합니다.
+*   주별 수동 수정은 `memo`만 허용하며, 금액 관련 필드는 모두 일별 원장에서 유도됩니다.
 
 ### 종목 캐시 용어
 
