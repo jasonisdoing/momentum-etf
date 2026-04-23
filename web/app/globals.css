@@ -1535,15 +1535,6 @@ a {
   min-height: 0;
 }
 
-.tickerDetailTables {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1rem;
-  flex: 1 1 auto;
-  min-height: 0;
-  padding-top: 0.75rem;
-}
-
 .tickerDetailHero {
   display: flex;
   align-items: center;
@@ -1604,13 +1595,18 @@ a {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0 0 0.25rem;
+  padding: 0.15rem 0 0.35rem;
   flex: 0 0 auto;
+}
+
+.tickerDetailTableHeaderBetween {
+  justify-content: space-between;
 }
 
 .tickerDetailTableTitle {
   font-weight: 700;
   font-size: 15px;
+  line-height: 1.35;
 }
 
 .tickerDetailTableMeta {
@@ -1620,21 +1616,280 @@ a {
 .tickerDetailChartWrap {
   position: relative;
   min-width: 0;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.tickerDetailTopGrid {
+.tickerDetailLayoutGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "info holdings"
+    "chart table";
   gap: 1rem;
   align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0.75rem;
+}
+
+.tickerDetailClassicLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0.75rem;
+}
+
+.tickerDetailInfoPanel {
+  grid-area: info;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 360px;
+}
+
+.tickerDetailInfoCard {
+  border: 1px solid #d9e2ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  display: grid;
+  gap: 0;
+  flex: 0 0 auto;
+}
+
+.tickerDetailInfoSummary {
+  border-bottom: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoSummaryRow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.52rem 0.8rem;
+  border-bottom: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoSummaryRow:last-child {
+  border-bottom: 0;
+}
+
+.tickerDetailInfoSummaryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0;
+  border-top: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoLabel {
+  font-size: 13px;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.tickerDetailInfoMain {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailInfoMain strong,
+.tickerDetailInfoMetric strong {
+  font-size: 14px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailInfoMain strong.metricPositive,
+.tickerDetailInfoMetric strong.metricPositive {
+  color: #e53935;
+}
+
+.tickerDetailInfoMain strong.metricNegative,
+.tickerDetailInfoMetric strong.metricNegative {
+  color: #2563eb;
+}
+
+.tickerDetailInfoMetric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoSummaryGrid > .tickerDetailInfoMetric:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.tickerDetailInfoTracker {
+  padding: 0.08rem 0.4rem 0.12rem;
+  background: #fff;
+  border-top: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoTrackerTime,
+.tickerDetailInfoTrackerSub,
+.tickerDetailInfoTrackerHint,
+.tickerDetailInfoTrackerFoot {
+  color: #8a94a6;
+  font-size: 13px;
+}
+
+.tickerDetailInfoTrackerBody {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.02rem 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 0.28rem;
+}
+
+.tickerDetailInfoTrackerLeft {
+  display: grid;
+  gap: 0;
+  border-right: 1px solid #e6edf5;
+  padding-right: 0.3rem;
+}
+
+.tickerDetailInfoTrackerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.08rem 0;
+  border-bottom: 1px dashed #d6deea;
+}
+
+.tickerDetailInfoTrackerRowLast {
+  border-bottom: 0;
+}
+
+.tickerDetailInfoTrackerLabel,
+.tickerDetailInfoTrackerBigLabel,
+.tickerDetailInfoTrackerEstimateLabel {
+  font-size: 13px;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailInfoTrackerRow strong {
+  font-size: 14px;
+  font-weight: 800;
+  color: #d64045;
+}
+
+.tickerDetailInfoTrackerRight {
+  display: grid;
+  align-content: start;
+  justify-items: end;
+  gap: 0;
+  text-align: right;
+}
+
+.tickerDetailInfoTrackerDate {
+  font-size: 13px;
+  font-weight: 800;
+  color: #4b5563;
+}
+
+.tickerDetailInfoTrackerBigValue {
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  color: #d64045;
+}
+
+.tickerDetailInfoTrackerEstimateValue {
+  font-size: 14px;
+  font-weight: 900;
+  color: #b77900;
+}
+
+.tickerDetailInfoTrackerFooter {
+  margin-top: 0.04rem;
+  padding-top: 0.08rem;
+  border-top: 1px solid #e6edf5;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.tickerDetailChartToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailChartMaLegend {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailChartMaLabel {
+  font-size: 12px;
+  color: #5b6778;
+  font-weight: 600;
+}
+
+.tickerDetailChartMaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.tickerDetailChartMaSwatch {
+  width: 14px;
+  height: 2px;
+  display: inline-block;
 }
 
 .tickerDetailHoldingsPanel {
+  grid-area: holdings;
   display: flex;
   height: 420px;
   min-height: 0;
   min-width: 0;
   flex-direction: column;
+}
+
+.tickerDetailLayoutGrid > .tickerDetailChartWrap {
+  grid-area: chart;
+}
+
+.tickerDetailLayoutGrid > .tickerDetailTablePanel {
+  grid-area: table;
+}
+
+.tickerDetailClassicLayout > .tickerDetailChartWrap {
+  min-height: 520px;
+}
+
+.tickerDetailTables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
 }
 
 .tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell,
@@ -1821,12 +2076,18 @@ a {
     font-size: 1rem;
   }
 
+  .tickerDetailLayoutGrid,
+  .tickerDetailClassicLayout,
   .tickerDetailTables {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .tickerDetailTopGrid {
-    grid-template-columns: minmax(0, 1fr);
+  .tickerDetailLayoutGrid {
+    grid-template-areas:
+      "info"
+      "holdings"
+      "chart"
+      "table";
   }
 
   .tickerDetailHoldingsPanel {

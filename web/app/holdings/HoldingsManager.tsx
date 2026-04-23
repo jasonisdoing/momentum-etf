@@ -396,7 +396,7 @@ export function HoldingsManager({
   const moveToTickerDetail = useCallback(
     (row: AggregatedHoldingRow | null | undefined) => {
       if (!row || !row.ticker) return;
-      const normalizedTicker = normalizeDisplayTicker(String(row.ticker ?? "-"));
+      const normalizedTicker = normalizeRouteTicker(String(row.ticker ?? "-"));
       if (!normalizedTicker || normalizedTicker === "-" || normalizedTicker === "IS") return;
 
       router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
@@ -463,8 +463,8 @@ export function HoldingsManager({
         if (!params.data || isDetailRow(params.data)) return null;
         const rawTicker = String(params.value ?? "-");
         if (rawTicker === "__CASH__") return <span className="appCodeText" style={{ color: "#8b949e" }}>-</span>;
-        const normalizedTicker = normalizeDisplayTicker(rawTicker);
-        if (normalizedTicker === "IS") return <span className="appCodeText">{normalizedTicker}</span>;
+        const displayTicker = normalizeDisplayTicker(rawTicker);
+        if (displayTicker === "IS") return <span className="appCodeText">{displayTicker}</span>;
         return (
           <button
             type="button"
@@ -472,7 +472,7 @@ export function HoldingsManager({
             style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
             onClick={() => moveToTickerDetail(params.data as AggregatedHoldingRow)}
           >
-            {normalizedTicker}
+            {displayTicker}
           </button>
         );
       },
@@ -821,6 +821,15 @@ function getBucketCellClass(bucket: string): string {
 function normalizeDisplayTicker(ticker: string): string {
   if (!ticker || ticker === "-") return "-";
   const upper = ticker.toUpperCase();
+  if (upper.startsWith("ASX:")) return upper;
+  if (/^\d{6}$/.test(upper)) return upper;
+  if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) return upper.split(".")[0];
+  return upper;
+}
+
+function normalizeRouteTicker(ticker: string): string {
+  if (!ticker || ticker === "-") return "-";
+  const upper = ticker.toUpperCase().replace(/^ASX:/, "");
   if (/^\d{6}$/.test(upper)) return upper;
   if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) return upper.split(".")[0];
   return upper;
