@@ -54,8 +54,8 @@ def calculate_maps_score(
 def calculate_signed_percentile_score(data: pd.Series | pd.DataFrame) -> pd.Series | pd.DataFrame:
     """Signed percentile 점수를 계산합니다.
 
-    - 양수 값들은 양수 그룹 내에서 백분위 랭킹 → ``[0, 50]``
-    - 음수 값들은 절댓값 기준 음수 그룹 내 백분위 랭킹 → ``[-50, 0]``
+    - 양수 값들은 양수 그룹 내에서 백분위 랭킹 → ``[0, 100]``
+    - 음수 값들은 절댓값 기준 음수 그룹 내 백분위 랭킹 → ``[-100, 0]``
     - 0 은 그대로 ``0.0``, ``NaN`` 은 유지한다.
 
     Series 가 입력되면 전체 값들을 한 세트로 보고 랭킹한다.
@@ -67,20 +67,20 @@ def calculate_signed_percentile_score(data: pd.Series | pd.DataFrame) -> pd.Seri
     Examples:
         >>> s = pd.Series([3, -1, 2, 0])
         >>> calculate_signed_percentile_score(s).tolist()
-        [50.0, -50.0, 25.0, 0.0]
+        [100.0, -100.0, 50.0, 0.0]
     """
     if isinstance(data, pd.Series):
         numeric = pd.to_numeric(data, errors="coerce")
-        pos_rank = numeric.where(numeric > 0).rank(method="average", pct=True) * 50.0
-        neg_rank = numeric.where(numeric < 0).abs().rank(method="average", pct=True) * -50.0
+        pos_rank = numeric.where(numeric > 0).rank(method="average", pct=True) * 100.0
+        neg_rank = numeric.where(numeric < 0).abs().rank(method="average", pct=True) * -100.0
         result = pos_rank.combine_first(neg_rank)
         result = result.mask(numeric == 0, 0.0)
         return result
 
     if isinstance(data, pd.DataFrame):
         numeric = data.apply(pd.to_numeric, errors="coerce")
-        pos_rank = numeric.where(numeric > 0).rank(axis=1, method="average", pct=True) * 50.0
-        neg_rank = numeric.where(numeric < 0).abs().rank(axis=1, method="average", pct=True) * -50.0
+        pos_rank = numeric.where(numeric > 0).rank(axis=1, method="average", pct=True) * 100.0
+        neg_rank = numeric.where(numeric < 0).abs().rank(axis=1, method="average", pct=True) * -100.0
         result = pos_rank.combine_first(neg_rank)
         result = result.mask(numeric == 0, 0.0)
         return result

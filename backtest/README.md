@@ -26,10 +26,8 @@ python backtest/run.py
 
 - `TOP_N_HOLD`
 - `HOLDING_BONUS_SCORE`
-- `FIRST_MA_TYPE`
-- `FIRST_MA_MONTHS`
-- `SECOND_MA_TYPE`
-- `SECOND_MA_MONTHS`
+- `MA_TYPE`
+- `MA_MONTHS`
 - `RSI_LIMIT` (`us`, `kor` 종목풀만 사용)
 
 세부 스윕 범위는 프로젝트 루트의 [config.py](../config.py) 안 `BACKTEST_CONFIG`에서 관리한다.
@@ -65,7 +63,7 @@ BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 - `backtest/results/<pool>-backtest_details_<YYYY-MM-DD>.log`
   - 최종 1등 조합만 다시 1회 시뮬레이션하여 거래일별 상세 보유 내역을 기록한다.
   - 각 거래일 표의 첫 row는 항상 CASH이며, 당일 SELL 종목도 함께 남긴다. 상태값은 CASH, HOLD, BUY, SELL, WAIT 로 표기된다. (WAIT은 현재 보유 중이 아닌 종목 중 해당 신호일 점수 상위 `TOP_N_HOLD` 후보를 참고용으로 보여준다.)
-  - 상세 표에는 `점수`, `추세1`, `추세2`가 함께 기록되며, 각 값은 해당 거래를 결정한 신호일 기준이다.
+  - 상세 표에는 `점수`, `추세`가 함께 기록되며, 각 값은 해당 거래를 결정한 신호일 기준이다.
   - 각 거래일 헤더에는 `총자산`, `현금`, `평가수익`, `누적수익`이 함께 표시된다.
 
 ## 현재 백테스트 가정

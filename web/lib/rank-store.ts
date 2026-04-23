@@ -14,7 +14,6 @@ type RankTickerType = {
 };
 
 type RankMaRule = {
-  order: number;
   ma_type: string;
   ma_months: number;
   ma_days: number;
@@ -80,7 +79,7 @@ type RankData = {
 
 export async function loadRankData(params?: {
   ticker_type?: string;
-  ma_rule_overrides?: RankMaRule[];
+  ma_rule_override?: RankMaRule;
   as_of_date?: string;
   held_bonus_score?: number;
 }): Promise<RankData> {
@@ -94,9 +93,9 @@ export async function loadRankData(params?: {
   if (typeof params?.held_bonus_score === "number") {
     search.set("held_bonus_score", String(params.held_bonus_score));
   }
-  for (const rule of params?.ma_rule_overrides ?? []) {
-    search.set(`rule${rule.order}_ma_type`, rule.ma_type);
-    search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
+  if (params?.ma_rule_override) {
+    search.set("ma_type", params.ma_rule_override.ma_type);
+    search.set("ma_months", String(params.ma_rule_override.ma_months));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

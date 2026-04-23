@@ -14,25 +14,20 @@ export async function GET(request: NextRequest) {
     if (heldBonusScore === null) {
       return jsonNoStore({ error: "보유보너스점수 값이 필요합니다." }, { status: 400 });
     }
-    const maRuleOverrides = Array.from({ length: 2 }, (_, index) => index + 1)
-      .map((order) => {
-        const maType = searchParams.get(`rule${order}_ma_type`);
-        const maMonthsRaw = searchParams.get(`rule${order}_ma_months`);
-        if (!maType && !maMonthsRaw) {
-          return null;
-        }
-        return {
-          order,
-          ma_type: maType ?? "",
-          ma_months: maMonthsRaw ? Number(maMonthsRaw) : 0,
-          ma_days: 0,
-          score_column: `추세${order}`,
-        };
-      })
-      .filter((rule): rule is NonNullable<typeof rule> => rule !== null);
+    const maType = searchParams.get("ma_type");
+    const maMonthsRaw = searchParams.get("ma_months");
+    const maRuleOverride =
+      maType || maMonthsRaw
+        ? {
+            ma_type: maType ?? "",
+            ma_months: maMonthsRaw ? Number(maMonthsRaw) : 0,
+            ma_days: 0,
+            score_column: "추세",
+          }
+        : undefined;
     const data = await loadRankData({
       ticker_type: tickerType,
-      ma_rule_overrides: maRuleOverrides,
+      ma_rule_override: maRuleOverride,
       as_of_date: asOfDate,
       held_bonus_score: Number(heldBonusScore),
     });

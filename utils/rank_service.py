@@ -285,7 +285,7 @@ def _build_rank_map_from_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
 def load_rank_data(
     *,
     ticker_type: str | None = None,
-    ma_rule_overrides: list[dict[str, Any]] | None = None,
+    ma_rule_override: dict[str, Any] | None = None,
     as_of_date: str | None = None,
     held_bonus_score: int | None,
 ) -> dict[str, Any]:
@@ -302,7 +302,7 @@ def load_rank_data(
     selected_config = next((cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None)
     country_code = str(selected_config.get("country_code") or "") if selected_config else ""
 
-    ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_overrides)
+    ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_override)
     selected_as_of_date: pd.Timestamp | None = None
     if as_of_date:
         try:

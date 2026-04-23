@@ -32,145 +32,67 @@ MONTHLY_RETURN_LABEL_COUNT = 13
 RSI_PERIOD = 14
 
 
-def _build_ma_rule_score_column(order: int) -> str:
-    return f"추세{order}"
+def _build_ma_rule_score_column() -> str:
+    return "추세"
 
 
-# MA 규칙은 항상 FIRST(order=1)/SECOND(order=2) 2개 고정이다.
-_MA_ORDER_LABELS: dict[int, str] = {1: "FIRST", 2: "SECOND"}
-_REQUIRED_MA_ORDERS: tuple[int, ...] = (1, 2)
+def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
+    if not isinstance(ma_rule_raw, dict):
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 항목은 객체여야 합니다.")
 
+    ma_type = str(ma_rule_raw.get("MA_TYPE") or "").strip().upper()
+    if not ma_type:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_TYPE'이 누락되었습니다.")
+    if ma_type not in ALLOWED_MA_TYPES:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_TYPE'이 유효하지 않습니다: {ma_type}")
 
-def _ma_order_label(order: int) -> str:
-    return _MA_ORDER_LABELS.get(int(order), f"order={int(order)}")
-
-
-def _normalize_ma_rules(ticker_type: str, ma_rules_raw: Any) -> list[dict[str, Any]]:
-    if not isinstance(ma_rules_raw, list) or len(ma_rules_raw) != len(_REQUIRED_MA_ORDERS):
+    ma_months_raw = ma_rule_raw.get("MA_MONTHS")
+    if ma_months_raw is None:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_MONTHS'가 누락되었습니다.")
+    try:
+        ma_months = int(ma_months_raw)
+    except (TypeError, ValueError) as exc:
         raise AccountSettingsError(
-            f"'{ticker_type}' 설정의 MA 규칙은 정확히 {len(_REQUIRED_MA_ORDERS)}개여야 합니다."
-        )
+            f"'{ticker_type}' 설정의 'MA_MONTHS'는 정수여야 합니다: {ma_months_raw}"
+        ) from exc
+    if ma_months < 1:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_MONTHS'는 1 이상이어야 합니다: {ma_months}")
 
-    normalized_rules: list[dict[str, Any]] = []
-    seen_orders: set[int] = set()
-
-    for raw_rule in ma_rules_raw:
-        if not isinstance(raw_rule, dict):
-            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 항목은 객체여야 합니다.")
-
-        order_raw = raw_rule.get("order")
-        if order_raw is None:
-            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙에 'order'가 누락되었습니다.")
-        try:
-            order = int(order_raw)
-        except (TypeError, ValueError) as exc:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA 규칙 order는 정수여야 합니다: {order_raw}"
-            ) from exc
-        if order not in _REQUIRED_MA_ORDERS:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 MA 규칙 order는 {list(_REQUIRED_MA_ORDERS)} 중 하나여야 합니다: {order}"
-            )
-        if order in seen_orders:
-            raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 order가 중복되었습니다: {order}")
-        seen_orders.add(order)
-
-        label = _ma_order_label(order)
-
-        ma_type = str(raw_rule.get("MA_TYPE") or "").strip().upper()
-        if not ma_type:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 '{label}_MA_TYPE'이 누락되었습니다."
-            )
-        if ma_type not in ALLOWED_MA_TYPES:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 '{label}_MA_TYPE'이 유효하지 않습니다: {ma_type}"
-            )
-
-        ma_months_raw = raw_rule.get("MA_MONTHS")
-        if ma_months_raw is None:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 '{label}_MA_MONTHS'가 누락되었습니다."
-            )
-        try:
-            ma_months = int(ma_months_raw)
-        except (TypeError, ValueError) as exc:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 '{label}_MA_MONTHS'는 정수여야 합니다: {ma_months_raw}"
-            ) from exc
-        if ma_months < 1:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정의 '{label}_MA_MONTHS'는 1 이상이어야 합니다: {ma_months}"
-            )
-
-        normalized_rules.append(
-            {
-                "order": order,
-                "ma_type": ma_type,
-                "ma_months": ma_months,
-                "ma_days": int(ma_months) * int(TRADING_DAYS_PER_MONTH),
-                "score_column": _build_ma_rule_score_column(order),
-            }
-        )
-
-    missing_orders = sorted(set(_REQUIRED_MA_ORDERS) - seen_orders)
-    if missing_orders:
-        raise AccountSettingsError(
-            f"'{ticker_type}' 설정의 MA 규칙에 누락된 order가 있습니다: {missing_orders}"
-        )
-
-    return sorted(normalized_rules, key=lambda item: int(item["order"]))
+    return {
+        "order": 1,
+        "ma_type": ma_type,
+        "ma_months": ma_months,
+        "ma_days": int(ma_months) * int(TRADING_DAYS_PER_MONTH),
+        "score_column": _build_ma_rule_score_column(),
+    }
 
 
 def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
-    """종목풀 설정의 FIRST_/SECOND_ MA 파라미터를 내부 규칙 리스트로 변환한다."""
+    """종목풀 설정의 단일 MA 파라미터를 내부 규칙 리스트로 변환한다."""
     settings = get_ticker_type_settings(ticker_type)
-
-    raw_rules: list[dict[str, Any]] = []
-    for order in _REQUIRED_MA_ORDERS:
-        label = _ma_order_label(order)
-        type_key = f"{label}_MA_TYPE"
-        months_key = f"{label}_MA_MONTHS"
-        if type_key not in settings:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정에 필수 항목 '{type_key}'가 누락되었습니다."
-            )
-        if months_key not in settings:
-            raise AccountSettingsError(
-                f"'{ticker_type}' 설정에 필수 항목 '{months_key}'가 누락되었습니다."
-            )
-        raw_rules.append(
-            {
-                "order": order,
-                "MA_TYPE": settings[type_key],
-                "MA_MONTHS": settings[months_key],
-            }
-        )
-
-    return _normalize_ma_rules(ticker_type, raw_rules)
+    if "MA_TYPE" not in settings:
+        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_TYPE'이 누락되었습니다.")
+    if "MA_MONTHS" not in settings:
+        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
+    return [_normalize_ma_rule(ticker_type, {"MA_TYPE": settings["MA_TYPE"], "MA_MONTHS": settings["MA_MONTHS"]})]
 
 
 def build_effective_ma_rules(
     ticker_type: str,
-    overrides: list[dict[str, Any]] | None = None,
+    override: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    base_rules = get_ticker_type_ma_rules(ticker_type)
-    if not overrides:
-        return base_rules
-
-    override_map = {int(rule["order"]): rule for rule in overrides if rule.get("order") is not None}
-    raw_rules: list[dict[str, Any]] = []
-    for rule in base_rules:
-        order = int(rule["order"])
-        override = override_map.get(order) or {}
-        raw_rules.append(
+    base_rule = get_ticker_type_ma_rules(ticker_type)[0]
+    if not override:
+        return [base_rule]
+    return [
+        _normalize_ma_rule(
+            ticker_type,
             {
-                "order": order,
-                "MA_TYPE": override.get("ma_type", rule["ma_type"]),
-                "MA_MONTHS": override.get("ma_months", rule["ma_months"]),
-            }
+                "MA_TYPE": override.get("ma_type", base_rule["ma_type"]),
+                "MA_MONTHS": override.get("ma_months", base_rule["ma_months"]),
+            },
         )
-    return _normalize_ma_rules(ticker_type, raw_rules)
+    ]
 
 
 def _calculate_rsi(close_series: pd.Series, period: int) -> float | None:
@@ -769,7 +691,7 @@ def build_ticker_type_rankings(
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
-        # 추세1/추세2/점수 는 아래 공통 엔진에서 한 번에 주입된다.
+        # 추세/점수는 아래 공통 엔진에서 한 번에 주입된다.
         ma_rule_scores = {str(rule["score_column"]): None for rule in effective_ma_rules}
 
         row = {

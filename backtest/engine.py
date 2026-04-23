@@ -26,7 +26,6 @@ from config import (
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import (
-    combine_rule_percentiles,
     compute_eligibility_mask,
     compute_rule_percentile_frame,
 )
@@ -284,16 +283,10 @@ def _init_worker(
     _W_RSI_VALUES = rsi_values
 
 
-def _run_single_combo(
-    args: tuple[int, float, str, int, str, int, float | None],
-) -> dict[str, Any]:
+def _run_single_combo(args: tuple[int, float, str, int, float | None]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, bonus, fma_t, fma_m, sma_t, sma_m, rsi_limit = args
-    # 공통 엔진과 동일한 방식으로 규칙별 percentile 합산 + 자격 마스크 적용.
-    composite_values = _combine_rule_percentiles_array(
-        [_W_PCT_VALUES[(fma_t, fma_m)], _W_PCT_VALUES[(sma_t, sma_m)]],
-        _W_ELIG_VALUES,
-    )
+    top_n, bonus, ma_t, ma_m, rsi_limit = args
+    composite_values = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
     total_ret, cagr, mdd, trades = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
@@ -311,10 +304,8 @@ def _run_single_combo(
     return {
         "TOP_N_HOLD": top_n,
         "HOLDING_BONUS_SCORE": bonus,
-        "FIRST_MA_TYPE": fma_t,
-        "FIRST_MA_MONTHS": fma_m,
-        "SECOND_MA_TYPE": sma_t,
-        "SECOND_MA_MONTHS": sma_m,
+        "MA_TYPE": ma_t,
+        "MA_MONTHS": ma_m,
         "RSI_LIMIT": rsi_limit,
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
@@ -579,10 +570,8 @@ def _write_results_file(
     initial_cash: float,
     top_n_values: list[int],
     bonus_values: list[float],
-    first_ma_types: list[str],
-    first_ma_months_list: list[int],
-    second_ma_types: list[str],
-    second_ma_months_list: list[int],
+    ma_types: list[str],
+    ma_months_list: list[int],
     rsi_limits: list[float] | None,
     total_combos: int,
     done_count: int,
@@ -623,18 +612,15 @@ def _write_results_file(
     )
     lines.append(
         f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 x HOLDING_BONUS_SCORE {len(bonus_values)}개 "
-        f"x FIRST_MA_TYPE {len(first_ma_types)}개 x FIRST_MA_MONTHS {len(first_ma_months_list)}개 "
-        f"x SECOND_MA_TYPE {len(second_ma_types)}개 x SECOND_MA_MONTHS {len(second_ma_months_list)}개 "
+        f"x MA_TYPE {len(ma_types)}개 x MA_MONTHS {len(ma_months_list)}개 "
         f"{f'x RSI_LIMIT {len(rsi_limits)}개 ' if rsi_limits is not None else ''}"
         f"= {total_combos}개 조합"
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
     lines.append(f'"HOLDING_BONUS_SCORE": {[int(b) if float(b).is_integer() else b for b in bonus_values]},')
-    lines.append(f'"FIRST_MA_TYPE": {first_ma_types},')
-    lines.append(f'"FIRST_MA_MONTHS": {first_ma_months_list},')
-    lines.append(f'"SECOND_MA_TYPE": {second_ma_types},')
-    lines.append(f'"SECOND_MA_MONTHS": {second_ma_months_list},')
+    lines.append(f'"MA_TYPE": {ma_types},')
+    lines.append(f'"MA_MONTHS": {ma_months_list},')
     if rsi_limits is not None:
         lines.append(f'"RSI_LIMIT": {[int(v) if float(v).is_integer() else v for v in rsi_limits]},')
     lines.append("")
@@ -643,7 +629,7 @@ def _write_results_file(
     lines.append(f"=== {status_label} - 기간: {months} 개월 | 정렬 기준: CAGR ===")
 
     # 테이블
-    top_limit = 100
+    top_limit = 20
     top_rows = sorted_results[:top_limit]
     if not top_rows:
         lines.append("(결과 없음)")
@@ -653,10 +639,8 @@ def _write_results_file(
     headers = [
         "TOP_N",
         "BONUS",
-        "MA1_TYPE",
-        "MA1_M",
-        "MA2_TYPE",
-        "MA2_M",
+        "MA_TYPE",
+        "MA_M",
         "RSI",
         "수익률(%)",
         "CAGR(%)",
@@ -667,8 +651,6 @@ def _write_results_file(
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
-            "-",
-            "-",
             "-",
             "-",
             "-",
@@ -688,10 +670,8 @@ def _write_results_file(
             [
                 str(r["TOP_N_HOLD"]),
                 f"{r['HOLDING_BONUS_SCORE']:g}",
-                r["FIRST_MA_TYPE"],
-                str(r["FIRST_MA_MONTHS"]),
-                r["SECOND_MA_TYPE"],
-                str(r["SECOND_MA_MONTHS"]),
+                r["MA_TYPE"],
+                str(r["MA_MONTHS"]),
                 "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
@@ -767,8 +747,7 @@ def _simulate_one_combo_details(
     top_n: int,
     bonus: float,
     composite_frame: pd.DataFrame,
-    first_rule_frame: pd.DataFrame,
-    second_rule_frame: pd.DataFrame,
+    rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
     close_frame: pd.DataFrame,
     rsi_frame: pd.DataFrame,
@@ -806,8 +785,7 @@ def _simulate_one_combo_details(
         "평가(%)",
         "비중",
         "점수",
-        "추세1",
-        "추세2",
+        "추세",
         "문구",
     ]
     aligns = [
@@ -815,7 +793,6 @@ def _simulate_one_combo_details(
         "left",
         "left",
         "left",
-        "right",
         "right",
         "right",
         "right",
@@ -840,6 +817,8 @@ def _simulate_one_combo_details(
     lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
     lines.append(f"TOP_N_HOLD: {top_n}")
     lines.append(f"HOLDING_BONUS_SCORE: {bonus:g}")
+    lines.append(f"MA_TYPE: {rule_frame.attrs.get('ma_type', '-')}")
+    lines.append(f"MA_MONTHS: {rule_frame.attrs.get('ma_months', '-')}")
     if rsi_limit is not None:
         lines.append(f"RSI_LIMIT: {rsi_limit:g}")
     lines.append("")
@@ -905,8 +884,7 @@ def _simulate_one_combo_details(
                     row["pnl_pct"],
                     row["weight"],
                     row["score"],
-                    row["trend1"],
-                    row["trend2"],
+                    row["trend"],
                     row["message"],
                 ]
             )
@@ -935,8 +913,7 @@ def _simulate_one_combo_details(
         close_exec = close_frame.loc[exec_day]
 
         composite = composite_frame.loc[signal_day].copy()
-        first_rule_signal = first_rule_frame.loc[signal_day].copy()
-        second_rule_signal = second_rule_frame.loc[signal_day].copy()
+        rule_signal = rule_frame.loc[signal_day].copy()
         rsi_signal = rsi_frame.loc[signal_day].copy()
         if bonus:
             for holding in shares:
@@ -995,15 +972,8 @@ def _simulate_one_combo_details(
                         "score": _format_score_value(
                             None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
                         ),
-                        "trend1": _format_score_value(
-                            None
-                            if pd.isna(first_rule_signal.get(ticker, np.nan))
-                            else float(first_rule_signal.get(ticker, np.nan))
-                        ),
-                        "trend2": _format_score_value(
-                            None
-                            if pd.isna(second_rule_signal.get(ticker, np.nan))
-                            else float(second_rule_signal.get(ticker, np.nan))
+                        "trend": _format_score_value(
+                            None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                         ),
                         "message": "거래 없음",
                     }
@@ -1071,15 +1041,8 @@ def _simulate_one_combo_details(
                     "score": _format_score_value(
                         None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
                     ),
-                    "trend1": _format_score_value(
-                        None
-                        if pd.isna(first_rule_signal.get(ticker, np.nan))
-                        else float(first_rule_signal.get(ticker, np.nan))
-                    ),
-                    "trend2": _format_score_value(
-                        None
-                        if pd.isna(second_rule_signal.get(ticker, np.nan))
-                        else float(second_rule_signal.get(ticker, np.nan))
+                    "trend": _format_score_value(
+                        None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                     ),
                     "message": (
                         "RSI 상한 초과로 시초가 전량매도"
@@ -1158,15 +1121,8 @@ def _simulate_one_combo_details(
                     "score": _format_score_value(
                         None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
                     ),
-                    "trend1": _format_score_value(
-                        None
-                        if pd.isna(first_rule_signal.get(ticker, np.nan))
-                        else float(first_rule_signal.get(ticker, np.nan))
-                    ),
-                    "trend2": _format_score_value(
-                        None
-                        if pd.isna(second_rule_signal.get(ticker, np.nan))
-                        else float(second_rule_signal.get(ticker, np.nan))
+                    "trend": _format_score_value(
+                        None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                     ),
                     "message": buy_messages.get(ticker, "기존 보유 유지"),
                 }
@@ -1201,15 +1157,8 @@ def _simulate_one_combo_details(
                     "score": _format_score_value(
                         None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
                     ),
-                    "trend1": _format_score_value(
-                        None
-                        if pd.isna(first_rule_signal.get(ticker, np.nan))
-                        else float(first_rule_signal.get(ticker, np.nan))
-                    ),
-                    "trend2": _format_score_value(
-                        None
-                        if pd.isna(second_rule_signal.get(ticker, np.nan))
-                        else float(second_rule_signal.get(ticker, np.nan))
+                    "trend": _format_score_value(
+                        None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                     ),
                     "message": f"대기 순위 {current_rank}위" if current_rank else "진입 대기",
                 }
@@ -1248,10 +1197,8 @@ def _write_details_file(
         "=== 상위 1개 조합 설정 ===",
         f"TOP_N_HOLD: {top_result['TOP_N_HOLD']}",
         f"HOLDING_BONUS_SCORE: {top_result['HOLDING_BONUS_SCORE']:g}",
-        f"FIRST_MA_TYPE: {top_result['FIRST_MA_TYPE']}",
-        f"FIRST_MA_MONTHS: {top_result['FIRST_MA_MONTHS']}",
-        f"SECOND_MA_TYPE: {top_result['SECOND_MA_TYPE']}",
-        f"SECOND_MA_MONTHS: {top_result['SECOND_MA_MONTHS']}",
+        f"MA_TYPE: {top_result['MA_TYPE']}",
+        f"MA_MONTHS: {top_result['MA_MONTHS']}",
         f"RSI_LIMIT: {rsi_limit_text}",
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
@@ -1294,10 +1241,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
 
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
     bonus_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
-    first_ma_types = [str(v).upper() for v in cfg["FIRST_MA_TYPE"]]
-    first_ma_months_list = [int(v) for v in cfg["FIRST_MA_MONTHS"]]
-    second_ma_types = [str(v).upper() for v in cfg["SECOND_MA_TYPE"]]
-    second_ma_months_list = [int(v) for v in cfg["SECOND_MA_MONTHS"]]
+    ma_types = [str(v).upper() for v in cfg["MA_TYPE"]]
+    ma_months_list = [int(v) for v in cfg["MA_MONTHS"]]
     rsi_limits: list[float] | None = None
     if "RSI_LIMIT" in cfg:
         rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
@@ -1318,10 +1263,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     months = int(round((today - start_target).days / 30.436875))
 
     # 워밍업: 최대 MA 개월 + 여유 2개월
-    max_ma_months = max(
-        max(first_ma_months_list, default=0),
-        max(second_ma_months_list, default=0),
-    )
+    max_ma_months = max(ma_months_list, default=0)
     warmup_days_target = (max_ma_months + 2) * TRADING_DAYS_PER_MONTH
     calendar_lookback_start = (start_target - pd.DateOffset(days=int(warmup_days_target * 1.6 + 60))).normalize()
 
@@ -1396,9 +1338,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     period_end = backtest_days[-1]
 
     # MA 타입/개월 유니크 집합 → signed percentile 사전계산
-    unique_first = set(itertools.product(first_ma_types, first_ma_months_list))
-    unique_second = set(itertools.product(second_ma_types, second_ma_months_list))
-    unique_ma_specs = unique_first | unique_second
+    unique_ma_specs = set(itertools.product(ma_types, ma_months_list))
 
     percentile_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
     logger.info("[%s] MA 점수 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
@@ -1488,10 +1428,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         itertools.product(
             top_n_values,
             bonus_values,
-            first_ma_types,
-            first_ma_months_list,
-            second_ma_types,
-            second_ma_months_list,
+            ma_types,
+            ma_months_list,
             rsi_limits if rsi_limits is not None else [None],
         )
     )
@@ -1517,10 +1455,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         "initial_cash": initial_cash,
         "top_n_values": top_n_values,
         "bonus_values": bonus_values,
-        "first_ma_types": first_ma_types,
-        "first_ma_months_list": first_ma_months_list,
-        "second_ma_types": second_ma_types,
-        "second_ma_months_list": second_ma_months_list,
+        "ma_types": ma_types,
+        "ma_months_list": ma_months_list,
         "rsi_limits": rsi_limits,
         "total_combos": total_combos,
         "period_start": period_start,
@@ -1601,13 +1537,10 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     sorted_results = sorted(results, key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
     if sorted_results:
         best_result = sorted_results[0]
-        best_composite = combine_rule_percentiles(
-            [
-                percentile_by_spec_win[(best_result["FIRST_MA_TYPE"], int(best_result["FIRST_MA_MONTHS"]))],
-                percentile_by_spec_win[(best_result["SECOND_MA_TYPE"], int(best_result["SECOND_MA_MONTHS"]))],
-            ],
-            eligibility_win,
-        )
+        best_rule_frame = percentile_by_spec_win[(best_result["MA_TYPE"], int(best_result["MA_MONTHS"]))].copy()
+        best_rule_frame.attrs["ma_type"] = best_result["MA_TYPE"]
+        best_rule_frame.attrs["ma_months"] = int(best_result["MA_MONTHS"])
+        best_composite = best_rule_frame.where(eligibility_win)
         ticker_name_map = {
             str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
             for item in etfs
@@ -1618,12 +1551,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             top_n=int(best_result["TOP_N_HOLD"]),
             bonus=float(best_result["HOLDING_BONUS_SCORE"]),
             composite_frame=best_composite,
-            first_rule_frame=percentile_by_spec_win[
-                (best_result["FIRST_MA_TYPE"], int(best_result["FIRST_MA_MONTHS"]))
-            ],
-            second_rule_frame=percentile_by_spec_win[
-                (best_result["SECOND_MA_TYPE"], int(best_result["SECOND_MA_MONTHS"]))
-            ],
+            rule_frame=best_rule_frame,
             open_frame=open_win,
             close_frame=close_win,
             rsi_frame=rsi_win,

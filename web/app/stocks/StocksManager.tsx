@@ -31,7 +31,6 @@ type RankTickerType = {
 };
 
 type RankMaRule = {
-  order: number;
   ma_type: string;
   ma_months: number;
   ma_days: number;
@@ -119,11 +118,12 @@ type RankAddingRowState = {
 };
 
 const rankGridTheme = createAppGridTheme();
+const MAX_SELECTABLE_MA_MONTHS = 24;
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
   ticker_type: string;
-  ma_rules: RankMaRule[];
+  ma_rule: RankMaRule | null;
   ma_type_options: string[];
   ma_months_max: number;
 };
@@ -250,8 +250,8 @@ function clampHeldBonusScore(value: number): number {
   if (Number.isNaN(value) || value < 0) {
     return 0;
   }
-  if (value > 50) {
-    return 50;
+  if (value > 20) {
+    return 20;
   }
   return Math.round(value / 5) * 5;
 }
@@ -269,7 +269,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [selectedTickerType, setSelectedAccountId] = useState(
     rankToolbarCache?.ticker_type ?? readRememberedTickerType() ?? "",
   );
-  const [maRules, setMaRules] = useState<RankMaRule[]>(rankToolbarCache?.ma_rules ?? []);
+  const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
@@ -292,6 +292,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [error, setError] = useState<string | null>(null);
   const [naverCategoryConfig, setNaverCategoryConfig] = useState<{ code: string; name: string }[]>([]);
   const todayDateInputValue = useMemo(() => getTodayDateInputValue(), []);
+  const selectableMaMonthsMax = useMemo(
+    () => Math.min(Math.max(maMonthsMax, 1), MAX_SELECTABLE_MA_MONTHS),
+    [maMonthsMax],
+  );
 
   function clearCacheWarningState() {
     setCacheBlocked(false);
@@ -302,7 +306,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   async function load(next?: {
     ticker_type?: string;
-    ma_rule_overrides?: RankMaRule[];
+    ma_rule_override?: RankMaRule;
     as_of_date?: string;
     held_bonus_score?: number;
     bootstrap?: boolean;
@@ -323,9 +327,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (typeof next?.held_bonus_score === "number") {
         search.set("held_bonus_score", String(next.held_bonus_score));
       }
-      for (const rule of next?.ma_rule_overrides ?? []) {
-        search.set(`rule${rule.order}_ma_type`, rule.ma_type);
-        search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
+      if (next?.ma_rule_override) {
+        search.set("ma_type", next.ma_rule_override.ma_type);
+        search.set("ma_months", String(next.ma_rule_override.ma_months));
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
@@ -342,7 +346,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       const nextAccountId = payload.ticker_type ?? "";
       setSelectedAccountId(nextAccountId);
       writeRememberedTickerType(nextAccountId);
-      setMaRules(payload.ma_rules ?? []);
+      setMaRule(payload.ma_rules?.[0] ?? null);
       setMaTypeOptions(payload.ma_type_options ?? []);
       setMaMonthsMax(payload.ma_months_max ?? 12);
       setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
@@ -350,7 +354,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       rankToolbarCache = {
         ticker_types: payload.ticker_types ?? [],
         ticker_type: nextAccountId,
-        ma_rules: payload.ma_rules ?? [],
+        ma_rule: payload.ma_rules?.[0] ?? null,
         ma_type_options: payload.ma_type_options ?? [],
         ma_months_max: payload.ma_months_max ?? 12,
       };
@@ -383,7 +387,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ) {
         void load({
           ticker_type: nextAccountId,
-          ma_rule_overrides: payload.ma_rules ?? next?.ma_rule_overrides,
+          ma_rule_override: payload.ma_rules?.[0] ?? next?.ma_rule_override,
           as_of_date: toDateInputValue(payload.as_of_date),
           held_bonus_score: configuredHeldBonusScore,
         });
@@ -434,7 +438,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setHeldBonusScore(normalized);
     void load({
       ticker_type: selectedTickerType,
-      ma_rule_overrides: maRules,
+      ma_rule_override: maRule ?? undefined,
       as_of_date: selectedAsOfDate,
       held_bonus_score: normalized,
     });
@@ -520,10 +524,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ];
   }, [addingRow, gridRows, pageMode]);
 
-  const maRuleSummary = useMemo(
-    () => maRules.map((rule) => `추세${rule.order}: ${rule.ma_type} ${rule.ma_months}개월`),
-    [maRules],
-  );
+  const maRuleSummary = useMemo(() => (maRule ? [`MA: ${maRule.ma_type} ${maRule.ma_months}개월`] : []), [maRule]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
@@ -801,21 +802,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
-      ...maRules.map(
-        (rule) =>
-          ({
-            field: rule.score_column,
-            headerName: `추세${rule.order}`,
-            minWidth: 72,
-            width: 72,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => {
-              const currency = selectedTickerTypeItem?.currency?.toUpperCase();
-              const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
-              return formatNumber(params.value ?? null, decimals);
-            },
-          }) as ColDef<RankGridRow>,
-      ),
+      {
+        field: maRule?.score_column ?? "추세",
+        headerName: "추세",
+        minWidth: 72,
+        width: 72,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+          const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
+          return formatNumber(params.value ?? null, decimals);
+        },
+      },
       {
         field: "RSI",
         headerName: "RSI",
@@ -940,21 +938,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
-      ...maRules.map(
-        (rule) =>
-          ({
-            field: rule.score_column,
-            headerName: `추세${rule.order}`,
-            minWidth: 72,
-            width: 72,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => {
-              const currency = selectedTickerTypeItem?.currency?.toUpperCase();
-              const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
-              return formatNumber(params.value ?? null, decimals);
-            },
-          }) as ColDef<RankGridRow>,
-      ),
+      {
+        field: maRule?.score_column ?? "추세",
+        headerName: "추세",
+        minWidth: 72,
+        width: 72,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+          const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
+          return formatNumber(params.value ?? null, decimals);
+        },
+      },
       {
         field: "RSI",
         headerName: "RSI",
@@ -1034,7 +1029,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [
     addingRow,
     dirtyCellKeys,
-    maRules,
+    maRule,
     metricMode,
     monthlyReturnLabels,
     pageMode,
@@ -1055,23 +1050,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
-  function handleMaRuleTypeChange(order: number, nextMaType: string) {
-    const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_type: nextMaType } : rule));
-    setMaRules(nextRules);
+  function handleMaRuleTypeChange(nextMaType: string) {
+    if (!maRule) {
+      return;
+    }
+    const nextRule = { ...maRule, ma_type: nextMaType };
+    setMaRule(nextRule);
     void load({
       ticker_type: selectedTickerType,
-      ma_rule_overrides: nextRules,
+      ma_rule_override: nextRule,
       as_of_date: selectedAsOfDate,
       held_bonus_score: heldBonusScore,
     });
   }
 
-  function handleMaRuleMonthsChange(order: number, nextMaMonths: number) {
-    const nextRules = maRules.map((rule) => (rule.order === order ? { ...rule, ma_months: nextMaMonths } : rule));
-    setMaRules(nextRules);
+  function handleMaRuleMonthsChange(nextMaMonths: number) {
+    if (!maRule) {
+      return;
+    }
+    const nextRule = { ...maRule, ma_months: nextMaMonths };
+    setMaRule(nextRule);
     void load({
       ticker_type: selectedTickerType,
-      ma_rule_overrides: nextRules,
+      ma_rule_override: nextRule,
       as_of_date: selectedAsOfDate,
       held_bonus_score: heldBonusScore,
     });
@@ -1081,7 +1082,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setSelectedAsOfDate(nextAsOfDate);
     void load({
       ticker_type: selectedTickerType,
-      ma_rule_overrides: maRules,
+      ma_rule_override: maRule ?? undefined,
       as_of_date: nextAsOfDate,
       held_bonus_score: heldBonusScore,
     });
@@ -1205,7 +1206,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         toast.success("[순위] 변경사항 저장 완료");
         void load({
           ticker_type: selectedTickerType,
-          ma_rule_overrides: maRules,
+          ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
           held_bonus_score: heldBonusScore,
         });
@@ -1249,7 +1250,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         toast.success(`[순위] ${selectedRows.length}개 종목 삭제 완료`);
         void load({
           ticker_type: selectedTickerType,
-          ma_rule_overrides: maRules,
+          ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
           held_bonus_score: heldBonusScore,
         });
@@ -1373,40 +1374,36 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </button>
                     </div>
                   </label>
-                  {pageMode === "rank" ? (
-                    <>
-                      {maRules.map((rule) => (
-                        <label key={rule.order} className="appLabeledField">
-                          <span className="appLabeledFieldLabel">{`추세${rule.order}`}</span>
-                          <div className="rankRuleFieldRow">
-                            <select
-                              className="form-select"
-                              value={rule.ma_type}
-                              onChange={(event) => handleMaRuleTypeChange(rule.order, event.target.value)}
-                              disabled={maTypeOptions.length === 0}
-                            >
-                              {maTypeOptions.map((option) => (
-                                <option key={`${rule.order}-${option}`} value={option}>
-                                  {option}
-                                </option>
-                              ))}
-                            </select>
-                            <select
-                              className="form-select"
-                              value={String(rule.ma_months)}
-                              onChange={(event) => handleMaRuleMonthsChange(rule.order, Number(event.target.value))}
-                              disabled={maTypeOptions.length === 0}
-                            >
-                              {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                                <option key={`${rule.order}-${month}`} value={month}>
-                                  {month}개월
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </label>
-                      ))}
-                    </>
+                  {pageMode === "rank" && maRule ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">MA</span>
+                      <div className="rankRuleFieldRow">
+                        <select
+                          className="form-select"
+                          value={maRule.ma_type}
+                          onChange={(event) => handleMaRuleTypeChange(event.target.value)}
+                          disabled={maTypeOptions.length === 0}
+                        >
+                          {maTypeOptions.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="form-select"
+                          value={String(maRule.ma_months)}
+                          onChange={(event) => handleMaRuleMonthsChange(Number(event.target.value))}
+                          disabled={maTypeOptions.length === 0}
+                        >
+                          {Array.from({ length: selectableMaMonthsMax }, (_, index) => index + 1).map((month) => (
+                            <option key={month} value={month}>
+                              {month}개월
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </label>
                   ) : null}
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">보유보너스점수</span>
@@ -1415,7 +1412,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       value={String(heldBonusScore)}
                       onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
                     >
-                      {Array.from({ length: 41 }, (_, index) => index * 5).map((score) => (
+                      {Array.from({ length: 5 }, (_, index) => index * 5).map((score) => (
                         <option key={score} value={score}>
                           {score}
                         </option>
