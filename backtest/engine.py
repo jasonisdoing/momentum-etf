@@ -822,6 +822,7 @@ def _simulate_one_combo_details(
     if rsi_limit is not None:
         lines.append(f"RSI_LIMIT: {rsi_limit:g}")
     lines.append("")
+    prev_total_equity_krw = initial_cash_krw
 
     def _append_day_section(
         *,
@@ -847,6 +848,9 @@ def _simulate_one_combo_details(
         cumulative_pct = (
             (cumulative_pnl_krw / initial_cash_krw) * 100.0 if initial_cash_krw > 0 else 0.0
         )
+        nonlocal prev_total_equity_krw
+        daily_pnl_krw = total_equity_krw - prev_total_equity_krw
+        daily_pct = ((daily_pnl_krw / prev_total_equity_krw) * 100.0) if prev_total_equity_krw > 0 else 0.0
         day_rows: list[list[str]] = []
         cash_row = [
             "1",
@@ -893,11 +897,13 @@ def _simulate_one_combo_details(
             f"[{day.strftime('%Y-%m-%d')}({_format_weekday_kr(day)})] "
             f"총자산 {format_price(total_equity_krw, 'kor')} / "
             f"현금 {format_price(cash_krw, 'kor')} / "
+            f"일간수익: {format_price(daily_pnl_krw, 'kor')}({format_pct_change(daily_pct)}) / "
             f"평가수익: {format_price(valuation_pnl_krw, 'kor')}({format_pct_change(valuation_pct)}) / "
             f"누적수익: {format_price(cumulative_pnl_krw, 'kor')}({format_pct_change(cumulative_pct)})"
         )
         lines.extend(render_table_eaw(headers, day_rows, aligns))
         lines.append("")
+        prev_total_equity_krw = total_equity_krw
 
     for exec_idx in range(1, len(backtest_days)):
         signal_day = backtest_days[exec_idx - 1]
@@ -1129,18 +1135,23 @@ def _simulate_one_combo_details(
             )
 
         wait_rows: list[dict[str, str]] = []
-        # 현재 보유 중인 종목을 제외하고 신호 점수순 상위 N개를 대기 종목으로 추출
-        waiting_candidates_df = target_df[~target_df["ticker"].isin(shares.keys())]
-        waiting_tickers = waiting_candidates_df.head(top_n)["ticker"].tolist()
-        
+        sold_rows_by_ticker = {row["ticker"]: row for row in sold_rows}
+        # 현재 보유 중인 종목을 제외하고 신호 점수순 상위 N개를 대기/매도 후보로 추출한다.
+        waiting_candidates_df = target_df[~target_df["ticker"].isin(shares.keys())].head(top_n).copy()
+        waiting_tickers = waiting_candidates_df["ticker"].tolist()
+
         for ticker in waiting_tickers:
+            current_rank = current_rank_map.get(ticker, 10_000)
+            if ticker in sold_rows_by_ticker:
+                sold_row = sold_rows_by_ticker[ticker].copy()
+                sold_row["rank"] = current_rank
+                wait_rows.append(sold_row)
+                continue
             current_price = float(close_exec.get(ticker, np.nan)) if not pd.isna(close_exec.get(ticker, np.nan)) else None
             previous_close = (
                 float(close_today.get(ticker, np.nan)) if not pd.isna(close_today.get(ticker, np.nan)) else None
             )
-            # 순위 계산 (전체 target_df 기준)
-            current_rank = next((i for i, t in enumerate(target_df["ticker"], 1) if t == ticker), None)
-            
+
             wait_rows.append(
                 {
                     "ticker": ticker,
@@ -1160,9 +1171,13 @@ def _simulate_one_combo_details(
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                     ),
-                    "message": f"대기 순위 {current_rank}위" if current_rank else "진입 대기",
+                    "message": f"대기 순위 {current_rank}위",
+                    "rank": current_rank,
                 }
             )
+
+        wait_rows.sort(key=lambda row: (int(row.get("rank", 10_000)), row["ticker"]))
+        sold_rows = [row for row in sold_rows if row["ticker"] not in waiting_tickers]
 
         note = "매도 후 신규 진입 및 잔액 현금 보유" if (to_sell or to_buy) else "거래 없음"
         _append_day_section(
