@@ -23,7 +23,9 @@ READ_ONLY_FIELDS = {
     "purchase_amount",
     "valuation_amount",
     "profit_loss",
+    "daily_profit",
     "cumulative_profit",
+    "daily_return_pct",
     "cumulative_return_pct",
     "exchange_rate",
     "bucket_pct_momentum",
@@ -53,7 +55,9 @@ FIELD_DEFS = [
     {"key": "purchase_amount", "label": "매입 금액", "type": "int"},
     {"key": "valuation_amount", "label": "평가 금액", "type": "int"},
     {"key": "profit_loss", "label": "평가 손익", "type": "int"},
+    {"key": "daily_profit", "label": "금일 손익", "type": "int"},
     {"key": "cumulative_profit", "label": "누적 손익", "type": "int"},
+    {"key": "daily_return_pct", "label": "일수익률 (%)", "type": "float"},
     {"key": "cumulative_return_pct", "label": "누적 수익률 (%)", "type": "float"},
     {"key": "memo", "label": "비고", "type": "text"},
     {"key": "exchange_rate", "label": "환율", "type": "float"},
@@ -133,6 +137,7 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
     docs_by_date = {str(doc["date"]): _apply_derived_fields(doc) for doc in docs}
     running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
     running_total_expense = 0
+    previous_cumulative_profit = 0
 
     for date_str in sorted(docs_by_date):
         doc = docs_by_date[date_str]
@@ -146,11 +151,15 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         doc["cumulative_profit"] = (
             _to_int(doc.get("total_assets", 0)) - _to_int(doc.get("total_principal", 0)) - running_total_expense
         )
+        doc["daily_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
         if total_principal == 0:
+            doc["daily_return_pct"] = 0.0
             doc["cumulative_return_pct"] = 0.0
         else:
+            doc["daily_return_pct"] = round((_to_int(doc.get("daily_profit", 0)) / total_principal) * 100, 2)
             doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
+        previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
 
     return [docs_by_date[str(doc["date"])] for doc in sorted(docs, key=lambda item: item["date"], reverse=True)]
 
@@ -173,7 +182,9 @@ def _doc_to_api_row(doc: dict[str, Any]) -> dict[str, Any]:
         "purchase_amount": _to_int(computed_doc.get("purchase_amount", 0)),
         "valuation_amount": _to_int(computed_doc.get("valuation_amount", 0)),
         "profit_loss": _to_int(computed_doc.get("profit_loss", 0)),
+        "daily_profit": _to_int(computed_doc.get("daily_profit", 0)),
         "cumulative_profit": _to_int(computed_doc.get("cumulative_profit", 0)),
+        "daily_return_pct": round(float(computed_doc.get("daily_return_pct", 0.0) or 0.0), 2),
         "cumulative_return_pct": round(float(computed_doc.get("cumulative_return_pct", 0.0) or 0.0), 2),
         "memo": str(computed_doc.get("memo", "") or ""),
         "exchange_rate": round(exchange_rate, 2),

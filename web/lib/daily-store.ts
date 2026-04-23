@@ -19,7 +19,9 @@ type DailyRow = {
   purchase_amount: number;
   valuation_amount: number;
   profit_loss: number;
+  daily_profit: number;
   cumulative_profit: number;
+  daily_return_pct: number;
   cumulative_return_pct: number;
   memo: string;
   exchange_rate: number;
