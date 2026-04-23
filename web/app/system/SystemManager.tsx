@@ -27,11 +27,11 @@ type SystemLastRunInfo = {
 };
 
 type SystemJobKey =
+  | "data_aggregate"
   | "cache_refresh"
   | "market_hours_analysis"
   | "metadata_updater"
-  | "asset_summary"
-  | "weekly_aggregate";
+  | "asset_summary";
 
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];

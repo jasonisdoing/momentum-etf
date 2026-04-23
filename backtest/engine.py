@@ -21,6 +21,7 @@ import pandas as pd
 from config import (
     BACKTEST_INITIAL_KRW_AMOUNT,
     BACKTEST_START_DATE,
+    MARKET_SCHEDULES,
     SLIPPAGE_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
@@ -35,8 +36,10 @@ from utils.formatters import format_pct_change, format_price, format_trading_day
 from utils.report import render_table_eaw
 from utils.settings_loader import get_ticker_type_settings
 from utils.stock_list_io import get_etfs
+from services.price_service import get_realtime_snapshot
 
 logger = logging.getLogger(__name__)
+RSI_PERIOD = 14
 
 # ----------------------------- 헬퍼 ----------------------------- #
 
@@ -129,6 +132,78 @@ def _should_include_latest_day(open_frame: pd.DataFrame, latest_day: pd.Timestam
     return bool(((~valid_open.isna()) & (valid_open > 0)).any())
 
 
+def _is_market_opened(country_code: str, today: pd.Timestamp) -> bool:
+    schedule = MARKET_SCHEDULES.get(str(country_code or "").strip().lower())
+    if not schedule:
+        raise ValueError(f"MARKET_SCHEDULES 에 '{country_code}' 설정이 없습니다.")
+
+    now_local = pd.Timestamp.now(tz=schedule["timezone"])
+    today_local = pd.Timestamp(today).tz_localize(schedule["timezone"])
+    return bool(
+        (now_local.date() > today_local.date())
+        or (now_local.date() == today_local.date() and now_local.time() >= schedule["open"])
+    )
+
+
+def _augment_frames_with_intraday_open(
+    frames: dict[str, pd.DataFrame],
+    tickers: list[str],
+    country_code: str,
+    latest_day: pd.Timestamp,
+    today: pd.Timestamp,
+) -> None:
+    normalized_latest = pd.Timestamp(latest_day).normalize()
+    normalized_today = pd.Timestamp(today).normalize()
+    if normalized_latest != normalized_today:
+        return
+
+    today_str = normalized_today.strftime("%Y-%m-%d")
+    trading_days = get_trading_days(today_str, today_str, country_code)
+    if not trading_days:
+        return
+    if not _is_market_opened(country_code, normalized_today):
+        return
+
+    snapshots = get_realtime_snapshot(country_code, tickers)
+    if not snapshots:
+        return
+
+    for ticker in tickers:
+        frame = frames.get(ticker)
+        if frame is None or frame.empty:
+            continue
+
+        snapshot = snapshots.get(ticker)
+        if not snapshot:
+            continue
+
+        open_price = float(snapshot.get("nowVal") or 0.0)
+        if open_price <= 0:
+            continue
+
+        row_payload = {column: np.nan for column in frame.columns}
+        for candidate in ("Open", "open"):
+            if candidate in row_payload:
+                row_payload[candidate] = open_price
+        for candidate in ("High", "high"):
+            if candidate in row_payload:
+                row_payload[candidate] = open_price
+        for candidate in ("Low", "low"):
+            if candidate in row_payload:
+                row_payload[candidate] = open_price
+        for candidate in ("Close", "close", "unadjusted_close"):
+            if candidate in row_payload:
+                row_payload[candidate] = open_price
+        for candidate in ("Volume", "volume"):
+            if candidate in row_payload:
+                row_payload[candidate] = 0
+
+        today_row = pd.DataFrame([row_payload], index=[normalized_today])
+        merged = pd.concat([frame, today_row])
+        merged = merged[~merged.index.duplicated(keep="last")].sort_index()
+        frames[ticker] = merged
+
+
 def _combine_rule_percentiles_array(
     per_rule_arrays: list[np.ndarray],
     eligibility_mask: np.ndarray,
@@ -147,6 +222,24 @@ def _combine_rule_percentiles_array(
     return composite
 
 
+def _compute_rsi_frame(close_frame: pd.DataFrame, period: int) -> pd.DataFrame:
+    """종가 프레임으로 RSI 프레임을 계산한다."""
+    delta = close_frame.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    rsi = pd.DataFrame(np.nan, index=close_frame.index, columns=close_frame.columns, dtype=float)
+    zero_loss_mask = avg_loss == 0
+    rsi[zero_loss_mask & ~avg_gain.isna()] = 100.0
+
+    valid_mask = (~avg_gain.isna()) & (~avg_loss.isna()) & (~zero_loss_mask)
+    rs = avg_gain[valid_mask] / avg_loss[valid_mask]
+    rsi[valid_mask] = 100.0 - (100.0 / (1.0 + rs))
+    return rsi
+
+
 # -------------------- 워커 프로세스 (병렬 실행) -------------------- #
 
 
@@ -161,6 +254,7 @@ _W_SELL_SLIPPAGE: float = 0.0
 _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
+_W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 
 
 def _init_worker(
@@ -171,12 +265,13 @@ def _init_worker(
     bt_days: list[pd.Timestamp],
     init_cash_local: float,
     fx_values: np.ndarray,
+    rsi_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
     global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
-    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES  # noqa: PLW0603
+    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES  # noqa: PLW0603
     _W_PCT_VALUES = pct_specs_values
     _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
@@ -186,13 +281,14 @@ def _init_worker(
     _W_OPEN_VALUES = open_values
     _W_CLOSE_VALUES = close_values
     _W_FX_VALUES = fx_values
+    _W_RSI_VALUES = rsi_values
 
 
 def _run_single_combo(
-    args: tuple[int, float, str, int, str, int],
+    args: tuple[int, float, str, int, str, int, float | None],
 ) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, bonus, fma_t, fma_m, sma_t, sma_m = args
+    top_n, bonus, fma_t, fma_m, sma_t, sma_m, rsi_limit = args
     # 공통 엔진과 동일한 방식으로 규칙별 percentile 합산 + 자격 마스크 적용.
     composite_values = _combine_rule_percentiles_array(
         [_W_PCT_VALUES[(fma_t, fma_m)], _W_PCT_VALUES[(sma_t, sma_m)]],
@@ -207,6 +303,8 @@ def _run_single_combo(
         close_values=_W_CLOSE_VALUES,
         backtest_days=_W_DAYS,
         fx_values=_W_FX_VALUES,
+        rsi_values=_W_RSI_VALUES,
+        rsi_limit=rsi_limit,
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
     )
@@ -217,6 +315,7 @@ def _run_single_combo(
         "FIRST_MA_MONTHS": fma_m,
         "SECOND_MA_TYPE": sma_t,
         "SECOND_MA_MONTHS": sma_m,
+        "RSI_LIMIT": rsi_limit,
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
         "MDD_PCT": mdd,
@@ -237,6 +336,8 @@ def _simulate_one_combo(
     close_values: np.ndarray,
     backtest_days: list[pd.Timestamp],
     fx_values: np.ndarray,
+    rsi_values: np.ndarray,
+    rsi_limit: float | None,
     buy_slippage: float,
     sell_slippage: float,
 ) -> tuple[float, float, float, int]:
@@ -267,6 +368,12 @@ def _simulate_one_combo(
         if bonus:
             held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
             composite_today[held_bonus_mask] += bonus
+
+        rsi_sell_mask = np.zeros_like(shares, dtype=bool)
+        if rsi_limit is not None:
+            rsi_today = rsi_values[signal_idx]
+            rsi_sell_mask = (~np.isnan(rsi_today)) & (rsi_today > rsi_limit)
+            composite_today[rsi_sell_mask] = np.nan
 
         open_exec = open_values[exec_idx]
         valid_mask = ~np.isnan(composite_today) & ~np.isnan(open_exec) & (open_exec > 0)
@@ -302,7 +409,7 @@ def _simulate_one_combo(
         target_mask = np.zeros_like(valid_mask, dtype=bool)
         target_mask[target_idx] = True
         held_mask = shares > 0
-        to_sell_idx = np.flatnonzero(held_mask & ~target_mask)
+        to_sell_idx = np.flatnonzero(held_mask & (~target_mask | rsi_sell_mask))
         to_buy_idx = target_idx[shares[target_idx] == 0]
 
         # 신호 시점 기준 총 자산 (= 목표 비중 계산용). 매수/매도는 현지 통화로 수행.
@@ -476,6 +583,7 @@ def _write_results_file(
     first_ma_months_list: list[int],
     second_ma_types: list[str],
     second_ma_months_list: list[int],
+    rsi_limits: list[float] | None,
     total_combos: int,
     done_count: int,
     period_start: pd.Timestamp,
@@ -517,6 +625,7 @@ def _write_results_file(
         f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 x HOLDING_BONUS_SCORE {len(bonus_values)}개 "
         f"x FIRST_MA_TYPE {len(first_ma_types)}개 x FIRST_MA_MONTHS {len(first_ma_months_list)}개 "
         f"x SECOND_MA_TYPE {len(second_ma_types)}개 x SECOND_MA_MONTHS {len(second_ma_months_list)}개 "
+        f"{f'x RSI_LIMIT {len(rsi_limits)}개 ' if rsi_limits is not None else ''}"
         f"= {total_combos}개 조합"
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
@@ -526,6 +635,8 @@ def _write_results_file(
     lines.append(f'"FIRST_MA_MONTHS": {first_ma_months_list},')
     lines.append(f'"SECOND_MA_TYPE": {second_ma_types},')
     lines.append(f'"SECOND_MA_MONTHS": {second_ma_months_list},')
+    if rsi_limits is not None:
+        lines.append(f'"RSI_LIMIT": {[int(v) if float(v).is_integer() else v for v in rsi_limits]},')
     lines.append("")
 
     status_label = "최종 결과" if is_final else f"중간 결과 ({done_count}/{total_combos})"
@@ -546,15 +657,17 @@ def _write_results_file(
         "MA1_M",
         "MA2_TYPE",
         "MA2_M",
+        "RSI",
         "수익률(%)",
         "CAGR(%)",
         "MDD(%)",
         "Trades",
     ]
-    aligns = ["left", "left", "left", "left", "left", "left", "right", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "left", "left", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
+            "-",
             "-",
             "-",
             "-",
@@ -579,6 +692,7 @@ def _write_results_file(
                 str(r["FIRST_MA_MONTHS"]),
                 r["SECOND_MA_TYPE"],
                 str(r["SECOND_MA_MONTHS"]),
+                "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
                 f"{r['MDD_PCT']:.2f}",
@@ -657,6 +771,8 @@ def _simulate_one_combo_details(
     second_rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
     close_frame: pd.DataFrame,
+    rsi_frame: pd.DataFrame,
+    rsi_limit: float | None,
     backtest_days: list[pd.Timestamp],
     fx_series: pd.Series,
     ticker_name_map: dict[str, str],
@@ -724,6 +840,8 @@ def _simulate_one_combo_details(
     lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
     lines.append(f"TOP_N_HOLD: {top_n}")
     lines.append(f"HOLDING_BONUS_SCORE: {bonus:g}")
+    if rsi_limit is not None:
+        lines.append(f"RSI_LIMIT: {rsi_limit:g}")
     lines.append("")
 
     def _append_day_section(
@@ -819,10 +937,17 @@ def _simulate_one_combo_details(
         composite = composite_frame.loc[signal_day].copy()
         first_rule_signal = first_rule_frame.loc[signal_day].copy()
         second_rule_signal = second_rule_frame.loc[signal_day].copy()
+        rsi_signal = rsi_frame.loc[signal_day].copy()
         if bonus:
             for holding in shares:
                 if holding in composite.index and not pd.isna(composite.loc[holding]):
                     composite.loc[holding] += bonus
+
+        rsi_sell_tickers: set[str] = set()
+        if rsi_limit is not None:
+            rsi_sell_mask = rsi_signal.notna() & (rsi_signal > rsi_limit)
+            rsi_sell_tickers = set(rsi_signal.index[rsi_sell_mask].tolist())
+            composite.loc[list(rsi_sell_tickers)] = np.nan
 
         valid = composite.dropna()
         if not valid.empty:
@@ -905,7 +1030,7 @@ def _simulate_one_combo_details(
         target_set = set(target_df["ticker"].head(top_n).tolist())
         current_set = set(shares.keys())
 
-        to_sell = current_set - target_set
+        to_sell = (current_set - target_set) | (current_set & rsi_sell_tickers)
         to_buy = target_set - current_set
         total_equity_signal = portfolio_value_local
 
@@ -956,7 +1081,11 @@ def _simulate_one_combo_details(
                         if pd.isna(second_rule_signal.get(ticker, np.nan))
                         else float(second_rule_signal.get(ticker, np.nan))
                     ),
-                    "message": "상위 N 제외로 시초가 전량매도",
+                    "message": (
+                        "RSI 상한 초과로 시초가 전량매도"
+                        if ticker in rsi_sell_tickers
+                        else "상위 N 제외로 시초가 전량매도"
+                    ),
                 }
             )
 
@@ -1112,6 +1241,7 @@ def _write_details_file(
     detail_lines: list[str],
 ) -> None:
     """상위 1개 조합의 일자별 보유 상세 로그를 기록한다."""
+    rsi_limit_text = "-" if top_result["RSI_LIMIT"] is None else f"{float(top_result['RSI_LIMIT']):g}"
     lines: list[str] = [
         f"종목풀: {pool_id}",
         f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}",
@@ -1122,6 +1252,7 @@ def _write_details_file(
         f"FIRST_MA_MONTHS: {top_result['FIRST_MA_MONTHS']}",
         f"SECOND_MA_TYPE: {top_result['SECOND_MA_TYPE']}",
         f"SECOND_MA_MONTHS: {top_result['SECOND_MA_MONTHS']}",
+        f"RSI_LIMIT: {rsi_limit_text}",
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
         f"MDD_PCT: {top_result['MDD_PCT']:.2f}",
@@ -1167,6 +1298,9 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     first_ma_months_list = [int(v) for v in cfg["FIRST_MA_MONTHS"]]
     second_ma_types = [str(v).upper() for v in cfg["SECOND_MA_TYPE"]]
     second_ma_months_list = [int(v) for v in cfg["SECOND_MA_MONTHS"]]
+    rsi_limits: list[float] | None = None
+    if "RSI_LIMIT" in cfg:
+        rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
 
     settings = get_ticker_type_settings(pool_id)
     country_code = str(settings.get("country_code") or "").strip().lower()
@@ -1203,6 +1337,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     # OHLCV 캐시 로드
     logger.info("[%s] OHLCV 캐시 로드: %s tickers ...", pool_id, len(tickers))
     frames = load_cached_frames_bulk_with_fallback(pool_id, tickers)
+    _augment_frames_with_intraday_open(frames, tickers, country_code, calendar_days[-1], today)
     missing = [t for t in tickers if t not in frames or frames[t] is None or frames[t].empty]
     if missing:
         logger.info(
@@ -1292,6 +1427,9 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     eligibility_values = eligibility_win.reindex(columns=ticker_columns).to_numpy(dtype=bool, copy=True)
     open_values = open_win.to_numpy(dtype=np.float64, copy=True)
     close_values = close_win.to_numpy(dtype=np.float64, copy=True)
+    rsi_frame = _compute_rsi_frame(close_frame, RSI_PERIOD)
+    rsi_win = rsi_frame.loc[backtest_days]
+    rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
 
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
@@ -1354,6 +1492,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             first_ma_months_list,
             second_ma_types,
             second_ma_months_list,
+            rsi_limits if rsi_limits is not None else [None],
         )
     )
     total_combos = len(combos)
@@ -1382,6 +1521,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         "first_ma_months_list": first_ma_months_list,
         "second_ma_types": second_ma_types,
         "second_ma_months_list": second_ma_months_list,
+        "rsi_limits": rsi_limits,
         "total_combos": total_combos,
         "period_start": period_start,
         "period_end": period_end,
@@ -1415,6 +1555,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             backtest_days,
             initial_cash_local,
             fx_values,
+            rsi_values,
             buy_slippage,
             sell_slippage,
         ),
@@ -1485,6 +1626,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             ],
             open_frame=open_win,
             close_frame=close_win,
+            rsi_frame=rsi_win,
+            rsi_limit=None if best_result["RSI_LIMIT"] is None else float(best_result["RSI_LIMIT"]),
             backtest_days=backtest_days,
             fx_series=fx_win,
             ticker_name_map=ticker_name_map,

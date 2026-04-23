@@ -18,11 +18,11 @@ export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as { action?: string };
     const allowed = new Set([
+      "data_aggregate",
       "cache_refresh",
       "market_hours_analysis",
       "metadata_updater",
       "asset_summary",
-      "weekly_aggregate",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {
@@ -30,7 +30,12 @@ export async function POST(request: NextRequest) {
     }
 
     const message = await triggerSystemAction(
-      actionStr as "cache_refresh" | "market_hours_analysis" | "metadata_updater" | "asset_summary" | "weekly_aggregate",
+      actionStr as
+        | "data_aggregate"
+        | "cache_refresh"
+        | "market_hours_analysis"
+        | "metadata_updater"
+        | "asset_summary",
     );
     return NextResponse.json({ message });
   } catch (error) {

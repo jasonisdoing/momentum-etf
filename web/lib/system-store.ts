@@ -28,11 +28,11 @@ type SystemData = {
 };
 
 type SystemAction =
+  | "data_aggregate"
   | "cache_refresh"
   | "market_hours_analysis"
   | "metadata_updater"
-  | "asset_summary"
-  | "weekly_aggregate";
+  | "asset_summary";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");
