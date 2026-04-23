@@ -28,7 +28,9 @@ type DailyRow = {
   purchase_amount: number;
   valuation_amount: number;
   profit_loss: number;
+  daily_profit: number;
   cumulative_profit: number;
+  daily_return_pct: number;
   cumulative_return_pct: number;
   memo: string;
   exchange_rate: number;
@@ -70,10 +72,12 @@ const MONEY_KEYS = new Set([
   "purchase_amount",
   "valuation_amount",
   "profit_loss",
+  "daily_profit",
   "cumulative_profit",
 ]);
 
 const PERCENT_KEYS = new Set([
+  "daily_return_pct",
   "cumulative_return_pct",
   "exchange_rate_change_pct",
   "bucket_pct_momentum",
@@ -96,7 +100,9 @@ const COLUMN_DEFS = [
   { key: "purchase_amount", label: "매입 금액" },
   { key: "valuation_amount", label: "평가 금액" },
   { key: "profit_loss", label: "평가 손익" },
+  { key: "daily_profit", label: "금일 손익" },
   { key: "cumulative_profit", label: "누적 손익" },
+  { key: "daily_return_pct", label: "일수익률" },
   { key: "cumulative_return_pct", label: "누적 수익률" },
   { key: "exchange_rate_change_pct", label: "환율(변동)" },
   { key: "exchange_rate", label: "환율" },
@@ -199,6 +205,7 @@ function getDailyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width?
     key === "purchase_amount" ||
     key === "valuation_amount" ||
     key === "profit_loss" ||
+    key === "daily_profit" ||
     key === "cumulative_profit"
   ) {
     return { width: 102, minWidth: 98 };
@@ -220,7 +227,7 @@ function getDailyColumnWidth(key: (typeof COLUMN_DEFS)[number]["key"]): { width?
   ) {
     return { width: 88, minWidth: 84 };
   }
-  if (key === "cumulative_return_pct") {
+  if (key === "daily_return_pct" || key === "cumulative_return_pct") {
     return { width: 96, minWidth: 92 };
   }
   if (
