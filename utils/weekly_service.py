@@ -6,6 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from utils.daily_fund_service import load_daily_docs_for_aggregation
+from utils.data_loader import get_trading_days
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 
@@ -96,6 +97,26 @@ def _format_week_date_display(date_str: str) -> str:
     weekday_kr = ["월", "화", "수", "목", "금", "토", "일"]
     dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
     return f"{dt.year}. {dt.month}. {dt.day} ({weekday_kr[dt.weekday()]})"
+
+
+def _get_iso_week_range(year: int, week: int) -> tuple[datetime.date, datetime.date]:
+    """해당 주차의 월요일과 일요일 날짜를 반환한다."""
+    monday = datetime.date.fromisocalendar(year, week, 1)
+    sunday = datetime.date.fromisocalendar(year, week, 7)
+    return monday, sunday
+
+
+def _get_last_trading_day_of_week(year: int, week: int) -> str:
+    """해당 주차의 한국 시장 마지막 영업일 날짜를 반환한다."""
+    monday, sunday = _get_iso_week_range(year, week)
+    try:
+        days = get_trading_days(str(monday), str(sunday), "kor")
+        if days:
+            return str(days[-1].date())
+    except Exception:
+        pass
+    # 폴백: 금요일 (달력 조회 실패 시)
+    return str(datetime.date.fromisocalendar(year, week, 5))
 
 
 def _normalize_bucket_percentages(source: dict[str, Any]) -> dict[str, float]:
@@ -229,13 +250,16 @@ def _get_week_group_key(date_str: str) -> tuple[int, int]:
     return iso.year, iso.week
 
 
-def _build_weekly_doc_from_group(docs: list[dict[str, Any]], memo: str) -> dict[str, Any]:
+def _build_weekly_doc_from_group(year: int, week: int, docs: list[dict[str, Any]], memo: str) -> dict[str, Any]:
     sorted_docs = sorted(docs, key=lambda item: str(item["date"]))
     last_doc = sorted_docs[-1]
     bucket_percentages = _normalize_bucket_percentages(last_doc)
     now = _get_now_kst()
+    # 종료일을 '데이터가 있는 마지막 날'이 아니라 '해당 주차의 마지막 영업일'로 고정
+    week_date = _get_last_trading_day_of_week(year, week)
+
     return {
-        "week_date": str(last_doc["date"]),
+        "week_date": week_date,
         "withdrawal_personal": sum(_to_int(doc.get("withdrawal_personal", 0)) for doc in sorted_docs),
         "withdrawal_mom": sum(_to_int(doc.get("withdrawal_mom", 0)) for doc in sorted_docs),
         "nh_principal_interest": sum(_to_int(doc.get("nh_principal_interest", 0)) for doc in sorted_docs),
@@ -260,15 +284,17 @@ def _build_weekly_docs_from_daily() -> list[dict[str, Any]]:
         grouped[_get_week_group_key(str(doc["date"]))].append(doc)
 
     db = _require_db()
-    existing_memo_by_week = {
-        str(doc["week_date"]): str(doc.get("memo", "") or "")
-        for doc in db[WEEKLY_COLLECTION].find({}, {"week_date": 1, "memo": 1})
-    }
+    # 메모를 (year, week) 튜플을 키로 하여 로드 (영업일 변경 대비)
+    existing_memo_by_iso = {}
+    for doc in db[WEEKLY_COLLECTION].find({}, {"week_date": 1, "memo": 1}):
+        wd = str(doc["week_date"])
+        iso_key = _get_week_group_key(wd)
+        existing_memo_by_iso[iso_key] = str(doc.get("memo", "") or "")
 
     weekly_docs: list[dict[str, Any]] = []
-    for group_docs in grouped.values():
-        last_date = max(str(doc["date"]) for doc in group_docs)
-        weekly_docs.append(_build_weekly_doc_from_group(group_docs, existing_memo_by_week.get(last_date, "")))
+    for (year, week), group_docs in grouped.items():
+        memo = existing_memo_by_iso.get((year, week), "")
+        weekly_docs.append(_build_weekly_doc_from_group(year, week, group_docs, memo))
 
     return sorted(weekly_docs, key=lambda item: str(item["week_date"]))
 
