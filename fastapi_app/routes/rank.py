@@ -1,27 +1,11 @@
 from __future__ import annotations
 
-import re
-
 from fastapi import APIRouter, Depends, Query, Request
 
 from fastapi_app.dependencies import require_internal_token
 from utils.rank_service import load_rank_data
 
 router = APIRouter(prefix="/internal/rank", tags=["rank"])
-
-
-def _parse_ma_rule_overrides(request: Request) -> list[dict[str, object]]:
-    overrides: dict[int, dict[str, object]] = {}
-    for key, value in request.query_params.multi_items():
-        match = re.fullmatch(r"rule(\d+)_(ma_type|ma_months)", key)
-        if not match:
-            continue
-        order = int(match.group(1))
-        field = match.group(2)
-        entry = overrides.setdefault(order, {"order": order})
-        entry[field] = value
-    return [overrides[order] for order in sorted(overrides)]
-
 
 @router.get("")
 def get_rank_data(
@@ -30,7 +14,14 @@ def get_rank_data(
     as_of_date: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    ma_rule_overrides = _parse_ma_rule_overrides(request)
+    ma_type = request.query_params.get("ma_type")
+    ma_months_raw = request.query_params.get("ma_months")
+    ma_rule_override: dict[str, object] | None = None
+    if ma_type is not None or ma_months_raw is not None:
+        ma_rule_override = {
+            "ma_type": ma_type or "",
+            "ma_months": int(ma_months_raw) if ma_months_raw is not None else 0,
+        }
     raw_held_bonus_score = request.query_params.get("held_bonus_score")
     if raw_held_bonus_score is None:
         raise ValueError("보유보너스점수 값이 필요합니다.")
@@ -41,7 +32,7 @@ def get_rank_data(
 
     return load_rank_data(
         ticker_type=ticker_type,
-        ma_rule_overrides=ma_rule_overrides,
+        ma_rule_override=ma_rule_override,
         as_of_date=as_of_date,
         held_bonus_score=held_bonus_score,
     )
