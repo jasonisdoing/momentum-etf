@@ -23,7 +23,7 @@
       "country_code": "kor",
       "currency": "KRW",
       "type_source": "Naver",
-      "TOP_N_HOLD": 5,
+      "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 20,
       "FIRST_MA_TYPE": "SMA",
       "FIRST_MA_MONTHS": 6,
