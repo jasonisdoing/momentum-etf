@@ -100,8 +100,8 @@ const COLUMN_DEFS = [
   { key: "purchase_amount", label: "매입 금액" },
   { key: "valuation_amount", label: "평가 금액" },
   { key: "profit_loss", label: "평가 손익" },
-  { key: "daily_profit", label: "금일 손익" },
   { key: "cumulative_profit", label: "누적 손익" },
+  { key: "daily_profit", label: "금일 손익" },
   { key: "daily_return_pct", label: "일수익률" },
   { key: "cumulative_return_pct", label: "누적 수익률" },
   { key: "exchange_rate_change_pct", label: "환율(변동)" },
@@ -162,7 +162,7 @@ function getColumnCellClass(key: string, value: number | string): string {
   if (MONEY_KEYS.has(key) || PERCENT_KEYS.has(key) || key === "exchange_rate") {
     classes.push("tableAlignRight");
   }
-  if (typeof value === "number" && (key === "profit_loss" || key === "cumulative_profit" || PERCENT_KEYS.has(key))) {
+  if (typeof value === "number" && (key === "profit_loss" || key === "cumulative_profit" || key === "daily_profit" || PERCENT_KEYS.has(key))) {
     const signedClass = getSignedClass(value);
     if (signedClass) {
       classes.push(signedClass);
