@@ -82,7 +82,7 @@ export function KorMarketStockManager({
 }) {
   const router = useRouter();
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
-  const [limit, setLimit] = useState<number>(200);
+  const [limit, setLimit] = useState<number>(100);
   const [minMarketCapJo, setMinMarketCapJo] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
