@@ -429,9 +429,9 @@ export function DailyManager({
                     </div>
                   </label>
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">원장 상태</span>
+                    <span className="appLabeledFieldLabel">집계</span>
                     <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
-                      기존 주별 종료일 스냅샷을 일별 원장 시드로 조회
+                      평일 09:32, 16:32 자산 스냅샷 기준 일별 자동 집계
                     </span>
                   </label>
                 </div>
