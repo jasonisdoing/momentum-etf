@@ -1269,6 +1269,40 @@ export function TickerDetailManager({
                                   {fxChangePct !== null ? formatPercent(fxChangePct) : "-"}
                                 </strong>
                               </div>
+                              {(() => {
+                                const prevClose = previousPriceRow?.close ?? (
+                                  latestClose !== null && latestChangePct !== null && (1 + latestChangePct / 100) !== 0
+                                    ? latestClose / (1 + latestChangePct / 100)
+                                    : null
+                                );
+                                const expectedPrice = prevClose !== null && portfolioChangePct !== null
+                                  ? prevClose * (1 + portfolioChangePct / 100)
+                                  : null;
+                                const expectedDelta = expectedPrice !== null && prevClose !== null
+                                  ? expectedPrice - prevClose
+                                  : null;
+                                return (
+                                  <div className="tickerDetailInfoTrackerRow">
+                                    <div>
+                                      <div className="tickerDetailInfoTrackerLabel">예상 가격</div>
+                                      <div className="tickerDetailInfoTrackerHint">포트폴리오 + 환율 변동 반영</div>
+                                    </div>
+                                    {expectedPrice !== null ? (
+                                      <div className="tickerDetailInfoMain">
+                                        <strong>{formatTickerPrice(expectedPrice, selectedCountryCode)}</strong>
+                                        <span className={getSignedClass(expectedDelta)}>
+                                          {formatSignedPriceDelta(expectedDelta, selectedCountryCode)}
+                                        </span>
+                                        <span className={getSignedClass(portfolioChangePct)}>
+                                          {formatPercent(portfolioChangePct)}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <strong>-</strong>
+                                    )}
+                                  </div>
+                                );
+                              })()}
                               <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
                                 <div>
                                   <div className="tickerDetailInfoTrackerLabel">구성종목 방향</div>
@@ -1298,6 +1332,7 @@ export function TickerDetailManager({
                                 theme={gridTheme}
                                 gridOptions={{
                                   suppressMovableColumns: true,
+                                  rowHeight: 40,
                                   getRowId: (params) => String(params.data.id),
                                   onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
                                     holdingsGridApiRef.current = event.api;

@@ -1628,11 +1628,12 @@ a {
   grid-template-areas:
     "info holdings"
     "chart table";
-  gap: 1rem;
+  column-gap: 1rem;
+  row-gap: 0.35rem;
   align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
-  padding-top: 0.75rem;
+  padding-top: 0.5rem;
 }
 
 .tickerDetailClassicLayout {
@@ -1651,7 +1652,7 @@ a {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  height: 420px;
+  height: 476px;
 }
 
 .tickerDetailInfoCard {
@@ -1827,7 +1828,7 @@ a {
 .tickerDetailHoldingsPanel {
   grid-area: holdings;
   display: flex;
-  height: 420px;
+  height: 476px;
   min-height: 0;
   min-width: 0;
   flex-direction: column;
