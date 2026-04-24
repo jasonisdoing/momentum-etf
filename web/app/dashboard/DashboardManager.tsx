@@ -276,14 +276,19 @@ const PERIOD_OPTIONS = [
   { label: "12달", months: 12 },
 ];
 
-function calcChangePct(sparkData: SparklinePoint[] | undefined, months: number): number | null {
+function calcChange(
+  sparkData: SparklinePoint[] | undefined,
+  months: number,
+): { pct: number; delta: number } | null {
   if (!sparkData || sparkData.length < 2) return null;
   const weeksBack = Math.round(months * 4.33);
   const baseIndex = Math.max(0, sparkData.length - 1 - weeksBack);
   const baseValue = sparkData[baseIndex].value;
   const currentValue = sparkData[sparkData.length - 1].value;
   if (baseValue === 0) return null;
-  return ((currentValue - baseValue) / Math.abs(baseValue)) * 100;
+  const delta = currentValue - baseValue;
+  const pct = (delta / Math.abs(baseValue)) * 100;
+  return { pct, delta };
 }
 
 type DashboardRenderableMetricItem = {
@@ -331,7 +336,8 @@ function DashboardMetricCard({
   const signClass = highlighted ? getSignedClass(item.value) : "";
   const sparkData = sparklines[item.label];
   const sparkColor = highlighted ? (item.value >= 0 ? "#2fb344" : "#d63939") : "#206bc4";
-  const changePct = calcChangePct(sparkData, periodMonths);
+  const change = calcChange(sparkData, periodMonths);
+  const isMoneyKind = item.kind === "money";
 
   function mask(value: number, kind: "money" | "percent" | "count" = "money"): string {
     if (hideMoney && kind === "money") return "••••••";
@@ -346,15 +352,22 @@ function DashboardMetricCard({
       >
         <div className="d-flex align-items-center justify-content-between">
           <div className="subheader">{item.label}</div>
-          {changePct !== null ? (
-            <span
-              className={changePct >= 0 ? "metricPositive" : "metricNegative"}
-              style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
-            >
-              {changePct.toFixed(1)}%
-              {changePct >= 0 ? " \u2197" : " \u2198"}
-            </span>
-          ) : null}
+          {change !== null ? (() => {
+            const pctRounded = Number(change.pct.toFixed(1));
+            const isZero = pctRounded === 0;
+            const colorClass = isZero ? "" : change.pct >= 0 ? "metricPositive" : "metricNegative";
+            const arrow = isZero ? "" : change.pct >= 0 ? " \u2197" : " \u2198";
+            const deltaText = isMoneyKind && !hideMoney ? `${formatMoney(change.delta)} ` : "";
+            return (
+              <span
+                className={colorClass}
+                style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
+              >
+                {deltaText}
+                {pctRounded.toFixed(1)}%{arrow}
+              </span>
+            );
+          })() : null}
         </div>
         {item.sub_value !== undefined && item.sub_kind === "count" ? (
           <div className="d-flex align-items-baseline gap-1" style={{ whiteSpace: "nowrap" }}>
@@ -467,16 +480,18 @@ export function DashboardManager() {
           스냅샷 {data?.latest_snapshot_date ?? "-"} · 주별 {data?.weekly_date ?? "-"} · 갱신 {formatUpdatedAt(data?.updated_at)}
         </div>
         <div className="d-flex align-items-center gap-2">
-          <select
-            className="form-select form-select-sm"
-            style={{ width: "auto" }}
-            value={periodMonths}
-            onChange={(e) => setPeriodMonths(Number(e.target.value))}
-          >
+          <div className="btn-group btn-group-sm" role="group" aria-label="기간 선택">
             {PERIOD_OPTIONS.map((opt) => (
-              <option key={opt.months} value={opt.months}>지난 {opt.label}</option>
+              <button
+                key={opt.months}
+                type="button"
+                className={`btn ${periodMonths === opt.months ? "btn-primary" : "btn-outline-secondary"}`}
+                onClick={() => setPeriodMonths(opt.months)}
+              >
+                지난 {opt.label}
+              </button>
             ))}
-          </select>
+          </div>
           {holdingsStatusMetric && holdingsStatusMetric.sub_value !== undefined ? (
             <div
               className="text-secondary"
