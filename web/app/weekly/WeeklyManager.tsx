@@ -334,6 +334,7 @@ export function WeeklyManager({
         ...getWeeklyColumnWidth(column.key),
         field: column.key,
         headerName: column.label,
+        pinned: column.key === "week_date_display" ? "left" : undefined,
         type:
           MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
             ? "rightAligned"
