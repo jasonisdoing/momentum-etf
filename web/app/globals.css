@@ -1651,7 +1651,7 @@ a {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  height: 360px;
+  height: 420px;
 }
 
 .tickerDetailInfoCard {
@@ -1660,9 +1660,9 @@ a {
   background: #fff;
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
   overflow: hidden;
-  display: grid;
-  gap: 0;
-  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
 }
 
 .tickerDetailInfoSummary {
@@ -1734,34 +1734,17 @@ a {
 }
 
 .tickerDetailInfoTracker {
-  padding: 0.08rem 0.4rem 0.12rem;
+  padding: 0.2rem 0.8rem;
   background: #fff;
   border-top: 1px solid #e6edf5;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
-.tickerDetailInfoTrackerTime,
-.tickerDetailInfoTrackerSub,
-.tickerDetailInfoTrackerHint,
-.tickerDetailInfoTrackerFoot {
+.tickerDetailInfoTrackerHint {
   color: #8a94a6;
   font-size: 13px;
-}
-
-.tickerDetailInfoTrackerBody {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0.02rem 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
-  gap: 0.28rem;
-}
-
-.tickerDetailInfoTrackerLeft {
-  display: grid;
-  gap: 0;
-  border-right: 1px solid #e6edf5;
-  padding-right: 0.3rem;
 }
 
 .tickerDetailInfoTrackerRow {
@@ -1769,17 +1752,16 @@ a {
   justify-content: space-between;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.08rem 0;
+  padding: 0.12rem 0;
   border-bottom: 1px dashed #d6deea;
+  flex: 1;
 }
 
 .tickerDetailInfoTrackerRowLast {
   border-bottom: 0;
 }
 
-.tickerDetailInfoTrackerLabel,
-.tickerDetailInfoTrackerBigLabel,
-.tickerDetailInfoTrackerEstimateLabel {
+.tickerDetailInfoTrackerLabel {
   font-size: 13px;
   font-weight: 800;
   color: #1f2937;
@@ -1788,43 +1770,21 @@ a {
 .tickerDetailInfoTrackerRow strong {
   font-size: 14px;
   font-weight: 800;
-  color: #d64045;
+  color: #1f2937;
 }
 
-.tickerDetailInfoTrackerRight {
-  display: grid;
-  align-content: start;
-  justify-items: end;
-  gap: 0;
-  text-align: right;
+.tickerDetailInfoTrackerRow strong.metricPositive {
+  color: #d32f2f;
 }
 
-.tickerDetailInfoTrackerDate {
-  font-size: 13px;
-  font-weight: 800;
-  color: #4b5563;
+.tickerDetailInfoTrackerRow strong.metricNegative {
+  color: #1d4ed8;
 }
 
-.tickerDetailInfoTrackerBigValue {
-  font-size: 18px;
-  font-weight: 900;
-  line-height: 1;
-  color: #d64045;
-}
-
-.tickerDetailInfoTrackerEstimateValue {
-  font-size: 14px;
-  font-weight: 900;
-  color: #b77900;
-}
-
-.tickerDetailInfoTrackerFooter {
-  margin-top: 0.04rem;
-  padding-top: 0.08rem;
-  border-top: 1px solid #e6edf5;
+.tickerDetailInfoTrackerCounts {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.55rem;
   flex-wrap: wrap;
   font-size: 13px;
   font-weight: 700;

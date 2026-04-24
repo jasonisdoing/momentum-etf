@@ -74,12 +74,17 @@ type TickerDetailResponse = {
 
 type TickerEtfInfo = {
   nav?: number | null;
+  nav_date?: string | null;
+  nav_change?: number | null;
+  nav_change_pct?: number | null;
   deviation?: number | null;
   expense_ratio?: number | null;
   dividend_yield_ttm?: number | null;
   total_net_assets_eok?: number | null;
   market_cap_krw?: number | null;
   volume?: number | null;
+  fx_rate?: number | null;
+  fx_change_pct?: number | null;
 };
 
 type TickerHoldingRow = {
@@ -937,11 +942,8 @@ export function TickerDetailManager({
     if (volume === null || Number.isNaN(volume)) {
       return "-";
     }
-    if (volume >= 1_000_000) {
-      return `${(volume / 1_000_000).toFixed(0)}M`;
-    }
-    if (volume >= 1_000) {
-      return `${(volume / 1_000).toFixed(0)}K`;
+    if (volume >= 10_000) {
+      return `${formatNumber(Math.floor(volume / 10_000), 0)}만`;
     }
     return formatNumber(volume, 0);
   }, [etfInfo?.volume, lastPriceRow]);
@@ -949,12 +951,50 @@ export function TickerDetailManager({
   const showKoreanEtfInfoSection = Boolean(
     selectedTicker?.country_code === "kor" && selectedTicker?.is_etf && selectedTicker?.has_holdings,
   );
-  const navDelta = useMemo(() => {
-    if (latestClose === null || etfInfo?.nav == null) {
-      return null;
-    }
-    return etfInfo.nav - latestClose;
-  }, [etfInfo?.nav, latestClose]);
+  const navDelta = etfInfo?.nav_change ?? null;
+  const navChangePct = etfInfo?.nav_change_pct ?? null;
+
+  // 환율 표시용 값 (장중 환율 변동 섹션에서만 사용)
+  const fxRate = etfInfo?.fx_rate ?? null;
+  const fxChangePct = etfInfo?.fx_change_pct ?? null;
+
+  // 포트폴리오 변동(구성종목 가중 평균) 계산
+  // - 해외 통화 보유종목은 환율 변동을 compound 적용해 원화 기준 변동률로 변환
+  // - 가중치 합이 100 미만이면 나머지는 현금(0% 변동)으로 가정 → 100 기준으로 정규화
+  // - change_pct가 null인 종목은 비중에서도 제외 (거래정지/데이터누락 방어)
+  const portfolioChangePct = useMemo(() => {
+    if (!holdings || holdings.length === 0) return null;
+
+    const fxFactor = fxChangePct != null && !Number.isNaN(fxChangePct)
+      ? 1 + fxChangePct / 100
+      : null;
+
+    let totalWeight = 0;
+    let weightedSum = 0;
+
+    holdings.forEach((h) => {
+      const weight = h.weight ?? 0;
+      if (weight <= 0) return;
+      if (h.change_pct == null || Number.isNaN(h.change_pct)) return;
+
+      const currency = String(h.price_currency || "").trim().toUpperCase();
+      const isForeign = currency !== "" && currency !== "KRW";
+      let changePctKrw = h.change_pct;
+      if (isForeign && fxFactor !== null) {
+        // (1 + 현지통화 변동률) × (1 + 환율 변동률) - 1
+        changePctKrw = ((1 + h.change_pct / 100) * fxFactor - 1) * 100;
+      }
+
+      weightedSum += weight * changePctKrw;
+      totalWeight += weight;
+    });
+
+    if (totalWeight <= 0) return null;
+    // 비중 합이 100 미만이면 현금 비중으로 간주 → 100 기준 정규화
+    // 100을 초과하면(정규화된 비중) totalWeight 그대로 사용
+    const divisor = Math.max(totalWeight, 100);
+    return weightedSum / divisor;
+  }, [holdings, fxChangePct]);
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
@@ -1169,7 +1209,7 @@ export function TickerDetailManager({
                                 <div className="tickerDetailInfoMain">
                                   <strong>{formatTickerPrice(etfInfo?.nav ?? null, "kor")}</strong>
                                   <span className={getSignedClass(navDelta)}>{formatSignedPriceDelta(navDelta, "kor")}</span>
-                                  <span className={getSignedClass(etfInfo?.deviation ?? null)}>{formatPercent(etfInfo?.deviation ?? null)}</span>
+                                  <span className={getSignedClass(navChangePct)}>{formatPercent(navChangePct)}</span>
                                 </div>
                               </div>
                               <div className="tickerDetailInfoSummaryGrid">
@@ -1200,44 +1240,45 @@ export function TickerDetailManager({
                               </div>
                             </div>
                             <div className="tickerDetailInfoTracker">
-                              <div className="tickerDetailInfoTrackerBody">
-                                <div className="tickerDetailInfoTrackerLeft">
-                                  <div className="tickerDetailInfoTrackerRow">
-                                    <div>
-                                      <div className="tickerDetailInfoTrackerLabel">장중 ETF iNAV 변동</div>
-                                      <div className="tickerDetailInfoTrackerHint">공식 iNAV</div>
-                                    </div>
-                                    <strong>-</strong>
-                                  </div>
-                                  <div className="tickerDetailInfoTrackerRow">
-                                    <div>
-                                      <div className="tickerDetailInfoTrackerLabel">포트폴리오 변동</div>
-                                      <div className="tickerDetailInfoTrackerHint">구성종목 가중 평균</div>
-                                    </div>
-                                    <strong>-</strong>
-                                  </div>
-                                  <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
-                                    <div>
-                                      <div className="tickerDetailInfoTrackerLabel">환율 변동</div>
-                                      <div className="tickerDetailInfoTrackerHint">-</div>
-                                    </div>
-                                    <strong>-</strong>
-                                  </div>
+                              <div className="tickerDetailInfoTrackerRow">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">장중 ETF iNAV 변동</div>
+                                  <div className="tickerDetailInfoTrackerHint">공식 iNAV</div>
                                 </div>
-                                <div className="tickerDetailInfoTrackerRight">
-                                  <div className="tickerDetailInfoTrackerDate">-</div>
-                                  <div className="tickerDetailInfoTrackerBigLabel">장 마감 이후 예상 변동</div>
-                                  <div className="tickerDetailInfoTrackerBigValue">-</div>
-                                  <div className="tickerDetailInfoTrackerHint">= 포트폴리오 + 환율 - 장중 ETF 흡수</div>
-                                  <div className="tickerDetailInfoTrackerEstimateLabel">추정 iNAV</div>
-                                  <div className="tickerDetailInfoTrackerEstimateValue">-</div>
-                                  <div className="tickerDetailInfoTrackerFoot">-</div>
-                                </div>
+                                <strong className={getSignedClass(etfInfo?.nav_change ?? null)}>
+                                  {etfInfo?.nav_change != null
+                                    ? `${formatSignedPriceDelta(etfInfo.nav_change, "kor")} (${formatPercent(etfInfo.nav_change_pct ?? null)})`
+                                    : "-"}
+                                </strong>
                               </div>
-                              <div className="tickerDetailInfoTrackerFooter">
-                                <span className="metricPositive">▲ {holdingsDirectionCounts.rising}종목</span>
-                                <span>■ {holdingsDirectionCounts.neutral}종목</span>
-                                <span className="metricNegative">▼ {holdingsDirectionCounts.falling}종목</span>
+                              <div className="tickerDetailInfoTrackerRow">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">포트폴리오 변동</div>
+                                  <div className="tickerDetailInfoTrackerHint">구성종목 가중 평균</div>
+                                </div>
+                                <strong className={getSignedClass(portfolioChangePct)}>
+                                  {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
+                                </strong>
+                              </div>
+                              <div className="tickerDetailInfoTrackerRow">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">환율 변동</div>
+                                  <div className="tickerDetailInfoTrackerHint">{fxRate ? `${formatNumber(fxRate, 2)}원` : "-"}</div>
+                                </div>
+                                <strong className={getSignedClass(fxChangePct)}>
+                                  {fxChangePct !== null ? formatPercent(fxChangePct) : "-"}
+                                </strong>
+                              </div>
+                              <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">구성종목 방향</div>
+                                  <div className="tickerDetailInfoTrackerHint">상승/보합/하락</div>
+                                </div>
+                                <div className="tickerDetailInfoTrackerCounts">
+                                  <span className="metricPositive">▲ {holdingsDirectionCounts.rising}종목</span>
+                                  <span>■ {holdingsDirectionCounts.neutral}종목</span>
+                                  <span className="metricNegative">▼ {holdingsDirectionCounts.falling}종목</span>
+                                </div>
                               </div>
                             </div>
                           </div>
