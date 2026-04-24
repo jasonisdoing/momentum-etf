@@ -786,6 +786,7 @@ def _simulate_one_combo_details(
         "비중",
         "점수",
         "추세",
+        "RSI(D-1)",
         "문구",
     ]
     aligns = [
@@ -793,6 +794,7 @@ def _simulate_one_combo_details(
         "left",
         "left",
         "left",
+        "right",
         "right",
         "right",
         "right",
@@ -868,6 +870,7 @@ def _simulate_one_combo_details(
             "-",
             "-",
             "-",
+            "-",
             note,
         ]
         day_rows.append(cash_row)
@@ -889,6 +892,7 @@ def _simulate_one_combo_details(
                     row["weight"],
                     row["score"],
                     row["trend"],
+                    row["rsi"],
                     row["message"],
                 ]
             )
@@ -981,6 +985,9 @@ def _simulate_one_combo_details(
                         "trend": _format_score_value(
                             None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                         ),
+                        "rsi": _format_score_value(
+                            None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
+                        ),
                         "message": "거래 없음",
                     }
                 )
@@ -1049,6 +1056,9 @@ def _simulate_one_combo_details(
                     ),
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
+                    ),
+                    "rsi": _format_score_value(
+                        None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
                     ),
                     "message": (
                         "RSI 상한 초과로 시초가 전량매도"
@@ -1130,6 +1140,9 @@ def _simulate_one_combo_details(
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
                     ),
+                    "rsi": _format_score_value(
+                        None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
+                    ),
                     "message": buy_messages.get(ticker, "기존 보유 유지"),
                 }
             )
@@ -1170,6 +1183,9 @@ def _simulate_one_combo_details(
                     ),
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan))
+                    ),
+                    "rsi": _format_score_value(
+                        None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
                     ),
                     "message": f"대기 순위 {current_rank}위",
                     "rank": current_rank,
@@ -1326,7 +1342,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     close_frame = pd.DataFrame(close_cols, index=index)
     open_frame = pd.DataFrame(open_cols, index=index)
 
-    # 1월 1일 시작 설정 시 1월 2일(첫 거래일)부터 매수가 가능하도록, 
+    # 1월 1일 시작 설정 시 1월 2일(첫 거래일)부터 매수가 가능하도록,
     # start_target 이후의 첫 거래일을 backtest_days[1]로 위치시킨다.
     # 이를 위해 start_target 이전의 마지막 1거래일을 찾아 backtest_days[0](시그널용)으로 포함한다.
     first_target_idx = next((i for i, d in enumerate(calendar_days) if d >= start_target), None)
@@ -1334,7 +1350,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         backtest_days = calendar_days[first_target_idx - 1 :]
     else:
         backtest_days = [d for d in calendar_days if d >= start_target]
-    
+
     if len(backtest_days) < 2:
         raise RuntimeError("백테스트 기간 내 거래일이 부족합니다. (최소 2거래일 필요)")
 
