@@ -29,11 +29,19 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 모든 배치는 캘린더 평일(월~금, KST) 에만 실행한다.
 # cron 의 요일 필드: 1=월, 2=화, ..., 5=금
 
-# 평일 매시간 정각 - 주가 캐시 갱신
-0 * * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+# 평일 09:20 ~ 17:20 매시 20분 - 주가 캐시 갱신
+# - 장 시간대(9:20~15:20) + 마감 후(16:20, 17:20) 만 실행
+# - 메타 업데이터(매시 30분)와 10분 간격을 두어 부하 분산
+# - 야간 실행은 전일 슬롯 덮어쓰기 위험이 있어 의도적으로 제외
+20 9-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 
-# 평일 09:00 KST - 종목 메타데이터 업데이트
-0 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py metadata_updater python scripts/stock_meta_cache_updater.py >> logs/cron/metadata_updater.log 2>&1
+# 평일 09:30 ~ 17:30 매시 30분 - 종목 메타데이터 업데이트
+# - 9:00 정각이 아닌 9:30부터 시작: 장 개장 직후 iNAV 미확정 상태 회피
+# - 장 시간대(9:30~15:30) + 마감 후(16:30, 17:30) 까지만 실행
+# - 매시간 실행으로 `stock_cache_meta_history` 에 당일 최종 스냅샷(17:30)이 남아,
+#   다음날 '전일 대비 iNAV 변동' 계산이 장 마감 값 기준으로 이뤄짐
+# - 야간(0~8시) 실행은 전일 슬롯 덮어쓰기 위험이 있어 의도적으로 제외
+30 9-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py metadata_updater python scripts/stock_meta_cache_updater.py >> logs/cron/metadata_updater.log 2>&1
 
 # 평일 09:32, 16:32 KST - 데이터 집계(일별 후 주별)
 32 9,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1

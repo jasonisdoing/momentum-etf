@@ -270,9 +270,16 @@ def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str, cat
 
     etf_info = fetch_korean_etf_info_from_naver(ticker_norm)
     holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
+    
+    # 실시간 iNAV/괴리율 추가 획득
+    from utils.data_loader import fetch_naver_etf_inav_snapshot
+    inav_snapshot = fetch_naver_etf_inav_snapshot([ticker_norm]).get(ticker_norm, {})
+    
     meta_cache = {
         "source": str(etf_info.get("source") or "naver_etf_meta"),
         "updated_at": str(etf_info.get("fetched_at") or ""),
+        "nav": inav_snapshot.get("nav"),
+        "deviation": inav_snapshot.get("deviation"),
         "reference_date": etf_info.get("reference_date"),
         "listed_date": etf_info.get("listed_date"),
         "dividend_yield_ttm": etf_info.get("dividend_yield_ttm"),

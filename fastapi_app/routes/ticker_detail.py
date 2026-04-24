@@ -8,11 +8,15 @@ from fastapi import APIRouter, Depends, Query
 
 from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
-from services.price_service import get_realtime_snapshot
-from services.price_service import get_realtime_snapshot_meta
-from services.price_service import get_worldstock_snapshot
-from services.price_service import get_yahoo_symbol_snapshot
+from services.price_service import (
+    get_exchange_rates,
+    get_realtime_snapshot,
+    get_realtime_snapshot_meta,
+    get_worldstock_snapshot,
+    get_yahoo_symbol_snapshot,
+)
 from services.stock_cache_service import get_stock_cache_meta
+from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
     load_cached_close_series_bulk_before_or_at_with_fallback,
@@ -207,6 +211,7 @@ def _infer_yahoo_symbol_currency(symbol: str) -> str:
 def _build_korean_etf_info_payload(
     *,
     ticker: str,
+    ticker_type: str,
     cache_document: dict[str, object] | None,
     latest_row: dict[str, object] | None,
 ) -> dict[str, object] | None:
@@ -225,12 +230,37 @@ def _build_korean_etf_info_payload(
     total_net_assets = meta_cache.get("total_net_assets")
     if total_net_assets is not None:
         try:
-            market_cap_krw = float(total_net_assets) * 100_000_000
+            # 네이버 ETFBase API의 totalNetAssets는 이미 '원' 단위임
+            market_cap_krw = float(total_net_assets)
         except (TypeError, ValueError):
             market_cap_krw = None
 
+    # 전일 iNAV 히스토리 조회
+    today_str = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+    prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, today_str)
+    prev_nav = None
+    if prev_history and "meta_cache" in prev_history:
+        prev_nav = prev_history["meta_cache"].get("nav")
+
+    nav_change = None
+    nav_change_pct = None
+    if nav_value is not None and prev_nav is not None and prev_nav > 0:
+        nav_change = float(nav_value) - float(prev_nav)
+        nav_change_pct = round((nav_change / float(prev_nav)) * 100, 2)
+
+    # 환율 정보 (무조건 제공)
+    rates = get_exchange_rates()
+    usd_info = rates.get("USD", {})
+    fx_rate = usd_info.get("rate")
+    fx_change_pct = usd_info.get("change_pct")
+
     return {
         "nav": float(nav_value) if nav_value is not None else None,
+        "nav_date": prev_history.get("date") if prev_history else None,
+        "nav_change": nav_change,
+        "nav_change_pct": nav_change_pct,
+        "fx_rate": fx_rate,
+        "fx_change_pct": fx_change_pct,
         "deviation": float(deviation_value) if deviation_value is not None else None,
         "expense_ratio": float(meta_cache["expense_ratio"]) if meta_cache.get("expense_ratio") is not None else None,
         "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"]) if meta_cache.get("dividend_yield_ttm") is not None else None,
@@ -637,6 +667,7 @@ def get_ticker_detail(
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
         etf_info = _build_korean_etf_info_payload(
             ticker=ticker,
+            ticker_type=ticker_type,
             cache_document=cache_document if isinstance(cache_document, dict) else None,
             latest_row=rows[-1] if rows else None,
         )
