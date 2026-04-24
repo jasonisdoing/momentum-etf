@@ -28,6 +28,7 @@ type ComponentSource = {
   return_pct?: number | null;
   daily_profit_krw?: number | null;
   cumulative_profit_krw?: number | null;
+  valuation_krw?: number | null;
 };
 
 type ComponentRow = {
@@ -42,6 +43,7 @@ type ComponentRow = {
   return_pct?: number | null;
   daily_profit_krw?: number | null;
   cumulative_profit_krw?: number | null;
+  valuation_krw?: number | null;
 };
 
 type EtfDetail = {
@@ -319,6 +321,16 @@ export function HoldingsDetailsPageClient() {
         return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
       },
     },
+    {
+      headerName: "평가금액",
+      field: "valuation_krw",
+      width: 140,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        return formatKrw(params.value);
+      },
+    },
   ], [expandedTicker]);
 
   // 상세 패널 렌더러 (부모 행과 컬럼/정렬 완벽 정밀 타격)
@@ -372,6 +384,10 @@ export function HoldingsDetailsPageClient() {
               <span className={getSignedClass(src.cumulative_profit_krw)}>
                 {formatKrw(src.cumulative_profit_krw)}
               </span>
+            </div>
+
+            <div className="hdColValuation">
+              {formatKrw(src.valuation_krw)}
             </div>
           </div>
         ))}
@@ -518,6 +534,7 @@ export function HoldingsDetailsPageClient() {
         .hdColReturn { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
+        .hdColValuation { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .holdingsDetailsNameCell {
           width: 100%;
           min-width: 0;

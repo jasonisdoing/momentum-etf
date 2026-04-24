@@ -396,6 +396,7 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         else:
             change_val = comp.get("change_pct")
         comp["daily_profit_krw"] = _estimate_daily_profit(_safe_float(comp.get("current_value_krw")), change_val)
+        comp["valuation_krw"] = _safe_float(comp.get("current_value_krw"))
         comp["return_pct"] = (
             (_safe_float(comp.get("cumulative_profit_krw")) / _safe_float(comp.get("buy_amount_krw")) * 100.0)
             if _safe_float(comp.get("buy_amount_krw")) > 0
@@ -421,6 +422,7 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
             else:
                 s_change_val = src.get("change_pct")
             src["daily_profit_krw"] = _estimate_daily_profit(_safe_float(src.get("current_value_krw")), s_change_val)
+            src["valuation_krw"] = _safe_float(src.get("current_value_krw"))
 
     return {
         "account_id": "TOTAL" if is_total else account_id_norm,
