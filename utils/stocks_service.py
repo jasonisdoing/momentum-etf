@@ -6,6 +6,7 @@ from utils.ticker_registry import load_ticker_type_configs as load_account_confi
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_nullable_number, normalize_text
+from utils.rank_service import invalidate_rank_data_cache
 from utils.stock_list_io import add_stock, hard_remove_stock, invalidate_ticker_type_cache
 from utils.stock_meta_updater import fetch_stock_info
 from services.price_service import get_realtime_snapshot
@@ -263,6 +264,7 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
     except Exception as e:
         logger.error(f"[{type_norm.upper()}/{ticker_norm}] 가격 캐시 갱신 실패: {e}")
 
+    invalidate_rank_data_cache(type_norm)
     return {"ticker": ticker_norm, "ticker_type": type_norm}
 
 
@@ -319,6 +321,7 @@ def add_active_stock(ticker_type: str, ticker: str, bucket_id: int) -> dict[str,
             invalidate_ticker_type_cache(ticker_type_norm)
         raise RuntimeError(f"종목 캐시 갱신에 실패해 추가를 취소했습니다: {refresh_error}") from refresh_error
 
+    invalidate_rank_data_cache(ticker_type_norm)
     return {
         "ticker": ticker_norm,
         "name": str(validated["name"]),
@@ -354,6 +357,7 @@ def update_stock_bucket(ticker_type: str, ticker: str, bucket_id: int) -> None:
 
     # stock_list_io 의 TTL 캐시가 60초간 이전 값을 반환해 버려서 UI 에 반영되지 않는 것을 방지한다.
     invalidate_ticker_type_cache(type_norm)
+    invalidate_rank_data_cache(type_norm)
 
 
 def delete_active_stock(ticker_type: str, ticker: str) -> None:
@@ -378,6 +382,8 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
         delete_stock_cache(type_norm, ticker_norm)
     except Exception:
         pass
+
+    invalidate_rank_data_cache(type_norm)
 
 
 def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
@@ -491,6 +497,7 @@ def restore_deleted_stocks(ticker_type: str, tickers: list[str]) -> int:
     )
     if result.modified_count > 0:
         invalidate_ticker_type_cache(type_norm)
+        invalidate_rank_data_cache(type_norm)
     return int(result.modified_count)
 
 
@@ -523,4 +530,5 @@ def hard_delete_stocks(ticker_type: str, tickers: list[str]) -> int:
 
     if result.deleted_count > 0:
         invalidate_ticker_type_cache(type_norm)
+        invalidate_rank_data_cache(type_norm)
     return int(result.deleted_count)
