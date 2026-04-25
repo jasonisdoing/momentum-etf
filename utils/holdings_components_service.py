@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.component_price_service import enrich_component_prices
 from services.stock_cache_service import get_stock_cache_meta
 from utils.account_registry import load_account_configs
 from utils.logger import get_app_logger
 from utils.ticker_registry import load_ticker_type_configs
 
 logger = get_app_logger()
+_MAX_VISIBLE_COMPONENTS = 100
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -206,6 +208,11 @@ def _append_account_components(
             source_return_pct = (source_cumulative_profit / source_buy_amount * 100.0) if source_buy_amount > 0 else None
             component_price_country_code = _infer_price_country_code(comp_ticker)
             component_currency = "KRW" if component_price_country_code == "kor" else "AUD" if component_price_country_code == "au" else "USD"
+            component_price_fields = {
+                "raw_code": item.get("raw_code"),
+                "reuters_code": item.get("reuters_code"),
+                "yahoo_symbol": item.get("yahoo_symbol"),
+            }
 
             if comp_ticker in merged:
                 merged[comp_ticker]["total_weight"] += weight
@@ -213,6 +220,9 @@ def _append_account_components(
                 merged[comp_ticker]["current_value_krw"] += source_current_value
                 merged[comp_ticker]["cumulative_profit_krw"] += source_cumulative_profit
                 merged[comp_ticker]["has_components"] = bool(merged[comp_ticker].get("has_components")) or True
+                for key, value in component_price_fields.items():
+                    if value and not merged[comp_ticker].get(key):
+                        merged[comp_ticker][key] = value
                 merged[comp_ticker]["sources"].append(
                     {
                         "etf_ticker": ticker,
@@ -236,6 +246,7 @@ def _append_account_components(
                     "total_weight": weight,
                     "currency": component_currency,
                     "price_country_code": component_price_country_code,
+                    **component_price_fields,
                     "buy_amount_krw": source_buy_amount,
                     "current_value_krw": source_current_value,
                     "cumulative_profit_krw": source_cumulative_profit,
@@ -324,77 +335,50 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     ]
     visible_components = _renormalize_component_weights(visible_components)
 
-    # 비중 순 정렬
-    sorted_components = sorted(
+    # 비중 순 정렬 후 화면에는 상위 구성종목만 반환한다.
+    all_sorted_components = sorted(
         (component for component in visible_components if float(component.get("total_weight") or 0.0) >= 0.01),
         key=lambda x: x["total_weight"],
         reverse=True,
     )
+    total_component_count = len(all_sorted_components)
+    sorted_components = all_sorted_components[:_MAX_VISIBLE_COMPONENTS]
 
-    # 실시간 가격 정보 추가
+    sorted_components, _ = enrich_component_prices(
+        sorted_components,
+        price_fetch_limit=100,
+        preserve_existing=True,
+    )
+
     from services.price_service import get_realtime_snapshot
-    
-    # 국가별 조회가 필요한 티커 목록 분류 (구성종목 + 소스 ETF)
-    kor_tickers = set()
-    us_tickers = set()
-    au_tickers = set()
 
-    def classify_ticker(ticker: str, price_country_code: Any) -> None:
-        ticker_norm = _normalize_ticker(ticker)
-        if not ticker_norm or ticker_norm in {"-", "IS"}:
-            return
-        country = str(price_country_code or "").strip().lower() or _infer_price_country_code(ticker_norm)
-        if country == "kor":
-            kor_tickers.add(ticker_norm)
-        elif country == "au":
-            au_tickers.add(ticker_norm)
-        elif country == "us":
-            us_tickers.add(ticker_norm)
+    source_tickers_by_country: dict[str, set[str]] = {"kor": set(), "au": set(), "us": set()}
+    for component in sorted_components:
+        for source in component["sources"]:
+            source_ticker = _normalize_ticker(source.get("etf_ticker"))
+            if not source_ticker or source_ticker in {"-", "IS"}:
+                continue
+            country = str(source.get("price_country_code") or "").strip().lower() or _infer_price_country_code(source_ticker)
+            if country in source_tickers_by_country:
+                source_tickers_by_country[country].add(source_ticker)
 
-    for c in sorted_components:
-        classify_ticker(c["ticker"], c.get("price_country_code"))
-        for src in c["sources"]:
-            classify_ticker(src["etf_ticker"], src.get("price_country_code"))
-    
-    # 실시간 스냅샷 조회
-    price_map: dict[str, dict[str, Any]] = {}
-    
-    if kor_tickers:
+    source_price_map: dict[str, dict[str, Any]] = {}
+    for country, tickers in source_tickers_by_country.items():
+        if not tickers:
+            continue
         try:
-            kor_results = get_realtime_snapshot("kor", list(kor_tickers))
-            price_map.update(kor_results)
-        except Exception as e:
-            logger.warning(f"보유종목 상세 가격 조회 실패 (kor): {e}")
-
-    if au_tickers:
-        try:
-            au_results = get_realtime_snapshot("au", list(au_tickers))
-            price_map.update(au_results)
-        except Exception as e:
-            logger.warning(f"보유종목 상세 가격 조회 실패 (au): {e}")
-            
-    if us_tickers:
-        try:
-            us_results = get_realtime_snapshot("us", list(us_tickers))
-            price_map.update(us_results)
-        except Exception as e:
-            logger.warning(f"보유종목 상세 가격 조회 실패 (us): {e}")
+            source_price_map.update(get_realtime_snapshot(country, list(tickers)))
+        except Exception as exc:
+            logger.warning("보유종목 상세 소스 ETF 가격 조회 실패 (%s): %s", country, exc)
 
     # 수치 반올림 및 가격 정보 병합
     for comp in sorted_components:
         comp["total_weight"] = round(comp["total_weight"], 2)
-        
-        # 구성종목 가격 정보 삽입
+
         ticker = comp["ticker"]
-        p_data = price_map.get(ticker, {})
-        if p_data:
-            comp["current_price"] = p_data.get("nowVal") if p_data.get("nowVal") is not None else p_data.get("price")
-            change_val = p_data.get("changeRate")
-            if change_val is None:
-                change_val = p_data.get("change_pct")
-            comp["change_pct"] = change_val
-        else:
-            change_val = comp.get("change_pct")
+        change_val = comp.get("change_pct")
+        if comp.get("price_currency"):
+            comp["currency"] = comp.get("price_currency")
         comp["daily_profit_krw"] = _estimate_daily_profit(_safe_float(comp.get("current_value_krw")), change_val)
         comp["valuation_krw"] = _safe_float(comp.get("current_value_krw"))
         comp["return_pct"] = (
@@ -411,13 +395,14 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         # 소스 ETF 가격 정보 삽입
         for src in comp["sources"]:
             src["weight"] = round(src["weight"], 2)
-            s_ticker = src["etf_ticker"]
-            s_p_data = price_map.get(s_ticker, {})
-            if s_p_data:
-                src["current_price"] = s_p_data.get("nowVal") if s_p_data.get("nowVal") is not None else s_p_data.get("price")
-                s_change_val = s_p_data.get("changeRate")
+            source_price = source_price_map.get(_normalize_ticker(src.get("etf_ticker")), {})
+            if source_price:
+                src["current_price"] = (
+                    source_price.get("nowVal") if source_price.get("nowVal") is not None else source_price.get("price")
+                )
+                s_change_val = source_price.get("changeRate")
                 if s_change_val is None:
-                    s_change_val = s_p_data.get("change_pct")
+                    s_change_val = source_price.get("change_pct")
                 src["change_pct"] = s_change_val
             else:
                 s_change_val = src.get("change_pct")
@@ -428,6 +413,8 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         "account_id": "TOTAL" if is_total else account_id_norm,
         "account_name": "전체" if is_total else account_name,
         "held_etf_count": len(filtered_etf_details),
+        "components_total_count": total_component_count,
+        "components_visible_limit": _MAX_VISIBLE_COMPONENTS,
         "components": sorted_components,
         "etf_details": sorted(filtered_etf_details, key=lambda x: (str(x.get("account_name") or ""), x["ticker"])),
     }
