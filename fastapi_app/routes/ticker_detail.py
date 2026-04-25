@@ -190,12 +190,14 @@ def _serialize_datetime(value: datetime | None) -> str | None:
     return value.isoformat()
 
 
-def _infer_yahoo_symbol_currency(symbol: str) -> str:
+def _infer_yahoo_symbol_currency(symbol: str) -> str | None:
     normalized = str(symbol or "").strip().upper()
     if normalized.endswith(".TW"):
         return "TWD"
     if normalized.endswith(".HK"):
         return "HKD"
+    if normalized.endswith((".SS", ".SZ", ".BJ")):
+        return "CNY"
     if normalized.endswith(".T"):
         return "JPY"
     if normalized.endswith(".L"):
@@ -204,7 +206,40 @@ def _infer_yahoo_symbol_currency(symbol: str) -> str:
         return "KRW"
     if normalized.endswith(".AX"):
         return "AUD"
-    return "USD"
+    return None
+
+
+def _build_fx_rates_for_holdings(holdings: list[dict[str, object]], rates: dict[str, object]) -> list[dict[str, object]]:
+    currencies: set[str] = set()
+    for item in holdings:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        raw_code = str(item.get("raw_code") or "").strip().upper()
+        name = str(item.get("name") or item.get("raw_name") or "").strip()
+        if ticker.startswith("KRD") or raw_code.startswith("KRD") or "현금" in name:
+            continue
+
+        currency = str(item.get("price_currency") or "").strip().upper()
+        if not currency:
+            inferred_currency = _infer_yahoo_symbol_currency(str(item.get("yahoo_symbol") or ""))
+            currency = str(inferred_currency or "").strip().upper()
+        if currency:
+            currencies.add(currency)
+
+    result: list[dict[str, object]] = []
+    for currency in sorted(currencies):
+        if currency == "KRW":
+            continue
+        rate_info = rates.get(currency)
+        if not isinstance(rate_info, dict):
+            continue
+        result.append(
+            {
+                "currency": currency,
+                "rate": rate_info.get("rate"),
+                "change_pct": rate_info.get("change_pct"),
+            }
+        )
+    return result
 
 
 def _build_korean_etf_info_payload(
@@ -213,6 +248,7 @@ def _build_korean_etf_info_payload(
     ticker_type: str,
     cache_document: dict[str, object] | None,
     latest_row: dict[str, object] | None,
+    holdings: list[dict[str, object]],
 ) -> dict[str, object] | None:
     if not isinstance(cache_document, dict):
         return None
@@ -252,6 +288,7 @@ def _build_korean_etf_info_payload(
     usd_info = rates.get("USD", {})
     fx_rate = usd_info.get("rate")
     fx_change_pct = usd_info.get("change_pct")
+    fx_rates = _build_fx_rates_for_holdings(holdings, rates)
 
     return {
         "nav": float(nav_value) if nav_value is not None else None,
@@ -260,6 +297,7 @@ def _build_korean_etf_info_payload(
         "nav_change_pct": nav_change_pct,
         "fx_rate": fx_rate,
         "fx_change_pct": fx_change_pct,
+        "fx_rates": fx_rates,
         "deviation": float(deviation_value) if deviation_value is not None else None,
         "expense_ratio": float(meta_cache["expense_ratio"]) if meta_cache.get("expense_ratio") is not None else None,
         "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"]) if meta_cache.get("dividend_yield_ttm") is not None else None,
@@ -664,13 +702,14 @@ def get_ticker_detail(
     if str(country_code or "").strip().lower() == "kor":
         cache_document = get_stock_cache_meta(ticker_type, ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
+        holdings = list(holdings_cache.get("items") or [])
         etf_info = _build_korean_etf_info_payload(
             ticker=ticker,
             ticker_type=ticker_type,
             cache_document=cache_document if isinstance(cache_document, dict) else None,
             latest_row=rows[-1] if rows else None,
+            holdings=holdings,
         )
-        holdings = list(holdings_cache.get("items") or [])
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
         if not holdings:
             holdings_error = (
@@ -705,6 +744,8 @@ def get_ticker_detail(
 
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings
+            if etf_info is not None:
+                etf_info["fx_rates"] = _build_fx_rates_for_holdings(holdings, get_exchange_rates())
 
     return {
         "ticker": ticker,

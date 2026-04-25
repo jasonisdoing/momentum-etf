@@ -1691,7 +1691,7 @@ a {
 }
 
 .tickerDetailInfoLabel {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
   color: #4b5563;
 }
@@ -1705,7 +1705,7 @@ a {
 
 .tickerDetailInfoMain strong,
 .tickerDetailInfoMetric strong {
-  font-size: 14px;
+  font-size: 17px;
   line-height: 1.1;
   font-weight: 800;
   color: #1f2937;
@@ -1745,7 +1745,7 @@ a {
 
 .tickerDetailInfoTrackerHint {
   color: #8a94a6;
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .tickerDetailInfoTrackerRow {
@@ -1763,13 +1763,13 @@ a {
 }
 
 .tickerDetailInfoTrackerLabel {
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   color: #1f2937;
 }
 
 .tickerDetailInfoTrackerRow strong {
-  font-size: 14px;
+  font-size: 17px;
   font-weight: 800;
   color: #1f2937;
 }
@@ -1782,12 +1782,53 @@ a {
   color: #1d4ed8;
 }
 
+.tickerDetailInfoFxList {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tickerDetailInfoFxItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  font-size: 14px;
+  font-weight: 700;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.tickerDetailInfoFxSeparator {
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.tickerDetailInfoFxItem strong {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.tickerDetailInfoFxItem .metricPositive {
+  color: #d32f2f;
+}
+
+.tickerDetailInfoFxItem .metricNegative {
+  color: #1d4ed8;
+}
+
 .tickerDetailInfoTrackerCounts {
   display: flex;
   align-items: center;
   gap: 0.55rem;
   flex-wrap: wrap;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 700;
 }
 
