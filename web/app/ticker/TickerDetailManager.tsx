@@ -85,6 +85,13 @@ type TickerEtfInfo = {
   volume?: number | null;
   fx_rate?: number | null;
   fx_change_pct?: number | null;
+  fx_rates?: TickerFxRate[];
+};
+
+type TickerFxRate = {
+  currency: string;
+  rate?: number | null;
+  change_pct?: number | null;
 };
 
 type TickerHoldingRow = {
@@ -954,8 +961,9 @@ export function TickerDetailManager({
   const navDelta = etfInfo?.nav_change ?? null;
   const navChangePct = etfInfo?.nav_change_pct ?? null;
 
-  // 환율 표시용 값 (장중 환율 변동 섹션에서만 사용)
-  const fxRate = etfInfo?.fx_rate ?? null;
+  const displayFxRates = useMemo<TickerFxRate[]>(() => {
+    return etfInfo?.fx_rates ?? [];
+  }, [etfInfo?.fx_rates]);
   const fxChangePct = etfInfo?.fx_change_pct ?? null;
 
   // 포트폴리오 변동(구성종목 가중 평균) 계산
@@ -1262,12 +1270,27 @@ export function TickerDetailManager({
                               </div>
                               <div className="tickerDetailInfoTrackerRow">
                                 <div>
-                                  <div className="tickerDetailInfoTrackerLabel">환율 변동</div>
-                                  <div className="tickerDetailInfoTrackerHint">{fxRate ? `${formatNumber(fxRate, 2)}원` : "-"}</div>
+                                  <div className="tickerDetailInfoTrackerLabel">환율</div>
+                                  <div className="tickerDetailInfoTrackerHint">구성종목 통화</div>
                                 </div>
-                                <strong className={getSignedClass(fxChangePct)}>
-                                  {fxChangePct !== null ? formatPercent(fxChangePct) : "-"}
-                                </strong>
+                                {displayFxRates.length > 0 ? (
+                                  <div className="tickerDetailInfoFxList">
+                                    {displayFxRates.map((fx, index) => (
+                                      <div key={fx.currency} className="tickerDetailInfoFxItem">
+                                        {index > 0 ? <span className="tickerDetailInfoFxSeparator">/</span> : null}
+                                        <span>{fx.currency}</span>
+                                        <strong>
+                                          {fx.rate != null ? `${formatNumber(fx.rate, 2)}원` : "-"}
+                                          <span className={getSignedClass(fx.change_pct ?? null)}>
+                                            ({formatPercent(fx.change_pct ?? null)})
+                                          </span>
+                                        </strong>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <strong>-</strong>
+                                )}
                               </div>
                               {(() => {
                                 const prevClose = previousPriceRow?.close ?? (

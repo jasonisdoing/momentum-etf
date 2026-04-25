@@ -207,9 +207,9 @@ def get_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, flo
 
 
 def get_exchange_rates() -> dict[str, Any]:
-    """USD/KRW, AUD/KRW 환율을 반환한다."""
+    """주요 통화의 원화 환율을 반환한다."""
 
-    cache_key = "fx:usd_aud"
+    cache_key = "fx:major"
     cached_entry = _FX_CACHE.get(cache_key)
     now = datetime.now()
 
@@ -433,6 +433,12 @@ def _fetch_exchange_rates() -> dict[str, Any]:
     mapping = {
         "USD": "KRW=X",
         "AUD": "AUDKRW=X",
+        "JPY": "JPYKRW=X",
+        "CNY": "CNYKRW=X",
+        "TWD": "TWDKRW=X",
+        "HKD": "HKDKRW=X",
+        "GBP": "GBPKRW=X",
+        "EUR": "EURKRW=X",
     }
     rates: dict[str, Any] = {}
     missing_currencies: list[str] = []
