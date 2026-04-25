@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
@@ -119,6 +120,8 @@ type RankAddingRowState = {
 
 const rankGridTheme = createAppGridTheme();
 const MAX_SELECTABLE_MA_MONTHS = 24;
+const RANK_SESSION_CACHE_TTL_MS = 60_000;
+const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
@@ -256,6 +259,10 @@ function clampHeldBonusScore(value: number): number {
   return Math.round(value / 5) * 5;
 }
 
+function buildRankSessionCacheKey(query: string): string {
+  return `${RANK_SESSION_CACHE_PREFIX}:${query || "default"}`;
+}
+
 
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
   const router = useRouter();
@@ -304,17 +311,65 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setStaleTickers([]);
   }
 
+  function applyRankPayload(payload: RankResponse) {
+    setAccounts(payload.ticker_types ?? []);
+    const nextAccountId = payload.ticker_type ?? "";
+    setSelectedAccountId(nextAccountId);
+    writeRememberedTickerType(nextAccountId);
+    setMaRule(payload.ma_rules?.[0] ?? null);
+    setMaTypeOptions(payload.ma_type_options ?? []);
+    setMaMonthsMax(payload.ma_months_max ?? 12);
+    setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
+    setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
+    rankToolbarCache = {
+      ticker_types: payload.ticker_types ?? [],
+      ticker_type: nextAccountId,
+      ma_rule: payload.ma_rules?.[0] ?? null,
+      ma_type_options: payload.ma_type_options ?? [],
+      ma_months_max: payload.ma_months_max ?? 12,
+    };
+    setAddingRow(null);
+    addingTickerDraftRef.current = "";
+    setDirtyRowIds([]);
+    setDirtyCellKeys([]);
+    setSelectedTickers([]);
+    setDeleteConfirmOpen(false);
+    setRows(payload.rows ?? []);
+    setCacheBlocked(Boolean(payload.cache_blocked));
+
+    const currentConfig = (payload.ticker_types ?? []).find(t => t.ticker_type === nextAccountId);
+    const configuredHeldBonusScore =
+      currentConfig && typeof currentConfig.holding_bonus_score === "number"
+        ? currentConfig.holding_bonus_score
+        : payload.held_bonus_score;
+
+    if (typeof payload.held_bonus_score === "number") {
+      setHeldBonusScore(payload.held_bonus_score);
+    } else if (typeof configuredHeldBonusScore === "number") {
+      setHeldBonusScore(configuredHeldBonusScore);
+    }
+
+    setRankingComputedAt(payload.ranking_computed_at ?? null);
+    setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
+    setMissingTickers(payload.missing_tickers ?? []);
+    setMissingTickerLabels(payload.missing_ticker_labels ?? []);
+    setStaleTickers(payload.stale_tickers ?? []);
+    setNaverCategoryConfig(payload.naver_category_config ?? []);
+  }
+
   async function load(next?: {
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
     held_bonus_score?: number;
     bootstrap?: boolean;
+    skip_session_cache?: boolean;
   }) {
     const requestSequence = ++loadSequenceRef.current;
     setLoading(true);
     setError(null);
     clearCacheWarningState();
+    let showedCachedPayload = false;
 
     try {
       const search = new URLSearchParams();
@@ -333,6 +388,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
+      const sessionCacheKey = buildRankSessionCacheKey(query);
+      if (!next?.skip_session_cache) {
+        const cachedPayload = readSessionTtlCache<RankResponse>(sessionCacheKey, RANK_SESSION_CACHE_TTL_MS);
+        if (cachedPayload && requestSequence === loadSequenceRef.current) {
+          applyRankPayload(cachedPayload);
+          setLoading(false);
+          showedCachedPayload = true;
+        }
+      }
+
       const response = await fetch(`/api/rank${query}`, { cache: "no-store" });
       const payload = (await response.json()) as RankResponse;
       if (!response.ok) {
@@ -342,51 +407,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return;
       }
 
-      setAccounts(payload.ticker_types ?? []);
-      const nextAccountId = payload.ticker_type ?? "";
-      setSelectedAccountId(nextAccountId);
-      writeRememberedTickerType(nextAccountId);
-      setMaRule(payload.ma_rules?.[0] ?? null);
-      setMaTypeOptions(payload.ma_type_options ?? []);
-      setMaMonthsMax(payload.ma_months_max ?? 12);
-      setSelectedAsOfDate(toDateInputValue(payload.as_of_date));
-      setMonthlyReturnLabels(payload.monthly_return_labels ?? []);
-      rankToolbarCache = {
-        ticker_types: payload.ticker_types ?? [],
-        ticker_type: nextAccountId,
-        ma_rule: payload.ma_rules?.[0] ?? null,
-        ma_type_options: payload.ma_type_options ?? [],
-        ma_months_max: payload.ma_months_max ?? 12,
-      };
-      setAddingRow(null);
-      addingTickerDraftRef.current = "";
-      setDirtyRowIds([]);
-      setDirtyCellKeys([]);
-      setSelectedTickers([]);
-      setDeleteConfirmOpen(false);
-      setRows(payload.rows ?? []);
-      setCacheBlocked(Boolean(payload.cache_blocked));
-
-      const currentConfig = (payload.ticker_types ?? []).find(t => t.ticker_type === nextAccountId);
-      const configuredHeldBonusScore =
-        currentConfig && typeof currentConfig.holding_bonus_score === "number"
-          ? currentConfig.holding_bonus_score
-          : payload.held_bonus_score;
-
-      if (typeof payload.held_bonus_score === "number") {
-        setHeldBonusScore(payload.held_bonus_score);
-      } else if (typeof configuredHeldBonusScore === "number") {
-        setHeldBonusScore(configuredHeldBonusScore);
-      }
-
-      setRankingComputedAt(payload.ranking_computed_at ?? null);
-      setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
-      setMissingTickers(payload.missing_tickers ?? []);
-      setMissingTickerLabels(payload.missing_ticker_labels ?? []);
-      setStaleTickers(payload.stale_tickers ?? []);
-      setNaverCategoryConfig(payload.naver_category_config ?? []);
+      writeSessionTtlCache(sessionCacheKey, payload);
+      applyRankPayload(payload);
     } catch (loadError) {
       if (requestSequence !== loadSequenceRef.current) {
+        return;
+      }
+      if (showedCachedPayload) {
         return;
       }
       let msg = loadError instanceof Error ? loadError.message : "순위 데이터를 불러오지 못했습니다.";
@@ -1192,6 +1219,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
           held_bonus_score: heldBonusScore,
+          skip_session_cache: true,
         });
       } catch (saveError) {
         showErrorToast(saveError instanceof Error ? saveError.message : "변경사항 저장에 실패했습니다.");
@@ -1236,6 +1264,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
           held_bonus_score: heldBonusScore,
+          skip_session_cache: true,
         });
       } catch (deleteError) {
         showErrorToast(deleteError instanceof Error ? deleteError.message : "종목 삭제에 실패했습니다.");
