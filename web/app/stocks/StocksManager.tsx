@@ -367,31 +367,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setRows(payload.rows ?? []);
       setCacheBlocked(Boolean(payload.cache_blocked));
 
-      // 선택된 ticker_type의 holding_bonus_score를 기본값으로 설정
       const currentConfig = (payload.ticker_types ?? []).find(t => t.ticker_type === nextAccountId);
       const configuredHeldBonusScore =
         currentConfig && typeof currentConfig.holding_bonus_score === "number"
           ? currentConfig.holding_bonus_score
           : payload.held_bonus_score;
 
-      if (typeof next?.held_bonus_score === "number") {
-        setHeldBonusScore(next.held_bonus_score);
+      if (typeof payload.held_bonus_score === "number") {
+        setHeldBonusScore(payload.held_bonus_score);
       } else if (typeof configuredHeldBonusScore === "number") {
         setHeldBonusScore(configuredHeldBonusScore);
-      }
-
-      if (
-        next?.bootstrap &&
-        typeof configuredHeldBonusScore === "number" &&
-        configuredHeldBonusScore !== payload.held_bonus_score
-      ) {
-        void load({
-          ticker_type: nextAccountId,
-          ma_rule_override: payload.ma_rules?.[0] ?? next?.ma_rule_override,
-          as_of_date: toDateInputValue(payload.as_of_date),
-          held_bonus_score: configuredHeldBonusScore,
-        });
-        return;
       }
 
       setRankingComputedAt(payload.ranking_computed_at ?? null);
@@ -425,12 +410,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({
       ticker_type: readRememberedTickerType() ?? undefined,
       as_of_date: getTodayDateInputValue(),
-      held_bonus_score: heldBonusScore,
       bootstrap: true,
     });
   }, []);
 
-  // 초기 로딩 시 heldBonusScore는 load 함수 내에서 설정됨
+  // 초기 로딩 시 보유 보너스 점수는 선택된 종목풀 설정을 서버에서 적용한다.
 
 
   function handleHeldBonusScoreChange(nextValue: number) {
@@ -1045,7 +1029,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     void load({
       ticker_type: accountId,
       as_of_date: selectedAsOfDate,
-      held_bonus_score: heldBonusScore,
       bootstrap: true,
     });
   }

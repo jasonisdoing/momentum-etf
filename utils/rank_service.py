@@ -328,9 +328,11 @@ def load_rank_data(
         if parsed_as_of_date is not None and not pd.isna(parsed_as_of_date):
             effective_as_of_date = parsed_as_of_date.normalize()
     if held_bonus_score is None:
-        raise ValueError("보유보너스점수 값이 필요합니다.")
-
-    bonus_score = int(held_bonus_score)
+        if selected_config is None:
+            raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
+        bonus_score = int(selected_config["holding_bonus_score"])
+    else:
+        bonus_score = int(held_bonus_score)
     current_rows = _build_bonus_adjusted_rows(dataframe, bonus_score)
     current_rank_map = _build_rank_map_from_rows(current_rows)
     previous_rank_map: dict[str, int] = {}

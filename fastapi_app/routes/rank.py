@@ -23,12 +23,12 @@ def get_rank_data(
             "ma_months": int(ma_months_raw) if ma_months_raw is not None else 0,
         }
     raw_held_bonus_score = request.query_params.get("held_bonus_score")
-    if raw_held_bonus_score is None:
-        raise ValueError("보유보너스점수 값이 필요합니다.")
-    try:
-        held_bonus_score = int(raw_held_bonus_score)
-    except ValueError as exc:
-        raise ValueError(f"보유보너스점수 형식이 올바르지 않습니다: {raw_held_bonus_score}") from exc
+    held_bonus_score: int | None = None
+    if raw_held_bonus_score is not None:
+        try:
+            held_bonus_score = int(raw_held_bonus_score)
+        except ValueError as exc:
+            raise ValueError(f"보유보너스점수 형식이 올바르지 않습니다: {raw_held_bonus_score}") from exc
 
     return load_rank_data(
         ticker_type=ticker_type,
