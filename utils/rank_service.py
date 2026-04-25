@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime
+from time import monotonic
 from typing import Any
 
 import pandas as pd
@@ -18,6 +20,54 @@ from utils.data_loader import get_trading_days
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 from config import NAVER_ETF_CATEGORY_CONFIG
+
+_RANK_DATA_CACHE_TTL_SECONDS = 60.0
+_RankCacheKey = tuple[str, str, tuple[tuple[str, int], ...], int]
+_RANK_DATA_CACHE: dict[_RankCacheKey, tuple[float, dict[str, Any]]] = {}
+
+
+def _build_rank_cache_key(
+    ticker_type: str,
+    as_of_date: pd.Timestamp | None,
+    ma_rules: list[dict[str, Any]],
+    held_bonus_score: int,
+) -> _RankCacheKey:
+    as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
+    ma_rule_key = tuple((str(rule.get("ma_type") or ""), int(rule.get("ma_months") or 0)) for rule in ma_rules)
+    return ticker_type, as_of_date_key, ma_rule_key, int(held_bonus_score)
+
+
+def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
+    """랭킹 응답 메모리 캐시를 무효화한다."""
+
+    if ticker_type is None:
+        _RANK_DATA_CACHE.clear()
+        return
+
+    target = str(ticker_type or "").strip().lower()
+    if not target:
+        return
+
+    for cache_key in list(_RANK_DATA_CACHE):
+        if cache_key[0] == target:
+            _RANK_DATA_CACHE.pop(cache_key, None)
+
+
+def _get_rank_data_cache(cache_key: _RankCacheKey) -> dict[str, Any] | None:
+    cached = _RANK_DATA_CACHE.get(cache_key)
+    if cached is None:
+        return None
+
+    cached_at, payload = cached
+    if monotonic() - cached_at > _RANK_DATA_CACHE_TTL_SECONDS:
+        _RANK_DATA_CACHE.pop(cache_key, None)
+        return None
+
+    return deepcopy(payload)
+
+
+def _set_rank_data_cache(cache_key: _RankCacheKey, payload: dict[str, Any]) -> None:
+    _RANK_DATA_CACHE[cache_key] = (monotonic(), deepcopy(payload))
 
 
 def _serialize_datetime(value: Any) -> str | None:
@@ -313,6 +363,18 @@ def load_rank_data(
         if selected_as_of_date > today_korea:
             raise ValueError("기준일은 오늘 이후로 선택할 수 없습니다.")
 
+    if held_bonus_score is None:
+        if selected_config is None:
+            raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
+        bonus_score = int(selected_config["holding_bonus_score"])
+    else:
+        bonus_score = int(held_bonus_score)
+
+    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules, bonus_score)
+    cached_payload = _get_rank_data_cache(cache_key)
+    if cached_payload is not None:
+        return cached_payload
+
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
         ma_rules=ma_rules,
@@ -327,12 +389,6 @@ def load_rank_data(
             parsed_as_of_date = None
         if parsed_as_of_date is not None and not pd.isna(parsed_as_of_date):
             effective_as_of_date = parsed_as_of_date.normalize()
-    if held_bonus_score is None:
-        if selected_config is None:
-            raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
-        bonus_score = int(selected_config["holding_bonus_score"])
-    else:
-        bonus_score = int(held_bonus_score)
     current_rows = _build_bonus_adjusted_rows(dataframe, bonus_score)
     current_rank_map = _build_rank_map_from_rows(current_rows)
     previous_rank_map: dict[str, int] = {}
@@ -360,7 +416,7 @@ def load_rank_data(
 
     dataframe = _apply_rank_info_cache(dataframe, selected_ticker_type)
 
-    return {
+    payload = {
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
@@ -387,3 +443,5 @@ def load_rank_data(
         "stale_tickers": [str(item) for item in (dataframe.attrs.get("stale_tickers") or [])],
         "naver_category_config": [c for c in NAVER_ETF_CATEGORY_CONFIG if c.get("show")],
     }
+    _set_rank_data_cache(cache_key, payload)
+    return payload
