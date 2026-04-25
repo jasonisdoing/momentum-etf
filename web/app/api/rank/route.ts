@@ -11,9 +11,6 @@ export async function GET(request: NextRequest) {
     const tickerType = searchParams.get("ticker_type") ?? undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
     const heldBonusScore = searchParams.get("held_bonus_score");
-    if (heldBonusScore === null) {
-      return jsonNoStore({ error: "보유보너스점수 값이 필요합니다." }, { status: 400 });
-    }
     const maType = searchParams.get("ma_type");
     const maMonthsRaw = searchParams.get("ma_months");
     const maRuleOverride =
@@ -29,7 +26,7 @@ export async function GET(request: NextRequest) {
       ticker_type: tickerType,
       ma_rule_override: maRuleOverride,
       as_of_date: asOfDate,
-      held_bonus_score: Number(heldBonusScore),
+      held_bonus_score: heldBonusScore === null ? undefined : Number(heldBonusScore),
     });
     return jsonNoStore(data);
   } catch (error) {
