@@ -58,6 +58,8 @@ type HoldingsComponentsData = {
   account_id: string;
   account_name: string;
   held_etf_count: number;
+  components_total_count?: number;
+  components_visible_limit?: number;
   components: ComponentRow[];
   etf_details: EtfDetail[];
 };
@@ -78,13 +80,15 @@ function formatWeight(w: number): string {
 
 function formatPrice(val: number | null | undefined, currency?: string): string {
   if (val == null) return "-";
-  if (currency === "USD") {
-    return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const normalizedCurrency = (currency ?? "KRW").toUpperCase();
+  if (normalizedCurrency === "KRW") {
+    return `${Math.floor(val).toLocaleString()}원`;
   }
-  if (currency === "AUD") {
-    return `A$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  }
-  return `${Math.floor(val).toLocaleString()}원`;
+  const fractionDigits = normalizedCurrency === "JPY" ? 0 : 2;
+  return `${val.toLocaleString(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  })} ${normalizedCurrency}`;
 }
 
 function formatSignedPercent(val: number | null | undefined): string {
@@ -416,6 +420,13 @@ export function HoldingsDetailsPageClient() {
   }), [DetailRenderer]);
 
   // 헤더 우측 정보
+  const componentsTotalCount = data?.components_total_count ?? data?.components.length ?? 0;
+  const componentsVisibleLimit = data?.components_visible_limit ?? data?.components.length ?? 0;
+  const componentsMetricText =
+    componentsTotalCount > componentsVisibleLimit
+      ? `${componentsTotalCount}개 중 상위 ${componentsVisibleLimit}개`
+      : `${componentsTotalCount}개`;
+
   const titleRight = data ? (
     <div className="appHeaderMetrics rankToolbarMeta">
       <div className="appHeaderMetric">
@@ -424,7 +435,7 @@ export function HoldingsDetailsPageClient() {
       </div>
       <div className="appHeaderMetric">
         <span>구성종목:</span>
-        <span className="appHeaderMetricValue">{data.components.length}개</span>
+        <span className="appHeaderMetricValue">{componentsMetricText}</span>
       </div>
     </div>
   ) : null;
