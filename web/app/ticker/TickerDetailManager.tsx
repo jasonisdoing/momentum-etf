@@ -74,6 +74,7 @@ type TickerDetailResponse = {
 
 type TickerEtfInfo = {
   nav?: number | null;
+  previous_nav?: number | null;
   nav_date?: string | null;
   nav_change?: number | null;
   nav_change_pct?: number | null;
@@ -92,6 +93,13 @@ type TickerFxRate = {
   currency: string;
   rate?: number | null;
   change_pct?: number | null;
+};
+
+type PortfolioChangeBreakdownItem = {
+  currency: string;
+  label: string;
+  change_pct: number;
+  weight: number;
 };
 
 type TickerHoldingRow = {
@@ -393,6 +401,20 @@ function buildRangeBadgeText(
   return `${formatTickerPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
 }
 
+function getCurrencyRegionLabel(currency: string): string {
+  const normalized = String(currency || "").trim().toUpperCase();
+  if (normalized === "KRW") return "국내";
+  if (normalized === "TWD") return "대만";
+  if (normalized === "JPY") return "일본";
+  if (normalized === "USD") return "미국";
+  if (normalized === "HKD") return "홍콩";
+  if (normalized === "CNY") return "중국";
+  if (normalized === "AUD") return "호주";
+  if (normalized === "GBP") return "영국";
+  if (normalized === "EUR") return "유럽";
+  return normalized;
+}
+
 function getInitialVisibleLogicalRange(
   data: PriceRow[],
   interval: ChartInterval,
@@ -435,7 +457,7 @@ function getInitialVisibleLogicalRange(
 
 export function TickerDetailManager({
 }: {
-}) {
+  }) {
   const searchParams = useSearchParams();
   const toast = useToast();
 
@@ -529,13 +551,13 @@ export function TickerDetailManager({
     if (matches.length > 1) {
       const rememberedType = readRememberedTickerType();
       const bestMatch = matches.find((m) => m.ticker_type === rememberedType);
-      
+
       if (bestMatch) {
         setSelectedTicker(bestMatch);
         void loadTickerData(bestMatch);
         return;
       }
-      
+
       setSelectedTicker(null);
       setError(`동일한 티커 ${qTicker}가 여러 종목풀(${matches.map(m => m.ticker_type).join(", ")})에 등록되어 있습니다.`);
       return;
@@ -964,21 +986,28 @@ export function TickerDetailManager({
   const displayFxRates = useMemo<TickerFxRate[]>(() => {
     return etfInfo?.fx_rates ?? [];
   }, [etfInfo?.fx_rates]);
-  const fxChangePct = etfInfo?.fx_change_pct ?? null;
+  const fxChangePctByCurrency = useMemo(() => {
+    const map = new Map<string, number>();
+    displayFxRates.forEach((fx) => {
+      const currency = String(fx.currency || "").trim().toUpperCase();
+      const changePct = fx.change_pct;
+      if (!currency || changePct == null || Number.isNaN(changePct)) {
+        return;
+      }
+      map.set(currency, changePct);
+    });
+    return map;
+  }, [displayFxRates]);
 
-  // 포트폴리오 변동(구성종목 가중 평균) 계산
-  // - 해외 통화 보유종목은 환율 변동을 compound 적용해 원화 기준 변동률로 변환
-  // - 가중치 합이 100 미만이면 나머지는 현금(0% 변동)으로 가정 → 100 기준으로 정규화
-  // - change_pct가 null인 종목은 비중에서도 제외 (거래정지/데이터누락 방어)
-  const portfolioChangePct = useMemo(() => {
-    if (!holdings || holdings.length === 0) return null;
+  const portfolioChange = useMemo<{
+    total_pct: number | null;
+    breakdown: PortfolioChangeBreakdownItem[];
+  }>(() => {
+    if (!holdings || holdings.length === 0) {
+      return { total_pct: null, breakdown: [] };
+    }
 
-    const fxFactor = fxChangePct != null && !Number.isNaN(fxChangePct)
-      ? 1 + fxChangePct / 100
-      : null;
-
-    let totalWeight = 0;
-    let weightedSum = 0;
+    const groups = new Map<string, { weight: number; weightedSum: number }>();
 
     holdings.forEach((h) => {
       const weight = h.weight ?? 0;
@@ -988,21 +1017,77 @@ export function TickerDetailManager({
       const currency = String(h.price_currency || "").trim().toUpperCase();
       const isForeign = currency !== "" && currency !== "KRW";
       let changePctKrw = h.change_pct;
-      if (isForeign && fxFactor !== null) {
+      if (isForeign) {
+        const fxChangePct = fxChangePctByCurrency.get(currency);
+        if (fxChangePct == null || Number.isNaN(fxChangePct)) {
+          return;
+        }
         // (1 + 현지통화 변동률) × (1 + 환율 변동률) - 1
+        const fxFactor = 1 + fxChangePct / 100;
         changePctKrw = ((1 + h.change_pct / 100) * fxFactor - 1) * 100;
       }
 
-      weightedSum += weight * changePctKrw;
-      totalWeight += weight;
+      const group = groups.get(currency || "KRW") ?? { weight: 0, weightedSum: 0 };
+      group.weight += weight;
+      group.weightedSum += weight * changePctKrw;
+      groups.set(currency || "KRW", group);
     });
 
-    if (totalWeight <= 0) return null;
-    // 비중 합이 100 미만이면 현금 비중으로 간주 → 100 기준 정규화
-    // 100을 초과하면(정규화된 비중) totalWeight 그대로 사용
+    let totalWeight = 0;
+    let totalWeightedSum = 0;
+    const breakdown: PortfolioChangeBreakdownItem[] = [];
+    for (const [currency, group] of groups.entries()) {
+      if (group.weight <= 0) {
+        continue;
+      }
+      const changePct = group.weightedSum / group.weight;
+      breakdown.push({
+        currency,
+        label: getCurrencyRegionLabel(currency),
+        change_pct: changePct,
+        weight: group.weight,
+      });
+      totalWeight += group.weight;
+      totalWeightedSum += group.weight * changePct;
+    }
+
+    breakdown.sort((a, b) => b.weight - a.weight);
+    if (totalWeight <= 0) {
+      return { total_pct: null, breakdown };
+    }
+
     const divisor = Math.max(totalWeight, 100);
-    return weightedSum / divisor;
-  }, [holdings, fxChangePct]);
+    return { total_pct: totalWeightedSum / divisor, breakdown };
+  }, [holdings, fxChangePctByCurrency]);
+  const portfolioChangePct = portfolioChange.total_pct;
+  const portfolioChangeBreakdown = portfolioChange.breakdown;
+  const estimatedIntradayNav = useMemo(() => {
+    const currentNav = etfInfo?.nav ?? null;
+    const previousNav = etfInfo?.previous_nav ?? null;
+    if (
+      currentNav === null ||
+      previousNav === null ||
+      portfolioChangePct === null ||
+      Number.isNaN(currentNav) ||
+      Number.isNaN(previousNav) ||
+      Number.isNaN(portfolioChangePct)
+    ) {
+      return { price: null, delta: null, remainingChangePct: null };
+    }
+
+    if (previousNav <= 0) {
+      return { price: null, delta: null, remainingChangePct: null };
+    }
+
+    const estimatedNav = previousNav * (1 + portfolioChangePct / 100);
+    const delta = estimatedNav - currentNav;
+    const remainingChangePct = currentNav === 0 ? null : ((estimatedNav / currentNav) - 1) * 100;
+    return {
+      price: estimatedNav,
+      delta,
+      remainingChangePct,
+    };
+  }, [etfInfo?.nav, etfInfo?.previous_nav, portfolioChangePct]);
 
   const dailyColumns = useMemo<ColDef[]>(
     () => [
@@ -1014,14 +1099,20 @@ export function TickerDetailManager({
         cellStyle: { fontWeight: 600 },
         cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
       },
-      { field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode) },
-      { field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
+      {
+        field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+      },
+      {
+        field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
-        ) },
-      { field: "volume", headerName: "거래량", minWidth: 118, flex: 1.2, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
+        )
+      },
+      {
+        field: "volume", headerName: "거래량", minWidth: 118, flex: 1.2, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0)
+      },
     ],
     [selectedCountryCode],
   );
@@ -1035,14 +1126,20 @@ export function TickerDetailManager({
         flex: 1.1,
         cellStyle: { fontWeight: 600 },
       },
-      { field: "close", headerName: "월말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode) },
-      { field: "change_pct", headerName: "월간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
+      {
+        field: "close", headerName: "월말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+      },
+      {
+        field: "change_pct", headerName: "월간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
-        ) },
-      { field: "volume", headerName: "월간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
+        )
+      },
+      {
+        field: "volume", headerName: "월간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0)
+      },
     ],
     [selectedCountryCode],
   );
@@ -1250,19 +1347,22 @@ export function TickerDetailManager({
                             <div className="tickerDetailInfoTracker">
                               <div className="tickerDetailInfoTrackerRow">
                                 <div>
-                                  <div className="tickerDetailInfoTrackerLabel">장중 ETF iNAV 변동</div>
-                                  <div className="tickerDetailInfoTrackerHint">공식 iNAV</div>
-                                </div>
-                                <strong className={getSignedClass(etfInfo?.nav_change ?? null)}>
-                                  {etfInfo?.nav_change != null
-                                    ? `${formatSignedPriceDelta(etfInfo.nav_change, "kor")} (${formatPercent(etfInfo.nav_change_pct ?? null)})`
-                                    : "-"}
-                                </strong>
-                              </div>
-                              <div className="tickerDetailInfoTrackerRow">
-                                <div>
                                   <div className="tickerDetailInfoTrackerLabel">포트폴리오 변동</div>
-                                  <div className="tickerDetailInfoTrackerHint">구성종목 가중 평균</div>
+                                  <div className="tickerDetailInfoTrackerHint">
+                                    {portfolioChangeBreakdown.length > 0 ? (
+                                      <span className="tickerDetailInfoBreakdownList">
+                                        {portfolioChangeBreakdown.map((item, index) => (
+                                          <span key={item.currency} className="tickerDetailInfoBreakdownItem">
+                                            {index > 0 ? <span className="tickerDetailInfoBreakdownSeparator">/</span> : null}
+                                            <span>{item.label}</span>
+                                            <span className={getSignedClass(item.change_pct)}>{formatPercent(item.change_pct)}</span>
+                                          </span>
+                                        ))}
+                                      </span>
+                                    ) : (
+                                      "구성종목 가중 평균"
+                                    )}
+                                  </div>
                                 </div>
                                 <strong className={getSignedClass(portfolioChangePct)}>
                                   {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
@@ -1292,32 +1392,35 @@ export function TickerDetailManager({
                                   <strong>-</strong>
                                 )}
                               </div>
+                              <div className="tickerDetailInfoTrackerRow">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">iNAV 대비 변동</div>
+                                  <div className="tickerDetailInfoTrackerHint">추정 iNAV / 현재 공식 iNAV - 1</div>
+                                </div>
+                                <strong className={getSignedClass(estimatedIntradayNav.remainingChangePct)}>
+                                  {estimatedIntradayNav.remainingChangePct !== null
+                                    ? formatPercent(estimatedIntradayNav.remainingChangePct)
+                                    : "-"}
+                                </strong>
+                              </div>
                               {(() => {
-                                const prevClose = previousPriceRow?.close ?? (
-                                  latestClose !== null && latestChangePct !== null && (1 + latestChangePct / 100) !== 0
-                                    ? latestClose / (1 + latestChangePct / 100)
-                                    : null
-                                );
-                                const expectedPrice = prevClose !== null && portfolioChangePct !== null
-                                  ? prevClose * (1 + portfolioChangePct / 100)
-                                  : null;
-                                const expectedDelta = expectedPrice !== null && prevClose !== null
-                                  ? expectedPrice - prevClose
-                                  : null;
+                                const estimatedNav = estimatedIntradayNav.price;
+                                const estimatedDelta = estimatedIntradayNav.delta;
+                                const estimatedChangePct = estimatedIntradayNav.remainingChangePct;
                                 return (
                                   <div className="tickerDetailInfoTrackerRow">
                                     <div>
-                                      <div className="tickerDetailInfoTrackerLabel">예상 가격</div>
-                                      <div className="tickerDetailInfoTrackerHint">포트폴리오 + 환율 변동 반영</div>
+                                      <div className="tickerDetailInfoTrackerLabel">추정 iNAV</div>
+                                      <div className="tickerDetailInfoTrackerHint">전일 iNAV × 포트폴리오 변동</div>
                                     </div>
-                                    {expectedPrice !== null ? (
+                                    {estimatedNav !== null ? (
                                       <div className="tickerDetailInfoMain">
-                                        <strong>{formatTickerPrice(expectedPrice, selectedCountryCode)}</strong>
-                                        <span className={getSignedClass(expectedDelta)}>
-                                          {formatSignedPriceDelta(expectedDelta, selectedCountryCode)}
+                                        <strong>{formatTickerPrice(estimatedNav, selectedCountryCode)}</strong>
+                                        <span className={getSignedClass(estimatedDelta)}>
+                                          {formatSignedPriceDelta(estimatedDelta, selectedCountryCode)}
                                         </span>
-                                        <span className={getSignedClass(portfolioChangePct)}>
-                                          {formatPercent(portfolioChangePct)}
+                                        <span className={getSignedClass(estimatedChangePct)}>
+                                          {formatPercent(estimatedChangePct)}
                                         </span>
                                       </div>
                                     ) : (

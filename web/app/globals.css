@@ -1748,6 +1748,32 @@ a {
   font-size: 14px;
 }
 
+.tickerDetailInfoBreakdownList {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailInfoBreakdownItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #8a94a6;
+}
+
+.tickerDetailInfoBreakdownSeparator {
+  color: #8a94a6;
+}
+
+.tickerDetailInfoBreakdownItem .metricPositive {
+  color: #d32f2f;
+}
+
+.tickerDetailInfoBreakdownItem .metricNegative {
+  color: #1d4ed8;
+}
+
 .tickerDetailInfoTrackerRow {
   display: flex;
   justify-content: space-between;
