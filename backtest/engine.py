@@ -741,6 +741,62 @@ def _format_weekday_kr(day: pd.Timestamp) -> str:
     return weekdays[int(day.weekday())]
 
 
+def _format_date_with_weekday(day: pd.Timestamp) -> str:
+    """거래일을 YYYY-MM-DD(요일) 형식으로 반환한다."""
+    return f"{day.strftime('%Y-%m-%d')}({_format_weekday_kr(day)})"
+
+
+def _week_key(day: pd.Timestamp) -> tuple[int, int]:
+    """ISO 연도/주차 기준 주별 그룹 키를 반환한다."""
+    iso = day.isocalendar()
+    return int(iso.year), int(iso.week)
+
+
+def _build_weekly_summary_rows(
+    *,
+    daily_summaries: list[dict[str, Any]],
+    initial_cash_krw: float,
+    top_n: int,
+) -> list[list[str]]:
+    """일별 평가 스냅샷에서 각 주의 마지막 거래일 요약 행을 만든다."""
+    if not daily_summaries:
+        return []
+
+    weekly_summaries: list[dict[str, Any]] = []
+    active_week_key = _week_key(pd.Timestamp(daily_summaries[0]["day"]))
+    last_summary = daily_summaries[0]
+
+    for summary in daily_summaries[1:]:
+        summary_week_key = _week_key(pd.Timestamp(summary["day"]))
+        if summary_week_key != active_week_key:
+            weekly_summaries.append(last_summary)
+            active_week_key = summary_week_key
+        last_summary = summary
+    weekly_summaries.append(last_summary)
+
+    rows: list[list[str]] = []
+    previous_total_krw = initial_cash_krw
+    for summary in weekly_summaries:
+        total_equity_krw = float(summary["total_equity_krw"])
+        weekly_pnl_krw = total_equity_krw - previous_total_krw
+        weekly_pct = (weekly_pnl_krw / previous_total_krw) * 100.0 if previous_total_krw > 0 else 0.0
+        cumulative_pnl_krw = total_equity_krw - initial_cash_krw
+        cumulative_pct = (cumulative_pnl_krw / initial_cash_krw) * 100.0 if initial_cash_krw > 0 else 0.0
+        rows.append(
+            [
+                _format_date_with_weekday(pd.Timestamp(summary["day"])),
+                format_price(total_equity_krw, "kor"),
+                f"{int(summary['holding_count'])}/{top_n}",
+                format_price(weekly_pnl_krw, "kor"),
+                format_pct_change(weekly_pct),
+                format_price(cumulative_pnl_krw, "kor"),
+                format_pct_change(cumulative_pct),
+            ]
+        )
+        previous_total_krw = total_equity_krw
+    return rows
+
+
 def _simulate_one_combo_details(
     *,
     initial_cash_local: float,
@@ -824,7 +880,10 @@ def _simulate_one_combo_details(
     if rsi_limit is not None:
         lines.append(f"RSI_LIMIT: {rsi_limit:g}")
     lines.append("")
+    lines.append("1. 일별 거래 내역")
+    lines.append("")
     prev_total_equity_krw = initial_cash_krw
+    daily_summaries: list[dict[str, Any]] = []
 
     def _append_day_section(
         *,
@@ -838,6 +897,7 @@ def _simulate_one_combo_details(
         valuation_cost_local: float,
         note: str,
     ) -> None:
+        nonlocal prev_total_equity_krw
         fx_today = float(fx_series.loc[day])
         total_equity_krw = total_equity_local * fx_today
         cash_krw = cash_local * fx_today
@@ -850,7 +910,13 @@ def _simulate_one_combo_details(
         cumulative_pct = (
             (cumulative_pnl_krw / initial_cash_krw) * 100.0 if initial_cash_krw > 0 else 0.0
         )
-        nonlocal prev_total_equity_krw
+        daily_summaries.append(
+            {
+                "day": day,
+                "total_equity_krw": total_equity_krw,
+                "holding_count": len(held_rows),
+            }
+        )
         daily_pnl_krw = total_equity_krw - prev_total_equity_krw
         daily_pct = ((daily_pnl_krw / prev_total_equity_krw) * 100.0) if prev_total_equity_krw > 0 else 0.0
         day_rows: list[list[str]] = []
@@ -898,7 +964,7 @@ def _simulate_one_combo_details(
             )
 
         lines.append(
-            f"[{day.strftime('%Y-%m-%d')}({_format_weekday_kr(day)})] "
+            f"[{_format_date_with_weekday(day)}] "
             f"총자산 {format_price(total_equity_krw, 'kor')} / "
             f"현금 {format_price(cash_krw, 'kor')} / "
             f"일간수익: {format_price(daily_pnl_krw, 'kor')}({format_pct_change(daily_pct)}) / "
@@ -1207,6 +1273,19 @@ def _simulate_one_combo_details(
             valuation_cost_local=valuation_cost_local,
             note=note,
         )
+
+    lines.append("2. 주별 내역")
+    weekly_headers = ["종료일", "총자산", "종목수", "주간수익", "주간수익률", "누적수익", "누적수익률"]
+    weekly_aligns = ["left", "right", "right", "right", "right", "right", "right"]
+    weekly_rows = _build_weekly_summary_rows(
+        daily_summaries=daily_summaries,
+        initial_cash_krw=initial_cash_krw,
+        top_n=top_n,
+    )
+    if weekly_rows:
+        lines.extend(render_table_eaw(weekly_headers, weekly_rows, weekly_aligns))
+    else:
+        lines.append("(내역 없음)")
 
     return lines
 
