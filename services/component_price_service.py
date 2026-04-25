@@ -53,6 +53,9 @@ def enrich_component_prices(
     yahoo_exchange_symbols: list[str] = []
 
     for item in holdings_for_pricing:
+        if _is_cash_like_holding(item):
+            continue
+
         component_ticker = _normalize_upper(item.get("ticker"))
         if _is_korean_six_digit_holding(item):
             korean_tickers.append(component_ticker)
@@ -84,7 +87,10 @@ def enrich_component_prices(
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or None
         enriched_item["yahoo_symbol"] = yahoo_symbol
 
-        if id(item) not in pricing_ids:
+        if _is_cash_like_holding(item):
+            _clear_price_fields(enriched_item, preserve_existing=preserve_existing)
+            enriched_item["price_currency"] = "KRW"
+        elif id(item) not in pricing_ids:
             _clear_price_fields(enriched_item, preserve_existing=preserve_existing)
         elif _is_korean_six_digit_holding(item):
             _apply_price_snapshot(
@@ -138,6 +144,13 @@ def enrich_component_prices(
 
 def _normalize_upper(value: Any) -> str:
     return str(value or "").strip().upper()
+
+
+def _is_cash_like_holding(item: dict[str, Any]) -> bool:
+    ticker = _normalize_upper(item.get("ticker"))
+    raw_code = _normalize_upper(item.get("raw_code"))
+    name = str(item.get("name") or item.get("raw_name") or "").strip()
+    return ticker.startswith("KRD") or raw_code.startswith("KRD") or "현금" in name
 
 
 def _is_korean_six_digit_holding(item: dict[str, Any]) -> bool:
