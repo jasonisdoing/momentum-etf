@@ -138,7 +138,7 @@ MIN_TRADING_DAYS = 5
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
 # -----------------------------------------------------------------------
-BACKTEST_START_DATE = "2026-01-01"
+BACKTEST_START_DATE = "2025-05-01"
 BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 
 # 슬리피지는 % 단위로 입력한다.
@@ -197,7 +197,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
-        "TOP_N_HOLD": [5],
+        "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["SMA", "EMA", "ALMA", "HMA"],
         "MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10],
