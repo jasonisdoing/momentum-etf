@@ -537,6 +537,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const maRuleSummary = useMemo(() => (maRule ? [`MA: ${maRule.ma_type} ${maRule.ma_months}개월`] : []), [maRule]);
 
+  // 추천 ✅ 대상 티커 집합 — 백테스트 로직과 동일하게 RSI 탈락 시 다음 순위로 백필.
+  const recommendedTickerSet = useMemo<Set<string>>(() => {
+    const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
+    if (!topN) return new Set();
+    const rsiLimit = selectedTickerTypeItem?.rsi_limit;
+    const sorted = [...gridRows]
+      .filter((r) => r.순위 != null)
+      .sort((a, b) => Number(a.순위 ?? 0) - Number(b.순위 ?? 0));
+    const picked = new Set<string>();
+    for (const row of sorted) {
+      if (picked.size >= topN) break;
+      if (rsiLimit != null) {
+        const rsi = row.RSI;
+        if (typeof rsi === "number" && !Number.isNaN(rsi) && rsi > rsiLimit) {
+          continue;
+        }
+      }
+      const ticker = String(row.티커 ?? "").trim();
+      if (ticker) picked.add(ticker);
+    }
+    return picked;
+  }, [gridRows, selectedTickerTypeItem?.top_n_hold, selectedTickerTypeItem?.rsi_limit]);
+
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
       {
@@ -592,18 +615,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         filter: false,
         cellStyle: { textAlign: "center" },
         valueGetter: (params) => {
-          const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
-          const rank = params.data?.순위 ?? null;
-          if (!topN || rank == null || Number(rank) > topN) return 0;
-          const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
-          if (configuredRsiLimit == null) {
-            return 1;
-          }
-          const rsi = params.data?.RSI ?? null;
-          if (typeof rsi !== "number" || Number.isNaN(rsi)) {
-            return 1;
-          }
-          return rsi <= configuredRsiLimit ? 1 : 0;
+          const ticker = String(params.data?.티커 ?? "").trim();
+          if (!ticker) return 0;
+          return recommendedTickerSet.has(ticker) ? 1 : 0;
         },
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (!params.value) return <span style={{ color: "#adb5bd" }}>-</span>;
@@ -1048,6 +1062,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerTypeItem?.country_code,
     selectedTickerTypeItem?.type_source,
     selectedTickerTypeItem?.top_n_hold,
+    recommendedTickerSet,
   ]);
 
   function handleTickerTypeChange(accountId: string) {
