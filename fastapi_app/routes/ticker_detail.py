@@ -26,8 +26,10 @@ from utils.cache_utils import (
 from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days, fetch_naver_etf_inav_snapshot
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
+from utils.settings_loader import list_available_accounts
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
+from utils.portfolio_io import load_portfolio_master
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
@@ -240,6 +242,43 @@ def _build_fx_rates_for_holdings(holdings: list[dict[str, object]], rates: dict[
             }
         )
     return result
+
+
+def _calculate_consolidated_average_buy_price(ticker: str) -> float | None:
+    """모든 계좌의 동일 티커 보유분을 합산해 통합 평균매입가를 계산한다."""
+    ticker_key = str(ticker or "").strip().upper()
+    if not ticker_key:
+        raise ValueError("ticker 값이 필요합니다.")
+
+    total_quantity = 0.0
+    total_buy_amount = 0.0
+    currencies: set[str] = set()
+
+    for account_id in list_available_accounts():
+        master = load_portfolio_master(account_id)
+        if not master:
+            continue
+        for holding in master.get("holdings") or []:
+            holding_ticker = str(holding.get("ticker") or "").strip().upper()
+            if holding_ticker != ticker_key:
+                continue
+
+            quantity = float(holding.get("quantity") or 0.0)
+            average_buy_price = float(holding.get("average_buy_price") or 0.0)
+            if quantity <= 0 or average_buy_price <= 0:
+                continue
+
+            currency = str(holding.get("currency") or "").strip().upper()
+            if currency:
+                currencies.add(currency)
+            total_quantity += quantity
+            total_buy_amount += quantity * average_buy_price
+
+    if len(currencies) > 1:
+        raise RuntimeError(f"{ticker_key} 보유 통화가 여러 개라 통합 평균단가를 계산할 수 없습니다: {sorted(currencies)}")
+    if total_quantity <= 0:
+        return None
+    return total_buy_amount / total_quantity
 
 
 def _build_korean_etf_info_payload(
@@ -650,6 +689,7 @@ def get_ticker_detail(
             "holdings_as_of_date": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
+            "my_average_buy_price": _calculate_consolidated_average_buy_price(ticker),
             "error": fetch_error or "가격 데이터를 가져오지 못했습니다.",
         }
 
@@ -754,4 +794,5 @@ def get_ticker_detail(
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
+        "my_average_buy_price": _calculate_consolidated_average_buy_price(ticker),
     }
