@@ -82,8 +82,8 @@ export function KorMarketStockManager({
 }) {
   const router = useRouter();
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
-  const [limit, setLimit] = useState<number>(150);
-  const [minMarketCapJo, setMinMarketCapJo] = useState("2");
+  const [limit, setLimit] = useState<number>(200);
+  const [minMarketCapJo, setMinMarketCapJo] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -371,7 +371,7 @@ export function KorMarketStockManager({
                         className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                         onClick={() => {
                           setMarket(opt);
-                          setLimit(opt === "KOSPI" ? 150 : 50);
+                          setLimit(opt === "KOSPI" ? 200 : 150);
                         }}
                       >
                         {opt === "KOSPI" ? "코스피" : "코스닥"}
