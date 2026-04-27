@@ -74,8 +74,6 @@ type TickerDetailResponse = {
 
 type TickerEtfInfo = {
   nav?: number | null;
-  previous_nav?: number | null;
-  nav_date?: string | null;
   nav_change?: number | null;
   nav_change_pct?: number | null;
   deviation?: number | null;
@@ -1061,34 +1059,6 @@ export function TickerDetailManager({
   }, [holdings, fxChangePctByCurrency]);
   const portfolioChangePct = portfolioChange.total_pct;
   const portfolioChangeBreakdown = portfolioChange.breakdown;
-  const estimatedIntradayNav = useMemo(() => {
-    const currentNav = etfInfo?.nav ?? null;
-    const previousNav = etfInfo?.previous_nav ?? null;
-    if (
-      currentNav === null ||
-      previousNav === null ||
-      portfolioChangePct === null ||
-      Number.isNaN(currentNav) ||
-      Number.isNaN(previousNav) ||
-      Number.isNaN(portfolioChangePct)
-    ) {
-      return { price: null, delta: null, remainingChangePct: null };
-    }
-
-    if (previousNav <= 0) {
-      return { price: null, delta: null, remainingChangePct: null };
-    }
-
-    const estimatedNav = previousNav * (1 + portfolioChangePct / 100);
-    const delta = estimatedNav - currentNav;
-    const remainingChangePct = currentNav === 0 ? null : ((estimatedNav / currentNav) - 1) * 100;
-    return {
-      price: estimatedNav,
-      delta,
-      remainingChangePct,
-    };
-  }, [etfInfo?.nav, etfInfo?.previous_nav, portfolioChangePct]);
-
   const dailyColumns = useMemo<ColDef[]>(
     () => [
       {
@@ -1392,43 +1362,6 @@ export function TickerDetailManager({
                                   <strong>-</strong>
                                 )}
                               </div>
-                              <div className="tickerDetailInfoTrackerRow">
-                                <div>
-                                  <div className="tickerDetailInfoTrackerLabel">iNAV 대비 변동</div>
-                                  <div className="tickerDetailInfoTrackerHint">추정 iNAV / 현재 공식 iNAV - 1</div>
-                                </div>
-                                <strong className={getSignedClass(estimatedIntradayNav.remainingChangePct)}>
-                                  {estimatedIntradayNav.remainingChangePct !== null
-                                    ? formatPercent(estimatedIntradayNav.remainingChangePct)
-                                    : "-"}
-                                </strong>
-                              </div>
-                              {(() => {
-                                const estimatedNav = estimatedIntradayNav.price;
-                                const estimatedDelta = estimatedIntradayNav.delta;
-                                const estimatedChangePct = estimatedIntradayNav.remainingChangePct;
-                                return (
-                                  <div className="tickerDetailInfoTrackerRow">
-                                    <div>
-                                      <div className="tickerDetailInfoTrackerLabel">추정 iNAV</div>
-                                      <div className="tickerDetailInfoTrackerHint">전일 iNAV × 포트폴리오 변동</div>
-                                    </div>
-                                    {estimatedNav !== null ? (
-                                      <div className="tickerDetailInfoMain">
-                                        <strong>{formatTickerPrice(estimatedNav, selectedCountryCode)}</strong>
-                                        <span className={getSignedClass(estimatedDelta)}>
-                                          {formatSignedPriceDelta(estimatedDelta, selectedCountryCode)}
-                                        </span>
-                                        <span className={getSignedClass(estimatedChangePct)}>
-                                          {formatPercent(estimatedChangePct)}
-                                        </span>
-                                      </div>
-                                    ) : (
-                                      <strong>-</strong>
-                                    )}
-                                  </div>
-                                );
-                              })()}
                               <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
                                 <div>
                                   <div className="tickerDetailInfoTrackerLabel">구성종목 방향</div>

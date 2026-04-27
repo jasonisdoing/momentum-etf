@@ -1668,6 +1668,17 @@ a {
 
 .tickerDetailInfoSummary {
   border-bottom: 1px solid #e6edf5;
+  flex: 5;
+  display: flex;
+  flex-direction: column;
+}
+
+.tickerDetailInfoSummary > .tickerDetailInfoSummaryRow {
+  flex: 1;
+}
+
+.tickerDetailInfoSummary > .tickerDetailInfoSummaryGrid {
+  flex: 3;
 }
 
 .tickerDetailInfoSummaryRow {
@@ -1686,6 +1697,7 @@ a {
 .tickerDetailInfoSummaryGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-auto-rows: 1fr;
   gap: 0;
   border-top: 1px solid #e6edf5;
 }
@@ -1738,9 +1750,13 @@ a {
   padding: 0.2rem 0.8rem;
   background: #fff;
   border-top: 1px solid #e6edf5;
-  flex: 1;
+  flex: 3;
   display: flex;
   flex-direction: column;
+}
+
+.tickerDetailInfoTracker > .tickerDetailInfoTrackerRow {
+  flex: 1;
 }
 
 .tickerDetailInfoTrackerHint {

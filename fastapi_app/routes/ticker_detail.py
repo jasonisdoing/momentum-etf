@@ -292,8 +292,6 @@ def _build_korean_etf_info_payload(
 
     return {
         "nav": float(nav_value) if nav_value is not None else None,
-        "previous_nav": float(prev_nav) if prev_nav is not None else None,
-        "nav_date": prev_history.get("date") if prev_history else None,
         "nav_change": nav_change,
         "nav_change_pct": nav_change_pct,
         "fx_rate": fx_rate,
