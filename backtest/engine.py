@@ -131,6 +131,23 @@ def _should_include_latest_day(open_frame: pd.DataFrame, latest_day: pd.Timestam
     return bool(((~valid_open.isna()) & (valid_open > 0)).any())
 
 
+def _filter_days_with_close_coverage(
+    backtest_days: list[pd.Timestamp],
+    close_frame: pd.DataFrame,
+) -> tuple[list[pd.Timestamp], list[pd.Timestamp]]:
+    """풀 전체 종가가 모두 비어 있는 날짜를 백테스트 거래일에서 제외한다."""
+    valid_days: list[pd.Timestamp] = []
+    excluded_days: list[pd.Timestamp] = []
+    for day in backtest_days:
+        normalized_day = pd.Timestamp(day).normalize()
+        close_row = pd.to_numeric(close_frame.loc[normalized_day], errors="coerce")
+        if close_row.notna().any():
+            valid_days.append(normalized_day)
+        else:
+            excluded_days.append(normalized_day)
+    return valid_days, excluded_days
+
+
 def _is_market_opened(country_code: str, today: pd.Timestamp) -> bool:
     schedule = MARKET_SCHEDULES.get(str(country_code or "").strip().lower())
     if not schedule:
@@ -1664,6 +1681,17 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
 
     if len(backtest_days) < 2:
         raise RuntimeError("백테스트 기간 내 거래일이 부족합니다. (최소 2거래일 필요)")
+
+    backtest_days, close_excluded_days = _filter_days_with_close_coverage(backtest_days, close_frame)
+    if close_excluded_days:
+        logger.info(
+            "[%s] 전체 종목 Close 데이터가 없어 백테스트에서 제외한 거래일: %s%s",
+            pool_id,
+            [d.strftime("%Y-%m-%d") for d in close_excluded_days[:10]],
+            "..." if len(close_excluded_days) > 10 else "",
+        )
+    if len(backtest_days) < 2:
+        raise RuntimeError("Close 데이터가 있는 백테스트 거래일이 부족합니다. (최소 2거래일 필요)")
 
     if not _should_include_latest_day(open_frame, backtest_days[-1], today):
         excluded_day = backtest_days[-1]
