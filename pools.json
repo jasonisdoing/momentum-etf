@@ -10,8 +10,8 @@
       "type_source": "Naver",
       "TOP_N_HOLD": 5,
       "HOLDING_BONUS_SCORE": 20,
-      "MA_TYPE": "EMA",
-      "MA_MONTHS": 8
+      "MA_TYPE": "ALMA",
+      "MA_MONTHS": 10
     },
     {
       "order": 2,
@@ -36,7 +36,7 @@
       "TOP_N_HOLD": 7,
       "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "EMA",
-      "MA_MONTHS": 8
+      "MA_MONTHS": 10
     },
     {
       "order": 4,

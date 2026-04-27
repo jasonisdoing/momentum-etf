@@ -2,7 +2,7 @@
 
 사용법:
     python scripts/check_similar_tickers.py kor_kr
-    python scripts/check_similar_tickers.py aus --threshold 0.90
+    python scripts/check_similar_tickers.py aus --threshold 0.95
 """
 
 from __future__ import annotations
@@ -122,7 +122,7 @@ def load_market_data(
 def build_similarity_groups(
     prices_df: pd.DataFrame,
     stats: dict[str, StockStats],
-    threshold: float = 0.95,
+    threshold: float = 0.97,
 ) -> list[tuple[str, list[tuple[str, float]]]]:
     """
     종목들을 유사 그룹으로 묶고, 각 그룹의 대장주(수익률 1위)를 선정합니다.
@@ -226,7 +226,7 @@ def print_report(
         for member_ticker, corr in members:
             member = stats[member_ticker]
 
-            if abs(corr) >= 0.95:
+            if abs(corr) >= 0.97:
                 emoji = "🔴"
                 action_msg = "👉 (중복 후보)"
             else:
@@ -241,8 +241,8 @@ def print_report(
     print(f"{'=' * 70}")
     print("  💡 '유사 그룹'은 서로 상관관계가 높은 종목들의 묶음입니다.")
     print("  각 그룹 내에서 [대장] 종목의 성과가 가장 좋습니다.")
-    print("  🔴 0.95 이상: 매우 유사함 -> 중복 후보")
-    print("  🟡 0.90 ~ 0.95: 유사함 -> 검토 필요")
+    print("  🔴 0.97 이상: 매우 유사함 -> 중복 후보")
+    print("  🟡 0.95 ~ 0.97: 유사함 -> 검토 필요")
     print()
 
 
@@ -259,7 +259,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.90,
+        default=0.95,
         help="상관계수 기준값",
     )
     return parser
