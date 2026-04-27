@@ -17,7 +17,12 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.cache_utils import get_cached_date_range, set_cache_refresh_completed_at
+from utils.cache_utils import (
+    get_cached_date_range,
+    load_cached_frame_with_fallback,
+    save_cached_frame,
+    set_cache_refresh_completed_at,
+)
 from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_recent_trading_day_gaps
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
@@ -27,6 +32,11 @@ from utils.stock_list_io import get_active_holding_tickers, get_all_etfs_includi
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
 PER_TICKER_TIMEOUT_SECONDS = 90
+
+# 풀 전체 NaN 비율이 이 임계값을 초과하는 날짜는 데이터 소스 오류로 간주하고
+# 모든 종목 캐시에서 그 날짜 행을 제거한다. 다음 cron 시 자동 재fetch.
+SUSPICIOUS_NAN_RATIO_THRESHOLD = 0.5
+SUSPICIOUS_LOOKBACK_DAYS = 400
 
 
 def _determine_start_date() -> str:
@@ -82,6 +92,116 @@ def _target_refresh_lock(target_id: str):
             fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
             os.close(fd)
+
+
+def _purge_suspicious_dates(
+    target_id: str,
+    tickers: list[str],
+    *,
+    lookback_days: int = SUSPICIOUS_LOOKBACK_DAYS,
+    nan_threshold: float = SUSPICIOUS_NAN_RATIO_THRESHOLD,
+) -> list[pd.Timestamp]:
+    """풀 전체 close 의 NaN 비율이 임계값을 초과하는 날짜를 캐시에서 제거한다.
+
+    데이터 소스(yfinance 등)가 특정 날짜에 다수 종목의 데이터를 일시적으로 빠뜨리거나
+    합성값을 반환할 때, 그 날짜 행을 모든 종목 캐시에서 제거해 다음 cron 시 재fetch 대상으로 만든다.
+    """
+    logger = get_app_logger()
+    if not tickers:
+        return []
+
+    cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=lookback_days))
+
+    # 1) 모든 티커의 close 시리즈 수집 → 와이드 매트릭스
+    close_map: dict[str, pd.Series] = {}
+    for ticker in tickers:
+        try:
+            df = load_cached_frame_with_fallback(target_id, ticker)
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        df = df[df.index >= cutoff]
+        if df.empty:
+            continue
+        close_col = next(
+            (c for c in ("unadjusted_close", "Close", "close") if c in df.columns),
+            None,
+        )
+        if close_col is None:
+            continue
+        s = pd.to_numeric(df[close_col], errors="coerce")
+        s.index = pd.to_datetime(s.index).normalize()
+        s = s[~s.index.duplicated(keep="last")]
+        close_map[ticker] = s
+
+    if not close_map:
+        return []
+
+    matrix = pd.DataFrame(close_map)
+    if matrix.empty:
+        return []
+
+    nan_ratio = matrix.isna().sum(axis=1) / float(matrix.shape[1])
+    suspicious = sorted(nan_ratio[nan_ratio > nan_threshold].index.tolist())
+    if not suspicious:
+        return []
+
+    suspicious_text = ", ".join(d.strftime("%Y-%m-%d") for d in suspicious)
+    logger.warning(
+        "[%s] 의심 날짜 감지 (NaN 비율 > %.0f%%, 종목 %d개 기준): %s — 캐시에서 제거합니다.",
+        target_id.upper(),
+        nan_threshold * 100,
+        matrix.shape[1],
+        suspicious_text,
+    )
+
+    # Slack 알림 (@channel)
+    try:
+        from utils.notification import send_slack_message_v2
+
+        slack_msg = (
+            f"<!channel> :warning: [{target_id.upper()}] 가격 캐시 의심 날짜 감지\n"
+            f"• 일자: {suspicious_text}\n"
+            f"• 기준: 풀 {matrix.shape[1]}개 종목 close NaN 비율 > {nan_threshold * 100:.0f}%\n"
+            f"• 조치: 해당 일자 행을 캐시에서 자동 제거 (다음 cron 시 재fetch 시도)"
+        )
+        send_slack_message_v2(slack_msg)
+    except Exception as exc:
+        logger.warning("[%s] Slack 알림 전송 실패: %s", target_id.upper(), exc)
+
+    # 2) 각 티커 캐시에서 의심 날짜 행 삭제 후 저장
+    suspicious_set = {pd.Timestamp(d).normalize() for d in suspicious}
+    purged_tickers = 0
+    for ticker in tickers:
+        try:
+            df = load_cached_frame_with_fallback(target_id, ticker)
+        except Exception:
+            continue
+        if df is None or df.empty:
+            continue
+        before = len(df)
+        normalized_index = pd.to_datetime(df.index).normalize()
+        keep_mask = ~normalized_index.isin(list(suspicious_set))
+        df_purged = df[keep_mask]
+        if len(df_purged) >= before:
+            continue
+        if df_purged.empty:
+            logger.warning("[%s] %s 의심 날짜 제거 후 데이터가 비어 저장 생략", target_id.upper(), ticker)
+            continue
+        try:
+            save_cached_frame(target_id, ticker, df_purged)
+            purged_tickers += 1
+        except Exception as exc:
+            logger.warning("[%s] %s 의심 날짜 제거 후 캐시 저장 실패: %s", target_id.upper(), ticker, exc)
+
+    logger.info(
+        "[%s] 의심 날짜 정리 완료: %d개 날짜 × 영향 종목 %d개",
+        target_id.upper(),
+        len(suspicious),
+        purged_tickers,
+    )
+    return suspicious
 
 
 def refresh_cache_for_target(
@@ -282,6 +402,17 @@ def refresh_cache_for_target(
             )
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
+
+        # 풀 전체 검증: 데이터 소스 오류로 다수 종목의 close 가 NaN인 날짜 자동 제거
+        try:
+            success_tickers = [
+                str(etf.get("ticker") or "").strip().upper()
+                for etf in target_items
+                if str(etf.get("ticker") or "").strip().upper() not in failed_tickers
+            ]
+            _purge_suspicious_dates(target_norm, success_tickers)
+        except Exception as exc:
+            logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
 
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
 
