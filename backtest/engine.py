@@ -752,34 +752,40 @@ def _week_key(day: pd.Timestamp) -> tuple[int, int]:
     return int(iso.year), int(iso.week)
 
 
-def _build_weekly_summary_rows(
+def _month_key(day: pd.Timestamp) -> tuple[int, int]:
+    """연/월 기준 월별 그룹 키를 반환한다."""
+    return int(day.year), int(day.month)
+
+
+def _build_period_summary_rows(
     *,
     daily_summaries: list[dict[str, Any]],
     initial_cash_krw: float,
     top_n: int,
+    key_fn,
 ) -> list[list[str]]:
-    """일별 평가 스냅샷에서 각 주의 마지막 거래일 요약 행을 만든다."""
+    """일별 평가 스냅샷에서 주어진 그룹 키 함수 기준 마지막 거래일 요약 행을 만든다."""
     if not daily_summaries:
         return []
 
-    weekly_summaries: list[dict[str, Any]] = []
-    active_week_key = _week_key(pd.Timestamp(daily_summaries[0]["day"]))
+    period_summaries: list[dict[str, Any]] = []
+    active_key = key_fn(pd.Timestamp(daily_summaries[0]["day"]))
     last_summary = daily_summaries[0]
 
     for summary in daily_summaries[1:]:
-        summary_week_key = _week_key(pd.Timestamp(summary["day"]))
-        if summary_week_key != active_week_key:
-            weekly_summaries.append(last_summary)
-            active_week_key = summary_week_key
+        summary_key = key_fn(pd.Timestamp(summary["day"]))
+        if summary_key != active_key:
+            period_summaries.append(last_summary)
+            active_key = summary_key
         last_summary = summary
-    weekly_summaries.append(last_summary)
+    period_summaries.append(last_summary)
 
     rows: list[list[str]] = []
     previous_total_krw = initial_cash_krw
-    for summary in weekly_summaries:
+    for summary in period_summaries:
         total_equity_krw = float(summary["total_equity_krw"])
-        weekly_pnl_krw = total_equity_krw - previous_total_krw
-        weekly_pct = (weekly_pnl_krw / previous_total_krw) * 100.0 if previous_total_krw > 0 else 0.0
+        period_pnl_krw = total_equity_krw - previous_total_krw
+        period_pct = (period_pnl_krw / previous_total_krw) * 100.0 if previous_total_krw > 0 else 0.0
         cumulative_pnl_krw = total_equity_krw - initial_cash_krw
         cumulative_pct = (cumulative_pnl_krw / initial_cash_krw) * 100.0 if initial_cash_krw > 0 else 0.0
         rows.append(
@@ -787,13 +793,95 @@ def _build_weekly_summary_rows(
                 _format_date_with_weekday(pd.Timestamp(summary["day"])),
                 format_price(total_equity_krw, "kor"),
                 f"{int(summary['holding_count'])}/{top_n}",
-                format_price(weekly_pnl_krw, "kor"),
-                format_pct_change(weekly_pct),
+                format_price(period_pnl_krw, "kor"),
+                format_pct_change(period_pct),
                 format_price(cumulative_pnl_krw, "kor"),
                 format_pct_change(cumulative_pct),
             ]
         )
         previous_total_krw = total_equity_krw
+    return rows
+
+
+def _build_weekly_summary_rows(
+    *,
+    daily_summaries: list[dict[str, Any]],
+    initial_cash_krw: float,
+    top_n: int,
+) -> list[list[str]]:
+    """일별 평가 스냅샷에서 각 주의 마지막 거래일 요약 행을 만든다."""
+    return _build_period_summary_rows(
+        daily_summaries=daily_summaries,
+        initial_cash_krw=initial_cash_krw,
+        top_n=top_n,
+        key_fn=_week_key,
+    )
+
+
+def _build_monthly_matrix_rows(
+    *,
+    daily_summaries: list[dict[str, Any]],
+    initial_cash_krw: float,
+) -> list[list[str]]:
+    """월별 수익률을 (연도 × 1~12월 + 연간) 가로 매트릭스 형태로 만든다."""
+    if not daily_summaries:
+        return []
+
+    # 각 (연, 월) 마지막 거래일의 총자산을 수집
+    month_end_total: dict[tuple[int, int], float] = {}
+    for summary in daily_summaries:
+        ts = pd.Timestamp(summary["day"])
+        month_end_total[(int(ts.year), int(ts.month))] = float(summary["total_equity_krw"])
+
+    if not month_end_total:
+        return []
+
+    sorted_keys = sorted(month_end_total.keys())
+    years = sorted({y for (y, _m) in sorted_keys})
+
+    # 월별 수익률: 직전 (연,월) 마지막 자산 대비
+    monthly_pct: dict[tuple[int, int], float] = {}
+    prev_total = initial_cash_krw
+    for key in sorted_keys:
+        total = month_end_total[key]
+        if prev_total > 0:
+            monthly_pct[key] = (total / prev_total - 1.0) * 100.0
+        else:
+            monthly_pct[key] = 0.0
+        prev_total = total
+
+    # 연간 수익률: 해당 연도의 마지막 월 자산 / 직전 연도 마지막 월 자산 (없으면 initial)
+    year_end_total: dict[int, float] = {}
+    for year in years:
+        months_in_year = [m for (y, m) in sorted_keys if y == year]
+        if months_in_year:
+            year_end_total[year] = month_end_total[(year, max(months_in_year))]
+
+    yearly_pct: dict[int, float] = {}
+    prev_year_total = initial_cash_krw
+    for year in years:
+        total = year_end_total.get(year)
+        if total is None:
+            continue
+        if prev_year_total > 0:
+            yearly_pct[year] = (total / prev_year_total - 1.0) * 100.0
+        else:
+            yearly_pct[year] = 0.0
+        prev_year_total = total
+
+    rows: list[list[str]] = []
+    for year in years:
+        row = [str(year)]
+        for month in range(1, 13):
+            if (year, month) in monthly_pct:
+                row.append(format_pct_change(monthly_pct[(year, month)]))
+            else:
+                row.append("-")
+        if year in yearly_pct:
+            row.append(format_pct_change(yearly_pct[year]))
+        else:
+            row.append("-")
+        rows.append(row)
     return rows
 
 
@@ -826,6 +914,14 @@ def _simulate_one_combo_details(
     avg_costs: dict[str, float] = {}
     last_buy_indices: dict[str, int] = {}
     lines: list[str] = []
+
+    # 종목별 성과 추적 (4. 종목별 성과 요약 섹션 용)
+    # 매도 시 실현 + 마지막 일 미실현 평가를 모두 합쳐 승/패 카운트.
+    # PnL == 0(무) 인 케이스는 카운트하지 않는다.
+    ticker_realized_pnl_krw: dict[str, float] = {}
+    ticker_win_count: dict[str, int] = {}
+    ticker_loss_count: dict[str, int] = {}
+    ticker_exposure_days: dict[str, int] = {}
 
     headers = [
         "#",
@@ -1058,6 +1154,9 @@ def _simulate_one_combo_details(
                     }
                 )
             held_rows.sort(key=lambda row: row["ticker"])
+            # 종목별 성과 추적: 거래 없음 분기에서도 보유 종목 노출일 +1
+            for _held_ticker in shares.keys():
+                ticker_exposure_days[_held_ticker] = ticker_exposure_days.get(_held_ticker, 0) + 1
             _append_day_section(
                 day=exec_day,
                 held_rows=held_rows,
@@ -1098,6 +1197,15 @@ def _simulate_one_combo_details(
             cash += proceeds_local
             realized_pnl_local = proceeds_local - (avg_cost * qty)
             realized_pct = ((price / avg_cost) - 1.0) * 100.0 if avg_cost > 0 else None
+            # 종목별 성과 추적: 실현 손익(KRW) 누적, 승/패 카운트 (PnL=0 은 카운트 제외)
+            _fx_at_exec = float(fx_series.loc[exec_day])
+            ticker_realized_pnl_krw[ticker] = (
+                ticker_realized_pnl_krw.get(ticker, 0.0) + realized_pnl_local * _fx_at_exec
+            )
+            if realized_pnl_local > 0:
+                ticker_win_count[ticker] = ticker_win_count.get(ticker, 0) + 1
+            elif realized_pnl_local < 0:
+                ticker_loss_count[ticker] = ticker_loss_count.get(ticker, 0) + 1
             previous_close = (
                 float(close_today.get(ticker, np.nan)) if not pd.isna(close_today.get(ticker, np.nan)) else None
             )
@@ -1261,6 +1369,10 @@ def _simulate_one_combo_details(
         wait_rows.sort(key=lambda row: (int(row.get("rank", 10_000)), row["ticker"]))
         sold_rows = [row for row in sold_rows if row["ticker"] not in waiting_tickers]
 
+        # 종목별 성과 추적: 당일 마감 시점 보유 종목별 노출일 +1
+        for _held_ticker in shares.keys():
+            ticker_exposure_days[_held_ticker] = ticker_exposure_days.get(_held_ticker, 0) + 1
+
         note = "매도 후 신규 진입 및 잔액 현금 보유" if (to_sell or to_buy) else "거래 없음"
         _append_day_section(
             day=exec_day,
@@ -1284,6 +1396,126 @@ def _simulate_one_combo_details(
     )
     if weekly_rows:
         lines.extend(render_table_eaw(weekly_headers, weekly_rows, weekly_aligns))
+    else:
+        lines.append("(내역 없음)")
+
+    lines.append("")
+    lines.append("3. 월별 내역")
+    monthly_headers = [
+        "연도",
+        "1월", "2월", "3월", "4월", "5월", "6월",
+        "7월", "8월", "9월", "10월", "11월", "12월",
+        "연간",
+    ]
+    monthly_aligns = ["left"] + ["right"] * 13
+    monthly_rows = _build_monthly_matrix_rows(
+        daily_summaries=daily_summaries,
+        initial_cash_krw=initial_cash_krw,
+    )
+    if monthly_rows:
+        lines.extend(render_table_eaw(monthly_headers, monthly_rows, monthly_aligns))
+    else:
+        lines.append("(내역 없음)")
+
+    # 4. 종목별 성과 요약: 마감 시점 미실현 손익을 더해 최종 기여도 계산
+    last_day = backtest_days[-1] if backtest_days else None
+    fx_at_last = float(fx_series.loc[last_day]) if last_day is not None else 1.0
+    last_close = close_frame.loc[last_day] if last_day is not None else None
+
+    final_pnl_krw: dict[str, float] = dict(ticker_realized_pnl_krw)
+    for ticker, qty in shares.items():
+        if qty <= 0:
+            continue
+        if last_close is None:
+            continue
+        last_price = last_close.get(ticker, np.nan)
+        if pd.isna(last_price):
+            continue
+        avg_cost = float(avg_costs.get(ticker, 0.0))
+        unrealized_local = (float(last_price) - avg_cost) * int(qty)
+        final_pnl_krw[ticker] = final_pnl_krw.get(ticker, 0.0) + unrealized_local * fx_at_last
+        # 미실현 평가도 승/패 카운트 (0 은 무시)
+        if unrealized_local > 0:
+            ticker_win_count[ticker] = ticker_win_count.get(ticker, 0) + 1
+        elif unrealized_local < 0:
+            ticker_loss_count[ticker] = ticker_loss_count.get(ticker, 0) + 1
+
+    candidate_tickers = (
+        set(final_pnl_krw.keys())
+        | set(ticker_win_count.keys())
+        | set(ticker_loss_count.keys())
+        | set(ticker_exposure_days.keys())
+    )
+    perf_tickers = sorted(
+        candidate_tickers,
+        key=lambda t: final_pnl_krw.get(t, 0.0),
+        reverse=True,
+    )
+
+    # 종목 수익률 (백테스트 기간 동안 close 기준)
+    backtest_start_day = backtest_days[0] if backtest_days else None
+
+    def _ticker_period_return(ticker: str) -> tuple[float | None, pd.Timestamp | None]:
+        """기간 내 첫 유효 종가 → 마지막 유효 종가 단순 변동률(%)과 첫 유효 일자."""
+        if ticker not in close_frame.columns:
+            return None, None
+        series = close_frame[ticker].dropna()
+        if series.empty:
+            return None, None
+        first_price = float(series.iloc[0])
+        last_price = float(series.iloc[-1])
+        if first_price <= 0:
+            return None, None
+        pct = (last_price / first_price - 1.0) * 100.0
+        first_date = pd.Timestamp(series.index[0])
+        return pct, first_date
+
+    lines.append("")
+    lines.append("4. 종목별 성과 요약")
+    perf_headers = ["#", "티커", "종목명", "기여도", "총손익", "노출일수", "거래횟수", "승률", "종목 수익률"]
+    perf_aligns = ["right", "left", "left", "right", "right", "right", "right", "right", "right"]
+    perf_rows: list[list[str]] = []
+    display_idx = 0
+    for ticker in perf_tickers:
+        wins = ticker_win_count.get(ticker, 0)
+        losses = ticker_loss_count.get(ticker, 0)
+        trades = wins + losses
+        if trades == 0:
+            # 매도 0회이고 미실현 평가도 0(또는 평가 불가) → 의미 없는 행 제외
+            continue
+        display_idx += 1
+        pnl_krw = final_pnl_krw.get(ticker, 0.0)
+        exposure = ticker_exposure_days.get(ticker, 0)
+        win_rate = wins / trades * 100.0
+
+        period_pct, first_date = _ticker_period_return(ticker)
+        if period_pct is None:
+            period_text = "-"
+        else:
+            period_text = format_pct_change(period_pct)
+            # 백테스트 시작일에 상장 안한 종목은 첫 유효일자 함께 표기
+            if (
+                first_date is not None
+                and backtest_start_day is not None
+                and pd.Timestamp(first_date) > pd.Timestamp(backtest_start_day)
+            ):
+                period_text = f"{period_text}({pd.Timestamp(first_date).strftime('%Y-%m-%d')})"
+
+        perf_rows.append(
+            [
+                str(display_idx),
+                ticker,
+                ticker_name_map.get(ticker, ticker),
+                format_price(pnl_krw, "kor"),
+                format_price(pnl_krw, "kor"),
+                str(exposure),
+                str(trades),
+                f"{win_rate:.1f}%",
+                period_text,
+            ]
+        )
+    if perf_rows:
+        lines.extend(render_table_eaw(perf_headers, perf_rows, perf_aligns))
     else:
         lines.append("(내역 없음)")
 
