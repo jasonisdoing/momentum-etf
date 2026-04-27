@@ -10,6 +10,7 @@ import {
   CandlestickSeries,
   LineSeries,
   HistogramSeries,
+  LineStyle,
 } from "lightweight-charts";
 import type {
   IChartApi,
@@ -69,6 +70,7 @@ type TickerDetailResponse = {
   holdings_as_of_date?: string | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
+  my_average_buy_price?: number | null;
   error?: string;
 };
 
@@ -145,6 +147,11 @@ type ChartRangeBadge = {
   tone: "high" | "low";
 };
 
+type ChartAverageBadge = {
+  top: number;
+  returnPct: number | null;
+};
+
 // --- 상수 ---
 
 const MA_PERIODS = [
@@ -169,6 +176,11 @@ function formatNumber(value: number | null, digits = 0): string {
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return `${value.toFixed(2)}%`;
+}
+
+function formatSignedPercent(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 function formatUnsignedPercent(value: number | null): string {
@@ -478,6 +490,7 @@ export function TickerDetailManager({
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
+  const [myAverageBuyPrice, setMyAverageBuyPrice] = useState<number | null>(null);
   const [addingPoolKeys, setAddingPoolKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -492,6 +505,7 @@ export function TickerDetailManager({
   const chartRef = useRef<IChartApi | null>(null);
   const [crosshairInfo, setCrosshairInfo] = useState<CrosshairInfo | null>(null);
   const [chartBadges, setChartBadges] = useState<ChartRangeBadge[]>([]);
+  const [chartAverageBadge, setChartAverageBadge] = useState<ChartAverageBadge | null>(null);
 
   // --- 종목 목록 로드 ---
 
@@ -601,6 +615,7 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
+    setMyAverageBuyPrice(null);
     setAddingPoolKeys([]);
     setCrosshairInfo(null);
     setChartBadges([]);
@@ -633,6 +648,7 @@ export function TickerDetailManager({
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
       setHoldingsError(payload.holdings_error ?? null);
+      setMyAverageBuyPrice(payload.my_average_buy_price ?? null);
       persistRecentTickerSearch({
         ticker: matchedItem.ticker,
         name: matchedItem.name,
@@ -747,11 +763,13 @@ export function TickerDetailManager({
       }
       setCrosshairInfo(null);
       setChartBadges([]);
+      setChartAverageBadge(null);
       return;
     }
     if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
     setCrosshairInfo(null);
     setChartBadges([]);
+    setChartAverageBadge(null);
 
     const container = chartContainerRef.current;
     const chart = createChart(container, {
@@ -780,8 +798,42 @@ export function TickerDetailManager({
         .filter((r) => r.open !== null && r.high !== null && r.low !== null && r.close !== null)
         .map((r) => ({ time: r.date as Time, open: r.open!, high: r.high!, low: r.low!, close: r.close! })),
     );
+    if (myAverageBuyPrice !== null && Number.isFinite(myAverageBuyPrice) && myAverageBuyPrice > 0) {
+      candleSeries.createPriceLine({
+        price: myAverageBuyPrice,
+        color: "#6b7280",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: "",
+      });
+    }
+
+    function updateAverageBadge() {
+      if (myAverageBuyPrice === null || !Number.isFinite(myAverageBuyPrice) || myAverageBuyPrice <= 0) {
+        setChartAverageBadge(null);
+        return;
+      }
+
+      const averageY = candleSeries.priceToCoordinate(myAverageBuyPrice);
+      if (averageY === null) {
+        setChartAverageBadge(null);
+        return;
+      }
+
+      const latestClose = chartRows[chartRows.length - 1]?.close ?? null;
+      const returnPct = latestClose !== null && latestClose > 0
+        ? ((latestClose / myAverageBuyPrice) - 1) * 100
+        : null;
+      const chartTop = container.offsetTop;
+      setChartAverageBadge({
+        top: chartTop + Math.max(8, Math.min(averageY - 16, container.clientHeight - 34)),
+        returnPct,
+      });
+    }
 
     function updateRangeBadges(logicalRange?: { from: number; to: number } | null) {
+      updateAverageBadge();
       const safeFrom = logicalRange ? Math.max(Math.floor(logicalRange.from), 0) : 0;
       const safeTo = logicalRange ? Math.min(Math.ceil(logicalRange.to), chartRows.length - 1) : chartRows.length - 1;
       const visibleRows = chartRows.slice(safeFrom, safeTo + 1).filter(
@@ -899,10 +951,11 @@ export function TickerDetailManager({
     return () => {
       observer.disconnect();
       setChartBadges([]);
+      setChartAverageBadge(null);
       chart.remove();
       chartRef.current = null;
     };
-  }, [chartInterval, chartRows, dateRowMap, priceMinMove, selectedCountryCode]);
+  }, [chartInterval, chartRows, dateRowMap, myAverageBuyPrice, priceMinMove, selectedCountryCode]);
 
   const reversedRows = useMemo(
     () => [...rows].reverse().map((r, i) => ({ ...r, id: `${r.date}-${i}` })),
@@ -1428,6 +1481,14 @@ export function TickerDetailManager({
                         <div className="tickerDetailChartMaLegend" />
                       </div>
                       <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                      {chartAverageBadge ? (
+                        <div className="tickerDetailAverageBadge" style={{ top: chartAverageBadge.top }}>
+                          <span>내 평균 </span>
+                          <span className={getSignedClass(chartAverageBadge.returnPct)}>
+                            {formatSignedPercent(chartAverageBadge.returnPct)}
+                          </span>
+                        </div>
+                      ) : null}
                       {chartBadges.map((badge, index) => (
                         <div
                           key={`${badge.tone}-${index}`}
