@@ -10,8 +10,8 @@
       "type_source": "Naver",
       "TOP_N_HOLD": 5,
       "HOLDING_BONUS_SCORE": 20,
-      "MA_TYPE": "ALMA",
-      "MA_MONTHS": 10
+      "MA_TYPE": "EMA",
+      "MA_MONTHS": 8
     },
     {
       "order": 2,
@@ -22,9 +22,9 @@
       "currency": "KRW",
       "type_source": "Naver",
       "TOP_N_HOLD": 4,
-      "HOLDING_BONUS_SCORE": 20,
+      "HOLDING_BONUS_SCORE": 15,
       "MA_TYPE": "EMA",
-      "MA_MONTHS": 7
+      "MA_MONTHS": 8
     },
     {
       "order": 3,
@@ -36,7 +36,7 @@
       "TOP_N_HOLD": 7,
       "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "EMA",
-      "MA_MONTHS": 10
+      "MA_MONTHS": 8
     },
     {
       "order": 4,
