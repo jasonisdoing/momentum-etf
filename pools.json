@@ -58,9 +58,9 @@
       "country_code": "kor",
       "currency": "KRW",
       "TOP_N_HOLD": 4,
-      "HOLDING_BONUS_SCORE": 5,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "EMA",
-      "MA_MONTHS": 7,
+      "MA_MONTHS": 8,
       "RSI_LIMIT": 84
     }
   ]
