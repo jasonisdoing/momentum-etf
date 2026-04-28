@@ -24,7 +24,6 @@ type HoldingsRow = {
   average_buy_price: string | number;
   current_price: string;
   current_price_num?: number;
-  days_held: string;
   pnl_krw: number;
   return_pct: number;
   weight_pct: number;
@@ -393,7 +392,6 @@ function buildCashGridRow(summary: AccountSummary): GridRow {
     average_buy_price: 0,
     current_price: "-",
     current_price_num: 0,
-    days_held: "-",
     pnl_krw: 0,
     return_pct: 0,
     weight_pct: 0,
@@ -732,7 +730,6 @@ function AccountHoldingsDetailPanel({
         quantity: 0,
         average_buy_price: 0,
         current_price: "-",
-        days_held: "-",
         pnl_krw: 0,
         return_pct: 0,
         weight_pct: 0,
@@ -1656,7 +1653,6 @@ function AccountHoldingsDetailPanel({
         <span className="appGridNumericValue">{params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"}</span>
       ),
     },
-    { field: "days_held", headerName: "보유일", width: 76 },
   ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
 
   return (

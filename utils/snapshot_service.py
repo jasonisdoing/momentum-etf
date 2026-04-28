@@ -103,23 +103,12 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
                 acc_valuation = float(df["평가금액(KRW)"].sum())
                 acc_purchase = float(df["매입금액(KRW)"].sum())
                 
-                # 보유 종목 상세 (티커, 보유일)
+                # 보유 종목 상세 (티커만; 보유일 컬럼은 더 이상 사용하지 않음)
                 holding_details = []
-                import pandas as pd
                 for _, row in df.iterrows():
                     ticker = str(row.get("ticker", row.get("티커", ""))).strip().upper()
                     if ticker and ticker != "NAN":
-                        # days_held_int가 NaN인 경우를 대비해 안전하게 처리
-                        raw_days = row.get("days_held_int")
-                        try:
-                            days_val = int(raw_days) if pd.notna(raw_days) else 1
-                        except (ValueError, TypeError):
-                            days_val = 1
-
-                        holding_details.append({
-                            "ticker": ticker,
-                            "days_held_int": days_val
-                        })
+                        holding_details.append({"ticker": ticker})
             else:
                 acc_valuation = 0.0
                 acc_purchase = 0.0

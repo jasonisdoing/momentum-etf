@@ -240,7 +240,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     if price_prefix
                     else f"{current_price:,.0f}원",
                     "current_price_num": current_price,
-                    "days_held": str(row.get("보유일", "-")),
                     "pnl_krw": pnl,
                     "pnl_krw_num": pnl,
                     "return_pct": round(ret_pct, 2),

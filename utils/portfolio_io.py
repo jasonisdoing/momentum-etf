@@ -225,30 +225,8 @@ def load_real_holdings_table(
     )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
-    # 보유일은 연속 보유 시작일(first_buy_date) 기준 경과일로 계산한다.
-    try:
-        from utils.formatters import format_trading_days
-
-        now = pd.Timestamp.now(KST).normalize().tz_localize(None)
-
-        def _calculate_days(row):
-            first_buy_date = row.get("first_buy_date") or row.get("last_buy_date")
-            if first_buy_date:
-                try:
-                    buy_ts = pd.to_datetime(first_buy_date).normalize().tz_localize(None)
-                    delta = (now - buy_ts).days
-                    return max(delta + 1, 1)
-                except Exception:
-                    pass
-
-            return 1
-
-        df_holdings["days_held_int"] = df_holdings.apply(_calculate_days, axis=1)
-        df_holdings["보유일"] = df_holdings["days_held_int"].apply(format_trading_days)
-    except Exception as e:
-        logger.warning(f"Error calculating dates based on snapshot: {e}")
-        df_holdings["보유일"] = "-"
-        df_holdings["days_held_int"] = 0
+    # 보유일 계산은 화면/슬랙에서 사용하지 않으므로 제거됨.
+    # DB 의 first_buy_date / last_buy_date 필드는 그대로 유지.
 
     # Fetch prices from price cache and exchange rates
     from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
@@ -456,7 +434,6 @@ def load_real_holdings_table(
             "currency": "AUD",
             "bucket": 2,  # "2. 시장지수"
             "first_buy_date": pd.Timestamp.now().normalize(),
-            "보유일": "-",
             "현재가": intl_val,
             "매입금액(KRW)": intl_princi_krw,
             "평가금액(KRW)": intl_val_krw,

@@ -17,7 +17,6 @@ type HoldingsRow = {
   quantity: number;
   current_price: string;
   current_price_num: number;
-  days_held: string;
   pnl_krw: number;
   pnl_krw_num: number;
   return_pct: number;
@@ -257,8 +256,6 @@ export function HoldingsManager({
       const nextBuyAmount = existing.buy_amount_krw + row.buy_amount_krw;
       const nextValuation = existing.valuation_krw + row.valuation_krw;
       const nextPnl = existing.pnl_krw + row.pnl_krw;
-      const existingDaysHeldInt = parseHoldingDaysToInt(existing.days_held);
-      const rowDaysHeldInt = parseHoldingDaysToInt(row.days_held);
       const weightedDailyChange =
         existing.daily_change_pct !== null && row.daily_change_pct !== null
           ? ((existing.daily_change_pct * existing.valuation_krw) + (row.daily_change_pct * row.valuation_krw)) /
@@ -277,7 +274,6 @@ export function HoldingsManager({
         bucket: row.valuation_krw > existing.valuation_krw ? row.bucket : existing.bucket,
         memo: existing.memo || row.memo,
         account_name: accountNames.join(", "),
-        days_held: rowDaysHeldInt > existingDaysHeldInt ? row.days_held : existing.days_held,
       });
       return acc;
     }, new Map<string, HoldingsRow>()).values(),
@@ -300,7 +296,6 @@ export function HoldingsManager({
       quantity: 0,
       current_price: "-",
       current_price_num: 0,
-      days_held: "-",
       pnl_krw: 0,
       pnl_krw_num: 0,
       return_pct: 0,
@@ -576,16 +571,6 @@ export function HoldingsManager({
         return <span className={getSignedClass(row.return_pct)}>{value}</span>;
       },
     },
-    {
-      headerName: "보유일",
-      field: "days_held",
-      width: 92,
-      cellClass: "tableAlignCenter",
-      cellRenderer: (params: { data?: ParentRow }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        return (params.data as AggregatedHoldingRow).days_held;
-      },
-    },
   ], [isCashRow, isDetailRow, moveToTickerDetail, showAmounts, expandedTicker, handleNameClick]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
@@ -833,12 +818,6 @@ function normalizeRouteTicker(ticker: string): string {
   if (/^\d{6}$/.test(upper)) return upper;
   if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) return upper.split(".")[0];
   return upper;
-}
-
-function parseHoldingDaysToInt(daysHeld: string): number {
-  if (!daysHeld || daysHeld === "-") return 0;
-  const match = daysHeld.match(/\d+/);
-  return match ? parseInt(match[0], 10) : 0;
 }
 
 function formatDateWithWeekday(dateStr: string): string {
