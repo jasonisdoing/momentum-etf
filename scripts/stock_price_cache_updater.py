@@ -147,7 +147,7 @@ def _purge_suspicious_dates(
     if not suspicious:
         return []
 
-    suspicious_text = ", ".join(d.strftime("%Y-%m-%d") for d in suspicious)
+    suspicious_text = ", ".join(pd.Timestamp(d).strftime("%Y-%m-%d") for d in suspicious)
     logger.warning(
         "[%s] 의심 날짜 감지 (NaN 비율 > %.0f%%, 종목 %d개 기준): %s — 캐시에서 제거합니다.",
         target_id.upper(),
@@ -155,20 +155,6 @@ def _purge_suspicious_dates(
         matrix.shape[1],
         suspicious_text,
     )
-
-    # Slack 알림 (@channel)
-    try:
-        from utils.notification import send_slack_message_v2
-
-        slack_msg = (
-            f"<!channel> :warning: [{target_id.upper()}] 가격 캐시 의심 날짜 감지\n"
-            f"• 일자: {suspicious_text}\n"
-            f"• 기준: 풀 {matrix.shape[1]}개 종목 close NaN 비율 > {nan_threshold * 100:.0f}%\n"
-            f"• 조치: 해당 일자 행을 캐시에서 자동 제거 (다음 cron 시 재fetch 시도)"
-        )
-        send_slack_message_v2(slack_msg)
-    except Exception as exc:
-        logger.warning("[%s] Slack 알림 전송 실패: %s", target_id.upper(), exc)
 
     # 2) 각 티커 캐시에서 의심 날짜 행 삭제 후 저장
     suspicious_set = {pd.Timestamp(d).normalize() for d in suspicious}
