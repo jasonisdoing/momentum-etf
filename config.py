@@ -198,8 +198,8 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
         "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
-        "MA_TYPE": ["ALMA", "HMA"],
-        "MA_MONTHS": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+        "MA_TYPE": ["SMA", "EMA", "ALMA", "HMA"],
+        "MA_MONTHS": [1, 2, 3, 4, 5, 6, 7, 8, 9],
         "RSI_LIMIT": [80, 82, 84, 86, 88, 90, 92, 94, 96, 98, 100],
     },
 }
