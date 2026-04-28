@@ -291,10 +291,7 @@ def main():
             for _, row in target_df.iterrows():
                 ticker = str(row.get("티커", "")).strip().upper()
                 if ticker and ticker != "IS": # International Shares 등 가상 종목 제외
-                    holding_list.append({
-                        "ticker": ticker,
-                        "days_held_int": int(row.get("days_held_int", 1))
-                    })
+                    holding_list.append({"ticker": ticker})
 
         save_daily_snapshot(
             acc["account_id"],

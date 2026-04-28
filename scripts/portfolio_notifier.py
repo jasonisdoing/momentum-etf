@@ -81,9 +81,6 @@ def process_account(account_id):
     principal = m_data.get("total_principal", 0.0)
     cash = m_data.get("cash_balance", 0.0)
 
-    from utils.data_loader import count_trading_days
-
-    now = datetime.now()
     valuation = 0.0
     holdings_text = []
 
@@ -112,25 +109,12 @@ def process_account(account_id):
                 if abs(daily_pct) > 1e-6:
                     daily_krw = int(round(eval_amount * (daily_pct / 100) / (1 + daily_pct / 100)))
 
-                currency = row.get("환종", "KRW")
-                market = {"USD": "us", "AUD": "au"}.get(currency, "kor")
-
-                # Calculate trading days
-                try:
-                    first_buy = row.get("first_buy_date")
-                    if first_buy:
-                        trading_days_held = count_trading_days(market, first_buy, now)
-                    else:
-                        trading_days_held = 1
-                except Exception:
-                    trading_days_held = row.get("보유일", 0)
-
                 emoji_daily = get_trend_emoji(daily_pct)
                 emoji_total = get_trend_emoji(profit_pct)
                 prof_emoji_daily = get_profit_emoji(daily_pct)
 
                 line = (
-                    f"• {ticker} - {name} (보유일: {trading_days_held}거래일)\n"
+                    f"• {ticker} - {name}\n"
                     f"누적 - {emoji_total} {profit_pct:+.2f}% ({format_kr_money(profit_krw)}) | "
                     f"일간 - {emoji_daily} {daily_pct:+.2f}% ({format_kr_money(daily_krw)}) {prof_emoji_daily}"
                 )
