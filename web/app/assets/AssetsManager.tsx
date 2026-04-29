@@ -1633,6 +1633,8 @@ function AccountHoldingsDetailPanel({
       headerName: "평가 금액",
       width: 124,
       type: "rightAligned",
+      // 수량/평균매입가 변경 시 평가금액 셀이 즉시 재렌더되도록 valueGetter 로 라이브 계산.
+      valueGetter: (params) => (params.data ? getPreviewValuationKrw(params.data) : null),
       editable: (params) => Boolean(params.data && params.data.ticker === CASH_ROW_TICKER && !isAusAccount && processingId !== params.data?.id),
       cellClass: (params) => {
         if (params.data?.ticker !== CASH_ROW_TICKER || isAusAccount) {
@@ -2215,6 +2217,14 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ]);
 
     const nextValuation = nextRows.reduce((sum, row) => sum + Number(row.valuation_krw ?? 0), 0);
+    // 자식 행의 목표 비중 변경이 부모 '목표비중합'에 즉시 반영되도록 합산 (현금/IS 행 제외).
+    const nextTargetRatioTotal = nextRows.reduce((sum, row) => {
+      const ticker = String(row.ticker || "").trim().toUpperCase();
+      if (ticker === CASH_ROW_TICKER || ticker === "IS") {
+        return sum;
+      }
+      return sum + Number(row.target_ratio ?? 0);
+    }, 0);
     setSummaries((previous) =>
       previous.map((summary) => {
         if (summary.account_id !== accountId) {
@@ -2225,6 +2235,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           valuation_krw: nextValuation,
           total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
           holdings_count: nextRows.filter((r) => r.ticker !== "IS").length,
+          target_ratio_total: nextTargetRatioTotal,
         };
       }),
     );
