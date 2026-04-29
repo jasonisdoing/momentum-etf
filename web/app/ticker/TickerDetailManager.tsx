@@ -1037,6 +1037,17 @@ export function TickerDetailManager({
   const displayFxRates = useMemo<TickerFxRate[]>(() => {
     return etfInfo?.fx_rates ?? [];
   }, [etfInfo?.fx_rates]);
+  const fxRateByCurrency = useMemo(() => {
+    const map = new Map<string, TickerFxRate>();
+    displayFxRates.forEach((fx) => {
+      const currency = String(fx.currency || "").trim().toUpperCase();
+      if (!currency) {
+        return;
+      }
+      map.set(currency, fx);
+    });
+    return map;
+  }, [displayFxRates]);
   const fxChangePctByCurrency = useMemo(() => {
     const map = new Map<string, number>();
     displayFxRates.forEach((fx) => {
@@ -1343,7 +1354,7 @@ export function TickerDetailManager({
                               <div className="tickerDetailInfoSummaryGrid">
                                 <div className="tickerDetailInfoMetric">
                                   <span className="tickerDetailInfoLabel">괴리율</span>
-                                  <strong className={getSignedClass(etfInfo?.deviation ?? null)}>{formatPercent(etfInfo?.deviation ?? null)}</strong>
+                                  <strong>{formatPercent(etfInfo?.deviation ?? null)}</strong>
                                 </div>
                                 <div className="tickerDetailInfoMetric">
                                   <span className="tickerDetailInfoLabel">거래량</span>
@@ -1374,13 +1385,23 @@ export function TickerDetailManager({
                                   <div className="tickerDetailInfoTrackerHint">
                                     {portfolioChangeBreakdown.length > 0 ? (
                                       <span className="tickerDetailInfoBreakdownList">
-                                        {portfolioChangeBreakdown.map((item, index) => (
-                                          <span key={item.currency} className="tickerDetailInfoBreakdownItem">
-                                            {index > 0 ? <span className="tickerDetailInfoBreakdownSeparator">/</span> : null}
-                                            <span>{item.label}</span>
-                                            <span className={getSignedClass(item.change_pct)}>{formatPercent(item.change_pct)}</span>
-                                          </span>
-                                        ))}
+                                        {portfolioChangeBreakdown.map((item) => {
+                                          const fx = fxRateByCurrency.get(item.currency);
+                                          return (
+                                            <span key={item.currency} className="tickerDetailInfoBreakdownItem">
+                                              <span>{item.label}({formatNumber(item.weight, 0)}%)</span>
+                                              <span className={getSignedClass(item.change_pct)}>{formatPercent(item.change_pct)}</span>
+                                              {fx ? (
+                                                <span className="tickerDetailInfoBreakdownFx">
+                                                  · 환율{" "}
+                                                  <span className={getSignedClass(fx.change_pct ?? null)}>
+                                                    {formatPercent(fx.change_pct ?? null)}
+                                                  </span>
+                                                </span>
+                                              ) : null}
+                                            </span>
+                                          );
+                                        })}
                                       </span>
                                     ) : (
                                       "구성종목 가중 평균"
@@ -1390,30 +1411,6 @@ export function TickerDetailManager({
                                 <strong className={getSignedClass(portfolioChangePct)}>
                                   {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
                                 </strong>
-                              </div>
-                              <div className="tickerDetailInfoTrackerRow">
-                                <div>
-                                  <div className="tickerDetailInfoTrackerLabel">환율</div>
-                                  <div className="tickerDetailInfoTrackerHint">구성종목 통화</div>
-                                </div>
-                                {displayFxRates.length > 0 ? (
-                                  <div className="tickerDetailInfoFxList">
-                                    {displayFxRates.map((fx, index) => (
-                                      <div key={fx.currency} className="tickerDetailInfoFxItem">
-                                        {index > 0 ? <span className="tickerDetailInfoFxSeparator">/</span> : null}
-                                        <span>{fx.currency}</span>
-                                        <strong>
-                                          {fx.rate != null ? `${formatNumber(fx.rate, 2)}원` : "-"}
-                                          <span className={getSignedClass(fx.change_pct ?? null)}>
-                                            ({formatPercent(fx.change_pct ?? null)})
-                                          </span>
-                                        </strong>
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <strong>-</strong>
-                                )}
                               </div>
                               <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
                                 <div>

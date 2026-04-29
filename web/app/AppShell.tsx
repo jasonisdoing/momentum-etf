@@ -50,18 +50,12 @@ const navGroups = [
     ],
   },
   {
-    id: "momentum-etf",
-    title: "ETF",
-    icon: IconListDetails,
-    items: [
-      { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
-    ],
-  },
-  {
     id: "info",
     title: "정보",
     icon: IconTrendingUp,
     items: [
+      { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
+      { href: "/compare", label: "종목 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
     ],

@@ -1765,20 +1765,18 @@ a {
 }
 
 .tickerDetailInfoBreakdownList {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  flex-wrap: wrap;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
 }
 
 .tickerDetailInfoBreakdownItem {
   display: inline-flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 0.25rem;
-  color: #8a94a6;
-}
-
-.tickerDetailInfoBreakdownSeparator {
+  align-items: baseline;
   color: #8a94a6;
 }
 
@@ -1788,6 +1786,11 @@ a {
 
 .tickerDetailInfoBreakdownItem .metricNegative {
   color: #1d4ed8;
+}
+
+.tickerDetailInfoBreakdownFx {
+  color: #64748b;
+  white-space: nowrap;
 }
 
 .tickerDetailInfoTrackerRow {
@@ -1872,6 +1875,647 @@ a {
   flex-wrap: wrap;
   font-size: 15px;
   font-weight: 700;
+}
+
+.comparePage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+
+.compareMainHeaderLeft {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.compareMainHeaderLeft .appLabeledField {
+  min-width: 13rem;
+}
+
+.compareTickerSearchField {
+  position: relative;
+  width: min(26rem, 100%);
+  min-width: 22rem;
+}
+
+.compareHeaderTabs {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.compareHeaderTabs .appSegmentedToggleButton {
+  white-space: nowrap;
+}
+
+.compareTickerSearchMenu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 0.45rem;
+  background: #fff;
+  box-shadow: 0 0.75rem 1.5rem rgba(15, 23, 42, 0.12);
+}
+
+.compareTickerSearchOption {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  background: transparent;
+  color: #1f2937;
+  text-align: left;
+}
+
+.compareTickerSearchOption:hover,
+.compareTickerSearchOption.is-active {
+  background: #f1f5f9;
+}
+
+.compareTickerSearchOption span {
+  font-weight: 800;
+}
+
+.compareTickerSearchOption small {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareTickerSearchEmpty {
+  padding: 0.75rem;
+  color: #64748b;
+  font-weight: 700;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .compareTickerSearchField {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.compareTitleMeta {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: #64748b;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.compareLoading,
+.compareEmpty {
+  padding: 1rem;
+  border: 1px dashed #d8e0ec;
+  border-radius: 0.5rem;
+  color: #64748b;
+  font-weight: 700;
+  text-align: center;
+}
+
+.compareHeroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+}
+
+.compareHeroCard,
+.compareSection {
+  border: 1px solid #dbe3ef;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.compareHeroCard {
+  padding: 1rem;
+  border-top-width: 0.25rem;
+}
+
+.compareHeroCard.is-a {
+  border-top-color: #d32f2f;
+}
+
+.compareHeroCard.is-b {
+  border-top-color: #1d4ed8;
+}
+
+.compareHeroTicker {
+  color: #111827;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.compareHeroName {
+  margin-top: 0.25rem;
+  min-height: 1.4rem;
+  color: #64748b;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.compareHeroPrice {
+  margin-top: 0.7rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.compareHeroPrice strong {
+  color: #1f2937;
+  font-size: 1.25rem;
+}
+
+.compareSection {
+  padding: 1rem;
+}
+
+.compareSectionHeader {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.compareSectionHeader h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.compareSectionMeta {
+  color: #64748b;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.compareLegend {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  color: #64748b;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.compareLegend span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.compareLegendSwatch {
+  width: 0.8rem;
+  height: 0.18rem;
+  border-radius: 999px;
+}
+
+.compareLegendSwatch.is-a {
+  background: #d32f2f;
+}
+
+.compareLegendSwatch.is-b {
+  background: #1d4ed8;
+}
+
+.compareChart {
+  width: 100%;
+  min-height: 280px;
+}
+
+.compareMetricsTableWrap,
+.compareHoldingsTableWrap {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.45rem;
+}
+
+.compareMetricsTable,
+.compareHoldingsTable {
+  width: 100%;
+  border-collapse: collapse;
+  color: #1f2937;
+  font-size: 0.92rem;
+}
+
+.compareMetricsTable th,
+.compareMetricsTable td,
+.compareHoldingsTable th,
+.compareHoldingsTable td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.compareMetricsTable th,
+.compareHoldingsTable th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.compareMetricsTable td:not(:first-child),
+.compareMetricsTable th:not(:first-child),
+.compareHoldingsTable td:nth-child(n + 3),
+.compareHoldingsTable th:nth-child(n + 3) {
+  text-align: right;
+}
+
+.compareHoldingsTable td:nth-child(2) {
+  min-width: 16rem;
+  white-space: normal;
+}
+
+.compareTabBar {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.compareTabBar .appSegmentedToggleButton {
+  border-radius: 999px;
+  padding: 0.7rem 1.1rem;
+  background: #f2f4f8;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.compareTabBar .appSegmentedToggleButton.is-active {
+  background: #0b4ea2;
+  color: #fff;
+}
+
+.compareAsOfText {
+  margin-left: 0.4rem;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.compareMatrix {
+  display: grid;
+  grid-template-columns: 6rem 5.5rem repeat(5, minmax(12rem, 1fr));
+  overflow: hidden;
+  border: 1px solid #d6deea;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.compareMatrixBody {
+  border-top: 0;
+}
+
+.compareMatrixLabel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 6rem;
+  padding: 0.9rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #f3f6fc;
+  color: #1f2937;
+  font-weight: 800;
+  text-align: center;
+}
+
+.compareMatrixLabelWide {
+  grid-column: span 2;
+}
+
+.compareProductHeaderLabel,
+.compareProductHeaderEmpty {
+  height: 8rem;
+  min-height: 8rem;
+}
+
+.compareMetricsGroupLabel {
+  min-height: 3.5rem;
+}
+
+.compareMetricPeriodLabel,
+.compareMetricCell {
+  display: flex;
+  align-items: center;
+  min-height: 3.5rem;
+  padding: 0.75rem 1rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.compareMetricPeriodLabel {
+  justify-content: center;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.compareMetricCell {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.compareMetricCell.metricPositive {
+  color: #d32f2f;
+}
+
+.compareMetricCell.metricNegative {
+  color: #1d4ed8;
+}
+
+.compareProductCard,
+.compareProductEmpty,
+.compareHoldingCount,
+.compareBasicCell {
+  position: relative;
+  min-height: 6rem;
+  padding: 1rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+}
+
+.compareProductCard {
+  display: grid;
+  grid-template-rows: auto minmax(2.5rem, auto) auto;
+  align-content: start;
+  row-gap: 0.45rem;
+  height: 8rem;
+  min-height: 8rem;
+  padding-right: 2.75rem;
+}
+
+.compareBasicCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  text-align: right;
+}
+
+.compareBasicCompactLabel,
+.compareBasicCompactCell {
+  min-height: 3.25rem;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+
+.compareBasicValue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.compareBasicValue strong:not(.metricPositive):not(.metricNegative),
+.compareBasicCell strong:not(.metricPositive):not(.metricNegative) {
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.compareBasicValue span {
+  font-weight: 700;
+}
+
+.compareBasicBreakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: flex-end;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.comparePortfolioBreakdownList {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.comparePortfolioBreakdownItem {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  align-items: baseline;
+}
+
+.comparePortfolioBreakdownFx {
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.compareProductEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-weight: 700;
+  text-align: center;
+}
+
+.compareProductRemove {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #6b7280;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.compareProductCode {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.compareProductName {
+  min-height: 2.4rem;
+  overflow: hidden;
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.compareProductPrice {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  color: #64748b;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compareMatrixWide {
+  grid-column: span 5;
+  min-width: 0;
+  padding: 1rem;
+  border-bottom: 1px solid #d6deea;
+}
+
+.comparePerformanceToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.comparePerformanceToolbar .appSegmentedToggleButton {
+  min-width: 4.5rem;
+}
+
+.comparePerformanceHint {
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.comparePerformanceHint.is-warning {
+  color: #dc2626;
+}
+
+.compareHoldingCount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.55rem 1rem;
+  color: #1f2937;
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.compareHoldingCountLabel,
+.compareHoldingCountEmpty {
+  min-height: 3rem;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.compareHoldingsGroupLabel {
+  min-height: 4.15rem;
+}
+
+.compareHoldingRankLabel,
+.compareHoldingCell {
+  min-height: 4.15rem;
+  padding: 0.5rem 0.65rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+}
+
+.compareHoldingRankLabel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.compareHoldingCell {
+  min-width: 0;
+  overflow: hidden;
+  color: #1f2937;
+}
+
+.compareHoldingCell.is-matched {
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
+}
+
+.compareHoldingFooter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  font-weight: 800;
+}
+
+.compareHoldingFooter strong {
+  color: #1f2937;
+}
+
+.compareHoldingsTopTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.compareHoldingsTopTable th,
+.compareHoldingsTopTable td {
+  padding: 0.75rem;
+  border: 1px solid #d6deea;
+  vertical-align: top;
+}
+
+.compareHoldingsTopTable th {
+  width: 4rem;
+  background: #f3f6fc;
+  color: #1f2937;
+  text-align: center;
+}
+
+.compareHoldingsTopTable td {
+  min-width: 0;
+}
+
+.compareHoldingName {
+  overflow: hidden;
+  color: #1f2937;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareHoldingCode {
+  margin-top: 0.1rem;
+  color: #9ca3af;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.compareHoldingsTopTable strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: #1f2937;
+  text-align: right;
 }
 
 .tickerDetailChartToolbar {
