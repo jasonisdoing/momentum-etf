@@ -446,6 +446,36 @@ a {
   letter-spacing: 0.01em;
 }
 
+.tickerDetailLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.tickerDetailLinkText {
+  user-select: text;
+}
+
+.tickerDetailLinkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 1px solid #d8e0ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  line-height: 1;
+}
+
+.tickerDetailLinkButton:hover {
+  border-color: #206bc4;
+  color: #206bc4;
+}
+
 .loginAppContent {
   width: 100%;
   min-height: 100vh;
@@ -2177,6 +2207,10 @@ a {
   background: #fff;
 }
 
+.compareMatrixWithTotal {
+  grid-template-columns: 6rem 5.5rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+}
+
 .compareMatrixBody {
   border-top: 0;
 }
@@ -2420,6 +2454,17 @@ a {
   font-weight: 900;
 }
 
+.compareHoldingTotalHeader,
+.compareHoldingTotalCount,
+.compareHoldingTotalCell {
+  background: #f8fafc;
+}
+
+.compareHoldingTotalHeader,
+.compareHoldingTotalCount {
+  color: #1f2937;
+}
+
 .compareHoldingCountLabel,
 .compareHoldingCountEmpty {
   min-height: 3rem;
@@ -2470,6 +2515,21 @@ a {
 
 .compareHoldingFooter strong {
   color: #1f2937;
+}
+
+.compareHoldingTotalCell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  text-align: right;
+}
+
+.compareHoldingTotalCell strong {
+  margin-top: 0.15rem;
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 900;
 }
 
 .compareHoldingsTopTable {

@@ -3,9 +3,9 @@
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import type { GridOptions } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
@@ -101,7 +101,6 @@ export function HoldingsManager({
 }: {
   onHeaderSummaryChange?: (summary: HoldingsHeaderSummary) => void;
 }) {
-  const router = useRouter();
   const [holdings, setHoldings] = useState<HoldingsRow[]>([]);
   const [totalCashKrw, setTotalCashKrw] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -388,17 +387,6 @@ export function HoldingsManager({
     [expandedTicker, fetchConstituents],
   );
 
-  const moveToTickerDetail = useCallback(
-    (row: AggregatedHoldingRow | null | undefined) => {
-      if (!row || !row.ticker) return;
-      const normalizedTicker = normalizeRouteTicker(String(row.ticker ?? "-"));
-      if (!normalizedTicker || normalizedTicker === "-" || normalizedTicker === "IS") return;
-
-      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
-    },
-    [router],
-  );
-
   const isCashRow = useCallback((row: AggregatedHoldingRow | undefined) => row?.ticker === "__CASH__", []);
 
   // 부모 그리드 rowData: main 행 + 펼쳐진 경우 detail 행 삽입
@@ -460,16 +448,7 @@ export function HoldingsManager({
         if (rawTicker === "__CASH__") return <span className="appCodeText" style={{ color: "#8b949e" }}>-</span>;
         const displayTicker = normalizeDisplayTicker(rawTicker);
         if (displayTicker === "IS") return <span className="appCodeText">{displayTicker}</span>;
-        return (
-          <button
-            type="button"
-            className="appCodeText"
-            style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
-            onClick={() => moveToTickerDetail(params.data as AggregatedHoldingRow)}
-          >
-            {displayTicker}
-          </button>
-        );
+        return <TickerDetailLink ticker={rawTicker} displayTicker={displayTicker} />;
       },
     },
     {
@@ -571,7 +550,7 @@ export function HoldingsManager({
         return <span className={getSignedClass(row.return_pct)}>{value}</span>;
       },
     },
-  ], [isCashRow, isDetailRow, moveToTickerDetail, showAmounts, expandedTicker, handleNameClick]);
+  ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
   const DetailRenderer = useCallback(
@@ -807,14 +786,6 @@ function normalizeDisplayTicker(ticker: string): string {
   if (!ticker || ticker === "-") return "-";
   const upper = ticker.toUpperCase();
   if (upper.startsWith("ASX:")) return upper;
-  if (/^\d{6}$/.test(upper)) return upper;
-  if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) return upper.split(".")[0];
-  return upper;
-}
-
-function normalizeRouteTicker(ticker: string): string {
-  if (!ticker || ticker === "-") return "-";
-  const upper = ticker.toUpperCase().replace(/^ASX:/, "");
   if (/^\d{6}$/.test(upper)) return upper;
   if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) return upper.split(".")[0];
   return upper;

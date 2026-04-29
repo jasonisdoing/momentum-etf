@@ -3,13 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useRouter } from "next/navigation";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -119,7 +119,6 @@ export function MarketManager({
 }: {
   onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string | null }) => void;
 }) {
-  const router = useRouter();
   const toast = useToast();
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
@@ -254,17 +253,6 @@ export function MarketManager({
     });
   }, [filteredRows.length, onHeaderSummaryChange, rows.length, updatedAt]);
 
-  const moveToTickerDetail = useCallback(
-    (ticker: string) => {
-      const normalizedTicker = String(ticker || "").trim().toUpperCase();
-      if (!normalizedTicker) {
-        return;
-      }
-      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
-    },
-    [router],
-  );
-
   const hasSelectedRows = selectedTickers.length > 0;
   const allVisibleSelected = useMemo(
     () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
@@ -369,16 +357,7 @@ export function MarketManager({
         width: 104,
         cellRenderer: (params: { value: string }) => {
           const value = String(params.value ?? "-");
-          return (
-            <button
-              type="button"
-              className="appCodeText"
-              style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
-              onClick={() => moveToTickerDetail(value)}
-            >
-              {value}
-            </button>
-          );
+          return <TickerDetailLink ticker={value} />;
         },
       },
       {
@@ -488,7 +467,7 @@ export function MarketManager({
         },
       },
     ],
-    [allVisibleSelected, moveToTickerDetail, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
   );
 
   function toggleGroup(group: string) {

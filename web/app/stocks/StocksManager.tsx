@@ -2,7 +2,6 @@
 
 import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
@@ -15,6 +14,7 @@ import {
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
@@ -265,7 +265,6 @@ function buildRankSessionCacheKey(query: string): string {
 
 
 export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange?: (summary: RankHeaderSummary) => void }) {
-  const router = useRouter();
   const toast = useToast();
   const lastBlockedToastRef = useRef<string | null>(null);
   const addingTickerDraftRef = useRef("");
@@ -454,17 +453,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       held_bonus_score: normalized,
     });
   }
-
-  const moveToTickerDetail = useMemo(
-    () => (ticker: string | null | undefined) => {
-      const normalizedTicker = String(ticker ?? "-").trim().toUpperCase();
-      if (!normalizedTicker || normalizedTicker === "-") {
-        return;
-      }
-      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
-    },
-    [router],
-  );
 
   const selectedTickerTypeItem = useMemo(
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
@@ -728,16 +716,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          return (
-            <button
-              type="button"
-              className="appCodeText"
-              style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
-              onClick={() => moveToTickerDetail(value)}
-            >
-              {value}
-            </button>
-          );
+          return <TickerDetailLink ticker={value} />;
         },
       },
       {

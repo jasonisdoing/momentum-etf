@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
 import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
 import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
-import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
@@ -555,7 +555,6 @@ function AccountHoldingsDetailPanel({
   onReload: () => Promise<void>;
 }) {
   const toast = useToast();
-  const router = useRouter();
   const [noteContent, setNoteContent] = useState("");
   const [savedNoteContent, setSavedNoteContent] = useState("");
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
@@ -714,17 +713,6 @@ function AccountHoldingsDetailPanel({
     (row: GridRow | undefined | null) => Boolean(row && row.ticker === CASH_ROW_TICKER),
     [],
   );
-  const moveToTickerDetail = useCallback(
-    (ticker: string | null | undefined) => {
-      const normalizedTicker = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
-      if (!normalizedTicker || normalizedTicker === "IS" || normalizedTicker === CASH_ROW_TICKER) {
-        return;
-      }
-      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
-    },
-    [router],
-  );
-
   const gridRows = useMemo<GridRow[]>(() => {
     const cashRow = buildCashGridRow(summary);
     const baseRows = rows
@@ -1388,13 +1376,11 @@ function AccountHoldingsDetailPanel({
         }
         return (
           row.ticker === CASH_ROW_TICKER ? <span>-</span> : (
-            <button
-              type="button"
-              className="btn btn-link p-0 appCodeText assetsTickerLink"
-              onClick={() => moveToTickerDetail(row.ticker)}
-            >
-              {params.value}
-            </button>
+            <TickerDetailLink
+              ticker={row.ticker}
+              displayTicker={String(params.value ?? row.ticker)}
+              className="assetsTickerLink"
+            />
           )
         );
       },
@@ -1679,7 +1665,7 @@ function AccountHoldingsDetailPanel({
         <span className="appGridNumericValue">{params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"}</span>
       ),
     },
-  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, moveToTickerDetail, processingId]);
+  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId]);
 
   return (
     <div className="assetsDetailPanel">

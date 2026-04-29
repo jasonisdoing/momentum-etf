@@ -5,6 +5,7 @@ import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   readRememberedMomentumEtfAccountId,
@@ -232,7 +233,7 @@ export function HoldingsDetailsPageClient() {
       width: 100,
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return <span className="text-muted fw-semibold" style={{ fontFamily: "monospace", fontSize: "13px" }}>{params.value}</span>;
+        return <TickerDetailLink ticker={String(params.value ?? "")} className="text-muted fw-semibold" />;
       },
     },
     {
@@ -347,7 +348,7 @@ export function HoldingsDetailsPageClient() {
           <div key={idx} className="holdingsDetailRow">
             {/* 1. 티커 (100px) - 좌측 패딩 12px, 폰트 13px 고정 */}
             <div className="hdColTicker fw-semibold text-muted" style={{ fontFamily: "monospace", fontSize: "13px" }}>
-              {src.etf_ticker}
+              <TickerDetailLink ticker={src.etf_ticker} />
             </div>
             
             {/* 2. 종목명 (flex:1) - 좌측 패딩 12px */}
