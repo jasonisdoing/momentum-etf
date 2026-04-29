@@ -34,6 +34,8 @@ type HoldingsRow = {
   sort_order?: number | null;
   original_quantity?: number;
   original_average_buy_price?: number;
+  // 계좌 단위로 도출된 KRW per local 통화 환율 (AUD 등). 신규 포지션 평가금액 계산 fallback 용.
+  account_fx_rate?: number;
 };
 
 type GridRow = HoldingsRow & { id: string };
@@ -274,9 +276,15 @@ function getPreviewValuationKrw(row: GridRow): number {
   if (row.currency === "KRW") {
     return getCurrentPriceNumber(row) * quantity;
   }
-  const currentQuantity = Number(row.original_quantity ?? row.quantity ?? 0);
-  if (currentQuantity > 0) {
+  const currentQuantity = Number(row.original_quantity ?? 0);
+  if (currentQuantity > 0 && Number(row.valuation_krw ?? 0) > 0) {
     return (Number(row.valuation_krw ?? 0) / currentQuantity) * quantity;
+  }
+  // 신규 포지션 등으로 원래 valuation 정보가 없는 경우: 현재가(현지통화) × 수량 × 계좌 환율
+  const localPrice = getCurrentPriceNumber(row);
+  const fxRate = Number(row.account_fx_rate ?? 0);
+  if (localPrice > 0 && fxRate > 0) {
+    return localPrice * quantity * fxRate;
   }
   return Number(row.valuation_krw ?? 0);
 }
@@ -591,13 +599,39 @@ function AccountHoldingsDetailPanel({
   }, [summary.account_id, summary.name, noteContent, toast]);
 
   const hydrateRows = useCallback(
-    (sourceRows: HoldingsRow[]) =>
-      sourceRows.map((row) => ({
+    (sourceRows: HoldingsRow[]) => {
+      // 계좌 환율(KRW per local) 도출:
+      //   1) 현금 잔액 KRW/native 비율 (가장 정확)
+      //   2) 유효한 sibling 행: valuation_krw / (original_quantity × current_price_num)
+      let accountFxRate = 0;
+      const cashKrw = Number(summary.cash_balance_krw ?? 0);
+      const cashNative = Number(summary.cash_balance_native ?? 0);
+      const accountCurrency = String(summary.currency || "KRW").trim().toUpperCase();
+      if (accountCurrency !== "KRW" && cashKrw > 0 && cashNative > 0) {
+        accountFxRate = cashKrw / cashNative;
+      }
+      if (accountFxRate <= 0 && accountCurrency !== "KRW") {
+        for (const row of sourceRows) {
+          const ticker = String(row.ticker || "").trim().toUpperCase();
+          if (ticker === CASH_ROW_TICKER || ticker === "IS") continue;
+          if (String(row.currency || "").toUpperCase() === "KRW") continue;
+          const qty = Number(row.original_quantity ?? row.quantity ?? 0);
+          const valKrw = Number(row.valuation_krw ?? 0);
+          const localPrice = Number(row.current_price_num ?? 0);
+          if (qty > 0 && valKrw > 0 && localPrice > 0) {
+            accountFxRate = valKrw / (qty * localPrice);
+            break;
+          }
+        }
+      }
+      return sourceRows.map((row) => ({
         ...row,
         original_quantity: Number(row.original_quantity ?? row.quantity ?? 0),
         original_average_buy_price: Number(row.original_average_buy_price ?? safeParseFloat(row.average_buy_price)),
-      })),
-    [],
+        account_fx_rate: accountFxRate > 0 ? accountFxRate : undefined,
+      }));
+    },
+    [summary.cash_balance_krw, summary.cash_balance_native, summary.currency],
   );
 
   const [rows, setRows] = useState<HoldingsRow[]>(() => hydrateRows(initialRows));
