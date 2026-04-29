@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
@@ -11,6 +10,7 @@ import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import {
@@ -80,7 +80,6 @@ export function KorMarketStockManager({
 }: {
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
-  const router = useRouter();
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
   const [limit, setLimit] = useState<number>(200);
   const [minMarketCapJo, setMinMarketCapJo] = useState("");
@@ -271,9 +270,9 @@ export function KorMarketStockManager({
         cellStyle: {
           fontFamily: "var(--font-mono, monospace)",
           fontSize: "13px",
-          cursor: "pointer",
         } as CellStyle,
         cellClass: "korMarketStockTickerCell",
+        cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
       },
       {
         headerName: "종목명",
@@ -350,7 +349,7 @@ export function KorMarketStockManager({
         },
       },
     ],
-    [allVisibleSelected, router, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
   );
 
   return (
@@ -439,12 +438,6 @@ export function KorMarketStockManager({
               gridOptions={{
                 overlayNoRowsTemplate: '<span style="color:#667382;">데이터 없음</span>',
                 suppressMovableColumns: true,
-                onCellClicked: (params) => {
-                  if (params.colDef.field !== "ticker") return;
-                  const ticker = String(params.data?.ticker ?? "").trim();
-                  if (!ticker) return;
-                  router.push(`/ticker?ticker=${encodeURIComponent(ticker)}`);
-                },
               }}
             />
           </div>

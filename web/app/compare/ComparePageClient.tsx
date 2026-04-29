@@ -6,6 +6,7 @@ import type { IChartApi, LineData, Time } from "lightweight-charts";
 
 import { PageFrame } from "../components/PageFrame";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 
 type CompareTab = "performance" | "basic" | "holdings";
 type PerformanceRange = "3m" | "6m" | "1y" | "3y";
@@ -78,6 +79,13 @@ type SelectedProduct = {
   detail: TickerDetailResponse;
 };
 
+type CompareHoldingExposureRow = {
+  code: string;
+  name: string;
+  totalWeight: number;
+  holdingsByProductKey: Map<string, TickerHoldingRow>;
+};
+
 type ChartDateRange = {
   startDate: string;
   endDate: string;
@@ -95,6 +103,8 @@ type PerformanceMetricRange =
 
 const MAX_PRODUCTS = 5;
 const COMPARE_STORAGE_KEY = "momentum-etf:compare:selected";
+const COMPARE_SELECTED_TICKER_TYPE_KEY = "momentum-etf:compare:selected-ticker-type";
+const COMPARE_STORAGE_KEY_PREFIX = "momentum-etf:compare:selected:";
 const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed"];
 const HOLDING_MATCH_COLORS = [
   "#dbeafe",
@@ -150,9 +160,41 @@ function readSavedCompareState(): SavedCompareState | null {
   }
 }
 
-function writeSavedCompareState(state: SavedCompareState): void {
+function getComparePoolStorageKey(tickerType: string): string {
+  return `${COMPARE_STORAGE_KEY_PREFIX}${tickerType}`;
+}
+
+function readSavedTickerType(): string | null {
+  if (typeof window === "undefined") return null;
+  const savedTickerType = window.localStorage.getItem(COMPARE_SELECTED_TICKER_TYPE_KEY);
+  if (savedTickerType) return savedTickerType;
+  return readSavedCompareState()?.tickerType ?? null;
+}
+
+function readSavedCompareKeys(tickerType: string): string[] {
+  if (typeof window === "undefined" || !tickerType) return [];
+  const raw = window.localStorage.getItem(getComparePoolStorageKey(tickerType));
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS);
+      }
+    } catch {
+      return [];
+    }
+  }
+  const legacyState = readSavedCompareState();
+  if (legacyState?.tickerType === tickerType) {
+    return legacyState.selectedKeys;
+  }
+  return [];
+}
+
+function writeSavedCompareState(tickerType: string, selectedKeys: string[]): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(COMPARE_STORAGE_KEY, JSON.stringify(state));
+  window.localStorage.setItem(COMPARE_SELECTED_TICKER_TYPE_KEY, tickerType);
+  window.localStorage.setItem(getComparePoolStorageKey(tickerType), JSON.stringify(selectedKeys.slice(0, MAX_PRODUCTS)));
 }
 
 function formatNumber(value: number | null | undefined, digits = 0): string {
@@ -396,6 +438,37 @@ function buildReturnSeries(rows: PriceRow[], dateRange: ChartDateRange | null): 
 
 function getHoldingCode(row: TickerHoldingRow): string {
   return String(row.yahoo_symbol || row.raw_code || row.ticker || "").trim().toUpperCase();
+}
+
+function buildHoldingExposureRows(products: SelectedProduct[]): CompareHoldingExposureRow[] {
+  if (products.length === 0) return [];
+  const rowsByCode = new Map<string, CompareHoldingExposureRow>();
+  const productCount = products.length;
+
+  products.forEach((product) => {
+    const productKey = tickerKey(product.item);
+    product.detail.holdings.forEach((holding) => {
+      const code = getHoldingCode(holding);
+      if (!code) return;
+      const weight = Number(holding.weight ?? 0);
+      const currentRow = rowsByCode.get(code) ?? {
+        code,
+        name: holding.name || holding.ticker || code,
+        totalWeight: 0,
+        holdingsByProductKey: new Map<string, TickerHoldingRow>(),
+      };
+      currentRow.totalWeight += weight / productCount;
+      if (!currentRow.holdingsByProductKey.has(productKey)) {
+        currentRow.holdingsByProductKey.set(productKey, holding);
+      }
+      rowsByCode.set(code, currentRow);
+    });
+  });
+
+  return Array.from(rowsByCode.values()).sort((a, b) => {
+    if (b.totalWeight !== a.totalWeight) return b.totalWeight - a.totalWeight;
+    return a.code.localeCompare(b.code);
+  });
 }
 
 async function loadTickerDetail(item: TickerItem): Promise<TickerDetailResponse> {
@@ -672,20 +745,19 @@ export function ComparePageClient() {
         const types = stocksPayload.ticker_types ?? [];
         setTickerItems(items);
         setTickerTypes(types);
-        const saved = readSavedCompareState();
-        const savedType = saved
-          ? types.find((type) => type.ticker_type === saved.tickerType && items.some((item) => item.ticker_type === saved.tickerType))
+        const savedTickerType = readSavedTickerType();
+        const savedType = savedTickerType
+          ? types.find((type) => type.ticker_type === savedTickerType && items.some((item) => item.ticker_type === savedTickerType))
           : null;
         const initialType = savedType ?? types.find((type) => items.some((item) => item.ticker_type === type.ticker_type));
         if (initialType) {
           setSelectedTickerType(initialType.ticker_type);
-          if (savedType && saved) {
-            const validKeys = saved.selectedKeys.filter((key) => {
-              const item = items.find((candidate) => tickerKey(candidate) === key);
-              return item?.ticker_type === savedType.ticker_type;
-            });
-            setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
-          }
+          const savedKeys = readSavedCompareKeys(initialType.ticker_type);
+          const validKeys = savedKeys.filter((key) => {
+            const item = items.find((candidate) => tickerKey(candidate) === key);
+            return item?.ticker_type === initialType.ticker_type;
+          });
+          setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
         }
         hydratedRef.current = true;
       } catch (loadError) {
@@ -707,7 +779,7 @@ export function ComparePageClient() {
 
   useEffect(() => {
     if (!hydratedRef.current || !selectedTickerType) return;
-    writeSavedCompareState({ tickerType: selectedTickerType, selectedKeys });
+    writeSavedCompareState(selectedTickerType, selectedKeys);
   }, [selectedKeys, selectedTickerType]);
 
   useEffect(() => {
@@ -744,25 +816,21 @@ export function ComparePageClient() {
     () => getChartDateRange(sortedProducts, selectedPerformanceRange.days),
     [selectedPerformanceRange.days, sortedProducts],
   );
+  const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts).slice(0, 10), [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
     const counts = new Map<string, number>();
-    const firstSeenCodes: string[] = [];
-    sortedProducts.forEach((product) => {
-      product.detail.holdings.slice(0, 10).forEach((holding) => {
-        const code = getHoldingCode(holding);
-        if (!code) return;
-        if (!counts.has(code)) firstSeenCodes.push(code);
-        counts.set(code, (counts.get(code) ?? 0) + 1);
-      });
+    holdingExposureRows.forEach((row) => {
+      counts.set(row.code, row.holdingsByProductKey.size);
     });
 
     const colors = new Map<string, string>();
-    firstSeenCodes.forEach((code) => {
+    holdingExposureRows.forEach((row) => {
+      const code = row.code;
       if ((counts.get(code) ?? 0) < 2) return;
       colors.set(code, HOLDING_MATCH_COLORS[colors.size % HOLDING_MATCH_COLORS.length]);
     });
     return colors;
-  }, [sortedProducts]);
+  }, [holdingExposureRows]);
 
   const titleRight = (
     <div className="compareTitleMeta">
@@ -788,9 +856,12 @@ export function ComparePageClient() {
                         className="form-select"
                         value={selectedTickerType}
                         onChange={(event) => {
-                          setSelectedTickerType(event.target.value);
+                          const nextTickerType = event.target.value;
+                          const savedKeys = readSavedCompareKeys(nextTickerType);
+                          const validKeys = savedKeys.filter((key) => itemByKey.get(key)?.ticker_type === nextTickerType);
+                          setSelectedTickerType(nextTickerType);
                           setProducts([]);
-                          setSelectedKeys([]);
+                          setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
                           setSearchText("");
                         }}
                         disabled={tickerTypes.length === 0}
@@ -845,8 +916,8 @@ export function ComparePageClient() {
 
         {loading ? <div className="compareLoading">비교 데이터를 불러오는 중...</div> : null}
 
-        <section className="compareMatrix">
-          <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">구분</div>
+        <section className={activeTab === "holdings" ? "compareMatrix compareMatrixWithTotal" : "compareMatrix"}>
+          <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
             <div key={tickerKey(product.item)} className="compareProductCard">
               <button
@@ -858,7 +929,7 @@ export function ComparePageClient() {
                 ×
               </button>
               <div className="compareProductCode" style={{ color: CHART_COLORS[index % CHART_COLORS.length] }}>
-                {product.item.ticker}
+                <TickerDetailLink ticker={product.item.ticker} />
               </div>
               <div className="compareProductName">{product.item.name}</div>
               <div className="compareProductPrice">
@@ -872,6 +943,9 @@ export function ComparePageClient() {
           {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
             <div key={`empty-${index}`} className="compareProductEmpty compareProductHeaderEmpty">비교 상품을 추가해 주세요.</div>
           ))}
+          {activeTab === "holdings" ? (
+            <div className="compareProductEmpty compareProductHeaderEmpty compareHoldingTotalHeader">합계</div>
+          ) : null}
         </section>
 
         {activeTab === "performance" ? (
@@ -946,7 +1020,7 @@ export function ComparePageClient() {
             ))}
           </section>
         ) : (
-          <section className="compareMatrix compareMatrixBody">
+          <section className="compareMatrix compareMatrixBody compareMatrixWithTotal">
             <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingCountLabel">구성종목 수</div>
             {sortedProducts.map((product) => (
               <div key={tickerKey(product.item)} className="compareHoldingCount">{product.detail.holdings.length}</div>
@@ -954,6 +1028,7 @@ export function ComparePageClient() {
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
               <div key={`empty-count-${index}`} className="compareProductEmpty compareHoldingCountEmpty" />
             ))}
+            <div className="compareHoldingCount compareHoldingTotalCount">합계비중</div>
             <div className="compareMatrixLabel compareHoldingsGroupLabel" style={{ gridRow: "span 10" }}>종목비중 TOP10</div>
             {Array.from({ length: 10 }).map((_, rowIndex) => (
               <Fragment key={rowIndex}>
@@ -986,6 +1061,15 @@ export function ComparePageClient() {
                 {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
                   <div key={`empty-holding-${rowIndex}-${index}`} className="compareHoldingCell">-</div>
                 ))}
+                {holdingExposureRows[rowIndex] ? (
+                  <div className="compareHoldingCell compareHoldingTotalCell">
+                    <div className="compareHoldingName">{holdingExposureRows[rowIndex].name}</div>
+                    <div className="compareHoldingCode">{holdingExposureRows[rowIndex].code}</div>
+                    <strong>{holdingExposureRows[rowIndex].totalWeight.toFixed(2)}%</strong>
+                  </div>
+                ) : (
+                  <div className="compareHoldingCell compareHoldingTotalCell">-</div>
+                )}
               </Fragment>
             ))}
           </section>
