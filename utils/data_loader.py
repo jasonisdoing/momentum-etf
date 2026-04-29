@@ -1554,6 +1554,36 @@ def _parse_comma_number(value: str | None) -> float | None:
         return None
 
 
+def _parse_naver_signed_change_rate(item: dict[str, Any]) -> float | None:
+    """네이버 등락률 필드와 등락 방향 코드를 함께 해석한다."""
+    change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
+    if change_rate is None:
+        return None
+
+    compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
+    if compare_code == "5" and change_rate > 0:
+        return -change_rate
+    return change_rate
+
+
+def _get_naver_pre_market_price_info(item: dict[str, Any]) -> dict[str, Any] | None:
+    """네이버 국내주식 응답에서 열린 장전 거래 가격 정보를 반환한다."""
+    over_market_info = item.get("overMarketPriceInfo")
+    if not isinstance(over_market_info, dict):
+        return None
+
+    trading_session_type = str(over_market_info.get("tradingSessionType") or "").strip().upper()
+    over_market_status = str(over_market_info.get("overMarketStatus") or "").strip().upper()
+    if trading_session_type != "PRE_MARKET" or over_market_status != "OPEN":
+        return None
+
+    over_price = _parse_comma_number(over_market_info.get("overPrice"))
+    if over_price is None:
+        return None
+
+    return over_market_info
+
+
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
@@ -1595,30 +1625,28 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            price_value = _parse_comma_number(item.get("closePrice"))
+            price_source = _get_naver_pre_market_price_info(item) or item
+            price_field = "overPrice" if price_source is not item else "closePrice"
+            price_value = _parse_comma_number(price_source.get(price_field))
             if price_value is None:
                 continue
 
             entry: dict[str, float] = {"nowVal": price_value}
 
-            change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
+            change_rate = _parse_naver_signed_change_rate(price_source)
             if change_rate is not None:
-                # 하락 시 음수로 변환
-                compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
-                if compare_code == "5" and change_rate > 0:
-                    change_rate = -change_rate
                 entry["changeRate"] = change_rate
 
-            open_val = _parse_comma_number(item.get("openPrice"))
+            open_val = _parse_comma_number(price_source.get("openPrice"))
             if open_val is not None:
                 entry["open"] = open_val
-            high_val = _parse_comma_number(item.get("highPrice"))
+            high_val = _parse_comma_number(price_source.get("highPrice"))
             if high_val is not None:
                 entry["high"] = high_val
-            low_val = _parse_comma_number(item.get("lowPrice"))
+            low_val = _parse_comma_number(price_source.get("lowPrice"))
             if low_val is not None:
                 entry["low"] = low_val
-            vol_val = _parse_comma_number(item.get("accumulatedTradingVolume"))
+            vol_val = _parse_comma_number(price_source.get("accumulatedTradingVolume"))
             if vol_val is not None:
                 entry["volume"] = vol_val
 
