@@ -521,7 +521,10 @@ function ProductSearchField({
         placeholder="티커 또는 종목명"
         onFocus={() => setFocused(true)}
         onBlur={() => window.setTimeout(() => setFocused(false), 120)}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setFocused(true);
+        }}
       />
       {focused && normalized ? (
         <div className="compareTickerSearchMenu">
