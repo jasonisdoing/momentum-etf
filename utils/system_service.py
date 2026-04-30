@@ -36,7 +36,7 @@ SCHEDULE_ROWS = [
     {
         "key": "data_aggregate",
         "job": "데이터 집계",
-        "target": "일별/주별 데이터",
+        "target": "일별/주별/월별 데이터",
         "cadence": "평일 09:32, 16:32 KST",
         "command": "python scripts/collect_data.py",
     },
