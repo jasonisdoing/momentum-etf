@@ -55,7 +55,7 @@ def _fetch_us_market_value_page(market: str, start_idx: int, page_size: int) -> 
     return payload
 
 
-def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 400) -> dict[str, Any]:
+def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
     """네이버 API에서 미국 시가총액 상위 종목 리스트를 가져온다."""
     if market not in _SUPPORTED_MARKETS:
         raise ValueError(f"지원하지 않는 마켓입니다: {market}")

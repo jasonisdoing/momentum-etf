@@ -101,7 +101,7 @@ export function UsMarketStockManager({
 
   const toast = useToast();
 
-  const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("400");
+  const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
 
   const load = useCallback(async (m: string, l: number, minCapUkmText: string) => {
     setLoading(true);
