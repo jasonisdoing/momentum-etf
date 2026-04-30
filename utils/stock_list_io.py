@@ -321,7 +321,11 @@ def get_active_holding_tickers() -> dict[str, set[str]]:
         for h in acc.get("holdings", []):
             t = str(h.get("ticker") or "").strip().upper()
             if t and t != "IS" and t != "__CASH__":
-                inferred_type = infer_ticker_type_for_ticker(t)
+                try:
+                    inferred_type = infer_ticker_type_for_ticker(t)
+                except Exception as exc:
+                    logger.warning("보유 스냅샷 티커 종목풀 추론 실패, 건너뜀 (%s): %s", t, exc)
+                    continue
                 holdings_by_type.setdefault(inferred_type, set()).add(t)
 
     return holdings_by_type

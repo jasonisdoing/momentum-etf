@@ -53,6 +53,10 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Referer": "https://m.stock.naver.com/",
     "Accept": "application/json, text/plain, */*",
 }
+
+# 네이버 미국 개별주 시가총액/업종 정보
+NAVER_US_STOCK_MARKET_VALUE_URL = "https://stock.naver.com/api/foreign/market/stock/global"
+
 # 네이버 ETF 대분류 설정 (use: 대표 분류용, show: 개별 컬럼 표시용)
 # 코드가 클수록 Representative(Main) 분류를 정할 때 우선순위가 높음
 NAVER_ETF_CATEGORY_CONFIG = [

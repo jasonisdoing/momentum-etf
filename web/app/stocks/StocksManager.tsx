@@ -249,6 +249,19 @@ function formatAssetInEok(value: number | null): string {
   return `${formatNumber(value / 100_000_000, 0)}억`;
 }
 
+function formatUsdMarketCap(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  if (value >= 1_000_000_000_000) {
+    return `${formatNumber(value / 1_000_000_000_000, 2)}조 달러`;
+  }
+  if (value >= 100_000_000) {
+    return `${formatNumber(value / 100_000_000, 1)}억 달러`;
+  }
+  return `${formatNumber(value, 0)}달러`;
+}
+
 function clampHeldBonusScore(value: number): number {
   if (Number.isNaN(value) || value < 0) {
     return 0;
@@ -760,7 +773,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span className="rankNameCellText" title={value}>{value}</span>;
         },
       },
-      ...(String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver"
+      ...(String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver" ||
+        String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us"
         ? [
           {
             field: "분류",
@@ -965,6 +979,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
     ];
 
+    const isUsTickerType = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us";
     const infoColumns: ColDef<RankGridRow>[] = [
       {
         field: "배당률",
@@ -974,21 +989,26 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
       },
-      {
-        field: "보수",
-        headerName: "보수",
-        minWidth: 92,
-        width: 92,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
-      },
+      ...(!isUsTickerType
+        ? [
+          {
+            field: "보수",
+            headerName: "보수",
+            minWidth: 92,
+            width: 92,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => formatPercent(params.value ?? null),
+          } as ColDef<RankGridRow>,
+        ]
+        : []),
       {
         field: "순자산총액",
-        headerName: "순자산총액",
+        headerName: isUsTickerType ? "시가총액" : "순자산총액",
         minWidth: 132,
         width: 132,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatAssetInEok(params.value ?? null),
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          isUsTickerType ? formatUsdMarketCap(params.value ?? null) : formatAssetInEok(params.value ?? null),
       },
       {
         field: "거래량",
