@@ -49,10 +49,10 @@
       "country_code": "us",
       "currency": "USD",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 0,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 4,
-      "RSI_LIMIT": 90
+      "RSI_LIMIT": 100
     },
     {
       "order": 5,
