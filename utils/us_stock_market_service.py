@@ -55,7 +55,7 @@ def _fetch_us_market_value_page(market: str, start_idx: int, page_size: int) -> 
     return payload
 
 
-def load_us_stock_market(market: str, limit: int) -> dict[str, Any]:
+def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 400) -> dict[str, Any]:
     """네이버 API에서 미국 시가총액 상위 종목 리스트를 가져온다."""
     if market not in _SUPPORTED_MARKETS:
         raise ValueError(f"지원하지 않는 마켓입니다: {market}")
@@ -66,35 +66,53 @@ def load_us_stock_market(market: str, limit: int) -> dict[str, Any]:
     ticker_pool_map = load_ticker_pool_map(country_code="us")
     held_tickers = load_all_holding_tickers(country_code="us")
 
+    target_count = limit
+    min_market_cap_usd = min_market_cap_ukm * 100_000_000
     rows: list[dict[str, Any]] = []
-    for item in _fetch_us_market_value_page(market, start_idx=0, page_size=limit):
-        raw_ticker = str(item.get("symbolCode") or "").strip().upper()
-        if not raw_ticker:
-            continue
-        ticker = raw_ticker.replace(".", "-") if "." in raw_ticker else raw_ticker
+    
+    start_idx = 0
+    page_size = 100
+    
+    while len(rows) < target_count:
+        items = _fetch_us_market_value_page(market, start_idx=start_idx, page_size=page_size)
+        if not items:
+            break
+            
+        for item in items:
+            market_cap = _parse_float(item.get("marketValue"))
+            if market_cap is None or market_cap < min_market_cap_usd:
+                continue
 
-        exchange = item.get("stockExchangeType") or {}
-        exchange_code = str(exchange.get("code") or market).strip().upper()
-        current_price = _parse_float(item.get("currentPrice") or item.get("closePrice"))
-        change_pct = _parse_float(item.get("fluctuationsRatio"))
-        market_cap = _parse_float(item.get("marketValue"))
+            raw_ticker = str(item.get("symbolCode") or "").strip().upper()
+            if not raw_ticker:
+                continue
+            ticker = raw_ticker.replace(".", "-") if "." in raw_ticker else raw_ticker
 
-        rows.append(
-            {
-                "rank": 0,
-                "ticker": ticker,
-                "name": item.get("koreanCodeName") or item.get("englishCodeName") or ticker,
-                "english_name": item.get("englishCodeName") or "",
-                "industry": item.get("reutersIndustryName") or "",
-                "market": exchange_code,
-                "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
-                "is_held": ticker in held_tickers,
-                "current_price": current_price,
-                "change_pct": change_pct,
-                "volume": _parse_int(item.get("accumulatedTradingVolume")),
-                "market_cap": market_cap,
-            }
-        )
+            exchange = item.get("stockExchangeType") or {}
+            exchange_code = str(exchange.get("code") or market).strip().upper()
+            current_price = _parse_float(item.get("currentPrice") or item.get("closePrice"))
+            change_pct = _parse_float(item.get("fluctuationsRatio"))
+
+            rows.append(
+                {
+                    "rank": 0,
+                    "ticker": ticker,
+                    "name": item.get("koreanCodeName") or item.get("englishCodeName") or ticker,
+                    "english_name": item.get("englishCodeName") or "",
+                    "industry": item.get("reutersIndustryName") or "",
+                    "market": exchange_code,
+                    "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
+                    "is_held": ticker in held_tickers,
+                    "current_price": current_price,
+                    "change_pct": change_pct,
+                    "volume": _parse_int(item.get("accumulatedTradingVolume")),
+                    "market_cap": market_cap,
+                }
+            )
+            if len(rows) >= target_count:
+                break
+                
+        start_idx += page_size
 
     _apply_us_realtime_overlay(rows)
     rows.sort(key=lambda row: (-(row["market_cap"] or 0), row["ticker"]))
@@ -124,7 +142,8 @@ def fetch_naver_us_stock_info_map(tickers: set[str] | list[str] | tuple[str, ...
                 break
 
             for item in page:
-                ticker = str(item.get("symbolCode") or "").strip().upper()
+                raw_ticker = str(item.get("symbolCode") or "").strip().upper()
+                ticker = raw_ticker.replace(".", "-") if "." in raw_ticker else raw_ticker
                 if ticker not in targets or ticker in found:
                     continue
                 exchange = item.get("stockExchangeType") or {}
