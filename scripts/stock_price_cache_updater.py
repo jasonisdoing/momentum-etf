@@ -27,7 +27,7 @@ from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_rec
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
-from utils.stock_list_io import get_active_holding_tickers, get_all_etfs_including_deleted
+from utils.stock_list_io import get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
@@ -288,12 +288,6 @@ def refresh_cache_for_target(
         # 종목풀 실행 시 해당 종목풀의 모든 종목 반영
         if target_norm in list_available_ticker_types():
             pass # get_all_etfs_including_deleted가 이미 수행함
-            holdings = _collect_portfolio_master_holdings(target_norm)
-            for item in holdings:
-                ticker = str(item.get("ticker") or "").strip().upper()
-                if not ticker or ticker in all_map:
-                    continue
-                all_map[ticker] = item
 
         # 벤치마크 추가
         benchmark_tickers = _collect_benchmark_tickers(target_norm)
@@ -426,29 +420,7 @@ def _collect_benchmark_tickers(target_id: str) -> list[str]:
     return sorted(tickers)
 
 
-def _collect_portfolio_master_holdings(target_id: str) -> list[dict[str, str]]:
-    """최신 스냅샷 기준 현재 보유 종목을 지정 종목풀의 캐시 갱신 대상에 추가한다."""
-    results: list[dict[str, str]] = []
-    seen: set[str] = set()
 
-    try:
-        active_holdings_by_type = get_active_holding_tickers()
-    except Exception:
-        return []
-
-    for ticker in sorted(active_holdings_by_type.get(target_id, set())):
-        ticker_norm = str(ticker or "").strip().upper()
-        if not ticker_norm or ticker_norm in seen:
-            continue
-        seen.add(ticker_norm)
-        results.append(
-            {
-                "ticker": ticker_norm,
-                "name": ticker_norm,
-                "type": "etf",
-            }
-        )
-    return results
 
 
 def _build_parser() -> argparse.ArgumentParser:

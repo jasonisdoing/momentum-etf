@@ -61,6 +61,8 @@ def _normalize_candidate_ticker(ticker: str, country_code: str) -> str:
         text = text.split(":")[-1].strip().upper()
     if (country_code or "").strip().lower() == "au" and text.endswith(".AX"):
         text = text[:-3]
+    if (country_code or "").strip().lower() == "us" and "." in text:
+        text = text.replace(".", "-")
     return text
 
 
@@ -125,6 +127,7 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "3_month_earn_rate": 1,
                 "6_month_earn_rate": 1,
                 "12_month_earn_rate": 1,
+                "exclude_from_ranking": 1,
             },
         )
     )
@@ -161,6 +164,7 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "return_3m": normalize_nullable_number(doc.get("3_month_earn_rate")),
                 "return_6m": normalize_nullable_number(doc.get("6_month_earn_rate")),
                 "return_12m": normalize_nullable_number(doc.get("12_month_earn_rate")),
+                "exclude_from_ranking": bool(doc.get("exclude_from_ranking")),
             }
             for doc in docs
         ],
@@ -372,16 +376,23 @@ def delete_active_stock(ticker_type: str, ticker: str) -> None:
         raise RuntimeError("삭제할 종목을 찾을 수 없습니다.")
 
     from utils.cache_utils import delete_cached_frame
+    from utils.stock_list_io import get_active_holding_tickers
 
     try:
-        delete_cached_frame(type_norm, ticker_norm)
+        is_currently_held = ticker_norm in get_active_holding_tickers().get(type_norm, set())
     except Exception:
-        pass
+        is_currently_held = False
 
-    try:
-        delete_stock_cache(type_norm, ticker_norm)
-    except Exception:
-        pass
+    if not is_currently_held:
+        try:
+            delete_cached_frame(type_norm, ticker_norm)
+        except Exception:
+            pass
+
+        try:
+            delete_stock_cache(type_norm, ticker_norm)
+        except Exception:
+            pass
 
     invalidate_rank_data_cache(type_norm)
 
@@ -532,3 +543,33 @@ def hard_delete_stocks(ticker_type: str, tickers: list[str]) -> int:
         invalidate_ticker_type_cache(type_norm)
         invalidate_rank_data_cache(type_norm)
     return int(result.deleted_count)
+
+
+def toggle_exclude_from_ranking(ticker_type: str, ticker: str, exclude: bool) -> None:
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    type_norm = str(ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+
+    result = db.stock_meta.update_one(
+        {
+            "ticker_type": type_norm,
+            "ticker": ticker_norm,
+            "is_deleted": {"$ne": True},
+        },
+        {
+            "$set": {
+                "exclude_from_ranking": bool(exclude),
+                "updated_at": datetime.now(),
+            }
+        },
+    )
+
+    if result.matched_count == 0:
+        raise RuntimeError("수정할 종목을 찾을 수 없습니다.")
+
+    # 캐시 무효화 (종목풀 리스트 캐시 재생성 및 랭킹 캐시 무효화)
+    invalidate_ticker_type_cache(type_norm)
+    invalidate_rank_data_cache(type_norm)

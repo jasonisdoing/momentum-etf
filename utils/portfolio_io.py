@@ -43,12 +43,20 @@ class MissingPriceCacheError(RuntimeError):
         super().__init__(f"[{self.ticker_type}] 가격 캐시 누락: {joined}")
 
 
-def load_all_holding_tickers() -> set[str]:
-    """전체 계좌의 실보유 티커 집합을 반환한다."""
-    from utils.settings_loader import list_available_accounts
+def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
+    """전체 계좌의 실보유 티커 집합을 반환한다.
+
+    country_code를 지정하면 해당 국가 계좌의 보유 종목만 반환한다.
+    """
+    from utils.settings_loader import list_available_accounts, get_account_settings
 
     held_tickers: set[str] = set()
     for t_id in list_available_accounts():
+        if country_code is not None:
+            account_settings = get_account_settings(t_id)
+            account_country = str(account_settings.get("country_code") or "").strip().lower()
+            if account_country != country_code.strip().lower():
+                continue
         snapshot = load_portfolio_master(t_id)
         if not snapshot:
             continue

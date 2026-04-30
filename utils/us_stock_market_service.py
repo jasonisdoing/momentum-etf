@@ -62,14 +62,16 @@ def load_us_stock_market(market: str, limit: int) -> dict[str, Any]:
     if limit not in (50, 100, 150, 200):
         raise ValueError(f"지원하지 않는 시가총액 상위 개수입니다: {limit}")
 
-    ticker_pool_map = load_ticker_pool_map()
-    held_tickers = load_all_holding_tickers()
+    # 미국 풀만 매칭 (호주 동일 심볼과 혼동 방지)
+    ticker_pool_map = load_ticker_pool_map(country_code="us")
+    held_tickers = load_all_holding_tickers(country_code="us")
 
     rows: list[dict[str, Any]] = []
     for item in _fetch_us_market_value_page(market, start_idx=0, page_size=limit):
-        ticker = str(item.get("symbolCode") or "").strip().upper()
-        if not ticker:
+        raw_ticker = str(item.get("symbolCode") or "").strip().upper()
+        if not raw_ticker:
             continue
+        ticker = raw_ticker.replace(".", "-") if "." in raw_ticker else raw_ticker
 
         exchange = item.get("stockExchangeType") or {}
         exchange_code = str(exchange.get("code") or market).strip().upper()

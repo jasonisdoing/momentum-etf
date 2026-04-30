@@ -133,6 +133,28 @@ export async function updateStockBucket(tickerType: string, ticker: string, buck
   });
 }
 
+export async function updateStockExclude(tickerType: string, ticker: string, exclude: boolean): Promise<void> {
+  if (typeof window !== "undefined") {
+    await fetchClientJson("/api/stocks/exclude", {
+      method: "PATCH",
+      body: JSON.stringify({
+        ticker_type: tickerType,
+        ticker,
+        exclude,
+      }),
+    });
+    return;
+  }
+  await fetchFastApiJson("/internal/stocks/exclude", {
+    method: "PATCH",
+    body: JSON.stringify({
+      ticker_type: tickerType,
+      ticker,
+      exclude,
+    }),
+  });
+}
+
 export async function deleteStock(tickerType: string, ticker: string): Promise<void> {
   if (typeof window !== "undefined") {
     await fetchClientJson("/api/stocks", {

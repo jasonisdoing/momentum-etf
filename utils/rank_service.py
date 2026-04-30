@@ -307,6 +307,7 @@ def _build_bonus_adjusted_rows(
 
     rows_with_index.sort(
         key=lambda row: (
+            1 if row.get("exclude_from_ranking") else 0,
             1 if row.get("점수") is None else 0,
             -(float(row["점수"]) if row.get("점수") is not None else 0.0),
             int(row["__base_index"]),
@@ -314,10 +315,15 @@ def _build_bonus_adjusted_rows(
     )
 
     ranked_rows: list[dict[str, Any]] = []
-    for rank, row in enumerate(rows_with_index, start=1):
+    current_rank = 1
+    for row in rows_with_index:
         normalized = dict(row)
         normalized.pop("__base_index", None)
-        normalized["순위"] = rank
+        if normalized.get("exclude_from_ranking"):
+            normalized["순위"] = None
+        else:
+            normalized["순위"] = current_rank
+            current_rank += 1
         ranked_rows.append(normalized)
     return ranked_rows
 

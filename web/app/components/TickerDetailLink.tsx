@@ -10,8 +10,15 @@ type TickerDetailLinkProps = {
 };
 
 function normalizeTickerForDetailRoute(ticker: string | null | undefined): string {
-  const upper = String(ticker || "").trim().toUpperCase().replace(/^ASX:/, "");
-  if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) {
+  const upper = String(ticker || "").trim().toUpperCase();
+  // 호주 시장 접두사(ASX:)만 보존. 미국 티커는 접두사 없이 사용.
+  if (upper.startsWith("ASX:")) {
+    return upper;
+  }
+  if (upper.endsWith(".AX")) {
+    return `ASX:${upper.slice(0, -3)}`;
+  }
+  if (upper.endsWith(".KS") || upper.endsWith(".KQ")) {
     return upper.split(".")[0];
   }
   return upper;

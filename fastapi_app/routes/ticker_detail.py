@@ -27,7 +27,7 @@ from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_d
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.settings_loader import load_common_settings
 from utils.settings_loader import list_available_accounts
-from utils.stock_list_io import get_etfs
+from utils.stock_list_io import get_active_holding_tickers, get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 from utils.portfolio_io import load_portfolio_master
 
@@ -83,10 +83,25 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
     if not ticker_key:
         raise ValueError("ticker 파라미터가 필요합니다.")
 
+    # 시장 명시 접두사가 있으면 해당 시장으로 강제 지정. 동일 심볼이 여러 풀에 있을 때 구분.
+    forced_ticker_type: str | None = None
+    if ticker_key.startswith("ASX:"):
+        ticker_key = ticker_key[len("ASX:"):]
+        forced_ticker_type = "aus"
+        if not ticker_key:
+            raise ValueError("ASX: 뒤에 티커가 필요합니다.")
+    elif ticker_key.startswith("US:"):
+        ticker_key = ticker_key[len("US:"):]
+        forced_ticker_type = "us"
+        if not ticker_key:
+            raise ValueError("US: 뒤에 티커가 필요합니다.")
+
     configs = load_ticker_type_configs()
     matches: list[dict[str, object]] = []
     for config in configs:
         ticker_type = config["ticker_type"]
+        if forced_ticker_type is not None and ticker_type != forced_ticker_type:
+            continue
         country_code = config.get("country_code", "")
         for item in get_etfs(ticker_type):
             item_ticker = str(item.get("ticker") or "").strip().upper()
@@ -106,7 +121,52 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
+        # 접두사 없이 호출된 경우 미국(us) 풀을 우선 선택
+        if forced_ticker_type is None:
+            us_matches = [m for m in matches if m["ticker_type"] == "us"]
+            if len(us_matches) == 1:
+                return us_matches[0]
         raise RuntimeError(f"동일한 티커 {ticker_key}가 여러 종목풀에 등록되어 있습니다.")
+
+    # ASX: 접두사로 호주를 명시했는데 풀에 없으면 즉시 호주로 결정 (미국 폴백 차단)
+    if forced_ticker_type == "aus":
+        return {
+            "ticker": ticker_key,
+            "name": ticker_key,
+            "ticker_type": "aus",
+            "country_code": "au",
+            "is_etf": True,
+            "has_holdings": False,
+        }
+
+    holding_matches = [
+        ticker_type
+        for ticker_type, tickers in get_active_holding_tickers().items()
+        if ticker_key in tickers
+    ]
+    if len(holding_matches) == 1:
+        holding_type = holding_matches[0]
+        holding_config = next(
+            (config for config in configs if str(config.get("ticker_type") or "").strip().lower() == holding_type),
+            {},
+        )
+        cache_doc = get_stock_cache_meta(holding_type, ticker_key)
+        holdings_cache = dict(cache_doc.get("holdings_cache") or {}) if isinstance(cache_doc, dict) else {}
+        cache_name = cache_doc.get("name") if isinstance(cache_doc, dict) else None
+        if not cache_name and ticker_key.isdigit() and len(ticker_key) == 6:
+            cache_name = _lookup_domestic_etf_name(ticker_key)
+
+        return {
+            "ticker": ticker_key,
+            "name": cache_name or ticker_key,
+            "ticker_type": holding_type,
+            "country_code": str(holding_config.get("country_code") or "").strip().lower(),
+            "is_etf": holding_type != "kor",
+            "has_holdings": bool(holdings_cache.get("items")),
+        }
+    if len(holding_matches) > 1:
+        joined = ", ".join(sorted(holding_matches))
+        raise RuntimeError(f"보유 중인 동일 티커 {ticker_key}가 여러 종목풀에 있습니다: {joined}")
 
     if ticker_key.isdigit() and len(ticker_key) == 6:
         domestic_etf_tickers = _load_domestic_etf_ticker_set()
