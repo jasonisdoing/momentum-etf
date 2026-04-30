@@ -12,6 +12,7 @@ from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.market import router as market_router
+from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
@@ -92,6 +93,7 @@ async def catch_mongodb_errors(request: Request, call_next):
 app.include_router(system_router)
 app.include_router(ticker_detail_router)
 app.include_router(weekly_router)
+app.include_router(monthly_router)
 import time
 _LAST_DB_ERROR_TIME = 0.0
 
