@@ -704,7 +704,7 @@ def build_ticker_type_rankings(
             "상장일": etf.get("listing_date", "-"),
             "분류": etf.get("etf_category", "") or "",
             "점수": None,
-            "보유": "보유" if ticker in held_tickers else "",
+            "보유": "보유" if (f"ASX:{ticker}" if country_code == "au" and not ticker.startswith("ASX:") else ticker) in held_tickers else "",
             "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,
             **price_metrics,

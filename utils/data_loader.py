@@ -1942,10 +1942,12 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     for sym in uncached:
         try:
+            # 토스는 BRK-A 등 하이픈(-)이 들어간 경우 BRK.A로 검색해야 결과가 나옵니다.
+            search_query = sym.replace("-", ".")
             resp = requests.post(
                 search_url,
                 headers=TOSS_INVEST_HEADERS,
-                json={"query": sym},
+                json={"query": search_query},
                 timeout=5,
             )
             resp.raise_for_status()
@@ -1962,10 +1964,11 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
                     product_code = stock.get("stockCode")
                     break
 
-            # EXACT 없으면 stockName이 심볼과 동일한 첫 번째 미국 종목
+            # EXACT 없으면 stockName이 심볼(원래 심볼 또는 검색 심볼)과 동일한 첫 번째 미국 종목
             if not product_code:
                 for stock in us_stocks:
-                    if str(stock.get("stockName") or "").strip().upper() == sym:
+                    name = str(stock.get("stockName") or "").strip().upper()
+                    if name == sym or name == search_query:
                         product_code = stock.get("stockCode")
                         break
 

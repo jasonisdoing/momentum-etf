@@ -101,12 +101,15 @@ export function UsMarketStockManager({
 
   const toast = useToast();
 
-  const load = useCallback(async (m: string, l: number) => {
+  const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("400");
+
+  const load = useCallback(async (m: string, l: number, minCapUkmText: string) => {
     setLoading(true);
     setError(null);
     try {
+      const minCap = String(minCapUkmText || "").trim() || "0";
       const [resp, stocksPayload] = await Promise.all([
-        fetch(`/api/us-market-stocks?market=${m}&limit=${l}`, { cache: "no-store" }),
+        fetch(`/api/us-market-stocks?market=${m}&limit=${l}&min_market_cap_ukm=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as UsMarketStocksResponse;
@@ -124,8 +127,8 @@ export function UsMarketStockManager({
   }, []);
 
   useEffect(() => {
-    void load(market, limit);
-  }, [market, limit, load]);
+    void load(market, limit, minMarketCapUkm);
+  }, [market, limit, minMarketCapUkm, load]);
 
   useEffect(() => {
     onSummaryChange?.({ market, count: rows.length, totalCount });
@@ -232,9 +235,9 @@ export function UsMarketStockManager({
 
     if (addedCount > 0) {
       setSelectedTickers([]);
-      await load(market, limit);
+      await load(market, limit, minMarketCapUkm);
     }
-  }, [load, market, limit, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, market, limit, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<UsMarketStockGridRow>[]>(
     () => [
@@ -403,10 +406,21 @@ export function UsMarketStockManager({
                   >
                     {LIMIT_OPTIONS.map((opt) => (
                       <option key={opt} value={opt}>
-                        {opt}
+                        {formatMarketLabel(market)} {opt}
                       </option>
                     ))}
                   </select>
+                </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">최소 시가총액(억 달러)</span>
+                  <input
+                    className="form-control"
+                    inputMode="numeric"
+                    value={minMarketCapUkm}
+                    onChange={(e) => setMinMarketCapUkm(e.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="최소 시가총액(억 달러)"
+                  />
                 </label>
               </div>
               <div className="appMainHeaderRight">

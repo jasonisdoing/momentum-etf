@@ -52,9 +52,9 @@ def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
 
     held_tickers: set[str] = set()
     for t_id in list_available_accounts():
+        account_settings = get_account_settings(t_id)
+        account_country = str(account_settings.get("country_code") or "").strip().lower()
         if country_code is not None:
-            account_settings = get_account_settings(t_id)
-            account_country = str(account_settings.get("country_code") or "").strip().lower()
             if account_country != country_code.strip().lower():
                 continue
         snapshot = load_portfolio_master(t_id)
@@ -63,6 +63,8 @@ def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
 
         for holding in snapshot.get("holdings", []):
             ticker = str(holding.get("ticker") or "").strip().upper()
+            if account_country == "au" and ticker and not ticker.startswith("ASX:"):
+                ticker = f"ASX:{ticker}"
             qty = float(holding.get("quantity") or 0)
             if ticker and qty > 0:
                 held_tickers.add(ticker)
