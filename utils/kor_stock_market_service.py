@@ -11,6 +11,7 @@ import requests
 from config import NAVER_FINANCE_HEADERS
 from utils.market_service import load_ticker_pool_map
 from utils.portfolio_io import load_all_holding_tickers
+from services.price_service import get_realtime_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,7 @@ def load_kor_stock_market(
         payload = _fetch_market_value_page(market, page=page + 1, page_size=page_size)
 
     rows = rows[:target_count]
+    _apply_kor_realtime_overlay(rows)
     for idx, row in enumerate(rows, start=1):
         row["rank"] = idx
 
@@ -137,3 +139,34 @@ def load_kor_stock_market(
         "count": len(rows),
         "rows": rows,
     }
+
+
+def _apply_kor_realtime_overlay(rows: list[dict[str, Any]]) -> None:
+    """한국 개별주 리스트에 네이버 실시간/장전 가격을 반영한다."""
+    tickers = [str(row.get("ticker") or "").strip().upper() for row in rows if str(row.get("ticker") or "").strip()]
+    if not tickers:
+        return
+
+    try:
+        snapshot = get_realtime_snapshot("kor", tickers)
+    except Exception as exc:
+        logger.warning("한국 개별주 실시간 가격 오버레이 실패: %s", exc)
+        return
+
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip().upper()
+        realtime = snapshot.get(ticker)
+        if not realtime:
+            continue
+
+        now_val = realtime.get("nowVal")
+        if now_val is not None:
+            row["current_price"] = now_val
+
+        change_rate = realtime.get("changeRate")
+        if change_rate is not None:
+            row["change_pct"] = change_rate
+
+        volume = realtime.get("volume")
+        if volume is not None:
+            row["volume"] = volume
