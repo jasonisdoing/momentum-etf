@@ -168,7 +168,7 @@ SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
 BACKTEST_CONFIG: dict[str, dict] = {
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
-        "TOP_N_HOLD": [4],
+        "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [10, 20],
         "MA_TYPE": ["SMA", "EMA", "ALMA", "HMA"],
         "MA_MONTHS": [6, 9, 12, 18, 24],
