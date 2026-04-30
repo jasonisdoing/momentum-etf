@@ -83,6 +83,7 @@ type CompareHoldingExposureRow = {
   code: string;
   name: string;
   totalWeight: number;
+  changePct: number | null;
   holdingsByProductKey: Map<string, TickerHoldingRow>;
 };
 
@@ -455,9 +456,13 @@ function buildHoldingExposureRows(products: SelectedProduct[]): CompareHoldingEx
         code,
         name: holding.name || holding.ticker || code,
         totalWeight: 0,
+        changePct: holding.change_pct ?? null,
         holdingsByProductKey: new Map<string, TickerHoldingRow>(),
       };
       currentRow.totalWeight += weight / productCount;
+      if (currentRow.changePct === null && holding.change_pct !== null && holding.change_pct !== undefined) {
+        currentRow.changePct = holding.change_pct;
+      }
       if (!currentRow.holdingsByProductKey.has(productKey)) {
         currentRow.holdingsByProductKey.set(productKey, holding);
       }
@@ -1062,10 +1067,26 @@ export function ComparePageClient() {
                   <div key={`empty-holding-${rowIndex}-${index}`} className="compareHoldingCell">-</div>
                 ))}
                 {holdingExposureRows[rowIndex] ? (
-                  <div className="compareHoldingCell compareHoldingTotalCell">
+                  <div
+                    className={
+                      holdingColorByCode.get(holdingExposureRows[rowIndex].code)
+                        ? "compareHoldingCell compareHoldingTotalCell is-matched"
+                        : "compareHoldingCell compareHoldingTotalCell"
+                    }
+                    style={
+                      holdingColorByCode.get(holdingExposureRows[rowIndex].code)
+                        ? { backgroundColor: holdingColorByCode.get(holdingExposureRows[rowIndex].code) }
+                        : undefined
+                    }
+                  >
                     <div className="compareHoldingName">{holdingExposureRows[rowIndex].name}</div>
                     <div className="compareHoldingCode">{holdingExposureRows[rowIndex].code}</div>
-                    <strong>{holdingExposureRows[rowIndex].totalWeight.toFixed(2)}%</strong>
+                    <div className="compareHoldingFooter">
+                      <span className={getSignedClass(holdingExposureRows[rowIndex].changePct)}>
+                        {formatSignedPercent(holdingExposureRows[rowIndex].changePct)}
+                      </span>
+                      <strong>{holdingExposureRows[rowIndex].totalWeight.toFixed(2)}%</strong>
+                    </div>
                   </div>
                 ) : (
                   <div className="compareHoldingCell compareHoldingTotalCell">-</div>
