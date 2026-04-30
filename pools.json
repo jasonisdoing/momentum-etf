@@ -9,10 +9,10 @@
       "currency": "KRW",
       "type_source": "Naver",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 10,
-      "MA_TYPE": "SMA",
+      "HOLDING_BONUS_SCORE": 20,
+      "MA_TYPE": "EMA",
       "MA_MONTHS": 9,
-      "RSI_LIMIT": 92
+      "RSI_LIMIT": 94
     },
     {
       "order": 2,
@@ -36,10 +36,10 @@
       "country_code": "au",
       "currency": "AUD",
       "TOP_N_HOLD": 7,
-      "HOLDING_BONUS_SCORE": 10,
+      "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "SMA",
-      "MA_MONTHS": 12,
-      "RSI_LIMIT": 86
+      "MA_MONTHS": 18,
+      "RSI_LIMIT": 90
     },
     {
       "order": 4,
@@ -62,10 +62,10 @@
       "country_code": "kor",
       "currency": "KRW",
       "TOP_N_HOLD": 3,
-      "HOLDING_BONUS_SCORE": 10,
+      "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
-      "RSI_LIMIT": 88
+      "RSI_LIMIT": 86
     }
   ]
 }
