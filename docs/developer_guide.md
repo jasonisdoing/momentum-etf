@@ -22,6 +22,7 @@
     *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
     *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
+    *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   `accounts.json`: 계좌 메타데이터 단일 설정 파일
 
@@ -41,8 +42,8 @@
 *   현재 초기 단계에서는 기존 `weekly_fund_data`의 종료일 row를 `daily_fund_data.date`로 시드 이관해 sparse 일별 원장으로 사용합니다.
 *   이 시드 데이터는 과거 일별 복원값이 아니라, **주별 종료일 스냅샷을 일별 원장에 옮긴 값**으로 취급합니다.
 *   초기 시드는 명시 스크립트 `./.venv/bin/python scripts/seed_daily_fund_data.py`로만 생성합니다. 런타임에서 자동 시드를 만들지 않습니다.
-*   통합 데이터 집계는 `./.venv/bin/python scripts/collect_data.py`가 담당하며, 미래 `daily_fund_data` row를 먼저 정리한 뒤 오늘 row를 upsert 하고 이어서 `daily_fund_data`에서 주별 마지막 영업일 snapshot을 읽어 `weekly_fund_data`를 다시 생성합니다.
-*   주별 수동 수정은 `memo`만 허용하며, 금액 관련 필드는 모두 일별 원장에서 유도됩니다.
+*   통합 데이터 집계는 `./.venv/bin/python scripts/collect_data.py`가 담당하며, 미래 `daily_fund_data` row를 먼저 정리한 뒤 오늘 row를 upsert 하고 이어서 `daily_fund_data`에서 주별/월별 마지막 영업일 snapshot을 읽어 `weekly_fund_data`, `monthly_fund_data`를 다시 생성합니다.
+*   주별/월별 수동 수정은 `memo`만 허용하며, 금액 관련 필드는 모두 일별 원장에서 유도됩니다.
 
 ### 종목 캐시 용어
 
@@ -52,10 +53,11 @@
     *   OHLCV, 종가 시계열, 실시간 스냅샷
     *   `utils/cache_utils.py`, `utils/data_loader.py`, `services/price_service.py`
 2.  **메타 캐시**
-    *   상장일, 배당률, 보수, 순자산총액, ETF 구성종목 같은 저빈도 정보
+    *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
     *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
+    *   미국 개별주는 네이버 `foreign/market/stock/global`에서 업종, 배당률, 시가총액을 조회해 `stock_meta.etf_category`와 `stock_cache_meta.meta_cache`에 저장합니다. 미국 개별주에는 보수 개념을 적용하지 않습니다.
     *   종목풀에 등록되지 않았더라도 최신 스냅샷에서 현재 보유 중인 티커는 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
@@ -71,7 +73,7 @@
 5.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
 6.  실시간 가격데이터를 제외한 값은 우선 `종목 캐시`에 저장하고 읽습니다. 화면 진입 시 외부 원천을 다시 호출하지 않고, 캐시된 메타/구성종목을 한꺼번에 읽어 응답 속도를 유지하는 것을 기본 원칙으로 삼습니다.
 7.  한국 ETF 구성종목 비중은 `stock_cache_meta.holdings_cache`를 우선 사용합니다. `/ticker`는 구성종목 목록/비중을 실시간 조회하지 않습니다.
-8.  배당률, 보수, 순자산총액, 상장일 같은 저빈도 ETF 메타는 `stock_cache_meta.meta_cache`를 우선 사용합니다.
+8.  배당률, 보수, 순자산총액/시가총액, 상장일 같은 저빈도 메타는 `stock_cache_meta.meta_cache`를 우선 사용합니다.
 9.  앞으로 새로운 저빈도 항목(예: ETF 메타, 구성종목 속성, 기초지수 관련 부가정보)을 발견하면, 실시간 가격데이터가 아닌 이상 먼저 `stock_cache_meta`에 저장하는 방향을 우선 원칙으로 삼습니다.
 10. 실시간 또는 준실시간 값을 내려주는 Next API 라우트는 요청 fetch뿐 아니라 응답 헤더에도 `Cache-Control: no-store`를 명시해 브라우저/중간 계층 캐시를 차단합니다.
 11. 가격 캐시 조회는 요청한 `ticker_type` 또는 국가 캐시만 엄격하게 조회합니다. 다른 종목풀 캐시로 자동 fallback 하지 않습니다. 계좌 보유 화면처럼 여러 종목풀이 섞인 경우에만 호출부에서 전체 종목풀 조회를 명시적으로 선택합니다.

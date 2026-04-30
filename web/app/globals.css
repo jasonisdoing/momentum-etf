@@ -4261,3 +4261,17 @@ a {
 .korMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
   flex: 0 0 11rem;
 }
+
+/* ─── 미국 개별주 마켓 ─── */
+
+.usMarketStockMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.usMarketStockMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 auto;
+}
+
+.usMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
+  flex: 0 0 9rem;
+}

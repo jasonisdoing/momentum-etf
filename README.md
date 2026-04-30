@@ -66,8 +66,8 @@ npm run dev
 웹에서 다음 기능을 사용합니다.
 * `http://localhost:3000/`
 * Home
-* 자산 관리 / 일별 / 스냅샷 / 주별
-* 종목 관리 / ETF 마켓 / AI용 요약 / 정보
+* 자산 관리 / 일별 / 주별 / 월별 / 스냅샷
+* 종목 관리 / 종목 비교 / 한국 개별주 / 미국 개별주 / 한국 ETF / 정보
 
 현재 기본 계좌 식별자는 다음과 같습니다.
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`
