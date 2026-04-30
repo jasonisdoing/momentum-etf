@@ -20,7 +20,12 @@ def _strip_pool_name_prefix(value: str) -> str:
     return _POOL_NAME_PREFIX_PATTERN.sub("", str(value or "").strip())
 
 
-def load_ticker_pool_map() -> dict[str, list[str]]:
+def load_ticker_pool_map(country_code: str | None = None) -> dict[str, list[str]]:
+    """종목 티커 → 종목풀 이름 매핑을 생성한다.
+
+    country_code를 지정하면 해당 국가의 풀만 포함한다.
+    동일 심볼이 여러 국가 풀에 있을 때(FANG: 미국 vs 호주) 잘못 매칭되는 것을 방지.
+    """
     from utils.stock_list_io import get_etfs
     from utils.ticker_registry import load_ticker_type_configs
 
@@ -28,8 +33,12 @@ def load_ticker_pool_map() -> dict[str, list[str]]:
 
     for config in load_ticker_type_configs():
         ticker_type = str(config.get("ticker_type") or "").strip().lower()
+        pool_country = str(config.get("country_code") or "").strip().lower()
         pool_name = _strip_pool_name_prefix(str(config.get("name") or ticker_type))
         if not ticker_type or not pool_name:
+            continue
+        # country_code 필터가 지정된 경우 해당 국가의 풀만 포함
+        if country_code is not None and pool_country != country_code.strip().lower():
             continue
 
         for item in get_etfs(ticker_type):

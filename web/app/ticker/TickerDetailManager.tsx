@@ -570,6 +570,14 @@ export function TickerDetailManager({
         return;
       }
 
+      // 접두사 없이 호출된 경우 미국(us) 풀을 우선 선택
+      const usMatch = matches.find((m) => m.country_code === "us");
+      if (usMatch) {
+        setSelectedTicker(usMatch);
+        void loadTickerData(usMatch);
+        return;
+      }
+
       setSelectedTicker(null);
       setError(`동일한 티커 ${qTicker}가 여러 종목풀(${matches.map(m => m.ticker_type).join(", ")})에 등록되어 있습니다.`);
       return;

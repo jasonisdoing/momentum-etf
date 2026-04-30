@@ -264,7 +264,11 @@ export function UsMarketStockManager({
           fontFamily: "var(--font-mono, monospace)",
           fontSize: "13px",
         } as CellStyle,
-        cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
+        cellRenderer: (params: { value?: string }) => {
+          // 미국 티커는 접두사 없이 그대로 사용. 백엔드 resolve에서 미국 우선 처리.
+          const raw = String(params.value ?? "").trim();
+          return <TickerDetailLink ticker={raw} displayTicker={raw} />;
+        },
       },
       {
         headerName: "종목명",

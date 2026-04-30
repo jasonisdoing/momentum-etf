@@ -30,7 +30,7 @@ npm run dev
 *   `SLACK_CHANNEL_ID`: 알림을 받을 슬랙 채널 ID
 
 ### 계좌 설정 (`accounts.json`)
-계좌 정의는 루트 `accounts.json` 한 파일에서 관리합니다. 각 계좌는 `account_id`, `order`, `name`, `icon`, `country_code`, `currency`를 명시적으로 가져야 하며, 필요하면 `URL`을 함께 설정합니다.
+계좌 정의는 루트 `accounts.json` 한 파일에서 관리합니다. 각 계좌는 `account_id`, `order`, `name`, `icon`, `country_code`, `currency`, `ticker_types`를 명시적으로 가져야 하며, 필요하면 `URL`을 함께 설정합니다. `ticker_types`는 해당 계좌가 보유할 수 있는 종목풀 목록입니다. 종목풀에서 제거한 종목이라도 계좌에 실제 보유 중이면 이 값을 기준으로 가격/메타 캐시 갱신 대상에 포함됩니다.
 
 ### 종목풀 설정 (`pools.json`)
 종목풀은 등록된 전체 종목을 유니버스로 사용합니다. `MA_TYPE`, `MA_MONTHS` 기준 단일 추세를 계산한 뒤, 이를 `0` 기준 상승/하락으로 나누고 구간 내 상대 순위(백분위)를 부호를 유지한 채 사용한 `점수` 내림차순으로 순위를 보여줍니다. 버킷은 분류와 표시용 참고 정보입니다.
@@ -98,7 +98,7 @@ npm run dev
 순위 화면에서 가격 캐시가 누락된 종목이 있으면 토스트 경고가 표시됩니다.
 *   누락된 종목명과 티커가 구체적으로 안내됩니다.
 *   필요하면 로컬에서 `python scripts/stock_meta_cache_updater.py` 또는 `python scripts/stock_price_cache_updater.py`를 실행해 정리합니다.
-*   종목풀에 등록되지 않은 티커라도 현재 계좌에 보유 중이면 메타데이터/가격 캐시 갱신 대상에 포함됩니다.
+*   종목풀에 등록되지 않은 티커라도 현재 계좌에 보유 중이면 `accounts.json`의 계좌별 `ticker_types`를 기준으로 메타데이터/가격 캐시 갱신 대상에 포함됩니다.
 *   순위 화면의 가격 캐시는 선택한 종목풀 기준으로만 판정하며, 다른 종목풀의 오래된 캐시를 대신 사용하지 않습니다.
 *   주별/월별 집계는 독립 원장을 별도로 유지하지 않고, 일별 원장(`daily_fund_data`)에서 다시 계산해 `weekly_fund_data`, `monthly_fund_data`를 갱신합니다.
 

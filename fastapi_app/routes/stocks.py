@@ -14,6 +14,7 @@ from utils.stocks_service import (
     restore_deleted_stocks,
     update_stock_bucket,
     validate_stock_candidate,
+    toggle_exclude_from_ranking,
 )
 
 router = APIRouter(prefix="/internal/stocks", tags=["stocks"])
@@ -23,6 +24,12 @@ class BucketUpdatePayload(BaseModel):
     ticker_type: str
     ticker: str
     bucket_id: int
+
+
+class StockExcludePayload(BaseModel):
+    ticker_type: str
+    ticker: str
+    exclude: bool
 
 
 class StockDeletePayload(BaseModel):
@@ -62,6 +69,12 @@ def get_active_stocks(
 @router.patch("")
 def patch_active_stock(payload: BucketUpdatePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
     update_stock_bucket(payload.ticker_type, payload.ticker, payload.bucket_id)
+    return {"ok": True}
+
+
+@router.patch("/exclude")
+def patch_exclude_stock(payload: StockExcludePayload, _: None = Depends(require_internal_token)) -> dict[str, bool]:
+    toggle_exclude_from_ranking(payload.ticker_type, payload.ticker, payload.exclude)
     return {"ok": True}
 
 

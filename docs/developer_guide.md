@@ -24,7 +24,7 @@
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
-*   `accounts.json`: 계좌 메타데이터 단일 설정 파일
+*   `accounts.json`: 계좌 메타데이터 단일 설정 파일. 각 계좌의 `ticker_types`는 해당 계좌가 보유할 수 있는 종목풀 목록이며, 보유종목이 종목풀에서 제거된 뒤에도 가격/메타 캐시 갱신 대상의 ticker_type을 결정하는 기준입니다.
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
@@ -58,7 +58,7 @@
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
     *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
     *   미국 개별주는 네이버 `foreign/market/stock/global`에서 업종, 배당률, 시가총액을 조회해 `stock_meta.etf_category`와 `stock_cache_meta.meta_cache`에 저장합니다. 미국 개별주에는 보수 개념을 적용하지 않습니다.
-    *   종목풀에 등록되지 않았더라도 최신 스냅샷에서 현재 보유 중인 티커는 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
+    *   종목풀에 등록되지 않았더라도 포트폴리오 마스터에서 현재 보유 중인 티커는 계좌 `ticker_types` 기준으로 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
 

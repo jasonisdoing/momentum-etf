@@ -772,8 +772,17 @@ def _fetch_ohlcv_with_cache(
         try:
             fetched = _fetch_ohlcv_core(ticker, country_code, miss_start, effective_end, cached_df)
         except PykrxDataUnavailableError:
-            # 전체 구간 실패는 곧바로 상위로 전파
-            raise
+            # 캐시가 없으면 상위로 전파, 캐시가 있으면 해당 구간만 무시하고 계속 진행
+            # (상장 전 기간 등 데이터가 없는 구간에서 전체 로드가 실패하는 것을 방지)
+            if cached_df is None or cached_df.empty:
+                raise
+            logger.warning(
+                "[CACHE] %s/%s 구간(%s~%s) pykrx 데이터 없음 — 기존 캐시로 진행합니다.",
+                cache_key_display, ticker,
+                miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"),
+            )
+            unfilled_ranges.append((miss_start, effective_end))
+            continue
 
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)
@@ -815,10 +824,17 @@ def _fetch_ohlcv_with_cache(
         )
         logger.warning("%s의 가격 데이터 일부 누락 구간을 남긴 채 부분 캐시를 사용합니다: %s", ticker, ranges_text)
     elif unfilled_ranges:
-        ranges_text = ", ".join(
-            f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
-        )
-        raise RuntimeError(f"{ticker}의 가격 데이터 누락 구간을 가져오지 못했습니다: {ranges_text}")
+        # 캐시 데이터 범위 이전의 unfilled 구간(상장 전 기간)은 무시
+        cache_min_for_check = combined_df.index.min().normalize() if combined_df is not None and not combined_df.empty else None
+        critical_unfilled = [
+            (s, e) for s, e in unfilled_ranges
+            if cache_min_for_check is None or e >= cache_min_for_check
+        ]
+        if critical_unfilled:
+            ranges_text = ", ".join(
+                f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in critical_unfilled
+            )
+            raise RuntimeError(f"{ticker}의 가격 데이터 누락 구간을 가져오지 못했습니다: {ranges_text}")
 
     cache_min = combined_df.index.min()
     cache_max = combined_df.index.max()

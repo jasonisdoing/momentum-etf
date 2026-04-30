@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
-import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate } from "@/lib/stocks-store";
+import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -78,6 +78,7 @@ type RankRow = {
   보수: number | null;
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
+  exclude_from_ranking?: boolean;
 };
 
 type RankResponse = {
@@ -487,12 +488,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [selectedTickerTypeItem?.ticker_type]);
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
+    const rows = pageMode === "rank" ? gridRows.filter((r) => !r.exclude_from_ranking) : gridRows;
     if (pageMode !== "manage" || !addingRow) {
-      return gridRows;
+      return rows;
     }
     return [
       {
-        id: "__adding__",
+        id: "adding-row",
         __isAddingRow: true,
         순번: "-",
         순위: null,
@@ -531,8 +533,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보수: null,
         순자산총액: null,
         "전일 거래량(주)": null,
+        exclude_from_ranking: false,
       },
-      ...gridRows,
+      ...rows,
     ];
   }, [addingRow, gridRows, pageMode]);
 
@@ -684,6 +687,50 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span>{getBucketName(Number(params.data?.bucket ?? 1))}</span>;
         },
       },
+      ...(pageMode === "manage"
+        ? [
+            {
+              field: "exclude_from_ranking",
+              headerName: "순위 제외",
+              minWidth: 84,
+              width: 84,
+              cellStyle: { textAlign: "center" },
+              cellRenderer: (params: { data?: RankGridRow; value: boolean | null | undefined }) => {
+                if (params.data?.__isAddingRow) return null;
+                const ticker = params.data?.티커;
+                if (!ticker) return null;
+                return (
+                  <div className="form-check form-switch d-flex justify-content-center align-items-center h-100 mb-0">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={!!params.value}
+                      style={{ cursor: "pointer", marginTop: 0 }}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        startTransition(async () => {
+                          try {
+                            await updateStockExclude(selectedTickerType, ticker, checked);
+                            toast.success(`[${ticker}] 순위 제외 ${checked ? "설정" : "해제"} 완료`);
+                            void load({
+                              ticker_type: selectedTickerType,
+                              ma_rule_override: maRule ?? undefined,
+                              as_of_date: selectedAsOfDate,
+                              held_bonus_score: heldBonusScore,
+                              skip_session_cache: true,
+                            });
+                          } catch (error) {
+                            showErrorToast(error instanceof Error ? error.message : "제외 설정에 실패했습니다.");
+                          }
+                        });
+                      }}
+                    />
+                  </div>
+                );
+              },
+            } as ColDef<RankGridRow>,
+          ]
+        : []),
       ...(selectedTickerType === "kor"
         ? [
           {
@@ -705,8 +752,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "티커",
         headerName: "티커",
-        minWidth: 92,
-        width: 92,
+        minWidth: 105,
+        width: 105,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             return (
@@ -729,7 +776,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          return <TickerDetailLink ticker={value} />;
+          // 호주 계좌는 ASX: 접두사로 표시하여 미국 동일 심볼과 구분
+          const isAusPool = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "au";
+          const displayValue = isAusPool && value !== "-" && !value.startsWith("ASX:")
+            ? `ASX:${value}`
+            : value;
+          return <TickerDetailLink ticker={displayValue} displayTicker={displayValue} />;
         },
       },
       {

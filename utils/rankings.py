@@ -705,6 +705,7 @@ def build_ticker_type_rankings(
             "분류": etf.get("etf_category", "") or "",
             "점수": None,
             "보유": "보유" if ticker in held_tickers else "",
+            "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,
             **price_metrics,
             "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,
