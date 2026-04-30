@@ -10,9 +10,9 @@
       "type_source": "Naver",
       "TOP_N_HOLD": 5,
       "HOLDING_BONUS_SCORE": 20,
-      "MA_TYPE": "ALMA",
-      "MA_MONTHS": 24,
-      "RSI_LIMIT": 92
+      "MA_TYPE": "SMA",
+      "MA_MONTHS": 11,
+      "RSI_LIMIT": 100
     },
     {
       "order": 2,
@@ -23,10 +23,10 @@
       "currency": "KRW",
       "type_source": "Naver",
       "TOP_N_HOLD": 4,
-      "HOLDING_BONUS_SCORE": 10,
-      "MA_TYPE": "EMA",
-      "MA_MONTHS": 12,
-      "RSI_LIMIT": 92
+      "HOLDING_BONUS_SCORE": 20,
+      "MA_TYPE": "SMA",
+      "MA_MONTHS": 6,
+      "RSI_LIMIT": 100
     },
     {
       "order": 3,
@@ -38,8 +38,8 @@
       "TOP_N_HOLD": 7,
       "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "SMA",
-      "MA_MONTHS": 18,
-      "RSI_LIMIT": 90
+      "MA_MONTHS": 12,
+      "RSI_LIMIT": 100
     },
     {
       "order": 4,
@@ -49,9 +49,9 @@
       "country_code": "us",
       "currency": "USD",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 10,
-      "MA_TYPE": "SMA",
-      "MA_MONTHS": 12,
+      "HOLDING_BONUS_SCORE": 20,
+      "MA_TYPE": "EMA",
+      "MA_MONTHS": 7,
       "RSI_LIMIT": 90
     },
     {
@@ -61,11 +61,11 @@
       "name": "한국 개별주",
       "country_code": "kor",
       "currency": "KRW",
-      "TOP_N_HOLD": 3,
-      "HOLDING_BONUS_SCORE": 20,
+      "TOP_N_HOLD": 5,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 6,
-      "RSI_LIMIT": 86
+      "MA_MONTHS": 5,
+      "RSI_LIMIT": 88
     }
   ]
 }

@@ -577,6 +577,13 @@ def _simulate_benchmark_buy_and_hold(
 # --------------------------- 결과 기록 --------------------------- #
 
 
+def _result_sort_key(result: dict[str, Any]) -> tuple[float, float, float]:
+    """백테스트 결과 정렬 키를 반환한다."""
+    rsi_limit = result.get("RSI_LIMIT")
+    sortable_rsi = float(rsi_limit) if rsi_limit is not None else float("-inf")
+    return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -sortable_rsi)
+
+
 def _write_results_file(
     *,
     out_path: Path,
@@ -600,7 +607,7 @@ def _write_results_file(
     is_final: bool,
 ) -> None:
     """결과를 로그 파일에 기록한다. 중간/최종 모두 동일 형식."""
-    sorted_results = sorted(results, key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
+    sorted_results = sorted(results, key=_result_sort_key)
 
     def _render_full_width_row(border_line: str, text: str) -> str:
         """테이블 전체 너비를 차지하는 단일 텍스트 row를 렌더링한다."""
@@ -1904,7 +1911,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         is_final=True,
         **write_kwargs,
     )
-    sorted_results = sorted(results, key=lambda r: (-r["CAGR_PCT"], r["MDD_PCT"]))
+    sorted_results = sorted(results, key=_result_sort_key)
     if sorted_results:
         best_result = sorted_results[0]
         best_rule_frame = percentile_by_spec_win[(best_result["MA_TYPE"], int(best_result["MA_MONTHS"]))].copy()
