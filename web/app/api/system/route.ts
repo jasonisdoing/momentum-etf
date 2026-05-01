@@ -30,15 +30,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "유효하지 않은 action 입니다." }, { status: 400 });
     }
 
-    const message = await triggerSystemAction(
-      actionStr as
-        | "data_aggregate"
-        | "cache_refresh"
-        | "market_hours_analysis"
-        | "metadata_updater"
-        | "asset_summary"
-        | "us_index_constituents",
-    );
+    const message = await triggerSystemAction(actionStr as SystemAction);
     return NextResponse.json({ message });
   } catch (error) {
     const message = error instanceof Error ? error.message : "시스템 작업 실행에 실패했습니다.";
