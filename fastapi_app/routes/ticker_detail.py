@@ -11,6 +11,7 @@ from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import enrich_component_prices
 from services.price_service import (
     get_exchange_rates,
+    get_exchange_rate_series,
     get_realtime_snapshot,
     get_realtime_snapshot_meta,
 )
@@ -304,6 +305,66 @@ def _build_fx_rates_for_holdings(holdings: list[dict[str, object]], rates: dict[
     return result
 
 
+_FX_SYMBOL_BY_CURRENCY = {
+    "USD": "KRW=X",
+    "AUD": "AUDKRW=X",
+    "JPY": "JPYKRW=X",
+    "CNY": "CNYKRW=X",
+    "TWD": "TWDKRW=X",
+    "HKD": "HKDKRW=X",
+    "GBP": "GBPKRW=X",
+    "EUR": "EURKRW=X",
+}
+
+
+def _build_cumulative_fx_rates_for_holdings(
+    holdings: list[dict[str, object]],
+    rates: dict[str, object],
+    base_date: str | None,
+) -> list[dict[str, object]]:
+    """구성종목 통화별 기준일 이후 환율 변동률을 구성한다."""
+    if not base_date:
+        return []
+
+    fx_rates = _build_fx_rates_for_holdings(holdings, rates)
+    if not fx_rates:
+        return []
+
+    base_ts = pd.Timestamp(base_date).normalize()
+    end_ts = datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
+    result: list[dict[str, object]] = []
+    for item in fx_rates:
+        currency = str(item.get("currency") or "").strip().upper()
+        current_rate = item.get("rate")
+        symbol = _FX_SYMBOL_BY_CURRENCY.get(currency)
+        if not symbol or current_rate is None:
+            continue
+        series = get_exchange_rate_series(
+            (base_ts - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
+            end_ts,
+            symbol=symbol,
+            allow_partial=True,
+        )
+        if series.empty:
+            continue
+        base_series = series[pd.to_datetime(series.index).normalize() <= base_ts]
+        if base_series.empty:
+            continue
+        base_rate = float(base_series.iloc[-1])
+        if base_rate <= 0:
+            continue
+        change_pct = ((float(current_rate) / base_rate) - 1.0) * 100.0
+        result.append(
+            {
+                "currency": currency,
+                "rate": current_rate,
+                "change_pct": change_pct,
+                "base_rate": base_rate,
+            }
+        )
+    return result
+
+
 def _calculate_consolidated_average_buy_price(ticker: str) -> float | None:
     """모든 계좌의 동일 티커 보유분을 합산해 통합 평균매입가를 계산한다."""
     ticker_key = str(ticker or "").strip().upper()
@@ -373,8 +434,10 @@ def _build_korean_etf_info_payload(
     today_str = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
     prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, today_str)
     prev_nav = None
+    portfolio_change_base_date = None
     if prev_history and "meta_cache" in prev_history:
         prev_nav = prev_history["meta_cache"].get("nav")
+        portfolio_change_base_date = str(prev_history.get("date") or "").strip() or None
 
     nav_change = None
     nav_change_pct = None
@@ -396,6 +459,7 @@ def _build_korean_etf_info_payload(
         "fx_rate": fx_rate,
         "fx_change_pct": fx_change_pct,
         "fx_rates": fx_rates,
+        "portfolio_change_base_date": portfolio_change_base_date,
         "deviation": float(deviation_value) if deviation_value is not None else None,
         "expense_ratio": float(meta_cache["expense_ratio"]) if meta_cache.get("expense_ratio") is not None else None,
         "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"]) if meta_cache.get("dividend_yield_ttm") is not None else None,
@@ -828,6 +892,7 @@ def get_ticker_detail(
             priced_holdings, holdings_price_as_of_date = enrich_component_prices(
                 holdings,
                 price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
+                cumulative_base_date=str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None,
             )
             enriched_holdings: list[dict[str, object]] = []
             for enriched_item in priced_holdings:
@@ -844,7 +909,12 @@ def get_ticker_detail(
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings
             if etf_info is not None:
-                etf_info["fx_rates"] = _build_fx_rates_for_holdings(holdings, get_exchange_rates())
+                base_date = str(etf_info.get("portfolio_change_base_date") or "").strip() or None
+                etf_info["fx_rates"] = _build_cumulative_fx_rates_for_holdings(
+                    holdings,
+                    get_exchange_rates(),
+                    base_date,
+                )
 
     return {
         "ticker": ticker,

@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
+import pandas as pd
+
 from services.price_service import get_realtime_snapshot, get_worldstock_snapshot, get_yahoo_symbol_snapshot
 from utils.logger import get_app_logger
 
@@ -31,6 +33,7 @@ def enrich_component_prices(
     *,
     price_fetch_limit: int,
     preserve_existing: bool = False,
+    cumulative_base_date: str | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """ETF 구성종목에 현재가/등락률/통화 정보를 붙인다."""
     holdings_list = [dict(item) for item in holdings]
@@ -51,6 +54,8 @@ def enrich_component_prices(
     au_tickers: list[str] = []
     worldstock_codes: list[str] = []
     yahoo_exchange_symbols: list[str] = []
+    baseline_yahoo_symbols: list[str] = []
+    previous_trading_day_baseline_symbols: set[str] = set()
 
     for item in holdings_for_pricing:
         if _is_cash_like_holding(item):
@@ -64,6 +69,10 @@ def enrich_component_prices(
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
         if not yahoo_symbol:
             continue
+        if cumulative_base_date:
+            baseline_yahoo_symbols.append(yahoo_symbol)
+            if _is_us_yahoo_symbol(yahoo_symbol):
+                previous_trading_day_baseline_symbols.add(yahoo_symbol)
         if yahoo_symbol.endswith(".AX"):
             au_tickers.append(yahoo_symbol[:-3])
         elif _is_worldstock_symbol(yahoo_symbol):
@@ -78,6 +87,11 @@ def enrich_component_prices(
     au_price_map = _safe_fetch_snapshot("au", au_tickers)
     worldstock_price_map = _safe_fetch_worldstock(worldstock_codes)
     yahoo_exchange_price_map = _safe_fetch_yahoo(yahoo_exchange_symbols)
+    baseline_price_map = _safe_fetch_yahoo_baseline_prices(
+        baseline_yahoo_symbols,
+        cumulative_base_date,
+        previous_trading_day_baseline_symbols,
+    )
 
     enriched: list[dict[str, Any]] = []
     price_as_of_dates: set[str] = set()
@@ -133,6 +147,10 @@ def enrich_component_prices(
                 preserve_existing=preserve_existing,
             )
 
+        if cumulative_base_date and yahoo_symbol:
+            baseline_item = baseline_price_map.get(yahoo_symbol)
+            _apply_cumulative_change(enriched_item, baseline_item)
+
         as_of_date = str(enriched_item.get("price_as_of_date") or "").strip()
         if as_of_date:
             price_as_of_dates.add(as_of_date)
@@ -174,6 +192,11 @@ def _is_yahoo_exchange_symbol(symbol: str) -> bool:
     return _normalize_upper(symbol).endswith((".TW", ".L"))
 
 
+def _is_us_yahoo_symbol(symbol: str) -> bool:
+    normalized = _normalize_upper(symbol)
+    return bool(normalized) and "." not in normalized
+
+
 def _safe_fetch_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, Any]]:
     if not tickers:
         return {}
@@ -204,6 +227,77 @@ def _safe_fetch_yahoo(symbols: list[str]) -> dict[str, dict[str, Any]]:
         return {}
 
 
+def _safe_fetch_yahoo_baseline_prices(
+    symbols: list[str],
+    base_date: str | None,
+    previous_trading_day_symbols: set[str],
+) -> dict[str, dict[str, Any]]:
+    if not symbols or not base_date:
+        return {}
+    try:
+        return _fetch_yahoo_baseline_prices(symbols, base_date, previous_trading_day_symbols)
+    except Exception as exc:
+        logger.warning("구성종목 기준일 가격 조회 실패(base_date=%s): %s", base_date, exc)
+        return {}
+
+
+def _fetch_yahoo_baseline_prices(
+    symbols: list[str],
+    base_date: str,
+    previous_trading_day_symbols: set[str],
+) -> dict[str, dict[str, Any]]:
+    import yfinance as yf
+
+    normalized_symbols = sorted({str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()})
+    if not normalized_symbols:
+        return {}
+
+    base_ts = pd.Timestamp(base_date).normalize()
+    start_ts = base_ts - pd.Timedelta(days=10)
+    end_ts = base_ts + pd.Timedelta(days=1)
+    downloaded = yf.download(
+        normalized_symbols,
+        start=start_ts.strftime("%Y-%m-%d"),
+        end=end_ts.strftime("%Y-%m-%d"),
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        group_by="ticker",
+        threads=True,
+    )
+    if downloaded is None or downloaded.empty:
+        return {}
+
+    def _extract_symbol_frame(symbol: str) -> pd.DataFrame | None:
+        if isinstance(downloaded.columns, pd.MultiIndex):
+            if symbol not in downloaded.columns.get_level_values(0):
+                return None
+            return downloaded[symbol].copy()
+        if len(normalized_symbols) != 1:
+            return None
+        return downloaded.copy()
+
+    previous_day_symbols = {str(symbol or "").strip().upper() for symbol in previous_trading_day_symbols}
+    result: dict[str, dict[str, Any]] = {}
+    for symbol in normalized_symbols:
+        frame = _extract_symbol_frame(symbol)
+        if frame is None or frame.empty or "Close" not in frame.columns:
+            continue
+        close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        normalized_index = pd.to_datetime(close_series.index).tz_localize(None).normalize()
+        if symbol in previous_day_symbols:
+            close_series = close_series[normalized_index < base_ts]
+        else:
+            close_series = close_series[normalized_index <= base_ts]
+        if close_series.empty:
+            continue
+        result[symbol] = {
+            "price": float(close_series.iloc[-1]),
+            "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
+        }
+    return result
+
+
 def _apply_price_snapshot(
     enriched_item: dict[str, Any],
     snapshot: dict[str, Any],
@@ -224,6 +318,32 @@ def _apply_price_snapshot(
     enriched_item["change_pct"] = float(change_pct) if change_pct is not None else None
     enriched_item["price_currency"] = currency
     enriched_item["price_as_of_date"] = snapshot.get("as_of_date")
+
+
+def _apply_cumulative_change(enriched_item: dict[str, Any], baseline_item: dict[str, Any] | None) -> None:
+    current_price = enriched_item.get("current_price")
+    baseline_price = baseline_item.get("price") if isinstance(baseline_item, dict) else None
+    if baseline_price is None or current_price is None:
+        enriched_item["baseline_price"] = None
+        enriched_item["baseline_price_date"] = None
+        enriched_item["cumulative_change_pct"] = None
+        return
+    try:
+        base_val = float(baseline_price)
+        current_val = float(current_price)
+    except (TypeError, ValueError):
+        enriched_item["baseline_price"] = None
+        enriched_item["baseline_price_date"] = None
+        enriched_item["cumulative_change_pct"] = None
+        return
+    if base_val <= 0:
+        enriched_item["baseline_price"] = None
+        enriched_item["baseline_price_date"] = None
+        enriched_item["cumulative_change_pct"] = None
+        return
+    enriched_item["baseline_price"] = base_val
+    enriched_item["baseline_price_date"] = baseline_item.get("date") if isinstance(baseline_item, dict) else None
+    enriched_item["cumulative_change_pct"] = ((current_val / base_val) - 1.0) * 100.0
 
 
 def _clear_price_fields(enriched_item: dict[str, Any], *, preserve_existing: bool) -> None:

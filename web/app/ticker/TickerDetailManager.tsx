@@ -87,6 +87,7 @@ type TickerEtfInfo = {
   fx_rate?: number | null;
   fx_change_pct?: number | null;
   fx_rates?: TickerFxRate[];
+  portfolio_change_base_date?: string | null;
 };
 
 type TickerFxRate = {
@@ -114,6 +115,8 @@ type TickerHoldingRow = {
   current_price?: number | null;
   previous_close?: number | null;
   change_pct?: number | null;
+  cumulative_change_pct?: number | null;
+  baseline_price_date?: string | null;
   price_currency?: string | null;
   weight: number | null;
   is_us_pool_candidate?: boolean;
@@ -230,6 +233,13 @@ function formatDateWithWeekday(value: string): string {
   if (Number.isNaN(date.getTime())) return value;
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   return `${value}(${weekdays[date.getDay()]})`;
+}
+
+function formatKoreanDateLabel(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
 function getSignedClass(value: number | null): string {
@@ -1082,11 +1092,12 @@ export function TickerDetailManager({
     holdings.forEach((h) => {
       const weight = h.weight ?? 0;
       if (weight <= 0) return;
-      if (h.change_pct == null || Number.isNaN(h.change_pct)) return;
+      const componentChangePct = h.cumulative_change_pct;
+      if (componentChangePct == null || Number.isNaN(componentChangePct)) return;
 
       const currency = String(h.price_currency || "").trim().toUpperCase();
       const isForeign = currency !== "" && currency !== "KRW";
-      let changePctKrw = h.change_pct;
+      let changePctKrw = componentChangePct;
       if (isForeign) {
         const fxChangePct = fxChangePctByCurrency.get(currency);
         if (fxChangePct == null || Number.isNaN(fxChangePct)) {
@@ -1094,7 +1105,7 @@ export function TickerDetailManager({
         }
         // (1 + 현지통화 변동률) × (1 + 환율 변동률) - 1
         const fxFactor = 1 + fxChangePct / 100;
-        changePctKrw = ((1 + h.change_pct / 100) * fxFactor - 1) * 100;
+        changePctKrw = ((1 + componentChangePct / 100) * fxFactor - 1) * 100;
       }
 
       const group = groups.get(currency || "KRW") ?? { weight: 0, weightedSum: 0 };
@@ -1131,6 +1142,7 @@ export function TickerDetailManager({
   }, [holdings, fxChangePctByCurrency]);
   const portfolioChangePct = portfolioChange.total_pct;
   const portfolioChangeBreakdown = portfolioChange.breakdown;
+  const portfolioChangeBaseDate = etfInfo?.portfolio_change_base_date ?? null;
   const dailyColumns = useMemo<ColDef[]>(
     () => [
       {
@@ -1389,7 +1401,10 @@ export function TickerDetailManager({
                             <div className="tickerDetailInfoTracker">
                               <div className="tickerDetailInfoTrackerRow">
                                 <div>
-                                  <div className="tickerDetailInfoTrackerLabel">포트폴리오 변동</div>
+                                  <div className="tickerDetailInfoTrackerLabel">
+                                    포트폴리오 변동
+                                    {portfolioChangeBaseDate ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)` : ""}
+                                  </div>
                                   <div className="tickerDetailInfoTrackerHint">
                                     {portfolioChangeBreakdown.length > 0 ? (
                                       <span className="tickerDetailInfoBreakdownList">
