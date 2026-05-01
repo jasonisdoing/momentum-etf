@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from services.price_service import get_exchange_rate_series
 from utils.account_registry import load_account_configs
+from utils.data_loader import get_trading_days
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
@@ -81,6 +82,16 @@ def _require_db() -> Any:
 
 def _get_now_kst() -> datetime.datetime:
     return datetime.datetime.now(KST)
+
+
+def _get_active_daily_date() -> str:
+    """오늘 이하의 마지막 한국 거래일을 반환한다."""
+    today = _get_now_kst().date()
+    search_start = today - datetime.timedelta(days=370)
+    trading_days = get_trading_days(str(search_start), str(today), "kor")
+    if not trading_days:
+        raise RuntimeError("오늘 이하의 한국 거래일을 찾지 못했습니다.")
+    return max(day.date().isoformat() for day in trading_days)
 
 
 def _to_int(value: object) -> int:
@@ -427,23 +438,23 @@ def seed_daily_data_from_weekly() -> dict[str, int]:
 
 def remove_future_daily_rows() -> dict[str, int]:
     db = _require_db()
-    today_str = _get_now_kst().date().isoformat()
-    deleted = db[DAILY_COLLECTION].delete_many({"date": {"$gt": today_str}}).deleted_count
+    active_date = _get_active_daily_date()
+    deleted = db[DAILY_COLLECTION].delete_many({"date": {"$gt": active_date}}).deleted_count
     return {"deleted": int(deleted)}
 
 
 def aggregate_today_daily_data() -> dict[str, str]:
     db = _require_db()
-    today_str = _get_now_kst().date().isoformat()
+    target_date = _get_active_daily_date()
     update_doc = _collect_live_daily_summary()
     update_doc["updated_at"] = _get_now_kst()
 
     db[DAILY_COLLECTION].update_one(
-        {"date": today_str},
+        {"date": target_date},
         {
             "$set": update_doc,
             "$setOnInsert": {
-                "date": today_str,
+                "date": target_date,
                 "withdrawal_personal": 0,
                 "withdrawal_mom": 0,
                 "nh_principal_interest": 0,
@@ -454,4 +465,4 @@ def aggregate_today_daily_data() -> dict[str, str]:
         },
         upsert=True,
     )
-    return {"date": today_str}
+    return {"date": target_date}
