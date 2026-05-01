@@ -43,6 +43,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "metadata_updater",
     "asset_summary",
     "market_hours_analysis",
+    "us_index_constituents",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
