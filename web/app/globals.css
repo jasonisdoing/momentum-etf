@@ -2295,6 +2295,7 @@ a {
   height: 8rem;
   min-height: 8rem;
   padding-right: 2.75rem;
+  border-top: 3px solid transparent;
 }
 
 .compareBasicCell {

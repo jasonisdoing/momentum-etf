@@ -110,6 +110,13 @@ const COMPARE_STORAGE_KEY = "momentum-etf:compare:selected";
 const COMPARE_SELECTED_TICKER_TYPE_KEY = "momentum-etf:compare:selected-ticker-type";
 const COMPARE_STORAGE_KEY_PREFIX = "momentum-etf:compare:selected:";
 const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed"];
+const CHART_TINTS = [
+  "rgba(239, 68, 68, 0.08)",
+  "rgba(37, 99, 235, 0.08)",
+  "rgba(22, 163, 74, 0.08)",
+  "rgba(245, 158, 11, 0.08)",
+  "rgba(124, 58, 237, 0.08)",
+];
 const HOLDING_MATCH_COLORS = [
   "#dbeafe",
   "#dcfce7",
@@ -904,7 +911,14 @@ export function ComparePageClient() {
         <section className={activeTab === "holdings" ? "compareMatrix compareMatrixWithTotal" : "compareMatrix"}>
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
-            <div key={tickerKey(product.item)} className="compareProductCard">
+            <div
+              key={tickerKey(product.item)}
+              className="compareProductCard"
+              style={{
+                borderTopColor: CHART_COLORS[index % CHART_COLORS.length],
+                background: CHART_TINTS[index % CHART_TINTS.length],
+              }}
+            >
               <button
                 type="button"
                 className="compareProductRemove"
