@@ -31,7 +31,8 @@ type SystemJobKey =
   | "cache_refresh"
   | "market_hours_analysis"
   | "metadata_updater"
-  | "asset_summary";
+  | "asset_summary"
+  | "us_index_constituents";
 
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];
@@ -70,9 +71,9 @@ const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
 ];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
-  { field: "job", headerName: "작업", minWidth: 140, width: 180 },
-  { field: "target", headerName: "대상", minWidth: 120, width: 140 },
-  { field: "cadence", headerName: "자동 주기", minWidth: 240, width: 280 },
+  { field: "job", headerName: "작업", minWidth: 160, width: 200 },
+  { field: "target", headerName: "대상", minWidth: 140, width: 180 },
+  { field: "cadence", headerName: "자동 주기", minWidth: 260, width: 300 },
   {
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",

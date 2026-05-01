@@ -52,10 +52,12 @@ function injectToggleFieldIntoHeader(children: ReactNode, toggleField: ReactElem
 }
 
 export function ResponsiveFiltersSection({ children }: ResponsiveFiltersSectionProps) {
+  const [mounted, setMounted] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
 
   useEffect(() => {
+    setMounted(true);
     const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_LANDSCAPE_BREAKPOINT_PX}px)`);
 
     const applyMatches = (matches: boolean) => {
@@ -75,7 +77,7 @@ export function ResponsiveFiltersSection({ children }: ResponsiveFiltersSectionP
     };
   }, []);
 
-  if (!isNarrow) {
+  if (!mounted || !isNarrow) {
     return <>{children}</>;
   }
 
