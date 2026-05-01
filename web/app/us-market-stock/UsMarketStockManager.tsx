@@ -316,14 +316,6 @@ export function UsMarketStockManager({
         },
       },
       {
-        headerName: "거래량",
-        field: "volume",
-        width: 140,
-        minWidth: 120,
-        type: "rightAligned",
-        valueFormatter: (p) => formatVolume(p.value),
-      },
-      {
         headerName: "시가총액",
         field: "market_cap",
         width: 160,

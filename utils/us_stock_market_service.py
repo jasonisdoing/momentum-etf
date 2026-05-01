@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import logging
+import time
+from datetime import date
 from typing import Any
 
+import pandas as pd
 import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
 from services.price_service import get_realtime_snapshot
+from utils.data_loader import get_today_str
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
 from utils.market_service import load_ticker_pool_map
 from utils.portfolio_io import load_all_holding_tickers
@@ -16,6 +20,8 @@ from utils.portfolio_io import load_all_holding_tickers
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_MARKETS = {"NYS", "NSQ"}
+_NAVER_US_PAGE_SIZE_MAX = 200
+
 _NAVER_US_PAGE_SIZE_MAX = 200
 
 
@@ -220,12 +226,13 @@ def fetch_naver_us_stock_info_map(tickers: set[str] | list[str] | tuple[str, ...
 
 
 def _apply_us_realtime_overlay(rows: list[dict[str, Any]]) -> None:
-    """미국 개별주 리스트에 기존 실시간 가격 조회 결과를 반영한다."""
-    tickers = [str(row.get("ticker") or "").strip().upper() for row in rows if str(row.get("ticker") or "").strip()]
+    """Toss API를 통해 실시간 가격 정보를 오버레이합니다."""
+    tickers = [str(row.get("ticker") or "").strip().upper() for row in rows if row.get("ticker")]
     if not tickers:
         return
 
     try:
+        from services.price_service import get_realtime_snapshot
         snapshot = get_realtime_snapshot("us", tickers)
     except Exception as exc:
         logger.warning("미국 개별주 실시간 가격 오버레이 실패: %s", exc)
@@ -244,39 +251,3 @@ def _apply_us_realtime_overlay(rows: list[dict[str, Any]]) -> None:
         change_rate = realtime.get("changeRate")
         if change_rate is not None:
             row["change_pct"] = change_rate
-
-        volume = realtime.get("volume")
-        if volume is not None:
-            row["volume"] = volume
-
-    # Toss API에서 누락된 경우나 시가총액이 없는 경우 yfinance로 보강
-    missing_tickers = []
-    for row in rows:
-        if row.get("current_price") is None or row.get("volume") is None or row.get("market_cap") is None:
-            missing_tickers.append(str(row.get("ticker") or "").strip().upper())
-
-    if missing_tickers:
-        try:
-            import yfinance as yf
-            # 배치 조회를 위해 50개씩 끊어서 처리 (너무 많으면 느려질 수 있음)
-            for i in range(0, len(missing_tickers), 50):
-                chunk = missing_tickers[i:i+50]
-                yf_symbols = [t.replace("-", "-") for t in chunk]
-                tickers_obj = yf.Tickers(" ".join(yf_symbols))
-                
-                for row in rows:
-                    tkr = str(row.get("ticker") or "").strip().upper()
-                    if tkr in chunk:
-                        yf_tkr = tkr.replace("-", "-")
-                        try:
-                            info = tickers_obj.tickers[yf_tkr].fast_info
-                            if row.get("current_price") is None and info.last_price:
-                                row["current_price"] = info.last_price
-                            if row.get("volume") is None and info.last_volume:
-                                row["volume"] = info.last_volume
-                            if row.get("market_cap") is None and info.market_cap:
-                                row["market_cap"] = info.market_cap
-                        except Exception:
-                            continue
-        except Exception as exc:
-            logger.warning("yfinance를 통한 미국 개별주 보강 실패: %s", exc)

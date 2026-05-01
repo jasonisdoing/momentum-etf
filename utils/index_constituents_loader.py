@@ -25,7 +25,7 @@ def load_index_constituents(index: str) -> list[dict[str, Any]]:
     if not path.exists():
         raise FileNotFoundError(
             f"{key} 구성종목 파일이 없습니다: {path}\n"
-            "scripts/fetch_index_constituents.py 를 실행해 파일을 생성하세요."
+            "scripts/update_us_index_holdings.py 를 실행해 파일을 생성하세요."
         )
 
     payload = json.loads(path.read_text(encoding="utf-8"))
