@@ -65,7 +65,7 @@
       "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 4,
-      "RSI_LIMIT": 90
+      "RSI_LIMIT": 85
     }
   ]
 }
