@@ -971,14 +971,6 @@ export function ComparePageClient() {
                 ) : null}
               </div>
               <CompareChart products={sortedProducts} dateRange={chartDateRange} />
-              <div className="compareLegend">
-                {sortedProducts.map((product, index) => (
-                  <span key={tickerKey(product.item)}>
-                    <i className="compareLegendSwatch" style={{ background: CHART_COLORS[index % CHART_COLORS.length] }} />
-                    {product.item.ticker}
-                  </span>
-                ))}
-              </div>
             </div>
             <div className="compareMatrixLabel compareMetricsGroupLabel" style={{ gridRow: `span ${PERFORMANCE_METRIC_RANGES.length}` }}>
               수익률(%)
