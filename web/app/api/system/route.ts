@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { loadSystemData, triggerSystemAction } from "../../../lib/system-store";
+import { SystemAction, loadSystemData, triggerSystemAction } from "../../../lib/system-store";
 
 export const dynamic = "force-dynamic";
 
