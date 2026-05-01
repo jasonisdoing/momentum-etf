@@ -261,6 +261,13 @@ function formatSignedPriceDelta(value: number | null | undefined, countryCode: s
 
 // getCurrencyRegionLabel は @/lib/portfolio-change から import
 
+function formatKoreanDateLabel(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+}
+
 function getLatestClose(detail: TickerDetailResponse): number | null {
   for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
     const close = detail.rows[index]?.close;
@@ -784,6 +791,16 @@ export function ComparePageClient() {
     () => getChartDateRange(sortedProducts, selectedPerformanceRange.days),
     [selectedPerformanceRange.days, sortedProducts],
   );
+  
+  const portfolioChangeBaseDate = useMemo(() => {
+    for (const p of sortedProducts) {
+      if (p.detail.etf_info?.portfolio_change_base_date) {
+        return p.detail.etf_info.portfolio_change_base_date;
+      }
+    }
+    return null;
+  }, [sortedProducts]);
+
   const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts).slice(0, 10), [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
     const counts = new Map<string, number>();
@@ -973,8 +990,16 @@ export function ComparePageClient() {
           <section className="compareMatrix compareMatrixBody">
             {BASIC_INFO_METRICS.map((metric) => (
               <Fragment key={metric.label}>
-                <div className={metric.multiline ? "compareMatrixLabel compareMatrixLabelWide" : "compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel"}>
-                  {metric.label}
+                <div 
+                  className={metric.multiline ? "compareMatrixLabel compareMatrixLabelWide" : "compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel"}
+                  style={metric.label === "포트폴리오 변동" ? { flexDirection: "column" } : undefined}
+                >
+                  <div className="compareMatrixLabelText">{metric.label}</div>
+                  {metric.label === "포트폴리오 변동" && portfolioChangeBaseDate && (
+                    <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal", marginTop: "4px" }}>
+                      ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
+                    </div>
+                  )}
                 </div>
                 {sortedProducts.map((product) => (
                   <div key={tickerKey(product.item)} className={metric.multiline ? "compareBasicCell" : "compareBasicCell compareBasicCompactCell"}>
