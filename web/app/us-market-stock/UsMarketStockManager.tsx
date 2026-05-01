@@ -32,6 +32,9 @@ type UsMarketStockRow = {
   change_pct: number | null;
   volume: number | null;
   market_cap: number | null;
+  return_3m_base_date: string | null;
+  return_3m_base_price: number | null;
+  return_3m_pct: number | null;
 };
 
 type UsMarketStockGridRow = UsMarketStockRow & {
@@ -97,7 +100,7 @@ export function UsMarketStockManager({
 }: {
   onSummaryChange?: (summary: { index: string; count: number; totalCount: number }) => void;
 }) {
-  const [index, setIndex] = useState<IndexOption>("SP500");
+  const [index, setIndex] = useState<IndexOption>("NDX100");
   const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -323,6 +326,18 @@ export function UsMarketStockManager({
         type: "rightAligned",
         sort: "desc",
         valueFormatter: (p) => formatUsdMarketCap(p.value),
+      },
+      {
+        headerName: "3개월(%)",
+        field: "return_3m_pct",
+        width: 116,
+        minWidth: 104,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
       },
       {
         field: "__selected__",

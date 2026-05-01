@@ -18,7 +18,7 @@ function formatIndexLabel(index: string): string {
 }
 
 export function UsMarketStockPageClient() {
-  const [summary, setSummary] = useState<StockSummary>({ index: "SP500", count: 0, totalCount: 0 });
+  const [summary, setSummary] = useState<StockSummary>({ index: "NDX100", count: 0, totalCount: 0 });
 
   const handleSummaryChange = useCallback((s: StockSummary) => setSummary(s), []);
 

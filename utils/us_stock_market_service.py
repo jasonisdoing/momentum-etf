@@ -22,8 +22,6 @@ logger = logging.getLogger(__name__)
 _SUPPORTED_MARKETS = {"NYS", "NSQ"}
 _NAVER_US_PAGE_SIZE_MAX = 200
 
-_NAVER_US_PAGE_SIZE_MAX = 200
-
 
 def _parse_float(value: Any) -> float | None:
     if value is None or value == "":
@@ -54,7 +52,7 @@ def _fetch_us_market_value_page(market: str, start_idx: int, page_size: int) -> 
         resp.raise_for_status()
         payload = resp.json()
     except Exception as exc:
-        logger.error("네이버 미국 주식 리스트 조회 실패 (market=%s, limit=%s): %s", market, limit, exc)
+        logger.error("네이버 미국 주식 리스트 조회 실패 (market=%s, page_size=%s): %s", market, page_size, exc)
         raise RuntimeError(f"네이버 미국 주식 리스트 조회에 실패했습니다: {exc}") from exc
 
     if not isinstance(payload, list):
@@ -114,6 +112,9 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
                     "change_pct": change_pct,
                     "volume": _parse_int(item.get("accumulatedTradingVolume")),
                     "market_cap": market_cap,
+                    "return_3m_base_date": None,
+                    "return_3m_base_price": None,
+                    "return_3m_pct": None,
                 }
             )
             if len(rows) >= target_count:
@@ -168,6 +169,9 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "change_pct": None,
                 "volume": item.get("volume"),
                 "market_cap": market_cap,
+                "return_3m_base_date": item.get("return_3m_base_date"),
+                "return_3m_base_price": item.get("return_3m_base_price"),
+                "return_3m_pct": item.get("return_3m_pct"),
             }
         )
 
@@ -251,3 +255,7 @@ def _apply_us_realtime_overlay(rows: list[dict[str, Any]]) -> None:
         change_rate = realtime.get("changeRate")
         if change_rate is not None:
             row["change_pct"] = change_rate
+
+        base_price = _parse_float(row.get("return_3m_base_price"))
+        if base_price is not None and base_price > 0 and row.get("current_price") is not None:
+            row["return_3m_pct"] = round(((float(row["current_price"]) / base_price) - 1.0) * 100.0, 4)

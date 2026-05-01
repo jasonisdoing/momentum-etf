@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       "market_hours_analysis",
       "metadata_updater",
       "asset_summary",
-      "us_index_constituents",
+      "us_market_stocks",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {

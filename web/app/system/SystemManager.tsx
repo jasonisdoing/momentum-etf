@@ -32,7 +32,7 @@ type SystemJobKey =
   | "market_hours_analysis"
   | "metadata_updater"
   | "asset_summary"
-  | "us_index_constituents";
+  | "us_market_stocks";
 
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];
