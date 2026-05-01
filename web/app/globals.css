@@ -3240,6 +3240,21 @@ a {
   background: rgba(32, 107, 196, 0.12);
 }
 
+.usMarketStockGrid .ag-cell.usMarketStockTextCell,
+.usMarketStockGrid .ag-cell.usMarketStockTextCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.usMarketStockTruncate {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .tickerDetailNameCell,
 .tickerDetailNameCell .ag-cell-value {
   display: block;

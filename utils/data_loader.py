@@ -404,13 +404,13 @@ def get_today_str() -> str:
 def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Timestamp]:
     """
     지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
-    국가별 거래일 파일(zcountry/{country}/market_calendars.json)만 사용합니다.
+    국가별 거래일 파일(data/country/{country}/market_calendars.json)만 사용합니다.
     """
     country_code = (country or "").strip().lower()
     if not country_code:
         raise ValueError("거래일 조회 국가 코드가 필요합니다.")
 
-    calendar_path = Path(__file__).resolve().parents[1] / "zcountry" / country_code / "market_calendars.json"
+    calendar_path = Path(__file__).resolve().parents[1] / "data" / "country" / country_code / "market_calendars.json"
     if not calendar_path.exists():
         raise FileNotFoundError(f"거래일 캘린더 파일이 없습니다: {calendar_path}")
 
@@ -2055,6 +2055,13 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
                 continue
 
             entry: dict[str, float] = {"nowVal": close_val}
+
+            volume = item.get("volume")
+            if volume is not None:
+                try:
+                    entry["volume"] = float(volume)
+                except (TypeError, ValueError):
+                    pass
 
             base_price = item.get("base")
             if base_price is not None:

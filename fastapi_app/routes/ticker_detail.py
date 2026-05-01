@@ -430,14 +430,25 @@ def _build_korean_etf_info_payload(
         except (TypeError, ValueError):
             market_cap_krw = None
 
-    # 전일 iNAV 히스토리 조회
+    # 최근 공식 iNAV 기준일과 비교 기준 iNAV 히스토리 조회
     today_str = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
-    prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, today_str)
+    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, today_str)
     prev_nav = None
     portfolio_change_base_date = None
-    if prev_history and "meta_cache" in prev_history:
-        prev_nav = prev_history["meta_cache"].get("nav")
-        portfolio_change_base_date = str(prev_history.get("date") or "").strip() or None
+    if latest_history and "meta_cache" in latest_history:
+        latest_history_nav = latest_history["meta_cache"].get("nav")
+        portfolio_change_base_date = str(latest_history.get("date") or "").strip() or None
+        if (
+            nav_value is not None
+            and latest_history_nav is not None
+            and float(nav_value) == float(latest_history_nav)
+            and portfolio_change_base_date
+        ):
+            prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, portfolio_change_base_date)
+            if prev_history and "meta_cache" in prev_history:
+                prev_nav = prev_history["meta_cache"].get("nav")
+        else:
+            prev_nav = latest_history_nav
 
     nav_change = None
     nav_change_pct = None

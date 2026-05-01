@@ -6,7 +6,8 @@ import { jsonNoStore } from "@/lib/no-store-response";
 export const dynamic = "force-dynamic";
 
 type UsMarketStocksResponse = {
-  market: string;
+  index: string;
+  updated_at: string;
   total_count: number;
   count: number;
   rows: Array<{
@@ -15,6 +16,7 @@ type UsMarketStocksResponse = {
     name: string;
     english_name: string;
     industry: string;
+    sector: string;
     market: string;
     ticker_pools: string;
     is_held: boolean;
@@ -27,16 +29,12 @@ type UsMarketStocksResponse = {
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const market = searchParams.get("market");
-  const limit = searchParams.get("limit");
-
-  if (!market || !limit) {
-    return jsonNoStore({ error: "market, limit 쿼리 파라미터가 모두 필요합니다." }, { status: 400 });
-  }
+  const index = searchParams.get("index") ?? "SP500";
+  const minMarketCapUkm = searchParams.get("min_market_cap_ukm") ?? "0";
 
   try {
     const data = await fetchFastApiJson<UsMarketStocksResponse>(
-      `/internal/us-market-stocks?market=${encodeURIComponent(market)}&limit=${encodeURIComponent(limit)}`,
+      `/internal/us-market-stocks/index?index=${encodeURIComponent(index)}&min_market_cap_ukm=${encodeURIComponent(minMarketCapUkm)}`,
     );
     return jsonNoStore(data);
   } catch (error) {

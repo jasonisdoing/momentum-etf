@@ -188,7 +188,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
-        "TOP_N_HOLD": [7],
+        "TOP_N_HOLD": [8],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [6],

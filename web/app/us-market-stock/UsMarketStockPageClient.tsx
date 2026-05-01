@@ -6,19 +6,19 @@ import { PageFrame } from "../components/PageFrame";
 import { UsMarketStockManager } from "./UsMarketStockManager";
 
 type StockSummary = {
-  market: string;
+  index: string;
   count: number;
   totalCount: number;
 };
 
-function formatMarketLabel(market: string): string {
-  if (market === "NYS") return "뉴욕";
-  if (market === "NSQ") return "나스닥";
-  return market;
+function formatIndexLabel(index: string): string {
+  if (index === "SP500") return "S&P500";
+  if (index === "NDX100") return "NASDAQ100";
+  return index;
 }
 
 export function UsMarketStockPageClient() {
-  const [summary, setSummary] = useState<StockSummary>({ market: "NSQ", count: 0, totalCount: 0 });
+  const [summary, setSummary] = useState<StockSummary>({ index: "SP500", count: 0, totalCount: 0 });
 
   const handleSummaryChange = useCallback((s: StockSummary) => setSummary(s), []);
 
@@ -30,8 +30,8 @@ export function UsMarketStockPageClient() {
           <span className="appHeaderMetricValue">{summary.count}개</span>
         </div>
         <div className="appHeaderMetric">
-          <span>마켓:</span>
-          <span className="appHeaderMetricValue">{formatMarketLabel(summary.market)}</span>
+          <span>인덱스:</span>
+          <span className="appHeaderMetricValue">{formatIndexLabel(summary.index)}</span>
         </div>
       </div>
     ),

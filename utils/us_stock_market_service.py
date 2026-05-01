@@ -9,6 +9,7 @@ import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
 from services.price_service import get_realtime_snapshot
+from utils.index_constituents_loader import load_index_constituents, load_index_meta
 from utils.market_service import load_ticker_pool_map
 from utils.portfolio_io import load_all_holding_tickers
 
@@ -127,6 +128,58 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
     }
 
 
+def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str, Any]:
+    """S&P500 또는 NASDAQ100 구성종목을 JSON에서 읽어 실시간 가격을 더해 반환한다.
+    시가총액은 JSON에 저장된 값(yfinance 기준)을 사용한다."""
+    constituents = load_index_constituents(index)
+    meta = load_index_meta(index)
+
+    ticker_pool_map = load_ticker_pool_map(country_code="us")
+    held_tickers = load_all_holding_tickers(country_code="us")
+
+    min_market_cap_usd = min_market_cap_ukm * 100_000_000
+
+    rows: list[dict[str, Any]] = []
+    for item in constituents:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        market_cap = item.get("market_cap")
+        if min_market_cap_usd > 0 and (market_cap is None or market_cap < min_market_cap_usd):
+            continue
+        rows.append(
+            {
+                "rank": 0,
+                "ticker": ticker,
+                "name": item.get("name") or ticker,
+                "english_name": item.get("name") or "",
+                "industry": item.get("industry") or item.get("sector") or "",
+                "sector": item.get("sector") or "",
+                "market": "",
+                "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
+                "is_held": ticker in held_tickers,
+                "current_price": None,
+                "change_pct": None,
+                "volume": item.get("volume"),
+                "market_cap": market_cap,
+            }
+        )
+
+    _apply_us_realtime_overlay(rows)
+    rows.sort(key=lambda r: (-(r["market_cap"] or 0), r["ticker"]))
+
+    for idx, row in enumerate(rows, start=1):
+        row["rank"] = idx
+
+    return {
+        "index": index.upper(),
+        "updated_at": meta.get("updated_at", ""),
+        "total_count": len(rows),
+        "count": len(rows),
+        "rows": rows,
+    }
+
+
 def fetch_naver_us_stock_info_map(tickers: set[str] | list[str] | tuple[str, ...]) -> dict[str, dict[str, Any]]:
     """네이버 미국 종목 API에서 요청 티커의 이름·거래소·업종 정보를 조회한다."""
     targets = {str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()}
@@ -195,3 +248,35 @@ def _apply_us_realtime_overlay(rows: list[dict[str, Any]]) -> None:
         volume = realtime.get("volume")
         if volume is not None:
             row["volume"] = volume
+
+    # Toss API에서 누락된 경우나 시가총액이 없는 경우 yfinance로 보강
+    missing_tickers = []
+    for row in rows:
+        if row.get("current_price") is None or row.get("volume") is None or row.get("market_cap") is None:
+            missing_tickers.append(str(row.get("ticker") or "").strip().upper())
+
+    if missing_tickers:
+        try:
+            import yfinance as yf
+            # 배치 조회를 위해 50개씩 끊어서 처리 (너무 많으면 느려질 수 있음)
+            for i in range(0, len(missing_tickers), 50):
+                chunk = missing_tickers[i:i+50]
+                yf_symbols = [t.replace("-", "-") for t in chunk]
+                tickers_obj = yf.Tickers(" ".join(yf_symbols))
+                
+                for row in rows:
+                    tkr = str(row.get("ticker") or "").strip().upper()
+                    if tkr in chunk:
+                        yf_tkr = tkr.replace("-", "-")
+                        try:
+                            info = tickers_obj.tickers[yf_tkr].fast_info
+                            if row.get("current_price") is None and info.last_price:
+                                row["current_price"] = info.last_price
+                            if row.get("volume") is None and info.last_volume:
+                                row["volume"] = info.last_volume
+                            if row.get("market_cap") is None and info.market_cap:
+                                row["market_cap"] = info.market_cap
+                        except Exception:
+                            continue
+        except Exception as exc:
+            logger.warning("yfinance를 통한 미국 개별주 보강 실패: %s", exc)
