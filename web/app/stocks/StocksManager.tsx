@@ -570,7 +570,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [selectedTickerTypeItem?.ticker_type]);
 
   const displayGridRows = useMemo<RankGridRow[]>(() => {
-    const rows = pageMode === "rank" ? gridRows.filter((r) => !r.exclude_from_ranking) : gridRows;
+    const rows = gridRows;
     if (pageMode !== "manage" || !addingRow) {
       return rows;
     }
@@ -651,10 +651,31 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "순위",
         headerName: "순위",
-        minWidth: 52,
-        width: 52,
+        minWidth: 72,
+        width: 72,
         cellStyle: { textAlign: "center" },
-        cellRenderer: (params: { value: number | null | undefined }) => {
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (pageMode === "rank" && params.data?.exclude_from_ranking) {
+            return (
+              <span
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  borderRadius: "999px",
+                  background: "#eef2f7",
+                  color: "#344054",
+                  fontSize: "0.72rem",
+                  fontWeight: 700,
+                  lineHeight: 1,
+                  padding: "0.18rem 0.38rem",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                📌 고정
+              </span>
+            );
+          }
           return (
             <span style={{ fontWeight: 700 }}>{params.value == null ? "-" : formatNumber(params.value, 0)}</span>
           );
@@ -773,7 +794,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ? [
             {
               field: "exclude_from_ranking",
-              headerName: "순위 제외",
+              headerName: "고정 종목",
               minWidth: 84,
               width: 84,
               cellStyle: { textAlign: "center" },
@@ -793,7 +814,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         startTransition(async () => {
                           try {
                             await updateStockExclude(selectedTickerType, ticker, checked);
-                            toast.success(`[${ticker}] 순위 제외 ${checked ? "설정" : "해제"} 완료`);
+                            toast.success(`[${ticker}] 고정 종목 ${checked ? "설정" : "해제"} 완료`);
                             void load({
                               ticker_type: selectedTickerType,
                               ma_rule_override: maRule ?? undefined,
@@ -802,7 +823,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                               skip_session_cache: true,
                             });
                           } catch (error) {
-                            showErrorToast(error instanceof Error ? error.message : "제외 설정에 실패했습니다.");
+                            showErrorToast(error instanceof Error ? error.message : "고정 종목 설정에 실패했습니다.");
                           }
                         });
                       }}

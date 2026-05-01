@@ -7,6 +7,7 @@ import type { IChartApi, LineData, Time } from "lightweight-charts";
 import { PageFrame } from "../components/PageFrame";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
+import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings";
 type PerformanceRange = "3m" | "6m" | "1y" | "3y";
@@ -54,6 +55,7 @@ type TickerEtfInfo = {
   market_cap_krw?: number | null;
   volume?: number | null;
   fx_rates?: TickerFxRate[];
+  portfolio_change_base_date?: string | null;
 };
 
 type TickerHoldingRow = {
@@ -63,6 +65,7 @@ type TickerHoldingRow = {
   raw_code?: string | null;
   yahoo_symbol?: string | null;
   change_pct?: number | null;
+  cumulative_change_pct?: number | null;
   price_currency?: string | null;
 };
 
@@ -256,19 +259,7 @@ function formatSignedPriceDelta(value: number | null | undefined, countryCode: s
   return `${value > 0 ? "▲ " : "▼ "}${formatPrice(absValue, countryCode)}`;
 }
 
-function getCurrencyRegionLabel(currency: string): string {
-  const normalized = String(currency || "").trim().toUpperCase();
-  if (normalized === "KRW") return "국내";
-  if (normalized === "TWD") return "대만";
-  if (normalized === "JPY") return "일본";
-  if (normalized === "USD") return "미국";
-  if (normalized === "HKD") return "홍콩";
-  if (normalized === "CNY") return "중국";
-  if (normalized === "AUD") return "호주";
-  if (normalized === "GBP") return "영국";
-  if (normalized === "EUR") return "유럽";
-  return normalized;
-}
+// getCurrencyRegionLabel は @/lib/portfolio-change から import
 
 function getLatestClose(detail: TickerDetailResponse): number | null {
   for (let index = detail.rows.length - 1; index >= 0; index -= 1) {
@@ -312,50 +303,19 @@ function getPortfolioChange(detail: TickerDetailResponse): {
   totalPct: number | null;
   breakdown: { currency: string; label: string; changePct: number; weight: number }[];
 } {
-  if (!detail.holdings || detail.holdings.length === 0) return { totalPct: null, breakdown: [] };
-
-  const fxChangePctByCurrency = new Map<string, number>();
-  (detail.etf_info?.fx_rates ?? []).forEach((fx) => {
-    const currency = String(fx.currency || "").trim().toUpperCase();
-    const changePct = fx.change_pct;
-    if (!currency || changePct === null || changePct === undefined || Number.isNaN(changePct)) return;
-    fxChangePctByCurrency.set(currency, changePct);
-  });
-
-  const groups = new Map<string, { weight: number; weightedSum: number }>();
-  detail.holdings.forEach((holding) => {
-    const weight = holding.weight ?? 0;
-    if (weight <= 0 || holding.change_pct === null || holding.change_pct === undefined || Number.isNaN(holding.change_pct)) return;
-
-    const currency = String(holding.price_currency || "").trim().toUpperCase() || "KRW";
-    const isForeign = currency !== "KRW";
-    let changePctKrw = holding.change_pct;
-    if (isForeign) {
-      const fxChangePct = fxChangePctByCurrency.get(currency);
-      if (fxChangePct === undefined || Number.isNaN(fxChangePct)) return;
-      changePctKrw = ((1 + holding.change_pct / 100) * (1 + fxChangePct / 100) - 1) * 100;
-    }
-
-    const group = groups.get(currency) ?? { weight: 0, weightedSum: 0 };
-    group.weight += weight;
-    group.weightedSum += weight * changePctKrw;
-    groups.set(currency, group);
-  });
-
-  let totalWeight = 0;
-  let totalWeightedSum = 0;
-  const breakdown: { currency: string; label: string; changePct: number; weight: number }[] = [];
-  groups.forEach((group, currency) => {
-    if (group.weight <= 0) return;
-    const changePct = group.weightedSum / group.weight;
-    breakdown.push({ currency, label: getCurrencyRegionLabel(currency), changePct, weight: group.weight });
-    totalWeight += group.weight;
-    totalWeightedSum += group.weight * changePct;
-  });
-  breakdown.sort((a, b) => b.weight - a.weight);
-  if (totalWeight <= 0) return { totalPct: null, breakdown };
-
-  return { totalPct: totalWeightedSum / Math.max(totalWeight, 100), breakdown };
+  const result = calcPortfolioChange(
+    detail.holdings ?? [],
+    detail.etf_info?.fx_rates ?? [],
+  );
+  return {
+    totalPct: result.totalPct,
+    breakdown: result.breakdown.map((item) => ({
+      currency: item.currency,
+      label: item.label,
+      changePct: item.change_pct,
+      weight: item.weight,
+    })),
+  };
 }
 
 function getPricedRows(rows: PriceRow[]): PriceRow[] {

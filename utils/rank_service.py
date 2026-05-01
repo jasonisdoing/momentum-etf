@@ -322,7 +322,6 @@ def _build_bonus_adjusted_rows(
 
     rows_with_index.sort(
         key=lambda row: (
-            1 if row.get("exclude_from_ranking") else 0,
             1 if row.get("점수") is None else 0,
             -(float(row["점수"]) if row.get("점수") is not None else 0.0),
             int(row["__base_index"]),

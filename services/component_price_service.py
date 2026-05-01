@@ -241,6 +241,11 @@ def _safe_fetch_yahoo_baseline_prices(
         return {}
 
 
+import threading
+
+_YAHOO_BASELINE_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
+_YAHOO_BASELINE_LOCK = threading.Lock()
+
 def _fetch_yahoo_baseline_prices(
     symbols: list[str],
     base_date: str,
@@ -252,50 +257,71 @@ def _fetch_yahoo_baseline_prices(
     if not normalized_symbols:
         return {}
 
-    base_ts = pd.Timestamp(base_date).normalize()
-    start_ts = base_ts - pd.Timedelta(days=10)
-    end_ts = base_ts + pd.Timedelta(days=1)
-    downloaded = yf.download(
-        normalized_symbols,
-        start=start_ts.strftime("%Y-%m-%d"),
-        end=end_ts.strftime("%Y-%m-%d"),
-        interval="1d",
-        auto_adjust=False,
-        progress=False,
-        group_by="ticker",
-        threads=True,
-    )
-    if downloaded is None or downloaded.empty:
-        return {}
+    with _YAHOO_BASELINE_LOCK:
+        result: dict[str, dict[str, Any]] = {}
+        symbols_to_fetch: list[str] = []
+        previous_day_symbols = {str(symbol or "").strip().upper() for symbol in previous_trading_day_symbols}
 
-    def _extract_symbol_frame(symbol: str) -> pd.DataFrame | None:
-        if isinstance(downloaded.columns, pd.MultiIndex):
-            if symbol not in downloaded.columns.get_level_values(0):
+        for symbol in normalized_symbols:
+            is_prev = symbol in previous_day_symbols
+            cache_key = (symbol, base_date, is_prev)
+            if cache_key in _YAHOO_BASELINE_CACHE:
+                result[symbol] = _YAHOO_BASELINE_CACHE[cache_key]
+            else:
+                symbols_to_fetch.append(symbol)
+
+        if not symbols_to_fetch:
+            return result
+
+        base_ts = pd.Timestamp(base_date).normalize()
+        start_ts = base_ts - pd.Timedelta(days=10)
+        end_ts = base_ts + pd.Timedelta(days=1)
+        downloaded = yf.download(
+            symbols_to_fetch,
+            start=start_ts.strftime("%Y-%m-%d"),
+            end=end_ts.strftime("%Y-%m-%d"),
+            interval="1d",
+            auto_adjust=False,
+            progress=False,
+            group_by="ticker",
+            threads=True,
+        )
+        if downloaded is None or downloaded.empty:
+            return result
+
+        def _extract_symbol_frame(symbol: str) -> pd.DataFrame | None:
+            if isinstance(downloaded.columns, pd.MultiIndex):
+                if symbol not in downloaded.columns.get_level_values(0):
+                    return None
+                return downloaded[symbol].copy()
+            if len(symbols_to_fetch) != 1:
                 return None
-            return downloaded[symbol].copy()
-        if len(normalized_symbols) != 1:
-            return None
-        return downloaded.copy()
+            return downloaded.copy()
 
-    previous_day_symbols = {str(symbol or "").strip().upper() for symbol in previous_trading_day_symbols}
-    result: dict[str, dict[str, Any]] = {}
-    for symbol in normalized_symbols:
-        frame = _extract_symbol_frame(symbol)
-        if frame is None or frame.empty or "Close" not in frame.columns:
-            continue
-        close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-        normalized_index = pd.to_datetime(close_series.index).tz_localize(None).normalize()
-        if symbol in previous_day_symbols:
-            close_series = close_series[normalized_index < base_ts]
-        else:
-            close_series = close_series[normalized_index <= base_ts]
-        if close_series.empty:
-            continue
-        result[symbol] = {
-            "price": float(close_series.iloc[-1]),
-            "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
-        }
-    return result
+        for symbol in symbols_to_fetch:
+            frame = _extract_symbol_frame(symbol)
+            if frame is None or frame.empty or "Close" not in frame.columns:
+                continue
+            close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+            normalized_index = pd.to_datetime(close_series.index).tz_localize(None).normalize()
+            
+            is_prev = symbol in previous_day_symbols
+            if is_prev:
+                close_series = close_series[normalized_index < base_ts]
+            else:
+                close_series = close_series[normalized_index <= base_ts]
+                
+            if close_series.empty:
+                continue
+                
+            data = {
+                "price": float(close_series.iloc[-1]),
+                "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
+            }
+            result[symbol] = data
+            _YAHOO_BASELINE_CACHE[(symbol, base_date, is_prev)] = data
+
+        return result
 
 
 def _apply_price_snapshot(
