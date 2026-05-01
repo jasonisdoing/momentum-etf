@@ -176,7 +176,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [6],
-        "RSI_LIMIT": [90, 95, 100],
+        "RSI_LIMIT": [85, 90, 95, 100],
     },
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
@@ -184,7 +184,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [6],
-        "RSI_LIMIT": [90, 95, 100],
+        "RSI_LIMIT": [85, 90, 95, 100],
     },
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
@@ -192,7 +192,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [6],
-        "RSI_LIMIT": [90, 95, 100],
+        "RSI_LIMIT": [85, 90, 95, 100],
     },
     "us": {
         "BENCHMARK": {"ticker": "VOO", "name": "뱅가드 S&P500"},
@@ -200,7 +200,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [4],
-        "RSI_LIMIT": [90, 95, 100],
+        "RSI_LIMIT": [85, 90, 95, 100],
     },
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
@@ -208,6 +208,6 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [4],
-        "RSI_LIMIT": [90, 95, 100],
+        "RSI_LIMIT": [85, 90, 95, 100],
     },
 }
