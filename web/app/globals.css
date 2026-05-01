@@ -3162,6 +3162,20 @@ a {
   background: rgba(102, 180, 102, 0.45);
 }
 
+.rankAgGrid .ag-row.rankFixedRow,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow,
+.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow {
+  background: rgba(199, 210, 254, 0.5);
+}
+
+.rankAgGrid .ag-row.rankFixedRow:hover,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow:hover,
+.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow:hover,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow:hover {
+  background: rgba(199, 210, 254, 0.62);
+}
+
 .rankAgGrid .ag-cell-value,
 .rankAgGrid .ag-group-value {
   width: 100%;

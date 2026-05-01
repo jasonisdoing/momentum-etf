@@ -663,8 +663,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   alignItems: "center",
                   justifyContent: "center",
                   borderRadius: "999px",
-                  background: "#eef2f7",
-                  color: "#344054",
+                  border: "1px solid #c7d2fe",
+                  background: "#eef2ff",
+                  color: "#4338ca",
                   fontSize: "0.72rem",
                   fontWeight: 700,
                   lineHeight: 1,
@@ -1677,6 +1678,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   const classes: string[] = [];
                   if ((params.data?.점수 ?? 0) < 0) {
                     classes.push("rankNegativeTrendRow");
+                  }
+                  if (params.data?.exclude_from_ranking) {
+                    classes.push("rankFixedRow");
                   }
                   if (String(params.data?.보유 || "").trim() !== "") {
                     classes.push("rankHeldRow");
