@@ -283,6 +283,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const lastBlockedToastRef = useRef<string | null>(null);
   const addingTickerDraftRef = useRef("");
   const loadSequenceRef = useRef(0);
+  const toolbarFetchAbortRef = useRef<AbortController | null>(null);
+  const rankFetchAbortRef = useRef<AbortController | null>(null);
   const [isPending, startTransition] = useTransition();
   const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
@@ -370,6 +372,72 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setNaverCategoryConfig(payload.naver_category_config ?? []);
   }
 
+  function applyRankToolbarPayload(payload: RankResponse) {
+    const nextTickerTypes = payload.ticker_types ?? [];
+    const nextAccountId = payload.ticker_type ?? readRememberedTickerType() ?? "";
+    setAccounts(nextTickerTypes);
+    setSelectedAccountId(nextAccountId);
+    if (nextAccountId) {
+      writeRememberedTickerType(nextAccountId);
+    }
+    setMaRule(payload.ma_rules?.[0] ?? null);
+    setMaTypeOptions(payload.ma_type_options ?? []);
+    setMaMonthsMax(payload.ma_months_max ?? 12);
+
+    const currentConfig = nextTickerTypes.find(t => t.ticker_type === nextAccountId);
+    const configuredHeldBonusScore =
+      currentConfig && typeof currentConfig.holding_bonus_score === "number"
+        ? currentConfig.holding_bonus_score
+        : payload.held_bonus_score;
+    if (typeof configuredHeldBonusScore === "number") {
+      setHeldBonusScore(configuredHeldBonusScore);
+    }
+
+    rankToolbarCache = {
+      ticker_types: nextTickerTypes,
+      ticker_type: nextAccountId,
+      ma_rule: payload.ma_rules?.[0] ?? null,
+      ma_type_options: payload.ma_type_options ?? [],
+      ma_months_max: payload.ma_months_max ?? 12,
+    };
+  }
+
+  async function loadToolbar() {
+    if (rankToolbarCache) {
+      return;
+    }
+
+    toolbarFetchAbortRef.current?.abort();
+    const abortController = new AbortController();
+    toolbarFetchAbortRef.current = abortController;
+
+    try {
+      const search = new URLSearchParams();
+      const rememberedTickerType = readRememberedTickerType();
+      if (rememberedTickerType) {
+        search.set("ticker_type", rememberedTickerType);
+      }
+      const query = search.size > 0 ? `?${search.toString()}` : "";
+      const response = await fetch(`/api/rank-toolbar${query}`, {
+        cache: "no-store",
+        signal: abortController.signal,
+      });
+      const payload = (await response.json()) as RankResponse;
+      if (!response.ok) {
+        throw new Error(payload.error ?? "종목풀 정보를 불러오지 못했습니다.");
+      }
+      applyRankToolbarPayload(payload);
+    } catch (loadError) {
+      if (loadError instanceof DOMException && loadError.name === "AbortError") {
+        return;
+      }
+    } finally {
+      if (toolbarFetchAbortRef.current === abortController) {
+        toolbarFetchAbortRef.current = null;
+      }
+    }
+  }
+
   async function load(next?: {
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
@@ -411,7 +479,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }
       }
 
-      const response = await fetch(`/api/rank${query}`, { cache: "no-store" });
+      rankFetchAbortRef.current?.abort();
+      const abortController = new AbortController();
+      rankFetchAbortRef.current = abortController;
+
+      const response = await fetch(`/api/rank${query}`, {
+        cache: "no-store",
+        signal: abortController.signal,
+      });
       const payload = (await response.json()) as RankResponse;
       if (!response.ok) {
         throw new Error(payload.error ?? "순위 데이터를 불러오지 못했습니다.");
@@ -423,6 +498,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       writeSessionTtlCache(sessionCacheKey, payload);
       applyRankPayload(payload);
     } catch (loadError) {
+      if (loadError instanceof DOMException && loadError.name === "AbortError") {
+        return;
+      }
       if (requestSequence !== loadSequenceRef.current) {
         return;
       }
@@ -441,12 +519,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
     } finally {
       if (requestSequence === loadSequenceRef.current) {
+        rankFetchAbortRef.current = null;
+      }
+      if (requestSequence === loadSequenceRef.current) {
         setLoading(false);
       }
     }
   }
 
   useEffect(() => {
+    void loadToolbar();
     void load({
       ticker_type: readRememberedTickerType() ?? undefined,
       as_of_date: getTodayDateInputValue(),

@@ -77,12 +77,33 @@ type RankData = {
   stale_tickers: string[];
 };
 
+type RankToolbarData = {
+  ticker_types: RankTickerType[];
+  ticker_type: string;
+  ma_rules: RankMaRule[];
+  ma_type_options: string[];
+  ma_months_max: number;
+  held_bonus_score: number;
+};
+
+export async function loadRankToolbarData(params?: {
+  ticker_type?: string;
+}, signal?: AbortSignal): Promise<RankToolbarData> {
+  const search = new URLSearchParams();
+  if (params?.ticker_type) {
+    search.set("ticker_type", params.ticker_type);
+  }
+
+  const query = search.size > 0 ? `?${search.toString()}` : "";
+  return fetchFastApiJson<RankToolbarData>(`/internal/rank/toolbar${query}`, { signal });
+}
+
 export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRule;
   as_of_date?: string;
   held_bonus_score?: number;
-}): Promise<RankData> {
+}, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
@@ -99,7 +120,7 @@ export async function loadRankData(params?: {
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";
-  return fetchFastApiJson<RankData>(`/internal/rank${query}`);
+  return fetchFastApiJson<RankData>(`/internal/rank${query}`, { signal });
 }
 
 export type { RankTickerType, RankMaRule, RankData, RankRow };
