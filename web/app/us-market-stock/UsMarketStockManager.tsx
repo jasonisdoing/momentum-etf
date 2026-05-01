@@ -24,6 +24,7 @@ type UsMarketStockRow = {
   name: string;
   english_name: string;
   industry: string;
+  sector: string;
   market: string;
   ticker_pools: string;
   is_held: boolean;
@@ -38,7 +39,8 @@ type UsMarketStockGridRow = UsMarketStockRow & {
 };
 
 type UsMarketStocksResponse = {
-  market: string;
+  index: string;
+  updated_at: string;
   total_count: number;
   count: number;
   rows: UsMarketStockRow[];
@@ -46,8 +48,14 @@ type UsMarketStocksResponse = {
 };
 
 const usMarketStockGridTheme = createAppGridTheme();
-const MARKET_OPTIONS = ["NYS", "NSQ"] as const;
-const LIMIT_OPTIONS = [50, 100, 150, 200] as const;
+const INDEX_OPTIONS = ["SP500", "NDX100"] as const;
+type IndexOption = (typeof INDEX_OPTIONS)[number];
+
+function formatIndexLabel(index: IndexOption): string {
+  if (index === "SP500") return "S&P500";
+  if (index === "NDX100") return "NASDAQ100";
+  return index;
+}
 
 function formatUsd(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -75,19 +83,22 @@ function formatUsdMarketCap(value: number | null): string {
   return `${new Intl.NumberFormat("ko-KR").format(value)}달러`;
 }
 
-function formatMarketLabel(market: string): string {
-  if (market === "NYS") return "뉴욕";
-  if (market === "NSQ") return "나스닥";
-  return market;
+function renderTruncatedText(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  return (
+    <span className="usMarketStockTruncate" title={text}>
+      {text || "-"}
+    </span>
+  );
 }
 
 export function UsMarketStockManager({
   onSummaryChange,
 }: {
-  onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
+  onSummaryChange?: (summary: { index: string; count: number; totalCount: number }) => void;
 }) {
-  const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("NSQ");
-  const [limit, setLimit] = useState<number>(100);
+  const [index, setIndex] = useState<IndexOption>("SP500");
+  const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -101,15 +112,13 @@ export function UsMarketStockManager({
 
   const toast = useToast();
 
-  const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
-
-  const load = useCallback(async (m: string, l: number, minCapUkmText: string) => {
+  const load = useCallback(async (idx: IndexOption, minCapUkmText: string) => {
     setLoading(true);
     setError(null);
     try {
       const minCap = String(minCapUkmText || "").trim() || "0";
       const [resp, stocksPayload] = await Promise.all([
-        fetch(`/api/us-market-stocks?market=${m}&limit=${l}&min_market_cap_ukm=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
+        fetch(`/api/us-market-stocks?index=${encodeURIComponent(idx)}&min_market_cap_ukm=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as UsMarketStocksResponse;
@@ -127,25 +136,14 @@ export function UsMarketStockManager({
   }, []);
 
   useEffect(() => {
-    void load(market, limit, minMarketCapUkm);
-  }, [market, limit, minMarketCapUkm, load]);
+    void load(index, minMarketCapUkm);
+  }, [index, minMarketCapUkm, load]);
 
   useEffect(() => {
-    onSummaryChange?.({ market, count: rows.length, totalCount });
-  }, [market, rows.length, totalCount, onSummaryChange]);
+    onSummaryChange?.({ index, count: rows.length, totalCount });
+  }, [index, rows.length, totalCount, onSummaryChange]);
 
-  const gridRows = useMemo(
-    () =>
-      [...rows].sort((left, right) => {
-        const leftMarketCap = left.market_cap ?? Number.NEGATIVE_INFINITY;
-        const rightMarketCap = right.market_cap ?? Number.NEGATIVE_INFINITY;
-        if (leftMarketCap !== rightMarketCap) {
-          return rightMarketCap - leftMarketCap;
-        }
-        return left.ticker.localeCompare(right.ticker);
-      }),
-    [rows],
-  );
+  const gridRows = useMemo(() => [...rows], [rows]);
 
   const allVisibleSelected = useMemo(
     () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
@@ -235,9 +233,9 @@ export function UsMarketStockManager({
 
     if (addedCount > 0) {
       setSelectedTickers([]);
-      await load(market, limit, minMarketCapUkm);
+      await load(index, minMarketCapUkm);
     }
-  }, [load, market, limit, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, index, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<UsMarketStockGridRow>[]>(
     () => [
@@ -256,7 +254,8 @@ export function UsMarketStockManager({
         field: "ticker_pools",
         width: 108,
         maxWidth: 160,
-        cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
+        cellClass: "usMarketStockTextCell",
+        cellRenderer: (params: { value: string }) => renderTruncatedText(params.value),
       },
       {
         headerName: "티커",
@@ -268,7 +267,6 @@ export function UsMarketStockManager({
           fontSize: "13px",
         } as CellStyle,
         cellRenderer: (params: { value?: string }) => {
-          // 미국 티커는 접두사 없이 그대로 사용. 백엔드 resolve에서 미국 우선 처리.
           const raw = String(params.value ?? "").trim();
           return <TickerDetailLink ticker={raw} displayTicker={raw} />;
         },
@@ -278,29 +276,24 @@ export function UsMarketStockManager({
         field: "name",
         flex: 1,
         minWidth: 180,
+        cellClass: "usMarketStockTextCell",
+        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
       },
       {
-        headerName: "영문명",
-        field: "english_name",
-        flex: 1,
-        minWidth: 220,
-      },
-      {
-        headerName: "거래소",
-        field: "market",
-        width: 92,
-        minWidth: 84,
-        valueFormatter: (p) => formatMarketLabel(String(p.value ?? "")),
+        headerName: "섹터",
+        field: "sector",
+        width: 160,
+        minWidth: 120,
+        cellClass: "usMarketStockTextCell",
+        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
       },
       {
         headerName: "업종",
         field: "industry",
-        width: 150,
+        width: 180,
         minWidth: 120,
-        cellRenderer: (params: { value?: string }) => {
-          const value = String(params.value ?? "").trim();
-          return <span title={value}>{value || "-"}</span>;
-        },
+        cellClass: "usMarketStockTextCell",
+        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
       },
       {
         headerName: "현재가",
@@ -382,34 +375,19 @@ export function UsMarketStockManager({
             <div className="appMainHeader">
               <div className="appMainHeaderLeft usMarketStockMainHeaderLeft">
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">마켓</span>
-                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="마켓 선택">
-                    {MARKET_OPTIONS.map((opt) => (
+                  <span className="appLabeledFieldLabel">인덱스</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="인덱스 선택">
+                    {INDEX_OPTIONS.map((opt) => (
                       <button
                         key={opt}
                         type="button"
-                        className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setMarket(opt)}
+                        className={index === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setIndex(opt)}
                       >
-                        {formatMarketLabel(opt)}
+                        {formatIndexLabel(opt)}
                       </button>
                     ))}
                   </div>
-                </label>
-
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">시가총액 상위</span>
-                  <select
-                    className="form-select"
-                    value={limit}
-                    onChange={(e) => setLimit(Number(e.target.value))}
-                  >
-                    {LIMIT_OPTIONS.map((opt) => (
-                      <option key={opt} value={opt}>
-                        {formatMarketLabel(market)} {opt}
-                      </option>
-                    ))}
-                  </select>
                 </label>
 
                 <label className="appLabeledField">
@@ -447,6 +425,7 @@ export function UsMarketStockManager({
 
           <div className="appGridFillWrap">
             <AppAgGrid<UsMarketStockGridRow>
+              className="usMarketStockGrid"
               rowData={gridRows}
               columnDefs={columnDefs}
               loading={loading}

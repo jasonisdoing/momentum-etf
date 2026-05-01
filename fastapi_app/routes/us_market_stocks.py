@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
-from utils.us_stock_market_service import load_us_stock_market
+from utils.us_stock_market_service import load_index_stock_market, load_us_stock_market
 
 router = APIRouter(prefix="/internal/us-market-stocks", tags=["us-market-stocks"])
 
@@ -18,3 +18,12 @@ def get_us_market_stocks(
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     return load_us_stock_market(market=market, limit=limit, min_market_cap_ukm=min_market_cap_ukm)
+
+
+@router.get("/index")
+def get_us_index_stocks(
+    index: Annotated[str, Query(pattern="^(SP500|NDX100)$")],
+    min_market_cap_ukm: Annotated[int, Query(ge=0)] = 0,
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    return load_index_stock_market(index=index, min_market_cap_ukm=min_market_cap_ukm)
