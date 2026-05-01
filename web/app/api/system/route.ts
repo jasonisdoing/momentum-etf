@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
       "market_hours_analysis",
       "metadata_updater",
       "asset_summary",
+      "us_index_constituents",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {
@@ -35,7 +36,8 @@ export async function POST(request: NextRequest) {
         | "cache_refresh"
         | "market_hours_analysis"
         | "metadata_updater"
-        | "asset_summary",
+        | "asset_summary"
+        | "us_index_constituents",
     );
     return NextResponse.json({ message });
   } catch (error) {
