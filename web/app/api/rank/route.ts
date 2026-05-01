@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
       ma_rule_override: maRuleOverride,
       as_of_date: asOfDate,
       held_bonus_score: heldBonusScore === null ? undefined : Number(heldBonusScore),
-    });
+    }, request.signal);
     return jsonNoStore(data);
   } catch (error) {
     let message = error instanceof Error ? error.message : "순위 데이터를 불러오지 못했습니다.";

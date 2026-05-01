@@ -3,9 +3,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 
 from fastapi_app.dependencies import require_internal_token
-from utils.rank_service import load_rank_data
+from utils.rank_service import load_rank_data, load_rank_toolbar_data
 
 router = APIRouter(prefix="/internal/rank", tags=["rank"])
+
+
+@router.get("/toolbar")
+def get_rank_toolbar_data(
+    ticker_type: str | None = Query(default=None),
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    return load_rank_toolbar_data(ticker_type=ticker_type)
+
 
 @router.get("")
 def get_rank_data(
