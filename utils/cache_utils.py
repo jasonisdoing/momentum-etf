@@ -837,11 +837,18 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
 
     ticker_norm = (ticker or "").strip().upper()
 
+    # [HOTFIX] 직렬화 오류 방지를 위한 정규화 및 중복 컬럼 제거
+    df_to_save.columns = [str(c) for c in df_to_save.columns]
+    df_to_save = df_to_save.loc[:, ~df_to_save.columns.duplicated()]
+    if hasattr(df_to_save.index, "name"):
+        df_to_save.index.name = None
+
     buf = io.BytesIO()
     try:
         df_to_save.to_parquet(buf, engine="pyarrow", compression="snappy")
     except Exception as exc:
-        raise RuntimeError(f"캐시 직렬화 실패 ({ticker_norm})") from exc
+        logger.error(f"캐시 직렬화 오류 발생 ({ticker_norm}): {exc}")
+        raise RuntimeError(f"캐시 직렬화 실패 ({ticker_norm}): {exc}") from exc
 
     payload = Binary(buf.getvalue())
 

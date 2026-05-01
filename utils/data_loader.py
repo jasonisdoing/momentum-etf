@@ -942,12 +942,30 @@ def _fetch_ohlcv_core(
         # yfinance MultiIndex 컬럼 평탄화 (Price, Ticker) -> Price
         if isinstance(fetched.columns, pd.MultiIndex):
             try:
-                # 레벨 이름 확인 (디버깅용 안전장치)
-                # 보통 level 0: Price type (Close, Open, ...), level 1: Ticker
-                fetched.columns = fetched.columns.droplevel(1)
-                fetched.columns.name = None
+                # 1. 'Ticker' 레벨에서 해당 티커만 추출 시도 (가장 표준적인 방법)
+                # yfinance는 보통 level 0: Price, level 1: Ticker 구조임
+                ticker_for_xs = download_ticker if country_code == "au" else ticker
+                if ticker_for_xs in fetched.columns.get_level_values(1):
+                    fetched = fetched.xs(ticker_for_xs, axis=1, level=1)
+                elif ticker in fetched.columns.get_level_values(1):
+                    fetched = fetched.xs(ticker, axis=1, level=1)
+                else:
+                    # 2. 'Price' 레벨만 남기기 (차선책)
+                    if "Price" in fetched.columns.names:
+                        fetched = fetched.get_level_values("Price")
+                    else:
+                        fetched.columns = fetched.columns.droplevel(1)
             except Exception as e:
                 logger.warning(f"yfinance MultiIndex 컬럼 평탄화 실패 ({ticker}): {e}")
+                # 3. 최후의 수단: 중복 제거 및 강제 변환
+                try:
+                    fetched.columns = [str(c[0]) if isinstance(c, tuple) else str(c) for c in fetched.columns]
+                except Exception:
+                    pass
+
+        # 중복 컬럼 최종 제거 (직렬화 에러 방지)
+        if fetched is not None and not fetched.empty:
+            fetched = fetched.loc[:, ~fetched.columns.duplicated()]
 
         return fetched
 

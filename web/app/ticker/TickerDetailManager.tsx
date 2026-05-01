@@ -27,6 +27,8 @@ import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
 import { readRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
+import type { PortfolioChangeBreakdownItem } from "@/lib/portfolio-change";
 
 // --- 타입 ---
 
@@ -96,12 +98,7 @@ type TickerFxRate = {
   change_pct?: number | null;
 };
 
-type PortfolioChangeBreakdownItem = {
-  currency: string;
-  label: string;
-  change_pct: number;
-  weight: number;
-};
+// PortfolioChangeBreakdownItem は @/lib/portfolio-change から import
 
 type TickerHoldingRow = {
   ticker: string;
@@ -421,19 +418,7 @@ function buildRangeBadgeText(
   return `${formatTickerPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
 }
 
-function getCurrencyRegionLabel(currency: string): string {
-  const normalized = String(currency || "").trim().toUpperCase();
-  if (normalized === "KRW") return "국내";
-  if (normalized === "TWD") return "대만";
-  if (normalized === "JPY") return "일본";
-  if (normalized === "USD") return "미국";
-  if (normalized === "HKD") return "홍콩";
-  if (normalized === "CNY") return "중국";
-  if (normalized === "AUD") return "호주";
-  if (normalized === "GBP") return "영국";
-  if (normalized === "EUR") return "유럽";
-  return normalized;
-}
+// getCurrencyRegionLabel は @/lib/portfolio-change から import
 
 function getInitialVisibleLogicalRange(
   data: PriceRow[],
@@ -1083,63 +1068,12 @@ export function TickerDetailManager({
     total_pct: number | null;
     breakdown: PortfolioChangeBreakdownItem[];
   }>(() => {
-    if (!holdings || holdings.length === 0) {
-      return { total_pct: null, breakdown: [] };
-    }
-
-    const groups = new Map<string, { weight: number; weightedSum: number }>();
-
-    holdings.forEach((h) => {
-      const weight = h.weight ?? 0;
-      if (weight <= 0) return;
-      const componentChangePct = h.cumulative_change_pct;
-      if (componentChangePct == null || Number.isNaN(componentChangePct)) return;
-
-      const currency = String(h.price_currency || "").trim().toUpperCase();
-      const isForeign = currency !== "" && currency !== "KRW";
-      let changePctKrw = componentChangePct;
-      if (isForeign) {
-        const fxChangePct = fxChangePctByCurrency.get(currency);
-        if (fxChangePct == null || Number.isNaN(fxChangePct)) {
-          return;
-        }
-        // (1 + 현지통화 변동률) × (1 + 환율 변동률) - 1
-        const fxFactor = 1 + fxChangePct / 100;
-        changePctKrw = ((1 + componentChangePct / 100) * fxFactor - 1) * 100;
-      }
-
-      const group = groups.get(currency || "KRW") ?? { weight: 0, weightedSum: 0 };
-      group.weight += weight;
-      group.weightedSum += weight * changePctKrw;
-      groups.set(currency || "KRW", group);
-    });
-
-    let totalWeight = 0;
-    let totalWeightedSum = 0;
-    const breakdown: PortfolioChangeBreakdownItem[] = [];
-    for (const [currency, group] of groups.entries()) {
-      if (group.weight <= 0) {
-        continue;
-      }
-      const changePct = group.weightedSum / group.weight;
-      breakdown.push({
-        currency,
-        label: getCurrencyRegionLabel(currency),
-        change_pct: changePct,
-        weight: group.weight,
-      });
-      totalWeight += group.weight;
-      totalWeightedSum += group.weight * changePct;
-    }
-
-    breakdown.sort((a, b) => b.weight - a.weight);
-    if (totalWeight <= 0) {
-      return { total_pct: null, breakdown };
-    }
-
-    const divisor = Math.max(totalWeight, 100);
-    return { total_pct: totalWeightedSum / divisor, breakdown };
-  }, [holdings, fxChangePctByCurrency]);
+    const result = calcPortfolioChange(holdings, displayFxRates);
+    return {
+      total_pct: result.totalPct,
+      breakdown: result.breakdown,
+    };
+  }, [holdings, displayFxRates]);
   const portfolioChangePct = portfolioChange.total_pct;
   const portfolioChangeBreakdown = portfolioChange.breakdown;
   const portfolioChangeBaseDate = etfInfo?.portfolio_change_base_date ?? null;
