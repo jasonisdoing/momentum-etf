@@ -831,9 +831,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "분류",
             headerName: "분류",
-            minWidth: 100,
+            minWidth: 120,
             flex: 1,
-            cellStyle: { textAlign: "center" },
+            cellClass: "appTextEllipsisCell",
             cellRenderer: (params: { value: string | null | undefined }) => {
               const value = String(params.value ?? "").trim();
               return <span title={value}>{value || "-"}</span>;
@@ -887,8 +887,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "RSI",
         headerName: "RSI",
-        minWidth: 86,
-        width: 86,
+        minWidth: 76,
+        width: 76,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
           renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),

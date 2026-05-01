@@ -2898,6 +2898,19 @@ a {
   -webkit-user-select: text;
 }
 
+.appAgGridTheme .ag-cell.appTextEllipsisCell,
+.appAgGridThemeLegacy .ag-cell.appTextEllipsisCell,
+.appAgGridTheme .ag-cell.appTextEllipsisCell .ag-cell-wrapper,
+.appAgGridThemeLegacy .ag-cell.appTextEllipsisCell .ag-cell-wrapper,
+.appAgGridTheme .ag-cell.appTextEllipsisCell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.appTextEllipsisCell .ag-cell-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .appGridNumericValue {
   display: flex;
   width: 100%;
