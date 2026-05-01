@@ -10,7 +10,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings";
-type PerformanceRange = "3m" | "6m" | "1y" | "3y";
+type PerformanceRange = "1m" | "3m" | "6m" | "1y" | "3y";
 
 type TickerItem = {
   ticker: string;
@@ -123,13 +123,13 @@ const HOLDING_MATCH_COLORS = [
   "#f3e8ff",
 ];
 const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number }[] = [
+  { key: "1m", label: "1개월", days: 31 },
   { key: "3m", label: "3개월", days: 92 },
   { key: "6m", label: "6개월", days: 183 },
   { key: "1y", label: "1년", days: 365 },
   { key: "3y", label: "3년", days: 365 * 3 },
 ];
 const PERFORMANCE_METRIC_RANGES: PerformanceMetricRange[] = [
-  { label: "1개월", kind: "period", days: 31 },
   ...PERFORMANCE_RANGES.map(({ label, days }) => ({ label, kind: "period" as const, days })),
   { label: "연초이후", kind: "ytd" },
 ];
@@ -663,7 +663,7 @@ export function ComparePageClient() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
-  const [performanceRange, setPerformanceRange] = useState<PerformanceRange>("1y");
+  const [performanceRange, setPerformanceRange] = useState<PerformanceRange>("3m");
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -768,7 +768,7 @@ export function ComparePageClient() {
     return () => window.removeEventListener("compare:add-product", handler);
   }, [selectedKeys]);
 
-  const selectedPerformanceRange = PERFORMANCE_RANGES.find((range) => range.key === performanceRange) ?? PERFORMANCE_RANGES[2];
+  const selectedPerformanceRange = PERFORMANCE_RANGES.find((range) => range.key === performanceRange) ?? PERFORMANCE_RANGES[1];
   const sortedProducts = useMemo(() => {
     return products
       .map((product, index) => ({
