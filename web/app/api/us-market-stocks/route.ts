@@ -24,12 +24,15 @@ type UsMarketStocksResponse = {
     change_pct: number | null;
     volume: number | null;
     market_cap: number | null;
+    return_3m_base_date: string | null;
+    return_3m_base_price: number | null;
+    return_3m_pct: number | null;
   }>;
 };
 
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
-  const index = searchParams.get("index") ?? "SP500";
+  const index = searchParams.get("index") ?? "NDX100";
   const minMarketCapUkm = searchParams.get("min_market_cap_ukm") ?? "0";
 
   try {

@@ -33,7 +33,7 @@ type SystemAction =
   | "market_hours_analysis"
   | "metadata_updater"
   | "asset_summary"
-  | "us_index_constituents";
+  | "us_market_stocks";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");
