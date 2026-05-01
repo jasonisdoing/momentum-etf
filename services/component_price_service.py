@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from services.price_service import get_realtime_snapshot, get_worldstock_snapshot, get_yahoo_symbol_snapshot
+from utils.cache_utils import load_cached_close_series_bulk_with_fallback
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -87,6 +88,7 @@ def enrich_component_prices(
     au_price_map = _safe_fetch_snapshot("au", au_tickers)
     worldstock_price_map = _safe_fetch_worldstock(worldstock_codes)
     yahoo_exchange_price_map = _safe_fetch_yahoo(yahoo_exchange_symbols)
+    korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_tickers, cumulative_base_date)
     baseline_price_map = _safe_fetch_yahoo_baseline_prices(
         baseline_yahoo_symbols,
         cumulative_base_date,
@@ -113,6 +115,8 @@ def enrich_component_prices(
                 "KRW",
                 preserve_existing=preserve_existing,
             )
+            if cumulative_base_date:
+                _apply_cumulative_change(enriched_item, korean_baseline_price_map.get(component_ticker))
         elif yahoo_symbol and yahoo_symbol.endswith(".AX"):
             _apply_price_snapshot(
                 enriched_item,
@@ -147,7 +151,7 @@ def enrich_component_prices(
                 preserve_existing=preserve_existing,
             )
 
-        if cumulative_base_date and yahoo_symbol:
+        if cumulative_base_date and yahoo_symbol and not _is_korean_six_digit_holding(item):
             baseline_item = baseline_price_map.get(yahoo_symbol)
             _apply_cumulative_change(enriched_item, baseline_item)
 
@@ -239,6 +243,53 @@ def _safe_fetch_yahoo_baseline_prices(
     except Exception as exc:
         logger.warning("구성종목 기준일 가격 조회 실패(base_date=%s): %s", base_date, exc)
         return {}
+
+
+def _safe_fetch_cached_baseline_prices(
+    ticker_type: str,
+    tickers: list[str],
+    base_date: str | None,
+) -> dict[str, dict[str, Any]]:
+    if not tickers or not base_date:
+        return {}
+    try:
+        return _fetch_cached_baseline_prices(ticker_type, tickers, base_date)
+    except Exception as exc:
+        logger.warning("구성종목 국내 기준일 가격 조회 실패(base_date=%s): %s", base_date, exc)
+        return {}
+
+
+def _fetch_cached_baseline_prices(
+    ticker_type: str,
+    tickers: list[str],
+    base_date: str,
+) -> dict[str, dict[str, Any]]:
+    normalized_tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
+    if not normalized_tickers:
+        return {}
+
+    base_ts = pd.Timestamp(base_date).normalize()
+    close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, normalized_tickers)
+    result: dict[str, dict[str, Any]] = {}
+    for ticker, series in close_series_map.items():
+        if series is None or series.empty:
+            continue
+        close_series = pd.to_numeric(series, errors="coerce").dropna()
+        close_series = close_series[close_series > 0]
+        if close_series.empty:
+            continue
+
+        normalized_index = pd.to_datetime(close_series.index).tz_localize(None).normalize()
+        base_series = close_series[normalized_index <= base_ts]
+        if base_series.empty:
+            continue
+
+        baseline_date = base_series.index[-1]
+        result[str(ticker).strip().upper()] = {
+            "price": float(base_series.iloc[-1]),
+            "date": pd.Timestamp(baseline_date).strftime("%Y-%m-%d"),
+        }
+    return result
 
 
 import threading
