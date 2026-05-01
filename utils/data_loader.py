@@ -2502,5 +2502,39 @@ def get_exchange_rate_series(
 
     # 결측치 보간 (ffill)
     rates = rates.fillna(method="ffill")
+    if _has_invalid_exchange_rate_values(symbol, rates):
+        logger.warning("%s 환율 캐시에 비정상 값이 있어 강제 재조회합니다.", symbol)
+        refreshed_df = _fetch_ohlcv_with_cache(
+            symbol,
+            target_country,
+            s_dt,
+            e_dt,
+            ticker_type=cache_dir_name,
+            force_refresh=True,
+            allow_partial=allow_partial,
+        )
+        if refreshed_df is None or refreshed_df.empty:
+            raise RuntimeError(f"{symbol} 환율 캐시 재조회 결과가 비어 있습니다.")
+        rates = refreshed_df["Close"].astype(float)
+        rates = rates[(rates.index >= s_dt) & (rates.index <= e_dt)]
+        rates = rates.fillna(method="ffill")
+        if _has_invalid_exchange_rate_values(symbol, rates):
+            raise RuntimeError(f"{symbol} 환율 시계열에 비정상 값이 남아 있습니다.")
 
     return rates
+
+
+def _has_invalid_exchange_rate_values(symbol: str, rates: pd.Series) -> bool:
+    normalized = str(symbol or "").strip().upper()
+    numeric_rates = pd.to_numeric(rates, errors="coerce").dropna()
+    if numeric_rates.empty:
+        return False
+    if (numeric_rates <= 0).any():
+        return True
+
+    # JPYKRW=X는 KRW/JPY 단위여야 하므로 정상 범위가 한 자리~십 원대다.
+    # 캐시에 USD/JPY 수준의 값이 섞이면 일본 포트폴리오/환율 변동률이 -96%대로 깨진다.
+    if normalized == "JPYKRW=X" and (numeric_rates > 50).any():
+        return True
+
+    return False
