@@ -8,10 +8,10 @@
       "country_code": "kor",
       "currency": "KRW",
       "type_source": "Naver",
-      "TOP_N_HOLD": 5,
+      "TOP_N_HOLD": 3,
       "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 6,
+      "MA_MONTHS": 5,
       "RSI_LIMIT": 100
     },
     {
@@ -61,7 +61,7 @@
       "name": "한국 개별주",
       "country_code": "kor",
       "currency": "KRW",
-      "TOP_N_HOLD": 5,
+      "TOP_N_HOLD": 3,
       "HOLDING_BONUS_SCORE": 5,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
