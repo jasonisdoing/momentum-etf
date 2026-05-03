@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef } from "ag-grid-community";
 import { IconCheck } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 type WeeklyEditableField = {
   key: string;
@@ -115,30 +116,7 @@ const COLUMN_DEFS = [
   { key: "loss_count", label: "손실 종목 수" },
 ] as const;
 
-const weeklyGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const weeklyGridTheme = createAppGridTheme();
 
 function formatMoney(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(Math.round(value));
@@ -356,6 +334,7 @@ export function WeeklyManager({
         ...getWeeklyColumnWidth(column.key),
         field: column.key,
         headerName: column.label,
+        pinned: column.key === "week_date_display" ? "left" : undefined,
         type:
           MONEY_KEYS.has(column.key) || PERCENT_KEYS.has(column.key) || column.key === "exchange_rate"
             ? "rightAligned"
@@ -387,23 +366,6 @@ export function WeeklyManager({
     ],
     [dirtyCellKeys, editableFieldMap, readOnlyKeys, visibleColumns],
   );
-
-  function handleAggregate() {
-    startTransition(async () => {
-      try {
-        setError(null);
-        const response = await fetch("/api/weekly", { method: "POST" });
-        const payload = (await response.json()) as { week_date?: string; error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "이번주 데이터 집계에 실패했습니다.");
-        }
-        await load({ silent: true });
-        toast.success(`[자산-주별] ${payload.week_date ?? activeWeekDate} 집계 완료`);
-      } catch (aggregateError) {
-        setError(aggregateError instanceof Error ? aggregateError.message : "이번주 데이터 집계에 실패했습니다.");
-      }
-    });
-  }
 
   function handleSave() {
     if (dirtyRowIds.length === 0) {
@@ -451,40 +413,37 @@ export function WeeklyManager({
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft weeklyMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">보기 방식</span>
-                  <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
-                    <button
-                      type="button"
-                      className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setViewMode("core")}
-                    >
-                      핵심만 보기
-                    </button>
-                    <button
-                      type="button"
-                      className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setViewMode("full")}
-                    >
-                      전체 보기
-                    </button>
-                  </div>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">집계</span>
-                  <button
-                    type="button"
-                    className="btn btn-success btn-sm px-3 fw-bold"
-                    onClick={handleAggregate}
-                    disabled={isPending}
-                  >
-                    {isPending ? "집계 중..." : "이번주 데이터 집계"}
-                  </button>
-                </label>
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader">
+                <div className="appMainHeaderLeft weeklyMainHeaderLeft">
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">보기 방식</span>
+                    <div className="appSegmentedToggle" role="group" aria-label="주별 보기 방식">
+                      <button
+                        type="button"
+                        className={viewMode === "core" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setViewMode("core")}
+                      >
+                        핵심만 보기
+                      </button>
+                      <button
+                        type="button"
+                        className={viewMode === "full" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => setViewMode("full")}
+                      >
+                        전체 보기
+                      </button>
+                    </div>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">집계</span>
+                    <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
+                      평일 09:35, 16:35 일별 원장 기준 주별 자동 집계
+                    </span>
+                  </label>
+                </div>
               </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
           <div className="card-header appActionHeader bg-light-subtle border-top">
             <div className="appActionHeaderInner">

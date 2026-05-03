@@ -6,7 +6,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./zaccounts:/app/zaccounts:ro
+      - ./accounts.json:/app/accounts.json:ro
     expose:
       - "8000"
     restart: always
@@ -22,7 +22,7 @@ services:
     environment:
       - FASTAPI_INTERNAL_URL=http://fastapi_app:8000
     volumes:
-      - ./zaccounts:/app/zaccounts:ro
+      - ./accounts.json:/app/accounts.json:ro
     restart: unless-stopped
 
   hybrid_proxy:

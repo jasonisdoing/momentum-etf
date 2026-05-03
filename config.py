@@ -53,6 +53,10 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Referer": "https://m.stock.naver.com/",
     "Accept": "application/json, text/plain, */*",
 }
+
+# 네이버 미국 개별주 시가총액/업종 정보
+NAVER_US_STOCK_MARKET_VALUE_URL = "https://stock.naver.com/api/foreign/market/stock/global"
+
 # 네이버 ETF 대분류 설정 (use: 대표 분류용, show: 개별 컬럼 표시용)
 # 코드가 클수록 Representative(Main) 분류를 정할 때 우선순위가 높음
 NAVER_ETF_CATEGORY_CONFIG = [
@@ -135,13 +139,83 @@ TRADING_DAYS_PER_MONTH = 20
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
 
-# 고점 컬럼 색상 기준 (%)
-# 이 값 이상이면 녹색(고점 근처), 미만이면 빨간색(낙폭 큼)
-HIGH_POINT_GREEN_THRESHOLD = -5
+# -----------------------------------------------------------------------
+# 백테스트 파라미터 스윕 설정
+# -----------------------------------------------------------------------
+BACKTEST_START_DATE = "2026-01-01"
+BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 
-# 유사 그룹 내에 보유 종목이 있으면 우선 대표로 유지합니다.
-# 다만 현재 그룹 1위보다 순위 백분위가 이 값 이상 뒤처지면 대표를 교체합니다.
-# 값은 퍼센트포인트(%p) 기준이며, 0이면 항상 보유 우선, 클수록 교체가 덜 발생합니다.
-# 실전 조정은 3.0~10.0 범위에서 시작하는 편이 무난합니다.
-# 예: 5.0이면 그룹 1위 대비 순위 백분위 차이가 5%p 이상일 때만 교체합니다.
-RANK_RECOMMEND_HOLDING_REPLACE_GAP_PCT = 5.0
+# 슬리피지는 % 단위로 입력한다.
+SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
+    "kor_kr": {
+        "BUY_PCT": 0.25,
+        "SELL_PCT": 0.25,
+    },
+    "kor_us": {
+        "BUY_PCT": 0.25,
+        "SELL_PCT": 0.25,
+    },
+    "aus": {
+        "BUY_PCT": 0.5,
+        "SELL_PCT": 0.5,
+    },
+    "us": {
+        "BUY_PCT": 0.15,
+        "SELL_PCT": 0.15,
+    },
+    "kor": {
+        "BUY_PCT": 0.25,
+        "SELL_PCT": 0.25,
+    },
+}
+
+BACKTEST_CONFIG: dict[str, dict] = {
+    "all": {
+        "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
+        "TOP_N_HOLD": [4],
+        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "MA_TYPE": ["ALMA"],
+        "MA_MONTHS": [3, 4, 5, 6],
+        "RSI_LIMIT": [100],
+    },
+    "kor_kr": {
+        "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
+        "TOP_N_HOLD": [3],
+        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "MA_TYPE": ["ALMA"],
+        "MA_MONTHS": [3, 4, 5, 6],
+        "RSI_LIMIT": [100],
+    },
+    "kor_us": {
+        "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
+        "TOP_N_HOLD": [3],
+        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "MA_TYPE": ["ALMA"],
+        "MA_MONTHS": [3, 4, 5, 6],
+        "RSI_LIMIT": [100],
+    },
+    "aus": {
+        "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
+        "TOP_N_HOLD": [6],
+        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "MA_TYPE": ["ALMA"],
+        "MA_MONTHS": [3, 4, 5, 6],
+        "RSI_LIMIT": [100],
+    },
+    "us": {
+        "BENCHMARK": {"ticker": "QQQ", "name": "인베스코 QQQ ETF"},
+        "TOP_N_HOLD": [5],
+        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "MA_TYPE": ["ALMA"],
+        "MA_MONTHS": [3, 4, 5, 6],
+        "RSI_LIMIT": [100],
+    },
+    "kor": {
+        "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
+        "TOP_N_HOLD": [3],
+        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "MA_TYPE": ["ALMA"],
+        "MA_MONTHS": [3, 4, 5, 6],
+        "RSI_LIMIT": [100],
+    },
+}

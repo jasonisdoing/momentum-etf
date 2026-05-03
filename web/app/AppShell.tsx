@@ -13,7 +13,6 @@ import {
   IconList,
   IconListDetails,
   IconMenu2,
-  IconNotebook,
   IconReceipt2,
   IconSettings,
   IconTrendingUp,
@@ -45,17 +44,10 @@ const navGroups = [
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
+      { href: "/daily", label: "일별", icon: IconReceipt2 },
       { href: "/weekly", label: "주별", icon: IconReceipt2 },
+      { href: "/monthly", label: "월별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
-    ],
-  },
-  {
-    id: "momentum-etf",
-    title: "ETF",
-    icon: IconListDetails,
-    items: [
-      { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
-      { href: "/note", label: "계좌 메모", icon: IconNotebook },
     ],
   },
   {
@@ -63,7 +55,10 @@ const navGroups = [
     title: "정보",
     icon: IconTrendingUp,
     items: [
+      { href: "/pools", label: "종목풀 순위", icon: IconMedal2 },
+      { href: "/compare", label: "종목 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
+      { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
     ],
   },
@@ -109,8 +104,7 @@ function formatChangePct(value: number | undefined): string {
   if (value === undefined || value === null || Number.isNaN(value)) {
     return "";
   }
-  const sign = value > 0 ? "+" : "";
-  return `(${sign}${value.toFixed(2)}%)`;
+  return `(${value.toFixed(2)}%)`;
 }
 
 function getFxChangeClass(value: number | undefined): string | undefined {

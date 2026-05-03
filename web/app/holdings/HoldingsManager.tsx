@@ -1,12 +1,13 @@
 "use client";
 
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 import type { GridOptions } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { TickerDetailLink } from "../components/TickerDetailLink";
+import { createAppGridTheme } from "../components/app-grid-theme";
+import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 type HoldingsRow = {
   account_name: string;
@@ -16,7 +17,6 @@ type HoldingsRow = {
   quantity: number;
   current_price: string;
   current_price_num: number;
-  days_held: string;
   pnl_krw: number;
   pnl_krw_num: number;
   return_pct: number;
@@ -26,6 +26,10 @@ type HoldingsRow = {
   bucket_id: number;
   bucket: string;
   memo: string;
+  ticker_type?: string;
+  country_code?: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type AccountSummary = {
@@ -66,36 +70,12 @@ type ParentRow =
   | (AggregatedHoldingRow & { rowType: "main" })
   | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean };
 
-const holdingsGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const holdingsGridTheme = createAppGridTheme();
 
-// 구성종목이 있을 수 있는 종목인지 판별 (한국 6자리 코드 + 현금 아님)
-// 0113D0, 0091P0 같은 알파뉴메릭 ETF 코드도 포함
+// 구성종목이 있을 수 있는 종목인지 판별 (ETF 및 구성종목 추적 가능 여부)
 function canHaveConstituents(row: AggregatedHoldingRow): boolean {
   if (row.ticker === "__CASH__") return false;
-  return row.currency === "KRW" && row.ticker.length === 6;
+  return row.has_holdings === true;
 }
 
 const DETAIL_PANEL_HEIGHT = 460;
@@ -106,19 +86,21 @@ function getDetailRowHeight(_count: number): number {
 }
 
 // ticker 페이지 gridTheme과 동일한 파라미터
-const constituentGridTheme = holdingsGridTheme.withParams({
+const constituentGridTheme = createAppGridTheme({
   rowHeight: 34,
   headerHeight: 36,
   wrapperBorderRadius: 10,
   fontSize: 14,
 });
 
+const HOLDINGS_CACHE_KEY = "momentum-etf:holdings:assets";
+const HOLDINGS_CACHE_TTL_MS = 30_000;
+
 export function HoldingsManager({
   onHeaderSummaryChange,
 }: {
   onHeaderSummaryChange?: (summary: HoldingsHeaderSummary) => void;
 }) {
-  const router = useRouter();
   const [holdings, setHoldings] = useState<HoldingsRow[]>([]);
   const [totalCashKrw, setTotalCashKrw] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -216,6 +198,22 @@ export function HoldingsManager({
 
   const loadHoldings = useCallback(async () => {
     try {
+      const cached = readSessionTtlCache<{ rows?: HoldingsRow[]; account_summaries?: AccountSummary[] }>(
+        HOLDINGS_CACHE_KEY,
+        HOLDINGS_CACHE_TTL_MS,
+      );
+      if (cached) {
+        const rows = (cached.rows || []).filter((r: HoldingsRow) => r.ticker && r.quantity > 0);
+        const cashSum = ((cached.account_summaries || []) as AccountSummary[]).reduce(
+          (sum: number, acc: AccountSummary) => sum + (acc.cash_balance_krw || 0),
+          0,
+        );
+        setHoldings(rows);
+        setTotalCashKrw(cashSum);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       const res = await fetch("/api/assets", { cache: "no-store" });
       if (!res.ok) {
@@ -224,6 +222,7 @@ export function HoldingsManager({
         return;
       }
       const data = await res.json();
+      writeSessionTtlCache(HOLDINGS_CACHE_KEY, data);
       const rows = (data.rows || []).filter((r: HoldingsRow) => r.ticker && r.quantity > 0);
       const cashSum = ((data.account_summaries || []) as AccountSummary[]).reduce(
         (sum: number, acc: AccountSummary) => sum + (acc.cash_balance_krw || 0),
@@ -256,8 +255,6 @@ export function HoldingsManager({
       const nextBuyAmount = existing.buy_amount_krw + row.buy_amount_krw;
       const nextValuation = existing.valuation_krw + row.valuation_krw;
       const nextPnl = existing.pnl_krw + row.pnl_krw;
-      const existingDaysHeldInt = parseHoldingDaysToInt(existing.days_held);
-      const rowDaysHeldInt = parseHoldingDaysToInt(row.days_held);
       const weightedDailyChange =
         existing.daily_change_pct !== null && row.daily_change_pct !== null
           ? ((existing.daily_change_pct * existing.valuation_krw) + (row.daily_change_pct * row.valuation_krw)) /
@@ -276,15 +273,15 @@ export function HoldingsManager({
         bucket: row.valuation_krw > existing.valuation_krw ? row.bucket : existing.bucket,
         memo: existing.memo || row.memo,
         account_name: accountNames.join(", "),
-        days_held: rowDaysHeldInt > existingDaysHeldInt ? row.days_held : existing.days_held,
       });
       return acc;
     }, new Map<string, HoldingsRow>()).values(),
   );
 
-  const holdingsValuation = aggregatedBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
+  const visibleBaseHoldings = aggregatedBaseHoldings.filter((row) => normalizeDisplayTicker(row.ticker) !== "IS");
+  const holdingsValuation = visibleBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
   const totalValuation = holdingsValuation + totalCashKrw;
-  const aggregatedHoldings: AggregatedHoldingRow[] = aggregatedBaseHoldings.map((row) => ({
+  const aggregatedHoldings: AggregatedHoldingRow[] = visibleBaseHoldings.map((row) => ({
     ...row,
     portfolio_weight_pct: totalValuation > 0 ? Number(((row.valuation_krw / totalValuation) * 100).toFixed(1)) : 0,
   }));
@@ -298,7 +295,6 @@ export function HoldingsManager({
       quantity: 0,
       current_price: "-",
       current_price_num: 0,
-      days_held: "-",
       pnl_krw: 0,
       pnl_krw_num: 0,
       return_pct: 0,
@@ -391,15 +387,6 @@ export function HoldingsManager({
     [expandedTicker, fetchConstituents],
   );
 
-  const moveToTickerDetail = useCallback(
-    (ticker: string | null | undefined) => {
-      const normalizedTicker = normalizeDisplayTicker(String(ticker ?? "-"));
-      if (!normalizedTicker || normalizedTicker === "-" || normalizedTicker === "IS") return;
-      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
-    },
-    [router],
-  );
-
   const isCashRow = useCallback((row: AggregatedHoldingRow | undefined) => row?.ticker === "__CASH__", []);
 
   // 부모 그리드 rowData: main 행 + 펼쳐진 경우 detail 행 삽입
@@ -459,18 +446,9 @@ export function HoldingsManager({
         if (!params.data || isDetailRow(params.data)) return null;
         const rawTicker = String(params.value ?? "-");
         if (rawTicker === "__CASH__") return <span className="appCodeText" style={{ color: "#8b949e" }}>-</span>;
-        const normalizedTicker = normalizeDisplayTicker(rawTicker);
-        if (normalizedTicker === "IS") return <span className="appCodeText">{normalizedTicker}</span>;
-        return (
-          <button
-            type="button"
-            className="appCodeText"
-            style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
-            onClick={() => moveToTickerDetail(normalizedTicker)}
-          >
-            {normalizedTicker}
-          </button>
-        );
+        const displayTicker = normalizeDisplayTicker(rawTicker);
+        if (displayTicker === "IS") return <span className="appCodeText">{displayTicker}</span>;
+        return <TickerDetailLink ticker={rawTicker} displayTicker={displayTicker} />;
       },
     },
     {
@@ -572,17 +550,7 @@ export function HoldingsManager({
         return <span className={getSignedClass(row.return_pct)}>{value}</span>;
       },
     },
-    {
-      headerName: "보유일",
-      field: "days_held",
-      width: 92,
-      cellClass: "tableAlignCenter",
-      cellRenderer: (params: { data?: ParentRow }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        return (params.data as AggregatedHoldingRow).days_held;
-      },
-    },
-  ], [isCashRow, isDetailRow, moveToTickerDetail, showAmounts, expandedTicker, handleNameClick]);
+  ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
   const DetailRenderer = useCallback(
@@ -795,14 +763,13 @@ function formatHoldingsKrw(val: number) {
 
 function formatSignedPercent(val: number | null): string {
   if (val == null) return "-";
-  const sign = val > 0 ? "+" : "";
-  return `${sign}${val.toFixed(2)}%`;
+  return `${val.toFixed(2)}%`;
 }
 
 function getSignedClass(val: number | null | undefined): string {
   if (val == null) return "";
-  if (val > 0) return "text-success";
-  if (val < 0) return "text-danger";
+  if (val > 0) return "metricPositive";
+  if (val < 0) return "metricNegative";
   return "";
 }
 
@@ -818,15 +785,10 @@ function getBucketCellClass(bucket: string): string {
 function normalizeDisplayTicker(ticker: string): string {
   if (!ticker || ticker === "-") return "-";
   const upper = ticker.toUpperCase();
+  if (upper.startsWith("ASX:")) return upper;
   if (/^\d{6}$/.test(upper)) return upper;
   if (upper.endsWith(".KS") || upper.endsWith(".KQ") || upper.endsWith(".AX")) return upper.split(".")[0];
   return upper;
-}
-
-function parseHoldingDaysToInt(daysHeld: string): number {
-  if (!daysHeld || daysHeld === "-") return 0;
-  const match = daysHeld.match(/\d+/);
-  return match ? parseInt(match[0], 10) : 0;
 }
 
 function formatDateWithWeekday(dateStr: string): string {

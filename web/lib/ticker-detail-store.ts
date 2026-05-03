@@ -41,18 +41,12 @@ type TickerMetaItem = {
   name: string;
   ticker_type: string;
   country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 async function resolveTickerMeta(ticker: string): Promise<TickerMetaItem> {
-  const items = await fetchFastApiJson<TickerMetaItem[]>("/internal/ticker-detail/tickers");
-  const matches = items.filter((item) => item.ticker.toLowerCase() === ticker.toLowerCase());
-  if (matches.length === 0) {
-    throw new Error(`${ticker} 티커를 찾지 못했습니다.`);
-  }
-  if (matches.length > 1) {
-    throw new Error(`동일한 티커 ${ticker}가 여러 종목풀에 등록되어 있습니다.`);
-  }
-  return matches[0];
+  return fetchFastApiJson<TickerMetaItem>(`/internal/ticker-detail/resolve?ticker=${encodeURIComponent(ticker)}`);
 }
 
 export async function loadTickerDetailData(params: {

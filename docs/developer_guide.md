@@ -5,6 +5,7 @@
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
+*   `backtest/`: 백테스트 전용 실행기, 스윕 설정, 결과 로그 생성 엔진
 *   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
@@ -14,12 +15,16 @@
     *   `fear_greed_service.py`: CNN 공포탐욕지수 연동 및 메모리 캐시
     *   **원칙**: 새로운 시장 지표, 가격 정보, 외부 데이터 크롤링 등은 혼동을 막기 위해 모두 이 폴더에서 각각의 서비스로 관리하고, 자체 캐시 시스템(TTL 등)을 구축합니다.
 *   `utils/rankings.py`: 순위 테이블 계산 전용 유틸
-*   `scripts/`: 데이터 수집, 캐시 갱신 등 유틸리티 스크립트
+*   `scripts/`: 데이터 수집, 캐시 갱신, 일별 원장 시드/집계 생성 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
     *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
     *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
+    *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
+    *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
+    *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
+*   `accounts.json`: 계좌 메타데이터 단일 설정 파일. 각 계좌의 `ticker_types`는 해당 계좌가 보유할 수 있는 종목풀 목록이며, 보유종목이 종목풀에서 제거된 뒤에도 가격/메타 캐시 갱신 대상의 ticker_type을 결정하는 기준입니다.
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
@@ -31,6 +36,15 @@
 4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
 5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
+### 일별 원장 원칙
+
+*   `daily_fund_data`는 앞으로 일/주/월 집계의 기준이 될 일별 원장 컬렉션입니다.
+*   현재 초기 단계에서는 기존 `weekly_fund_data`의 종료일 row를 `daily_fund_data.date`로 시드 이관해 sparse 일별 원장으로 사용합니다.
+*   이 시드 데이터는 과거 일별 복원값이 아니라, **주별 종료일 스냅샷을 일별 원장에 옮긴 값**으로 취급합니다.
+*   초기 시드는 명시 스크립트 `./.venv/bin/python scripts/seed_daily_fund_data.py`로만 생성합니다. 런타임에서 자동 시드를 만들지 않습니다.
+*   통합 데이터 집계는 `./.venv/bin/python scripts/collect_data.py`가 담당하며, 미래 `daily_fund_data` row를 먼저 정리한 뒤 오늘 row를 upsert 하고 이어서 `daily_fund_data`에서 주별/월별 마지막 영업일 snapshot을 읽어 `weekly_fund_data`, `monthly_fund_data`를 다시 생성합니다.
+*   주별/월별 수동 수정은 `memo`만 허용하며, 금액 관련 필드는 모두 일별 원장에서 유도됩니다.
+
 ### 종목 캐시 용어
 
 이 프로젝트에서 **종목 캐시**는 다음 두 가지를 합친 상위 개념으로 사용합니다.
@@ -39,10 +53,12 @@
     *   OHLCV, 종가 시계열, 실시간 스냅샷
     *   `utils/cache_utils.py`, `utils/data_loader.py`, `services/price_service.py`
 2.  **메타 캐시**
-    *   상장일, 배당률, 보수, 순자산총액, ETF 구성종목 같은 저빈도 정보
+    *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
     *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
+    *   미국 개별주는 네이버 `foreign/market/stock/global`에서 업종, 배당률, 시가총액을 조회해 `stock_meta.etf_category`와 `stock_cache_meta.meta_cache`에 저장합니다. 미국 개별주에는 보수 개념을 적용하지 않습니다.
+    *   종목풀에 등록되지 않았더라도 포트폴리오 마스터에서 현재 보유 중인 티커는 계좌 `ticker_types` 기준으로 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
 
@@ -57,9 +73,10 @@
 5.  `utils/data_loader.py`는 원천 fetch 함수와 OHLCV 보완 로직을 포함하지만, 신규 호출부를 작성할 때는 직접 진입점으로 우선 사용하지 않습니다.
 6.  실시간 가격데이터를 제외한 값은 우선 `종목 캐시`에 저장하고 읽습니다. 화면 진입 시 외부 원천을 다시 호출하지 않고, 캐시된 메타/구성종목을 한꺼번에 읽어 응답 속도를 유지하는 것을 기본 원칙으로 삼습니다.
 7.  한국 ETF 구성종목 비중은 `stock_cache_meta.holdings_cache`를 우선 사용합니다. `/ticker`는 구성종목 목록/비중을 실시간 조회하지 않습니다.
-8.  배당률, 보수, 순자산총액, 상장일 같은 저빈도 ETF 메타는 `stock_cache_meta.meta_cache`를 우선 사용합니다.
-9.  앞으로 새로운 저빈도 항목(예: ETF 메타, 구성종목 속성, 기초지수 관련 부가정보)을 발견하면, 실시간 가격데이터가 아닌 이상 먼저 `stock_cache_meta`에 저장하는 방향을 기본값으로 삼습니다.
+8.  배당률, 보수, 순자산총액/시가총액, 상장일 같은 저빈도 메타는 `stock_cache_meta.meta_cache`를 우선 사용합니다.
+9.  앞으로 새로운 저빈도 항목(예: ETF 메타, 구성종목 속성, 기초지수 관련 부가정보)을 발견하면, 실시간 가격데이터가 아닌 이상 먼저 `stock_cache_meta`에 저장하는 방향을 우선 원칙으로 삼습니다.
 10. 실시간 또는 준실시간 값을 내려주는 Next API 라우트는 요청 fetch뿐 아니라 응답 헤더에도 `Cache-Control: no-store`를 명시해 브라우저/중간 계층 캐시를 차단합니다.
+11. 가격 캐시 조회는 요청한 `ticker_type` 또는 국가 캐시만 엄격하게 조회합니다. 다른 종목풀 캐시로 자동 fallback 하지 않습니다. 계좌 보유 화면처럼 여러 종목풀이 섞인 경우에만 호출부에서 전체 종목풀 조회를 명시적으로 선택합니다.
 
 ## 2. 순위 화면 정합성 원칙
 
@@ -77,7 +94,7 @@
 
 ### 핵심 일관성 체크리스트
 
-1.  **입력 단순화**: 종목풀 설정의 `MA_RULES`를 기본값으로 사용하되, 순위 화면에서는 `추세1`, `추세2`를 각각 변경할 수 있다.
+1.  **입력 단순화**: 종목풀 설정의 `MA_TYPE`, `MA_MONTHS`를 사용하고, 순위 화면에서도 같은 단일 MA 기준만 변경할 수 있다.
 2.  **정렬 기준 고정**: `점수`가 있는 종목을 `점수` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
 3.  **데이터 기준**:
     *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
@@ -89,17 +106,29 @@
 
 ## 3. 전략 설정 규칙
 
-종목풀 설정 포맷(`ztickers/<order>_<ticker_type>/config.json`):
+종목풀 설정 포맷(`pools.json`):
 
 ```json
 {
-  "icon": "🇰🇷",
-  "name": "국내상장 국내",
-  "country_code": "kor",
-  "currency": "KRW",
-  "MA_RULES": [
-    { "order": 1, "MA_TYPE": "SMA", "MA_MONTHS": 10 },
-    { "order": 2, "MA_TYPE": "ALMA", "MA_MONTHS": 3 }
+  "all": {
+    "TOP_N_HOLD": 3,
+    "HOLDING_BONUS_SCORE": 10,
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 5,
+    "RSI_LIMIT": 100,
+    "include": ["kor_kr", "kor_us", "kor"]
+  },
+  "pools": [
+    {
+      "order": 1,
+      "ticker_type": "kor_kr",
+      "icon": "🇰🇷",
+      "name": "국내상장 국내",
+      "country_code": "kor",
+      "currency": "KRW",
+      "MA_TYPE": "SMA",
+      "MA_MONTHS": 10
+    }
   ]
 }
 ```
@@ -108,7 +137,8 @@
 
 검증 원칙(현재 운영):
 
-* 종목풀: `MA_RULES` 필수
+* 전체 종목풀: `all.TOP_N_HOLD`, `all.HOLDING_BONUS_SCORE`, `all.MA_TYPE`, `all.MA_MONTHS`, `all.RSI_LIMIT`, `all.include` 필수
+* 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
@@ -119,24 +149,25 @@
     *   가격/환율 문제면 `services/price_service.py`를 함께 확인
     *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
 2.  **검증**:
-    *   순위 화면에서 종목풀 변경 또는 `추세1`, `추세2` 변경 시 컬럼과 점수가 즉시 갱신되는지 확인
+    *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 점수가 즉시 갱신되는지 확인
     *   실제 보유 종목이 녹색 행으로 표시되는지 확인
 3.  **확인**:
-    *   `점수`, 규칙별 `추세(...)` 컬럼이 `현재가` 뒤에 표시되는지 확인
+    *   `점수`, `추세` 컬럼이 `현재가` 뒤에 표시되는지 확인
 
 ## 5. 순위 화면의 정의
 
-**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 `MA_RULES` 기준 점수를 계산한 결과입니다.
+**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 `MA_TYPE`, `MA_MONTHS` 기준 점수를 계산한 결과입니다.
 
 ### 핵심 원칙
 1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.
 2.  **실보유 구분**: 실제 보유 종목만 행 색상으로 표시합니다.
 3.  **정렬 규칙**: `점수` 내림차순, `점수` 계산 불가 종목은 맨 아래입니다.
 4.  **계좌 종목 직접 관리**: 계좌가 자신의 종목 유니버스를 직접 보유하며, 별도 종목풀 fallback은 사용하지 않습니다.
+5.  **고정 종목 표시**: `exclude_from_ranking=true`인 고정 종목은 순위 번호 없이 현재 위치만 보여줍니다.
 
 ## 6. 화면 UI 표준
 
-AG Grid 기반 주요 화면은 현재 `/stocks`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
+AG Grid 기반 주요 화면은 현재 `/pools`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
 
 ### 공통 레이아웃 순서
 1.  **메뉴 헤더**

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from typing import Any
 
 from utils.db_manager import get_db_connection
@@ -92,6 +93,33 @@ def get_stock_cache_meta_docs(ticker_type: str, tickers: list[str]) -> dict[str,
     return result
 
 
+def get_previous_stock_cache_meta_history(
+    ticker_type: str, 
+    ticker: str, 
+    before_date: str
+) -> dict[str, Any] | None:
+    """특정 날짜(YYYY-MM-DD) 이전의 가장 최근 히스토리 스냅샷을 반환한다."""
+    type_norm = (ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    
+    db = get_db_connection()
+    if db is None:
+        return None
+        
+    coll = db["stock_cache_meta_history"]
+    # before_date보다 작은 날짜 중 가장 최근 것 하나 조회
+    doc = coll.find_one(
+        {
+            "ticker_type": type_norm, 
+            "ticker": ticker_norm, 
+            "date": {"$lt": before_date}
+        },
+        sort=[("date", -1)],
+        projection={"_id": 0}
+    )
+    return dict(doc) if isinstance(doc, dict) else None
+
+
 def upsert_stock_cache_meta_doc(
     ticker_type: str,
     ticker: str,
@@ -132,6 +160,7 @@ def upsert_stock_cache_meta_doc(
     if holdings_cache is not None:
         payload["holdings_cache"] = holdings_cache
 
+    # 1. 최신 정보 업데이트 (기존 로직)
     coll.update_one(
         {"ticker_type": type_norm, "ticker": ticker_norm},
         {
@@ -140,6 +169,48 @@ def upsert_stock_cache_meta_doc(
         },
         upsert=True,
     )
+
+    # 2. 일자별 히스토리 스냅샷 저장
+    db = get_db_connection()
+    if db is not None:
+        history_coll = db["stock_cache_meta_history"]
+        
+        # 한국 시간 기준으로 귀속 날짜 결정
+        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        from utils.data_loader import get_trading_days
+        
+        # 최근 7일간 거래일 조회
+        start_search = (now_kst - timedelta(days=7)).strftime("%Y-%m-%d")
+        end_search = now_kst.strftime("%Y-%m-%d")
+        trading_days = get_trading_days(start_search, end_search, "kor")
+        trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
+        
+        today_str = now_kst.strftime("%Y-%m-%d")
+        
+        # 9시 이후이고 오늘이 거래일이면 오늘 날짜 사용, 아니면 직전 거래일 사용
+        if now_kst.hour >= 9 and today_str in trading_days_str:
+            snapshot_date = today_str
+        else:
+            # 오늘이 거래일이어도 9시 전이면 직전 거래일, 오늘이 휴장일이면 가장 최근 거래일
+            past_days = [d for d in trading_days_str if d < today_str]
+            snapshot_date = past_days[-1] if past_days else today_str
+
+        history_payload = payload.copy()
+        history_payload["date"] = snapshot_date
+        
+        # 히스토리 컬렉션 인덱스 (최초 1회)
+        history_coll.create_index(
+            [("ticker_type", 1), ("ticker", 1), ("date", -1)],
+            unique=True,
+            name="ticker_date_history_unique",
+            background=True
+        )
+        
+        history_coll.update_one(
+            {"ticker_type": type_norm, "ticker": ticker_norm, "date": snapshot_date},
+            {"$set": history_payload},
+            upsert=True
+        )
 
 
 def delete_stock_cache_meta_doc(ticker_type: str, ticker: str) -> None:

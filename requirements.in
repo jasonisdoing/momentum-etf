@@ -10,3 +10,4 @@ yfinance
 slack-sdk
 fastapi
 uvicorn
+lxml

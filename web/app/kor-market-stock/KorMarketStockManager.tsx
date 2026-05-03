@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
@@ -10,7 +9,10 @@ import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -40,30 +42,7 @@ type KorMarketStocksResponse = {
   error?: string;
 };
 
-const korMarketStockGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const korMarketStockGridTheme = createAppGridTheme();
 
 function formatKrw(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -72,7 +51,7 @@ function formatKrw(value: number | null): string {
 
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 function formatVolume(value: number | null): string {
@@ -93,69 +72,8 @@ function formatMarketCap(value: number | null): string {
 }
 
 const MARKET_OPTIONS = ["KOSPI", "KOSDAQ"] as const;
-const LIMIT_OPTIONS = [30, 50, 100] as const;
-
-const columnDefs: ColDef<KorMarketStockRow>[] = [
-  {
-    headerName: "#",
-    field: "rank",
-    width: 64,
-    minWidth: 56,
-    maxWidth: 76,
-    sortable: false,
-    resizable: false,
-    cellStyle: { textAlign: "center", color: "#8896a6" },
-  },
-  {
-    headerName: "티커",
-    field: "ticker",
-    width: 100,
-    minWidth: 84,
-    cellStyle: { fontFamily: "var(--font-mono, monospace)", fontSize: "13px" },
-  },
-  {
-    headerName: "종목명",
-    field: "name",
-    flex: 1,
-    minWidth: 180,
-  },
-  {
-    headerName: "현재가",
-    field: "current_price",
-    width: 130,
-    minWidth: 108,
-    type: "rightAligned",
-    valueFormatter: (p) => formatKrw(p.value),
-  },
-  {
-    headerName: "등락률",
-    field: "change_pct",
-    width: 110,
-    minWidth: 96,
-    type: "rightAligned",
-    valueFormatter: (p) => formatPercent(p.value),
-    cellClassRules: {
-      metricPositive: (p) => p.value != null && p.value > 0,
-      metricNegative: (p) => p.value != null && p.value < 0,
-    },
-  },
-  {
-    headerName: "거래량",
-    field: "volume",
-    width: 140,
-    minWidth: 120,
-    type: "rightAligned",
-    valueFormatter: (p) => formatVolume(p.value),
-  },
-  {
-    headerName: "시가총액",
-    field: "market_cap",
-    width: 160,
-    minWidth: 140,
-    type: "rightAligned",
-    valueFormatter: (p) => formatMarketCap(p.value),
-  },
-];
+const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
+const KOSDAQ_LIMIT_OPTIONS = [150, 100, 50] as const;
 
 export function KorMarketStockManager({
   onSummaryChange,
@@ -163,7 +81,8 @@ export function KorMarketStockManager({
   onSummaryChange?: (summary: { market: string; count: number; totalCount: number }) => void;
 }) {
   const [market, setMarket] = useState<(typeof MARKET_OPTIONS)[number]>("KOSPI");
-  const [limit, setLimit] = useState<(typeof LIMIT_OPTIONS)[number]>(50);
+  const [limit, setLimit] = useState<number>(200);
+  const [minMarketCapJo, setMinMarketCapJo] = useState("");
   const [rows, setRows] = useState<KorMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
@@ -177,12 +96,13 @@ export function KorMarketStockManager({
 
   const toast = useToast();
 
-  const load = useCallback(async (m: string, l: number) => {
+  const load = useCallback(async (m: string, l: number, minCapJoText: string) => {
     setLoading(true);
     setError(null);
     try {
+      const minCapJo = String(minCapJoText || "").trim() || "0";
       const [resp, stocksPayload] = await Promise.all([
-        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}`, { cache: "no-store" }),
+        fetch(`/api/kor-market-stocks?market=${m}&limit=${l}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as KorMarketStocksResponse;
@@ -200,16 +120,40 @@ export function KorMarketStockManager({
   }, []);
 
   useEffect(() => {
-    load(market, limit);
-  }, [market, limit, load]);
+    load(market, limit, minMarketCapJo);
+  }, [market, limit, minMarketCapJo, load]);
+
+  const limitOptions = useMemo<number[]>(
+    () => (market === "KOSPI" ? [...KOSPI_LIMIT_OPTIONS] : [...KOSDAQ_LIMIT_OPTIONS]),
+    [market],
+  );
+
+  useEffect(() => {
+    if (!limitOptions.includes(limit)) {
+      setLimit(limitOptions[0]);
+    }
+  }, [limit, limitOptions]);
 
   useEffect(() => {
     onSummaryChange?.({ market, count: rows.length, totalCount });
   }, [market, rows.length, totalCount, onSummaryChange]);
 
+  const gridRows = useMemo(
+    () =>
+      [...rows].sort((left, right) => {
+        const leftMarketCap = left.market_cap ?? Number.NEGATIVE_INFINITY;
+        const rightMarketCap = right.market_cap ?? Number.NEGATIVE_INFINITY;
+        if (leftMarketCap !== rightMarketCap) {
+          return rightMarketCap - leftMarketCap;
+        }
+        return left.ticker.localeCompare(right.ticker);
+      }),
+    [rows],
+  );
+
   const allVisibleSelected = useMemo(
-    () => rows.length > 0 && rows.every((row) => selectedTickers.includes(row.ticker)),
-    [rows, selectedTickers],
+    () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
+    [gridRows, selectedTickers],
   );
 
   const toggleTickerSelection = useCallback((ticker: string) => {
@@ -219,7 +163,7 @@ export function KorMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const visibleTickers = rows.map((row) => row.ticker);
+    const visibleTickers = gridRows.map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (visibleTickers.length === 0) return current;
       const allSelected = visibleTickers.every((ticker) => current.includes(ticker));
@@ -228,14 +172,14 @@ export function KorMarketStockManager({
       }
       return [...new Set([...current, ...visibleTickers])];
     });
-  }, [rows]);
+  }, [gridRows]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
 
     const stockPools = tickerPools.filter((p) => p.name.includes("한국 개별주"));
     const remembered = readRememberedTickerType();
-    
+
     if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
       setSelectedTickerPool(remembered);
     } else if (stockPools.length === 1) {
@@ -295,9 +239,9 @@ export function KorMarketStockManager({
 
     if (addedCount > 0) {
       setSelectedTickers([]);
-      await load(market, limit);
+      await load(market, limit, minMarketCapJo);
     }
-  }, [load, market, limit, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, market, limit, minMarketCapJo, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<KorMarketStockGridRow>[]>(
     () => [
@@ -307,7 +251,7 @@ export function KorMarketStockManager({
         width: 64,
         minWidth: 56,
         maxWidth: 76,
-        sortable: false,
+        sortable: true,
         resizable: false,
         cellStyle: { textAlign: "center", color: "#8896a6" } as CellStyle,
       },
@@ -323,7 +267,12 @@ export function KorMarketStockManager({
         field: "ticker",
         width: 100,
         minWidth: 84,
-        cellStyle: { fontFamily: "var(--font-mono, monospace)", fontSize: "13px" } as CellStyle,
+        cellStyle: {
+          fontFamily: "var(--font-mono, monospace)",
+          fontSize: "13px",
+        } as CellStyle,
+        cellClass: "korMarketStockTickerCell",
+        cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
       },
       {
         headerName: "종목명",
@@ -365,6 +314,7 @@ export function KorMarketStockManager({
         width: 160,
         minWidth: 140,
         type: "rightAligned",
+        sort: "desc",
         valueFormatter: (p) => formatMarketCap(p.value),
       },
       {
@@ -407,51 +357,67 @@ export function KorMarketStockManager({
       <div className="card appCard appTableCardFill">
         {/* 메인 헤더 */}
         <div className="card-header">
-          <div className="appMainHeader">
-            <div className="appMainHeaderLeft korMarketStockMainHeaderLeft">
-              <label className="appLabeledField">
-                <span className="appLabeledFieldLabel">마켓</span>
-                <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="마켓 선택">
-                  {MARKET_OPTIONS.map((opt) => (
-                    <button
-                      key={opt}
-                      type="button"
-                      className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setMarket(opt)}
-                    >
-                      {opt === "KOSPI" ? "코스피" : "코스닥"}
-                    </button>
-                  ))}
-                </div>
-              </label>
+          <ResponsiveFiltersSection>
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft korMarketStockMainHeaderLeft">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">마켓</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="마켓 선택">
+                    {MARKET_OPTIONS.map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        className={market === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => {
+                          setMarket(opt);
+                          setLimit(opt === "KOSPI" ? 200 : 150);
+                        }}
+                      >
+                        {opt === "KOSPI" ? "코스피" : "코스닥"}
+                      </button>
+                    ))}
+                  </div>
+                </label>
 
-              <label className="appLabeledField">
-                <span className="appLabeledFieldLabel">시가총액 상위</span>
-                <select
-                  className="form-select"
-                  value={limit}
-                  onChange={(e) => setLimit(Number(e.target.value) as (typeof LIMIT_OPTIONS)[number])}
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">시가총액 상위</span>
+                  <select
+                    className="form-select"
+                    value={limit}
+                    onChange={(e) => setLimit(Number(e.target.value))}
+                  >
+                    {limitOptions.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {market} {opt}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">최소 시가총액(조)</span>
+                  <input
+                    className="form-control"
+                    inputMode="numeric"
+                    value={minMarketCapJo}
+                    onChange={(e) => setMinMarketCapJo(e.target.value.replace(/[^\d]/g, ""))}
+                    placeholder="최소 시가총액(조)"
+                  />
+                </label>
+              </div>
+              <div className="appMainHeaderRight">
+                <button
+                  type="button"
+                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                  onClick={handleOpenAddModal}
+                  disabled={selectedTickers.length === 0}
                 >
-                  {LIMIT_OPTIONS.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}개
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  <IconPlus size={16} stroke={2} />
+                  추가
+                </button>
+              </div>
             </div>
-            <div className="appMainHeaderRight">
-              <button
-                type="button"
-                className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                onClick={handleOpenAddModal}
-                disabled={selectedTickers.length === 0}
-              >
-                <IconPlus size={16} stroke={2} />
-                추가
-              </button>
-            </div>
-          </div>
+          </ResponsiveFiltersSection>
         </div>
 
         <div className="card-body appCardBodyTight appTableCardBodyFill">
@@ -463,11 +429,12 @@ export function KorMarketStockManager({
 
           <div className="appGridFillWrap">
             <AppAgGrid<KorMarketStockGridRow>
-              rowData={rows}
+              rowData={gridRows}
               columnDefs={columnDefs}
               loading={loading}
               theme={korMarketStockGridTheme}
               minHeight="32rem"
+              getRowClass={(params) => (params.data?.is_held ? "appHeldRow" : "")}
               gridOptions={{
                 overlayNoRowsTemplate: '<span style="color:#667382;">데이터 없음</span>',
                 suppressMovableColumns: true,

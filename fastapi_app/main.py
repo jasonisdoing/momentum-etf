@@ -7,16 +7,19 @@ from utils.env import load_env_if_present
 
 from .routes.assets import router as assets_router
 from .routes.dashboard import router as dashboard_router
+from .routes.daily import router as daily_router
 from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.market import router as market_router
+from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
+from .routes.us_market_stocks import router as us_market_stocks_router
 from .routes.weekly import router as weekly_router
 
 load_env_if_present()
@@ -57,6 +60,7 @@ app.include_router(assets_router)
 app.include_router(holdings_router)
 app.include_router(holdings_components_router)
 app.include_router(dashboard_router)
+app.include_router(daily_router)
 app.include_router(kor_market_stocks_router)
 app.include_router(market_router)
 app.include_router(note_router)
@@ -89,7 +93,9 @@ async def catch_mongodb_errors(request: Request, call_next):
 
 app.include_router(system_router)
 app.include_router(ticker_detail_router)
+app.include_router(us_market_stocks_router)
 app.include_router(weekly_router)
+app.include_router(monthly_router)
 import time
 _LAST_DB_ERROR_TIME = 0.0
 

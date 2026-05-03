@@ -240,7 +240,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     if price_prefix
                     else f"{current_price:,.0f}원",
                     "current_price_num": current_price,
-                    "days_held": str(row.get("보유일", "-")),
                     "pnl_krw": pnl,
                     "pnl_krw_num": pnl,
                     "return_pct": round(ret_pct, 2),
@@ -250,6 +249,10 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "valuation_krw": val_amount,
                     "memo": str(row.get("memo") or "").strip(),
                     "sort_order": safe_int(row.get("sort_order")),
+                    "ticker_type": str(row.get("ticker_type") or "").strip(),
+                    "country_code": str(row.get("country_code") or "").strip(),
+                    "is_etf": bool(row.get("is_etf")),
+                    "has_holdings": bool(row.get("has_holdings")),
                 }
             )
 
@@ -373,14 +376,10 @@ def update_holding(
 
     holdings = master.get("holdings", [])
     found = False
-    today_str = datetime.now().strftime("%Y-%m-%d")
     for h in holdings:
         if str(h.get("ticker", "")).strip() == raw_ticker:
-            previous_quantity = int(h.get("quantity") or 0)
             if quantity is not None:
                 h["quantity"] = int(quantity)
-                if int(quantity) > previous_quantity:
-                    h["last_buy_date"] = today_str
             if average_buy_price is not None:
                 h["average_buy_price"] = float(average_buy_price)
             if memo is not None:
@@ -546,7 +545,7 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     from utils.settings_loader import get_account_settings
     from utils.stocks_service import validate_stock_candidate
 
-    # 1. 계좌 설정 로드 (zaccounts/ 하위의 실제 설정 파일 읽기)
+    # 1. 계좌 설정 로드 (accounts.json의 계좌 설정 읽기)
     try:
         settings = get_account_settings(account_id)
         # account_settings["settings"]가 아닌 top-level에 있는 경우가 많음
@@ -554,15 +553,12 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     except Exception as e:
         raise RuntimeError(f"계좌 설정을 찾을 수 없습니다: {account_id} ({e})")
 
-    # 2. 계좌의 ticker_types 목록 추출 (실제 필드명인 'ticker_codes' 사용)
-    ticker_types = settings.get("ticker_codes") or []
-    
-    if isinstance(ticker_types, str):
-        ticker_types = [ticker_types]
+    # 2. 전체 종목풀을 대상으로 종목 추가 가능 여부를 검사한다.
+    from utils.settings_loader import list_available_ticker_types
 
+    ticker_types = list_available_ticker_types()
     if not ticker_types:
-        available_keys = list(settings.keys())
-        raise RuntimeError(f"계좌 설정({account_id})에서 'ticker_codes'를 찾을 수 없습니다. (Keys: {available_keys})")
+        raise RuntimeError("사용 가능한 종목풀이 없습니다.")
 
     # 3. 기존 "종목 추가" 모달과 동일한 검증 엔진 사용
     last_error = None

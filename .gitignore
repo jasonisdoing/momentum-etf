@@ -20,8 +20,7 @@ web/next-env.d.ts
 .DS_Store
 
 # 백테스트 결과
-zaccounts/*/results
-ztickers/*/results
+backtest/results
 
 
 # 노트 파일

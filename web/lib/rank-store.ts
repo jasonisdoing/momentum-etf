@@ -7,12 +7,14 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
+  top_n_hold?: number;
+  rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
+  include?: string[];
 };
 
 type RankMaRule = {
-  order: number;
   ma_type: string;
   ma_months: number;
   ma_days: number;
@@ -70,16 +72,39 @@ type RankData = {
   ranking_computed_at: string | null;
   realtime_fetched_at: string | null;
   previous_trading_day: string | null;
+  held_bonus_score: number;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];
 };
 
+type RankToolbarData = {
+  ticker_types: RankTickerType[];
+  ticker_type: string;
+  ma_rules: RankMaRule[];
+  ma_type_options: string[];
+  ma_months_max: number;
+  held_bonus_score: number;
+};
+
+export async function loadRankToolbarData(params?: {
+  ticker_type?: string;
+}, signal?: AbortSignal): Promise<RankToolbarData> {
+  const search = new URLSearchParams();
+  if (params?.ticker_type) {
+    search.set("ticker_type", params.ticker_type);
+  }
+
+  const query = search.size > 0 ? `?${search.toString()}` : "";
+  return fetchFastApiJson<RankToolbarData>(`/internal/rank/toolbar${query}`, { signal });
+}
+
 export async function loadRankData(params?: {
   ticker_type?: string;
-  ma_rule_overrides?: RankMaRule[];
+  ma_rule_override?: RankMaRule;
   as_of_date?: string;
-}): Promise<RankData> {
+  held_bonus_score?: number;
+}, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
     search.set("ticker_type", params.ticker_type);
@@ -87,13 +112,16 @@ export async function loadRankData(params?: {
   if (params?.as_of_date) {
     search.set("as_of_date", params.as_of_date);
   }
-  for (const rule of params?.ma_rule_overrides ?? []) {
-    search.set(`rule${rule.order}_ma_type`, rule.ma_type);
-    search.set(`rule${rule.order}_ma_months`, String(rule.ma_months));
+  if (typeof params?.held_bonus_score === "number") {
+    search.set("held_bonus_score", String(params.held_bonus_score));
+  }
+  if (params?.ma_rule_override) {
+    search.set("ma_type", params.ma_rule_override.ma_type);
+    search.set("ma_months", String(params.ma_rule_override.ma_months));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";
-  return fetchFastApiJson<RankData>(`/internal/rank${query}`);
+  return fetchFastApiJson<RankData>(`/internal/rank${query}`, { signal });
 }
 
 export type { RankTickerType, RankMaRule, RankData, RankRow };

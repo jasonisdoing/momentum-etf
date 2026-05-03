@@ -2,15 +2,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IconPlus } from "@tabler/icons-react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useRouter } from "next/navigation";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import {
   readRememberedTickerType,
   writeRememberedTickerType,
@@ -63,30 +64,7 @@ const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
 
 const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "선물", "채권(모든종류)", "혼합", "리츠"];
 
-const marketGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const marketGridTheme = createAppGridTheme();
 
 function formatKrwEok(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -141,13 +119,12 @@ export function MarketManager({
 }: {
   onHeaderSummaryChange?: (summary: { filteredCount: number; totalCount: number; updatedAt: string | null }) => void;
 }) {
-  const router = useRouter();
   const toast = useToast();
   const [rows, setRows] = useState<MarketRowItem[]>([]);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [tickerPools, setTickerPools] = useState<MarketTickerPool[]>([]);
   const [query, setQuery] = useState("");
-  const [minMarketCap, setMinMarketCap] = useState("500"); // 시가총액(억)
+  const [minMarketCap, setMinMarketCap] = useState("1000"); // 시가총액(억)
   const [minPrevVolume, setMinPrevVolume] = useState("100000"); // 거래량(주)
   const [excludedGroups, setExcludedGroups] = useState<string[]>(DEFAULT_EXCLUDED_GROUPS);
   const [newOnly, setNewOnly] = useState(false);
@@ -276,17 +253,6 @@ export function MarketManager({
     });
   }, [filteredRows.length, onHeaderSummaryChange, rows.length, updatedAt]);
 
-  const moveToTickerDetail = useCallback(
-    (ticker: string) => {
-      const normalizedTicker = String(ticker || "").trim().toUpperCase();
-      if (!normalizedTicker) {
-        return;
-      }
-      router.push(`/ticker?ticker=${encodeURIComponent(normalizedTicker)}`);
-    },
-    [router],
-  );
-
   const hasSelectedRows = selectedTickers.length > 0;
   const allVisibleSelected = useMemo(
     () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
@@ -391,16 +357,7 @@ export function MarketManager({
         width: 104,
         cellRenderer: (params: { value: string }) => {
           const value = String(params.value ?? "-");
-          return (
-            <button
-              type="button"
-              className="appCodeText"
-              style={{ color: "inherit", textDecoration: "none", background: "none", border: "none", padding: 0 }}
-              onClick={() => moveToTickerDetail(value)}
-            >
-              {value}
-            </button>
-          );
+          return <TickerDetailLink ticker={value} />;
         },
       },
       {
@@ -510,7 +467,7 @@ export function MarketManager({
         },
       },
     ],
-    [allVisibleSelected, moveToTickerDetail, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
   );
 
   function toggleGroup(group: string) {
@@ -564,78 +521,80 @@ export function MarketManager({
       <section className="appSection appSectionFill">
         <div className="card appCard appTableCardFill">
           <div className="card-header">
-            <div className="appMainHeader marketMainHeader">
-              <div className="appMainHeaderLeft marketMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">티커/종목명</span>
-                  <input
-                    className="field compactField"
-                    type="text"
-                    placeholder="티커 또는 종목명을 입력"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">시가총액(억)</span>
-                  <input
-                    className="field compactField"
-                    type="number"
-                    placeholder="최소 시가총액"
-                    value={minMarketCap}
-                    onChange={(event) => setMinMarketCap(event.target.value)}
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">거래량(주)</span>
-                  <div className="marketVolumeInlineRow">
+            <ResponsiveFiltersSection>
+              <div className="appMainHeader marketMainHeader">
+                <div className="appMainHeaderLeft marketMainHeaderLeft">
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">티커/종목명</span>
                     <input
-                      className="field compactField marketVolumeInput"
-                      type="number"
-                      placeholder="최소 전일 거래량"
-                      value={minPrevVolume}
-                      onChange={(event) => setMinPrevVolume(event.target.value)}
+                      className="field compactField"
+                      type="text"
+                      placeholder="티커 또는 종목명을 입력"
+                      value={query}
+                      onChange={(event) => setQuery(event.target.value)}
                     />
-                    <div className="marketNewOnlyRow">
-                      <button
-                        type="button"
-                        className={newOnly ? "filterPill filterPillActive" : "filterPill"}
-                        onClick={toggleNewOnly}
-                      >
-                        신규
-                      </button>
-                      {newOnly ? (
-                        <div className="marketNewOnlyDaysRow">
-                          <input
-                            className="field compactField marketNewOnlyDaysInput"
-                            type="number"
-                            min={1}
-                            step={1}
-                            value={newListingDays}
-                            onChange={(event) => handleNewListingDaysChange(event.target.value)}
-                            aria-label="신규 ETF 최근 일수"
-                          />
-                          <span className="marketNewOnlyDaysLabel">일</span>
-                        </div>) : null}
-                      {newOnly ? (
-                        <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
-                      ) : null}
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">시가총액(억)</span>
+                    <input
+                      className="field compactField"
+                      type="number"
+                      placeholder="최소 시가총액"
+                      value={minMarketCap}
+                      onChange={(event) => setMinMarketCap(event.target.value)}
+                    />
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">거래량(주)</span>
+                    <div className="marketVolumeInlineRow">
+                      <input
+                        className="field compactField marketVolumeInput"
+                        type="number"
+                        placeholder="최소 전일 거래량"
+                        value={minPrevVolume}
+                        onChange={(event) => setMinPrevVolume(event.target.value)}
+                      />
+                      <div className="marketNewOnlyRow">
+                        <button
+                          type="button"
+                          className={newOnly ? "filterPill filterPillActive" : "filterPill"}
+                          onClick={toggleNewOnly}
+                        >
+                          신규
+                        </button>
+                        {newOnly ? (
+                          <div className="marketNewOnlyDaysRow">
+                            <input
+                              className="field compactField marketNewOnlyDaysInput"
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={newListingDays}
+                              onChange={(event) => handleNewListingDaysChange(event.target.value)}
+                              aria-label="신규 ETF 최근 일수"
+                            />
+                            <span className="marketNewOnlyDaysLabel">일</span>
+                          </div>) : null}
+                        {newOnly ? (
+                          <span className="marketNewOnlyHint">최근 {Math.max(1, Number.parseInt(newListingDays || "14", 10) || 14)}일 상장 ETF</span>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                </label>
+                  </label>
+                </div>
+                <div className="appMainHeaderRight">
+                  <button
+                    type="button"
+                    className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
+                    onClick={handleOpenAddModal}
+                    disabled={!hasSelectedRows}
+                  >
+                    <IconPlus size={16} stroke={2} />
+                    추가
+                  </button>
+                </div>
               </div>
-              <div className="appMainHeaderRight">
-                <button
-                  type="button"
-                  className="btn btn-success btn-sm px-3 fw-bold d-flex align-items-center gap-1"
-                  onClick={handleOpenAddModal}
-                  disabled={!hasSelectedRows}
-                >
-                  <IconPlus size={16} stroke={2} />
-                  추가
-                </button>
-              </div>
-            </div>
+            </ResponsiveFiltersSection>
           </div>
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="pillRow">

@@ -10,12 +10,10 @@ type AccountConfig = {
   currency: string;
 };
 
-const ACCOUNT_DIR_PATTERN = /^(?<order>\d+)_(?<account>[a-z0-9_]+)$/;
-
-async function getAccountsRoot(): Promise<string> {
+async function getAccountsConfigPath(): Promise<string> {
   const candidates = [
-    path.join(process.cwd(), "zaccounts"),
-    path.join(process.cwd(), "..", "zaccounts"),
+    path.join(process.cwd(), "accounts.json"),
+    path.join(process.cwd(), "..", "accounts.json"),
   ];
 
   for (const candidate of candidates) {
@@ -28,37 +26,25 @@ async function getAccountsRoot(): Promise<string> {
     }
   }
 
-  throw new Error("zaccounts 디렉터리를 찾을 수 없습니다.");
+  throw new Error("accounts.json 파일을 찾을 수 없습니다.");
 }
 
 export async function loadAccountConfigs(): Promise<AccountConfig[]> {
-  const accountsRoot = await getAccountsRoot();
-  const entries = await fs.readdir(accountsRoot, { withFileTypes: true });
-  const configs: AccountConfig[] = [];
-
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) {
-      continue;
-    }
-
-    const match = ACCOUNT_DIR_PATTERN.exec(entry.name);
-    if (!match?.groups) {
-      continue;
-    }
-
-    const configPath = path.join(accountsRoot, entry.name, "config.json");
-    const raw = await fs.readFile(configPath, "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-
-    configs.push({
-      account_id: match.groups.account,
-      order: Number(match.groups.order),
-      name: String(parsed.name ?? match.groups.account),
-      icon: String(parsed.icon ?? ""),
-      country_code: String(parsed.country_code ?? "").trim().toLowerCase(),
-      currency: String(parsed.currency ?? "").trim().toUpperCase(),
-    });
+  const configPath = await getAccountsConfigPath();
+  const raw = await fs.readFile(configPath, "utf-8");
+  const parsed = JSON.parse(raw) as { accounts?: Array<Record<string, unknown>> };
+  if (!Array.isArray(parsed.accounts)) {
+    throw new Error("accounts.json의 accounts 필드는 배열이어야 합니다.");
   }
+
+  const configs: AccountConfig[] = parsed.accounts.map((entry) => ({
+    account_id: String(entry.account_id ?? "").trim().toLowerCase(),
+    order: Number(entry.order ?? 0),
+    name: String(entry.name ?? "").trim(),
+    icon: String(entry.icon ?? ""),
+    country_code: String(entry.country_code ?? "").trim().toLowerCase(),
+    currency: String(entry.currency ?? "").trim().toUpperCase(),
+  }));
 
   configs.sort((left, right) => left.order - right.order);
   return configs;

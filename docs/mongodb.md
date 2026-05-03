@@ -77,7 +77,7 @@ MONGO_DB_ROOT_PASSWORD=<랜덤 32자>
 1. `MONGO_DB_CONNECTION_STRING` 이 설정되어 있으면 **그대로 사용** (롤백 용이)
 2. 없으면 `MONGO_DB_USER` / `MONGO_DB_PASSWORD` / `MONGO_DB_HOST` 로 조립
 3. 호스트가 `*.mongodb.net` 으로 끝나면 자동으로 `mongodb+srv://`, 아니면 `mongodb://`
-4. 옵션은 `MONGO_DB_OPTIONS` 로 덮어쓸 수 있음. 기본값:
+4. 옵션은 `MONGO_DB_OPTIONS` 로 덮어쓸 수 있음. 예시:
    - Atlas: `retryWrites=true&w=majority`
    - VM: `authSource=admin&retryWrites=true&w=majority`
 
@@ -96,7 +96,7 @@ brew install autossh
 **SSH 터널을 먼저 띄운다.**
 
 ```bash
-autossh -M 0 -N -i ~/DEV/ssh-key-2025-10-09.key \
+autossh -M 0 -f -N -i ~/DEV/ssh-key-2025-10-09.key \
   -o "ServerAliveInterval=30" -o "ServerAliveCountMax=3" \
   -L 27017:localhost:27017 ubuntu@134.185.109.82
 ```

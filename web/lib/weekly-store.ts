@@ -48,12 +48,6 @@ export async function loadWeeklyTableData(): Promise<WeeklyTableData> {
   return fetchFastApiJson<WeeklyTableData>("/internal/weekly");
 }
 
-export async function aggregateActiveWeekData(): Promise<{ week_date: string }> {
-  return fetchFastApiJson<{ week_date: string }>("/internal/weekly", {
-    method: "POST",
-  });
-}
-
 export async function updateWeeklyRow(
   weekDate: string,
   payload: Record<string, unknown>,

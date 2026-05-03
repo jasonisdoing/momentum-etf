@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -12,12 +11,23 @@ if str(PROJECT_ROOT) not in sys.path:
 from utils.db_manager import get_db_connection
 
 
-@dataclass
 class MigrationStats:
-    stock_meta_updated: int = 0
-    portfolio_docs_updated: int = 0
-    holdings_updated: int = 0
-    weekly_docs_updated: int = 0
+    stock_meta_updated: int
+    portfolio_docs_updated: int
+    holdings_updated: int
+    weekly_docs_updated: int
+
+    def __init__(
+        self,
+        stock_meta_updated: int,
+        portfolio_docs_updated: int,
+        holdings_updated: int,
+        weekly_docs_updated: int,
+    ) -> None:
+        self.stock_meta_updated = stock_meta_updated
+        self.portfolio_docs_updated = portfolio_docs_updated
+        self.holdings_updated = holdings_updated
+        self.weekly_docs_updated = weekly_docs_updated
 
 
 def remap_bucket_value(bucket: Any) -> Any:
@@ -141,7 +151,12 @@ def main() -> None:
     if db is None:
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
 
-    stats = MigrationStats()
+    stats = MigrationStats(
+        stock_meta_updated=0,
+        portfolio_docs_updated=0,
+        holdings_updated=0,
+        weekly_docs_updated=0,
+    )
     migrate_stock_meta(db, stats)
     migrate_portfolio_master(db, stats)
     migrate_weekly_fund_data(db, stats)

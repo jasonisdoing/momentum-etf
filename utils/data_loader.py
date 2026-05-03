@@ -404,13 +404,13 @@ def get_today_str() -> str:
 def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Timestamp]:
     """
     지정된 기간 내의 모든 거래일을 pd.Timestamp 리스트로 반환합니다.
-    국가별 거래일 파일(zcountry/{country}/market_calendars.json)만 사용합니다.
+    국가별 거래일 파일(data/country/{country}/market_calendars.json)만 사용합니다.
     """
     country_code = (country or "").strip().lower()
     if not country_code:
         raise ValueError("거래일 조회 국가 코드가 필요합니다.")
 
-    calendar_path = Path(__file__).resolve().parents[1] / "zcountry" / country_code / "market_calendars.json"
+    calendar_path = Path(__file__).resolve().parents[1] / "data" / "country" / country_code / "market_calendars.json"
     if not calendar_path.exists():
         raise FileNotFoundError(f"거래일 캘린더 파일이 없습니다: {calendar_path}")
 
@@ -555,7 +555,7 @@ def get_next_trading_day(
     country: str,
     reference_date: pd.Timestamp | None = None,
     *,
-    search_horizon_days: int = 30,
+    search_horizon_days: int,
 ) -> pd.Timestamp | None:
     """reference_date 이후의 다음 거래일을 반환한다."""
 
@@ -573,11 +573,11 @@ def get_next_trading_day(
 
 def fetch_ohlcv(
     ticker: str,
-    country: str = "kor",
-    months_back: int = None,
+    country: str,
+    *,
+    months_back: int | None,
     date_range: list[str | None] | None = None,
     base_date: pd.Timestamp | None = None,
-    *,
     ticker_type: str | None = None,
     force_refresh: bool = False,
     update_listing_meta: bool = False,
@@ -599,7 +599,8 @@ def fetch_ohlcv(
             return None
     else:
         now = base_date if base_date is not None else pd.Timestamp.now()
-        months_back = months_back or 3  # months_back의 기본값은 3개월
+        if months_back is None:
+            raise ValueError("date_range가 없으면 months_back 값이 필요합니다.")
         start_dt = now - pd.DateOffset(months=int(months_back))
         end_dt = now
 
@@ -771,8 +772,17 @@ def _fetch_ohlcv_with_cache(
         try:
             fetched = _fetch_ohlcv_core(ticker, country_code, miss_start, effective_end, cached_df)
         except PykrxDataUnavailableError:
-            # 전체 구간 실패는 곧바로 상위로 전파
-            raise
+            # 캐시가 없으면 상위로 전파, 캐시가 있으면 해당 구간만 무시하고 계속 진행
+            # (상장 전 기간 등 데이터가 없는 구간에서 전체 로드가 실패하는 것을 방지)
+            if cached_df is None or cached_df.empty:
+                raise
+            logger.warning(
+                "[CACHE] %s/%s 구간(%s~%s) pykrx 데이터 없음 — 기존 캐시로 진행합니다.",
+                cache_key_display, ticker,
+                miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"),
+            )
+            unfilled_ranges.append((miss_start, effective_end))
+            continue
 
         if fetched is not None and not fetched.empty:
             new_frames.append(fetched)
@@ -814,10 +824,17 @@ def _fetch_ohlcv_with_cache(
         )
         logger.warning("%s의 가격 데이터 일부 누락 구간을 남긴 채 부분 캐시를 사용합니다: %s", ticker, ranges_text)
     elif unfilled_ranges:
-        ranges_text = ", ".join(
-            f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in unfilled_ranges
-        )
-        raise RuntimeError(f"{ticker}의 가격 데이터 누락 구간을 가져오지 못했습니다: {ranges_text}")
+        # 캐시 데이터 범위 이전의 unfilled 구간(상장 전 기간)은 무시
+        cache_min_for_check = combined_df.index.min().normalize() if combined_df is not None and not combined_df.empty else None
+        critical_unfilled = [
+            (s, e) for s, e in unfilled_ranges
+            if cache_min_for_check is None or e >= cache_min_for_check
+        ]
+        if critical_unfilled:
+            ranges_text = ", ".join(
+                f"{start.strftime('%Y-%m-%d')}~{end.strftime('%Y-%m-%d')}" for start, end in critical_unfilled
+            )
+            raise RuntimeError(f"{ticker}의 가격 데이터 누락 구간을 가져오지 못했습니다: {ranges_text}")
 
     cache_min = combined_df.index.min()
     cache_max = combined_df.index.max()
@@ -925,12 +942,30 @@ def _fetch_ohlcv_core(
         # yfinance MultiIndex 컬럼 평탄화 (Price, Ticker) -> Price
         if isinstance(fetched.columns, pd.MultiIndex):
             try:
-                # 레벨 이름 확인 (디버깅용 안전장치)
-                # 보통 level 0: Price type (Close, Open, ...), level 1: Ticker
-                fetched.columns = fetched.columns.droplevel(1)
-                fetched.columns.name = None
+                # 1. 'Ticker' 레벨에서 해당 티커만 추출 시도 (가장 표준적인 방법)
+                # yfinance는 보통 level 0: Price, level 1: Ticker 구조임
+                ticker_for_xs = download_ticker if country_code == "au" else ticker
+                if ticker_for_xs in fetched.columns.get_level_values(1):
+                    fetched = fetched.xs(ticker_for_xs, axis=1, level=1)
+                elif ticker in fetched.columns.get_level_values(1):
+                    fetched = fetched.xs(ticker, axis=1, level=1)
+                else:
+                    # 2. 'Price' 레벨만 남기기 (차선책)
+                    if "Price" in fetched.columns.names:
+                        fetched = fetched.get_level_values("Price")
+                    else:
+                        fetched.columns = fetched.columns.droplevel(1)
             except Exception as e:
                 logger.warning(f"yfinance MultiIndex 컬럼 평탄화 실패 ({ticker}): {e}")
+                # 3. 최후의 수단: 중복 제거 및 강제 변환
+                try:
+                    fetched.columns = [str(c[0]) if isinstance(c, tuple) else str(c) for c in fetched.columns]
+                except Exception:
+                    pass
+
+        # 중복 컬럼 최종 제거 (직렬화 에러 방지)
+        if fetched is not None and not fetched.empty:
+            fetched = fetched.loc[:, ~fetched.columns.duplicated()]
 
         return fetched
 
@@ -1031,7 +1066,7 @@ def repair_recent_trading_day_gaps(
     country: str,
     *,
     ticker_type: str,
-    lookback_days: int = 15,
+    lookback_days: int,
 ) -> list[pd.Timestamp]:
     """최근 거래일 구간의 내부 누락 일봉을 다시 조회해 캐시에 병합한다."""
 
@@ -1110,9 +1145,9 @@ def repair_recent_trading_day_gaps(
 def fetch_ohlcv_for_tickers(
     tickers: list[str],
     country: str,
-    date_range: list[str] | None = None,
-    warmup_days: int = 0,
     *,
+    warmup_days: int,
+    date_range: list[str] | None = None,
     ticker_type: str | None = None,
     allow_remote_fetch: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
@@ -1333,7 +1368,13 @@ def fetch_ohlcv_for_tickers(
                 missing.append(tkr)
                 continue
             ticker_date_range = [ticker_start.strftime("%Y-%m-%d"), adjusted_date_range[1]]
-            df = fetch_ohlcv(ticker=tkr, country=country, date_range=ticker_date_range, ticker_type=ticker_type)
+            df = fetch_ohlcv(
+                ticker=tkr,
+                country=country,
+                months_back=None,
+                date_range=ticker_date_range,
+                ticker_type=ticker_type,
+            )
             if df is None or df.empty:
                 # 실시간 데이터로 대체 시도
                 if is_today and tkr in realtime_data:
@@ -1376,7 +1417,7 @@ def prepare_price_data(
     country: str,
     start_date: str,
     end_date: str,
-    warmup_days: int = 0,
+    warmup_days: int,
     ticker_type: str | None = None,
     allow_remote_fetch: bool = False,
 ) -> tuple[dict[str, pd.DataFrame], list[str]]:
@@ -1547,6 +1588,36 @@ def _parse_comma_number(value: str | None) -> float | None:
         return None
 
 
+def _parse_naver_signed_change_rate(item: dict[str, Any]) -> float | None:
+    """네이버 등락률 필드와 등락 방향 코드를 함께 해석한다."""
+    change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
+    if change_rate is None:
+        return None
+
+    compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
+    if compare_code == "5" and change_rate > 0:
+        return -change_rate
+    return change_rate
+
+
+def _get_naver_pre_market_price_info(item: dict[str, Any]) -> dict[str, Any] | None:
+    """네이버 국내주식 응답에서 열린 장전 거래 가격 정보를 반환한다."""
+    over_market_info = item.get("overMarketPriceInfo")
+    if not isinstance(over_market_info, dict):
+        return None
+
+    trading_session_type = str(over_market_info.get("tradingSessionType") or "").strip().upper()
+    over_market_status = str(over_market_info.get("overMarketStatus") or "").strip().upper()
+    if trading_session_type != "PRE_MARKET" or over_market_status != "OPEN":
+        return None
+
+    over_price = _parse_comma_number(over_market_info.get("overPrice"))
+    if over_price is None:
+        return None
+
+    return over_market_info
+
+
 def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
@@ -1588,16 +1659,99 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            price_value = _parse_comma_number(item.get("closePrice"))
+            price_source = _get_naver_pre_market_price_info(item) or item
+            price_field = "overPrice" if price_source is not item else "closePrice"
+            price_value = _parse_comma_number(price_source.get(price_field))
             if price_value is None:
                 continue
 
             entry: dict[str, float] = {"nowVal": price_value}
 
+            change_rate = _parse_naver_signed_change_rate(price_source)
+            if change_rate is not None:
+                entry["changeRate"] = change_rate
+
+            open_val = _parse_comma_number(price_source.get("openPrice"))
+            if open_val is not None:
+                entry["open"] = open_val
+            high_val = _parse_comma_number(price_source.get("highPrice"))
+            if high_val is not None:
+                entry["high"] = high_val
+            low_val = _parse_comma_number(price_source.get("lowPrice"))
+            if low_val is not None:
+                entry["low"] = low_val
+            vol_val = _parse_comma_number(price_source.get("accumulatedTradingVolume"))
+            if vol_val is not None:
+                entry["volume"] = vol_val
+
+            result[code] = entry
+
+        return result
+
+    # 청크 단위로 호출 (URL 길이 제한 대비)
+    snapshot: dict[str, dict[str, float]] = {}
+    chunk_size = 50
+    for i in range(0, len(normalized_codes), chunk_size):
+        chunk = normalized_codes[i : i + chunk_size]
+        snapshot.update(_fetch_chunk(chunk))
+
+    return snapshot
+
+
+def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str, float | str]]:
+    """네이버 worldstock 폴링 API에서 해외 종목의 지연 시세를 조회합니다."""
+
+    normalized_codes = [str(code).strip().upper() for code in reuters_codes if str(code or "").strip()]
+    if not normalized_codes:
+        return {}
+
+    if not requests:
+        logger.debug("requests 라이브러리가 없어 네이버 worldstock 조회를 건너뜁니다.")
+        return {}
+
+    _NAVER_WORLDSTOCK_POLLING_URL = "https://stock.naver.com/api/polling/worldstock/stock"
+    _NAVER_WORLDSTOCK_POLLING_HEADERS = {
+        "User-Agent": (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/123.0.0.0 Safari/537.36"
+        ),
+        "Referer": "https://stock.naver.com/",
+        "Accept": "application/json, text/plain, */*",
+    }
+
+    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float | str]]:
+        codes = ",".join(chunk)
+        url = f"{_NAVER_WORLDSTOCK_POLLING_URL}?reutersCodes={codes}"
+        try:
+            response = requests.get(url, headers=_NAVER_WORLDSTOCK_POLLING_HEADERS, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as exc:
+            logger.warning("네이버 worldstock 조회 실패: %s", exc)
+            return {}
+
+        result: dict[str, dict[str, float | str]] = {}
+        datas = data.get("datas") or []
+        for item in datas:
+            code = str(item.get("reutersCode") or "").strip().upper()
+            if not code:
+                continue
+
+            price_value = _parse_comma_number(item.get("closePrice"))
+            if price_value is None:
+                continue
+
+            entry: dict[str, float | str] = {"nowVal": price_value}
+
+            prev_close = _parse_comma_number(item.get("compareToPreviousClosePrice"))
+            compare_code = str(((item.get("compareToPreviousPrice") or {}).get("code")) or "").strip()
+            if prev_close is not None:
+                signed_diff = -prev_close if compare_code == "5" and prev_close > 0 else prev_close
+                entry["prevClose"] = price_value - signed_diff
+
             change_rate = _parse_comma_number(item.get("fluctuationsRatio"))
             if change_rate is not None:
-                # 하락 시 음수로 변환
-                compare_code = (item.get("compareToPreviousPrice") or {}).get("code", "")
                 if compare_code == "5" and change_rate > 0:
                     change_rate = -change_rate
                 entry["changeRate"] = change_rate
@@ -1615,12 +1769,15 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if vol_val is not None:
                 entry["volume"] = vol_val
 
+            currency_code = str(((item.get("currencyType") or {}).get("code")) or "").strip().upper()
+            if currency_code:
+                entry["currency"] = currency_code
+
             result[code] = entry
 
         return result
 
-    # 청크 단위로 호출 (URL 길이 제한 대비)
-    snapshot: dict[str, dict[str, float]] = {}
+    snapshot: dict[str, dict[str, float | str]] = {}
     chunk_size = 50
     for i in range(0, len(normalized_codes), chunk_size):
         chunk = normalized_codes[i : i + chunk_size]
@@ -1803,10 +1960,12 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     for sym in uncached:
         try:
+            # 토스는 BRK-A 등 하이픈(-)이 들어간 경우 BRK.A로 검색해야 결과가 나옵니다.
+            search_query = sym.replace("-", ".")
             resp = requests.post(
                 search_url,
                 headers=TOSS_INVEST_HEADERS,
-                json={"query": sym},
+                json={"query": search_query},
                 timeout=5,
             )
             resp.raise_for_status()
@@ -1823,10 +1982,11 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
                     product_code = stock.get("stockCode")
                     break
 
-            # EXACT 없으면 stockName이 심볼과 동일한 첫 번째 미국 종목
+            # EXACT 없으면 stockName이 심볼(원래 심볼 또는 검색 심볼)과 동일한 첫 번째 미국 종목
             if not product_code:
                 for stock in us_stocks:
-                    if str(stock.get("stockName") or "").strip().upper() == sym:
+                    name = str(stock.get("stockName") or "").strip().upper()
+                    if name == sym or name == search_query:
                         product_code = stock.get("stockCode")
                         break
 
@@ -1913,6 +2073,13 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
                 continue
 
             entry: dict[str, float] = {"nowVal": close_val}
+
+            volume = item.get("volume")
+            if volume is not None:
+                try:
+                    entry["volume"] = float(volume)
+                except (TypeError, ValueError):
+                    pass
 
             base_price = item.get("base")
             if base_price is not None:
@@ -2335,5 +2502,39 @@ def get_exchange_rate_series(
 
     # 결측치 보간 (ffill)
     rates = rates.fillna(method="ffill")
+    if _has_invalid_exchange_rate_values(symbol, rates):
+        logger.warning("%s 환율 캐시에 비정상 값이 있어 강제 재조회합니다.", symbol)
+        refreshed_df = _fetch_ohlcv_with_cache(
+            symbol,
+            target_country,
+            s_dt,
+            e_dt,
+            ticker_type=cache_dir_name,
+            force_refresh=True,
+            allow_partial=allow_partial,
+        )
+        if refreshed_df is None or refreshed_df.empty:
+            raise RuntimeError(f"{symbol} 환율 캐시 재조회 결과가 비어 있습니다.")
+        rates = refreshed_df["Close"].astype(float)
+        rates = rates[(rates.index >= s_dt) & (rates.index <= e_dt)]
+        rates = rates.fillna(method="ffill")
+        if _has_invalid_exchange_rate_values(symbol, rates):
+            raise RuntimeError(f"{symbol} 환율 시계열에 비정상 값이 남아 있습니다.")
 
     return rates
+
+
+def _has_invalid_exchange_rate_values(symbol: str, rates: pd.Series) -> bool:
+    normalized = str(symbol or "").strip().upper()
+    numeric_rates = pd.to_numeric(rates, errors="coerce").dropna()
+    if numeric_rates.empty:
+        return False
+    if (numeric_rates <= 0).any():
+        return True
+
+    # JPYKRW=X는 KRW/JPY 단위여야 하므로 정상 범위가 한 자리~십 원대다.
+    # 캐시에 USD/JPY 수준의 값이 섞이면 일본 포트폴리오/환율 변동률이 -96%대로 깨진다.
+    if normalized == "JPYKRW=X" and (numeric_rates > 50).any():
+        return True
+
+    return False
