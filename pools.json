@@ -1,14 +1,13 @@
 {
   "all": {
     "TOP_N_HOLD": 5,
-    "HOLDING_BONUS_SCORE": 10,
+    "HOLDING_BONUS_SCORE": 20,
     "MA_TYPE": "ALMA",
     "MA_MONTHS": 6,
     "RSI_LIMIT": 100,
     "include": [
       "kor_kr",
-      "kor_us",
-      "kor"
+      "kor_us"
     ]
   },
   "pools": [

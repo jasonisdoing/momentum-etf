@@ -127,6 +127,7 @@ const rankGridTheme = createAppGridTheme();
 const MAX_SELECTABLE_MA_MONTHS = 24;
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
 const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
+const DEFAULT_TICKER_TYPE = "all";
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
@@ -293,7 +294,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [pageMode, setPageMode] = useState<"rank" | "manage">("rank");
   const [ticker_types, setAccounts] = useState<RankTickerType[]>(rankToolbarCache?.ticker_types ?? []);
   const [selectedTickerType, setSelectedAccountId] = useState(
-    rankToolbarCache?.ticker_type ?? readRememberedTickerType() ?? "",
+    rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);

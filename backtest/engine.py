@@ -29,16 +29,17 @@ from core.strategy.scoring import (
     compute_eligibility_mask,
     compute_rule_percentile_frame,
 )
-from utils.cache_utils import load_cached_frames_bulk_with_fallback
+from utils.cache_utils import load_cached_frames_bulk_from_ticker_types, load_cached_frames_bulk_with_fallback
 from utils.data_loader import get_exchange_rate_series, get_trading_days
 from utils.formatters import format_pct_change, format_price, format_trading_days
 from utils.report import render_table_eaw
-from utils.settings_loader import get_ticker_type_settings
+from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 from services.price_service import get_realtime_snapshot
 
 logger = logging.getLogger(__name__)
 RSI_PERIOD = 14
+ALL_POOL_ID = "all"
 
 # ----------------------------- 헬퍼 ----------------------------- #
 
@@ -114,6 +115,76 @@ def _resolve_slippage(pool_id: str) -> tuple[float, float]:
     if buy_ratio < 0 or sell_ratio < 0:
         raise ValueError(f"SLIPPAGE_CONFIG['{pool_id}']는 음수일 수 없습니다.")
     return buy_ratio, sell_ratio
+
+
+def _resolve_slippage_for_backtest(pool_id: str, include_ticker_types: list[str]) -> tuple[float, float]:
+    """백테스트 대상 종목풀의 매수/매도 슬리피지 비율을 반환한다."""
+    if pool_id != ALL_POOL_ID:
+        return _resolve_slippage(pool_id)
+
+    if pool_id in SLIPPAGE_CONFIG:
+        return _resolve_slippage(pool_id)
+
+    resolved = {_resolve_slippage(ticker_type) for ticker_type in include_ticker_types}
+    if len(resolved) != 1:
+        raise ValueError(
+            "SLIPPAGE_CONFIG['all'] 설정이 없고 all.include 종목풀들의 슬리피지가 서로 다릅니다."
+        )
+    return next(iter(resolved))
+
+
+def _resolve_backtest_pool_inputs(pool_id: str) -> tuple[str, list[dict[str, Any]], list[str], str]:
+    """백테스트용 국가 코드, 종목 목록, 캐시 키, 결과 파일 접두사를 만든다."""
+    if pool_id != ALL_POOL_ID:
+        settings = get_ticker_type_settings(pool_id)
+        country_code = str(settings.get("country_code") or "").strip().lower()
+        if not country_code:
+            raise ValueError(f"'{pool_id}' 설정에 country_code 가 없습니다.")
+        pool_order = int(settings.get("order", 0))
+        display_prefix = f"{pool_order}_{pool_id}" if pool_order > 0 else pool_id
+        return country_code, _exclude_fixed_holdings(get_etfs(pool_id)), [pool_id], display_prefix
+
+    all_settings = get_all_pool_settings()
+    include_ticker_types = [str(ticker_type).strip().lower() for ticker_type in all_settings["include"]]
+    included_settings = [get_ticker_type_settings(ticker_type) for ticker_type in include_ticker_types]
+    country_codes = {
+        str(settings.get("country_code") or "").strip().lower()
+        for settings in included_settings
+        if str(settings.get("country_code") or "").strip()
+    }
+    if len(country_codes) != 1:
+        raise ValueError(
+            "'all' 백테스트는 같은 country_code 종목풀만 지원합니다. "
+            f"현재 all.include={include_ticker_types}, country_codes={sorted(country_codes)}"
+        )
+
+    etfs: list[dict[str, Any]] = []
+    ticker_sources: dict[str, str] = {}
+    duplicated: list[str] = []
+    for ticker_type in include_ticker_types:
+        for item in _exclude_fixed_holdings(get_etfs(ticker_type)):
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            if ticker in ticker_sources:
+                duplicated.append(f"{ticker}({ticker_sources[ticker]}, {ticker_type})")
+                continue
+            ticker_sources[ticker] = ticker_type
+            new_item = dict(item)
+            new_item["source_ticker_type"] = ticker_type
+            etfs.append(new_item)
+
+    if duplicated:
+        joined = ", ".join(duplicated[:10])
+        suffix = "..." if len(duplicated) > 10 else ""
+        raise RuntimeError(f"'all' 백테스트 대상에 중복 티커가 있습니다: {joined}{suffix}")
+
+    return next(iter(country_codes)), etfs, include_ticker_types, "0_all"
+
+
+def _exclude_fixed_holdings(etfs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """고정 보유 종목은 백테스트 투자 후보군에서 제외한다."""
+    return [item for item in etfs if not bool(item.get("exclude_from_ranking"))]
 
 
 def _should_include_latest_day(open_frame: pd.DataFrame, latest_day: pd.Timestamp, today: pd.Timestamp) -> bool:
@@ -1603,7 +1674,6 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     cfg = config[pool_id]
     start_target = pd.Timestamp(BACKTEST_START_DATE).normalize()
     initial_cash = float(BACKTEST_INITIAL_KRW_AMOUNT)
-    buy_slippage, sell_slippage = _resolve_slippage(pool_id)
 
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
     bonus_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
@@ -1613,15 +1683,22 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     if "RSI_LIMIT" in cfg:
         rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
 
-    settings = get_ticker_type_settings(pool_id)
-    country_code = str(settings.get("country_code") or "").strip().lower()
-    if not country_code:
-        raise ValueError(f"'{pool_id}' 설정에 country_code 가 없습니다.")
-
-    etfs = get_etfs(pool_id)
+    country_code, etfs, cache_ticker_types, display_prefix = _resolve_backtest_pool_inputs(pool_id)
+    buy_slippage, sell_slippage = _resolve_slippage_for_backtest(pool_id, cache_ticker_types)
     tickers = sorted({str(item.get("ticker") or "").strip().upper() for item in etfs if item.get("ticker")})
     if not tickers:
         raise RuntimeError(f"'{pool_id}' 풀에 활성 ETF 가 없습니다.")
+
+    benchmark_config = cfg.get("BENCHMARK")
+    benchmark_ticker = ""
+    benchmark_name = ""
+    if benchmark_config is not None:
+        benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
+        benchmark_name = str(benchmark_config.get("name") or "").strip()
+        if not benchmark_ticker or not benchmark_name:
+            raise ValueError(
+                f"BACKTEST_CONFIG['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
+            )
 
     # 기간 설정
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
@@ -1643,9 +1720,13 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         raise RuntimeError("거래일 캘린더가 비어 있습니다.")
 
     # OHLCV 캐시 로드
-    logger.info("[%s] OHLCV 캐시 로드: %s tickers ...", pool_id, len(tickers))
-    frames = load_cached_frames_bulk_with_fallback(pool_id, tickers)
-    _augment_frames_with_intraday_open(frames, tickers, country_code, calendar_days[-1], today)
+    load_tickers = sorted(set(tickers + ([benchmark_ticker] if benchmark_ticker else [])))
+    logger.info("[%s] OHLCV 캐시 로드: %s tickers ...", pool_id, len(load_tickers))
+    if pool_id == ALL_POOL_ID:
+        frames = load_cached_frames_bulk_from_ticker_types(cache_ticker_types, load_tickers)
+    else:
+        frames = load_cached_frames_bulk_with_fallback(pool_id, load_tickers)
+    _augment_frames_with_intraday_open(frames, load_tickers, country_code, calendar_days[-1], today)
     missing = [t for t in tickers if t not in frames or frames[t] is None or frames[t].empty]
     if missing:
         logger.info(
@@ -1658,12 +1739,13 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     tickers = [t for t in tickers if t in frames and frames[t] is not None and not frames[t].empty]
     if not tickers:
         raise RuntimeError("캐시된 OHLCV 가 있는 티커가 없습니다.")
+    matrix_tickers = [t for t in load_tickers if t in frames and frames[t] is not None and not frames[t].empty]
 
-    # Close/Open 매트릭스 구축 (index = calendar_days, columns = tickers)
+    # Close/Open 매트릭스 구축 (index = calendar_days, columns = 로드된 후보+벤치마크)
     close_cols: dict[str, pd.Series] = {}
     open_cols: dict[str, pd.Series] = {}
     index = pd.DatetimeIndex(calendar_days)
-    for ticker in tickers:
+    for ticker in matrix_tickers:
         frame = frames[ticker]
         if not isinstance(frame.index, pd.DatetimeIndex):
             frame.index = pd.to_datetime(frame.index)
@@ -1676,6 +1758,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
 
     close_frame = pd.DataFrame(close_cols, index=index)
     open_frame = pd.DataFrame(open_cols, index=index)
+    strategy_close_frame = close_frame.reindex(columns=tickers)
+    strategy_open_frame = open_frame.reindex(columns=tickers)
 
     # 1월 1일 시작 설정 시 1월 2일(첫 거래일)부터 매수가 가능하도록,
     # start_target 이후의 첫 거래일을 backtest_days[1]로 위치시킨다.
@@ -1689,7 +1773,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     if len(backtest_days) < 2:
         raise RuntimeError("백테스트 기간 내 거래일이 부족합니다. (최소 2거래일 필요)")
 
-    backtest_days, close_excluded_days = _filter_days_with_close_coverage(backtest_days, close_frame)
+    backtest_days, close_excluded_days = _filter_days_with_close_coverage(backtest_days, strategy_close_frame)
     if close_excluded_days:
         logger.info(
             "[%s] 전체 종목 Close 데이터가 없어 백테스트에서 제외한 거래일: %s%s",
@@ -1700,7 +1784,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     if len(backtest_days) < 2:
         raise RuntimeError("Close 데이터가 있는 백테스트 거래일이 부족합니다. (최소 2거래일 필요)")
 
-    if not _should_include_latest_day(open_frame, backtest_days[-1], today):
+    if not _should_include_latest_day(strategy_open_frame, backtest_days[-1], today):
         excluded_day = backtest_days[-1]
         backtest_days = backtest_days[:-1]
         logger.info(
@@ -1722,11 +1806,11 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     for mtype, m_months in unique_ma_specs:
         # rankings 와 동일한 공통 엔진 함수를 통해 규칙별 percentile 프레임 생성.
         percentile_by_spec[(mtype, int(m_months))] = compute_rule_percentile_frame(
-            close_frame, mtype, int(m_months)
+            strategy_close_frame, mtype, int(m_months)
         )
 
     # 자격 마스크도 공통 엔진으로 생성 (MIN_TRADING_DAYS 기준) — rankings 와 동일.
-    eligibility_frame = compute_eligibility_mask(close_frame)
+    eligibility_frame = compute_eligibility_mask(strategy_close_frame)
 
     # 워커에 전달할 데이터를 백테스트 기간으로 미리 슬라이스 (메모리 절감)
     percentile_by_spec_win = {
@@ -1734,8 +1818,10 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         for key, pf in percentile_by_spec.items()
     }
     eligibility_win = eligibility_frame.loc[backtest_days]
-    open_win = open_frame.loc[backtest_days]
-    close_win = close_frame.loc[backtest_days]
+    open_win = strategy_open_frame.loc[backtest_days]
+    close_win = strategy_close_frame.loc[backtest_days]
+    benchmark_open_win = open_frame.loc[backtest_days]
+    benchmark_close_win = close_frame.loc[backtest_days]
     ticker_columns = list(open_win.columns)
     percentile_by_spec_values = {
         key: pf.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
@@ -1744,7 +1830,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     eligibility_values = eligibility_win.reindex(columns=ticker_columns).to_numpy(dtype=bool, copy=True)
     open_values = open_win.to_numpy(dtype=np.float64, copy=True)
     close_values = close_win.to_numpy(dtype=np.float64, copy=True)
-    rsi_frame = _compute_rsi_frame(close_frame, RSI_PERIOD)
+    rsi_frame = _compute_rsi_frame(strategy_close_frame, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
     rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
 
@@ -1774,18 +1860,11 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     )
 
     benchmark_result: dict[str, Any] | None = None
-    benchmark_config = cfg.get("BENCHMARK")
     if benchmark_config is not None:
-        benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
-        benchmark_name = str(benchmark_config.get("name") or "").strip()
-        if not benchmark_ticker or not benchmark_name:
-            raise ValueError(
-                f"BACKTEST_CONFIG['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
-            )
         benchmark_total_ret, benchmark_cagr, benchmark_mdd, benchmark_trades = _simulate_benchmark_buy_and_hold(
             ticker=benchmark_ticker,
-            open_frame=open_win,
-            close_frame=close_win,
+            open_frame=benchmark_open_win,
+            close_frame=benchmark_close_win,
             backtest_days=backtest_days,
             fx_series=fx_win,
             initial_cash_local=initial_cash_local,
@@ -1814,11 +1893,6 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
 
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
     n_workers = max(1, (os.cpu_count() or 2) - 1)
-
-    # 폴더/파일 순번 처리를 위해 pools.json의 order 정보를 접두사로 사용
-    pool_settings = get_ticker_type_settings(pool_id)
-    pool_order = int(pool_settings.get("order", 0))
-    display_prefix = f"{pool_order}_{pool_id}" if pool_order > 0 else pool_id
 
     # 결과 파일 경로
     results_dir = Path(__file__).resolve().parent / "results"
