@@ -1067,15 +1067,18 @@ export function TickerDetailManager({
   const portfolioChange = useMemo<{
     total_pct: number | null;
     breakdown: PortfolioChangeBreakdownItem[];
+    coverage_weight: number;
   }>(() => {
     const result = calcPortfolioChange(holdings, displayFxRates);
     return {
       total_pct: result.totalPct,
       breakdown: result.breakdown,
+      coverage_weight: result.coverageWeight,
     };
   }, [holdings, displayFxRates]);
   const portfolioChangePct = portfolioChange.total_pct;
   const portfolioChangeBreakdown = portfolioChange.breakdown;
+  const portfolioChangeCoverageWeight = portfolioChange.coverage_weight;
   const portfolioChangeBaseDate = etfInfo?.portfolio_change_base_date ?? null;
   const dailyColumns = useMemo<ColDef[]>(
     () => [
@@ -1337,7 +1340,13 @@ export function TickerDetailManager({
                                 <div>
                                   <div className="tickerDetailInfoTrackerLabel">
                                     포트폴리오 변동
-                                    {portfolioChangeBaseDate ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)` : ""}
+                                    {portfolioChangeBaseDate
+                                      ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후${
+                                          portfolioChangeCoverageWeight > 0 && portfolioChangeCoverageWeight < 99.5
+                                            ? `, ${portfolioChangeCoverageWeight.toFixed(0)}% 비중 사용`
+                                            : ""
+                                        })`
+                                      : ""}
                                   </div>
                                   <div className="tickerDetailInfoTrackerHint">
                                     {portfolioChangeBreakdown.length > 0 ? (
