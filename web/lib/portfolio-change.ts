@@ -30,6 +30,8 @@ export type PortfolioChangeBreakdownItem = {
 export type PortfolioChangeResult = {
   totalPct: number | null;
   breakdown: PortfolioChangeBreakdownItem[];
+  /** 가격 데이터가 확보된 종목들의 비중 합 (0~100). 누락이 없으면 100. */
+  coverageWeight: number;
 };
 
 /** 통화 코드 → 지역 라벨 */
@@ -53,14 +55,15 @@ function getCurrencyRegionLabel(currency: string): string {
  *
  * - holdings 의 cumulative_change_pct (캐시 갱신 시점 대비 누적 변동률) 기준
  * - 외화 종목은 (1 + 종목변동률) × (1 + 환율변동률) - 1 로 원화 환산
- * - 가중 평균으로 합산, 총 비중이 100% 미만이면 100으로 나눔
+ * - 누락 종목은 0% 로 처리, 가중합 / 100 으로 계산
+ * - coverageWeight 로 실제 가격 데이터가 확보된 비중 반환
  */
 export function calcPortfolioChange(
   holdings: PortfolioChangeHolding[],
   fxRates: PortfolioChangeFxRate[],
 ): PortfolioChangeResult {
   if (!holdings || holdings.length === 0) {
-    return { totalPct: null, breakdown: [] };
+    return { totalPct: null, breakdown: [], coverageWeight: 0 };
   }
 
   // 통화별 환율 변동률 맵
@@ -100,7 +103,7 @@ export function calcPortfolioChange(
   }
 
   // 합산
-  let totalWeight = 0;
+  let coverageWeight = 0;
   let totalWeightedSum = 0;
   const breakdown: PortfolioChangeBreakdownItem[] = [];
 
@@ -113,18 +116,17 @@ export function calcPortfolioChange(
       change_pct: changePct,
       weight: group.weight,
     });
-    totalWeight += group.weight;
+    coverageWeight += group.weight;
     totalWeightedSum += group.weight * changePct;
   }
 
   breakdown.sort((a, b) => b.weight - a.weight);
 
-  if (totalWeight <= 0) {
-    return { totalPct: null, breakdown };
+  if (coverageWeight <= 0) {
+    return { totalPct: null, breakdown, coverageWeight: 0 };
   }
 
-  const divisor = Math.max(totalWeight, 100);
-  return { totalPct: totalWeightedSum / divisor, breakdown };
+  return { totalPct: totalWeightedSum / 100, breakdown, coverageWeight };
 }
 
 export { getCurrencyRegionLabel };

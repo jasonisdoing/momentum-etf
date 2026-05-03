@@ -56,6 +56,9 @@ def enrich_component_prices(
     worldstock_codes: list[str] = []
     yahoo_exchange_symbols: list[str] = []
     baseline_yahoo_symbols: list[str] = []
+    # 한국 ETF 마감(15:30 KST) 시점에 미국장은 아직 열리지 않았으므로(US 22:30 KST 개장),
+    # 한국 base_date 마감 시점에 반영된 미국 가격은 전 미국 거래일 종가다.
+    # 따라서 미국 종목 baseline 은 base_date 미만(< base_ts)으로 한 번 더 소급해야 한다.
     previous_trading_day_baseline_symbols: set[str] = set()
 
     for item in holdings_for_pricing:
@@ -355,16 +358,16 @@ def _fetch_yahoo_baseline_prices(
                 continue
             close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
             normalized_index = pd.to_datetime(close_series.index).tz_localize(None).normalize()
-            
+
             is_prev = symbol in previous_day_symbols
             if is_prev:
+                # 한국 base_date 마감 시점에는 미국장이 열리기 전이므로 base_date 미만 종가 사용
                 close_series = close_series[normalized_index < base_ts]
             else:
                 close_series = close_series[normalized_index <= base_ts]
-                
+
             if close_series.empty:
                 continue
-                
             data = {
                 "price": float(close_series.iloc[-1]),
                 "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
