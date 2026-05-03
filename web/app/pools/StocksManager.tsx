@@ -2,7 +2,7 @@
 
 import { IconDeviceFloppy, IconPlus, IconTrash } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
@@ -314,6 +314,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+
+  // gridRows의 id 계산과 동일한 방식으로 row id를 생성한다.
+  const getRowId = useCallback(
+    (row: { 티커?: unknown; source_ticker_type?: unknown }) =>
+      `${String(row.source_ticker_type ?? selectedTickerType).trim().toLowerCase()}:${normalizeTicker(String(row.티커 ?? ""))}`,
+    [selectedTickerType],
+  );
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -1329,7 +1336,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const nextBucketId = getBucketIdByName(bucketName);
     setRows((prev) =>
       prev.map((currentRow) =>
-        normalizeTicker(String(currentRow.티커 ?? "")) === row.id
+        getRowId(currentRow) === row.id
           ? {
             ...currentRow,
             bucket: nextBucketId,
@@ -1398,7 +1405,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }
 
   async function processDirtyRows() {
-    const dirtyRows = rows.filter((row) => dirtyRowIds.includes(normalizeTicker(String(row.티커 ?? ""))));
+    const dirtyRows = rows.filter((row) => dirtyRowIds.includes(getRowId(row)));
     for (const row of dirtyRows) {
       await updateStockBucket(selectedTickerType, String(row.티커 ?? ""), Number(row.bucket ?? 1));
     }
@@ -1451,14 +1458,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       return;
     }
 
-    const selectedRows = rows.filter((row) => selectedTickers.includes(normalizeTicker(String(row.티커 ?? ""))));
+    const selectedRows = rows.filter((row) => selectedTickers.includes(getRowId(row)));
     startTransition(async () => {
       try {
         for (const row of selectedRows) {
           await deleteStock(selectedTickerType, String(row.티커 ?? ""));
         }
-        const deletedTickerSet = new Set(selectedRows.map((row) => normalizeTicker(String(row.티커 ?? ""))));
-        setRows((prev) => prev.filter((row) => !deletedTickerSet.has(normalizeTicker(String(row.티커 ?? "")))));
+        const deletedIdSet = new Set(selectedRows.map((row) => getRowId(row)));
+        setRows((prev) => prev.filter((row) => !deletedIdSet.has(getRowId(row))));
         setSelectedTickers([]);
         setDeleteConfirmOpen(false);
         clearCacheWarningState();
@@ -1512,7 +1519,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const upCount = gridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
     const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
-    const ruleSummaryParts = [...maRuleSummary];
+    const configuredTopN = selectedTickerTypeItem?.top_n_hold;
+    const configuredBonus = selectedTickerTypeItem?.holding_bonus_score;
+    const ruleSummaryParts: string[] = [];
+    if (configuredTopN != null && !Number.isNaN(configuredTopN)) {
+      ruleSummaryParts.push(`TOP ${formatNumber(configuredTopN, 0)}`);
+    }
+    if (configuredBonus != null && !Number.isNaN(configuredBonus)) {
+      ruleSummaryParts.push(`보너스 ${formatNumber(configuredBonus, 0)}`);
+    }
+    ruleSummaryParts.push(...maRuleSummary);
     if (configuredRsiLimit != null && !Number.isNaN(configuredRsiLimit)) {
       ruleSummaryParts.push(`RSI ${formatNumber(configuredRsiLimit, 0)}`);
     }
@@ -1712,6 +1728,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 className="rankAgGrid"
                 rowData={displayGridRows}
                 columnDefs={columns}
+                getRowId={(params) => params.data.id ?? ""}
                 loading={loading || isPending}
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
@@ -1800,7 +1817,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         <div className="d-flex flex-column gap-2">
           <div className="fw-semibold">
             {selectedTickers.length === 1
-              ? `${rows.find((row) => selectedTickers.includes(normalizeTicker(String(row.티커 ?? ""))))?.종목명 ?? ""}(${selectedTickers[0]}) 종목을 삭제합니다.`
+              ? `${rows.find((row) => selectedTickers.includes(getRowId(row)))?.종목명 ?? ""}(${selectedTickers[0]}) 종목을 삭제합니다.`
               : `${selectedTickers.length}개 종목을 삭제합니다.`}
           </div>
           <div className="text-secondary small">삭제된 종목은 복구되지 않으며 즉시 제거됩니다.</div>
