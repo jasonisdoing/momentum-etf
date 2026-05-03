@@ -110,14 +110,26 @@
 
 ```json
 {
-  "order": 1,
-  "ticker_type": "kor_kr",
-  "icon": "🇰🇷",
-  "name": "국내상장 국내",
-  "country_code": "kor",
-  "currency": "KRW",
-  "MA_TYPE": "SMA",
-  "MA_MONTHS": 10
+  "all": {
+    "TOP_N_HOLD": 3,
+    "HOLDING_BONUS_SCORE": 10,
+    "MA_TYPE": "ALMA",
+    "MA_MONTHS": 5,
+    "RSI_LIMIT": 100,
+    "include": ["kor_kr", "kor_us", "kor"]
+  },
+  "pools": [
+    {
+      "order": 1,
+      "ticker_type": "kor_kr",
+      "icon": "🇰🇷",
+      "name": "국내상장 국내",
+      "country_code": "kor",
+      "currency": "KRW",
+      "MA_TYPE": "SMA",
+      "MA_MONTHS": 10
+    }
+  ]
 }
 ```
 
@@ -125,7 +137,8 @@
 
 검증 원칙(현재 운영):
 
-* 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
+* 전체 종목풀: `all.TOP_N_HOLD`, `all.HOLDING_BONUS_SCORE`, `all.MA_TYPE`, `all.MA_MONTHS`, `all.RSI_LIMIT`, `all.include` 필수
+* 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 
 ## 4. 테스트 및 검증
@@ -153,7 +166,7 @@
 
 ## 6. 화면 UI 표준
 
-AG Grid 기반 주요 화면은 현재 `/stocks`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
+AG Grid 기반 주요 화면은 현재 `/pools`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
 
 ### 공통 레이아웃 순서
 1.  **메뉴 헤더**

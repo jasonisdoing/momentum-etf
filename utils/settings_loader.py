@@ -115,6 +115,47 @@ def _load_pool_configs() -> list[dict[str, Any]]:
     return sorted(loaded, key=lambda item: (int(item["order"]), str(item["ticker_type"])))
 
 
+@cache
+def get_all_pool_settings() -> dict[str, Any]:
+    """pools.json의 0. 전체 가상 종목풀 설정을 로드합니다."""
+
+    payload = _load_pools_payload()
+    all_settings = payload.get("all")
+    if not isinstance(all_settings, dict):
+        raise AccountSettingsError(f"'pools.json'의 'all'은 객체여야 합니다: {POOL_SETTINGS_PATH}")
+
+    required_keys = ["TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT", "include"]
+    missing_keys = [key for key in required_keys if key not in all_settings]
+    if missing_keys:
+        raise AccountSettingsError(f"'all' 설정에 필수 항목이 누락되었습니다: {', '.join(missing_keys)}")
+
+    include_raw = all_settings.get("include")
+    if not isinstance(include_raw, list):
+        raise AccountSettingsError("'all.include'는 배열이어야 합니다.")
+
+    include: list[str] = []
+    for raw_ticker_type in include_raw:
+        ticker_type = str(raw_ticker_type or "").strip().lower()
+        if not ticker_type:
+            raise AccountSettingsError("'all.include'에는 빈 종목풀 식별자를 넣을 수 없습니다.")
+        if ticker_type in include:
+            raise AccountSettingsError(f"'all.include'에 중복된 종목풀이 있습니다: {ticker_type}")
+        include.append(ticker_type)
+
+    if not include:
+        raise AccountSettingsError("'all.include'에는 하나 이상의 종목풀이 필요합니다.")
+
+    available_types = set(list_available_ticker_types())
+    unknown_types = [ticker_type for ticker_type in include if ticker_type not in available_types]
+    if unknown_types:
+        raise AccountSettingsError(f"'all.include'에 알 수 없는 종목풀이 있습니다: {', '.join(unknown_types)}")
+
+    return {
+        **all_settings,
+        "include": include,
+    }
+
+
 def list_available_ticker_types() -> list[str]:
     """pools.json에 정의된 유효한 종목타입 목록을 반환합니다."""
     return [str(item["ticker_type"]) for item in _load_pool_configs()]

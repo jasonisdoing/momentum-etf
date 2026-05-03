@@ -701,6 +701,8 @@ def build_ticker_type_rankings(
             "종목명": etf.get("name", ""),
             "마켓": etf.get("market", ""),
             "country_code": country_code,
+            "currency": str(settings.get("currency") or ""),
+            "source_ticker_type": ticker_type,
             "상장일": etf.get("listing_date", "-"),
             "분류": etf.get("etf_category", "") or "",
             "점수": None,

@@ -9,7 +9,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(payload);
   } catch (error) {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : "종목 관리 데이터를 불러오지 못했습니다." },
+      { error: error instanceof Error ? error.message : "종목풀 순위 데이터를 불러오지 못했습니다." },
       { status: 400 },
     );
   }
