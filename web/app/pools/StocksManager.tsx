@@ -29,6 +29,7 @@ type RankTickerType = {
   rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
+  include?: string[];
 };
 
 type RankMaRule = {
@@ -40,6 +41,9 @@ type RankMaRule = {
 
 type RankRow = {
   [key: string]: string | number | boolean | null | undefined;
+  source_ticker_type?: string;
+  종목풀?: string;
+  currency?: string;
   순번: string;
   순위: number | null;
   이전순위: number | null;
@@ -554,14 +558,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
     [ticker_types, selectedTickerType],
   );
+  const isAllTickerType = selectedTickerType === "all";
+
+  useEffect(() => {
+    if (isAllTickerType && pageMode === "manage") {
+      setPageMode("rank");
+    }
+  }, [isAllTickerType, pageMode]);
 
   const gridRows = useMemo<RankGridRow[]>(
     () =>
       rows.map((row, index) => ({
         ...row,
-        id: normalizeTicker(String(row.티커 ?? `${index}`)),
+        id: `${String(row.source_ticker_type ?? selectedTickerType).trim().toLowerCase()}:${normalizeTicker(String(row.티커 ?? `${index}`))}`,
       })),
-    [rows],
+    [rows, selectedTickerType],
   );
 
   const showDeviationColumn = useMemo(() => {
@@ -640,8 +651,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           continue;
         }
       }
-      const ticker = String(row.티커 ?? "").trim();
-      if (ticker) picked.add(ticker);
+      if (row.id) picked.add(row.id);
     }
     return picked;
   }, [gridRows, selectedTickerTypeItem?.top_n_hold, selectedTickerTypeItem?.rsi_limit]);
@@ -723,11 +733,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         filter: false,
         cellStyle: { textAlign: "center" },
         valueGetter: (params) => {
-          const ticker = String(params.data?.티커 ?? "").trim();
-          if (!ticker) return 0;
-          return recommendedTickerSet.has(ticker) ? 1 : 0;
+          const rowId = String(params.data?.id ?? "").trim();
+          if (!rowId) return 0;
+          return recommendedTickerSet.has(rowId) ? 1 : 0;
         },
-        cellRenderer: (params: { value: number | null | undefined }) => {
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (!params.value) return <span style={{ color: "#adb5bd" }}>-</span>;
           return <span style={{ fontSize: "1rem" }}>✅</span>;
         },
@@ -835,6 +845,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             } as ColDef<RankGridRow>,
           ]
         : []),
+      ...(isAllTickerType
+        ? [
+          {
+            field: "종목풀",
+            headerName: "종목풀",
+            minWidth: 116,
+            width: 116,
+            cellClass: "appTextEllipsisCell",
+            cellRenderer: (params: { value: string | null | undefined }) => {
+              const value = String(params.value ?? "").trim();
+              return <span title={value}>{value || "-"}</span>;
+            },
+          } as ColDef<RankGridRow>,
+        ]
+        : []),
       ...(selectedTickerType === "kor"
         ? [
           {
@@ -881,7 +906,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }
           const value = String(params.value ?? "-");
           // 호주 계좌는 ASX: 접두사로 표시하여 미국 동일 심볼과 구분
-          const isAusPool = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "au";
+          const rowCountryCode = String(params.data?.country_code || selectedTickerTypeItem?.country_code || "").toLowerCase();
+          const isAusPool = rowCountryCode === "au";
           const displayValue = isAusPool && value !== "-" && !value.startsWith("ASX:")
             ? `ASX:${value}`
             : value;
@@ -929,7 +955,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return <span className="rankNameCellText" title={value}>{value}</span>;
         },
       },
-      ...(String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver" ||
+      ...(isAllTickerType ||
+        String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver" ||
         String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us"
         ? [
           {
@@ -951,9 +978,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 88,
         width: 88,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           const currency = selectedTickerTypeItem?.currency?.toUpperCase();
-          const decimals = currency === "USD" || currency === "AUD" ? 2 : 0;
+          const rowCurrency = String(params.data?.currency || currency || "").toUpperCase();
+          const decimals = rowCurrency === "USD" || rowCurrency === "AUD" ? 2 : 0;
           return formatNumber(params.value ?? null, decimals);
         },
       },
@@ -982,8 +1010,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 72,
         width: 72,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          const currency = String(params.data?.currency || selectedTickerTypeItem?.currency || "").toUpperCase();
           const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
           return formatNumber(params.value ?? null, decimals);
         },
@@ -1023,7 +1051,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 80,
         width: 80,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           const value = params.value ?? null;
           const isHighlighted = value !== null && value >= -5;
           return (
@@ -1118,8 +1146,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 72,
         width: 72,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          const currency = selectedTickerTypeItem?.currency?.toUpperCase();
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          const currency = String(params.data?.currency || selectedTickerTypeItem?.currency || "").toUpperCase();
           const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
           return formatNumber(params.value ?? null, decimals);
         },
@@ -1214,15 +1242,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     monthlyReturnLabels,
     pageMode,
     selectedTickerType,
+    isAllTickerType,
     selectedTickerTypeItem?.country_code,
     selectedTickerTypeItem?.type_source,
     selectedTickerTypeItem?.top_n_hold,
+    selectedTickerTypeItem?.currency,
     recommendedTickerSet,
   ]);
 
   function handleTickerTypeChange(accountId: string) {
     setSelectedAccountId(accountId);
     writeRememberedTickerType(accountId);
+    if (accountId === "all") {
+      setPageMode("rank");
+    }
     void load({
       ticker_type: accountId,
       as_of_date: selectedAsOfDate,
@@ -1550,7 +1583,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       <button
                         type="button"
                         className={pageMode === "manage" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setPageMode("manage")}
+                        onClick={() => {
+                          if (!isAllTickerType) {
+                            setPageMode("manage");
+                          }
+                        }}
+                        disabled={isAllTickerType}
+                        title={isAllTickerType ? "전체 종목풀에서는 관리모드를 사용할 수 없습니다." : undefined}
                       >
                         관리모드
                       </button>

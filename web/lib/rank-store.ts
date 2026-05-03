@@ -11,6 +11,7 @@ type RankTickerType = {
   rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
+  include?: string[];
 };
 
 type RankMaRule = {

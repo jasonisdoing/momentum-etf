@@ -55,7 +55,7 @@ const navGroups = [
     title: "정보",
     icon: IconTrendingUp,
     items: [
-      { href: "/stocks", label: "종목 관리", icon: IconMedal2 },
+      { href: "/pools", label: "종목풀 순위", icon: IconMedal2 },
       { href: "/compare", label: "종목 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
