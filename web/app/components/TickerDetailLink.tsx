@@ -1,7 +1,6 @@
 "use client";
 
 import { IconExternalLink } from "@tabler/icons-react";
-import { useRouter } from "next/navigation";
 
 type TickerDetailLinkProps = {
   ticker: string | null | undefined;
@@ -25,10 +24,10 @@ function normalizeTickerForDetailRoute(ticker: string | null | undefined): strin
 }
 
 export function TickerDetailLink({ ticker, displayTicker, className }: TickerDetailLinkProps) {
-  const router = useRouter();
   const routeTicker = normalizeTickerForDetailRoute(ticker);
   const text = String(displayTicker ?? ticker ?? "-").trim() || "-";
   const disabled = !routeTicker || routeTicker === "-" || routeTicker === "IS" || routeTicker === "__CASH__";
+  const href = `/ticker?ticker=${encodeURIComponent(routeTicker)}`;
 
   if (disabled) {
     return (
@@ -41,19 +40,18 @@ export function TickerDetailLink({ ticker, displayTicker, className }: TickerDet
   return (
     <span className={className ? `tickerDetailLink ${className}` : "tickerDetailLink"}>
       <span className="appCodeText tickerDetailLinkText">{text}</span>
-      <button
-        type="button"
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
         className="tickerDetailLinkButton"
         aria-label={`${text} 상세 보기`}
         title="상세 보기"
         onMouseDown={(event) => event.stopPropagation()}
-        onClick={(event) => {
-          event.stopPropagation();
-          router.push(`/ticker?ticker=${encodeURIComponent(routeTicker)}`);
-        }}
+        onClick={(event) => event.stopPropagation()}
       >
         <IconExternalLink size={12} stroke={2.2} />
-      </button>
+      </a>
     </span>
   );
 }
