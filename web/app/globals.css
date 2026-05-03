@@ -469,6 +469,7 @@ a {
   background: #fff;
   color: #64748b;
   line-height: 1;
+  text-decoration: none;
 }
 
 .tickerDetailLinkButton:hover {
