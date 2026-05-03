@@ -8,7 +8,13 @@
 python backtest/run.py kor_kr
 ```
 
-인자 없이 실행하면 설정된 모든 종목풀을 순차적으로 실행한다:
+`pools.json`의 `all.include`에 지정된 종목풀을 한데 합쳐 실행하려면 `all`을 넘긴다:
+
+```bash
+python backtest/run.py all
+```
+
+인자 없이 실행하면 설정된 모든 개별 종목풀과 `all`을 순차적으로 실행한다:
 
 ```bash
 python backtest/run.py
@@ -16,6 +22,7 @@ python backtest/run.py
 
 ## 대상 종목풀
 
+- `all`
 - `kor_kr`
 - `kor_us`
 - `aus`
@@ -40,6 +47,7 @@ BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 ```
 
 종목풀별 슬리피지 설정은 같은 파일의 `SLIPPAGE_CONFIG`에서 별도로 관리한다.
+`all`은 `SLIPPAGE_CONFIG["all"]`이 있으면 그 값을 사용하고, 없으면 `all.include`의 종목풀 슬리피지가 모두 같을 때만 그 값을 사용한다.
 
 ```python
 "kor_kr": {
@@ -87,6 +95,7 @@ BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 - 매수는 단주만 허용하며, 남는 자금은 현금으로 유지
 - 수동 집행 규칙 한 줄: **"교체가 있으면 신규 K개에 `min(현금÷K, 총자산÷N)` 만큼씩 단주 매수"**
 - `HOLDING_BONUS_SCORE`는 백테스트 내부에서만 적용
+- 종목풀의 `고정 종목`(`exclude_from_ranking=true`)은 다른 곳에서 개별 보유하는 종목이므로 백테스트 후보군에서 제외한다
 - `RSI_LIMIT`가 설정된 개별주 종목풀(`us`, `kor`)은 신호일 기준 `RSI > RSI_LIMIT`이면
   다음 거래일 시초가에 즉시 전량 매도하고, 신규 편입 후보에서도 제외한다
 

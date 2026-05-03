@@ -590,6 +590,18 @@ def load_cached_frames_bulk_from_all_ticker_types(tickers: Iterable[str]) -> dic
     return _load_cached_frames_bulk_from_keys(get_all_ticker_type_lookup_keys(), tickers)
 
 
+def load_cached_frames_bulk_from_ticker_types(
+    ticker_types: Iterable[str],
+    tickers: Iterable[str],
+) -> dict[str, pd.DataFrame]:
+    """지정한 종목풀 캐시에서만 순서대로 OHLCV 프레임을 조회한다."""
+    cache_keys = [str(ticker_type or "").strip().lower() for ticker_type in ticker_types]
+    cache_keys = [ticker_type for ticker_type in cache_keys if ticker_type]
+    if not cache_keys:
+        raise ValueError("조회할 ticker_types가 필요합니다.")
+    return _load_cached_frames_bulk_from_keys(cache_keys, tickers)
+
+
 def load_cached_close_series_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.Series]:
     """계좌 캐시에서 종가 시리즈만 조회한다."""
     normalized = []

@@ -33,6 +33,8 @@ def main(argv: list[str]) -> int:
         ordered_pools = list_available_ticker_types()
         # BACKTEST_CONFIG에 설정된 것만 필터링하여 실행 (위험 방지)
         pools = [p for p in ordered_pools if p in BACKTEST_CONFIG]
+        if "all" in BACKTEST_CONFIG:
+            pools.insert(0, "all")
         
         logger.info("모든 종목풀에 대해 지정된 순서대로 백테스트를 실행합니다: %s", pools)
         for pool_id in pools:
