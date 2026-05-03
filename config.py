@@ -172,7 +172,7 @@ SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
 BACKTEST_CONFIG: dict[str, dict] = {
     "all": {
         "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
-        "TOP_N_HOLD": [5],
+        "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 4, 5, 6],
@@ -180,7 +180,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
-        "TOP_N_HOLD": [4],
+        "TOP_N_HOLD": [3],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 4, 5, 6],
@@ -212,7 +212,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
-        "TOP_N_HOLD": [4],
+        "TOP_N_HOLD": [3],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 4, 5, 6],
