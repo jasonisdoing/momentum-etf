@@ -2,6 +2,7 @@
 
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -270,9 +271,16 @@ def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str, cat
 
     etf_info = fetch_korean_etf_info_from_naver(ticker_norm)
     holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
+    
+    # 실시간 iNAV/괴리율 추가 획득
+    from utils.data_loader import fetch_naver_etf_inav_snapshot
+    inav_snapshot = fetch_naver_etf_inav_snapshot([ticker_norm]).get(ticker_norm, {})
+    
     meta_cache = {
         "source": str(etf_info.get("source") or "naver_etf_meta"),
         "updated_at": str(etf_info.get("fetched_at") or ""),
+        "nav": inav_snapshot.get("nav"),
+        "deviation": inav_snapshot.get("deviation"),
         "reference_date": etf_info.get("reference_date"),
         "listed_date": etf_info.get("listed_date"),
         "dividend_yield_ttm": etf_info.get("dividend_yield_ttm"),
@@ -306,6 +314,53 @@ def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str, cat
     )
 
 
+def _format_iso_date(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return pd.Timestamp(text).strftime("%Y-%m-%d")
+    except Exception:
+        return text[:10] if len(text) >= 10 else text
+
+
+def _refresh_us_stock_meta_cache(
+    ticker_type: str,
+    ticker: str,
+    name: str,
+    naver_entry: dict[str, Any],
+) -> None:
+    """미국 개별주 메타 캐시를 네이버 미국 종목 API 기준으로 갱신한다."""
+    ticker_type_norm = str(ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    name_norm = str(name or "").strip() or ticker_norm
+    if not ticker_type_norm or not ticker_norm:
+        raise ValueError("ticker_type과 ticker가 필요합니다.")
+
+    meta_cache = {
+        "source": "naver_us_market_stock",
+        "updated_at": datetime.now().isoformat(),
+        "listed_date": _format_iso_date(naver_entry.get("listing_date")),
+        "dividend_yield_ttm": naver_entry.get("dividend_yield_ttm"),
+        "dividend_per_share_ttm": naver_entry.get("dividend_per_share_ttm"),
+        "expense_ratio": None,
+        "total_net_assets": naver_entry.get("market_cap"),
+        "issue_name": name_norm,
+        "market": naver_entry.get("market"),
+        "industry": naver_entry.get("industry"),
+    }
+
+    refresh_stock_cache(
+        ticker_type_norm,
+        ticker_norm,
+        country_code="us",
+        name=name_norm,
+        meta_cache=meta_cache,
+    )
+
+
 def update_ticker_type_metadata(
     ticker_type: str, progress_callback: Callable[[int, int, str], None] | None = None
 ):
@@ -323,6 +378,7 @@ def update_ticker_type_metadata(
 
     # 삭제된 종목 포함하여 모든 종목 로드
     stock_data = get_all_etfs_including_deleted(type_norm)
+    
     if not stock_data:
         logger.warning(f"'{type_norm}' 종목타입의 종목 데이터가 비어있습니다.")
         return
@@ -364,6 +420,19 @@ def update_ticker_type_metadata(
         if supplemented:
             logger.info(f"[{type_norm.upper()}] 카테고리 맵으로 ETF 이름 {supplemented}건 보완")
 
+    naver_us_stock_map: dict[str, dict[str, Any]] = {}
+    if country_code == "us":
+        from utils.us_stock_market_service import fetch_naver_us_stock_info_map
+
+        us_tickers = {
+            str(stock.get("ticker") or "").strip().upper()
+            for stock in ticker_entries
+            if str(stock.get("ticker") or "").strip()
+        }
+        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 맵을 구성합니다...")
+        naver_us_stock_map = fetch_naver_us_stock_info_map(us_tickers)
+        logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 {len(naver_us_stock_map)}건 수집")
+
     # 업데이트 사항을 모아두기 위한 리스트
     updates_for_db = []
 
@@ -379,6 +448,7 @@ def update_ticker_type_metadata(
                 naver_etf_map,
                 type_norm,
                 naver_category_map=naver_category_map,
+                naver_us_stock_map=naver_us_stock_map,
             )
 
             name = stock.get("name") or "-"
@@ -392,6 +462,8 @@ def update_ticker_type_metadata(
                 "name",
                 "listing_date",
                 "market",
+                "is_etf",
+                "has_holdings",
                 "1_week_avg_volume",
                 "volume",
                 "1_week_earn_rate",
@@ -401,6 +473,8 @@ def update_ticker_type_metadata(
                 "6_month_earn_rate",
                 "12_month_earn_rate",
                 "etf_category",
+                "dividend_yield_ttm",
+                "market_cap",
             ]
             # 개별 분류 컬럼들을 업데이트 필드에 추가
             for cat in NAVER_ETF_CATEGORY_CONFIG:
@@ -410,14 +484,22 @@ def update_ticker_type_metadata(
                 if f in stock:
                     update_doc[f] = stock[f]
 
-            # 한국 종목인 경우에만 상세 캐시(배당률 등) 갱신 시도
-            if country_code == "kor":
+            # 한국 ETF(type_source=Naver)인 경우에만 상세 캐시(배당률 등) 갱신 시도
+            # 한국 개별주는 ETFBase API 대상이 아니므로 건너뜀
+            if country_code == "kor" and is_naver_source:
                 try:
                     # 카테고리 정보만 추출하여 전달
                     cat_info = {f"cat_{c['code']}": stock.get(f"cat_{c['code']}") for c in NAVER_ETF_CATEGORY_CONFIG if f"cat_{c['code']}" in stock}
                     _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name), category_data=cat_info)
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
+            elif country_code == "us":
+                naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
+                if naver_entry:
+                    try:
+                        _refresh_us_stock_meta_cache(type_norm, str(ticker), str(name), naver_entry)
+                    except Exception as e:
+                        logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 개별주 메타 캐시 갱신 건너뜀: {e}")
 
             updates_for_db.append(update_doc)
 
@@ -579,11 +661,16 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     # 카테고리(투자국가/섹터/지수)는 배치 업데이트에서 일괄 갱신되는 것이 정상.
     naver_etf_map: dict[str, str] = {}
     naver_category_map: dict[str, dict[str, Any]] = {}
+    naver_us_stock_map: dict[str, dict[str, Any]] = {}
     if type_source.lower() == "naver":
         logger.info(
             f"[{type_norm.upper()}/{ticker_norm}] 단일 업데이트: 카테고리 맵 스캔 생략 "
             "(전체 업데이트 시 재구성됨)"
         )
+    if country_code == "us":
+        from utils.us_stock_market_service import fetch_naver_us_stock_info_map
+
+        naver_us_stock_map = fetch_naver_us_stock_info_map({ticker_norm})
 
     stock: dict[str, Any] = {"ticker": ticker_norm}
 
@@ -606,19 +693,31 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         naver_etf_map,
         type_norm,
         naver_category_map=naver_category_map,
+        naver_us_stock_map=naver_us_stock_map,
     )
 
-    if country_code == "kor":
+    # 한국 ETF(type_source=Naver)만 ETF 상세 캐시(배당률 등) 갱신 대상
+    # 한국 개별주(type_source 미설정)는 ETFBase API 대상이 아니므로 건너뜀
+    if country_code == "kor" and type_source.lower() == "naver":
         try:
             _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
         except Exception as meta_cache_error:
             logger.error(f"[{type_norm.upper()}/{ticker_norm}] ETF 메타 캐시 갱신 실패: {meta_cache_error}")
+    elif country_code == "us":
+        naver_entry = naver_us_stock_map.get(ticker_norm, {})
+        if naver_entry:
+            try:
+                _refresh_us_stock_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), naver_entry)
+            except Exception as meta_cache_error:
+                logger.error(f"[{type_norm.upper()}/{ticker_norm}] 미국 개별주 메타 캐시 갱신 실패: {meta_cache_error}")
 
     update_doc = {"ticker": ticker_norm}
     fields_to_update = [
         "name",
         "listing_date",
         "market",
+        "is_etf",
+        "has_holdings",
         "1_week_avg_volume",
         "volume",
         "1_week_earn_rate",
@@ -628,6 +727,8 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "6_month_earn_rate",
         "12_month_earn_rate",
         "etf_category",
+        "dividend_yield_ttm",
+        "market_cap",
     ]
     # 개별 분류 컬럼들을 업데이트 필드에 추가
     for cat in NAVER_ETF_CATEGORY_CONFIG:
@@ -651,6 +752,7 @@ def update_single_stock_metadata(
     account_norm: str = "",
     *,
     naver_category_map: dict[str, Any] | None = None,
+    naver_us_stock_map: dict[str, Any] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
     logger = get_app_logger()
@@ -692,7 +794,11 @@ def update_single_stock_metadata(
         new_name = naver_etf_map.get(ticker)
         if new_name:
             stock["name"] = new_name
+            stock["is_etf"] = True
+            stock["has_holdings"] = True
         elif not stock.get("name") or stock.get("name") == ticker:
+            stock["is_etf"] = False
+            stock["has_holdings"] = False
             # 일반주/ETN은 네이버 marketValue 통합 맵 → pykrx 폴백 순서로 조회
             try:
                 fetched_name = fetch_pykrx_name(ticker)
@@ -702,6 +808,9 @@ def update_single_stock_metadata(
                         logger.info(f"[{account_norm.upper()}/{ticker}] 종목명 획득: {fetched_name}")
             except Exception as e:
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
+        else:
+            stock["is_etf"] = False
+            stock["has_holdings"] = False
 
         # 3. 마켓(KOSPI/KOSDAQ) 조회 — 네이버 marketValue 통합 맵 사용
         if not stock.get("market"):
@@ -715,6 +824,31 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
     elif country_code in ("us", "au"):
+        # 해외 주식 플래그 설정
+        if country_code == "au":
+            stock["is_etf"] = True
+            stock["has_holdings"] = False
+        else:
+            stock["is_etf"] = False
+            stock["has_holdings"] = False
+
+        if country_code == "us" and naver_us_stock_map:
+            naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
+            industry = str(naver_entry.get("industry") or "").strip()
+            if industry:
+                stock["etf_category"] = industry
+            market = str(naver_entry.get("market") or "").strip().upper()
+            if market:
+                stock["market"] = market
+            if not stock.get("name"):
+                fetched_name = str(naver_entry.get("name") or "").strip()
+                if fetched_name:
+                    stock["name"] = fetched_name
+            if naver_entry.get("dividend_yield_ttm") is not None:
+                stock["dividend_yield_ttm"] = naver_entry.get("dividend_yield_ttm")
+            if naver_entry.get("market_cap") is not None:
+                stock["market_cap"] = naver_entry.get("market_cap")
+
         try:
             t = yf.Ticker(yfinance_ticker)
 

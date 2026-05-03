@@ -446,6 +446,37 @@ a {
   letter-spacing: 0.01em;
 }
 
+.tickerDetailLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.tickerDetailLinkText {
+  user-select: text;
+}
+
+.tickerDetailLinkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  padding: 0;
+  border: 1px solid #d8e0ec;
+  border-radius: 999px;
+  background: #fff;
+  color: #64748b;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.tickerDetailLinkButton:hover {
+  border-color: #206bc4;
+  color: #206bc4;
+}
+
 .loginAppContent {
   width: 100%;
   min-height: 100vh;
@@ -1535,15 +1566,6 @@ a {
   min-height: 0;
 }
 
-.tickerDetailTables {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 1rem;
-  flex: 1 1 auto;
-  min-height: 0;
-  padding-top: 0.75rem;
-}
-
 .tickerDetailHero {
   display: flex;
   align-items: center;
@@ -1604,13 +1626,18 @@ a {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0 0 0.25rem;
+  padding: 0.15rem 0 0.35rem;
   flex: 0 0 auto;
+}
+
+.tickerDetailTableHeaderBetween {
+  justify-content: space-between;
 }
 
 .tickerDetailTableTitle {
   font-weight: 700;
   font-size: 15px;
+  line-height: 1.35;
 }
 
 .tickerDetailTableMeta {
@@ -1620,21 +1647,989 @@ a {
 .tickerDetailChartWrap {
   position: relative;
   min-width: 0;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-.tickerDetailTopGrid {
+.tickerDetailLayoutGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas:
+    "info holdings"
+    "chart table";
+  column-gap: 1rem;
+  row-gap: 0.35rem;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0.5rem;
+}
+
+.tickerDetailClassicLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1rem;
+  align-items: stretch;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 0.75rem;
+}
+
+.tickerDetailInfoPanel {
+  grid-area: info;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 476px;
+}
+
+.tickerDetailInfoCard {
+  border: 1px solid #d9e2ef;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.tickerDetailInfoSummary {
+  border-bottom: 1px solid #e6edf5;
+  flex: 5;
+  display: flex;
+  flex-direction: column;
+}
+
+.tickerDetailInfoSummary > .tickerDetailInfoSummaryRow {
+  flex: 1;
+}
+
+.tickerDetailInfoSummary > .tickerDetailInfoSummaryGrid {
+  flex: 3;
+}
+
+.tickerDetailInfoSummaryRow {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  gap: 0.55rem;
+  align-items: center;
+  padding: 0.52rem 0.8rem;
+  border-bottom: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoSummaryRow:last-child {
+  border-bottom: 0;
+}
+
+.tickerDetailInfoSummaryGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 0;
+  border-top: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoLabel {
+  font-size: 15px;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.tickerDetailInfoMain {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailInfoMain strong,
+.tickerDetailInfoMetric strong {
+  font-size: 17px;
+  line-height: 1.1;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailInfoMain strong.metricPositive,
+.tickerDetailInfoMetric strong.metricPositive {
+  color: #e53935;
+}
+
+.tickerDetailInfoMain strong.metricNegative,
+.tickerDetailInfoMetric strong.metricNegative {
+  color: #2563eb;
+}
+
+.tickerDetailInfoMetric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid #e6edf5;
+}
+
+.tickerDetailInfoSummaryGrid > .tickerDetailInfoMetric:nth-last-child(-n + 2) {
+  border-bottom: 0;
+}
+
+.tickerDetailInfoTracker {
+  padding: 0.2rem 0.8rem;
+  background: #fff;
+  border-top: 1px solid #e6edf5;
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+}
+
+.tickerDetailInfoTracker > .tickerDetailInfoTrackerRow {
+  flex: 1;
+}
+
+.tickerDetailInfoTrackerHint {
+  color: #8a94a6;
+  font-size: 14px;
+}
+
+.tickerDetailInfoBreakdownList {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.tickerDetailInfoBreakdownItem {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: baseline;
+  color: #8a94a6;
+}
+
+.tickerDetailInfoBreakdownItem .metricPositive {
+  color: #d32f2f;
+}
+
+.tickerDetailInfoBreakdownItem .metricNegative {
+  color: #1d4ed8;
+}
+
+.tickerDetailInfoBreakdownFx {
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.tickerDetailInfoTrackerRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.12rem 0;
+  border-bottom: 1px dashed #d6deea;
+  flex: 1;
+}
+
+.tickerDetailInfoTrackerRowLast {
+  border-bottom: 0;
+}
+
+.tickerDetailInfoTrackerLabel {
+  font-size: 15px;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailInfoTrackerRow strong {
+  font-size: 17px;
+  font-weight: 800;
+  color: #1f2937;
+}
+
+.tickerDetailInfoTrackerRow strong.metricPositive {
+  color: #d32f2f;
+}
+
+.tickerDetailInfoTrackerRow strong.metricNegative {
+  color: #1d4ed8;
+}
+
+.tickerDetailInfoFxList {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.tickerDetailInfoFxItem {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  font-size: 14px;
+  font-weight: 700;
+  color: #4b5563;
+  white-space: nowrap;
+}
+
+.tickerDetailInfoFxSeparator {
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.tickerDetailInfoFxItem strong {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.25rem;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.tickerDetailInfoFxItem .metricPositive {
+  color: #d32f2f;
+}
+
+.tickerDetailInfoFxItem .metricNegative {
+  color: #1d4ed8;
+}
+
+.tickerDetailInfoTrackerCounts {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.comparePage {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  min-height: 0;
+}
+
+.compareMainHeaderLeft {
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.compareMainHeaderLeft .appLabeledField {
+  min-width: 13rem;
+}
+
+.compareTickerSearchField {
+  position: relative;
+  width: min(26rem, 100%);
+  min-width: 22rem;
+}
+
+.compareHeaderTabs {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+
+.compareHeaderTabs .appSegmentedToggleButton {
+  white-space: nowrap;
+}
+
+.compareTickerSearchMenu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 0.45rem;
+  background: #fff;
+  box-shadow: 0 0.75rem 1.5rem rgba(15, 23, 42, 0.12);
+}
+
+.compareTickerSearchOption {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  align-items: center;
+  padding: 0.65rem 0.85rem;
+  border: 0;
+  border-bottom: 1px solid #eef2f7;
+  background: transparent;
+  color: #1f2937;
+  text-align: left;
+}
+
+.compareTickerSearchOption:hover,
+.compareTickerSearchOption.is-active {
+  background: #f1f5f9;
+}
+
+.compareTickerSearchOption span {
+  font-weight: 800;
+}
+
+.compareTickerSearchOption small {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareTickerSearchEmpty {
+  padding: 0.75rem;
+  color: #64748b;
+  font-weight: 700;
+  text-align: center;
+}
+
+@media (max-width: 768px) {
+  .compareTickerSearchField {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+.compareTitleMeta {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  color: #64748b;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.compareLoading,
+.compareEmpty {
+  padding: 1rem;
+  border: 1px dashed #d8e0ec;
+  border-radius: 0.5rem;
+  color: #64748b;
+  font-weight: 700;
+  text-align: center;
+}
+
+.compareHeroGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1rem;
-  align-items: stretch;
+}
+
+.compareHeroCard,
+.compareSection {
+  border: 1px solid #dbe3ef;
+  border-radius: 0.5rem;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.compareHeroCard {
+  padding: 1rem;
+  border-top-width: 0.25rem;
+}
+
+.compareHeroCard.is-a {
+  border-top-color: #d32f2f;
+}
+
+.compareHeroCard.is-b {
+  border-top-color: #1d4ed8;
+}
+
+.compareHeroTicker {
+  color: #111827;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+
+.compareHeroName {
+  margin-top: 0.25rem;
+  min-height: 1.4rem;
+  color: #64748b;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.compareHeroPrice {
+  margin-top: 0.7rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.compareHeroPrice strong {
+  color: #1f2937;
+  font-size: 1.25rem;
+}
+
+.compareSection {
+  padding: 1rem;
+}
+
+.compareSectionHeader {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.compareSectionHeader h2 {
+  margin: 0;
+  color: #111827;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.compareSectionMeta {
+  color: #64748b;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-align: right;
+}
+
+.compareLegend {
+  display: flex;
+  gap: 0.85rem;
+  align-items: center;
+  color: #64748b;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.compareLegend span {
+  display: inline-flex;
+  gap: 0.35rem;
+  align-items: center;
+}
+
+.compareLegendSwatch {
+  width: 0.8rem;
+  height: 0.18rem;
+  border-radius: 999px;
+}
+
+.compareLegendSwatch.is-a {
+  background: #d32f2f;
+}
+
+.compareLegendSwatch.is-b {
+  background: #1d4ed8;
+}
+
+.compareChart {
+  width: 100%;
+  min-height: 280px;
+}
+
+.compareMetricsTableWrap,
+.compareHoldingsTableWrap {
+  overflow: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.45rem;
+}
+
+.compareMetricsTable,
+.compareHoldingsTable {
+  width: 100%;
+  border-collapse: collapse;
+  color: #1f2937;
+  font-size: 0.92rem;
+}
+
+.compareMetricsTable th,
+.compareMetricsTable td,
+.compareHoldingsTable th,
+.compareHoldingsTable td {
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid #e2e8f0;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.compareMetricsTable th,
+.compareHoldingsTable th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 800;
+}
+
+.compareMetricsTable td:not(:first-child),
+.compareMetricsTable th:not(:first-child),
+.compareHoldingsTable td:nth-child(n + 3),
+.compareHoldingsTable th:nth-child(n + 3) {
+  text-align: right;
+}
+
+.compareHoldingsTable td:nth-child(2) {
+  min-width: 16rem;
+  white-space: normal;
+}
+
+.compareTabBar {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.compareTabBar .appSegmentedToggleButton {
+  border-radius: 999px;
+  padding: 0.7rem 1.1rem;
+  background: #f2f4f8;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.compareTabBar .appSegmentedToggleButton.is-active {
+  background: #0b4ea2;
+  color: #fff;
+}
+
+.compareAsOfText {
+  margin-left: 0.4rem;
+  color: #64748b;
+  font-weight: 700;
+}
+
+.compareMatrix {
+  display: grid;
+  grid-template-columns: 6rem 5.5rem repeat(5, minmax(12rem, 1fr));
+  overflow: hidden;
+  border: 1px solid #d6deea;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.compareMatrixWithTotal {
+  grid-template-columns: 6rem 5.5rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+}
+
+.compareMatrixBody {
+  border-top: 0;
+}
+
+.compareMatrixLabel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 6rem;
+  padding: 0.9rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #f3f6fc;
+  color: #1f2937;
+  font-weight: 800;
+  text-align: center;
+}
+
+.compareMatrixLabelWide {
+  grid-column: span 2;
+}
+
+.compareProductHeaderLabel,
+.compareProductHeaderEmpty {
+  height: 8rem;
+  min-height: 8rem;
+}
+
+.compareMetricsGroupLabel {
+  min-height: 3.5rem;
+}
+
+.compareMetricPeriodLabel,
+.compareMetricCell {
+  display: flex;
+  align-items: center;
+  min-height: 3.5rem;
+  padding: 0.75rem 1rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.compareMetricPeriodLabel {
+  justify-content: center;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.compareMetricCell {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.compareMetricCell.metricPositive {
+  color: #d32f2f;
+}
+
+.compareMetricCell.metricNegative {
+  color: #1d4ed8;
+}
+
+.compareProductCard,
+.compareProductEmpty,
+.compareHoldingCount,
+.compareBasicCell {
+  position: relative;
+  min-height: 6rem;
+  padding: 1rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+}
+
+.compareProductCard {
+  display: grid;
+  grid-template-rows: auto minmax(2.5rem, auto) auto;
+  align-content: start;
+  row-gap: 0.45rem;
+  height: 8rem;
+  min-height: 8rem;
+  padding-right: 2.75rem;
+  border-top: 3px solid transparent;
+}
+
+.compareBasicCell {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  text-align: right;
+}
+
+.compareBasicCompactLabel,
+.compareBasicCompactCell {
+  min-height: 3.25rem;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+}
+
+.compareBasicValue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.compareBasicValue strong:not(.metricPositive):not(.metricNegative),
+.compareBasicCell strong:not(.metricPositive):not(.metricNegative) {
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.compareBasicValue span {
+  font-weight: 700;
+}
+
+.compareBasicBreakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  align-items: flex-end;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.comparePortfolioBreakdownList {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.3rem;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.comparePortfolioBreakdownItem {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  align-items: baseline;
+}
+
+.comparePortfolioBreakdownFx {
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.compareProductEmpty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-weight: 700;
+  text-align: center;
+}
+
+.compareProductRemove {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border: 0;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #6b7280;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.compareProductCode {
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.compareProductName {
+  min-height: 2.4rem;
+  overflow: hidden;
+  color: #1f2937;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.compareProductPrice {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  color: #64748b;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.compareMatrixWide {
+  grid-column: span 5;
+  min-width: 0;
+  padding: 1rem;
+  border-bottom: 1px solid #d6deea;
+}
+
+.comparePerformanceToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+
+.comparePerformanceToolbar .appSegmentedToggleButton {
+  min-width: 4.5rem;
+}
+
+.comparePerformanceHint {
+  color: #64748b;
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.comparePerformanceHint.is-warning {
+  color: #dc2626;
+}
+
+.compareHoldingCount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.55rem 1rem;
+  color: #1f2937;
+  font-size: 1.1rem;
+  font-weight: 900;
+}
+
+.compareHoldingTotalHeader,
+.compareHoldingTotalCount,
+.compareHoldingTotalCell {
+  background: #f8fafc;
+}
+
+.compareHoldingTotalHeader,
+.compareHoldingTotalCount {
+  color: #1f2937;
+}
+
+.compareHoldingCountLabel,
+.compareHoldingCountEmpty {
+  min-height: 3rem;
+  padding-top: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.compareHoldingsGroupLabel {
+  min-height: 4.15rem;
+}
+
+.compareHoldingRankLabel,
+.compareHoldingCell {
+  min-height: 4.15rem;
+  padding: 0.5rem 0.65rem;
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+}
+
+.compareHoldingRankLabel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
+  color: #1f2937;
+  font-weight: 800;
+}
+
+.compareHoldingCell {
+  min-width: 0;
+  overflow: hidden;
+  color: #1f2937;
+}
+
+.compareHoldingCell.is-matched {
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
+}
+
+.compareHoldingFooter {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-top: 0.15rem;
+  font-weight: 800;
+}
+
+.compareHoldingFooter strong {
+  color: #1f2937;
+}
+
+.compareHoldingTotalCell {
+  color: #1f2937;
+}
+
+.compareHoldingsTopTable {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.compareHoldingsTopTable th,
+.compareHoldingsTopTable td {
+  padding: 0.75rem;
+  border: 1px solid #d6deea;
+  vertical-align: top;
+}
+
+.compareHoldingsTopTable th {
+  width: 4rem;
+  background: #f3f6fc;
+  color: #1f2937;
+  text-align: center;
+}
+
+.compareHoldingsTopTable td {
+  min-width: 0;
+}
+
+.compareHoldingName {
+  overflow: hidden;
+  color: #1f2937;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.compareHoldingCode {
+  margin-top: 0.1rem;
+  color: #9ca3af;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
+.compareHoldingsTopTable strong {
+  display: block;
+  margin-top: 0.35rem;
+  color: #1f2937;
+  text-align: right;
+}
+
+.tickerDetailChartToolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailChartMaLegend {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.tickerDetailChartMaLabel {
+  font-size: 12px;
+  color: #5b6778;
+  font-weight: 600;
+}
+
+.tickerDetailChartMaItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.tickerDetailChartMaSwatch {
+  width: 14px;
+  height: 2px;
+  display: inline-block;
 }
 
 .tickerDetailHoldingsPanel {
+  grid-area: holdings;
   display: flex;
-  height: 420px;
+  height: 476px;
   min-height: 0;
   min-width: 0;
   flex-direction: column;
+}
+
+.tickerDetailLayoutGrid > .tickerDetailChartWrap {
+  grid-area: chart;
+}
+
+.tickerDetailLayoutGrid > .tickerDetailTablePanel {
+  grid-area: table;
+}
+
+.tickerDetailClassicLayout > .tickerDetailChartWrap {
+  min-height: 520px;
+}
+
+.tickerDetailTables {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  min-width: 0;
 }
 
 .tickerDetailHoldingsGrid .ag-cell.tickerDetailCodeCell,
@@ -1753,6 +2748,24 @@ a {
   transform: translateX(-50%);
 }
 
+.tickerDetailAverageBadge {
+  position: absolute;
+  left: 1.5rem;
+  z-index: 3;
+  pointer-events: none;
+  max-width: 12rem;
+  padding: 0.25rem 0.55rem;
+  border: 1px solid #cfd6e4;
+  border-radius: 0.35rem;
+  background: #fff;
+  color: #1f2937;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 .tickerDetailChartBadge.is-high .tickerDetailChartBadgeArrow {
   bottom: -0.9rem;
 }
@@ -1794,7 +2807,7 @@ a {
   --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
 }
 
-@media (max-width: 991.98px) {
+@media (max-width: 0px) {
   .pageFrameTitle {
     align-items: flex-start;
     flex-direction: column;
@@ -1821,12 +2834,18 @@ a {
     font-size: 1rem;
   }
 
+  .tickerDetailLayoutGrid,
+  .tickerDetailClassicLayout,
   .tickerDetailTables {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .tickerDetailTopGrid {
-    grid-template-columns: minmax(0, 1fr);
+  .tickerDetailLayoutGrid {
+    grid-template-areas:
+      "info"
+      "holdings"
+      "chart"
+      "table";
   }
 
   .tickerDetailHoldingsPanel {
@@ -1880,6 +2899,28 @@ a {
 .appAgGridThemeLegacy .ag-cell-value {
   user-select: text;
   -webkit-user-select: text;
+}
+
+.appAgGridTheme .ag-cell.appTextEllipsisCell,
+.appAgGridThemeLegacy .ag-cell.appTextEllipsisCell,
+.appAgGridTheme .ag-cell.appTextEllipsisCell .ag-cell-wrapper,
+.appAgGridThemeLegacy .ag-cell.appTextEllipsisCell .ag-cell-wrapper,
+.appAgGridTheme .ag-cell.appTextEllipsisCell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.appTextEllipsisCell .ag-cell-value {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.appGridNumericValue {
+  display: flex;
+  width: 100%;
+  justify-content: flex-end;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
 }
 
 .appAgGridTheme .ag-row.appHeldRow {
@@ -2011,6 +3052,30 @@ a {
   overflow: hidden;
 }
 
+.assetsNoteSection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 0.25rem;
+}
+
+.assetsNoteSectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.assetsNoteSectionHeader .noteMetaRow {
+  margin-bottom: 0;
+}
+
+.assetsNoteTextarea {
+  min-height: 8.5rem;
+  max-height: 14rem;
+  margin-bottom: 0;
+}
+
 .assetsChildAgGrid .ag-body-vertical-scroll {
   display: none !important;
 }
@@ -2098,6 +3163,20 @@ a {
 
 .rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow:hover {
   background: rgba(102, 180, 102, 0.45);
+}
+
+.rankAgGrid .ag-row.rankFixedRow,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow,
+.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow {
+  background: rgba(199, 210, 254, 0.5);
+}
+
+.rankAgGrid .ag-row.rankFixedRow:hover,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow:hover,
+.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow:hover,
+.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow:hover {
+  background: rgba(199, 210, 254, 0.62);
 }
 
 .rankAgGrid .ag-cell-value,
@@ -2189,6 +3268,21 @@ a {
 
 .stocksAgGrid .ag-row.ag-row-selected:hover {
   background: rgba(32, 107, 196, 0.12);
+}
+
+.usMarketStockGrid .ag-cell.usMarketStockTextCell,
+.usMarketStockGrid .ag-cell.usMarketStockTextCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.usMarketStockTruncate {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tickerDetailNameCell,
@@ -2527,6 +3621,21 @@ a {
   width: 100%;
 }
 
+.appResponsiveFiltersField {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  margin: 0;
+}
+
+.appResponsiveFiltersToggle {
+  min-height: 32px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .marketMainHeader {
   flex-wrap: nowrap;
 }
@@ -2612,14 +3721,6 @@ a {
 
 .weeklyMainHeaderLeft .appLabeledField:first-child {
   flex: 0 0 auto;
-}
-
-.noteMainHeaderLeft .appLabeledField {
-  width: auto;
-}
-
-.noteMainHeaderLeft .appLabeledField:first-child {
-  flex: 0 0 14rem;
 }
 
 .noteMetaRow {
@@ -2908,31 +4009,11 @@ a {
   margin: 0;
 }
 
-.bulkTextarea {
-  width: 100%;
-  min-height: 65vh;
-  resize: vertical;
-  padding: 12px 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.92);
-  color: var(--ink);
-  font: inherit;
-  line-height: 1.5;
-  margin-bottom: 12px;
-}
-
-.bulkTextarea:focus {
-  outline: none;
-  border-color: rgba(31, 107, 70, 0.28);
-  box-shadow: 0 0 0 3px rgba(31, 107, 70, 0.08);
-}
-
 .prelineText {
   white-space: pre-line;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 0px) {
   .appToastViewport {
     top: calc(var(--app-header-height) + 0.5rem);
     left: 0.75rem;
@@ -2956,11 +4037,18 @@ a {
     position: sticky;
     top: 0;
     z-index: 1050;
+    height: auto;
+    min-height: 0;
   }
 
   .appTopHeaderInner {
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
   }
 
   .appHeaderLeft {
@@ -2970,12 +4058,13 @@ a {
   .appMobileHeader {
     display: flex;
     min-height: var(--app-header-height);
-    height: 100%;
+    height: auto;
     gap: 0.375rem;
+    width: 100%;
   }
 
   .appMobileBrand {
-    font-size: 1.65rem;
+    font-size: 1.35rem;
     line-height: 1;
   }
 
@@ -3100,10 +4189,6 @@ a {
     flex: 1 1 100%;
   }
 
-  .noteMainHeaderLeft .appLabeledField {
-    flex: 1 1 100%;
-  }
-
   .accountSelect {
     min-width: 0;
     max-width: none;
@@ -3119,12 +4204,37 @@ a {
     min-width: 0;
     justify-content: flex-start;
     flex-wrap: wrap;
+    gap: 0.3rem 0.6rem;
+    white-space: normal;
+    line-height: 1.2;
   }
 
   .topbarTickerSearchItem {
     width: 100%;
     margin-left: 0;
-    margin-top: 0.25rem;
+    margin-top: 0;
+    order: -1;
+  }
+
+  .topbarFxItem {
+    flex: 0 1 auto;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .topbarFxItem strong {
+    font-size: 1.1rem;
+  }
+
+  .topbarSentimentItem {
+    margin-right: 0;
+    white-space: normal;
+  }
+
+  .topbarSentimentLabel,
+  .topbarSentimentValue {
+    white-space: normal;
+    flex-wrap: wrap;
   }
 
   .globalTickerSearch {
@@ -3171,7 +4281,13 @@ a {
   }
 }
 
-@media (max-width: 700px) {
+@media (max-width: 1280px) {
+  .topbarTickerSearchItem {
+    display: none;
+  }
+}
+
+@media (max-width: 0px) {
   .pageHeaderCompact h1 {
     font-size: 22px;
   }
@@ -3188,5 +4304,19 @@ a {
 }
 
 .korMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
+  flex: 0 0 11rem;
+}
+
+/* ─── 미국 개별주 마켓 ─── */
+
+.usMarketStockMainHeaderLeft .appLabeledField {
+  width: auto;
+}
+
+.usMarketStockMainHeaderLeft .appLabeledField:first-child {
+  flex: 0 0 auto;
+}
+
+.usMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
   flex: 0 0 9rem;
 }

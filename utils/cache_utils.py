@@ -172,27 +172,46 @@ def _get_refresh_status_collection():
 
 
 def get_cache_lookup_keys(account_id: str) -> list[str]:
-    """캐시 조회 시도 순서를 반환한다.
+    """캐시 조회 키를 반환한다.
 
-    계좌 ID가 전달되면 해당 계좌의 ticker_codes 설정을 기반으로
-    실제 캐시 컬렉션 키 목록을 반환한다.
+    암묵적인 fallback 없이, 전달된 account_id/ticker_type 자신만 조회한다.
     """
     token = (account_id or "").strip().lower()
     if not token:
         return []
-
-    # 계좌 설정에서 ticker_codes를 읽어 캐시 조회 키로 사용
-    try:
-        from utils.settings_loader import get_account_settings
-
-        settings = get_account_settings(token)
-        ticker_codes = settings.get("ticker_codes")
-        if isinstance(ticker_codes, list) and ticker_codes:
-            return [str(tc).strip().lower() for tc in ticker_codes if str(tc).strip()]
-    except Exception:
-        pass
-
     return [token]
+
+
+def get_all_ticker_type_lookup_keys() -> list[str]:
+    """모든 종목풀 캐시 키를 명시적으로 반환한다."""
+    from utils.settings_loader import list_available_ticker_types
+
+    return [str(ticker_type).strip().lower() for ticker_type in list_available_ticker_types() if str(ticker_type).strip()]
+
+
+def _load_cached_frames_bulk_from_keys(cache_keys: Iterable[str], tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
+    normalized = []
+    for ticker in tickers:
+        norm = (ticker or "").strip().upper()
+        if norm:
+            normalized.append(norm)
+    if not normalized:
+        return {}
+
+    frames: dict[str, pd.DataFrame] = {}
+    missing = set(normalized)
+
+    for cache_key in cache_keys:
+        key_norm = str(cache_key or "").strip().lower()
+        if not key_norm or not missing:
+            continue
+        fetched = load_cached_frames_bulk(key_norm, missing)
+        if not fetched:
+            continue
+        frames.update(fetched)
+        missing -= set(fetched.keys())
+
+    return frames
 
 
 def _deserialize_cached_doc(doc: dict[str, Any], collection=None) -> pd.DataFrame | None:
@@ -560,27 +579,27 @@ def load_cached_close_series_bulk_before_or_at(
 
 def load_cached_frames_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
     """계좌 캐시를 조회한다."""
-    normalized = []
-    for ticker in tickers:
-        norm = (ticker or "").strip().upper()
-        if norm:
-            normalized.append(norm)
-    if not normalized:
-        return {}
+    return _load_cached_frames_bulk_from_keys(get_cache_lookup_keys(account_id), tickers)
 
-    frames: dict[str, pd.DataFrame] = {}
-    missing = set(normalized)
 
-    for cache_key in get_cache_lookup_keys(account_id):
-        if not missing:
-            break
-        fetched = load_cached_frames_bulk(cache_key, missing)
-        if not fetched:
-            continue
-        frames.update(fetched)
-        missing -= set(fetched.keys())
+def load_cached_frames_bulk_from_all_ticker_types(tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
+    """모든 종목풀 캐시에서 순서대로 조회한다.
 
-    return frames
+    계좌 보유 화면처럼 종목풀이 섞일 수 있는 경우에만 명시적으로 사용한다.
+    """
+    return _load_cached_frames_bulk_from_keys(get_all_ticker_type_lookup_keys(), tickers)
+
+
+def load_cached_frames_bulk_from_ticker_types(
+    ticker_types: Iterable[str],
+    tickers: Iterable[str],
+) -> dict[str, pd.DataFrame]:
+    """지정한 종목풀 캐시에서만 순서대로 OHLCV 프레임을 조회한다."""
+    cache_keys = [str(ticker_type or "").strip().lower() for ticker_type in ticker_types]
+    cache_keys = [ticker_type for ticker_type in cache_keys if ticker_type]
+    if not cache_keys:
+        raise ValueError("조회할 ticker_types가 필요합니다.")
+    return _load_cached_frames_bulk_from_keys(cache_keys, tickers)
 
 
 def load_cached_close_series_bulk_with_fallback(account_id: str, tickers: Iterable[str]) -> dict[str, pd.Series]:
@@ -830,11 +849,18 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
 
     ticker_norm = (ticker or "").strip().upper()
 
+    # [HOTFIX] 직렬화 오류 방지를 위한 정규화 및 중복 컬럼 제거
+    df_to_save.columns = [str(c) for c in df_to_save.columns]
+    df_to_save = df_to_save.loc[:, ~df_to_save.columns.duplicated()]
+    if hasattr(df_to_save.index, "name"):
+        df_to_save.index.name = None
+
     buf = io.BytesIO()
     try:
         df_to_save.to_parquet(buf, engine="pyarrow", compression="snappy")
     except Exception as exc:
-        raise RuntimeError(f"캐시 직렬화 실패 ({ticker_norm})") from exc
+        logger.error(f"캐시 직렬화 오류 발생 ({ticker_norm}): {exc}")
+        raise RuntimeError(f"캐시 직렬화 실패 ({ticker_norm}): {exc}") from exc
 
     payload = Binary(buf.getvalue())
 

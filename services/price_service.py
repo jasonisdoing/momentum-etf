@@ -9,6 +9,7 @@ from config import MARKET_SCHEDULES
 from utils.data_loader import (
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
+    fetch_naver_worldstock_snapshot,
     fetch_naver_stock_realtime_snapshot,
     fetch_toss_us_stock_snapshot,
     get_latest_trading_day,
@@ -26,10 +27,12 @@ logger = get_app_logger()
 # key: "{country}:{ticker}" → {"data": {...}, "fetched_at": dt, "expires_at": dt, "source": str}
 _TICKER_PRICE_CACHE: dict[str, dict[str, Any]] = {}
 
-_KOR_ACTIVE_TTL_SECONDS = 30
+_KOR_ACTIVE_TTL_SECONDS = 60
 _AU_ACTIVE_TTL_SECONDS = 60
 _US_ACTIVE_TTL_SECONDS = 60
-_IDLE_TTL_SECONDS = 3600
+_WORLDSTOCK_TTL_SECONDS = 900
+_YAHOO_SYMBOL_TTL_SECONDS = 900
+_IDLE_TTL_SECONDS = 60
 _FX_TTL_SECONDS = 3600
 
 # 하위 호환: 기존 쿼리 단위 캐시 (환율 전용으로 유지)
@@ -103,10 +106,110 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
     return {**cached_result, **fetched_filtered}
 
 
-def get_exchange_rates() -> dict[str, Any]:
-    """USD/KRW, AUD/KRW 환율을 반환한다."""
+def get_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str, float | str]]:
+    """Reuters code 기반 해외 종목 지연 시세를 반환한다."""
 
-    cache_key = "fx:usd_aud"
+    normalized_codes = _normalize_tickers(reuters_codes)
+    if not normalized_codes:
+        return {}
+
+    now = datetime.now()
+    cached_result: dict[str, dict[str, float | str]] = {}
+    expired_codes: list[str] = []
+
+    for code in normalized_codes:
+        cache_key = f"worldstock:{code}"
+        entry = _TICKER_PRICE_CACHE.get(cache_key)
+        fetched_at = entry.get("fetched_at") if entry else None
+        is_alive = (
+            entry is not None
+            and isinstance(fetched_at, datetime)
+            and (now - fetched_at).total_seconds() < _WORLDSTOCK_TTL_SECONDS
+        )
+        if is_alive:
+            cached_result[code] = entry["data"]  # type: ignore[index]
+        else:
+            expired_codes.append(code)
+
+    if not expired_codes:
+        return cached_result
+
+    try:
+        fetched_data = fetch_naver_worldstock_snapshot(expired_codes)
+    except Exception as exc:
+        logger.warning("네이버 worldstock 조회 실패로 stale 캐시를 재사용합니다. error=%s", exc)
+        stale_result: dict[str, dict[str, float | str]] = {}
+        for code in expired_codes:
+            entry = _TICKER_PRICE_CACHE.get(f"worldstock:{code}")
+            if entry and "data" in entry:
+                entry["is_stale"] = True
+                stale_result[code] = entry["data"]
+        return {**cached_result, **stale_result}
+
+    fetched_at = datetime.now()
+    expires_at = fetched_at + timedelta(seconds=_WORLDSTOCK_TTL_SECONDS)
+    for code, data in fetched_data.items():
+        _TICKER_PRICE_CACHE[f"worldstock:{code}"] = {
+            "data": data,
+            "fetched_at": fetched_at,
+            "expires_at": expires_at,
+            "source": "naver_worldstock",
+            "is_stale": False,
+        }
+
+    fetched_filtered = {code: fetched_data[code] for code in expired_codes if code in fetched_data}
+    return {**cached_result, **fetched_filtered}
+
+
+def get_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, float]]:
+    """Yahoo 심볼 기반 지연 시세를 반환한다."""
+
+    normalized_symbols = _normalize_tickers(symbols)
+    if not normalized_symbols:
+        return {}
+
+    now = datetime.now()
+    cached_result: dict[str, dict[str, float]] = {}
+    expired_symbols: list[str] = []
+
+    for symbol in normalized_symbols:
+        cache_key = f"yahoo:{symbol}"
+        entry = _TICKER_PRICE_CACHE.get(cache_key)
+        fetched_at = entry.get("fetched_at") if entry else None
+        is_alive = (
+            entry is not None
+            and isinstance(fetched_at, datetime)
+            and (now - fetched_at).total_seconds() < _YAHOO_SYMBOL_TTL_SECONDS
+        )
+        if is_alive:
+            cached_result[symbol] = entry["data"]  # type: ignore[index]
+        else:
+            expired_symbols.append(symbol)
+
+    if not expired_symbols:
+        return cached_result
+
+    fetched_data = _fetch_yahoo_symbol_snapshot(expired_symbols)
+
+    fetched_at = datetime.now()
+    expires_at = fetched_at + timedelta(seconds=_YAHOO_SYMBOL_TTL_SECONDS)
+    for symbol, data in fetched_data.items():
+        _TICKER_PRICE_CACHE[f"yahoo:{symbol}"] = {
+            "data": data,
+            "fetched_at": fetched_at,
+            "expires_at": expires_at,
+            "source": "yahoo_download",
+            "is_stale": False,
+        }
+
+    fetched_filtered = {symbol: fetched_data[symbol] for symbol in expired_symbols if symbol in fetched_data}
+    return {**cached_result, **fetched_filtered}
+
+
+def get_exchange_rates() -> dict[str, Any]:
+    """주요 통화의 원화 환율을 반환한다."""
+
+    cache_key = "fx:major"
     cached_entry = _FX_CACHE.get(cache_key)
     now = datetime.now()
 
@@ -291,14 +394,7 @@ def _reuse_stale_fx_cache(cache_key: str, exc: Exception) -> dict[str, Any] | No
 
 
 def _get_realtime_ttl_seconds(country: str) -> int:
-    if _is_market_active(country):
-        if country == "kor":
-            return _KOR_ACTIVE_TTL_SECONDS
-        if country == "au":
-            return _AU_ACTIVE_TTL_SECONDS
-        if country == "us":
-            return _US_ACTIVE_TTL_SECONDS
-    return _IDLE_TTL_SECONDS
+    return 60
 
 
 def _is_market_active(country: str) -> bool:
@@ -337,6 +433,12 @@ def _fetch_exchange_rates() -> dict[str, Any]:
     mapping = {
         "USD": "KRW=X",
         "AUD": "AUDKRW=X",
+        "JPY": "JPYKRW=X",
+        "CNY": "CNYKRW=X",
+        "TWD": "TWDKRW=X",
+        "HKD": "HKDKRW=X",
+        "GBP": "GBPKRW=X",
+        "EUR": "EURKRW=X",
     }
     rates: dict[str, Any] = {}
     missing_currencies: list[str] = []
@@ -368,6 +470,66 @@ def _fetch_exchange_rates() -> dict[str, Any]:
     return rates
 
 
+def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, float]]:
+    import pandas as pd
+    import yfinance as yf
+
+    normalized_symbols = [str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()]
+    if not normalized_symbols:
+        return {}
+
+    result: dict[str, dict[str, float]] = {}
+    downloaded = yf.download(
+        normalized_symbols,
+        period="7d",
+        interval="1d",
+        auto_adjust=False,
+        progress=False,
+        group_by="ticker",
+        threads=True,
+    )
+    if downloaded is None or downloaded.empty:
+        return result
+
+    def _extract_symbol_frame(symbol: str) -> pd.DataFrame | None:
+        if isinstance(downloaded.columns, pd.MultiIndex):
+            if symbol not in downloaded.columns.get_level_values(0):
+                return None
+            frame = downloaded[symbol].copy()
+        else:
+            if len(normalized_symbols) != 1:
+                return None
+            frame = downloaded.copy()
+        if frame.empty or "Close" not in frame.columns:
+            return None
+        return frame
+
+    for symbol in normalized_symbols:
+        frame = _extract_symbol_frame(symbol)
+        if frame is None:
+            continue
+
+        close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        if close_series.empty:
+            continue
+
+        now_val = float(close_series.iloc[-1])
+        prev_close = None
+        if len(close_series) >= 2:
+            prev_close = float(close_series.iloc[-2])
+
+        change_rate = None
+        if prev_close not in (None, 0):
+            change_rate = round(((now_val - prev_close) / prev_close) * 100.0, 2)
+
+        result[symbol] = {
+            "nowVal": now_val,
+            "prevClose": prev_close,
+            "changeRate": change_rate,
+        }
+
+    return result
+
 __all__ = [
     "clear_price_service_cache",
     "get_exchange_rate_series",
@@ -375,4 +537,6 @@ __all__ = [
     "get_realtime_cache_meta",
     "get_realtime_snapshot",
     "get_realtime_snapshot_meta",
+    "get_worldstock_snapshot",
+    "get_yahoo_symbol_snapshot",
 ]

@@ -12,13 +12,14 @@
 
 **Momentum ETF**는 계좌 설정을 기반으로 동작하는 **ETF 순위 분석 시스템**입니다.
 현재 운영 모델은 다음과 같습니다.
-* 계좌(`zaccounts/*`): 등록된 전체 종목을 직접 관리하고 비중 조절로 운용
+* 계좌(`accounts.json`): 등록된 전체 종목을 직접 관리하고 비중 조절로 운용
+* 종목풀(`pools.json`): 순위/전략 계산에 사용하는 종목풀 메타데이터
 
 감정이나 직관에 의존하는 투자를 지양하고, **이동평균(MA)**과 **RSI** 등 기술적 지표를 활용하여 **"현재 계좌 종목의 상대 추세 강도를 비교하는"** 데이터 기반의 의사결정을 지원합니다.
 
 ## ✨ 주요 기능 (Key Features)
 
-*   **📊 계좌별 순위 화면**: 종목풀별 `MA_RULES` 기본값을 불러오고, 화면에서 `추세1`과 `추세2`를 각각 바꿔가며 점수와 규칙별 추세를 즉시 확인합니다.
+*   **📊 계좌별 순위 화면**: 종목풀별 `MA_TYPE`, `MA_MONTHS` 설정을 불러오고, 화면에서 단일 MA 기준 점수와 추세를 즉시 확인합니다.
 *   **🟩 실보유 강조 표시**: 실제 보유 종목은 순위 테이블에서 녹색 행으로 즉시 구분합니다.
 *   **🛡️ 데이터 안정성 (Robust Caching)**: **Apache Parquet** 포맷을 캐시 엔진으로 도입하여 라이브러리 버전 mismatch로부터 자유롭고 안정적인 데이터 로딩을 보장합니다.
 *   **🛠️ 종목 관리**: 계좌별 종목 추가/수정/삭제 및 삭제 종목 복원을 지원합니다.
@@ -31,6 +32,7 @@
 *   **[사용자 가이드 (User Guide)](docs/user_guide.md)**: 설치, 설정, 실행 방법, 결과 해석
 *   **[전략 로직 (Strategy Logic)](docs/strategy_logic.md)**: 이동평균 점수 계산 규칙과 정렬 기준
 *   **[개발자 가이드 (Developer Guide)](docs/developer_guide.md)**: 시스템 아키텍처, 데이터 파이프라인, 화면 구성
+*   **[백테스트 가이드](backtest/README.md)**: 백테스트 실행 방법, 설정, 출력 파일 설명
 
 ## ⚡️ 빠른 시작 (Quick Start)
 
@@ -51,7 +53,7 @@ pip install -r requirements.txt
 ```
 
 ### 2. 설정
-`config.py` 및 `zaccounts/<account>/config.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
+`config.py` 및 `accounts.json` 파일을 환경에 맞게 수정합니다. (상세 내용은 [사용자 가이드](docs/user_guide.md) 참고)
 
 ### 3. 실행
 
@@ -64,8 +66,8 @@ npm run dev
 웹에서 다음 기능을 사용합니다.
 * `http://localhost:3000/`
 * Home
-* 자산 관리 / 스냅샷 / 주별
-* 종목 관리 / ETF 마켓 / 계좌 메모 / AI용 요약 / 정보
+* 자산 관리 / 일별 / 주별 / 월별 / 스냅샷
+* 종목 관리 / 종목 비교 / 한국 개별주 / 미국 개별주 / 한국 ETF / 정보
 
 현재 기본 계좌 식별자는 다음과 같습니다.
 * 계좌: `kor_account`, `isa_account`, `pension_account`, `core_account`, `aus_account`

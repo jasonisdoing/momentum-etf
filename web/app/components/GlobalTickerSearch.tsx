@@ -50,8 +50,7 @@ function formatChangePct(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
   }
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}%`;
+  return `${value.toFixed(2)}%`;
 }
 
 function getChangeClass(value: number | null): string {
@@ -319,7 +318,11 @@ export function GlobalTickerSearch() {
                     </button>
                   ))}
                   {filteredTickers.length === 0 ? (
-                    <div className="globalTickerSearchEmpty">검색 결과가 없습니다.</div>
+                    topMoversLoading ? (
+                      <div className="globalTickerSearchEmpty">검색 데이터를 불러오는 중...</div>
+                    ) : (
+                      <div className="globalTickerSearchEmpty">검색 결과가 없습니다.</div>
+                    )
                   ) : null}
                 </div>
               </div>

@@ -20,6 +20,7 @@ type AppAgGridProps<TData> = {
   className?: string;
   getRowClass?: (params: RowClassParams<TData>) => string;
   getCellClass?: (params: CellClassParams<TData>) => string | string[] | undefined;
+  getRowId?: (params: { data: TData }) => string;
   gridOptions?: GridOptions<TData>;
   theme?: Theme | "legacy";
 };
@@ -31,6 +32,7 @@ export function AppAgGrid<TData>({
   minHeight = "24rem",
   className,
   getRowClass,
+  getRowId,
   gridOptions,
   theme = "legacy",
 }: AppAgGridProps<TData>) {
@@ -53,6 +55,7 @@ export function AppAgGrid<TData>({
             resizable: true,
           }}
           getRowClass={getRowClass}
+          getRowId={getRowId}
           {...gridOptions}
         />
       </div>

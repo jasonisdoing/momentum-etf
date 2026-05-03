@@ -10,6 +10,7 @@ import {
   CandlestickSeries,
   LineSeries,
   HistogramSeries,
+  LineStyle,
 } from "lightweight-charts";
 import type {
   IChartApi,
@@ -18,7 +19,6 @@ import type {
   Time,
   MouseEventParams,
 } from "lightweight-charts";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { ColDef, GridApi, GridReadyEvent } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -26,6 +26,9 @@ import { useToast } from "../components/ToastProvider";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
 import { readRememberedTickerType } from "../components/account-selection";
+import { createAppGridTheme } from "../components/app-grid-theme";
+import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
+import type { PortfolioChangeBreakdownItem } from "@/lib/portfolio-change";
 
 // --- 타입 ---
 
@@ -34,6 +37,8 @@ type TickerItem = {
   name: string;
   ticker_type: string;
   country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type PriceRow = {
@@ -57,16 +62,43 @@ type MonthlyPriceRow = {
 };
 
 type ChartInterval = "day" | "week" | "month";
+type HistoryTab = "daily" | "monthly";
 
 type TickerDetailResponse = {
   ticker: string;
   rows: PriceRow[];
+  etf_info?: TickerEtfInfo | null;
   holdings: TickerHoldingRow[];
   holdings_as_of_date?: string | null;
   holdings_price_as_of_date?: string | null;
   holdings_error?: string | null;
+  my_average_buy_price?: number | null;
   error?: string;
 };
+
+type TickerEtfInfo = {
+  nav?: number | null;
+  nav_change?: number | null;
+  nav_change_pct?: number | null;
+  deviation?: number | null;
+  expense_ratio?: number | null;
+  dividend_yield_ttm?: number | null;
+  total_net_assets_eok?: number | null;
+  market_cap_krw?: number | null;
+  volume?: number | null;
+  fx_rate?: number | null;
+  fx_change_pct?: number | null;
+  fx_rates?: TickerFxRate[];
+  portfolio_change_base_date?: string | null;
+};
+
+type TickerFxRate = {
+  currency: string;
+  rate?: number | null;
+  change_pct?: number | null;
+};
+
+// PortfolioChangeBreakdownItem は @/lib/portfolio-change から import
 
 type TickerHoldingRow = {
   ticker: string;
@@ -80,12 +112,23 @@ type TickerHoldingRow = {
   current_price?: number | null;
   previous_close?: number | null;
   change_pct?: number | null;
+  cumulative_change_pct?: number | null;
+  baseline_price_date?: string | null;
   price_currency?: string | null;
   weight: number | null;
   is_us_pool_candidate?: boolean;
   in_us_pool?: boolean;
   is_kor_pool_candidate?: boolean;
   in_kor_pool?: boolean;
+};
+
+type TickerResolveItem = {
+  ticker: string;
+  name: string;
+  ticker_type: string;
+  country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type CrosshairInfo = {
@@ -104,6 +147,11 @@ type ChartRangeBadge = {
   tone: "high" | "low";
 };
 
+type ChartAverageBadge = {
+  top: number;
+  returnPct: number | null;
+};
+
 // --- 상수 ---
 
 const MA_PERIODS = [
@@ -113,25 +161,10 @@ const MA_PERIODS = [
   { period: 120, color: "#9C27B0", label: "120" },
 ];
 
-const gridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 34,
-    headerHeight: 36,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-  });
+const gridTheme = createAppGridTheme({
+  rowHeight: 34,
+  headerHeight: 36,
+});
 
 // --- 유틸 ---
 
@@ -142,6 +175,11 @@ function formatNumber(value: number | null, digits = 0): string {
 
 function formatPercent(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${value.toFixed(2)}%`;
+}
+
+function formatSignedPercent(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
@@ -150,12 +188,55 @@ function formatUnsignedPercent(value: number | null): string {
   return `${value.toFixed(2)}%`;
 }
 
+function formatRatioPercent(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  return `${value.toFixed(2)}%`;
+}
+
+function formatEok(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  const jo = Math.floor(value / 10_000);
+  const eok = Math.round(value % 10_000);
+  if (jo <= 0) {
+    return `${formatNumber(eok, 0)}억`;
+  }
+  if (eok <= 0) {
+    return `${formatNumber(jo, 0)}조`;
+  }
+  return `${formatNumber(jo, 0)}조 ${formatNumber(eok, 0)}억`;
+}
+
+function formatEokFromKrw(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return formatEok(value / 100_000_000);
+}
+
+function formatSignedPriceDelta(value: number | null, countryCode: string): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  const absValue = Math.abs(value);
+  if (absValue === 0) {
+    return "0";
+  }
+  return `${value > 0 ? "▲ " : "▼ "}${formatTickerPrice(absValue, countryCode)}`;
+}
+
 function formatDateWithWeekday(value: string): string {
   if (!value) return "-";
   const date = new Date(`${value}T00:00:00`);
   if (Number.isNaN(date.getTime())) return value;
   const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
   return `${value}(${weekdays[date.getDay()]})`;
+}
+
+function formatKoreanDateLabel(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
 }
 
 function getSignedClass(value: number | null): string {
@@ -286,6 +367,34 @@ function formatTickerPrice(value: number | null, countryCode: string): string {
     }).format(value)}`;
   }
 
+  if (normalized === "twd") {
+    return `${new Intl.NumberFormat("zh-TW", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)} TWD`;
+  }
+
+  if (normalized === "hkd") {
+    return `HK$${new Intl.NumberFormat("en-HK", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
+  if (normalized === "jpy") {
+    return `¥${new Intl.NumberFormat("ja-JP", {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(value)}`;
+  }
+
+  if (normalized === "gbp") {
+    return `£${new Intl.NumberFormat("en-GB", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value)}`;
+  }
+
   if (normalized === "cny") {
     return `${new Intl.NumberFormat("zh-CN", {
       minimumFractionDigits: 2,
@@ -308,6 +417,8 @@ function buildRangeBadgeText(
   const pct = anchorPrice === 0 ? null : ((currentPrice / anchorPrice) - 1) * 100;
   return `${formatTickerPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
 }
+
+// getCurrencyRegionLabel は @/lib/portfolio-change から import
 
 function getInitialVisibleLogicalRange(
   data: PriceRow[],
@@ -351,7 +462,7 @@ function getInitialVisibleLogicalRange(
 
 export function TickerDetailManager({
 }: {
-}) {
+  }) {
   const searchParams = useSearchParams();
   const toast = useToast();
 
@@ -370,9 +481,11 @@ export function TickerDetailManager({
   // 데이터
   const [rows, setRows] = useState<PriceRow[]>([]);
   const [holdings, setHoldings] = useState<TickerHoldingRow[]>([]);
+  const [etfInfo, setEtfInfo] = useState<TickerEtfInfo | null>(null);
   const [holdingsAsOfDate, setHoldingsAsOfDate] = useState<string | null>(null);
   const [holdingsPriceAsOfDate, setHoldingsPriceAsOfDate] = useState<string | null>(null);
   const [holdingsError, setHoldingsError] = useState<string | null>(null);
+  const [myAverageBuyPrice, setMyAverageBuyPrice] = useState<number | null>(null);
   const [addingPoolKeys, setAddingPoolKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -380,12 +493,14 @@ export function TickerDetailManager({
   const holdingsGridApiRef = useRef<GridApi<TickerHoldingRow> | null>(null);
   const addingPoolKeysRef = useRef<string[]>([]);
   const [chartInterval, setChartInterval] = useState<ChartInterval>("day");
+  const [historyTab, setHistoryTab] = useState<HistoryTab>("daily");
 
   // 차트
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const [crosshairInfo, setCrosshairInfo] = useState<CrosshairInfo | null>(null);
   const [chartBadges, setChartBadges] = useState<ChartRangeBadge[]>([]);
+  const [chartAverageBadge, setChartAverageBadge] = useState<ChartAverageBadge | null>(null);
 
   // --- 종목 목록 로드 ---
 
@@ -436,26 +551,57 @@ export function TickerDetailManager({
 
     setRows([]);
     setHoldings([]);
+    setEtfInfo(null);
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
     if (matches.length > 1) {
       const rememberedType = readRememberedTickerType();
       const bestMatch = matches.find((m) => m.ticker_type === rememberedType);
-      
+
       if (bestMatch) {
         setSelectedTicker(bestMatch);
         void loadTickerData(bestMatch);
         return;
       }
-      
+
+      // 접두사 없이 호출된 경우 미국(us) 풀을 우선 선택
+      const usMatch = matches.find((m) => m.country_code === "us");
+      if (usMatch) {
+        setSelectedTicker(usMatch);
+        void loadTickerData(usMatch);
+        return;
+      }
+
       setSelectedTicker(null);
       setError(`동일한 티커 ${qTicker}가 여러 종목풀(${matches.map(m => m.ticker_type).join(", ")})에 등록되어 있습니다.`);
       return;
     }
 
-    setSelectedTicker(null);
-    setError(`${qTicker} 티커를 찾지 못했습니다.`);
+    void (async () => {
+      try {
+        const response = await fetch(`/api/ticker-resolve?ticker=${encodeURIComponent(qTicker)}`, {
+          cache: "no-store",
+        });
+        const resolved = (await response.json()) as TickerResolveItem & { error?: string };
+        if (!response.ok) {
+          throw new Error(resolved.error || `${qTicker} 티커를 찾지 못했습니다.`);
+        }
+        const resolvedItem: TickerItem = {
+          ticker: resolved.ticker,
+          name: resolved.name,
+          ticker_type: resolved.ticker_type,
+          country_code: resolved.country_code,
+          is_etf: resolved.is_etf,
+          has_holdings: resolved.has_holdings,
+        };
+        setSelectedTicker(resolvedItem);
+        await loadTickerData(resolvedItem);
+      } catch (error) {
+        setSelectedTicker(null);
+        setError(error instanceof Error ? error.message : `${qTicker} 티커를 찾지 못했습니다.`);
+      }
+    })();
   }, [allTickers, qTicker, qTickerType, qCountryCode, qName]);
 
   // --- 데이터 로드 ---
@@ -472,6 +618,7 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
+    setMyAverageBuyPrice(null);
     setAddingPoolKeys([]);
     setCrosshairInfo(null);
     setChartBadges([]);
@@ -480,6 +627,12 @@ export function TickerDetailManager({
       const search = new URLSearchParams({
         ticker: item.ticker,
       });
+      if (item.ticker_type) {
+        search.set("ticker_type", item.ticker_type);
+      }
+      if (item.country_code) {
+        search.set("country_code", item.country_code);
+      }
       const response = await fetch(`/api/ticker-detail?${search.toString()}`, {
         cache: "no-store",
         signal: controller.signal,
@@ -493,10 +646,12 @@ export function TickerDetailManager({
           (candidate) => candidate.ticker === item.ticker && candidate.ticker_type === item.ticker_type,
         ) ?? item;
       setRows(payload.rows);
+      setEtfInfo(payload.etf_info ?? null);
       setHoldings(payload.holdings ?? []);
       setHoldingsAsOfDate(payload.holdings_as_of_date ?? null);
       setHoldingsPriceAsOfDate(payload.holdings_price_as_of_date ?? null);
       setHoldingsError(payload.holdings_error ?? null);
+      setMyAverageBuyPrice(payload.my_average_buy_price ?? null);
       persistRecentTickerSearch({
         ticker: matchedItem.ticker,
         name: matchedItem.name,
@@ -509,6 +664,7 @@ export function TickerDetailManager({
       if (err instanceof DOMException && err.name === "AbortError") return;
       setError(err instanceof Error ? err.message : "데이터를 불러오지 못했습니다.");
       setRows([]);
+      setEtfInfo(null);
       setHoldings([]);
       setHoldingsAsOfDate(null);
       setHoldingsPriceAsOfDate(null);
@@ -610,11 +766,13 @@ export function TickerDetailManager({
       }
       setCrosshairInfo(null);
       setChartBadges([]);
+      setChartAverageBadge(null);
       return;
     }
     if (chartRef.current) { chartRef.current.remove(); chartRef.current = null; }
     setCrosshairInfo(null);
     setChartBadges([]);
+    setChartAverageBadge(null);
 
     const container = chartContainerRef.current;
     const chart = createChart(container, {
@@ -629,9 +787,9 @@ export function TickerDetailManager({
     chartRef.current = chart;
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: "#26a69a", downColor: "#ef5350",
-      borderUpColor: "#26a69a", borderDownColor: "#ef5350",
-      wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+      upColor: "#e03131", downColor: "#206bc4",
+      borderUpColor: "#e03131", borderDownColor: "#206bc4",
+      wickUpColor: "#e03131", wickDownColor: "#206bc4",
       priceFormat: {
         type: "custom",
         minMove: priceMinMove,
@@ -643,8 +801,42 @@ export function TickerDetailManager({
         .filter((r) => r.open !== null && r.high !== null && r.low !== null && r.close !== null)
         .map((r) => ({ time: r.date as Time, open: r.open!, high: r.high!, low: r.low!, close: r.close! })),
     );
+    if (myAverageBuyPrice !== null && Number.isFinite(myAverageBuyPrice) && myAverageBuyPrice > 0) {
+      candleSeries.createPriceLine({
+        price: myAverageBuyPrice,
+        color: "#6b7280",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: "",
+      });
+    }
+
+    function updateAverageBadge() {
+      if (myAverageBuyPrice === null || !Number.isFinite(myAverageBuyPrice) || myAverageBuyPrice <= 0) {
+        setChartAverageBadge(null);
+        return;
+      }
+
+      const averageY = candleSeries.priceToCoordinate(myAverageBuyPrice);
+      if (averageY === null) {
+        setChartAverageBadge(null);
+        return;
+      }
+
+      const latestClose = chartRows[chartRows.length - 1]?.close ?? null;
+      const returnPct = latestClose !== null && latestClose > 0
+        ? ((latestClose / myAverageBuyPrice) - 1) * 100
+        : null;
+      const chartTop = container.offsetTop;
+      setChartAverageBadge({
+        top: chartTop + Math.max(8, Math.min(averageY - 16, container.clientHeight - 34)),
+        returnPct,
+      });
+    }
 
     function updateRangeBadges(logicalRange?: { from: number; to: number } | null) {
+      updateAverageBadge();
       const safeFrom = logicalRange ? Math.max(Math.floor(logicalRange.from), 0) : 0;
       const safeTo = logicalRange ? Math.min(Math.ceil(logicalRange.to), chartRows.length - 1) : chartRows.length - 1;
       const visibleRows = chartRows.slice(safeFrom, safeTo + 1).filter(
@@ -716,7 +908,7 @@ export function TickerDetailManager({
         .map((r, i) => {
           const prevClose = i > 0 ? chartRows[i - 1].close : null;
           const isUp = prevClose !== null && r.close !== null ? r.close >= prevClose : true;
-          return { time: r.date as Time, value: r.volume!, color: isUp ? "rgba(38, 166, 154, 0.3)" : "rgba(239, 83, 80, 0.3)" };
+          return { time: r.date as Time, value: r.volume!, color: isUp ? "rgba(224, 49, 49, 0.32)" : "rgba(32, 107, 196, 0.32)" };
         }),
     );
 
@@ -762,10 +954,11 @@ export function TickerDetailManager({
     return () => {
       observer.disconnect();
       setChartBadges([]);
+      setChartAverageBadge(null);
       chart.remove();
       chartRef.current = null;
     };
-  }, [chartInterval, chartRows, dateRowMap, priceMinMove, selectedCountryCode]);
+  }, [chartInterval, chartRows, dateRowMap, myAverageBuyPrice, priceMinMove, selectedCountryCode]);
 
   const reversedRows = useMemo(
     () => [...rows].reverse().map((r, i) => ({ ...r, id: `${r.date}-${i}` })),
@@ -791,7 +984,99 @@ export function TickerDetailManager({
     if (holdingsRows.length === 0) return "데이터 없음";
     return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
   }, [holdingsRows.length]);
+  const holdingsDirectionCounts = useMemo(() => {
+    let rising = 0;
+    let neutral = 0;
+    let falling = 0;
+    for (const row of holdingsRows) {
+      const changePct = row.change_pct;
+      if (changePct == null || Number.isNaN(changePct) || changePct === 0) {
+        neutral += 1;
+        continue;
+      }
+      if (changePct > 0) {
+        rising += 1;
+        continue;
+      }
+      falling += 1;
+    }
+    return { rising, neutral, falling };
+  }, [holdingsRows]);
 
+  const lastPriceRow = useMemo(() => rows[rows.length - 1] ?? null, [rows]);
+  const previousPriceRow = useMemo(() => rows[rows.length - 2] ?? null, [rows]);
+  const latestClose = lastPriceRow?.close ?? null;
+  const latestChangePct = lastPriceRow?.change_pct ?? null;
+  const latestChangeAmount = useMemo(() => {
+    if (latestClose === null || latestChangePct === null) {
+      return null;
+    }
+    if (previousPriceRow?.close != null) {
+      return latestClose - previousPriceRow.close;
+    }
+    const previousClose = latestClose / (1 + latestChangePct / 100);
+    if (!Number.isFinite(previousClose)) {
+      return null;
+    }
+    return latestClose - previousClose;
+  }, [latestClose, latestChangePct, previousPriceRow]);
+  const latestVolumeText = useMemo(() => {
+    const volume = etfInfo?.volume ?? lastPriceRow?.volume ?? null;
+    if (volume === null || Number.isNaN(volume)) {
+      return "-";
+    }
+    if (volume >= 10_000) {
+      return `${formatNumber(Math.floor(volume / 10_000), 0)}만`;
+    }
+    return formatNumber(volume, 0);
+  }, [etfInfo?.volume, lastPriceRow]);
+
+  const showKoreanEtfInfoSection = Boolean(
+    selectedTicker?.country_code === "kor" && selectedTicker?.is_etf && selectedTicker?.has_holdings,
+  );
+  const navDelta = etfInfo?.nav_change ?? null;
+  const navChangePct = etfInfo?.nav_change_pct ?? null;
+
+  const displayFxRates = useMemo<TickerFxRate[]>(() => {
+    return etfInfo?.fx_rates ?? [];
+  }, [etfInfo?.fx_rates]);
+  const fxRateByCurrency = useMemo(() => {
+    const map = new Map<string, TickerFxRate>();
+    displayFxRates.forEach((fx) => {
+      const currency = String(fx.currency || "").trim().toUpperCase();
+      if (!currency) {
+        return;
+      }
+      map.set(currency, fx);
+    });
+    return map;
+  }, [displayFxRates]);
+  const fxChangePctByCurrency = useMemo(() => {
+    const map = new Map<string, number>();
+    displayFxRates.forEach((fx) => {
+      const currency = String(fx.currency || "").trim().toUpperCase();
+      const changePct = fx.change_pct;
+      if (!currency || changePct == null || Number.isNaN(changePct)) {
+        return;
+      }
+      map.set(currency, changePct);
+    });
+    return map;
+  }, [displayFxRates]);
+
+  const portfolioChange = useMemo<{
+    total_pct: number | null;
+    breakdown: PortfolioChangeBreakdownItem[];
+  }>(() => {
+    const result = calcPortfolioChange(holdings, displayFxRates);
+    return {
+      total_pct: result.totalPct,
+      breakdown: result.breakdown,
+    };
+  }, [holdings, displayFxRates]);
+  const portfolioChangePct = portfolioChange.total_pct;
+  const portfolioChangeBreakdown = portfolioChange.breakdown;
+  const portfolioChangeBaseDate = etfInfo?.portfolio_change_base_date ?? null;
   const dailyColumns = useMemo<ColDef[]>(
     () => [
       {
@@ -802,14 +1087,20 @@ export function TickerDetailManager({
         cellStyle: { fontWeight: 600 },
         cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
       },
-      { field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode) },
-      { field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
+      {
+        field: "close", headerName: "종가", minWidth: 84, flex: 0.95, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+      },
+      {
+        field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
-        ) },
-      { field: "volume", headerName: "거래량", minWidth: 118, flex: 1.2, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
+        )
+      },
+      {
+        field: "volume", headerName: "거래량", minWidth: 118, flex: 1.2, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0)
+      },
     ],
     [selectedCountryCode],
   );
@@ -823,14 +1114,20 @@ export function TickerDetailManager({
         flex: 1.1,
         cellStyle: { fontWeight: 600 },
       },
-      { field: "close", headerName: "월말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode) },
-      { field: "change_pct", headerName: "월간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
+      {
+        field: "close", headerName: "월말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+      },
+      {
+        field: "change_pct", headerName: "월간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
-        ) },
-      { field: "volume", headerName: "월간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
-        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0) },
+        )
+      },
+      {
+        field: "volume", headerName: "월간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0)
+      },
     ],
     [selectedCountryCode],
   );
@@ -972,8 +1269,153 @@ export function TickerDetailManager({
                         </span>
                       ) : null}
                     </div>
-                    {rows.length > 0 ? (
-                      <div className="tickerDetailHeroRight">
+                  </div>
+                ) : null}
+
+                {/* 캔들스틱 차트 / 구성종목 / 가격 테이블 */}
+                {loading && rows.length === 0 ? (
+                  <div style={{ height: 420, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <span className="spinner-border" />
+                  </div>
+                ) : rows.length > 0 ? (
+                  <div className={showKoreanEtfInfoSection ? "tickerDetailLayoutGrid" : "tickerDetailClassicLayout"}>
+                    {showKoreanEtfInfoSection ? (
+                      <>
+                        <div className="tickerDetailInfoPanel">
+                          <div className="tickerDetailTableHeader">
+                            <span className="tickerDetailTableTitle">ETF정보</span>
+                          </div>
+                          <div className="tickerDetailInfoCard">
+                            <div className="tickerDetailInfoSummary">
+                              <div className="tickerDetailInfoSummaryRow">
+                                <span className="tickerDetailInfoLabel">현재가</span>
+                                <div className="tickerDetailInfoMain">
+                                  <strong>{formatTickerPrice(latestClose, selectedCountryCode)}</strong>
+                                  <span className={getSignedClass(latestChangeAmount ?? latestChangePct)}>
+                                    {formatSignedPriceDelta(latestChangeAmount, selectedCountryCode)}
+                                  </span>
+                                  <span className={getSignedClass(latestChangePct)}>{formatPercent(latestChangePct)}</span>
+                                </div>
+                              </div>
+                              <div className="tickerDetailInfoSummaryRow">
+                                <span className="tickerDetailInfoLabel">iNAV</span>
+                                <div className="tickerDetailInfoMain">
+                                  <strong>{formatTickerPrice(etfInfo?.nav ?? null, "kor")}</strong>
+                                  <span className={getSignedClass(navDelta)}>{formatSignedPriceDelta(navDelta, "kor")}</span>
+                                  <span className={getSignedClass(navChangePct)}>{formatPercent(navChangePct)}</span>
+                                </div>
+                              </div>
+                              <div className="tickerDetailInfoSummaryGrid">
+                                <div className="tickerDetailInfoMetric">
+                                  <span className="tickerDetailInfoLabel">괴리율</span>
+                                  <strong>{formatPercent(etfInfo?.deviation ?? null)}</strong>
+                                </div>
+                                <div className="tickerDetailInfoMetric">
+                                  <span className="tickerDetailInfoLabel">거래량</span>
+                                  <strong>{latestVolumeText}</strong>
+                                </div>
+                                <div className="tickerDetailInfoMetric">
+                                  <span className="tickerDetailInfoLabel">운용보수</span>
+                                  <strong>{formatRatioPercent(etfInfo?.expense_ratio ?? null)}</strong>
+                                </div>
+                                <div className="tickerDetailInfoMetric">
+                                  <span className="tickerDetailInfoLabel">시가총액</span>
+                                  <strong>{formatEokFromKrw(etfInfo?.market_cap_krw ?? null)}</strong>
+                                </div>
+                                <div className="tickerDetailInfoMetric">
+                                  <span className="tickerDetailInfoLabel">배당수익률</span>
+                                  <strong>{formatRatioPercent(etfInfo?.dividend_yield_ttm ?? null)}</strong>
+                                </div>
+                                <div className="tickerDetailInfoMetric">
+                                  <span className="tickerDetailInfoLabel">배당주기</span>
+                                  <strong>-</strong>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="tickerDetailInfoTracker">
+                              <div className="tickerDetailInfoTrackerRow">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">
+                                    포트폴리오 변동
+                                    {portfolioChangeBaseDate ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)` : ""}
+                                  </div>
+                                  <div className="tickerDetailInfoTrackerHint">
+                                    {portfolioChangeBreakdown.length > 0 ? (
+                                      <span className="tickerDetailInfoBreakdownList">
+                                        {portfolioChangeBreakdown.map((item) => {
+                                          const fx = fxRateByCurrency.get(item.currency);
+                                          return (
+                                            <span key={item.currency} className="tickerDetailInfoBreakdownItem">
+                                              <span>{item.label}({formatNumber(item.weight, 0)}%)</span>
+                                              <span className={getSignedClass(item.change_pct)}>{formatPercent(item.change_pct)}</span>
+                                              {fx ? (
+                                                <span className="tickerDetailInfoBreakdownFx">
+                                                  · 환율{" "}
+                                                  <span className={getSignedClass(fx.change_pct ?? null)}>
+                                                    {formatPercent(fx.change_pct ?? null)}
+                                                  </span>
+                                                </span>
+                                              ) : null}
+                                            </span>
+                                          );
+                                        })}
+                                      </span>
+                                    ) : (
+                                      "구성종목 가중 평균"
+                                    )}
+                                  </div>
+                                </div>
+                                <strong className={getSignedClass(portfolioChangePct)}>
+                                  {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
+                                </strong>
+                              </div>
+                              <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
+                                <div>
+                                  <div className="tickerDetailInfoTrackerLabel">구성종목 방향</div>
+                                  <div className="tickerDetailInfoTrackerHint">상승/보합/하락</div>
+                                </div>
+                                <div className="tickerDetailInfoTrackerCounts">
+                                  <span className="metricPositive">▲ {holdingsDirectionCounts.rising}종목</span>
+                                  <span>■ {holdingsDirectionCounts.neutral}종목</span>
+                                  <span className="metricNegative">▼ {holdingsDirectionCounts.falling}종목</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="tickerDetailHoldingsPanel">
+                          <div className="tickerDetailTableHeader">
+                            <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
+                            <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
+                          </div>
+                          {holdingsRows.length > 0 ? (
+                            <div className="appGridFillWrap">
+                              <AppAgGrid
+                                className="tickerDetailHoldingsGrid"
+                                rowData={holdingsRows}
+                                columnDefs={holdingColumns}
+                                loading={loading}
+                                theme={gridTheme}
+                                gridOptions={{
+                                  suppressMovableColumns: true,
+                                  rowHeight: 40,
+                                  getRowId: (params) => String(params.data.id),
+                                  onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
+                                    holdingsGridApiRef.current = event.api;
+                                  },
+                                }}
+                              />
+                            </div>
+                          ) : (
+                            <div className="tickerDetailHoldingsEmpty">
+                              {holdingsError ?? "구성종목 데이터를 확인할 수 없습니다."}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    ) : null}
+                    <div className="tickerDetailChartWrap">
+                      <div className="tickerDetailChartToolbar">
                         <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
                           {[
                             { value: "day", label: "일" },
@@ -990,113 +1432,106 @@ export function TickerDetailManager({
                             </button>
                           ))}
                         </div>
-                        <span style={{ fontSize: 12, color: "#5b6778", fontWeight: 600 }}>이동평균선</span>
-                        {MA_PERIODS.map((ma) => (
-                          chartRows.length >= ma.period ? (
-                            <span key={ma.period} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12 }}>
-                              <span style={{ width: 14, height: 2, backgroundColor: ma.color, display: "inline-block" }} />
-                              <span style={{ color: ma.color, fontWeight: 600 }}>{ma.label}</span>
-                            </span>
-                          ) : null
-                        ))}
+                        <div className="tickerDetailChartMaLegend" />
                       </div>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {/* 캔들스틱 차트 (고정 높이) */}
-                {loading && rows.length === 0 ? (
-                  <div style={{ height: 420, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <span className="spinner-border" />
-                  </div>
-                ) : rows.length > 0 ? (
-                  <div style={{ flexShrink: 0 }}>
-                    <div className={selectedCountryCode === "kor" ? "tickerDetailTopGrid" : ""}>
-                      {selectedCountryCode === "kor" ? (
-                        <div className="tickerDetailHoldingsPanel">
-                          <div className="tickerDetailTableHeader">
-                            <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
-                            <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
-                          </div>
-                          {holdingsRows.length > 0 ? (
-                            <div className="appGridFillWrap">
-                              <AppAgGrid
-                                className="tickerDetailHoldingsGrid"
-                                rowData={holdingsRows}
-                                columnDefs={holdingColumns}
-                                loading={loading}
-                                theme={gridTheme}
-                                gridOptions={{
-                                  suppressMovableColumns: true,
-                                  getRowId: (params) => String(params.data.id),
-                                  onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
-                                    holdingsGridApiRef.current = event.api;
-                                  },
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <div className="tickerDetailHoldingsEmpty">
-                              {holdingsError ?? "구성종목 데이터를 확인할 수 없습니다."}
-                            </div>
-                          )}
+                      <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
+                      {chartAverageBadge ? (
+                        <div className="tickerDetailAverageBadge" style={{ top: chartAverageBadge.top }}>
+                          <span>내 평균 </span>
+                          <span className={getSignedClass(chartAverageBadge.returnPct)}>
+                            {formatSignedPercent(chartAverageBadge.returnPct)}
+                          </span>
                         </div>
                       ) : null}
-                      <div className="tickerDetailChartWrap">
-                        <div ref={chartContainerRef} style={{ width: "100%", position: "relative" }} />
-                        {chartBadges.map((badge, index) => (
-                          <div
-                            key={`${badge.tone}-${index}`}
-                            className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
-                            style={{ left: badge.left, top: badge.top }}
-                          >
-                            {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
-                            <span className="tickerDetailChartBadgeText">{badge.text}</span>
-                            {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
+                      {chartBadges.map((badge, index) => (
+                        <div
+                          key={`${badge.tone}-${index}`}
+                          className={badge.tone === "high" ? "tickerDetailChartBadge is-high" : "tickerDetailChartBadge is-low"}
+                          style={{ left: badge.left, top: badge.top }}
+                        >
+                          {badge.tone === "low" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↑</span> : null}
+                          <span className="tickerDetailChartBadgeText">{badge.text}</span>
+                          {badge.tone === "high" ? <span className="tickerDetailChartBadgeArrow" style={{ left: badge.anchorLeft }}>↓</span> : null}
+                        </div>
+                      ))}
+                    </div>
+                    {showKoreanEtfInfoSection ? (
+                      <div className="tickerDetailTablePanel">
+                        <div className="tickerDetailTableHeader tickerDetailTableHeaderBetween">
+                          <div className="appSegmentedToggle appSegmentedToggleCompact" role="tablist" aria-label="가격 이력 탭">
+                            <button
+                              type="button"
+                              role="tab"
+                              aria-selected={historyTab === "daily"}
+                              className={historyTab === "daily" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                              onClick={() => setHistoryTab("daily")}
+                            >
+                              일별
+                            </button>
+                            <button
+                              type="button"
+                              role="tab"
+                              aria-selected={historyTab === "monthly"}
+                              className={historyTab === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                              onClick={() => setHistoryTab("monthly")}
+                            >
+                              월별
+                            </button>
                           </div>
-                        ))}
+                          <span className="text-muted tickerDetailTableMeta">
+                            {historyTab === "daily"
+                              ? `총 ${new Intl.NumberFormat("ko-KR").format(rows.length)}일`
+                              : `총 ${new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월`}
+                          </span>
+                        </div>
+                        <div className="appGridFillWrap">
+                          <AppAgGrid
+                            rowData={historyTab === "daily" ? reversedRows : monthlyRows}
+                            columnDefs={historyTab === "daily" ? dailyColumns : monthlyColumns}
+                            loading={loading}
+                            theme={gridTheme}
+                            gridOptions={{ suppressMovableColumns: true }}
+                          />
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* 일별/월별 테이블 (나머지 공간 채움) */}
-                {selectedTicker ? (
-                  <div className="tickerDetailTables">
-                    <div className="tickerDetailTablePanel">
-                      <div className="tickerDetailTableHeader">
-                        <span className="tickerDetailTableTitle">일별</span>
-                        <span className="text-muted tickerDetailTableMeta">
-                          총 {new Intl.NumberFormat("ko-KR").format(rows.length)}일
-                        </span>
+                    ) : (
+                      <div className="tickerDetailTables">
+                        <div className="tickerDetailTablePanel">
+                          <div className="tickerDetailTableHeader tickerDetailTableHeaderBetween">
+                            <span className="tickerDetailTableTitle">일별</span>
+                            <span className="text-muted tickerDetailTableMeta">
+                              총 {new Intl.NumberFormat("ko-KR").format(rows.length)}일
+                            </span>
+                          </div>
+                          <div className="appGridFillWrap">
+                            <AppAgGrid
+                              rowData={reversedRows}
+                              columnDefs={dailyColumns}
+                              loading={loading}
+                              theme={gridTheme}
+                              gridOptions={{ suppressMovableColumns: true }}
+                            />
+                          </div>
+                        </div>
+                        <div className="tickerDetailTablePanel">
+                          <div className="tickerDetailTableHeader tickerDetailTableHeaderBetween">
+                            <span className="tickerDetailTableTitle">월별</span>
+                            <span className="text-muted tickerDetailTableMeta">
+                              총 {new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월
+                            </span>
+                          </div>
+                          <div className="appGridFillWrap">
+                            <AppAgGrid
+                              rowData={monthlyRows}
+                              columnDefs={monthlyColumns}
+                              loading={loading}
+                              theme={gridTheme}
+                              gridOptions={{ suppressMovableColumns: true }}
+                            />
+                          </div>
+                        </div>
                       </div>
-                      <div className="appGridFillWrap">
-                        <AppAgGrid
-                          rowData={reversedRows}
-                          columnDefs={dailyColumns}
-                          loading={loading}
-                          theme={gridTheme}
-                          gridOptions={{ suppressMovableColumns: true }}
-                        />
-                      </div>
-                    </div>
-                    <div className="tickerDetailTablePanel">
-                      <div className="tickerDetailTableHeader">
-                        <span className="tickerDetailTableTitle">월별</span>
-                        <span className="text-muted tickerDetailTableMeta">
-                          총 {new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월
-                        </span>
-                      </div>
-                      <div className="appGridFillWrap">
-                        <AppAgGrid
-                          rowData={monthlyRows}
-                          columnDefs={monthlyColumns}
-                          loading={loading}
-                          theme={gridTheme}
-                          gridOptions={{ suppressMovableColumns: true }}
-                        />
-                      </div>
-                    </div>
+                    )}
                   </div>
                 ) : null}
               </>

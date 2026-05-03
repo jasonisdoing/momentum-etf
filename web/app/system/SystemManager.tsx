@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { iconSetQuartzBold, themeQuartz } from "ag-grid-community";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 type SystemSummaryRow = {
   category: string;
@@ -21,17 +21,25 @@ type SystemScheduleRow = {
   command: string;
 };
 
+type SystemLastRunInfo = {
+  status?: string | null;
+  display?: string | null;
+};
+
 type SystemJobKey =
+  | "data_aggregate"
   | "cache_refresh"
   | "market_hours_analysis"
   | "metadata_updater"
-  | "asset_summary";
+  | "asset_summary"
+  | "us_market_stocks";
 
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];
   schedule_rows?: SystemScheduleRow[];
   schedule_note?: string;
   running_jobs?: string[];
+  last_run_by_job?: Record<string, SystemLastRunInfo>;
   error?: string;
 };
 
@@ -40,36 +48,14 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
   running: boolean;
   anyRunning: boolean;
+  lastRunDisplay: string;
 };
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
-const appGridTheme = themeQuartz
-  .withPart(iconSetQuartzBold)
-  .withParams({
-    accentColor: "#206bc4",
-    backgroundColor: "#ffffff",
-    foregroundColor: "#182433",
-    headerBackgroundColor: "#f8fafc",
-    headerTextColor: "#5b6778",
-    spacing: 8,
-    fontSize: 14,
-    wrapperBorderRadius: 10,
-    rowHeight: 38,
-    headerHeight: 38,
-    cellHorizontalPadding: 12,
-    headerColumnBorder: true,
-    headerColumnBorderHeight: "70%",
-    columnBorder: true,
-    oddRowBackgroundColor: "#fbfdff",
-    headerCellHoverBackgroundColor: "#eef4fb",
-    headerCellMovingBackgroundColor: "#e8f0fb",
-    iconButtonHoverBackgroundColor: "#eef4fb",
-    iconButtonHoverColor: "#206bc4",
-    iconSize: 18,
-  });
+const appGridTheme = createAppGridTheme();
 
 const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
   {
@@ -85,9 +71,9 @@ const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
 ];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
-  { field: "job", headerName: "작업", minWidth: 140, width: 180 },
-  { field: "target", headerName: "대상", minWidth: 120, width: 140 },
-  { field: "cadence", headerName: "자동 주기", minWidth: 140, width: 180 },
+  { field: "job", headerName: "작업", minWidth: 160, width: 200 },
+  { field: "target", headerName: "대상", minWidth: 140, width: 180 },
+  { field: "cadence", headerName: "자동 주기", minWidth: 260, width: 300 },
   {
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
@@ -114,6 +100,13 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       </span>
     ),
   },
+  {
+    field: "lastRunDisplay",
+    headerName: "마지막 실행 시간",
+    minWidth: 220,
+    width: 250,
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
 ];
 
 export function SystemManager({
@@ -127,6 +120,7 @@ export function SystemManager({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningJobs, setRunningJobs] = useState<string[]>([]);
+  const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [, startTransition] = useTransition();
   const toast = useToast();
   const runningSet = new Set(runningJobs);
@@ -137,6 +131,7 @@ export function SystemManager({
     id: row.key,
     running: runningSet.has(row.key),
     anyRunning,
+    lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
   }));
 
   useEffect(() => {
@@ -164,6 +159,7 @@ export function SystemManager({
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
+        setLastRunByJob(payload.last_run_by_job ?? {});
         if (initial) setError(null);
       } catch (loadError) {
         if (alive && initial) {

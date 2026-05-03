@@ -20,9 +20,7 @@ def _normalize_code(value: Any, fallback: str) -> str:
 
 
 def load_ticker_type_configs() -> list[dict[str, Any]]:
-    """`ztickers`에 정의된 종목풀 정보를 정렬된 리스트로 반환합니다."""
-
-    from utils.settings_loader import parse_ticker_dir_name, get_ticker_dir
+    """pools.json에 정의된 종목풀 정보를 정렬된 리스트로 반환합니다."""
 
     configs: list[dict[str, Any]] = []
 
@@ -41,8 +39,7 @@ def load_ticker_type_configs() -> list[dict[str, Any]]:
             raise AccountSettingsError(f"종목풀 '{t_id}' 설정에 icon이 필요합니다.")
         is_default = bool(settings.get("default", False))
         
-        path = get_ticker_dir(t_id)
-        order, _ = parse_ticker_dir_name(path.name)
+        order = int(settings["order"])
         
         name = f"{int(order)}. {base_name}"
 

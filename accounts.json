@@ -1,0 +1,48 @@
+{
+  "accounts": [
+    {
+      "account_id": "kor_account",
+      "order": 1,
+      "icon": "🇰🇷",
+      "name": "국내 계좌",
+      "country_code": "kor",
+      "currency": "KRW"
+    },
+    {
+      "account_id": "isa_account",
+      "order": 2,
+      "icon": "🇰🇷",
+      "name": "ISA 계좌",
+      "country_code": "kor",
+      "currency": "KRW",
+      "URL": "https://mablewide.kbsec.com/"
+    },
+    {
+      "account_id": "pension_account",
+      "order": 3,
+      "icon": "🇰🇷",
+      "name": "연금저축 계좌",
+      "country_code": "kor",
+      "currency": "KRW",
+      "URL": "https://mablewide.kbsec.com/"
+    },
+    {
+      "account_id": "core_account",
+      "order": 4,
+      "icon": "💼",
+      "name": "장기보유 계좌",
+      "country_code": "kor",
+      "currency": "KRW",
+      "URL": "https://tossinvest.com/"
+    },
+    {
+      "account_id": "aus_account",
+      "order": 5,
+      "icon": "🇦🇺",
+      "name": "호주 연금",
+      "country_code": "au",
+      "currency": "AUD",
+      "URL": "https://app.superhero.com.au/"
+    }
+  ]
+}

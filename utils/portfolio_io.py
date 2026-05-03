@@ -43,18 +43,28 @@ class MissingPriceCacheError(RuntimeError):
         super().__init__(f"[{self.ticker_type}] 가격 캐시 누락: {joined}")
 
 
-def load_all_holding_tickers() -> set[str]:
-    """전체 계좌의 실보유 티커 집합을 반환한다."""
-    from utils.settings_loader import list_available_accounts
+def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
+    """전체 계좌의 실보유 티커 집합을 반환한다.
+
+    country_code를 지정하면 해당 국가 계좌의 보유 종목만 반환한다.
+    """
+    from utils.settings_loader import list_available_accounts, get_account_settings
 
     held_tickers: set[str] = set()
     for t_id in list_available_accounts():
+        account_settings = get_account_settings(t_id)
+        account_country = str(account_settings.get("country_code") or "").strip().lower()
+        if country_code is not None:
+            if account_country != country_code.strip().lower():
+                continue
         snapshot = load_portfolio_master(t_id)
         if not snapshot:
             continue
 
         for holding in snapshot.get("holdings", []):
             ticker = str(holding.get("ticker") or "").strip().upper()
+            if account_country == "au" and ticker and not ticker.startswith("ASX:"):
+                ticker = f"ASX:{ticker}"
             qty = float(holding.get("quantity") or 0)
             if ticker and qty > 0:
                 held_tickers.add(ticker)
@@ -138,51 +148,68 @@ def load_real_holdings_table(
     db = get_db_connection()
     if db is not None and not df_holdings.empty:
         all_tickers = df_holdings["ticker"].unique().tolist()
-        
-        # 현재 계정의 ticker_type 목록 가져오기
-        ticker_codes = []
-        try:
-            acc_settings = get_account_settings(account_id)
-            ticker_codes = acc_settings.get("ticker_codes", [])
-            if isinstance(ticker_codes, str): ticker_codes = [ticker_codes]
-        except:
-            pass
 
         bucket_map = {}
         name_map = {}
-        # 우선순위 1: 현재 계정에 설정된 종목풀에서 검색
-        if ticker_codes:
-            cursor = db.stock_meta.find(
-                {"ticker": {"$in": all_tickers}, "ticker_type": {"$in": ticker_codes}, "is_deleted": {"$ne": True}},
-                {"ticker": 1, "bucket": 1, "name": 1}
-            )
-            for doc in cursor:
-                t = doc["ticker"]
-                if t not in bucket_map: 
-                    bucket_map[t] = doc.get("bucket", 1)
-                if t not in name_map:
-                    name_map[t] = doc.get("name")
+        type_map = {}
+        is_etf_map = {}
+        has_holdings_map = {}
+        cursor = db.stock_meta.find(
+            {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
+            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1, "has_holdings": 1}
+        )
+        for doc in cursor:
+            t = doc["ticker"]
+            if t not in bucket_map:
+                bucket_map[t] = doc.get("bucket", 1)
+            if t not in name_map:
+                name_map[t] = doc.get("name")
+            if t not in type_map:
+                type_map[t] = doc.get("ticker_type")
+            if t not in is_etf_map:
+                is_etf_map[t] = doc.get("is_etf", False)
+            if t not in has_holdings_map:
+                has_holdings_map[t] = doc.get("has_holdings", False)
 
-        # 우선순위 2: 계정에 없으면 시스템 전체 종목풀 검색 (Fallback)
-        missing_tickers = [t for t in all_tickers if t not in bucket_map]
-        if missing_tickers:
-            cursor = db.stock_meta.find(
-                {"ticker": {"$in": missing_tickers}, "is_deleted": {"$ne": True}},
-                {"ticker": 1, "bucket": 1, "name": 1}
-            )
-            for doc in cursor:
-                t = doc["ticker"]
-                if t not in bucket_map:
-                    bucket_map[t] = doc.get("bucket", 1)
-                if t not in name_map:
-                    name_map[t] = doc.get("name")
+        cache_cursor = db.stock_cache_meta.find(
+            {"ticker": {"$in": all_tickers}},
+            {"ticker": 1, "holdings_cache.items": 1},
+        )
+        for doc in cache_cursor:
+            ticker = str(doc.get("ticker") or "").strip().upper()
+            if not ticker:
+                continue
+            items = (((doc.get("holdings_cache") or {}).get("items")) or [])
+            has_items = bool(items)
+            if has_items:
+                has_holdings_map[ticker] = True
 
         # 데이터 업데이트 (종목풀 정보 우선 적용)
         df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
         df_holdings["name"] = df_holdings.apply(
-            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])), 
+            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])),
             axis=1
         )
+        df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
+        df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
+        df_holdings["has_holdings"] = df_holdings["ticker"].map(lambda t: has_holdings_map.get(t, False))
+
+        # 계좌의 country_code 찾아와서 부여
+        try:
+            account_info = get_account_settings(account_id)
+            account_country = account_info.get("country_code", "kor")
+        except Exception:
+            account_country = "kor"
+
+        df_holdings["country_code"] = account_country
+
+        # ticker_type이 없는 미등록 종목인 경우, 국가 코드를 기반으로 기본값 할당
+        def _fallback_ticker_type(row):
+            if row.get("ticker_type"): return row["ticker_type"]
+            c_code = row.get("country_code", "kor")
+            return "us" if c_code == "us" else "aus" if c_code == "au" else "kor"
+
+        df_holdings["ticker_type"] = df_holdings.apply(_fallback_ticker_type, axis=1)
 
     import numpy as np
 
@@ -208,37 +235,14 @@ def load_real_holdings_table(
     )
     df_holdings["average_buy_price"] = pd.to_numeric(df_holdings["average_buy_price"], errors="coerce").fillna(0.0)
 
-    # 보유일은 마지막 매수일 기준 경과일로 계산한다.
-    try:
-        from utils.formatters import format_trading_days
-
-        now = pd.Timestamp.now(KST).normalize().tz_localize(None)
-
-        def _calculate_days(row):
-            # 기존 데이터 호환을 위해 last_buy_date가 없으면 first_buy_date를 사용한다.
-            last_buy_date = row.get("last_buy_date") or row.get("first_buy_date")
-            if last_buy_date:
-                try:
-                    buy_ts = pd.to_datetime(last_buy_date).normalize().tz_localize(None)
-                    delta = (now - buy_ts).days
-                    return max(delta + 1, 1)
-                except Exception:
-                    pass
-
-            return 1
-
-        df_holdings["days_held_int"] = df_holdings.apply(_calculate_days, axis=1)
-        df_holdings["보유일"] = df_holdings["days_held_int"].apply(format_trading_days)
-    except Exception as e:
-        logger.warning(f"Error calculating dates based on snapshot: {e}")
-        df_holdings["보유일"] = "-"
-        df_holdings["days_held_int"] = 0
+    # 보유일 계산은 화면/슬랙에서 사용하지 않으므로 제거됨.
+    # DB 의 first_buy_date / last_buy_date 필드는 그대로 유지.
 
     # Fetch prices from price cache and exchange rates
-    from utils.cache_utils import load_cached_frames_bulk_with_fallback
+    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk_with_fallback(account_id, tickers)
+    cached_frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
     missing_price_tickers: set[str] = set()
 
     def _get_current_price(row):
@@ -410,7 +414,15 @@ def load_real_holdings_table(
             if _db is not None:
                 today = _resolve_snapshot_date()
                 prev_snap = _db.daily_snapshots.find_one(
-                    {"snapshot_date": {"$lt": today}},
+                    {
+                        "snapshot_date": {"$lt": today},
+                        "accounts": {
+                            "$elemMatch": {
+                                "account_id": "aus_account",
+                                "intl_shares_value": {"$exists": True, "$type": "number", "$gt": 0}
+                            }
+                        }
+                    },
                     sort=[("snapshot_date", -1)],
                 )
                 if prev_snap:
@@ -430,13 +442,16 @@ def load_real_holdings_table(
             "quantity": 1,
             "average_buy_price": intl_princi,
             "currency": "AUD",
-            "bucket": 3,  # "3. 시장지수"
+            "bucket": 2,  # "2. 시장지수"
             "first_buy_date": pd.Timestamp.now().normalize(),
-            "보유일": "-",
             "현재가": intl_val,
             "매입금액(KRW)": intl_princi_krw,
             "평가금액(KRW)": intl_val_krw,
             "일간(%)": intl_daily_pct,
+            "is_etf": False,
+            "has_holdings": False,
+            "country_code": "au",
+            "ticker_type": "aus",
         }
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
         # Ensure value columns are numeric after concat
@@ -468,7 +483,7 @@ def load_real_holdings_table(
     vals_for_sum = pd.to_numeric(df_holdings["평가금액(KRW)"], errors="coerce").fillna(0)
     cash_val = pd.to_numeric(snapshot.get("cash_balance", 0), errors="coerce") or 0
     total_assets = vals_for_sum.sum() + cash_val
-    
+
     if total_assets > 0:
         df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(1)
     else:
