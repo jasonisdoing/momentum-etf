@@ -60,7 +60,7 @@
       "country_code": "us",
       "currency": "USD",
       "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 15,
+      "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
       "RSI_LIMIT": 100
@@ -73,7 +73,7 @@
       "country_code": "kor",
       "currency": "KRW",
       "TOP_N_HOLD": 3,
-      "HOLDING_BONUS_SCORE": 5,
+      "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
       "RSI_LIMIT": 100
