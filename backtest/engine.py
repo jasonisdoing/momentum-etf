@@ -219,6 +219,15 @@ def _filter_days_with_close_coverage(
     return valid_days, excluded_days
 
 
+def _build_valuation_close_frame(close_frame: pd.DataFrame) -> pd.DataFrame:
+    """보유 종목 평가용 종가 프레임을 만든다.
+
+    신호/순위 계산은 원본 종가를 사용하고, 평가금액 계산에서만 직전 유효 종가를 사용한다.
+    개별 종목 캐시가 하루 늦게 갱신된 경우에도 보유 종목을 0원으로 평가하지 않기 위함이다.
+    """
+    return close_frame.ffill()
+
+
 def _is_market_opened(country_code: str, today: pd.Timestamp) -> bool:
     schedule = MARKET_SCHEDULES.get(str(country_code or "").strip().lower())
     if not schedule:
@@ -506,6 +515,18 @@ def _simulate_one_combo(
             cash += n * price
             trade_count += 1
 
+        available_slots = max(0, int(top_n) - int(np.count_nonzero(shares > 0)))
+        if available_slots <= 0:
+            close_exec = close_values[exec_idx]
+            priced_exec_mask = ~np.isnan(close_exec)
+            portfolio_value_local = cash + float(np.dot(shares[priced_exec_mask], close_exec[priced_exec_mask]))
+            fx_today = float(fx_values[exec_idx])
+            value_curve.append(portfolio_value_local * fx_today)
+            continue
+
+        if to_buy_idx.size > available_slots:
+            to_buy_idx = to_buy_idx[:available_slots]
+
         # 2) 매수 (방식 S3): 신규 K개에 ``min(현금/K, 총자산/N)`` 씩 균등 단주 매수.
         #    - 기존 보유 종목 절대 트리밍 없음 (상승 추세 보존).
         #    - 1/N 슬롯 상한으로 한 종목 몰빵 차단.
@@ -576,56 +597,16 @@ def _simulate_benchmark_buy_and_hold(
     initial_cash_local: float,
     buy_slippage: float,
 ) -> tuple[float, float, float, int]:
-    """벤치마크 1종목을 첫 체결일 시초가에 1회 매수 후 끝까지 보유한다.
-
-    백테스트는 종목풀의 거래일 캘린더를 기준으로 평가하므로, 벤치마크가 해당 일자에
-    거래되지 않았더라도 가장 최근 유효 종가로 평가한다. 단, 첫 체결일 종가 자체가
-    없으면 시작 기준을 잡을 수 없으므로 즉시 실패시킨다.
-    """
-    if len(backtest_days) < 2:
-        raise RuntimeError("벤치마크 계산에 필요한 거래일이 부족합니다.")
-    if ticker not in open_frame.columns or ticker not in close_frame.columns:
-        raise RuntimeError(f"벤치마크 티커 '{ticker}' 가격 데이터가 없습니다.")
-
-    first_exec_day = backtest_days[1]
-    raw_open_price = float(open_frame.at[first_exec_day, ticker])
-    if pd.isna(raw_open_price) or raw_open_price <= 0:
-        raise RuntimeError(
-            f"벤치마크 '{ticker}'의 첫 체결일({first_exec_day.strftime('%Y-%m-%d')}) 시가가 비정상입니다."
-        )
-
-    entry_price = raw_open_price * (1.0 + buy_slippage)
-    shares = int(initial_cash_local // entry_price)
-    if shares <= 0:
-        raise RuntimeError(
-            f"벤치마크 '{ticker}'를 초기 자금으로 1주도 매수할 수 없습니다."
-        )
-
-    cash = float(initial_cash_local) - (shares * entry_price)
-    value_curve: list[float] = []
-    exec_days = backtest_days[1:]
-    close_series = pd.to_numeric(close_frame[ticker], errors="coerce").reindex(exec_days)
-    first_close = float(close_series.iloc[0]) if not pd.isna(close_series.iloc[0]) else np.nan
-    if pd.isna(first_close) or first_close <= 0:
-        raise RuntimeError(
-            f"벤치마크 '{ticker}'의 첫 체결일 종가가 비정상입니다: {first_exec_day.strftime('%Y-%m-%d')}"
-        )
-
-    close_series = close_series.ffill()
-    invalid_days = close_series[close_series.isna() | (close_series <= 0)]
-    if not invalid_days.empty:
-        first_invalid = pd.Timestamp(invalid_days.index[0]).strftime("%Y-%m-%d")
-        raise RuntimeError(
-            f"벤치마크 '{ticker}'의 종가가 비정상입니다: {first_invalid}"
-        )
-
-    for exec_day in exec_days:
-        close_price = float(close_series.loc[exec_day])
-        fx_today = float(fx_series.loc[exec_day])
-        total_value_local = cash + (shares * close_price)
-        value_curve.append(total_value_local * fx_today)
-
-    values = pd.Series(value_curve, index=exec_days)
+    """벤치마크 1종목을 첫 체결일 시초가에 1회 매수 후 끝까지 보유한다."""
+    values = _build_benchmark_value_curve(
+        ticker=ticker,
+        open_frame=open_frame,
+        close_frame=close_frame,
+        backtest_days=backtest_days,
+        fx_series=fx_series,
+        initial_cash_local=initial_cash_local,
+        buy_slippage=buy_slippage,
+    )
     start_val = initial_cash_local * float(fx_series.iloc[0])
     end_val = values.iloc[-1]
     total_return_pct = (end_val / start_val - 1.0) * 100.0 if start_val > 0 else 0.0
@@ -643,6 +624,59 @@ def _simulate_benchmark_buy_and_hold(
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
     return float(total_return_pct), float(cagr_pct), float(mdd_pct), 1
+
+
+def _build_benchmark_value_curve(
+    *,
+    ticker: str,
+    open_frame: pd.DataFrame,
+    close_frame: pd.DataFrame,
+    backtest_days: list[pd.Timestamp],
+    fx_series: pd.Series,
+    initial_cash_local: float,
+    buy_slippage: float,
+) -> pd.Series:
+    """벤치마크 1종목의 일별 KRW 평가금액 곡선을 만든다."""
+    if len(backtest_days) < 2:
+        raise RuntimeError("벤치마크 계산에 필요한 거래일이 부족합니다.")
+    if ticker not in open_frame.columns or ticker not in close_frame.columns:
+        raise RuntimeError(f"벤치마크 티커 '{ticker}' 가격 데이터가 없습니다.")
+
+    first_exec_day = backtest_days[1]
+    raw_open_price = float(open_frame.at[first_exec_day, ticker])
+    if pd.isna(raw_open_price) or raw_open_price <= 0:
+        raise RuntimeError(
+            f"벤치마크 '{ticker}'의 첫 체결일({first_exec_day.strftime('%Y-%m-%d')}) 시가가 비정상입니다."
+        )
+
+    entry_price = raw_open_price * (1.0 + buy_slippage)
+    shares = int(initial_cash_local // entry_price)
+    if shares <= 0:
+        raise RuntimeError(f"벤치마크 '{ticker}'를 초기 자금으로 1주도 매수할 수 없습니다.")
+
+    cash = float(initial_cash_local) - (shares * entry_price)
+    exec_days = backtest_days[1:]
+    close_series = pd.to_numeric(close_frame[ticker], errors="coerce").reindex(exec_days)
+    first_close = float(close_series.iloc[0]) if not pd.isna(close_series.iloc[0]) else np.nan
+    if pd.isna(first_close) or first_close <= 0:
+        raise RuntimeError(
+            f"벤치마크 '{ticker}'의 첫 체결일 종가가 비정상입니다: {first_exec_day.strftime('%Y-%m-%d')}"
+        )
+
+    close_series = close_series.ffill()
+    invalid_days = close_series[close_series.isna() | (close_series <= 0)]
+    if not invalid_days.empty:
+        first_invalid = pd.Timestamp(invalid_days.index[0]).strftime("%Y-%m-%d")
+        raise RuntimeError(f"벤치마크 '{ticker}'의 종가가 비정상입니다: {first_invalid}")
+
+    value_curve = []
+    for exec_day in exec_days:
+        close_price = float(close_series.loc[exec_day])
+        fx_today = float(fx_series.loc[exec_day])
+        total_value_local = cash + (shares * close_price)
+        value_curve.append(total_value_local * fx_today)
+
+    return pd.Series(value_curve, index=exec_days)
 
 
 # --------------------------- 결과 기록 --------------------------- #
@@ -913,44 +947,30 @@ def _build_weekly_summary_rows(
     )
 
 
-def _build_monthly_matrix_rows(
+def _calculate_monthly_matrix_values(
     *,
-    daily_summaries: list[dict[str, Any]],
+    period_totals: dict[tuple[int, int], float],
     initial_cash_krw: float,
-) -> list[list[str]]:
-    """월별 수익률을 (연도 × 1~12월 + 연간) 가로 매트릭스 형태로 만든다."""
-    if not daily_summaries:
-        return []
+) -> tuple[list[int], dict[tuple[int, int], float], dict[int, float]]:
+    """월말 자산 맵에서 월별/연간 수익률 값을 계산한다."""
+    if not period_totals:
+        return [], {}, {}
 
-    # 각 (연, 월) 마지막 거래일의 총자산을 수집
-    month_end_total: dict[tuple[int, int], float] = {}
-    for summary in daily_summaries:
-        ts = pd.Timestamp(summary["day"])
-        month_end_total[(int(ts.year), int(ts.month))] = float(summary["total_equity_krw"])
-
-    if not month_end_total:
-        return []
-
-    sorted_keys = sorted(month_end_total.keys())
+    sorted_keys = sorted(period_totals.keys())
     years = sorted({y for (y, _m) in sorted_keys})
 
-    # 월별 수익률: 직전 (연,월) 마지막 자산 대비
     monthly_pct: dict[tuple[int, int], float] = {}
     prev_total = initial_cash_krw
     for key in sorted_keys:
-        total = month_end_total[key]
-        if prev_total > 0:
-            monthly_pct[key] = (total / prev_total - 1.0) * 100.0
-        else:
-            monthly_pct[key] = 0.0
+        total = period_totals[key]
+        monthly_pct[key] = (total / prev_total - 1.0) * 100.0 if prev_total > 0 else 0.0
         prev_total = total
 
-    # 연간 수익률: 해당 연도의 마지막 월 자산 / 직전 연도 마지막 월 자산 (없으면 initial)
     year_end_total: dict[int, float] = {}
     for year in years:
         months_in_year = [m for (y, m) in sorted_keys if y == year]
         if months_in_year:
-            year_end_total[year] = month_end_total[(year, max(months_in_year))]
+            year_end_total[year] = period_totals[(year, max(months_in_year))]
 
     yearly_pct: dict[int, float] = {}
     prev_year_total = initial_cash_krw
@@ -958,25 +978,62 @@ def _build_monthly_matrix_rows(
         total = year_end_total.get(year)
         if total is None:
             continue
-        if prev_year_total > 0:
-            yearly_pct[year] = (total / prev_year_total - 1.0) * 100.0
-        else:
-            yearly_pct[year] = 0.0
+        yearly_pct[year] = (total / prev_year_total - 1.0) * 100.0 if prev_year_total > 0 else 0.0
         prev_year_total = total
 
+    return years, monthly_pct, yearly_pct
+
+
+def _build_monthly_comparison_matrix_rows(
+    *,
+    daily_summaries: list[dict[str, Any]],
+    benchmark_values_krw: pd.Series | None,
+    initial_cash_krw: float,
+) -> list[list[str]]:
+    """전략/벤치마크/차이 월별 수익률 비교 행을 만든다."""
+    if not daily_summaries:
+        return []
+
+    strategy_totals: dict[tuple[int, int], float] = {}
+    for summary in daily_summaries:
+        ts = pd.Timestamp(summary["day"])
+        strategy_totals[(int(ts.year), int(ts.month))] = float(summary["total_equity_krw"])
+
+    strategy_years, strategy_monthly, strategy_yearly = _calculate_monthly_matrix_values(
+        period_totals=strategy_totals,
+        initial_cash_krw=initial_cash_krw,
+    )
+    if not strategy_years:
+        return []
+
+    benchmark_monthly: dict[tuple[int, int], float] = {}
+    benchmark_yearly: dict[int, float] = {}
+    if benchmark_values_krw is not None and not benchmark_values_krw.empty:
+        benchmark_totals: dict[tuple[int, int], float] = {}
+        for day, value in benchmark_values_krw.items():
+            ts = pd.Timestamp(day)
+            if pd.isna(value):
+                continue
+            benchmark_totals[(int(ts.year), int(ts.month))] = float(value)
+        _benchmark_years, benchmark_monthly, benchmark_yearly = _calculate_monthly_matrix_values(
+            period_totals=benchmark_totals,
+            initial_cash_krw=initial_cash_krw,
+        )
+
     rows: list[list[str]] = []
-    for year in years:
-        row = [str(year)]
-        for month in range(1, 13):
-            if (year, month) in monthly_pct:
-                row.append(format_pct_change(monthly_pct[(year, month)]))
-            else:
-                row.append("-")
-        if year in yearly_pct:
-            row.append(format_pct_change(yearly_pct[year]))
-        else:
-            row.append("-")
-        rows.append(row)
+    for year in strategy_years:
+        for label, monthly_values, yearly_values in [
+            ("전략", strategy_monthly, strategy_yearly),
+            ("벤치마크", benchmark_monthly, benchmark_yearly),
+        ]:
+            row = [str(year), label]
+            for month in range(1, 13):
+                value = monthly_values.get((year, month))
+                row.append(format_pct_change(value) if value is not None else "-")
+            value = yearly_values.get(year)
+            row.append(format_pct_change(value) if value is not None else "-")
+            rows.append(row)
+
     return rows
 
 
@@ -993,6 +1050,7 @@ def _simulate_one_combo_details(
     rsi_limit: float | None,
     backtest_days: list[pd.Timestamp],
     fx_series: pd.Series,
+    benchmark_values_krw: pd.Series | None,
     ticker_name_map: dict[str, str],
     country_code: str,
     buy_slippage: float,
@@ -1341,6 +1399,11 @@ def _simulate_one_combo_details(
         if to_buy and cash > 0:
             new_entrants_df = target_df[target_df["ticker"].isin(to_buy)]
             new_entrants = new_entrants_df["ticker"].tolist()
+            available_slots = max(0, int(top_n) - len(shares))
+            if available_slots <= 0:
+                new_entrants = []
+            elif len(new_entrants) > available_slots:
+                new_entrants = new_entrants[:available_slots]
             k_new = len(new_entrants)
             if k_new > 0:
                 slot_target = total_equity_signal / float(top_n)
@@ -1498,13 +1561,15 @@ def _simulate_one_combo_details(
     lines.append("3. 월별 내역")
     monthly_headers = [
         "연도",
+        "구분",
         "1월", "2월", "3월", "4월", "5월", "6월",
         "7월", "8월", "9월", "10월", "11월", "12월",
         "연간",
     ]
-    monthly_aligns = ["left"] + ["right"] * 13
-    monthly_rows = _build_monthly_matrix_rows(
+    monthly_aligns = ["left", "left"] + ["right"] * 13
+    monthly_rows = _build_monthly_comparison_matrix_rows(
         daily_summaries=daily_summaries,
+        benchmark_values_krw=benchmark_values_krw,
         initial_cash_krw=initial_cash_krw,
     )
     if monthly_rows:
@@ -1820,6 +1885,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     eligibility_win = eligibility_frame.loc[backtest_days]
     open_win = strategy_open_frame.loc[backtest_days]
     close_win = strategy_close_frame.loc[backtest_days]
+    valuation_close_win = _build_valuation_close_frame(strategy_close_frame).loc[backtest_days]
     benchmark_open_win = open_frame.loc[backtest_days]
     benchmark_close_win = close_frame.loc[backtest_days]
     ticker_columns = list(open_win.columns)
@@ -1829,7 +1895,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     }
     eligibility_values = eligibility_win.reindex(columns=ticker_columns).to_numpy(dtype=bool, copy=True)
     open_values = open_win.to_numpy(dtype=np.float64, copy=True)
-    close_values = close_win.to_numpy(dtype=np.float64, copy=True)
+    close_values = valuation_close_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
     rsi_frame = _compute_rsi_frame(strategy_close_frame, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
     rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
@@ -1997,6 +2063,17 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             for item in etfs
             if item.get("ticker")
         }
+        benchmark_values_krw = None
+        if benchmark_config is not None:
+            benchmark_values_krw = _build_benchmark_value_curve(
+                ticker=benchmark_ticker,
+                open_frame=benchmark_open_win,
+                close_frame=benchmark_close_win,
+                backtest_days=backtest_days,
+                fx_series=fx_win,
+                initial_cash_local=initial_cash_local,
+                buy_slippage=buy_slippage,
+            )
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
@@ -2004,11 +2081,12 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,
-            close_frame=close_win,
+            close_frame=valuation_close_win,
             rsi_frame=rsi_win,
             rsi_limit=None if best_result["RSI_LIMIT"] is None else float(best_result["RSI_LIMIT"]),
             backtest_days=backtest_days,
             fx_series=fx_win,
+            benchmark_values_krw=benchmark_values_krw,
             ticker_name_map=ticker_name_map,
             country_code=country_code,
             buy_slippage=buy_slippage,

@@ -26,14 +26,14 @@ SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 APP_DIR=/home/ubuntu/apps/momentum-etf
 
-# 모든 배치는 캘린더 평일(월~금, KST) 에만 실행한다.
-# cron 의 요일 필드: 1=월, 2=화, ..., 5=금
+# 기본 배치는 캘린더 평일(월~금, KST) 에 실행한다.
+# cron 의 요일 필드: 1=월, 2=화, ..., 6=토
 
-# 평일 09:20 ~ 17:20 매시 20분 - 주가 캐시 갱신
-# - 장 시간대(9:20~15:20) + 마감 후(16:20, 17:20) 만 실행
+# 월~토 05:20 ~ 17:20 매시 20분 - 주가 캐시 갱신
+# - 미국 금요일 정규장 종가가 한국시간 토요일 새벽에 확정되는 점을 반영
 # - 메타 업데이터(매시 30분)와 10분 간격을 두어 부하 분산
-# - 야간 실행은 전일 슬롯 덮어쓰기 위험이 있어 의도적으로 제외
-20 9-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+# - 미국 표준시간 마감(06:00 KST) 이후 반영 지연을 06:20 이후 반복 실행으로 흡수
+20 5-17 * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 
 # 평일 09:30 ~ 17:30 매시 30분 - 종목 메타데이터 업데이트
 # - 9:00 정각이 아닌 9:30부터 시작: 장 개장 직후 iNAV 미확정 상태 회피
