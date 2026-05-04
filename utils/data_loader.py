@@ -2470,7 +2470,7 @@ def get_exchange_rate_series(
     기본값으로 Yahoo Finance의 'KRW=X' 심볼을 사용합니다.
     """
     # country="us"로 설정하여 yfinance를 사용하도록 하고,
-    # ticker_type="fx"를 사용하여 data/fx (가상계정) 캐시에 저장
+    # ticker_type="fx"를 사용하여 MongoDB의 fx 캐시에 저장
     target_country = "us"
     cache_dir_name = "fx"
 
@@ -2532,9 +2532,22 @@ def _has_invalid_exchange_rate_values(symbol: str, rates: pd.Series) -> bool:
     if (numeric_rates <= 0).any():
         return True
 
-    # JPYKRW=X는 KRW/JPY 단위여야 하므로 정상 범위가 한 자리~십 원대다.
-    # 캐시에 USD/JPY 수준의 값이 섞이면 일본 포트폴리오/환율 변동률이 -96%대로 깨진다.
-    if normalized == "JPYKRW=X" and (numeric_rates > 50).any():
-        return True
+    # 통화별 KRW 환산율 정상 범위 (캐시에 다른 통화 값이 섞이는 경우 방지).
+    # 범위를 벗어나면 비정상 값으로 간주해 강제 재조회한다.
+    expected_ranges: dict[str, tuple[float, float]] = {
+        "KRW=X": (1000.0, 1900.0),      # USD/KRW (현재 ~1389)
+        "AUDKRW=X": (650.0, 1100.0),    # AUD/KRW (현재 ~900)
+        "JPYKRW=X": (6.0, 15.0),        # JPY/KRW (현재 ~9)
+        "CNYKRW=X": (140.0, 280.0),     # CNY/KRW (현재 ~190)
+        "TWDKRW=X": (30.0, 60.0),       # TWD/KRW (현재 ~43)
+        "HKDKRW=X": (130.0, 250.0),     # HKD/KRW (현재 ~175)
+        "GBPKRW=X": (1400.0, 2400.0),   # GBP/KRW (현재 ~1750)
+        "EURKRW=X": (1200.0, 2100.0),   # EUR/KRW (현재 ~1500)
+    }
+    bounds = expected_ranges.get(normalized)
+    if bounds is not None:
+        low, high = bounds
+        if (numeric_rates < low).any() or (numeric_rates > high).any():
+            return True
 
     return False
