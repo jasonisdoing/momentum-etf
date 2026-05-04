@@ -54,6 +54,16 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
+# 토스증권 API 설정 (미국 주식 실시간)
+TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
+TOSS_INVEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://tossinvest.com/",
+    "Origin": "https://tossinvest.com",
+    "Content-Type": "application/json",
+}
+
+
 # 네이버 미국 개별주 시가총액/업종 정보
 NAVER_US_STOCK_MARKET_VALUE_URL = "https://stock.naver.com/api/foreign/market/stock/global"
 
@@ -87,15 +97,6 @@ AU_QUOTEAPI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://www.marketindex.com.au/",
     "Origin": "https://www.marketindex.com.au",
-}
-
-# 토스증권 API 설정 (미국 주식 실시간)
-TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
-TOSS_INVEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Referer": "https://tossinvest.com/",
-    "Origin": "https://tossinvest.com",
-    "Content-Type": "application/json",
 }
 
 # KIS 종목정보파일 다운로드 URL
@@ -212,7 +213,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     },
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
-        "TOP_N_HOLD": [3],
+        "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 4, 5, 6],

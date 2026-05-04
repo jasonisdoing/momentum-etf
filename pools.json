@@ -72,7 +72,7 @@
       "name": "한국 개별주",
       "country_code": "kor",
       "currency": "KRW",
-      "TOP_N_HOLD": 3,
+      "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
