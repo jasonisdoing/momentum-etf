@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -431,8 +431,10 @@ def _build_korean_etf_info_payload(
             market_cap_krw = None
 
     # 최근 공식 iNAV 기준일과 비교 기준 iNAV 히스토리 조회
-    today_str = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
-    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, today_str)
+    # 오늘 날짜의 히스토리도 포함하기 위해 내일 날짜를 전달한다 (함수는 $lt 비교).
+    today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
+    tomorrow_str = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, tomorrow_str)
     prev_nav = None
     portfolio_change_base_date = None
     if latest_history and "meta_cache" in latest_history:
