@@ -27,6 +27,8 @@ from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_rec
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
+from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
+from services.stock_cache_service import get_stock_cache_meta
 from utils.stock_list_io import get_all_etfs_including_deleted
 
 FETCH_RETRY_ATTEMPTS = 3
@@ -188,6 +190,86 @@ def _purge_suspicious_dates(
         purged_tickers,
     )
     return suspicious
+
+
+def _refresh_portfolio_change_cache_for_target(
+    target_id: str,
+    target_items: list[dict],
+    success_tickers: set[str],
+) -> None:
+    """가격 캐시 갱신 후 ETF 포트폴리오 변동 캐시를 미리 계산한다."""
+    logger = get_app_logger()
+    target_norm = (target_id or "").strip().lower()
+    if not target_norm or not target_items:
+        return
+
+    candidates: list[str] = []
+    for item in target_items:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker or ticker not in success_tickers:
+            continue
+        try:
+            cache_doc = get_stock_cache_meta(target_norm, ticker)
+        except Exception as exc:
+            logger.warning("[%s] %s 포트폴리오 변동 대상 확인 실패: %s", target_norm.upper(), ticker, exc)
+            continue
+        holdings = ((cache_doc or {}).get("holdings_cache") or {}).get("items") if isinstance(cache_doc, dict) else None
+        if holdings:
+            candidates.append(ticker)
+
+    if not candidates:
+        logger.info("[%s] 포트폴리오 변동 캐시 갱신 대상이 없습니다.", target_norm.upper())
+        return
+
+    succeeded = 0
+    failed: list[str] = []
+    logger.info("[%s] 포트폴리오 변동 캐시 갱신 시작: %d개", target_norm.upper(), len(candidates))
+    for index, ticker in enumerate(candidates, 1):
+        started_at = time.perf_counter()
+        try:
+            result = compute_and_store_portfolio_change_bundle(ticker, target_norm)
+            if result:
+                succeeded += 1
+                logger.info(
+                    " -> 포트폴리오 변동 캐시 갱신 완료: %d/%d - %s | 소요 %.1fs",
+                    index,
+                    len(candidates),
+                    ticker,
+                    time.perf_counter() - started_at,
+                )
+            else:
+                failed.append(ticker)
+                logger.warning(
+                    " -> 포트폴리오 변동 캐시 계산 불가: %d/%d - %s | 소요 %.1fs",
+                    index,
+                    len(candidates),
+                    ticker,
+                    time.perf_counter() - started_at,
+                )
+        except Exception as exc:
+            failed.append(ticker)
+            logger.warning(
+                " -> 포트폴리오 변동 캐시 갱신 실패: %d/%d - %s: %s | 소요 %.1fs",
+                index,
+                len(candidates),
+                ticker,
+                exc,
+                time.perf_counter() - started_at,
+            )
+
+    if failed:
+        preview = ", ".join(failed[:10])
+        suffix_text = " ..." if len(failed) > 10 else ""
+        logger.warning(
+            "[%s] 포트폴리오 변동 캐시 일부 실패: %s%s (총 %d개 실패 / %d개 성공)",
+            target_norm.upper(),
+            preview,
+            suffix_text,
+            len(failed),
+            succeeded,
+        )
+    else:
+        logger.info("[%s] 포트폴리오 변동 캐시 갱신 완료 (%d개).", target_norm.upper(), succeeded)
 
 
 def refresh_cache_for_target(
@@ -383,16 +465,22 @@ def refresh_cache_for_target(
         else:
             logger.info("-> [%s] 캐시 갱신 완료 (%d개 종목).", target_norm.upper(), succeeded_count)
 
+        success_tickers = [
+            str(etf.get("ticker") or "").strip().upper()
+            for etf in target_items
+            if str(etf.get("ticker") or "").strip().upper() not in failed_tickers
+        ]
+
         # 풀 전체 검증: 데이터 소스 오류로 다수 종목의 close 가 NaN인 날짜 자동 제거
         try:
-            success_tickers = [
-                str(etf.get("ticker") or "").strip().upper()
-                for etf in target_items
-                if str(etf.get("ticker") or "").strip().upper() not in failed_tickers
-            ]
             _purge_suspicious_dates(target_norm, success_tickers)
         except Exception as exc:
             logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
+
+        try:
+            _refresh_portfolio_change_cache_for_target(target_norm, target_items, set(success_tickers))
+        except Exception as exc:
+            logger.warning("[%s] 포트폴리오 변동 캐시 갱신 중 오류: %s", target_norm.upper(), exc)
 
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
 

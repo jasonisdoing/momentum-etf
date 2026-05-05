@@ -2201,7 +2201,7 @@ a {
 
 .compareMatrix {
   display: grid;
-  grid-template-columns: 6rem 5.5rem repeat(5, minmax(12rem, 1fr));
+  grid-template-columns: 4.75rem 5.6rem repeat(5, minmax(12rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2209,7 +2209,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 6rem 5.5rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 4.75rem 5.6rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2290,12 +2290,11 @@ a {
 
 .compareProductCard {
   display: grid;
-  grid-template-rows: auto minmax(2.5rem, auto) auto;
+  grid-template-rows: auto auto auto;
   align-content: start;
   row-gap: 0.45rem;
   height: 8rem;
   min-height: 8rem;
-  padding-right: 2.75rem;
   border-top: 3px solid transparent;
 }
 
@@ -2392,19 +2391,17 @@ a {
 .compareProductCode {
   font-size: 1rem;
   font-weight: 900;
+  padding-right: 2rem;
 }
 
 .compareProductName {
-  min-height: 2.4rem;
   overflow: hidden;
   color: #1f2937;
   font-size: 1rem;
   font-weight: 800;
   line-height: 1.25;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compareProductPrice {

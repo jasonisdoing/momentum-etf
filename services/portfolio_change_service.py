@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
+import math
 import pandas as pd
 
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rates, get_exchange_rate_series
-from services.stock_cache_service import get_stock_cache_meta
+from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,36 @@ _FX_SYMBOL_BY_CURRENCY = {
 
 def _cache_key(ticker_type: str, ticker: str) -> str:
     return f"{(ticker_type or '').strip().lower()}:{(ticker or '').strip().upper()}"
+
+
+def _to_jsonable(value: Any) -> Any:
+    """MongoDB 저장이 가능한 기본 타입으로 변환한다."""
+    if isinstance(value, dict):
+        return {str(k): _to_jsonable(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, tuple):
+        return [_to_jsonable(v) for v in value]
+    if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
+        return None
+    if value is not None and not isinstance(value, (str, bytes)):
+        try:
+            if bool(pd.isna(value)):
+                return None
+        except (TypeError, ValueError):
+            pass
+    if hasattr(value, "item"):
+        try:
+            return _to_jsonable(value.item())
+        except Exception:
+            pass
+    return value
 
 
 def _is_cache_alive(entry: dict[str, Any], now: datetime) -> bool:
@@ -222,6 +253,21 @@ def compute_portfolio_change_bundle(
     holdings = list(holdings_cache.get("items") or [])
     if not holdings:
         return None
+    holdings_reference_date = str(holdings_cache.get("reference_date") or "").strip() or None
+
+    if use_cache:
+        persisted = cache_doc.get("portfolio_change_cache")
+        if (
+            isinstance(persisted, dict)
+            and persisted.get("base_date")
+            and persisted.get("holdings_reference_date") == holdings_reference_date
+        ):
+            with _PORTFOLIO_CHANGE_LOCK:
+                _PORTFOLIO_CHANGE_CACHE[key] = {
+                    "data": persisted,
+                    "expires_at": now + timedelta(seconds=_TTL_SECONDS),
+                }
+            return persisted
 
     base_date = determine_portfolio_change_base_date(norm_type, norm_ticker)
     if not base_date:
@@ -242,6 +288,7 @@ def compute_portfolio_change_bundle(
         "total_pct": total_pct,
         "breakdown": breakdown,
         "coverage_weight": coverage,
+        "holdings_reference_date": holdings_reference_date,
     }
 
     with _PORTFOLIO_CHANGE_LOCK:
@@ -251,6 +298,30 @@ def compute_portfolio_change_bundle(
         }
 
     return result
+
+
+def compute_and_store_portfolio_change_bundle(ticker: str, ticker_type: str) -> dict[str, Any] | None:
+    """포트폴리오 변동을 새로 계산해 stock_cache_meta 에 저장한다."""
+    result = compute_portfolio_change_bundle(ticker, ticker_type, use_cache=False)
+    if not result:
+        return None
+
+    stored = _to_jsonable(
+        {
+            **result,
+            "updated_at": datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
+            "source": "price_cache",
+        }
+    )
+    refresh_stock_portfolio_change_cache(ticker_type, ticker, stored)
+
+    key = _cache_key(ticker_type, ticker)
+    with _PORTFOLIO_CHANGE_LOCK:
+        _PORTFOLIO_CHANGE_CACHE[key] = {
+            "data": stored,
+            "expires_at": datetime.now() + timedelta(seconds=_TTL_SECONDS),
+        }
+    return stored
 
 
 def clear_portfolio_change_cache() -> None:

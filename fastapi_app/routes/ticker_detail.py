@@ -850,6 +850,8 @@ def get_ticker_detail(
                 priced_holdings = bundle.get("priced_holdings") or []
                 holdings_price_as_of_date = None
                 bundle_fx_rates = bundle.get("fx_rates") or []
+                if etf_info is not None:
+                    etf_info["portfolio_change_base_date"] = bundle.get("base_date")
             else:
                 priced_holdings, holdings_price_as_of_date = enrich_component_prices(
                     holdings,

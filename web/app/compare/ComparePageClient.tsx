@@ -809,6 +809,16 @@ export function ComparePageClient() {
   }, [sortedProducts]);
 
   const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts).slice(0, 10), [sortedProducts]);
+  const uniqueHoldingCount = useMemo(() => {
+    const codes = new Set<string>();
+    sortedProducts.forEach((product) => {
+      product.detail.holdings.forEach((holding) => {
+        const code = getHoldingCode(holding);
+        if (code) codes.add(code);
+      });
+    });
+    return codes.size;
+  }, [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
     const counts = new Map<string, number>();
     holdingExposureRows.forEach((row) => {
@@ -1020,14 +1030,23 @@ export function ComparePageClient() {
           </section>
         ) : (
           <section className="compareMatrix compareMatrixBody compareMatrixWithTotal">
-            <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingCountLabel">구성종목 수</div>
+            <div className="compareMatrixLabel compareMatrixLabelWide" style={{ flexDirection: "column" }}>
+              <div className="compareMatrixLabelText">포트폴리오 변동</div>
+              {portfolioChangeBaseDate && (
+                <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal", marginTop: "4px" }}>
+                  ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
+                </div>
+              )}
+            </div>
             {sortedProducts.map((product) => (
-              <div key={tickerKey(product.item)} className="compareHoldingCount">{product.detail.holdings.length}</div>
+              <div key={tickerKey(product.item)} className="compareBasicCell">
+                <BasicInfoValue product={product} metric="포트폴리오 변동" />
+              </div>
             ))}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-              <div key={`empty-count-${index}`} className="compareProductEmpty compareHoldingCountEmpty" />
+              <div key={`empty-holding-portfolio-change-${index}`} className="compareProductEmpty">-</div>
             ))}
-            <div className="compareHoldingCount compareHoldingTotalCount">합계비중</div>
+            <div className="compareProductEmpty compareHoldingTotalCount">-</div>
             <div className="compareMatrixLabel compareHoldingsGroupLabel" style={{ gridRow: "span 10" }}>종목비중 TOP10</div>
             {Array.from({ length: 10 }).map((_, rowIndex) => (
               <Fragment key={rowIndex}>
@@ -1087,6 +1106,14 @@ export function ComparePageClient() {
                 )}
               </Fragment>
             ))}
+            <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingCountLabel">구성종목 수</div>
+            {sortedProducts.map((product) => (
+              <div key={tickerKey(product.item)} className="compareHoldingCount">{product.detail.holdings.length}</div>
+            ))}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-count-${index}`} className="compareProductEmpty compareHoldingCountEmpty" />
+            ))}
+            <div className="compareHoldingCount compareHoldingTotalCount">{uniqueHoldingCount}</div>
           </section>
         )}
       </div>

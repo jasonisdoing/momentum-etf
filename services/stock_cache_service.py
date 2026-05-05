@@ -6,6 +6,7 @@ from utils.stock_cache_meta_io import (
     delete_stock_cache_meta_doc,
     get_stock_cache_meta_doc,
     get_stock_cache_meta_docs,
+    update_stock_portfolio_change_cache_doc,
     upsert_stock_cache_meta_doc,
 )
 
@@ -82,6 +83,16 @@ def refresh_stock_cache(
         meta_cache=meta_cache,
         holdings_cache=holdings_cache,
     )
+
+
+def refresh_stock_portfolio_change_cache(
+    ticker_type: str,
+    ticker: str,
+    portfolio_change_cache: dict[str, Any],
+) -> None:
+    """포트폴리오 변동 계산 캐시를 저장한다."""
+
+    update_stock_portfolio_change_cache_doc(ticker_type, ticker, portfolio_change_cache)
 
 
 def delete_stock_cache(ticker_type: str, ticker: str) -> None:
