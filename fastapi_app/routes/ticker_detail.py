@@ -514,6 +514,8 @@ def _apply_realtime_snapshot_to_dataframe(
         return df
 
     target_trading_day = _resolve_realtime_target_trading_day(country)
+    if country == "kor" and realtime_entry.get("is_pre_market") is True:
+        target_trading_day = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date()).normalize()
     latest_trading_day = (target_trading_day or get_latest_trading_day(country)).normalize()
     adjusted = df.copy()
 
