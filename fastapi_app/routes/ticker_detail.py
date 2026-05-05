@@ -9,6 +9,11 @@ from fastapi import APIRouter, Depends, Query
 from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import enrich_component_prices
+from services.portfolio_change_service import (
+    build_cumulative_fx_rates as _build_cumulative_fx_rates_for_holdings,
+    compute_portfolio_change_bundle,
+    determine_portfolio_change_base_date,
+)
 from services.price_service import (
     get_exchange_rates,
     get_exchange_rate_series,
@@ -300,66 +305,6 @@ def _build_fx_rates_for_holdings(holdings: list[dict[str, object]], rates: dict[
                 "currency": currency,
                 "rate": rate_info.get("rate"),
                 "change_pct": rate_info.get("change_pct"),
-            }
-        )
-    return result
-
-
-_FX_SYMBOL_BY_CURRENCY = {
-    "USD": "KRW=X",
-    "AUD": "AUDKRW=X",
-    "JPY": "JPYKRW=X",
-    "CNY": "CNYKRW=X",
-    "TWD": "TWDKRW=X",
-    "HKD": "HKDKRW=X",
-    "GBP": "GBPKRW=X",
-    "EUR": "EURKRW=X",
-}
-
-
-def _build_cumulative_fx_rates_for_holdings(
-    holdings: list[dict[str, object]],
-    rates: dict[str, object],
-    base_date: str | None,
-) -> list[dict[str, object]]:
-    """구성종목 통화별 기준일 이후 환율 변동률을 구성한다."""
-    if not base_date:
-        return []
-
-    fx_rates = _build_fx_rates_for_holdings(holdings, rates)
-    if not fx_rates:
-        return []
-
-    base_ts = pd.Timestamp(base_date).normalize()
-    end_ts = datetime.now(ZoneInfo("Asia/Seoul")).replace(tzinfo=None)
-    result: list[dict[str, object]] = []
-    for item in fx_rates:
-        currency = str(item.get("currency") or "").strip().upper()
-        current_rate = item.get("rate")
-        symbol = _FX_SYMBOL_BY_CURRENCY.get(currency)
-        if not symbol or current_rate is None:
-            continue
-        series = get_exchange_rate_series(
-            (base_ts - pd.Timedelta(days=10)).strftime("%Y-%m-%d"),
-            end_ts,
-            symbol=symbol,
-            allow_partial=True,
-        )
-        if series.empty:
-            continue
-        base_series = series[pd.to_datetime(series.index).normalize() <= base_ts]
-        if base_series.empty:
-            continue
-        base_rate = float(base_series.iloc[-1])
-        if base_rate <= 0:
-            continue
-        change_pct = ((float(current_rate) / base_rate) - 1.0) * 100.0
-        result.append(
-            {
-                "currency": currency,
-                "rate": current_rate,
-                "change_pct": change_pct,
-                "base_rate": base_rate,
             }
         )
     return result
@@ -899,16 +844,24 @@ def get_ticker_detail(
             kor_pool_tickers = _load_kor_pool_ticker_set()
             domestic_etf_tickers = _load_domestic_etf_ticker_set()
 
-            # 구성종목이 수천 개인 글로벌 ETF(예: 0060H0) 는 yfinance 호출이 폭주해
-            # 응답이 30초 이상 걸리므로, 비중 상위 종목으로 가격 조회를 제한한다.
-            _HOLDINGS_PRICE_FETCH_LIMIT = 100
-            priced_holdings, holdings_price_as_of_date = enrich_component_prices(
-                holdings,
-                price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
-                cumulative_base_date=str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None,
-            )
+            # /holdings 엔드포인트와 동일한 캐시 결과를 공유한다.
+            bundle = compute_portfolio_change_bundle(ticker, ticker_type)
+            if bundle:
+                priced_holdings = bundle.get("priced_holdings") or []
+                holdings_price_as_of_date = None
+                bundle_fx_rates = bundle.get("fx_rates") or []
+            else:
+                priced_holdings, holdings_price_as_of_date = enrich_component_prices(
+                    holdings,
+                    price_fetch_limit=100,
+                    cumulative_base_date=str(etf_info.get("portfolio_change_base_date") or "") if etf_info else None,
+                )
+                bundle_fx_rates = None
+
             enriched_holdings: list[dict[str, object]] = []
-            for enriched_item in priced_holdings:
+            for source_item in priced_holdings:
+                # 캐시 공유를 위해 dict 복사 후 풀 플래그를 추가한다.
+                enriched_item = dict(source_item)
                 component_ticker = str(enriched_item.get("ticker") or "").strip().upper()
 
                 enriched_item["is_us_pool_candidate"] = _is_us_pool_candidate(enriched_item)
@@ -922,12 +875,15 @@ def get_ticker_detail(
                 enriched_holdings.append(enriched_item)
             holdings = enriched_holdings
             if etf_info is not None:
-                base_date = str(etf_info.get("portfolio_change_base_date") or "").strip() or None
-                etf_info["fx_rates"] = _build_cumulative_fx_rates_for_holdings(
-                    holdings,
-                    get_exchange_rates(),
-                    base_date,
-                )
+                if bundle_fx_rates is not None:
+                    etf_info["fx_rates"] = bundle_fx_rates
+                else:
+                    base_date = str(etf_info.get("portfolio_change_base_date") or "").strip() or None
+                    etf_info["fx_rates"] = _build_cumulative_fx_rates_for_holdings(
+                        holdings,
+                        get_exchange_rates(),
+                        base_date,
+                    )
 
     return {
         "ticker": ticker,
