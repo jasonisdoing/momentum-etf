@@ -105,6 +105,9 @@ export function HoldingsManager({
   const [totalCashKrw, setTotalCashKrw] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showAmounts, setShowAmounts] = useState(true);
+  // ticker → portfolio_change_pct (null = 계산 불가, undefined = 미조회)
+  const [portfolioChanges, setPortfolioChanges] = useState<Record<string, number | null>>({});
+  const [portfolioChangesLoading, setPortfolioChangesLoading] = useState(false);
 
   // 펼쳐진 ticker + 구성종목 캐시
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
@@ -243,6 +246,47 @@ export function HoldingsManager({
     void loadHoldings();
   }, [loadHoldings]);
 
+  useEffect(() => {
+    if (holdings.length === 0) return;
+    const targets = new Map<string, { ticker: string; ticker_type: string }>();
+    for (const row of holdings) {
+      if (!row.is_etf || !row.has_holdings) continue;
+      if (!row.ticker_type) continue;
+      const key = row.ticker.toUpperCase();
+      if (!targets.has(key)) {
+        targets.set(key, { ticker: key, ticker_type: row.ticker_type });
+      }
+    }
+    if (targets.size === 0) return;
+
+    let cancelled = false;
+    setPortfolioChangesLoading(true);
+    fetch("/api/holdings-portfolio-changes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items: Array.from(targets.values()) }),
+      cache: "no-store",
+    })
+      .then((resp) => resp.json())
+      .then((data: { results?: Record<string, { total_pct: number | null }> }) => {
+        if (cancelled) return;
+        const next: Record<string, number | null> = {};
+        for (const key of targets.keys()) {
+          const result = data?.results?.[key];
+          next[key] = result?.total_pct ?? null;
+        }
+        setPortfolioChanges(next);
+      })
+      .catch(() => { })
+      .finally(() => {
+        if (!cancelled) setPortfolioChangesLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [holdings]);
+
   const accountNames = [...new Set(holdings.map((h) => h.account_name))];
   const aggregatedBaseHoldings = Array.from(
     holdings.reduce((acc, row) => {
@@ -258,7 +302,7 @@ export function HoldingsManager({
       const weightedDailyChange =
         existing.daily_change_pct !== null && row.daily_change_pct !== null
           ? ((existing.daily_change_pct * existing.valuation_krw) + (row.daily_change_pct * row.valuation_krw)) /
-            Math.max(nextValuation, 1)
+          Math.max(nextValuation, 1)
           : existing.daily_change_pct ?? row.daily_change_pct;
       acc.set(key, {
         ...existing,
@@ -516,7 +560,7 @@ export function HoldingsManager({
     {
       headerName: "평가금액",
       field: "valuation_krw",
-      width: 160,
+      width: 100,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -527,7 +571,7 @@ export function HoldingsManager({
     {
       headerName: "현재가",
       field: "current_price_num",
-      width: 140,
+      width: 120,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -540,7 +584,7 @@ export function HoldingsManager({
     {
       headerName: "평가손익",
       field: "pnl_krw",
-      width: 150,
+      width: 100,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -550,7 +594,24 @@ export function HoldingsManager({
         return <span className={getSignedClass(row.return_pct)}>{value}</span>;
       },
     },
-  ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
+    {
+      headerName: "포트폴리오 변동(%)",
+      width: 140,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentRow }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as AggregatedHoldingRow;
+        if (isCashRow(row)) return "-";
+        if (!row.is_etf || !row.has_holdings) return "-";
+        const change = portfolioChanges[row.ticker];
+        if (change === undefined) {
+          return portfolioChangesLoading ? <span style={{ color: "#9aa6b8" }}>…</span> : "-";
+        }
+        if (change === null) return "-";
+        return <span className={getSignedClass(change)}>{formatSignedPercent(change)}</span>;
+      },
+    },
+  ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick, portfolioChanges, portfolioChangesLoading]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
   const DetailRenderer = useCallback(
