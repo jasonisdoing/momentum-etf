@@ -1618,7 +1618,7 @@ def _get_naver_pre_market_price_info(item: dict[str, Any]) -> dict[str, Any] | N
     return over_market_info
 
 
-def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
@@ -1640,7 +1640,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         "Accept": "application/json, text/plain, */*",
     }
 
-    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
+    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
         item_codes = ",".join(chunk)
         url = f"{_NAVER_STOCK_POLLING_URL}?itemCodes={item_codes}"
 
@@ -1659,13 +1659,16 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            price_source = _get_naver_pre_market_price_info(item) or item
+            pre_market_info = _get_naver_pre_market_price_info(item)
+            price_source = pre_market_info or item
             price_field = "overPrice" if price_source is not item else "closePrice"
             price_value = _parse_comma_number(price_source.get(price_field))
             if price_value is None:
                 continue
 
-            entry: dict[str, float] = {"nowVal": price_value}
+            entry: dict[str, Any] = {"nowVal": price_value}
+            if pre_market_info is not None:
+                entry["is_pre_market"] = True
 
             change_rate = _parse_naver_signed_change_rate(price_source)
             if change_rate is not None:
@@ -1689,7 +1692,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         return result
 
     # 청크 단위로 호출 (URL 길이 제한 대비)
-    snapshot: dict[str, dict[str, float]] = {}
+    snapshot: dict[str, dict[str, Any]] = {}
     chunk_size = 50
     for i in range(0, len(normalized_codes), chunk_size):
         chunk = normalized_codes[i : i + chunk_size]
