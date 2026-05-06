@@ -209,21 +209,18 @@ class MissingPriceDataError(RuntimeError):
 
 def format_missing_price_data_guidance(
     exc: MissingPriceDataError,
-    *,
-    target_id: str | None = None,
 ) -> list[str]:
     """가격 캐시 누락 시 사용자에게 보여줄 공통 안내 문구를 생성합니다."""
     country = str(getattr(exc, "country", "") or "").strip().lower()
     tickers = list(getattr(exc, "tickers", []) or [])
     country_label = country.upper() if country else "UNKNOWN"
-    cache_target = str(target_id or "").strip().lower() or country or "<ticker_type>"
 
     lines = [
         f"[{country_label}] 가격 캐시가 없는 티커 {len(tickers)}개",
     ]
     if tickers:
         lines.append(f"누락 티커: {', '.join(tickers)}")
-    lines.append(f"다음을 실행해서 캐시를 업데이트 해주세요. python scripts/stock_price_cache_updater.py {cache_target}")
+    lines.append("다음을 실행해서 전체 가격 캐시를 업데이트 해주세요. python scripts/stock_price_cache_updater.py")
     return lines
 
 
