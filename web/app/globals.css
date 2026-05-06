@@ -2199,6 +2199,103 @@ a {
   font-weight: 700;
 }
 
+.assetChartsPage {
+  gap: 0.75rem;
+}
+
+.assetChartsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.assetChartsCard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 34rem;
+  overflow: hidden;
+}
+
+.assetChartsCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 0.25rem;
+}
+
+.assetChartsCardHeader h2 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.assetChartsCardHeader p {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.assetChartsBody {
+  flex: 1 1 auto;
+  min-height: 28rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.assetChartsTooltip {
+  min-width: 12rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.5rem;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+}
+
+.assetChartsTooltipTitle {
+  margin-bottom: 0.35rem;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.assetChartsTooltipRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.assetChartsTooltipLabel {
+  font-weight: 800;
+}
+
+.assetChartsTooltipRow strong {
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1200px) {
+  .assetChartsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .assetChartsCard {
+    min-height: 28rem;
+  }
+
+  .assetChartsBody {
+    min-height: 23rem;
+  }
+}
+
 .compareMatrix {
   display: grid;
   grid-template-columns: 4.75rem 5.6rem repeat(5, minmax(12rem, 1fr));
