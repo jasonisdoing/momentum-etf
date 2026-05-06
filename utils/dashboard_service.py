@@ -65,9 +65,12 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "total_stocks": normalize_number(doc.get("profit_count")) + normalize_number(doc.get("loss_count")),
         }
 
+    # 수익률 계산 규칙: weekly_return_pct = TWR(1주), cumulative_return_pct = ROI.
+    # 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
     running_total = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
     running_expense = 0.0
     previous_cumulative_profit = 0.0
+    previous_total_assets = 0.0
 
     for week_date in sorted(docs_by_date.keys()):
         doc = docs_by_date[week_date]
@@ -84,13 +87,11 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         )
         weekly_profit = cumulative_profit - previous_cumulative_profit
         total_principal = normalize_number(doc.get("total_principal"))
+        deposit_withdrawal = normalize_number(doc.get("deposit_withdrawal"))
+        twr_base = previous_total_assets + deposit_withdrawal
 
-        if total_principal > 0:
-            weekly_return_pct = (weekly_profit / total_principal) * 100
-            cumulative_return_pct = (cumulative_profit / total_principal) * 100
-        else:
-            weekly_return_pct = 0.0
-            cumulative_return_pct = 0.0
+        weekly_return_pct = (weekly_profit / twr_base) * 100 if twr_base > 0 else 0.0
+        cumulative_return_pct = (cumulative_profit / total_principal) * 100 if total_principal > 0 else 0.0
 
         doc["cumulative_profit"] = cumulative_profit
         doc["weekly_profit"] = weekly_profit
@@ -98,6 +99,7 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         doc["cumulative_return_pct"] = cumulative_return_pct
 
         previous_cumulative_profit = cumulative_profit
+        previous_total_assets = normalize_number(doc.get("total_assets"))
 
     return [
         docs_by_date[str(doc.get("week_date") or "")]
@@ -169,9 +171,18 @@ def load_dashboard_data() -> dict[str, Any]:
         cash_ratio = (cash_balance / total_assets) * 100 if total_assets > 0 else 0.0
         previous_total_assets = normalize_number(previous_snapshot_account.get("total_assets"))
         weekly_base_total_assets = normalize_number(weekly_base_snapshot_account.get("total_assets"))
-        daily_profit = total_assets - previous_total_assets if previous_snapshot_account else 0.0
-        weekly_profit = total_assets - weekly_base_total_assets if weekly_base_snapshot_account else 0.0
+        # daily_profit / weekly_profit 은 입출금 영향을 제거한 시장 변동분만 계산한다 (TWR 분자).
+        previous_account_principal = normalize_number(previous_snapshot_account.get("total_principal"))
+        weekly_base_account_principal = normalize_number(weekly_base_snapshot_account.get("total_principal"))
+        daily_deposit = (total_principal - previous_account_principal) if previous_snapshot_account else 0.0
+        weekly_deposit = (total_principal - weekly_base_account_principal) if weekly_base_snapshot_account else 0.0
+        daily_profit = (total_assets - previous_total_assets - daily_deposit) if previous_snapshot_account else 0.0
+        weekly_profit = (total_assets - weekly_base_total_assets - weekly_deposit) if weekly_base_snapshot_account else 0.0
 
+        daily_twr_base_acc = previous_total_assets + daily_deposit
+        weekly_twr_base_acc = weekly_base_total_assets + weekly_deposit
+        daily_return_pct_acc = (daily_profit / daily_twr_base_acc) * 100 if daily_twr_base_acc > 0 else 0.0
+        weekly_return_pct_acc = (weekly_profit / weekly_twr_base_acc) * 100 if weekly_twr_base_acc > 0 else 0.0
         accounts.append(
             {
                 "account_id": config["account_id"],
@@ -186,7 +197,9 @@ def load_dashboard_data() -> dict[str, Any]:
                 "net_profit": net_profit,
                 "net_profit_pct": net_profit_pct,
                 "daily_profit": daily_profit,
+                "daily_return_pct": daily_return_pct_acc,
                 "weekly_profit": weekly_profit,
+                "weekly_return_pct": weekly_return_pct_acc,
                 "_df_live": df_live, # 버킷 계산을 위해 임시 보관
             }
         )
@@ -196,10 +209,17 @@ def load_dashboard_data() -> dict[str, Any]:
     total_cash = sum(account["cash_balance"] for account in accounts)
     previous_total_assets = normalize_number((previous_snapshot or {}).get("total_assets"))
     weekly_base_total_assets = normalize_number((weekly_base_snapshot or {}).get("total_assets"))
-    daily_profit = total_assets - previous_total_assets if previous_snapshot else 0.0
-    daily_return_pct = (daily_profit / previous_total_assets) * 100 if previous_total_assets > 0 else 0.0
-    weekly_profit = total_assets - weekly_base_total_assets if weekly_base_snapshot else 0.0
-    weekly_return_pct = (weekly_profit / weekly_base_total_assets) * 100 if weekly_base_total_assets > 0 else 0.0
+    # 전체 합계도 입출금 보정한 TWR 분자/분모로 계산.
+    previous_total_principal = normalize_number((previous_snapshot or {}).get("total_principal"))
+    weekly_base_total_principal = normalize_number((weekly_base_snapshot or {}).get("total_principal"))
+    daily_deposit_total = (total_principal - previous_total_principal) if previous_snapshot else 0.0
+    weekly_deposit_total = (total_principal - weekly_base_total_principal) if weekly_base_snapshot else 0.0
+    daily_profit = (total_assets - previous_total_assets - daily_deposit_total) if previous_snapshot else 0.0
+    weekly_profit = (total_assets - weekly_base_total_assets - weekly_deposit_total) if weekly_base_snapshot else 0.0
+    daily_twr_base = previous_total_assets + daily_deposit_total
+    weekly_twr_base = weekly_base_total_assets + weekly_deposit_total
+    daily_return_pct = (daily_profit / daily_twr_base) * 100 if daily_twr_base > 0 else 0.0
+    weekly_return_pct = (weekly_profit / weekly_twr_base) * 100 if weekly_twr_base > 0 else 0.0
 
     metrics_row1 = [
         {"label": "총 자산", "value": total_assets, "kind": "money"},
@@ -296,6 +316,14 @@ def load_dashboard_data() -> dict[str, Any]:
         "metrics_row1": metrics_row1,
         "metrics_row2": metrics_row2,
         "accounts": accounts,
+        "totals": {
+            "total_assets": total_assets,
+            "total_principal": total_principal,
+            "daily_profit": daily_profit,
+            "daily_return_pct": daily_return_pct,
+            "weekly_profit": weekly_profit,
+            "weekly_return_pct": weekly_return_pct,
+        },
         "buckets": buckets,
         "account_buckets": account_buckets,
         "sparklines": sparklines,
