@@ -287,6 +287,12 @@ export function HoldingsManager({
     };
   }, [holdings, showPortfolioChange]);
 
+  useEffect(() => {
+    if (showPortfolioChange) {
+      setExpandedTicker(null);
+    }
+  }, [showPortfolioChange]);
+
   const accountNames = [...new Set(holdings.map((h) => h.account_name))];
   const aggregatedBaseHoldings = Array.from(
     holdings.reduce((acc, row) => {
@@ -434,7 +440,10 @@ export function HoldingsManager({
   // 부모 그리드 rowData: main 행 + 펼쳐진 경우 detail 행 삽입
   const parentRows = useMemo<ParentRow[]>(() => {
     const result: ParentRow[] = [];
-    for (const row of aggregatedHoldings) {
+    const displayHoldings = showPortfolioChange
+      ? aggregatedHoldings.filter((row) => row.has_holdings === true)
+      : aggregatedHoldings;
+    for (const row of displayHoldings) {
       result.push({ ...row, rowType: "main" });
       if (expandedTicker === row.ticker) {
         const cached = constituentsCacheRef.current.get(row.ticker);
@@ -448,7 +457,7 @@ export function HoldingsManager({
       }
     }
     return result;
-  }, [aggregatedHoldings, expandedTicker, detailLoading]);
+  }, [aggregatedHoldings, showPortfolioChange, expandedTicker, detailLoading]);
 
   const isDetailRow = useCallback(
     (row: ParentRow | undefined): row is Extract<ParentRow, { rowType: "detail" }> =>
