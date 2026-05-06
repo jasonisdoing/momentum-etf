@@ -516,7 +516,6 @@ def _build_parser() -> argparse.ArgumentParser:
         description="OHLCV 캐시 갱신 스크립트",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("target", nargs="?", help="Account ID")
     parser.add_argument(
         "--start",
         help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정",
@@ -532,26 +531,14 @@ def main():
     parser = _build_parser()
     args = parser.parse_args()
 
-    target = (args.target or "").strip().lower()
     start_date = args.start or _determine_start_date()
-
-    targets_to_update: list[str] = []
-    available_types = list_available_ticker_types()
-    
-    if not target:
-        targets_to_update = available_types
-    else:
-        if target in available_types:
-            targets_to_update = [target]
-        else:
-            logger.error(f"Target '{target}' is not a valid ticker pool ID.")
-            return
+    targets_to_update = list_available_ticker_types()
 
     if not targets_to_update:
         logger.warning("갱신할 대상이 없습니다.")
         return
 
-    logger.info("입력 파라미터: targets=%s, start=%s", targets_to_update, start_date)
+    logger.info("전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s", targets_to_update, start_date)
 
     for t_id in targets_to_update:
         refresh_cache_for_target(t_id, start_date)

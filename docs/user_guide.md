@@ -111,7 +111,7 @@ npm run dev
 ### 캐시 알림 (Alerts)
 순위 화면에서 가격 캐시가 누락된 종목이 있으면 토스트 경고가 표시됩니다.
 *   누락된 종목명과 티커가 구체적으로 안내됩니다.
-*   필요하면 로컬에서 `python scripts/stock_meta_cache_updater.py` 또는 `python scripts/stock_price_cache_updater.py`를 실행해 정리합니다.
+*   필요하면 로컬에서 `python scripts/stock_meta_cache_updater.py` 또는 전체 가격 캐시 갱신 명령 `python scripts/stock_price_cache_updater.py`를 실행해 정리합니다.
 *   종목풀에 등록되지 않은 티커라도 현재 계좌에 보유 중이면 `accounts.json`의 계좌별 `ticker_types`를 기준으로 메타데이터/가격 캐시 갱신 대상에 포함됩니다.
 *   순위 화면의 가격 캐시는 선택한 종목풀 기준으로만 판정하며, 다른 종목풀의 오래된 캐시를 대신 사용하지 않습니다.
 *   주별/월별 집계는 독립 원장을 별도로 유지하지 않고, 일별 원장(`daily_fund_data`)에서 다시 계산해 `weekly_fund_data`, `monthly_fund_data`를 갱신합니다.

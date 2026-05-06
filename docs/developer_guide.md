@@ -52,6 +52,7 @@
 1.  **가격 캐시**
     *   OHLCV, 종가 시계열, 실시간 스냅샷
     *   `utils/cache_utils.py`, `utils/data_loader.py`, `services/price_service.py`
+    *   `scripts/stock_price_cache_updater.py`는 종목풀 인자를 받지 않고 항상 전체 종목풀의 가격 캐시를 갱신합니다.
 2.  **메타 캐시**
     *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
