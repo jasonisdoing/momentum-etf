@@ -145,10 +145,22 @@ def _apply_derived_fields(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """수익률 계산 규칙 (전체 페이지 통일):
+
+    - daily_return_pct (TWR 1일):
+        daily_profit / (previous_total_assets + deposit_withdrawal) × 100
+        분자는 입출금 제거된 순수 시장변동, 분모는 직전 평가액에 당일 입출금을 보정.
+    - cumulative_return_pct (ROI):
+        cumulative_profit / total_principal × 100
+        내가 투입한 누적 원금 대비 총 수익률.
+
+    자세한 정책은 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
+    """
     docs_by_date = {str(doc["date"]): _apply_derived_fields(doc) for doc in docs}
     running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
     running_total_expense = 0
     previous_cumulative_profit = 0
+    previous_total_assets = 0
 
     for date_str in sorted(docs_by_date):
         doc = docs_by_date[date_str]
@@ -164,13 +176,18 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         )
         doc["daily_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
-        if total_principal == 0:
+        deposit_withdrawal = _to_int(doc.get("deposit_withdrawal", 0))
+        twr_base = previous_total_assets + deposit_withdrawal
+        if twr_base > 0:
+            doc["daily_return_pct"] = round((_to_int(doc.get("daily_profit", 0)) / twr_base) * 100, 2)
+        else:
             doc["daily_return_pct"] = 0.0
+        if total_principal == 0:
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["daily_return_pct"] = round((_to_int(doc.get("daily_profit", 0)) / total_principal) * 100, 2)
             doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
+        previous_total_assets = _to_int(doc.get("total_assets", 0))
 
     return [docs_by_date[str(doc["date"])] for doc in sorted(docs, key=lambda item: item["date"], reverse=True)]
 

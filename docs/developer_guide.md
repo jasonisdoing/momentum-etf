@@ -78,6 +78,42 @@
 10. 실시간 또는 준실시간 값을 내려주는 Next API 라우트는 요청 fetch뿐 아니라 응답 헤더에도 `Cache-Control: no-store`를 명시해 브라우저/중간 계층 캐시를 차단합니다.
 11. 가격 캐시 조회는 요청한 `ticker_type` 또는 국가 캐시만 엄격하게 조회합니다. 다른 종목풀 캐시로 자동 fallback 하지 않습니다. 계좌 보유 화면처럼 여러 종목풀이 섞인 경우에만 호출부에서 전체 종목풀 조회를 명시적으로 선택합니다.
 
+### 자산 수익률 계산 정책 (단일 출처)
+
+자산 화면(자산 관리 `/assets`, 일별 `/daily`, 주별 `/weekly`, 월별 `/monthly`, 대시보드 `/dashboard`)의 모든 수익률 지표는 아래 규칙을 따릅니다. 분모/분자 정의를 바꾸려면 이 절을 먼저 수정하고 코드를 동기화합니다.
+
+- **기간 수익률 (일/주/월) — TWR(Time-Weighted Return) 1기간**
+  - 공식: `period_return_pct = period_profit / (previous_total_assets + period_deposit_withdrawal) × 100`
+  - 분자(`period_profit`)는 `cumulative_profit`의 차분으로 계산되며, `total_principal` 누적이 입출금을 흡수해 입출금 영향이 자동 제거됩니다.
+  - 분모는 직전 기간 종료 시점의 평가액에 이번 기간 입출금을 합산해, 큰 입금일에도 % 변동률이 왜곡되지 않습니다.
+- **누적 수익률 — ROI(Return on Investment)**
+  - 공식: `cumulative_return_pct = cumulative_profit / total_principal × 100`
+  - `cumulative_profit = total_assets - total_principal - total_expense_누적`.
+  - 펀드 매니저 평가용 TWR 누적과 다른 단순 비율(투입 원금 대비 총 수익).
+
+화면별 매핑:
+
+| 화면 | 일(%) | 주(%) | 월(%) | 누적(%) |
+|------|-------|-------|-------|---------|
+| /daily | TWR 1일 | — | — | ROI |
+| /weekly | — | TWR 1주 | — | ROI |
+| /monthly | — | — | TWR 1월 | ROI |
+| /assets | TWR 1일 | TWR 1주 | — | ROI |
+| /dashboard | TWR 1일 | TWR 1주 | — | ROI |
+
+같은 일자에서는 모든 화면의 일(%) 값이 동일합니다.
+
+구현 위치:
+
+- 백엔드(Python): `utils/daily_fund_service.py`, `utils/weekly_service.py`, `utils/monthly_service.py`, `utils/dashboard_service.py` 의 `_apply_running_total_principal` / `_calculate_weekly_docs` / `load_dashboard_data`.
+- 프론트엔드: `/assets`(`web/app/assets/AssetsManager.tsx`)는 백엔드의 `daily_return_pct`/`weekly_return_pct` 값을 그대로 사용합니다(자체 계산 금지).
+- `/ticker`의 "포트폴리오 변동(%)"은 별도 지표(ETF 구성종목 가중평균)이며 본 정책과 무관합니다.
+
+데이터 무결성:
+
+- `total_principal`은 입출금 발생 시 즉시 반영되어야 합니다. 누락 시 모든 기간 수익률이 왜곡됩니다.
+- 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
+
 ## 2. 순위 화면 정합성 원칙
 
 > **Critical**: 이 시스템은 **순위 화면이 단일 진실 원천(single source of truth)** 입니다. 화면에서 보이는 값은 계좌 종목 목록, 가격 캐시, 실제 보유 데이터로 직접 계산되어야 합니다.

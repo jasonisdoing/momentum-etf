@@ -63,7 +63,9 @@ type AccountSummary = {
   net_profit: number;
   net_profit_pct: number;
   daily_profit: number;
+  daily_return_pct: number;
   weekly_profit: number;
+  weekly_return_pct: number;
 };
 
 type ParentGridRow =
@@ -86,7 +88,9 @@ type ParentGridRow =
     net_profit: number;
     net_profit_pct: number;
     daily_profit: number;
+    daily_return_pct: number;
     weekly_profit: number;
+    weekly_return_pct: number;
   }
   | {
     id: string;
@@ -220,10 +224,8 @@ function formatHiddenAmount(showAmounts: boolean, value: string): string {
   return showAmounts ? value : "••••";
 }
 
-function calculatePeriodReturnPct(totalAssets: number, periodProfit: number): number {
-  const baseAssets = totalAssets - periodProfit;
-  return baseAssets > 0 ? (periodProfit / baseAssets) * 100 : 0;
-}
+// (제거됨) 기간 수익률은 백엔드 dashboard_service 의 TWR 기반 daily_return_pct/weekly_return_pct 사용.
+// 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
 
 function formatNoteUpdatedAt(value: string | null): string {
   if (!value) {
@@ -1975,8 +1977,14 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const toast = useToast();
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
+  const [dashTotals, setDashTotals] = useState<{
+    daily_profit?: number;
+    daily_return_pct?: number;
+    weekly_profit?: number;
+    weekly_return_pct?: number;
+  } | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showAmounts, setShowAmounts] = useState(false);
+  const [showAmounts, setShowAmounts] = useState(true);
   const [loading, setLoading] = useState(true);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
@@ -1998,7 +2006,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
       const dashData = dashResponse?.ok ? await dashResponse.json() : null;
-      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; weekly_profit: number }> = {};
+      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; daily_return_pct: number; weekly_profit: number; weekly_return_pct: number }> = {};
       if (dashData?.accounts) {
         for (const a of dashData.accounts) {
           dashAccounts[a.account_id] = {
@@ -2006,11 +2014,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             net_profit: a.net_profit ?? 0,
             net_profit_pct: a.net_profit_pct ?? 0,
             daily_profit: a.daily_profit ?? 0,
+            daily_return_pct: a.daily_return_pct ?? 0,
             weekly_profit: a.weekly_profit ?? 0,
+            weekly_return_pct: a.weekly_return_pct ?? 0,
           };
         }
       }
-      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, weekly_profit: 0 };
+      const dashTotals = dashData?.totals ?? null;
+      setDashTotals(dashTotals);
+      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, daily_return_pct: 0, weekly_profit: 0, weekly_return_pct: 0 };
       const mergedSummaries = (payload.account_summaries ?? []).map((s) => ({
         ...s,
         ...(dashAccounts[s.account_id] ?? defaultDash),
@@ -2088,8 +2100,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cash_ratio: totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0,
       net_profit: totalAssets - totalPrincipal,
       net_profit_pct: totalPrincipal > 0 ? ((totalAssets - totalPrincipal) / totalPrincipal) * 100 : 0,
-      daily_profit: summaries.reduce((sum, s) => sum + (s.daily_profit ?? 0), 0),
-      weekly_profit: summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
+      daily_profit: dashTotals?.daily_profit ?? summaries.reduce((sum, s) => sum + (s.daily_profit ?? 0), 0),
+      daily_return_pct: dashTotals?.daily_return_pct ?? 0,
+      weekly_profit: dashTotals?.weekly_profit ?? summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
+      weekly_return_pct: dashTotals?.weekly_return_pct ?? 0,
     };
 
     const detailRows = summaries.flatMap((summary): ParentGridRow[] => {
@@ -2480,7 +2494,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!params.data || isDetailRow(params.data)) {
           return null;
         }
-        return calculatePeriodReturnPct(Number(params.data.total_assets_krw ?? 0), Number(params.data.daily_profit ?? 0));
+        // 백엔드에서 TWR 기반으로 계산된 daily_return_pct 사용 (입출금 영향 제거).
+        return Number(params.data.daily_return_pct ?? 0);
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
         params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
@@ -2508,7 +2523,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!params.data || isDetailRow(params.data)) {
           return null;
         }
-        return calculatePeriodReturnPct(Number(params.data.total_assets_krw ?? 0), Number(params.data.weekly_profit ?? 0));
+        // 백엔드에서 TWR 기반으로 계산된 weekly_return_pct 사용 (입출금 영향 제거).
+        return Number(params.data.weekly_return_pct ?? 0);
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
         params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined

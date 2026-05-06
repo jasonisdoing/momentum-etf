@@ -162,10 +162,13 @@ def _apply_derived_fields(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """수익률 계산 규칙: monthly_return_pct = TWR(1월), cumulative_return_pct = ROI.
+    상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고."""
     docs_by_date = {str(doc["month_date"]): _apply_derived_fields(doc) for doc in docs}
     running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
     running_total_expense = 0
     previous_cumulative_profit = 0
+    previous_total_assets = 0
 
     for month_date in sorted(docs_by_date):
         doc = docs_by_date[month_date]
@@ -181,13 +184,18 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         )
         doc["monthly_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
-        if total_principal == 0:
+        deposit_withdrawal = _to_int(doc.get("deposit_withdrawal", 0))
+        twr_base = previous_total_assets + deposit_withdrawal
+        if twr_base > 0:
+            doc["monthly_return_pct"] = round((_to_int(doc.get("monthly_profit", 0)) / twr_base) * 100, 2)
+        else:
             doc["monthly_return_pct"] = 0.0
+        if total_principal == 0:
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["monthly_return_pct"] = round((_to_int(doc.get("monthly_profit", 0)) / total_principal) * 100, 2)
             doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
+        previous_total_assets = _to_int(doc.get("total_assets", 0))
 
     return [
         docs_by_date[str(doc["month_date"])] for doc in sorted(docs, key=lambda item: item["month_date"], reverse=True)
