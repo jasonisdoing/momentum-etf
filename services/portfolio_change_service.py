@@ -78,6 +78,17 @@ def _is_cache_alive(entry: dict[str, Any], now: datetime) -> bool:
     return isinstance(expires, datetime) and now < expires
 
 
+def _is_portfolio_change_cache_usable(cache_data: Any, holdings_reference_date: str | None) -> bool:
+    """계산 실패로 저장된 포트폴리오 변동 캐시는 재계산 대상이다."""
+    if not isinstance(cache_data, dict):
+        return False
+    if not cache_data.get("base_date"):
+        return False
+    if cache_data.get("holdings_reference_date") != holdings_reference_date:
+        return False
+    return cache_data.get("total_pct") is not None
+
+
 def determine_portfolio_change_base_date(ticker_type: str, ticker: str) -> str | None:
     """오늘 자정+1일을 넘겨 오늘 히스토리도 포함한 가장 최근 기준일을 반환한다."""
     today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
@@ -241,12 +252,6 @@ def compute_portfolio_change_bundle(
     key = _cache_key(norm_type, norm_ticker)
     now = datetime.now()
 
-    if use_cache:
-        with _PORTFOLIO_CHANGE_LOCK:
-            cached = _PORTFOLIO_CHANGE_CACHE.get(key)
-            if cached and _is_cache_alive(cached, now):
-                return cached["data"]
-
     cache_doc = get_stock_cache_meta(norm_type, norm_ticker)
     if not isinstance(cache_doc, dict):
         return None
@@ -257,12 +262,16 @@ def compute_portfolio_change_bundle(
     holdings_reference_date = str(holdings_cache.get("reference_date") or "").strip() or None
 
     if use_cache:
+        with _PORTFOLIO_CHANGE_LOCK:
+            cached = _PORTFOLIO_CHANGE_CACHE.get(key)
+            if cached and _is_cache_alive(cached, now):
+                cached_data = cached.get("data")
+                if _is_portfolio_change_cache_usable(cached_data, holdings_reference_date):
+                    return cached_data
+                _PORTFOLIO_CHANGE_CACHE.pop(key, None)
+
         persisted = cache_doc.get("portfolio_change_cache")
-        if (
-            isinstance(persisted, dict)
-            and persisted.get("base_date")
-            and persisted.get("holdings_reference_date") == holdings_reference_date
-        ):
+        if _is_portfolio_change_cache_usable(persisted, holdings_reference_date):
             with _PORTFOLIO_CHANGE_LOCK:
                 _PORTFOLIO_CHANGE_CACHE[key] = {
                     "data": persisted,
