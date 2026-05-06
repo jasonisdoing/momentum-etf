@@ -315,6 +315,7 @@ function getLatestChangeAmount(detail: TickerDetailResponse): number | null {
 
 function getPortfolioChange(detail: TickerDetailResponse): {
   totalPct: number | null;
+  coverageWeight: number;
   breakdown: { currency: string; label: string; changePct: number; weight: number }[];
 } {
   const result = calcPortfolioChange(
@@ -323,6 +324,7 @@ function getPortfolioChange(detail: TickerDetailResponse): {
   );
   return {
     totalPct: result.totalPct,
+    coverageWeight: result.coverageWeight,
     breakdown: result.breakdown.map((item) => ({
       currency: item.currency,
       label: item.label,
@@ -590,7 +592,14 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
     });
     return (
       <div className="compareBasicValue">
-        <strong className={getSignedClass(portfolioChange.totalPct)}>{formatSignedPercent(portfolioChange.totalPct)}</strong>
+        <div className="comparePortfolioTotalLine">
+          <strong className={getSignedClass(portfolioChange.totalPct)}>{formatSignedPercent(portfolioChange.totalPct)}</strong>
+          {portfolioChange.coverageWeight > 0 && portfolioChange.coverageWeight < 99.5 ? (
+            <span className="comparePortfolioCoverage">
+              (계산 반영 {portfolioChange.coverageWeight.toFixed(1)}%)
+            </span>
+          ) : null}
+        </div>
         {portfolioChange.breakdown.length > 0 ? (
           <span className="comparePortfolioBreakdownList">
             {portfolioChange.breakdown.map((item) => (
@@ -1018,7 +1027,16 @@ export function ComparePageClient() {
                   )}
                 </div>
                 {sortedProducts.map((product) => (
-                  <div key={tickerKey(product.item)} className={metric.multiline ? "compareBasicCell" : "compareBasicCell compareBasicCompactCell"}>
+                  <div
+                    key={tickerKey(product.item)}
+                    className={
+                      metric.label === "포트폴리오 변동"
+                        ? "compareBasicCell comparePortfolioCell"
+                        : metric.multiline
+                          ? "compareBasicCell"
+                          : "compareBasicCell compareBasicCompactCell"
+                    }
+                  >
                     <BasicInfoValue product={product} metric={metric.label} />
                   </div>
                 ))}
@@ -1039,7 +1057,7 @@ export function ComparePageClient() {
               )}
             </div>
             {sortedProducts.map((product) => (
-              <div key={tickerKey(product.item)} className="compareBasicCell">
+              <div key={tickerKey(product.item)} className="compareBasicCell comparePortfolioCell">
                 <BasicInfoValue product={product} metric="포트폴리오 변동" />
               </div>
             ))}

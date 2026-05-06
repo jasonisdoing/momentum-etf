@@ -10,7 +10,7 @@ import signal
 import sys
 import time
 from collections.abc import Callable
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 
 import pandas as pd
 
@@ -27,6 +27,7 @@ from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_rec
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
+from services.component_price_service import build_component_price_snapshot, select_component_holdings_for_pricing
 from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
 from services.stock_cache_service import get_stock_cache_meta
 from utils.stock_list_io import get_all_etfs_including_deleted
@@ -70,20 +71,16 @@ def _ticker_refresh_timeout(seconds: int):
 
 
 @contextmanager
-def _target_refresh_lock(target_id: str):
-    """동일 대상 캐시 갱신이 동시에 실행되지 않도록 파일 잠금을 건다."""
-    target_norm = (target_id or "").strip().lower()
-    if not target_norm:
-        raise ValueError("잠금을 위한 target_id가 필요합니다.")
-
-    lock_path = os.path.join("/tmp", f"momentum_etf_cache_refresh_{target_norm}.lock")
+def _global_refresh_lock():
+    """전체 가격 캐시 갱신이 동시에 실행되지 않도록 파일 잠금을 건다."""
+    lock_path = os.path.join("/tmp", "momentum_etf_cache_refresh.lock")
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
 
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
         os.close(fd)
-        raise RuntimeError(f"[{target_norm.upper()}] 캐시 갱신이 이미 실행 중입니다. 중복 실행을 중단합니다.") from exc
+        raise RuntimeError("가격 캐시 갱신이 이미 실행 중입니다. 중복 실행을 중단합니다.") from exc
 
     try:
         os.ftruncate(fd, 0)
@@ -203,7 +200,8 @@ def _refresh_portfolio_change_cache_for_target(
     if not target_norm or not target_items:
         return
 
-    candidates: list[str] = []
+    candidates: list[tuple[str, list[dict]]] = []
+    snapshot_holdings: list[dict] = []
     for item in target_items:
         ticker = str(item.get("ticker") or "").strip().upper()
         if not ticker or ticker not in success_tickers:
@@ -215,7 +213,9 @@ def _refresh_portfolio_change_cache_for_target(
             continue
         holdings = ((cache_doc or {}).get("holdings_cache") or {}).get("items") if isinstance(cache_doc, dict) else None
         if holdings:
-            candidates.append(ticker)
+            holdings_list = list(holdings)
+            candidates.append((ticker, holdings_list))
+            snapshot_holdings.extend(select_component_holdings_for_pricing(holdings_list, 100))
 
     if not candidates:
         logger.info("[%s] 포트폴리오 변동 캐시 갱신 대상이 없습니다.", target_norm.upper())
@@ -223,11 +223,23 @@ def _refresh_portfolio_change_cache_for_target(
 
     succeeded = 0
     failed: list[str] = []
+    logger.info("[%s] 포트폴리오 변동 공통 구성종목 가격 스냅샷 생성 시작: %d개 후보", target_norm.upper(), len(snapshot_holdings))
+    component_price_snapshot = build_component_price_snapshot(snapshot_holdings)
+    logger.info(
+        "[%s] 포트폴리오 변동 공통 구성종목 가격 스냅샷 생성 완료: %d개",
+        target_norm.upper(),
+        len(component_price_snapshot),
+    )
+
     logger.info("[%s] 포트폴리오 변동 캐시 갱신 시작: %d개", target_norm.upper(), len(candidates))
-    for index, ticker in enumerate(candidates, 1):
+    for index, (ticker, _) in enumerate(candidates, 1):
         started_at = time.perf_counter()
         try:
-            result = compute_and_store_portfolio_change_bundle(ticker, target_norm)
+            result = compute_and_store_portfolio_change_bundle(
+                ticker,
+                target_norm,
+                component_price_snapshot=component_price_snapshot,
+            )
             if result:
                 succeeded += 1
                 logger.info(
@@ -356,7 +368,8 @@ def refresh_cache_for_target(
             raise RuntimeError(f"{ticker} 데이터 갱신 실패 원인을 확인할 수 없습니다.")
         raise last_error
 
-    with _target_refresh_lock(target_norm):
+    # 전체 실행 잠금은 main()에서 한 번만 잡는다.
+    with nullcontext():
         # 종목 리스트 로드
         try:
             all_etfs_from_file = get_all_etfs_including_deleted(target_norm)
@@ -540,8 +553,9 @@ def main():
 
     logger.info("전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s", targets_to_update, start_date)
 
-    for t_id in targets_to_update:
-        refresh_cache_for_target(t_id, start_date)
+    with _global_refresh_lock():
+        for t_id in targets_to_update:
+            refresh_cache_for_target(t_id, start_date)
 
 
 if __name__ == "__main__":

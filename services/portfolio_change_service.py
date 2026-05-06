@@ -225,6 +225,7 @@ def compute_portfolio_change_bundle(
     ticker_type: str,
     *,
     use_cache: bool = True,
+    component_price_snapshot: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """ETF 1개의 포트폴리오 변동 계산 결과(캐시 포함).
 
@@ -277,6 +278,7 @@ def compute_portfolio_change_bundle(
         holdings,
         price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
         cumulative_base_date=base_date,
+        component_price_snapshot=component_price_snapshot,
     )
     fx_rates = build_cumulative_fx_rates(priced_holdings, get_exchange_rates(), base_date)
     total_pct, breakdown, coverage = _calc_breakdown_and_total(priced_holdings, fx_rates)
@@ -300,9 +302,19 @@ def compute_portfolio_change_bundle(
     return result
 
 
-def compute_and_store_portfolio_change_bundle(ticker: str, ticker_type: str) -> dict[str, Any] | None:
+def compute_and_store_portfolio_change_bundle(
+    ticker: str,
+    ticker_type: str,
+    *,
+    component_price_snapshot: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
     """포트폴리오 변동을 새로 계산해 stock_cache_meta 에 저장한다."""
-    result = compute_portfolio_change_bundle(ticker, ticker_type, use_cache=False)
+    result = compute_portfolio_change_bundle(
+        ticker,
+        ticker_type,
+        use_cache=False,
+        component_price_snapshot=component_price_snapshot,
+    )
     if not result:
         return None
 
