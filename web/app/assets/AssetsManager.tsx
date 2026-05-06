@@ -216,6 +216,15 @@ function formatRatioPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
 
+function formatHiddenAmount(showAmounts: boolean, value: string): string {
+  return showAmounts ? value : "••••";
+}
+
+function calculatePeriodReturnPct(totalAssets: number, periodProfit: number): number {
+  const baseAssets = totalAssets - periodProfit;
+  return baseAssets > 0 ? (periodProfit / baseAssets) * 100 : 0;
+}
+
 function formatNoteUpdatedAt(value: string | null): string {
   if (!value) {
     return "아직 저장된 메모가 없습니다.";
@@ -1967,6 +1976,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAmounts, setShowAmounts] = useState(false);
   const [loading, setLoading] = useState(true);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
@@ -2335,7 +2345,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       flex: 1,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
       field: "account_url",
@@ -2391,7 +2401,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return parsed;
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
       field: "valuation_krw",
@@ -2400,7 +2410,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       flex: 1,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
       field: "cash_edit_value",
@@ -2413,9 +2423,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return "";
         }
         if (isTotalRow(params.data)) {
-          return formatKrw(params.value ?? 0);
+          return formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0));
         }
-        return formatPrice(params.value ?? 0, params.data.currency);
+        return formatHiddenAmount(showAmounts, formatPrice(params.value ?? 0, params.data.currency));
       },
     },
     {
@@ -2435,7 +2445,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
           : "",
     },
     {
@@ -2457,7 +2467,24 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
+          : "",
+    },
+    {
+      colId: "daily_profit_pct",
+      headerName: "금일(%)",
+      minWidth: 88,
+      flex: 0.7,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data)) {
+          return null;
+        }
+        return calculatePeriodReturnPct(Number(params.data.total_assets_krw ?? 0), Number(params.data.daily_profit ?? 0));
+      },
+      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
+        params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
+          ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
           : "",
     },
     {
@@ -2468,7 +2495,24 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
+          : "",
+    },
+    {
+      colId: "weekly_profit_pct",
+      headerName: "금주(%)",
+      minWidth: 88,
+      flex: 0.7,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data)) {
+          return null;
+        }
+        return calculatePeriodReturnPct(Number(params.data.total_assets_krw ?? 0), Number(params.data.weekly_profit ?? 0));
+      },
+      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
+        params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
+          ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
           : "",
     },
     {
@@ -2498,7 +2542,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatNumber(params.value) : "",
     },
-  ], [expandedId, isDirtyParentCell]);
+  ], [expandedId, isDirtyParentCell, showAmounts]);
 
   const gridOptions = useMemo<GridOptions<ParentGridRow>>(
     () => ({
@@ -2564,6 +2608,20 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
         <div className="card appCard shadow-sm appTableCardFill">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft" />
+              <div className="appMainHeaderRight">
+                <button
+                  type="button"
+                  className={`btn btn-sm shadow-sm ${showAmounts ? "btn-outline-secondary" : "btn-dark"}`}
+                  onClick={() => setShowAmounts((previous) => !previous)}
+                >
+                  {showAmounts ? "금액 가리기" : "금액 보기"}
+                </button>
+              </div>
+            </div>
+          </div>
           <div className="card-body p-2 appTableCardBodyFill">
             <AppAgGrid
               rowData={parentRows}
