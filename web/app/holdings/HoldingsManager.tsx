@@ -40,9 +40,7 @@ type AccountSummary = {
 type AggregatedHoldingRow = HoldingsRow & { portfolio_weight_pct: number };
 
 type HoldingsHeaderSummary = {
-  accountCount: number;
   holdingCount: number;
-  totalValuation: number;
 };
 
 type ConstituentRow = {
@@ -356,11 +354,9 @@ export function HoldingsManager({
 
   useEffect(() => {
     onHeaderSummaryChange?.({
-      accountCount: accountNames.length,
       holdingCount: aggregatedHoldings.length,
-      totalValuation,
     });
-  }, [accountNames.length, aggregatedHoldings.length, onHeaderSummaryChange, totalValuation]);
+  }, [aggregatedHoldings.length, onHeaderSummaryChange]);
 
   // 구성종목 + 일별 가격 fetch
   const fetchConstituents = useCallback(async (ticker: string): Promise<DetailData | null> => {
@@ -595,6 +591,30 @@ export function HoldingsManager({
       },
     },
     {
+      headerName: "ETF 여부",
+      field: "is_etf",
+      width: 90,
+      cellClass: "tableAlignCenter",
+      cellRenderer: (params: { data?: ParentRow }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as AggregatedHoldingRow;
+        if (isCashRow(row)) return "-";
+        return row.is_etf ? <span className="holdingsCheckMark">✅</span> : "-";
+      },
+    },
+    {
+      headerName: "구성종목보유",
+      field: "has_holdings",
+      width: 116,
+      cellClass: "tableAlignCenter",
+      cellRenderer: (params: { data?: ParentRow }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as AggregatedHoldingRow;
+        if (isCashRow(row)) return "-";
+        return row.has_holdings ? <span className="holdingsCheckMark">✅</span> : "-";
+      },
+    },
+    {
       headerName: "포트폴리오 변동(%)",
       width: 140,
       type: "rightAligned",
@@ -751,6 +771,10 @@ export function HoldingsManager({
         .holdingsGrid .holdingsNameCell {
           min-width: 0;
           overflow: hidden;
+        }
+        .holdingsGrid .holdingsCheckMark {
+          color: #16a34a;
+          font-weight: 800;
         }
         .holdingsGrid .ag-row.holdingsRowCash .ag-cell {
           background-color: #f4f5f7;

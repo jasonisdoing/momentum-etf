@@ -121,6 +121,8 @@ def enrich_component_prices(
                 currency,
                 preserve_existing=preserve_existing,
             )
+            if cumulative_base_date and _is_korean_six_digit_holding(item):
+                _apply_cumulative_change(enriched_item, korean_baseline_price_map.get(component_ticker))
         elif _is_korean_six_digit_holding(item):
             _apply_price_snapshot(
                 enriched_item,
