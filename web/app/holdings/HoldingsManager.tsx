@@ -103,6 +103,7 @@ export function HoldingsManager({
   const [totalCashKrw, setTotalCashKrw] = useState(0);
   const [loading, setLoading] = useState(true);
   const [showAmounts, setShowAmounts] = useState(true);
+  const [showPortfolioChange, setShowPortfolioChange] = useState(false);
   // ticker → portfolio_change_pct (null = 계산 불가, undefined = 미조회)
   const [portfolioChanges, setPortfolioChanges] = useState<Record<string, number | null>>({});
   const [portfolioChangesLoading, setPortfolioChangesLoading] = useState(false);
@@ -245,6 +246,7 @@ export function HoldingsManager({
   }, [loadHoldings]);
 
   useEffect(() => {
+    if (!showPortfolioChange) return;
     if (holdings.length === 0) return;
     const targets = new Map<string, { ticker: string; ticker_type: string }>();
     for (const row of holdings) {
@@ -283,7 +285,7 @@ export function HoldingsManager({
     return () => {
       cancelled = true;
     };
-  }, [holdings]);
+  }, [holdings, showPortfolioChange]);
 
   const accountNames = [...new Set(holdings.map((h) => h.account_name))];
   const aggregatedBaseHoldings = Array.from(
@@ -541,6 +543,25 @@ export function HoldingsManager({
         return <span className={getSignedClass(row.daily_change_pct)}>{formatSignedPercent(row.daily_change_pct)}</span>;
       },
     },
+    ...(showPortfolioChange ? [
+      {
+        headerName: "포트폴리오 변동(%)",
+        width: 140,
+        type: "rightAligned",
+        cellRenderer: (params: { data?: ParentRow }) => {
+          if (!params.data || isDetailRow(params.data)) return null;
+          const row = params.data as AggregatedHoldingRow;
+          if (isCashRow(row)) return "-";
+          if (!row.is_etf || !row.has_holdings) return "-";
+          const change = portfolioChanges[row.ticker];
+          if (change === undefined) {
+            return portfolioChangesLoading ? <span style={{ color: "#9aa6b8" }}>…</span> : "-";
+          }
+          if (change === null) return "-";
+          return <span className={getSignedClass(change)}>{formatSignedPercent(change)}</span>;
+        },
+      },
+    ] : []),
     {
       headerName: "수익률(%)",
       field: "return_pct",
@@ -614,24 +635,7 @@ export function HoldingsManager({
         return row.has_holdings ? <span className="holdingsCheckMark">✅</span> : "-";
       },
     },
-    {
-      headerName: "포트폴리오 변동(%)",
-      width: 140,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentRow }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        const row = params.data as AggregatedHoldingRow;
-        if (isCashRow(row)) return "-";
-        if (!row.is_etf || !row.has_holdings) return "-";
-        const change = portfolioChanges[row.ticker];
-        if (change === undefined) {
-          return portfolioChangesLoading ? <span style={{ color: "#9aa6b8" }}>…</span> : "-";
-        }
-        if (change === null) return "-";
-        return <span className={getSignedClass(change)}>{formatSignedPercent(change)}</span>;
-      },
-    },
-  ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick, portfolioChanges, portfolioChangesLoading]);
+  ], [isCashRow, isDetailRow, showAmounts, showPortfolioChange, expandedTicker, handleNameClick, portfolioChanges, portfolioChangesLoading]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
   const DetailRenderer = useCallback(
@@ -722,6 +726,13 @@ export function HoldingsManager({
             <div className="appMainHeader">
               <div className="appMainHeaderLeft" />
               <div className="appMainHeaderRight">
+                <button
+                  type="button"
+                  className={`btn btn-sm shadow-sm ${showPortfolioChange ? "btn-dark" : "btn-outline-secondary"}`}
+                  onClick={() => setShowPortfolioChange((prev) => !prev)}
+                >
+                  {showPortfolioChange ? "포트폴리오 변동 숨기기" : "포트폴리오 변동 보기"}
+                </button>
                 <button
                   type="button"
                   className={`btn btn-sm shadow-sm ${showAmounts ? "btn-outline-secondary" : "btn-dark"}`}
