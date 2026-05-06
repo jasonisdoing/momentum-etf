@@ -3,7 +3,7 @@
     "TOP_N_HOLD": 4,
     "HOLDING_BONUS_SCORE": 20,
     "MA_TYPE": "ALMA",
-    "MA_MONTHS": 6,
+    "MA_MONTHS": 5,
     "RSI_LIMIT": 100,
     "include": [
       "kor_kr",
@@ -19,7 +19,7 @@
       "country_code": "kor",
       "currency": "KRW",
       "type_source": "Naver",
-      "TOP_N_HOLD": 3,
+      "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 15,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
@@ -46,10 +46,10 @@
       "name": "호주 연금",
       "country_code": "au",
       "currency": "AUD",
-      "TOP_N_HOLD": 6,
+      "TOP_N_HOLD": 5,
       "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 4,
+      "MA_MONTHS": 5,
       "RSI_LIMIT": 100
     },
     {
@@ -73,7 +73,7 @@
       "country_code": "kor",
       "currency": "KRW",
       "TOP_N_HOLD": 4,
-      "HOLDING_BONUS_SCORE": 20,
+      "HOLDING_BONUS_SCORE": 5,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
       "RSI_LIMIT": 100
