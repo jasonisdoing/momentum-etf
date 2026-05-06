@@ -1341,11 +1341,7 @@ export function TickerDetailManager({
                                   <div className="tickerDetailInfoTrackerLabel">
                                     포트폴리오 변동
                                     {portfolioChangeBaseDate
-                                      ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후${
-                                          portfolioChangeCoverageWeight > 0 && portfolioChangeCoverageWeight < 99.5
-                                            ? `, ${portfolioChangeCoverageWeight.toFixed(0)}% 비중 사용`
-                                            : ""
-                                        })`
+                                      ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)`
                                       : ""}
                                   </div>
                                   <div className="tickerDetailInfoTrackerHint">
@@ -1374,9 +1370,14 @@ export function TickerDetailManager({
                                     )}
                                   </div>
                                 </div>
-                                <strong className={getSignedClass(portfolioChangePct)}>
-                                  {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
-                                </strong>
+                                <div className="tickerDetailInfoTrackerValue">
+                                  <strong className={getSignedClass(portfolioChangePct)}>
+                                    {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
+                                  </strong>
+                                  {portfolioChangeCoverageWeight > 0 && portfolioChangeCoverageWeight < 99.5 ? (
+                                    <span>(계산 반영 {portfolioChangeCoverageWeight.toFixed(1)}%)</span>
+                                  ) : null}
+                                </div>
                               </div>
                               <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
                                 <div>

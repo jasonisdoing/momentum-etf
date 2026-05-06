@@ -35,19 +35,15 @@ def enrich_component_prices(
     price_fetch_limit: int,
     preserve_existing: bool = False,
     cumulative_base_date: str | None = None,
+    component_price_snapshot: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """ETF 구성종목에 현재가/등락률/통화 정보를 붙인다."""
     holdings_list = [dict(item) for item in holdings]
     if not holdings_list:
         return [], None
 
-    def _weight_value(item: dict[str, Any]) -> float:
-        try:
-            return float(item.get("weight") or item.get("total_weight") or 0.0)
-        except (TypeError, ValueError):
-            return 0.0
-
-    holdings_for_pricing = sorted(holdings_list, key=_weight_value, reverse=True)[:price_fetch_limit]
+    component_price_snapshot = component_price_snapshot or {}
+    holdings_for_pricing = select_component_holdings_for_pricing(holdings_list, price_fetch_limit)
     pricing_ids = {id(item) for item in holdings_for_pricing}
 
     korean_tickers: list[str] = []
@@ -67,7 +63,8 @@ def enrich_component_prices(
 
         component_ticker = _normalize_upper(item.get("ticker"))
         if _is_korean_six_digit_holding(item):
-            korean_tickers.append(component_ticker)
+            if _component_price_key(item) not in component_price_snapshot:
+                korean_tickers.append(component_ticker)
             continue
 
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
@@ -78,19 +75,23 @@ def enrich_component_prices(
             if _is_us_yahoo_symbol(yahoo_symbol):
                 previous_trading_day_baseline_symbols.add(yahoo_symbol)
         if yahoo_symbol.endswith(".AX"):
-            au_tickers.append(yahoo_symbol[:-3])
+            if _component_price_key(item) not in component_price_snapshot:
+                au_tickers.append(yahoo_symbol[:-3])
         elif _is_worldstock_symbol(yahoo_symbol):
-            worldstock_codes.append(_normalize_upper(item.get("reuters_code")) or yahoo_symbol)
+            if _component_price_key(item) not in component_price_snapshot:
+                worldstock_codes.append(_normalize_upper(item.get("reuters_code")) or yahoo_symbol)
         elif _is_yahoo_exchange_symbol(yahoo_symbol):
-            yahoo_exchange_symbols.append(yahoo_symbol)
+            if _component_price_key(item) not in component_price_snapshot:
+                yahoo_exchange_symbols.append(yahoo_symbol)
         elif "." not in yahoo_symbol:
-            us_tickers.append(yahoo_symbol)
+            if _component_price_key(item) not in component_price_snapshot:
+                us_tickers.append(yahoo_symbol)
 
-    kor_price_map = _safe_fetch_snapshot("kor", korean_tickers)
-    us_price_map = _safe_fetch_snapshot("us", us_tickers)
-    au_price_map = _safe_fetch_snapshot("au", au_tickers)
-    worldstock_price_map = _safe_fetch_worldstock(worldstock_codes)
-    yahoo_exchange_price_map = _safe_fetch_yahoo(yahoo_exchange_symbols)
+    kor_price_map = _safe_fetch_snapshot("kor", sorted(set(korean_tickers)))
+    us_price_map = _safe_fetch_snapshot("us", sorted(set(us_tickers)))
+    au_price_map = _safe_fetch_snapshot("au", sorted(set(au_tickers)))
+    worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
+    yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
     korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_tickers, cumulative_base_date)
     baseline_price_map = _safe_fetch_yahoo_baseline_prices(
         baseline_yahoo_symbols,
@@ -111,6 +112,15 @@ def enrich_component_prices(
             enriched_item["price_currency"] = "KRW"
         elif id(item) not in pricing_ids:
             _clear_price_fields(enriched_item, preserve_existing=preserve_existing)
+        elif _component_price_key(item) in component_price_snapshot:
+            snapshot = component_price_snapshot[_component_price_key(item)]
+            currency = str(snapshot.get("currency") or _infer_component_currency(item)).strip().upper()
+            _apply_price_snapshot(
+                enriched_item,
+                snapshot,
+                currency,
+                preserve_existing=preserve_existing,
+            )
         elif _is_korean_six_digit_holding(item):
             _apply_price_snapshot(
                 enriched_item,
@@ -167,6 +177,94 @@ def enrich_component_prices(
     return enriched, price_as_of
 
 
+def select_component_holdings_for_pricing(
+    holdings: Iterable[dict[str, Any]],
+    price_fetch_limit: int,
+) -> list[dict[str, Any]]:
+    """비중 상위 구성종목만 가격 조회 대상으로 선택한다."""
+    holdings_list = list(holdings)
+    if price_fetch_limit <= 0:
+        return []
+    return sorted(holdings_list, key=_weight_value, reverse=True)[:price_fetch_limit]
+
+
+def build_component_price_snapshot(
+    holdings: Iterable[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """중복 구성종목을 한 번만 조회해 공통 가격 스냅샷을 만든다."""
+    holdings_list = [dict(item) for item in holdings]
+    if not holdings_list:
+        return {}
+
+    korean_tickers: set[str] = set()
+    us_tickers: set[str] = set()
+    au_tickers: set[str] = set()
+    worldstock_codes: set[str] = set()
+    yahoo_exchange_symbols: set[str] = set()
+
+    for item in holdings_list:
+        if _is_cash_like_holding(item):
+            continue
+        component_ticker = _normalize_upper(item.get("ticker"))
+        yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
+        if _is_korean_six_digit_holding(item):
+            korean_tickers.add(component_ticker)
+        elif yahoo_symbol.endswith(".AX"):
+            au_tickers.add(yahoo_symbol[:-3])
+        elif _is_worldstock_symbol(yahoo_symbol):
+            worldstock_codes.add(_normalize_upper(item.get("reuters_code")) or yahoo_symbol)
+        elif _is_yahoo_exchange_symbol(yahoo_symbol):
+            yahoo_exchange_symbols.add(yahoo_symbol)
+        elif yahoo_symbol and "." not in yahoo_symbol:
+            us_tickers.add(yahoo_symbol)
+
+    kor_price_map = _safe_fetch_snapshot("kor", sorted(korean_tickers))
+    us_price_map = _safe_fetch_snapshot("us", sorted(us_tickers))
+    au_price_map = _safe_fetch_snapshot("au", sorted(au_tickers))
+    worldstock_price_map = _safe_fetch_worldstock(sorted(worldstock_codes))
+    yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(yahoo_exchange_symbols))
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for item in holdings_list:
+        key = _component_price_key(item)
+        if not key or key in snapshot:
+            continue
+        component_ticker = _normalize_upper(item.get("ticker"))
+        yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
+        price_item: dict[str, Any] | None = None
+        currency = _infer_component_currency(item)
+
+        if _is_korean_six_digit_holding(item):
+            price_item = kor_price_map.get(component_ticker)
+            currency = "KRW"
+        elif yahoo_symbol.endswith(".AX"):
+            price_item = au_price_map.get(yahoo_symbol[:-3])
+            currency = "AUD"
+        elif _is_worldstock_symbol(yahoo_symbol):
+            lookup_code = _normalize_upper(item.get("reuters_code")) or yahoo_symbol
+            price_item = worldstock_price_map.get(lookup_code)
+            currency = str((price_item or {}).get("currency") or infer_yahoo_symbol_currency(yahoo_symbol))
+        elif _is_yahoo_exchange_symbol(yahoo_symbol):
+            price_item = yahoo_exchange_price_map.get(yahoo_symbol)
+            currency = infer_yahoo_symbol_currency(yahoo_symbol)
+        elif yahoo_symbol and "." not in yahoo_symbol:
+            price_item = us_price_map.get(yahoo_symbol)
+            currency = "USD"
+
+        if not price_item:
+            continue
+        snapshot[key] = {**price_item, "currency": currency}
+
+    return snapshot
+
+
+def _weight_value(item: dict[str, Any]) -> float:
+    try:
+        return float(item.get("weight") or item.get("total_weight") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _normalize_upper(value: Any) -> str:
     return str(value or "").strip().upper()
 
@@ -202,6 +300,37 @@ def _is_yahoo_exchange_symbol(symbol: str) -> bool:
 def _is_us_yahoo_symbol(symbol: str) -> bool:
     normalized = _normalize_upper(symbol)
     return bool(normalized) and "." not in normalized
+
+
+def _component_price_key(item: dict[str, Any]) -> str | None:
+    if _is_cash_like_holding(item):
+        return None
+    component_ticker = _normalize_upper(item.get("ticker"))
+    if _is_korean_six_digit_holding(item):
+        return f"kor:{component_ticker}"
+
+    yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
+    if not yahoo_symbol:
+        return None
+    if yahoo_symbol.endswith(".AX"):
+        return f"au:{yahoo_symbol[:-3]}"
+    if _is_worldstock_symbol(yahoo_symbol):
+        return f"world:{_normalize_upper(item.get('reuters_code')) or yahoo_symbol}"
+    if _is_yahoo_exchange_symbol(yahoo_symbol):
+        return f"yahoo:{yahoo_symbol}"
+    if "." in yahoo_symbol:
+        return None
+    return f"us:{yahoo_symbol}"
+
+
+def _infer_component_currency(item: dict[str, Any]) -> str:
+    component_ticker = _normalize_upper(item.get("ticker"))
+    yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
+    if _is_korean_six_digit_holding(item):
+        return "KRW"
+    if yahoo_symbol.endswith(".AX"):
+        return "AUD"
+    return infer_yahoo_symbol_currency(yahoo_symbol)
 
 
 def _safe_fetch_snapshot(country_code: str, tickers: list[str]) -> dict[str, dict[str, Any]]:
