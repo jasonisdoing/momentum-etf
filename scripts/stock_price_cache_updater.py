@@ -30,7 +30,7 @@ from utils.settings_loader import get_ticker_type_settings, list_available_ticke
 from services.component_price_service import build_component_price_snapshot, select_component_holdings_for_pricing
 from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
 from services.stock_cache_service import get_stock_cache_meta
-from utils.stock_list_io import get_all_etfs_including_deleted
+from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
 
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
@@ -490,11 +490,7 @@ def refresh_cache_for_target(
         except Exception as exc:
             logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
 
-        try:
-            _refresh_portfolio_change_cache_for_target(target_norm, target_items, set(success_tickers))
-        except Exception as exc:
-            logger.warning("[%s] 포트폴리오 변동 캐시 갱신 중 오류: %s", target_norm.upper(), exc)
-
+        # 포트폴리오 변동 캐시 갱신은 별도 스크립트(scripts/portfolio_refresh.py)에서 처리한다.
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
 
 
@@ -534,6 +530,37 @@ def _build_parser() -> argparse.ArgumentParser:
         help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정",
     )
     return parser
+
+
+def refresh_portfolio_change_for_all_targets() -> None:
+    """모든 종목풀의 ETF 포트폴리오 변동 캐시를 갱신한다 (가격 캐시는 건드리지 않음)."""
+    logger = get_app_logger()
+    targets_to_update = list_available_ticker_types()
+    if not targets_to_update:
+        logger.warning("포트폴리오 변동 캐시 갱신 대상이 없습니다.")
+        return
+
+    logger.info("전체 종목풀 포트폴리오 변동 캐시 갱신 시작: targets=%s", targets_to_update)
+    for t_id in targets_to_update:
+        target_norm = (t_id or "").strip().lower()
+        if not target_norm:
+            continue
+        try:
+            target_items = list(get_etfs(target_norm) or [])
+        except Exception as exc:
+            logger.warning("[%s] 종목 목록 조회 실패: %s", target_norm.upper(), exc)
+            continue
+        if not target_items:
+            continue
+        success_tickers = {
+            str(item.get("ticker") or "").strip().upper()
+            for item in target_items
+            if str(item.get("ticker") or "").strip()
+        }
+        try:
+            _refresh_portfolio_change_cache_for_target(target_norm, target_items, success_tickers)
+        except Exception as exc:
+            logger.warning("[%s] 포트폴리오 변동 캐시 갱신 실패: %s", target_norm.upper(), exc)
 
 
 def main():

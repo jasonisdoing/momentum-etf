@@ -40,6 +40,7 @@ MAX_TAIL_CHARS = 1500
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
 SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "cache_refresh",
+    "portfolio_refresh",
     "metadata_updater",
     "asset_summary",
     "market_hours_analysis",

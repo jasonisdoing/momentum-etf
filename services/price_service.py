@@ -108,16 +108,20 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
 
 def get_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str, float | str]]:
     """Reuters code 기반 해외 종목 지연 시세를 반환한다."""
+    from utils.symbol_resolution_blacklist import get_active_blacklist
 
     normalized_codes = _normalize_tickers(reuters_codes)
     if not normalized_codes:
         return {}
 
+    blacklist = get_active_blacklist()
     now = datetime.now()
     cached_result: dict[str, dict[str, float | str]] = {}
     expired_codes: list[str] = []
 
     for code in normalized_codes:
+        if code in blacklist:
+            continue
         cache_key = f"worldstock:{code}"
         entry = _TICKER_PRICE_CACHE.get(cache_key)
         fetched_at = entry.get("fetched_at") if entry else None
@@ -158,6 +162,13 @@ def get_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str,
         }
 
     fetched_filtered = {code: fetched_data[code] for code in expired_codes if code in fetched_data}
+
+    # 일괄 조회 후 응답에 빠진 코드는 영구 누락 가능성 → 블랙리스트에 마킹
+    from utils.symbol_resolution_blacklist import mark_failed
+    for code in expired_codes:
+        if code not in fetched_data:
+            mark_failed(code, source="네이버", reason="Worldstock: 응답에 누락된 코드")
+
     return {**cached_result, **fetched_filtered}
 
 
@@ -474,7 +485,14 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
     import pandas as pd
     import yfinance as yf
 
+    from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
+
     normalized_symbols = [str(symbol or "").strip().upper() for symbol in symbols if str(symbol or "").strip()]
+    if not normalized_symbols:
+        return {}
+
+    blacklist = get_active_blacklist()
+    normalized_symbols = [s for s in normalized_symbols if s not in blacklist]
     if not normalized_symbols:
         return {}
 
@@ -489,6 +507,8 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
         threads=True,
     )
     if downloaded is None or downloaded.empty:
+        for symbol in normalized_symbols:
+            mark_failed(symbol, source="야후", reason="yfinance: 일괄 조회 결과 비어있음")
         return result
 
     def _extract_symbol_frame(symbol: str) -> pd.DataFrame | None:
@@ -507,6 +527,7 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
     for symbol in normalized_symbols:
         frame = _extract_symbol_frame(symbol)
         if frame is None:
+            mark_failed(symbol, source="야후", reason="yfinance: 가격 데이터 없음")
             continue
 
         close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
