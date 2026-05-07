@@ -5,6 +5,7 @@ from typing import Any
 
 from utils.account_registry import load_account_configs
 import pandas as pd
+from utils.daily_fund_service import load_daily_docs_for_aggregation
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_number, to_iso_string
@@ -207,19 +208,18 @@ def load_dashboard_data() -> dict[str, Any]:
     total_assets = sum(account["total_assets"] for account in accounts)
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
-    previous_total_assets = normalize_number((previous_snapshot or {}).get("total_assets"))
-    weekly_base_total_assets = normalize_number((weekly_base_snapshot or {}).get("total_assets"))
-    # 전체 합계도 입출금 보정한 TWR 분자/분모로 계산.
-    previous_total_principal = normalize_number((previous_snapshot or {}).get("total_principal"))
-    weekly_base_total_principal = normalize_number((weekly_base_snapshot or {}).get("total_principal"))
-    daily_deposit_total = (total_principal - previous_total_principal) if previous_snapshot else 0.0
-    weekly_deposit_total = (total_principal - weekly_base_total_principal) if weekly_base_snapshot else 0.0
-    daily_profit = (total_assets - previous_total_assets - daily_deposit_total) if previous_snapshot else 0.0
-    weekly_profit = (total_assets - weekly_base_total_assets - weekly_deposit_total) if weekly_base_snapshot else 0.0
-    daily_twr_base = previous_total_assets + daily_deposit_total
-    weekly_twr_base = weekly_base_total_assets + weekly_deposit_total
-    daily_return_pct = (daily_profit / daily_twr_base) * 100 if daily_twr_base > 0 else 0.0
-    weekly_return_pct = (weekly_profit / weekly_twr_base) * 100 if weekly_twr_base > 0 else 0.0
+    # /assets 와 /daily, /weekly 의 일/주 수익률을 일치시키기 위해
+    # daily_fund_data 와 weekly_fund_data 에서 마지막 row 를 직접 사용한다.
+    # (자산 수익률 계산 정책: docs/developer_guide.md 참고)
+    try:
+        latest_daily_doc = next(iter(load_daily_docs_for_aggregation()), None)
+    except Exception as exc:
+        logger.warning("daily_fund_data 조회 실패: %s", exc)
+        latest_daily_doc = None
+    daily_profit = normalize_number((latest_daily_doc or {}).get("daily_profit"))
+    daily_return_pct = normalize_number((latest_daily_doc or {}).get("daily_return_pct"))
+    weekly_profit = normalize_number((latest_weekly or {}).get("weekly_profit"))
+    weekly_return_pct = normalize_number((latest_weekly or {}).get("weekly_return_pct"))
 
     metrics_row1 = [
         {"label": "총 자산", "value": total_assets, "kind": "money"},
