@@ -297,7 +297,13 @@ def _build_missing_ticker_labels(ticker_type: str, missing_tickers: list[str]) -
     return labels
 
 
-def _get_previous_trading_day(country_code: str, reference_date: pd.Timestamp | None) -> pd.Timestamp | None:
+def _get_nth_previous_trading_day(
+    country_code: str,
+    reference_date: pd.Timestamp | None,
+    offset: int,
+) -> pd.Timestamp | None:
+    if offset < 1:
+        raise ValueError("이전 거래일 offset은 1 이상이어야 합니다.")
     if reference_date is None:
         return None
 
@@ -308,16 +314,22 @@ def _get_previous_trading_day(country_code: str, reference_date: pd.Timestamp | 
     if pd.isna(reference):
         return None
     reference = reference.normalize()
-    search_start = reference - pd.DateOffset(days=15)
+    search_start = reference - pd.DateOffset(days=max(15, offset * 4 + 10))
     trading_days = get_trading_days(
         search_start.strftime("%Y-%m-%d"),
         reference.strftime("%Y-%m-%d"),
         country_code,
     )
-    previous_days = [pd.Timestamp(day).normalize() for day in trading_days if pd.Timestamp(day).normalize() < reference]
-    if not previous_days:
+    previous_days = sorted(
+        {pd.Timestamp(day).normalize() for day in trading_days if pd.Timestamp(day).normalize() < reference}
+    )
+    if len(previous_days) < offset:
         return None
-    return max(previous_days)
+    return previous_days[-offset]
+
+
+def _get_previous_trading_day(country_code: str, reference_date: pd.Timestamp | None) -> pd.Timestamp | None:
+    return _get_nth_previous_trading_day(country_code, reference_date, 1)
 
 
 def _build_rank_map(dataframe: pd.DataFrame) -> dict[str, int]:
@@ -344,21 +356,14 @@ def _normalize_score_value(value: Any) -> float | None:
     return score
 
 
-def _build_bonus_adjusted_rows(
-    dataframe: pd.DataFrame,
-    held_bonus_score: int,
-) -> list[dict[str, Any]]:
+def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     rows_with_index: list[dict[str, Any]] = []
     for index, row in enumerate(dataframe.to_dict(orient="records")):
         score = _normalize_score_value(row.get("점수"))
-        is_held = str(row.get("보유") or "").strip() != ""
-        adjusted_score = score
-        if score is not None and is_held:
-            adjusted_score = round(score + held_bonus_score, 1)
         rows_with_index.append(
             {
                 **row,
-                "점수": adjusted_score,
+                "점수": score,
                 "__base_index": index,
             }
         )
@@ -578,14 +583,20 @@ def _compute_rank_data_payload(
             parsed_as_of_date = None
         if parsed_as_of_date is not None and not pd.isna(parsed_as_of_date):
             effective_as_of_date = parsed_as_of_date.normalize()
-    current_rows = _build_bonus_adjusted_rows(dataframe, bonus_score)
+    current_rows = _build_score_ranked_rows(dataframe)
     current_rank_map = _build_rank_map_from_rows(current_rows)
     previous_rank_map: dict[str, int] = {}
+    weekly_rank_map: dict[str, int] = {}
     raw_latest_trading_day = dataframe.attrs.get("latest_trading_day")
     previous_trading_day = (
         effective_as_of_date - pd.Timedelta(days=1)
         if is_all_ticker_type and effective_as_of_date is not None
         else _get_previous_trading_day(country_code, raw_latest_trading_day)
+    )
+    weekly_rank_trading_day = (
+        effective_as_of_date - pd.Timedelta(days=7)
+        if is_all_ticker_type and effective_as_of_date is not None
+        else _get_nth_previous_trading_day(country_code, raw_latest_trading_day, 5)
     )
     if previous_trading_day is not None:
         if is_all_ticker_type:
@@ -602,8 +613,25 @@ def _compute_rank_data_payload(
                 ma_rules=ma_rules,
                 as_of_date=previous_trading_day,
             )
-        previous_rows = _build_bonus_adjusted_rows(previous_dataframe, bonus_score)
+        previous_rows = _build_score_ranked_rows(previous_dataframe)
         previous_rank_map = _build_rank_map_from_rows(previous_rows)
+    if weekly_rank_trading_day is not None:
+        if is_all_ticker_type:
+            all_settings = get_all_pool_settings()
+            weekly_dataframe = _build_all_ticker_type_rankings(
+                configs_payload=configs_payload,
+                include_ticker_types=[str(ticker_type) for ticker_type in all_settings["include"]],
+                ma_rules=ma_rules,
+                selected_as_of_date=weekly_rank_trading_day,
+            )
+        else:
+            weekly_dataframe = build_ticker_type_rankings(
+                selected_ticker_type,
+                ma_rules=ma_rules,
+                as_of_date=weekly_rank_trading_day,
+            )
+        weekly_rows = _build_score_ranked_rows(weekly_dataframe)
+        weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
 
     if current_rows:
         dataframe_attrs = dict(dataframe.attrs)
@@ -612,6 +640,7 @@ def _compute_rank_data_payload(
             row_key = _build_rank_row_key(row)
             row["순위"] = current_rank_map.get(row_key)
             row["이전순위"] = previous_rank_map.get(row_key)
+            row["1주순위"] = weekly_rank_map.get(row_key)
             enriched_rows.append(row)
         dataframe = pd.DataFrame(enriched_rows)
         dataframe.attrs.update(dataframe_attrs)
@@ -637,6 +666,7 @@ def _compute_rank_data_payload(
         "ranking_computed_at": _serialize_datetime(dataframe.attrs.get("ranking_computed_at")),
         "realtime_fetched_at": _serialize_datetime(dataframe.attrs.get("realtime_fetched_at")),
         "previous_trading_day": _serialize_datetime(previous_trading_day),
+        "weekly_rank_trading_day": _serialize_datetime(weekly_rank_trading_day),
         "missing_tickers": [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         "missing_ticker_labels": (
             [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])]

@@ -47,6 +47,7 @@ type RankRow = {
   순번: string;
   순위: number | null;
   이전순위: number | null;
+  "1주순위": number | null;
   버킷: string;
   bucket: number;
   티커: string;
@@ -181,6 +182,21 @@ function getSignedClass(value: number | null): string {
     return "";
   }
   return value > 0 ? "metricPositive" : "metricNegative";
+}
+
+function renderRankDelta(value: number | null | undefined) {
+  const rankDelta = value ?? null;
+  if (rankDelta === null || rankDelta === undefined || rankDelta === 0) {
+    return <span style={{ fontWeight: 600, color: "#6c757d" }}>-</span>;
+  }
+
+  const isRise = rankDelta > 0;
+  const delta = Math.abs(rankDelta);
+  return (
+    <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
+      {isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"}
+    </span>
+  );
 }
 
 function getBucketCellClass(bucketLabel: string): string {
@@ -600,6 +616,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         순번: "-",
         순위: null,
         이전순위: null,
+        "1주순위": null,
         버킷: getBucketName(addingRow.bucket),
         bucket: addingRow.bucket,
         티커: addingRow.ticker,
@@ -642,14 +659,27 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const maRuleSummary = useMemo(() => (maRule ? [`MA: ${maRule.ma_type} ${maRule.ma_months}개월`] : []), [maRule]);
 
-  // 추천 ✅ 대상 티커 집합 — 백테스트 로직과 동일하게 RSI 탈락 시 다음 순위로 백필.
+  // 추천 ✅ 대상 티커 집합 — 순위 표시는 원점수 기준, 추천만 보유보너스를 반영한다.
   const recommendedTickerSet = useMemo<Set<string>>(() => {
     const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
     if (!topN) return new Set();
     const rsiLimit = selectedTickerTypeItem?.rsi_limit;
+    const bonusScore = Number(heldBonusScore ?? 0);
     const sorted = [...gridRows]
-      .filter((r) => r.순위 != null)
-      .sort((a, b) => Number(a.순위 ?? 0) - Number(b.순위 ?? 0));
+      .filter((r) => r.순위 != null && !r.exclude_from_ranking)
+      .sort((a, b) => {
+        const aScore = typeof a.점수 === "number" && !Number.isNaN(a.점수) ? a.점수 : null;
+        const bScore = typeof b.점수 === "number" && !Number.isNaN(b.점수) ? b.점수 : null;
+        const aAdjustedScore = aScore === null ? null : aScore + (String(a.보유 || "").trim() ? bonusScore : 0);
+        const bAdjustedScore = bScore === null ? null : bScore + (String(b.보유 || "").trim() ? bonusScore : 0);
+        if (aAdjustedScore === null && bAdjustedScore === null) {
+          return Number(a.순위 ?? 0) - Number(b.순위 ?? 0);
+        }
+        if (aAdjustedScore === null) return 1;
+        if (bAdjustedScore === null) return -1;
+        if (bAdjustedScore !== aAdjustedScore) return bAdjustedScore - aAdjustedScore;
+        return Number(a.순위 ?? 0) - Number(b.순위 ?? 0);
+      });
     const picked = new Set<string>();
     for (const row of sorted) {
       if (picked.size >= topN) break;
@@ -662,16 +692,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (row.id) picked.add(row.id);
     }
     return picked;
-  }, [gridRows, selectedTickerTypeItem?.top_n_hold, selectedTickerTypeItem?.rsi_limit]);
+  }, [gridRows, heldBonusScore, selectedTickerTypeItem?.top_n_hold, selectedTickerTypeItem?.rsi_limit]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
       {
         field: "순위",
         headerName: "순위",
-        minWidth: 72,
-        width: 72,
-        cellStyle: { textAlign: "center" },
+        minWidth: 54,
+        width: 54,
+        cellStyle: { justifyContent: "center", textAlign: "center", overflow: "hidden", paddingLeft: 2, paddingRight: 2 },
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (pageMode === "rank" && params.data?.exclude_from_ranking) {
             return (
@@ -684,14 +714,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   border: "1px solid #c7d2fe",
                   background: "#eef2ff",
                   color: "#4338ca",
-                  fontSize: "0.72rem",
+                  fontSize: "0.58rem",
                   fontWeight: 700,
                   lineHeight: 1,
-                  padding: "0.18rem 0.38rem",
+                  padding: "0.12rem 0.22rem",
                   whiteSpace: "nowrap",
+                  maxWidth: "100%",
                 }}
               >
-                📌 고정
+                📌고정
               </span>
             );
           }
@@ -702,11 +733,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       {
         field: "이전순위",
-        headerName: "이전순위",
-        minWidth: 98,
-        width: 98,
-        cellStyle: { textAlign: "center" },
-        sortable: false,
+        headerName: "이전",
+        minWidth: 58,
+        width: 58,
+        cellStyle: { justifyContent: "center", textAlign: "center" },
+        sortable: true,
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           const currentRank = params.data?.순위 ?? null;
           const previousRank = params.value ?? null;
@@ -715,20 +746,53 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }
 
           if (currentRank === previousRank) {
-            return (
-              <span style={{ fontWeight: 600 }}>
-                {currentRank}(-)
-              </span>
-            );
+            return <span style={{ fontWeight: 600 }}>{previousRank}</span>;
           }
 
           const isRise = currentRank < previousRank;
-          const delta = Math.abs(currentRank - previousRank);
           return (
             <span style={{ color: isRise ? "#d63939" : "#206bc4", fontWeight: 700 }}>
-              {currentRank}({isRise ? `+${delta}` : `-${delta}`} {isRise ? "▲" : "▼"})
+              {previousRank}
             </span>
           );
+        },
+      },
+      {
+        colId: "순위변동",
+        headerName: "변동",
+        minWidth: 66,
+        width: 66,
+        cellStyle: { textAlign: "center" },
+        sortable: true,
+        valueGetter: (params) => {
+          const currentRank = params.data?.순위 ?? null;
+          const previousRank = params.data?.이전순위 ?? null;
+          if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
+            return null;
+          }
+          return previousRank - currentRank;
+        },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          return renderRankDelta(params.value);
+        },
+      },
+      {
+        colId: "1주순위변동",
+        headerName: "1주",
+        minWidth: 66,
+        width: 66,
+        cellStyle: { textAlign: "center" },
+        sortable: true,
+        valueGetter: (params) => {
+          const currentRank = params.data?.순위 ?? null;
+          const weeklyRank = params.data?.["1주순위"] ?? null;
+          if (currentRank === null || currentRank === undefined || weeklyRank === null || weeklyRank === undefined) {
+            return null;
+          }
+          return weeklyRank - currentRank;
+        },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          return renderRankDelta(params.value);
         },
       },
       {
