@@ -44,6 +44,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "asset_summary",
     "market_hours_analysis",
     "us_market_stocks",
+    "data_aggregate",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
