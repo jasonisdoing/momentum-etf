@@ -29,11 +29,11 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 기본 배치는 캘린더 평일(월~금, KST) 에 실행한다.
 # cron 의 요일 필드: 1=월, 2=화, ..., 6=토
 
-# 월~토 05:30 ~ 17:30 매시 30분 - 주가 캐시 갱신
-# - 미국 금요일 정규장 종가가 한국시간 토요일 새벽에 확정되는 점을 반영
+# 월~토 24시간 매시 0분/30분 - 주가 캐시 갱신
+# - 미국 정규장(22:30 ~ 05:00 KST)을 포함한 모든 시간대를 30분 간격으로 커버
 # - 메타 업데이터(매시 45분)와 15분 간격을 두어 부하 분산
-# - 미국 표준시간 마감(06:00 KST) 이후 반영 지연을 06:30 이후 반복 실행으로 흡수
-30 5-17 * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+# - 미국 금요일 정규장 종가가 한국시간 토요일 새벽에 확정되는 점도 자동 반영
+0,30 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 
 # 평일 09:45 ~ 17:45 매시 45분 - 종목 메타데이터 업데이트
 # - 9:00 정각이 아닌 9:45부터 시작: 장 개장 직후 iNAV 미확정 상태 회피
