@@ -45,7 +45,7 @@ SCHEDULE_ROWS = [
         "key": "cache_refresh",
         "job": "가격 캐시 업데이트",
         "target": "모든 종목/포트폴리오 변동",
-        "cadence": "월~토 05:30 ~ 17:30 매시 30분 KST",
+        "cadence": "월~토 24시간 매시 0분/30분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
     },
     {
