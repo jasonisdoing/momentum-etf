@@ -53,7 +53,7 @@ SCHEDULE_ROWS = [
         "key": "portfolio_refresh",
         "job": "포트폴리오 업데이트",
         "target": "포트폴리오 구성종목 가격",
-        "cadence": "월~토 24시간 매시 0분/30분 KST",
+        "cadence": "월~토 24시간 10분 간격 KST",
         "command": "python scripts/portfolio_refresh.py",
     },
     {
