@@ -19,6 +19,7 @@ load_env_if_present()
 SystemAction = Literal[
     "data_aggregate",
     "cache_refresh",
+    "portfolio_refresh",
     "market_hours_analysis",
     "metadata_updater",
     "asset_summary",
@@ -44,9 +45,16 @@ SCHEDULE_ROWS = [
     {
         "key": "cache_refresh",
         "job": "가격 캐시 업데이트",
-        "target": "모든 종목/포트폴리오 변동",
+        "target": "모든 종목 가격",
         "cadence": "월~토 24시간 매시 0분/30분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
+    },
+    {
+        "key": "portfolio_refresh",
+        "job": "포트폴리오 업데이트",
+        "target": "포트폴리오 구성종목 가격",
+        "cadence": "월~토 24시간 매시 0분/30분 KST",
+        "command": "python scripts/portfolio_refresh.py",
     },
     {
         "key": "market_hours_analysis",
@@ -75,6 +83,7 @@ SCHEDULE_ROWS = [
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
+    "portfolio_refresh": "scripts/portfolio_refresh.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",

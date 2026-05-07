@@ -447,11 +447,17 @@ def _fetch_yahoo_baseline_prices(
         symbols_to_fetch: list[str] = []
         previous_day_symbols = {str(symbol or "").strip().upper() for symbol in previous_trading_day_symbols}
 
+        from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
+        blacklist = get_active_blacklist()
+
         for symbol in normalized_symbols:
             is_prev = symbol in previous_day_symbols
             cache_key = (symbol, base_date, is_prev)
             if cache_key in _YAHOO_BASELINE_CACHE:
                 result[symbol] = _YAHOO_BASELINE_CACHE[cache_key]
+            elif symbol in blacklist:
+                # 24시간 내 yfinance/토스에서 실패한 심볼은 재시도하지 않음
+                continue
             else:
                 symbols_to_fetch.append(symbol)
 
@@ -486,6 +492,8 @@ def _fetch_yahoo_baseline_prices(
         for symbol in symbols_to_fetch:
             frame = _extract_symbol_frame(symbol)
             if frame is None or frame.empty or "Close" not in frame.columns:
+                # yfinance 가 반환하지 않은 심볼은 상폐/미상장 가능성 → 블랙리스트
+                mark_failed(symbol, source="야후", reason="yfinance: 가격 데이터 없음")
                 continue
             close_series = pd.to_numeric(frame["Close"], errors="coerce").dropna()
             normalized_index = pd.to_datetime(close_series.index).tz_localize(None).normalize()
@@ -498,6 +506,7 @@ def _fetch_yahoo_baseline_prices(
                 close_series = close_series[normalized_index <= base_ts]
 
             if close_series.empty:
+                mark_failed(symbol, source="야후", reason="yfinance: base_date 이전 종가 없음")
                 continue
             data = {
                 "price": float(close_series.iloc[-1]),

@@ -1939,13 +1939,20 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     Returns:
         {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
     """
+    from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
+
     result: dict[str, str] = {}
     uncached: list[str] = []
+
+    blacklist = get_active_blacklist()
 
     for sym in symbols:
         cached_code = _TOSS_SYMBOL_CODE_CACHE.get(sym)
         if cached_code:
             result[sym] = cached_code
+        elif sym in blacklist:
+            # 24시간 내 실패한 심볼은 재시도하지 않음
+            continue
         else:
             uncached.append(sym)
 
@@ -1995,9 +2002,11 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
                 result[sym] = product_code
             else:
                 logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
+                mark_failed(sym, source="토스", reason="미국 주식 검색 결과 없음")
 
         except Exception as exc:
             logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
+            mark_failed(sym, source="토스", reason=f"API 오류: {exc}")
 
     return result
 
