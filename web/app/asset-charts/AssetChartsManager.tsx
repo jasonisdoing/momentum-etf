@@ -26,6 +26,8 @@ type ChartRow = {
   week_date: string;
   label: string;
   total_assets: number;
+  // 누적 인출을 안 했다고 가정한 총자산 (= total_assets + 누적 인출)
+  total_assets_if_no_withdraw: number;
   total_principal: number;
   bucket_1: number;
   bucket_2: number;
@@ -90,24 +92,29 @@ function formatVisiblePeriod(rows: ChartRow[]): string {
 }
 
 function buildChartRows(rows: WeeklyRow[]): ChartRow[] {
-  return [...rows]
-    .sort((a, b) => a.week_date.localeCompare(b.week_date))
-    .map((row) => {
-      const totalAssets = toNumber(row.total_assets);
-      const totalPrincipal = toNumber(row.total_principal);
-      const cashAmount = totalAssets * (toNumber(row.bucket_pct_cash) / 100);
-      return {
-        week_date: row.week_date,
-        label: formatDateLabel(row.week_date),
-        total_assets: totalAssets,
-        total_principal: totalPrincipal,
-        bucket_1: totalAssets * (toNumber(row.bucket_pct_momentum) / 100),
-        bucket_2: totalAssets * (toNumber(row.bucket_pct_market) / 100),
-        bucket_3: totalAssets * (toNumber(row.bucket_pct_dividend) / 100),
-        bucket_4: totalAssets * (toNumber(row.bucket_pct_alternative) / 100),
-        bucket_5: cashAmount,
-      };
-    });
+  // 시간순 정렬 후 total_expense 누적합을 추적한다.
+  const sorted = [...rows].sort((a, b) => a.week_date.localeCompare(b.week_date));
+  let runningExpense = 0;
+  return sorted.map((row) => {
+    const totalAssets = toNumber(row.total_assets);
+    const totalPrincipal = toNumber(row.total_principal);
+    runningExpense += toNumber(row.total_expense);
+    // 인출 미반영 가정 총자산 = 총자산 - 누적 지출
+    // (지출이 음수로 기록되는 컨벤션이라 빼면 더해진다)
+    const cashAmount = totalAssets * (toNumber(row.bucket_pct_cash) / 100);
+    return {
+      week_date: row.week_date,
+      label: formatDateLabel(row.week_date),
+      total_assets: totalAssets,
+      total_assets_if_no_withdraw: totalAssets - runningExpense,
+      total_principal: totalPrincipal,
+      bucket_1: totalAssets * (toNumber(row.bucket_pct_momentum) / 100),
+      bucket_2: totalAssets * (toNumber(row.bucket_pct_market) / 100),
+      bucket_3: totalAssets * (toNumber(row.bucket_pct_dividend) / 100),
+      bucket_4: totalAssets * (toNumber(row.bucket_pct_alternative) / 100),
+      bucket_5: cashAmount,
+    };
+  });
 }
 
 function filterRowsByRange(rows: ChartRow[], rangeKey: RangeKey): ChartRow[] {
@@ -299,8 +306,8 @@ export function AssetChartsManager({
           <div className="card appCard assetChartsCard">
             <div className="assetChartsCardHeader">
               <div>
-                <h2>총자산 / 원금</h2>
-                <p>주별 총자산과 원금 흐름</p>
+                <h2>총자산(인출 미반영) / 총자산 / 원금</h2>
+                <p>주별 총자산·원금 흐름과 인출 안 했다면 총자산</p>
               </div>
             </div>
             <div className="assetChartsBody">
@@ -318,12 +325,24 @@ export function AssetChartsManager({
                         <stop offset="5%" stopColor="#7c3aed" stopOpacity={0.32} />
                         <stop offset="95%" stopColor="#7c3aed" stopOpacity={0.04} />
                       </linearGradient>
+                      <linearGradient id="assetChartTotalNoWithdraw" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#2563eb" stopOpacity={0.32} />
+                        <stop offset="95%" stopColor="#2563eb" stopOpacity={0.04} />
+                      </linearGradient>
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="week_date" tickFormatter={formatMonthAxisLabel} minTickGap={18} tick={{ fontSize: 12 }} />
                     <YAxis hide={!showAmounts} tickFormatter={formatCompactMoney} width={showAmounts ? 88 : 0} tick={{ fontSize: 12 }} />
                     <Tooltip content={<ChartTooltip />} />
                     <Legend />
+                    <Area
+                      type="monotone"
+                      dataKey="total_assets_if_no_withdraw"
+                      name="총 자산(인출 미반영)"
+                      stroke="#2563eb"
+                      fill="url(#assetChartTotalNoWithdraw)"
+                      strokeWidth={2}
+                    />
                     <Area
                       type="monotone"
                       dataKey="total_principal"
