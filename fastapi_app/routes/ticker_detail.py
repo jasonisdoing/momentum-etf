@@ -10,7 +10,7 @@ from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import enrich_component_prices
 from services.portfolio_change_service import (
-    build_cumulative_fx_rates as _build_cumulative_fx_rates_for_holdings,
+    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
     compute_portfolio_change_bundle,
     determine_portfolio_change_base_date,
 )
@@ -882,11 +882,9 @@ def get_ticker_detail(
                 if bundle_fx_rates is not None:
                     etf_info["fx_rates"] = bundle_fx_rates
                 else:
-                    base_date = str(etf_info.get("portfolio_change_base_date") or "").strip() or None
-                    etf_info["fx_rates"] = _build_cumulative_fx_rates_for_holdings(
+                    etf_info["fx_rates"] = _build_daily_fx_rates_for_holdings(
                         holdings,
                         get_exchange_rates(),
-                        base_date,
                     )
 
     return {

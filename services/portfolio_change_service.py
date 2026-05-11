@@ -17,12 +17,14 @@ import pandas as pd
 from services.component_price_service import enrich_component_prices
 from services.price_service import get_exchange_rates, get_exchange_rate_series
 from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
+from utils.data_loader import fetch_naver_etf_inav_snapshot
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
 
 logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
 _TTL_SECONDS = 300
+_PORTFOLIO_CHANGE_CALC_VERSION = 2
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
 _PORTFOLIO_CHANGE_LOCK = threading.Lock()
@@ -82,11 +84,42 @@ def _is_portfolio_change_cache_usable(cache_data: Any, holdings_reference_date: 
     """계산 실패로 저장된 포트폴리오 변동 캐시는 재계산 대상이다."""
     if not isinstance(cache_data, dict):
         return False
+    if cache_data.get("calc_version") != _PORTFOLIO_CHANGE_CALC_VERSION:
+        return False
     if not cache_data.get("base_date"):
         return False
     if cache_data.get("holdings_reference_date") != holdings_reference_date:
         return False
-    return cache_data.get("total_pct") is not None
+    if cache_data.get("total_pct") is None:
+        return False
+    return not _has_missing_korean_component_cumulative_change(cache_data)
+
+
+def _has_missing_korean_component_cumulative_change(cache_data: dict[str, Any]) -> bool:
+    """국내 6자리 구성종목의 기준가 계산이 누락된 기존 캐시는 폐기한다."""
+    priced_holdings = cache_data.get("priced_holdings")
+    if not isinstance(priced_holdings, list):
+        return False
+
+    for item in priced_holdings:
+        if not isinstance(item, dict):
+            continue
+        ticker = str(item.get("ticker") or "").strip()
+        if not ticker.isdigit() or len(ticker) != 6:
+            continue
+        try:
+            weight = float(item.get("weight") or 0)
+        except (TypeError, ValueError):
+            continue
+        if weight <= 0:
+            continue
+        if str(item.get("price_currency") or "").strip().upper() != "KRW":
+            continue
+        if item.get("current_price") is None:
+            continue
+        if item.get("cumulative_change_pct") is None:
+            return True
+    return False
 
 
 def determine_portfolio_change_base_date(ticker_type: str, ticker: str) -> str | None:
@@ -109,6 +142,32 @@ def _build_fx_rates_for_currencies(currencies: set[str], rates: dict[str, Any]) 
         if rate is None:
             continue
         result.append({"currency": currency, "rate": rate})
+    return result
+
+
+def build_daily_fx_rates(
+    holdings: list[dict[str, Any]],
+    rates: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """구성종목 통화별 최신 일간 환율 변동률을 구성한다."""
+    currencies: set[str] = set()
+    for h in holdings:
+        currency = str(h.get("price_currency") or "").strip().upper()
+        if currency and currency != "KRW":
+            currencies.add(currency)
+
+    result: list[dict[str, Any]] = []
+    for item in _build_fx_rates_for_currencies(currencies, rates):
+        currency = str(item.get("currency") or "").strip().upper()
+        info = rates.get(currency)
+        if not isinstance(info, dict):
+            continue
+        result.append(
+            {
+                **item,
+                "change_pct": info.get("change_pct"),
+            }
+        )
     return result
 
 
@@ -174,7 +233,7 @@ def _calc_breakdown_and_total(
     holdings: list[dict[str, Any]],
     fx_rates: list[dict[str, Any]],
 ) -> tuple[float | None, list[dict[str, Any]], float]:
-    """portfolio-change.ts 의 calcPortfolioChange 와 동일 로직 (Python 포팅)."""
+    """기준일 이후 누적 포트폴리오 변동률을 계산한다."""
     fx_change_by_currency: dict[str, float] = {}
     for fx in fx_rates:
         cur = str(fx.get("currency") or "").strip().upper()
@@ -229,6 +288,116 @@ def _calc_breakdown_and_total(
     if coverage <= 0:
         return None, breakdown, 0.0
     return total_weighted_sum / 100, breakdown, coverage
+
+
+def _calc_realtime_portfolio_change(
+    holdings: list[dict[str, Any]],
+    fx_rates: list[dict[str, Any]],
+) -> tuple[float | None, list[dict[str, Any]], float, float | None]:
+    """구성종목 일간 변동과 환율 변동을 합산한 포트폴리오 변동률을 계산한다.
+
+    ETF의 공식 iNAV 변동률은 별도 지표로 보관하지만 여기서는 차감하지 않는다.
+    이 값은 전일 기준 구성종목과 환율만으로 추정한 포트폴리오 변동이다.
+    """
+    fx_change_by_currency: dict[str, float] = {}
+    for fx in fx_rates:
+        cur = str(fx.get("currency") or "").strip().upper()
+        chg = fx.get("change_pct")
+        if cur and chg is not None:
+            try:
+                fx_change_by_currency[cur] = float(chg)
+            except (TypeError, ValueError):
+                continue
+
+    groups: dict[str, dict[str, float]] = {}
+    for h in holdings:
+        try:
+            weight = float(h.get("weight") or 0)
+        except (TypeError, ValueError):
+            continue
+        if weight <= 0:
+            continue
+        comp = h.get("change_pct")
+        if comp is None:
+            continue
+        try:
+            comp_val = float(comp)
+        except (TypeError, ValueError):
+            continue
+
+        currency = str(h.get("price_currency") or "").strip().upper() or "KRW"
+        if currency != "KRW" and currency not in fx_change_by_currency:
+            continue
+
+        g = groups.setdefault(currency, {"weight": 0.0, "component_weighted_sum": 0.0})
+        g["weight"] += weight
+        g["component_weighted_sum"] += weight * comp_val
+
+    coverage = 0.0
+    gross_weighted_sum = 0.0
+    breakdown: list[dict[str, Any]] = []
+    for currency, g in groups.items():
+        if g["weight"] <= 0:
+            continue
+        component_change = g["component_weighted_sum"] / g["weight"]
+        adjusted_change = component_change
+        if currency != "KRW":
+            fx_change = fx_change_by_currency[currency]
+            adjusted_change = ((1 + component_change / 100) * (1 + fx_change / 100) - 1) * 100
+
+        breakdown.append({"currency": currency, "change_pct": component_change, "weight": g["weight"]})
+        coverage += g["weight"]
+        gross_weighted_sum += g["weight"] * adjusted_change
+
+    breakdown.sort(key=lambda x: -x["weight"])
+
+    if coverage <= 0:
+        return None, breakdown, 0.0, None
+
+    gross_pct = gross_weighted_sum / 100
+    return gross_pct, breakdown, coverage, gross_pct
+
+
+def _resolve_nav_change_pct(ticker_type: str, ticker: str, current_nav: Any) -> float | None:
+    """네이버 현재 iNAV와 메타 히스토리로 공식 iNAV 장중 변동률을 계산한다."""
+    try:
+        nav_value = float(current_nav)
+    except (TypeError, ValueError):
+        return None
+    if nav_value <= 0:
+        return None
+
+    today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
+    tomorrow_str = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
+    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, tomorrow_str)
+    if not latest_history or "meta_cache" not in latest_history:
+        return None
+
+    latest_history_nav = latest_history["meta_cache"].get("nav")
+    portfolio_change_base_date = str(latest_history.get("date") or "").strip() or None
+    prev_nav = None
+    try:
+        if (
+            latest_history_nav is not None
+            and float(nav_value) == float(latest_history_nav)
+            and portfolio_change_base_date
+        ):
+            prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, portfolio_change_base_date)
+            if prev_history and "meta_cache" in prev_history:
+                prev_nav = prev_history["meta_cache"].get("nav")
+        else:
+            prev_nav = latest_history_nav
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        prev_nav_value = float(prev_nav)
+    except (TypeError, ValueError):
+        return None
+    if prev_nav_value <= 0:
+        return None
+
+    return ((nav_value / prev_nav_value) - 1.0) * 100.0
 
 
 def compute_portfolio_change_bundle(
@@ -289,14 +458,23 @@ def compute_portfolio_change_bundle(
         cumulative_base_date=base_date,
         component_price_snapshot=component_price_snapshot,
     )
-    fx_rates = build_cumulative_fx_rates(priced_holdings, get_exchange_rates(), base_date)
-    total_pct, breakdown, coverage = _calc_breakdown_and_total(priced_holdings, fx_rates)
+    rates = get_exchange_rates()
+    fx_rates = build_daily_fx_rates(priced_holdings, rates)
+    inav_snapshot = fetch_naver_etf_inav_snapshot([norm_ticker]).get(norm_ticker, {})
+    nav_change_pct = _resolve_nav_change_pct(norm_type, norm_ticker, inav_snapshot.get("nav"))
+    total_pct, breakdown, coverage, gross_portfolio_pct = _calc_realtime_portfolio_change(
+        priced_holdings,
+        fx_rates,
+    )
 
     result = {
+        "calc_version": _PORTFOLIO_CHANGE_CALC_VERSION,
         "base_date": base_date,
         "priced_holdings": priced_holdings,
         "fx_rates": fx_rates,
         "total_pct": total_pct,
+        "gross_portfolio_pct": gross_portfolio_pct,
+        "inav_change_pct": nav_change_pct,
         "breakdown": breakdown,
         "coverage_weight": coverage,
         "holdings_reference_date": holdings_reference_date,
