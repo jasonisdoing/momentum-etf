@@ -47,6 +47,7 @@ def enrich_component_prices(
     pricing_ids = {id(item) for item in holdings_for_pricing}
 
     korean_tickers: list[str] = []
+    korean_baseline_tickers: list[str] = []
     us_tickers: list[str] = []
     au_tickers: list[str] = []
     worldstock_codes: list[str] = []
@@ -63,6 +64,8 @@ def enrich_component_prices(
 
         component_ticker = _normalize_upper(item.get("ticker"))
         if _is_korean_six_digit_holding(item):
+            if cumulative_base_date:
+                korean_baseline_tickers.append(component_ticker)
             if _component_price_key(item) not in component_price_snapshot:
                 korean_tickers.append(component_ticker)
             continue
@@ -92,7 +95,7 @@ def enrich_component_prices(
     au_price_map = _safe_fetch_snapshot("au", sorted(set(au_tickers)))
     worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
     yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
-    korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_tickers, cumulative_base_date)
+    korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_baseline_tickers, cumulative_base_date)
     baseline_price_map = _safe_fetch_yahoo_baseline_prices(
         baseline_yahoo_symbols,
         cumulative_base_date,
@@ -423,6 +426,48 @@ def _fetch_cached_baseline_prices(
             "price": float(base_series.iloc[-1]),
             "date": pd.Timestamp(baseline_date).strftime("%Y-%m-%d"),
         }
+
+    missing = [t for t in normalized_tickers if t not in result]
+    if missing:
+        pykrx_result = _fetch_pykrx_baseline_prices(missing, base_date)
+        result.update(pykrx_result)
+
+    return result
+
+
+def _fetch_pykrx_baseline_prices(
+    tickers: list[str],
+    base_date: str,
+) -> dict[str, dict[str, Any]]:
+    try:
+        from pykrx import stock as _stock
+    except ImportError:
+        return {}
+
+    base_ts = pd.Timestamp(base_date).normalize()
+    start_ts = base_ts - pd.Timedelta(days=10)
+    start_str = start_ts.strftime("%Y%m%d")
+    end_str = base_ts.strftime("%Y%m%d")
+
+    result: dict[str, dict[str, Any]] = {}
+    for ticker in tickers:
+        try:
+            df = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+            if df is None or df.empty:
+                continue
+            close_col = "종가" if "종가" in df.columns else "Close" if "Close" in df.columns else None
+            if close_col is None:
+                continue
+            close_series = pd.to_numeric(df[close_col], errors="coerce").dropna()
+            close_series = close_series[close_series > 0]
+            if close_series.empty:
+                continue
+            result[ticker] = {
+                "price": float(close_series.iloc[-1]),
+                "date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
+            }
+        except Exception as exc:
+            logger.warning("pykrx 기준일 가격 조회 실패(ticker=%s): %s", ticker, exc)
     return result
 
 
