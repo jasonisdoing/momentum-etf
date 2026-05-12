@@ -5,9 +5,11 @@ import { createChart, ColorType, CrosshairMode, LineSeries } from "lightweight-c
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
 import { PageFrame } from "../components/PageFrame";
+import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
-import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
+import { calcPortfolioChange } from "@/lib/portfolio-change";
+import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings";
 type PerformanceRange = "1m" | "3m" | "6m" | "1y" | "3y";
@@ -266,8 +268,6 @@ function formatSignedPriceDelta(value: number | null | undefined, countryCode: s
   return `${value > 0 ? "▲ " : "▼ "}${formatPrice(absValue, countryCode)}`;
 }
 
-// getCurrencyRegionLabel は @/lib/portfolio-change から import
-
 function formatKoreanDateLabel(value: string | null): string {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
@@ -313,25 +313,11 @@ function getLatestChangeAmount(detail: TickerDetailResponse): number | null {
   return latestClose - calculatedPreviousClose;
 }
 
-function getPortfolioChange(detail: TickerDetailResponse): {
-  totalPct: number | null;
-  coverageWeight: number;
-  breakdown: { currency: string; label: string; changePct: number; weight: number }[];
-} {
-  const result = calcPortfolioChange(
+function getPortfolioChange(detail: TickerDetailResponse): PortfolioChangeResult {
+  return calcPortfolioChange(
     detail.holdings ?? [],
     detail.etf_info?.fx_rates ?? [],
   );
-  return {
-    totalPct: result.totalPct,
-    coverageWeight: result.coverageWeight,
-    breakdown: result.breakdown.map((item) => ({
-      currency: item.currency,
-      label: item.label,
-      changePct: item.change_pct,
-      weight: item.weight,
-    })),
-  };
 }
 
 function getPricedRows(rows: PriceRow[]): PriceRow[] {
@@ -585,39 +571,14 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
   }
 
   if (metric === "포트폴리오 변동") {
-    const fxRateByCurrency = new Map<string, TickerFxRate>();
-    (etfInfo?.fx_rates ?? []).forEach((fx) => {
-      const currency = String(fx.currency || "").trim().toUpperCase();
-      if (currency) fxRateByCurrency.set(currency, fx);
-    });
     return (
       <div className="compareBasicValue">
-        <div className="comparePortfolioTotalLine">
-          <strong className={getSignedClass(portfolioChange.totalPct)}>{formatSignedPercent(portfolioChange.totalPct)}</strong>
-          {portfolioChange.coverageWeight > 0 && portfolioChange.coverageWeight < 99.5 ? (
-            <span className="comparePortfolioCoverage">
-              (계산 반영 {portfolioChange.coverageWeight.toFixed(1)}%)
-            </span>
-          ) : null}
-        </div>
-        {portfolioChange.breakdown.length > 0 ? (
-          <span className="comparePortfolioBreakdownList">
-            {portfolioChange.breakdown.map((item) => (
-              <span key={item.currency} className="comparePortfolioBreakdownItem">
-                <span>{item.label}({formatNumber(item.weight, 0)}%)</span>
-                <span className={getSignedClass(item.changePct)}>{formatSignedPercent(item.changePct)}</span>
-                {fxRateByCurrency.has(item.currency) ? (
-                  <span className="comparePortfolioBreakdownFx">
-                    · 환율{" "}
-                    <span className={getSignedClass(fxRateByCurrency.get(item.currency)?.change_pct ?? null)}>
-                      {formatSignedPercent(fxRateByCurrency.get(item.currency)?.change_pct ?? null)}
-                    </span>
-                  </span>
-                ) : null}
-              </span>
-            ))}
-          </span>
-        ) : null}
+        <PortfolioChangeBreakdown
+          items={portfolioChange.breakdown}
+          fxRates={etfInfo?.fx_rates ?? []}
+          variant="compact"
+          emptyText="-"
+        />
       </div>
     );
   }
@@ -1081,12 +1042,14 @@ export function ComparePageClient() {
                     >
                       {holding ? (
                         <>
-                          <div className="compareHoldingName">{holding.name || holding.ticker}</div>
-                          <div className="compareHoldingCode">{holdingCode}</div>
-                          <div className="compareHoldingFooter">
+                          <div className="compareHoldingLine">
+                            <div className="compareHoldingName">{holding.name || holding.ticker}</div>
                             <span className={getSignedClass(holding.change_pct ?? null)}>
                               {formatSignedPercent(holding.change_pct ?? null)}
                             </span>
+                          </div>
+                          <div className="compareHoldingLine">
+                            <div className="compareHoldingCode">{holdingCode}</div>
                             <strong>{Number(holding.weight ?? 0).toFixed(2)}%</strong>
                           </div>
                         </>
@@ -1110,12 +1073,14 @@ export function ComparePageClient() {
                         : undefined
                     }
                   >
-                    <div className="compareHoldingName">{holdingExposureRows[rowIndex].name}</div>
-                    <div className="compareHoldingCode">{holdingExposureRows[rowIndex].code}</div>
-                    <div className="compareHoldingFooter">
+                    <div className="compareHoldingLine">
+                      <div className="compareHoldingName">{holdingExposureRows[rowIndex].name}</div>
                       <span className={getSignedClass(holdingExposureRows[rowIndex].changePct)}>
                         {formatSignedPercent(holdingExposureRows[rowIndex].changePct)}
                       </span>
+                    </div>
+                    <div className="compareHoldingLine">
+                      <div className="compareHoldingCode">{holdingExposureRows[rowIndex].code}</div>
                       <strong>{holdingExposureRows[rowIndex].totalWeight.toFixed(2)}%</strong>
                     </div>
                   </div>
