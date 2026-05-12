@@ -35,8 +35,9 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # - 미국 금요일 정규장 종가가 한국시간 토요일 새벽에 확정되는 점도 자동 반영
 0,30 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 
-# 월~토 24시간 10분 간격 - 포트폴리오 구성종목 가격 갱신
-0,10,20,30,40,50 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py portfolio_refresh python scripts/portfolio_refresh.py >> logs/cron/portfolio_refresh.log 2>&1
+# 월~토 24시간 매시 15분/45분 - 포트폴리오 구성종목 가격 갱신
+# - 가격 캐시 갱신(0분/30분) 완료 후 최신 가격 기준으로 구성종목 변동 캐시를 갱신
+15,45 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py portfolio_refresh python scripts/portfolio_refresh.py >> logs/cron/portfolio_refresh.log 2>&1
 
 # 평일 09:45 ~ 17:45 매시 45분 - 종목 메타데이터 업데이트
 # - 9:00 정각이 아닌 9:45부터 시작: 장 개장 직후 iNAV 미확정 상태 회피
