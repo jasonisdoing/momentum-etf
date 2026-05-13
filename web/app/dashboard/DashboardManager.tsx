@@ -39,6 +39,12 @@ type DashboardBucketItem = {
 type DashboardData = {
   metrics_row1?: DashboardMetricItem[];
   metrics_row2?: DashboardMetricItem[];
+  period_profits?: {
+    daily: { profit: number; return_pct: number };
+    weekly: { profit: number; return_pct: number };
+    monthly: { profit: number; return_pct: number };
+    yearly: { profit: number; return_pct: number };
+  };
   accounts?: DashboardAccountSummaryItem[];
   buckets?: DashboardBucketItem[];
   account_buckets?: Record<string, DashboardBucketItem[]>;
@@ -610,6 +616,39 @@ export function DashboardManager() {
           ))}
         </div>
       </div>
+
+      {data?.period_profits ? (
+        <div className="dashboardPeriodProfitGrid">
+          {(
+            [
+              { key: "daily", label: "금일" },
+              { key: "weekly", label: "금주" },
+              { key: "monthly", label: "금월" },
+              { key: "yearly", label: "금년" },
+            ] as const
+          ).map((entry) => {
+            const item = data.period_profits?.[entry.key];
+            const profit = item?.profit ?? 0;
+            const pct = item?.return_pct ?? 0;
+            const signClass = getSignedClass(profit);
+            return (
+              <div key={entry.key} className="card card-sm dashboardPeriodProfitCard">
+                <div className="card-body dashboardPeriodProfitBody">
+                  <div className="dashboardPeriodProfitLabel">{entry.label}</div>
+                  <div className="dashboardPeriodProfitValueRow">
+                    <span className={`dashboardPeriodProfitAmount ${signClass}`.trim()}>
+                      {mask(profit, "money")}
+                    </span>
+                    <span className={`dashboardPeriodProfitPct ${signClass}`.trim()}>
+                      {`${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

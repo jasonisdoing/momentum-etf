@@ -1188,6 +1188,52 @@ a {
   min-height: 24rem;
 }
 
+.dashboardPeriodProfitGrid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboardPeriodProfitCard {
+  min-width: 0;
+}
+
+.dashboardPeriodProfitBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+}
+
+.dashboardPeriodProfitLabel {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2d3d;
+}
+
+.dashboardPeriodProfitValueRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dashboardPeriodProfitAmount {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.dashboardPeriodProfitPct {
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .dashboardPeriodProfitGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .dashboardMetricCardBody {
   display: flex;
   flex-direction: column;
