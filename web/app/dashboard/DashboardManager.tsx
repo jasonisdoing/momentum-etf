@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Area, AreaChart, Cell, Pie, PieChart, Tooltip } from "recharts";
+import { Area, AreaChart, Cell, Pie, PieChart, Tooltip, XAxis, YAxis } from "recharts";
 
 import { BUCKET_COLORS } from "@/lib/bucket-theme";
+import { useHideMoney } from "@/lib/hide-money-context";
 import { AppLoadingState } from "../components/AppLoadingState";
 
 type DashboardMetricItem = {
@@ -133,7 +134,34 @@ function SparklineTooltip({ active, payload }: { active?: boolean; payload?: Arr
 
 let sparklineCounter = 0;
 
-function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?: string }) {
+function formatYAxisTick(value: number, kind: "money" | "percent" | "count" = "money"): string {
+  if (!Number.isFinite(value)) return "";
+  if (kind === "percent") return `${value.toFixed(0)}%`;
+  // money / count → 억/만원 단위로 축약
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 100_000_000) {
+    const eok = value / 100_000_000;
+    return `${sign}${Math.abs(eok).toFixed(eok % 1 === 0 ? 0 : 1).replace(/^-/, "")}억`;
+  }
+  if (abs >= 10_000) {
+    const man = Math.round(value / 10_000);
+    return `${man.toLocaleString("ko-KR")}만`;
+  }
+  return value.toLocaleString("ko-KR");
+}
+
+function Sparkline({
+  data,
+  color = "#206bc4",
+  kind = "money",
+  hideYAxisValues = false,
+}: {
+  data: SparklinePoint[];
+  color?: string;
+  kind?: "money" | "percent" | "count";
+  hideYAxisValues?: boolean;
+}) {
   const [id] = useState(() => `spark-${++sparklineCounter}`);
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -154,14 +182,15 @@ function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?
   }, []);
 
   if (data.length < 2) return null;
+  const tickStyle = { fontSize: 12, fill: "#4a5568", fontWeight: 500 };
   return (
-    <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 96, minWidth: 0 }}>
+    <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 120, minWidth: 0 }}>
       {size.width > 0 && size.height > 0 ? (
         <AreaChart
           data={data}
           width={size.width}
           height={size.height}
-          margin={{ top: 0, right: 0, bottom: 0, left: 0 }}
+          margin={{ top: 4, right: 8, bottom: 4, left: 4 }}
         >
           <defs>
             <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
@@ -169,6 +198,24 @@ function Sparkline({ data, color = "#206bc4" }: { data: SparklinePoint[]; color?
               <stop offset="100%" stopColor={color} stopOpacity={0.02} />
             </linearGradient>
           </defs>
+          <XAxis
+            dataKey="date"
+            tick={tickStyle}
+            tickFormatter={(value: string) => formatSparkDateLabel(value)}
+            tickLine={false}
+            axisLine={{ stroke: "#e6e8ec" }}
+            minTickGap={32}
+            interval="preserveStartEnd"
+          />
+          <YAxis
+            tick={hideYAxisValues ? false : tickStyle}
+            tickFormatter={(value: number) => formatYAxisTick(value, kind)}
+            tickLine={false}
+            axisLine={{ stroke: "#e6e8ec" }}
+            width={hideYAxisValues ? 12 : 52}
+            tickCount={4}
+            domain={["auto", "auto"]}
+          />
           <Area
             type="monotone"
             dataKey="value"
@@ -273,8 +320,19 @@ const PERIOD_OPTIONS = [
   { label: "1달", months: 1 },
   { label: "3달", months: 3 },
   { label: "6달", months: 6 },
-  { label: "12달", months: 12 },
+  { label: "1년", months: 12 },
+  { label: "2년", months: 24 },
+  { label: "3년", months: 36 },
 ];
+
+function formatSparkDateLabel(value: string): string {
+  if (!value) return "";
+  const date = new Date(value.length === 10 ? `${value}T00:00:00` : value);
+  if (Number.isNaN(date.getTime())) return value;
+  const yy = String(date.getFullYear()).slice(2);
+  const mm = String(date.getMonth() + 1);
+  return `${yy}.${mm}`;
+}
 
 function calcChange(
   sparkData: SparklinePoint[] | undefined,
@@ -301,7 +359,7 @@ type DashboardRenderableMetricItem = {
 
 const DASHBOARD_ROW1_LABELS = ["총 자산", "투자 원금", "금일 손익", "금주 손익"] as const;
 const DASHBOARD_ROW2_LABELS = ["누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
-const DASHBOARD_LEFT_LABELS = ["총 자산", "투자 원금", "누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
+const DASHBOARD_LEFT_LABELS = ["총 자산", "투자 원금", "누적 손익", "현금 잔고"] as const;
 
 const DASHBOARD_ACCOUNT_WEIGHTS: { account_id: string; icon: string; label: string }[] = [
   { account_id: "kor_account", icon: "🇰🇷", label: "국내 계좌" },
@@ -334,9 +392,15 @@ function DashboardMetricCard({
 }) {
   const highlighted = shouldHighlight(item.label);
   const signClass = highlighted ? getSignedClass(item.value) : "";
-  const sparkData = sparklines[item.label];
+  const fullSparkData = sparklines[item.label];
+  const sparkData = (() => {
+    if (!fullSparkData || fullSparkData.length === 0) return fullSparkData;
+    const weeksBack = Math.round(periodMonths * 4.33);
+    const startIndex = Math.max(0, fullSparkData.length - 1 - weeksBack);
+    return fullSparkData.slice(startIndex);
+  })();
   const sparkColor = highlighted ? (item.value >= 0 ? "#2fb344" : "#d63939") : "#206bc4";
-  const change = calcChange(sparkData, periodMonths);
+  const change = calcChange(fullSparkData, periodMonths);
   const isMoneyKind = item.kind === "money";
 
   function mask(value: number, kind: "money" | "percent" | "count" = "money"): string {
@@ -350,22 +414,37 @@ function DashboardMetricCard({
         className={`card-body ${sparkData ? "dashboardMetricCardBody" : "dashboardMetricCardBody dashboardMetricCardBodyTextOnly"}`}
         style={{ overflow: "hidden", paddingTop: "0.85rem", paddingBottom: "0.85rem" }}
       >
-        <div className="d-flex align-items-center justify-content-between">
-          <div className="subheader">{item.label}</div>
+        <div className="d-flex align-items-start justify-content-between">
+          <div
+            className="subheader"
+            style={{ fontSize: "1rem", fontWeight: 700, color: "#1f2d3d", letterSpacing: 0 }}
+          >
+            {item.label}
+          </div>
           {change !== null ? (() => {
             const pctRounded = Number(change.pct.toFixed(1));
             const isZero = pctRounded === 0;
             const colorClass = isZero ? "" : change.pct >= 0 ? "metricPositive" : "metricNegative";
             const arrow = isZero ? "" : change.pct >= 0 ? " \u2197" : " \u2198";
-            const deltaText = isMoneyKind && !hideMoney ? `${formatMoney(change.delta)} ` : "";
+            const deltaText = isMoneyKind ? (hideMoney ? "•••••• " : `${formatMoney(change.delta)} `) : "";
+            const periodOption = PERIOD_OPTIONS.find((opt) => opt.months === periodMonths);
+            const periodLabel = periodOption ? `${periodOption.label} \uc804 \ub300\ube44` : "";
             return (
-              <span
-                className={colorClass}
-                style={{ fontSize: "0.75rem", fontWeight: 600, whiteSpace: "nowrap" }}
-              >
-                {deltaText}
-                {pctRounded.toFixed(1)}%{arrow}
-              </span>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+                <span
+                  className="subheader"
+                  style={{ fontSize: "0.78rem", fontWeight: 600, color: "#8a94a6" }}
+                >
+                  {periodLabel}
+                </span>
+                <span
+                  className={colorClass}
+                  style={{ fontSize: "0.94rem", fontWeight: 600, whiteSpace: "nowrap" }}
+                >
+                  {deltaText}
+                  {pctRounded.toFixed(1)}%{arrow}
+                </span>
+              </div>
             );
           })() : null}
         </div>
@@ -398,7 +477,12 @@ function DashboardMetricCard({
         )}
         {sparkData ? (
           <div className="dashboardMetricCardSparkline">
-            <Sparkline data={sparkData} color={sparkColor} />
+            <Sparkline
+              data={sparkData}
+              color={sparkColor}
+              kind={item.kind}
+              hideYAxisValues={hideMoney && item.kind === "money"}
+            />
           </div>
         ) : null}
       </div>
@@ -410,7 +494,7 @@ export function DashboardManager() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [hideMoney, setHideMoney] = useState(false);
+  const { hideMoney, toggleHideMoney } = useHideMoney();
   const [periodMonths, setPeriodMonths] = useState(12);
 
   function mask(value: number, kind: "money" | "percent" | "count" = "money"): string {
@@ -461,9 +545,6 @@ export function DashboardManager() {
   }));
   const leftMetricItems = orderMetricItems(dashboardMetricItems, DASHBOARD_LEFT_LABELS);
   const holdingsStatusMetric = dashboardMetricItems.find((item) => item.label === "수익/손실 종목 수");
-  const buckets = data?.buckets ?? [];
-  const accountBuckets = data?.account_buckets ?? {};
-  const accounts = data?.accounts ?? [];
   const sparklines = data?.sparklines ?? {};
 
   return (
@@ -508,7 +589,7 @@ export function DashboardManager() {
           <button
             type="button"
             className={`btn btn-sm ${hideMoney ? "btn-primary" : "btn-outline-secondary"}`}
-            onClick={() => setHideMoney((c) => !c)}
+            onClick={toggleHideMoney}
           >
             {hideMoney ? "금액 보이기" : "금액 가리기"}
           </button>
@@ -527,78 +608,6 @@ export function DashboardManager() {
               />
             </div>
           ))}
-        </div>
-
-        <div className="dashboardOverviewRight">
-          <div className="card dashboardOverviewChartCard">
-            <div className="card-header dashboardMiniChartHeader">
-              <h3 className="card-title dashboardMiniChartTitle">전체 구성 비중</h3>
-            </div>
-            <div className="card-body dashboardMiniChartBody">
-              <div className="dashboardMiniChartCanvas">
-                <DashboardDonutChart buckets={buckets} />
-              </div>
-              <DashboardBucketLegend buckets={buckets} />
-            </div>
-          </div>
-
-          {DASHBOARD_ACCOUNT_WEIGHTS.map((config) => {
-            const acctBuckets = accountBuckets[config.account_id] ?? [];
-            return (
-              <div key={config.account_id} className="card dashboardOverviewChartCard">
-                <div className="card-header dashboardMiniChartHeader">
-                  <h3 className="card-title dashboardMiniChartTitle">{config.icon} {config.label}</h3>
-                </div>
-                <div className="card-body dashboardMiniChartBody">
-                  <div className="dashboardMiniChartCanvas">
-                    <DashboardDonutChart buckets={acctBuckets} />
-                  </div>
-                  <DashboardBucketLegend buckets={acctBuckets} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* 계좌별 요약 */}
-      <div className="card">
-        <div className="card-header">
-          <h3 className="card-title">계좌별 요약</h3>
-        </div>
-        <div className="table-responsive">
-          <table className="table table-vcenter card-table">
-            <thead>
-              <tr>
-                <th>계좌</th>
-                <th className="text-end">총 자산</th>
-                <th className="text-end">총 원금</th>
-                <th className="text-end">평가 금액</th>
-                <th className="text-end">현금</th>
-                <th className="text-end">현금 비중</th>
-                <th className="text-end">계좌 손익</th>
-                <th className="text-end">수익률</th>
-                <th className="text-end">금일 손익</th>
-                <th className="text-end">금주 손익</th>
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map((a) => (
-                <tr key={a.account_id}>
-                  <td>{renderAccountNameCell(a)}</td>
-                  <td className="text-end">{mask(a.total_assets)}</td>
-                  <td className="text-end">{mask(a.total_principal)}</td>
-                  <td className="text-end">{mask(a.valuation_krw)}</td>
-                  <td className="text-end">{mask(a.cash_balance)}</td>
-                  <td className="text-end">{formatPercent(a.cash_ratio)}</td>
-                  <td className={`text-end ${getSignedClass(a.net_profit)}`}>{mask(a.net_profit)}</td>
-                  <td className={`text-end ${getSignedClass(a.net_profit_pct)}`}>{formatPercent(a.net_profit_pct)}</td>
-                  <td className={`text-end ${getSignedClass(a.daily_profit)}`}>{mask(a.daily_profit)}</td>
-                  <td className={`text-end ${getSignedClass(a.weekly_profit)}`}>{mask(a.weekly_profit)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>
