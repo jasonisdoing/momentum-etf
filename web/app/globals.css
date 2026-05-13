@@ -803,6 +803,14 @@ a {
   line-height: 1;
 }
 
+.topbarFxItem strong.metricPositive {
+  color: var(--metric-positive, #e03131);
+}
+
+.topbarFxItem strong.metricNegative {
+  color: var(--metric-negative, #206bc4);
+}
+
 .topbarSentimentItem {
   display: inline-flex;
   align-items: center;

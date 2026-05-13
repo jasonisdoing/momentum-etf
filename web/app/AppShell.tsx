@@ -107,6 +107,12 @@ type DashboardMetricItem = {
 type DashboardSummary = {
   metrics_row1?: DashboardMetricItem[];
   metrics_row2?: DashboardMetricItem[];
+  period_profits?: {
+    daily?: { profit: number; return_pct: number };
+    weekly?: { profit: number; return_pct: number };
+    monthly?: { profit: number; return_pct: number };
+    yearly?: { profit: number; return_pct: number };
+  };
 };
 
 type ProfitMetric = {
@@ -532,30 +538,21 @@ export function AppShell({ children }: AppShellProps) {
                 <GlobalTickerSearch />
               </span>
               {(() => {
-                const allMetrics = [
-                  ...(dashboardSummary?.metrics_row1 ?? []),
-                  ...(dashboardSummary?.metrics_row2 ?? []),
-                ];
-                const daily = pickProfitMetric(allMetrics, "금일 손익");
-                const weekly = pickProfitMetric(allMetrics, "금주 손익");
-                const renderItem = (label: string, metric: ProfitMetric | null) => (
+                const periods = dashboardSummary?.period_profits;
+                const renderPctItem = (label: string, pct: number | undefined) => (
                   <span className="topbarFxItem">
                     {label}:{" "}
                     {isDashboardSummaryLoading ? (
                       <span className="topbarFxLoading" aria-label={`${label} 로딩 중`}>
                         <span className="topbarSpinner" />
                       </span>
-                    ) : metric ? (
-                      <>
-                        <strong className={getFxChangeClass(metric.amount)}>
-                          {hideMoney ? "••••••" : formatProfitAmount(metric.amount)}
-                        </strong>
-                        {metric.pct !== null ? (
-                          <span className={getFxChangeClass(metric.pct)}>
-                            {formatProfitPct(metric.pct)}
-                          </span>
-                        ) : null}
-                      </>
+                    ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
+                      <strong
+                        className={getFxChangeClass(pct)}
+                        style={{ fontSize: "14.5px" }}
+                      >
+                        {`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}
+                      </strong>
                     ) : (
                       <strong>-</strong>
                     )}
@@ -563,8 +560,9 @@ export function AppShell({ children }: AppShellProps) {
                 );
                 return (
                   <>
-                    {renderItem("금일", daily)}
-                    {renderItem("금주", weekly)}
+                    {renderPctItem("금일", periods?.daily?.return_pct)}
+                    {renderPctItem("금주", periods?.weekly?.return_pct)}
+                    {renderPctItem("금월", periods?.monthly?.return_pct)}
                   </>
                 );
               })()}
