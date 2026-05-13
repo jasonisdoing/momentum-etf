@@ -10,6 +10,8 @@ from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_number, to_iso_string
 from utils.portfolio_io import load_real_holdings_table
+from utils.monthly_service import _load_monthly_docs as _load_monthly_docs_with_running
+from utils.yearly_service import _load_yearly_docs as _load_yearly_docs_with_running
 
 logger = get_app_logger()
 
@@ -221,6 +223,30 @@ def load_dashboard_data() -> dict[str, Any]:
     weekly_profit = normalize_number((latest_weekly or {}).get("weekly_profit"))
     weekly_return_pct = normalize_number((latest_weekly or {}).get("weekly_return_pct"))
 
+    # 월별/년별 최신 doc 의 금월/금년 손익 (캐시 누락 시 0 으로 폴백)
+    try:
+        latest_monthly_doc = next(iter(_load_monthly_docs_with_running()), None)
+    except Exception as exc:
+        logger.warning("monthly_fund_data 조회 실패: %s", exc)
+        latest_monthly_doc = None
+    monthly_profit = normalize_number((latest_monthly_doc or {}).get("monthly_profit"))
+    monthly_return_pct = normalize_number((latest_monthly_doc or {}).get("monthly_return_pct"))
+
+    try:
+        latest_yearly_doc = next(iter(_load_yearly_docs_with_running()), None)
+    except Exception as exc:
+        logger.warning("yearly_fund_data 조회 실패: %s", exc)
+        latest_yearly_doc = None
+    yearly_profit = normalize_number((latest_yearly_doc or {}).get("yearly_profit"))
+    yearly_return_pct = normalize_number((latest_yearly_doc or {}).get("yearly_return_pct"))
+
+    period_profits = {
+        "daily": {"profit": daily_profit, "return_pct": daily_return_pct},
+        "weekly": {"profit": weekly_profit, "return_pct": weekly_return_pct},
+        "monthly": {"profit": monthly_profit, "return_pct": monthly_return_pct},
+        "yearly": {"profit": yearly_profit, "return_pct": yearly_return_pct},
+    }
+
     metrics_row1 = [
         {"label": "총 자산", "value": total_assets, "kind": "money"},
         {"label": "투자 원금", "value": total_principal, "kind": "money"},
@@ -315,6 +341,7 @@ def load_dashboard_data() -> dict[str, Any]:
     return {
         "metrics_row1": metrics_row1,
         "metrics_row2": metrics_row2,
+        "period_profits": period_profits,
         "accounts": accounts,
         "totals": {
             "total_assets": total_assets,
