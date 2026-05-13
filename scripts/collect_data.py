@@ -11,6 +11,7 @@ from utils.daily_fund_service import aggregate_today_daily_data, remove_future_d
 from utils.env import load_env_if_present
 from utils.monthly_service import aggregate_active_month_data
 from utils.weekly_service import aggregate_active_week_data
+from utils.yearly_service import aggregate_active_year_data
 
 
 def main() -> int:
@@ -19,11 +20,13 @@ def main() -> int:
     daily_result = aggregate_today_daily_data()
     weekly_result = aggregate_active_week_data()
     monthly_result = aggregate_active_month_data()
+    yearly_result = aggregate_active_year_data()
     print(
         f"[data_aggregate] 데이터 집계 완료: "
         f"daily={daily_result['date']} "
         f"weekly={weekly_result['week_date']} "
         f"monthly={monthly_result['month_date']} "
+        f"yearly={yearly_result['year_date']} "
         f"(미래 row 제거 {cleanup['deleted']}건)"
     )
     return 0

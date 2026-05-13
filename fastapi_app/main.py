@@ -21,6 +21,7 @@ from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
 from .routes.us_market_stocks import router as us_market_stocks_router
 from .routes.weekly import router as weekly_router
+from .routes.yearly import router as yearly_router
 
 load_env_if_present()
 
@@ -96,6 +97,7 @@ app.include_router(ticker_detail_router)
 app.include_router(us_market_stocks_router)
 app.include_router(weekly_router)
 app.include_router(monthly_router)
+app.include_router(yearly_router)
 import time
 _LAST_DB_ERROR_TIME = 0.0
 
