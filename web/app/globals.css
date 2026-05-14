@@ -2525,6 +2525,23 @@ a {
   font-weight: 700;
 }
 
+.compareGroupControl {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+}
+
+.compareGroupControl select.form-select {
+  width: 14rem;
+  flex: 0 0 auto;
+}
+
+.compareGroupControl .btn {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
 .compareMetricsGroupLabel .compareMatrixLabelHint {
   font-size: 11px;
   color: #64748b;

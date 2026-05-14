@@ -19,6 +19,8 @@ type TickerItem = {
   name: string;
   ticker_type: string;
   country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type TickerTypeItem = {
@@ -98,19 +100,16 @@ type ChartDateRange = {
   shortened: boolean;
 };
 
-type SavedCompareState = {
-  tickerType: string;
-  selectedKeys: string[];
-};
+type CompareGroupMap = Record<string, string[]>;
 
 type PerformanceMetricRange =
   | { label: string; kind: "period"; days: number }
   | { label: string; kind: "ytd" };
 
 const MAX_PRODUCTS = 5;
-const COMPARE_STORAGE_KEY = "momentum-etf:compare:selected";
-const COMPARE_SELECTED_TICKER_TYPE_KEY = "momentum-etf:compare:selected-ticker-type";
-const COMPARE_STORAGE_KEY_PREFIX = "momentum-etf:compare:selected:";
+const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
+const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
+const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
 const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed"];
 const CHART_TINTS = [
   "rgba(239, 68, 68, 0.08)",
@@ -162,57 +161,66 @@ function tickerKey(item: TickerItem): string {
   return `${item.ticker_type}::${item.country_code}::${item.ticker}`;
 }
 
-function readSavedCompareState(): SavedCompareState | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(COMPARE_STORAGE_KEY);
-  if (!raw) return null;
+function readCompareGroups(): CompareGroupMap {
+  if (typeof window === "undefined") return {};
+  const raw = window.localStorage.getItem(COMPARE_GROUPS_KEY);
+  if (!raw) return {};
   try {
-    const parsed = JSON.parse(raw) as Partial<SavedCompareState>;
-    if (!parsed.tickerType || !Array.isArray(parsed.selectedKeys)) return null;
-    return {
-      tickerType: parsed.tickerType,
-      selectedKeys: parsed.selectedKeys.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function getComparePoolStorageKey(tickerType: string): string {
-  return `${COMPARE_STORAGE_KEY_PREFIX}${tickerType}`;
-}
-
-function readSavedTickerType(): string | null {
-  if (typeof window === "undefined") return null;
-  const savedTickerType = window.localStorage.getItem(COMPARE_SELECTED_TICKER_TYPE_KEY);
-  if (savedTickerType) return savedTickerType;
-  return readSavedCompareState()?.tickerType ?? null;
-}
-
-function readSavedCompareKeys(tickerType: string): string[] {
-  if (typeof window === "undefined" || !tickerType) return [];
-  const raw = window.localStorage.getItem(getComparePoolStorageKey(tickerType));
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        return parsed.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS);
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const result: CompareGroupMap = {};
+      for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (Array.isArray(value)) {
+          result[name] = value
+            .filter((key): key is string => typeof key === "string")
+            .slice(0, MAX_PRODUCTS);
+        }
       }
-    } catch {
-      return [];
+      return result;
     }
+  } catch {
+    return {};
   }
-  const legacyState = readSavedCompareState();
-  if (legacyState?.tickerType === tickerType) {
-    return legacyState.selectedKeys;
+  return {};
+}
+
+function writeCompareGroups(groups: CompareGroupMap): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(COMPARE_GROUPS_KEY, JSON.stringify(groups));
+}
+
+function readActiveGroupName(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(COMPARE_ACTIVE_GROUP_KEY);
+}
+
+function writeActiveGroupName(name: string | null): void {
+  if (typeof window === "undefined") return;
+  if (name === null) {
+    window.localStorage.removeItem(COMPARE_ACTIVE_GROUP_KEY);
+  } else {
+    window.localStorage.setItem(COMPARE_ACTIVE_GROUP_KEY, name);
+  }
+}
+
+function readTempSelection(): string[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(COMPARE_TEMP_SELECTION_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS);
+    }
+  } catch {
+    return [];
   }
   return [];
 }
 
-function writeSavedCompareState(tickerType: string, selectedKeys: string[]): void {
+function writeTempSelection(keys: string[]): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(COMPARE_SELECTED_TICKER_TYPE_KEY, tickerType);
-  window.localStorage.setItem(getComparePoolStorageKey(tickerType), JSON.stringify(selectedKeys.slice(0, MAX_PRODUCTS)));
+  window.localStorage.setItem(COMPARE_TEMP_SELECTION_KEY, JSON.stringify(keys.slice(0, MAX_PRODUCTS)));
 }
 
 function formatNumber(value: number | null | undefined, digits = 0): string {
@@ -734,8 +742,6 @@ function CompareChart({ products, dateRange }: { products: SelectedProduct[]; da
 
 export function ComparePageClient() {
   const [tickerItems, setTickerItems] = useState<TickerItem[]>([]);
-  const [tickerTypes, setTickerTypes] = useState<TickerTypeItem[]>([]);
-  const [selectedTickerType, setSelectedTickerType] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
@@ -743,6 +749,8 @@ export function ComparePageClient() {
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [groups, setGroups] = useState<CompareGroupMap>({});
+  const [activeGroupName, setActiveGroupName] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const hydratedRef = useRef(false);
 
@@ -752,9 +760,10 @@ export function ComparePageClient() {
     return map;
   }, [tickerItems]);
 
-  const poolTickerItems = useMemo(
-    () => tickerItems.filter((item) => item.ticker_type === selectedTickerType),
-    [selectedTickerType, tickerItems],
+  /** has_holdings === true 인 ETF 만 검색 대상. (국내상장 국내/해외 ETF) */
+  const searchableItems = useMemo(
+    () => tickerItems.filter((item) => item.has_holdings === true),
+    [tickerItems],
   );
 
   const loadSelectedProducts = useCallback(async (keys: string[]) => {
@@ -779,35 +788,29 @@ export function ComparePageClient() {
     let alive = true;
     async function loadInitialData() {
       try {
-        const [tickersResponse, stocksResponse] = await Promise.all([
-          fetch("/api/ticker-tickers", { cache: "no-store" }),
-          fetch("/api/stocks", { cache: "no-store" }),
-        ]);
+        const tickersResponse = await fetch("/api/ticker-tickers", { cache: "no-store" });
         const tickersPayload = (await tickersResponse.json()) as TickerItem[] | { error?: string };
-        const stocksPayload = (await stocksResponse.json()) as StocksTableData | { error?: string };
         if (!tickersResponse.ok || !Array.isArray(tickersPayload)) {
           throw new Error(Array.isArray(tickersPayload) ? "종목 목록을 불러오지 못했습니다." : tickersPayload.error);
         }
-        if (!stocksResponse.ok || !("ticker_types" in stocksPayload)) {
-          throw new Error("종목풀 목록을 불러오지 못했습니다.");
-        }
         if (!alive) return;
         const items = tickersPayload.filter((item) => item.ticker && item.ticker_type && item.country_code);
-        const types = stocksPayload.ticker_types ?? [];
         setTickerItems(items);
-        setTickerTypes(types);
-        const savedTickerType = readSavedTickerType();
-        const savedType = savedTickerType
-          ? types.find((type) => type.ticker_type === savedTickerType && items.some((item) => item.ticker_type === savedTickerType))
-          : null;
-        const initialType = savedType ?? types.find((type) => items.some((item) => item.ticker_type === type.ticker_type));
-        if (initialType) {
-          setSelectedTickerType(initialType.ticker_type);
-          const savedKeys = readSavedCompareKeys(initialType.ticker_type);
-          const validKeys = savedKeys.filter((key) => {
-            const item = items.find((candidate) => tickerKey(candidate) === key);
-            return item?.ticker_type === initialType.ticker_type;
-          });
+
+        // 그룹/활성 그룹/임시 선택 복원
+        const savedGroups = readCompareGroups();
+        const savedActive = readActiveGroupName();
+        setGroups(savedGroups);
+        const isValidActive = savedActive && savedGroups[savedActive] !== undefined;
+        if (isValidActive) {
+          setActiveGroupName(savedActive);
+          const savedKeys = savedGroups[savedActive] ?? [];
+          const validKeys = savedKeys.filter((key) => items.some((it) => tickerKey(it) === key));
+          setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
+        } else {
+          setActiveGroupName(null);
+          const tempKeys = readTempSelection();
+          const validKeys = tempKeys.filter((key) => items.some((it) => tickerKey(it) === key));
           setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
         }
         hydratedRef.current = true;
@@ -828,10 +831,19 @@ export function ComparePageClient() {
     void loadSelectedProducts(selectedKeys);
   }, [loadSelectedProducts, selectedKeys]);
 
+  // selectedKeys 가 변경될 때 활성 그룹이면 해당 그룹에 자동 저장, 아니면 임시 저장
   useEffect(() => {
-    if (!hydratedRef.current || !selectedTickerType) return;
-    writeSavedCompareState(selectedTickerType, selectedKeys);
-  }, [selectedKeys, selectedTickerType]);
+    if (!hydratedRef.current) return;
+    if (activeGroupName) {
+      setGroups((current) => {
+        const next = { ...current, [activeGroupName]: selectedKeys.slice(0, MAX_PRODUCTS) };
+        writeCompareGroups(next);
+        return next;
+      });
+    } else {
+      writeTempSelection(selectedKeys);
+    }
+  }, [selectedKeys, activeGroupName]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -843,6 +855,71 @@ export function ComparePageClient() {
     window.addEventListener("compare:add-product", handler);
     return () => window.removeEventListener("compare:add-product", handler);
   }, [selectedKeys]);
+
+  /** 그룹 선택 변경 (드롭다운). */
+  const handleSelectGroup = useCallback((name: string | null) => {
+    setActiveGroupName(name);
+    writeActiveGroupName(name);
+    if (name) {
+      const keys = groups[name] ?? [];
+      setSelectedKeys(keys.slice(0, MAX_PRODUCTS));
+    } else {
+      const tempKeys = readTempSelection();
+      setSelectedKeys(tempKeys.slice(0, MAX_PRODUCTS));
+    }
+    setSearchText("");
+  }, [groups]);
+
+  /** 빈 새 그룹 생성. 기존에 선택된 종목은 제거됨. */
+  const handleCreateGroup = useCallback(() => {
+    const rawName = window.prompt("그룹 이름을 입력하세요 (예: 배당 ETF 모음)");
+    if (rawName === null) return;
+    const name = rawName.trim();
+    if (!name) return;
+    if (groups[name] !== undefined) {
+      window.alert(`"${name}" 그룹이 이미 존재합니다.`);
+      return;
+    }
+    const nextGroups = { ...groups, [name]: [] };
+    setGroups(nextGroups);
+    writeCompareGroups(nextGroups);
+    setActiveGroupName(name);
+    writeActiveGroupName(name);
+    setSelectedKeys([]);
+    setSearchText("");
+  }, [groups]);
+
+  /** 현재 그룹 이름 변경. */
+  const handleRenameGroup = useCallback(() => {
+    if (!activeGroupName) return;
+    const rawName = window.prompt("새 그룹 이름을 입력하세요", activeGroupName);
+    if (rawName === null) return;
+    const name = rawName.trim();
+    if (!name || name === activeGroupName) return;
+    if (groups[name] !== undefined) {
+      window.alert(`"${name}" 그룹이 이미 존재합니다.`);
+      return;
+    }
+    const { [activeGroupName]: oldKeys, ...rest } = groups;
+    const nextGroups = { ...rest, [name]: oldKeys };
+    setGroups(nextGroups);
+    writeCompareGroups(nextGroups);
+    setActiveGroupName(name);
+    writeActiveGroupName(name);
+  }, [activeGroupName, groups]);
+
+  /** 현재 그룹 삭제. */
+  const handleDeleteGroup = useCallback(() => {
+    if (!activeGroupName) return;
+    if (!window.confirm(`"${activeGroupName}" 그룹을 삭제하시겠습니까?`)) return;
+    const { [activeGroupName]: _, ...rest } = groups;
+    setGroups(rest);
+    writeCompareGroups(rest);
+    setActiveGroupName(null);
+    writeActiveGroupName(null);
+    const tempKeys = readTempSelection();
+    setSelectedKeys(tempKeys.slice(0, MAX_PRODUCTS));
+  }, [activeGroupName, groups]);
 
   // commonAvailableRange 는 sortedProducts 와 무관(순서만 다름)하므로 products 로 미리 계산
   const commonAvailableRange = useMemo(() => getCommonAvailableRange(products), [products]);
@@ -997,7 +1074,7 @@ export function ComparePageClient() {
   );
 
   return (
-    <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="ETF 비교" fullHeight fullWidth titleRight={titleRight}>
       <div className="appPageStack appPageStackFill comparePage">
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
@@ -1008,35 +1085,54 @@ export function ComparePageClient() {
                 <div className="appMainHeader">
                   <div className="appMainHeaderLeft compareMainHeaderLeft">
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">종목풀</span>
-                      <select
-                        className="form-select"
-                        value={selectedTickerType}
-                        onChange={(event) => {
-                          const nextTickerType = event.target.value;
-                          const savedKeys = readSavedCompareKeys(nextTickerType);
-                          const validKeys = savedKeys.filter((key) => itemByKey.get(key)?.ticker_type === nextTickerType);
-                          setSelectedTickerType(nextTickerType);
-                          setProducts([]);
-                          setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
-                          setSearchText("");
-                        }}
-                        disabled={tickerTypes.length === 0}
-                      >
-                        {tickerTypes.length === 0 ? (
-                          <option value="">종목풀 불러오는 중...</option>
-                        ) : (
-                          tickerTypes.map((type) => (
-                            <option key={type.ticker_type} value={type.ticker_type}>
-                              {type.icon ? `${type.icon} ` : ""}{type.name}
-                            </option>
-                          ))
-                        )}
-                      </select>
+                      <span className="appLabeledFieldLabel">그룹</span>
+                      <div className="compareGroupControl">
+                        <select
+                          className="form-select"
+                          value={activeGroupName ?? ""}
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            handleSelectGroup(next === "" ? null : next);
+                          }}
+                        >
+                          <option value="">(저장 안 됨)</option>
+                          {Object.keys(groups).sort().map((name) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={handleCreateGroup}
+                          title="현재 선택을 새 그룹으로 저장"
+                        >
+                          + 새 그룹
+                        </button>
+                        {activeGroupName ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary"
+                              onClick={handleRenameGroup}
+                              title="그룹 이름 변경"
+                            >
+                              이름 변경
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={handleDeleteGroup}
+                              title="현재 그룹 삭제"
+                            >
+                              그룹 삭제
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </label>
                     <ProductSearchField
                       value={searchText}
-                      items={poolTickerItems}
+                      items={searchableItems}
                       disabledKeys={selectedKeys}
                       inputRef={searchInputRef}
                       onChange={setSearchText}
