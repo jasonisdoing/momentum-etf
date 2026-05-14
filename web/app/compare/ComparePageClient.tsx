@@ -12,7 +12,7 @@ import { calcPortfolioChange } from "@/lib/portfolio-change";
 import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings";
-type PerformanceRange = "1m" | "3m" | "6m" | "1y" | "3y";
+type PerformanceRange = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y";
 
 type TickerItem = {
   ticker: string;
@@ -131,16 +131,21 @@ const HOLDING_MATCH_COLORS = [
   "#ecfccb",
   "#f3e8ff",
 ];
-const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number }[] = [
+const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number; ytd?: boolean }[] = [
   { key: "1m", label: "1개월", days: 31 },
   { key: "3m", label: "3개월", days: 92 },
   { key: "6m", label: "6개월", days: 183 },
+  { key: "ytd", label: "연초이후", days: 0, ytd: true },
   { key: "1y", label: "1년", days: 365 },
   { key: "3y", label: "3년", days: 365 * 3 },
 ];
 const PERFORMANCE_METRIC_RANGES: PerformanceMetricRange[] = [
-  ...PERFORMANCE_RANGES.map(({ label, days }) => ({ label, kind: "period" as const, days })),
+  { label: "1개월", kind: "period", days: 31 },
+  { label: "3개월", kind: "period", days: 92 },
+  { label: "6개월", kind: "period", days: 183 },
   { label: "연초이후", kind: "ytd" },
+  { label: "1년", kind: "period", days: 365 },
+  { label: "3년", kind: "period", days: 365 * 3 },
 ];
 const BASIC_INFO_METRICS = [
   { label: "현재가", multiline: true },
@@ -364,7 +369,43 @@ function getMetricReturnPct(rows: PriceRow[], period: PerformanceMetricRange): n
   return getReturnPct(rows, period.days);
 }
 
-function getChartDateRange(products: SelectedProduct[], calendarDays: number): ChartDateRange | null {
+/**
+ * 선택된 종목들의 공통 가용 기간을 계산한다.
+ * - start: 각 종목의 첫 영업일 중 가장 늦은 날(가장 짧은 종목 기준)
+ * - end:   각 종목의 마지막 영업일 중 가장 이른 날
+ */
+function getCommonAvailableRange(products: SelectedProduct[]): {
+  startDate: Date;
+  endDate: Date;
+  days: number;
+} | null {
+  const pricedRowsList = products.map((product) => getPricedRows(product.detail.rows));
+  if (pricedRowsList.length === 0 || pricedRowsList.some((rows) => rows.length < 2)) return null;
+  const startTimes = pricedRowsList.map((rows) => new Date(rows[0].date).getTime());
+  const endTimes = pricedRowsList.map((rows) => new Date(rows.at(-1)?.date ?? "").getTime());
+  if (startTimes.some(Number.isNaN) || endTimes.some(Number.isNaN)) return null;
+  const startDate = new Date(Math.max(...startTimes));
+  const endDate = new Date(Math.min(...endTimes));
+  if (startDate >= endDate) return null;
+  const days = Math.floor((endDate.getTime() - startDate.getTime()) / (24 * 3600 * 1000));
+  return { startDate, endDate, days };
+}
+
+function formatMaxRangeLabel(days: number): string {
+  if (days < 30) return `${days}일`;
+  if (days < 365) {
+    const months = Math.round(days / 30);
+    return `${months}개월`;
+  }
+  const years = days / 365;
+  const rounded = Math.round(years * 10) / 10;
+  return rounded % 1 === 0 ? `${rounded.toFixed(0)}년` : `${rounded.toFixed(1)}년`;
+}
+
+function getChartDateRange(
+  products: SelectedProduct[],
+  options: { calendarDays?: number; ytd?: boolean },
+): ChartDateRange | null {
   const pricedRowsList = products.map((product) => getPricedRows(product.detail.rows));
   if (pricedRowsList.length === 0 || pricedRowsList.some((rows) => rows.length < 2)) return null;
 
@@ -373,8 +414,14 @@ function getChartDateRange(products: SelectedProduct[], calendarDays: number): C
   if (startTimes.some(Number.isNaN) || endTimes.some(Number.isNaN)) return null;
 
   const comparableEnd = new Date(Math.min(...endTimes));
-  const requestedStart = new Date(comparableEnd);
-  requestedStart.setDate(requestedStart.getDate() - calendarDays);
+  let requestedStart: Date;
+  if (options.ytd) {
+    // 올해 초(1월 1일)부터
+    requestedStart = new Date(`${comparableEnd.getFullYear()}-01-01T00:00:00`);
+  } else {
+    requestedStart = new Date(comparableEnd);
+    requestedStart.setDate(requestedStart.getDate() - (options.calendarDays ?? 0));
+  }
 
   const firstCommonStart = new Date(Math.max(...startTimes));
   const comparableStart = firstCommonStart > requestedStart ? firstCommonStart : requestedStart;
@@ -385,6 +432,58 @@ function getChartDateRange(products: SelectedProduct[], calendarDays: number): C
     endDate: toDateKey(comparableEnd),
     shortened: firstCommonStart > requestedStart,
   };
+}
+
+/**
+ * 주어진 기간의 일간 종가에서 MDD(%) 계산.
+ * MDD = min((price - running_max) / running_max) × 100
+ */
+function getMaxDrawdownPct(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  if (seriesRows.length < 2) return null;
+  let runningMax = seriesRows[0].close ?? 0;
+  let maxDrawdown = 0; // 0 이하의 값(음수)으로 갱신됨
+  for (const row of seriesRows) {
+    const price = row.close ?? 0;
+    if (price <= 0) continue;
+    if (price > runningMax) {
+      runningMax = price;
+      continue;
+    }
+    if (runningMax <= 0) continue;
+    const drawdown = (price - runningMax) / runningMax;
+    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+  }
+  return maxDrawdown * 100;
+}
+
+/**
+ * 샤프지수 = (일간 수익률 평균 / 표준편차) × √252.
+ * 무위험 수익률 = 0 으로 단순화 (편차로만 위험 측정).
+ */
+function getSharpeRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  if (seriesRows.length < 3) return null;
+  const dailyReturns: number[] = [];
+  for (let i = 1; i < seriesRows.length; i++) {
+    const prev = seriesRows[i - 1].close ?? 0;
+    const curr = seriesRows[i].close ?? 0;
+    if (prev <= 0 || curr <= 0) continue;
+    dailyReturns.push(curr / prev - 1);
+  }
+  if (dailyReturns.length < 2) return null;
+  const mean = dailyReturns.reduce((acc, v) => acc + v, 0) / dailyReturns.length;
+  const variance =
+    dailyReturns.reduce((acc, v) => acc + (v - mean) ** 2, 0) / (dailyReturns.length - 1);
+  const std = Math.sqrt(variance);
+  if (std === 0) return null;
+  return (mean / std) * Math.sqrt(252);
 }
 
 function buildReturnSeries(rows: PriceRow[], dateRange: ChartDateRange | null): LineData[] {
@@ -640,7 +739,7 @@ export function ComparePageClient() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
-  const [performanceRange, setPerformanceRange] = useState<PerformanceRange>("3m");
+  const [performanceRange, setPerformanceRange] = useState<string>("3m");
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -745,13 +844,34 @@ export function ComparePageClient() {
     return () => window.removeEventListener("compare:add-product", handler);
   }, [selectedKeys]);
 
-  const selectedPerformanceRange = PERFORMANCE_RANGES.find((range) => range.key === performanceRange) ?? PERFORMANCE_RANGES[1];
+  // commonAvailableRange 는 sortedProducts 와 무관(순서만 다름)하므로 products 로 미리 계산
+  const commonAvailableRange = useMemo(() => getCommonAvailableRange(products), [products]);
+
+  const selectedPerformanceRange = useMemo<{
+    key: string;
+    label: string;
+    days: number;
+    ytd?: boolean;
+  }>(() => {
+    const fixed = PERFORMANCE_RANGES.find((range) => range.key === performanceRange);
+    if (fixed) return fixed;
+    if (performanceRange === "__max__" && commonAvailableRange) {
+      return {
+        key: "__max__",
+        label: `최대 ${formatMaxRangeLabel(commonAvailableRange.days)}`,
+        days: commonAvailableRange.days,
+      };
+    }
+    return PERFORMANCE_RANGES[1];
+  }, [commonAvailableRange, performanceRange]);
   const sortedProducts = useMemo(() => {
     return products
       .map((product, index) => ({
         product,
         index,
-        returnPct: getReturnPct(product.detail.rows, selectedPerformanceRange.days),
+        returnPct: selectedPerformanceRange.ytd
+          ? getYearToDateReturnPct(product.detail.rows)
+          : getReturnPct(product.detail.rows, selectedPerformanceRange.days),
       }))
       .sort((a, b) => {
         const aValue = a.returnPct;
@@ -763,11 +883,76 @@ export function ComparePageClient() {
         return bValue - aValue;
       })
       .map(({ product }) => product);
-  }, [products, selectedPerformanceRange.days]);
+  }, [products, selectedPerformanceRange.days, selectedPerformanceRange.ytd]);
   const chartDateRange = useMemo(
-    () => getChartDateRange(sortedProducts, selectedPerformanceRange.days),
-    [selectedPerformanceRange.days, sortedProducts],
+    () => getChartDateRange(sortedProducts, {
+      calendarDays: selectedPerformanceRange.days,
+      ytd: selectedPerformanceRange.ytd,
+    }),
+    [selectedPerformanceRange.days, selectedPerformanceRange.ytd, sortedProducts],
   );
+
+  /** 토글 버튼 목록 — 가용 기간보다 긴 옵션은 disabled, 적당한 max 옵션 동적 삽입. */
+  const performanceRangeButtons = useMemo<
+    Array<{ key: string; label: string; enabled: boolean; days: number; ytd?: boolean }>
+  >(() => {
+    const maxDays = commonAvailableRange?.days ?? Infinity;
+    const ytdStart = commonAvailableRange
+      ? new Date(`${commonAvailableRange.endDate.getFullYear()}-01-01T00:00:00`)
+      : null;
+    const ytdFullyCovered =
+      commonAvailableRange && ytdStart ? commonAvailableRange.startDate <= ytdStart : true;
+
+    // 표준 버튼 + enabled 플래그
+    const base: Array<{ key: string; label: string; enabled: boolean; days: number; ytd?: boolean }> =
+      PERFORMANCE_RANGES.map((range) => {
+        let enabled: boolean;
+        if (range.ytd) {
+          enabled = ytdFullyCovered;
+        } else {
+          // 5일 정도 tolerance (영업일/달력일 차이)
+          enabled = maxDays + 5 >= range.days;
+        }
+        return { key: range.key as string, label: range.label, enabled, days: range.days, ytd: range.ytd };
+      });
+
+    // 마지막으로 enabled 된 표준 범위(가장 긴 것)를 찾고, max 와 차이 크면 "max" 버튼 삽입
+    if (commonAvailableRange) {
+      // YTD 제외 가장 긴 enabled 고정 범위 days
+      const lastEnabledFixed = base
+        .filter((b) => b.enabled && !b.ytd)
+        .reduce((acc, b) => Math.max(acc, b.days), 0);
+      const TOLERANCE_DAYS = 14; // 2주 이상 차이 나야 별도 버튼 의미 있음
+      const hasMeaningfulGap = maxDays - lastEnabledFixed > TOLERANCE_DAYS;
+      if (hasMeaningfulGap) {
+        // 첫 번째 disabled 위치 직전에 삽입
+        const firstDisabledIdx = base.findIndex((b) => !b.enabled && !b.ytd);
+        const maxButton = {
+          key: "__max__",
+          label: `최대 ${formatMaxRangeLabel(commonAvailableRange.days)}`,
+          enabled: true,
+          days: commonAvailableRange.days,
+          ytd: undefined as boolean | undefined,
+        };
+        if (firstDisabledIdx >= 0) {
+          base.splice(firstDisabledIdx, 0, maxButton);
+        } else {
+          base.push(maxButton);
+        }
+      }
+    }
+    return base;
+  }, [commonAvailableRange]);
+
+  // 현재 선택된 범위가 disabled 가 됐다면 자동으로 가장 큰 enabled 로 폴백
+  useEffect(() => {
+    const current = performanceRangeButtons.find((b) => b.key === performanceRange);
+    if (current && current.enabled) return;
+    const lastEnabled = [...performanceRangeButtons].reverse().find((b) => b.enabled);
+    if (lastEnabled && lastEnabled.key !== performanceRange) {
+      setPerformanceRange(lastEnabled.key);
+    }
+  }, [performanceRange, performanceRangeButtons]);
   
   const portfolioChangeBaseDate = useMemo(() => {
     for (const p of sortedProducts) {
@@ -933,22 +1118,30 @@ export function ComparePageClient() {
             <div className="compareMatrixWide">
               <div className="comparePerformanceToolbar">
                 <div className="appSegmentedToggle" role="group" aria-label="수익률 추이 기간">
-                  {PERFORMANCE_RANGES.map((range) => (
-                    <button
-                      key={range.key}
-                      type="button"
-                      className={performanceRange === range.key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setPerformanceRange(range.key)}
-                    >
-                      {range.label}
-                    </button>
-                  ))}
+                  {performanceRangeButtons.map((range) => {
+                    const isActive = performanceRange === range.key;
+                    const className = [
+                      "btn",
+                      "appSegmentedToggleButton",
+                      isActive ? "is-active" : "",
+                      !range.enabled ? "is-disabled" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
+                    return (
+                      <button
+                        key={range.key}
+                        type="button"
+                        className={className}
+                        disabled={!range.enabled}
+                        title={!range.enabled ? "선택된 종목의 데이터가 부족합니다" : undefined}
+                        onClick={() => range.enabled && setPerformanceRange(range.key)}
+                      >
+                        {range.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                {chartDateRange?.shortened ? (
-                  <span className="comparePerformanceHint is-warning">
-                    선택 기간보다 데이터가 짧아 {formatDateKey(chartDateRange.startDate)} ~ {formatDateKey(chartDateRange.endDate)} 기준 비교
-                  </span>
-                ) : null}
               </div>
               <CompareChart products={sortedProducts} dateRange={chartDateRange} />
             </div>
@@ -971,6 +1164,49 @@ export function ComparePageClient() {
                 ))}
               </Fragment>
             ))}
+
+            <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
+              MDD(%)
+              <div className="compareMatrixLabelHint">
+                {chartDateRange?.shortened
+                  ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
+                  : `${selectedPerformanceRange.label} 기준`}
+              </div>
+            </div>
+            {sortedProducts.map((product) => {
+              const value = getMaxDrawdownPct(product.detail.rows, chartDateRange);
+              return (
+                <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                  {formatPercent(value)}
+                </div>
+              );
+            })}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-mdd-${index}`} className="compareMetricCell">-</div>
+            ))}
+
+            <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
+              샤프 지수
+              <div className="compareMatrixLabelHint">
+                {chartDateRange?.shortened
+                  ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
+                  : `${selectedPerformanceRange.label} 기준`}
+              </div>
+            </div>
+            {sortedProducts.map((product) => {
+              const value = getSharpeRatio(product.detail.rows, chartDateRange);
+              return (
+                <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                  {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
+                </div>
+              );
+            })}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+            ))}
+            <div className="compareSharpeLegend">
+              샤프 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (무위험 수익률 0 기준, 연율화)
+            </div>
           </section>
         ) : activeTab === "basic" ? (
           <section className="compareMatrix compareMatrixBody">
