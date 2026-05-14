@@ -29,15 +29,14 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 기본 배치는 캘린더 평일(월~금, KST) 에 실행한다.
 # cron 의 요일 필드: 1=월, 2=화, ..., 6=토
 
-# 월~토 24시간 매시 0분/30분 - 가격 캐시 갱신 (모든 종목 가격)
-# - 미국 정규장(22:30 ~ 05:00 KST)을 포함한 모든 시간대를 30분 간격으로 커버
-# - 메타 업데이터(매시 45분)와 15분 간격을 두어 부하 분산
-# - 미국 금요일 정규장 종가가 한국시간 토요일 새벽에 확정되는 점도 자동 반영
-0,30 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+# 월~토 24시간 매시 0분 - 가격 캐시 갱신 (모든 종목 가격)
+# - 시간당 1회로 부하 완화 (A1.Flex 1 OCPU 환경)
+# - 미국 정규장(22:30 ~ 05:00 KST)을 포함한 모든 시간대 커버
+0 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 
-# 월~토 24시간 매시 15분/45분 - 포트폴리오 구성종목 가격 갱신
-# - 가격 캐시 갱신(0분/30분) 완료 후 최신 가격 기준으로 구성종목 변동 캐시를 갱신
-15,45 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py portfolio_refresh python scripts/portfolio_refresh.py >> logs/cron/portfolio_refresh.log 2>&1
+# 월~토 24시간 매시 30분 - 포트폴리오 구성종목 가격 갱신
+# - cache_refresh(:00) 완료 후 30분 뒤에 실행해 부하 분산
+30 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py portfolio_refresh python scripts/portfolio_refresh.py >> logs/cron/portfolio_refresh.log 2>&1
 
 # 평일 09:45 ~ 17:45 매시 45분 - 종목 메타데이터 업데이트
 # - 9:00 정각이 아닌 9:45부터 시작: 장 개장 직후 iNAV 미확정 상태 회피
@@ -47,10 +46,10 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # - 야간(0~8시) 실행은 전일 슬롯 덮어쓰기 위험이 있어 의도적으로 제외
 45 9-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py metadata_updater python scripts/stock_meta_cache_updater.py >> logs/cron/metadata_updater.log 2>&1
 
-# 평일 09:05 ~ 15:50 KST - 데이터 집계(일별 후 주별/월별/년별)
-# - 15분 간격(:05, :20, :35, :50)으로 실행. 시간당 4회 × 7시간 = 28회/일
-# - 가격 캐시(:00, :30)와 포트폴리오 갱신(:15, :45) 직후 5분 뒤에 돌아 가장 신선한 데이터를 집계
-5,20,35,50 9-15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
+# 평일 09:15 ~ 15:15 KST - 데이터 집계(일별 후 주별/월별/년별)
+# - 시간당 1회(:15), KOSPI 거래시간대만 실행. 7회/일
+# - cache_refresh(:00) 완료 직후 15분 뒤에 집계해 가장 신선한 데이터 사용
+15 9-15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
 
 # 평일 09:40, 16:40 KST - 자산 요약
 40 9,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
