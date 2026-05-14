@@ -26,6 +26,11 @@ type SystemLastRunInfo = {
   display?: string | null;
 };
 
+type SystemNextRunInfo = {
+  at?: string | null;
+  display?: string | null;
+};
+
 type SystemJobKey =
   | "data_aggregate"
   | "cache_refresh"
@@ -41,6 +46,7 @@ type SystemResponse = {
   schedule_note?: string;
   running_jobs?: string[];
   last_run_by_job?: Record<string, SystemLastRunInfo>;
+  next_run_by_job?: Record<string, SystemNextRunInfo>;
   error?: string;
 };
 
@@ -50,7 +56,27 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   running: boolean;
   anyRunning: boolean;
   lastRunDisplay: string;
+  nextRunAt: string | null;
+  nextRunDisplay: string;
 };
+
+function formatRelativeUntil(iso: string | null | undefined, nowMs: number): string | null {
+  if (!iso) return null;
+  const target = new Date(iso).getTime();
+  if (Number.isNaN(target)) return null;
+  const deltaSec = Math.floor((target - nowMs) / 1000);
+  if (deltaSec <= 0) return "곧";
+  if (deltaSec < 60) return `${deltaSec}초 후`;
+  if (deltaSec < 3600) return `${Math.floor(deltaSec / 60)}분 후`;
+  if (deltaSec < 86400) {
+    const hours = Math.floor(deltaSec / 3600);
+    const minutes = Math.floor((deltaSec % 3600) / 60);
+    return minutes ? `${hours}시간 ${minutes}분 후` : `${hours}시간 후`;
+  }
+  const days = Math.floor(deltaSec / 86400);
+  const hours = Math.floor((deltaSec % 86400) / 3600);
+  return hours ? `${days}일 ${hours}시간 후` : `${days}일 후`;
+}
 
 function formatCount(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
@@ -72,9 +98,23 @@ const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
 ];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
-  { field: "job", headerName: "작업", minWidth: 160, width: 200 },
+  { field: "job", headerName: "작업", minWidth: 140, width: 150 },
   { field: "target", headerName: "대상", minWidth: 140, width: 180 },
   { field: "cadence", headerName: "자동 주기", minWidth: 260, width: 300 },
+  {
+    field: "nextRunDisplay",
+    headerName: "다음 실행",
+    minWidth: 140,
+    width: 160,
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
+    field: "lastRunDisplay",
+    headerName: "마지막 실행",
+    minWidth: 140,
+    width: 160,
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
   {
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
@@ -101,13 +141,6 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       </span>
     ),
   },
-  {
-    field: "lastRunDisplay",
-    headerName: "마지막 실행 시간",
-    minWidth: 220,
-    width: 250,
-    cellRenderer: (params: { value: string }) => params.value || "-",
-  },
 ];
 
 export function SystemManager({
@@ -122,18 +155,31 @@ export function SystemManager({
   const [error, setError] = useState<string | null>(null);
   const [runningJobs, setRunningJobs] = useState<string[]>([]);
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
+  const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
+  const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
   const toast = useToast();
   const runningSet = new Set(runningJobs);
   const anyRunning = runningSet.size > 0;
   const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
-  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => ({
-    ...row,
-    id: row.key,
-    running: runningSet.has(row.key),
-    anyRunning,
-    lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
-  }));
+  const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
+    const nextRunAt = nextRunByJob[row.key]?.at ?? null;
+    const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
+    return {
+      ...row,
+      id: row.key,
+      running: runningSet.has(row.key),
+      anyRunning,
+      lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
+      nextRunAt,
+      nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
+    };
+  });
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -161,6 +207,7 @@ export function SystemManager({
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
         setLastRunByJob(payload.last_run_by_job ?? {});
+        setNextRunByJob(payload.next_run_by_job ?? {});
         if (initial) setError(null);
       } catch (loadError) {
         if (alive && initial) {

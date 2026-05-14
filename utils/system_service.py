@@ -6,7 +6,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -26,7 +26,12 @@ SystemAction = Literal[
     "us_market_stocks",
 ]
 
+# 평일(월~금) / 월~토 weekday 셋. (Python: 0=월 ... 6=일)
+_WEEKDAYS_MON_FRI = [0, 1, 2, 3, 4]
+_WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
+
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
+# schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
 SCHEDULE_ROWS = [
     {
         "key": "asset_summary",
@@ -34,13 +39,19 @@ SCHEDULE_ROWS = [
         "target": "전체 계좌",
         "cadence": "평일 09:40, 16:40 KST",
         "command": "python scripts/slack_asset_summary.py",
+        "schedule": {"minutes": [40], "hours": [9, 16], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "data_aggregate",
         "job": "데이터 집계",
-        "target": "일별/주별/월별 데이터",
-        "cadence": "평일 09:35, 15:35 KST",
+        "target": "일별/주별/월별/년별 데이터",
+        "cadence": "평일 09:05 ~ 15:50 매시 :05/:20/:35/:50 KST",
         "command": "python scripts/collect_data.py",
+        "schedule": {
+            "minutes": [5, 20, 35, 50],
+            "hours": list(range(9, 16)),
+            "weekdays": _WEEKDAYS_MON_FRI,
+        },
     },
     {
         "key": "cache_refresh",
@@ -48,6 +59,7 @@ SCHEDULE_ROWS = [
         "target": "모든 종목 가격",
         "cadence": "월~토 24시간 매시 0분/30분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
+        "schedule": {"minutes": [0, 30], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "portfolio_refresh",
@@ -55,6 +67,7 @@ SCHEDULE_ROWS = [
         "target": "포트폴리오 구성종목 가격",
         "cadence": "월~토 24시간 매시 15분/45분 KST",
         "command": "python scripts/portfolio_refresh.py",
+        "schedule": {"minutes": [15, 45], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "market_hours_analysis",
@@ -62,6 +75,7 @@ SCHEDULE_ROWS = [
         "target": "시장 스케줄",
         "cadence": "평일 07:00 KST",
         "command": "python scripts/analyze_market_hours.py",
+        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "metadata_updater",
@@ -69,6 +83,7 @@ SCHEDULE_ROWS = [
         "target": "모든 종목타입",
         "cadence": "평일 09:45 ~ 17:45 매시 45분 KST",
         "command": "python scripts/stock_meta_cache_updater.py",
+        "schedule": {"minutes": [45], "hours": list(range(9, 18)), "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "us_market_stocks",
@@ -76,6 +91,7 @@ SCHEDULE_ROWS = [
         "target": "S&P500, NASDAQ100",
         "cadence": "평일 08:00 KST",
         "command": "python scripts/update_us_market_stocks.py",
+        "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
 ]
 
@@ -119,21 +135,84 @@ def _parse_kst_datetime(value: str) -> datetime | None:
         return None
 
 
+def _compute_next_run(schedule: dict[str, list[int]] | None) -> datetime | None:
+    """주어진 스케줄(minutes/hours/weekdays)에 맞는 가장 가까운 다음 실행 시각(KST)을 반환한다."""
+    if not schedule:
+        return None
+    minutes = sorted(set(int(m) for m in schedule.get("minutes", [])))
+    hours = sorted(set(int(h) for h in schedule.get("hours", [])))
+    weekdays = sorted(set(int(w) for w in schedule.get("weekdays", [])))
+    if not minutes or not hours or not weekdays:
+        return None
+
+    tz = ZoneInfo("Asia/Seoul")
+    now = datetime.now(tz)
+    # 다음 분 단위부터 검사 (현재 분은 이미 지났다고 보수적으로 가정)
+    candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
+    # 최대 8일까지 탐색 (어떤 weekday/hour/minute 조합이라도 이 범위 내에 반드시 매치)
+    end = candidate + timedelta(days=8)
+    while candidate < end:
+        if candidate.weekday() in weekdays:
+            if candidate.hour in hours:
+                if candidate.minute in minutes:
+                    return candidate
+                # 같은 시간 내에서 다음 후보 분 찾기
+                next_minute = next((m for m in minutes if m > candidate.minute), None)
+                if next_minute is not None:
+                    candidate = candidate.replace(minute=next_minute)
+                    continue
+                # 시간 내 후보 분이 없으면 다음 시간으로
+                candidate = (candidate + timedelta(hours=1)).replace(minute=0)
+                continue
+            # 같은 날 내에서 다음 후보 시간 찾기
+            next_hour = next((h for h in hours if h > candidate.hour), None)
+            if next_hour is not None:
+                candidate = candidate.replace(hour=next_hour, minute=minutes[0])
+                continue
+            # 시간 내 후보가 없으면 다음 날로
+            candidate = (candidate + timedelta(days=1)).replace(hour=hours[0], minute=minutes[0])
+            continue
+        # weekday 불일치 → 다음 날 첫 후보로
+        candidate = (candidate + timedelta(days=1)).replace(hour=hours[0], minute=minutes[0])
+    return None
+
+
+def _format_until(when: datetime | None) -> str:
+    if when is None:
+        return "-"
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+    delta_seconds = int((when - now).total_seconds())
+    if delta_seconds <= 0:
+        return "곧"
+    if delta_seconds < 60:
+        return f"{delta_seconds}초 후"
+    if delta_seconds < 3600:
+        return f"{delta_seconds // 60}분 후"
+    if delta_seconds < 86400:
+        hours = delta_seconds // 3600
+        minutes = (delta_seconds % 3600) // 60
+        return f"{hours}시간 {minutes}분 후" if minutes else f"{hours}시간 후"
+    days = delta_seconds // 86400
+    hours = (delta_seconds % 86400) // 3600
+    return f"{days}일 {hours}시간 후" if hours else f"{days}일 후"
+
+
 def _format_elapsed_since(when: datetime | None) -> str:
     if when is None:
         return "-"
     now = datetime.now(ZoneInfo("Asia/Seoul"))
     delta_seconds = max(0, int((now - when).total_seconds()))
     if delta_seconds < 60:
-        elapsed = "방금전"
-    elif delta_seconds < 3600:
-        elapsed = f"{delta_seconds // 60}분전"
-    elif delta_seconds < 86400:
-        elapsed = f"{delta_seconds // 3600}시간전"
-    else:
-        elapsed = f"{delta_seconds // 86400}일전"
-    weekday = ["월", "화", "수", "목", "금", "토", "일"][when.weekday()]
-    return f"{when.strftime('%Y-%m-%d')}({weekday}) {when.strftime('%H:%M')}({elapsed})"
+        return "방금 전"
+    if delta_seconds < 3600:
+        return f"{delta_seconds // 60}분 전"
+    if delta_seconds < 86400:
+        hours = delta_seconds // 3600
+        minutes = (delta_seconds % 3600) // 60
+        return f"{hours}시간 {minutes}분 전" if minutes else f"{hours}시간 전"
+    days = delta_seconds // 86400
+    hours = (delta_seconds % 86400) // 3600
+    return f"{days}일 {hours}시간 전" if hours else f"{days}일 전"
 
 
 def _read_last_job_run(job_key: str) -> dict[str, str | None]:
@@ -227,6 +306,20 @@ def load_system_data() -> dict[str, object]:
             row["key"]: _read_last_job_run(str(row["key"]))
             for row in SCHEDULE_ROWS
         },
+        "next_run_by_job": {
+            row["key"]: _build_next_run_payload(row.get("schedule"))
+            for row in SCHEDULE_ROWS
+        },
+    }
+
+
+def _build_next_run_payload(schedule: dict | None) -> dict[str, str | None]:
+    next_run = _compute_next_run(schedule)
+    if next_run is None:
+        return {"at": None, "display": "-"}
+    return {
+        "at": next_run.isoformat(),
+        "display": _format_until(next_run),
     }
 
 
