@@ -48,17 +48,75 @@ def _is_hidden_component_ticker(ticker: Any) -> bool:
     return _normalize_ticker(str(ticker or "")) == "IS"
 
 
-def _renormalize_component_weights(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    total_weight_sum = sum(_safe_float(component.get("total_weight")) for component in components)
-    if total_weight_sum <= 0.0:
-        return components
+def _load_account_valuation_krw(account_id: str) -> float:
+    from utils.portfolio_io import load_real_holdings_table
 
-    scale = 100.0 / total_weight_sum
-    for component in components:
-        component["total_weight"] = _safe_float(component.get("total_weight")) * scale
-        for source in component.get("sources", []):
-            source["weight"] = _safe_float(source.get("weight")) * scale
-    return components
+    try:
+        df = load_real_holdings_table(account_id)
+    except Exception as exc:
+        logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", account_id, exc)
+        return 0.0
+
+    if df is None or df.empty:
+        return 0.0
+    return float(df["평가금액(KRW)"].sum())
+
+
+def _load_account_cash_balance_krw(account_id: str) -> float:
+    from utils.portfolio_io import load_portfolio_master
+
+    master = load_portfolio_master(account_id) or {}
+    return _safe_float(master.get("cash_balance"))
+
+
+def _append_account_cash_component(
+    *,
+    account_id: str,
+    account_name: str,
+    merged: dict[str, dict[str, Any]],
+    cash_balance_krw: float,
+    total_assets_krw: float,
+) -> None:
+    if cash_balance_krw <= 0.0 or total_assets_krw <= 0.0:
+        return
+
+    cash_weight = cash_balance_krw / total_assets_krw * 100.0
+    source = {
+        "etf_ticker": "-",
+        "etf_name": "현금",
+        "weight": cash_weight,
+        "current_price": None,
+        "change_pct": None,
+        "currency": "KRW",
+        "price_country_code": "kor",
+        "buy_amount_krw": 0.0,
+        "current_value_krw": cash_balance_krw,
+        "cumulative_profit_krw": 0.0,
+        "return_pct": None,
+        "account_id": account_id,
+        "account_name": account_name,
+    }
+
+    if "-" in merged:
+        merged["-"]["total_weight"] += cash_weight
+        merged["-"]["current_value_krw"] += cash_balance_krw
+        merged["-"]["sources"].append(source)
+        return
+
+    merged["-"] = {
+        "ticker": "-",
+        "name": "현금",
+        "has_components": False,
+        "total_weight": cash_weight,
+        "current_price": None,
+        "change_pct": None,
+        "currency": "KRW",
+        "price_country_code": "kor",
+        "buy_amount_krw": 0.0,
+        "current_value_krw": cash_balance_krw,
+        "cumulative_profit_krw": 0.0,
+        "sources": [source],
+    }
 
 
 def _append_account_components(
@@ -286,42 +344,62 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     etf_details: list[dict[str, Any]] = []
 
     if is_total:
-        total_valuation_krw = 0.0
+        account_totals: list[dict[str, Any]] = []
+        total_assets_krw = 0.0
         for account in all_accounts:
             curr_account_id = str(account["account_id"])
-            try:
-                from utils.portfolio_io import load_real_holdings_table
+            curr_valuation_krw = _load_account_valuation_krw(curr_account_id)
+            curr_cash_krw = _load_account_cash_balance_krw(curr_account_id)
+            account_totals.append(
+                {
+                    "account_id": curr_account_id,
+                    "account_name": str(account.get("name", curr_account_id)),
+                    "valuation_krw": curr_valuation_krw,
+                    "cash_krw": curr_cash_krw,
+                }
+            )
+            total_assets_krw += curr_valuation_krw + curr_cash_krw
 
-                curr_df = load_real_holdings_table(curr_account_id)
-            except Exception as exc:
-                logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", curr_account_id, exc)
-                continue
-            if curr_df is None or curr_df.empty:
-                continue
-            total_valuation_krw += float(curr_df["평가금액(KRW)"].sum())
-
-        for account in all_accounts:
-            curr_account_id = str(account["account_id"])
-            curr_account_name = str(account.get("name", curr_account_id))
+        for account_total in account_totals:
+            curr_account_id = str(account_total["account_id"])
+            curr_account_name = str(account_total["account_name"])
             _append_account_components(
                 account_id=curr_account_id,
                 account_name=curr_account_name,
                 merged=merged,
                 etf_details=etf_details,
-                total_valuation_krw=total_valuation_krw,
+                total_valuation_krw=total_assets_krw,
+            )
+            _append_account_cash_component(
+                account_id=curr_account_id,
+                account_name=curr_account_name,
+                merged=merged,
+                cash_balance_krw=float(account_total["cash_krw"]),
+                total_assets_krw=total_assets_krw,
             )
     else:
         account_name = str(account_config.get("name", account_id_norm))
+        account_valuation_krw = _load_account_valuation_krw(account_id_norm)
+        account_cash_krw = _load_account_cash_balance_krw(account_id_norm)
+        account_total_assets_krw = account_valuation_krw + account_cash_krw
         _append_account_components(
             account_id=account_id_norm,
             account_name=account_name,
             merged=merged,
             etf_details=etf_details,
+            total_valuation_krw=account_total_assets_krw,
+        )
+        _append_account_cash_component(
+            account_id=account_id_norm,
+            account_name=account_name,
+            merged=merged,
+            cash_balance_krw=account_cash_krw,
+            total_assets_krw=account_total_assets_krw,
         )
 
     filtered_etf_details = [detail for detail in etf_details if not _is_hidden_component_ticker(detail.get("ticker"))]
 
-    if not filtered_etf_details:
+    if not filtered_etf_details and not merged:
         return {
             "account_id": "TOTAL" if is_total else account_id_norm,
             "account_name": "전체" if is_total else account_name,
@@ -333,7 +411,6 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     visible_components = [
         component for component in merged.values() if not _is_hidden_component_ticker(component.get("ticker"))
     ]
-    visible_components = _renormalize_component_weights(visible_components)
 
     # 비중 순 정렬 후 화면에는 상위 구성종목만 반환한다.
     all_sorted_components = sorted(

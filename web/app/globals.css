@@ -2459,7 +2459,7 @@ a {
 
 .compareMatrix {
   display: grid;
-  grid-template-columns: 4.75rem 5.6rem repeat(5, minmax(12rem, 1fr));
+  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(12rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2467,7 +2467,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 4.75rem 5.6rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2552,8 +2552,8 @@ a {
 .compareMetricCell {
   display: flex;
   align-items: center;
-  min-height: 2.5rem;
-  padding: 0.75rem 1rem;
+  min-height: 2.15rem;
+  padding: 0.45rem 0.85rem;
   border-right: 1px solid #d6deea;
   border-bottom: 1px solid #d6deea;
   background: #fff;
@@ -2570,6 +2570,15 @@ a {
 .compareMetricCell {
   justify-content: flex-end;
   text-align: right;
+}
+
+.compareMetricPeriodLabel.is-active-range,
+.compareMetricCell.is-active-range {
+  background: #ecfdf5;
+}
+
+.compareMetricPeriodLabel.is-active-range {
+  color: #15803d;
 }
 
 .compareMetricCell.metricPositive {
