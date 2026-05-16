@@ -103,8 +103,8 @@ type ChartDateRange = {
 type CompareGroupMap = Record<string, string[]>;
 
 type PerformanceMetricRange =
-  | { label: string; kind: "period"; days: number }
-  | { label: string; kind: "ytd" };
+  | { key: string; label: string; kind: "period"; days: number }
+  | { key: string; label: string; kind: "ytd" };
 
 const MAX_PRODUCTS = 5;
 const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
@@ -139,12 +139,12 @@ const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number; 
   { key: "3y", label: "3년", days: 365 * 3 },
 ];
 const PERFORMANCE_METRIC_RANGES: PerformanceMetricRange[] = [
-  { label: "1개월", kind: "period", days: 31 },
-  { label: "3개월", kind: "period", days: 92 },
-  { label: "6개월", kind: "period", days: 183 },
-  { label: "연초이후", kind: "ytd" },
-  { label: "1년", kind: "period", days: 365 },
-  { label: "3년", kind: "period", days: 365 * 3 },
+  { key: "1m", label: "1개월", kind: "period", days: 31 },
+  { key: "3m", label: "3개월", kind: "period", days: 92 },
+  { key: "6m", label: "6개월", kind: "period", days: 183 },
+  { key: "ytd", label: "연초이후", kind: "ytd" },
+  { key: "1y", label: "1년", kind: "period", days: 365 },
+  { key: "3y", label: "3년", kind: "period", days: 365 * 3 },
 ];
 const BASIC_INFO_METRICS = [
   { label: "현재가", multiline: true },
@@ -745,7 +745,7 @@ export function ComparePageClient() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
-  const [performanceRange, setPerformanceRange] = useState<string>("3m");
+  const [performanceRange, setPerformanceRange] = useState<string>("ytd");
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -941,6 +941,24 @@ export function ComparePageClient() {
     }
     return PERFORMANCE_RANGES[1];
   }, [commonAvailableRange, performanceRange]);
+  const performanceMetricRows = useMemo<PerformanceMetricRange[]>(() => {
+    if (selectedPerformanceRange.key !== "__max__") return PERFORMANCE_METRIC_RANGES;
+    const maxRow: PerformanceMetricRange = {
+      key: "__max__",
+      label: selectedPerformanceRange.label,
+      kind: "period",
+      days: selectedPerformanceRange.days,
+    };
+    const insertIndex = PERFORMANCE_METRIC_RANGES.findIndex(
+      (row) => row.kind === "period" && row.days > selectedPerformanceRange.days,
+    );
+    if (insertIndex < 0) return [...PERFORMANCE_METRIC_RANGES, maxRow];
+    return [
+      ...PERFORMANCE_METRIC_RANGES.slice(0, insertIndex),
+      maxRow,
+      ...PERFORMANCE_METRIC_RANGES.slice(insertIndex),
+    ];
+  }, [selectedPerformanceRange.days, selectedPerformanceRange.key, selectedPerformanceRange.label]);
   const sortedProducts = useMemo(() => {
     return products
       .map((product, index) => ({
@@ -1241,25 +1259,36 @@ export function ComparePageClient() {
               </div>
               <CompareChart products={sortedProducts} dateRange={chartDateRange} />
             </div>
-            <div className="compareMatrixLabel compareMetricsGroupLabel" style={{ gridRow: `span ${PERFORMANCE_METRIC_RANGES.length}` }}>
+            <div className="compareMatrixLabel compareMetricsGroupLabel" style={{ gridRow: `span ${performanceMetricRows.length}` }}>
               수익률(%)
             </div>
-            {PERFORMANCE_METRIC_RANGES.map((period) => (
-              <Fragment key={period.label}>
-                <div className="compareMetricPeriodLabel">{period.label}</div>
+            {performanceMetricRows.map((period) => {
+              const isActiveMetricRow = period.key === selectedPerformanceRange.key;
+              return (
+              <Fragment key={period.key}>
+                <div className={`compareMetricPeriodLabel ${isActiveMetricRow ? "is-active-range" : ""}`}>{period.label}</div>
                 {sortedProducts.map((product) => {
                   const value = getMetricReturnPct(product.detail.rows, period);
                   return (
-                    <div key={tickerKey(product.item)} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    <div
+                      key={tickerKey(product.item)}
+                      className={`compareMetricCell ${getSignedClass(value)} ${isActiveMetricRow ? "is-active-range" : ""}`}
+                    >
                       {formatPercent(value)}
                     </div>
                   );
                 })}
                 {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-                  <div key={`empty-metric-${period.label}-${index}`} className="compareMetricCell">-</div>
+                  <div
+                    key={`empty-metric-${period.label}-${index}`}
+                    className={`compareMetricCell ${isActiveMetricRow ? "is-active-range" : ""}`}
+                  >
+                    -
+                  </div>
                 ))}
               </Fragment>
-            ))}
+              );
+            })}
 
             <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
               MDD(%)

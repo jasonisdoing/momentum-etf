@@ -1,7 +1,9 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
+import { hierarchy, treemap, treemapSquarify } from "d3-hierarchy";
+import type { HierarchyRectangularNode } from "d3-hierarchy";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
@@ -69,10 +71,28 @@ type MainGridRow = ComponentRow & { rowType: "main" };
 type DetailGridRow = { rowType: "detail"; parentTicker: string; sources: ComponentSource[] };
 type GridRow = MainGridRow | DetailGridRow;
 
+type TreemapRect = {
+  item: ComponentRow;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  normalizedWeight: number;
+};
+
+type TreemapDatum = {
+  item?: ComponentRow;
+  value?: number;
+  children?: TreemapDatum[];
+};
+
 const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY = "momentum-etf:holdings-details:accounts";
 const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:data:";
 const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS = 300_000;
 const HOLDINGS_COMPONENTS_CACHE_TTL_MS = 30_000;
+const TREEMAP_FALLBACK_WIDTH = 1_200;
+const TREEMAP_FALLBACK_HEIGHT = 360;
+const TREEMAP_VISIBLE_LIMIT = 20;
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 function formatWeight(w: number): string {
@@ -103,6 +123,23 @@ function formatKrw(val: number | null | undefined): string {
   return `${rounded.toLocaleString()}원`;
 }
 
+function formatDisplayName(name: string | null | undefined): string {
+  if (!name) return "-";
+  const original = name.trim();
+  const cleaned = original
+    .replace(/\s*[\(\（][^\)\）]*[\)\）]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || original;
+}
+
+function getTreemapLabel(item: ComponentRow): string {
+  const ticker = item.ticker.trim();
+  if (ticker === "-") return formatDisplayName(item.name);
+  if (/^\d{6}$/.test(ticker)) return formatDisplayName(item.name);
+  return ticker;
+}
+
 function getSignedClass(val: number | null | undefined): string {
   if (val == null) return "";
   if (val > 0) return "metricPositive";
@@ -110,10 +147,218 @@ function getSignedClass(val: number | null | undefined): string {
   return "";
 }
 
+function getTreemapColor(changePct: number | null | undefined): string {
+  if (changePct == null || changePct === 0) return "#b8c0ce";
+  const intensity = Math.min(Math.abs(changePct) / 6, 1);
+  if (changePct > 0) {
+    const lightness = 66 - intensity * 28;
+    return `hsl(0 64% ${lightness}%)`;
+  }
+  const lightness = 66 - intensity * 26;
+  return `hsl(216 78% ${lightness}%)`;
+}
+
+function getTreemapTextColor(changePct: number | null | undefined): string {
+  if (changePct == null) return "#1f2937";
+  if (changePct === 0) return "#1f2937";
+  return "#ffffff";
+}
+
+function getTreemapWeight(item: ComponentRow): number {
+  const weight = Number(item.total_weight);
+  return Number.isFinite(weight) && weight > 0 ? weight : 0;
+}
+
+function buildTreemapRects(items: ComponentRow[], width: number, height: number): TreemapRect[] {
+  const children = items
+    .map((item) => ({ item, value: getTreemapWeight(item) }))
+    .filter((entry) => entry.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, TREEMAP_VISIBLE_LIMIT);
+  const totalWeight = children.reduce((acc, entry) => acc + entry.value, 0);
+  if (totalWeight <= 0 || width <= 0 || height <= 0) return [];
+  const normalizedChildren = children.map((entry) => ({
+    item: entry.item,
+    value: (entry.value / totalWeight) * 100,
+  }));
+
+  const root = hierarchy<TreemapDatum>({ children: normalizedChildren })
+    .sum((datum) => datum.value ?? 0)
+    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
+
+  treemap<TreemapDatum>()
+    .tile(treemapSquarify.ratio(1.2))
+    .size([width, height])
+    .paddingInner(3)
+    .round(true)(root);
+
+  return (root as HierarchyRectangularNode<TreemapDatum>)
+    .leaves()
+    .map((node) => {
+      const item = node.data.item;
+      if (!item) return null;
+      return {
+        item,
+        x: node.x0,
+        y: node.y0,
+        width: Math.max(0, node.x1 - node.x0),
+        height: Math.max(0, node.y1 - node.y0),
+        normalizedWeight: node.data.value ?? 0,
+      };
+    })
+    .filter((rect): rect is TreemapRect => rect != null);
+}
+
 const gridTheme = createAppGridTheme();
 
 function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
   return row?.rowType === "detail";
+}
+
+function HoldingsTreemap({ components }: { components: ComponentRow[] }) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const clipBaseId = React.useId().replace(/:/g, "");
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useLayoutEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      setSize({ width: rect.width, height: rect.height });
+    };
+    measure();
+    const rafId = window.requestAnimationFrame(measure);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      setSize({ width, height });
+    });
+    observer.observe(node);
+    window.addEventListener("resize", measure);
+    return () => {
+      window.cancelAnimationFrame(rafId);
+      window.removeEventListener("resize", measure);
+      observer.disconnect();
+    };
+  }, []);
+
+  const treemapSize = {
+    width: size.width > 0 ? size.width : TREEMAP_FALLBACK_WIDTH,
+    height: size.height > 0 ? size.height : TREEMAP_FALLBACK_HEIGHT,
+  };
+  const rects = useMemo(
+    () => buildTreemapRects(components, treemapSize.width, treemapSize.height),
+    [components, treemapSize.height, treemapSize.width],
+  );
+
+  if (components.length === 0) {
+    return (
+      <section className="holdingsTreemapSection">
+        <div className="holdingsTreemapHeader">
+          <h3>트리맵</h3>
+        </div>
+        <div className="holdingsTreemapEmpty">표시할 구성종목이 없습니다.</div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="holdingsTreemapSection">
+      <div className="holdingsTreemapHeader">
+        <h3>트리맵</h3>
+        <span>상위 20종목</span>
+      </div>
+      <div ref={containerRef} className="holdingsTreemapCanvas">
+        <svg
+          className="holdingsTreemapSvg"
+          viewBox={`0 0 ${treemapSize.width} ${treemapSize.height}`}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label="보유 구성종목 트리맵"
+        >
+          <defs>
+            {rects.map((rect, index) => (
+              <clipPath key={`${rect.item.ticker}-${index}`} id={`${clipBaseId}-treemap-${index}`}>
+                <rect x={rect.x + 2} y={rect.y + 2} width={Math.max(0, rect.width - 4)} height={Math.max(0, rect.height - 4)} />
+              </clipPath>
+            ))}
+          </defs>
+          {rects.map((rect, index) => {
+            const item = rect.item;
+            const showTicker = rect.width >= 44 && rect.height >= 24;
+            const showChange = rect.width >= 70 && rect.height >= 44;
+            const showWeight = rect.width >= 70 && rect.height >= 62;
+            const textColor = getTreemapTextColor(item.change_pct);
+            const subduedTextColor = item.change_pct == null || item.change_pct === 0 ? "#64748b" : "rgba(255, 255, 255, 0.72)";
+            const title = `${formatDisplayName(item.name)} ${formatSignedPercent(item.change_pct)} ${formatWeight(rect.normalizedWeight)}`;
+            const label = getTreemapLabel(item);
+            return (
+              <g
+                key={item.ticker}
+                className="holdingsTreemapTileGroup"
+                clipPath={`url(#${clipBaseId}-treemap-${index})`}
+              >
+                <title>{title}</title>
+                <rect
+                  x={rect.x + 1}
+                  y={rect.y + 1}
+                  width={Math.max(0, rect.width - 2)}
+                  height={Math.max(0, rect.height - 2)}
+                  fill={getTreemapColor(item.change_pct)}
+                  stroke="#f8fafc"
+                  strokeWidth={2}
+                />
+                {showTicker && (
+                  <text
+                    x={rect.x + 8}
+                    y={rect.y + 20}
+                    fill={textColor}
+                    className="holdingsTreemapTicker"
+                  >
+                    {label}
+                  </text>
+                )}
+                {showChange && (
+                  <text
+                    x={rect.x + 8}
+                    y={rect.y + 40}
+                    fill={textColor}
+                    className="holdingsTreemapChange"
+                  >
+                    {formatSignedPercent(item.change_pct)}
+                  </text>
+                )}
+                {showWeight && (
+                  <text
+                    x={rect.x + 8}
+                    y={rect.y + rect.height - 10}
+                    fill={subduedTextColor}
+                    className="holdingsTreemapWeight"
+                  >
+                    {formatWeight(rect.normalizedWeight)}
+                  </text>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="holdingsTreemapGauge" aria-hidden="true">
+        <div className="holdingsTreemapGaugeBar" />
+        <div className="holdingsTreemapGaugeLabels">
+          <span>-5%</span>
+          <span>-3%</span>
+          <span>-1%</span>
+          <span>0%</span>
+          <span>+1%</span>
+          <span>+3%</span>
+          <span>+5%</span>
+        </div>
+      </div>
+    </section>
+  );
 }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
@@ -241,6 +486,7 @@ export function HoldingsDetailsPageClient() {
       field: "name",
       flex: 1,
       minWidth: 140,
+      cellClass: "holdingsDetailsNameAgCell",
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         const mainRow = params.data as MainGridRow;
@@ -256,7 +502,7 @@ export function HoldingsDetailsPageClient() {
                 ▶
               </span>
             )}
-            <span className="fw-bold text-dark holdingsDetailsNameText">{params.value}</span>
+            <span className="fw-bold text-dark holdingsDetailsNameText">{formatDisplayName(params.value)}</span>
           </div>
         );
       },
@@ -353,7 +599,7 @@ export function HoldingsDetailsPageClient() {
             
             {/* 2. 종목명 (flex:1) - 좌측 패딩 12px */}
             <div className="hdColName fw-bold text-dark">
-              {src.etf_name}
+              {formatDisplayName(src.etf_name)}
             </div>
             
             {/* 3. 비중 (90px) - 우측 패딩 12px */}
@@ -486,8 +732,9 @@ export function HoldingsDetailsPageClient() {
             </ResponsiveFiltersSection>
           </div>
           
-          <div className="card-body appCardBodyTight appTableCardBodyFill">
-            <div className="appGridFillWrap">
+          <div className="card-body appCardBodyTight appTableCardBodyFill holdingsDetailsBody">
+            <HoldingsTreemap components={data?.components ?? []} />
+            <div className="appGridFillWrap holdingsDetailsGridWrap">
               <AppAgGrid
                 rowData={isLoading ? [] : gridRows}
                 columnDefs={columnDefs}
@@ -552,12 +799,131 @@ export function HoldingsDetailsPageClient() {
           min-width: 0;
           overflow: hidden;
         }
+        .holdingsDetailsNameAgCell {
+          overflow: hidden;
+        }
+        .holdingsDetailsNameAgCell .ag-cell-wrapper,
+        .holdingsDetailsNameAgCell .ag-cell-value {
+          min-width: 0;
+          width: 100%;
+          overflow: hidden;
+        }
         .holdingsDetailsNameText {
           min-width: 0;
+          max-width: 100%;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
           display: inline-block;
+        }
+        .holdingsDetailsBody {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          min-height: 0;
+        }
+        .holdingsDetailsGridWrap {
+          flex: 1 1 0;
+          min-height: 280px;
+        }
+        .holdingsTreemapSection {
+          flex: 0 0 48%;
+          min-height: 300px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          border: 1px solid #d8e2ef;
+          border-radius: 10px;
+          background: #ffffff;
+          padding: 12px;
+          box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+        }
+        .holdingsTreemapHeader {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 12px;
+          min-height: 28px;
+        }
+        .holdingsTreemapHeader h3 {
+          margin: 0;
+          font-size: 18px;
+          font-weight: 800;
+          color: #1f2937;
+        }
+        .holdingsTreemapHeader span {
+          font-size: 13px;
+          font-weight: 700;
+          color: #718096;
+        }
+        .holdingsTreemapCanvas {
+          position: relative;
+          flex: 1 1 auto;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+          background: #eef2f7;
+          border: 1px solid #d8e2ef;
+        }
+        .holdingsTreemapSvg {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+        .holdingsTreemapGauge {
+          flex: 0 0 auto;
+          padding: 2px 8px 0;
+        }
+        .holdingsTreemapGaugeBar {
+          height: 14px;
+          border-radius: 999px;
+          background:
+            linear-gradient(
+              90deg,
+              #3b82f6 0%,
+              #2563eb 25%,
+              #1e4f94 47%,
+              #b8c0ce 50%,
+              #a52a2a 53%,
+              #c53030 75%,
+              #ef4444 100%
+            );
+        }
+        .holdingsTreemapGaugeLabels {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 6px;
+          color: #8a94a6;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .holdingsTreemapTicker {
+          font-size: 16px;
+          font-weight: 800;
+          letter-spacing: 0;
+          dominant-baseline: hanging;
+        }
+        .holdingsTreemapChange {
+          font-size: 15px;
+          font-weight: 800;
+          dominant-baseline: hanging;
+        }
+        .holdingsTreemapWeight {
+          font-size: 13px;
+          font-weight: 800;
+          dominant-baseline: text-after-edge;
+        }
+        .holdingsTreemapEmpty {
+          flex: 1 1 auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 260px;
+          border: 1px dashed #cbd5e1;
+          border-radius: 8px;
+          color: #718096;
+          font-weight: 700;
         }
         .hdColName {
           white-space: nowrap;
