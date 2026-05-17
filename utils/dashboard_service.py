@@ -338,10 +338,17 @@ def load_dashboard_data() -> dict[str, Any]:
         df_live = account.pop("_df_live", None)
         account_buckets[aid] = _compute_account_buckets(aid, account["cash_balance"], df_live=df_live)
 
+    try:
+        from utils.system_service import is_deploying as _is_deploying
+        deploying = bool(_is_deploying())
+    except Exception:
+        deploying = False
+
     return {
         "metrics_row1": metrics_row1,
         "metrics_row2": metrics_row2,
         "period_profits": period_profits,
+        "is_deploying": deploying,
         "accounts": accounts,
         "totals": {
             "total_assets": total_assets,

@@ -113,6 +113,7 @@ type DashboardSummary = {
     monthly?: { profit: number; return_pct: number };
     yearly?: { profit: number; return_pct: number };
   };
+  is_deploying?: boolean;
 };
 
 type ProfitMetric = {
@@ -514,6 +515,23 @@ export function AppShell({ children }: AppShellProps) {
                   <IconLayoutSidebarLeftCollapse size={18} stroke={1.9} />
                 )}
               </button>
+              {dashboardSummary?.is_deploying ? (
+                <span
+                  title="서버 배포 진행 중 — DB가 일시적으로 느려질 수 있습니다"
+                  style={{
+                    marginLeft: "0.5rem",
+                    padding: "3px 10px",
+                    borderRadius: 6,
+                    background: "#fef3c7",
+                    color: "#92400e",
+                    fontWeight: 700,
+                    fontSize: "0.82rem",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🚧 배포 진행 중
+                </span>
+              ) : null}
             </div>
             <div className="appMobileHeader">
               <button
