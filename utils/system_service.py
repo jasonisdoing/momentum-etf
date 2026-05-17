@@ -113,6 +113,7 @@ _LABEL_BY_ACTION: dict[str, str] = {
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
 _LOG_DIR = _PROJECT_ROOT / "logs" / "cron"
+_DEPLOY_LOCK = _LOCK_DIR / ".deploy.lock"
 # 락파일이 이 시간(초)보다 오래되면 stale 로 간주하고 삭제한다.
 _STALE_LOCK_SECONDS = 60 * 60  # 1시간
 _RUN_BATCH_START_PATTERN = re.compile(
@@ -302,6 +303,7 @@ def load_system_data() -> dict[str, object]:
             "별도로 유지됩니다. (정의: `infra/cron/crontab`)"
         ),
         "running_jobs": get_running_jobs(),
+        "is_deploying": _DEPLOY_LOCK.exists(),
         "last_run_by_job": {
             row["key"]: _read_last_job_run(str(row["key"]))
             for row in SCHEDULE_ROWS
@@ -327,12 +329,21 @@ class BatchAlreadyRunningError(RuntimeError):
     """다른 배치가 실행 중일 때 트리거 요청을 거부하기 위한 예외."""
 
 
+class DeployInProgressError(RuntimeError):
+    """배포 진행 중에는 수동 배치를 거부한다."""
+
+
 def trigger_system_action(action: SystemAction) -> str:
     """배치를 백그라운드로 실행. cron 과 동일하게 run_batch.py 래퍼를 경유해
     실패 결과를 슬랙으로 알립니다. 다른 배치가 실행 중이면 거부합니다."""
 
     if action not in _SCRIPT_BY_ACTION:
         raise ValueError("지원하지 않는 시스템 작업입니다.")
+
+    if _DEPLOY_LOCK.exists():
+        raise DeployInProgressError(
+            "배포가 진행 중입니다. 완료 후 다시 시도해주세요."
+        )
 
     running = get_running_jobs()
     if running:

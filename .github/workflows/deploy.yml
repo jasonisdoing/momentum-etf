@@ -26,6 +26,12 @@ jobs:
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
+            # 배포 진행 플래그 — 이 파일이 있는 동안 cron/수동 배치 모두 차단된다
+            mkdir -p logs/cron
+            touch logs/cron/.deploy.lock
+            # 어떤 경로로 빠져나가도 lock 은 반드시 제거
+            trap 'rm -f $HOME/apps/momentum-etf/logs/cron/.deploy.lock; echo ">>> deploy lock 해제"' EXIT
+            echo ">>> deploy lock 생성"
             # stale rename 유령 컨테이너 선별 제거
             #   이전 배포가 docker compose recreate 중간에 끊기면
             #   `<12hex>_momentum-etf-*` 형태의 리네임 유산이 남아 다음 배포에서

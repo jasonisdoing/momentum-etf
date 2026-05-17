@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from utils.system_service import (
     BatchAlreadyRunningError,
+    DeployInProgressError,
     SystemAction,
     load_system_data,
     trigger_system_action,
@@ -27,5 +28,7 @@ def get_system_data(_: None = Depends(require_internal_token)) -> dict[str, obje
 def post_system_action(payload: SystemActionRequest, _: None = Depends(require_internal_token)) -> dict[str, str]:
     try:
         return {"message": trigger_system_action(payload.action)}
+    except DeployInProgressError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except BatchAlreadyRunningError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

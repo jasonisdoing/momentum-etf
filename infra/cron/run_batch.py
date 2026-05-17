@@ -38,6 +38,7 @@ MAX_TAIL_LINES = 15
 MAX_TAIL_CHARS = 1500
 
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
+DEPLOY_LOCK = LOCK_DIR / ".deploy.lock"
 SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "cache_refresh",
     "portfolio_refresh",
@@ -112,6 +113,15 @@ def main(argv: list[str]) -> int:
 
     started_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     started_monotonic = time.monotonic()
+
+    # 배포 진행 중이면 즉시 스킵 (deploy.yml 이 .deploy.lock 을 생성/제거)
+    if DEPLOY_LOCK.exists():
+        skip_line = (
+            f"[run_batch] SKIP job={job_name} reason=deploy_in_progress at={started_at}"
+        )
+        print(skip_line)
+        _append_log_line(job_name, skip_line)
+        return 0
 
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
