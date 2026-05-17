@@ -49,39 +49,79 @@ def _last_backup_marker(backup_dir: Path) -> Path:
     return backup_dir / ".last_backup"
 
 
-def _read_last_backup_time(marker: Path) -> datetime | None:
-    """마커 파일에 저장된 ISO 타임스탬프를 읽어 datetime 으로 변환."""
+_MARKER_STARTED_KEY = "마지막 백업 시작:"
+_MARKER_ENDED_KEY = "마지막 백업 종료:"
+_MARKER_ELAPSED_KEY = "걸린 시간:"
+_MARKER_STATUS_KEY = "성공 여부:"
+_MARKER_LOG_KEY = "로그:"
+
+
+def _read_marker_started_at(marker: Path) -> datetime | None:
+    """마커 파일에서 '마지막 백업 시작:' 라인을 파싱해 datetime 반환."""
     if not marker.exists():
         return None
     try:
-        text = marker.read_text(encoding="utf-8").strip()
+        text = marker.read_text(encoding="utf-8")
     except OSError:
         return None
-    if not text:
-        return None
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    for line in text.splitlines():
+        if line.startswith(_MARKER_STARTED_KEY):
+            value = line[len(_MARKER_STARTED_KEY):].strip()
+            if not value:
+                return None
+            try:
+                return datetime.fromisoformat(value)
+            except ValueError:
+                return None
+    return None
 
 
-def _write_last_backup_time(marker: Path, when: datetime) -> None:
-    marker.write_text(when.isoformat(timespec="seconds"), encoding="utf-8")
+def _write_marker(
+    marker: Path,
+    *,
+    started_at: datetime,
+    ended_at: datetime,
+    elapsed_seconds: float,
+    success: bool,
+    log: str | None = None,
+) -> None:
+    """마커 파일에 백업 결과를 사람이 읽을 수 있는 형식으로 저장."""
+    lines = [
+        f"{_MARKER_STARTED_KEY} {started_at.isoformat(timespec='seconds')}",
+        f"{_MARKER_ENDED_KEY} {ended_at.isoformat(timespec='seconds')}",
+        f"{_MARKER_ELAPSED_KEY} {elapsed_seconds:.1f}초",
+        f"{_MARKER_STATUS_KEY} {'성공' if success else '실패'}",
+    ]
+    if not success and log:
+        lines.append(f"{_MARKER_LOG_KEY}")
+        lines.append(log.rstrip())
+    marker.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _should_run(backup_dir: Path, min_interval_hours: float) -> bool:
     marker = _last_backup_marker(backup_dir)
-    last = _read_last_backup_time(marker)
+    last = _read_marker_started_at(marker)
     if last is None:
         return True
     age_hours = (datetime.now() - last).total_seconds() / 3600
     if age_hours >= min_interval_hours:
         return True
     print(
-        f"[backup_mongo] 마지막 백업({last.isoformat(timespec='seconds')})으로부터 "
+        f"[backup_mongo] 마지막 백업 시작({last.isoformat(timespec='seconds')})으로부터 "
         f"{age_hours:.1f}시간 경과 — 임계({min_interval_hours:.0f}h) 미만이라 스킵"
     )
     return False
+
+
+def _notify_failure(message: str) -> None:
+    """실패 시에만 슬랙 전송. 성공은 무알림."""
+    try:
+        sys.path.insert(0, str(ROOT_DIR))
+        from utils.notification import send_slack_message_v2
+
+        send_slack_message_v2(message)
+    except Exception as exc:  # pragma: no cover - 알림 실패는 표준에러로만
+        print(f"[backup_mongo] 슬랙 알림 실패: {exc}", file=sys.stderr)
 
 
 def _cleanup_old(backup_dir: Path, retention_days: int) -> None:
@@ -148,8 +188,10 @@ def run_backup() -> int:
         )
         return 1
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    started_at = datetime.now()
+    timestamp = started_at.strftime("%Y%m%d-%H%M%S")
     target = backup_dir / f"{timestamp}.archive.gz"
+    marker = _last_backup_marker(backup_dir)
     print(f"[backup_mongo] 백업 시작 → {target}")
 
     # autossh 터널(localhost:27017 → 서버 MongoDB)을 통해 로컬에서 직접 mongodump 실행.
@@ -165,24 +207,49 @@ def run_backup() -> int:
         "--gzip",
     ]
 
-    started = time.monotonic()
+    started_mono = time.monotonic()
     with target.open("wb") as out:
         proc = subprocess.run(dump_cmd, stdout=out, stderr=subprocess.PIPE, check=False)
 
-    elapsed = time.monotonic() - started
+    elapsed = time.monotonic() - started_mono
+    ended_at = datetime.now()
     size_mb = target.stat().st_size / (1024 * 1024) if target.exists() else 0
+    stderr_text = (proc.stderr or b"").decode("utf-8", errors="ignore").strip()
 
-    if proc.returncode != 0 or size_mb < 0.01:
-        stderr_tail = (proc.stderr or b"").decode("utf-8", errors="ignore").strip()[-500:]
-        print(f"[backup_mongo] 실패 (exit={proc.returncode}, size={size_mb:.1f}MB): {stderr_tail}", file=sys.stderr)
+    success = proc.returncode == 0 and size_mb >= 0.01
+
+    if not success:
         # 실패한 0바이트 파일 정리
         try:
             target.unlink(missing_ok=True)
         except OSError:
             pass
+        log_tail = stderr_text[-1000:] if stderr_text else f"(exit={proc.returncode}, size={size_mb:.2f}MB)"
+        _write_marker(
+            marker,
+            started_at=started_at,
+            ended_at=ended_at,
+            elapsed_seconds=elapsed,
+            success=False,
+            log=log_tail,
+        )
+        print(f"[backup_mongo] 실패 (exit={proc.returncode}, size={size_mb:.1f}MB): {log_tail[:300]}", file=sys.stderr)
+        _notify_failure(
+            "❌ *MongoDB 백업 실패 (로컬)*\n"
+            f"• 시작: {started_at.isoformat(timespec='seconds')}\n"
+            f"• 소요: {elapsed:.1f}s\n"
+            f"• exit: {proc.returncode}\n"
+            f"```\n{log_tail[-700:]}\n```"
+        )
         return proc.returncode or 1
 
-    _write_last_backup_time(_last_backup_marker(backup_dir), datetime.now())
+    _write_marker(
+        marker,
+        started_at=started_at,
+        ended_at=ended_at,
+        elapsed_seconds=elapsed,
+        success=True,
+    )
     print(f"[backup_mongo] 완료 - {size_mb:.1f} MB, {elapsed:.1f}s")
     _cleanup_old(backup_dir, retention_days)
     return 0
