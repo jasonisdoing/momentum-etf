@@ -256,33 +256,37 @@ def _read_last_job_run(job_key: str) -> dict[str, str | None]:
 def get_running_jobs() -> list[str]:
     """현재 실행 중인 배치 키 목록을 반환합니다.
 
-    run_batch.py 가 생성한 `logs/cron/<key>.lock` 파일을 스캔합니다.
-    1시간 이상 된 락파일은 비정상 종료로 간주하고 삭제합니다.
+    MongoDB `batch_locks` 컬렉션을 조회합니다. TTL 인덱스가 만료된 락을
+    자동 정리하므로 stale 처리는 별도로 하지 않습니다.
     """
-    if not _LOCK_DIR.exists():
-        return []
-    now = time.time()
-    running: list[str] = []
-    for lock_file in _LOCK_DIR.glob("*.lock"):
-        key = lock_file.stem
-        if key not in _SCRIPT_BY_ACTION:
-            continue
-        try:
-            mtime = lock_file.stat().st_mtime
-        except FileNotFoundError:
-            continue
-        age = now - mtime
-        if age > _STALE_LOCK_SECONDS:
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return []
+        from datetime import datetime as _dt
+        now = _dt.now(ZoneInfo("Asia/Seoul"))
+        running: list[str] = []
+        for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1}):
+            key = str(doc.get("_id") or "")
+            if key not in _SCRIPT_BY_ACTION:
+                continue
+            expires_at = doc.get("expires_at")
+            # 만료 시점 비교는 tz-naive/aware 모두 안전하게
             try:
-                lock_file.unlink(missing_ok=True)
-                _logger.warning(
-                    "stale 락파일 제거: %s (age=%.0fs)", lock_file.name, age
-                )
-            except Exception as exc:  # pragma: no cover
-                _logger.warning("stale 락파일 제거 실패: %s (%s)", lock_file.name, exc)
-            continue
-        running.append(key)
-    return sorted(running)
+                if expires_at and (
+                    (getattr(expires_at, "tzinfo", None) and expires_at < now)
+                    or (not getattr(expires_at, "tzinfo", None) and expires_at < now.replace(tzinfo=None))
+                ):
+                    continue
+            except Exception:
+                pass
+            running.append(key)
+        return sorted(running)
+    except Exception as exc:
+        _logger.warning("batch_locks 조회 실패: %s", exc)
+        return []
 
 
 def load_system_data() -> dict[str, object]:
