@@ -60,8 +60,23 @@ def _terminate_process(process: subprocess.Popen[bytes] | None, name: str) -> No
         process.wait(timeout=5)
 
 
+def _maybe_backup_server_mongo() -> None:
+    """서버 MongoDB 를 로컬로 백업한다 (24시간 단위 스로틀). 실패해도 dev 서버는 정상 시작."""
+    try:
+        subprocess.run(
+            [str(PYTHON_BIN), "scripts/backup_mongo.py"],
+            cwd=ROOT_DIR,
+            timeout=120,
+            check=False,
+        )
+    except Exception as exc:
+        print(f"[run_local_dev] 백업 호출 실패(무시): {exc}")
+
+
 def main() -> int:
     _ensure_python_exists()
+
+    _maybe_backup_server_mongo()
 
     fastapi_process: subprocess.Popen[bytes] | None = None
     next_process: subprocess.Popen[bytes] | None = None

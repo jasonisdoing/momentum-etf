@@ -26,12 +26,18 @@ jobs:
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
-            # 배포 진행 플래그 — 이 파일이 있는 동안 cron/수동 배치 모두 차단된다
-            mkdir -p logs/cron
-            touch logs/cron/.deploy.lock
-            # 어떤 경로로 빠져나가도 lock 은 반드시 제거
-            trap 'rm -f $HOME/apps/momentum-etf/logs/cron/.deploy.lock; echo ">>> deploy lock 해제"' EXIT
-            echo ">>> deploy lock 생성"
+            # 배포 진행 플래그 — MongoDB 의 batch_locks 컬렉션에 저장해
+            # 로컬/서버 어디서든 동일하게 감지 가능하도록 한다.
+            set -a; source .env; set +a
+            DEPLOY_FLAG_UPSERT='db.batch_locks.replaceOne({_id:"__deploy__"}, {_id:"__deploy__", host:"jason-server", started_at:new Date(), expires_at: new Date(Date.now()+30*60*1000)}, {upsert:true})'
+            DEPLOY_FLAG_DELETE='db.batch_locks.deleteOne({_id:"__deploy__"})'
+            sudo docker compose exec -T mongodb mongosh --quiet \
+              --username "$MONGO_DB_ROOT_USER" --password "$MONGO_DB_ROOT_PASSWORD" \
+              --authenticationDatabase admin "$MONGO_DB_NAME" \
+              --eval "$DEPLOY_FLAG_UPSERT" || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
+            echo ">>> deploy 플래그 설정"
+            # 어떤 경로로 빠져나가도 플래그는 반드시 제거
+            trap 'sudo docker compose -f $HOME/apps/momentum-etf/docker-compose.yml exec -T mongodb mongosh --quiet --username "$MONGO_DB_ROOT_USER" --password "$MONGO_DB_ROOT_PASSWORD" --authenticationDatabase admin "$MONGO_DB_NAME" --eval "'"$DEPLOY_FLAG_DELETE"'" || true; echo ">>> deploy 플래그 해제"' EXIT
             # stale rename 유령 컨테이너 선별 제거
             #   이전 배포가 docker compose recreate 중간에 끊기면
             #   `<12hex>_momentum-etf-*` 형태의 리네임 유산이 남아 다음 배포에서

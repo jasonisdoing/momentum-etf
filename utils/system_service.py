@@ -112,7 +112,20 @@ _LABEL_BY_ACTION: dict[str, str] = {
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
 _LOG_DIR = _PROJECT_ROOT / "logs" / "cron"
-_DEPLOY_LOCK = _LOCK_DIR / ".deploy.lock"
+DEPLOY_LOCK_DOC_ID = "__deploy__"
+
+
+def is_deploying() -> bool:
+    """MongoDB batch_locks 에서 배포 진행 플래그 조회."""
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return False
+        return db.batch_locks.find_one({"_id": DEPLOY_LOCK_DOC_ID}) is not None
+    except Exception:
+        return False
 # 락파일이 이 시간(초)보다 오래되면 stale 로 간주하고 삭제한다.
 _RUN_BATCH_START_PATTERN = re.compile(
     r"^\[run_batch\] START job=(?P<job>[a-z_]+) cmd=.* at=(?P<started_at>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)$"
@@ -305,7 +318,7 @@ def load_system_data() -> dict[str, object]:
             "별도로 유지됩니다. (정의: `infra/cron/crontab`)"
         ),
         "running_jobs": get_running_jobs(),
-        "is_deploying": _DEPLOY_LOCK.exists(),
+        "is_deploying": is_deploying(),
         "last_run_by_job": {
             row["key"]: _read_last_job_run(str(row["key"]))
             for row in SCHEDULE_ROWS
@@ -342,7 +355,7 @@ def trigger_system_action(action: SystemAction) -> str:
     if action not in _SCRIPT_BY_ACTION:
         raise ValueError("지원하지 않는 시스템 작업입니다.")
 
-    if _DEPLOY_LOCK.exists():
+    if is_deploying():
         raise DeployInProgressError(
             "배포가 진행 중입니다. 완료 후 다시 시도해주세요."
         )
