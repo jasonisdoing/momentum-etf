@@ -76,7 +76,8 @@ def _maybe_backup_server_mongo() -> None:
 def main() -> int:
     _ensure_python_exists()
 
-    _maybe_backup_server_mongo()
+    # TODO: Atlas 프리티어 테스트 중 임시 비활성화. 안정화되면 다시 활성화.
+    # _maybe_backup_server_mongo()
 
     fastapi_process: subprocess.Popen[bytes] | None = None
     next_process: subprocess.Popen[bytes] | None = None
