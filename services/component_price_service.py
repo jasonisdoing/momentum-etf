@@ -24,6 +24,8 @@ def infer_yahoo_symbol_currency(symbol: str) -> str:
         return "GBP"
     if normalized.endswith((".KS", ".KQ")):
         return "KRW"
+    if normalized.endswith((".SZ", ".SS")):
+        return "CNY"
     if normalized.endswith(".AX"):
         return "AUD"
     return "USD"
@@ -299,7 +301,7 @@ def _is_worldstock_symbol(symbol: str) -> bool:
 
 
 def _is_yahoo_exchange_symbol(symbol: str) -> bool:
-    return _normalize_upper(symbol).endswith((".TW", ".L"))
+    return _normalize_upper(symbol).endswith((".TW", ".L", ".SZ", ".SS"))
 
 
 def _is_us_yahoo_symbol(symbol: str) -> bool:
