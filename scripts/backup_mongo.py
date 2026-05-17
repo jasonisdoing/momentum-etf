@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-DEFAULT_BACKUP_DIR = ROOT_DIR / "backups"
+DEFAULT_BACKUP_DIR = ROOT_DIR / ".backups"
 
 
 def _get_env(name: str, default: str) -> str:
