@@ -5,7 +5,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -115,7 +114,6 @@ _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
 _LOG_DIR = _PROJECT_ROOT / "logs" / "cron"
 _DEPLOY_LOCK = _LOCK_DIR / ".deploy.lock"
 # 락파일이 이 시간(초)보다 오래되면 stale 로 간주하고 삭제한다.
-_STALE_LOCK_SECONDS = 60 * 60  # 1시간
 _RUN_BATCH_START_PATTERN = re.compile(
     r"^\[run_batch\] START job=(?P<job>[a-z_]+) cmd=.* at=(?P<started_at>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)$"
 )
