@@ -53,8 +53,6 @@ jobs:
             bash infra/cron/install.sh
             echo ">>> Current crontab (momentum-etf block):"
             crontab -l | sed -n '/# >>> momentum-etf >>>/,/# <<< momentum-etf <<</p' | head -60
-            # stale 락파일 정리 (이전 비정상 종료로 남았을 수 있는 락)
-            find logs/cron -maxdepth 1 -name '*.lock' -mmin +60 -delete 2>/dev/null || true
             echo ">>> Oracle VM deployment completed."
 
       - name: Collect Oracle VM disk usage
