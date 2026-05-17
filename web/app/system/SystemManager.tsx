@@ -45,6 +45,7 @@ type SystemResponse = {
   schedule_rows?: SystemScheduleRow[];
   schedule_note?: string;
   running_jobs?: string[];
+  is_deploying?: boolean;
   last_run_by_job?: Record<string, SystemLastRunInfo>;
   next_run_by_job?: Record<string, SystemNextRunInfo>;
   error?: string;
@@ -55,6 +56,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
   running: boolean;
   anyRunning: boolean;
+  isDeploying: boolean;
   lastRunDisplay: string;
   nextRunAt: string | null;
   nextRunDisplay: string;
@@ -124,6 +126,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       const row = params.data as SystemScheduleGridRow | undefined;
       if (!row) return { cursor: "default" };
       if (row.running) return { cursor: "default", backgroundColor: "#fff8e1" };
+      if (row.isDeploying) return { cursor: "not-allowed", color: "#9aa4b1", backgroundColor: "#fef3c7" };
       if (row.anyRunning) return { cursor: "not-allowed", color: "#9aa4b1" };
       return { cursor: "pointer" };
     },
@@ -131,6 +134,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       const row = params.data as SystemScheduleGridRow | undefined;
       if (!row) return "";
       if (row.running) return "현재 실행 중입니다.";
+      if (row.isDeploying) return "배포 진행 중이라 실행할 수 없습니다.";
       if (row.anyRunning) return "다른 배치가 실행 중이라 시작할 수 없습니다.";
       return `클릭 시 "${row.job}" 배치를 백그라운드로 실행합니다.`;
     },
@@ -154,6 +158,7 @@ export function SystemManager({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [runningJobs, setRunningJobs] = useState<string[]>([]);
+  const [isDeploying, setIsDeploying] = useState(false);
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
   const [nowTick, setNowTick] = useState(() => Date.now());
@@ -170,6 +175,7 @@ export function SystemManager({
       id: row.key,
       running: runningSet.has(row.key),
       anyRunning,
+      isDeploying,
       lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
@@ -206,6 +212,7 @@ export function SystemManager({
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
+        setIsDeploying(Boolean(payload.is_deploying));
         setLastRunByJob(payload.last_run_by_job ?? {});
         setNextRunByJob(payload.next_run_by_job ?? {});
         if (initial) setError(null);
@@ -268,6 +275,22 @@ export function SystemManager({
         </div>
       ) : null}
 
+      {isDeploying ? (
+        <div className="appBannerStack">
+          <div
+            style={{
+              padding: "0.5rem 0.75rem",
+              borderRadius: 6,
+              background: "#fef3c7",
+              color: "#92400e",
+              fontWeight: 600,
+            }}
+          >
+            🚧 배포 진행 중 — 배치 실행은 일시적으로 차단됩니다. 완료 시 자동 해제됩니다.
+          </div>
+        </div>
+      ) : null}
+
       <section className="appSection">
         <div className="card appCard">
           <div className="card-header">
@@ -291,6 +314,7 @@ export function SystemManager({
                   if (event.colDef.field !== "command") return;
                   const row = event.data as SystemScheduleGridRow | undefined;
                   if (!row?.key) return;
+                  if (row.running || row.anyRunning || row.isDeploying) return;
                   handleTriggerJob(row.key as SystemJobKey, row.job);
                 },
               }}
