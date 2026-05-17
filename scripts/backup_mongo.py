@@ -110,12 +110,12 @@ def run_backup() -> int:
     ssh_host = _get_env("BACKUP_SSH_HOST", "134.185.109.82")
     ssh_user = _get_env("BACKUP_SSH_USER", "ubuntu")
     ssh_key = Path(_get_env("BACKUP_SSH_KEY", "~/DEV/ssh-key-2025-10-09.key")).expanduser()
-    db_name = _get_env("BACKUP_MONGO_DB_NAME", "momentum_etf_db")
-    mongo_user = _get_env("BACKUP_MONGO_USER", _read_dotenv_pair("MONGO_DB_ROOT_USER") or "root")
-    mongo_pass = _get_env("BACKUP_MONGO_PASSWORD", _read_dotenv_pair("MONGO_DB_ROOT_PASSWORD") or "")
+    db_name = _get_env("BACKUP_MONGO_DB_NAME", _read_dotenv_pair("MONGO_DB_NAME") or "momentum_etf_db")
+    mongo_user = _get_env("BACKUP_MONGO_USER", _read_dotenv_pair("MONGO_DB_USER") or "")
+    mongo_pass = _get_env("BACKUP_MONGO_PASSWORD", _read_dotenv_pair("MONGO_DB_PASSWORD") or "")
 
-    if not mongo_pass:
-        print("[backup_mongo] MONGO_DB_ROOT_PASSWORD 가 .env 에 없습니다 — 백업 불가", file=sys.stderr)
+    if not mongo_user or not mongo_pass:
+        print("[backup_mongo] MONGO_DB_USER/MONGO_DB_PASSWORD 가 .env 에 없습니다 — 백업 불가", file=sys.stderr)
         return 1
     if not ssh_key.exists():
         print(f"[backup_mongo] SSH 키 없음: {ssh_key}", file=sys.stderr)
@@ -125,10 +125,13 @@ def run_backup() -> int:
     target = backup_dir / f"{timestamp}.archive.gz"
     print(f"[backup_mongo] 백업 시작 → {target}")
 
+    # MongoDB 가 VM 내부망(127.0.0.1)에만 노출되어 있어 SSH 로 컨테이너에 진입해 mongodump 실행.
+    # 인증은 앱 유저(MONGO_DB_USER/MONGO_DB_PASSWORD)로 충분 — root 권한 필요 X.
     remote_cmd = (
         f"sudo docker compose -f ~/apps/momentum-etf/docker-compose.yml exec -T mongodb "
         f"mongodump "
-        f"--username={mongo_user} --password={mongo_pass} --authenticationDatabase=admin "
+        f"--username='{mongo_user}' --password='{mongo_pass}' "
+        f"--authenticationDatabase=admin "
         f"--db={db_name} --archive --gzip"
     )
     ssh_cmd = [
