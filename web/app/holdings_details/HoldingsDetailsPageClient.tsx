@@ -123,6 +123,11 @@ function formatKrw(val: number | null | undefined): string {
   return `${rounded.toLocaleString()}원`;
 }
 
+function maskAmount(showAmounts: boolean, value: string): string {
+  if (value === "-") return value;
+  return showAmounts ? value : "••••";
+}
+
 function formatDisplayName(name: string | null | undefined): string {
   if (!name) return "-";
   const original = name.trim();
@@ -219,6 +224,8 @@ function HoldingsTreemap({ components }: { components: ComponentRow[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const clipBaseId = React.useId().replace(/:/g, "");
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const [isCollapsed, setIsCollapsed] = useState(false);
+  const toggleLabel = isCollapsed ? "펼치기" : "접기";
 
   useLayoutEffect(() => {
     const node = containerRef.current;
@@ -265,98 +272,112 @@ function HoldingsTreemap({ components }: { components: ComponentRow[] }) {
   }
 
   return (
-    <section className="holdingsTreemapSection">
+    <section className={isCollapsed ? "holdingsTreemapSection holdingsTreemapSectionCollapsed" : "holdingsTreemapSection"}>
       <div className="holdingsTreemapHeader">
         <h3>트리맵</h3>
-        <span>상위 20종목</span>
-      </div>
-      <div ref={containerRef} className="holdingsTreemapCanvas">
-        <svg
-          className="holdingsTreemapSvg"
-          viewBox={`0 0 ${treemapSize.width} ${treemapSize.height}`}
-          preserveAspectRatio="none"
-          role="img"
-          aria-label="보유 구성종목 트리맵"
-        >
-          <defs>
-            {rects.map((rect, index) => (
-              <clipPath key={`${rect.item.ticker}-${index}`} id={`${clipBaseId}-treemap-${index}`}>
-                <rect x={rect.x + 2} y={rect.y + 2} width={Math.max(0, rect.width - 4)} height={Math.max(0, rect.height - 4)} />
-              </clipPath>
-            ))}
-          </defs>
-          {rects.map((rect, index) => {
-            const item = rect.item;
-            const showTicker = rect.width >= 44 && rect.height >= 24;
-            const showChange = rect.width >= 70 && rect.height >= 44;
-            const showWeight = rect.width >= 70 && rect.height >= 62;
-            const textColor = getTreemapTextColor(item.change_pct);
-            const subduedTextColor = item.change_pct == null || item.change_pct === 0 ? "#64748b" : "rgba(255, 255, 255, 0.72)";
-            const title = `${formatDisplayName(item.name)} ${formatSignedPercent(item.change_pct)} ${formatWeight(rect.normalizedWeight)}`;
-            const label = getTreemapLabel(item);
-            return (
-              <g
-                key={item.ticker}
-                className="holdingsTreemapTileGroup"
-                clipPath={`url(#${clipBaseId}-treemap-${index})`}
-              >
-                <title>{title}</title>
-                <rect
-                  x={rect.x + 1}
-                  y={rect.y + 1}
-                  width={Math.max(0, rect.width - 2)}
-                  height={Math.max(0, rect.height - 2)}
-                  fill={getTreemapColor(item.change_pct)}
-                  stroke="#f8fafc"
-                  strokeWidth={2}
-                />
-                {showTicker && (
-                  <text
-                    x={rect.x + 8}
-                    y={rect.y + 20}
-                    fill={textColor}
-                    className="holdingsTreemapTicker"
-                  >
-                    {label}
-                  </text>
-                )}
-                {showChange && (
-                  <text
-                    x={rect.x + 8}
-                    y={rect.y + 40}
-                    fill={textColor}
-                    className="holdingsTreemapChange"
-                  >
-                    {formatSignedPercent(item.change_pct)}
-                  </text>
-                )}
-                {showWeight && (
-                  <text
-                    x={rect.x + 8}
-                    y={rect.y + rect.height - 10}
-                    fill={subduedTextColor}
-                    className="holdingsTreemapWeight"
-                  >
-                    {formatWeight(rect.normalizedWeight)}
-                  </text>
-                )}
-              </g>
-            );
-          })}
-        </svg>
-      </div>
-      <div className="holdingsTreemapGauge" aria-hidden="true">
-        <div className="holdingsTreemapGaugeBar" />
-        <div className="holdingsTreemapGaugeLabels">
-          <span>-5%</span>
-          <span>-3%</span>
-          <span>-1%</span>
-          <span>0%</span>
-          <span>+1%</span>
-          <span>+3%</span>
-          <span>+5%</span>
+        <div className="holdingsTreemapHeaderActions">
+          <span>상위 20종목</span>
+          <button
+            type="button"
+            className="holdingsTreemapToggle"
+            aria-expanded={!isCollapsed}
+            onClick={() => setIsCollapsed((prev) => !prev)}
+          >
+            {isCollapsed ? "▼" : "▲"} {toggleLabel}
+          </button>
         </div>
       </div>
+      {!isCollapsed && (
+        <>
+          <div ref={containerRef} className="holdingsTreemapCanvas">
+            <svg
+              className="holdingsTreemapSvg"
+              viewBox={`0 0 ${treemapSize.width} ${treemapSize.height}`}
+              preserveAspectRatio="none"
+              role="img"
+              aria-label="보유 구성종목 트리맵"
+            >
+              <defs>
+                {rects.map((rect, index) => (
+                  <clipPath key={`${rect.item.ticker}-${index}`} id={`${clipBaseId}-treemap-${index}`}>
+                    <rect x={rect.x + 2} y={rect.y + 2} width={Math.max(0, rect.width - 4)} height={Math.max(0, rect.height - 4)} />
+                  </clipPath>
+                ))}
+              </defs>
+              {rects.map((rect, index) => {
+                const item = rect.item;
+                const showTicker = rect.width >= 44 && rect.height >= 24;
+                const showChange = rect.width >= 70 && rect.height >= 44;
+                const showWeight = rect.width >= 70 && rect.height >= 62;
+                const textColor = getTreemapTextColor(item.change_pct);
+                const subduedTextColor = item.change_pct == null || item.change_pct === 0 ? "#64748b" : "rgba(255, 255, 255, 0.72)";
+                const title = `${formatDisplayName(item.name)} ${formatSignedPercent(item.change_pct)} ${formatWeight(rect.normalizedWeight)}`;
+                const label = getTreemapLabel(item);
+                return (
+                  <g
+                    key={item.ticker}
+                    className="holdingsTreemapTileGroup"
+                    clipPath={`url(#${clipBaseId}-treemap-${index})`}
+                  >
+                    <title>{title}</title>
+                    <rect
+                      x={rect.x + 1}
+                      y={rect.y + 1}
+                      width={Math.max(0, rect.width - 2)}
+                      height={Math.max(0, rect.height - 2)}
+                      fill={getTreemapColor(item.change_pct)}
+                      stroke="#f8fafc"
+                      strokeWidth={2}
+                    />
+                    {showTicker && (
+                      <text
+                        x={rect.x + 8}
+                        y={rect.y + 20}
+                        fill={textColor}
+                        className="holdingsTreemapTicker"
+                      >
+                        {label}
+                      </text>
+                    )}
+                    {showChange && (
+                      <text
+                        x={rect.x + 8}
+                        y={rect.y + 40}
+                        fill={textColor}
+                        className="holdingsTreemapChange"
+                      >
+                        {formatSignedPercent(item.change_pct)}
+                      </text>
+                    )}
+                    {showWeight && (
+                      <text
+                        x={rect.x + 8}
+                        y={rect.y + rect.height - 10}
+                        fill={subduedTextColor}
+                        className="holdingsTreemapWeight"
+                      >
+                        {formatWeight(rect.normalizedWeight)}
+                      </text>
+                    )}
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+          <div className="holdingsTreemapGauge" aria-hidden="true">
+            <div className="holdingsTreemapGaugeBar" />
+            <div className="holdingsTreemapGaugeLabels">
+              <span>-5%</span>
+              <span>-3%</span>
+              <span>-1%</span>
+              <span>0%</span>
+              <span>+1%</span>
+              <span>+3%</span>
+              <span>+5%</span>
+            </div>
+          </div>
+        </>
+      )}
     </section>
   );
 }
@@ -371,6 +392,7 @@ export function HoldingsDetailsPageClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+  const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
 
   // 계좌 목록 로드
@@ -559,7 +581,7 @@ export function HoldingsDetailsPageClient() {
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
+        return <span className={showAmounts ? getSignedClass(params.value) : ""}>{maskAmount(showAmounts, formatKrw(params.value))}</span>;
       },
     },
     {
@@ -569,7 +591,7 @@ export function HoldingsDetailsPageClient() {
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
+        return <span className={showAmounts ? getSignedClass(params.value) : ""}>{maskAmount(showAmounts, formatKrw(params.value))}</span>;
       },
     },
     {
@@ -579,10 +601,10 @@ export function HoldingsDetailsPageClient() {
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return formatKrw(params.value);
+        return maskAmount(showAmounts, formatKrw(params.value));
       },
     },
-  ], [expandedTicker]);
+  ], [expandedTicker, showAmounts]);
 
   // 상세 패널 렌더러 (부모 행과 컬럼/정렬 완벽 정밀 타격)
   const DetailRenderer = useCallback((params: { data?: GridRow }) => {
@@ -626,25 +648,25 @@ export function HoldingsDetailsPageClient() {
             </div>
 
             <div className="hdColDailyProfit">
-              <span className={getSignedClass(src.daily_profit_krw)}>
-                {formatKrw(src.daily_profit_krw)}
+              <span className={showAmounts ? getSignedClass(src.daily_profit_krw) : ""}>
+                {maskAmount(showAmounts, formatKrw(src.daily_profit_krw))}
               </span>
             </div>
 
             <div className="hdColCumulativeProfit">
-              <span className={getSignedClass(src.cumulative_profit_krw)}>
-                {formatKrw(src.cumulative_profit_krw)}
+              <span className={showAmounts ? getSignedClass(src.cumulative_profit_krw) : ""}>
+                {maskAmount(showAmounts, formatKrw(src.cumulative_profit_krw))}
               </span>
             </div>
 
             <div className="hdColValuation">
-              {formatKrw(src.valuation_krw)}
+              {maskAmount(showAmounts, formatKrw(src.valuation_krw))}
             </div>
           </div>
         ))}
       </div>
     );
-  }, []);
+  }, [showAmounts]);
 
   const gridOptions = useMemo<GridOptions<GridRow>>(() => ({
     getRowId: (params) => (isDetailRow(params.data) ? `detail:${params.data.parentTicker}` : params.data.ticker),
@@ -727,6 +749,15 @@ export function HoldingsDetailsPageClient() {
                       )}
                     </select>
                   </label>
+                </div>
+                <div className="appMainHeaderRight">
+                  <button
+                    type="button"
+                    className={`btn btn-sm shadow-sm ${showAmounts ? "btn-outline-secondary" : "btn-dark"}`}
+                    onClick={() => setShowAmounts((prev) => !prev)}
+                  >
+                    {showAmounts ? "금액 가리기" : "금액 보기"}
+                  </button>
                 </div>
               </div>
             </ResponsiveFiltersSection>
@@ -838,6 +869,10 @@ export function HoldingsDetailsPageClient() {
           padding: 12px;
           box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
         }
+        .holdingsTreemapSectionCollapsed {
+          flex-basis: auto;
+          min-height: 0;
+        }
         .holdingsTreemapHeader {
           display: flex;
           align-items: baseline;
@@ -851,10 +886,29 @@ export function HoldingsDetailsPageClient() {
           font-weight: 800;
           color: #1f2937;
         }
+        .holdingsTreemapHeaderActions {
+          display: inline-flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 10px;
+        }
         .holdingsTreemapHeader span {
           font-size: 13px;
           font-weight: 700;
           color: #718096;
+        }
+        .holdingsTreemapToggle {
+          border: 0;
+          background: transparent;
+          color: #4a5568;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1;
+          padding: 4px 0;
+        }
+        .holdingsTreemapToggle:hover {
+          color: #1f2937;
         }
         .holdingsTreemapCanvas {
           position: relative;
