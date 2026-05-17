@@ -39,7 +39,7 @@ MAX_TAIL_LINES = 15
 MAX_TAIL_CHARS = 1500
 
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
-DEPLOY_LOCK = LOCK_DIR / ".deploy.lock"
+DEPLOY_LOCK_DOC_ID = "__deploy__"
 SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "cache_refresh",
     "portfolio_refresh",
@@ -147,14 +147,20 @@ def main(argv: list[str]) -> int:
     started_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     started_monotonic = time.monotonic()
 
-    # 배포 진행 중이면 즉시 스킵 (deploy.yml 이 .deploy.lock 을 생성/제거)
-    if DEPLOY_LOCK.exists():
-        skip_line = (
-            f"[run_batch] SKIP job={job_name} reason=deploy_in_progress at={started_at}"
-        )
-        print(skip_line)
-        _append_log_line(job_name, skip_line)
-        return 0
+    # 배포 진행 중이면 즉시 스킵 (deploy.yml 이 MongoDB 의 __deploy__ 문서를 생성/제거)
+    try:
+        from utils.db_manager import get_db_connection
+
+        _db_check = get_db_connection()
+        if _db_check is not None and _db_check.batch_locks.find_one({"_id": DEPLOY_LOCK_DOC_ID}):
+            skip_line = (
+                f"[run_batch] SKIP job={job_name} reason=deploy_in_progress at={started_at}"
+            )
+            print(skip_line)
+            _append_log_line(job_name, skip_line)
+            return 0
+    except Exception:
+        pass  # DB 조회 실패는 무시하고 본 작업으로 진행 (DB 락에서 다시 차단됨)
 
     # MongoDB 분산 락: 로컬/서버 어디서든 동일 작업 중복 실행 차단
     db_lock = None
