@@ -1,5 +1,6 @@
 import os
 import time
+from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
@@ -25,8 +26,20 @@ def _reset_connection() -> None:
     _mongo_client = None
 
 
-def _resolve_connection_string() -> str | None:
-    return (os.environ.get("MONGO_DB_CONNECTION_STRING") or "").strip() or None
+def _get_required_env(name: str) -> str:
+    value = (os.environ.get(name) or "").strip()
+    if not value:
+        raise RuntimeError(f"{name} 환경변수가 필요합니다.")
+    return value
+
+
+def _resolve_connection_string() -> str:
+    user = quote_plus(_get_required_env("MONGO_DB_USER"))
+    password = quote_plus(_get_required_env("MONGO_DB_PASSWORD"))
+    host = _get_required_env("MONGO_DB_HOST")
+    port = (os.environ.get("MONGO_DB_PORT") or "27017").strip() or "27017"
+    auth_source = (os.environ.get("MONGO_DB_AUTH_SOURCE") or "admin").strip() or "admin"
+    return f"mongodb://{user}:{password}@{host}:{port}/?authSource={quote_plus(auth_source)}"
 
 
 def _build_client(connection_string: str) -> MongoClient:
@@ -69,14 +82,12 @@ def get_db_connection():
     if _db_connection is not None:
         return _db_connection
 
-    connection_string = _resolve_connection_string()
-    db_name = (os.environ.get("MONGO_DB_NAME") or "momentum_etf_db").strip() or "momentum_etf_db"
-    if not connection_string:
-        logger.error(
-            "오류: MongoDB 연결 정보가 설정되지 않았습니다. "
-            "MONGO_DB_CONNECTION_STRING 환경변수를 확인하세요."
-        )
+    try:
+        connection_string = _resolve_connection_string()
+    except RuntimeError as exc:
+        logger.error("오류: MongoDB 연결 정보가 설정되지 않았습니다. %s", exc)
         return None
+    db_name = (os.environ.get("MONGO_DB_NAME") or "momentum_etf_db").strip() or "momentum_etf_db"
 
     last_error: Exception | None = None
     for attempt, wait_seconds in enumerate((0, 1.5, 4.0), start=1):

@@ -43,14 +43,21 @@ function resolveEnv(key: string): string {
   return fromFile;
 }
 
-function getMongoUri(): string {
-  const uri = resolveEnv("MONGO_DB_CONNECTION_STRING");
-  if (!uri) {
-    throw new Error(
-      "MongoDB 연결 정보가 없습니다. MONGO_DB_CONNECTION_STRING 환경변수를 설정하세요.",
-    );
+function getRequiredEnv(key: string): string {
+  const value = resolveEnv(key).trim();
+  if (!value) {
+    throw new Error(`${key} 환경변수가 필요합니다.`);
   }
-  return uri;
+  return value;
+}
+
+function getMongoUri(): string {
+  const user = encodeURIComponent(getRequiredEnv("MONGO_DB_USER"));
+  const password = encodeURIComponent(getRequiredEnv("MONGO_DB_PASSWORD"));
+  const host = getRequiredEnv("MONGO_DB_HOST");
+  const port = resolveEnv("MONGO_DB_PORT").trim() || "27017";
+  const authSource = encodeURIComponent(resolveEnv("MONGO_DB_AUTH_SOURCE").trim() || "admin");
+  return `mongodb://${user}:${password}@${host}:${port}/?authSource=${authSource}`;
 }
 
 function getMongoDbName(): string {
