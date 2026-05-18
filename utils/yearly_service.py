@@ -5,7 +5,7 @@ from collections import defaultdict
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from utils.daily_fund_service import load_daily_docs_for_aggregation
+from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
 from utils.data_loader import get_trading_days
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
@@ -162,7 +162,7 @@ def _apply_derived_fields(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """수익률 계산 규칙: yearly_return_pct = TWR(1년), cumulative_return_pct = ROI.
+    """수익률 계산 규칙: yearly_return_pct = 입출금 제거 1년 수익률, cumulative_return_pct = ROI.
     상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고."""
     docs_by_date = {str(doc["year_date"]): _apply_derived_fields(doc) for doc in docs}
     running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
@@ -184,12 +184,10 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         )
         doc["yearly_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
-        deposit_withdrawal = _to_int(doc.get("deposit_withdrawal", 0))
-        twr_base = previous_total_assets + deposit_withdrawal
-        if twr_base > 0:
-            doc["yearly_return_pct"] = round((_to_int(doc.get("yearly_profit", 0)) / twr_base) * 100, 2)
-        else:
-            doc["yearly_return_pct"] = 0.0
+        doc["yearly_return_pct"] = round(
+            calculate_period_return_pct(_to_int(doc.get("yearly_profit", 0)), previous_total_assets),
+            2,
+        )
         if total_principal == 0:
             doc["cumulative_return_pct"] = 0.0
         else:

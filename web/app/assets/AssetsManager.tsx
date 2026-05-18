@@ -224,7 +224,7 @@ function formatHiddenAmount(showAmounts: boolean, value: string): string {
   return showAmounts ? value : "••••";
 }
 
-// (제거됨) 기간 수익률은 백엔드 dashboard_service 의 TWR 기반 daily_return_pct/weekly_return_pct 사용.
+// (제거됨) 기간 수익률은 백엔드 dashboard_service 의 입출금 제거 daily_return_pct/weekly_return_pct 사용.
 // 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
 
 function formatNoteUpdatedAt(value: string | null): string {
@@ -2494,7 +2494,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!params.data || isDetailRow(params.data)) {
           return null;
         }
-        // 백엔드에서 TWR 기반으로 계산된 daily_return_pct 사용 (입출금 영향 제거).
+        // 백엔드에서 계산된 daily_return_pct 사용 (입출금 영향 제거).
         return Number(params.data.daily_return_pct ?? 0);
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
@@ -2523,7 +2523,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!params.data || isDetailRow(params.data)) {
           return null;
         }
-        // 백엔드에서 TWR 기반으로 계산된 weekly_return_pct 사용 (입출금 영향 제거).
+        // 백엔드에서 계산된 weekly_return_pct 사용 (입출금 영향 제거).
         return Number(params.data.weekly_return_pct ?? 0);
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
