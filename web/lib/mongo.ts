@@ -55,9 +55,8 @@ function getMongoUri(): string {
   const user = encodeURIComponent(getRequiredEnv("MONGO_DB_USER"));
   const password = encodeURIComponent(getRequiredEnv("MONGO_DB_PASSWORD"));
   const host = getRequiredEnv("MONGO_DB_HOST");
-  const port = resolveEnv("MONGO_DB_PORT").trim() || "27017";
-  const authSource = encodeURIComponent(resolveEnv("MONGO_DB_AUTH_SOURCE").trim() || "admin");
-  return `mongodb://${user}:${password}@${host}:${port}/?authSource=${authSource}`;
+  const authSource = encodeURIComponent(getRequiredEnv("MONGO_DB_AUTH_SOURCE"));
+  return `mongodb://${user}:${password}@${host}/?authSource=${authSource}`;
 }
 
 function getMongoDbName(): string {
