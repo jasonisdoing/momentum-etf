@@ -1,8 +1,25 @@
 services:
-  fastapi_app:
-    image: ghcr.io/jasonisdoing/momentum-etf-fastapi:latest
+  mongodb:
+    image: mongo:8.0
     env_file:
       - .env
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_DB_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_DB_PASSWORD}
+    volumes:
+      - ./mongo-data:/data/db
+    ports:
+      - "127.0.0.1:27017:27017"
+    restart: always
+
+  fastapi_app:
+    image: ghcr.io/jasonisdoing/momentum-etf-fastapi:latest
+    depends_on:
+      - mongodb
+    env_file:
+      - .env
+    environment:
+      - MONGO_DB_HOST=mongodb
     volumes:
       - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더, 종목 리스트 등) — git 추적 제외, 서버에 직접 배치
@@ -19,10 +36,12 @@ services:
     image: ghcr.io/jasonisdoing/momentum-etf-node:latest
     depends_on:
       - fastapi_app
+      - mongodb
     env_file:
       - .env
     environment:
       - FASTAPI_INTERNAL_URL=http://fastapi_app:8000
+      - MONGO_DB_HOST=mongodb
     volumes:
       - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더 등) — fastapi_app 와 동일하게 bind-mount
