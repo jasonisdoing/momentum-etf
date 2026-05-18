@@ -35,9 +35,7 @@ function loadEnvFile(filePath) {
       continue;
     }
     const [key, value] = parsed;
-    if (!process.env[key]) {
-      process.env[key] = value;
-    }
+    process.env[key] = value;
   }
 }
 
