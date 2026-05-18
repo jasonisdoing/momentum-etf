@@ -5,7 +5,7 @@ import os
 import re
 import subprocess
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -276,21 +276,24 @@ def get_running_jobs() -> list[str]:
         db = get_db_connection()
         if db is None:
             return []
-        from datetime import datetime as _dt
-        now = _dt.now(ZoneInfo("Asia/Seoul"))
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         running: list[str] = []
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
             if key not in _SCRIPT_BY_ACTION:
                 continue
             expires_at = doc.get("expires_at")
-            # 만료 시점 비교는 tz-naive/aware 모두 안전하게
+            # MongoDB는 datetime을 UTC 기준으로 저장하고 naive datetime으로 반환할 수 있다.
+            # 따라서 현재 시각도 UTC naive로 맞춰 비교한다.
             try:
-                if expires_at and (
-                    (getattr(expires_at, "tzinfo", None) and expires_at < now)
-                    or (not getattr(expires_at, "tzinfo", None) and expires_at < now.replace(tzinfo=None))
-                ):
-                    continue
+                if isinstance(expires_at, datetime):
+                    comparable_expires_at = (
+                        expires_at.astimezone(timezone.utc).replace(tzinfo=None)
+                        if expires_at.tzinfo
+                        else expires_at
+                    )
+                    if comparable_expires_at < now:
+                        continue
             except Exception:
                 pass
             running.append(key)
