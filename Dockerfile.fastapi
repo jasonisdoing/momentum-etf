@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -6,7 +7,11 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt fastapi uvicorn
+# BuildKit cache mount 로 pip 다운로드 캐시를 영구 보존.
+# requirements.txt 가 안 바뀌면 layer 캐시로 즉시 통과,
+# 바뀌어도 캐시 마운트의 wheel 들을 재사용해 다운로드를 거의 안 함.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt fastapi uvicorn
 
 COPY . .
 
