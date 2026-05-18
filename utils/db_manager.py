@@ -37,9 +37,8 @@ def _resolve_connection_string() -> str:
     user = quote_plus(_get_required_env("MONGO_DB_USER"))
     password = quote_plus(_get_required_env("MONGO_DB_PASSWORD"))
     host = _get_required_env("MONGO_DB_HOST")
-    port = (os.environ.get("MONGO_DB_PORT") or "27017").strip() or "27017"
-    auth_source = (os.environ.get("MONGO_DB_AUTH_SOURCE") or "admin").strip() or "admin"
-    return f"mongodb://{user}:{password}@{host}:{port}/?authSource={quote_plus(auth_source)}"
+    auth_source = _get_required_env("MONGO_DB_AUTH_SOURCE")
+    return f"mongodb://{user}:{password}@{host}/?authSource={quote_plus(auth_source)}"
 
 
 def _build_client(connection_string: str) -> MongoClient:

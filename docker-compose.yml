@@ -19,7 +19,7 @@ services:
     env_file:
       - .env
     environment:
-      - MONGO_DB_HOST=mongodb
+      - MONGO_DB_HOST=mongodb:27017
     volumes:
       - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더, 종목 리스트 등) — git 추적 제외, 서버에 직접 배치
@@ -41,7 +41,7 @@ services:
       - .env
     environment:
       - FASTAPI_INTERNAL_URL=http://fastapi_app:8000
-      - MONGO_DB_HOST=mongodb
+      - MONGO_DB_HOST=mongodb:27017
     volumes:
       - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더 등) — fastapi_app 와 동일하게 bind-mount
