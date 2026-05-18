@@ -26,15 +26,12 @@ jobs:
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
-            # 배포 진행 플래그 — MongoDB 의 batch_locks 컬렉션에 저장해
-            # 로컬/서버 어디서든 동일하게 감지 가능하도록 한다.
-            # Atlas 사용 환경이므로 fastapi_app 컨테이너의 pymongo 로 직접 연결 (mongo container 의존 X)
-            FLAG_PY_UPSERT='from datetime import datetime, timedelta; from utils.db_manager import get_db_connection; db=get_db_connection(); db.batch_locks.replace_one({"_id":"__deploy__"}, {"_id":"__deploy__","host":"jason-server","started_at":datetime.utcnow(),"expires_at":datetime.utcnow()+timedelta(minutes=30)}, upsert=True)'
-            FLAG_PY_DELETE='from utils.db_manager import get_db_connection; db=get_db_connection(); db.batch_locks.delete_one({"_id":"__deploy__"})'
-            sudo docker compose exec -T fastapi_app python -c "$FLAG_PY_UPSERT" || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
-            echo ">>> deploy 플래그 설정"
+            # 배포 진행 플래그 — fastapi_app 컨테이너 안에서 헬퍼 스크립트 실행.
+            # quote escape 문제 회피를 위해 별도 파일로 분리해두었다.
+            sudo docker compose exec -T fastapi_app python infra/cron/deploy_flag_set.py \
+              || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
             # 어떤 경로로 빠져나가도 플래그는 반드시 제거
-            trap 'cd $HOME/apps/momentum-etf && sudo docker compose exec -T fastapi_app python -c "'"$FLAG_PY_DELETE"'" || true; echo ">>> deploy 플래그 해제"' EXIT
+            trap 'cd $HOME/apps/momentum-etf && sudo docker compose exec -T fastapi_app python infra/cron/deploy_flag_clear.py || true' EXIT
             # stale rename 유령 컨테이너 선별 제거
             #   이전 배포가 docker compose recreate 중간에 끊기면
             #   `<12hex>_momentum-etf-*` 형태의 리네임 유산이 남아 다음 배포에서
