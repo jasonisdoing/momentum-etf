@@ -355,11 +355,6 @@ def trigger_system_action(action: SystemAction) -> str:
     if action not in _SCRIPT_BY_ACTION:
         raise ValueError("지원하지 않는 시스템 작업입니다.")
 
-    if is_deploying():
-        raise DeployInProgressError(
-            "배포가 진행 중입니다. 완료 후 다시 시도해주세요."
-        )
-
     running = get_running_jobs()
     if running:
         running_labels = ", ".join(_LABEL_BY_ACTION.get(k, k) for k in running)
