@@ -12,7 +12,8 @@ env:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
+    # 서버(Oracle Ampere A1, ARM64) 네이티브 빌드 — 무료 ARM 러너 사용
+    runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
       packages: write
@@ -30,29 +31,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build & push fastapi image
+      - name: Build & push fastapi image (linux/arm64)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile.fastapi
+          platforms: linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_FASTAPI }}:latest
             ${{ env.IMAGE_FASTAPI }}:${{ github.sha }}
-          cache-from: type=gha,scope=fastapi
-          cache-to: type=gha,mode=max,scope=fastapi
+          cache-from: type=gha,scope=fastapi-arm64
+          cache-to: type=gha,mode=max,scope=fastapi-arm64
 
-      - name: Build & push node image
+      - name: Build & push node image (linux/arm64)
         uses: docker/build-push-action@v5
         with:
           context: .
           file: web/Dockerfile
+          platforms: linux/arm64
           push: true
           tags: |
             ${{ env.IMAGE_NODE }}:latest
             ${{ env.IMAGE_NODE }}:${{ github.sha }}
-          cache-from: type=gha,scope=node
-          cache-to: type=gha,mode=max,scope=node
+          cache-from: type=gha,scope=node-arm64
+          cache-to: type=gha,mode=max,scope=node-arm64
 
   deploy:
     needs: build-and-push
