@@ -86,7 +86,7 @@ def get_db_connection():
     except RuntimeError as exc:
         logger.error("오류: MongoDB 연결 정보가 설정되지 않았습니다. %s", exc)
         return None
-    db_name = (os.environ.get("MONGO_DB_NAME") or "momentum_etf_db").strip() or "momentum_etf_db"
+    db_name = _get_required_env("MONGO_DB_NAME")
 
     last_error: Exception | None = None
     for attempt, wait_seconds in enumerate((0, 1.5, 4.0), start=1):
