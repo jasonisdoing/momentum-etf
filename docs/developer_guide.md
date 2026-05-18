@@ -105,6 +105,15 @@
 
 같은 일자에서는 모든 화면의 일(%) 값이 동일합니다.
 
+#### 합계 행 vs 계좌별 행의 현금흐름 처리 차이 (`/assets`, `/dashboard`)
+
+- **합계 행 (정확)**: `daily_fund_data` / `weekly_fund_data` 최신 doc 의 `daily_profit` / `weekly_profit` 을 그대로 사용합니다. 사용자가 `/daily` 화면에서 입력한 `deposit_withdrawal`, `withdrawal_personal`, `withdrawal_mom`, `nh_principal_interest` 가 분자에서 직접 차감되어 **시장 변동분만** 손익으로 잡힙니다.
+- **계좌별 행 (추정)**: 계좌별 입출금 명시 데이터가 없어, `daily_snapshots` 에서 `오늘 total_principal − 어제 total_principal` 차이를 입출금으로 **추정** 합니다. 추정 한계:
+  - 사용자가 인출 전에 `portfolio_master.total_principal` 을 미리 수정해버리면, 어제·오늘 스냅샷의 원금이 같아 입출금 추정이 0 으로 잡히고, 실제 인출액이 계좌별 손익에 통째로 손실로 표시될 수 있습니다.
+  - 반대로 원금 단순 정정(입출금 없음)을 한 경우에도 그 차이가 입출금으로 잡혀 손익을 왜곡할 수 있습니다.
+- 따라서 **계좌별 일(%) / 주(%) 는 참고용**이며, 정확한 일/주 손익은 **합계 행** 또는 `/daily` / `/weekly` 화면을 기준으로 합니다.
+- 인출/입금이 발생했을 때 계좌별 행도 정확하게 보고 싶다면, 인출 발생일에는 **포트폴리오 원금 수정을 그날 안에 함께** 반영하는 운영 규칙이 필요합니다 (당일 원금 차이 = 당일 입출금).
+
 구현 위치:
 
 - 백엔드(Python): `utils/daily_fund_service.py`, `utils/weekly_service.py`, `utils/monthly_service.py`, `utils/yearly_service.py`, `utils/dashboard_service.py` 의 `calculate_period_return_pct` / `_apply_running_total_principal` / `_calculate_weekly_docs` / `load_dashboard_data`.
