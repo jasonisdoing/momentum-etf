@@ -6,16 +6,16 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import math
 import pandas as pd
 
 from services.component_price_service import enrich_component_prices
-from services.price_service import get_exchange_rates, get_exchange_rate_series
+from services.price_service import get_exchange_rate_series, get_exchange_rates
 from services.stock_cache_service import get_stock_cache_meta, refresh_stock_portfolio_change_cache
 from utils.data_loader import fetch_naver_etf_inav_snapshot
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
@@ -80,6 +80,21 @@ def _is_cache_alive(entry: dict[str, Any], now: datetime) -> bool:
     return isinstance(expires, datetime) and now < expires
 
 
+def _to_utc_naive(value: Any) -> datetime | None:
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _is_persisted_cache_alive(cache_doc: dict[str, Any], now: datetime) -> bool:
+    updated_at = _to_utc_naive(cache_doc.get("portfolio_change_cache_updated_at"))
+    if updated_at is None:
+        return False
+    return now - updated_at < timedelta(seconds=_TTL_SECONDS)
+
+
 def _is_portfolio_change_cache_usable(cache_data: Any, holdings_reference_date: str | None) -> bool:
     """계산 실패로 저장된 포트폴리오 변동 캐시는 재계산 대상이다."""
     if not isinstance(cache_data, dict):
@@ -93,6 +108,35 @@ def _is_portfolio_change_cache_usable(cache_data: Any, holdings_reference_date: 
     if cache_data.get("total_pct") is None:
         return False
     return not _has_missing_korean_component_cumulative_change(cache_data)
+
+
+def _build_storable_result(result: dict[str, Any], source: str) -> dict[str, Any]:
+    return _to_jsonable(
+        {
+            **result,
+            "updated_at": datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
+            "source": source,
+        }
+    )
+
+
+def _store_portfolio_change_result(
+    ticker_type: str,
+    ticker: str,
+    result: dict[str, Any],
+    *,
+    source: str,
+) -> dict[str, Any]:
+    stored = _build_storable_result(result, source)
+    refresh_stock_portfolio_change_cache(ticker_type, ticker, stored)
+
+    key = _cache_key(ticker_type, ticker)
+    with _PORTFOLIO_CHANGE_LOCK:
+        _PORTFOLIO_CHANGE_CACHE[key] = {
+            "data": stored,
+            "expires_at": datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=_TTL_SECONDS),
+        }
+    return stored
 
 
 def _has_missing_korean_component_cumulative_change(cache_data: dict[str, Any]) -> bool:
@@ -419,7 +463,7 @@ def compute_portfolio_change_bundle(
         return None
 
     key = _cache_key(norm_type, norm_ticker)
-    now = datetime.now()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
 
     cache_doc = get_stock_cache_meta(norm_type, norm_ticker)
     if not isinstance(cache_doc, dict):
@@ -440,7 +484,9 @@ def compute_portfolio_change_bundle(
                 _PORTFOLIO_CHANGE_CACHE.pop(key, None)
 
         persisted = cache_doc.get("portfolio_change_cache")
-        if _is_portfolio_change_cache_usable(persisted, holdings_reference_date):
+        if _is_portfolio_change_cache_usable(persisted, holdings_reference_date) and _is_persisted_cache_alive(
+            cache_doc, now
+        ):
             with _PORTFOLIO_CHANGE_LOCK:
                 _PORTFOLIO_CHANGE_CACHE[key] = {
                     "data": persisted,
@@ -480,6 +526,9 @@ def compute_portfolio_change_bundle(
         "holdings_reference_date": holdings_reference_date,
     }
 
+    if use_cache:
+        return _store_portfolio_change_result(norm_type, norm_ticker, result, source="realtime_ttl")
+
     with _PORTFOLIO_CHANGE_LOCK:
         _PORTFOLIO_CHANGE_CACHE[key] = {
             "data": result,
@@ -505,22 +554,7 @@ def compute_and_store_portfolio_change_bundle(
     if not result:
         return None
 
-    stored = _to_jsonable(
-        {
-            **result,
-            "updated_at": datetime.now(ZoneInfo("Asia/Seoul")).isoformat(),
-            "source": "price_cache",
-        }
-    )
-    refresh_stock_portfolio_change_cache(ticker_type, ticker, stored)
-
-    key = _cache_key(ticker_type, ticker)
-    with _PORTFOLIO_CHANGE_LOCK:
-        _PORTFOLIO_CHANGE_CACHE[key] = {
-            "data": stored,
-            "expires_at": datetime.now() + timedelta(seconds=_TTL_SECONDS),
-        }
-    return stored
+    return _store_portfolio_change_result(ticker_type, ticker, result, source="manual_refresh")
 
 
 def clear_portfolio_change_cache() -> None:

@@ -34,7 +34,6 @@ type SystemNextRunInfo = {
 type SystemJobKey =
   | "data_aggregate"
   | "cache_refresh"
-  | "portfolio_refresh"
   | "market_hours_analysis"
   | "metadata_updater"
   | "asset_summary"

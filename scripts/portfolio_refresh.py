@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""포트폴리오 구성종목 가격 업데이트 스크립트.
+"""포트폴리오 구성종목 가격 캐시 수동 갱신 스크립트.
 
 모든 종목풀의 ETF에 대해 포트폴리오 변동 캐시를 갱신한다.
-가격 캐시(stock_price_cache_updater.py) 와 분리된 별도 배치.
+기본 화면 조회는 TTL 기반 실시간 갱신 경로를 사용한다.
 """
 
 from __future__ import annotations
