@@ -81,39 +81,41 @@
 
 ### 자산 수익률 계산 정책 (단일 출처)
 
-자산 화면(자산 관리 `/assets`, 일별 `/daily`, 주별 `/weekly`, 월별 `/monthly`, 대시보드 `/dashboard`)의 모든 수익률 지표는 아래 규칙을 따릅니다. 분모/분자 정의를 바꾸려면 이 절을 먼저 수정하고 코드를 동기화합니다.
+자산 화면(자산 관리 `/assets`, 일별 `/daily`, 주별 `/weekly`, 월별 `/monthly`, 연별 `/yearly`, 대시보드 `/dashboard`)의 모든 수익률 지표는 아래 규칙을 따릅니다. 분모/분자 정의를 바꾸려면 이 절을 먼저 수정하고 코드를 동기화합니다.
 
-- **기간 수익률 (일/주/월) — TWR(Time-Weighted Return) 1기간**
-  - 공식: `period_return_pct = period_profit / (previous_total_assets + period_deposit_withdrawal) × 100`
+- **기간 수익률 (일/주/월/년) — 입출금 제거 1기간 수익률**
+  - 공식: `period_return_pct = period_profit / previous_total_assets × 100`
   - 분자(`period_profit`)는 `cumulative_profit`의 차분으로 계산되며, `total_principal` 누적이 입출금을 흡수해 입출금 영향이 자동 제거됩니다.
-  - 분모는 직전 기간 종료 시점의 평가액에 이번 기간 입출금을 합산해, 큰 입금일에도 % 변동률이 왜곡되지 않습니다.
+  - 분모는 직전 기간 종료 시점의 총자산으로 고정해, 입금/출금 자체가 해당 기간 수익률 기준금액을 흔들지 않게 합니다.
 - **누적 수익률 — ROI(Return on Investment)**
   - 공식: `cumulative_return_pct = cumulative_profit / total_principal × 100`
   - `cumulative_profit = total_assets - total_principal - total_expense_누적`.
-  - 펀드 매니저 평가용 TWR 누적과 다른 단순 비율(투입 원금 대비 총 수익).
+  - 기간 수익률을 복리 누적한 값이 아니라 투입 원금 대비 총 수익을 보는 단순 비율입니다.
 
 화면별 매핑:
 
-| 화면 | 일(%) | 주(%) | 월(%) | 누적(%) |
-|------|-------|-------|-------|---------|
-| /daily | TWR 1일 | — | — | ROI |
-| /weekly | — | TWR 1주 | — | ROI |
-| /monthly | — | — | TWR 1월 | ROI |
-| /assets | TWR 1일 | TWR 1주 | — | ROI |
-| /dashboard | TWR 1일 | TWR 1주 | — | ROI |
+| 화면 | 일(%) | 주(%) | 월(%) | 년(%) | 누적(%) |
+|------|-------|-------|-------|-------|---------|
+| /daily | 입출금 제거 1일 | — | — | — | ROI |
+| /weekly | — | 입출금 제거 1주 | — | — | ROI |
+| /monthly | — | — | 입출금 제거 1월 | — | ROI |
+| /yearly | — | — | — | 입출금 제거 1년 | ROI |
+| /assets | 입출금 제거 1일 | 입출금 제거 1주 | — | — | ROI |
+| /dashboard | 입출금 제거 1일 | 입출금 제거 1주 | 입출금 제거 1월 | 입출금 제거 1년 | ROI |
 
 같은 일자에서는 모든 화면의 일(%) 값이 동일합니다.
 
 구현 위치:
 
-- 백엔드(Python): `utils/daily_fund_service.py`, `utils/weekly_service.py`, `utils/monthly_service.py`, `utils/dashboard_service.py` 의 `_apply_running_total_principal` / `_calculate_weekly_docs` / `load_dashboard_data`.
+- 백엔드(Python): `utils/daily_fund_service.py`, `utils/weekly_service.py`, `utils/monthly_service.py`, `utils/yearly_service.py`, `utils/dashboard_service.py` 의 `calculate_period_return_pct` / `_apply_running_total_principal` / `_calculate_weekly_docs` / `load_dashboard_data`.
 - 프론트엔드: `/assets`(`web/app/assets/AssetsManager.tsx`)는 백엔드의 `daily_return_pct`/`weekly_return_pct` 값을 그대로 사용합니다(자체 계산 금지).
 - `/ticker`의 "포트폴리오 변동(%)"은 별도 지표(ETF 구성종목 가중평균)이며 본 정책과 무관합니다.
 
 데이터 무결성:
 
 - `total_principal`은 입출금 발생 시 즉시 반영되어야 합니다. 누락 시 모든 기간 수익률이 왜곡됩니다.
-- 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
+- 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 정책 변경 자체에는 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
+- 과거 일별 입출금 값을 수정한 경우에는 주/월/년 raw 집계(`deposit_withdrawal`, `total_assets` 등)를 다시 만들기 위해 관련 집계 버튼을 눌러야 합니다.
 
 ## 2. 순위 화면 정합성 원칙
 
