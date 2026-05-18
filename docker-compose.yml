@@ -1,8 +1,6 @@
 services:
   fastapi_app:
-    build:
-      context: .
-      dockerfile: Dockerfile.fastapi
+    image: ghcr.io/jasonisdoing/momentum-etf-fastapi:latest
     env_file:
       - .env
     volumes:
@@ -16,9 +14,7 @@ services:
     restart: always
 
   node_app:
-    build:
-      context: .
-      dockerfile: web/Dockerfile
+    image: ghcr.io/jasonisdoing/momentum-etf-node:latest
     depends_on:
       - fastapi_app
     env_file:
