@@ -17,6 +17,9 @@ import pandas as pd
 # 프로젝트 루트를 Python 경로에 추가
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from services.component_price_service import build_component_price_snapshot, select_component_holdings_for_pricing
+from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
+from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_utils import (
     get_cached_date_range,
     load_cached_frame_with_fallback,
@@ -27,9 +30,6 @@ from utils.data_loader import PykrxDataUnavailableError, fetch_ohlcv, repair_rec
 from utils.env import load_env_if_present
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types, load_common_settings
-from services.component_price_service import build_component_price_snapshot, select_component_holdings_for_pricing
-from services.portfolio_change_service import compute_and_store_portfolio_change_bundle
-from services.stock_cache_service import get_stock_cache_meta
 from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
 
 FETCH_RETRY_ATTEMPTS = 3
@@ -109,7 +109,7 @@ def _purge_suspicious_dates(
     if not tickers:
         return []
 
-    cutoff = (pd.Timestamp.now().normalize() - pd.Timedelta(days=lookback_days))
+    cutoff = pd.Timestamp.now().normalize() - pd.Timedelta(days=lookback_days)
 
     # 1) 모든 티커의 close 시리즈 수집 → 와이드 매트릭스
     close_map: dict[str, pd.Series] = {}
@@ -223,7 +223,11 @@ def _refresh_portfolio_change_cache_for_target(
 
     succeeded = 0
     failed: list[str] = []
-    logger.info("[%s] 포트폴리오 변동 공통 구성종목 가격 스냅샷 생성 시작: %d개 후보", target_norm.upper(), len(snapshot_holdings))
+    logger.info(
+        "[%s] 포트폴리오 변동 공통 구성종목 가격 스냅샷 생성 시작: %d개 후보",
+        target_norm.upper(),
+        len(snapshot_holdings),
+    )
     component_price_snapshot = build_component_price_snapshot(snapshot_holdings)
     logger.info(
         "[%s] 포트폴리오 변동 공통 구성종목 가격 스냅샷 생성 완료: %d개",
@@ -382,7 +386,7 @@ def refresh_cache_for_target(
 
         # 종목풀 실행 시 해당 종목풀의 모든 종목 반영
         if target_norm in list_available_ticker_types():
-            pass # get_all_etfs_including_deleted가 이미 수행함
+            pass  # get_all_etfs_including_deleted가 이미 수행함
 
         # 벤치마크 추가
         benchmark_tickers = _collect_benchmark_tickers(target_norm)
@@ -490,7 +494,7 @@ def refresh_cache_for_target(
         except Exception as exc:
             logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
 
-        # 포트폴리오 변동 캐시 갱신은 별도 스크립트(scripts/portfolio_refresh.py)에서 처리한다.
+        # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
 
 
@@ -515,9 +519,6 @@ def _collect_benchmark_tickers(target_id: str) -> list[str]:
         pass
 
     return sorted(tickers)
-
-
-
 
 
 def _build_parser() -> argparse.ArgumentParser:

@@ -41,7 +41,6 @@ MAX_TAIL_CHARS = 1500
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
 SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "cache_refresh",
-    "portfolio_refresh",
     "metadata_updater",
     "asset_summary",
     "market_hours_analysis",
@@ -87,13 +86,15 @@ def _acquire_db_lock(job_name: str, ttl_seconds: int = 1800) -> tuple[object, st
     db.batch_locks.delete_many({"_id": job_name, "expires_at": {"$lt": now}})
 
     try:
-        db.batch_locks.insert_one({
-            "_id": job_name,
-            "host": host,
-            "pid": pid,
-            "acquired_at": now,
-            "expires_at": expires_at,
-        })
+        db.batch_locks.insert_one(
+            {
+                "_id": job_name,
+                "host": host,
+                "pid": pid,
+                "acquired_at": now,
+                "expires_at": expires_at,
+            }
+        )
         return (db, job_name)
     except Exception:
         existing = db.batch_locks.find_one({"_id": job_name}) or {}
@@ -195,10 +196,7 @@ def main(argv: list[str]) -> int:
         _append_log_line(job_name, exception_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n"
-            f"• 시작: {started_at}\n"
-            f"• 소요: {elapsed:.1f}s\n"
-            f"• 에러: `{exc}`"
+            f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n• 시작: {started_at}\n• 소요: {elapsed:.1f}s\n• 에러: `{exc}`"
         )
         print(exception_line, file=sys.stderr)
         _release_db_lock(db_lock)
@@ -237,9 +235,7 @@ def main(argv: list[str]) -> int:
         )
 
     ended_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-    end_line = (
-        f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
-    )
+    end_line = f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
     print(end_line)
     _append_log_line(job_name, end_line)
     return exit_code

@@ -18,7 +18,6 @@ load_env_if_present()
 SystemAction = Literal[
     "data_aggregate",
     "cache_refresh",
-    "portfolio_refresh",
     "market_hours_analysis",
     "metadata_updater",
     "asset_summary",
@@ -61,14 +60,6 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
-        "key": "portfolio_refresh",
-        "job": "포트폴리오 업데이트",
-        "target": "포트폴리오 구성종목 가격",
-        "cadence": "월~토 24시간 매시 30분 KST",
-        "command": "python scripts/portfolio_refresh.py",
-        "schedule": {"minutes": [30], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
-    },
-    {
         "key": "market_hours_analysis",
         "job": "장 시간 분석",
         "target": "시장 스케줄",
@@ -98,16 +89,13 @@ SCHEDULE_ROWS = [
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
-    "portfolio_refresh": "scripts/portfolio_refresh.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
 }
 
-_LABEL_BY_ACTION: dict[str, str] = {
-    row["key"]: row["job"] for row in SCHEDULE_ROWS
-}
+_LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
@@ -126,6 +114,8 @@ def is_deploying() -> bool:
         return db.batch_locks.find_one({"_id": DEPLOY_LOCK_DOC_ID}) is not None
     except Exception:
         return False
+
+
 # 락파일이 이 시간(초)보다 오래되면 stale 로 간주하고 삭제한다.
 _RUN_BATCH_START_PATTERN = re.compile(
     r"^\[run_batch\] START job=(?P<job>[a-z_]+) cmd=.* at=(?P<started_at>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} KST)$"
@@ -288,9 +278,7 @@ def get_running_jobs() -> list[str]:
             try:
                 if isinstance(expires_at, datetime):
                     comparable_expires_at = (
-                        expires_at.astimezone(timezone.utc).replace(tzinfo=None)
-                        if expires_at.tzinfo
-                        else expires_at
+                        expires_at.astimezone(timezone.utc).replace(tzinfo=None) if expires_at.tzinfo else expires_at
                     )
                     if comparable_expires_at < now:
                         continue
@@ -322,14 +310,8 @@ def load_system_data() -> dict[str, object]:
         ),
         "running_jobs": get_running_jobs(),
         "is_deploying": is_deploying(),
-        "last_run_by_job": {
-            row["key"]: _read_last_job_run(str(row["key"]))
-            for row in SCHEDULE_ROWS
-        },
-        "next_run_by_job": {
-            row["key"]: _build_next_run_payload(row.get("schedule"))
-            for row in SCHEDULE_ROWS
-        },
+        "last_run_by_job": {row["key"]: _read_last_job_run(str(row["key"])) for row in SCHEDULE_ROWS},
+        "next_run_by_job": {row["key"]: _build_next_run_payload(row.get("schedule")) for row in SCHEDULE_ROWS},
     }
 
 
@@ -361,9 +343,7 @@ def trigger_system_action(action: SystemAction) -> str:
     running = get_running_jobs()
     if running:
         running_labels = ", ".join(_LABEL_BY_ACTION.get(k, k) for k in running)
-        raise BatchAlreadyRunningError(
-            f"다른 배치가 실행 중입니다: {running_labels}. 완료 후 다시 시도해주세요."
-        )
+        raise BatchAlreadyRunningError(f"다른 배치가 실행 중입니다: {running_labels}. 완료 후 다시 시도해주세요.")
 
     project_root = _PROJECT_ROOT
     script_rel = _SCRIPT_BY_ACTION[action]
