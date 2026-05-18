@@ -1,57 +1,98 @@
-name: Deploy to Oracle VM
+name: Build & Deploy to Oracle VM
 
 on:
   push:
     branches:
       - upgrade   # upgrade 브랜치에 push 시 자동 배포
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_FASTAPI: ghcr.io/${{ github.repository_owner }}/momentum-etf-fastapi
+  IMAGE_NODE: ghcr.io/${{ github.repository_owner }}/momentum-etf-node
+
 jobs:
-  deploy:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy to Oracle VM
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push fastapi image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.fastapi
+          push: true
+          tags: |
+            ${{ env.IMAGE_FASTAPI }}:latest
+            ${{ env.IMAGE_FASTAPI }}:${{ github.sha }}
+          cache-from: type=gha,scope=fastapi
+          cache-to: type=gha,mode=max,scope=fastapi
+
+      - name: Build & push node image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: web/Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NODE }}:latest
+            ${{ env.IMAGE_NODE }}:${{ github.sha }}
+          cache-from: type=gha,scope=node
+          cache-to: type=gha,mode=max,scope=node
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Oracle VM (pull & up)
         uses: appleboy/ssh-action@master
-        timeout-minutes: 20
+        timeout-minutes: 10
         with:
           host: ${{ secrets.ORACLE_VM_HOST }}
           username: ${{ secrets.ORACLE_VM_USERNAME }}
           key: ${{ secrets.ORACLE_VM_SSH_KEY }}
-          # SSH 연결/명령 타임아웃 명시 (VM 다운 시 무한 대기 방지)
           timeout: 60s
-          command_timeout: 18m
+          command_timeout: 8m
           script: |
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
             cd ~/apps/momentum-etf
             # 배포 진행 플래그 — fastapi_app 컨테이너 안에서 헬퍼 스크립트 실행.
-            # quote escape 문제 회피를 위해 별도 파일로 분리해두었다.
             sudo docker compose exec -T fastapi_app python infra/cron/deploy_flag_set.py \
               || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
             # 어떤 경로로 빠져나가도 플래그는 반드시 제거
             trap 'cd $HOME/apps/momentum-etf && sudo docker compose exec -T fastapi_app python infra/cron/deploy_flag_clear.py || true' EXIT
             # stale rename 유령 컨테이너 선별 제거
-            #   이전 배포가 docker compose recreate 중간에 끊기면
-            #   `<12hex>_momentum-etf-*` 형태의 리네임 유산이 남아 다음 배포에서
-            #   "name is already in use" 충돌을 일으킴. 정상 컨테이너는 건드리지 않음.
             sudo docker ps -a --format '{{.ID}} {{.Names}}' \
               | awk '$2 ~ /^[0-9a-f]{12}_momentum-etf-/ { print $1 }' \
               | xargs -r sudo docker rm -f
+            # docker-compose.yml / infra/cron / nginx 등 설정 파일 갱신
             if [ ! -d .git ]; then
               git clone https://github.com/jasonisdoing/momentum-etf.git .
             else
               git fetch origin upgrade
               git reset --hard origin/upgrade
             fi
-            # BuildKit 활성화 (Dockerfile 의 --mount=type=cache 사용을 위해 필수)
-            export DOCKER_BUILDKIT=1
-            export COMPOSE_DOCKER_CLI_BUILD=1
-            sudo -E docker compose up -d --build --remove-orphans
+            # GHCR 에서 최신 이미지 pull (빌드 없음 — CPU 부하 거의 없음)
+            sudo docker compose pull fastapi_app node_app
+            # 컨테이너 재기동 (image 가 바뀐 서비스만 재생성)
+            sudo docker compose up -d --remove-orphans
+            # 미사용 이미지 정리
             sudo docker image prune -af
-            # 빌드 캐시는 보존 (다음 배포 속도↑). 디스크 부담 시 수동으로 정리.
-            # sudo docker builder prune -af  # 비활성화
             # 마커 기반 idempotent crontab 설치 (타 앱 cron 항목 보존)
             echo ">>> Installing crontab via infra/cron/install.sh"
             bash infra/cron/install.sh
@@ -74,6 +115,9 @@ jobs:
           DISK_USE=$(ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ORACLE_VM_USERNAME@$ORACLE_VM_HOST" "df -h / | awk 'NR==2 {print \$5}'" || true)
           echo "disk_free=${DISK_FREE:-unknown}" >> "$GITHUB_OUTPUT"
           echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout for version extraction
+        uses: actions/checkout@v4
 
       - name: Extract APP_VERSION
         id: app_version
