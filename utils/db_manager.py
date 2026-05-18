@@ -1,20 +1,13 @@
 import os
 import time
-from urllib.parse import quote_plus
 
 from dotenv import load_dotenv
 from pymongo import MongoClient
 
-try:
-    import data.settings as global_settings  # type: ignore
-except ImportError:  # pragma: no cover - 하위 호환
-    global_settings = object()
 from utils.logger import get_app_logger
 
-# .env 파일이 있다면 로드합니다.
 load_dotenv()
 
-# --- 전역 변수로 DB 연결 관리 ---
 _db_connection = None
 _mongo_client: MongoClient | None = None
 logger = get_app_logger()
@@ -33,41 +26,7 @@ def _reset_connection() -> None:
 
 
 def _resolve_connection_string() -> str | None:
-    """환경 변수로부터 MongoDB 연결 문자열을 결정한다.
-
-    우선순위:
-    1) MONGO_DB_CONNECTION_STRING 가 설정되어 있으면 그대로 사용 (하위호환)
-    2) MONGO_DB_USER / MONGO_DB_PASSWORD / MONGO_DB_HOST 가 모두 있으면 조립
-       - host 가 *.mongodb.net 이면 mongodb+srv:// 자동 선택
-       - 그 외에는 mongodb:// (authSource=admin, retryWrites, w=majority 기본 옵션)
-    """
-    existing = (os.environ.get("MONGO_DB_CONNECTION_STRING") or "").strip()
-    if existing:
-        return existing
-
-    user = (os.environ.get("MONGO_DB_USER") or "").strip()
-    password = os.environ.get("MONGO_DB_PASSWORD") or ""
-    host = (os.environ.get("MONGO_DB_HOST") or "").strip()
-    if not (user and password and host):
-        return None
-
-    db_name = (os.environ.get("MONGO_DB_NAME") or "momentum_etf_db").strip() or "momentum_etf_db"
-    is_srv = host.endswith(".mongodb.net")
-    scheme = "mongodb+srv" if is_srv else "mongodb"
-
-    default_opts = (
-        "retryWrites=true&w=majority"
-        if is_srv
-        else "authSource=admin&retryWrites=true&w=majority"
-    )
-    options = (os.environ.get("MONGO_DB_OPTIONS") or default_opts).strip()
-
-    user_q = quote_plus(user)
-    pass_q = quote_plus(password)
-    uri = f"{scheme}://{user_q}:{pass_q}@{host}/{db_name}"
-    if options:
-        uri = f"{uri}?{options}"
-    return uri
+    return (os.environ.get("MONGO_DB_CONNECTION_STRING") or "").strip() or None
 
 
 def _build_client(connection_string: str) -> MongoClient:
@@ -110,14 +69,12 @@ def get_db_connection():
     if _db_connection is not None:
         return _db_connection
 
-    connection_string = _resolve_connection_string() or getattr(
-        global_settings, "MONGO_DB_CONNECTION_STRING", None
-    )
+    connection_string = _resolve_connection_string()
     db_name = (os.environ.get("MONGO_DB_NAME") or "momentum_etf_db").strip() or "momentum_etf_db"
     if not connection_string:
         logger.error(
             "오류: MongoDB 연결 정보가 설정되지 않았습니다. "
-            "MONGO_DB_CONNECTION_STRING 또는 MONGO_DB_USER/PASSWORD/HOST 환경변수를 확인하세요."
+            "MONGO_DB_CONNECTION_STRING 환경변수를 확인하세요."
         )
         return None
 
