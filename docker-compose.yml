@@ -5,6 +5,8 @@ services:
       - .env
     volumes:
       - ./accounts.json:/app/accounts.json:ro
+      # 정적 참조 데이터 (거래일 캘린더, 종목 리스트 등) — git 추적 제외, 서버에 직접 배치
+      - ./data:/app/data:ro
       # cron 래퍼 hotfix 용 bind mount (이미지 재빌드 없이 반영)
       - ./infra/cron:/app/infra/cron:ro
       # cron 배치 로그 (호스트에서 tail 가능)
@@ -23,6 +25,8 @@ services:
       - FASTAPI_INTERNAL_URL=http://fastapi_app:8000
     volumes:
       - ./accounts.json:/app/accounts.json:ro
+      # 정적 참조 데이터 (거래일 캘린더 등) — fastapi_app 와 동일하게 bind-mount
+      - ./data:/app/data:ro
     restart: always
 
   hybrid_proxy:

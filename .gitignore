@@ -40,12 +40,8 @@ web/lib/bucket_theme.json
 # 임시 파일
 tmp/
 
-# 캐시 — data/ 내부 동적 산출물만 무시, 정적 참조 파일(거래일 캘린더 등)은 포함
+# 캐시 — data/ 내부는 서버에 직접 배치하고 컨테이너로 bind-mount 함 (git 추적 제외)
 data/*
-!data/*.json
-!data/country/
-!data/country/**
-!data/README*
 
 # DB 백업 (Atlas → VM 마이그레이션, 로컬 자동 백업)
 .backups/
