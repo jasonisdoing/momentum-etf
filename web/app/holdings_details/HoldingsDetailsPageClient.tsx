@@ -77,7 +77,7 @@ type TreemapRect = {
   y: number;
   width: number;
   height: number;
-  normalizedWeight: number;
+  displayWeight: number;
 };
 
 type TreemapDatum = {
@@ -208,7 +208,7 @@ function buildTreemapRects(items: ComponentRow[], width: number, height: number)
         y: node.y0,
         width: Math.max(0, node.x1 - node.x0),
         height: Math.max(0, node.y1 - node.y0),
-        normalizedWeight: node.data.value ?? 0,
+        displayWeight: getTreemapWeight(item),
       };
     })
     .filter((rect): rect is TreemapRect => rect != null);
@@ -311,7 +311,7 @@ function HoldingsTreemap({ components }: { components: ComponentRow[] }) {
                 const showWeight = rect.width >= 70 && rect.height >= 62;
                 const textColor = getTreemapTextColor(item.change_pct);
                 const subduedTextColor = item.change_pct == null || item.change_pct === 0 ? "#64748b" : "rgba(255, 255, 255, 0.72)";
-                const title = `${formatDisplayName(item.name)} ${formatSignedPercent(item.change_pct)} ${formatWeight(rect.normalizedWeight)}`;
+                const title = `${formatDisplayName(item.name)} ${formatSignedPercent(item.change_pct)} ${formatWeight(rect.displayWeight)}`;
                 const label = getTreemapLabel(item);
                 return (
                   <g
@@ -356,7 +356,7 @@ function HoldingsTreemap({ components }: { components: ComponentRow[] }) {
                         fill={subduedTextColor}
                         className="holdingsTreemapWeight"
                       >
-                        {formatWeight(rect.normalizedWeight)}
+                        {formatWeight(rect.displayWeight)}
                       </text>
                     )}
                   </g>
