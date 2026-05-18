@@ -1,3 +1,4 @@
+# Python 캐시/가상환경
 __pycache__/
 *.pyc
 *.pyo
@@ -5,8 +6,49 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
+
+# 환경/설정
 .env
+.env.*
+!.env.example
+
+# Git
 .git
+.gitignore
+
+# 로그/데이터
 logs/
 mongo-data/
 .backups/
+backups/
+data/
+tmp/
+
+# 백테스트/노트
+backtest/
+znotes/
+
+# 에디터/도구
+.vscode/
+.matplotlib/
+.claude/
+
+# OS
+.DS_Store
+
+# 웹 빌드 산출물 (Dockerfile 안에서 새로 빌드)
+web/.next/
+web/node_modules/
+web/next-env.d.ts
+web/.turbo/
+
+# 임시 백업/아카이브
+*.archive.gz
+*.bak
+*.bak-*
+
+# README/문서 (실행에 불필요)
+docs/
+*.md
+!web/README.md
