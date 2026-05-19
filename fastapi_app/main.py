@@ -12,6 +12,7 @@ from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.market import router as market_router
+from .routes.market_trend import router as market_trend_router
 from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.rank import router as rank_router
@@ -64,6 +65,7 @@ app.include_router(dashboard_router)
 app.include_router(daily_router)
 app.include_router(kor_market_stocks_router)
 app.include_router(market_router)
+app.include_router(market_trend_router)
 app.include_router(note_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
