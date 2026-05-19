@@ -13,27 +13,6 @@ const MA_MONTHS_MAX = 12;
 const DEFAULT_MA_TYPE: (typeof MA_TYPE_OPTIONS)[number] = "ALMA";
 const DEFAULT_MA_MONTHS = 4;
 
-type CompareKey = "w1" | "m1" | "m3";
-const COMPARE_OPTIONS: Array<{ value: CompareKey; label: string }> = [
-  { value: "w1", label: "1주일전" },
-  { value: "m1", label: "1달전" },
-  { value: "m3", label: "3달전" },
-];
-const DEFAULT_COMPARE: CompareKey = "w1";
-
-function getCompareValue(item: MarketTrendItem, key: CompareKey): number | null {
-  switch (key) {
-    case "w1":
-      return item.trend_pct_w1;
-    case "m1":
-      return item.trend_pct_m1;
-    case "m3":
-      return item.trend_pct_m3;
-    default:
-      return null;
-  }
-}
-
 type MarketTrendItem = {
   name: string;
   ticker: string;
@@ -41,8 +20,9 @@ type MarketTrendItem = {
   change_pct: number | null;
   trend_pct: number | null;
   trend_pct_w1: number | null;
-  trend_pct_m1: number | null;
-  trend_pct_m3: number | null;
+  trend_pct_w2: number | null;
+  trend_pct_w3: number | null;
+  trend_pct_w4: number | null;
 };
 
 type MarketTrendResponse = {
@@ -74,65 +54,80 @@ function renderSignedPercentCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatPct(params.value)}</span>;
 }
 
-type RegimeKey = "strong_up" | "weak_up" | "sideways" | "strong_down" | "weak_down";
+type RegimeKey = "accel_up" | "decel_up" | "sideways" | "accel_down" | "decel_down";
 
 const REGIME_LABEL: Record<RegimeKey, string> = {
-  strong_up: "⬆️ 강한 상승",
-  weak_up: "↗️ 상승 둔화",
+  accel_up: "⬆️ 상승 가속",
+  decel_up: "↗️ 상승 감속",
   sideways: "➡️ 횡보",
-  strong_down: "⬇️ 하락 심화",
-  weak_down: "↘️ 하락 둔화",
+  accel_down: "⬇️ 하락 가속",
+  decel_down: "↘️ 하락 감속",
 };
 
 // 레짐 별 텍스트 색상 (빨주노초파) — 셀과 하단 설명에서 동일하게 사용한다.
 const REGIME_COLORS: Record<RegimeKey, string> = {
-  strong_up: "#e03131",   // 빨강
-  weak_up: "#f76707",     // 주황
-  sideways: "#f59f00",    // 노랑(amber, 백색 배경 가독성 확보)
-  strong_down: "#2f9e44", // 초록
-  weak_down: "#1971c2",   // 파랑
+  accel_up: "#e03131",   // 빨강
+  decel_up: "#f76707",   // 주황
+  sideways: "#f59f00",   // 노랑(amber)
+  accel_down: "#2f9e44", // 초록
+  decel_down: "#1971c2", // 파랑
 };
 
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
-  { key: "strong_up", text: "⬆️ 강한 상승: 시장이 가속도를 붙여 올라가는 중입니다." },
-  { key: "weak_up", text: "↗️ 상승 둔화: 여전히 상승세이나 고점 신호 또는 숨고르기 국면입니다." },
+  { key: "accel_up", text: "⬆️ 상승 가속: 시장이 가속도를 붙여 올라가는 중입니다." },
+  { key: "decel_up", text: "↗️ 상승 감속: 여전히 상승세이나 고점 신호 또는 숨고르기 국면입니다." },
   { key: "sideways", text: "➡️ 횡보: 방향성 없이 에너지를 응축하거나 단기 소외된 구간입니다." },
-  { key: "strong_down", text: "⬇️ 하락 심화: 낙폭이 커지며 투매가 나오거나 하락 탄력이 붙는 중입니다." },
-  { key: "weak_down", text: "↘️ 하락 둔화: 하락세이나 바닥을 다지며 진정되는 중 (반등 가능성 타진)입니다." },
+  { key: "accel_down", text: "⬇️ 하락 가속: 낙폭이 커지며 투매가 나오거나 하락 탄력이 붙는 중입니다." },
+  { key: "decel_down", text: "↘️ 하락 감속: 하락세이나 바닥을 다지며 진정되는 중 (반등 가능성 타진)입니다." },
 ];
 
-function classifyRegime(trend: number | null, compareValue: number | null): RegimeKey | null {
-  if (trend === null || trend === undefined || Number.isNaN(trend)) return null;
-  // 1순위: 횡보 (절대값 1% 이하)
-  if (Math.abs(trend) <= 1.0) return "sideways";
-  // 2/3순위 비교는 과거 시점 값 필요
-  if (compareValue === null || compareValue === undefined || Number.isNaN(compareValue)) return null;
-  if (trend > 0) {
-    return trend > compareValue ? "strong_up" : "weak_up";
-  }
-  // trend < 0
-  return trend < compareValue ? "strong_down" : "weak_down";
+/** 1·2·3·4주 전 추세 평균. 4개 모두 유효해야 평균 반환, 부족하면 null. */
+function averageWeeklyTrend(item: MarketTrendItem): number | null {
+  const values = [item.trend_pct_w1, item.trend_pct_w2, item.trend_pct_w3, item.trend_pct_w4];
+  const valid = values.filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v));
+  if (valid.length < 4) return null;
+  return (valid[0] + valid[1] + valid[2] + valid[3]) / 4;
 }
 
-function makeRenderRegimeCell(compareKey: CompareKey) {
-  return function RegimeCell(params: { data?: MarketTrendItem }) {
-    const data = params.data;
-    if (!data) return null;
-    const key = classifyRegime(data.trend_pct, getCompareValue(data, compareKey));
-    if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
-    const fontWeight = key === "strong_up" || key === "strong_down" ? 700 : 500;
-    return (
-      <span style={{ color: REGIME_COLORS[key], fontWeight }}>
-        {REGIME_LABEL[key]}
-      </span>
-    );
-  };
+/**
+ * 레짐 판별 — '추세' 와 '1·2·3·4주 평균' 두 값만 비교한다.
+ *
+ * 우선순위:
+ *   1) |추세| <= 1.0 → 횡보
+ *   2) 추세 > 0 일 때
+ *        추세 >  평균 → 상승 가속
+ *        추세 <= 평균 → 상승 감속
+ *   3) 추세 < 0 일 때
+ *        추세 <  평균 → 하락 가속
+ *        추세 >= 평균 → 하락 감속
+ */
+function classifyRegime(trend: number | null, avgPast: number | null): RegimeKey | null {
+  if (trend === null || trend === undefined || Number.isNaN(trend)) return null;
+  if (Math.abs(trend) <= 1.0) return "sideways";
+  if (avgPast === null || avgPast === undefined || Number.isNaN(avgPast)) return null;
+  if (trend > 0) {
+    return trend > avgPast ? "accel_up" : "decel_up";
+  }
+  // trend < 0 (trend === 0 은 횡보에서 이미 처리됨)
+  return trend < avgPast ? "accel_down" : "decel_down";
+}
+
+function renderRegimeCell(params: { data?: MarketTrendItem }) {
+  const data = params.data;
+  if (!data) return null;
+  const key = classifyRegime(data.trend_pct, averageWeeklyTrend(data));
+  if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
+  const fontWeight = key === "accel_up" || key === "accel_down" ? 700 : 500;
+  return (
+    <span style={{ color: REGIME_COLORS[key], fontWeight }}>
+      {REGIME_LABEL[key]}
+    </span>
+  );
 }
 
 export function MarketTrendClient() {
   const [maType, setMaType] = useState<string>(DEFAULT_MA_TYPE);
   const [maMonths, setMaMonths] = useState<number>(DEFAULT_MA_MONTHS);
-  const [compareKey, setCompareKey] = useState<CompareKey>(DEFAULT_COMPARE);
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -210,10 +205,10 @@ export function MarketTrendClient() {
         valueGetter: (params) => {
           const data = params.data as MarketTrendItem | undefined;
           if (!data) return null;
-          const key = classifyRegime(data.trend_pct, getCompareValue(data, compareKey));
+          const key = classifyRegime(data.trend_pct, averageWeeklyTrend(data));
           return key ? REGIME_LABEL[key] : null;
         },
-        cellRenderer: makeRenderRegimeCell(compareKey),
+        cellRenderer: renderRegimeCell,
       },
       {
         field: "trend_pct",
@@ -226,33 +221,42 @@ export function MarketTrendClient() {
       },
       {
         field: "trend_pct_w1",
-        headerName: "1주일전",
+        headerName: "1주",
         flex: 1,
-        minWidth: 100,
+        minWidth: 90,
         sortable: true,
         type: "rightAligned",
         cellRenderer: renderSignedPercentCell,
       },
       {
-        field: "trend_pct_m1",
-        headerName: "1달전",
+        field: "trend_pct_w2",
+        headerName: "2주",
         flex: 1,
-        minWidth: 100,
+        minWidth: 90,
         sortable: true,
         type: "rightAligned",
         cellRenderer: renderSignedPercentCell,
       },
       {
-        field: "trend_pct_m3",
-        headerName: "3달전",
+        field: "trend_pct_w3",
+        headerName: "3주",
         flex: 1,
-        minWidth: 100,
+        minWidth: 90,
+        sortable: true,
+        type: "rightAligned",
+        cellRenderer: renderSignedPercentCell,
+      },
+      {
+        field: "trend_pct_w4",
+        headerName: "4주",
+        flex: 1,
+        minWidth: 90,
         sortable: true,
         type: "rightAligned",
         cellRenderer: renderSignedPercentCell,
       },
     ],
-    [compareKey],
+    [],
   );
 
   const titleRight = useMemo(
@@ -306,20 +310,6 @@ export function MarketTrendClient() {
                           ))}
                         </select>
                       </div>
-                    </label>
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">비교</span>
-                      <select
-                        className="form-select"
-                        value={compareKey}
-                        onChange={(event) => setCompareKey(event.target.value as CompareKey)}
-                      >
-                        {COMPARE_OPTIONS.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
                     </label>
                   </div>
                 </div>
