@@ -29,9 +29,10 @@ INDICES: list[dict[str, str]] = [
 # 과거 시점 추세 계산용 trading-day offset (오늘 대비 N 거래일 전).
 TRADING_DAYS_PER_WEEK = 5
 TREND_OFFSETS_DAYS = {
-    "trend_pct_w1": TRADING_DAYS_PER_WEEK * 1,            # 1주일 전
-    "trend_pct_m1": TRADING_DAYS_PER_MONTH * 1,           # 1달 전
-    "trend_pct_m3": TRADING_DAYS_PER_MONTH * 3,           # 3달 전
+    "trend_pct_w1": TRADING_DAYS_PER_WEEK * 1,            # 1주 전
+    "trend_pct_w2": TRADING_DAYS_PER_WEEK * 2,            # 2주 전
+    "trend_pct_w3": TRADING_DAYS_PER_WEEK * 3,            # 3주 전
+    "trend_pct_w4": TRADING_DAYS_PER_WEEK * 4,            # 4주 전
 }
 
 
@@ -106,8 +107,9 @@ def _build_item(
         "change_pct": None,
         "trend_pct": None,
         "trend_pct_w1": None,
-        "trend_pct_m1": None,
-        "trend_pct_m3": None,
+        "trend_pct_w2": None,
+        "trend_pct_w3": None,
+        "trend_pct_w4": None,
     }
     if df is None or df.empty:
         return base
