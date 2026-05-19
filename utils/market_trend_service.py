@@ -117,18 +117,14 @@ def _build_item(
         "trend_score_w2": None,
         "trend_score_w3": None,
         "trend_score_w4": None,
-        # 1~8주 시점의 레짐 (해당 시점에서 4주 평균과의 비교 결과)
-        "regime_w1": None,
-        "regime_w2": None,
-        "regime_w3": None,
-        "regime_w4": None,
-        "regime_w5": None,
-        "regime_w6": None,
-        "regime_w7": None,
-        "regime_w8": None,
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
+        # 현재 레짐의 지속 일수 + 직전 3개 레짐 기간 (테이블 표시용)
+        "current_regime_days": None,
+        "prev_regime_1": None,
+        "prev_regime_2": None,
+        "prev_regime_3": None,
     }
     if df is None or df.empty:
         return base
@@ -170,18 +166,19 @@ def _build_item(
     for key, offset in TREND_OFFSETS_DAYS.items():
         base[key] = _trend_pct_at(close_series, ma_series, offset=offset)
 
-    # 1~8주 시점의 레짐 — 그 시점의 4주 평균과 비교.
-    for week_num in range(1, 9):
-        base_offset = TRADING_DAYS_PER_WEEK * week_num
-        trend_at_week = _trend_pct_at(close_series, ma_series, offset=base_offset)
-        # 그 시점 기준 1·2·3·4주 전 추세% 평균
-        past_vals = []
-        for k in (1, 2, 3, 4):
-            v = _trend_pct_at(close_series, ma_series, offset=base_offset + TRADING_DAYS_PER_WEEK * k)
-            if v is not None:
-                past_vals.append(v)
-        avg_at_week = sum(past_vals) / 4 if len(past_vals) == 4 else None
-        base[f"regime_w{week_num}"] = _classify_regime(trend_at_week, avg_at_week)
+    # 최근 12개월 일별 레짐을 계산해 연속 구간으로 그룹화 → 현재 지속일수 + 직전 3개 레짐 기간.
+    ranges = _build_daily_regime_ranges(close_series, ma_series)
+    if ranges:
+        base["current_regime_days"] = ranges[-1]["days"]
+        for slot, offset in ((1, -2), (2, -3), (3, -4)):
+            if len(ranges) >= -offset:
+                r = ranges[offset]
+                base[f"prev_regime_{slot}"] = {
+                    "regime": r["regime"],
+                    "start_date": r["start_date"],
+                    "end_date": r["end_date"],
+                    "days": r["days"],
+                }
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 위쪽 최고/아래쪽 최저 괴리율로 점수 정규화.
     score_window = TRADING_DAYS_PER_MONTH * 12
@@ -255,6 +252,72 @@ def _trend_pct_at(
     if price is None or ma_value is None or ma_value == 0:
         return None
     return (price / ma_value - 1.0) * 100.0
+
+
+def _build_daily_regime_ranges(
+    close_series: pd.Series,
+    ma_series: pd.Series,
+    window_days: int = TRADING_DAYS_PER_MONTH * 12,
+) -> list[dict[str, Any]]:
+    """최근 ``window_days`` 거래일의 일별 레짐을 계산해 연속 구간으로 그룹화한다.
+
+    반환 형식: [{"regime": str, "start_date": str, "end_date": str, "days": int}, ...]
+    오래된 순서 → 최신 순서.
+    """
+    if close_series is None or ma_series is None:
+        return []
+    length = min(len(close_series), len(ma_series))
+    if length == 0:
+        return []
+
+    # 일별 추세% (전체 시리즈)
+    full_trend: list[float | None] = []
+    for idx in range(length):
+        c = _to_float(close_series.iloc[idx])
+        m = _to_float(ma_series.iloc[idx])
+        if c is None or m is None or m == 0:
+            full_trend.append(None)
+        else:
+            full_trend.append((c / m - 1.0) * 100.0)
+
+    take = min(length, int(window_days))
+    start_idx = length - take
+    week_offsets = (5, 10, 15, 20)
+    ranges: list[dict[str, Any]] = []
+    current: dict[str, Any] | None = None
+    for idx in range(start_idx, length):
+        date_value = close_series.index[idx]
+        date_str = (
+            date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
+        )
+        trend = full_trend[idx]
+        past_vals = []
+        for off in week_offsets:
+            j = idx - off
+            if j >= 0 and full_trend[j] is not None:
+                past_vals.append(full_trend[j])
+        avg_past = sum(past_vals) / 4 if len(past_vals) == 4 else None
+        regime = _classify_regime(trend, avg_past)
+        if regime is None:
+            if current:
+                ranges.append(current)
+                current = None
+            continue
+        if current is None or current["regime"] != regime:
+            if current:
+                ranges.append(current)
+            current = {
+                "regime": regime,
+                "start_date": date_str,
+                "end_date": date_str,
+                "days": 1,
+            }
+        else:
+            current["end_date"] = date_str
+            current["days"] += 1
+    if current:
+        ranges.append(current)
+    return ranges
 
 
 def _classify_regime(trend: float | None, avg_past: float | None) -> str | None:
