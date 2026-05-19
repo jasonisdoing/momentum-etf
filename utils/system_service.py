@@ -43,11 +43,11 @@ SCHEDULE_ROWS = [
         "key": "data_aggregate",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
-        "cadence": "평일 09:15 ~ 15:15 매시 :15 KST",
+        "cadence": "평일 09:15 ~ 16:15 매시 :15 KST",
         "command": "python scripts/collect_data.py",
         "schedule": {
             "minutes": [15],
-            "hours": list(range(9, 16)),
+            "hours": list(range(9, 17)),
             "weekdays": _WEEKDAYS_MON_FRI,
         },
     },
