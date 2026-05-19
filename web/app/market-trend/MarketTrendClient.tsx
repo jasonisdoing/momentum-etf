@@ -33,15 +33,18 @@ type MarketTrendItem = {
   trend_score_w4: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
-  // 1~8주 시점의 레짐 (그 시점에서의 4주 평균 비교)
-  regime_w1: RegimeKey | null;
-  regime_w2: RegimeKey | null;
-  regime_w3: RegimeKey | null;
-  regime_w4: RegimeKey | null;
-  regime_w5: RegimeKey | null;
-  regime_w6: RegimeKey | null;
-  regime_w7: RegimeKey | null;
-  regime_w8: RegimeKey | null;
+  // 현재 레짐 지속일수 + 직전 3개 레짐 기간
+  current_regime_days: number | null;
+  prev_regime_1: RegimeRange | null;
+  prev_regime_2: RegimeRange | null;
+  prev_regime_3: RegimeRange | null;
+};
+
+type RegimeRange = {
+  regime: RegimeKey;
+  start_date: string;
+  end_date: string;
+  days: number;
 };
 
 type MainRow = MarketTrendItem & { rowType: "main"; id: string };
@@ -99,6 +102,31 @@ const REGIME_SHORT_LABEL: Record<RegimeKey, string> = {
   decel_down: "중립(진정)",
   accel_down: "하락",
 };
+/** "4월 8일" 같은 한국어 월/일 표시 (연도 생략). */
+function formatKoreanDate(date: string | null | undefined): string {
+  if (!date) return "-";
+  const parts = date.split("-");
+  if (parts.length !== 3) return date;
+  const [, m, d] = parts;
+  return `${Number(m)}월 ${Number(d)}일`;
+}
+
+/** 직전 레짐 기간 셀: "상승: 4월 8일~5월 15일 (28일)" 형태. */
+function renderRegimeRangeCell(params: { value?: RegimeRange | null }) {
+  const range = params.value ?? null;
+  if (!range) return <span style={{ color: "#adb5bd" }}>-</span>;
+  const label = REGIME_SHORT_LABEL[range.regime];
+  const color = REGIME_COLORS[range.regime];
+  return (
+    <span style={{ color, fontWeight: 600, whiteSpace: "nowrap", fontSize: "0.85rem" }}>
+      <strong>{label}</strong>
+      <span style={{ fontWeight: 400, marginLeft: 6 }}>
+        {formatKoreanDate(range.start_date)} ~ {formatKoreanDate(range.end_date)}
+      </span>
+    </span>
+  );
+}
+
 function renderRegimeWeekCell(params: { value?: RegimeKey | null }) {
   const key = params.value ?? null;
   if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
@@ -269,8 +297,8 @@ export function MarketTrendClient() {
       },
       {
         headerName: "추세",
-        flex: 1.1,
-        minWidth: 110,
+        flex: 0.9,
+        minWidth: 95,
         sortable: true,
         headerClass: "marketTrendRegimeHeader",
         cellStyle: {
@@ -287,11 +315,11 @@ export function MarketTrendClient() {
         },
         cellRenderer: renderRegimeCell,
       },
-      ...([1, 2, 3, 4, 5, 6, 7, 8] as const).map<ColDef<GridRow>>((week) => ({
-        field: `regime_w${week}` as keyof MarketTrendItem,
-        headerName: `${week}주`,
-        flex: 0.8,
-        minWidth: 78,
+      {
+        field: "current_regime_days",
+        headerName: "기간",
+        flex: 0.6,
+        minWidth: 75,
         sortable: true,
         cellStyle: {
           display: "flex",
@@ -300,7 +328,26 @@ export function MarketTrendClient() {
           textAlign: "center",
         },
         headerClass: "marketTrendRegimeHeader",
-        cellRenderer: renderRegimeWeekCell,
+        cellRenderer: (params: { value?: number | null }) => {
+          const d = params.value;
+          if (d === null || d === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
+          return <span style={{ color: "#1f2937" }}>{d}일째</span>;
+        },
+      },
+      ...([1, 2, 3] as const).map<ColDef<GridRow>>((slot) => ({
+        field: `prev_regime_${slot}` as keyof MarketTrendItem,
+        headerName: `최근${slot}`,
+        flex: 1.5,
+        minWidth: 190,
+        sortable: false,
+        cellDataType: false,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          textAlign: "left",
+        },
+        cellRenderer: renderRegimeRangeCell,
       })),
     ],
     [expandedTicker],
