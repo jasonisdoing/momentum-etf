@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import {
   IconCash,
+  IconChartLine,
   IconChevronDown,
   IconMoodSmile,
   IconHome,
@@ -27,6 +28,7 @@ import { useHideMoney } from "@/lib/hide-money-context";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
 const homeItem = { href: "/", label: "홈", icon: IconHome };
+const marketTrendItem = { href: "/market-trend", label: "시장지수 추세", icon: IconChartLine };
 const holdingsItem = { href: "/holdings", label: "보유종목", icon: IconActivity };
 const holdingsDetailsItem = { href: "/holdings_details", label: "보유종목 상세", icon: IconListDetails };
 
@@ -349,6 +351,7 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const HomeIcon = homeItem.icon;
+  const MarketTrendIcon = marketTrendItem.icon;
   const HoldingsIcon = holdingsItem.icon;
   const fearGreedDelta =
     fearGreed?.score !== null &&
@@ -421,6 +424,14 @@ export function AppShell({ children }: AppShellProps) {
               <HomeIcon size={18} stroke={1.9} />
             </span>
             <span className="nav-link-title">{homeItem.label}</span>
+          </Link>
+        </div>
+        <div className="nav-item appSidebarItem">
+          <Link href={marketTrendItem.href} className={pathname === marketTrendItem.href ? "nav-link active" : "nav-link"}>
+            <span className="appSidebarIcon" aria-hidden="true">
+              <MarketTrendIcon size={18} stroke={1.9} />
+            </span>
+            <span className="nav-link-title">{marketTrendItem.label}</span>
           </Link>
         </div>
         <div className="nav-item appSidebarItem">
