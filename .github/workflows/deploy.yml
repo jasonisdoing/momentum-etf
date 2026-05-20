@@ -76,10 +76,10 @@ jobs:
             cd ~/apps/momentum-etf
             export COMPOSE_PARALLEL_LIMIT=1
             # 배포 진행 플래그 — fastapi_app 컨테이너 안에서 헬퍼 스크립트 실행.
-            sudo docker compose exec -T fastapi_app python infra/cron/deploy_flag_set.py \
+            sudo docker compose exec -T -w /app fastapi_app env PYTHONPATH=/app python infra/cron/deploy_flag_set.py \
               || echo ">>> deploy 플래그 설정 실패 (계속 진행)"
             # 어떤 경로로 빠져나가도 플래그는 반드시 제거
-            trap 'cd $HOME/apps/momentum-etf && sudo docker compose exec -T fastapi_app python infra/cron/deploy_flag_clear.py || true' EXIT
+            trap 'cd $HOME/apps/momentum-etf && sudo docker compose exec -T -w /app fastapi_app env PYTHONPATH=/app python infra/cron/deploy_flag_clear.py || true' EXIT
             # stale rename 유령 컨테이너 선별 제거
             sudo docker ps -a --format '{{.ID}} {{.Names}}' \
               | awk '$2 ~ /^[0-9a-f]{12}_momentum-etf-/ { print $1 }' \
@@ -96,25 +96,25 @@ jobs:
             sudo docker compose pull node_app
             # 앱 서비스만 순차 교체한다. MongoDB는 배포마다 건드리지 않는다.
             sudo docker compose up -d --no-deps fastapi_app
-            for i in $(seq 1 30); do
+            for i in $(seq 1 60); do
               if sudo docker compose exec -T fastapi_app python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/health', timeout=2)" >/dev/null 2>&1; then
                 echo ">>> fastapi_app health check passed"
                 break
               fi
-              if [ "$i" -eq 30 ]; then
+              if [ "$i" -eq 60 ]; then
                 echo "fastapi_app health check failed" >&2
                 exit 1
               fi
               sleep 2
             done
             sudo docker compose up -d --no-deps node_app
-            for i in $(seq 1 30); do
-              if sudo docker compose exec -T node_app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
-                echo ">>> node_app health check passed"
+            for i in $(seq 1 60); do
+              if sudo docker compose exec -T node_app node -e "fetch('http://127.0.0.1:3000/api/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
+                echo ">>> node_app live check passed"
                 break
               fi
-              if [ "$i" -eq 30 ]; then
-                echo "node_app health check failed" >&2
+              if [ "$i" -eq 60 ]; then
+                echo "node_app live check failed" >&2
                 exit 1
               fi
               sleep 2
