@@ -6,9 +6,8 @@ import {
   CrosshairMode,
   LineSeries,
   createChart,
-  createSeriesMarkers,
 } from "lightweight-charts";
-import type { IChartApi, LineData, SeriesMarker, Time } from "lightweight-charts";
+import type { IChartApi, LineData, Time } from "lightweight-charts";
 
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
 
@@ -57,7 +56,7 @@ type RegimeRange = {
   isCurrent: boolean;
 };
 
-type ChartRangeKey = "1m" | "3m" | "6m" | "ytd" | "1y";
+type ChartRangeKey = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y" | "5y";
 
 const CHART_RANGES: Array<{ key: ChartRangeKey; label: string; days?: number; ytd?: boolean }> = [
   { key: "1m", label: "1개월", days: 31 },
@@ -65,6 +64,8 @@ const CHART_RANGES: Array<{ key: ChartRangeKey; label: string; days?: number; yt
   { key: "6m", label: "6개월", days: 183 },
   { key: "ytd", label: "연초이후", ytd: true },
   { key: "1y", label: "1년", days: 365 },
+  { key: "3y", label: "3년", days: 365 * 3 },
+  { key: "5y", label: "5년", days: 365 * 5 },
 ];
 
 // 3단계 통합: 상승(빨강) / 중립(녹색) / 하락(파랑). 중립은 sub-label 로 조정/진정 구분.
@@ -84,12 +85,6 @@ const REGIME_LABEL: Record<RegimeKey, string> = {
 
 function parseDateKey(date: string): Date {
   return new Date(`${date}T00:00:00`);
-}
-
-function formatKoreanDate(date: string): string {
-  const [year, month, day] = date.split("-");
-  if (!year || !month || !day) return date;
-  return `${year}년 ${Number(month)}월 ${Number(day)}일`;
 }
 
 function formatKoreanAxisMonth(time: Time): string {
@@ -309,19 +304,6 @@ function buildLineData(history: HistoryPoint[], key: "close" | "ma"): LineData<T
     }));
 }
 
-function buildWeekMarkers(history: HistoryPoint[], weekMarkers: WeekMarker[]): SeriesMarker<Time>[] {
-  const visibleDates = new Set(history.map((point) => point.date));
-  return weekMarkers
-    .filter((marker) => visibleDates.has(marker.date))
-    .map((marker, index) => ({
-      time: marker.date as Time,
-      position: index % 2 === 0 ? "aboveBar" : "belowBar",
-      color: marker.regime ? REGIME_COLOR[marker.regime] : "#868e96",
-      shape: "circle",
-      text: `${marker.week}주`,
-    }));
-}
-
 function renderRegimeBands(
   chart: IChartApi,
   overlay: HTMLDivElement,
@@ -352,6 +334,69 @@ function renderRegimeBands(
   }
 }
 
+/** 현재 + 최근 3개 레짐 구간을 차트 상단에 라벨로 표시 (4개). */
+function renderRecentRegimeLabels(
+  chart: IChartApi,
+  overlay: HTMLDivElement,
+  history: HistoryPoint[],
+): void {
+  overlay.innerHTML = "";
+  const width = overlay.clientWidth;
+  if (width <= 0) return;
+  // 현재(가장 최근) + 직전 3개 = 4개. ranges[0] 이 현재.
+  const ranges = buildRecentRegimeRanges(history, 4);
+
+  // 현재(top)부터 1단계씩 내려가며 4단으로 배치.
+  const ROW_HEIGHT = 22;
+  const TOP_OFFSET = 4;
+  ranges.forEach((range, idx) => {
+    const start = chart.timeScale().timeToCoordinate(range.startDate as Time);
+    const end = chart.timeScale().timeToCoordinate(range.endDate as Time);
+    if (start === null && end === null) return;
+    const left = Math.max(0, start ?? 0);
+    const right = Math.min(width, end ?? width);
+    // 1일치 구간(start === end)도 허용 — center 는 그 단일 좌표.
+    if (right < left) return;
+    const center = (left + right) / 2;
+
+    const label = document.createElement("div");
+    label.style.position = "absolute";
+    label.style.top = `${TOP_OFFSET + idx * ROW_HEIGHT}px`;
+    label.style.left = `${center}px`;
+    label.style.transform = "translateX(-50%)";
+    label.style.padding = "2px 8px";
+    label.style.borderRadius = "10px";
+    label.style.fontSize = "11px";
+    label.style.fontWeight = "700";
+    label.style.color = "#fff";
+    label.style.background = REGIME_COLOR[range.regime];
+    label.style.whiteSpace = "nowrap";
+    label.style.pointerEvents = "none";
+    label.style.boxShadow = "0 2px 6px rgba(15, 23, 42, 0.18)";
+
+    const startTxt = formatShortMonthDay(range.startDate);
+    const endTxt = range.isCurrent ? "현재" : formatShortMonthDay(range.endDate);
+    label.textContent = `${REGIME_LABEL[range.regime].replace(/^[^\s]+\s/, "")} ${startTxt}~${endTxt}`;
+    overlay.appendChild(label);
+
+    // 라벨이 차트 경계를 넘으면 안쪽으로 클램프 (특히 현재 구간이 오른쪽 끝에 있을 때).
+    const half = label.offsetWidth / 2;
+    const minCenter = half + 4;
+    const maxCenter = width - half - 4;
+    const clamped = Math.max(minCenter, Math.min(maxCenter, center));
+    if (clamped !== center) {
+      label.style.left = `${clamped}px`;
+    }
+  });
+}
+
+function formatShortMonthDay(date: string): string {
+  const parts = date.split("-");
+  if (parts.length !== 3) return date;
+  const [, m, d] = parts;
+  return `${Number(m)}/${Number(d)}`;
+}
+
 export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -359,6 +404,7 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
   const [rangeKey, setRangeKey] = useState<ChartRangeKey>("ytd");
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const bandOverlayRef = useRef<HTMLDivElement | null>(null);
+  const labelOverlayRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
@@ -395,10 +441,6 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
     [data, rangeKey],
   );
 
-  const recentRegimeRanges = useMemo(
-    () => buildRecentRegimeRanges(visibleHistory, 3),
-    [visibleHistory],
-  );
   const latestPoint = data?.history.at(-1) ?? null;
   const gaugeData = computeGaugeData({
     trend: latestPoint?.trend_pct,
@@ -413,13 +455,15 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
   useEffect(() => {
     const container = chartContainerRef.current;
     const overlay = bandOverlayRef.current;
+    const labelsOverlay = labelOverlayRef.current;
     const tooltip = tooltipRef.current;
-    if (!container || !overlay || !tooltip) return;
+    if (!container || !overlay || !tooltip || !labelsOverlay) return;
 
     chartRef.current?.remove();
     chartRef.current = null;
     tooltip.style.display = "none";
     overlay.innerHTML = "";
+    labelsOverlay.innerHTML = "";
 
     if (visibleHistory.length < 2) return;
 
@@ -457,7 +501,6 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
       lastValueVisible: true,
     });
     closeSeries.setData(buildLineData(visibleHistory, "close"));
-    createSeriesMarkers(closeSeries, buildWeekMarkers(visibleHistory, data?.week_markers ?? []));
 
     chart.addSeries(LineSeries, {
       color: "#fa5252",
@@ -511,7 +554,10 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
     });
 
     const redrawBands = () => {
-      requestAnimationFrame(() => renderRegimeBands(chart, overlay, visibleHistory));
+      requestAnimationFrame(() => {
+        renderRegimeBands(chart, overlay, visibleHistory);
+        renderRecentRegimeLabels(chart, labelsOverlay, visibleHistory);
+      });
     };
     redrawBands();
     chart.timeScale().subscribeVisibleLogicalRangeChange(redrawBands);
@@ -529,9 +575,10 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
       chart.remove();
       chartRef.current = null;
       overlay.innerHTML = "";
+      labelsOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
-  }, [data?.week_markers, visibleHistory]);
+  }, [visibleHistory]);
 
   return (
     <div
@@ -542,12 +589,6 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
         boxSizing: "border-box",
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
-        <strong style={{ fontSize: "1rem" }}>{name}</strong>
-        <span style={{ fontSize: "0.85rem", color: "#5f6b82" }}>
-          종가 + {maType} {maMonths}개월 MA
-        </span>
-      </div>
       {error ? (
         <div className="alert alert-danger mb-0">{error}</div>
       ) : loading && !data ? (
@@ -733,6 +774,16 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
               style={{ position: "absolute", inset: 0, zIndex: 1 }}
             />
             <div
+              ref={labelOverlayRef}
+              style={{
+                position: "absolute",
+                inset: 0,
+                zIndex: 2,
+                overflow: "hidden",
+                pointerEvents: "none",
+              }}
+            />
+            <div
               ref={tooltipRef}
               style={{
                 display: "none",
@@ -750,26 +801,6 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
               }}
             />
           </div>
-          {recentRegimeRanges.length > 0 ? (
-            <div
-              style={{
-                display: "grid",
-                gap: 4,
-                marginTop: 8,
-                padding: "8px 10px",
-                borderTop: "1px solid #e9ecef",
-                fontSize: "0.86rem",
-                lineHeight: 1.35,
-              }}
-            >
-              {recentRegimeRanges.map((range) => (
-                <div key={`${range.regime}:${range.startDate}`} style={{ color: REGIME_COLOR[range.regime] }}>
-                  <strong>{REGIME_LABEL[range.regime]}</strong>: {formatKoreanDate(range.startDate)} ~{" "}
-                  {range.isCurrent ? "현재" : formatKoreanDate(range.endDate)}
-                </div>
-              ))}
-            </div>
-          ) : null}
         </div>
       )}
     </div>

@@ -217,6 +217,53 @@ def _format_elapsed_since(when: datetime | None) -> str:
     return f"{days}일 {hours}시간 전" if hours else f"{days}일 전"
 
 
+def _format_duration_seconds(seconds: float | int | None) -> str | None:
+    if seconds is None:
+        return None
+    total_seconds = max(0, int(round(float(seconds))))
+    if total_seconds < 60:
+        return f"{total_seconds}초"
+    minutes = total_seconds // 60
+    remain_seconds = total_seconds % 60
+    if minutes < 60:
+        return f"{minutes}분 {remain_seconds}초" if remain_seconds else f"{minutes}분"
+    hours = minutes // 60
+    remain_minutes = minutes % 60
+    return f"{hours}시간 {remain_minutes}분" if remain_minutes else f"{hours}시간"
+
+
+def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = 5) -> float | None:
+    """최근 성공 실행의 평균 소요시간(초)을 반환한다. 성공 로그가 없으면 최근 종료 로그를 사용한다."""
+    log_path = _LOG_DIR / f"{job_key}.log"
+    if not log_path.exists():
+        return None
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return None
+
+    successful: list[float] = []
+    completed: list[float] = []
+    for line in reversed(lines):
+        end_match = _RUN_BATCH_END_PATTERN.match(line.strip())
+        if not end_match or end_match.group("job") != job_key:
+            continue
+        try:
+            elapsed = float(end_match.group("elapsed"))
+        except (TypeError, ValueError):
+            continue
+        completed.append(elapsed)
+        if end_match.group("status") == "성공":
+            successful.append(elapsed)
+            if len(successful) >= sample_size:
+                break
+
+    samples = successful[:sample_size] or completed[:sample_size]
+    if not samples:
+        return None
+    return sum(samples) / len(samples)
+
+
 def _read_last_job_run(job_key: str) -> dict[str, str | None]:
     log_path = _LOG_DIR / f"{job_key}.log"
     if not log_path.exists():
@@ -291,6 +338,55 @@ def get_running_jobs() -> list[str]:
         return []
 
 
+def get_running_job_details() -> dict[str, dict[str, object]]:
+    """실행 중인 배치별 시작 시각과 예상 소요시간 정보를 반환한다."""
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return {}
+        now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        details: dict[str, dict[str, object]] = {}
+        for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1, "acquired_at": 1}):
+            key = str(doc.get("_id") or "")
+            if key not in _SCRIPT_BY_ACTION:
+                continue
+            expires_at = doc.get("expires_at")
+            if isinstance(expires_at, datetime):
+                comparable_expires_at = (
+                    expires_at.astimezone(timezone.utc).replace(tzinfo=None) if expires_at.tzinfo else expires_at
+                )
+                if comparable_expires_at < now_utc_naive:
+                    continue
+
+            acquired_at = doc.get("acquired_at")
+            started_at: datetime | None = None
+            if isinstance(acquired_at, datetime):
+                started_at = acquired_at.astimezone(ZoneInfo("Asia/Seoul")) if acquired_at.tzinfo else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+
+            estimated_seconds = _read_average_job_elapsed_seconds(key)
+            elapsed_seconds = max(0, int((now_kst - started_at).total_seconds())) if started_at else None
+            remaining_seconds = (
+                max(0, int(round(estimated_seconds)) - int(elapsed_seconds))
+                if estimated_seconds is not None and elapsed_seconds is not None
+                else None
+            )
+            details[key] = {
+                "started_at": started_at.isoformat() if started_at else None,
+                "estimated_seconds": int(round(estimated_seconds)) if estimated_seconds is not None else None,
+                "elapsed_seconds": elapsed_seconds,
+                "remaining_seconds": remaining_seconds,
+                "estimated_display": _format_duration_seconds(estimated_seconds),
+                "remaining_display": _format_duration_seconds(remaining_seconds),
+            }
+        return details
+    except Exception as exc:
+        _logger.warning("batch_locks 상세 조회 실패: %s", exc)
+        return {}
+
+
 def load_system_data() -> dict[str, object]:
     accounts = load_account_configs()
     return {
@@ -309,6 +405,7 @@ def load_system_data() -> dict[str, object]:
             "별도로 유지됩니다. (정의: `infra/cron/crontab`)"
         ),
         "running_jobs": get_running_jobs(),
+        "running_job_details": get_running_job_details(),
         "is_deploying": is_deploying(),
         "last_run_by_job": {row["key"]: _read_last_job_run(str(row["key"])) for row in SCHEDULE_ROWS},
         "next_run_by_job": {row["key"]: _build_next_run_payload(row.get("schedule")) for row in SCHEDULE_ROWS},

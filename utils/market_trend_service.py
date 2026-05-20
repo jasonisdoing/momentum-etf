@@ -356,7 +356,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
     try:
         df = yf.download(
             tickers=yf_ticker,
-            period="2y",
+            period="10y",
             interval="1d",
             progress=False,
             auto_adjust=True,
@@ -411,8 +411,8 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         logger.exception("MA 계산 실패: %s (type=%s, days=%d)", yf_ticker, ma_type, ma_days)
         ma_series = None
 
-    # 최근 12개월 = 240 거래일
-    tail = TRADING_DAYS_PER_MONTH * 12
+    # 최근 5년치 = 약 1200 거래일 (프론트에서 1개월~5년 범위 선택 가능)
+    tail = TRADING_DAYS_PER_MONTH * 12 * 5
     length = min(len(close_series), len(ma_series) if ma_series is not None else len(close_series))
     take = min(length, tail)
 

@@ -19,12 +19,22 @@ type SystemLastRunInfo = {
   display?: string | null;
 };
 
+type SystemRunningJobDetail = {
+  started_at?: string | null;
+  estimated_seconds?: number | null;
+  elapsed_seconds?: number | null;
+  remaining_seconds?: number | null;
+  estimated_display?: string | null;
+  remaining_display?: string | null;
+};
+
 type SystemData = {
   summary_rows: SystemSummaryRow[];
   schedule_rows: SystemScheduleRow[];
   schedule_note: string;
   running_jobs: string[];
   last_run_by_job?: Record<string, SystemLastRunInfo>;
+  running_job_details?: Record<string, SystemRunningJobDetail>;
 };
 
 type SystemAction =
@@ -47,4 +57,11 @@ export async function triggerSystemAction(action: SystemAction): Promise<string>
   return payload.message;
 }
 
-export type { SystemAction, SystemData, SystemLastRunInfo, SystemScheduleRow, SystemSummaryRow };
+export type {
+  SystemAction,
+  SystemData,
+  SystemLastRunInfo,
+  SystemRunningJobDetail,
+  SystemScheduleRow,
+  SystemSummaryRow,
+};
