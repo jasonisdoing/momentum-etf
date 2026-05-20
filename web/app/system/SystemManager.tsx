@@ -26,6 +26,14 @@ type SystemLastRunInfo = {
   display?: string | null;
 };
 
+type SystemRunningJobDetail = {
+  started_at?: string | null;
+  estimated_seconds?: number | null;
+  remaining_seconds?: number | null;
+  estimated_display?: string | null;
+  remaining_display?: string | null;
+};
+
 type SystemNextRunInfo = {
   at?: string | null;
   display?: string | null;
@@ -46,6 +54,7 @@ type SystemResponse = {
   running_jobs?: string[];
   is_deploying?: boolean;
   last_run_by_job?: Record<string, SystemLastRunInfo>;
+  running_job_details?: Record<string, SystemRunningJobDetail>;
   next_run_by_job?: Record<string, SystemNextRunInfo>;
   error?: string;
 };
@@ -57,6 +66,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   anyRunning: boolean;
   isDeploying: boolean;
   lastRunDisplay: string;
+  runningCommandPrefix: string;
   nextRunAt: string | null;
   nextRunDisplay: string;
 };
@@ -77,6 +87,35 @@ function formatRelativeUntil(iso: string | null | undefined, nowMs: number): str
   const days = Math.floor(deltaSec / 86400);
   const hours = Math.floor((deltaSec % 86400) / 3600);
   return hours ? `${days}일 ${hours}시간 후` : `${days}일 후`;
+}
+
+function formatDurationSeconds(seconds: number): string {
+  const totalSec = Math.max(0, Math.round(seconds));
+  if (totalSec < 60) return `${totalSec}초`;
+  const minutes = Math.floor(totalSec / 60);
+  const remainSeconds = totalSec % 60;
+  if (minutes < 60) return remainSeconds ? `${minutes}분 ${remainSeconds}초` : `${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return remainMinutes ? `${hours}시간 ${remainMinutes}분` : `${hours}시간`;
+}
+
+function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, nowMs: number): string {
+  const estimatedSeconds = detail?.estimated_seconds;
+  const estimatedDisplay = detail?.estimated_display;
+  if (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0 || !detail?.started_at) {
+    return "▶ 실행 중... ";
+  }
+  const startedMs = new Date(detail.started_at).getTime();
+  if (Number.isNaN(startedMs)) {
+    return estimatedDisplay
+      ? `▶ 실행 중(예상시간 ${estimatedDisplay})... `
+      : "▶ 실행 중... ";
+  }
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
+  const remainingSeconds = Math.max(0, Math.round(estimatedSeconds - elapsedSeconds));
+  const remainingText = remainingSeconds > 0 ? `${formatDurationSeconds(remainingSeconds)} 남음` : "예상시간 초과";
+  return `▶ 실행 중(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
 }
 
 function formatCount(value: number): string {
@@ -137,7 +176,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     },
     cellRenderer: (params: { value: string; data?: SystemScheduleGridRow }) => (
       <span className="appCodeText">
-        {params.data?.running ? "▶ 실행 중... " : ""}
+        {params.data?.running ? params.data.runningCommandPrefix : ""}
         {params.value}
       </span>
     ),
@@ -157,6 +196,7 @@ export function SystemManager({
   const [runningJobs, setRunningJobs] = useState<string[]>([]);
   const [isDeploying, setIsDeploying] = useState(false);
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
+  const [runningJobDetails, setRunningJobDetails] = useState<Record<string, SystemRunningJobDetail>>({});
   const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
@@ -174,15 +214,16 @@ export function SystemManager({
       anyRunning,
       isDeploying,
       lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
+      runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
     };
   });
 
   useEffect(() => {
-    const id = window.setInterval(() => setNowTick(Date.now()), 30_000);
+    const id = window.setInterval(() => setNowTick(Date.now()), anyRunning ? 1000 : 30_000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [anyRunning]);
 
   useEffect(() => {
     onHeaderSummaryChange?.({
@@ -211,6 +252,7 @@ export function SystemManager({
         setRunningJobs(payload.running_jobs ?? []);
         setIsDeploying(Boolean(payload.is_deploying));
         setLastRunByJob(payload.last_run_by_job ?? {});
+        setRunningJobDetails(payload.running_job_details ?? {});
         setNextRunByJob(payload.next_run_by_job ?? {});
         if (initial) setError(null);
       } catch (loadError) {
