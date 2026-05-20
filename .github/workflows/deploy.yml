@@ -96,28 +96,30 @@ jobs:
             sudo docker compose pull node_app
             # 앱 서비스만 순차 교체한다. MongoDB는 배포마다 건드리지 않는다.
             sudo docker compose up -d --no-deps fastapi_app
-            for i in $(seq 1 60); do
+            for i in $(seq 1 30); do
               if sudo docker compose exec -T fastapi_app python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/internal/health', timeout=2)" >/dev/null 2>&1; then
                 echo ">>> fastapi_app health check passed"
                 break
               fi
-              if [ "$i" -eq 60 ]; then
+              if [ "$i" -eq 30 ]; then
                 echo "fastapi_app health check failed" >&2
+                sudo docker compose logs --tail=80 fastapi_app >&2
                 exit 1
               fi
-              sleep 2
+              sleep 1
             done
             sudo docker compose up -d --no-deps node_app
-            for i in $(seq 1 60); do
+            for i in $(seq 1 30); do
               if sudo docker compose exec -T node_app node -e "fetch('http://127.0.0.1:3000/api/live').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" >/dev/null 2>&1; then
                 echo ">>> node_app live check passed"
                 break
               fi
-              if [ "$i" -eq 60 ]; then
+              if [ "$i" -eq 30 ]; then
                 echo "node_app live check failed" >&2
+                sudo docker compose logs --tail=80 node_app >&2
                 exit 1
               fi
-              sleep 2
+              sleep 1
             done
             sudo docker compose up -d --no-deps hybrid_proxy
             # 이미지 정리는 배포 중 CPU/디스크 I/O 피크를 만들기 때문에 배포 경로에서는 실행하지 않는다.
