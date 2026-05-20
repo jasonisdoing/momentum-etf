@@ -2452,28 +2452,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
     },
     {
-      field: "net_profit",
-      headerName: "계좌 손익",
-      minWidth: 120,
-      flex: 1,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
-          : "",
-    },
-    {
-      field: "net_profit_pct",
-      headerName: "수익률",
-      minWidth: 90,
-      flex: 0.7,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{`${(params.value ?? 0).toFixed(2)}%`}</span>
-          : "",
-    },
-    {
       field: "daily_profit",
       headerName: "금일 손익",
       minWidth: 110,
@@ -2500,6 +2478,28 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
         params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
           ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
+          : "",
+    },
+    {
+      field: "net_profit",
+      headerName: "계좌 손익",
+      minWidth: 120,
+      flex: 1,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
+          : "",
+    },
+    {
+      field: "net_profit_pct",
+      headerName: "수익률",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{`${(params.value ?? 0).toFixed(2)}%`}</span>
           : "",
     },
     {
