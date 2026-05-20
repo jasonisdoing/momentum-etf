@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getAuthCookieName, verifySessionToken } from "./lib/auth";
 
 function isPublicPath(pathname: string): boolean {
-  return pathname === "/login" || pathname.startsWith("/api/auth/");
+  return pathname === "/login" || pathname === "/api/live" || pathname.startsWith("/api/auth/");
 }
 
 function isStaticPath(pathname: string): boolean {
