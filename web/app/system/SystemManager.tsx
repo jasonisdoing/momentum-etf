@@ -114,7 +114,12 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
   }
   const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
   const remainingSeconds = Math.max(0, Math.round(estimatedSeconds - elapsedSeconds));
-  const remainingText = remainingSeconds > 0 ? `${formatDurationSeconds(remainingSeconds)} 남음` : "예상시간 초과";
+  // 예상시간 초과 시: "+12초 초과" 처럼 얼만큼 초과했는지 표시. 2배 초과시 곧 lock 자동 제거됨.
+  const overrunSeconds = Math.max(0, Math.round(elapsedSeconds - estimatedSeconds));
+  const remainingText =
+    remainingSeconds > 0
+      ? `${formatDurationSeconds(remainingSeconds)} 남음`
+      : `+${formatDurationSeconds(overrunSeconds)} 초과`;
   return `▶ 실행 중(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
 }
 
