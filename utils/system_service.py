@@ -311,12 +311,65 @@ def _read_last_job_run(job_key: str) -> dict[str, str | None]:
     }
 
 
+def _cleanup_stale_locks() -> int:
+    """예상 소요시간의 2배를 초과한 락은 stale 로 간주하고 삭제한다.
+
+    - 평균(예상) 소요시간을 모르는 락은 건드리지 않는다.
+    - elapsed > estimated * 2 인 락만 삭제한다.
+
+    Returns:
+        삭제된 락 개수
+    """
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return 0
+        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        deleted = 0
+        for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1}):
+            key = str(doc.get("_id") or "")
+            if key not in _SCRIPT_BY_ACTION:
+                continue
+            acquired_at = doc.get("acquired_at")
+            if not isinstance(acquired_at, datetime):
+                continue
+            started_at = (
+                acquired_at.astimezone(ZoneInfo("Asia/Seoul"))
+                if acquired_at.tzinfo
+                else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+            )
+            elapsed_seconds = int((now_kst - started_at).total_seconds())
+            if elapsed_seconds <= 0:
+                continue
+            estimated_seconds = _read_average_job_elapsed_seconds(key)
+            if estimated_seconds is None or estimated_seconds <= 0:
+                continue
+            if elapsed_seconds > int(estimated_seconds * 2):
+                try:
+                    db.batch_locks.delete_one({"_id": key})
+                    deleted += 1
+                    _logger.warning(
+                        "Stale lock 제거: job=%s elapsed=%ds estimated=%ds",
+                        key, elapsed_seconds, int(estimated_seconds),
+                    )
+                except Exception as exc:
+                    _logger.warning("Stale lock 삭제 실패 (job=%s): %s", key, exc)
+        return deleted
+    except Exception as exc:
+        _logger.warning("Stale lock 정리 실패: %s", exc)
+        return 0
+
+
 def get_running_jobs() -> list[str]:
     """현재 실행 중인 배치 키 목록을 반환합니다.
 
     MongoDB `batch_locks` 컬렉션을 조회합니다. TTL 인덱스가 만료된 락을
-    자동 정리하므로 stale 처리는 별도로 하지 않습니다.
+    자동 정리하며, 예상 소요시간 2배를 초과한 락도 stale 로 보고 삭제합니다.
     """
+    # 조회 전에 stale 락 정리 (조회/상세 모두에서 효과)
+    _cleanup_stale_locks()
     try:
         from utils.db_manager import get_db_connection
 
