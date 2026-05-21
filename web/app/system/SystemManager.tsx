@@ -159,16 +159,6 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     width: 300,
     cellRenderer: (params: { value?: string }) => {
       const text = params.value ?? "";
-      const pauseTag = "(임시중지)";
-      if (text.startsWith(pauseTag)) {
-        const rest = text.slice(pauseTag.length);
-        return (
-          <span>
-            <span style={{ color: "#d62828", fontWeight: 700 }}>{pauseTag}</span>
-            {rest}
-          </span>
-        );
-      }
       return text || "-";
     },
   },

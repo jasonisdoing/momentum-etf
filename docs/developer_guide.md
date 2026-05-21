@@ -2,6 +2,26 @@
 
 이 문서는 Momentum ETF 순위 시스템의 아키텍처, 데이터 흐름, 그리고 개발 시 반드시 지켜야 할 정합성 원칙을 설명합니다.
 
+## 0. 로컬 실행
+
+개발과 자동 배치는 **두 개의 터미널** 로 나누어 실행합니다.
+
+```bash
+# 터미널 1 — 웹 (FastAPI + Next dev)
+python run_local_dev.py
+
+# 터미널 2 — 배치 스케줄러 (APScheduler)
+python run_local_scheduler.py
+```
+
+- `run_local_dev.py` 는 FastAPI(`uvicorn`, 포트 8000) 와 Next dev(`npm run dev`, 포트 3000) 를 함께 띄웁니다.
+- `run_local_scheduler.py` 는 `infra/cron/crontab` 을 파싱해 APScheduler 로 자동 배치를 돌립니다.
+  - `APP_TYPE=Local` 로 자동 설정되어 `batch_locks` 의 owner 가 구분됩니다.
+  - 노트북이 꺼져 있었던 시간의 누락 분은 따라잡지 않습니다 (다음 예약 시각부터 동작).
+  - Ctrl+C 로 깔끔히 종료됩니다.
+- VM 의 cron 은 제거되어 있으므로, **자동 배치를 돌리려면 터미널 2 가 켜져 있어야** 합니다.
+- 수동 1회 실행은 `/system` 화면의 버튼으로도 가능하며, 동일한 `batch_locks` 락을 사용하므로 자동 실행과 충돌하지 않습니다.
+
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조

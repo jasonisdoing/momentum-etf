@@ -74,3 +74,29 @@ location = /robots.txt {
 - Node 앱이 내부 네트워크에서 FastAPI를 호출
 - nginx-proxy가 `etf.dojason.com` 요청을 momentum-etf-app-1 컨테이너로 프록시
 - SSL은 acme-companion이 Let's Encrypt 인증서로 자동 처리
+
+---
+
+## 배치 운영
+
+### VM cron 제거
+
+1 OCPU ARM VM 에서 배치 실행 시 CPU 100% 폭주로 시스템 다운이 반복돼,
+momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.sh --uninstall`).
+같은 VM 의 `leverage-switching` cron 은 영향받지 않는다.
+
+### 로컬 스케줄러로 전환
+
+모든 momentum-etf 자동 배치는 로컬(Mac) 의 `run_local_scheduler.py` 가 실행한다.
+이 프로세스는 `infra/cron/crontab` 파일을 단일 진실 소스로 파싱하여
+APScheduler 에 등록한다.
+
+- 락 메커니즘: MongoDB `batch_locks` 컬렉션 (`_id=<job_name>` unique)
+  → 로컬 자동 실행과 `/system` 화면 수동 실행이 동일한 락을 거치므로 중복 방지됨
+- 락 소유자 식별: `APP_TYPE` 환경변수 (`Local` vs 미설정 시 `PROD`)
+- 노트북이 꺼져 있던 시간의 미실행 분은 따라잡지 않는다 (misfire_grace_time=None)
+
+### VM 의 역할 (현재)
+
+- Docker 컨테이너 (웹 + FastAPI + MongoDB + nginx-proxy) 만 가동
+- 자동 배치 없음. 수동 실행이 필요하면 `/system` 화면의 버튼으로 트리거
