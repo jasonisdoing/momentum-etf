@@ -81,6 +81,7 @@ def _acquire_db_lock(job_name: str, ttl_seconds: int = 1800) -> tuple[object, st
     expires_at = now + timedelta(seconds=ttl_seconds)
     host = socket.gethostname()
     pid = os.getpid()
+    app_type = (os.environ.get("APP_TYPE") or "PROD").strip() or "PROD"
 
     # 만료된 락은 미리 제거(클럭 차이로 TTL 인덱스 지연이 있을 수 있음)
     db.batch_locks.delete_many({"_id": job_name, "expires_at": {"$lt": now}})
@@ -91,6 +92,7 @@ def _acquire_db_lock(job_name: str, ttl_seconds: int = 1800) -> tuple[object, st
                 "_id": job_name,
                 "host": host,
                 "pid": pid,
+                "app_type": app_type,
                 "acquired_at": now,
                 "expires_at": expires_at,
             }

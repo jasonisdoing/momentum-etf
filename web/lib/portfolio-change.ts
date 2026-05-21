@@ -19,11 +19,18 @@ export type PortfolioChangeFxRate = {
   change_pct?: number | null;
 };
 
-/** 통화별 분석 항목 */
+/** 통화별 분석 항목.
+ *
+ * - change_pct: 현지 통화 기준 변동률 (참조용)
+ * - adjusted_change_pct: 환율을 합산한 KRW 환산 변동률 (UI 표시용)
+ *   외화: (1 + change_pct/100) × (1 + fx_pct/100) − 1
+ *   KRW: change_pct 와 동일
+ */
 export type PortfolioChangeBreakdownItem = {
   currency: string;
   label: string;
   change_pct: number;
+  adjusted_change_pct: number;
   weight: number;
 };
 
@@ -114,6 +121,7 @@ export function calcPortfolioChange(
       currency,
       label: getCurrencyRegionLabel(currency),
       change_pct: componentChangePct,
+      adjusted_change_pct: adjustedChangePct,
       weight: group.weight,
     });
     coverageWeight += group.weight;

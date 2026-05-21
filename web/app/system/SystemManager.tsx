@@ -32,6 +32,8 @@ type SystemRunningJobDetail = {
   remaining_seconds?: number | null;
   estimated_display?: string | null;
   remaining_display?: string | null;
+  owner_app_type?: string | null;
+  is_mine?: boolean;
 };
 
 type SystemNextRunInfo = {
@@ -101,6 +103,11 @@ function formatDurationSeconds(seconds: number): string {
 }
 
 function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, nowMs: number): string {
+  // 다른 인스턴스가 락을 잡고 있으면 간단히 "[그 인스턴스]에서 작업중" 만 표시.
+  if (detail && detail.is_mine === false) {
+    const owner = (detail.owner_app_type ?? "다른 인스턴스").toUpperCase();
+    return `▶ ${owner}에서 작업중... `;
+  }
   const estimatedSeconds = detail?.estimated_seconds;
   const estimatedDisplay = detail?.estimated_display;
   if (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0 || !detail?.started_at) {
