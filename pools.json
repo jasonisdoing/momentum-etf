@@ -19,10 +19,10 @@
       "country_code": "kor",
       "currency": "KRW",
       "type_source": "Naver",
-      "TOP_N_HOLD": 4,
-      "HOLDING_BONUS_SCORE": 20,
+      "TOP_N_HOLD": 3,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 4,
+      "MA_MONTHS": 6,
       "RSI_LIMIT": 100
     },
     {
@@ -36,7 +36,7 @@
       "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 4,
+      "MA_MONTHS": 5,
       "RSI_LIMIT": 100
     },
     {
