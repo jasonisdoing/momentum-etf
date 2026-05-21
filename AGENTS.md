@@ -54,8 +54,6 @@
    - 전략 계산·로직      → `docs/strategy_logic.md`
    - 전체 구조 개요      → `docs/project_overview.md`
 
-3. 갱신 후 응답 끝에 한 줄로 보고한다.
-   형식: `📝 docs 갱신: <파일> (<핵심 변경 요약>)`
 
 ## 6. 작업 방식
 

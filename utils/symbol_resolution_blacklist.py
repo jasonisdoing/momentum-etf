@@ -3,7 +3,7 @@
 토스/야후 등 외부 심볼 매핑에 실패한 티커를 일정 시간 동안 skip 하기 위한 파일 캐시.
 
 - 위치: data/yahoo_resolve_blacklist.json
-- TTL: 24시간 (지나면 자동 휘발 후 재시도)
+- TTL: 1시간 (지나면 자동 휘발 후 재시도)
 - 동시성: 같은 프로세스 내에서는 threading.Lock 으로 보호.
   여러 프로세스가 동시에 쓸 가능성은 cron 스케줄상 거의 없음 (충돌 시 최악의 경우 한 번의 항목 손실 — 다음 실행에서 다시 마킹됨).
 """
@@ -20,7 +20,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 _BLACKLIST_PATH = Path(__file__).resolve().parents[1] / "data" / "yahoo_resolve_blacklist.json"
-_TTL = timedelta(hours=24)
+_TTL = timedelta(hours=1)
 _LOCK = threading.Lock()
 
 
