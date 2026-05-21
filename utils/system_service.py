@@ -30,58 +30,68 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
+# ⚠️ 자동 배치 임시중지 상태. 모든 cron 항목은 infra/cron/crontab 에서도
+# 주석 처리되어 있고, UI 의 cadence 앞에 "(임시중지)" 표시를 붙여 사용자에게
+# 알린다. 재가동 시: (1) 아래 cadence 의 "(임시중지) " 접두어 제거,
+# (2) infra/cron/crontab 의 # PAUSED → 원복, (3) 서버 재배포.
 SCHEDULE_ROWS = [
     {
         "key": "asset_summary",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "cadence": "평일 09:40, 16:40 KST",
+        "cadence": "(임시중지) 평일 09:40, 16:40 KST",
         "command": "python scripts/slack_asset_summary.py",
         "schedule": {"minutes": [40], "hours": [9, 16], "weekdays": _WEEKDAYS_MON_FRI},
+        "paused": True,
     },
     {
         "key": "data_aggregate",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
-        "cadence": "평일 09:15 ~ 16:15 매시 :15 KST",
+        "cadence": "(임시중지) 평일 09:15 ~ 16:15 매시 :15 KST",
         "command": "python scripts/collect_data.py",
         "schedule": {
             "minutes": [15],
             "hours": list(range(9, 17)),
             "weekdays": _WEEKDAYS_MON_FRI,
         },
+        "paused": True,
     },
     {
         "key": "cache_refresh",
         "job": "가격 캐시 업데이트",
         "target": "모든 종목 가격",
-        "cadence": "월~토 24시간 매시 0분 KST",
+        "cadence": "(임시중지) 월~토 24시간 매시 0분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        "paused": True,
     },
     {
         "key": "market_hours_analysis",
         "job": "장 시간 분석",
         "target": "시장 스케줄",
-        "cadence": "평일 07:00 KST",
+        "cadence": "(임시중지) 평일 07:00 KST",
         "command": "python scripts/analyze_market_hours.py",
         "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+        "paused": True,
     },
     {
         "key": "metadata_updater",
         "job": "종목 메타데이터 업데이트",
         "target": "모든 종목타입",
-        "cadence": "평일 09:45 ~ 17:45 매시 45분 KST",
+        "cadence": "(임시중지) 평일 09:45 ~ 17:45 매시 45분 KST",
         "command": "python scripts/stock_meta_cache_updater.py",
         "schedule": {"minutes": [45], "hours": list(range(9, 18)), "weekdays": _WEEKDAYS_MON_FRI},
+        "paused": True,
     },
     {
         "key": "us_market_stocks",
         "job": "미국 개별주 업데이트",
         "target": "S&P500, NASDAQ100",
-        "cadence": "평일 08:00 KST",
+        "cadence": "(임시중지) 평일 08:00 KST",
         "command": "python scripts/update_us_market_stocks.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+        "paused": True,
     },
 ]
 
@@ -400,9 +410,10 @@ def load_system_data() -> dict[str, object]:
         ],
         "schedule_rows": SCHEDULE_ROWS,
         "schedule_note": (
-            "VM 호스트 cron 이 `infra/cron/run_batch.py` 래퍼를 통해 실행하며 "
-            "실패 결과만 슬랙으로 알립니다. 개별 스크립트가 보내는 본문 알림은 "
-            "별도로 유지됩니다. (정의: `infra/cron/crontab`)"
+            "⚠️ 자동 배치 임시중지 — VM CPU 부담 회피를 위해 모든 cron 일정이 중단되었습니다. "
+            "현재 모든 배치는 로컬(Mac)에서 수동으로 실행합니다. "
+            "재개하려면 `utils/system_service.py` 의 `(임시중지)` 접두어와 "
+            "`infra/cron/crontab` 의 `# PAUSED` 주석을 원복하세요."
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),
