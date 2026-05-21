@@ -365,7 +365,7 @@ type DashboardRenderableMetricItem = {
 
 const DASHBOARD_ROW1_LABELS = ["총 자산", "투자 원금", "금일 손익", "금주 손익"] as const;
 const DASHBOARD_ROW2_LABELS = ["누적 손익", "현금 잔고", "금일 손익", "금주 손익"] as const;
-const DASHBOARD_LEFT_LABELS = ["총 자산", "투자 원금", "누적 손익", "현금 잔고"] as const;
+const DASHBOARD_LEFT_LABELS = ["총 자산", "투자 원금", "누적 손익", "평가 손익 (인출분 합산)"] as const;
 
 const DASHBOARD_ACCOUNT_WEIGHTS: { account_id: string; icon: string; label: string }[] = [
   { account_id: "kor_account", icon: "🇰🇷", label: "국내 계좌" },

@@ -270,12 +270,25 @@ def load_dashboard_data() -> dict[str, Any]:
     profit_count = normalize_number((latest_weekly or {}).get("profit_count"))
     loss_count = normalize_number((latest_weekly or {}).get("loss_count"))
 
+    # 평가 손익 (인출분 합산): 총 자산 − 투자 원금 (인출액도 수익에 포함한 운용 성과 총합)
+    gross_cumulative_profit = total_assets - total_principal
+    gross_cumulative_return_pct = (
+        round((gross_cumulative_profit / total_principal) * 100, 2) if total_principal > 0 else 0.0
+    )
+
     metrics_row2 = [
         {
             "label": "누적 손익",
             "value": normalize_number((latest_weekly or {}).get("cumulative_profit")),
             "kind": "money",
             "sub_value": normalize_number((latest_weekly or {}).get("cumulative_return_pct")),
+            "sub_kind": "percent",
+        },
+        {
+            "label": "평가 손익 (인출분 합산)",
+            "value": gross_cumulative_profit,
+            "kind": "money",
+            "sub_value": gross_cumulative_return_pct,
             "sub_kind": "percent",
         },
         {"label": "현금 잔고", "value": total_cash, "kind": "money"},
@@ -323,6 +336,12 @@ def load_dashboard_data() -> dict[str, Any]:
         "총 자산": _spark([normalize_number(d.get("total_assets")) for d in sparkline_source]),
         "투자 원금": _spark([normalize_number(d.get("total_principal")) for d in sparkline_source]),
         "누적 손익": _spark([normalize_number(d.get("cumulative_profit")) for d in sparkline_source]),
+        "평가 손익 (인출분 합산)": _spark(
+            [
+                normalize_number(d.get("total_assets")) - normalize_number(d.get("total_principal"))
+                for d in sparkline_source
+            ]
+        ),
         "현금 잔고": _spark(
             [
                 normalize_number(d.get("total_principal")) - normalize_number(d.get("purchase_amount"))
