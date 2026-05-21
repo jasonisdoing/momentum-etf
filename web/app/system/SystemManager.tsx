@@ -140,7 +140,26 @@ const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   { field: "job", headerName: "작업", minWidth: 140, width: 150 },
   { field: "target", headerName: "대상", minWidth: 140, width: 180 },
-  { field: "cadence", headerName: "자동 주기", minWidth: 260, width: 300 },
+  {
+    field: "cadence",
+    headerName: "자동 주기",
+    minWidth: 260,
+    width: 300,
+    cellRenderer: (params: { value?: string }) => {
+      const text = params.value ?? "";
+      const pauseTag = "(임시중지)";
+      if (text.startsWith(pauseTag)) {
+        const rest = text.slice(pauseTag.length);
+        return (
+          <span>
+            <span style={{ color: "#d62828", fontWeight: 700 }}>{pauseTag}</span>
+            {rest}
+          </span>
+        );
+      }
+      return text || "-";
+    },
+  },
   {
     field: "nextRunDisplay",
     headerName: "다음 실행",
