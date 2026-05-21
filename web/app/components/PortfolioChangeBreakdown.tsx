@@ -7,7 +7,8 @@ type PortfolioChangeFxRate = {
 
 type PortfolioChangeBreakdownProps = {
   items: PortfolioChangeBreakdownItem[];
-  fxRates: PortfolioChangeFxRate[];
+  /** 호환용 — 더 이상 사용하지 않음 (합산값은 item.adjusted_change_pct 에 포함). */
+  fxRates?: PortfolioChangeFxRate[];
   variant: "detail" | "compact";
   emptyText: string;
 };
@@ -27,18 +28,26 @@ function getSignedClass(value: number | null | undefined): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
-function buildFxRateMap(fxRates: PortfolioChangeFxRate[]): Map<string, PortfolioChangeFxRate> {
-  const fxRateByCurrency = new Map<string, PortfolioChangeFxRate>();
-  for (const fx of fxRates) {
-    const currency = String(fx.currency || "").trim().toUpperCase();
-    if (currency) fxRateByCurrency.set(currency, fx);
-  }
-  return fxRateByCurrency;
+/** 다중 통화일 때 표시할 "합계" 정보를 계산.
+ * 가중평균 = Σ(weight × adjusted_change_pct) / Σ(weight)
+ * → "추적된 추세가 전체에 동일하게 적용된다고 가정한 추정 평균 수익률"
+ */
+function computeSummary(items: PortfolioChangeBreakdownItem[]): {
+  totalWeight: number;
+  weightedAvg: number;
+} | null {
+  if (items.length < 2) return null;
+  const totalWeight = items.reduce((sum, it) => sum + it.weight, 0);
+  if (totalWeight <= 0) return null;
+  const weightedSum = items.reduce((sum, it) => sum + it.weight * it.adjusted_change_pct, 0);
+  return {
+    totalWeight,
+    weightedAvg: weightedSum / totalWeight,
+  };
 }
 
 export function PortfolioChangeBreakdown({
   items,
-  fxRates,
   variant,
   emptyText,
 }: PortfolioChangeBreakdownProps) {
@@ -46,50 +55,86 @@ export function PortfolioChangeBreakdown({
     return <span>{emptyText}</span>;
   }
 
-  const fxRateByCurrency = buildFxRateMap(fxRates);
+  const summary = computeSummary(items);
 
   if (variant === "detail") {
     return (
       <div className="portfolioChangeBreakdownDetail" aria-label="포트폴리오 변동 상세">
-        {items.map((item) => {
-          const fx = fxRateByCurrency.get(item.currency);
-          return (
-            <div key={item.currency} className="portfolioChangeBreakdownDetailRow">
-              <span className="portfolioChangeBreakdownRegion">{item.label}({formatWeight(item.weight)})</span>
-              <span className={getSignedClass(item.change_pct)}>{formatSignedPercent(item.change_pct)}</span>
-              {fx ? (
-                <span className="portfolioChangeBreakdownDetailFx">
-                  · 환율{" "}
-                  <span className={getSignedClass(fx.change_pct ?? null)}>
-                    {formatSignedPercent(fx.change_pct ?? null)}
+        {summary ? (
+          <>
+            <div className="portfolioChangeBreakdownDetailRow portfolioChangeBreakdownTotal">
+              <span className="portfolioChangeBreakdownRegion">
+                <strong>합계</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>(추적 {formatWeight(summary.totalWeight)})</span>
+              </span>
+              <strong className={getSignedClass(summary.weightedAvg)} style={{ fontSize: "1.2em" }}>
+                {formatSignedPercent(summary.weightedAvg)}
+              </strong>
+            </div>
+            <div className="portfolioChangeBreakdownDetailRow portfolioChangeBreakdownInline">
+              {items.map((item, idx) => (
+                <span key={item.currency}>
+                  {idx > 0 ? ", " : ""}
+                  <span>{item.label}({formatWeight(item.weight)})</span>{" "}
+                  <span className={getSignedClass(item.adjusted_change_pct)}>
+                    {formatSignedPercent(item.adjusted_change_pct)}
                   </span>
                 </span>
-              ) : null}
+              ))}
             </div>
-          );
-        })}
+          </>
+        ) : (
+          // 단일 통화 — 합계 라인과 동일한 강조 스타일
+          items.map((item) => (
+            <div
+              key={item.currency}
+              className="portfolioChangeBreakdownDetailRow portfolioChangeBreakdownTotal"
+            >
+              <span className="portfolioChangeBreakdownRegion">
+                <strong>{item.label}</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>({formatWeight(item.weight)})</span>
+              </span>
+              <strong className={getSignedClass(item.adjusted_change_pct)} style={{ fontSize: "1.2em" }}>
+                {formatSignedPercent(item.adjusted_change_pct)}
+              </strong>
+            </div>
+          ))
+        )}
       </div>
     );
   }
+  // compact variant
   return (
     <span className="portfolioChangeBreakdownCompact">
-      {items.map((item) => {
-        const fx = fxRateByCurrency.get(item.currency);
-        return (
-          <span key={item.currency} className="portfolioChangeBreakdownCompactItem">
-            <span>{item.label}({formatWeight(item.weight)})</span>
-            <span className={getSignedClass(item.change_pct)}>{formatSignedPercent(item.change_pct)}</span>
-            {fx ? (
-              <span className="portfolioChangeBreakdownCompactFx">
-                · 환율{" "}
-                <span className={getSignedClass(fx.change_pct ?? null)}>
-                  {formatSignedPercent(fx.change_pct ?? null)}
+      {summary ? (
+        <>
+          <span className="portfolioChangeBreakdownCompactItem">
+            <strong>합계</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>(추적 {formatWeight(summary.totalWeight)})</span>{" "}
+            <strong className={getSignedClass(summary.weightedAvg)} style={{ fontSize: "1.2em" }}>
+              {formatSignedPercent(summary.weightedAvg)}
+            </strong>
+          </span>
+          <span className="portfolioChangeBreakdownCompactItem portfolioChangeBreakdownInline">
+            {items.map((item, idx) => (
+              <span key={item.currency}>
+                {idx > 0 ? ", " : ""}
+                <span>{item.label}({formatWeight(item.weight)})</span>{" "}
+                <span className={getSignedClass(item.adjusted_change_pct)}>
+                  {formatSignedPercent(item.adjusted_change_pct)}
                 </span>
               </span>
-            ) : null}
+            ))}
           </span>
-        );
-      })}
+        </>
+      ) : (
+        // 단일 통화 — 합계 라인과 동일한 강조 스타일
+        items.map((item) => (
+          <span key={item.currency} className="portfolioChangeBreakdownCompactItem">
+            <strong>{item.label}</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>({formatWeight(item.weight)})</span>{" "}
+            <strong className={getSignedClass(item.adjusted_change_pct)} style={{ fontSize: "1.2em" }}>
+              {formatSignedPercent(item.adjusted_change_pct)}
+            </strong>
+          </span>
+        ))
+      )}
     </span>
   );
 }

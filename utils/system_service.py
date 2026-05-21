@@ -402,7 +402,7 @@ def get_running_jobs() -> list[str]:
 
 
 def get_running_job_details() -> dict[str, dict[str, object]]:
-    """실행 중인 배치별 시작 시각과 예상 소요시간 정보를 반환한다."""
+    """실행 중인 배치별 시작 시각, 예상 소요시간, 락 소유 인스턴스 정보를 반환한다."""
     try:
         from utils.db_manager import get_db_connection
 
@@ -411,8 +411,11 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
             return {}
         now_utc_naive = datetime.now(timezone.utc).replace(tzinfo=None)
         now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        my_app_type = (os.environ.get("APP_TYPE") or "PROD").strip() or "PROD"
         details: dict[str, dict[str, object]] = {}
-        for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1, "acquired_at": 1}):
+        for doc in db.batch_locks.find(
+            {}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}
+        ):
             key = str(doc.get("_id") or "")
             if key not in _SCRIPT_BY_ACTION:
                 continue
@@ -436,6 +439,8 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                 if estimated_seconds is not None and elapsed_seconds is not None
                 else None
             )
+            owner_app_type = (str(doc.get("app_type") or "") or "PROD").strip()
+            is_mine = owner_app_type.lower() == my_app_type.lower()
             details[key] = {
                 "started_at": started_at.isoformat() if started_at else None,
                 "estimated_seconds": int(round(estimated_seconds)) if estimated_seconds is not None else None,
@@ -443,6 +448,8 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                 "remaining_seconds": remaining_seconds,
                 "estimated_display": _format_duration_seconds(estimated_seconds),
                 "remaining_display": _format_duration_seconds(remaining_seconds),
+                "owner_app_type": owner_app_type,
+                "is_mine": is_mine,
             }
         return details
     except Exception as exc:
