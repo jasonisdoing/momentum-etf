@@ -12,7 +12,7 @@ import { MarketTrendChart } from "./MarketTrendChart";
 const MA_TYPE_OPTIONS = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"] as const;
 const MA_MONTHS_MAX = 12;
 const DEFAULT_MA_TYPE: (typeof MA_TYPE_OPTIONS)[number] = "ALMA";
-const DEFAULT_MA_MONTHS = 4;
+const DEFAULT_MA_MONTHS = 6;
 
 type MarketTrendItem = {
   name: string;
