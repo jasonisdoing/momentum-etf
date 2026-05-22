@@ -29,7 +29,15 @@ from utils.portfolio_io import (
     save_daily_snapshot,
 )
 from utils.report import format_kr_money
+from utils.monthly_service import (
+    MONTHLY_COLLECTION,
+    _apply_running_total_principal as _apply_monthly_running,
+)
 from utils.weekly_service import _apply_running_total_principal as _apply_weekly_running
+from utils.yearly_service import (
+    YEARLY_COLLECTION,
+    _apply_running_total_principal as _apply_yearly_running,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -95,6 +103,48 @@ def _load_latest_weekly_metrics():
         "weekly_return_pct": float(latest.get("weekly_return_pct", 0.0) or 0.0),
         "cumulative_profit": _to_int(latest.get("cumulative_profit", 0)),
         "cumulative_return_pct": float(latest.get("cumulative_return_pct", 0.0) or 0.0),
+    }
+
+
+def _load_latest_monthly_metrics():
+    """월별 데이터 테이블과 동일한 정의(TWR 1월)로 최신 월간 손익 지표를 반환한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 월별 데이터를 조회할 수 없습니다.")
+
+    docs = list(db[MONTHLY_COLLECTION].find().sort("month_date", 1))
+    if not docs:
+        raise RuntimeError("monthly_fund_data 데이터가 없어 월간 손익을 계산할 수 없습니다.")
+
+    enriched = _apply_monthly_running(docs)  # 결과는 month_date 내림차순
+    if not enriched:
+        raise RuntimeError("월간 손익 계산 결과를 만들지 못했습니다.")
+    latest = enriched[0]
+    return {
+        "month_date": str(latest.get("month_date") or "").strip(),
+        "monthly_profit": _to_int(latest.get("monthly_profit", 0)),
+        "monthly_return_pct": float(latest.get("monthly_return_pct", 0.0) or 0.0),
+    }
+
+
+def _load_latest_yearly_metrics():
+    """연별 데이터 테이블과 동일한 정의(TWR 1년)로 최신 연간 손익 지표를 반환한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 연별 데이터를 조회할 수 없습니다.")
+
+    docs = list(db[YEARLY_COLLECTION].find().sort("year_date", 1))
+    if not docs:
+        raise RuntimeError("yearly_fund_data 데이터가 없어 연간 손익을 계산할 수 없습니다.")
+
+    enriched = _apply_yearly_running(docs)  # 결과는 year_date 내림차순
+    if not enriched:
+        raise RuntimeError("연간 손익 계산 결과를 만들지 못했습니다.")
+    latest = enriched[0]
+    return {
+        "year_date": str(latest.get("year_date") or "").strip(),
+        "yearly_profit": _to_int(latest.get("yearly_profit", 0)),
+        "yearly_return_pct": float(latest.get("yearly_return_pct", 0.0) or 0.0),
     }
 
 
@@ -195,6 +245,8 @@ def main():
     # (자산 수익률 계산 정책: docs/developer_guide.md)
     daily_metrics = _load_latest_daily_metrics()
     weekly_metrics = _load_latest_weekly_metrics()
+    monthly_metrics = _load_latest_monthly_metrics()
+    yearly_metrics = _load_latest_yearly_metrics()
     cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
 
     # 1. Compose Main Message (Total Summary)
@@ -207,6 +259,8 @@ def main():
         f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)\n"
         f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} ({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
         f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
+        f"🗓️ *금월 손익*: {format_korean_currency(monthly_metrics['monthly_profit'])} ({monthly_metrics['monthly_return_pct']:+.2f}%) {get_trend_emoji(monthly_metrics['monthly_profit'])}\n"
+        f"📅 *금년 손익*: {format_korean_currency(yearly_metrics['yearly_profit'])} ({yearly_metrics['yearly_return_pct']:+.2f}%) {get_trend_emoji(yearly_metrics['yearly_profit'])}\n"
         f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
     )
 
