@@ -1,15 +1,20 @@
 """시장지수 추세 데이터 서비스.
 
 코스피/코스피200/S&P500/나스닥/나스닥100 의 현재가, 변동률, MA 대비 추세% 를 계산한다.
-가격은 yfinance 에서 직접 가져오며 (인덱스는 stock_cache 미사용), MA 계산은 utils.moving_averages 사용.
+가격 소스:
+    - 한국 인덱스(KOSPI/KOSPI200): 네이버 차트 API (yfinance 가 1거래일 지연되는 이슈 회피)
+    - 미국 인덱스(S&P500/나스닥/나스닥100): yfinance
+MA 계산은 utils.moving_averages 사용.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import pandas as pd
+import requests
 import yfinance as yf
 
 from config import TRADING_DAYS_PER_MONTH
@@ -18,13 +23,62 @@ from utils.moving_averages import calculate_moving_average
 logger = logging.getLogger(__name__)
 
 # 표시 순서대로 정의. yf_ticker 는 Yahoo Finance 인덱스 심볼.
+# kor_naver_symbol 이 있으면 한국 인덱스로 간주하고 가격은 네이버에서 받는다.
 INDICES: list[dict[str, str]] = [
-    {"name": "코스피", "yf_ticker": "^KS11"},
-    {"name": "코스피 200", "yf_ticker": "^KS200"},
+    {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
+    {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥", "yf_ticker": "^IXIC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
 ]
+
+# 네이버 차트 (legacy XML) — 인덱스 일봉 OHLCV. count 만큼 최신부터 거꾸로 N건 반환.
+_NAVER_INDEX_CHART_URL = "https://fchart.stock.naver.com/sise.nhn"
+_NAVER_ITEM_RE = re.compile(r'<item data="([^"]+)"')
+
+
+def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
+    """네이버 차트 API 에서 한국 인덱스 일봉 종가 시계열을 받아온다.
+
+    Args:
+        symbol: KOSPI 또는 KPI200.
+        count: 최근부터 N 거래일.
+
+    Returns:
+        DatetimeIndex 정렬된 pd.Series(Close) 또는 None (실패 시).
+    """
+    try:
+        resp = requests.get(
+            _NAVER_INDEX_CHART_URL,
+            params={"symbol": symbol, "timeframe": "day", "count": int(count), "requestType": 0},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        resp.encoding = "EUC-KR"
+        items = _NAVER_ITEM_RE.findall(resp.text)
+    except Exception:
+        logger.exception("네이버 인덱스 차트 조회 실패: %s", symbol)
+        return None
+    if not items:
+        return None
+
+    dates: list[pd.Timestamp] = []
+    closes: list[float] = []
+    for raw in items:
+        parts = raw.split("|")
+        if len(parts) < 5:
+            continue
+        try:
+            ts = pd.Timestamp(parts[0])
+            close = float(parts[4])
+        except (ValueError, TypeError):
+            continue
+        dates.append(ts)
+        closes.append(close)
+    if not dates:
+        return None
+    series = pd.Series(closes, index=pd.DatetimeIndex(dates))
+    return series.sort_index()
 
 # 과거 시점 추세 계산용 trading-day offset (오늘 대비 N 거래일 전).
 TRADING_DAYS_PER_WEEK = 5
@@ -64,12 +118,11 @@ def compute_market_trend(ma_type: str, ma_months: int) -> dict[str, Any]:
     if ma_days < 2:
         ma_days = 2
 
-    tickers = [idx["yf_ticker"] for idx in INDICES]
-    # 단일 호출로 일괄 다운로드 (네트워크 효율). MA 가 가장 긴 12개월 = 240일 이라
-    # 2년치 데이터면 충분히 안전. 3개월 전 추세 계산용 과거 시점도 같은 윈도우에서 커버.
+    # 미국 인덱스만 yfinance 로 일괄 다운로드 (한국 2개는 네이버 사용).
+    us_tickers = [idx["yf_ticker"] for idx in INDICES if not idx.get("kor_naver_symbol")]
     try:
         df = yf.download(
-            tickers=tickers,
+            tickers=us_tickers,
             period="2y",
             interval="1d",
             group_by="ticker",
@@ -81,9 +134,20 @@ def compute_market_trend(ma_type: str, ma_months: int) -> dict[str, Any]:
         logger.exception("yfinance 시장지수 다운로드 실패")
         df = None
 
+    # 한국 인덱스(KOSPI/KPI200) 종가는 네이버 차트 API 로 조회 (2년치 ≈ 500거래일).
+    kor_close_by_ticker: dict[str, pd.Series] = {}
+    for idx in INDICES:
+        naver_symbol = idx.get("kor_naver_symbol")
+        if not naver_symbol:
+            continue
+        series = _fetch_naver_kor_index_close(naver_symbol, count=500)
+        if series is not None and not series.empty:
+            kor_close_by_ticker[idx["yf_ticker"]] = series
+
     items: list[dict[str, Any]] = []
     for idx in INDICES:
-        item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, ma_type)
+        kor_close = kor_close_by_ticker.get(idx["yf_ticker"])
+        item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, ma_type, kor_close)
         items.append(item)
 
     return {
@@ -99,6 +163,7 @@ def _build_item(
     name: str,
     ma_days: int,
     ma_type: str,
+    kor_close: pd.Series | None = None,
 ) -> dict[str, Any]:
     base: dict[str, Any] = {
         "name": name,
@@ -126,19 +191,22 @@ def _build_item(
         "prev_regime_2": None,
         "prev_regime_3": None,
     }
-    if df is None or df.empty:
+    # 한국 인덱스는 네이버에서 받은 close_series 를 우선 사용한다.
+    if kor_close is not None and not kor_close.empty:
+        close_series = kor_close.dropna()
+    elif df is None or df.empty:
         return base
-
-    # multi-ticker 결과는 컬럼 멀티인덱스(ticker, ohlc). 단일 ticker 결과는 평탄.
-    try:
-        if (yf_ticker, "Close") in df.columns:
-            close_series = df[(yf_ticker, "Close")].dropna()
-        elif "Close" in df.columns:
-            close_series = df["Close"].dropna()
-        else:
+    else:
+        # multi-ticker 결과는 컬럼 멀티인덱스(ticker, ohlc). 단일 ticker 결과는 평탄.
+        try:
+            if (yf_ticker, "Close") in df.columns:
+                close_series = df[(yf_ticker, "Close")].dropna()
+            elif "Close" in df.columns:
+                close_series = df["Close"].dropna()
+            else:
+                return base
+        except Exception:
             return base
-    except Exception:
-        return base
 
     if close_series is None or close_series.empty or len(close_series) < 2:
         return base
@@ -347,54 +415,58 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             "week_markers": [{week: 1, date, trend_pct}, ...]}``
         해당 ticker 가 알려진 인덱스가 아니면 name 은 ticker 그대로 사용.
     """
-    name = next((idx["name"] for idx in INDICES if idx["yf_ticker"] == yf_ticker), yf_ticker)
+    index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
+    name = index_meta["name"] if index_meta else yf_ticker
+    naver_symbol = (index_meta or {}).get("kor_naver_symbol")
 
     ma_days = int(ma_months) * int(TRADING_DAYS_PER_MONTH)
     if ma_days < 2:
         ma_days = 2
 
-    try:
-        df = yf.download(
-            tickers=yf_ticker,
-            period="10y",
-            interval="1d",
-            progress=False,
-            auto_adjust=True,
-            threads=False,
-        )
-    except Exception:
-        logger.exception("yfinance 단일 인덱스 다운로드 실패: %s", yf_ticker)
-        df = None
+    empty_payload = {
+        "ticker": yf_ticker,
+        "name": name,
+        "ma_type": ma_type,
+        "ma_months": int(ma_months),
+        "history": [],
+        "week_markers": [],
+    }
 
-    if df is None or df.empty:
-        return {
-            "ticker": yf_ticker,
-            "name": name,
-            "ma_type": ma_type,
-            "ma_months": int(ma_months),
-            "history": [],
-            "week_markers": [],
-        }
-
-    # yfinance 가 단일 ticker 라도 컬럼을 멀티인덱스로 줄 수 있어 평탄화.
-    close_raw = df["Close"] if "Close" in df.columns else None
-    if close_raw is None:
+    close_series: pd.Series | None = None
+    if naver_symbol:
+        # 한국 인덱스: 네이버 차트에서 직접 받는다 (5년 ≈ 1250거래일, 여유 포함 1500).
+        close_series = _fetch_naver_kor_index_close(naver_symbol, count=1500)
+        if close_series is None:
+            return empty_payload
+    else:
         try:
-            close_raw = df.xs("Close", axis=1, level=0)
+            df = yf.download(
+                tickers=yf_ticker,
+                period="10y",
+                interval="1d",
+                progress=False,
+                auto_adjust=True,
+                threads=False,
+            )
         except Exception:
-            close_raw = None
-    if close_raw is None:
-        return {
-            "ticker": yf_ticker,
-            "name": name,
-            "ma_type": ma_type,
-            "ma_months": int(ma_months),
-            "history": [],
-            "week_markers": [],
-        }
-    if isinstance(close_raw, pd.DataFrame):
-        close_raw = close_raw.iloc[:, 0]
-    close_series = close_raw.dropna()
+            logger.exception("yfinance 단일 인덱스 다운로드 실패: %s", yf_ticker)
+            df = None
+
+        if df is None or df.empty:
+            return empty_payload
+
+        # yfinance 가 단일 ticker 라도 컬럼을 멀티인덱스로 줄 수 있어 평탄화.
+        close_raw = df["Close"] if "Close" in df.columns else None
+        if close_raw is None:
+            try:
+                close_raw = df.xs("Close", axis=1, level=0)
+            except Exception:
+                close_raw = None
+        if close_raw is None:
+            return empty_payload
+        if isinstance(close_raw, pd.DataFrame):
+            close_raw = close_raw.iloc[:, 0]
+        close_series = close_raw.dropna()
     if len(close_series) < 2:
         return {
             "ticker": yf_ticker,
