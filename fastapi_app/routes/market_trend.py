@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
+from config import MARKET_TREND_DEFAULT_MA_MONTHS, MARKET_TREND_DEFAULT_MA_TYPE
 from fastapi_app.dependencies import require_internal_token
 from utils.market_trend_service import compute_index_history, compute_market_trend
 from utils.rankings import ALLOWED_MA_TYPES
@@ -18,10 +19,23 @@ def _normalize_ma_type(ma_type: str) -> str:
     return normalized
 
 
+@router.get("/defaults")
+def get_market_trend_defaults(
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """화면 진입 시 사용할 MA 기본값 (config.py 가 단일 진실 소스)."""
+    return {
+        "ma_type": MARKET_TREND_DEFAULT_MA_TYPE,
+        "ma_months": MARKET_TREND_DEFAULT_MA_MONTHS,
+    }
+
+
 @router.get("")
 def get_market_trend(
-    ma_type: str = Query("ALMA", description="이동평균 타입"),
-    ma_months: int = Query(4, ge=1, le=12, description="이동평균 기간(개월)"),
+    ma_type: str = Query(MARKET_TREND_DEFAULT_MA_TYPE, description="이동평균 타입"),
+    ma_months: int = Query(
+        MARKET_TREND_DEFAULT_MA_MONTHS, ge=1, le=12, description="이동평균 기간(개월)"
+    ),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     return compute_market_trend(_normalize_ma_type(ma_type), int(ma_months))
@@ -30,8 +44,10 @@ def get_market_trend(
 @router.get("/history")
 def get_market_trend_history(
     ticker: str = Query(..., description="Yahoo Finance 지수 심볼 (예: ^GSPC)"),
-    ma_type: str = Query("ALMA", description="이동평균 타입"),
-    ma_months: int = Query(4, ge=1, le=12, description="이동평균 기간(개월)"),
+    ma_type: str = Query(MARKET_TREND_DEFAULT_MA_TYPE, description="이동평균 타입"),
+    ma_months: int = Query(
+        MARKET_TREND_DEFAULT_MA_MONTHS, ge=1, le=12, description="이동평균 기간(개월)"
+    ),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     return compute_index_history(ticker, _normalize_ma_type(ma_type), int(ma_months))

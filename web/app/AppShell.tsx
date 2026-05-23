@@ -23,7 +23,6 @@ import {
   IconLayoutSidebarLeftExpand,
 } from "@tabler/icons-react";
 
-import { parseFearGreedSummary } from "@/lib/fear-greed";
 import { useHideMoney } from "@/lib/hide-money-context";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
@@ -355,9 +354,9 @@ export function AppShell({ children }: AppShellProps) {
   const HoldingsIcon = holdingsItem.icon;
   const fearGreedDelta =
     fearGreed?.score !== null &&
-    fearGreed?.score !== undefined &&
-    fearGreed.previous_close_score !== null &&
-    fearGreed.previous_close_score !== undefined
+      fearGreed?.score !== undefined &&
+      fearGreed.previous_close_score !== null &&
+      fearGreed.previous_close_score !== undefined
       ? fearGreed.score - fearGreed.previous_close_score
       : null;
 

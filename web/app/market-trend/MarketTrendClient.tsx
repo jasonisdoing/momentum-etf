@@ -11,8 +11,6 @@ import { MarketTrendChart } from "./MarketTrendChart";
 
 const MA_TYPE_OPTIONS = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"] as const;
 const MA_MONTHS_MAX = 12;
-const DEFAULT_MA_TYPE: (typeof MA_TYPE_OPTIONS)[number] = "ALMA";
-const DEFAULT_MA_MONTHS = 6;
 
 type MarketTrendItem = {
   name: string;
@@ -201,9 +199,14 @@ function renderRegimeCell(params: { data?: GridRow }) {
   );
 }
 
-export function MarketTrendClient() {
-  const [maType, setMaType] = useState<string>(DEFAULT_MA_TYPE);
-  const [maMonths, setMaMonths] = useState<number>(DEFAULT_MA_MONTHS);
+type MarketTrendClientProps = {
+  defaultMaType: string;
+  defaultMaMonths: number;
+};
+
+export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTrendClientProps) {
+  const [maType, setMaType] = useState<string>(defaultMaType);
+  const [maMonths, setMaMonths] = useState<number>(defaultMaMonths);
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

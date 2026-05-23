@@ -134,6 +134,11 @@ MARKET_SCHEDULES = {
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
+# 시장지수 추세 화면(/market-trend) 기본 MA 설정.
+# 화면 진입 시 드롭다운의 초기값으로 사용된다.
+MARKET_TREND_DEFAULT_MA_TYPE = "ALMA"
+MARKET_TREND_DEFAULT_MA_MONTHS = 4
+
 # 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
