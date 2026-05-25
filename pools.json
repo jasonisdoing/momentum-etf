@@ -46,7 +46,7 @@
       "name": "호주 연금",
       "country_code": "au",
       "currency": "AUD",
-      "TOP_N_HOLD": 6,
+      "TOP_N_HOLD": 7,
       "HOLDING_BONUS_SCORE": 20,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 4,
