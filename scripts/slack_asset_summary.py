@@ -256,17 +256,13 @@ def main():
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
 
-    # 전일 대비 자산 변동(괄호 안 표기용). 직전 스냅샷이 없으면 생략.
-    prev_total_snapshot = get_latest_daily_snapshot("TOTAL", before_today=True)
+    # 총 자산 옆 변동액도 일별 집계 결과와 동일한 장부 기준을 사용한다.
     asset_change_text = ""
-    if prev_total_snapshot:
-        prev_total_assets = float(prev_total_snapshot.get("total_assets") or 0.0)
-        if prev_total_assets > 0:
-            delta = total_assets - prev_total_assets
-            if delta > 0:
-                asset_change_text = f" ({format_korean_currency(delta)}:small_red_triangle:)"
-            elif delta < 0:
-                asset_change_text = f" ({format_korean_currency(delta)}:chart_with_downwards_trend:)"
+    daily_profit = daily_metrics["daily_profit"]
+    if daily_profit > 0:
+        asset_change_text = f" ({format_korean_currency(daily_profit)}:small_red_triangle:)"
+    elif daily_profit < 0:
+        asset_change_text = f" ({format_korean_currency(daily_profit)}:chart_with_downwards_trend:)"
 
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
