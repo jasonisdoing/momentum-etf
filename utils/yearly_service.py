@@ -6,7 +6,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
-from utils.data_loader import get_trading_days
+from utils.data_loader import get_trading_days_any
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 
@@ -105,7 +105,7 @@ def _get_year_range(year: int) -> tuple[datetime.date, datetime.date]:
 
 
 def _get_last_trading_day_of_year(year: int) -> str:
-    """해당 연도의 한국 시장 마지막 거래일 날짜를 반환한다.
+    """해당 연도의 한국/호주 합집합 마지막 거래일 날짜를 반환한다.
 
     아직 진행 중인 연도(연말 거래일 이전)의 경우 오늘 이전 가장 최근 거래일을 사용한다.
     """
@@ -113,12 +113,12 @@ def _get_last_trading_day_of_year(year: int) -> str:
     today = datetime.date.today()
     upper = min(last_day, today)
     try:
-        days = get_trading_days(str(first_day), str(upper), "kor")
+        days = get_trading_days_any(str(first_day), str(upper), ["kor", "au"])
         if days:
             return str(days[-1].date())
     except Exception:
         pass
-    raise RuntimeError(f"{year} 한국 시장 거래일을 조회하지 못했습니다.")
+    raise RuntimeError(f"{year} 한국/호주 거래일을 조회하지 못했습니다.")
 
 
 def _normalize_bucket_percentages(source: dict[str, Any]) -> dict[str, float]:

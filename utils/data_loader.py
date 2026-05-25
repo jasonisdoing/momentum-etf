@@ -450,6 +450,17 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
     return sorted(list(set(final_list)))
 
 
+def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -> list[pd.Timestamp]:
+    """여러 국가 중 하나라도 개장한 날짜를 거래일로 반환한다."""
+    if not countries:
+        raise ValueError("거래일 조회 국가 코드 목록이 필요합니다.")
+
+    merged: set[pd.Timestamp] = set()
+    for country in countries:
+        merged.update(get_trading_days(start_date, end_date, country))
+    return sorted(merged)
+
+
 def is_trading_day(
     country: str,
     date: str | datetime | pd.Timestamp | None = None,

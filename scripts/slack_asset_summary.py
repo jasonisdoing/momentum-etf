@@ -28,7 +28,7 @@ from utils.portfolio_io import (
     load_real_holdings_table,
     save_daily_snapshot,
 )
-from utils.report import format_kr_money
+from utils.report import format_kr_money, format_kr_money_man
 from utils.monthly_service import (
     MONTHLY_COLLECTION,
     _apply_running_total_principal as _apply_monthly_running,
@@ -43,7 +43,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 
-format_korean_currency = format_kr_money
+# 슬랙 알림(데이터 집계 결과 / 총 자산 요약)에서 사용하는 금액 포맷.
+# 만원 미만은 절사하여 간결하게 표시한다.
+format_korean_currency = format_kr_money_man
+# format_kr_money 는 다른 곳(계좌별 상세 등)에서 필요할 수 있어 import 만 유지.
+_ = format_kr_money
 WEEKLY_COLLECTION = "weekly_fund_data"
 INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
 INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
@@ -251,17 +255,25 @@ def main():
 
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+
+    # 전일 대비 자산 변동(괄호 안 표기용). 직전 스냅샷이 없으면 생략.
+    prev_total_snapshot = get_latest_daily_snapshot("TOTAL", before_today=True)
+    asset_change_text = ""
+    if prev_total_snapshot:
+        prev_total_assets = float(prev_total_snapshot.get("total_assets") or 0.0)
+        if prev_total_assets > 0:
+            delta = total_assets - prev_total_assets
+            if delta > 0:
+                asset_change_text = f" ({format_korean_currency(delta)}:small_red_triangle:)"
+            elif delta < 0:
+                asset_change_text = f" ({format_korean_currency(delta)}:chart_with_downwards_trend:)"
+
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
+        f"💰 *총 자산*: *{format_korean_currency(total_assets)}*{asset_change_text}\n"
         f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
         f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)\n"
-        f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} ({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
-        f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
-        f"🗓️ *금월 손익*: {format_korean_currency(monthly_metrics['monthly_profit'])} ({monthly_metrics['monthly_return_pct']:+.2f}%) {get_trend_emoji(monthly_metrics['monthly_profit'])}\n"
-        f"📅 *금년 손익*: {format_korean_currency(yearly_metrics['yearly_profit'])} ({yearly_metrics['yearly_return_pct']:+.2f}%) {get_trend_emoji(yearly_metrics['yearly_profit'])}\n"
-        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
     )
 
     main_ts = send_slack_message_v2(main_text)
@@ -269,7 +281,17 @@ def main():
         logger.error("Failed to send main Slack message.")
         return
 
-    # 2. Compose Account Details (Thread)
+    # 2. Compose Profit & Loss Summary (Thread) — 금일/금주/금월/금년/누적
+    pnl_text = (
+        f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} ({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
+        f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
+        f"🗓️ *금월 손익*: {format_korean_currency(monthly_metrics['monthly_profit'])} ({monthly_metrics['monthly_return_pct']:+.2f}%) {get_trend_emoji(monthly_metrics['monthly_profit'])}\n"
+        f"📅 *금년 손익*: {format_korean_currency(yearly_metrics['yearly_profit'])} ({yearly_metrics['yearly_return_pct']:+.2f}%) {get_trend_emoji(yearly_metrics['yearly_profit'])}\n"
+        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}"
+    )
+    send_slack_message_v2(pnl_text, thread_ts=main_ts)
+
+    # 3. Compose Account Details (Thread)
     acc_details = ["*📂 계좌별 상세 현황*"]
     for acc in account_summaries:
         # Fetch previous account snapshot
