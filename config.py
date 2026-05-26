@@ -134,11 +134,6 @@ MARKET_SCHEDULES = {
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
-# 시장지수 추세 화면(/market-trend) 기본 MA 설정.
-# 화면 진입 시 드롭다운의 초기값으로 사용된다.
-MARKET_TREND_DEFAULT_MA_TYPE = "ALMA"
-MARKET_TREND_DEFAULT_MA_MONTHS = 4
-
 # 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
 # ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
@@ -148,7 +143,7 @@ MIN_TRADING_DAYS = 5
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
 # -----------------------------------------------------------------------
-BACKTEST_START_DATE = "2026-01-01"
+BACKTEST_START_DATE = "2025-09-01"
 BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 
 # 슬리피지는 % 단위로 입력한다.
@@ -179,39 +174,39 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "all": {
         "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "RSI_LIMIT": [100],
     },
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "RSI_LIMIT": [100],
     },
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "RSI_LIMIT": [100],
     },
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
         "TOP_N_HOLD": [6],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "RSI_LIMIT": [100],
     },
     "us": {
         "BENCHMARK": {"ticker": "QQQ", "name": "인베스코 QQQ ETF"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 4, 5, 6],
         "RSI_LIMIT": [100],
@@ -219,9 +214,9 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
         "RSI_LIMIT": [100],
     },
 }
