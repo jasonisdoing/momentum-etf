@@ -118,6 +118,7 @@ const CHART_TINTS = [
   "rgba(245, 158, 11, 0.08)",
   "rgba(124, 58, 237, 0.08)",
 ];
+// 옅은 파스텔 (셀 배경 매칭용). 진한 텍스트 버전과 1:1 대응되도록 유지한다.
 const HOLDING_MATCH_COLORS = [
   "#dbeafe",
   "#dcfce7",
@@ -129,6 +130,19 @@ const HOLDING_MATCH_COLORS = [
   "#fce7f3",
   "#ecfccb",
   "#f3e8ff",
+];
+// HOLDING_MATCH_COLORS 와 1:1 대응되는 진한 톤 (큰 숫자 텍스트용).
+const HOLDING_MATCH_TEXT_COLORS = [
+  "#2563eb",
+  "#16a34a",
+  "#d97706",
+  "#7c3aed",
+  "#0891b2",
+  "#dc2626",
+  "#4f46e5",
+  "#db2777",
+  "#65a30d",
+  "#9333ea",
 ];
 const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number; ytd?: boolean }[] = [
   { key: "1m", label: "1개월", days: 31 },
@@ -1076,6 +1090,20 @@ export function ComparePageClient() {
     });
     return colors;
   }, [holdingExposureRows]);
+  // 매칭 종목의 텍스트용 진한 색 (큰 순위 숫자 색으로 사용).
+  const holdingTextColorByCode = useMemo(() => {
+    const counts = new Map<string, number>();
+    holdingExposureRows.forEach((row) => {
+      counts.set(row.code, row.holdingsByProductKey.size);
+    });
+    const colors = new Map<string, string>();
+    holdingExposureRows.forEach((row) => {
+      const code = row.code;
+      if ((counts.get(code) ?? 0) < 2) return;
+      colors.set(code, HOLDING_MATCH_TEXT_COLORS[colors.size % HOLDING_MATCH_TEXT_COLORS.length]);
+    });
+    return colors;
+  }, [holdingExposureRows]);
 
   const titleRight = (
     <div className="compareTitleMeta">
@@ -1435,14 +1463,18 @@ export function ComparePageClient() {
                 ) : (
                   sortedHoldings.map((holding, idx) => {
                     const holdingCode = getHoldingCode(holding);
-                    const matchColor = holdingCode ? holdingColorByCode.get(holdingCode) : undefined;
+                    const matchTextColor = holdingCode
+                      ? holdingTextColorByCode.get(holdingCode)
+                      : undefined;
                     // 비중 절대값 기준 단일 색조 (슬레이트 그레이). 10% 에서 alpha 최대치(0.25) 도달.
                     const weight = Number(holding.weight ?? 0);
                     const alpha = Math.min(0.25, Math.max(0, (weight / 10) * 0.25));
-                    // 매칭된 종목은 좌측 4px 색상 strip 으로 표시 (배경은 비중용).
+                    // 가운데 큰 비중% 색: 매칭이면 진한 매칭색, 아니면 슬레이트 그레이.
+                    const weightTextColor = matchTextColor || "#475569";
                     const cellStyle = {
                       backgroundColor: weight > 0 ? `rgba(71, 85, 105, ${alpha})` : undefined,
-                      boxShadow: matchColor ? `inset 4px 0 0 0 ${matchColor}` : undefined,
+                      position: "relative",
+                      overflow: "hidden",
                     } as const;
                     return (
                       <div
@@ -1450,16 +1482,45 @@ export function ComparePageClient() {
                         className="compareHoldingCell"
                         style={cellStyle}
                       >
-                        <div className="compareHoldingLine">
+                        {/* 좌측: 종목명(상) / 티커(하) */}
+                        <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: "0.1rem" }}>
                           <div className="compareHoldingName">{holding.name || holding.ticker}</div>
-                          <span className={getSignedClass(holding.change_pct ?? null)}>
-                            {formatSignedPercent(holding.change_pct ?? null)}
-                          </span>
-                        </div>
-                        <div className="compareHoldingLine">
                           <div className="compareHoldingCode">{holdingCode}</div>
-                          <strong>{Number(holding.weight ?? 0).toFixed(2)}%</strong>
                         </div>
+                        {/* 가운데: 큰 비중% (매칭 색 통합) */}
+                        <span
+                          aria-label={`비중 ${weight.toFixed(2)}%`}
+                          style={{
+                            position: "absolute",
+                            left: "50%",
+                            top: "70%",
+                            transform: "translate(-50%, -50%)",
+                            color: weightTextColor,
+                            fontSize: "1.15rem",
+                            fontWeight: 900,
+                            lineHeight: 1,
+                            pointerEvents: "none",
+                            zIndex: 2,
+                          }}
+                        >
+                          {weight.toFixed(2)}%
+                        </span>
+                        {/* 우측: 큰 변동률% (셀 두 줄 가운데 정렬) */}
+                        <span
+                          className={getSignedClass(holding.change_pct ?? null)}
+                          style={{
+                            position: "absolute",
+                            right: "0.65rem",
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            fontSize: "1.2rem",
+                            fontWeight: 800,
+                            pointerEvents: "none",
+                            zIndex: 2,
+                          }}
+                        >
+                          {formatSignedPercent(holding.change_pct ?? null)}
+                        </span>
                       </div>
                     );
                   })
