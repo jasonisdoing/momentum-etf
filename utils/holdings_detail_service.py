@@ -174,8 +174,11 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             logger.warning("holdings 로드 실패 (%s): %s", curr_account_id, exc)
             continue
 
+        # 보유 종목이 0개인 계좌도 합계/현금/원금은 표시해야 한다.
+        # df 가 None 이거나 비어있으면 빈 DataFrame 으로 처리해서 이어 진행한다.
         if df is None or df.empty:
-            continue
+            import pandas as pd  # 지연 import (위 모듈 import 와 일관성)
+            df = pd.DataFrame()
 
         settings = account.get("settings") or {}
         country_code = str(settings.get("country_code") or "").strip().lower()
