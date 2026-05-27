@@ -303,11 +303,18 @@ def _read_last_job_run(job_key: str) -> dict[str, str | None]:
     }
 
 
-def _cleanup_stale_locks() -> int:
-    """예상 소요시간의 2배를 초과한 락은 stale 로 간주하고 삭제한다.
+# 평균 소요시간을 모르는 락도 이 시간(초)을 넘으면 무조건 stale 로 간주.
+# (TTL 인덱스가 동작 안 하는 케이스에 대비한 절대 안전망)
+_STALE_LOCK_ABSOLUTE_MAX_SECONDS = 6 * 3600  # 6시간
 
-    - 평균(예상) 소요시간을 모르는 락은 건드리지 않는다.
-    - elapsed > estimated * 2 인 락만 삭제한다.
+
+def _cleanup_stale_locks() -> int:
+    """오래된 락을 stale 로 간주하고 삭제한다.
+
+    삭제 조건(우선순위):
+        1. expires_at 이 현재 시각보다 과거 → 즉시 삭제 (TTL 인덱스 fallback)
+        2. elapsed > 예상 소요시간 × 2 → 삭제
+        3. elapsed > 6시간 → 무조건 삭제 (예상값을 모르더라도 절대 상한)
 
     Returns:
         삭제된 락 개수
@@ -318,33 +325,64 @@ def _cleanup_stale_locks() -> int:
         db = get_db_connection()
         if db is None:
             return 0
-        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+        kst = ZoneInfo("Asia/Seoul")
+        now_kst = datetime.now(kst)
+        now_utc = datetime.now(timezone.utc)
         deleted = 0
-        for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1}):
+        for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
             if key not in _SCRIPT_BY_ACTION:
                 continue
+
+            # (1) expires_at 기반 정리 — TTL 인덱스가 어떤 이유로 안 도는 경우의 안전망
+            expires_at = doc.get("expires_at")
+            if isinstance(expires_at, datetime):
+                expires_aware = (
+                    expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
+                )
+                if expires_aware < now_utc:
+                    try:
+                        db.batch_locks.delete_one({"_id": key})
+                        deleted += 1
+                        _logger.warning(
+                            "Stale lock 제거(expires 초과): job=%s expires_at=%s",
+                            key, expires_at,
+                        )
+                        continue
+                    except Exception as exc:
+                        _logger.warning("Stale lock 삭제 실패 (job=%s): %s", key, exc)
+
+            # (2)(3) elapsed 기반 정리
             acquired_at = doc.get("acquired_at")
             if not isinstance(acquired_at, datetime):
                 continue
             started_at = (
-                acquired_at.astimezone(ZoneInfo("Asia/Seoul"))
+                acquired_at.astimezone(kst)
                 if acquired_at.tzinfo
-                else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+                else acquired_at.replace(tzinfo=timezone.utc).astimezone(kst)
             )
             elapsed_seconds = int((now_kst - started_at).total_seconds())
             if elapsed_seconds <= 0:
                 continue
+
             estimated_seconds = _read_average_job_elapsed_seconds(key)
-            if estimated_seconds is None or estimated_seconds <= 0:
-                continue
-            if elapsed_seconds > int(estimated_seconds * 2):
+            should_delete = False
+            reason = ""
+            if estimated_seconds is not None and estimated_seconds > 0:
+                if elapsed_seconds > int(estimated_seconds * 2):
+                    should_delete = True
+                    reason = f"estimated×2 초과 (estimated={int(estimated_seconds)}s)"
+            if not should_delete and elapsed_seconds > _STALE_LOCK_ABSOLUTE_MAX_SECONDS:
+                should_delete = True
+                reason = f"절대 상한 {_STALE_LOCK_ABSOLUTE_MAX_SECONDS}s 초과"
+
+            if should_delete:
                 try:
                     db.batch_locks.delete_one({"_id": key})
                     deleted += 1
                     _logger.warning(
-                        "Stale lock 제거: job=%s elapsed=%ds estimated=%ds",
-                        key, elapsed_seconds, int(estimated_seconds),
+                        "Stale lock 제거: job=%s elapsed=%ds (%s)",
+                        key, elapsed_seconds, reason,
                     )
                 except Exception as exc:
                     _logger.warning("Stale lock 삭제 실패 (job=%s): %s", key, exc)
