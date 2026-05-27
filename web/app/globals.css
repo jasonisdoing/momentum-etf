@@ -2771,6 +2771,13 @@ a {
   min-height: 4.15rem;
 }
 
+/* 각 ETF 컬럼의 독립 스크롤 컨테이너 (종목비중 행) */
+.compareHoldingScrollColumn {
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+}
+
 .compareHoldingRankLabel,
 .compareHoldingCell {
   min-height: 3.25rem;
