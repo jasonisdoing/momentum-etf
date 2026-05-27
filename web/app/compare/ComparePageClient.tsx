@@ -745,6 +745,8 @@ export function ComparePageClient() {
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
+  // 구성 종목 탭에서 종목 정렬 기준: weight(비중, 기본) / change(상승률 내림차순)
+  const [holdingsSortBy, setHoldingsSortBy] = useState<"weight" | "change">("weight");
   const [performanceRange, setPerformanceRange] = useState<string>("ytd");
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1058,17 +1060,8 @@ export function ComparePageClient() {
     return null;
   }, [sortedProducts]);
 
-  const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts).slice(0, 10), [sortedProducts]);
-  const uniqueHoldingCount = useMemo(() => {
-    const codes = new Set<string>();
-    sortedProducts.forEach((product) => {
-      product.detail.holdings.forEach((holding) => {
-        const code = getHoldingCode(holding);
-        if (code) codes.add(code);
-      });
-    });
-    return codes.size;
-  }, [sortedProducts]);
+  // 매칭 색상 계산용: 전체 종목 (이전엔 상위 10개만이었지만 컬럼 스크롤로 전부 노출되므로 전부 대상).
+  const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts), [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
     const counts = new Map<string, number>();
     holdingExposureRows.forEach((row) => {
@@ -1155,29 +1148,61 @@ export function ComparePageClient() {
                       inputRef={searchInputRef}
                       onChange={setSearchText}
                     />
-                    <div className="compareHeaderTabs appSegmentedToggle" role="group" aria-label="비교 보기 선택">
-                      <button
-                        type="button"
-                        className={activeTab === "performance" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setActiveTab("performance")}
-                      >
-                        성과분석
-                      </button>
-                      <button
-                        type="button"
-                        className={activeTab === "basic" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setActiveTab("basic")}
-                      >
-                        기본 정보
-                      </button>
-                      <button
-                        type="button"
-                        className={activeTab === "holdings" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setActiveTab("holdings")}
-                      >
-                        구성 종목
-                      </button>
-                    </div>
+                    <label className="appLabeledField" style={{ minWidth: 0, width: "auto" }}>
+                      <span className="appLabeledFieldLabel">탭</span>
+                      <div className="compareHeaderTabs appSegmentedToggle" role="group" aria-label="비교 보기 선택">
+                        <button
+                          type="button"
+                          className={activeTab === "performance" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("performance")}
+                        >
+                          성과분석
+                        </button>
+                        <button
+                          type="button"
+                          className={activeTab === "basic" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("basic")}
+                        >
+                          기본 정보
+                        </button>
+                        <button
+                          type="button"
+                          className={activeTab === "holdings" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("holdings")}
+                        >
+                          구성 종목
+                        </button>
+                      </div>
+                    </label>
+                    {activeTab === "holdings" ? (
+                      <label className="appLabeledField" style={{ marginLeft: "0.75rem", minWidth: 0, width: "auto" }}>
+                        <span className="appLabeledFieldLabel">구성종목 정렬</span>
+                        <div className="appSegmentedToggle" role="group" aria-label="구성종목 정렬 기준">
+                          <button
+                            type="button"
+                            className={
+                              holdingsSortBy === "weight"
+                                ? "btn appSegmentedToggleButton is-active"
+                                : "btn appSegmentedToggleButton"
+                            }
+                            onClick={() => setHoldingsSortBy("weight")}
+                          >
+                            비중
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              holdingsSortBy === "change"
+                                ? "btn appSegmentedToggleButton is-active"
+                                : "btn appSegmentedToggleButton"
+                            }
+                            onClick={() => setHoldingsSortBy("change")}
+                          >
+                            상승률
+                          </button>
+                        </div>
+                      </label>
+                    ) : null}
                   </div>
                 </div>
               </ResponsiveFiltersSection>
@@ -1187,7 +1212,7 @@ export function ComparePageClient() {
 
         {loading ? <div className="compareLoading">비교 데이터를 불러오는 중...</div> : null}
 
-        <section className={activeTab === "holdings" ? "compareMatrix compareMatrixWithTotal" : "compareMatrix"}>
+        <section className="compareMatrix">
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
             <div
@@ -1221,9 +1246,6 @@ export function ComparePageClient() {
           {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
             <div key={`empty-${index}`} className="compareProductEmpty compareProductHeaderEmpty">비교 상품을 추가해 주세요.</div>
           ))}
-          {activeTab === "holdings" ? (
-            <div className="compareProductEmpty compareProductHeaderEmpty compareHoldingTotalHeader">합계</div>
-          ) : null}
         </section>
 
         {activeTab === "performance" ? (
@@ -1369,7 +1391,7 @@ export function ComparePageClient() {
             ))}
           </section>
         ) : (
-          <section className="compareMatrix compareMatrixBody compareMatrixWithTotal">
+          <section className="compareMatrix compareMatrixBody">
             <div className="compareMatrixLabel compareMatrixLabelWide" style={{ flexDirection: "column" }}>
               <div className="compareMatrixLabelText">포트폴리오 변동</div>
               {portfolioChangeBaseDate && (
@@ -1386,78 +1408,68 @@ export function ComparePageClient() {
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
               <div key={`empty-holding-portfolio-change-${index}`} className="compareProductEmpty">-</div>
             ))}
-            <div className="compareProductEmpty compareHoldingTotalCount">-</div>
-            <div className="compareMatrixLabel compareHoldingsGroupLabel" style={{ gridRow: "span 10" }}>종목비중 TOP10</div>
-            {Array.from({ length: 10 }).map((_, rowIndex) => (
-              <Fragment key={rowIndex}>
-                <div className="compareHoldingRankLabel">{rowIndex + 1}</div>
-                {sortedProducts.map((product) => {
-                  const holding = product.detail.holdings[rowIndex];
-                  const holdingCode = holding ? getHoldingCode(holding) : "";
-                  const matchColor = holdingCode ? holdingColorByCode.get(holdingCode) : undefined;
-                  return (
-                    <div
-                      key={tickerKey(product.item)}
-                      className={matchColor ? "compareHoldingCell is-matched" : "compareHoldingCell"}
-                      style={matchColor ? { backgroundColor: matchColor } : undefined}
-                    >
-                      {holding ? (
-                        <>
-                          <div className="compareHoldingLine">
-                            <div className="compareHoldingName">{holding.name || holding.ticker}</div>
-                            <span className={getSignedClass(holding.change_pct ?? null)}>
-                              {formatSignedPercent(holding.change_pct ?? null)}
-                            </span>
-                          </div>
-                          <div className="compareHoldingLine">
-                            <div className="compareHoldingCode">{holdingCode}</div>
-                            <strong>{Number(holding.weight ?? 0).toFixed(2)}%</strong>
-                          </div>
-                        </>
-                      ) : "-"}
-                    </div>
-                  );
-                })}
-                {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-                  <div key={`empty-holding-${rowIndex}-${index}`} className="compareHoldingCell">-</div>
-                ))}
-                {holdingExposureRows[rowIndex] ? (
-                  <div
-                    className={
-                      holdingColorByCode.get(holdingExposureRows[rowIndex].code)
-                        ? "compareHoldingCell compareHoldingTotalCell is-matched"
-                        : "compareHoldingCell compareHoldingTotalCell"
-                    }
-                    style={
-                      holdingColorByCode.get(holdingExposureRows[rowIndex].code)
-                        ? { backgroundColor: holdingColorByCode.get(holdingExposureRows[rowIndex].code) }
-                        : undefined
-                    }
-                  >
-                    <div className="compareHoldingLine">
-                      <div className="compareHoldingName">{holdingExposureRows[rowIndex].name}</div>
-                      <span className={getSignedClass(holdingExposureRows[rowIndex].changePct)}>
-                        {formatSignedPercent(holdingExposureRows[rowIndex].changePct)}
-                      </span>
-                    </div>
-                    <div className="compareHoldingLine">
-                      <div className="compareHoldingCode">{holdingExposureRows[rowIndex].code}</div>
-                      <strong>{holdingExposureRows[rowIndex].totalWeight.toFixed(2)}%</strong>
-                    </div>
-                  </div>
+            <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingsGroupLabel">구성종목</div>
+            {sortedProducts.map((product) => {
+              // 정렬 기준에 따라 표시용 holdings 를 만든다. 원본은 변형하지 않는다.
+              const sortedHoldings = (() => {
+                if (holdingsSortBy === "change") {
+                  return [...product.detail.holdings].sort((a, b) => {
+                    const av = a.change_pct ?? Number.NEGATIVE_INFINITY;
+                    const bv = b.change_pct ?? Number.NEGATIVE_INFINITY;
+                    return bv - av; // 상승률 내림차순
+                  });
+                }
+                // 기본: 백엔드가 이미 비중순으로 내려준다고 가정. 안정성 위해 명시적 정렬.
+                return [...product.detail.holdings].sort(
+                  (a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0),
+                );
+              })();
+              return (
+              <div
+                key={tickerKey(product.item)}
+                className="compareHoldingScrollColumn"
+                style={{ maxHeight: "60vh", overflowY: "auto" }}
+              >
+                {sortedHoldings.length === 0 ? (
+                  <div className="compareHoldingCell">-</div>
                 ) : (
-                  <div className="compareHoldingCell compareHoldingTotalCell">-</div>
+                  sortedHoldings.map((holding, idx) => {
+                    const holdingCode = getHoldingCode(holding);
+                    const matchColor = holdingCode ? holdingColorByCode.get(holdingCode) : undefined;
+                    // 비중 절대값 기준 단일 색조 (슬레이트 그레이). 10% 에서 alpha 최대치(0.25) 도달.
+                    const weight = Number(holding.weight ?? 0);
+                    const alpha = Math.min(0.25, Math.max(0, (weight / 10) * 0.25));
+                    // 매칭된 종목은 좌측 4px 색상 strip 으로 표시 (배경은 비중용).
+                    const cellStyle = {
+                      backgroundColor: weight > 0 ? `rgba(71, 85, 105, ${alpha})` : undefined,
+                      boxShadow: matchColor ? `inset 4px 0 0 0 ${matchColor}` : undefined,
+                    } as const;
+                    return (
+                      <div
+                        key={`${holdingCode || holding.ticker}-${idx}`}
+                        className="compareHoldingCell"
+                        style={cellStyle}
+                      >
+                        <div className="compareHoldingLine">
+                          <div className="compareHoldingName">{holding.name || holding.ticker}</div>
+                          <span className={getSignedClass(holding.change_pct ?? null)}>
+                            {formatSignedPercent(holding.change_pct ?? null)}
+                          </span>
+                        </div>
+                        <div className="compareHoldingLine">
+                          <div className="compareHoldingCode">{holdingCode}</div>
+                          <strong>{Number(holding.weight ?? 0).toFixed(2)}%</strong>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
-              </Fragment>
-            ))}
-            <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingCountLabel">구성종목 수</div>
-            {sortedProducts.map((product) => (
-              <div key={tickerKey(product.item)} className="compareHoldingCount">{product.detail.holdings.length}</div>
-            ))}
+              </div>
+              );
+            })}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-              <div key={`empty-count-${index}`} className="compareProductEmpty compareHoldingCountEmpty" />
+              <div key={`empty-holding-scroll-${index}`} className="compareHoldingCell">-</div>
             ))}
-            <div className="compareHoldingCount compareHoldingTotalCount">{uniqueHoldingCount}</div>
           </section>
         )}
       </div>
