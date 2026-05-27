@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
 _TTL_SECONDS = 300
-_PORTFOLIO_CHANGE_CALC_VERSION = 2
+_PORTFOLIO_CHANGE_CALC_VERSION = 3
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
 _PORTFOLIO_CHANGE_LOCK = threading.Lock()

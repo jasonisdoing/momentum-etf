@@ -7,6 +7,7 @@ import pandas as pd
 
 from services.price_service import get_realtime_snapshot, get_worldstock_snapshot, get_yahoo_symbol_snapshot
 from utils.cache_utils import load_cached_close_series_bulk_with_fallback
+from utils.formatters import clean_holding_display_name
 from utils.logger import get_app_logger
 
 logger = get_app_logger()
@@ -111,6 +112,9 @@ def enrich_component_prices(
         component_ticker = _normalize_upper(item.get("ticker"))
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or None
         enriched_item["yahoo_symbol"] = yahoo_symbol
+        # 표시 이름 정제 (예: "AMD(어드밴스드 마이크로 디바이시스)" → "AMD").
+        # 원본은 raw_name 에 보존되어 있다.
+        enriched_item["name"] = clean_holding_display_name(item.get("name"))
 
         if _is_cash_like_holding(item):
             _clear_price_fields(enriched_item, preserve_existing=preserve_existing)

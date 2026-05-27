@@ -2,7 +2,31 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
+# 영문 티커 + 한글 풀네임 괄호 패턴 (예: "AMD(어드밴스드 마이크로 디바이시스)" → "AMD").
+# 한글 우선주 표기 (예: "현대모비스(우)") 같은 케이스는 영향 받지 않는다 — 영문 시작 패턴만 매치.
+_HOLDING_NAME_PAREN_RE = re.compile(r"^([A-Z][A-Z0-9.\-]*)\s*\(.+\)$")
+
+
+def clean_holding_display_name(name: str | None) -> str:
+    """ETF 구성종목 표시 이름에서 영문 티커 뒤 괄호 풀네임을 제거한다.
+
+    예:
+        "AMD(어드밴스드 마이크로 디바이시스)" → "AMD"
+        "TSMC(타이완반도체제조)" → "TSMC"
+        "Kioxia Holdings Corp" → "Kioxia Holdings Corp"  (변경 없음)
+        "엔비디아" → "엔비디아"  (변경 없음)
+        "현대모비스(우)" → "현대모비스(우)"  (한글 시작이라 변경 없음)
+    """
+    text = (name or "").strip()
+    if not text:
+        return text
+    match = _HOLDING_NAME_PAREN_RE.match(text)
+    if match:
+        return match.group(1)
+    return text
 
 
 def format_price(value: Any, country_code: str) -> str:
