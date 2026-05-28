@@ -1,24 +1,18 @@
 "use client";
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
-import { hierarchy, treemap, treemapSquarify } from "d3-hierarchy";
-import type { HierarchyRectangularNode } from "d3-hierarchy";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import {
-  readRememberedMomentumEtfAccountId,
-  writeRememberedMomentumEtfAccountId,
-} from "../components/account-selection";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
-type AccountOption = {
-  account_id: string;
-  name: string;
+type ExposureCountryOption = {
+  code: string;
+  label: string;
 };
 
 type ComponentSource = {
@@ -71,28 +65,11 @@ type MainGridRow = ComponentRow & { rowType: "main" };
 type DetailGridRow = { rowType: "detail"; parentTicker: string; sources: ComponentSource[] };
 type GridRow = MainGridRow | DetailGridRow;
 
-type TreemapRect = {
-  item: ComponentRow;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  displayWeight: number;
-};
-
-type TreemapDatum = {
-  item?: ComponentRow;
-  value?: number;
-  children?: TreemapDatum[];
-};
-
-const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY = "momentum-etf:holdings-details:accounts";
-const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:data:";
-const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS = 300_000;
+const HOLDINGS_EXPOSURE_COUNTRIES_CACHE_KEY = "momentum-etf:holdings-details:exposure-countries";
+const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:exposure:";
+const HOLDINGS_EXPOSURE_COUNTRIES_CACHE_TTL_MS = 300_000;
 const HOLDINGS_COMPONENTS_CACHE_TTL_MS = 30_000;
-const TREEMAP_FALLBACK_WIDTH = 1_200;
-const TREEMAP_FALLBACK_HEIGHT = 360;
-const TREEMAP_VISIBLE_LIMIT = 20;
+const REMEMBERED_EXPOSURE_COUNTRY_STORAGE_KEY = "momentum-etf:holdings-details:remembered-exposure-country";
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 function formatWeight(w: number): string {
@@ -138,13 +115,6 @@ function formatDisplayName(name: string | null | undefined): string {
   return cleaned || original;
 }
 
-function getTreemapLabel(item: ComponentRow): string {
-  const ticker = item.ticker.trim();
-  if (ticker === "-") return formatDisplayName(item.name);
-  if (/^\d{6}$/.test(ticker)) return formatDisplayName(item.name);
-  return ticker;
-}
-
 function getSignedClass(val: number | null | undefined): string {
   if (val == null) return "";
   if (val > 0) return "metricPositive";
@@ -152,66 +122,119 @@ function getSignedClass(val: number | null | undefined): string {
   return "";
 }
 
-function getTreemapColor(changePct: number | null | undefined): string {
-  if (changePct == null || changePct === 0) return "#b8c0ce";
-  const intensity = Math.min(Math.abs(changePct) / 6, 1);
-  if (changePct > 0) {
-    const lightness = 66 - intensity * 28;
-    return `hsl(0 64% ${lightness}%)`;
+function formatSignedPercentWithPlus(val: number | null | undefined): string {
+  if (val == null || Number.isNaN(val)) return "-";
+  return `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+}
+
+const BOX_VIEW_TOP_N = 100;
+
+// 박스 좌측 strip: 변동률 절댓값에 따라 진한 빨강(양수) / 진한 파랑(음수). 5% 에서 최대 진하기.
+function getChangeStripColor(changePct: number | null | undefined): string | undefined {
+  if (changePct == null || Number.isNaN(changePct) || changePct === 0) return undefined;
+  const intensity = Math.min(Math.abs(changePct) / 5, 1);
+  const lightness = 60 - intensity * 30; // 60% (옅음) → 30% (진함)
+  return changePct > 0
+    ? `hsl(0, 75%, ${lightness}%)`
+    : `hsl(216, 75%, ${lightness}%)`;
+}
+
+function HoldingsBoxView({ components }: { components: ComponentRow[] }) {
+  // 비중 내림차순 상위 N개
+  const topComponents = useMemo(() => {
+    return [...components]
+      .sort((a, b) => Number(b.total_weight ?? 0) - Number(a.total_weight ?? 0))
+      .slice(0, BOX_VIEW_TOP_N);
+  }, [components]);
+
+  if (topComponents.length === 0) {
+    return (
+      <div style={{ padding: "1.5rem", color: "#64748b" }}>표시할 구성종목이 없습니다.</div>
+    );
   }
-  const lightness = 66 - intensity * 26;
-  return `hsl(216 78% ${lightness}%)`;
-}
 
-function getTreemapTextColor(changePct: number | null | undefined): string {
-  if (changePct == null) return "#1f2937";
-  if (changePct === 0) return "#1f2937";
-  return "#ffffff";
-}
-
-function getTreemapWeight(item: ComponentRow): number {
-  const weight = Number(item.total_weight);
-  return Number.isFinite(weight) && weight > 0 ? weight : 0;
-}
-
-function buildTreemapRects(items: ComponentRow[], width: number, height: number): TreemapRect[] {
-  const children = items
-    .map((item) => ({ item, value: getTreemapWeight(item) }))
-    .filter((entry) => entry.value > 0)
-    .sort((a, b) => b.value - a.value)
-    .slice(0, TREEMAP_VISIBLE_LIMIT);
-  const totalWeight = children.reduce((acc, entry) => acc + entry.value, 0);
-  if (totalWeight <= 0 || width <= 0 || height <= 0) return [];
-  const normalizedChildren = children.map((entry) => ({
-    item: entry.item,
-    value: (entry.value / totalWeight) * 100,
-  }));
-
-  const root = hierarchy<TreemapDatum>({ children: normalizedChildren })
-    .sum((datum) => datum.value ?? 0)
-    .sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
-
-  treemap<TreemapDatum>()
-    .tile(treemapSquarify.ratio(1.2))
-    .size([width, height])
-    .paddingInner(3)
-    .round(true)(root);
-
-  return (root as HierarchyRectangularNode<TreemapDatum>)
-    .leaves()
-    .map((node) => {
-      const item = node.data.item;
-      if (!item) return null;
-      return {
-        item,
-        x: node.x0,
-        y: node.y0,
-        width: Math.max(0, node.x1 - node.x0),
-        height: Math.max(0, node.y1 - node.y0),
-        displayWeight: getTreemapWeight(item),
-      };
-    })
-    .filter((rect): rect is TreemapRect => rect != null);
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+        gap: "0.5rem",
+        padding: "0.75rem",
+        overflowY: "auto",
+        height: "100%",
+        alignContent: "start",
+      }}
+    >
+      {topComponents.map((row) => {
+        const weight = Number(row.total_weight ?? 0);
+        const changePct = row.change_pct;
+        // 변동률 기반 배경 (양수 빨강 / 음수 파랑, 5%에서 alpha 최대치 0.18).
+        let changeBg: string | undefined;
+        if (changePct != null && !Number.isNaN(changePct) && changePct !== 0) {
+          const alpha = Math.min(0.18, (Math.abs(changePct) / 5) * 0.18);
+          changeBg =
+            changePct > 0
+              ? `rgba(239, 68, 68, ${alpha})`
+              : `rgba(37, 99, 235, ${alpha})`;
+        }
+        const stripColor = getChangeStripColor(changePct);
+        return (
+          <div
+            key={row.ticker}
+            style={{
+              position: "relative",
+              overflow: "hidden",
+              minHeight: "3.25rem",
+              padding: "0.42rem 0.65rem",
+              borderRight: "1px solid #d6deea",
+              borderBottom: "1px solid #d6deea",
+              borderRadius: "0.25rem",
+              background: changeBg || "#fff",
+              boxShadow: stripColor ? `inset 4px 0 0 0 ${stripColor}` : undefined,
+            }}
+          >
+            {/* 윗줄: 종목명 (전체 너비) */}
+            <div
+              style={{
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                color: "#1f2937",
+                fontSize: "1rem",
+                fontWeight: 800,
+                lineHeight: 1.25,
+              }}
+            >
+              {formatDisplayName(row.name) || row.ticker}
+            </div>
+            {/* 아랫줄: 티커 + 비중 + 변동률 */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.5rem",
+                marginTop: "0.15rem",
+              }}
+            >
+              <div style={{ flex: "0 0 auto", color: "#9ca3af", fontSize: "0.85rem" }}>
+                {row.ticker}
+              </div>
+              <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
+                {weight.toFixed(2)}%
+              </span>
+              <span
+                className={getSignedClass(changePct)}
+                style={{ fontSize: "0.95rem", fontWeight: 800 }}
+              >
+                {formatSignedPercentWithPlus(changePct)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const gridTheme = createAppGridTheme();
@@ -220,220 +243,80 @@ function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
   return row?.rowType === "detail";
 }
 
-function HoldingsTreemap({ components }: { components: ComponentRow[] }) {
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const clipBaseId = React.useId().replace(/:/g, "");
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const toggleLabel = isCollapsed ? "펼치기" : "접기";
-
-  useLayoutEffect(() => {
-    const node = containerRef.current;
-    if (!node) return;
-    const measure = () => {
-      const rect = node.getBoundingClientRect();
-      setSize({ width: rect.width, height: rect.height });
-    };
-    measure();
-    const rafId = window.requestAnimationFrame(measure);
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      if (!entry) return;
-      const { width, height } = entry.contentRect;
-      setSize({ width, height });
-    });
-    observer.observe(node);
-    window.addEventListener("resize", measure);
-    return () => {
-      window.cancelAnimationFrame(rafId);
-      window.removeEventListener("resize", measure);
-      observer.disconnect();
-    };
-  }, []);
-
-  const treemapSize = {
-    width: size.width > 0 ? size.width : TREEMAP_FALLBACK_WIDTH,
-    height: size.height > 0 ? size.height : TREEMAP_FALLBACK_HEIGHT,
-  };
-  const rects = useMemo(
-    () => buildTreemapRects(components, treemapSize.width, treemapSize.height),
-    [components, treemapSize.height, treemapSize.width],
-  );
-
-  if (components.length === 0) {
-    return (
-      <section className="holdingsTreemapSection">
-        <div className="holdingsTreemapHeader">
-          <h3>트리맵</h3>
-        </div>
-        <div className="holdingsTreemapEmpty">표시할 구성종목이 없습니다.</div>
-      </section>
-    );
+function readRememberedExposureCountry(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(REMEMBERED_EXPOSURE_COUNTRY_STORAGE_KEY) || "";
+  } catch {
+    return "";
   }
+}
 
-  return (
-    <section className={isCollapsed ? "holdingsTreemapSection holdingsTreemapSectionCollapsed" : "holdingsTreemapSection"}>
-      <div className="holdingsTreemapHeader">
-        <h3>트리맵</h3>
-        <div className="holdingsTreemapHeaderActions">
-          <span>상위 20종목</span>
-          <button
-            type="button"
-            className="holdingsTreemapToggle"
-            aria-expanded={!isCollapsed}
-            onClick={() => setIsCollapsed((prev) => !prev)}
-          >
-            {isCollapsed ? "▼" : "▲"} {toggleLabel}
-          </button>
-        </div>
-      </div>
-      {!isCollapsed && (
-        <>
-          <div ref={containerRef} className="holdingsTreemapCanvas">
-            <svg
-              className="holdingsTreemapSvg"
-              viewBox={`0 0 ${treemapSize.width} ${treemapSize.height}`}
-              preserveAspectRatio="none"
-              role="img"
-              aria-label="보유 구성종목 트리맵"
-            >
-              <defs>
-                {rects.map((rect, index) => (
-                  <clipPath key={`${rect.item.ticker}-${index}`} id={`${clipBaseId}-treemap-${index}`}>
-                    <rect x={rect.x + 2} y={rect.y + 2} width={Math.max(0, rect.width - 4)} height={Math.max(0, rect.height - 4)} />
-                  </clipPath>
-                ))}
-              </defs>
-              {rects.map((rect, index) => {
-                const item = rect.item;
-                const showTicker = rect.width >= 44 && rect.height >= 24;
-                const showChange = rect.width >= 70 && rect.height >= 44;
-                const showWeight = rect.width >= 70 && rect.height >= 62;
-                const textColor = getTreemapTextColor(item.change_pct);
-                const subduedTextColor = item.change_pct == null || item.change_pct === 0 ? "#64748b" : "rgba(255, 255, 255, 0.72)";
-                const title = `${formatDisplayName(item.name)} ${formatSignedPercent(item.change_pct)} ${formatWeight(rect.displayWeight)}`;
-                const label = getTreemapLabel(item);
-                return (
-                  <g
-                    key={item.ticker}
-                    className="holdingsTreemapTileGroup"
-                    clipPath={`url(#${clipBaseId}-treemap-${index})`}
-                  >
-                    <title>{title}</title>
-                    <rect
-                      x={rect.x + 1}
-                      y={rect.y + 1}
-                      width={Math.max(0, rect.width - 2)}
-                      height={Math.max(0, rect.height - 2)}
-                      fill={getTreemapColor(item.change_pct)}
-                      stroke="#f8fafc"
-                      strokeWidth={2}
-                    />
-                    {showTicker && (
-                      <text
-                        x={rect.x + 8}
-                        y={rect.y + 20}
-                        fill={textColor}
-                        className="holdingsTreemapTicker"
-                      >
-                        {label}
-                      </text>
-                    )}
-                    {showChange && (
-                      <text
-                        x={rect.x + 8}
-                        y={rect.y + 40}
-                        fill={textColor}
-                        className="holdingsTreemapChange"
-                      >
-                        {formatSignedPercent(item.change_pct)}
-                      </text>
-                    )}
-                    {showWeight && (
-                      <text
-                        x={rect.x + 8}
-                        y={rect.y + rect.height - 10}
-                        fill={subduedTextColor}
-                        className="holdingsTreemapWeight"
-                      >
-                        {formatWeight(rect.displayWeight)}
-                      </text>
-                    )}
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-          <div className="holdingsTreemapGauge" aria-hidden="true">
-            <div className="holdingsTreemapGaugeBar" />
-            <div className="holdingsTreemapGaugeLabels">
-              <span>-5%</span>
-              <span>-3%</span>
-              <span>-1%</span>
-              <span>0%</span>
-              <span>+1%</span>
-              <span>+3%</span>
-              <span>+5%</span>
-            </div>
-          </div>
-        </>
-      )}
-    </section>
-  );
+function writeRememberedExposureCountry(code: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(REMEMBERED_EXPOSURE_COUNTRY_STORAGE_KEY, code);
+  } catch {
+    // ignore quota errors
+  }
 }
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
 export function HoldingsDetailsPageClient() {
-  const [accounts, setAccounts] = useState<AccountOption[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<string>(
-    readRememberedMomentumEtfAccountId() || "",
+  const [exposureCountries, setExposureCountries] = useState<ExposureCountryOption[]>([]);
+  const [selectedExposureCountry, setSelectedExposureCountry] = useState<string>(
+    readRememberedExposureCountry() || "",
   );
   const [data, setData] = useState<HoldingsComponentsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 뷰 모드: 리스트(기본 — 테이블) / 박스 (구성종목을 카드 박스로 나열)
+  const [viewMode, setViewMode] = useState<"list" | "box">("list");
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
   const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
 
-  // 계좌 목록 로드
+  // 노출국가 목록 로드
   useEffect(() => {
-    async function fetchAccounts() {
+    async function fetchExposureCountries() {
       try {
-        const cached = readSessionTtlCache<AccountOption[]>(
-          HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY,
-          HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS,
+        const cached = readSessionTtlCache<ExposureCountryOption[]>(
+          HOLDINGS_EXPOSURE_COUNTRIES_CACHE_KEY,
+          HOLDINGS_EXPOSURE_COUNTRIES_CACHE_TTL_MS,
         );
         if (cached && cached.length > 0) {
-          setAccounts(cached);
-          if (!selectedAccount) {
-            setSelectedAccount("TOTAL");
-            writeRememberedMomentumEtfAccountId("TOTAL");
+          setExposureCountries(cached);
+          if (!selectedExposureCountry) {
+            const first = cached[0].code;
+            setSelectedExposureCountry(first);
+            writeRememberedExposureCountry(first);
           }
           return;
         }
 
-        const res = await fetch("/api/holdings-components/accounts", { cache: "no-store" });
-        if (!res.ok) throw new Error("계좌 목록을 불러오지 못했습니다.");
-        const list = (await res.json()) as AccountOption[];
-        writeSessionTtlCache(HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY, list);
-        setAccounts(list);
-        if (list.length > 0 && !selectedAccount) {
-          setSelectedAccount("TOTAL");
-          writeRememberedMomentumEtfAccountId("TOTAL");
+        const res = await fetch("/api/holdings-components/exposure-countries", { cache: "no-store" });
+        if (!res.ok) throw new Error("노출국가 목록을 불러오지 못했습니다.");
+        const list = (await res.json()) as ExposureCountryOption[];
+        writeSessionTtlCache(HOLDINGS_EXPOSURE_COUNTRIES_CACHE_KEY, list);
+        setExposureCountries(list);
+        if (list.length > 0 && !selectedExposureCountry) {
+          const first = list[0].code;
+          setSelectedExposureCountry(first);
+          writeRememberedExposureCountry(first);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
       }
     }
-    void fetchAccounts();
+    void fetchExposureCountries();
   }, []);
 
-  // 선택된 계좌 데이터 로드
-  const loadData = useCallback(async (accountId: string) => {
-    if (!accountId) return;
+  // 선택된 노출국가 데이터 로드
+  const loadData = useCallback(async (exposureCode: string) => {
+    if (!exposureCode) return;
     const requestSequence = requestSequenceRef.current + 1;
     requestSequenceRef.current = requestSequence;
-    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${accountId}`;
+    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${exposureCode}`;
     const cached = readSessionTtlCache<HoldingsComponentsData>(cacheKey, HOLDINGS_COMPONENTS_CACHE_TTL_MS);
     if (cached) {
       setError(null);
@@ -447,9 +330,10 @@ export function HoldingsDetailsPageClient() {
     setData(null);
     setExpandedTicker(null);
     try {
-      const res = await fetch(`/api/holdings-components?account_id=${encodeURIComponent(accountId)}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/holdings-components/by-exposure-country?exposure_country_code=${encodeURIComponent(exposureCode)}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "데이터를 불러오지 못했습니다.");
@@ -473,8 +357,8 @@ export function HoldingsDetailsPageClient() {
   }, []);
 
   useEffect(() => {
-    if (selectedAccount) void loadData(selectedAccount);
-  }, [selectedAccount, loadData]);
+    if (selectedExposureCountry) void loadData(selectedExposureCountry);
+  }, [selectedExposureCountry, loadData]);
 
   // 그리드 데이터 가공
   const gridRows = useMemo<GridRow[]>(() => {
@@ -555,7 +439,7 @@ export function HoldingsDetailsPageClient() {
     {
       headerName: "일간(%)",
       field: "change_pct",
-      width: 100,
+      width: 80,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -565,19 +449,9 @@ export function HoldingsDetailsPageClient() {
       },
     },
     {
-      headerName: "수익률",
-      field: "return_pct",
-      width: 100,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        return <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>;
-      },
-    },
-    {
       headerName: "금일 손익",
       field: "daily_profit_krw",
-      width: 140,
+      width: 110,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -587,7 +461,7 @@ export function HoldingsDetailsPageClient() {
     {
       headerName: "누적 손익",
       field: "cumulative_profit_krw",
-      width: 140,
+      width: 110,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -641,12 +515,6 @@ export function HoldingsDetailsPageClient() {
               </span>
             </div>
 
-            <div className="hdColReturn">
-              <span className={getSignedClass(src.return_pct)}>
-                {formatSignedPercent(src.return_pct)}
-              </span>
-            </div>
-
             <div className="hdColDailyProfit">
               <span className={showAmounts ? getSignedClass(src.daily_profit_krw) : ""}>
                 {maskAmount(showAmounts, formatKrw(src.daily_profit_krw))}
@@ -696,6 +564,23 @@ export function HoldingsDetailsPageClient() {
       ? `${componentsTotalCount}개 중 상위 ${componentsVisibleLimit}개`
       : `${componentsTotalCount}개`;
 
+  // 전체 구성종목 가중 평균 변동률과 추적 비중. 리스트/박스 뷰 모두 동일 값 사용.
+  const averageStats = useMemo(() => {
+    if (!data) return null;
+    let tracked = 0;
+    let weightedSum = 0;
+    for (const row of data.components) {
+      const w = Number(row.total_weight ?? 0);
+      const c = row.change_pct;
+      if (w <= 0) continue;
+      if (c == null || Number.isNaN(c)) continue;
+      tracked += w;
+      weightedSum += w * c;
+    }
+    if (tracked <= 0) return null;
+    return { avgPct: weightedSum / tracked, trackedWeight: tracked };
+  }, [data]);
+
   const titleRight = data ? (
     <div className="appHeaderMetrics rankToolbarMeta">
       <div className="appHeaderMetric">
@@ -706,6 +591,27 @@ export function HoldingsDetailsPageClient() {
         <span>구성종목:</span>
         <span className="appHeaderMetricValue">{componentsMetricText}</span>
       </div>
+      {averageStats ? (
+        <div className="appHeaderMetric">
+          <span>평균:</span>
+          <span
+            className="appHeaderMetricValue"
+            style={{
+              color:
+                averageStats.avgPct > 0
+                  ? "#d32f2f"
+                  : averageStats.avgPct < 0
+                  ? "#1d4ed8"
+                  : undefined,
+            }}
+          >
+            {formatSignedPercentWithPlus(averageStats.avgPct)}
+          </span>
+          <span style={{ color: "#94a3b8", marginLeft: "0.25rem", fontSize: "0.85rem" }}>
+            (추적 {averageStats.trackedWeight.toFixed(0)}%)
+          </span>
+        </div>
+      ) : null}
     </div>
   ) : null;
 
@@ -724,30 +630,54 @@ export function HoldingsDetailsPageClient() {
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft rankMainHeaderLeft">
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">계좌</span>
+                    <span className="appLabeledFieldLabel">노출국가</span>
                     <select
                       className="form-select"
-                      value={selectedAccount}
+                      value={selectedExposureCountry}
                       onChange={(e) => {
-                        const nextId = e.target.value;
-                        setSelectedAccount(nextId);
-                        writeRememberedMomentumEtfAccountId(nextId);
+                        const nextCode = e.target.value;
+                        setSelectedExposureCountry(nextCode);
+                        writeRememberedExposureCountry(nextCode);
                       }}
-                      disabled={accounts.length === 0}
+                      disabled={exposureCountries.length === 0}
                     >
-                      {accounts.length === 0 ? (
-                        <option value="">계좌 불러오는 중...</option>
+                      {exposureCountries.length === 0 ? (
+                        <option value="">노출국가 불러오는 중...</option>
                       ) : (
-                        <>
-                          <option value="TOTAL">전체</option>
-                          {accounts.map((acc) => (
-                            <option key={acc.account_id} value={acc.account_id}>
-                              {acc.name}
-                            </option>
-                          ))}
-                        </>
+                        exposureCountries.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.label}
+                          </option>
+                        ))
                       )}
                     </select>
+                  </label>
+                  <label className="appLabeledField" style={{ minWidth: 0, width: "auto", flex: "0 0 auto" }}>
+                    <span className="appLabeledFieldLabel">뷰</span>
+                    <div className="appSegmentedToggle" role="group" aria-label="보기 형식 선택">
+                      <button
+                        type="button"
+                        className={
+                          viewMode === "list"
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        onClick={() => setViewMode("list")}
+                      >
+                        리스트
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          viewMode === "box"
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        onClick={() => setViewMode("box")}
+                      >
+                        박스
+                      </button>
+                    </div>
                   </label>
                 </div>
                 <div className="appMainHeaderRight">
@@ -764,7 +694,9 @@ export function HoldingsDetailsPageClient() {
           </div>
           
           <div className="card-body appCardBodyTight appTableCardBodyFill holdingsDetailsBody">
-            <HoldingsTreemap components={data?.components ?? []} />
+            {viewMode === "box" ? (
+              <HoldingsBoxView components={data?.components ?? []} />
+            ) : (
             <div className="appGridFillWrap holdingsDetailsGridWrap">
               <AppAgGrid
                 rowData={isLoading ? [] : gridRows}
@@ -779,6 +711,7 @@ export function HoldingsDetailsPageClient() {
                 }}
               />
             </div>
+            )}
           </div>
         </div>
       </section>
@@ -821,7 +754,6 @@ export function HoldingsDetailsPageClient() {
         .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
         .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
         .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
-        .hdColReturn { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColValuation { width: 140px; padding-right: 12px; justify-content: flex-end; }

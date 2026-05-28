@@ -12,7 +12,6 @@
     "@tabler/icons-react": "^3.41.0",
     "ag-grid-community": "^35.2.0",
     "ag-grid-react": "^35.2.0",
-    "d3-hierarchy": "^3.1.2",
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.6",
     "lightweight-charts": "^5.1.0",
@@ -23,7 +22,6 @@
     "recharts": "^3.8.1"
   },
   "devDependencies": {
-    "@types/d3-hierarchy": "^3.1.7",
     "@types/node": "^24.6.0",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",

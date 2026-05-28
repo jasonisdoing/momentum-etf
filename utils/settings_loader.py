@@ -161,6 +161,33 @@ def list_available_ticker_types() -> list[str]:
     return [str(item["ticker_type"]) for item in _load_pool_configs()]
 
 
+def list_ticker_types_by_exposure_country(exposure_country_code: str) -> list[str]:
+    """지정한 노출국가(exposure_country_code) 에 속한 종목풀의 ticker_type 목록을 반환한다.
+
+    예: "us" → ["kor_us", "us"] (국내상장 미국 + 미국상장 미국)
+    매칭되는 풀이 없으면 빈 리스트.
+    """
+    target = str(exposure_country_code or "").strip().lower()
+    if not target:
+        return []
+    result: list[str] = []
+    for pool in _load_pool_configs():
+        exposure = str(pool.get("exposure_country_code") or "").strip().lower()
+        if exposure == target:
+            result.append(str(pool["ticker_type"]))
+    return result
+
+
+def list_available_exposure_countries() -> list[str]:
+    """pools.json 에 등록된 모든 노출국가 코드를 정의 순서대로 반환한다 (중복 제거)."""
+    seen: list[str] = []
+    for pool in _load_pool_configs():
+        code = str(pool.get("exposure_country_code") or "").strip().lower()
+        if code and code not in seen:
+            seen.append(code)
+    return seen
+
+
 def list_available_accounts() -> list[str]:
     """
     accounts.json에 정의된 유효한 계정 목록을 반환합니다.
