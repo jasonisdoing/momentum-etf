@@ -126,8 +126,13 @@ def _append_account_components(
     merged: dict[str, dict[str, Any]],
     etf_details: list[dict[str, Any]],
     total_valuation_krw: float | None = None,
+    ticker_type_filter: set[str] | None = None,
 ) -> None:
-    """단일 계좌의 보유 ETF 구성종목을 누적 병합한다."""
+    """단일 계좌의 보유 ETF 구성종목을 누적 병합한다.
+
+    ticker_type_filter 가 주어지면 해당 ticker_type 의 ETF 만 통합 대상으로 한다
+    (노출국가 필터에 사용).
+    """
     from utils.portfolio_io import load_real_holdings_table
 
     try:
@@ -152,6 +157,11 @@ def _append_account_components(
         quantity = int(row.get("수량", row.get("quantity", 0)))
         if quantity <= 0:
             continue
+
+        if ticker_type_filter is not None:
+            row_ticker_type = str(row.get("ticker_type") or "").strip().lower()
+            if row_ticker_type not in ticker_type_filter:
+                continue
 
         valuation = float(row.get("평가금액(KRW)") or 0.0)
         buy_amount = float(row.get("매입금액(KRW)") or 0.0)
@@ -326,10 +336,20 @@ def _append_account_components(
                 }
 
 
-def load_account_holdings_components(account_id: str) -> dict[str, Any]:
+def load_account_holdings_components(
+    account_id: str,
+    *,
+    ticker_type_filter: set[str] | None = None,
+    include_cash: bool = True,
+) -> dict[str, Any]:
     """특정 계좌의 보유 ETF 구성종목을 통합 합산하여 비중 순으로 반환한다.
 
     구성종목 캐시가 없는 ETF는 자기 자신을 100%로 취급한다.
+
+    Args:
+        account_id: 계좌 ID 또는 "TOTAL" (전체 계좌 통합).
+        ticker_type_filter: 지정 시 해당 ticker_type 의 ETF 만 통합 (노출국가 필터에 사용).
+        include_cash: False 면 현금 항목을 합산 결과에서 제외 (노출국가 필터에 사용).
     """
     all_accounts = load_account_configs()
     account_id_norm = str(account_id or "").strip()
@@ -369,14 +389,16 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
                 merged=merged,
                 etf_details=etf_details,
                 total_valuation_krw=total_assets_krw,
+                ticker_type_filter=ticker_type_filter,
             )
-            _append_account_cash_component(
-                account_id=curr_account_id,
-                account_name=curr_account_name,
-                merged=merged,
-                cash_balance_krw=float(account_total["cash_krw"]),
-                total_assets_krw=total_assets_krw,
-            )
+            if include_cash:
+                _append_account_cash_component(
+                    account_id=curr_account_id,
+                    account_name=curr_account_name,
+                    merged=merged,
+                    cash_balance_krw=float(account_total["cash_krw"]),
+                    total_assets_krw=total_assets_krw,
+                )
     else:
         account_name = str(account_config.get("name", account_id_norm))
         account_valuation_krw = _load_account_valuation_krw(account_id_norm)
@@ -388,14 +410,16 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
             merged=merged,
             etf_details=etf_details,
             total_valuation_krw=account_total_assets_krw,
+            ticker_type_filter=ticker_type_filter,
         )
-        _append_account_cash_component(
-            account_id=account_id_norm,
-            account_name=account_name,
-            merged=merged,
-            cash_balance_krw=account_cash_krw,
-            total_assets_krw=account_total_assets_krw,
-        )
+        if include_cash:
+            _append_account_cash_component(
+                account_id=account_id_norm,
+                account_name=account_name,
+                merged=merged,
+                cash_balance_krw=account_cash_krw,
+                total_assets_krw=account_total_assets_krw,
+            )
 
     filtered_etf_details = [detail for detail in etf_details if not _is_hidden_component_ticker(detail.get("ticker"))]
 
@@ -495,3 +519,35 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         "components": sorted_components,
         "etf_details": sorted(filtered_etf_details, key=lambda x: (str(x.get("account_name") or ""), x["ticker"])),
     }
+
+
+def load_exposure_country_holdings_components(exposure_country_code: str) -> dict[str, Any]:
+    """노출국가(exposure_country_code) 기준 보유 ETF 구성종목 통합.
+
+    pools.json 의 exposure_country_code 가 매칭되는 ticker_type 의 ETF 들만 통합하며,
+    현금은 합산에서 제외한다.
+    """
+    from utils.settings_loader import list_ticker_types_by_exposure_country
+
+    code = str(exposure_country_code or "").strip().lower()
+    if not code:
+        raise ValueError("exposure_country_code 가 비어 있습니다.")
+    ticker_types = list_ticker_types_by_exposure_country(code)
+    if not ticker_types:
+        return {
+            "account_id": f"EXPOSURE:{code}",
+            "account_name": code.upper(),
+            "held_etf_count": 0,
+            "components_total_count": 0,
+            "components_visible_limit": _MAX_VISIBLE_COMPONENTS,
+            "components": [],
+            "etf_details": [],
+        }
+    result = load_account_holdings_components(
+        "TOTAL",
+        ticker_type_filter={t.strip().lower() for t in ticker_types},
+        include_cash=False,
+    )
+    result["account_id"] = f"EXPOSURE:{code}"
+    result["account_name"] = code.upper()
+    return result
