@@ -1463,18 +1463,28 @@ export function ComparePageClient() {
                 ) : (
                   sortedHoldings.map((holding, idx) => {
                     const holdingCode = getHoldingCode(holding);
-                    const matchTextColor = holdingCode
+                    // 공통 종목 매칭 색상은 카드 좌측 strip 으로 표시 (배경/텍스트 색에 안 섞임).
+                    const matchStripColor = holdingCode
                       ? holdingTextColorByCode.get(holdingCode)
                       : undefined;
-                    // 비중 절대값 기준 단일 색조 (슬레이트 그레이). 10% 에서 alpha 최대치(0.25) 도달.
                     const weight = Number(holding.weight ?? 0);
-                    const alpha = Math.min(0.25, Math.max(0, (weight / 10) * 0.25));
-                    // 가운데 큰 비중% 색: 매칭이면 진한 매칭색, 아니면 슬레이트 그레이.
-                    const weightTextColor = matchTextColor || "#475569";
+                    // 가운데 큰 비중% 색: 항상 슬레이트 그레이 (매칭 색은 좌측 strip 이 담당).
+                    const weightTextColor = "#475569";
+                    // 변동률 기반 배경: 양수=빨강, 음수=파랑. 5% 절댓값에서 alpha 최대치(0.18) 도달.
+                    const changePct = holding.change_pct;
+                    let changeBg: string | undefined;
+                    if (changePct != null && !Number.isNaN(changePct) && changePct !== 0) {
+                      const changeAlpha = Math.min(0.18, (Math.abs(changePct) / 5) * 0.18);
+                      changeBg =
+                        changePct > 0
+                          ? `rgba(239, 68, 68, ${changeAlpha})`
+                          : `rgba(37, 99, 235, ${changeAlpha})`;
+                    }
                     const cellStyle = {
-                      backgroundColor: weight > 0 ? `rgba(71, 85, 105, ${alpha})` : undefined,
                       position: "relative",
                       overflow: "hidden",
+                      backgroundColor: changeBg,
+                      boxShadow: matchStripColor ? `inset 4px 0 0 0 ${matchStripColor}` : undefined,
                     } as const;
                     return (
                       <div
@@ -1482,45 +1492,33 @@ export function ComparePageClient() {
                         className="compareHoldingCell"
                         style={cellStyle}
                       >
-                        {/* 좌측: 종목명(상) / 티커(하) */}
-                        <div style={{ position: "relative", zIndex: 1, display: "flex", flexDirection: "column", gap: "0.1rem" }}>
-                          <div className="compareHoldingName">{holding.name || holding.ticker}</div>
-                          <div className="compareHoldingCode">{holdingCode}</div>
+                        {/* 윗줄: 종목명 (전체 너비) */}
+                        <div className="compareHoldingName" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {holding.name || holding.ticker}
                         </div>
-                        {/* 가운데: 큰 비중% (매칭 색 통합) */}
-                        <span
-                          aria-label={`비중 ${weight.toFixed(2)}%`}
+                        {/* 아랫줄: 티커 + 비중 + 변동률 */}
+                        <div
                           style={{
-                            position: "absolute",
-                            left: "50%",
-                            top: "70%",
-                            transform: "translate(-50%, -50%)",
-                            color: weightTextColor,
-                            fontSize: "1.15rem",
-                            fontWeight: 900,
-                            lineHeight: 1,
-                            pointerEvents: "none",
-                            zIndex: 2,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "0.5rem",
+                            marginTop: "0.15rem",
                           }}
                         >
-                          {weight.toFixed(2)}%
-                        </span>
-                        {/* 우측: 큰 변동률% (셀 두 줄 가운데 정렬) */}
-                        <span
-                          className={getSignedClass(holding.change_pct ?? null)}
-                          style={{
-                            position: "absolute",
-                            right: "0.65rem",
-                            top: "50%",
-                            transform: "translateY(-50%)",
-                            fontSize: "1.2rem",
-                            fontWeight: 800,
-                            pointerEvents: "none",
-                            zIndex: 2,
-                          }}
-                        >
-                          {formatSignedPercent(holding.change_pct ?? null)}
-                        </span>
+                          <div className="compareHoldingCode" style={{ flex: "0 0 auto" }}>
+                            {holdingCode}
+                          </div>
+                          <span style={{ color: weightTextColor, fontWeight: 900, fontSize: "0.95rem" }}>
+                            {weight.toFixed(2)}%
+                          </span>
+                          <span
+                            className={getSignedClass(holding.change_pct ?? null)}
+                            style={{ fontSize: "0.95rem", fontWeight: 800 }}
+                          >
+                            {formatSignedPercent(holding.change_pct ?? null)}
+                          </span>
+                        </div>
                       </div>
                     );
                   })
