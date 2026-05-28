@@ -10,7 +10,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
-type ExposureCountryOption = {
+type HoldingCountryOption = {
   code: string;
   label: string;
 };
@@ -65,11 +65,11 @@ type MainGridRow = ComponentRow & { rowType: "main" };
 type DetailGridRow = { rowType: "detail"; parentTicker: string; sources: ComponentSource[] };
 type GridRow = MainGridRow | DetailGridRow;
 
-const HOLDINGS_EXPOSURE_COUNTRIES_CACHE_KEY = "momentum-etf:holdings-details:exposure-countries";
-const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:exposure:";
-const HOLDINGS_EXPOSURE_COUNTRIES_CACHE_TTL_MS = 300_000;
+const HOLDING_COUNTRIES_CACHE_KEY = "momentum-etf:holdings-details:holding-countries";
+const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:holding-country:";
+const HOLDING_COUNTRIES_CACHE_TTL_MS = 300_000;
 const HOLDINGS_COMPONENTS_CACHE_TTL_MS = 30_000;
-const REMEMBERED_EXPOSURE_COUNTRY_STORAGE_KEY = "momentum-etf:holdings-details:remembered-exposure-country";
+const REMEMBERED_HOLDING_COUNTRY_STORAGE_KEY = "momentum-etf:holdings-details:remembered-holding-country";
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 function formatWeight(w: number): string {
@@ -243,19 +243,19 @@ function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
   return row?.rowType === "detail";
 }
 
-function readRememberedExposureCountry(): string {
+function readRememberedHoldingCountry(): string {
   if (typeof window === "undefined") return "";
   try {
-    return window.localStorage.getItem(REMEMBERED_EXPOSURE_COUNTRY_STORAGE_KEY) || "";
+    return window.localStorage.getItem(REMEMBERED_HOLDING_COUNTRY_STORAGE_KEY) || "";
   } catch {
     return "";
   }
 }
 
-function writeRememberedExposureCountry(code: string): void {
+function writeRememberedHoldingCountry(code: string): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(REMEMBERED_EXPOSURE_COUNTRY_STORAGE_KEY, code);
+    window.localStorage.setItem(REMEMBERED_HOLDING_COUNTRY_STORAGE_KEY, code);
   } catch {
     // ignore quota errors
   }
@@ -263,9 +263,9 @@ function writeRememberedExposureCountry(code: string): void {
 
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
 export function HoldingsDetailsPageClient() {
-  const [exposureCountries, setExposureCountries] = useState<ExposureCountryOption[]>([]);
-  const [selectedExposureCountry, setSelectedExposureCountry] = useState<string>(
-    readRememberedExposureCountry() || "",
+  const [holdingCountries, setHoldingCountries] = useState<HoldingCountryOption[]>([]);
+  const [selectedHoldingCountry, setSelectedHoldingCountry] = useState<string>(
+    readRememberedHoldingCountry() || "",
   );
   const [data, setData] = useState<HoldingsComponentsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -276,47 +276,47 @@ export function HoldingsDetailsPageClient() {
   const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
 
-  // 노출국가 목록 로드
+  // 종목 국가 목록 로드 (미국/한국/호주/기타국가 고정 4개)
   useEffect(() => {
-    async function fetchExposureCountries() {
+    async function fetchHoldingCountries() {
       try {
-        const cached = readSessionTtlCache<ExposureCountryOption[]>(
-          HOLDINGS_EXPOSURE_COUNTRIES_CACHE_KEY,
-          HOLDINGS_EXPOSURE_COUNTRIES_CACHE_TTL_MS,
+        const cached = readSessionTtlCache<HoldingCountryOption[]>(
+          HOLDING_COUNTRIES_CACHE_KEY,
+          HOLDING_COUNTRIES_CACHE_TTL_MS,
         );
         if (cached && cached.length > 0) {
-          setExposureCountries(cached);
-          if (!selectedExposureCountry) {
+          setHoldingCountries(cached);
+          if (!selectedHoldingCountry) {
             const first = cached[0].code;
-            setSelectedExposureCountry(first);
-            writeRememberedExposureCountry(first);
+            setSelectedHoldingCountry(first);
+            writeRememberedHoldingCountry(first);
           }
           return;
         }
 
-        const res = await fetch("/api/holdings-components/exposure-countries", { cache: "no-store" });
-        if (!res.ok) throw new Error("노출국가 목록을 불러오지 못했습니다.");
-        const list = (await res.json()) as ExposureCountryOption[];
-        writeSessionTtlCache(HOLDINGS_EXPOSURE_COUNTRIES_CACHE_KEY, list);
-        setExposureCountries(list);
-        if (list.length > 0 && !selectedExposureCountry) {
+        const res = await fetch("/api/holdings-components/holding-countries", { cache: "no-store" });
+        if (!res.ok) throw new Error("종목 국가 목록을 불러오지 못했습니다.");
+        const list = (await res.json()) as HoldingCountryOption[];
+        writeSessionTtlCache(HOLDING_COUNTRIES_CACHE_KEY, list);
+        setHoldingCountries(list);
+        if (list.length > 0 && !selectedHoldingCountry) {
           const first = list[0].code;
-          setSelectedExposureCountry(first);
-          writeRememberedExposureCountry(first);
+          setSelectedHoldingCountry(first);
+          writeRememberedHoldingCountry(first);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
       }
     }
-    void fetchExposureCountries();
+    void fetchHoldingCountries();
   }, []);
 
-  // 선택된 노출국가 데이터 로드
-  const loadData = useCallback(async (exposureCode: string) => {
-    if (!exposureCode) return;
+  // 선택된 종목 국가 데이터 로드
+  const loadData = useCallback(async (countryCode: string) => {
+    if (!countryCode) return;
     const requestSequence = requestSequenceRef.current + 1;
     requestSequenceRef.current = requestSequence;
-    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${exposureCode}`;
+    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${countryCode}`;
     const cached = readSessionTtlCache<HoldingsComponentsData>(cacheKey, HOLDINGS_COMPONENTS_CACHE_TTL_MS);
     if (cached) {
       setError(null);
@@ -331,7 +331,7 @@ export function HoldingsDetailsPageClient() {
     setExpandedTicker(null);
     try {
       const res = await fetch(
-        `/api/holdings-components/by-exposure-country?exposure_country_code=${encodeURIComponent(exposureCode)}`,
+        `/api/holdings-components/by-holding-country?country_code=${encodeURIComponent(countryCode)}`,
         { cache: "no-store" },
       );
       if (!res.ok) {
@@ -357,8 +357,8 @@ export function HoldingsDetailsPageClient() {
   }, []);
 
   useEffect(() => {
-    if (selectedExposureCountry) void loadData(selectedExposureCountry);
-  }, [selectedExposureCountry, loadData]);
+    if (selectedHoldingCountry) void loadData(selectedHoldingCountry);
+  }, [selectedHoldingCountry, loadData]);
 
   // 그리드 데이터 가공
   const gridRows = useMemo<GridRow[]>(() => {
@@ -630,21 +630,21 @@ export function HoldingsDetailsPageClient() {
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft rankMainHeaderLeft">
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">노출국가</span>
+                    <span className="appLabeledFieldLabel">종목 국가</span>
                     <select
                       className="form-select"
-                      value={selectedExposureCountry}
+                      value={selectedHoldingCountry}
                       onChange={(e) => {
                         const nextCode = e.target.value;
-                        setSelectedExposureCountry(nextCode);
-                        writeRememberedExposureCountry(nextCode);
+                        setSelectedHoldingCountry(nextCode);
+                        writeRememberedHoldingCountry(nextCode);
                       }}
-                      disabled={exposureCountries.length === 0}
+                      disabled={holdingCountries.length === 0}
                     >
-                      {exposureCountries.length === 0 ? (
-                        <option value="">노출국가 불러오는 중...</option>
+                      {holdingCountries.length === 0 ? (
+                        <option value="">종목 국가 불러오는 중...</option>
                       ) : (
-                        exposureCountries.map((c) => (
+                        holdingCountries.map((c) => (
                           <option key={c.code} value={c.code}>
                             {c.label}
                           </option>

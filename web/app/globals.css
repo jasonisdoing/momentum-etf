@@ -2082,13 +2082,13 @@ a {
 }
 
 .compareMainHeaderLeft .appLabeledField {
-  min-width: 13rem;
+  min-width: 10rem;
 }
 
 .compareTickerSearchField {
   position: relative;
-  width: min(26rem, 100%);
-  min-width: 22rem;
+  width: min(20rem, 100%);
+  min-width: 14rem;
 }
 
 .compareHeaderTabs {

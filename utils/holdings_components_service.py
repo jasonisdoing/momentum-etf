@@ -44,6 +44,56 @@ def _infer_price_country_code(ticker: str) -> str:
     return "us"
 
 
+# 종목 국가 분류 (보유종목 상세 화면의 필터 셀렉터용).
+# 미국 / 한국 / 호주 / 기타국가 4개 그룹.
+_HOLDING_COUNTRY_US = "us"
+_HOLDING_COUNTRY_KOR = "kor"
+_HOLDING_COUNTRY_AU = "au"
+_HOLDING_COUNTRY_OTHER = "other"
+_HOLDING_COUNTRY_LABELS: dict[str, str] = {
+    _HOLDING_COUNTRY_US: "미국",
+    _HOLDING_COUNTRY_KOR: "한국",
+    _HOLDING_COUNTRY_AU: "호주",
+    _HOLDING_COUNTRY_OTHER: "기타국가",
+}
+_HOLDING_COUNTRY_ORDER: list[str] = [
+    _HOLDING_COUNTRY_US,
+    _HOLDING_COUNTRY_KOR,
+    _HOLDING_COUNTRY_AU,
+    _HOLDING_COUNTRY_OTHER,
+]
+
+
+def _classify_holding_country(ticker: str) -> str:
+    """티커 패턴으로 종목 자체의 국가를 미국/한국/호주/기타국가 4개로 분류한다.
+
+    예:
+        "NVDA" → us, "AAPL" → us
+        "000660" → kor (6자리 숫자)
+        "2454.AX" → au (.AX)
+        "285A.T" → other (.T), "0981.HK" → other, "688041.SS" → other 등
+    """
+    ticker_norm = _normalize_ticker(ticker)
+    if not ticker_norm or ticker_norm in {"-", "IS"}:
+        return _HOLDING_COUNTRY_OTHER
+    if len(ticker_norm) == 6 and ticker_norm.isdigit():
+        return _HOLDING_COUNTRY_KOR
+    if ticker_norm.endswith(".AX"):
+        return _HOLDING_COUNTRY_AU
+    # 점이 없는 영문 티커는 미국으로 간주.
+    if "." not in ticker_norm and ticker_norm.isascii() and ticker_norm.isalpha():
+        return _HOLDING_COUNTRY_US
+    return _HOLDING_COUNTRY_OTHER
+
+
+def list_holding_country_options() -> list[dict[str, str]]:
+    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (미국, 한국, 호주, 기타국가 순)."""
+    return [
+        {"code": code, "label": _HOLDING_COUNTRY_LABELS[code]}
+        for code in _HOLDING_COUNTRY_ORDER
+    ]
+
+
 def _is_hidden_component_ticker(ticker: Any) -> bool:
     return _normalize_ticker(str(ticker or "")) == "IS"
 
@@ -521,33 +571,30 @@ def load_account_holdings_components(
     }
 
 
-def load_exposure_country_holdings_components(exposure_country_code: str) -> dict[str, Any]:
-    """노출국가(exposure_country_code) 기준 보유 ETF 구성종목 통합.
+def load_holding_country_components(country_code: str) -> dict[str, Any]:
+    """종목 국가(us/kor/au/other) 기준 보유 ETF 구성종목 통합.
 
-    pools.json 의 exposure_country_code 가 매칭되는 ticker_type 의 ETF 들만 통합하며,
-    현금은 합산에서 제외한다.
+    모든 계좌의 보유 ETF 의 구성종목을 통합한 뒤, 각 종목의 티커 패턴으로 분류된
+    국가가 인자와 일치하는 종목만 남긴다. 현금은 항상 제외하며 비중은 원본
+    (전체 자산 대비) 그대로 유지한다.
     """
-    from utils.settings_loader import list_ticker_types_by_exposure_country
+    code = str(country_code or "").strip().lower()
+    if code not in _HOLDING_COUNTRY_LABELS:
+        raise ValueError(f"지원하지 않는 종목 국가 코드: {country_code}")
 
-    code = str(exposure_country_code or "").strip().lower()
-    if not code:
-        raise ValueError("exposure_country_code 가 비어 있습니다.")
-    ticker_types = list_ticker_types_by_exposure_country(code)
-    if not ticker_types:
-        return {
-            "account_id": f"EXPOSURE:{code}",
-            "account_name": code.upper(),
-            "held_etf_count": 0,
-            "components_total_count": 0,
-            "components_visible_limit": _MAX_VISIBLE_COMPONENTS,
-            "components": [],
-            "etf_details": [],
-        }
-    result = load_account_holdings_components(
-        "TOTAL",
-        ticker_type_filter={t.strip().lower() for t in ticker_types},
-        include_cash=False,
-    )
-    result["account_id"] = f"EXPOSURE:{code}"
-    result["account_name"] = code.upper()
-    return result
+    base = load_account_holdings_components("TOTAL", include_cash=False)
+    filtered_components: list[dict[str, Any]] = []
+    for comp in base.get("components") or []:
+        comp_ticker = str(comp.get("ticker") or "")
+        if _classify_holding_country(comp_ticker) == code:
+            filtered_components.append(comp)
+
+    return {
+        "account_id": f"HOLDING_COUNTRY:{code}",
+        "account_name": _HOLDING_COUNTRY_LABELS[code],
+        "held_etf_count": base.get("held_etf_count", 0),
+        "components_total_count": len(filtered_components),
+        "components_visible_limit": _MAX_VISIBLE_COMPONENTS,
+        "components": filtered_components,
+        "etf_details": base.get("etf_details") or [],
+    }

@@ -7,19 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from fastapi_app.dependencies import require_internal_token
 from utils.account_registry import load_account_configs
 from utils.holdings_components_service import (
+    list_holding_country_options,
     load_account_holdings_components,
-    load_exposure_country_holdings_components,
+    load_holding_country_components,
 )
-from utils.settings_loader import list_available_exposure_countries
 
 router = APIRouter(prefix="/internal/holdings-components", tags=["holdings-components"])
-
-# 노출국가 코드 → 화면 표시 한글 라벨.
-_EXPOSURE_COUNTRY_LABELS: dict[str, str] = {
-    "us": "미국",
-    "kor": "한국",
-    "au": "호주",
-}
 
 
 @router.get("/accounts")
@@ -37,23 +30,12 @@ def get_accounts(
     ]
 
 
-@router.get("/exposure-countries")
-def get_exposure_countries(
+@router.get("/holding-countries")
+def get_holding_countries(
     _: None = Depends(require_internal_token),
 ) -> list[dict[str, str]]:
-    """노출국가 셀렉터에 사용할 코드/라벨 목록을 반환한다 (미국, 한국, 호주 순)."""
-    available = set(list_available_exposure_countries())
-    preferred_order = ["us", "kor", "au"]
-    items: list[dict[str, str]] = []
-    for code in preferred_order:
-        if code in available:
-            items.append({"code": code, "label": _EXPOSURE_COUNTRY_LABELS.get(code, code.upper())})
-    # 위 순서에 없는 추가 코드는 정의 순서로 뒤에 붙인다.
-    for code in list_available_exposure_countries():
-        if code in preferred_order:
-            continue
-        items.append({"code": code, "label": _EXPOSURE_COUNTRY_LABELS.get(code, code.upper())})
-    return items
+    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (미국, 한국, 호주, 기타국가 순)."""
+    return list_holding_country_options()
 
 
 @router.get("")
@@ -65,10 +47,10 @@ def get_holdings_components(
     return load_account_holdings_components(account_id)
 
 
-@router.get("/by-exposure-country")
-def get_holdings_by_exposure_country(
-    exposure_country_code: str = Query(...),
+@router.get("/by-holding-country")
+def get_holdings_by_holding_country(
+    country_code: str = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """노출국가별 보유 ETF 구성종목 통합 데이터를 반환한다."""
-    return load_exposure_country_holdings_components(exposure_country_code)
+    """종목 국가별 보유 ETF 구성종목 통합 데이터를 반환한다."""
+    return load_holding_country_components(country_code)

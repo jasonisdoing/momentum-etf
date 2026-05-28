@@ -6,15 +6,15 @@ export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
   try {
-    const code = request.nextUrl.searchParams.get("exposure_country_code");
+    const code = request.nextUrl.searchParams.get("country_code");
     if (!code) {
       return jsonNoStore(
-        { error: "exposure_country_code 파라미터가 필요합니다." },
+        { error: "country_code 파라미터가 필요합니다." },
         { status: 400 },
       );
     }
     const data = await fetchFastApiJson(
-      `/internal/holdings-components/by-exposure-country?exposure_country_code=${encodeURIComponent(code)}`,
+      `/internal/holdings-components/by-holding-country?country_code=${encodeURIComponent(code)}`,
     );
     return jsonNoStore(data);
   } catch (error) {
