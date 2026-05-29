@@ -35,7 +35,7 @@ def infer_yahoo_symbol_currency(symbol: str) -> str:
 def enrich_component_prices(
     holdings: Iterable[dict[str, Any]],
     *,
-    price_fetch_limit: int,
+    price_fetch_limit: int | None,
     preserve_existing: bool = False,
     cumulative_base_date: str | None = None,
     component_price_snapshot: dict[str, dict[str, Any]] | None = None,
@@ -66,6 +66,13 @@ def enrich_component_prices(
             continue
 
         component_ticker = _normalize_upper(item.get("ticker"))
+        # 호주: ASX: 접두사를 가장 먼저 인식해 호주 시장으로 라우팅 (docs/developer_guide 참조).
+        # ASX:TECH 형태가 시스템 표준이고 .AX 는 yahoo 심볼 등 외부에서 들어오는 변형 형태이다.
+        if component_ticker.startswith("ASX:"):
+            if _component_price_key(item) not in component_price_snapshot:
+                au_tickers.append(component_ticker[4:])
+            continue
+
         if _is_korean_six_digit_holding(item):
             if cumulative_base_date:
                 korean_baseline_tickers.append(component_ticker)
@@ -121,6 +128,14 @@ def enrich_component_prices(
             enriched_item["price_currency"] = "KRW"
         elif id(item) not in pricing_ids:
             _clear_price_fields(enriched_item, preserve_existing=preserve_existing)
+        elif component_ticker and component_ticker.startswith("ASX:"):
+            # 호주 ASX: 접두사 — 시스템 표준 호주 시장 식별자.
+            _apply_price_snapshot(
+                enriched_item,
+                au_price_map.get(component_ticker[4:], {}),
+                "AUD",
+                preserve_existing=preserve_existing,
+            )
         elif _component_price_key(item) in component_price_snapshot:
             snapshot = component_price_snapshot[_component_price_key(item)]
             currency = str(snapshot.get("currency") or _infer_component_currency(item)).strip().upper()
@@ -190,10 +205,16 @@ def enrich_component_prices(
 
 def select_component_holdings_for_pricing(
     holdings: Iterable[dict[str, Any]],
-    price_fetch_limit: int,
+    price_fetch_limit: int | None,
 ) -> list[dict[str, Any]]:
-    """비중 상위 구성종목만 가격 조회 대상으로 선택한다."""
+    """비중 상위 구성종목만 가격 조회 대상으로 선택한다.
+
+    price_fetch_limit=None 이면 전체 holdings 를 가격 조회 대상으로 사용한다
+    (보유 상세 화면처럼 전 종목 가격이 필요한 케이스).
+    """
     holdings_list = list(holdings)
+    if price_fetch_limit is None:
+        return holdings_list
     if price_fetch_limit <= 0:
         return []
     return sorted(holdings_list, key=_weight_value, reverse=True)[:price_fetch_limit]
