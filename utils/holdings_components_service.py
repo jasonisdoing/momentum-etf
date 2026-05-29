@@ -65,25 +65,42 @@ _HOLDING_COUNTRY_ORDER: list[str] = [
 
 
 def _classify_holding_country(ticker: str) -> str:
-    """티커 패턴으로 종목 자체의 국가를 미국/한국/호주/기타국가 4개로 분류한다.
+    """티커 패턴만으로 종목 국가를 미국/한국/호주/기타국가 4개로 분류한다.
 
-    예:
-        "NVDA" → us, "AAPL" → us
-        "000660" → kor (6자리 숫자)
-        "2454.AX" → au (.AX)
-        "285A.T" → other (.T), "0981.HK" → other, "688041.SS" → other 등
+    호주 종목은 시스템 전 구간에서 `ASX:` 접두사가 강제 부착되어 유통된다
+    (docs/developer_guide.md "호주 티커 식별 규칙" 참조). 분류도 그 접두사를
+    그대로 식별 키로 사용한다.
     """
     ticker_norm = _normalize_ticker(ticker)
     if not ticker_norm or ticker_norm in {"-", "IS"}:
         return _HOLDING_COUNTRY_OTHER
+    # 호주: ASX: 접두사 또는 .AX 접미사
+    if ticker_norm.startswith("ASX:") or ticker_norm.endswith(".AX"):
+        return _HOLDING_COUNTRY_AU
     if len(ticker_norm) == 6 and ticker_norm.isdigit():
         return _HOLDING_COUNTRY_KOR
-    if ticker_norm.endswith(".AX"):
-        return _HOLDING_COUNTRY_AU
     # 점이 없는 영문 티커는 미국으로 간주.
     if "." not in ticker_norm and ticker_norm.isascii() and ticker_norm.isalpha():
         return _HOLDING_COUNTRY_US
     return _HOLDING_COUNTRY_OTHER
+
+
+def _ensure_asx_prefix(ticker: str) -> str:
+    """호주 시장 종목 ticker 에 `ASX:` 접두사를 강제 부착한다.
+
+    이미 접두사가 있으면 그대로, 없으면 부착. `.AX` 접미사 형태(`2454.AX`) 도
+    `ASX:2454` 형태로 표준화한다. 6자리 숫자/현금 등 명백히 호주가 아닌 패턴은
+    그대로 둔다 (호출자가 호주임을 이미 알고 부르는 함수이므로 ticker 형식만 본다).
+    """
+    raw = (ticker or "").strip()
+    if not raw:
+        return raw
+    upper = raw.upper()
+    if upper.startswith("ASX:"):
+        return upper
+    if upper.endswith(".AX"):
+        return f"ASX:{upper[:-3]}"
+    return f"ASX:{upper}"
 
 
 def list_holding_country_options() -> list[dict[str, str]]:
@@ -203,7 +220,7 @@ def _append_account_components(
         total_valuation = 1.0
 
     for _, row in df.iterrows():
-        ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
+        raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
         quantity = int(row.get("수량", row.get("quantity", 0)))
         if quantity <= 0:
             continue
@@ -220,7 +237,13 @@ def _append_account_components(
         etf_daily_pct = row.get("일간(%)")
         etf_current_price = row.get("현재가")
         etf_currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
-        etf_price_country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(ticker)
+        etf_price_country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
+        # 호주 ETF/종목은 시스템 전 구간에서 ASX: 접두사를 강제 부착한다.
+        # (docs/developer_guide.md "호주 티커 식별 규칙" 참조)
+        if etf_price_country_code == "au" or etf_currency == "AUD":
+            ticker = _ensure_asx_prefix(raw_ticker)
+        else:
+            ticker = raw_ticker
         portfolio_weight = valuation / total_valuation
 
         cache_doc = None
@@ -391,6 +414,7 @@ def load_account_holdings_components(
     *,
     ticker_type_filter: set[str] | None = None,
     include_cash: bool = True,
+    max_components: int | None = None,
 ) -> dict[str, Any]:
     """특정 계좌의 보유 ETF 구성종목을 통합 합산하여 비중 순으로 반환한다.
 
@@ -487,17 +511,19 @@ def load_account_holdings_components(
     ]
 
     # 비중 순 정렬 후 화면에는 상위 구성종목만 반환한다.
+    # 임계값은 0 초과(전체 자산 대비 비중이 양수). ETF 안 작은 비중 종목도 누락되지 않도록.
     all_sorted_components = sorted(
-        (component for component in visible_components if float(component.get("total_weight") or 0.0) >= 0.01),
+        (component for component in visible_components if float(component.get("total_weight") or 0.0) > 0.0),
         key=lambda x: x["total_weight"],
         reverse=True,
     )
     total_component_count = len(all_sorted_components)
-    sorted_components = all_sorted_components[:_MAX_VISIBLE_COMPONENTS]
+    cap = max_components if max_components is not None else _MAX_VISIBLE_COMPONENTS
+    sorted_components = all_sorted_components[:cap] if cap and cap > 0 else all_sorted_components
 
     sorted_components, _ = enrich_component_prices(
         sorted_components,
-        price_fetch_limit=100,
+        price_fetch_limit=None,  # 보유 종목 전체에 가격 채움 (작은 비중 종목 누락 방지).
         preserve_existing=True,
     )
 
@@ -582,11 +608,12 @@ def load_holding_country_components(country_code: str) -> dict[str, Any]:
     if code not in _HOLDING_COUNTRY_LABELS:
         raise ValueError(f"지원하지 않는 종목 국가 코드: {country_code}")
 
-    base = load_account_holdings_components("TOTAL", include_cash=False)
+    # 국가 필터 후 박스 뷰에서 작은 비중 종목까지 보여야 하므로, 통합 시 cap 을 적용하지 않는다.
+    # (TOTAL cap=100 을 그대로 두면 한국·호주의 작은 종목들이 미국 큰 종목 100개에 밀려 응답에서 통째 사라짐.)
+    base = load_account_holdings_components("TOTAL", include_cash=False, max_components=0)
     filtered_components: list[dict[str, Any]] = []
     for comp in base.get("components") or []:
-        comp_ticker = str(comp.get("ticker") or "")
-        if _classify_holding_country(comp_ticker) == code:
+        if _classify_holding_country(str(comp.get("ticker") or "")) == code:
             filtered_components.append(comp)
 
     return {
@@ -594,7 +621,8 @@ def load_holding_country_components(country_code: str) -> dict[str, Any]:
         "account_name": _HOLDING_COUNTRY_LABELS[code],
         "held_etf_count": base.get("held_etf_count", 0),
         "components_total_count": len(filtered_components),
-        "components_visible_limit": _MAX_VISIBLE_COMPONENTS,
+        # 종목 국가별 통합은 cap 을 두지 않으므로 visible_limit 도 total 과 동일.
+        "components_visible_limit": len(filtered_components),
         "components": filtered_components,
         "etf_details": base.get("etf_details") or [],
     }

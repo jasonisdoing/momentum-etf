@@ -5,7 +5,7 @@ import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink } from "../components/TickerDetailLink";
+import { TickerDetailLink, stripAsxPrefix } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
@@ -127,8 +127,6 @@ function formatSignedPercentWithPlus(val: number | null | undefined): string {
   return `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
 }
 
-const BOX_VIEW_TOP_N = 100;
-
 // 박스 좌측 strip: 변동률 절댓값에 따라 진한 빨강(양수) / 진한 파랑(음수). 5% 에서 최대 진하기.
 function getChangeStripColor(changePct: number | null | undefined): string | undefined {
   if (changePct == null || Number.isNaN(changePct) || changePct === 0) return undefined;
@@ -139,17 +137,51 @@ function getChangeStripColor(changePct: number | null | undefined): string | und
     : `hsl(216, 75%, ${lightness}%)`;
 }
 
-function HoldingsBoxView({ components }: { components: ComponentRow[] }) {
-  // 비중 내림차순 상위 N개
+function HoldingsBoxView({
+  components,
+  isLoading,
+}: {
+  components: ComponentRow[];
+  isLoading?: boolean;
+}) {
+  // 비중 내림차순 전체 (캡 없음 — 작은 비중 종목까지 모두 표시).
   const topComponents = useMemo(() => {
-    return [...components]
-      .sort((a, b) => Number(b.total_weight ?? 0) - Number(a.total_weight ?? 0))
-      .slice(0, BOX_VIEW_TOP_N);
+    return [...components].sort(
+      (a, b) => Number(b.total_weight ?? 0) - Number(a.total_weight ?? 0),
+    );
   }, [components]);
+
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "3rem 1.5rem",
+          minHeight: "240px",
+          color: "#64748b",
+        }}
+      >
+        구성종목 불러오는 중...
+      </div>
+    );
+  }
 
   if (topComponents.length === 0) {
     return (
-      <div style={{ padding: "1.5rem", color: "#64748b" }}>표시할 구성종목이 없습니다.</div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "3rem 1.5rem",
+          minHeight: "240px",
+          color: "#64748b",
+        }}
+      >
+        표시할 구성종목이 없습니다.
+      </div>
     );
   }
 
@@ -205,7 +237,7 @@ function HoldingsBoxView({ components }: { components: ComponentRow[] }) {
                 lineHeight: 1.25,
               }}
             >
-              {formatDisplayName(row.name) || row.ticker}
+              {formatDisplayName(row.name) || stripAsxPrefix(row.ticker)}
             </div>
             {/* 아랫줄: 티커 + 비중 + 변동률 */}
             <div
@@ -218,7 +250,7 @@ function HoldingsBoxView({ components }: { components: ComponentRow[] }) {
               }}
             >
               <div style={{ flex: "0 0 auto", color: "#9ca3af", fontSize: "0.85rem" }}>
-                {row.ticker}
+                {stripAsxPrefix(row.ticker)}
               </div>
               <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
                 {weight.toFixed(2)}%
@@ -270,8 +302,8 @@ export function HoldingsDetailsPageClient() {
   const [data, setData] = useState<HoldingsComponentsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 뷰 모드: 리스트(기본 — 테이블) / 박스 (구성종목을 카드 박스로 나열)
-  const [viewMode, setViewMode] = useState<"list" | "box">("list");
+  // 뷰 모드: 박스(기본 — 구성종목 카드) / 리스트 (테이블)
+  const [viewMode, setViewMode] = useState<"list" | "box">("box");
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
   const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
@@ -658,17 +690,6 @@ export function HoldingsDetailsPageClient() {
                       <button
                         type="button"
                         className={
-                          viewMode === "list"
-                            ? "btn appSegmentedToggleButton is-active"
-                            : "btn appSegmentedToggleButton"
-                        }
-                        onClick={() => setViewMode("list")}
-                      >
-                        리스트
-                      </button>
-                      <button
-                        type="button"
-                        className={
                           viewMode === "box"
                             ? "btn appSegmentedToggleButton is-active"
                             : "btn appSegmentedToggleButton"
@@ -676,6 +697,17 @@ export function HoldingsDetailsPageClient() {
                         onClick={() => setViewMode("box")}
                       >
                         박스
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          viewMode === "list"
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        onClick={() => setViewMode("list")}
+                      >
+                        리스트
                       </button>
                     </div>
                   </label>
@@ -695,7 +727,7 @@ export function HoldingsDetailsPageClient() {
           
           <div className="card-body appCardBodyTight appTableCardBodyFill holdingsDetailsBody">
             {viewMode === "box" ? (
-              <HoldingsBoxView components={data?.components ?? []} />
+              <HoldingsBoxView components={data?.components ?? []} isLoading={isLoading} />
             ) : (
             <div className="appGridFillWrap holdingsDetailsGridWrap">
               <AppAgGrid
