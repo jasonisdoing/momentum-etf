@@ -1907,14 +1907,13 @@ function AccountHoldingsDetailPanel({
               if (!orderedTickers.length) {
                 return;
               }
-              setRows((previous) => {
-                const nextRows = reorderRowsByTickers(previous, orderedTickers);
-                rowsRef.current = nextRows;
-                onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
-                return nextRows;
-              });
+              // setState updater 안에서 부모 setState (onRowsSync) 를 트리거하면
+              // React 가 "render 중 다른 컴포넌트 업데이트" 로 경고한다. updater 밖에서
+              // 순차 호출하도록 분리한다.
               const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
               rowsRef.current = nextRows;
+              setRows(nextRows);
+              onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
               setIsReorderDirty(true);
               isReorderDirtyRef.current = true;
               scheduleSilentReorderSave(nextRows);
