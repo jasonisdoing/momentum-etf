@@ -20,6 +20,7 @@ from scripts.slack_asset_summary import (
     _load_latest_monthly_metrics,
     _load_latest_weekly_metrics,
     _load_latest_yearly_metrics,
+    collect_global_totals,
     format_korean_currency,
     get_trend_emoji,
 )
@@ -32,12 +33,16 @@ def _send_data_aggregate_summary() -> None:
     weekly_metrics = _load_latest_weekly_metrics()
     monthly_metrics = _load_latest_monthly_metrics()
     yearly_metrics = _load_latest_yearly_metrics()
+    totals = collect_global_totals()
 
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     message = (
         f"*📊 데이터 집계 결과 ({now_str})*\n"
+        f"💰 *총 자산*: *{format_korean_currency(totals['total_assets'])}*\n"
         f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} "
         f"({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
+        f"💵 *현금 잔고*: {format_korean_currency(totals['global_cash'])} ({totals['cash_pct']:.1f}%)\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} "
         f"({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
         f"🗓️ *금월 손익*: {format_korean_currency(monthly_metrics['monthly_profit'])} "

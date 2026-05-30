@@ -161,6 +161,55 @@ def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
     )
 
 
+def collect_global_totals() -> dict[str, object]:
+    """전체 계좌 합산 — 총 자산 / 투자 원금 / 현금 잔고 / 자산 변동 텍스트 반환.
+
+    슬랙의 총 자산 요약과 데이터 집계 결과 두 메시지가 공통으로 사용한다.
+    포맷팅된 텍스트(asset_change_text)는 슬랙용 이모지 형식이다.
+    """
+    accounts = load_account_configs()
+    global_principal = 0.0
+    global_cash = 0.0
+    total_assets = 0.0
+    for account in accounts:
+        account_id = account["account_id"]
+        if not account.get("settings", {}).get("show_hold", True):
+            continue
+        m_data = load_portfolio_master(account_id) or {}
+        principal = float(m_data.get("total_principal") or 0.0)
+        cash = float(m_data.get("cash_balance") or 0.0)
+        global_principal += principal
+        global_cash += cash
+        try:
+            df = load_real_holdings_table(account_id, strict_price_cache=False)
+        except Exception:
+            df = None
+        valuation = float(df["평가금액(KRW)"].sum()) if df is not None and not df.empty else 0.0
+        total_assets += valuation + cash
+
+    cash_pct = (global_cash / total_assets * 100.0) if total_assets > 0 else 0.0
+
+    # 전일 대비 자산 변동
+    prev_total_snapshot = get_latest_daily_snapshot("TOTAL", before_today=True)
+    asset_change_text = ""
+    if prev_total_snapshot:
+        prev_total_assets = float(prev_total_snapshot.get("total_assets") or 0.0)
+        if prev_total_assets > 0:
+            delta = total_assets - prev_total_assets
+            if delta > 0:
+                asset_change_text = f" ({format_korean_currency(delta)}:small_red_triangle:)"
+            elif delta < 0:
+                asset_change_text = f" ({format_korean_currency(delta)}:chart_with_downwards_trend:)"
+
+    return {
+        "total_assets": total_assets,
+        "global_principal": global_principal,
+        "global_cash": global_cash,
+        "cash_pct": cash_pct,
+        "asset_change_text": asset_change_text,
+    }
+
+
 def main():
     load_env_if_present()
 
@@ -256,20 +305,11 @@ def main():
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
 
-    # 총 자산 옆 변동액도 일별 집계 결과와 동일한 장부 기준을 사용한다.
-    asset_change_text = ""
-    daily_profit = daily_metrics["daily_profit"]
-    if daily_profit > 0:
-        asset_change_text = f" ({format_korean_currency(daily_profit)}:small_red_triangle:)"
-    elif daily_profit < 0:
-        asset_change_text = f" ({format_korean_currency(daily_profit)}:chart_with_downwards_trend:)"
-
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"💰 *총 자산*: *{format_korean_currency(total_assets)}*{asset_change_text}\n"
-        f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
-        f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)\n"
+        f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
+        f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} "
+        f"({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
     )
 
     main_ts = send_slack_message_v2(main_text)
@@ -277,13 +317,14 @@ def main():
         logger.error("Failed to send main Slack message.")
         return
 
-    # 2. Compose Profit & Loss Summary (Thread) — 금일/금주/금월/금년/누적
+    # 2. Compose Profit & Loss Summary (Thread) — 금일/금주/금월/금년/누적 + 현금 잔고
     pnl_text = (
         f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} ({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
         f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
         f"🗓️ *금월 손익*: {format_korean_currency(monthly_metrics['monthly_profit'])} ({monthly_metrics['monthly_return_pct']:+.2f}%) {get_trend_emoji(monthly_metrics['monthly_profit'])}\n"
         f"📅 *금년 손익*: {format_korean_currency(yearly_metrics['yearly_profit'])} ({yearly_metrics['yearly_return_pct']:+.2f}%) {get_trend_emoji(yearly_metrics['yearly_profit'])}\n"
-        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}"
+        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
+        f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)"
     )
     send_slack_message_v2(pnl_text, thread_ts=main_ts)
 

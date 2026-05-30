@@ -136,15 +136,49 @@ def _run_job(job_name: str, script_path: str) -> None:
         log.exception("배치 실행 실패: %s — %s", job_name, exc)
 
 
+_CRON_DOW_TO_NAME = ("sun", "mon", "tue", "wed", "thu", "fri", "sat", "sun")
+
+
+def _convert_cron_dow(field: str) -> str:
+    """표준 cron 의 요일 필드(0=일,1=월,...,6=토,7=일)를 APScheduler 이름 형식으로 변환.
+
+    APScheduler 의 day_of_week 숫자 규칙(0=월) 과 표준 cron(0=일) 이 다르기 때문에
+    숫자 그대로 넘기면 주말 발송 버그가 발생한다. mon/tue/... 같은 이름은 두 시스템이
+    동일하게 인식하므로 명시 변환한다.
+    """
+    if not field or field == "*":
+        return field
+
+    def convert_token(token: str) -> str:
+        token = token.strip()
+        if "-" in token:
+            start, end = token.split("-", 1)
+            return f"{convert_token(start)}-{convert_token(end)}"
+        if "/" in token:
+            base, step = token.split("/", 1)
+            return f"{convert_token(base)}/{step}"
+        if token.isdigit():
+            idx = int(token)
+            if 0 <= idx <= 7:
+                return _CRON_DOW_TO_NAME[idx]
+        return token
+
+    return ",".join(convert_token(t) for t in field.split(","))
+
+
 def _build_trigger(cron_expr: str) -> CronTrigger:
-    """5필드 cron 식 → APScheduler CronTrigger."""
+    """5필드 cron 식 → APScheduler CronTrigger.
+
+    중요: APScheduler 의 day_of_week 숫자는 0=월요일이라 표준 cron(0=일)과 어긋난다.
+    숫자를 mon/tue 등 이름으로 명시 변환해서 두 체계의 차이를 흡수한다.
+    """
     minute, hour, dom, month, dow = cron_expr.split()
     return CronTrigger(
         minute=minute,
         hour=hour,
         day=dom,
         month=month,
-        day_of_week=dow,
+        day_of_week=_convert_cron_dow(dow),
         timezone=KST,
     )
 
