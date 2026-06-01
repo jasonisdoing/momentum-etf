@@ -40,6 +40,35 @@ def format_kr_money(value: float) -> str:
     return sign + formatted
 
 
+def format_kr_money_man(value: float) -> str:
+    """금액을 '억', '만' 단위까지만 표시 (만원 미만은 절사).
+
+    슬랙 손익 요약처럼 큰 금액을 간결하게 보여줄 때 사용한다.
+    예: 117697562 → "1억 1769만원",  36901477 → "3690만원"
+    절사 결과가 0이면 "0원".
+    """
+    if value is None or not isinstance(value, numbers.Real):
+        return "-"
+    val_int = int(round(value))
+    if val_int == 0:
+        return "0원"
+
+    sign = "-" if val_int < 0 else ""
+    val_abs = abs(val_int)
+    eok = val_abs // 100000000
+    man = (val_abs % 100000000) // 10000
+
+    parts = []
+    if eok > 0:
+        parts.append(f"{eok}억")
+    if man > 0:
+        parts.append(f"{man}만")
+    if not parts:
+        # 만원 미만 — 절사 결과 0
+        return "0원"
+    return sign + " ".join(parts) + "원"
+
+
 def format_money(value: float, country: str) -> str:
     """금액을 통화/국가 코드에 맞는 형식으로 포맷합니다."""
     if value is None or not isinstance(value, numbers.Real):

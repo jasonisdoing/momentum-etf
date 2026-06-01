@@ -1,22 +1,18 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink } from "../components/TickerDetailLink";
+import { TickerDetailLink, stripAsxPrefix } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import {
-  readRememberedMomentumEtfAccountId,
-  writeRememberedMomentumEtfAccountId,
-} from "../components/account-selection";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
 // ─── 타입 ────────────────────────────────────────────────────────────────────
-type AccountOption = {
-  account_id: string;
-  name: string;
+type HoldingCountryOption = {
+  code: string;
+  label: string;
 };
 
 type ComponentSource = {
@@ -69,10 +65,11 @@ type MainGridRow = ComponentRow & { rowType: "main" };
 type DetailGridRow = { rowType: "detail"; parentTicker: string; sources: ComponentSource[] };
 type GridRow = MainGridRow | DetailGridRow;
 
-const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY = "momentum-etf:holdings-details:accounts";
-const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:data:";
-const HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS = 300_000;
+const HOLDING_COUNTRIES_CACHE_KEY = "momentum-etf:holdings-details:holding-countries";
+const HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX = "momentum-etf:holdings-details:holding-country:";
+const HOLDING_COUNTRIES_CACHE_TTL_MS = 300_000;
 const HOLDINGS_COMPONENTS_CACHE_TTL_MS = 30_000;
+const REMEMBERED_HOLDING_COUNTRY_STORAGE_KEY = "momentum-etf:holdings-details:remembered-holding-country";
 
 // ─── 유틸 ────────────────────────────────────────────────────────────────────
 function formatWeight(w: number): string {
@@ -103,11 +100,173 @@ function formatKrw(val: number | null | undefined): string {
   return `${rounded.toLocaleString()}원`;
 }
 
+function maskAmount(showAmounts: boolean, value: string): string {
+  if (value === "-") return value;
+  return showAmounts ? value : "••••";
+}
+
+function formatDisplayName(name: string | null | undefined): string {
+  if (!name) return "-";
+  const original = name.trim();
+  const cleaned = original
+    .replace(/\s*[\(\（][^\)\）]*[\)\）]\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || original;
+}
+
 function getSignedClass(val: number | null | undefined): string {
   if (val == null) return "";
   if (val > 0) return "metricPositive";
   if (val < 0) return "metricNegative";
   return "";
+}
+
+function formatSignedPercentWithPlus(val: number | null | undefined): string {
+  if (val == null || Number.isNaN(val)) return "-";
+  return `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+}
+
+// 박스 좌측 strip: 변동률 절댓값에 따라 진한 빨강(양수) / 진한 파랑(음수). 5% 에서 최대 진하기.
+function getChangeStripColor(changePct: number | null | undefined): string | undefined {
+  if (changePct == null || Number.isNaN(changePct) || changePct === 0) return undefined;
+  const intensity = Math.min(Math.abs(changePct) / 5, 1);
+  const lightness = 60 - intensity * 30; // 60% (옅음) → 30% (진함)
+  return changePct > 0
+    ? `hsl(0, 75%, ${lightness}%)`
+    : `hsl(216, 75%, ${lightness}%)`;
+}
+
+function HoldingsBoxView({
+  components,
+  isLoading,
+}: {
+  components: ComponentRow[];
+  isLoading?: boolean;
+}) {
+  // 비중 내림차순 전체 (캡 없음 — 작은 비중 종목까지 모두 표시).
+  const topComponents = useMemo(() => {
+    return [...components].sort(
+      (a, b) => Number(b.total_weight ?? 0) - Number(a.total_weight ?? 0),
+    );
+  }, [components]);
+
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "3rem 1.5rem",
+          minHeight: "240px",
+          color: "#64748b",
+        }}
+      >
+        구성종목 불러오는 중...
+      </div>
+    );
+  }
+
+  if (topComponents.length === 0) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "3rem 1.5rem",
+          minHeight: "240px",
+          color: "#64748b",
+        }}
+      >
+        표시할 구성종목이 없습니다.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
+        gap: "0.5rem",
+        padding: "0.75rem",
+        overflowY: "auto",
+        height: "100%",
+        alignContent: "start",
+      }}
+    >
+      {topComponents.map((row) => {
+        const weight = Number(row.total_weight ?? 0);
+        const changePct = row.change_pct;
+        // 변동률 기반 배경 (양수 빨강 / 음수 파랑, 5%에서 alpha 최대치 0.18).
+        let changeBg: string | undefined;
+        if (changePct != null && !Number.isNaN(changePct) && changePct !== 0) {
+          const alpha = Math.min(0.18, (Math.abs(changePct) / 5) * 0.18);
+          changeBg =
+            changePct > 0
+              ? `rgba(239, 68, 68, ${alpha})`
+              : `rgba(37, 99, 235, ${alpha})`;
+        }
+        const stripColor = getChangeStripColor(changePct);
+        return (
+          <div
+            key={row.ticker}
+            style={{
+              position: "relative",
+              overflow: "hidden",
+              minHeight: "3.25rem",
+              padding: "0.42rem 0.65rem",
+              borderRight: "1px solid #d6deea",
+              borderBottom: "1px solid #d6deea",
+              borderRadius: "0.25rem",
+              background: changeBg || "#fff",
+              boxShadow: stripColor ? `inset 4px 0 0 0 ${stripColor}` : undefined,
+            }}
+          >
+            {/* 윗줄: 종목명 (전체 너비) */}
+            <div
+              style={{
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                color: "#1f2937",
+                fontSize: "1rem",
+                fontWeight: 800,
+                lineHeight: 1.25,
+              }}
+            >
+              {formatDisplayName(row.name) || stripAsxPrefix(row.ticker)}
+            </div>
+            {/* 아랫줄: 티커 + 비중 + 변동률 */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "0.5rem",
+                marginTop: "0.15rem",
+              }}
+            >
+              <div style={{ flex: "0 0 auto", color: "#9ca3af", fontSize: "0.85rem" }}>
+                {stripAsxPrefix(row.ticker)}
+              </div>
+              <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
+                {weight.toFixed(2)}%
+              </span>
+              <span
+                className={getSignedClass(changePct)}
+                style={{ fontSize: "0.95rem", fontWeight: 800 }}
+              >
+                {formatSignedPercentWithPlus(changePct)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const gridTheme = createAppGridTheme();
@@ -116,57 +275,80 @@ function isDetailRow(row: GridRow | undefined): row is DetailGridRow {
   return row?.rowType === "detail";
 }
 
+function readRememberedHoldingCountry(): string {
+  if (typeof window === "undefined") return "";
+  try {
+    return window.localStorage.getItem(REMEMBERED_HOLDING_COUNTRY_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeRememberedHoldingCountry(code: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(REMEMBERED_HOLDING_COUNTRY_STORAGE_KEY, code);
+  } catch {
+    // ignore quota errors
+  }
+}
+
 // ─── 컴포넌트 ─────────────────────────────────────────────────────────────────
 export function HoldingsDetailsPageClient() {
-  const [accounts, setAccounts] = useState<AccountOption[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<string>(
-    readRememberedMomentumEtfAccountId() || "",
+  const [holdingCountries, setHoldingCountries] = useState<HoldingCountryOption[]>([]);
+  const [selectedHoldingCountry, setSelectedHoldingCountry] = useState<string>(
+    readRememberedHoldingCountry() || "",
   );
   const [data, setData] = useState<HoldingsComponentsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 뷰 모드: 박스(기본 — 구성종목 카드) / 리스트 (테이블)
+  const [viewMode, setViewMode] = useState<"list" | "box">("box");
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+  const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
 
-  // 계좌 목록 로드
+  // 종목 국가 목록 로드 (미국/한국/호주/기타국가 고정 4개)
   useEffect(() => {
-    async function fetchAccounts() {
+    async function fetchHoldingCountries() {
       try {
-        const cached = readSessionTtlCache<AccountOption[]>(
-          HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY,
-          HOLDINGS_COMPONENT_ACCOUNTS_CACHE_TTL_MS,
+        const cached = readSessionTtlCache<HoldingCountryOption[]>(
+          HOLDING_COUNTRIES_CACHE_KEY,
+          HOLDING_COUNTRIES_CACHE_TTL_MS,
         );
         if (cached && cached.length > 0) {
-          setAccounts(cached);
-          if (!selectedAccount) {
-            setSelectedAccount("TOTAL");
-            writeRememberedMomentumEtfAccountId("TOTAL");
+          setHoldingCountries(cached);
+          if (!selectedHoldingCountry) {
+            const first = cached[0].code;
+            setSelectedHoldingCountry(first);
+            writeRememberedHoldingCountry(first);
           }
           return;
         }
 
-        const res = await fetch("/api/holdings-components/accounts", { cache: "no-store" });
-        if (!res.ok) throw new Error("계좌 목록을 불러오지 못했습니다.");
-        const list = (await res.json()) as AccountOption[];
-        writeSessionTtlCache(HOLDINGS_COMPONENT_ACCOUNTS_CACHE_KEY, list);
-        setAccounts(list);
-        if (list.length > 0 && !selectedAccount) {
-          setSelectedAccount("TOTAL");
-          writeRememberedMomentumEtfAccountId("TOTAL");
+        const res = await fetch("/api/holdings-components/holding-countries", { cache: "no-store" });
+        if (!res.ok) throw new Error("종목 국가 목록을 불러오지 못했습니다.");
+        const list = (await res.json()) as HoldingCountryOption[];
+        writeSessionTtlCache(HOLDING_COUNTRIES_CACHE_KEY, list);
+        setHoldingCountries(list);
+        if (list.length > 0 && !selectedHoldingCountry) {
+          const first = list[0].code;
+          setSelectedHoldingCountry(first);
+          writeRememberedHoldingCountry(first);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : "오류가 발생했습니다.");
       }
     }
-    void fetchAccounts();
+    void fetchHoldingCountries();
   }, []);
 
-  // 선택된 계좌 데이터 로드
-  const loadData = useCallback(async (accountId: string) => {
-    if (!accountId) return;
+  // 선택된 종목 국가 데이터 로드
+  const loadData = useCallback(async (countryCode: string) => {
+    if (!countryCode) return;
     const requestSequence = requestSequenceRef.current + 1;
     requestSequenceRef.current = requestSequence;
-    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${accountId}`;
+    const cacheKey = `${HOLDINGS_COMPONENTS_CACHE_KEY_PREFIX}${countryCode}`;
     const cached = readSessionTtlCache<HoldingsComponentsData>(cacheKey, HOLDINGS_COMPONENTS_CACHE_TTL_MS);
     if (cached) {
       setError(null);
@@ -180,9 +362,10 @@ export function HoldingsDetailsPageClient() {
     setData(null);
     setExpandedTicker(null);
     try {
-      const res = await fetch(`/api/holdings-components?account_id=${encodeURIComponent(accountId)}`, {
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/holdings-components/by-holding-country?country_code=${encodeURIComponent(countryCode)}`,
+        { cache: "no-store" },
+      );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(body.error ?? "데이터를 불러오지 못했습니다.");
@@ -206,8 +389,8 @@ export function HoldingsDetailsPageClient() {
   }, []);
 
   useEffect(() => {
-    if (selectedAccount) void loadData(selectedAccount);
-  }, [selectedAccount, loadData]);
+    if (selectedHoldingCountry) void loadData(selectedHoldingCountry);
+  }, [selectedHoldingCountry, loadData]);
 
   // 그리드 데이터 가공
   const gridRows = useMemo<GridRow[]>(() => {
@@ -241,6 +424,7 @@ export function HoldingsDetailsPageClient() {
       field: "name",
       flex: 1,
       minWidth: 140,
+      cellClass: "holdingsDetailsNameAgCell",
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         if (!params.data || isDetailRow(params.data)) return null;
         const mainRow = params.data as MainGridRow;
@@ -256,7 +440,7 @@ export function HoldingsDetailsPageClient() {
                 ▶
               </span>
             )}
-            <span className="fw-bold text-dark holdingsDetailsNameText">{params.value}</span>
+            <span className="fw-bold text-dark holdingsDetailsNameText">{formatDisplayName(params.value)}</span>
           </div>
         );
       },
@@ -287,7 +471,7 @@ export function HoldingsDetailsPageClient() {
     {
       headerName: "일간(%)",
       field: "change_pct",
-      width: 100,
+      width: 80,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -297,33 +481,23 @@ export function HoldingsDetailsPageClient() {
       },
     },
     {
-      headerName: "수익률",
-      field: "return_pct",
-      width: 100,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        return <span className={getSignedClass(params.value)}>{formatSignedPercent(params.value)}</span>;
-      },
-    },
-    {
       headerName: "금일 손익",
       field: "daily_profit_krw",
-      width: 140,
+      width: 110,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
+        return <span className={showAmounts ? getSignedClass(params.value) : ""}>{maskAmount(showAmounts, formatKrw(params.value))}</span>;
       },
     },
     {
       headerName: "누적 손익",
       field: "cumulative_profit_krw",
-      width: 140,
+      width: 110,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return <span className={getSignedClass(params.value)}>{formatKrw(params.value)}</span>;
+        return <span className={showAmounts ? getSignedClass(params.value) : ""}>{maskAmount(showAmounts, formatKrw(params.value))}</span>;
       },
     },
     {
@@ -333,10 +507,10 @@ export function HoldingsDetailsPageClient() {
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
-        return formatKrw(params.value);
+        return maskAmount(showAmounts, formatKrw(params.value));
       },
     },
-  ], [expandedTicker]);
+  ], [expandedTicker, showAmounts]);
 
   // 상세 패널 렌더러 (부모 행과 컬럼/정렬 완벽 정밀 타격)
   const DetailRenderer = useCallback((params: { data?: GridRow }) => {
@@ -353,7 +527,7 @@ export function HoldingsDetailsPageClient() {
             
             {/* 2. 종목명 (flex:1) - 좌측 패딩 12px */}
             <div className="hdColName fw-bold text-dark">
-              {src.etf_name}
+              {formatDisplayName(src.etf_name)}
             </div>
             
             {/* 3. 비중 (90px) - 우측 패딩 12px */}
@@ -373,32 +547,26 @@ export function HoldingsDetailsPageClient() {
               </span>
             </div>
 
-            <div className="hdColReturn">
-              <span className={getSignedClass(src.return_pct)}>
-                {formatSignedPercent(src.return_pct)}
-              </span>
-            </div>
-
             <div className="hdColDailyProfit">
-              <span className={getSignedClass(src.daily_profit_krw)}>
-                {formatKrw(src.daily_profit_krw)}
+              <span className={showAmounts ? getSignedClass(src.daily_profit_krw) : ""}>
+                {maskAmount(showAmounts, formatKrw(src.daily_profit_krw))}
               </span>
             </div>
 
             <div className="hdColCumulativeProfit">
-              <span className={getSignedClass(src.cumulative_profit_krw)}>
-                {formatKrw(src.cumulative_profit_krw)}
+              <span className={showAmounts ? getSignedClass(src.cumulative_profit_krw) : ""}>
+                {maskAmount(showAmounts, formatKrw(src.cumulative_profit_krw))}
               </span>
             </div>
 
             <div className="hdColValuation">
-              {formatKrw(src.valuation_krw)}
+              {maskAmount(showAmounts, formatKrw(src.valuation_krw))}
             </div>
           </div>
         ))}
       </div>
     );
-  }, []);
+  }, [showAmounts]);
 
   const gridOptions = useMemo<GridOptions<GridRow>>(() => ({
     getRowId: (params) => (isDetailRow(params.data) ? `detail:${params.data.parentTicker}` : params.data.ticker),
@@ -428,6 +596,23 @@ export function HoldingsDetailsPageClient() {
       ? `${componentsTotalCount}개 중 상위 ${componentsVisibleLimit}개`
       : `${componentsTotalCount}개`;
 
+  // 전체 구성종목 가중 평균 변동률과 추적 비중. 리스트/박스 뷰 모두 동일 값 사용.
+  const averageStats = useMemo(() => {
+    if (!data) return null;
+    let tracked = 0;
+    let weightedSum = 0;
+    for (const row of data.components) {
+      const w = Number(row.total_weight ?? 0);
+      const c = row.change_pct;
+      if (w <= 0) continue;
+      if (c == null || Number.isNaN(c)) continue;
+      tracked += w;
+      weightedSum += w * c;
+    }
+    if (tracked <= 0) return null;
+    return { avgPct: weightedSum / tracked, trackedWeight: tracked };
+  }, [data]);
+
   const titleRight = data ? (
     <div className="appHeaderMetrics rankToolbarMeta">
       <div className="appHeaderMetric">
@@ -438,6 +623,27 @@ export function HoldingsDetailsPageClient() {
         <span>구성종목:</span>
         <span className="appHeaderMetricValue">{componentsMetricText}</span>
       </div>
+      {averageStats ? (
+        <div className="appHeaderMetric">
+          <span>평균:</span>
+          <span
+            className="appHeaderMetricValue"
+            style={{
+              color:
+                averageStats.avgPct > 0
+                  ? "#d32f2f"
+                  : averageStats.avgPct < 0
+                  ? "#1d4ed8"
+                  : undefined,
+            }}
+          >
+            {formatSignedPercentWithPlus(averageStats.avgPct)}
+          </span>
+          <span style={{ color: "#94a3b8", marginLeft: "0.25rem", fontSize: "0.85rem" }}>
+            (추적 {averageStats.trackedWeight.toFixed(0)}%)
+          </span>
+        </div>
+      ) : null}
     </div>
   ) : null;
 
@@ -456,38 +662,74 @@ export function HoldingsDetailsPageClient() {
               <div className="appMainHeader">
                 <div className="appMainHeaderLeft rankMainHeaderLeft">
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">계좌</span>
+                    <span className="appLabeledFieldLabel">종목 국가</span>
                     <select
                       className="form-select"
-                      value={selectedAccount}
+                      value={selectedHoldingCountry}
                       onChange={(e) => {
-                        const nextId = e.target.value;
-                        setSelectedAccount(nextId);
-                        writeRememberedMomentumEtfAccountId(nextId);
+                        const nextCode = e.target.value;
+                        setSelectedHoldingCountry(nextCode);
+                        writeRememberedHoldingCountry(nextCode);
                       }}
-                      disabled={accounts.length === 0}
+                      disabled={holdingCountries.length === 0}
                     >
-                      {accounts.length === 0 ? (
-                        <option value="">계좌 불러오는 중...</option>
+                      {holdingCountries.length === 0 ? (
+                        <option value="">종목 국가 불러오는 중...</option>
                       ) : (
-                        <>
-                          <option value="TOTAL">전체</option>
-                          {accounts.map((acc) => (
-                            <option key={acc.account_id} value={acc.account_id}>
-                              {acc.name}
-                            </option>
-                          ))}
-                        </>
+                        holdingCountries.map((c) => (
+                          <option key={c.code} value={c.code}>
+                            {c.label}
+                          </option>
+                        ))
                       )}
                     </select>
                   </label>
+                  <label className="appLabeledField" style={{ minWidth: 0, width: "auto", flex: "0 0 auto" }}>
+                    <span className="appLabeledFieldLabel">뷰</span>
+                    <div className="appSegmentedToggle" role="group" aria-label="보기 형식 선택">
+                      <button
+                        type="button"
+                        className={
+                          viewMode === "box"
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        onClick={() => setViewMode("box")}
+                      >
+                        박스
+                      </button>
+                      <button
+                        type="button"
+                        className={
+                          viewMode === "list"
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        onClick={() => setViewMode("list")}
+                      >
+                        리스트
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                <div className="appMainHeaderRight">
+                  <button
+                    type="button"
+                    className={`btn btn-sm shadow-sm ${showAmounts ? "btn-outline-secondary" : "btn-dark"}`}
+                    onClick={() => setShowAmounts((prev) => !prev)}
+                  >
+                    {showAmounts ? "금액 가리기" : "금액 보기"}
+                  </button>
                 </div>
               </div>
             </ResponsiveFiltersSection>
           </div>
           
-          <div className="card-body appCardBodyTight appTableCardBodyFill">
-            <div className="appGridFillWrap">
+          <div className="card-body appCardBodyTight appTableCardBodyFill holdingsDetailsBody">
+            {viewMode === "box" ? (
+              <HoldingsBoxView components={data?.components ?? []} isLoading={isLoading} />
+            ) : (
+            <div className="appGridFillWrap holdingsDetailsGridWrap">
               <AppAgGrid
                 rowData={isLoading ? [] : gridRows}
                 columnDefs={columnDefs}
@@ -501,6 +743,7 @@ export function HoldingsDetailsPageClient() {
                 }}
               />
             </div>
+            )}
           </div>
         </div>
       </section>
@@ -543,7 +786,6 @@ export function HoldingsDetailsPageClient() {
         .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
         .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
         .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
-        .hdColReturn { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColValuation { width: 140px; padding-right: 12px; justify-content: flex-end; }
@@ -552,12 +794,154 @@ export function HoldingsDetailsPageClient() {
           min-width: 0;
           overflow: hidden;
         }
+        .holdingsDetailsNameAgCell {
+          overflow: hidden;
+        }
+        .holdingsDetailsNameAgCell .ag-cell-wrapper,
+        .holdingsDetailsNameAgCell .ag-cell-value {
+          min-width: 0;
+          width: 100%;
+          overflow: hidden;
+        }
         .holdingsDetailsNameText {
           min-width: 0;
+          max-width: 100%;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
           display: inline-block;
+        }
+        .holdingsDetailsBody {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          min-height: 0;
+        }
+        .holdingsDetailsGridWrap {
+          flex: 1 1 0;
+          min-height: 280px;
+        }
+        .holdingsTreemapSection {
+          flex: 0 0 48%;
+          min-height: 300px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+          border: 1px solid #d8e2ef;
+          border-radius: 10px;
+          background: #ffffff;
+          padding: 12px;
+          box-shadow: 0 2px 10px rgba(15, 23, 42, 0.04);
+        }
+        .holdingsTreemapSectionCollapsed {
+          flex-basis: auto;
+          min-height: 0;
+        }
+        .holdingsTreemapHeader {
+          display: flex;
+          align-items: baseline;
+          justify-content: space-between;
+          gap: 12px;
+          min-height: 28px;
+        }
+        .holdingsTreemapHeader h3 {
+          margin: 0;
+          font-size: 18px;
+          font-weight: 800;
+          color: #1f2937;
+        }
+        .holdingsTreemapHeaderActions {
+          display: inline-flex;
+          align-items: center;
+          justify-content: flex-end;
+          gap: 10px;
+        }
+        .holdingsTreemapHeader span {
+          font-size: 13px;
+          font-weight: 700;
+          color: #718096;
+        }
+        .holdingsTreemapToggle {
+          border: 0;
+          background: transparent;
+          color: #4a5568;
+          cursor: pointer;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1;
+          padding: 4px 0;
+        }
+        .holdingsTreemapToggle:hover {
+          color: #1f2937;
+        }
+        .holdingsTreemapCanvas {
+          position: relative;
+          flex: 1 1 auto;
+          height: 100%;
+          min-height: 0;
+          overflow: hidden;
+          background: #eef2f7;
+          border: 1px solid #d8e2ef;
+        }
+        .holdingsTreemapSvg {
+          display: block;
+          width: 100%;
+          height: 100%;
+        }
+        .holdingsTreemapGauge {
+          flex: 0 0 auto;
+          padding: 2px 8px 0;
+        }
+        .holdingsTreemapGaugeBar {
+          height: 14px;
+          border-radius: 999px;
+          background:
+            linear-gradient(
+              90deg,
+              #3b82f6 0%,
+              #2563eb 25%,
+              #1e4f94 47%,
+              #b8c0ce 50%,
+              #a52a2a 53%,
+              #c53030 75%,
+              #ef4444 100%
+            );
+        }
+        .holdingsTreemapGaugeLabels {
+          display: flex;
+          justify-content: space-between;
+          margin-top: 6px;
+          color: #8a94a6;
+          font-size: 13px;
+          font-weight: 800;
+          line-height: 1;
+        }
+        .holdingsTreemapTicker {
+          font-size: 16px;
+          font-weight: 800;
+          letter-spacing: 0;
+          dominant-baseline: hanging;
+        }
+        .holdingsTreemapChange {
+          font-size: 15px;
+          font-weight: 800;
+          dominant-baseline: hanging;
+        }
+        .holdingsTreemapWeight {
+          font-size: 13px;
+          font-weight: 800;
+          dominant-baseline: text-after-edge;
+        }
+        .holdingsTreemapEmpty {
+          flex: 1 1 auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          min-height: 260px;
+          border: 1px dashed #cbd5e1;
+          border-radius: 8px;
+          color: #718096;
+          font-weight: 700;
         }
         .hdColName {
           white-space: nowrap;

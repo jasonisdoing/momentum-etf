@@ -5,15 +5,13 @@ from collections import defaultdict
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from utils.daily_fund_service import load_daily_docs_for_aggregation
-from utils.data_loader import get_trading_days
+from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
+from utils.data_loader import get_trading_days_any
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 
 WEEKLY_COLLECTION = "weekly_fund_data"
 KST = ZoneInfo("Asia/Seoul")
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 READ_ONLY_FIELDS = {
     "withdrawal_personal",
     "withdrawal_mom",
@@ -107,10 +105,10 @@ def _get_iso_week_range(year: int, week: int) -> tuple[datetime.date, datetime.d
 
 
 def _get_last_trading_day_of_week(year: int, week: int) -> str:
-    """해당 주차의 한국 시장 마지막 영업일 날짜를 반환한다."""
+    """해당 주차의 한국/호주 합집합 마지막 거래일 날짜를 반환한다."""
     monday, sunday = _get_iso_week_range(year, week)
     try:
-        days = get_trading_days(str(monday), str(sunday), "kor")
+        days = get_trading_days_any(str(monday), str(sunday), ["kor", "au"])
         if days:
             return str(days[-1].date())
     except Exception:
@@ -160,18 +158,20 @@ def _apply_derived_fields(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """수익률 계산 규칙: weekly_return_pct = 입출금 제거 1주 수익률, cumulative_return_pct = ROI.
+    상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고."""
     docs_by_date = {str(doc["week_date"]): _apply_derived_fields(doc) for doc in docs}
-    running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
+    # 시드 row(2023년 마지막 거래일) 의 deposit_withdrawal 에 초기 입금이 들어있고
+    # 이후 row 들의 입출금이 누적되어 total_principal 이 계산된다.
+    running_total = 0
     running_total_expense = 0
     previous_cumulative_profit = 0
+    previous_total_assets = 0
 
     for week_date in sorted(docs_by_date):
         doc = docs_by_date[week_date]
-        if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            doc["total_principal"] = INITIAL_TOTAL_PRINCIPAL_VALUE
-        else:
-            running_total += _to_int(doc.get("deposit_withdrawal", 0))
-            doc["total_principal"] = running_total
+        running_total += _to_int(doc.get("deposit_withdrawal", 0))
+        doc["total_principal"] = running_total
 
         running_total_expense += _to_int(doc.get("total_expense", 0))
         doc["cumulative_profit"] = (
@@ -179,13 +179,16 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         )
         doc["weekly_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
+        doc["weekly_return_pct"] = round(
+            calculate_period_return_pct(_to_int(doc.get("weekly_profit", 0)), previous_total_assets),
+            2,
+        )
         if total_principal == 0:
-            doc["weekly_return_pct"] = 0.0
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["weekly_return_pct"] = round((_to_int(doc.get("weekly_profit", 0)) / total_principal) * 100, 2)
             doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
+        previous_total_assets = _to_int(doc.get("total_assets", 0))
 
     return [
         docs_by_date[str(doc["week_date"])] for doc in sorted(docs, key=lambda item: item["week_date"], reverse=True)

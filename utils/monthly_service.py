@@ -5,15 +5,13 @@ from collections import defaultdict
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from utils.daily_fund_service import load_daily_docs_for_aggregation
-from utils.data_loader import get_trading_days
+from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
+from utils.data_loader import get_trading_days_any
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 
 MONTHLY_COLLECTION = "monthly_fund_data"
 KST = ZoneInfo("Asia/Seoul")
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 READ_ONLY_FIELDS = {
     "withdrawal_personal",
     "withdrawal_mom",
@@ -110,15 +108,15 @@ def _get_month_range(year: int, month: int) -> tuple[datetime.date, datetime.dat
 
 
 def _get_last_trading_day_of_month(year: int, month: int) -> str:
-    """해당 월의 한국 시장 마지막 거래일 날짜를 반환한다."""
+    """해당 월의 한국/호주 합집합 마지막 거래일 날짜를 반환한다."""
     first_day, last_day = _get_month_range(year, month)
     try:
-        days = get_trading_days(str(first_day), str(last_day), "kor")
+        days = get_trading_days_any(str(first_day), str(last_day), ["kor", "au"])
         if days:
             return str(days[-1].date())
     except Exception:
         pass
-    raise RuntimeError(f"{year}-{month:02d} 한국 시장 거래일을 조회하지 못했습니다.")
+    raise RuntimeError(f"{year}-{month:02d} 한국/호주 거래일을 조회하지 못했습니다.")
 
 
 def _normalize_bucket_percentages(source: dict[str, Any]) -> dict[str, float]:
@@ -162,18 +160,20 @@ def _apply_derived_fields(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """수익률 계산 규칙: monthly_return_pct = 입출금 제거 1월 수익률, cumulative_return_pct = ROI.
+    상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고."""
     docs_by_date = {str(doc["month_date"]): _apply_derived_fields(doc) for doc in docs}
-    running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
+    # 시드 row(2023년 마지막 거래일) 의 deposit_withdrawal 에 초기 입금이 들어있고
+    # 이후 row 들의 입출금이 누적되어 total_principal 이 계산된다.
+    running_total = 0
     running_total_expense = 0
     previous_cumulative_profit = 0
+    previous_total_assets = 0
 
     for month_date in sorted(docs_by_date):
         doc = docs_by_date[month_date]
-        if month_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            doc["total_principal"] = INITIAL_TOTAL_PRINCIPAL_VALUE
-        else:
-            running_total += _to_int(doc.get("deposit_withdrawal", 0))
-            doc["total_principal"] = running_total
+        running_total += _to_int(doc.get("deposit_withdrawal", 0))
+        doc["total_principal"] = running_total
 
         running_total_expense += _to_int(doc.get("total_expense", 0))
         doc["cumulative_profit"] = (
@@ -181,13 +181,16 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         )
         doc["monthly_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
+        doc["monthly_return_pct"] = round(
+            calculate_period_return_pct(_to_int(doc.get("monthly_profit", 0)), previous_total_assets),
+            2,
+        )
         if total_principal == 0:
-            doc["monthly_return_pct"] = 0.0
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["monthly_return_pct"] = round((_to_int(doc.get("monthly_profit", 0)) / total_principal) * 100, 2)
             doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
+        previous_total_assets = _to_int(doc.get("total_assets", 0))
 
     return [
         docs_by_date[str(doc["month_date"])] for doc in sorted(docs, key=lambda item: item["month_date"], reverse=True)

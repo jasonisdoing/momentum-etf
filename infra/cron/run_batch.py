@@ -20,10 +20,11 @@
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -44,6 +45,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "asset_summary",
     "market_hours_analysis",
     "us_market_stocks",
+    "data_aggregate",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
@@ -58,22 +60,58 @@ def _append_log_line(job_name: str, text: str) -> None:
             handle.write("\n")
 
 
-def _acquire_lock(job_name: str) -> Path:
-    """실행 중 락파일 생성. 내용에는 pid 와 시작시각을 기록."""
-    LOCK_DIR.mkdir(parents=True, exist_ok=True)
-    lock_path = LOCK_DIR / f"{job_name}.lock"
-    lock_path.write_text(
-        f"pid={os.getpid()}\nstarted={datetime.now(KST).isoformat()}\n",
-        encoding="utf-8",
-    )
-    return lock_path
+def _acquire_db_lock(job_name: str, ttl_seconds: int = 1800) -> tuple[object, str] | None:
+    """MongoDB 에 분산 락을 잡는다. 다른 호스트(로컬/서버)에서 동일 작업 중복 실행 방지.
 
+    반환: (db, job_name) 성공 시 / None: 이미 다른 곳에서 실행 중
+    """
+    from utils.db_manager import get_db_connection  # 지연 임포트
 
-def _release_lock(lock_path: Path) -> None:
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패 — 배치 실행 불가")
+
+    # 만료 인덱스 (1회만 호출되어도 idempotent)
     try:
-        lock_path.unlink(missing_ok=True)
+        db.batch_locks.create_index("expires_at", expireAfterSeconds=0)
+    except Exception:
+        pass  # 이미 있을 수 있음
+
+    now = datetime.now(KST)
+    expires_at = now + timedelta(seconds=ttl_seconds)
+    host = socket.gethostname()
+    pid = os.getpid()
+    app_type = (os.environ.get("APP_TYPE") or "PROD").strip() or "PROD"
+
+    # 만료된 락은 미리 제거(클럭 차이로 TTL 인덱스 지연이 있을 수 있음)
+    db.batch_locks.delete_many({"_id": job_name, "expires_at": {"$lt": now}})
+
+    try:
+        db.batch_locks.insert_one(
+            {
+                "_id": job_name,
+                "host": host,
+                "pid": pid,
+                "app_type": app_type,
+                "acquired_at": now,
+                "expires_at": expires_at,
+            }
+        )
+        return (db, job_name)
+    except Exception:
+        existing = db.batch_locks.find_one({"_id": job_name}) or {}
+        owner = f"host={existing.get('host')} pid={existing.get('pid')} acquired_at={existing.get('acquired_at')}"
+        raise RuntimeError(f"다른 곳에서 이미 실행 중: {owner}")
+
+
+def _release_db_lock(handle: tuple[object, str] | None) -> None:
+    if handle is None:
+        return
+    db, job_name = handle
+    try:
+        db.batch_locks.delete_one({"_id": job_name})
     except Exception as exc:  # pragma: no cover
-        print(f"[run_batch] 락 해제 실패: {exc}", file=sys.stderr)
+        print(f"[run_batch] DB 락 해제 실패: {exc}", file=sys.stderr)
 
 
 def _notify(text: str) -> None:
@@ -111,14 +149,25 @@ def main(argv: list[str]) -> int:
     started_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
     started_monotonic = time.monotonic()
 
+    # 배포 진행 중에도 cron 시도. fastapi_app 재시작 시점엔 실패하지만 다음 슬롯에 자동 재시도.
+    # (DB 가 Atlas 로 분리되어 deploy 가 DB 부하에 영향을 안 줌)
+
+    # MongoDB 분산 락: 로컬/서버 어디서든 동일 작업 중복 실행 차단
+    db_lock = None
+    try:
+        db_lock = _acquire_db_lock(job_name)
+    except RuntimeError as exc:
+        skip_line = f"[run_batch] SKIP job={job_name} reason={exc} at={started_at}"
+        print(skip_line, file=sys.stderr)
+        _append_log_line(job_name, skip_line)
+        return 0
+
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
 
     start_line = f"[run_batch] START job={job_name} cmd={' '.join(command)} at={started_at}"
     print(start_line)
     _append_log_line(job_name, start_line)
-
-    lock_path = _acquire_lock(job_name)
 
     try:
         result = subprocess.run(
@@ -130,7 +179,6 @@ def main(argv: list[str]) -> int:
             check=False,
         )
     except FileNotFoundError as exc:
-        _release_lock(lock_path)
         elapsed = time.monotonic() - started_monotonic
         fail_line = f"[run_batch] FAIL {exc}"
         _append_log_line(job_name, fail_line)
@@ -142,23 +190,21 @@ def main(argv: list[str]) -> int:
             f"• 에러: `{exc}`"
         )
         print(fail_line, file=sys.stderr)
+        _release_db_lock(db_lock)
         return 127
     except Exception as exc:
-        _release_lock(lock_path)
         elapsed = time.monotonic() - started_monotonic
         exception_line = f"[run_batch] EXCEPTION {exc}"
         _append_log_line(job_name, exception_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n"
-            f"• 시작: {started_at}\n"
-            f"• 소요: {elapsed:.1f}s\n"
-            f"• 에러: `{exc}`"
+            f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n• 시작: {started_at}\n• 소요: {elapsed:.1f}s\n• 에러: `{exc}`"
         )
         print(exception_line, file=sys.stderr)
+        _release_db_lock(db_lock)
         return 1
     finally:
-        _release_lock(lock_path)
+        _release_db_lock(db_lock)
 
     elapsed = time.monotonic() - started_monotonic
     exit_code = result.returncode
@@ -191,9 +237,7 @@ def main(argv: list[str]) -> int:
         )
 
     ended_at = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S KST")
-    end_line = (
-        f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
-    )
+    end_line = f"[run_batch] END job={job_name} status={status} exit={exit_code} elapsed={elapsed:.1f}s at={ended_at}"
     print(end_line)
     _append_log_line(job_name, end_line)
     return exit_code

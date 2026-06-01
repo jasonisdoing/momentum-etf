@@ -209,21 +209,18 @@ class MissingPriceDataError(RuntimeError):
 
 def format_missing_price_data_guidance(
     exc: MissingPriceDataError,
-    *,
-    target_id: str | None = None,
 ) -> list[str]:
     """가격 캐시 누락 시 사용자에게 보여줄 공통 안내 문구를 생성합니다."""
     country = str(getattr(exc, "country", "") or "").strip().lower()
     tickers = list(getattr(exc, "tickers", []) or [])
     country_label = country.upper() if country else "UNKNOWN"
-    cache_target = str(target_id or "").strip().lower() or country or "<ticker_type>"
 
     lines = [
         f"[{country_label}] 가격 캐시가 없는 티커 {len(tickers)}개",
     ]
     if tickers:
         lines.append(f"누락 티커: {', '.join(tickers)}")
-    lines.append(f"다음을 실행해서 캐시를 업데이트 해주세요. python scripts/stock_price_cache_updater.py {cache_target}")
+    lines.append("다음을 실행해서 전체 가격 캐시를 업데이트 해주세요. python scripts/stock_price_cache_updater.py")
     return lines
 
 
@@ -451,6 +448,17 @@ def get_trading_days(start_date: str, end_date: str, country: str) -> list[pd.Ti
     final_list = [d for d in trading_days_ts if start_date_ts <= d <= end_date_ts]
 
     return sorted(list(set(final_list)))
+
+
+def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -> list[pd.Timestamp]:
+    """여러 국가 중 하나라도 개장한 날짜를 거래일로 반환한다."""
+    if not countries:
+        raise ValueError("거래일 조회 국가 코드 목록이 필요합니다.")
+
+    merged: set[pd.Timestamp] = set()
+    for country in countries:
+        merged.update(get_trading_days(start_date, end_date, country))
+    return sorted(merged)
 
 
 def is_trading_day(
@@ -1618,7 +1626,7 @@ def _get_naver_pre_market_price_info(item: dict[str, Any]) -> dict[str, Any] | N
     return over_market_info
 
 
-def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, Any]]:
     """stock.naver.com 폴링 API에서 한국 개별 종목의 실시간 가격 정보를 조회합니다."""
 
     normalized_codes = [str(t).strip().upper() for t in tickers if str(t or "").strip()]
@@ -1640,7 +1648,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         "Accept": "application/json, text/plain, */*",
     }
 
-    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float]]:
+    def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
         item_codes = ",".join(chunk)
         url = f"{_NAVER_STOCK_POLLING_URL}?itemCodes={item_codes}"
 
@@ -1659,13 +1667,16 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
             if not code:
                 continue
 
-            price_source = _get_naver_pre_market_price_info(item) or item
+            pre_market_info = _get_naver_pre_market_price_info(item)
+            price_source = pre_market_info or item
             price_field = "overPrice" if price_source is not item else "closePrice"
             price_value = _parse_comma_number(price_source.get(price_field))
             if price_value is None:
                 continue
 
-            entry: dict[str, float] = {"nowVal": price_value}
+            entry: dict[str, Any] = {"nowVal": price_value}
+            if pre_market_info is not None:
+                entry["is_pre_market"] = True
 
             change_rate = _parse_naver_signed_change_rate(price_source)
             if change_rate is not None:
@@ -1689,7 +1700,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         return result
 
     # 청크 단위로 호출 (URL 길이 제한 대비)
-    snapshot: dict[str, dict[str, float]] = {}
+    snapshot: dict[str, dict[str, Any]] = {}
     chunk_size = 50
     for i in range(0, len(normalized_codes), chunk_size):
         chunk = normalized_codes[i : i + chunk_size]
@@ -1939,13 +1950,20 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     Returns:
         {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
     """
+    from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
+
     result: dict[str, str] = {}
     uncached: list[str] = []
+
+    blacklist = get_active_blacklist()
 
     for sym in symbols:
         cached_code = _TOSS_SYMBOL_CODE_CACHE.get(sym)
         if cached_code:
             result[sym] = cached_code
+        elif sym in blacklist:
+            # 24시간 내 실패한 심볼은 재시도하지 않음
+            continue
         else:
             uncached.append(sym)
 
@@ -1995,9 +2013,11 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
                 result[sym] = product_code
             else:
                 logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
+                mark_failed(sym, source="토스", reason="미국 주식 검색 결과 없음")
 
         except Exception as exc:
             logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
+            mark_failed(sym, source="토스", reason=f"API 오류: {exc}")
 
     return result
 
@@ -2470,7 +2490,7 @@ def get_exchange_rate_series(
     기본값으로 Yahoo Finance의 'KRW=X' 심볼을 사용합니다.
     """
     # country="us"로 설정하여 yfinance를 사용하도록 하고,
-    # ticker_type="fx"를 사용하여 data/fx (가상계정) 캐시에 저장
+    # ticker_type="fx"를 사용하여 MongoDB의 fx 캐시에 저장
     target_country = "us"
     cache_dir_name = "fx"
 
@@ -2532,9 +2552,22 @@ def _has_invalid_exchange_rate_values(symbol: str, rates: pd.Series) -> bool:
     if (numeric_rates <= 0).any():
         return True
 
-    # JPYKRW=X는 KRW/JPY 단위여야 하므로 정상 범위가 한 자리~십 원대다.
-    # 캐시에 USD/JPY 수준의 값이 섞이면 일본 포트폴리오/환율 변동률이 -96%대로 깨진다.
-    if normalized == "JPYKRW=X" and (numeric_rates > 50).any():
-        return True
+    # 통화별 KRW 환산율 정상 범위 (캐시에 다른 통화 값이 섞이는 경우 방지).
+    # 범위를 벗어나면 비정상 값으로 간주해 강제 재조회한다.
+    expected_ranges: dict[str, tuple[float, float]] = {
+        "KRW=X": (1000.0, 1900.0),      # USD/KRW (현재 ~1389)
+        "AUDKRW=X": (650.0, 1100.0),    # AUD/KRW (현재 ~900)
+        "JPYKRW=X": (6.0, 15.0),        # JPY/KRW (현재 ~9)
+        "CNYKRW=X": (140.0, 280.0),     # CNY/KRW (현재 ~190)
+        "TWDKRW=X": (30.0, 60.0),       # TWD/KRW (현재 ~43)
+        "HKDKRW=X": (130.0, 250.0),     # HKD/KRW (현재 ~175)
+        "GBPKRW=X": (1400.0, 2400.0),   # GBP/KRW (현재 ~1750)
+        "EURKRW=X": (1200.0, 2100.0),   # EUR/KRW (현재 ~1500)
+    }
+    bounds = expected_ranges.get(normalized)
+    if bounds is not None:
+        low, high = bounds
+        if (numeric_rates < low).any() or (numeric_rates > high).any():
+            return True
 
     return False

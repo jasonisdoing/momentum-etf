@@ -257,6 +257,63 @@ a {
 .appSidebarFooter {
   margin-top: auto;
   padding-top: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.appSidebarSentiment {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0.65rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.88rem;
+  color: #f1f5f9;
+}
+
+.appSidebarSentimentItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  color: #f1f5f9;
+  text-decoration: none;
+  padding: 0.25rem 0.3rem;
+  border-radius: 5px;
+  font-weight: 500;
+}
+
+.appSidebarSentimentItem:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.appSidebarSentimentLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #cbd5e1;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.appSidebarSentimentValue {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.appSidebarSentimentValue strong {
+  font-size: 0.95rem;
+  color: #ffffff;
+}
+
+.appSidebarSentimentSub {
+  color: #cbd5e1;
+  font-size: 0.78rem;
 }
 
 .appMain {
@@ -746,6 +803,14 @@ a {
   line-height: 1;
 }
 
+.topbarFxItem strong.metricPositive {
+  color: var(--metric-positive, #e03131);
+}
+
+.topbarFxItem strong.metricNegative {
+  color: var(--metric-negative, #206bc4);
+}
+
 .topbarSentimentItem {
   display: inline-flex;
   align-items: center;
@@ -1128,7 +1193,53 @@ a {
 
 .dashboardMetricCard {
   height: 100%;
-  min-height: 10.5rem;
+  min-height: 24rem;
+}
+
+.dashboardPeriodProfitGrid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dashboardPeriodProfitCard {
+  min-width: 0;
+}
+
+.dashboardPeriodProfitBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.9rem 1rem;
+}
+
+.dashboardPeriodProfitLabel {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1f2d3d;
+}
+
+.dashboardPeriodProfitValueRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.dashboardPeriodProfitAmount {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.dashboardPeriodProfitPct {
+  font-size: 0.94rem;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .dashboardPeriodProfitGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .dashboardMetricCardBody {
@@ -1149,6 +1260,7 @@ a {
   min-height: 0;
   margin-top: auto;
 }
+
 
 .dashboardOverviewChartBody {
   display: flex;
@@ -1795,35 +1907,6 @@ a {
   font-size: 14px;
 }
 
-.tickerDetailInfoBreakdownList {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.25rem;
-  min-width: 0;
-}
-
-.tickerDetailInfoBreakdownItem {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 0.25rem;
-  align-items: baseline;
-  color: #8a94a6;
-}
-
-.tickerDetailInfoBreakdownItem .metricPositive {
-  color: #d32f2f;
-}
-
-.tickerDetailInfoBreakdownItem .metricNegative {
-  color: #1d4ed8;
-}
-
-.tickerDetailInfoBreakdownFx {
-  color: #64748b;
-  white-space: nowrap;
-}
-
 .tickerDetailInfoTrackerRow {
   display: flex;
   justify-content: space-between;
@@ -1850,12 +1933,90 @@ a {
   color: #1f2937;
 }
 
+.tickerDetailInfoTrackerValue {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.1rem;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.tickerDetailInfoTrackerValue span {
+  color: #8a94a6;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .tickerDetailInfoTrackerRow strong.metricPositive {
   color: #d32f2f;
 }
 
 .tickerDetailInfoTrackerRow strong.metricNegative {
   color: #1d4ed8;
+}
+
+.portfolioChangeBreakdownDetail {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  margin-top: 0.2rem;
+  border-top: 1px dashed #d6deea;
+  color: #64748b;
+  font-size: 0.95rem;
+  line-height: 1.25;
+}
+
+.portfolioChangeBreakdownDetailRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.28rem;
+  padding: 0.24rem 0;
+  border-bottom: 1px solid #e8eef7;
+}
+
+.portfolioChangeBreakdownDetailRow:last-child {
+  border-bottom: 0;
+}
+
+.portfolioChangeBreakdownDetailRow > span {
+  white-space: nowrap;
+}
+
+.portfolioChangeBreakdownRegion {
+  color: #8a94a6;
+  font-weight: 800;
+}
+
+.portfolioChangeBreakdownDetailFx {
+  color: #64748b;
+}
+
+.portfolioChangeBreakdownCompact {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.18rem;
+  min-width: 0;
+  color: #64748b;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.portfolioChangeBreakdownCompactItem {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
+  align-items: baseline;
+  max-width: 100%;
+}
+
+.portfolioChangeBreakdownCompactFx {
+  color: #64748b;
+  white-space: nowrap;
 }
 
 .tickerDetailInfoFxList {
@@ -1921,13 +2082,13 @@ a {
 }
 
 .compareMainHeaderLeft .appLabeledField {
-  min-width: 13rem;
+  min-width: 10rem;
 }
 
 .compareTickerSearchField {
   position: relative;
-  width: min(26rem, 100%);
-  min-width: 22rem;
+  width: min(20rem, 100%);
+  min-width: 14rem;
 }
 
 .compareHeaderTabs {
@@ -2199,9 +2360,106 @@ a {
   font-weight: 700;
 }
 
+.assetChartsPage {
+  gap: 0.75rem;
+}
+
+.assetChartsGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.assetChartsCard {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 34rem;
+  overflow: hidden;
+}
+
+.assetChartsCardHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem 0.25rem;
+}
+
+.assetChartsCardHeader h2 {
+  margin: 0;
+  color: #1f2937;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.assetChartsCardHeader p {
+  margin: 0.2rem 0 0;
+  color: #64748b;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.assetChartsBody {
+  flex: 1 1 auto;
+  min-height: 28rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+}
+
+.assetChartsTooltip {
+  min-width: 12rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.5rem;
+  background: rgba(15, 23, 42, 0.92);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+}
+
+.assetChartsTooltipTitle {
+  margin-bottom: 0.35rem;
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.assetChartsTooltipRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.assetChartsTooltipLabel {
+  font-weight: 800;
+}
+
+.assetChartsTooltipRow strong {
+  color: #f8fafc;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 1200px) {
+  .assetChartsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .assetChartsCard {
+    min-height: 28rem;
+  }
+
+  .assetChartsBody {
+    min-height: 23rem;
+  }
+}
+
 .compareMatrix {
   display: grid;
-  grid-template-columns: 6rem 5.5rem repeat(5, minmax(12rem, 1fr));
+  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(12rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2209,7 +2467,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 6rem 5.5rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2241,15 +2499,61 @@ a {
 }
 
 .compareMetricsGroupLabel {
-  min-height: 3.5rem;
+  min-height: 2.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.compareMetricsGroupLabel.compareMetricsGroupLabelSingle {
+  grid-column: span 2;
+}
+
+.compareSharpeLegend {
+  grid-column: 1 / -1;
+  padding: 0.6rem 1rem;
+  font-size: 12px;
+  color: #475569;
+  background: #f8fafc;
+  border-top: 1px solid #d6deea;
+  line-height: 1.5;
+}
+
+.compareSharpeLegend strong {
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.compareGroupControl {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: nowrap;
+}
+
+.compareGroupControl select.form-select {
+  width: 14rem;
+  flex: 0 0 auto;
+}
+
+.compareGroupControl .btn {
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.compareMetricsGroupLabel .compareMatrixLabelHint {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 400;
 }
 
 .compareMetricPeriodLabel,
 .compareMetricCell {
   display: flex;
   align-items: center;
-  min-height: 3.5rem;
-  padding: 0.75rem 1rem;
+  min-height: 2.15rem;
+  padding: 0.45rem 0.85rem;
   border-right: 1px solid #d6deea;
   border-bottom: 1px solid #d6deea;
   background: #fff;
@@ -2266,6 +2570,15 @@ a {
 .compareMetricCell {
   justify-content: flex-end;
   text-align: right;
+}
+
+.compareMetricPeriodLabel.is-active-range,
+.compareMetricCell.is-active-range {
+  background: #ecfdf5;
+}
+
+.compareMetricPeriodLabel.is-active-range {
+  color: #15803d;
 }
 
 .compareMetricCell.metricPositive {
@@ -2290,12 +2603,11 @@ a {
 
 .compareProductCard {
   display: grid;
-  grid-template-rows: auto minmax(2.5rem, auto) auto;
+  grid-template-rows: auto auto auto;
   align-content: start;
   row-gap: 0.45rem;
   height: 8rem;
   min-height: 8rem;
-  padding-right: 2.75rem;
   border-top: 3px solid transparent;
 }
 
@@ -2305,6 +2617,11 @@ a {
   justify-content: flex-end;
   min-width: 0;
   text-align: right;
+}
+
+.comparePortfolioCell {
+  display: block;
+  padding-top: 0.25rem;
 }
 
 .compareBasicCompactLabel,
@@ -2343,29 +2660,6 @@ a {
   line-height: 1.25;
 }
 
-.comparePortfolioBreakdownList {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.3rem;
-  color: #64748b;
-  font-size: 0.82rem;
-  line-height: 1.25;
-}
-
-.comparePortfolioBreakdownItem {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.25rem;
-  align-items: baseline;
-}
-
-.comparePortfolioBreakdownFx {
-  color: #64748b;
-  white-space: nowrap;
-}
-
 .compareProductEmpty {
   display: flex;
   align-items: center;
@@ -2392,19 +2686,17 @@ a {
 .compareProductCode {
   font-size: 1rem;
   font-weight: 900;
+  padding-right: 2rem;
 }
 
 .compareProductName {
-  min-height: 2.4rem;
   overflow: hidden;
   color: #1f2937;
   font-size: 1rem;
   font-weight: 800;
   line-height: 1.25;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compareProductPrice {
@@ -2479,10 +2771,17 @@ a {
   min-height: 4.15rem;
 }
 
+/* 각 ETF 컬럼의 독립 스크롤 컨테이너 (종목비중 행) */
+.compareHoldingScrollColumn {
+  border-right: 1px solid #d6deea;
+  border-bottom: 1px solid #d6deea;
+  background: #fff;
+}
+
 .compareHoldingRankLabel,
 .compareHoldingCell {
-  min-height: 4.15rem;
-  padding: 0.5rem 0.65rem;
+  min-height: 3.25rem;
+  padding: 0.42rem 0.65rem;
   border-right: 1px solid #d6deea;
   border-bottom: 1px solid #d6deea;
   background: #fff;
@@ -2507,16 +2806,24 @@ a {
   box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.22);
 }
 
-.compareHoldingFooter {
+.compareHoldingLine {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  margin-top: 0.15rem;
   font-weight: 800;
 }
 
-.compareHoldingFooter strong {
+.compareHoldingLine + .compareHoldingLine {
+  margin-top: 0.08rem;
+}
+
+.compareHoldingLine > span,
+.compareHoldingLine > strong {
+  flex: 0 0 auto;
+}
+
+.compareHoldingLine strong {
   color: #1f2937;
 }
 
@@ -2549,6 +2856,7 @@ a {
 }
 
 .compareHoldingName {
+  min-width: 0;
   overflow: hidden;
   color: #1f2937;
   font-weight: 800;
@@ -2557,10 +2865,13 @@ a {
 }
 
 .compareHoldingCode {
-  margin-top: 0.1rem;
+  min-width: 0;
+  overflow: hidden;
   color: #9ca3af;
   font-size: 0.86rem;
   font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .compareHoldingsTopTable strong {
@@ -3564,6 +3875,18 @@ a {
 .appSegmentedToggleButton.is-active {
   background: var(--tblr-primary);
   color: #fff;
+}
+
+.appSegmentedToggleButton.is-disabled,
+.appSegmentedToggleButton:disabled {
+  color: #9ca3af;
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.appSegmentedToggleButton.is-disabled:hover,
+.appSegmentedToggleButton:disabled:hover {
+  background: transparent;
 }
 
 .appHeaderMetrics {

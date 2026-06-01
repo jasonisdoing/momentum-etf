@@ -63,7 +63,9 @@ type AccountSummary = {
   net_profit: number;
   net_profit_pct: number;
   daily_profit: number;
+  daily_return_pct: number;
   weekly_profit: number;
+  weekly_return_pct: number;
 };
 
 type ParentGridRow =
@@ -86,7 +88,9 @@ type ParentGridRow =
     net_profit: number;
     net_profit_pct: number;
     daily_profit: number;
+    daily_return_pct: number;
     weekly_profit: number;
+    weekly_return_pct: number;
   }
   | {
     id: string;
@@ -215,6 +219,13 @@ function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "avera
 function formatRatioPercent(value: number): string {
   return `${value.toFixed(1)}%`;
 }
+
+function formatHiddenAmount(showAmounts: boolean, value: string): string {
+  return showAmounts ? value : "••••";
+}
+
+// (제거됨) 기간 수익률은 백엔드 dashboard_service 의 입출금 제거 daily_return_pct/weekly_return_pct 사용.
+// 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
 
 function formatNoteUpdatedAt(value: string | null): string {
   if (!value) {
@@ -1896,14 +1907,13 @@ function AccountHoldingsDetailPanel({
               if (!orderedTickers.length) {
                 return;
               }
-              setRows((previous) => {
-                const nextRows = reorderRowsByTickers(previous, orderedTickers);
-                rowsRef.current = nextRows;
-                onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
-                return nextRows;
-              });
+              // setState updater 안에서 부모 setState (onRowsSync) 를 트리거하면
+              // React 가 "render 중 다른 컴포넌트 업데이트" 로 경고한다. updater 밖에서
+              // 순차 호출하도록 분리한다.
               const nextRows = reorderRowsByTickers(rowsRef.current, orderedTickers);
               rowsRef.current = nextRows;
+              setRows(nextRows);
+              onRowsSync(summary.account_id, buildSyncedHoldingRows(nextRows, summary));
               setIsReorderDirty(true);
               isReorderDirtyRef.current = true;
               scheduleSilentReorderSave(nextRows);
@@ -1966,7 +1976,14 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const toast = useToast();
   const [allRows, setAllRows] = useState<HoldingsRow[]>([]);
   const [summaries, setSummaries] = useState<AccountSummary[]>([]);
+  const [dashTotals, setDashTotals] = useState<{
+    daily_profit?: number;
+    daily_return_pct?: number;
+    weekly_profit?: number;
+    weekly_return_pct?: number;
+  } | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [showAmounts, setShowAmounts] = useState(true);
   const [loading, setLoading] = useState(true);
   const [parentDirtyCellKeys, setParentDirtyCellKeys] = useState<string[]>([]);
   const [editingParentId, setEditingParentId] = useState<string | null>(null);
@@ -1988,7 +2005,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
       const dashData = dashResponse?.ok ? await dashResponse.json() : null;
-      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; weekly_profit: number }> = {};
+      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; daily_return_pct: number; weekly_profit: number; weekly_return_pct: number }> = {};
       if (dashData?.accounts) {
         for (const a of dashData.accounts) {
           dashAccounts[a.account_id] = {
@@ -1996,11 +2013,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             net_profit: a.net_profit ?? 0,
             net_profit_pct: a.net_profit_pct ?? 0,
             daily_profit: a.daily_profit ?? 0,
+            daily_return_pct: a.daily_return_pct ?? 0,
             weekly_profit: a.weekly_profit ?? 0,
+            weekly_return_pct: a.weekly_return_pct ?? 0,
           };
         }
       }
-      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, weekly_profit: 0 };
+      const dashTotals = dashData?.totals ?? null;
+      setDashTotals(dashTotals);
+      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, daily_return_pct: 0, weekly_profit: 0, weekly_return_pct: 0 };
       const mergedSummaries = (payload.account_summaries ?? []).map((s) => ({
         ...s,
         ...(dashAccounts[s.account_id] ?? defaultDash),
@@ -2078,8 +2099,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cash_ratio: totalAssets > 0 ? (totalCash / totalAssets) * 100 : 0,
       net_profit: totalAssets - totalPrincipal,
       net_profit_pct: totalPrincipal > 0 ? ((totalAssets - totalPrincipal) / totalPrincipal) * 100 : 0,
-      daily_profit: summaries.reduce((sum, s) => sum + (s.daily_profit ?? 0), 0),
-      weekly_profit: summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
+      daily_profit: dashTotals?.daily_profit ?? summaries.reduce((sum, s) => sum + (s.daily_profit ?? 0), 0),
+      daily_return_pct: dashTotals?.daily_return_pct ?? 0,
+      weekly_profit: dashTotals?.weekly_profit ?? summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
+      weekly_return_pct: dashTotals?.weekly_return_pct ?? 0,
     };
 
     const detailRows = summaries.flatMap((summary): ParentGridRow[] => {
@@ -2335,7 +2358,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       flex: 1,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
       field: "account_url",
@@ -2391,7 +2414,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         return parsed;
       },
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
       field: "valuation_krw",
@@ -2400,7 +2423,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       flex: 1,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? formatKrw(params.value ?? 0) : "",
+        params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
       field: "cash_edit_value",
@@ -2413,9 +2436,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return "";
         }
         if (isTotalRow(params.data)) {
-          return formatKrw(params.value ?? 0);
+          return formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0));
         }
-        return formatPrice(params.value ?? 0, params.data.currency);
+        return formatHiddenAmount(showAmounts, formatPrice(params.value ?? 0, params.data.currency));
       },
     },
     {
@@ -2428,6 +2451,35 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
     },
     {
+      field: "daily_profit",
+      headerName: "금일 손익",
+      minWidth: 110,
+      flex: 0.9,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data)
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
+          : "",
+    },
+    {
+      colId: "daily_profit_pct",
+      headerName: "금일(%)",
+      minWidth: 88,
+      flex: 0.7,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data)) {
+          return null;
+        }
+        // 백엔드에서 계산된 daily_return_pct 사용 (입출금 영향 제거).
+        return Number(params.data.daily_return_pct ?? 0);
+      },
+      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
+        params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
+          ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
+          : "",
+    },
+    {
       field: "net_profit",
       headerName: "계좌 손익",
       minWidth: 120,
@@ -2435,7 +2487,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
           : "",
     },
     {
@@ -2450,17 +2502,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           : "",
     },
     {
-      field: "daily_profit",
-      headerName: "금일 손익",
-      minWidth: 110,
-      flex: 0.9,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
-          : "",
-    },
-    {
       field: "weekly_profit",
       headerName: "금주 손익",
       minWidth: 110,
@@ -2468,7 +2509,25 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data)
-          ? <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
+          : "",
+    },
+    {
+      colId: "weekly_profit_pct",
+      headerName: "금주(%)",
+      minWidth: 88,
+      flex: 0.7,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data)) {
+          return null;
+        }
+        // 백엔드에서 계산된 weekly_return_pct 사용 (입출금 영향 제거).
+        return Number(params.data.weekly_return_pct ?? 0);
+      },
+      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
+        params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
+          ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
           : "",
     },
     {
@@ -2498,7 +2557,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data) ? formatNumber(params.value) : "",
     },
-  ], [expandedId, isDirtyParentCell]);
+  ], [expandedId, isDirtyParentCell, showAmounts]);
 
   const gridOptions = useMemo<GridOptions<ParentGridRow>>(
     () => ({
@@ -2564,6 +2623,20 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     <div className="appPageStack appPageStackFill">
       <section className="appSection appSectionFill">
         <div className="card appCard shadow-sm appTableCardFill">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft" />
+              <div className="appMainHeaderRight">
+                <button
+                  type="button"
+                  className={`btn btn-sm shadow-sm ${showAmounts ? "btn-outline-secondary" : "btn-dark"}`}
+                  onClick={() => setShowAmounts((previous) => !previous)}
+                >
+                  {showAmounts ? "금액 가리기" : "금액 보기"}
+                </button>
+              </div>
+            </div>
+          </div>
           <div className="card-body p-2 appTableCardBodyFill">
             <AppAgGrid
               rowData={parentRows}

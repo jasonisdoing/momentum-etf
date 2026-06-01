@@ -43,42 +43,20 @@ function resolveEnv(key: string): string {
   return fromFile;
 }
 
-function buildMongoUriFromParts(): string | null {
-  const user = resolveEnv("MONGO_DB_USER");
-  const password = resolveEnv("MONGO_DB_PASSWORD");
-  const host = resolveEnv("MONGO_DB_HOST");
-  if (!user || !password || !host) {
-    return null;
+function getRequiredEnv(key: string): string {
+  const value = resolveEnv(key).trim();
+  if (!value) {
+    throw new Error(`${key} 환경변수가 필요합니다.`);
   }
-
-  const dbName = resolveEnv("MONGO_DB_NAME") || "momentum_etf_db";
-  const isSrv = host.endsWith(".mongodb.net");
-  const scheme = isSrv ? "mongodb+srv" : "mongodb";
-  const defaultOpts = isSrv
-    ? "retryWrites=true&w=majority"
-    : "authSource=admin&retryWrites=true&w=majority";
-  const options = resolveEnv("MONGO_DB_OPTIONS") || defaultOpts;
-
-  const userEnc = encodeURIComponent(user);
-  const passEnc = encodeURIComponent(password);
-  const base = `${scheme}://${userEnc}:${passEnc}@${host}/${dbName}`;
-  return options ? `${base}?${options}` : base;
+  return value;
 }
 
 function getMongoUri(): string {
-  // 1순위: 명시적 연결 문자열 (하위호환 / 롤백 용이)
-  const explicit = resolveEnv("MONGO_DB_CONNECTION_STRING");
-  if (explicit) {
-    return explicit;
-  }
-  // 2순위: USER/PASSWORD/HOST 부품으로 조립
-  const fromParts = buildMongoUriFromParts();
-  if (fromParts) {
-    return fromParts;
-  }
-  throw new Error(
-    "MongoDB 연결 정보가 없습니다. MONGO_DB_CONNECTION_STRING 또는 MONGO_DB_USER/PASSWORD/HOST 환경변수를 설정하세요.",
-  );
+  const user = encodeURIComponent(getRequiredEnv("MONGO_DB_USER"));
+  const password = encodeURIComponent(getRequiredEnv("MONGO_DB_PASSWORD"));
+  const host = getRequiredEnv("MONGO_DB_HOST");
+  const authSource = encodeURIComponent(getRequiredEnv("MONGO_DB_AUTH_SOURCE"));
+  return `mongodb://${user}:${password}@${host}/?authSource=${authSource}`;
 }
 
 function getMongoDbName(): string {

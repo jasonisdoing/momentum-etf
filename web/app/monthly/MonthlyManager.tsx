@@ -438,7 +438,7 @@ export function MonthlyManager({
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">집계</span>
                     <span className="form-control form-control-sm bg-light text-secondary d-flex align-items-center">
-                      평일 09:35, 16:35 일별 원장 기준 월별 자동 집계
+                      평일 09:15~15:15 매시간 일별 원장 기준 월별 자동 집계
                     </span>
                   </label>
                 </div>

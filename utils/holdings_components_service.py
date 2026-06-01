@@ -44,21 +44,146 @@ def _infer_price_country_code(ticker: str) -> str:
     return "us"
 
 
+# 종목 국가 분류 (보유종목 상세 화면의 필터 셀렉터용).
+# 미국 / 한국 / 호주 / 기타국가 4개 그룹.
+_HOLDING_COUNTRY_US = "us"
+_HOLDING_COUNTRY_KOR = "kor"
+_HOLDING_COUNTRY_AU = "au"
+_HOLDING_COUNTRY_OTHER = "other"
+_HOLDING_COUNTRY_LABELS: dict[str, str] = {
+    _HOLDING_COUNTRY_US: "미국",
+    _HOLDING_COUNTRY_KOR: "한국",
+    _HOLDING_COUNTRY_AU: "호주",
+    _HOLDING_COUNTRY_OTHER: "기타국가",
+}
+_HOLDING_COUNTRY_ORDER: list[str] = [
+    _HOLDING_COUNTRY_US,
+    _HOLDING_COUNTRY_KOR,
+    _HOLDING_COUNTRY_AU,
+    _HOLDING_COUNTRY_OTHER,
+]
+
+
+def _classify_holding_country(ticker: str) -> str:
+    """티커 패턴만으로 종목 국가를 미국/한국/호주/기타국가 4개로 분류한다.
+
+    호주 종목은 시스템 전 구간에서 `ASX:` 접두사가 강제 부착되어 유통된다
+    (docs/developer_guide.md "호주 티커 식별 규칙" 참조). 분류도 그 접두사를
+    그대로 식별 키로 사용한다.
+    """
+    ticker_norm = _normalize_ticker(ticker)
+    if not ticker_norm or ticker_norm in {"-", "IS"}:
+        return _HOLDING_COUNTRY_OTHER
+    # 호주: ASX: 접두사 또는 .AX 접미사
+    if ticker_norm.startswith("ASX:") or ticker_norm.endswith(".AX"):
+        return _HOLDING_COUNTRY_AU
+    if len(ticker_norm) == 6 and ticker_norm.isdigit():
+        return _HOLDING_COUNTRY_KOR
+    # 점이 없는 영문 티커는 미국으로 간주.
+    if "." not in ticker_norm and ticker_norm.isascii() and ticker_norm.isalpha():
+        return _HOLDING_COUNTRY_US
+    return _HOLDING_COUNTRY_OTHER
+
+
+def _ensure_asx_prefix(ticker: str) -> str:
+    """호주 시장 종목 ticker 에 `ASX:` 접두사를 강제 부착한다.
+
+    이미 접두사가 있으면 그대로, 없으면 부착. `.AX` 접미사 형태(`2454.AX`) 도
+    `ASX:2454` 형태로 표준화한다. 6자리 숫자/현금 등 명백히 호주가 아닌 패턴은
+    그대로 둔다 (호출자가 호주임을 이미 알고 부르는 함수이므로 ticker 형식만 본다).
+    """
+    raw = (ticker or "").strip()
+    if not raw:
+        return raw
+    upper = raw.upper()
+    if upper.startswith("ASX:"):
+        return upper
+    if upper.endswith(".AX"):
+        return f"ASX:{upper[:-3]}"
+    return f"ASX:{upper}"
+
+
+def list_holding_country_options() -> list[dict[str, str]]:
+    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (미국, 한국, 호주, 기타국가 순)."""
+    return [
+        {"code": code, "label": _HOLDING_COUNTRY_LABELS[code]}
+        for code in _HOLDING_COUNTRY_ORDER
+    ]
+
+
 def _is_hidden_component_ticker(ticker: Any) -> bool:
     return _normalize_ticker(str(ticker or "")) == "IS"
 
 
-def _renormalize_component_weights(components: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    total_weight_sum = sum(_safe_float(component.get("total_weight")) for component in components)
-    if total_weight_sum <= 0.0:
-        return components
+def _load_account_valuation_krw(account_id: str) -> float:
+    from utils.portfolio_io import load_real_holdings_table
 
-    scale = 100.0 / total_weight_sum
-    for component in components:
-        component["total_weight"] = _safe_float(component.get("total_weight")) * scale
-        for source in component.get("sources", []):
-            source["weight"] = _safe_float(source.get("weight")) * scale
-    return components
+    try:
+        df = load_real_holdings_table(account_id)
+    except Exception as exc:
+        logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", account_id, exc)
+        return 0.0
+
+    if df is None or df.empty:
+        return 0.0
+    return float(df["평가금액(KRW)"].sum())
+
+
+def _load_account_cash_balance_krw(account_id: str) -> float:
+    from utils.portfolio_io import load_portfolio_master
+
+    master = load_portfolio_master(account_id) or {}
+    return _safe_float(master.get("cash_balance"))
+
+
+def _append_account_cash_component(
+    *,
+    account_id: str,
+    account_name: str,
+    merged: dict[str, dict[str, Any]],
+    cash_balance_krw: float,
+    total_assets_krw: float,
+) -> None:
+    if cash_balance_krw <= 0.0 or total_assets_krw <= 0.0:
+        return
+
+    cash_weight = cash_balance_krw / total_assets_krw * 100.0
+    source = {
+        "etf_ticker": "-",
+        "etf_name": "현금",
+        "weight": cash_weight,
+        "current_price": None,
+        "change_pct": None,
+        "currency": "KRW",
+        "price_country_code": "kor",
+        "buy_amount_krw": 0.0,
+        "current_value_krw": cash_balance_krw,
+        "cumulative_profit_krw": 0.0,
+        "return_pct": None,
+        "account_id": account_id,
+        "account_name": account_name,
+    }
+
+    if "-" in merged:
+        merged["-"]["total_weight"] += cash_weight
+        merged["-"]["current_value_krw"] += cash_balance_krw
+        merged["-"]["sources"].append(source)
+        return
+
+    merged["-"] = {
+        "ticker": "-",
+        "name": "현금",
+        "has_components": False,
+        "total_weight": cash_weight,
+        "current_price": None,
+        "change_pct": None,
+        "currency": "KRW",
+        "price_country_code": "kor",
+        "buy_amount_krw": 0.0,
+        "current_value_krw": cash_balance_krw,
+        "cumulative_profit_krw": 0.0,
+        "sources": [source],
+    }
 
 
 def _append_account_components(
@@ -68,8 +193,13 @@ def _append_account_components(
     merged: dict[str, dict[str, Any]],
     etf_details: list[dict[str, Any]],
     total_valuation_krw: float | None = None,
+    ticker_type_filter: set[str] | None = None,
 ) -> None:
-    """단일 계좌의 보유 ETF 구성종목을 누적 병합한다."""
+    """단일 계좌의 보유 ETF 구성종목을 누적 병합한다.
+
+    ticker_type_filter 가 주어지면 해당 ticker_type 의 ETF 만 통합 대상으로 한다
+    (노출국가 필터에 사용).
+    """
     from utils.portfolio_io import load_real_holdings_table
 
     try:
@@ -90,10 +220,15 @@ def _append_account_components(
         total_valuation = 1.0
 
     for _, row in df.iterrows():
-        ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
+        raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
         quantity = int(row.get("수량", row.get("quantity", 0)))
         if quantity <= 0:
             continue
+
+        if ticker_type_filter is not None:
+            row_ticker_type = str(row.get("ticker_type") or "").strip().lower()
+            if row_ticker_type not in ticker_type_filter:
+                continue
 
         valuation = float(row.get("평가금액(KRW)") or 0.0)
         buy_amount = float(row.get("매입금액(KRW)") or 0.0)
@@ -102,7 +237,13 @@ def _append_account_components(
         etf_daily_pct = row.get("일간(%)")
         etf_current_price = row.get("현재가")
         etf_currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
-        etf_price_country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(ticker)
+        etf_price_country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
+        # 호주 ETF/종목은 시스템 전 구간에서 ASX: 접두사를 강제 부착한다.
+        # (docs/developer_guide.md "호주 티커 식별 규칙" 참조)
+        if etf_price_country_code == "au" or etf_currency == "AUD":
+            ticker = _ensure_asx_prefix(raw_ticker)
+        else:
+            ticker = raw_ticker
         portfolio_weight = valuation / total_valuation
 
         cache_doc = None
@@ -268,10 +409,21 @@ def _append_account_components(
                 }
 
 
-def load_account_holdings_components(account_id: str) -> dict[str, Any]:
+def load_account_holdings_components(
+    account_id: str,
+    *,
+    ticker_type_filter: set[str] | None = None,
+    include_cash: bool = True,
+    max_components: int | None = None,
+) -> dict[str, Any]:
     """특정 계좌의 보유 ETF 구성종목을 통합 합산하여 비중 순으로 반환한다.
 
     구성종목 캐시가 없는 ETF는 자기 자신을 100%로 취급한다.
+
+    Args:
+        account_id: 계좌 ID 또는 "TOTAL" (전체 계좌 통합).
+        ticker_type_filter: 지정 시 해당 ticker_type 의 ETF 만 통합 (노출국가 필터에 사용).
+        include_cash: False 면 현금 항목을 합산 결과에서 제외 (노출국가 필터에 사용).
     """
     all_accounts = load_account_configs()
     account_id_norm = str(account_id or "").strip()
@@ -286,42 +438,66 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     etf_details: list[dict[str, Any]] = []
 
     if is_total:
-        total_valuation_krw = 0.0
+        account_totals: list[dict[str, Any]] = []
+        total_assets_krw = 0.0
         for account in all_accounts:
             curr_account_id = str(account["account_id"])
-            try:
-                from utils.portfolio_io import load_real_holdings_table
+            curr_valuation_krw = _load_account_valuation_krw(curr_account_id)
+            curr_cash_krw = _load_account_cash_balance_krw(curr_account_id)
+            account_totals.append(
+                {
+                    "account_id": curr_account_id,
+                    "account_name": str(account.get("name", curr_account_id)),
+                    "valuation_krw": curr_valuation_krw,
+                    "cash_krw": curr_cash_krw,
+                }
+            )
+            total_assets_krw += curr_valuation_krw + curr_cash_krw
 
-                curr_df = load_real_holdings_table(curr_account_id)
-            except Exception as exc:
-                logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", curr_account_id, exc)
-                continue
-            if curr_df is None or curr_df.empty:
-                continue
-            total_valuation_krw += float(curr_df["평가금액(KRW)"].sum())
-
-        for account in all_accounts:
-            curr_account_id = str(account["account_id"])
-            curr_account_name = str(account.get("name", curr_account_id))
+        for account_total in account_totals:
+            curr_account_id = str(account_total["account_id"])
+            curr_account_name = str(account_total["account_name"])
             _append_account_components(
                 account_id=curr_account_id,
                 account_name=curr_account_name,
                 merged=merged,
                 etf_details=etf_details,
-                total_valuation_krw=total_valuation_krw,
+                total_valuation_krw=total_assets_krw,
+                ticker_type_filter=ticker_type_filter,
             )
+            if include_cash:
+                _append_account_cash_component(
+                    account_id=curr_account_id,
+                    account_name=curr_account_name,
+                    merged=merged,
+                    cash_balance_krw=float(account_total["cash_krw"]),
+                    total_assets_krw=total_assets_krw,
+                )
     else:
         account_name = str(account_config.get("name", account_id_norm))
+        account_valuation_krw = _load_account_valuation_krw(account_id_norm)
+        account_cash_krw = _load_account_cash_balance_krw(account_id_norm)
+        account_total_assets_krw = account_valuation_krw + account_cash_krw
         _append_account_components(
             account_id=account_id_norm,
             account_name=account_name,
             merged=merged,
             etf_details=etf_details,
+            total_valuation_krw=account_total_assets_krw,
+            ticker_type_filter=ticker_type_filter,
         )
+        if include_cash:
+            _append_account_cash_component(
+                account_id=account_id_norm,
+                account_name=account_name,
+                merged=merged,
+                cash_balance_krw=account_cash_krw,
+                total_assets_krw=account_total_assets_krw,
+            )
 
     filtered_etf_details = [detail for detail in etf_details if not _is_hidden_component_ticker(detail.get("ticker"))]
 
-    if not filtered_etf_details:
+    if not filtered_etf_details and not merged:
         return {
             "account_id": "TOTAL" if is_total else account_id_norm,
             "account_name": "전체" if is_total else account_name,
@@ -333,20 +509,21 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
     visible_components = [
         component for component in merged.values() if not _is_hidden_component_ticker(component.get("ticker"))
     ]
-    visible_components = _renormalize_component_weights(visible_components)
 
     # 비중 순 정렬 후 화면에는 상위 구성종목만 반환한다.
+    # 임계값은 0 초과(전체 자산 대비 비중이 양수). ETF 안 작은 비중 종목도 누락되지 않도록.
     all_sorted_components = sorted(
-        (component for component in visible_components if float(component.get("total_weight") or 0.0) >= 0.01),
+        (component for component in visible_components if float(component.get("total_weight") or 0.0) > 0.0),
         key=lambda x: x["total_weight"],
         reverse=True,
     )
     total_component_count = len(all_sorted_components)
-    sorted_components = all_sorted_components[:_MAX_VISIBLE_COMPONENTS]
+    cap = max_components if max_components is not None else _MAX_VISIBLE_COMPONENTS
+    sorted_components = all_sorted_components[:cap] if cap and cap > 0 else all_sorted_components
 
     sorted_components, _ = enrich_component_prices(
         sorted_components,
-        price_fetch_limit=100,
+        price_fetch_limit=None,  # 보유 종목 전체에 가격 채움 (작은 비중 종목 누락 방지).
         preserve_existing=True,
     )
 
@@ -417,4 +594,35 @@ def load_account_holdings_components(account_id: str) -> dict[str, Any]:
         "components_visible_limit": _MAX_VISIBLE_COMPONENTS,
         "components": sorted_components,
         "etf_details": sorted(filtered_etf_details, key=lambda x: (str(x.get("account_name") or ""), x["ticker"])),
+    }
+
+
+def load_holding_country_components(country_code: str) -> dict[str, Any]:
+    """종목 국가(us/kor/au/other) 기준 보유 ETF 구성종목 통합.
+
+    모든 계좌의 보유 ETF 의 구성종목을 통합한 뒤, 각 종목의 티커 패턴으로 분류된
+    국가가 인자와 일치하는 종목만 남긴다. 현금은 항상 제외하며 비중은 원본
+    (전체 자산 대비) 그대로 유지한다.
+    """
+    code = str(country_code or "").strip().lower()
+    if code not in _HOLDING_COUNTRY_LABELS:
+        raise ValueError(f"지원하지 않는 종목 국가 코드: {country_code}")
+
+    # 국가 필터 후 박스 뷰에서 작은 비중 종목까지 보여야 하므로, 통합 시 cap 을 적용하지 않는다.
+    # (TOTAL cap=100 을 그대로 두면 한국·호주의 작은 종목들이 미국 큰 종목 100개에 밀려 응답에서 통째 사라짐.)
+    base = load_account_holdings_components("TOTAL", include_cash=False, max_components=0)
+    filtered_components: list[dict[str, Any]] = []
+    for comp in base.get("components") or []:
+        if _classify_holding_country(str(comp.get("ticker") or "")) == code:
+            filtered_components.append(comp)
+
+    return {
+        "account_id": f"HOLDING_COUNTRY:{code}",
+        "account_name": _HOLDING_COUNTRY_LABELS[code],
+        "held_etf_count": base.get("held_etf_count", 0),
+        "components_total_count": len(filtered_components),
+        # 종목 국가별 통합은 cap 을 두지 않으므로 visible_limit 도 total 과 동일.
+        "components_visible_limit": len(filtered_components),
+        "components": filtered_components,
+        "etf_details": base.get("etf_details") or [],
     }

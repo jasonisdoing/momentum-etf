@@ -213,6 +213,40 @@ def upsert_stock_cache_meta_doc(
         )
 
 
+def update_stock_portfolio_change_cache_doc(
+    ticker_type: str,
+    ticker: str,
+    portfolio_change_cache: dict[str, Any],
+) -> None:
+    """종목 메타 캐시 문서에 포트폴리오 변동 계산 캐시만 갱신한다."""
+    type_norm = (ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    if not type_norm:
+        raise ValueError("ticker_type must be provided")
+    if not ticker_norm:
+        raise ValueError("ticker must be provided")
+    if not isinstance(portfolio_change_cache, dict):
+        raise ValueError("portfolio_change_cache must be a dict")
+
+    coll = _get_collection()
+    if coll is None:
+        raise RuntimeError("MongoDB 연결 실패 — stock_cache_meta 컬렉션에 쓸 수 없습니다.")
+
+    now = datetime.now(timezone.utc)
+    result = coll.update_one(
+        {"ticker_type": type_norm, "ticker": ticker_norm},
+        {
+            "$set": {
+                "portfolio_change_cache": portfolio_change_cache,
+                "portfolio_change_cache_updated_at": now,
+                "updated_at": now,
+            },
+        },
+    )
+    if result.matched_count == 0:
+        raise RuntimeError(f"[{type_norm}/{ticker_norm}] 포트폴리오 변동 캐시를 저장할 메타 문서가 없습니다.")
+
+
 def delete_stock_cache_meta_doc(ticker_type: str, ticker: str) -> None:
     """종목 메타 캐시 문서 1건을 삭제한다."""
     type_norm = (ticker_type or "").strip().lower()

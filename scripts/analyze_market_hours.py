@@ -205,9 +205,9 @@ if __name__ == "__main__":
     for hl in header_lines:
         collector.print(hl)
 
-    # 3. 개별 종목풀 결과 출력
+    # 3. 개별 종목풀 결과는 콘솔 로그로만 출력 (슬랙 메시지에는 포함하지 않음)
     for out in account_outputs:
-        collector.print(out)
+        print(out)
 
     # 4. 슬랙 전송
     full_text = collector.get_full_text()

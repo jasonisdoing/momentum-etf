@@ -2,12 +2,13 @@
  * 포트폴리오 변동 계산 공통 모듈.
  *
  * /ticker 와 /compare 페이지에서 동일한 기준으로 포트폴리오 변동을 계산한다.
- * 변동률 기준: cumulative_change_pct (캐시 갱신 시점 대비 누적 변동률)
+ * 변동률 기준: 구성종목 일간 변동률 + 일간 환율 변동률
  */
 
 /** 포트폴리오 변동 계산에 필요한 최소 holding 인터페이스 */
 export type PortfolioChangeHolding = {
   weight: number | null;
+  change_pct?: number | null;
   cumulative_change_pct?: number | null;
   price_currency?: string | null;
 };
@@ -18,11 +19,18 @@ export type PortfolioChangeFxRate = {
   change_pct?: number | null;
 };
 
-/** 통화별 분석 항목 */
+/** 통화별 분석 항목.
+ *
+ * - change_pct: 현지 통화 기준 변동률 (참조용)
+ * - adjusted_change_pct: 환율을 합산한 KRW 환산 변동률 (UI 표시용)
+ *   외화: (1 + change_pct/100) × (1 + fx_pct/100) − 1
+ *   KRW: change_pct 와 동일
+ */
 export type PortfolioChangeBreakdownItem = {
   currency: string;
   label: string;
   change_pct: number;
+  adjusted_change_pct: number;
   weight: number;
 };
 
@@ -30,6 +38,8 @@ export type PortfolioChangeBreakdownItem = {
 export type PortfolioChangeResult = {
   totalPct: number | null;
   breakdown: PortfolioChangeBreakdownItem[];
+  /** 가격 데이터가 확보된 종목들의 비중 합 (0~100). 누락이 없으면 100. */
+  coverageWeight: number;
 };
 
 /** 통화 코드 → 지역 라벨 */
@@ -51,16 +61,17 @@ function getCurrencyRegionLabel(currency: string): string {
 /**
  * 포트폴리오 변동을 계산한다.
  *
- * - holdings 의 cumulative_change_pct (캐시 갱신 시점 대비 누적 변동률) 기준
+ * - holdings 의 change_pct (현재 일간 변동률) 기준
  * - 외화 종목은 (1 + 종목변동률) × (1 + 환율변동률) - 1 로 원화 환산
- * - 가중 평균으로 합산, 총 비중이 100% 미만이면 100으로 나눔
+ * - 누락 종목은 계산에서 제외
+ * - coverageWeight 로 실제 가격 데이터가 확보된 비중 반환
  */
 export function calcPortfolioChange(
   holdings: PortfolioChangeHolding[],
   fxRates: PortfolioChangeFxRate[],
 ): PortfolioChangeResult {
   if (!holdings || holdings.length === 0) {
-    return { totalPct: null, breakdown: [] };
+    return { totalPct: null, breakdown: [], coverageWeight: 0 };
   }
 
   // 통화별 환율 변동률 맵
@@ -72,59 +83,58 @@ export function calcPortfolioChange(
     fxChangePctByCurrency.set(currency, changePct);
   }
 
-  // 통화별 가중합 집계
-  const groups = new Map<string, { weight: number; weightedSum: number }>();
+  // 통화별 구성종목 일간 변동률 가중합 집계
+  const groups = new Map<string, { weight: number; componentWeightedSum: number }>();
 
   for (const h of holdings) {
     const weight = h.weight ?? 0;
     if (weight <= 0) continue;
 
-    const componentChangePct = h.cumulative_change_pct;
+    const componentChangePct = h.change_pct;
     if (componentChangePct == null || Number.isNaN(componentChangePct)) continue;
 
     const currency = String(h.price_currency || "").trim().toUpperCase() || "KRW";
-    const isForeign = currency !== "KRW";
+    if (currency !== "KRW" && !fxChangePctByCurrency.has(currency)) continue;
 
-    let changePctKrw = componentChangePct;
-    if (isForeign) {
-      const fxChangePct = fxChangePctByCurrency.get(currency);
-      if (fxChangePct == null || Number.isNaN(fxChangePct)) continue;
-      // (1 + 현지통화 변동률) × (1 + 환율 변동률) - 1
-      changePctKrw = ((1 + componentChangePct / 100) * (1 + fxChangePct / 100) - 1) * 100;
-    }
-
-    const group = groups.get(currency) ?? { weight: 0, weightedSum: 0 };
+    const group = groups.get(currency) ?? { weight: 0, componentWeightedSum: 0 };
     group.weight += weight;
-    group.weightedSum += weight * changePctKrw;
+    group.componentWeightedSum += weight * componentChangePct;
     groups.set(currency, group);
   }
 
   // 합산
-  let totalWeight = 0;
-  let totalWeightedSum = 0;
+  let coverageWeight = 0;
+  let grossWeightedSum = 0;
   const breakdown: PortfolioChangeBreakdownItem[] = [];
 
   for (const [currency, group] of groups.entries()) {
     if (group.weight <= 0) continue;
-    const changePct = group.weightedSum / group.weight;
+    const componentChangePct = group.componentWeightedSum / group.weight;
+    let adjustedChangePct = componentChangePct;
+    if (currency !== "KRW") {
+      const fxChangePct = fxChangePctByCurrency.get(currency);
+      if (fxChangePct == null || Number.isNaN(fxChangePct)) continue;
+      // (1 + 현지통화 변동률) × (1 + 환율 변동률) - 1
+      adjustedChangePct = ((1 + componentChangePct / 100) * (1 + fxChangePct / 100) - 1) * 100;
+    }
     breakdown.push({
       currency,
       label: getCurrencyRegionLabel(currency),
-      change_pct: changePct,
+      change_pct: componentChangePct,
+      adjusted_change_pct: adjustedChangePct,
       weight: group.weight,
     });
-    totalWeight += group.weight;
-    totalWeightedSum += group.weight * changePct;
+    coverageWeight += group.weight;
+    grossWeightedSum += group.weight * adjustedChangePct;
   }
 
   breakdown.sort((a, b) => b.weight - a.weight);
 
-  if (totalWeight <= 0) {
-    return { totalPct: null, breakdown };
+  if (coverageWeight <= 0) {
+    return { totalPct: null, breakdown, coverageWeight: 0 };
   }
 
-  const divisor = Math.max(totalWeight, 100);
-  return { totalPct: totalWeightedSum / divisor, breakdown };
+  return { totalPct: grossWeightedSum / 100, breakdown, coverageWeight };
 }
 
 export { getCurrencyRegionLabel };

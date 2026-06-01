@@ -1,7 +1,8 @@
 {
   "all": {
+    "_comment_MA": "MA_TYPE/MA_MONTHS는 종목 순위(/순위 화면)와 시장지수 추세(/market-trend 드롭다운 초기값) 모두에 사용된다. 둘을 같은 기준으로 본다.",
     "TOP_N_HOLD": 4,
-    "HOLDING_BONUS_SCORE": 20,
+    "HOLDING_BONUS_SCORE": 10,
     "MA_TYPE": "ALMA",
     "MA_MONTHS": 6,
     "RSI_LIMIT": 100,
@@ -19,24 +20,24 @@
       "country_code": "kor",
       "currency": "KRW",
       "type_source": "Naver",
-      "TOP_N_HOLD": 3,
-      "HOLDING_BONUS_SCORE": 15,
+      "TOP_N_HOLD": 4,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 6,
+      "MA_MONTHS": 9,
       "RSI_LIMIT": 100
     },
     {
       "order": 2,
       "ticker_type": "kor_us",
-      "icon": "🇰🇷",
+      "icon": "🇺🇸",
       "name": "국내상장 해외",
       "country_code": "kor",
       "currency": "KRW",
       "type_source": "Naver",
-      "TOP_N_HOLD": 3,
-      "HOLDING_BONUS_SCORE": 20,
+      "TOP_N_HOLD": 4,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 5,
+      "MA_MONTHS": 12,
       "RSI_LIMIT": 100
     },
     {
@@ -46,10 +47,10 @@
       "name": "호주 연금",
       "country_code": "au",
       "currency": "AUD",
-      "TOP_N_HOLD": 6,
-      "HOLDING_BONUS_SCORE": 20,
+      "TOP_N_HOLD": 7,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 4,
+      "MA_MONTHS": 12,
       "RSI_LIMIT": 100
     },
     {
@@ -59,10 +60,10 @@
       "name": "미국 나스닥100",
       "country_code": "us",
       "currency": "USD",
-      "TOP_N_HOLD": 5,
-      "HOLDING_BONUS_SCORE": 15,
+      "TOP_N_HOLD": 4,
+      "HOLDING_BONUS_SCORE": 5,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 6,
+      "MA_MONTHS": 12,
       "RSI_LIMIT": 100
     },
     {
@@ -72,8 +73,8 @@
       "name": "한국 개별주",
       "country_code": "kor",
       "currency": "KRW",
-      "TOP_N_HOLD": 3,
-      "HOLDING_BONUS_SCORE": 5,
+      "TOP_N_HOLD": 4,
+      "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
       "MA_MONTHS": 6,
       "RSI_LIMIT": 100

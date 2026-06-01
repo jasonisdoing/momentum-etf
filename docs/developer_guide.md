@@ -2,6 +2,56 @@
 
 이 문서는 Momentum ETF 순위 시스템의 아키텍처, 데이터 흐름, 그리고 개발 시 반드시 지켜야 할 정합성 원칙을 설명합니다.
 
+## ⚠️ 호주 티커(ASX) 식별 규칙 — 모든 경로에서 일관 적용
+
+호주 시장(ASX) 의 종목/ETF 는 미국 티커와 영문 알파벳이 겹치는 경우가 흔하다 (예: `TECH`, `HACK`, `ACDC` 는 호주 ASX 와 미국 양쪽에 다른 종목으로 존재). **티커만으로는 둘을 구분할 수 없으므로**, 다음 규칙을 시스템 전 구간에서 반드시 지킨다.
+
+### 규칙
+
+1. **저장·전달 시점부터 호주 종목 ticker 는 `ASX:` 접두사를 강제** 부착한다.
+   - 예: `TECH` (X) / `ASX:TECH` (O)
+   - 예: `HACK` (X) / `ASX:HACK` (O)
+2. **모든 내부 데이터(메모리/캐시/DB/API 응답)** 에서 호주 종목은 `ASX:` 가 붙은 형태로 유통된다.
+3. **화면에 표시할 때만** display helper 로 `ASX:` 접두사를 제거하고 사용자에게 보여준다.
+   - 예: 그리드/박스 셀 — `ASX:TECH` → 사용자에게 "TECH" 만 보임
+4. **국가 분류 / 가격 조회 분기 / 라우팅** 은 ticker 의 `ASX:` 패턴을 직접 보고 호주로 식별한다.
+5. **위반 시 미국 종목과 혼동되어 잘못된 가격이 표시**된다 (실제로 과거에 `TECH`, `HACK`, `ACDC` 등이 미국 토스 API 로 조회되어 호주 시장 미개장임에도 미국 변동률이 표시되는 버그 발생).
+
+### 적용 위치
+
+- `_normalize_ticker` 류의 정규화 함수: ASX 종목 진입 시 접두사 부착
+- `_append_account_components` 등 ETF·구성종목 통합 진입점: row 의 country_code 또는 currency 가 호주이면 ticker 에 `ASX:` 자동 부착
+- `services/component_price_service.enrich_component_prices`: 가격 조회 분기에서 `ASX:` 접두사 인식 → 호주 QuoteAPI 로 라우팅 (`.AX` 와 동등 처리)
+- `_classify_holding_country`: ticker 가 `ASX:` 로 시작하면 즉시 `au` 로 분류
+- 프론트엔드 표시: `displayTicker(t)` 같은 helper 로 `"ASX:TECH"` → `"TECH"` 변환 후 노출
+
+### 새 진입점 추가 시 체크리스트
+
+- [ ] 외부에서 들어오는 호주 종목 ticker 에 `ASX:` 가 붙어 있는가?
+- [ ] 정규화 함수가 `ASX:` 를 보존하는가? (대문자/소문자 변환은 prefix 도 정규화)
+- [ ] 가격 조회 시 `ASX:` 접두사로 호주 시장 라우팅이 되는가?
+- [ ] 화면 표시 직전에만 `ASX:` 를 제거하는가?
+
+## 0. 로컬 실행
+
+개발과 자동 배치는 **두 개의 터미널** 로 나누어 실행합니다.
+
+```bash
+# 터미널 1 — 웹 (FastAPI + Next dev)
+python run_local_dev.py
+
+# 터미널 2 — 배치 스케줄러 (APScheduler)
+python run_local_scheduler.py
+```
+
+- `run_local_dev.py` 는 FastAPI(`uvicorn`, 포트 8000) 와 Next dev(`npm run dev`, 포트 3000) 를 함께 띄웁니다.
+- `run_local_scheduler.py` 는 `infra/cron/crontab` 을 파싱해 APScheduler 로 자동 배치를 돌립니다.
+  - `APP_TYPE=Local` 로 자동 설정되어 `batch_locks` 의 owner 가 구분됩니다.
+  - 노트북이 꺼져 있었던 시간의 누락 분은 따라잡지 않습니다 (다음 예약 시각부터 동작).
+  - Ctrl+C 로 깔끔히 종료됩니다.
+- VM 의 cron 은 제거되어 있으므로, **자동 배치를 돌리려면 터미널 2 가 켜져 있어야** 합니다.
+- 수동 1회 실행은 `/system` 화면의 버튼으로도 가능하며, 동일한 `batch_locks` 락을 사용하므로 자동 실행과 충돌하지 않습니다.
+
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
@@ -52,6 +102,7 @@
 1.  **가격 캐시**
     *   OHLCV, 종가 시계열, 실시간 스냅샷
     *   `utils/cache_utils.py`, `utils/data_loader.py`, `services/price_service.py`
+    *   `scripts/stock_price_cache_updater.py`는 종목풀 인자를 받지 않고 항상 전체 종목풀의 가격 캐시를 갱신합니다.
 2.  **메타 캐시**
     *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
@@ -77,6 +128,53 @@
 9.  앞으로 새로운 저빈도 항목(예: ETF 메타, 구성종목 속성, 기초지수 관련 부가정보)을 발견하면, 실시간 가격데이터가 아닌 이상 먼저 `stock_cache_meta`에 저장하는 방향을 우선 원칙으로 삼습니다.
 10. 실시간 또는 준실시간 값을 내려주는 Next API 라우트는 요청 fetch뿐 아니라 응답 헤더에도 `Cache-Control: no-store`를 명시해 브라우저/중간 계층 캐시를 차단합니다.
 11. 가격 캐시 조회는 요청한 `ticker_type` 또는 국가 캐시만 엄격하게 조회합니다. 다른 종목풀 캐시로 자동 fallback 하지 않습니다. 계좌 보유 화면처럼 여러 종목풀이 섞인 경우에만 호출부에서 전체 종목풀 조회를 명시적으로 선택합니다.
+
+### 자산 수익률 계산 정책 (단일 출처)
+
+자산 화면(자산 관리 `/assets`, 일별 `/daily`, 주별 `/weekly`, 월별 `/monthly`, 연별 `/yearly`, 대시보드 `/dashboard`)의 모든 수익률 지표는 아래 규칙을 따릅니다. 분모/분자 정의를 바꾸려면 이 절을 먼저 수정하고 코드를 동기화합니다.
+
+- **기간 수익률 (일/주/월/년) — 입출금 제거 1기간 수익률**
+  - 공식: `period_return_pct = period_profit / previous_total_assets × 100`
+  - 분자(`period_profit`)는 `cumulative_profit`의 차분으로 계산되며, `total_principal` 누적이 입출금을 흡수해 입출금 영향이 자동 제거됩니다.
+  - 분모는 직전 기간 종료 시점의 총자산으로 고정해, 입금/출금 자체가 해당 기간 수익률 기준금액을 흔들지 않게 합니다.
+- **누적 수익률 — ROI(Return on Investment)**
+  - 공식: `cumulative_return_pct = cumulative_profit / total_principal × 100`
+  - `cumulative_profit = total_assets - total_principal - total_expense_누적`.
+  - 기간 수익률을 복리 누적한 값이 아니라 투입 원금 대비 총 수익을 보는 단순 비율입니다.
+
+화면별 매핑:
+
+| 화면 | 일(%) | 주(%) | 월(%) | 년(%) | 누적(%) |
+|------|-------|-------|-------|-------|---------|
+| /daily | 입출금 제거 1일 | — | — | — | ROI |
+| /weekly | — | 입출금 제거 1주 | — | — | ROI |
+| /monthly | — | — | 입출금 제거 1월 | — | ROI |
+| /yearly | — | — | — | 입출금 제거 1년 | ROI |
+| /assets | 입출금 제거 1일 | 입출금 제거 1주 | — | — | ROI |
+| /dashboard | 입출금 제거 1일 | 입출금 제거 1주 | 입출금 제거 1월 | 입출금 제거 1년 | ROI |
+
+같은 일자에서는 모든 화면의 일(%) 값이 동일합니다.
+
+#### 합계 행 vs 계좌별 행의 현금흐름 처리 차이 (`/assets`, `/dashboard`)
+
+- **합계 행 (정확)**: `daily_fund_data` / `weekly_fund_data` 최신 doc 의 `daily_profit` / `weekly_profit` 을 그대로 사용합니다. 사용자가 `/daily` 화면에서 입력한 `deposit_withdrawal`, `withdrawal_personal`, `withdrawal_mom`, `nh_principal_interest` 가 분자에서 직접 차감되어 **시장 변동분만** 손익으로 잡힙니다.
+- **계좌별 행 (추정)**: 계좌별 입출금 명시 데이터가 없어, `daily_snapshots` 에서 `오늘 total_principal − 어제 total_principal` 차이를 입출금으로 **추정** 합니다. 추정 한계:
+  - 사용자가 인출 전에 `portfolio_master.total_principal` 을 미리 수정해버리면, 어제·오늘 스냅샷의 원금이 같아 입출금 추정이 0 으로 잡히고, 실제 인출액이 계좌별 손익에 통째로 손실로 표시될 수 있습니다.
+  - 반대로 원금 단순 정정(입출금 없음)을 한 경우에도 그 차이가 입출금으로 잡혀 손익을 왜곡할 수 있습니다.
+- 따라서 **계좌별 일(%) / 주(%) 는 참고용**이며, 정확한 일/주 손익은 **합계 행** 또는 `/daily` / `/weekly` 화면을 기준으로 합니다.
+- 인출/입금이 발생했을 때 계좌별 행도 정확하게 보고 싶다면, 인출 발생일에는 **포트폴리오 원금 수정을 그날 안에 함께** 반영하는 운영 규칙이 필요합니다 (당일 원금 차이 = 당일 입출금).
+
+구현 위치:
+
+- 백엔드(Python): `utils/daily_fund_service.py`, `utils/weekly_service.py`, `utils/monthly_service.py`, `utils/yearly_service.py`, `utils/dashboard_service.py` 의 `calculate_period_return_pct` / `_apply_running_total_principal` / `_calculate_weekly_docs` / `load_dashboard_data`.
+- 프론트엔드: `/assets`(`web/app/assets/AssetsManager.tsx`)는 백엔드의 `daily_return_pct`/`weekly_return_pct` 값을 그대로 사용합니다(자체 계산 금지).
+- `/ticker`의 "포트폴리오 변동(%)"은 별도 지표(ETF 구성종목 가중평균)이며 본 정책과 무관합니다.
+
+데이터 무결성:
+
+- `total_principal`은 입출금 발생 시 즉시 반영되어야 합니다. 누락 시 모든 기간 수익률이 왜곡됩니다.
+- 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 정책 변경 자체에는 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
+- 과거 일별 입출금 값을 수정한 경우에는 주/월/년 raw 집계(`deposit_withdrawal`, `total_assets` 등)를 다시 만들기 위해 관련 집계 버튼을 눌러야 합니다.
 
 ## 2. 순위 화면 정합성 원칙
 
