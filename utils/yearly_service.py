@@ -12,8 +12,6 @@ from utils.normalization import to_iso_string
 
 YEARLY_COLLECTION = "yearly_fund_data"
 KST = ZoneInfo("Asia/Seoul")
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 READ_ONLY_FIELDS = {
     "withdrawal_personal",
     "withdrawal_mom",
@@ -165,18 +163,17 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
     """수익률 계산 규칙: yearly_return_pct = 입출금 제거 1년 수익률, cumulative_return_pct = ROI.
     상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고."""
     docs_by_date = {str(doc["year_date"]): _apply_derived_fields(doc) for doc in docs}
-    running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
+    # 시드 row(2023년 마지막 거래일) 의 deposit_withdrawal 에 초기 입금이 들어있고
+    # 이후 row 들의 입출금이 누적되어 total_principal 이 계산된다.
+    running_total = 0
     running_total_expense = 0
     previous_cumulative_profit = 0
     previous_total_assets = 0
 
     for year_date in sorted(docs_by_date):
         doc = docs_by_date[year_date]
-        if year_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            doc["total_principal"] = INITIAL_TOTAL_PRINCIPAL_VALUE
-        else:
-            running_total += _to_int(doc.get("deposit_withdrawal", 0))
-            doc["total_principal"] = running_total
+        running_total += _to_int(doc.get("deposit_withdrawal", 0))
+        doc["total_principal"] = running_total
 
         running_total_expense += _to_int(doc.get("total_expense", 0))
         doc["cumulative_profit"] = (

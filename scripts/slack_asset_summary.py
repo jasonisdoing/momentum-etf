@@ -49,8 +49,6 @@ format_korean_currency = format_kr_money_man
 # format_kr_money 는 다른 곳(계좌별 상세 등)에서 필요할 수 있어 import 만 유지.
 _ = format_kr_money
 WEEKLY_COLLECTION = "weekly_fund_data"
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 KST = ZoneInfo("Asia/Seoul")
 
 
