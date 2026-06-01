@@ -16,8 +16,6 @@ from utils.yearly_service import _load_yearly_docs as _load_yearly_docs_with_run
 
 logger = get_app_logger()
 
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
 
@@ -73,19 +71,17 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     # 수익률 계산 규칙: weekly_return_pct = 입출금 제거 1주 수익률, cumulative_return_pct = ROI.
     # 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
-    running_total = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
+    # 시드 row(2023년 마지막 거래일) 의 deposit_withdrawal 에 초기 입금이 들어있고
+    # 이후 row 들의 입출금이 누적되어 total_principal 이 계산된다.
+    running_total = 0.0
     running_expense = 0.0
     previous_cumulative_profit = 0.0
     previous_total_assets = 0.0
 
     for week_date in sorted(docs_by_date.keys()):
         doc = docs_by_date[week_date]
-
-        if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            doc["total_principal"] = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
-        else:
-            running_total += normalize_number(doc.get("deposit_withdrawal"))
-            doc["total_principal"] = running_total
+        running_total += normalize_number(doc.get("deposit_withdrawal"))
+        doc["total_principal"] = running_total
 
         running_expense += normalize_number(doc.get("total_expense"))
         cumulative_profit = (
