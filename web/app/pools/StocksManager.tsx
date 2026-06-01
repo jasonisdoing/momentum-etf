@@ -875,59 +875,69 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       ...(pageMode === "manage"
         ? [
-            {
-              field: "exclude_from_ranking",
-              headerName: "고정 종목",
-              minWidth: 84,
-              width: 84,
-              cellStyle: { textAlign: "center" },
-              cellRenderer: (params: { data?: RankGridRow; value: boolean | null | undefined }) => {
-                if (params.data?.__isAddingRow) return null;
-                const ticker = params.data?.티커;
-                if (!ticker) return null;
-                return (
-                  <div className="form-check form-switch d-flex justify-content-center align-items-center h-100 mb-0">
-                    <input
-                      type="checkbox"
-                      className="form-check-input"
-                      checked={!!params.value}
-                      style={{ cursor: "pointer", marginTop: 0 }}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        startTransition(async () => {
-                          try {
-                            await updateStockExclude(selectedTickerType, ticker, checked);
-                            toast.success(`[${ticker}] 고정 종목 ${checked ? "설정" : "해제"} 완료`);
-                            void load({
-                              ticker_type: selectedTickerType,
-                              ma_rule_override: maRule ?? undefined,
-                              as_of_date: selectedAsOfDate,
-                              held_bonus_score: heldBonusScore,
-                              skip_session_cache: true,
-                            });
-                          } catch (error) {
-                            showErrorToast(error instanceof Error ? error.message : "고정 종목 설정에 실패했습니다.");
-                          }
-                        });
-                      }}
-                    />
-                  </div>
-                );
-              },
-            } as ColDef<RankGridRow>,
-          ]
+          {
+            field: "exclude_from_ranking",
+            headerName: "고정 종목",
+            minWidth: 84,
+            width: 84,
+            cellStyle: { textAlign: "center" },
+            cellRenderer: (params: { data?: RankGridRow; value: boolean | null | undefined }) => {
+              if (params.data?.__isAddingRow) return null;
+              const ticker = params.data?.티커;
+              if (!ticker) return null;
+              return (
+                <div className="form-check form-switch d-flex justify-content-center align-items-center h-100 mb-0">
+                  <input
+                    type="checkbox"
+                    className="form-check-input"
+                    checked={!!params.value}
+                    style={{ cursor: "pointer", marginTop: 0 }}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      startTransition(async () => {
+                        try {
+                          await updateStockExclude(selectedTickerType, ticker, checked);
+                          toast.success(`[${ticker}] 고정 종목 ${checked ? "설정" : "해제"} 완료`);
+                          void load({
+                            ticker_type: selectedTickerType,
+                            ma_rule_override: maRule ?? undefined,
+                            as_of_date: selectedAsOfDate,
+                            held_bonus_score: heldBonusScore,
+                            skip_session_cache: true,
+                          });
+                        } catch (error) {
+                          showErrorToast(error instanceof Error ? error.message : "고정 종목 설정에 실패했습니다.");
+                        }
+                      });
+                    }}
+                  />
+                </div>
+              );
+            },
+          } as ColDef<RankGridRow>,
+        ]
         : []),
       ...(isAllTickerType
         ? [
           {
             field: "종목풀",
             headerName: "종목풀",
-            minWidth: 116,
-            width: 116,
+            minWidth: 125,
+            width: 125,
             cellClass: "appTextEllipsisCell",
-            cellRenderer: (params: { value: string | null | undefined }) => {
+            cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
               const value = String(params.value ?? "").trim();
-              return <span title={value}>{value || "-"}</span>;
+              if (!value) {
+                return <span>-</span>;
+              }
+              // 1순위: source_ticker_type 식별자 매칭, 2순위: name 매칭
+              const sourceTickerType = String(params.data?.source_ticker_type ?? "").trim();
+              const matched =
+                (sourceTickerType && ticker_types.find((tt) => tt.ticker_type === sourceTickerType)) ||
+                ticker_types.find((tt) => tt.name === value);
+              const icon = matched?.icon ?? "";
+              const display = icon ? `${icon} ${value}` : value;
+              return <span title={display}>{display}</span>;
             },
           } as ColDef<RankGridRow>,
         ]
@@ -1320,6 +1330,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerTypeItem?.top_n_hold,
     selectedTickerTypeItem?.currency,
     recommendedTickerSet,
+    ticker_types,
   ]);
 
   function handleTickerTypeChange(accountId: string) {
