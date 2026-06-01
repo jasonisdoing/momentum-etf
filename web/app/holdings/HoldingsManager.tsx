@@ -40,9 +40,7 @@ type AccountSummary = {
 type AggregatedHoldingRow = HoldingsRow & { portfolio_weight_pct: number };
 
 type HoldingsHeaderSummary = {
-  accountCount: number;
   holdingCount: number;
-  totalValuation: number;
 };
 
 type ConstituentRow = {
@@ -258,7 +256,7 @@ export function HoldingsManager({
       const weightedDailyChange =
         existing.daily_change_pct !== null && row.daily_change_pct !== null
           ? ((existing.daily_change_pct * existing.valuation_krw) + (row.daily_change_pct * row.valuation_krw)) /
-            Math.max(nextValuation, 1)
+          Math.max(nextValuation, 1)
           : existing.daily_change_pct ?? row.daily_change_pct;
       acc.set(key, {
         ...existing,
@@ -312,11 +310,9 @@ export function HoldingsManager({
 
   useEffect(() => {
     onHeaderSummaryChange?.({
-      accountCount: accountNames.length,
       holdingCount: aggregatedHoldings.length,
-      totalValuation,
     });
-  }, [accountNames.length, aggregatedHoldings.length, onHeaderSummaryChange, totalValuation]);
+  }, [aggregatedHoldings.length, onHeaderSummaryChange]);
 
   // 구성종목 + 일별 가격 fetch
   const fetchConstituents = useCallback(async (ticker: string): Promise<DetailData | null> => {
@@ -516,7 +512,7 @@ export function HoldingsManager({
     {
       headerName: "평가금액",
       field: "valuation_krw",
-      width: 160,
+      width: 100,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -527,7 +523,7 @@ export function HoldingsManager({
     {
       headerName: "현재가",
       field: "current_price_num",
-      width: 140,
+      width: 120,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -540,7 +536,7 @@ export function HoldingsManager({
     {
       headerName: "평가손익",
       field: "pnl_krw",
-      width: 150,
+      width: 100,
       type: "rightAligned",
       cellRenderer: (params: { data?: ParentRow }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -548,6 +544,30 @@ export function HoldingsManager({
         if (isCashRow(row)) return "-";
         const value = showAmounts ? formatHoldingsKrw(row.pnl_krw) : "••••";
         return <span className={getSignedClass(row.return_pct)}>{value}</span>;
+      },
+    },
+    {
+      headerName: "ETF 여부",
+      field: "is_etf",
+      width: 90,
+      cellClass: "tableAlignCenter",
+      cellRenderer: (params: { data?: ParentRow }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as AggregatedHoldingRow;
+        if (isCashRow(row)) return "-";
+        return row.is_etf ? <span className="holdingsCheckMark">✅</span> : "-";
+      },
+    },
+    {
+      headerName: "구성종목보유",
+      field: "has_holdings",
+      width: 116,
+      cellClass: "tableAlignCenter",
+      cellRenderer: (params: { data?: ParentRow }) => {
+        if (!params.data || isDetailRow(params.data)) return null;
+        const row = params.data as AggregatedHoldingRow;
+        if (isCashRow(row)) return "-";
+        return row.has_holdings ? <span className="holdingsCheckMark">✅</span> : "-";
       },
     },
   ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
@@ -690,6 +710,10 @@ export function HoldingsManager({
         .holdingsGrid .holdingsNameCell {
           min-width: 0;
           overflow: hidden;
+        }
+        .holdingsGrid .holdingsCheckMark {
+          color: #16a34a;
+          font-weight: 800;
         }
         .holdingsGrid .ag-row.holdingsRowCash .ag-cell {
           background-color: #f4f5f7;

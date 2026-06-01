@@ -5,6 +5,7 @@ import "@tabler/core/dist/css/tabler.min.css";
 import { AppShell } from "./AppShell";
 import { buildBucketCssVariables } from "../lib/bucket-theme";
 import { ToastProvider } from "./components/ToastProvider";
+import { HideMoneyProvider } from "@/lib/hide-money-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -22,7 +23,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
       <body>
         <style>{buildBucketCssVariables()}</style>
         <ToastProvider>
-          <AppShell>{children}</AppShell>
+          <HideMoneyProvider>
+            <AppShell>{children}</AppShell>
+          </HideMoneyProvider>
         </ToastProvider>
       </body>
     </html>

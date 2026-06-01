@@ -25,9 +25,22 @@ type DashboardBucketItem = {
   weight_pct: number;
 };
 
+type DashboardPeriodProfit = {
+  profit: number;
+  return_pct: number;
+};
+
+type DashboardPeriodProfits = {
+  daily: DashboardPeriodProfit;
+  weekly: DashboardPeriodProfit;
+  monthly: DashboardPeriodProfit;
+  yearly: DashboardPeriodProfit;
+};
+
 type DashboardData = {
   metrics_row1: DashboardMetricItem[];
   metrics_row2: DashboardMetricItem[];
+  period_profits?: DashboardPeriodProfits;
   accounts: DashboardAccountSummaryItem[];
   buckets: DashboardBucketItem[];
   sparklines: Record<string, Array<{ date: string; value: number }>>;

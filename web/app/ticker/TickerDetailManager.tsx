@@ -23,11 +23,12 @@ import type { ColDef, GridApi, GridReadyEvent } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
+import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
 import { readRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
-import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
+import { calcPortfolioChange } from "@/lib/portfolio-change";
 import type { PortfolioChangeBreakdownItem } from "@/lib/portfolio-change";
 
 // --- 타입 ---
@@ -97,8 +98,6 @@ type TickerFxRate = {
   rate?: number | null;
   change_pct?: number | null;
 };
-
-// PortfolioChangeBreakdownItem は @/lib/portfolio-change から import
 
 type TickerHoldingRow = {
   ticker: string;
@@ -417,8 +416,6 @@ function buildRangeBadgeText(
   const pct = anchorPrice === 0 ? null : ((currentPrice / anchorPrice) - 1) * 100;
   return `${formatTickerPrice(anchorPrice, countryCode)} (${formatPercent(pct)}, ${date})`;
 }
-
-// getCurrencyRegionLabel は @/lib/portfolio-change から import
 
 function getInitialVisibleLogicalRange(
   data: PriceRow[],
@@ -1040,41 +1037,19 @@ export function TickerDetailManager({
   const displayFxRates = useMemo<TickerFxRate[]>(() => {
     return etfInfo?.fx_rates ?? [];
   }, [etfInfo?.fx_rates]);
-  const fxRateByCurrency = useMemo(() => {
-    const map = new Map<string, TickerFxRate>();
-    displayFxRates.forEach((fx) => {
-      const currency = String(fx.currency || "").trim().toUpperCase();
-      if (!currency) {
-        return;
-      }
-      map.set(currency, fx);
-    });
-    return map;
-  }, [displayFxRates]);
-  const fxChangePctByCurrency = useMemo(() => {
-    const map = new Map<string, number>();
-    displayFxRates.forEach((fx) => {
-      const currency = String(fx.currency || "").trim().toUpperCase();
-      const changePct = fx.change_pct;
-      if (!currency || changePct == null || Number.isNaN(changePct)) {
-        return;
-      }
-      map.set(currency, changePct);
-    });
-    return map;
-  }, [displayFxRates]);
 
   const portfolioChange = useMemo<{
     total_pct: number | null;
     breakdown: PortfolioChangeBreakdownItem[];
+    coverage_weight: number;
   }>(() => {
     const result = calcPortfolioChange(holdings, displayFxRates);
     return {
       total_pct: result.totalPct,
       breakdown: result.breakdown,
+      coverage_weight: result.coverageWeight,
     };
   }, [holdings, displayFxRates]);
-  const portfolioChangePct = portfolioChange.total_pct;
   const portfolioChangeBreakdown = portfolioChange.breakdown;
   const portfolioChangeBaseDate = etfInfo?.portfolio_change_base_date ?? null;
   const dailyColumns = useMemo<ColDef[]>(
@@ -1337,37 +1312,19 @@ export function TickerDetailManager({
                                 <div>
                                   <div className="tickerDetailInfoTrackerLabel">
                                     포트폴리오 변동
-                                    {portfolioChangeBaseDate ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)` : ""}
+                                    {portfolioChangeBaseDate
+                                      ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)`
+                                      : ""}
                                   </div>
                                   <div className="tickerDetailInfoTrackerHint">
-                                    {portfolioChangeBreakdown.length > 0 ? (
-                                      <span className="tickerDetailInfoBreakdownList">
-                                        {portfolioChangeBreakdown.map((item) => {
-                                          const fx = fxRateByCurrency.get(item.currency);
-                                          return (
-                                            <span key={item.currency} className="tickerDetailInfoBreakdownItem">
-                                              <span>{item.label}({formatNumber(item.weight, 0)}%)</span>
-                                              <span className={getSignedClass(item.change_pct)}>{formatPercent(item.change_pct)}</span>
-                                              {fx ? (
-                                                <span className="tickerDetailInfoBreakdownFx">
-                                                  · 환율{" "}
-                                                  <span className={getSignedClass(fx.change_pct ?? null)}>
-                                                    {formatPercent(fx.change_pct ?? null)}
-                                                  </span>
-                                                </span>
-                                              ) : null}
-                                            </span>
-                                          );
-                                        })}
-                                      </span>
-                                    ) : (
-                                      "구성종목 가중 평균"
-                                    )}
+                                    <PortfolioChangeBreakdown
+                                      items={portfolioChangeBreakdown}
+                                      fxRates={displayFxRates}
+                                      variant="detail"
+                                      emptyText="구성종목 가중 평균"
+                                    />
                                   </div>
                                 </div>
-                                <strong className={getSignedClass(portfolioChangePct)}>
-                                  {portfolioChangePct !== null ? formatPercent(portfolioChangePct) : "-"}
-                                </strong>
                               </div>
                               <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
                                 <div>

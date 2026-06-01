@@ -3,17 +3,19 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from utils.account_registry import load_account_configs
 import pandas as pd
+
+from utils.account_registry import load_account_configs
+from utils.daily_fund_service import calculate_period_return_pct, load_daily_docs_for_aggregation
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
+from utils.monthly_service import _load_monthly_docs as _load_monthly_docs_with_running
 from utils.normalization import normalize_number, to_iso_string
 from utils.portfolio_io import load_real_holdings_table
+from utils.yearly_service import _load_yearly_docs as _load_yearly_docs_with_running
 
 logger = get_app_logger()
 
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
 
@@ -32,7 +34,9 @@ def _find_latest_snapshot_before_week_start(db: Any) -> dict[str, Any] | None:
     )
 
 
-def _compute_account_buckets(account_id: str, cash_balance: float, df_live: pd.DataFrame | None = None) -> list[dict[str, Any]]:
+def _compute_account_buckets(
+    account_id: str, cash_balance: float, df_live: pd.DataFrame | None = None
+) -> list[dict[str, Any]]:
     """계좌 하나의 버킷별 비중을 계산한다."""
     bucket_totals: dict[str, float] = {name: 0.0 for name in BUCKET_NAMES}
 
@@ -65,18 +69,19 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "total_stocks": normalize_number(doc.get("profit_count")) + normalize_number(doc.get("loss_count")),
         }
 
-    running_total = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
+    # 수익률 계산 규칙: weekly_return_pct = 입출금 제거 1주 수익률, cumulative_return_pct = ROI.
+    # 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
+    # 시드 row(2023년 마지막 거래일) 의 deposit_withdrawal 에 초기 입금이 들어있고
+    # 이후 row 들의 입출금이 누적되어 total_principal 이 계산된다.
+    running_total = 0.0
     running_expense = 0.0
     previous_cumulative_profit = 0.0
+    previous_total_assets = 0.0
 
     for week_date in sorted(docs_by_date.keys()):
         doc = docs_by_date[week_date]
-
-        if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            doc["total_principal"] = float(INITIAL_TOTAL_PRINCIPAL_VALUE)
-        else:
-            running_total += normalize_number(doc.get("deposit_withdrawal"))
-            doc["total_principal"] = running_total
+        running_total += normalize_number(doc.get("deposit_withdrawal"))
+        doc["total_principal"] = running_total
 
         running_expense += normalize_number(doc.get("total_expense"))
         cumulative_profit = (
@@ -85,12 +90,8 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         weekly_profit = cumulative_profit - previous_cumulative_profit
         total_principal = normalize_number(doc.get("total_principal"))
 
-        if total_principal > 0:
-            weekly_return_pct = (weekly_profit / total_principal) * 100
-            cumulative_return_pct = (cumulative_profit / total_principal) * 100
-        else:
-            weekly_return_pct = 0.0
-            cumulative_return_pct = 0.0
+        weekly_return_pct = calculate_period_return_pct(weekly_profit, previous_total_assets)
+        cumulative_return_pct = (cumulative_profit / total_principal) * 100 if total_principal > 0 else 0.0
 
         doc["cumulative_profit"] = cumulative_profit
         doc["weekly_profit"] = weekly_profit
@@ -98,6 +99,7 @@ def _calculate_weekly_docs(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         doc["cumulative_return_pct"] = cumulative_return_pct
 
         previous_cumulative_profit = cumulative_profit
+        previous_total_assets = normalize_number(doc.get("total_assets"))
 
     return [
         docs_by_date[str(doc.get("week_date") or "")]
@@ -169,9 +171,18 @@ def load_dashboard_data() -> dict[str, Any]:
         cash_ratio = (cash_balance / total_assets) * 100 if total_assets > 0 else 0.0
         previous_total_assets = normalize_number(previous_snapshot_account.get("total_assets"))
         weekly_base_total_assets = normalize_number(weekly_base_snapshot_account.get("total_assets"))
-        daily_profit = total_assets - previous_total_assets if previous_snapshot_account else 0.0
-        weekly_profit = total_assets - weekly_base_total_assets if weekly_base_snapshot_account else 0.0
+        # daily_profit / weekly_profit 은 입출금 영향을 제거한 시장 변동분만 계산한다.
+        previous_account_principal = normalize_number(previous_snapshot_account.get("total_principal"))
+        weekly_base_account_principal = normalize_number(weekly_base_snapshot_account.get("total_principal"))
+        daily_deposit = (total_principal - previous_account_principal) if previous_snapshot_account else 0.0
+        weekly_deposit = (total_principal - weekly_base_account_principal) if weekly_base_snapshot_account else 0.0
+        daily_profit = (total_assets - previous_total_assets - daily_deposit) if previous_snapshot_account else 0.0
+        weekly_profit = (
+            (total_assets - weekly_base_total_assets - weekly_deposit) if weekly_base_snapshot_account else 0.0
+        )
 
+        daily_return_pct_acc = calculate_period_return_pct(daily_profit, previous_total_assets)
+        weekly_return_pct_acc = calculate_period_return_pct(weekly_profit, weekly_base_total_assets)
         accounts.append(
             {
                 "account_id": config["account_id"],
@@ -186,20 +197,52 @@ def load_dashboard_data() -> dict[str, Any]:
                 "net_profit": net_profit,
                 "net_profit_pct": net_profit_pct,
                 "daily_profit": daily_profit,
+                "daily_return_pct": daily_return_pct_acc,
                 "weekly_profit": weekly_profit,
-                "_df_live": df_live, # 버킷 계산을 위해 임시 보관
+                "weekly_return_pct": weekly_return_pct_acc,
+                "_df_live": df_live,  # 버킷 계산을 위해 임시 보관
             }
         )
 
     total_assets = sum(account["total_assets"] for account in accounts)
     total_principal = sum(account["total_principal"] for account in accounts)
     total_cash = sum(account["cash_balance"] for account in accounts)
-    previous_total_assets = normalize_number((previous_snapshot or {}).get("total_assets"))
-    weekly_base_total_assets = normalize_number((weekly_base_snapshot or {}).get("total_assets"))
-    daily_profit = total_assets - previous_total_assets if previous_snapshot else 0.0
-    daily_return_pct = (daily_profit / previous_total_assets) * 100 if previous_total_assets > 0 else 0.0
-    weekly_profit = total_assets - weekly_base_total_assets if weekly_base_snapshot else 0.0
-    weekly_return_pct = (weekly_profit / weekly_base_total_assets) * 100 if weekly_base_total_assets > 0 else 0.0
+    # /assets 와 /daily, /weekly 의 일/주 수익률을 일치시키기 위해
+    # daily_fund_data 와 weekly_fund_data 에서 마지막 row 를 직접 사용한다.
+    # (자산 수익률 계산 정책: docs/developer_guide.md 참고)
+    try:
+        latest_daily_doc = next(iter(load_daily_docs_for_aggregation()), None)
+    except Exception as exc:
+        logger.warning("daily_fund_data 조회 실패: %s", exc)
+        latest_daily_doc = None
+    daily_profit = normalize_number((latest_daily_doc or {}).get("daily_profit"))
+    daily_return_pct = normalize_number((latest_daily_doc or {}).get("daily_return_pct"))
+    weekly_profit = normalize_number((latest_weekly or {}).get("weekly_profit"))
+    weekly_return_pct = normalize_number((latest_weekly or {}).get("weekly_return_pct"))
+
+    # 월별/년별 최신 doc 의 금월/금년 손익 (캐시 누락 시 0 으로 폴백)
+    try:
+        latest_monthly_doc = next(iter(_load_monthly_docs_with_running()), None)
+    except Exception as exc:
+        logger.warning("monthly_fund_data 조회 실패: %s", exc)
+        latest_monthly_doc = None
+    monthly_profit = normalize_number((latest_monthly_doc or {}).get("monthly_profit"))
+    monthly_return_pct = normalize_number((latest_monthly_doc or {}).get("monthly_return_pct"))
+
+    try:
+        latest_yearly_doc = next(iter(_load_yearly_docs_with_running()), None)
+    except Exception as exc:
+        logger.warning("yearly_fund_data 조회 실패: %s", exc)
+        latest_yearly_doc = None
+    yearly_profit = normalize_number((latest_yearly_doc or {}).get("yearly_profit"))
+    yearly_return_pct = normalize_number((latest_yearly_doc or {}).get("yearly_return_pct"))
+
+    period_profits = {
+        "daily": {"profit": daily_profit, "return_pct": daily_return_pct},
+        "weekly": {"profit": weekly_profit, "return_pct": weekly_return_pct},
+        "monthly": {"profit": monthly_profit, "return_pct": monthly_return_pct},
+        "yearly": {"profit": yearly_profit, "return_pct": yearly_return_pct},
+    }
 
     metrics_row1 = [
         {"label": "총 자산", "value": total_assets, "kind": "money"},
@@ -223,12 +266,25 @@ def load_dashboard_data() -> dict[str, Any]:
     profit_count = normalize_number((latest_weekly or {}).get("profit_count"))
     loss_count = normalize_number((latest_weekly or {}).get("loss_count"))
 
+    # 평가 손익 (인출분 합산): 총 자산 − 투자 원금 (인출액도 수익에 포함한 운용 성과 총합)
+    gross_cumulative_profit = total_assets - total_principal
+    gross_cumulative_return_pct = (
+        round((gross_cumulative_profit / total_principal) * 100, 2) if total_principal > 0 else 0.0
+    )
+
     metrics_row2 = [
         {
             "label": "누적 손익",
             "value": normalize_number((latest_weekly or {}).get("cumulative_profit")),
             "kind": "money",
             "sub_value": normalize_number((latest_weekly or {}).get("cumulative_return_pct")),
+            "sub_kind": "percent",
+        },
+        {
+            "label": "평가 손익 (인출분 합산)",
+            "value": gross_cumulative_profit,
+            "kind": "money",
+            "sub_value": gross_cumulative_return_pct,
             "sub_kind": "percent",
         },
         {"label": "현금 잔고", "value": total_cash, "kind": "money"},
@@ -276,6 +332,12 @@ def load_dashboard_data() -> dict[str, Any]:
         "총 자산": _spark([normalize_number(d.get("total_assets")) for d in sparkline_source]),
         "투자 원금": _spark([normalize_number(d.get("total_principal")) for d in sparkline_source]),
         "누적 손익": _spark([normalize_number(d.get("cumulative_profit")) for d in sparkline_source]),
+        "평가 손익 (인출분 합산)": _spark(
+            [
+                normalize_number(d.get("total_assets")) - normalize_number(d.get("total_principal"))
+                for d in sparkline_source
+            ]
+        ),
         "현금 잔고": _spark(
             [
                 normalize_number(d.get("total_principal")) - normalize_number(d.get("purchase_amount"))
@@ -292,10 +354,27 @@ def load_dashboard_data() -> dict[str, Any]:
         df_live = account.pop("_df_live", None)
         account_buckets[aid] = _compute_account_buckets(aid, account["cash_balance"], df_live=df_live)
 
+    try:
+        from utils.system_service import is_deploying as _is_deploying
+
+        deploying = bool(_is_deploying())
+    except Exception:
+        deploying = False
+
     return {
         "metrics_row1": metrics_row1,
         "metrics_row2": metrics_row2,
+        "period_profits": period_profits,
+        "is_deploying": deploying,
         "accounts": accounts,
+        "totals": {
+            "total_assets": total_assets,
+            "total_principal": total_principal,
+            "daily_profit": daily_profit,
+            "daily_return_pct": daily_return_pct,
+            "weekly_profit": weekly_profit,
+            "weekly_return_pct": weekly_return_pct,
+        },
         "buckets": buckets,
         "account_buckets": account_buckets,
         "sparklines": sparklines,

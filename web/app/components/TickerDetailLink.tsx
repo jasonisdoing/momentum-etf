@@ -23,9 +23,16 @@ function normalizeTickerForDetailRoute(ticker: string | null | undefined): strin
   return upper;
 }
 
+/** 화면 표시용 — 호주 ASX: 접두사를 제거해 사용자에게 보여줄 문자열 반환. */
+export function stripAsxPrefix(ticker: string | null | undefined): string {
+  const text = String(ticker ?? "").trim();
+  return text.startsWith("ASX:") ? text.slice(4) : text;
+}
+
 export function TickerDetailLink({ ticker, displayTicker, className }: TickerDetailLinkProps) {
   const routeTicker = normalizeTickerForDetailRoute(ticker);
-  const text = String(displayTicker ?? ticker ?? "-").trim() || "-";
+  // displayTicker 가 명시 안 되면 ASX: 접두사를 자동 제거해서 표시한다.
+  const text = String(displayTicker ?? stripAsxPrefix(ticker) ?? "-").trim() || "-";
   const disabled = !routeTicker || routeTicker === "-" || routeTicker === "IS" || routeTicker === "__CASH__";
   const href = `/ticker?ticker=${encodeURIComponent(routeTicker)}`;
 

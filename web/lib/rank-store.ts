@@ -26,6 +26,7 @@ type RankRow = {
   순번: string;
   순위: number | null;
   이전순위: number | null;
+  "1주순위": number | null;
   버킷: string;
   bucket: number;
   티커: string;

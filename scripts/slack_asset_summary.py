@@ -17,6 +17,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.account_registry import load_account_configs
+from utils.daily_fund_service import load_daily_docs_for_aggregation
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
 from utils.notification import send_slack_message_v2
@@ -27,16 +28,27 @@ from utils.portfolio_io import (
     load_real_holdings_table,
     save_daily_snapshot,
 )
-from utils.report import format_kr_money
+from utils.report import format_kr_money, format_kr_money_man
+from utils.monthly_service import (
+    MONTHLY_COLLECTION,
+    _apply_running_total_principal as _apply_monthly_running,
+)
+from utils.weekly_service import _apply_running_total_principal as _apply_weekly_running
+from utils.yearly_service import (
+    YEARLY_COLLECTION,
+    _apply_running_total_principal as _apply_yearly_running,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
 
-format_korean_currency = format_kr_money
+# 슬랙 알림(데이터 집계 결과 / 총 자산 요약)에서 사용하는 금액 포맷.
+# 만원 미만은 절사하여 간결하게 표시한다.
+format_korean_currency = format_kr_money_man
+# format_kr_money 는 다른 곳(계좌별 상세 등)에서 필요할 수 있어 import 만 유지.
+_ = format_kr_money
 WEEKLY_COLLECTION = "weekly_fund_data"
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 KST = ZoneInfo("Asia/Seoul")
 
 
@@ -60,8 +72,21 @@ def _calculate_total_expense(doc):
     )
 
 
+def _load_latest_daily_metrics():
+    """일별 데이터 테이블과 동일한 정의(TWR 1일)로 최신 일간 손익 지표를 반환한다."""
+    docs = load_daily_docs_for_aggregation()
+    if not docs:
+        raise RuntimeError("daily_fund_data 데이터가 없어 일간 손익을 계산할 수 없습니다.")
+    latest = docs[0]  # _apply_running_total_principal 결과는 date 내림차순
+    return {
+        "date": str(latest.get("date") or "").strip(),
+        "daily_profit": _to_int(latest.get("daily_profit", 0)),
+        "daily_return_pct": float(latest.get("daily_return_pct", 0.0) or 0.0),
+    }
+
+
 def _load_latest_weekly_metrics():
-    """주별 데이터 테이블과 동일한 정의로 최신 주간 손익 지표를 계산한다."""
+    """주별 데이터 테이블과 동일한 정의(TWR 1주, ROI 누적)로 최신 주간 손익 지표를 반환한다."""
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결 실패로 주별 데이터를 조회할 수 없습니다.")
@@ -70,40 +95,59 @@ def _load_latest_weekly_metrics():
     if not docs:
         raise RuntimeError("weekly_fund_data 데이터가 없어 주간 손익을 계산할 수 없습니다.")
 
-    running_total_principal = INITIAL_TOTAL_PRINCIPAL_VALUE
-    running_total_expense = 0
-    previous_cumulative_profit = 0
-    latest_metrics = None
-
-    for doc in docs:
-        week_date = str(doc.get("week_date") or "").strip()
-        if not week_date:
-            raise RuntimeError("weekly_fund_data에 week_date가 비어 있는 행이 있습니다.")
-
-        if week_date <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            total_principal = INITIAL_TOTAL_PRINCIPAL_VALUE
-        else:
-            running_total_principal += _to_int(doc.get("deposit_withdrawal", 0))
-            total_principal = running_total_principal
-
-        running_total_expense += _calculate_total_expense(doc)
-        total_assets = _to_int(doc.get("total_assets", 0))
-        cumulative_profit = total_assets - total_principal - running_total_expense
-        weekly_profit = cumulative_profit - previous_cumulative_profit
-
-        latest_metrics = {
-            "week_date": week_date,
-            "weekly_profit": weekly_profit,
-            "weekly_return_pct": (weekly_profit / total_principal * 100) if total_principal else 0.0,
-            "cumulative_profit": cumulative_profit,
-            "cumulative_return_pct": (cumulative_profit / total_principal * 100) if total_principal else 0.0,
-        }
-        previous_cumulative_profit = cumulative_profit
-
-    if latest_metrics is None:
+    enriched = _apply_weekly_running(docs)  # 결과는 week_date 내림차순
+    if not enriched:
         raise RuntimeError("주간 손익 계산 결과를 만들지 못했습니다.")
+    latest = enriched[0]
+    return {
+        "week_date": str(latest.get("week_date") or "").strip(),
+        "weekly_profit": _to_int(latest.get("weekly_profit", 0)),
+        "weekly_return_pct": float(latest.get("weekly_return_pct", 0.0) or 0.0),
+        "cumulative_profit": _to_int(latest.get("cumulative_profit", 0)),
+        "cumulative_return_pct": float(latest.get("cumulative_return_pct", 0.0) or 0.0),
+    }
 
-    return latest_metrics
+
+def _load_latest_monthly_metrics():
+    """월별 데이터 테이블과 동일한 정의(TWR 1월)로 최신 월간 손익 지표를 반환한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 월별 데이터를 조회할 수 없습니다.")
+
+    docs = list(db[MONTHLY_COLLECTION].find().sort("month_date", 1))
+    if not docs:
+        raise RuntimeError("monthly_fund_data 데이터가 없어 월간 손익을 계산할 수 없습니다.")
+
+    enriched = _apply_monthly_running(docs)  # 결과는 month_date 내림차순
+    if not enriched:
+        raise RuntimeError("월간 손익 계산 결과를 만들지 못했습니다.")
+    latest = enriched[0]
+    return {
+        "month_date": str(latest.get("month_date") or "").strip(),
+        "monthly_profit": _to_int(latest.get("monthly_profit", 0)),
+        "monthly_return_pct": float(latest.get("monthly_return_pct", 0.0) or 0.0),
+    }
+
+
+def _load_latest_yearly_metrics():
+    """연별 데이터 테이블과 동일한 정의(TWR 1년)로 최신 연간 손익 지표를 반환한다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 연별 데이터를 조회할 수 없습니다.")
+
+    docs = list(db[YEARLY_COLLECTION].find().sort("year_date", 1))
+    if not docs:
+        raise RuntimeError("yearly_fund_data 데이터가 없어 연간 손익을 계산할 수 없습니다.")
+
+    enriched = _apply_yearly_running(docs)  # 결과는 year_date 내림차순
+    if not enriched:
+        raise RuntimeError("연간 손익 계산 결과를 만들지 못했습니다.")
+    latest = enriched[0]
+    return {
+        "year_date": str(latest.get("year_date") or "").strip(),
+        "yearly_profit": _to_int(latest.get("yearly_profit", 0)),
+        "yearly_return_pct": float(latest.get("yearly_return_pct", 0.0) or 0.0),
+    }
 
 
 def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
@@ -113,6 +157,55 @@ def _build_missing_cache_alert(account_id: str, tickers: list[str]) -> str:
         f"가격 캐시가 없는 보유 종목: {ticker_text}\n"
         f"종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요."
     )
+
+
+def collect_global_totals() -> dict[str, object]:
+    """전체 계좌 합산 — 총 자산 / 투자 원금 / 현금 잔고 / 자산 변동 텍스트 반환.
+
+    슬랙의 총 자산 요약과 데이터 집계 결과 두 메시지가 공통으로 사용한다.
+    포맷팅된 텍스트(asset_change_text)는 슬랙용 이모지 형식이다.
+    """
+    accounts = load_account_configs()
+    global_principal = 0.0
+    global_cash = 0.0
+    total_assets = 0.0
+    for account in accounts:
+        account_id = account["account_id"]
+        if not account.get("settings", {}).get("show_hold", True):
+            continue
+        m_data = load_portfolio_master(account_id) or {}
+        principal = float(m_data.get("total_principal") or 0.0)
+        cash = float(m_data.get("cash_balance") or 0.0)
+        global_principal += principal
+        global_cash += cash
+        try:
+            df = load_real_holdings_table(account_id, strict_price_cache=False)
+        except Exception:
+            df = None
+        valuation = float(df["평가금액(KRW)"].sum()) if df is not None and not df.empty else 0.0
+        total_assets += valuation + cash
+
+    cash_pct = (global_cash / total_assets * 100.0) if total_assets > 0 else 0.0
+
+    # 전일 대비 자산 변동
+    prev_total_snapshot = get_latest_daily_snapshot("TOTAL", before_today=True)
+    asset_change_text = ""
+    if prev_total_snapshot:
+        prev_total_assets = float(prev_total_snapshot.get("total_assets") or 0.0)
+        if prev_total_assets > 0:
+            delta = total_assets - prev_total_assets
+            if delta > 0:
+                asset_change_text = f" ({format_korean_currency(delta)}:small_red_triangle:)"
+            elif delta < 0:
+                asset_change_text = f" ({format_korean_currency(delta)}:chart_with_downwards_trend:)"
+
+    return {
+        "total_assets": total_assets,
+        "global_principal": global_principal,
+        "global_cash": global_cash,
+        "cash_pct": cash_pct,
+        "asset_change_text": asset_change_text,
+    }
 
 
 def main():
@@ -199,30 +292,22 @@ def main():
     # Global Calculations
     total_assets = sum(acc["total_assets"] for acc in account_summaries)
 
-    # Fetch previous snapshots
-    prev_global = get_latest_daily_snapshot("TOTAL", before_today=True)
-    global_change = 0.0
-    global_change_pct = 0.0
-    if prev_global:
-        prev_total = prev_global.get("total_assets", 0.0)
-        if prev_total > 0:
-            global_change = total_assets - prev_total
-            global_change_pct = (global_change / prev_total) * 100
-
+    # 일/주/누적 손익은 /daily, /weekly 화면과 동일한 값으로 통일.
+    # (자산 수익률 계산 정책: docs/developer_guide.md)
+    daily_metrics = _load_latest_daily_metrics()
     weekly_metrics = _load_latest_weekly_metrics()
+    monthly_metrics = _load_latest_monthly_metrics()
+    yearly_metrics = _load_latest_yearly_metrics()
     cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
 
     # 1. Compose Main Message (Total Summary)
     now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+
     main_text = (
         f"*📊 총 자산 요약 ({now_str})*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"💰 *총 자산*: *{format_korean_currency(total_assets)}*\n"
-        f"🏛️ *투자 원금*: {format_korean_currency(global_principal)}\n"
-        f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)\n"
-        f"📆 *금일 손익*: {format_korean_currency(global_change)} ({global_change_pct:+.2f}%) {get_trend_emoji(global_change)}\n"
-        f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
-        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
+        f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} "
+        f"({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
     )
 
     main_ts = send_slack_message_v2(main_text)
@@ -230,7 +315,18 @@ def main():
         logger.error("Failed to send main Slack message.")
         return
 
-    # 2. Compose Account Details (Thread)
+    # 2. Compose Profit & Loss Summary (Thread) — 금일/금주/금월/금년/누적 + 현금 잔고
+    pnl_text = (
+        f"📆 *금일 손익*: {format_korean_currency(daily_metrics['daily_profit'])} ({daily_metrics['daily_return_pct']:+.2f}%) {get_trend_emoji(daily_metrics['daily_profit'])}\n"
+        f"🗓️ *금주 손익*: {format_korean_currency(weekly_metrics['weekly_profit'])} ({weekly_metrics['weekly_return_pct']:+.2f}%) {get_trend_emoji(weekly_metrics['weekly_profit'])}\n"
+        f"🗓️ *금월 손익*: {format_korean_currency(monthly_metrics['monthly_profit'])} ({monthly_metrics['monthly_return_pct']:+.2f}%) {get_trend_emoji(monthly_metrics['monthly_profit'])}\n"
+        f"📅 *금년 손익*: {format_korean_currency(yearly_metrics['yearly_profit'])} ({yearly_metrics['yearly_return_pct']:+.2f}%) {get_trend_emoji(yearly_metrics['yearly_profit'])}\n"
+        f"🏁 *누적 손익*: *{format_korean_currency(weekly_metrics['cumulative_profit'])} ({weekly_metrics['cumulative_return_pct']:+.2f}%)* {get_trend_emoji(weekly_metrics['cumulative_profit'])}\n"
+        f"💵 *현금 잔고*: {format_korean_currency(global_cash)} ({cash_pct:.1f}%)"
+    )
+    send_slack_message_v2(pnl_text, thread_ts=main_ts)
+
+    # 3. Compose Account Details (Thread)
     acc_details = ["*📂 계좌별 상세 현황*"]
     for acc in account_summaries:
         # Fetch previous account snapshot

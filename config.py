@@ -54,6 +54,16 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
+# 토스증권 API 설정 (미국 주식 실시간)
+TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
+TOSS_INVEST_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
+    "Referer": "https://tossinvest.com/",
+    "Origin": "https://tossinvest.com",
+    "Content-Type": "application/json",
+}
+
+
 # 네이버 미국 개별주 시가총액/업종 정보
 NAVER_US_STOCK_MARKET_VALUE_URL = "https://stock.naver.com/api/foreign/market/stock/global"
 
@@ -87,15 +97,6 @@ AU_QUOTEAPI_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://www.marketindex.com.au/",
     "Origin": "https://www.marketindex.com.au",
-}
-
-# 토스증권 API 설정 (미국 주식 실시간)
-TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
-TOSS_INVEST_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Referer": "https://tossinvest.com/",
-    "Origin": "https://tossinvest.com",
-    "Content-Type": "application/json",
 }
 
 # KIS 종목정보파일 다운로드 URL
@@ -142,7 +143,7 @@ MIN_TRADING_DAYS = 5
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
 # -----------------------------------------------------------------------
-BACKTEST_START_DATE = "2026-01-01"
+BACKTEST_START_DATE = "2025-06-01"
 BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 
 # 슬리피지는 % 단위로 입력한다.
@@ -173,49 +174,49 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "all": {
         "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
-        "TOP_N_HOLD": [3],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "TOP_N_HOLD": [4],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
-        "TOP_N_HOLD": [3],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "TOP_N_HOLD": [4],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
-        "TOP_N_HOLD": [6],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "TOP_N_HOLD": [7],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "us": {
         "BENCHMARK": {"ticker": "QQQ", "name": "인베스코 QQQ ETF"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
-        "TOP_N_HOLD": [3],
-        "HOLDING_BONUS_SCORE": [0, 5, 10, 15, 20],
+        "TOP_N_HOLD": [4],
+        "HOLDING_BONUS_SCORE": [0, 5, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
 }

@@ -5,18 +5,22 @@ import { createChart, ColorType, CrosshairMode, LineSeries } from "lightweight-c
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
 import { PageFrame } from "../components/PageFrame";
+import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { TickerDetailLink } from "../components/TickerDetailLink";
-import { calcPortfolioChange, getCurrencyRegionLabel } from "@/lib/portfolio-change";
+import { calcPortfolioChange } from "@/lib/portfolio-change";
+import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings";
-type PerformanceRange = "1m" | "3m" | "6m" | "1y" | "3y";
+type PerformanceRange = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y";
 
 type TickerItem = {
   ticker: string;
   name: string;
   ticker_type: string;
   country_code: string;
+  is_etf?: boolean;
+  has_holdings?: boolean;
 };
 
 type TickerTypeItem = {
@@ -96,19 +100,16 @@ type ChartDateRange = {
   shortened: boolean;
 };
 
-type SavedCompareState = {
-  tickerType: string;
-  selectedKeys: string[];
-};
+type CompareGroupMap = Record<string, string[]>;
 
 type PerformanceMetricRange =
-  | { label: string; kind: "period"; days: number }
-  | { label: string; kind: "ytd" };
+  | { key: string; label: string; kind: "period"; days: number }
+  | { key: string; label: string; kind: "ytd" };
 
 const MAX_PRODUCTS = 5;
-const COMPARE_STORAGE_KEY = "momentum-etf:compare:selected";
-const COMPARE_SELECTED_TICKER_TYPE_KEY = "momentum-etf:compare:selected-ticker-type";
-const COMPARE_STORAGE_KEY_PREFIX = "momentum-etf:compare:selected:";
+const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
+const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
+const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
 const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed"];
 const CHART_TINTS = [
   "rgba(239, 68, 68, 0.08)",
@@ -117,6 +118,7 @@ const CHART_TINTS = [
   "rgba(245, 158, 11, 0.08)",
   "rgba(124, 58, 237, 0.08)",
 ];
+// 옅은 파스텔 (셀 배경 매칭용). 진한 텍스트 버전과 1:1 대응되도록 유지한다.
 const HOLDING_MATCH_COLORS = [
   "#dbeafe",
   "#dcfce7",
@@ -129,16 +131,34 @@ const HOLDING_MATCH_COLORS = [
   "#ecfccb",
   "#f3e8ff",
 ];
-const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number }[] = [
+// HOLDING_MATCH_COLORS 와 1:1 대응되는 진한 톤 (큰 숫자 텍스트용).
+const HOLDING_MATCH_TEXT_COLORS = [
+  "#2563eb",
+  "#16a34a",
+  "#d97706",
+  "#7c3aed",
+  "#0891b2",
+  "#dc2626",
+  "#4f46e5",
+  "#db2777",
+  "#65a30d",
+  "#9333ea",
+];
+const PERFORMANCE_RANGES: { key: PerformanceRange; label: string; days: number; ytd?: boolean }[] = [
   { key: "1m", label: "1개월", days: 31 },
   { key: "3m", label: "3개월", days: 92 },
   { key: "6m", label: "6개월", days: 183 },
+  { key: "ytd", label: "연초이후", days: 0, ytd: true },
   { key: "1y", label: "1년", days: 365 },
   { key: "3y", label: "3년", days: 365 * 3 },
 ];
 const PERFORMANCE_METRIC_RANGES: PerformanceMetricRange[] = [
-  ...PERFORMANCE_RANGES.map(({ label, days }) => ({ label, kind: "period" as const, days })),
-  { label: "연초이후", kind: "ytd" },
+  { key: "1m", label: "1개월", kind: "period", days: 31 },
+  { key: "3m", label: "3개월", kind: "period", days: 92 },
+  { key: "6m", label: "6개월", kind: "period", days: 183 },
+  { key: "ytd", label: "연초이후", kind: "ytd" },
+  { key: "1y", label: "1년", kind: "period", days: 365 },
+  { key: "3y", label: "3년", kind: "period", days: 365 * 3 },
 ];
 const BASIC_INFO_METRICS = [
   { label: "현재가", multiline: true },
@@ -155,57 +175,66 @@ function tickerKey(item: TickerItem): string {
   return `${item.ticker_type}::${item.country_code}::${item.ticker}`;
 }
 
-function readSavedCompareState(): SavedCompareState | null {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(COMPARE_STORAGE_KEY);
-  if (!raw) return null;
+function readCompareGroups(): CompareGroupMap {
+  if (typeof window === "undefined") return {};
+  const raw = window.localStorage.getItem(COMPARE_GROUPS_KEY);
+  if (!raw) return {};
   try {
-    const parsed = JSON.parse(raw) as Partial<SavedCompareState>;
-    if (!parsed.tickerType || !Array.isArray(parsed.selectedKeys)) return null;
-    return {
-      tickerType: parsed.tickerType,
-      selectedKeys: parsed.selectedKeys.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function getComparePoolStorageKey(tickerType: string): string {
-  return `${COMPARE_STORAGE_KEY_PREFIX}${tickerType}`;
-}
-
-function readSavedTickerType(): string | null {
-  if (typeof window === "undefined") return null;
-  const savedTickerType = window.localStorage.getItem(COMPARE_SELECTED_TICKER_TYPE_KEY);
-  if (savedTickerType) return savedTickerType;
-  return readSavedCompareState()?.tickerType ?? null;
-}
-
-function readSavedCompareKeys(tickerType: string): string[] {
-  if (typeof window === "undefined" || !tickerType) return [];
-  const raw = window.localStorage.getItem(getComparePoolStorageKey(tickerType));
-  if (raw) {
-    try {
-      const parsed = JSON.parse(raw) as unknown;
-      if (Array.isArray(parsed)) {
-        return parsed.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS);
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const result: CompareGroupMap = {};
+      for (const [name, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (Array.isArray(value)) {
+          result[name] = value
+            .filter((key): key is string => typeof key === "string")
+            .slice(0, MAX_PRODUCTS);
+        }
       }
-    } catch {
-      return [];
+      return result;
     }
+  } catch {
+    return {};
   }
-  const legacyState = readSavedCompareState();
-  if (legacyState?.tickerType === tickerType) {
-    return legacyState.selectedKeys;
+  return {};
+}
+
+function writeCompareGroups(groups: CompareGroupMap): void {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(COMPARE_GROUPS_KEY, JSON.stringify(groups));
+}
+
+function readActiveGroupName(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(COMPARE_ACTIVE_GROUP_KEY);
+}
+
+function writeActiveGroupName(name: string | null): void {
+  if (typeof window === "undefined") return;
+  if (name === null) {
+    window.localStorage.removeItem(COMPARE_ACTIVE_GROUP_KEY);
+  } else {
+    window.localStorage.setItem(COMPARE_ACTIVE_GROUP_KEY, name);
+  }
+}
+
+function readTempSelection(): string[] {
+  if (typeof window === "undefined") return [];
+  const raw = window.localStorage.getItem(COMPARE_TEMP_SELECTION_KEY);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((key): key is string => typeof key === "string").slice(0, MAX_PRODUCTS);
+    }
+  } catch {
+    return [];
   }
   return [];
 }
 
-function writeSavedCompareState(tickerType: string, selectedKeys: string[]): void {
+function writeTempSelection(keys: string[]): void {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(COMPARE_SELECTED_TICKER_TYPE_KEY, tickerType);
-  window.localStorage.setItem(getComparePoolStorageKey(tickerType), JSON.stringify(selectedKeys.slice(0, MAX_PRODUCTS)));
+  window.localStorage.setItem(COMPARE_TEMP_SELECTION_KEY, JSON.stringify(keys.slice(0, MAX_PRODUCTS)));
 }
 
 function formatNumber(value: number | null | undefined, digits = 0): string {
@@ -266,8 +295,6 @@ function formatSignedPriceDelta(value: number | null | undefined, countryCode: s
   return `${value > 0 ? "▲ " : "▼ "}${formatPrice(absValue, countryCode)}`;
 }
 
-// getCurrencyRegionLabel は @/lib/portfolio-change から import
-
 function formatKoreanDateLabel(value: string | null): string {
   if (!value) return "";
   const date = new Date(`${value}T00:00:00`);
@@ -313,23 +340,11 @@ function getLatestChangeAmount(detail: TickerDetailResponse): number | null {
   return latestClose - calculatedPreviousClose;
 }
 
-function getPortfolioChange(detail: TickerDetailResponse): {
-  totalPct: number | null;
-  breakdown: { currency: string; label: string; changePct: number; weight: number }[];
-} {
-  const result = calcPortfolioChange(
+function getPortfolioChange(detail: TickerDetailResponse): PortfolioChangeResult {
+  return calcPortfolioChange(
     detail.holdings ?? [],
     detail.etf_info?.fx_rates ?? [],
   );
-  return {
-    totalPct: result.totalPct,
-    breakdown: result.breakdown.map((item) => ({
-      currency: item.currency,
-      label: item.label,
-      changePct: item.change_pct,
-      weight: item.weight,
-    })),
-  };
 }
 
 function getPricedRows(rows: PriceRow[]): PriceRow[] {
@@ -376,7 +391,43 @@ function getMetricReturnPct(rows: PriceRow[], period: PerformanceMetricRange): n
   return getReturnPct(rows, period.days);
 }
 
-function getChartDateRange(products: SelectedProduct[], calendarDays: number): ChartDateRange | null {
+/**
+ * 선택된 종목들의 공통 가용 기간을 계산한다.
+ * - start: 각 종목의 첫 영업일 중 가장 늦은 날(가장 짧은 종목 기준)
+ * - end:   각 종목의 마지막 영업일 중 가장 이른 날
+ */
+function getCommonAvailableRange(products: SelectedProduct[]): {
+  startDate: Date;
+  endDate: Date;
+  days: number;
+} | null {
+  const pricedRowsList = products.map((product) => getPricedRows(product.detail.rows));
+  if (pricedRowsList.length === 0 || pricedRowsList.some((rows) => rows.length < 2)) return null;
+  const startTimes = pricedRowsList.map((rows) => new Date(rows[0].date).getTime());
+  const endTimes = pricedRowsList.map((rows) => new Date(rows.at(-1)?.date ?? "").getTime());
+  if (startTimes.some(Number.isNaN) || endTimes.some(Number.isNaN)) return null;
+  const startDate = new Date(Math.max(...startTimes));
+  const endDate = new Date(Math.min(...endTimes));
+  if (startDate >= endDate) return null;
+  const days = Math.floor((endDate.getTime() - startDate.getTime()) / (24 * 3600 * 1000));
+  return { startDate, endDate, days };
+}
+
+function formatMaxRangeLabel(days: number): string {
+  if (days < 30) return `${days}일`;
+  if (days < 365) {
+    const months = Math.round(days / 30);
+    return `${months}개월`;
+  }
+  const years = days / 365;
+  const rounded = Math.round(years * 10) / 10;
+  return rounded % 1 === 0 ? `${rounded.toFixed(0)}년` : `${rounded.toFixed(1)}년`;
+}
+
+function getChartDateRange(
+  products: SelectedProduct[],
+  options: { calendarDays?: number; ytd?: boolean },
+): ChartDateRange | null {
   const pricedRowsList = products.map((product) => getPricedRows(product.detail.rows));
   if (pricedRowsList.length === 0 || pricedRowsList.some((rows) => rows.length < 2)) return null;
 
@@ -385,8 +436,14 @@ function getChartDateRange(products: SelectedProduct[], calendarDays: number): C
   if (startTimes.some(Number.isNaN) || endTimes.some(Number.isNaN)) return null;
 
   const comparableEnd = new Date(Math.min(...endTimes));
-  const requestedStart = new Date(comparableEnd);
-  requestedStart.setDate(requestedStart.getDate() - calendarDays);
+  let requestedStart: Date;
+  if (options.ytd) {
+    // 올해 초(1월 1일)부터
+    requestedStart = new Date(`${comparableEnd.getFullYear()}-01-01T00:00:00`);
+  } else {
+    requestedStart = new Date(comparableEnd);
+    requestedStart.setDate(requestedStart.getDate() - (options.calendarDays ?? 0));
+  }
 
   const firstCommonStart = new Date(Math.max(...startTimes));
   const comparableStart = firstCommonStart > requestedStart ? firstCommonStart : requestedStart;
@@ -397,6 +454,58 @@ function getChartDateRange(products: SelectedProduct[], calendarDays: number): C
     endDate: toDateKey(comparableEnd),
     shortened: firstCommonStart > requestedStart,
   };
+}
+
+/**
+ * 주어진 기간의 일간 종가에서 MDD(%) 계산.
+ * MDD = min((price - running_max) / running_max) × 100
+ */
+function getMaxDrawdownPct(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  if (seriesRows.length < 2) return null;
+  let runningMax = seriesRows[0].close ?? 0;
+  let maxDrawdown = 0; // 0 이하의 값(음수)으로 갱신됨
+  for (const row of seriesRows) {
+    const price = row.close ?? 0;
+    if (price <= 0) continue;
+    if (price > runningMax) {
+      runningMax = price;
+      continue;
+    }
+    if (runningMax <= 0) continue;
+    const drawdown = (price - runningMax) / runningMax;
+    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+  }
+  return maxDrawdown * 100;
+}
+
+/**
+ * 샤프지수 = (일간 수익률 평균 / 표준편차) × √252.
+ * 무위험 수익률 = 0 으로 단순화 (편차로만 위험 측정).
+ */
+function getSharpeRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  if (seriesRows.length < 3) return null;
+  const dailyReturns: number[] = [];
+  for (let i = 1; i < seriesRows.length; i++) {
+    const prev = seriesRows[i - 1].close ?? 0;
+    const curr = seriesRows[i].close ?? 0;
+    if (prev <= 0 || curr <= 0) continue;
+    dailyReturns.push(curr / prev - 1);
+  }
+  if (dailyReturns.length < 2) return null;
+  const mean = dailyReturns.reduce((acc, v) => acc + v, 0) / dailyReturns.length;
+  const variance =
+    dailyReturns.reduce((acc, v) => acc + (v - mean) ** 2, 0) / (dailyReturns.length - 1);
+  const std = Math.sqrt(variance);
+  if (std === 0) return null;
+  return (mean / std) * Math.sqrt(252);
 }
 
 function buildReturnSeries(rows: PriceRow[], dateRange: ChartDateRange | null): LineData[] {
@@ -583,32 +692,14 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
   }
 
   if (metric === "포트폴리오 변동") {
-    const fxRateByCurrency = new Map<string, TickerFxRate>();
-    (etfInfo?.fx_rates ?? []).forEach((fx) => {
-      const currency = String(fx.currency || "").trim().toUpperCase();
-      if (currency) fxRateByCurrency.set(currency, fx);
-    });
     return (
       <div className="compareBasicValue">
-        <strong className={getSignedClass(portfolioChange.totalPct)}>{formatSignedPercent(portfolioChange.totalPct)}</strong>
-        {portfolioChange.breakdown.length > 0 ? (
-          <span className="comparePortfolioBreakdownList">
-            {portfolioChange.breakdown.map((item) => (
-              <span key={item.currency} className="comparePortfolioBreakdownItem">
-                <span>{item.label}({formatNumber(item.weight, 0)}%)</span>
-                <span className={getSignedClass(item.changePct)}>{formatSignedPercent(item.changePct)}</span>
-                {fxRateByCurrency.has(item.currency) ? (
-                  <span className="comparePortfolioBreakdownFx">
-                    · 환율{" "}
-                    <span className={getSignedClass(fxRateByCurrency.get(item.currency)?.change_pct ?? null)}>
-                      {formatSignedPercent(fxRateByCurrency.get(item.currency)?.change_pct ?? null)}
-                    </span>
-                  </span>
-                ) : null}
-              </span>
-            ))}
-          </span>
-        ) : null}
+        <PortfolioChangeBreakdown
+          items={portfolioChange.breakdown}
+          fxRates={etfInfo?.fx_rates ?? []}
+          variant="compact"
+          emptyText="-"
+        />
       </div>
     );
   }
@@ -665,15 +756,17 @@ function CompareChart({ products, dateRange }: { products: SelectedProduct[]; da
 
 export function ComparePageClient() {
   const [tickerItems, setTickerItems] = useState<TickerItem[]>([]);
-  const [tickerTypes, setTickerTypes] = useState<TickerTypeItem[]>([]);
-  const [selectedTickerType, setSelectedTickerType] = useState("");
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [products, setProducts] = useState<SelectedProduct[]>([]);
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
-  const [performanceRange, setPerformanceRange] = useState<PerformanceRange>("3m");
+  // 구성 종목 탭에서 종목 정렬 기준: weight(비중, 기본) / change(상승률 내림차순)
+  const [holdingsSortBy, setHoldingsSortBy] = useState<"weight" | "change">("weight");
+  const [performanceRange, setPerformanceRange] = useState<string>("ytd");
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [groups, setGroups] = useState<CompareGroupMap>({});
+  const [activeGroupName, setActiveGroupName] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const hydratedRef = useRef(false);
 
@@ -683,9 +776,10 @@ export function ComparePageClient() {
     return map;
   }, [tickerItems]);
 
-  const poolTickerItems = useMemo(
-    () => tickerItems.filter((item) => item.ticker_type === selectedTickerType),
-    [selectedTickerType, tickerItems],
+  /** has_holdings === true 인 ETF 만 검색 대상. (국내상장 국내/해외 ETF) */
+  const searchableItems = useMemo(
+    () => tickerItems.filter((item) => item.has_holdings === true),
+    [tickerItems],
   );
 
   const loadSelectedProducts = useCallback(async (keys: string[]) => {
@@ -710,35 +804,29 @@ export function ComparePageClient() {
     let alive = true;
     async function loadInitialData() {
       try {
-        const [tickersResponse, stocksResponse] = await Promise.all([
-          fetch("/api/ticker-tickers", { cache: "no-store" }),
-          fetch("/api/stocks", { cache: "no-store" }),
-        ]);
+        const tickersResponse = await fetch("/api/ticker-tickers", { cache: "no-store" });
         const tickersPayload = (await tickersResponse.json()) as TickerItem[] | { error?: string };
-        const stocksPayload = (await stocksResponse.json()) as StocksTableData | { error?: string };
         if (!tickersResponse.ok || !Array.isArray(tickersPayload)) {
           throw new Error(Array.isArray(tickersPayload) ? "종목 목록을 불러오지 못했습니다." : tickersPayload.error);
         }
-        if (!stocksResponse.ok || !("ticker_types" in stocksPayload)) {
-          throw new Error("종목풀 목록을 불러오지 못했습니다.");
-        }
         if (!alive) return;
         const items = tickersPayload.filter((item) => item.ticker && item.ticker_type && item.country_code);
-        const types = stocksPayload.ticker_types ?? [];
         setTickerItems(items);
-        setTickerTypes(types);
-        const savedTickerType = readSavedTickerType();
-        const savedType = savedTickerType
-          ? types.find((type) => type.ticker_type === savedTickerType && items.some((item) => item.ticker_type === savedTickerType))
-          : null;
-        const initialType = savedType ?? types.find((type) => items.some((item) => item.ticker_type === type.ticker_type));
-        if (initialType) {
-          setSelectedTickerType(initialType.ticker_type);
-          const savedKeys = readSavedCompareKeys(initialType.ticker_type);
-          const validKeys = savedKeys.filter((key) => {
-            const item = items.find((candidate) => tickerKey(candidate) === key);
-            return item?.ticker_type === initialType.ticker_type;
-          });
+
+        // 그룹/활성 그룹/임시 선택 복원
+        const savedGroups = readCompareGroups();
+        const savedActive = readActiveGroupName();
+        setGroups(savedGroups);
+        const isValidActive = savedActive && savedGroups[savedActive] !== undefined;
+        if (isValidActive) {
+          setActiveGroupName(savedActive);
+          const savedKeys = savedGroups[savedActive] ?? [];
+          const validKeys = savedKeys.filter((key) => items.some((it) => tickerKey(it) === key));
+          setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
+        } else {
+          setActiveGroupName(null);
+          const tempKeys = readTempSelection();
+          const validKeys = tempKeys.filter((key) => items.some((it) => tickerKey(it) === key));
           setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
         }
         hydratedRef.current = true;
@@ -759,10 +847,19 @@ export function ComparePageClient() {
     void loadSelectedProducts(selectedKeys);
   }, [loadSelectedProducts, selectedKeys]);
 
+  // selectedKeys 가 변경될 때 활성 그룹이면 해당 그룹에 자동 저장, 아니면 임시 저장
   useEffect(() => {
-    if (!hydratedRef.current || !selectedTickerType) return;
-    writeSavedCompareState(selectedTickerType, selectedKeys);
-  }, [selectedKeys, selectedTickerType]);
+    if (!hydratedRef.current) return;
+    if (activeGroupName) {
+      setGroups((current) => {
+        const next = { ...current, [activeGroupName]: selectedKeys.slice(0, MAX_PRODUCTS) };
+        writeCompareGroups(next);
+        return next;
+      });
+    } else {
+      writeTempSelection(selectedKeys);
+    }
+  }, [selectedKeys, activeGroupName]);
 
   useEffect(() => {
     const handler = (event: Event) => {
@@ -775,13 +872,117 @@ export function ComparePageClient() {
     return () => window.removeEventListener("compare:add-product", handler);
   }, [selectedKeys]);
 
-  const selectedPerformanceRange = PERFORMANCE_RANGES.find((range) => range.key === performanceRange) ?? PERFORMANCE_RANGES[1];
+  /** 그룹 선택 변경 (드롭다운). */
+  const handleSelectGroup = useCallback((name: string | null) => {
+    setActiveGroupName(name);
+    writeActiveGroupName(name);
+    if (name) {
+      const keys = groups[name] ?? [];
+      setSelectedKeys(keys.slice(0, MAX_PRODUCTS));
+    } else {
+      const tempKeys = readTempSelection();
+      setSelectedKeys(tempKeys.slice(0, MAX_PRODUCTS));
+    }
+    setSearchText("");
+  }, [groups]);
+
+  /** 빈 새 그룹 생성. 기존에 선택된 종목은 제거됨. */
+  const handleCreateGroup = useCallback(() => {
+    const rawName = window.prompt("그룹 이름을 입력하세요 (예: 배당 ETF 모음)");
+    if (rawName === null) return;
+    const name = rawName.trim();
+    if (!name) return;
+    if (groups[name] !== undefined) {
+      window.alert(`"${name}" 그룹이 이미 존재합니다.`);
+      return;
+    }
+    const nextGroups = { ...groups, [name]: [] };
+    setGroups(nextGroups);
+    writeCompareGroups(nextGroups);
+    setActiveGroupName(name);
+    writeActiveGroupName(name);
+    setSelectedKeys([]);
+    setSearchText("");
+  }, [groups]);
+
+  /** 현재 그룹 이름 변경. */
+  const handleRenameGroup = useCallback(() => {
+    if (!activeGroupName) return;
+    const rawName = window.prompt("새 그룹 이름을 입력하세요", activeGroupName);
+    if (rawName === null) return;
+    const name = rawName.trim();
+    if (!name || name === activeGroupName) return;
+    if (groups[name] !== undefined) {
+      window.alert(`"${name}" 그룹이 이미 존재합니다.`);
+      return;
+    }
+    const { [activeGroupName]: oldKeys, ...rest } = groups;
+    const nextGroups = { ...rest, [name]: oldKeys };
+    setGroups(nextGroups);
+    writeCompareGroups(nextGroups);
+    setActiveGroupName(name);
+    writeActiveGroupName(name);
+  }, [activeGroupName, groups]);
+
+  /** 현재 그룹 삭제. */
+  const handleDeleteGroup = useCallback(() => {
+    if (!activeGroupName) return;
+    if (!window.confirm(`"${activeGroupName}" 그룹을 삭제하시겠습니까?`)) return;
+    const { [activeGroupName]: _, ...rest } = groups;
+    setGroups(rest);
+    writeCompareGroups(rest);
+    setActiveGroupName(null);
+    writeActiveGroupName(null);
+    const tempKeys = readTempSelection();
+    setSelectedKeys(tempKeys.slice(0, MAX_PRODUCTS));
+  }, [activeGroupName, groups]);
+
+  // commonAvailableRange 는 sortedProducts 와 무관(순서만 다름)하므로 products 로 미리 계산
+  const commonAvailableRange = useMemo(() => getCommonAvailableRange(products), [products]);
+
+  const selectedPerformanceRange = useMemo<{
+    key: string;
+    label: string;
+    days: number;
+    ytd?: boolean;
+  }>(() => {
+    const fixed = PERFORMANCE_RANGES.find((range) => range.key === performanceRange);
+    if (fixed) return fixed;
+    if (performanceRange === "__max__" && commonAvailableRange) {
+      return {
+        key: "__max__",
+        label: `최대 ${formatMaxRangeLabel(commonAvailableRange.days)}`,
+        days: commonAvailableRange.days,
+      };
+    }
+    return PERFORMANCE_RANGES[1];
+  }, [commonAvailableRange, performanceRange]);
+  const performanceMetricRows = useMemo<PerformanceMetricRange[]>(() => {
+    if (selectedPerformanceRange.key !== "__max__") return PERFORMANCE_METRIC_RANGES;
+    const maxRow: PerformanceMetricRange = {
+      key: "__max__",
+      label: selectedPerformanceRange.label,
+      kind: "period",
+      days: selectedPerformanceRange.days,
+    };
+    const insertIndex = PERFORMANCE_METRIC_RANGES.findIndex(
+      (row) => row.kind === "period" && row.days > selectedPerformanceRange.days,
+    );
+    if (insertIndex < 0) return [...PERFORMANCE_METRIC_RANGES, maxRow];
+    return [
+      ...PERFORMANCE_METRIC_RANGES.slice(0, insertIndex),
+      maxRow,
+      ...PERFORMANCE_METRIC_RANGES.slice(insertIndex),
+    ];
+  }, [selectedPerformanceRange.days, selectedPerformanceRange.key, selectedPerformanceRange.label]);
   const sortedProducts = useMemo(() => {
     return products
       .map((product, index) => ({
         product,
         index,
-        returnPct: getReturnPct(product.detail.rows, selectedPerformanceRange.days),
+        returnPct: selectedPerformanceRange.ytd
+          ? getYearToDateReturnPct(product.detail.rows)
+          : getReturnPct(product.detail.rows, selectedPerformanceRange.days),
       }))
       .sort((a, b) => {
         const aValue = a.returnPct;
@@ -793,11 +994,76 @@ export function ComparePageClient() {
         return bValue - aValue;
       })
       .map(({ product }) => product);
-  }, [products, selectedPerformanceRange.days]);
+  }, [products, selectedPerformanceRange.days, selectedPerformanceRange.ytd]);
   const chartDateRange = useMemo(
-    () => getChartDateRange(sortedProducts, selectedPerformanceRange.days),
-    [selectedPerformanceRange.days, sortedProducts],
+    () => getChartDateRange(sortedProducts, {
+      calendarDays: selectedPerformanceRange.days,
+      ytd: selectedPerformanceRange.ytd,
+    }),
+    [selectedPerformanceRange.days, selectedPerformanceRange.ytd, sortedProducts],
   );
+
+  /** 토글 버튼 목록 — 가용 기간보다 긴 옵션은 disabled, 적당한 max 옵션 동적 삽입. */
+  const performanceRangeButtons = useMemo<
+    Array<{ key: string; label: string; enabled: boolean; days: number; ytd?: boolean }>
+  >(() => {
+    const maxDays = commonAvailableRange?.days ?? Infinity;
+    const ytdStart = commonAvailableRange
+      ? new Date(`${commonAvailableRange.endDate.getFullYear()}-01-01T00:00:00`)
+      : null;
+    const ytdFullyCovered =
+      commonAvailableRange && ytdStart ? commonAvailableRange.startDate <= ytdStart : true;
+
+    // 표준 버튼 + enabled 플래그
+    const base: Array<{ key: string; label: string; enabled: boolean; days: number; ytd?: boolean }> =
+      PERFORMANCE_RANGES.map((range) => {
+        let enabled: boolean;
+        if (range.ytd) {
+          enabled = ytdFullyCovered;
+        } else {
+          // 5일 정도 tolerance (영업일/달력일 차이)
+          enabled = maxDays + 5 >= range.days;
+        }
+        return { key: range.key as string, label: range.label, enabled, days: range.days, ytd: range.ytd };
+      });
+
+    // 마지막으로 enabled 된 표준 범위(가장 긴 것)를 찾고, max 와 차이 크면 "max" 버튼 삽입
+    if (commonAvailableRange) {
+      // YTD 제외 가장 긴 enabled 고정 범위 days
+      const lastEnabledFixed = base
+        .filter((b) => b.enabled && !b.ytd)
+        .reduce((acc, b) => Math.max(acc, b.days), 0);
+      const TOLERANCE_DAYS = 14; // 2주 이상 차이 나야 별도 버튼 의미 있음
+      const hasMeaningfulGap = maxDays - lastEnabledFixed > TOLERANCE_DAYS;
+      if (hasMeaningfulGap) {
+        // 첫 번째 disabled 위치 직전에 삽입
+        const firstDisabledIdx = base.findIndex((b) => !b.enabled && !b.ytd);
+        const maxButton = {
+          key: "__max__",
+          label: `최대 ${formatMaxRangeLabel(commonAvailableRange.days)}`,
+          enabled: true,
+          days: commonAvailableRange.days,
+          ytd: undefined as boolean | undefined,
+        };
+        if (firstDisabledIdx >= 0) {
+          base.splice(firstDisabledIdx, 0, maxButton);
+        } else {
+          base.push(maxButton);
+        }
+      }
+    }
+    return base;
+  }, [commonAvailableRange]);
+
+  // 현재 선택된 범위가 disabled 가 됐다면 자동으로 가장 큰 enabled 로 폴백
+  useEffect(() => {
+    const current = performanceRangeButtons.find((b) => b.key === performanceRange);
+    if (current && current.enabled) return;
+    const lastEnabled = [...performanceRangeButtons].reverse().find((b) => b.enabled);
+    if (lastEnabled && lastEnabled.key !== performanceRange) {
+      setPerformanceRange(lastEnabled.key);
+    }
+  }, [performanceRange, performanceRangeButtons]);
   
   const portfolioChangeBaseDate = useMemo(() => {
     for (const p of sortedProducts) {
@@ -808,7 +1074,8 @@ export function ComparePageClient() {
     return null;
   }, [sortedProducts]);
 
-  const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts).slice(0, 10), [sortedProducts]);
+  // 매칭 색상 계산용: 전체 종목 (이전엔 상위 10개만이었지만 컬럼 스크롤로 전부 노출되므로 전부 대상).
+  const holdingExposureRows = useMemo(() => buildHoldingExposureRows(sortedProducts), [sortedProducts]);
   const holdingColorByCode = useMemo(() => {
     const counts = new Map<string, number>();
     holdingExposureRows.forEach((row) => {
@@ -823,6 +1090,20 @@ export function ComparePageClient() {
     });
     return colors;
   }, [holdingExposureRows]);
+  // 매칭 종목의 텍스트용 진한 색 (큰 순위 숫자 색으로 사용).
+  const holdingTextColorByCode = useMemo(() => {
+    const counts = new Map<string, number>();
+    holdingExposureRows.forEach((row) => {
+      counts.set(row.code, row.holdingsByProductKey.size);
+    });
+    const colors = new Map<string, string>();
+    holdingExposureRows.forEach((row) => {
+      const code = row.code;
+      if ((counts.get(code) ?? 0) < 2) return;
+      colors.set(code, HOLDING_MATCH_TEXT_COLORS[colors.size % HOLDING_MATCH_TEXT_COLORS.length]);
+    });
+    return colors;
+  }, [holdingExposureRows]);
 
   const titleRight = (
     <div className="compareTitleMeta">
@@ -832,7 +1113,7 @@ export function ComparePageClient() {
   );
 
   return (
-    <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="ETF 비교" fullHeight fullWidth titleRight={titleRight}>
       <div className="appPageStack appPageStackFill comparePage">
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
@@ -843,62 +1124,113 @@ export function ComparePageClient() {
                 <div className="appMainHeader">
                   <div className="appMainHeaderLeft compareMainHeaderLeft">
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">종목풀</span>
-                      <select
-                        className="form-select"
-                        value={selectedTickerType}
-                        onChange={(event) => {
-                          const nextTickerType = event.target.value;
-                          const savedKeys = readSavedCompareKeys(nextTickerType);
-                          const validKeys = savedKeys.filter((key) => itemByKey.get(key)?.ticker_type === nextTickerType);
-                          setSelectedTickerType(nextTickerType);
-                          setProducts([]);
-                          setSelectedKeys(validKeys.slice(0, MAX_PRODUCTS));
-                          setSearchText("");
-                        }}
-                        disabled={tickerTypes.length === 0}
-                      >
-                        {tickerTypes.length === 0 ? (
-                          <option value="">종목풀 불러오는 중...</option>
-                        ) : (
-                          tickerTypes.map((type) => (
-                            <option key={type.ticker_type} value={type.ticker_type}>
-                              {type.icon ? `${type.icon} ` : ""}{type.name}
-                            </option>
-                          ))
-                        )}
-                      </select>
+                      <span className="appLabeledFieldLabel">그룹</span>
+                      <div className="compareGroupControl">
+                        <select
+                          className="form-select"
+                          value={activeGroupName ?? ""}
+                          onChange={(event) => {
+                            const next = event.target.value;
+                            handleSelectGroup(next === "" ? null : next);
+                          }}
+                        >
+                          <option value="">(저장 안 됨)</option>
+                          {Object.keys(groups).sort().map((name) => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={handleCreateGroup}
+                          title="현재 선택을 새 그룹으로 저장"
+                        >
+                          + 새 그룹
+                        </button>
+                        {activeGroupName ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary"
+                              onClick={handleRenameGroup}
+                              title="그룹 이름 변경"
+                            >
+                              이름 변경
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger"
+                              onClick={handleDeleteGroup}
+                              title="현재 그룹 삭제"
+                            >
+                              그룹 삭제
+                            </button>
+                          </>
+                        ) : null}
+                      </div>
                     </label>
                     <ProductSearchField
                       value={searchText}
-                      items={poolTickerItems}
+                      items={searchableItems}
                       disabledKeys={selectedKeys}
                       inputRef={searchInputRef}
                       onChange={setSearchText}
                     />
-                    <div className="compareHeaderTabs appSegmentedToggle" role="group" aria-label="비교 보기 선택">
-                      <button
-                        type="button"
-                        className={activeTab === "performance" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setActiveTab("performance")}
-                      >
-                        성과분석
-                      </button>
-                      <button
-                        type="button"
-                        className={activeTab === "basic" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setActiveTab("basic")}
-                      >
-                        기본 정보
-                      </button>
-                      <button
-                        type="button"
-                        className={activeTab === "holdings" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setActiveTab("holdings")}
-                      >
-                        구성 종목
-                      </button>
-                    </div>
+                    <label className="appLabeledField" style={{ minWidth: 0, width: "auto" }}>
+                      <span className="appLabeledFieldLabel">탭</span>
+                      <div className="compareHeaderTabs appSegmentedToggle" role="group" aria-label="비교 보기 선택">
+                        <button
+                          type="button"
+                          className={activeTab === "performance" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("performance")}
+                        >
+                          성과분석
+                        </button>
+                        <button
+                          type="button"
+                          className={activeTab === "basic" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("basic")}
+                        >
+                          기본 정보
+                        </button>
+                        <button
+                          type="button"
+                          className={activeTab === "holdings" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("holdings")}
+                        >
+                          구성 종목
+                        </button>
+                      </div>
+                    </label>
+                    {activeTab === "holdings" ? (
+                      <label className="appLabeledField" style={{ marginLeft: "0.75rem", minWidth: 0, width: "auto" }}>
+                        <span className="appLabeledFieldLabel">구성종목 정렬</span>
+                        <div className="appSegmentedToggle" role="group" aria-label="구성종목 정렬 기준">
+                          <button
+                            type="button"
+                            className={
+                              holdingsSortBy === "weight"
+                                ? "btn appSegmentedToggleButton is-active"
+                                : "btn appSegmentedToggleButton"
+                            }
+                            onClick={() => setHoldingsSortBy("weight")}
+                          >
+                            비중
+                          </button>
+                          <button
+                            type="button"
+                            className={
+                              holdingsSortBy === "change"
+                                ? "btn appSegmentedToggleButton is-active"
+                                : "btn appSegmentedToggleButton"
+                            }
+                            onClick={() => setHoldingsSortBy("change")}
+                          >
+                            상승률
+                          </button>
+                        </div>
+                      </label>
+                    ) : null}
                   </div>
                 </div>
               </ResponsiveFiltersSection>
@@ -908,7 +1240,7 @@ export function ComparePageClient() {
 
         {loading ? <div className="compareLoading">비교 데이터를 불러오는 중...</div> : null}
 
-        <section className={activeTab === "holdings" ? "compareMatrix compareMatrixWithTotal" : "compareMatrix"}>
+        <section className="compareMatrix">
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
             <div
@@ -942,9 +1274,6 @@ export function ComparePageClient() {
           {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
             <div key={`empty-${index}`} className="compareProductEmpty compareProductHeaderEmpty">비교 상품을 추가해 주세요.</div>
           ))}
-          {activeTab === "holdings" ? (
-            <div className="compareProductEmpty compareProductHeaderEmpty compareHoldingTotalHeader">합계</div>
-          ) : null}
         </section>
 
         {activeTab === "performance" ? (
@@ -953,44 +1282,106 @@ export function ComparePageClient() {
             <div className="compareMatrixWide">
               <div className="comparePerformanceToolbar">
                 <div className="appSegmentedToggle" role="group" aria-label="수익률 추이 기간">
-                  {PERFORMANCE_RANGES.map((range) => (
-                    <button
-                      key={range.key}
-                      type="button"
-                      className={performanceRange === range.key ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                      onClick={() => setPerformanceRange(range.key)}
-                    >
-                      {range.label}
-                    </button>
-                  ))}
+                  {performanceRangeButtons.map((range) => {
+                    const isActive = performanceRange === range.key;
+                    const className = [
+                      "btn",
+                      "appSegmentedToggleButton",
+                      isActive ? "is-active" : "",
+                      !range.enabled ? "is-disabled" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
+                    return (
+                      <button
+                        key={range.key}
+                        type="button"
+                        className={className}
+                        disabled={!range.enabled}
+                        title={!range.enabled ? "선택된 종목의 데이터가 부족합니다" : undefined}
+                        onClick={() => range.enabled && setPerformanceRange(range.key)}
+                      >
+                        {range.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                {chartDateRange?.shortened ? (
-                  <span className="comparePerformanceHint is-warning">
-                    선택 기간보다 데이터가 짧아 {formatDateKey(chartDateRange.startDate)} ~ {formatDateKey(chartDateRange.endDate)} 기준 비교
-                  </span>
-                ) : null}
               </div>
               <CompareChart products={sortedProducts} dateRange={chartDateRange} />
             </div>
-            <div className="compareMatrixLabel compareMetricsGroupLabel" style={{ gridRow: `span ${PERFORMANCE_METRIC_RANGES.length}` }}>
+            <div className="compareMatrixLabel compareMetricsGroupLabel" style={{ gridRow: `span ${performanceMetricRows.length}` }}>
               수익률(%)
             </div>
-            {PERFORMANCE_METRIC_RANGES.map((period) => (
-              <Fragment key={period.label}>
-                <div className="compareMetricPeriodLabel">{period.label}</div>
+            {performanceMetricRows.map((period) => {
+              const isActiveMetricRow = period.key === selectedPerformanceRange.key;
+              return (
+              <Fragment key={period.key}>
+                <div className={`compareMetricPeriodLabel ${isActiveMetricRow ? "is-active-range" : ""}`}>{period.label}</div>
                 {sortedProducts.map((product) => {
                   const value = getMetricReturnPct(product.detail.rows, period);
                   return (
-                    <div key={tickerKey(product.item)} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    <div
+                      key={tickerKey(product.item)}
+                      className={`compareMetricCell ${getSignedClass(value)} ${isActiveMetricRow ? "is-active-range" : ""}`}
+                    >
                       {formatPercent(value)}
                     </div>
                   );
                 })}
                 {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-                  <div key={`empty-metric-${period.label}-${index}`} className="compareMetricCell">-</div>
+                  <div
+                    key={`empty-metric-${period.label}-${index}`}
+                    className={`compareMetricCell ${isActiveMetricRow ? "is-active-range" : ""}`}
+                  >
+                    -
+                  </div>
                 ))}
               </Fragment>
+              );
+            })}
+
+            <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
+              MDD(%)
+              <div className="compareMatrixLabelHint">
+                {chartDateRange?.shortened
+                  ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
+                  : `${selectedPerformanceRange.label} 기준`}
+              </div>
+            </div>
+            {sortedProducts.map((product) => {
+              const value = getMaxDrawdownPct(product.detail.rows, chartDateRange);
+              return (
+                <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                  {formatPercent(value)}
+                </div>
+              );
+            })}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-mdd-${index}`} className="compareMetricCell">-</div>
             ))}
+
+            <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
+              샤프 지수
+              <div className="compareMatrixLabelHint">
+                {chartDateRange?.shortened
+                  ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
+                  : `${selectedPerformanceRange.label} 기준`}
+              </div>
+            </div>
+            {sortedProducts.map((product) => {
+              const value = getSharpeRatio(product.detail.rows, chartDateRange);
+              return (
+                <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                  {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
+                </div>
+              );
+            })}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+            ))}
+            <div className="compareSharpeLegend">
+              샤프 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (무위험 수익률 0 기준, 연율화)
+            </div>
           </section>
         ) : activeTab === "basic" ? (
           <section className="compareMatrix compareMatrixBody">
@@ -1008,7 +1399,16 @@ export function ComparePageClient() {
                   )}
                 </div>
                 {sortedProducts.map((product) => (
-                  <div key={tickerKey(product.item)} className={metric.multiline ? "compareBasicCell" : "compareBasicCell compareBasicCompactCell"}>
+                  <div
+                    key={tickerKey(product.item)}
+                    className={
+                      metric.label === "포트폴리오 변동"
+                        ? "compareBasicCell comparePortfolioCell"
+                        : metric.multiline
+                          ? "compareBasicCell"
+                          : "compareBasicCell compareBasicCompactCell"
+                    }
+                  >
                     <BasicInfoValue product={product} metric={metric.label} />
                   </div>
                 ))}
@@ -1019,73 +1419,115 @@ export function ComparePageClient() {
             ))}
           </section>
         ) : (
-          <section className="compareMatrix compareMatrixBody compareMatrixWithTotal">
-            <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingCountLabel">구성종목 수</div>
+          <section className="compareMatrix compareMatrixBody">
+            <div className="compareMatrixLabel compareMatrixLabelWide" style={{ flexDirection: "column" }}>
+              <div className="compareMatrixLabelText">포트폴리오 변동</div>
+              {portfolioChangeBaseDate && (
+                <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal", marginTop: "4px" }}>
+                  ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
+                </div>
+              )}
+            </div>
             {sortedProducts.map((product) => (
-              <div key={tickerKey(product.item)} className="compareHoldingCount">{product.detail.holdings.length}</div>
+              <div key={tickerKey(product.item)} className="compareBasicCell comparePortfolioCell">
+                <BasicInfoValue product={product} metric="포트폴리오 변동" />
+              </div>
             ))}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-              <div key={`empty-count-${index}`} className="compareProductEmpty compareHoldingCountEmpty" />
+              <div key={`empty-holding-portfolio-change-${index}`} className="compareProductEmpty">-</div>
             ))}
-            <div className="compareHoldingCount compareHoldingTotalCount">합계비중</div>
-            <div className="compareMatrixLabel compareHoldingsGroupLabel" style={{ gridRow: "span 10" }}>종목비중 TOP10</div>
-            {Array.from({ length: 10 }).map((_, rowIndex) => (
-              <Fragment key={rowIndex}>
-                <div className="compareHoldingRankLabel">{rowIndex + 1}</div>
-                {sortedProducts.map((product) => {
-                  const holding = product.detail.holdings[rowIndex];
-                  const holdingCode = holding ? getHoldingCode(holding) : "";
-                  const matchColor = holdingCode ? holdingColorByCode.get(holdingCode) : undefined;
-                  return (
-                    <div
-                      key={tickerKey(product.item)}
-                      className={matchColor ? "compareHoldingCell is-matched" : "compareHoldingCell"}
-                      style={matchColor ? { backgroundColor: matchColor } : undefined}
-                    >
-                      {holding ? (
-                        <>
-                          <div className="compareHoldingName">{holding.name || holding.ticker}</div>
-                          <div className="compareHoldingCode">{holdingCode}</div>
-                          <div className="compareHoldingFooter">
-                            <span className={getSignedClass(holding.change_pct ?? null)}>
-                              {formatSignedPercent(holding.change_pct ?? null)}
-                            </span>
-                            <strong>{Number(holding.weight ?? 0).toFixed(2)}%</strong>
-                          </div>
-                        </>
-                      ) : "-"}
-                    </div>
-                  );
-                })}
-                {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-                  <div key={`empty-holding-${rowIndex}-${index}`} className="compareHoldingCell">-</div>
-                ))}
-                {holdingExposureRows[rowIndex] ? (
-                  <div
-                    className={
-                      holdingColorByCode.get(holdingExposureRows[rowIndex].code)
-                        ? "compareHoldingCell compareHoldingTotalCell is-matched"
-                        : "compareHoldingCell compareHoldingTotalCell"
-                    }
-                    style={
-                      holdingColorByCode.get(holdingExposureRows[rowIndex].code)
-                        ? { backgroundColor: holdingColorByCode.get(holdingExposureRows[rowIndex].code) }
-                        : undefined
-                    }
-                  >
-                    <div className="compareHoldingName">{holdingExposureRows[rowIndex].name}</div>
-                    <div className="compareHoldingCode">{holdingExposureRows[rowIndex].code}</div>
-                    <div className="compareHoldingFooter">
-                      <span className={getSignedClass(holdingExposureRows[rowIndex].changePct)}>
-                        {formatSignedPercent(holdingExposureRows[rowIndex].changePct)}
-                      </span>
-                      <strong>{holdingExposureRows[rowIndex].totalWeight.toFixed(2)}%</strong>
-                    </div>
-                  </div>
+            <div className="compareMatrixLabel compareMatrixLabelWide compareHoldingsGroupLabel">구성종목</div>
+            {sortedProducts.map((product) => {
+              // 정렬 기준에 따라 표시용 holdings 를 만든다. 원본은 변형하지 않는다.
+              const sortedHoldings = (() => {
+                if (holdingsSortBy === "change") {
+                  return [...product.detail.holdings].sort((a, b) => {
+                    const av = a.change_pct ?? Number.NEGATIVE_INFINITY;
+                    const bv = b.change_pct ?? Number.NEGATIVE_INFINITY;
+                    return bv - av; // 상승률 내림차순
+                  });
+                }
+                // 기본: 백엔드가 이미 비중순으로 내려준다고 가정. 안정성 위해 명시적 정렬.
+                return [...product.detail.holdings].sort(
+                  (a, b) => Number(b.weight ?? 0) - Number(a.weight ?? 0),
+                );
+              })();
+              return (
+              <div
+                key={tickerKey(product.item)}
+                className="compareHoldingScrollColumn"
+                style={{ maxHeight: "60vh", overflowY: "auto" }}
+              >
+                {sortedHoldings.length === 0 ? (
+                  <div className="compareHoldingCell">-</div>
                 ) : (
-                  <div className="compareHoldingCell compareHoldingTotalCell">-</div>
+                  sortedHoldings.map((holding, idx) => {
+                    const holdingCode = getHoldingCode(holding);
+                    // 공통 종목 매칭 색상은 카드 좌측 strip 으로 표시 (배경/텍스트 색에 안 섞임).
+                    const matchStripColor = holdingCode
+                      ? holdingTextColorByCode.get(holdingCode)
+                      : undefined;
+                    const weight = Number(holding.weight ?? 0);
+                    // 가운데 큰 비중% 색: 항상 슬레이트 그레이 (매칭 색은 좌측 strip 이 담당).
+                    const weightTextColor = "#475569";
+                    // 변동률 기반 배경: 양수=빨강, 음수=파랑. 5% 절댓값에서 alpha 최대치(0.18) 도달.
+                    const changePct = holding.change_pct;
+                    let changeBg: string | undefined;
+                    if (changePct != null && !Number.isNaN(changePct) && changePct !== 0) {
+                      const changeAlpha = Math.min(0.18, (Math.abs(changePct) / 5) * 0.18);
+                      changeBg =
+                        changePct > 0
+                          ? `rgba(239, 68, 68, ${changeAlpha})`
+                          : `rgba(37, 99, 235, ${changeAlpha})`;
+                    }
+                    const cellStyle = {
+                      position: "relative",
+                      overflow: "hidden",
+                      backgroundColor: changeBg,
+                      boxShadow: matchStripColor ? `inset 4px 0 0 0 ${matchStripColor}` : undefined,
+                    } as const;
+                    return (
+                      <div
+                        key={`${holdingCode || holding.ticker}-${idx}`}
+                        className="compareHoldingCell"
+                        style={cellStyle}
+                      >
+                        {/* 윗줄: 종목명 (전체 너비) */}
+                        <div className="compareHoldingName" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {holding.name || holding.ticker}
+                        </div>
+                        {/* 아랫줄: 티커 + 비중 + 변동률 */}
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "0.5rem",
+                            marginTop: "0.15rem",
+                          }}
+                        >
+                          <div className="compareHoldingCode" style={{ flex: "0 0 auto" }}>
+                            {holdingCode}
+                          </div>
+                          <span style={{ color: weightTextColor, fontWeight: 900, fontSize: "0.95rem" }}>
+                            {weight.toFixed(2)}%
+                          </span>
+                          <span
+                            className={getSignedClass(holding.change_pct ?? null)}
+                            style={{ fontSize: "0.95rem", fontWeight: 800 }}
+                          >
+                            {formatSignedPercent(holding.change_pct ?? null)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
-              </Fragment>
+              </div>
+              );
+            })}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-holding-scroll-${index}`} className="compareHoldingCell">-</div>
             ))}
           </section>
         )}

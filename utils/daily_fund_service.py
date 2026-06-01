@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 
 from services.price_service import get_exchange_rate_series
 from utils.account_registry import load_account_configs
-from utils.data_loader import get_trading_days
+from utils.data_loader import get_trading_days_any
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
@@ -14,8 +14,6 @@ from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
 DAILY_COLLECTION = "daily_fund_data"
 WEEKLY_COLLECTION = "weekly_fund_data"
 KST = ZoneInfo("Asia/Seoul")
-INITIAL_TOTAL_PRINCIPAL_DATE = "2024-01-31"
-INITIAL_TOTAL_PRINCIPAL_VALUE = 56_000_000
 
 READ_ONLY_FIELDS = {
     "total_expense",
@@ -85,12 +83,12 @@ def _get_now_kst() -> datetime.datetime:
 
 
 def _get_active_daily_date() -> str:
-    """오늘 이하의 마지막 한국 거래일을 반환한다."""
+    """오늘 이하의 마지막 한국/호주 합집합 거래일을 반환한다."""
     today = _get_now_kst().date()
     search_start = today - datetime.timedelta(days=370)
-    trading_days = get_trading_days(str(search_start), str(today), "kor")
+    trading_days = get_trading_days_any(str(search_start), str(today), ["kor", "au"])
     if not trading_days:
-        raise RuntimeError("오늘 이하의 한국 거래일을 찾지 못했습니다.")
+        raise RuntimeError("오늘 이하의 한국/호주 거래일을 찾지 못했습니다.")
     return max(day.date().isoformat() for day in trading_days)
 
 
@@ -100,6 +98,13 @@ def _to_int(value: object) -> int:
 
 def _to_float(value: object) -> float:
     return float(value or 0.0)
+
+
+def calculate_period_return_pct(period_profit: float, previous_total_assets: float) -> float:
+    """입출금 제거 손익을 직전 기간 총자산 대비 수익률로 계산한다."""
+    if previous_total_assets <= 0:
+        return 0.0
+    return (period_profit / previous_total_assets) * 100
 
 
 def _format_date_display(date_str: str) -> str:
@@ -145,18 +150,29 @@ def _apply_derived_fields(source: dict[str, Any]) -> dict[str, Any]:
 
 
 def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """수익률 계산 규칙 (전체 페이지 통일):
+
+    - daily_return_pct (입출금 제거 1일 수익률):
+        daily_profit / previous_total_assets × 100
+        분자는 입출금 제거된 순수 시장변동, 분모는 직전 기간 총자산.
+    - cumulative_return_pct (ROI):
+        cumulative_profit / total_principal × 100
+        내가 투입한 누적 원금 대비 총 수익률.
+
+    자세한 정책은 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
+    """
     docs_by_date = {str(doc["date"]): _apply_derived_fields(doc) for doc in docs}
-    running_total = INITIAL_TOTAL_PRINCIPAL_VALUE
+    # 시드 row(2023-12-28) 의 deposit_withdrawal 에 초기 입금이 들어있고
+    # 이후 row 들의 입출금이 누적되어 total_principal 이 계산된다.
+    running_total = 0
     running_total_expense = 0
     previous_cumulative_profit = 0
+    previous_total_assets = 0
 
     for date_str in sorted(docs_by_date):
         doc = docs_by_date[date_str]
-        if date_str <= INITIAL_TOTAL_PRINCIPAL_DATE:
-            doc["total_principal"] = INITIAL_TOTAL_PRINCIPAL_VALUE
-        else:
-            running_total += _to_int(doc.get("deposit_withdrawal", 0))
-            doc["total_principal"] = running_total
+        running_total += _to_int(doc.get("deposit_withdrawal", 0))
+        doc["total_principal"] = running_total
 
         running_total_expense += _to_int(doc.get("total_expense", 0))
         doc["cumulative_profit"] = (
@@ -164,13 +180,16 @@ def _apply_running_total_principal(docs: list[dict[str, Any]]) -> list[dict[str,
         )
         doc["daily_profit"] = _to_int(doc.get("cumulative_profit", 0)) - previous_cumulative_profit
         total_principal = _to_int(doc.get("total_principal", 0))
+        doc["daily_return_pct"] = round(
+            calculate_period_return_pct(_to_int(doc.get("daily_profit", 0)), previous_total_assets),
+            2,
+        )
         if total_principal == 0:
-            doc["daily_return_pct"] = 0.0
             doc["cumulative_return_pct"] = 0.0
         else:
-            doc["daily_return_pct"] = round((_to_int(doc.get("daily_profit", 0)) / total_principal) * 100, 2)
             doc["cumulative_return_pct"] = round((_to_int(doc.get("cumulative_profit", 0)) / total_principal) * 100, 2)
         previous_cumulative_profit = _to_int(doc.get("cumulative_profit", 0))
+        previous_total_assets = _to_int(doc.get("total_assets", 0))
 
     return [docs_by_date[str(doc["date"])] for doc in sorted(docs, key=lambda item: item["date"], reverse=True)]
 
@@ -320,7 +339,9 @@ def _load_daily_docs() -> list[dict[str, Any]]:
     db = _require_db()
     docs = list(db[DAILY_COLLECTION].find().sort("date", -1))
     if not docs:
-        raise RuntimeError("daily_fund_data 데이터가 없습니다. 먼저 ./.venv/bin/python scripts/seed_daily_fund_data.py 를 실행하세요.")
+        raise RuntimeError(
+            "daily_fund_data 데이터가 없습니다. 먼저 ./.venv/bin/python scripts/seed_daily_fund_data.py 를 실행하세요."
+        )
     return _apply_running_total_principal(docs)
 
 
@@ -420,12 +441,17 @@ def seed_daily_data_from_weekly() -> dict[str, int]:
     seeded = 0
     skipped = 0
     for doc in _apply_running_total_principal(
-        [{"date": str(item["week_date"]), **{k: v for k, v in item.items() if k != "week_date"}} for item in weekly_docs]
+        [
+            {"date": str(item["week_date"]), **{k: v for k, v in item.items() if k != "week_date"}}
+            for item in weekly_docs
+        ]
     ):
         if str(doc["date"]) > today_str:
             skipped += 1
             continue
-        daily_doc = _convert_weekly_doc_to_daily_seed({"week_date": doc["date"], **{k: v for k, v in doc.items() if k != "date"}})
+        daily_doc = _convert_weekly_doc_to_daily_seed(
+            {"week_date": doc["date"], **{k: v for k, v in doc.items() if k != "date"}}
+        )
         exists = db[DAILY_COLLECTION].count_documents({"date": daily_doc["date"]}, limit=1)
         if exists:
             skipped += 1
