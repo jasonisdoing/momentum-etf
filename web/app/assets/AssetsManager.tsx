@@ -2426,6 +2426,33 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
+      colId: "asset_weight",
+      headerName: "비중",
+      minWidth: 80,
+      flex: 0.6,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
+          return null;
+        }
+        // 합계 행의 총 자산을 분모로 사용
+        let totalSum = 0;
+        params.api.forEachNode((node) => {
+          const d = node.data as ParentGridRow | undefined;
+          if (d && isTotalRow(d)) {
+            totalSum = Number((d as Record<string, unknown>).total_assets_krw ?? 0);
+          }
+        });
+        if (totalSum <= 0) return null;
+        const own = Number((params.data as Record<string, unknown>).total_assets_krw ?? 0);
+        return (own / totalSum) * 100;
+      },
+      cellRenderer: (params: { value?: number | null }) =>
+        params.value !== null && params.value !== undefined
+          ? `${params.value.toFixed(2)}%`
+          : "",
+    },
+    {
       field: "cash_edit_value",
       headerName: "현금",
       minWidth: 124,
