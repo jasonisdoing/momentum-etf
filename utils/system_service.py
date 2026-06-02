@@ -488,7 +488,26 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
 
 
 def load_system_data() -> dict[str, object]:
+    from utils.batch_queue import list_queue
+
     accounts = load_account_configs()
+    queue_items = list_queue(limit=30)
+    # ObjectId/datetime 직렬화 — 응답 직전 평탄화
+    serialized_queue: list[dict[str, object]] = []
+    for q in queue_items:
+        serialized_queue.append(
+            {
+                "id": str(q.get("_id")),
+                "job_name": q.get("job_name"),
+                "status": q.get("status"),
+                "triggered_by": q.get("triggered_by"),
+                "triggered_at": q.get("triggered_at").isoformat() if q.get("triggered_at") else None,
+                "started_at": q.get("started_at").isoformat() if q.get("started_at") else None,
+                "ended_at": q.get("ended_at").isoformat() if q.get("ended_at") else None,
+                "exit_code": q.get("exit_code"),
+                "error": q.get("error"),
+            }
+        )
     return {
         "summary_rows": [
             {
@@ -501,10 +520,12 @@ def load_system_data() -> dict[str, object]:
         "schedule_rows": SCHEDULE_ROWS,
         "schedule_note": (
             "자동 배치는 로컬(Mac) 의 `run_local_scheduler.py` 에서 실행됩니다. "
-            "VM cron 은 사용하지 않으며, `infra/cron/crontab` 파일이 스케줄 정의의 단일 진실 소스입니다."
+            "VM cron 은 사용하지 않으며, `infra/cron/crontab` 파일이 스케줄 정의의 단일 진실 소스입니다. "
+            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 워커가 FIFO 순서로 직렬 처리합니다."
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),
+        "batch_queue": serialized_queue,
         "is_deploying": is_deploying(),
         "last_run_by_job": {row["key"]: _read_last_job_run(str(row["key"])) for row in SCHEDULE_ROWS},
         "next_run_by_job": {row["key"]: _build_next_run_payload(row.get("schedule")) for row in SCHEDULE_ROWS},
@@ -530,31 +551,18 @@ class DeployInProgressError(RuntimeError):
 
 
 def trigger_system_action(action: SystemAction) -> str:
-    """배치를 백그라운드로 실행. cron 과 동일하게 run_batch.py 래퍼를 경유해
-    실패 결과를 슬랙으로 알립니다. 다른 배치가 실행 중이면 거부합니다."""
+    """배치 작업을 큐에 추가한다 (직접 실행하지 않음).
+
+    같은 작업이 이미 pending/running 이면 무시. 워커가 FIFO 로 직렬 처리.
+    """
+    from utils.batch_queue import enqueue
 
     if action not in _SCRIPT_BY_ACTION:
         raise ValueError("지원하지 않는 시스템 작업입니다.")
 
-    running = get_running_jobs()
-    if running:
-        running_labels = ", ".join(_LABEL_BY_ACTION.get(k, k) for k in running)
-        raise BatchAlreadyRunningError(f"다른 배치가 실행 중입니다: {running_labels}. 완료 후 다시 시도해주세요.")
-
-    project_root = _PROJECT_ROOT
     script_rel = _SCRIPT_BY_ACTION[action]
-    wrapper_rel = "infra/cron/run_batch.py"
-
-    env = os.environ.copy()
-    env.setdefault("PYTHONUNBUFFERED", "1")
-
-    subprocess.Popen(
-        [sys.executable, wrapper_rel, action, sys.executable, script_rel],
-        cwd=str(project_root),
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
     label = _LABEL_BY_ACTION.get(action, action)
-    return f"[시스템-배치] {label} 백그라운드 실행을 시작했습니다."
+    result = enqueue(action, script_rel, triggered_by="manual")
+    if not result.get("enqueued"):
+        return f"[시스템-배치] {label} 이미 큐에 있습니다 ({result.get('reason')})."
+    return f"[시스템-배치] {label} 큐에 추가됨. 워커가 순서대로 실행합니다."
