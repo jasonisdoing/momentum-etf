@@ -106,17 +106,18 @@ type PerformanceMetricRange =
   | { key: string; label: string; kind: "period"; days: number }
   | { key: string; label: string; kind: "ytd" };
 
-const MAX_PRODUCTS = 5;
+const MAX_PRODUCTS = 6;
 const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
 const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
 const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
-const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed"];
+const CHART_COLORS = ["#ef4444", "#2563eb", "#16a34a", "#f59e0b", "#7c3aed", "#db2777"];
 const CHART_TINTS = [
   "rgba(239, 68, 68, 0.08)",
   "rgba(37, 99, 235, 0.08)",
   "rgba(22, 163, 74, 0.08)",
   "rgba(245, 158, 11, 0.08)",
   "rgba(124, 58, 237, 0.08)",
+  "rgba(219, 39, 119, 0.08)",
 ];
 // 옅은 파스텔 (셀 배경 매칭용). 진한 텍스트 버전과 1:1 대응되도록 유지한다.
 const HOLDING_MATCH_COLORS = [

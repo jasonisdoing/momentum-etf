@@ -2459,7 +2459,7 @@ a {
 
 .compareMatrix {
   display: grid;
-  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(12rem, 1fr));
+  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(11rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2467,7 +2467,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(10rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2709,7 +2709,7 @@ a {
 }
 
 .compareMatrixWide {
-  grid-column: span 5;
+  grid-column: span 6;
   min-width: 0;
   padding: 1rem;
   border-bottom: 1px solid #d6deea;
