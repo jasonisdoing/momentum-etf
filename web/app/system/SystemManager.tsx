@@ -49,6 +49,18 @@ type SystemJobKey =
   | "asset_summary"
   | "us_market_stocks";
 
+type BatchQueueItem = {
+  id: string;
+  job_name: string;
+  status: "pending" | "running" | "done" | "failed";
+  triggered_by: "manual" | "schedule" | string;
+  triggered_at: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  exit_code: number | null;
+  error: string | null;
+};
+
 type SystemResponse = {
   summary_rows?: SystemSummaryRow[];
   schedule_rows?: SystemScheduleRow[];
@@ -58,6 +70,7 @@ type SystemResponse = {
   last_run_by_job?: Record<string, SystemLastRunInfo>;
   running_job_details?: Record<string, SystemRunningJobDetail>;
   next_run_by_job?: Record<string, SystemNextRunInfo>;
+  batch_queue?: BatchQueueItem[];
   error?: string;
 };
 
@@ -71,6 +84,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   runningCommandPrefix: string;
   nextRunAt: string | null;
   nextRunDisplay: string;
+  pendingPosition: number; // 0 = 대기 없음, 1~ = N번째 대기
 };
 
 function formatRelativeUntil(iso: string | null | undefined, nowMs: number): string | null {
@@ -185,22 +199,34 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       const row = params.data as SystemScheduleGridRow | undefined;
       if (!row) return { cursor: "default" };
       if (row.running) return { cursor: "default", backgroundColor: "#fff8e1" };
-      if (row.anyRunning) return { cursor: "not-allowed", color: "#9aa4b1" };
+      // 큐 기반: 다른 배치가 실행 중이어도 클릭 가능 (대기 큐에 추가됨)
       return { cursor: "pointer" };
     },
     tooltipValueGetter: (params) => {
       const row = params.data as SystemScheduleGridRow | undefined;
       if (!row) return "";
       if (row.running) return "현재 실행 중입니다.";
-      if (row.anyRunning) return "다른 배치가 실행 중이라 시작할 수 없습니다.";
-      return `클릭 시 "${row.job}" 배치를 백그라운드로 실행합니다.`;
+      return `클릭 시 "${row.job}" 배치를 큐에 추가합니다 (워커가 순서대로 실행).`;
     },
-    cellRenderer: (params: { value: string; data?: SystemScheduleGridRow }) => (
-      <span className="appCodeText">
-        {params.data?.running ? params.data.runningCommandPrefix : ""}
-        {params.value}
-      </span>
-    ),
+    cellRenderer: (params: { value: string; data?: SystemScheduleGridRow }) => {
+      const row = params.data;
+      let badge: React.ReactNode = null;
+      if (row?.running) {
+        badge = <span style={{ color: "#d97706", fontWeight: 700, marginRight: 6 }}>{row.runningCommandPrefix}</span>;
+      } else if (row && row.pendingPosition > 0) {
+        badge = (
+          <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>
+            ⏳ 대기 {row.pendingPosition} ▶
+          </span>
+        );
+      }
+      return (
+        <span className="appCodeText">
+          {badge}
+          {params.value}
+        </span>
+      );
+    },
   },
 ];
 
@@ -219,11 +245,22 @@ export function SystemManager({
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [runningJobDetails, setRunningJobDetails] = useState<Record<string, SystemRunningJobDetail>>({});
   const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
+  const [batchQueue, setBatchQueue] = useState<BatchQueueItem[]>([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
   const toast = useToast();
   const runningSet = new Set(runningJobs);
   const anyRunning = runningSet.size > 0;
+  // 대기 중 (pending) 큐 항목 — 오래된 순. FIFO 처리 순번 매핑.
+  const pendingOrder = new Map<string, number>();
+  batchQueue
+    .filter((q) => q.status === "pending")
+    .sort((a, b) => String(a.triggered_at ?? "").localeCompare(String(b.triggered_at ?? "")))
+    .forEach((q, idx) => {
+      if (!pendingOrder.has(q.job_name)) {
+        pendingOrder.set(q.job_name, idx + 1);
+      }
+    });
   const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
@@ -238,6 +275,7 @@ export function SystemManager({
       runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
+      pendingPosition: pendingOrder.get(row.key) ?? 0,
     };
   });
 
@@ -271,6 +309,7 @@ export function SystemManager({
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
+        setBatchQueue(payload.batch_queue ?? []);
         setIsDeploying(Boolean(payload.is_deploying));
         setLastRunByJob(payload.last_run_by_job ?? {});
         setRunningJobDetails(payload.running_job_details ?? {});
@@ -295,17 +334,17 @@ export function SystemManager({
 
   function handleTriggerJob(action: SystemJobKey, label: string) {
     if (runningSet.has(action)) {
-      // 이미 이 배치가 실행 중인 경우 — 조용히 무시 (표시만 확인하라는 의미)
+      toast.success(`${label} 은(는) 현재 실행 중입니다.`);
       return;
     }
-    if (anyRunning) {
-      toast.error("다른 배치가 실행 중입니다. 완료 후 다시 시도해주세요.");
+    const pendingPos = pendingOrder.get(action) ?? 0;
+    if (pendingPos > 0) {
+      toast.success(`${label} 은(는) 이미 큐에서 ${pendingPos}번째로 대기 중입니다.`);
       return;
     }
+    // 큐 기반: 다른 배치 실행 중이어도 거부하지 않고 enqueue (백엔드가 중복 enqueue 만 차단)
     startTransition(async () => {
       setError(null);
-      // 낙관적 UI: 즉시 running 표시 → 다음 폴링에서 서버 상태로 교체됨
-      setRunningJobs((prev) => (prev.includes(action) ? prev : [...prev, action]));
       try {
         const response = await fetch("/api/system", {
           method: "POST",
@@ -314,13 +353,11 @@ export function SystemManager({
         });
         const payload = (await response.json()) as { message?: string; error?: string };
         if (!response.ok) {
-          // 트리거 실패 시 낙관적 표시 롤백
-          setRunningJobs((prev) => prev.filter((k) => k !== action));
-          throw new Error(payload.error ?? "배치 실행에 실패했습니다.");
+          throw new Error(payload.error ?? "배치 큐 추가에 실패했습니다.");
         }
-        toast.success(String(payload.message ?? `[배치] ${label} 실행 시작`));
+        toast.success(String(payload.message ?? `[배치] ${label} 큐에 추가됨`));
       } catch (actionError) {
-        const msg = actionError instanceof Error ? actionError.message : "배치 실행에 실패했습니다.";
+        const msg = actionError instanceof Error ? actionError.message : "배치 큐 추가에 실패했습니다.";
         setError(msg);
         toast.error(msg);
       }
@@ -359,7 +396,7 @@ export function SystemManager({
                   if (event.colDef.field !== "command") return;
                   const row = event.data as SystemScheduleGridRow | undefined;
                   if (!row?.key) return;
-                  if (row.running || row.anyRunning) return;
+                  // 큐 기반: 모든 작업 클릭 허용. running/pending 중복은 handleTriggerJob 내부에서 토스트 안내.
                   handleTriggerJob(row.key as SystemJobKey, row.job);
                 },
               }}

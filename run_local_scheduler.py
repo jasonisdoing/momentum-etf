@@ -27,10 +27,12 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from apscheduler.schedulers.blocking import BlockingScheduler
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 ROOT_DIR = Path(__file__).resolve().parent
@@ -118,8 +120,23 @@ def _parse_crontab(path: Path) -> list[tuple[str, str, str]]:
     return jobs
 
 
-def _run_job(job_name: str, script_path: str) -> None:
-    """run_batch.py 래퍼를 통해 배치 1건 실행."""
+def _enqueue_from_schedule(job_name: str, script_path: str) -> None:
+    """APScheduler 가 호출 — 직접 실행하지 않고 batch_queue 에 enqueue 만."""
+    sys.path.insert(0, str(ROOT_DIR))
+    from utils.batch_queue import enqueue
+
+    try:
+        result = enqueue(job_name, script_path, triggered_by="schedule")
+        if result.get("enqueued"):
+            log.info("스케줄 → 큐 추가: %s", job_name)
+        else:
+            log.info("스케줄 → 큐 무시 (중복): %s — %s", job_name, result.get("reason"))
+    except Exception as exc:
+        log.exception("스케줄 enqueue 실패: %s — %s", job_name, exc)
+
+
+def _run_subprocess(job_name: str, script_path: str) -> int:
+    """run_batch.py 래퍼를 통해 배치 1건 실행하고 exit code 반환."""
     log.info("배치 시작: %s (%s)", job_name, script_path)
     env = os.environ.copy()
     env.setdefault("APP_TYPE", "Local")
@@ -132,8 +149,76 @@ def _run_job(job_name: str, script_path: str) -> None:
             check=False,
         )
         log.info("배치 종료: %s (exit=%d)", job_name, result.returncode)
-    except Exception as exc:  # pragma: no cover
+        return result.returncode
+    except Exception as exc:
         log.exception("배치 실행 실패: %s — %s", job_name, exc)
+        return 1
+
+
+def _queue_worker_loop(stop_event: threading.Event) -> None:
+    """큐 컨슈머 스레드. pending 항목을 FIFO 로 직렬 실행한다."""
+    sys.path.insert(0, str(ROOT_DIR))
+    from utils.batch_queue import (
+        claim_next_pending,
+        ensure_indexes,
+        mark_done,
+        mark_failed,
+        reap_stale_running,
+        update_heartbeat,
+    )
+
+    ensure_indexes()
+    # 시작 시 stale running 정리 (워커가 죽었던 경우 회복)
+    reaped = reap_stale_running()
+    if reaped > 0:
+        log.warning("워커 시작 시점 stale running %d건 → failed 마킹", reaped)
+
+    log.info("큐 워커 시작 (1초 polling)")
+    last_stale_check = time.monotonic()
+    while not stop_event.is_set():
+        try:
+            item = claim_next_pending()
+            if item is None:
+                # 주기적으로 stale running 청소 (1분마다)
+                if time.monotonic() - last_stale_check > 60:
+                    reap_stale_running()
+                    last_stale_check = time.monotonic()
+                stop_event.wait(1.0)
+                continue
+
+            item_id = item["_id"]
+            job_name = item["job_name"]
+            script_path = item["script_path"]
+            log.info("큐 → 실행: %s (id=%s)", job_name, item_id)
+
+            # heartbeat 갱신 스레드 — 30초마다
+            hb_stop = threading.Event()
+
+            def _heartbeat() -> None:
+                while not hb_stop.is_set():
+                    try:
+                        update_heartbeat(item_id)
+                    except Exception:
+                        pass
+                    hb_stop.wait(30.0)
+
+            hb_thread = threading.Thread(target=_heartbeat, daemon=True)
+            hb_thread.start()
+
+            try:
+                exit_code = _run_subprocess(job_name, script_path)
+                mark_done(item_id, exit_code)
+            except Exception as exc:
+                log.exception("큐 항목 처리 실패: %s — %s", job_name, exc)
+                mark_failed(item_id, str(exc))
+            finally:
+                hb_stop.set()
+                hb_thread.join(timeout=2)
+        except Exception as exc:
+            log.exception("큐 워커 루프 예외: %s", exc)
+            stop_event.wait(2.0)
+
+    log.info("큐 워커 종료")
 
 
 _CRON_DOW_TO_NAME = ("sun", "mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -198,11 +283,11 @@ def main() -> int:
         log.warning("등록할 배치가 없습니다. crontab 파일을 확인하세요: %s", CRONTAB_FILE)
         return 1
 
-    sched = BlockingScheduler(timezone=KST)
+    sched = BackgroundScheduler(timezone=KST)
     for cron_expr, job_name, script_path in jobs:
         trigger = _build_trigger(cron_expr)
         sched.add_job(
-            _run_job,
+            _enqueue_from_schedule,
             trigger=trigger,
             args=(job_name, script_path),
             id=job_name,
@@ -214,19 +299,31 @@ def main() -> int:
         )
         log.info("등록: %-25s  cron=\"%s\"  script=%s", job_name, cron_expr, script_path)
 
+    stop_event = threading.Event()
+    worker_thread = threading.Thread(
+        target=_queue_worker_loop, args=(stop_event,), daemon=False, name="batch-queue-worker"
+    )
+
     def _shutdown(signum: int, _frame) -> None:
-        log.info("신호 %s 수신 — 스케줄러 종료", signum)
-        sched.shutdown(wait=False)
+        log.info("신호 %s 수신 — 스케줄러/워커 종료", signum)
+        stop_event.set()
+        try:
+            sched.shutdown(wait=False)
+        except Exception:
+            pass
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
     log.info("로컬 스케줄러 시작 (등록 %d건, APP_TYPE=Local)", len(jobs))
     log.info("종료: Ctrl+C")
+    sched.start()
+    worker_thread.start()
+
     try:
-        sched.start()
+        worker_thread.join()
     except (KeyboardInterrupt, SystemExit):
-        pass
+        stop_event.set()
     return 0
 
 
