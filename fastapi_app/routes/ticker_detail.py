@@ -10,18 +10,18 @@ from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import enrich_component_prices
 from services.portfolio_change_service import (
-    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
+    _resolve_base_date_to_trading_day,
     compute_portfolio_change_bundle,
-    determine_portfolio_change_base_date,
+)
+from services.portfolio_change_service import (
+    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
 )
 from services.price_service import (
     get_exchange_rates,
-    get_exchange_rate_series,
     get_realtime_snapshot,
     get_realtime_snapshot_meta,
 )
 from services.stock_cache_service import get_stock_cache_meta
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
 from utils.cache_utils import (
     get_cache_refresh_completed_at,
     load_cached_close_series_bulk_before_or_at_with_fallback,
@@ -29,13 +29,13 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_ohlcv, get_latest_trading_day, get_trading_days, fetch_naver_etf_inav_snapshot
+from utils.data_loader import fetch_naver_etf_inav_snapshot, fetch_ohlcv, get_latest_trading_day, get_trading_days
 from utils.kis_market import load_cached_kis_domestic_etf_master
-from utils.settings_loader import load_common_settings
-from utils.settings_loader import list_available_accounts
+from utils.portfolio_io import load_portfolio_master
+from utils.settings_loader import list_available_accounts, load_common_settings
+from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
 from utils.stock_list_io import get_active_holding_tickers, get_etfs
 from utils.ticker_registry import load_ticker_type_configs
-from utils.portfolio_io import load_portfolio_master
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
 
@@ -384,7 +384,14 @@ def _build_korean_etf_info_payload(
     portfolio_change_base_date = None
     if latest_history and "meta_cache" in latest_history:
         latest_history_nav = latest_history["meta_cache"].get("nav")
-        portfolio_change_base_date = str(latest_history.get("date") or "").strip() or None
+        raw_base_date = str(latest_history.get("date") or "").strip() or None
+        # 한국 종목 풀: base_date 가 휴장일이면 직전 거래일로 보정
+        if raw_base_date and str(ticker_type or "").strip().lower().startswith("kor"):
+            portfolio_change_base_date = _resolve_base_date_to_trading_day(
+                ticker_type, ticker, raw_base_date
+            )
+        else:
+            portfolio_change_base_date = raw_base_date
         if (
             nav_value is not None
             and latest_history_nav is not None
