@@ -90,7 +90,11 @@ export function calcPortfolioChange(
     const weight = h.weight ?? 0;
     if (weight <= 0) continue;
 
-    const componentChangePct = h.change_pct;
+    // base_date 이후 누적 변동을 우선 사용해야 한국 휴장일에도 정확한 누적률이 나온다.
+    // (한국 거래일에는 cumulative_change_pct == change_pct 이지만, 한국 휴장일에는
+    //  토스의 일간 기준(미국 직전 본장 종가)이 yahoo baseline 보다 하루 뒤로 점프하여
+    //  change_pct 만 사용하면 "오늘 증가분"만 반영되는 버그가 발생한다.)
+    const componentChangePct = h.cumulative_change_pct ?? h.change_pct;
     if (componentChangePct == null || Number.isNaN(componentChangePct)) continue;
 
     const currency = String(h.price_currency || "").trim().toUpperCase() || "KRW";

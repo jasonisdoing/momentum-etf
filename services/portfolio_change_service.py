@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 _HOLDINGS_PRICE_FETCH_LIMIT = 100
 _TTL_SECONDS = 300
-_PORTFOLIO_CHANGE_CALC_VERSION = 3
+_PORTFOLIO_CHANGE_CALC_VERSION = 4  # 합계 계산을 base_date 누적(cumulative_change_pct)로 전환
 
 _PORTFOLIO_CHANGE_CACHE: dict[str, dict[str, Any]] = {}
 _PORTFOLIO_CHANGE_LOCK = threading.Lock()
@@ -412,7 +412,13 @@ def _calc_realtime_portfolio_change(
             continue
         if weight <= 0:
             continue
-        comp = h.get("change_pct")
+        # base_date 이후 누적 변동을 사용해야 한국 휴장일에도 "직전 거래일 종가 vs 현재가" 가
+        # 정확히 반영된다. cumulative_change_pct 가 있으면 우선 사용하고, 없으면 일간(change_pct)
+        # 으로 폴백한다. (cumulative_change_pct 는 yahoo baseline 과 토스 현재가의 비율로
+        # 계산되어 base_date 종가 → 현재 시점 누적률을 의미한다.)
+        comp = h.get("cumulative_change_pct")
+        if comp is None:
+            comp = h.get("change_pct")
         if comp is None:
             continue
         try:
@@ -563,13 +569,19 @@ def compute_portfolio_change_bundle(
         component_price_snapshot=component_price_snapshot,
     )
     rates = get_exchange_rates()
-    fx_rates = build_daily_fx_rates(priced_holdings, rates)
+    # 합계 계산은 base_date 이후 누적 변동을 사용하므로 환율도 누적률을 적용한다.
+    # 누적 환율 조회 실패 시(휴장/네트워크 문제) 일간 환율로 폴백.
+    cumulative_fx = build_cumulative_fx_rates(priced_holdings, rates, base_date)
+    daily_fx = build_daily_fx_rates(priced_holdings, rates)
+    fx_rates_for_calc = cumulative_fx if cumulative_fx else daily_fx
     inav_snapshot = fetch_naver_etf_inav_snapshot([norm_ticker]).get(norm_ticker, {})
     nav_change_pct = _resolve_nav_change_pct(norm_type, norm_ticker, inav_snapshot.get("nav"))
     total_pct, breakdown, coverage, gross_portfolio_pct = _calc_realtime_portfolio_change(
         priced_holdings,
-        fx_rates,
+        fx_rates_for_calc,
     )
+    # 화면 표시용 fx_rates 는 일간 변동률 유지 (기존 UI 호환)
+    fx_rates = daily_fx
 
     result = {
         "calc_version": _PORTFOLIO_CHANGE_CALC_VERSION,
