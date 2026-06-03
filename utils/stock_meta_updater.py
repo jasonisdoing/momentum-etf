@@ -19,6 +19,7 @@ from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import refresh_stock_cache
 from utils.data_loader import (
+    _YF_SESSION,
     fetch_naver_kor_market,
     fetch_naver_kor_stock_map,
     fetch_pykrx_name,
@@ -27,6 +28,36 @@ from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+
+# -------------------------------------------------------------------------
+# 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
+# `update_stock_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
+# -------------------------------------------------------------------------
+_BATCH_NAVER_CATEGORY_MAP: dict[str, dict[str, Any]] | None = None
+_BATCH_NAVER_ETF_NAMES_MAP: dict[str, str] | None = None
+
+
+def _reset_batch_caches() -> None:
+    """메타 업데이트 배치 진입 시 풀 간 공유 캐시를 초기화한다."""
+    global _BATCH_NAVER_CATEGORY_MAP, _BATCH_NAVER_ETF_NAMES_MAP
+    _BATCH_NAVER_CATEGORY_MAP = None
+    _BATCH_NAVER_ETF_NAMES_MAP = None
+
+
+def _get_cached_naver_category_map() -> dict[str, dict[str, Any]]:
+    """배치 동안 1회만 카테고리 맵을 빌드해 풀들에 공유."""
+    global _BATCH_NAVER_CATEGORY_MAP
+    if _BATCH_NAVER_CATEGORY_MAP is None:
+        _BATCH_NAVER_CATEGORY_MAP = _build_naver_category_map()
+    return _BATCH_NAVER_CATEGORY_MAP
+
+
+def _get_cached_naver_etf_names_map() -> dict[str, str]:
+    """배치 동안 1회만 ETF 이름 맵을 빌드해 풀들에 공유."""
+    global _BATCH_NAVER_ETF_NAMES_MAP
+    if _BATCH_NAVER_ETF_NAMES_MAP is None:
+        _BATCH_NAVER_ETF_NAMES_MAP = fetch_naver_etf_names_map()
+    return _BATCH_NAVER_ETF_NAMES_MAP
 
 
 def _build_naver_category_map() -> dict[str, dict[str, str]]:
@@ -400,8 +431,9 @@ def update_ticker_type_metadata(
     naver_etf_map: dict[str, str] = {}
     is_naver_source = type_source.lower() == "naver"
     if country_code == "kor":
-        logger.info("네이버 API에서 전체 종목 정보들을 수집합니다...")
-        naver_etf_map = fetch_naver_etf_names_map()
+        # 풀 간 공유 캐시 사용 (kor_kr/kor_us/kor 모두 같은 API 결과를 공유)
+        logger.info("네이버 API에서 전체 종목 정보들을 수집합니다 (배치 캐시)...")
+        naver_etf_map = dict(_get_cached_naver_etf_names_map())
         # type_source=Naver 풀은 모두 ETF이므로 일반주 맵 프리로드 생략
         if not is_naver_source:
             fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
@@ -409,8 +441,9 @@ def update_ticker_type_metadata(
     # type_source == "Naver" 인 종목풀만 카테고리(투자국가/섹터/지수) 역인덱스 맵 구성
     naver_category_map: dict[str, dict[str, Any]] = {}
     if is_naver_source:
-        logger.info(f"[{type_norm.upper()}] 네이버 ETF 카테고리 맵을 구성합니다...")
-        naver_category_map = _build_naver_category_map()
+        # 풀 간 공유 캐시 사용 (Naver 풀끼리 동일 카테고리 트리)
+        logger.info(f"[{type_norm.upper()}] 네이버 ETF 카테고리 맵을 가져옵니다 (배치 캐시)...")
+        naver_category_map = _get_cached_naver_category_map()
         # 카테고리 API 응답으로 수집한 이름을 ETF 이름 맵에 보완
         supplemented = 0
         for t_code, entry in naver_category_map.items():
@@ -516,7 +549,7 @@ def update_ticker_type_metadata(
             if progress_callback:
                 progress_callback(idx, total_count, f"{name}({ticker})")
             updated_count += 1
-            time.sleep(0.1)  # 속도 조절
+            time.sleep(0.02)  # 속도 조절 (외부 API 보호용 미소 슬립)
 
         except Exception as e:
             logger.error(f"[{type_norm.upper()}/{ticker}] 메타데이터 업데이트 실패: {e}")
@@ -535,6 +568,9 @@ def update_stock_metadata(ticker_type: str | None = None):
     모든 종목타입 또는 특정 종목타입의 메타데이터를 업데이트합니다.
     """
     logger = get_app_logger()
+
+    # 풀 간 공유 캐시 초기화 — 이번 배치에서 1회만 카테고리 맵/ETF 이름 맵을 빌드한다.
+    _reset_batch_caches()
 
     ticker_types_to_update: list[str] = []
     available_ticker_types = list_available_ticker_types()
@@ -851,7 +887,12 @@ def update_single_stock_metadata(
                 stock["market_cap"] = naver_entry.get("market_cap")
 
         try:
-            t = yf.Ticker(yfinance_ticker)
+            # HTTP keep-alive: 가능하면 공유 curl_cffi Session 사용
+            t = (
+                yf.Ticker(yfinance_ticker, session=_YF_SESSION)
+                if _YF_SESSION is not None
+                else yf.Ticker(yfinance_ticker)
+            )
 
             if not stock.get("name") or stock.get("name") == ticker:
                 try:
