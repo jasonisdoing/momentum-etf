@@ -2,7 +2,7 @@
 
 import time
 import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pandas as pd
@@ -17,7 +17,7 @@ from config import (
 )
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
-from services.stock_cache_service import refresh_stock_cache
+from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from utils.data_loader import (
     _YF_SESSION,
     fetch_naver_kor_market,
@@ -292,43 +292,80 @@ from collections.abc import Callable
 
 from utils.stock_list_io import bulk_update_stocks, get_all_etfs_including_deleted
 
+# ETF 메타(info) 캐시 TTL — 이 시간 안에 갱신된 메타가 있으면 네이버 info 호출을 스킵.
+# 사용자 정책: info 는 변경 빈도가 낮으므로 1일 TTL, holdings 는 항상 갱신.
+_ETF_INFO_CACHE_TTL = timedelta(days=1)
 
-def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str, category_data: dict[str, Any] | None = None) -> None:
-    """한국 ETF 메타/구성종목 캐시를 네이버 기준으로 함께 갱신한다."""
+
+def _is_meta_cache_fresh(existing_doc: dict[str, Any] | None) -> bool:
+    """기존 메타 캐시 문서의 updated_at 이 TTL 이내인지 판정."""
+    if not isinstance(existing_doc, dict):
+        return False
+    meta = existing_doc.get("meta_cache")
+    if not isinstance(meta, dict) or not meta:
+        return False
+    updated_at = existing_doc.get("updated_at")
+    if not isinstance(updated_at, datetime):
+        return False
+    # MongoDB datetime 은 naive(UTC) 일 수 있어 tz-aware 화
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    return (now - updated_at) < _ETF_INFO_CACHE_TTL
+
+
+def _refresh_korean_etf_meta_cache(
+    ticker_type: str,
+    ticker: str,
+    name: str,
+    category_data: dict[str, Any] | None = None,
+    *,
+    existing_cache_doc: dict[str, Any] | None = None,
+) -> None:
+    """한국 ETF 메타/구성종목 캐시를 네이버 기준으로 갱신한다.
+
+    info(저빈도) 는 TTL 이내면 네이버 호출을 스킵하고 holdings 만 갱신한다.
+    """
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
     name_norm = str(name or "").strip() or ticker_norm
     if not ticker_type_norm or not ticker_norm:
         raise ValueError("ticker_type과 ticker가 필요합니다.")
 
-    etf_info = fetch_korean_etf_info_from_naver(ticker_norm)
-    holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
-    
-    # 실시간 iNAV/괴리율 추가 획득
-    from utils.data_loader import fetch_naver_etf_inav_snapshot
-    inav_snapshot = fetch_naver_etf_inav_snapshot([ticker_norm]).get(ticker_norm, {})
-    
-    meta_cache = {
-        "source": str(etf_info.get("source") or "naver_etf_meta"),
-        "updated_at": str(etf_info.get("fetched_at") or ""),
-        "nav": inav_snapshot.get("nav"),
-        "deviation": inav_snapshot.get("deviation"),
-        "reference_date": etf_info.get("reference_date"),
-        "listed_date": etf_info.get("listed_date"),
-        "dividend_yield_ttm": etf_info.get("dividend_yield_ttm"),
-        "dividend_per_share_ttm": etf_info.get("dividend_per_share_ttm"),
-        "recent_ex_dividend_at": etf_info.get("recent_ex_dividend_at"),
-        "expense_ratio": etf_info.get("expense_ratio"),
-        "total_net_assets": etf_info.get("total_net_assets"),
-        "issue_name": etf_info.get("issue_name"),
-        "base_index": etf_info.get("base_index"),
-    }
-    # 추가 카테고리 정보가 있으면 업데이트
-    if category_data:
-        for k, v in category_data.items():
-            if k.startswith("cat_"):
-                meta_cache[k] = v
+    # 1) info 캐시 TTL 판정
+    skip_info = _is_meta_cache_fresh(existing_cache_doc)
 
+    meta_cache: dict[str, Any] | None = None
+    if not skip_info:
+        etf_info = fetch_korean_etf_info_from_naver(ticker_norm)
+
+        # 실시간 iNAV/괴리율 추가 획득 (글로벌 캐시라 비용 거의 없음)
+        from utils.data_loader import fetch_naver_etf_inav_snapshot
+        inav_snapshot = fetch_naver_etf_inav_snapshot([ticker_norm]).get(ticker_norm, {})
+
+        meta_cache = {
+            "source": str(etf_info.get("source") or "naver_etf_meta"),
+            "updated_at": str(etf_info.get("fetched_at") or ""),
+            "nav": inav_snapshot.get("nav"),
+            "deviation": inav_snapshot.get("deviation"),
+            "reference_date": etf_info.get("reference_date"),
+            "listed_date": etf_info.get("listed_date"),
+            "dividend_yield_ttm": etf_info.get("dividend_yield_ttm"),
+            "dividend_per_share_ttm": etf_info.get("dividend_per_share_ttm"),
+            "recent_ex_dividend_at": etf_info.get("recent_ex_dividend_at"),
+            "expense_ratio": etf_info.get("expense_ratio"),
+            "total_net_assets": etf_info.get("total_net_assets"),
+            "issue_name": etf_info.get("issue_name"),
+            "base_index": etf_info.get("base_index"),
+        }
+        # 추가 카테고리 정보가 있으면 업데이트
+        if category_data:
+            for k, v in category_data.items():
+                if k.startswith("cat_"):
+                    meta_cache[k] = v
+
+    # 2) holdings 는 항상 갱신 (TTL 미적용)
+    holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
     holdings_cache = {
         "source": str(holdings_info.get("source") or "naver_etf_component"),
         "updated_at": str(holdings_info.get("fetched_at") or ""),
@@ -336,12 +373,13 @@ def _refresh_korean_etf_meta_cache(ticker_type: str, ticker: str, name: str, cat
         "holdings_count": holdings_info.get("holdings_count"),
         "items": list(holdings_info.get("holdings") or []),
     }
+
     refresh_stock_cache(
         ticker_type_norm,
         ticker_norm,
         country_code="kor",
         name=name_norm,
-        meta_cache=meta_cache,
+        meta_cache=meta_cache,  # None 이면 meta 부분은 미변경
         holdings_cache=holdings_cache,
     )
 
@@ -454,6 +492,24 @@ def update_ticker_type_metadata(
         if supplemented:
             logger.info(f"[{type_norm.upper()}] 카테고리 맵으로 ETF 이름 {supplemented}건 보완")
 
+    # type_source=Naver 풀(한국 ETF): 기존 메타 캐시 문서를 1회 일괄 로드 →
+    # 종목별 TTL 판정에 사용. 1일 이내면 fetch_korean_etf_info_from_naver 스킵.
+    existing_meta_cache_map: dict[str, dict[str, Any]] = {}
+    if is_naver_source:
+        all_tickers_for_pool = [
+            str(stock.get("ticker") or "").strip().upper()
+            for stock in ticker_entries
+            if str(stock.get("ticker") or "").strip()
+        ]
+        try:
+            existing_meta_cache_map = get_stock_cache_meta_map(type_norm, all_tickers_for_pool)
+            logger.info(
+                f"[{type_norm.upper()}] 기존 메타 캐시 문서 {len(existing_meta_cache_map)}건 로드 (TTL 판정용)"
+            )
+        except Exception as exc:
+            logger.warning(f"[{type_norm.upper()}] 기존 메타 캐시 로드 실패 — 전체 갱신으로 진행: {exc}")
+            existing_meta_cache_map = {}
+
     naver_us_stock_map: dict[str, dict[str, Any]] = {}
     if country_code == "us":
         from utils.us_stock_market_service import fetch_naver_us_stock_info_map
@@ -524,7 +580,14 @@ def update_ticker_type_metadata(
                 try:
                     # 카테고리 정보만 추출하여 전달
                     cat_info = {f"cat_{c['code']}": stock.get(f"cat_{c['code']}") for c in NAVER_ETF_CATEGORY_CONFIG if f"cat_{c['code']}" in stock}
-                    _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name), category_data=cat_info)
+                    existing_doc = existing_meta_cache_map.get(str(ticker).strip().upper())
+                    _refresh_korean_etf_meta_cache(
+                        type_norm,
+                        str(ticker),
+                        str(name),
+                        category_data=cat_info,
+                        existing_cache_doc=existing_doc,
+                    )
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
             elif country_code == "us":
@@ -537,8 +600,8 @@ def update_ticker_type_metadata(
 
             updates_for_db.append(update_doc)
 
-            # 중간 저장 (20개 단위)
-            if len(updates_for_db) >= 20:
+            # 중간 저장 (100개 단위로 MongoDB round-trip 절감)
+            if len(updates_for_db) >= 100:
                 try:
                     modified = bulk_update_stocks(type_norm, updates_for_db)
                     logger.info(f"[{type_norm.upper()}] 중간 저장 완료 ({idx}/{total_count}, {modified}건)")
