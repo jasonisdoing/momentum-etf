@@ -10,8 +10,9 @@ from pathlib import Path
 from typing import Literal
 from zoneinfo import ZoneInfo
 
-from utils.account_registry import load_account_configs
+from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
+from utils.ticker_registry import load_ticker_type_configs
 
 load_env_if_present()
 
@@ -127,6 +128,54 @@ _RUN_BATCH_END_PATTERN = re.compile(
 )
 
 _logger = logging.getLogger(__name__)
+
+
+def _to_float(value: object) -> float:
+    try:
+        return float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _build_pool_summary_rows() -> list[dict[str, object]]:
+    """종목풀별 활성 종목과 최근 성과 요약을 만든다."""
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결 실패로 종목풀 요약을 조회할 수 없습니다.")
+
+    rows: list[dict[str, object]] = []
+    for config in load_ticker_type_configs():
+        ticker_type = str(config["ticker_type"])
+        docs = list(
+            db.stock_meta.find(
+                {"ticker_type": ticker_type, "is_deleted": {"$ne": True}},
+                {
+                    "_id": 0,
+                    "ticker": 1,
+                    "is_etf": 1,
+                    "1_week_earn_rate": 1,
+                },
+            )
+        )
+
+        stock_count = len(docs)
+        rising_count = sum(1 for doc in docs if _to_float(doc.get("1_week_earn_rate")) > 0)
+        etf_count = sum(1 for doc in docs if bool(doc.get("is_etf")))
+        rows.append(
+            {
+                "id": ticker_type,
+                "order": int(config["order"]),
+                "pool": str(config["name"]),
+                "ticker_type": ticker_type,
+                "country_code": str(config.get("country_code") or "").upper(),
+                "stock_count": stock_count,
+                "rising_count": rising_count,
+                "rising_ratio": round((rising_count / stock_count) * 100, 2) if stock_count > 0 else 0.0,
+                "etf_count": etf_count,
+            }
+        )
+
+    return rows
 
 
 def _parse_kst_datetime(value: str) -> datetime | None:
@@ -490,7 +539,6 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
 def load_system_data() -> dict[str, object]:
     from utils.batch_queue import list_queue
 
-    accounts = load_account_configs()
     queue_items = list_queue(limit=30)
     # ObjectId/datetime 직렬화 — 응답 직전 평탄화
     serialized_queue: list[dict[str, object]] = []
@@ -509,14 +557,7 @@ def load_system_data() -> dict[str, object]:
             }
         )
     return {
-        "summary_rows": [
-            {
-                "category": f"{account.get('icon', '')} {account['name']}".strip(),
-                "count": int(account["order"]),
-                "target": account["account_id"],
-            }
-            for account in accounts
-        ],
+        "pool_rows": _build_pool_summary_rows(),
         "schedule_rows": SCHEDULE_ROWS,
         "schedule_note": (
             "자동 배치는 로컬(Mac) 의 `run_local_scheduler.py` 에서 실행됩니다. "
