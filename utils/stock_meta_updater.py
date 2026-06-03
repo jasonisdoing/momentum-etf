@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
-import requests
+import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
 from config import (
@@ -23,6 +23,7 @@ from utils.data_loader import (
     fetch_naver_kor_stock_map,
     fetch_pykrx_name,
 )
+from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
@@ -42,7 +43,7 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
     ticker_categories: dict[str, dict[str, str]] = {}
 
     try:
-        themes_response = requests.get(
+        themes_response = shared_session.get(
             NAVER_ETF_THEMES_URL,
             headers=NAVER_ETF_CATEGORY_HEADERS,
             timeout=10,
@@ -86,7 +87,7 @@ def _build_naver_category_map() -> dict[str, dict[str, str]]:
             page_size = 100
             while True:
                 try:
-                    resp = requests.get(
+                    resp = shared_session.get(
                         NAVER_ETF_DOMESTIC_URL,
                         params={
                             "listingType": "aumDesc",
@@ -185,7 +186,7 @@ def fetch_naver_etf_names_map() -> dict[str, str]:
     names_map = {}
 
     try:
-        response = requests.get(url, headers=NAVER_FINANCE_HEADERS, timeout=5)
+        response = shared_session.get(url, headers=NAVER_FINANCE_HEADERS, timeout=5)
         response.raise_for_status()
         data = response.json()
 
@@ -219,7 +220,7 @@ def _fetch_naver_listing_date(ticker: str) -> str | None:
     url = f"{NAVER_FINANCE_CHART_API_URL}?symbol={ticker}&timeframe=day&count=1&requestType=0"
 
     try:
-        response = requests.get(url, timeout=5)
+        response = shared_session.get(url, timeout=5)
         response.raise_for_status()
 
         # 네이버 차트 API는 EUC-KR 기반 XML을 반환하므로 명시적으로 디코딩

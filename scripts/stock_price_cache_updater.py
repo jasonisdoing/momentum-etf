@@ -36,6 +36,14 @@ FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
 PER_TICKER_TIMEOUT_SECONDS = 90
 
+def _resolve_fetch_workers() -> int:
+    """종목 fetch 병렬 워커 수.
+
+    ⚠️ 현재 pykrx/yfinance 가 thread-safe 가 아닐 가능성이 있어 병렬 동작 시 deadlock 발생.
+    안전하게 직렬(1) 로 고정한다. 추후 ProcessPoolExecutor 또는 asyncio 기반 재설계 필요.
+    """
+    return 1
+
 # 풀 전체 NaN 비율이 이 임계값을 초과하는 날짜는 데이터 소스 오류로 간주하고
 # 모든 종목 캐시에서 그 날짜 행을 제거한다. 다음 cron 시 자동 재fetch.
 SUSPICIOUS_NAN_RATIO_THRESHOLD = 0.5
@@ -45,8 +53,11 @@ SUSPICIOUS_LOOKBACK_DAYS = 400
 def _determine_start_date() -> str:
     settings = load_common_settings() or {}
     start = settings.get("CACHE_START_DATE")
-    if start:
-        return str(start)
+    if not start:
+        raise RuntimeError(
+            "CACHE_START_DATE 가 설정되지 않았습니다. config.py 또는 공용 설정을 확인하세요."
+        )
+    return str(start)
 
 
 @contextmanager
@@ -235,8 +246,15 @@ def _refresh_portfolio_change_cache_for_target(
         len(component_price_snapshot),
     )
 
-    logger.info("[%s] 포트폴리오 변동 캐시 갱신 시작: %d개", target_norm.upper(), len(candidates))
-    for index, (ticker, _) in enumerate(candidates, 1):
+    max_workers = _resolve_fetch_workers()
+    logger.info(
+        "[%s] 포트폴리오 변동 캐시 갱신 시작: %d개 (병렬 워커 %d)",
+        target_norm.upper(),
+        len(candidates),
+        max_workers,
+    )
+
+    def _process_one_bundle(idx: int, ticker: str) -> tuple[bool, str]:
         started_at = time.perf_counter()
         try:
             result = compute_and_store_portfolio_change_bundle(
@@ -244,34 +262,51 @@ def _refresh_portfolio_change_cache_for_target(
                 target_norm,
                 component_price_snapshot=component_price_snapshot,
             )
+            elapsed = time.perf_counter() - started_at
             if result:
-                succeeded += 1
                 logger.info(
                     " -> 포트폴리오 변동 캐시 갱신 완료: %d/%d - %s | 소요 %.1fs",
-                    index,
-                    len(candidates),
-                    ticker,
-                    time.perf_counter() - started_at,
+                    idx, len(candidates), ticker, elapsed,
                 )
-            else:
-                failed.append(ticker)
-                logger.warning(
-                    " -> 포트폴리오 변동 캐시 계산 불가: %d/%d - %s | 소요 %.1fs",
-                    index,
-                    len(candidates),
-                    ticker,
-                    time.perf_counter() - started_at,
-                )
+                return True, ticker
+            logger.warning(
+                " -> 포트폴리오 변동 캐시 계산 불가: %d/%d - %s | 소요 %.1fs",
+                idx, len(candidates), ticker, elapsed,
+            )
+            return False, ticker
         except Exception as exc:
-            failed.append(ticker)
+            elapsed = time.perf_counter() - started_at
             logger.warning(
                 " -> 포트폴리오 변동 캐시 갱신 실패: %d/%d - %s: %s | 소요 %.1fs",
-                index,
-                len(candidates),
-                ticker,
-                exc,
-                time.perf_counter() - started_at,
+                idx, len(candidates), ticker, exc, elapsed,
             )
+            return False, ticker
+
+    if max_workers <= 1:
+        for index, (ticker, _) in enumerate(candidates, 1):
+            ok, t = _process_one_bundle(index, ticker)
+            if ok:
+                succeeded += 1
+            else:
+                failed.append(t)
+    else:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [
+                executor.submit(_process_one_bundle, i + 1, t)
+                for i, (t, _) in enumerate(candidates)
+            ]
+            for future in as_completed(futures):
+                try:
+                    ok, t = future.result()
+                except Exception as exc:
+                    logger.warning("포트폴리오 변동 갱신 task 예외: %s", exc)
+                    continue
+                if ok:
+                    succeeded += 1
+                else:
+                    failed.append(t)
 
     if failed:
         preview = ", ".join(failed[:10])
@@ -410,63 +445,95 @@ def refresh_cache_for_target(
         total_tickers = len(target_items)
         failed_tickers: list[str] = []
         succeeded_count = 0
+        if not start_date:
+            raise RuntimeError(
+                "refresh_cache_for_target 에 start_date 가 전달되지 않았습니다. "
+                "_determine_start_date() 결과를 명시적으로 넘기세요."
+            )
+        range_start = start_date
 
-        for i, etf in enumerate(target_items, 1):
-            ticker = str(etf.get("ticker") or "").strip().upper()
-            name = etf.get("name") or "-"
-            started_at = time.perf_counter()
+        max_workers = _resolve_fetch_workers()
+        logger.info(
+            "[%s] 가격 캐시 갱신 시작: %d개 종목, 병렬 워커 %d",
+            target_norm.upper(),
+            total_tickers,
+            max_workers,
+        )
 
-            if progress_callback:
-                progress_callback(i, total_tickers, f"{name}({ticker})")
-
-            logger.info(" -> 가격 캐시 처리 시작: %d/%d - %s(%s)", i, total_tickers, name, ticker)
-
+        def _process_one(idx: int, etf_item: dict) -> tuple[bool, str, str]:
+            """단일 종목 처리. 반환: (성공여부, ticker, log_message)."""
+            t = str(etf_item.get("ticker") or "").strip().upper()
+            n = etf_item.get("name") or "-"
+            started = time.perf_counter()
             try:
-                range_start = start_date or "1990-01-01"
-                with _ticker_refresh_timeout(PER_TICKER_TIMEOUT_SECONDS):
-                    unresolved_days = _refresh_single_ticker_with_retry(
-                        ticker=ticker,
-                        country_code=country_code,
-                        range_start=range_start,
-                        account_id=target_norm,
-                    )
-
+                unresolved_days = _refresh_single_ticker_with_retry(
+                    ticker=t,
+                    country_code=country_code,
+                    range_start=range_start,
+                    account_id=target_norm,
+                )
+                elapsed = time.perf_counter() - started
                 if unresolved_days:
                     unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
-                    logger.warning(
-                        " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) - 최근 거래일 누락 유지: %s | 소요 %.1fs",
-                        i,
-                        total_tickers,
-                        name,
-                        ticker,
-                        unresolved_text,
-                        time.perf_counter() - started_at,
-                    )
+                    msg = f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t}) - 최근 거래일 누락 유지: {unresolved_text} | 소요 {elapsed:.1f}s"
+                    logger.warning(msg)
                 else:
-                    logger.info(
-                        " -> 가격 캐시 갱신 완료: %d/%d - %s(%s) | 소요 %.1fs",
-                        i,
-                        total_tickers,
-                        name,
-                        ticker,
-                        time.perf_counter() - started_at,
-                    )
-                succeeded_count += 1
+                    msg = f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t}) | 소요 {elapsed:.1f}s"
+                    logger.info(msg)
+                return True, t, msg
             except PykrxDataUnavailableError as e:
-                failed_tickers.append(ticker)
+                elapsed = time.perf_counter() - started
                 if _is_today_unavailable_warning(e):
-                    logger.warning(
-                        "%s 당일 데이터 미집계: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
-                    )
+                    logger.warning("%s 당일 데이터 미집계: %s | 소요 %.1fs", t, e, elapsed)
                 else:
-                    logger.error(
-                        "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
-                    )
+                    logger.error("%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", t, e, elapsed)
+                return False, t, ""
             except Exception as e:
-                failed_tickers.append(ticker)
-                logger.error(
-                    "%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", ticker, e, time.perf_counter() - started_at
-                )
+                elapsed = time.perf_counter() - started
+                logger.error("%s 데이터 처리 중 오류 발생: %s | 소요 %.1fs", t, e, elapsed)
+                return False, t, ""
+
+        if max_workers <= 1:
+            # 직렬 모드 (기존 호환)
+            for i, etf in enumerate(target_items, 1):
+                if progress_callback:
+                    name = etf.get("name") or "-"
+                    ticker = str(etf.get("ticker") or "").strip().upper()
+                    progress_callback(i, total_tickers, f"{name}({ticker})")
+                ok, t, _ = _process_one(i, etf)
+                if ok:
+                    succeeded_count += 1
+                else:
+                    failed_tickers.append(t)
+        else:
+            # 병렬 모드
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_idx = {
+                    executor.submit(_process_one, i + 1, etf): (i + 1, etf)
+                    for i, etf in enumerate(target_items)
+                }
+                completed = 0
+                for future in as_completed(future_to_idx):
+                    idx, etf = future_to_idx[future]
+                    try:
+                        ok, t, _ = future.result(timeout=PER_TICKER_TIMEOUT_SECONDS)
+                    except FuturesTimeoutError:
+                        t = str(etf.get("ticker") or "").strip().upper()
+                        logger.error("%s 종목 처리 타임아웃 (%ds 초과)", t, PER_TICKER_TIMEOUT_SECONDS)
+                        ok = False
+                    except Exception as e:
+                        t = str(etf.get("ticker") or "").strip().upper()
+                        logger.error("%s 처리 중 예외: %s", t, e)
+                        ok = False
+                    if ok:
+                        succeeded_count += 1
+                    else:
+                        failed_tickers.append(t)
+                    completed += 1
+                    if progress_callback:
+                        progress_callback(completed, total_tickers, t)
 
         if failed_tickers:
             preview = ", ".join(failed_tickers[:10])

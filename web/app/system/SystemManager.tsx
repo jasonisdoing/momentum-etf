@@ -7,10 +7,16 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
-type SystemSummaryRow = {
-  category: string;
-  count: number;
-  target: string;
+type SystemPoolRow = {
+  id: string;
+  order: number;
+  pool: string;
+  ticker_type: string;
+  country_code: string;
+  stock_count: number;
+  rising_count: number;
+  rising_ratio: number;
+  etf_count: number;
 };
 
 type SystemScheduleRow = {
@@ -62,7 +68,7 @@ type BatchQueueItem = {
 };
 
 type SystemResponse = {
-  summary_rows?: SystemSummaryRow[];
+  pool_rows?: SystemPoolRow[];
   schedule_rows?: SystemScheduleRow[];
   schedule_note?: string;
   running_jobs?: string[];
@@ -74,7 +80,7 @@ type SystemResponse = {
   error?: string;
 };
 
-type SystemSummaryGridRow = SystemSummaryRow & { id: string };
+type SystemPoolGridRow = SystemPoolRow;
 type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
   running: boolean;
@@ -148,19 +154,60 @@ function formatCount(value: number): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
+function formatPercent(value: number): string {
+  return `${new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}%`;
+}
+
 const appGridTheme = createAppGridTheme();
 
-const summaryColumns: ColDef<SystemSummaryGridRow>[] = [
+const poolColumns: ColDef<SystemPoolGridRow>[] = [
   {
-    field: "count",
+    field: "order",
     headerName: "순서",
     minWidth: 72,
-    width: 72,
+    flex: 0.45,
     type: "rightAligned",
     cellRenderer: (params: { value: number }) => formatCount(params.value),
   },
-  { field: "target", headerName: "계좌 ID", minWidth: 200, flex: 1 },
-  { field: "category", headerName: "계좌", minWidth: 200, flex: 1.2 },
+  { field: "pool", headerName: "종목풀", minWidth: 180, flex: 1.8 },
+  { field: "ticker_type", headerName: "ID", minWidth: 100, flex: 0.7 },
+  { field: "country_code", headerName: "국가", minWidth: 82, flex: 0.55 },
+  {
+    field: "stock_count",
+    headerName: "종목수",
+    minWidth: 100,
+    flex: 0.65,
+    type: "rightAligned",
+    cellRenderer: (params: { value: number }) => formatCount(params.value),
+  },
+  {
+    field: "rising_count",
+    headerName: "상승수",
+    minWidth: 100,
+    flex: 0.75,
+    type: "rightAligned",
+    cellRenderer: (params: { value: number; data?: SystemPoolGridRow }) => {
+      const total = params.data?.stock_count ?? 0;
+      return `${formatCount(params.value)}/${formatCount(total)}`;
+    },
+  },
+  {
+    field: "rising_ratio",
+    headerName: "상승비율",
+    minWidth: 100,
+    flex: 0.75,
+    type: "rightAligned",
+    cellStyle: { color: "#dc2626" },
+    cellRenderer: (params: { value: number }) => formatPercent(params.value),
+  },
+  {
+    field: "etf_count",
+    headerName: "ETF",
+    minWidth: 82,
+    flex: 0.55,
+    type: "rightAligned",
+    cellRenderer: (params: { value: number }) => formatCount(params.value),
+  },
 ];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
@@ -233,9 +280,9 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
 export function SystemManager({
   onHeaderSummaryChange,
 }: {
-  onHeaderSummaryChange?: (summary: { accountCount: number; scheduleCount: number }) => void;
+  onHeaderSummaryChange?: (summary: { poolCount: number; scheduleCount: number }) => void;
 }) {
-  const [summaryRows, setSummaryRows] = useState<SystemSummaryRow[]>([]);
+  const [poolRows, setPoolRows] = useState<SystemPoolRow[]>([]);
   const [scheduleRows, setScheduleRows] = useState<SystemScheduleRow[]>([]);
   const [scheduleNote, setScheduleNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -261,7 +308,7 @@ export function SystemManager({
         pendingOrder.set(q.job_name, idx + 1);
       }
     });
-  const summaryGridRows: SystemSummaryGridRow[] = summaryRows.map((row) => ({ ...row, id: row.category }));
+  const poolGridRows: SystemPoolGridRow[] = poolRows;
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
     const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
@@ -286,10 +333,10 @@ export function SystemManager({
 
   useEffect(() => {
     onHeaderSummaryChange?.({
-      accountCount: summaryRows.length,
+      poolCount: poolRows.length,
       scheduleCount: scheduleRows.length,
     });
-  }, [onHeaderSummaryChange, scheduleRows.length, summaryRows.length]);
+  }, [onHeaderSummaryChange, poolRows.length, scheduleRows.length]);
 
   useEffect(() => {
     let alive = true;
@@ -305,7 +352,7 @@ export function SystemManager({
 
         if (!alive) return;
 
-        setSummaryRows(payload.summary_rows ?? []);
+        setPoolRows(payload.pool_rows ?? []);
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
@@ -411,14 +458,14 @@ export function SystemManager({
           <div className="card-header">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">계좌 요약</span>
+                <span className="appHeaderMetricValue">종목풀</span>
               </div>
             </div>
           </div>
           <div className="card-body appCardBodyTight">
             <AppAgGrid
-              rowData={summaryGridRows}
-              columnDefs={summaryColumns}
+              rowData={poolGridRows}
+              columnDefs={poolColumns}
               loading={loading}
               minHeight="18rem"
               theme={appGridTheme}

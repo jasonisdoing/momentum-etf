@@ -49,6 +49,17 @@ try:
 except ImportError:
     yf = None
 
+# yfinance HTTP keep-alive 패치: yf.download 가 session 인자를 안 주면 매 호출마다
+# curl_cffi.Session 을 새로 만들어 TLS handshake 비용이 누적된다. 모듈 레벨에서 한 번만
+# Session 을 만들고 모든 호출에 주입한다. (yfinance 0.2.x 부터는 curl_cffi.Session 만 받음)
+_YF_SESSION = None
+try:
+    from curl_cffi import requests as _ccr  # type: ignore
+
+    _YF_SESSION = _ccr.Session(impersonate="chrome")
+except Exception:
+    _YF_SESSION = None
+
 # pykrx가 설치되지 않았을 경우를 대비한 예외 처리
 _pykrx_import_error = None
 try:
@@ -58,6 +69,28 @@ except ImportError:
 
     _pykrx_import_error = traceback.format_exc()
     _stock = None
+
+# HTTP keep-alive 패치: pykrx 가 매 호출마다 requests.get() 으로 새 connection 을 만들어
+# TLS handshake 비용(약 100~300ms/호출)이 누적된다. pykrx 내부 webio 모듈의 requests
+# 참조를 모듈 레벨 Session 으로 교체해 connection pool 을 재사용한다.
+# (Session 객체에도 .get/.post 메서드가 있으므로 webio.py 의 `requests.get(...)` 호출이
+# 그대로 Session 메서드 호출로 동작한다.)
+_PYKRX_HTTP_SESSION = None
+if requests is not None:
+    try:
+        from pykrx.website.comm import webio as _pykrx_webio  # type: ignore
+
+        _PYKRX_HTTP_SESSION = requests.Session()
+        # urllib3 connection pool 크기 확대 (직렬이라 10 도 충분하지만 여유)
+        from requests.adapters import HTTPAdapter
+
+        _pykrx_adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+        _PYKRX_HTTP_SESSION.mount("http://", _pykrx_adapter)
+        _PYKRX_HTTP_SESSION.mount("https://", _pykrx_adapter)
+        _pykrx_webio.requests = _PYKRX_HTTP_SESSION  # type: ignore[attr-defined]
+    except Exception:
+        # 패치 실패해도 동작 자체에는 문제 없음 (속도만 손해)
+        _PYKRX_HTTP_SESSION = None
 
 # from utils.notification import send_verbose_log_to_slack
 
@@ -924,6 +957,7 @@ def _fetch_ohlcv_core(
                     end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
                     progress=False,
                     auto_adjust=True,
+                    session=_YF_SESSION,
                 )
         except Exception as exc:
             error_msg = str(exc)
@@ -2232,9 +2266,8 @@ def _load_naver_kor_stock_map() -> dict[str, dict[str, str]]:
     try:
         import time as _time
 
-        import requests
-
         from config import NAVER_STOCK_MARKET_VALUE_HEADERS, NAVER_STOCK_MARKET_VALUE_URL
+        from utils.http_session import shared_session
 
         for market in ["KOSPI", "KOSDAQ"]:
             page = 1
@@ -2242,7 +2275,7 @@ def _load_naver_kor_stock_map() -> dict[str, dict[str, str]]:
             while True:
                 try:
                     url = NAVER_STOCK_MARKET_VALUE_URL.format(market=market)
-                    resp = requests.get(
+                    resp = shared_session.get(
                         url,
                         params={"page": page, "pageSize": page_size},
                         headers=NAVER_STOCK_MARKET_VALUE_HEADERS,
@@ -2452,6 +2485,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
             auto_adjust=True,
             progress=False,
             show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
+            session=_YF_SESSION,
         )
 
         if df is not None and not df.empty:
