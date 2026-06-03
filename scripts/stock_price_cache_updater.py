@@ -460,6 +460,37 @@ def refresh_cache_for_target(
             max_workers,
         )
 
+        # US/AUS 풀: yfinance 일괄 prefetch 적용 (종목당 호출 → 풀당 1회 호출).
+        # prefetch 실패 시 _fetch_ohlcv_core 가 종목별 호출로 자동 fallback 한다.
+        if country_code in ("us", "au"):
+            try:
+                from utils.data_loader import (
+                    prefetch_yfinance_bulk,
+                    reset_yf_bulk_prefetch,
+                )
+
+                reset_yf_bulk_prefetch()
+                start_ts = pd.to_datetime(range_start)
+                end_ts = pd.Timestamp.now().normalize()
+                pf_tickers = [
+                    str(item.get("ticker") or "").strip().upper()
+                    for item in target_items
+                    if str(item.get("ticker") or "").strip()
+                ]
+                saved_count = prefetch_yfinance_bulk(pf_tickers, country_code, start_ts, end_ts)
+                logger.info(
+                    "[%s] yfinance 일괄 prefetch: %d/%d 종목 캐시 적재",
+                    target_norm.upper(),
+                    saved_count,
+                    len(pf_tickers),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[%s] yfinance 일괄 prefetch 건너뜀(종목별 호출 fallback): %s",
+                    target_norm.upper(),
+                    exc,
+                )
+
         def _process_one(idx: int, etf_item: dict) -> tuple[bool, str, str]:
             """단일 종목 처리. 반환: (성공여부, ticker, log_message)."""
             t = str(etf_item.get("ticker") or "").strip().upper()

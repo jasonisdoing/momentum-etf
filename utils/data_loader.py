@@ -920,6 +920,105 @@ def _fetch_ohlcv_with_cache(
     return sliced
 
 
+# -------------------------------------------------------------------------
+# yfinance 일괄 prefetch 캐시.
+# 가격 캐시 배치에서 풀(US/AUS) 시작 시 전체 티커를 1회 yf.download(...) 로 받아
+# 이 dict 에 종목별 DataFrame 으로 저장하면, _fetch_ohlcv_core 가 종목별 호출 대신
+# 캐시 hit 으로 처리한다. force_refresh=True 정책 하에 종목당 TLS/round-trip 비용
+# 을 한 번으로 압축한다.
+# -------------------------------------------------------------------------
+_YF_BULK_PREFETCH: dict[str, pd.DataFrame] = {}
+
+
+def reset_yf_bulk_prefetch() -> None:
+    """배치 진입 시 일괄 prefetch 캐시를 초기화한다."""
+    _YF_BULK_PREFETCH.clear()
+
+
+def prefetch_yfinance_bulk(
+    tickers: list[str],
+    country_code: str,
+    start_dt: pd.Timestamp,
+    end_dt: pd.Timestamp,
+) -> int:
+    """US/AUS 풀의 전체 티커를 한 번에 다운로드해 모듈 캐시에 저장한다.
+
+    Returns: 캐시에 저장된 종목 수 (0이면 prefetch 실패 — fallback 으로 종목별 호출 유지).
+    """
+    if yf is None or not tickers:
+        return 0
+    country_norm = (country_code or "").strip().lower()
+    if country_norm not in ("us", "au"):
+        return 0
+
+    # AU 는 .AX 접미사 필요
+    download_tickers: list[str] = []
+    ticker_to_download = {}
+    for t in tickers:
+        t_norm = str(t or "").strip().upper()
+        if not t_norm or t_norm.startswith("^"):
+            continue
+        dl = t_norm
+        if country_norm == "au" and not dl.endswith(".AX"):
+            dl = f"{t_norm}.AX"
+        download_tickers.append(dl)
+        ticker_to_download[t_norm] = dl
+
+    if not download_tickers:
+        return 0
+
+    saved = 0
+    try:
+        with _silence_yfinance_output():
+            df = yf.download(
+                download_tickers,
+                start=start_dt.strftime("%Y-%m-%d"),
+                end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
+                progress=False,
+                auto_adjust=True,
+                group_by="ticker",
+                threads=False,  # 종목별 분리는 우리가 수행
+                session=_YF_SESSION,
+            )
+    except Exception as exc:
+        logger.warning("yfinance 일괄 prefetch 실패 (%s): %s — 종목별 호출로 fallback", country_norm, exc)
+        return 0
+
+    if df is None or df.empty:
+        return 0
+
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+
+    # 응답 구조 처리 (다중 티커는 MultiIndex columns)
+    if isinstance(df.columns, pd.MultiIndex):
+        # group_by='ticker' 라 level 0 == ticker
+        available_dl = set(df.columns.get_level_values(0))
+        for orig_ticker, dl_ticker in ticker_to_download.items():
+            if dl_ticker not in available_dl:
+                continue
+            try:
+                sub = df[dl_ticker].dropna(how="all")
+            except Exception:
+                continue
+            if sub is None or sub.empty:
+                continue
+            sub = sub.loc[:, ~sub.columns.duplicated()]
+            _YF_BULK_PREFETCH[orig_ticker] = sub
+            saved += 1
+    else:
+        # 단일 티커 응답 (download_tickers 가 1건일 때)
+        if len(ticker_to_download) == 1:
+            orig_ticker = next(iter(ticker_to_download))
+            df2 = df.dropna(how="all")
+            if not df2.empty:
+                df2 = df2.loc[:, ~df2.columns.duplicated()]
+                _YF_BULK_PREFETCH[orig_ticker] = df2
+                saved = 1
+
+    return saved
+
+
 def _fetch_ohlcv_core(
     ticker: str,
     country: str,
@@ -939,6 +1038,13 @@ def _fetch_ohlcv_core(
                 # yfinance 호출 전 기존 데이터 확인 (옵션)
                 # 하지만 여기선 원천 조회 우선이므로 fallback은 호출 실패 시 사용
                 pass
+
+        # 일괄 prefetch 캐시 hit 시 그것을 그대로 반환 (yfinance 호출 1회로 풀 전체 처리).
+        bulk_df = _YF_BULK_PREFETCH.get(str(ticker).strip().upper())
+        if bulk_df is not None and not bulk_df.empty:
+            sliced = bulk_df[(bulk_df.index >= start_dt) & (bulk_df.index <= end_dt)]
+            if not sliced.empty:
+                return sliced.copy()
 
         if yf is None:
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
@@ -1030,6 +1136,10 @@ def _fetch_ohlcv_core(
         all_dfs = []
         pykrx_failed = False
         pykrx_error_msg = None
+        # 첫 청크에서 성공한 pykrx 함수를 기억해 두 번째 청크부터 곧바로 사용 → 불필요한 폴백 호출 제거.
+        # ETF 풀(get_etf), 일반주 풀(get_market), ETN 풀(get_etn) 중 무엇인지 한 번만 결정한다.
+        chosen_fn = None  # type: Any
+        get_etn_func = getattr(_stock, "get_etn_ohlcv_by_date", None)
 
         current_start = start_dt
         while current_start <= end_dt:
@@ -1038,13 +1148,21 @@ def _fetch_ohlcv_core(
             end_str = current_end.strftime("%Y%m%d")
 
             try:
-                df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
-                if df_part is None or df_part.empty:
-                    df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
-                if df_part is None or df_part.empty:
-                    get_etn_func = getattr(_stock, "get_etn_ohlcv_by_date", None)
-                    if callable(get_etn_func):
-                        df_part = get_etn_func(start_str, end_str, ticker)
+                if chosen_fn is not None:
+                    # 종목 유형이 이미 확정된 경우: 해당 함수만 호출 (폴백 제거).
+                    df_part = chosen_fn(start_str, end_str, ticker)
+                else:
+                    df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
+                    if df_part is not None and not df_part.empty:
+                        chosen_fn = _stock.get_etf_ohlcv_by_date
+                    else:
+                        df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+                        if df_part is not None and not df_part.empty:
+                            chosen_fn = _stock.get_market_ohlcv_by_date
+                        elif callable(get_etn_func):
+                            df_part = get_etn_func(start_str, end_str, ticker)
+                            if df_part is not None and not df_part.empty:
+                                chosen_fn = get_etn_func
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
             except (json.JSONDecodeError, KeyError) as err:
