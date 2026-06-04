@@ -557,6 +557,7 @@ function AccountHoldingsDetailPanel({
   onCashSync,
   onSortStateChange,
   onReload,
+  showAmounts,
 }: {
   summary: AccountSummary;
   initialRows: HoldingsRow[];
@@ -564,6 +565,7 @@ function AccountHoldingsDetailPanel({
   onCashSync: (accountId: string, balance: number, targetRatio: number) => void;
   onSortStateChange: (accountId: string, sortState: ColumnState[]) => void;
   onReload: () => Promise<void>;
+  showAmounts: boolean;
 }) {
   const toast = useToast();
   const [noteContent, setNoteContent] = useState("");
@@ -1646,7 +1648,7 @@ function AccountHoldingsDetailPanel({
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number }) => (
         params.data?.ticker === CASH_ROW_TICKER ? <span>-</span> :
-          <span className={getSignedClass(params.value ?? 0)}>{formatKrw(params.value ?? 0)}</span>
+          <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
       ),
     },
     {
@@ -1673,10 +1675,10 @@ function AccountHoldingsDetailPanel({
         return parsed;
       },
       cellRenderer: (params: { data?: GridRow }) => (
-        <span className="appGridNumericValue">{params.data ? formatKrw(getPreviewValuationKrw(params.data)) : "-"}</span>
+        <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
       ),
     },
-  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId]);
+  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId, showAmounts]);
 
   return (
     <div className="assetsDetailPanel">
@@ -2316,10 +2318,11 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }}
           onSortStateChange={handleChildSortStateChange}
           onReload={load}
+          showAmounts={showAmounts}
         />
       );
     },
-    [handleChildRowsSync, handleChildSortStateChange, load],
+    [handleChildRowsSync, handleChildSortStateChange, load, showAmounts],
   );
 
   const parentColumns = useMemo<ColDef<ParentGridRow>[]>(() => [
