@@ -316,15 +316,18 @@ def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = 5) -> flo
     return sum(samples) / len(samples)
 
 
-def _read_last_job_run(job_key: str) -> dict[str, str | None]:
+def _read_last_job_run_from_log(job_key: str) -> tuple[str, datetime] | None:
+    """logs/cron/{job_key}.log 의 마지막 END 라인을 찾아 (status, started_at) 반환.
+
+    status: "success" | "failure".
+    """
     log_path = _LOG_DIR / f"{job_key}.log"
     if not log_path.exists():
-        return {"status": None, "display": "-"}
-
+        return None
     try:
         lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
     except OSError:
-        return {"status": None, "display": "-"}
+        return None
 
     pending_started_at: str | None = None
     last_started_at: str | None = None
@@ -335,7 +338,6 @@ def _read_last_job_run(job_key: str) -> dict[str, str | None]:
         if start_match and start_match.group("job") == job_key:
             pending_started_at = start_match.group("started_at")
             continue
-
         end_match = _RUN_BATCH_END_PATTERN.match(line.strip())
         if end_match and end_match.group("job") == job_key:
             last_status = "success" if end_match.group("status") == "성공" else "failure"
@@ -343,12 +345,71 @@ def _read_last_job_run(job_key: str) -> dict[str, str | None]:
             pending_started_at = None
 
     if not last_status or not last_started_at:
-        return {"status": None, "display": "-"}
-
+        return None
     started_at = _parse_kst_datetime(last_started_at)
-    icon = "✅" if last_status == "success" else "❌"
+    if started_at is None:
+        return None
+    return (last_status, started_at)
+
+
+def _read_last_job_run_from_queue(job_key: str) -> tuple[str, datetime] | None:
+    """batch_queue 에서 가장 최근 종료된(done/failed) cache_refresh 의 결과를 반환.
+
+    wrapper 가 SIGKILL/배포로 외부 종료되면 cache_refresh.log 에 END 라인이 남지
+    않으므로 batch_queue 의 ended_at + status 가 더 정확한 최근 정보를 갖는다.
+    """
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return None
+        doc = db.batch_queue.find_one(
+            {"job_name": job_key, "status": {"$in": ["done", "failed"]}, "ended_at": {"$ne": None}},
+            sort=[("ended_at", -1)],
+            projection={"_id": 0, "status": 1, "started_at": 1, "ended_at": 1},
+        )
+        if not isinstance(doc, dict):
+            return None
+        started_raw = doc.get("started_at") or doc.get("ended_at")
+        if not isinstance(started_raw, datetime):
+            return None
+        started_at = (
+            started_raw.astimezone(ZoneInfo("Asia/Seoul"))
+            if started_raw.tzinfo
+            else started_raw.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+        )
+        status = "success" if str(doc.get("status")) == "done" else "failure"
+        return (status, started_at)
+    except Exception as exc:
+        _logger.warning("batch_queue 최근 종료 조회 실패 (job=%s): %s", job_key, exc)
+        return None
+
+
+def _read_last_job_run(job_key: str) -> dict[str, str | None]:
+    """마지막 실행 정보를 반환한다.
+
+    두 소스를 보고 **더 최근 시점**의 것을 표시한다:
+      1) logs/cron/{job_key}.log 의 [run_batch] END 라인 (영구 이력)
+      2) batch_queue 의 가장 최근 done/failed 항목 (24h TTL — wrapper 가
+         외부 종료되어 END 라인을 못 쓴 케이스 보완)
+    """
+    log_result = _read_last_job_run_from_log(job_key)
+    queue_result = _read_last_job_run_from_queue(job_key)
+
+    chosen: tuple[str, datetime] | None
+    if log_result and queue_result:
+        # 더 최근 시점 우선
+        chosen = log_result if log_result[1] >= queue_result[1] else queue_result
+    else:
+        chosen = log_result or queue_result
+
+    if chosen is None:
+        return {"status": None, "display": "-"}
+    status, started_at = chosen
+    icon = "✅" if status == "success" else "❌"
     return {
-        "status": last_status,
+        "status": status,
         "display": f"{icon} {_format_elapsed_since(started_at)}",
     }
 
