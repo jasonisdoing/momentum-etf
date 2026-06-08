@@ -31,4 +31,4 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 40 9,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
-*/10 8-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py component_prices_updater python scripts/component_prices_updater.py >> logs/cron/component_prices_updater.log 2>&1
+*/30 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py component_prices_updater python scripts/component_prices_updater.py >> logs/cron/component_prices_updater.log 2>&1
