@@ -62,3 +62,23 @@ services:
     volumes:
       - ./infra/hybrid/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     restart: always
+
+  # 배치 스케줄러 — infra/cron/crontab 을 단일 진실 소스로 APScheduler 가 큐에 enqueue.
+  # fastapi 와 동일한 ghcr 이미지를 재사용하여 별도 빌드/푸시 없이 같은 배포 흐름에 편입.
+  scheduler:
+    image: ghcr.io/jasonisdoing/momentum-etf-fastapi:latest
+    depends_on:
+      - mongodb
+    env_file:
+      - .env
+    environment:
+      - APP_TYPE=Server
+      - TZ=Asia/Seoul
+      - MONGO_DB_HOST=mongodb:27017
+    volumes:
+      - ./accounts.json:/app/accounts.json:ro
+      - ./data:/app/data
+      - ./infra/cron:/app/infra/cron:ro
+      - ./logs:/app/logs
+    command: ["python", "-u", "infra/server_scheduler.py"]
+    restart: unless-stopped
