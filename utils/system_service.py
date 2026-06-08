@@ -31,9 +31,9 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
-# 운영 방식: VM cron 은 제거됐고, 서버 docker scheduler 컨테이너의 run_scheduler.py
+# 운영 방식: VM cron 은 제거됐고, 서버 docker scheduler 컨테이너의 infra/server_scheduler.py
 # 가 infra/cron/crontab 을 읽어 APScheduler 로 큐에 enqueue 합니다. worker 는
-# 서버와 로컬(`python run_scheduler.py`) 양쪽에서 큐를 atomic 하게 claim 합니다.
+# 서버와 로컬(`python infra/server_scheduler.py`) 양쪽에서 큐를 atomic 하게 claim 합니다.
 SCHEDULE_ROWS = [
     {
         "key": "asset_summary",
@@ -661,11 +661,11 @@ def load_system_data() -> dict[str, object]:
         "pool_rows": _build_pool_summary_rows(),
         "schedule_rows": SCHEDULE_ROWS,
         "schedule_note": (
-            "cron 스케줄은 서버 scheduler 컨테이너의 `run_scheduler.py` 가 큐에 enqueue 합니다 "
-            "(`infra/cron/crontab` 단일 진실 소스). "
-            "큐 워커는 서버 + 로컬(`python run_scheduler.py` 실행 시)에서 함께 동작하며 "
-            "MongoDB find_one_and_update 로 작업을 한 곳에서만 atomic 하게 claim 합니다. "
-            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 직렬 처리됩니다."
+            "cron 스케줄 트리거는 서버 scheduler 컨테이너의 APScheduler 가 담당하며, "
+            "`infra/cron/crontab` 파일이 단일 진실 소스입니다. "
+            "큐 워커는 서버와 로컬(`python run_local_dev.py` 실행 중) 양쪽에서 함께 동작하며 "
+            "MongoDB `find_one_and_update` 로 한 곳에서만 atomic 하게 claim 합니다. "
+            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 순서로 직렬 처리됩니다."
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),

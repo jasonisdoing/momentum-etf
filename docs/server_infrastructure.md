@@ -87,7 +87,7 @@ momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.s
 
 ### 로컬 스케줄러로 전환
 
-모든 momentum-etf 자동 배치는 로컬(Mac) 의 `run_scheduler.py` 가 실행한다.
+모든 momentum-etf 자동 배치는 로컬(Mac) 의 `infra/server_scheduler.py` 가 실행한다.
 이 프로세스는 `infra/cron/crontab` 파일을 단일 진실 소스로 파싱하여
 APScheduler 에 등록한다.
 
