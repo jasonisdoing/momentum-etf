@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -489,8 +489,16 @@ export function SystemManager({
     });
   }, [onHeaderSummaryChange, poolRows.length, scheduleRows.length]);
 
+  // polling 주기 동적 결정: 실행 중인 배치가 있을 때만 3초, 평상시 15초.
+  // setInterval 콜백이 ref 를 읽도록 하여 useEffect 재실행 없이 주기만 바꾼다.
+  const anyRunningRef = useRef(anyRunning);
+  useEffect(() => {
+    anyRunningRef.current = anyRunning;
+  }, [anyRunning]);
+
   useEffect(() => {
     let alive = true;
+    let timer: number | null = null;
 
     async function load(initial: boolean) {
       try {
@@ -521,13 +529,16 @@ export function SystemManager({
       } finally {
         if (alive && initial) setLoading(false);
       }
+      // 다음 tick 예약 — 매번 ref 값을 읽어 주기 결정(실행 중 3초 / 평상시 15초).
+      if (!alive) return;
+      const ms = anyRunningRef.current ? 3000 : 15_000;
+      timer = window.setTimeout(() => load(false), ms);
     }
 
     load(true);
-    const intervalId = window.setInterval(() => load(false), 3000);
     return () => {
       alive = false;
-      window.clearInterval(intervalId);
+      if (timer != null) window.clearTimeout(timer);
     };
   }, []);
 
@@ -588,6 +599,8 @@ export function SystemManager({
               loading={loading}
               minHeight="18rem"
               theme={appGridTheme}
+              // 행 단위 diff 업데이트 — polling 시 전체 그리드 재마운트 방지(깜박임 제거).
+              getRowId={(params) => params.data.key}
               gridOptions={{
                 suppressMovableColumns: true,
                 domLayout: "autoHeight",
@@ -647,6 +660,8 @@ export function SystemManager({
               loading={loading}
               minHeight="18rem"
               theme={appGridTheme}
+              // 행 단위 diff 업데이트 — polling 시 전체 그리드 재마운트 방지(깜박임 제거).
+              getRowId={(params) => params.data.id}
               gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
             />
           </div>
