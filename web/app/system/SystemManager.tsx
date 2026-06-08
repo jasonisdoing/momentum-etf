@@ -44,6 +44,7 @@ type SystemRunningJobDetail = {
   remaining_display?: string | null;
   owner_app_type?: string | null;
   is_mine?: boolean;
+  cancel_requested?: boolean;
 };
 
 type SystemNextRunInfo = {
@@ -98,6 +99,8 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   lastRunEndedAt: string | null;
   estimatedDisplay: string; // "4분 7초" 또는 "-" (이력 없음)
   runningCommandPrefix: string;
+  runningCancellable: boolean; // 같은 인스턴스의 worker 가 처리 중이라 중단 가능
+  runningCancelRequested: boolean; // 이미 중단 요청 보냈는지
   nextRunAt: string | null;
   nextRunDisplay: string;
   pendingPosition: number; // 0 = 대기 없음, 1~ = N번째 대기
@@ -324,8 +327,51 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     cellRenderer: (params: { value: string; data?: SystemScheduleGridRow }) => {
       const row = params.data;
       let badge: React.ReactNode = null;
+      let cancelBtn: React.ReactNode = null;
       if (row?.running) {
         badge = <span style={{ color: "#d97706", fontWeight: 700, marginRight: 6 }}>{row.runningCommandPrefix}</span>;
+        if (row.runningCancellable) {
+          const alreadyRequested = row.runningCancelRequested;
+          cancelBtn = (
+            <button
+              type="button"
+              style={{
+                marginLeft: 8,
+                padding: "2px 8px",
+                fontSize: "11px",
+                fontWeight: 600,
+                color: alreadyRequested ? "#9ca3af" : "#fff",
+                background: alreadyRequested ? "#e5e7eb" : "#dc2626",
+                border: "none",
+                borderRadius: 4,
+                cursor: alreadyRequested ? "not-allowed" : "pointer",
+              }}
+              disabled={alreadyRequested}
+              title={alreadyRequested ? "이미 중단 요청을 보냈습니다." : "이 배치를 중단합니다."}
+              onClick={async (e) => {
+                e.stopPropagation();
+                if (!window.confirm(`"${row.job}" 배치를 중단할까요? (현재 진행 중인 데이터가 일부만 반영됩니다)`)) return;
+                try {
+                  const resp = await fetch("/api/system/cancel", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ key: row.key }),
+                  });
+                  const data = await resp.json().catch(() => ({}));
+                  if (!resp.ok) {
+                    window.alert(`중단 실패: ${data.error ?? `HTTP ${resp.status}`}`);
+                  } else {
+                    window.alert(data.message ?? "중단 요청을 보냈습니다.");
+                  }
+                } catch (err) {
+                  window.alert(`중단 실패: ${err instanceof Error ? err.message : String(err)}`);
+                }
+              }}
+            >
+              {alreadyRequested ? "중단 중…" : "❌ 중단"}
+            </button>
+          );
+        }
       } else if (row && row.pendingPosition > 0) {
         badge = (
           <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>
@@ -337,6 +383,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
         <span className="appCodeText">
           {badge}
           {params.value}
+          {cancelBtn}
         </span>
       );
     },
@@ -392,6 +439,9 @@ export function SystemManager({
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
       estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
       runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
+      runningCancellable:
+        runningSet.has(row.key) && Boolean(runningJobDetails[row.key]?.is_mine),
+      runningCancelRequested: Boolean(runningJobDetails[row.key]?.cancel_requested),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
       pendingPosition: pendingOrder.get(row.key) ?? 0,

@@ -751,7 +751,14 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
             heartbeat_threshold = now_utc_naive - timedelta(minutes=3)
             for doc in db.batch_queue.find(
                 {"status": "running"},
-                {"_id": 0, "job_name": 1, "started_at": 1, "last_heartbeat": 1, "app_type": 1},
+                {
+                    "_id": 0,
+                    "job_name": 1,
+                    "started_at": 1,
+                    "last_heartbeat": 1,
+                    "app_type": 1,
+                    "cancel_requested": 1,
+                },
             ):
                 key = str(doc.get("job_name") or "")
                 if not key or key not in _SCRIPT_BY_ACTION:
@@ -795,6 +802,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                     "remaining_display": _format_duration_seconds(q_remaining_seconds),
                     "owner_app_type": owner_app_type,
                     "is_mine": is_mine,
+                    "cancel_requested": bool(doc.get("cancel_requested")),
                 }
         except Exception as exc:
             _logger.warning("batch_queue running 조회 실패: %s", exc)
@@ -870,6 +878,54 @@ class BatchAlreadyRunningError(RuntimeError):
 
 class DeployInProgressError(RuntimeError):
     """배포 진행 중에는 수동 배치를 거부한다."""
+
+
+class JobCancelForbiddenError(RuntimeError):
+    """현재 인스턴스의 APP_TYPE 과 worker 의 app_type 이 일치하지 않을 때 거부."""
+
+
+def request_cancel_running_job(job_key: str) -> dict[str, str]:
+    """현재 fastapi 인스턴스의 APP_TYPE 과 일치하는 worker 가 처리 중일 때만 취소 요청을 보낸다.
+
+    예외:
+      - JobCancelForbiddenError: 다른 인스턴스(서버↔로컬)에서 처리 중인 작업
+      - ValueError: 알 수 없는 job_key
+      - RuntimeError: running 항목이 없거나 DB 실패
+    """
+    if job_key not in _SCRIPT_BY_ACTION:
+        raise ValueError(f"알 수 없는 작업 키: {job_key}")
+
+    my_app_type = (os.environ.get("APP_TYPE") or "Server").strip() or "Server"
+
+    try:
+        from utils.batch_queue import request_cancel_running
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            raise RuntimeError("DB 연결 실패")
+        # 현재 running 인 항목의 app_type 을 먼저 확인 — 권한 검증
+        doc = db.batch_queue.find_one(
+            {"job_name": job_key, "status": "running"},
+            {"_id": 0, "app_type": 1},
+        )
+        if not isinstance(doc, dict):
+            raise RuntimeError("실행 중인 항목이 없습니다.")
+        worker_app_type = (str(doc.get("app_type") or "")).strip() or "Server"
+        if worker_app_type.lower() != my_app_type.lower():
+            raise JobCancelForbiddenError(
+                f"이 작업은 [{worker_app_type.upper()}] 에서 실행 중이라 [{my_app_type.upper()}] 페이지에서는 중단할 수 없습니다."
+            )
+
+        result = request_cancel_running(job_key, requester_app_type=my_app_type)
+        if not result.get("ok"):
+            raise RuntimeError(str(result.get("reason") or "취소 요청 실패"))
+        return {"message": f"[{worker_app_type.upper()}] 의 {job_key} 중단 요청을 보냈습니다. 곧 종료됩니다."}
+    except (JobCancelForbiddenError, ValueError, RuntimeError):
+        raise
+    except Exception as exc:
+        _logger.warning("취소 요청 실패: %s — %s", job_key, exc)
+        raise RuntimeError(f"취소 요청 실패: {exc}") from exc
 
 
 def trigger_system_action(action: SystemAction) -> str:

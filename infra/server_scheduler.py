@@ -41,6 +41,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -150,24 +151,45 @@ def _enqueue_from_schedule(job_name: str, script_path: str) -> None:
         log.exception("스케줄 enqueue 실패: %s — %s", job_name, exc)
 
 
-def _run_subprocess(job_name: str, script_path: str) -> int:
+def _run_subprocess(job_name: str, script_path: str, item_id: Any = None) -> int:
     """run_batch.py 래퍼를 통해 배치 1건 실행하고 exit code 반환."""
     log.info("배치 시작: %s (%s)", job_name, script_path)
     env = os.environ.copy()
     env.setdefault("APP_TYPE", "Local")
     env.setdefault("PYTHONUNBUFFERED", "1")
+    sys.path.insert(0, str(ROOT_DIR))
+    from utils.batch_queue import is_cancel_requested
+
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [str(PYTHON_BIN), str(RUN_BATCH), job_name, str(PYTHON_BIN), script_path],
             cwd=str(ROOT_DIR),
             env=env,
-            check=False,
         )
-        log.info("배치 종료: %s (exit=%d)", job_name, result.returncode)
-        return result.returncode
     except Exception as exc:
         log.exception("배치 실행 실패: %s — %s", job_name, exc)
         return 1
+
+    # 자식 프로세스가 끝날 때까지 wait — 단 5초마다 batch_queue 의 cancel 플래그를 확인한다.
+    # cancel 요청이 들어오면 SIGTERM, 5초 뒤에도 안 죽으면 SIGKILL 로 강제 종료.
+    while True:
+        try:
+            exit_code = proc.wait(timeout=5)
+            log.info("배치 종료: %s (exit=%d)", job_name, exit_code)
+            return exit_code
+        except subprocess.TimeoutExpired:
+            if item_id is not None and is_cancel_requested(item_id):
+                log.warning("배치 취소 요청 수신 → SIGTERM: %s", job_name)
+                proc.terminate()
+                try:
+                    exit_code = proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    log.warning("SIGTERM 10초 무응답 → SIGKILL: %s", job_name)
+                    proc.kill()
+                    exit_code = proc.wait()
+                log.info("배치 강제 종료 완료: %s (exit=%d)", job_name, exit_code)
+                # 130 = bash convention for "terminated by signal" — failed 로 마킹된다
+                return exit_code if exit_code != 0 else 130
 
 
 def _queue_worker_loop(stop_event: threading.Event) -> None:
@@ -221,7 +243,7 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
             hb_thread.start()
 
             try:
-                exit_code = _run_subprocess(job_name, script_path)
+                exit_code = _run_subprocess(job_name, script_path, item_id)
                 mark_done(item_id, exit_code)
             except Exception as exc:
                 log.exception("큐 항목 처리 실패: %s — %s", job_name, exc)

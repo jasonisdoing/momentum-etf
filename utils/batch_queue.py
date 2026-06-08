@@ -242,3 +242,42 @@ def cancel_pending(item_id: Any) -> bool:
         {"_id": item_id, "status": STATUS_PENDING}
     )
     return result.deleted_count > 0
+
+
+def request_cancel_running(job_name: str, requester_app_type: str | None = None) -> dict[str, Any]:
+    """현재 running 인 작업에 취소 요청 플래그를 세운다.
+
+    worker 가 polling 으로 이 플래그를 확인하고 자식 프로세스에 SIGTERM 을 보낸다.
+    같은 app_type 의 worker 만 자기 작업을 중단할 수 있는 책임은 호출 측에서 검증한다.
+    Returns: {"ok": bool, "reason": str, "item": dict | None}
+    """
+    db = get_db_connection()
+    if db is None:
+        return {"ok": False, "reason": "DB 연결 실패", "item": None}
+    coll = db[BATCH_QUEUE_COLLECTION]
+    now = _now_utc()
+    doc = coll.find_one_and_update(
+        {"job_name": job_name, "status": STATUS_RUNNING},
+        {
+            "$set": {
+                "cancel_requested": True,
+                "cancel_requested_at": now,
+                "cancel_requested_by": requester_app_type or "unknown",
+            }
+        },
+        return_document=True,  # type: ignore[arg-type]
+    )
+    if not doc:
+        return {"ok": False, "reason": "실행 중인 항목이 없습니다.", "item": None}
+    return {"ok": True, "reason": "취소 요청 완료", "item": doc}
+
+
+def is_cancel_requested(item_id: Any) -> bool:
+    """worker 가 자식 프로세스 중단 여부를 빠르게 polling 확인."""
+    db = get_db_connection()
+    if db is None:
+        return False
+    doc = db[BATCH_QUEUE_COLLECTION].find_one(
+        {"_id": item_id}, {"_id": 0, "cancel_requested": 1}
+    )
+    return bool(isinstance(doc, dict) and doc.get("cancel_requested"))
