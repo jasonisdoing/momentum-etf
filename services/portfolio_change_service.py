@@ -41,6 +41,40 @@ _FX_SYMBOL_BY_CURRENCY = {
 }
 
 
+def _build_snapshot_from_cached_holdings(holdings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """holdings_cache.items 에 component_prices_updater 가 미리 박아둔 가격을 snapshot 으로 변환.
+
+    enrich_component_prices 의 component_price_snapshot 인자에 그대로 전달하면 외부 API
+    호출이 우회된다. current_price 가 없는 항목은 snapshot 에 들어가지 않으므로 그런
+    항목만 enrich 가 외부에서 조회한다 (혼합 동작 안전).
+    """
+    from services.component_price_service import _component_price_key, _is_cash_like_holding
+
+    snapshot: dict[str, dict[str, Any]] = {}
+    for item in holdings:
+        if not isinstance(item, dict):
+            continue
+        if _is_cash_like_holding(item):
+            continue
+        if item.get("current_price") is None:
+            continue
+        key = _component_price_key(item)
+        if not key:
+            continue
+        entry: dict[str, Any] = {"nowVal": item.get("current_price")}
+        if item.get("previous_close") is not None:
+            entry["prevClose"] = item.get("previous_close")
+        if item.get("change_pct") is not None:
+            entry["changeRate"] = item.get("change_pct")
+        currency = item.get("price_currency")
+        if currency:
+            entry["currency"] = currency
+        if item.get("price_as_of_date"):
+            entry["as_of_date"] = item.get("price_as_of_date")
+        snapshot[key] = entry
+    return snapshot
+
+
 def _cache_key(ticker_type: str, ticker: str) -> str:
     return f"{(ticker_type or '').strip().lower()}:{(ticker or '').strip().upper()}"
 
@@ -562,11 +596,20 @@ def compute_portfolio_change_bundle(
                 }
             return persisted
 
+    # holdings_cache.items 에 component_prices_updater 배치가 미리 채워둔 가격이 있으면
+    # 그것을 snapshot 으로 전달해 enrich 가 외부 API 호출(토스/네이버/야후 등)을 우회한다.
+    # 호출자가 명시적으로 snapshot 을 전달했으면 그것을 우선한다 (예: 같은 화면 안에서
+    # 가격을 한 번만 갱신하고 여러 ETF 에 분배하는 케이스).
+    effective_snapshot = (
+        component_price_snapshot
+        if component_price_snapshot is not None
+        else _build_snapshot_from_cached_holdings(holdings)
+    )
     priced_holdings, _ = enrich_component_prices(
         holdings,
         price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
         cumulative_base_date=base_date,
-        component_price_snapshot=component_price_snapshot,
+        component_price_snapshot=effective_snapshot,
     )
     rates = get_exchange_rates()
     # 합계 계산은 base_date 이후 누적 변동을 사용하므로 환율도 누적률을 적용한다.

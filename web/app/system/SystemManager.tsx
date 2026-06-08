@@ -228,6 +228,16 @@ const poolColumns: ColDef<SystemPoolGridRow>[] = [
 ];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
+  {
+    headerName: "#",
+    minWidth: 48,
+    width: 56,
+    maxWidth: 64,
+    sortable: false,
+    suppressMovable: true,
+    type: "rightAligned",
+    valueGetter: (params) => (params.node ? (params.node.rowIndex ?? -1) + 1 : ""),
+  },
   { field: "job", headerName: "작업", minWidth: 140, width: 150 },
   { field: "target", headerName: "대상", minWidth: 140, width: 180 },
   {
@@ -339,13 +349,13 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
               type="button"
               style={{
                 marginLeft: 8,
-                padding: "2px 8px",
-                fontSize: "11px",
-                fontWeight: 600,
-                color: alreadyRequested ? "#9ca3af" : "#fff",
-                background: alreadyRequested ? "#e5e7eb" : "#dc2626",
+                padding: 0,
+                fontSize: "14px",
+                fontWeight: 700,
+                lineHeight: 1,
+                color: alreadyRequested ? "#9ca3af" : "#dc2626",
+                background: "transparent",
                 border: "none",
-                borderRadius: 4,
                 cursor: alreadyRequested ? "not-allowed" : "pointer",
               }}
               disabled={alreadyRequested}
@@ -370,7 +380,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
                 }
               }}
             >
-              {alreadyRequested ? "⏳" : "❌"}
+              {alreadyRequested ? "⏳" : "✕"}
             </button>
           );
         }
