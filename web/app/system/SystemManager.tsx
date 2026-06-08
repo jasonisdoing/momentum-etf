@@ -123,21 +123,24 @@ function formatDurationSeconds(seconds: number): string {
 }
 
 function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, nowMs: number): string {
-  // 다른 인스턴스가 락을 잡고 있으면 간단히 "[그 인스턴스]에서 작업중" 만 표시.
-  if (detail && detail.is_mine === false) {
-    const owner = (detail.owner_app_type ?? "다른 인스턴스").toUpperCase();
-    return `▶ ${owner}에서 작업중... `;
-  }
+  // 다른 인스턴스(예: 서버 scheduler)가 락을 잡고 있어도 진행률은 동일하게 표시한다.
+  // 진행률 데이터(started_at, estimated_seconds 등)는 batch_locks 에서 공유되므로
+  // 인스턴스 무관하게 보일 수 있다. owner 라벨만 추가로 붙인다.
+  const ownerLabel =
+    detail && detail.is_mine === false
+      ? `[${(detail.owner_app_type ?? "다른 인스턴스").toUpperCase()}] `
+      : "";
+
   const estimatedSeconds = detail?.estimated_seconds;
   const estimatedDisplay = detail?.estimated_display;
   if (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0 || !detail?.started_at) {
-    return "▶ 실행 중... ";
+    return `▶ ${ownerLabel}실행 중... `;
   }
   const startedMs = new Date(detail.started_at).getTime();
   if (Number.isNaN(startedMs)) {
     return estimatedDisplay
-      ? `▶ 실행 중(예상시간 ${estimatedDisplay})... `
-      : "▶ 실행 중... ";
+      ? `▶ ${ownerLabel}실행 중(예상시간 ${estimatedDisplay})... `
+      : `▶ ${ownerLabel}실행 중... `;
   }
   const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
   const remainingSeconds = Math.max(0, Math.round(estimatedSeconds - elapsedSeconds));
@@ -147,7 +150,7 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
     remainingSeconds > 0
       ? `${formatDurationSeconds(remainingSeconds)} 남음`
       : `+${formatDurationSeconds(overrunSeconds)} 초과`;
-  return `▶ 실행 중(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
+  return `▶ ${ownerLabel}실행 중(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
 }
 
 function formatCount(value: number): string {
