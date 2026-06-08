@@ -444,8 +444,10 @@ def _cleanup_stale_locks() -> int:
 def get_running_jobs() -> list[str]:
     """현재 실행 중인 배치 키 목록을 반환합니다.
 
-    MongoDB `batch_locks` 컬렉션을 조회합니다. TTL 인덱스가 만료된 락을
-    자동 정리하며, 예상 소요시간 2배를 초과한 락도 stale 로 보고 삭제합니다.
+    두 소스를 합쳐서 본다:
+      1) batch_locks — 락이 살아있는 작업
+      2) batch_queue status=running 이면서 heartbeat 가 최근 3분 안에 갱신된 작업
+         (장시간 작업이라 락이 만료됐어도 worker 가 계속 처리 중인 경우)
     """
     # 조회 전에 stale 락 정리 (조회/상세 모두에서 효과)
     _cleanup_stale_locks()
@@ -456,7 +458,9 @@ def get_running_jobs() -> list[str]:
         if db is None:
             return []
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        running: list[str] = []
+        running: set[str] = set()
+
+        # 1) batch_locks
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
             if key not in _SCRIPT_BY_ACTION:
@@ -473,7 +477,30 @@ def get_running_jobs() -> list[str]:
                         continue
             except Exception:
                 pass
-            running.append(key)
+            running.add(key)
+
+        # 2) batch_queue running + heartbeat 살아있음 (3분 안)
+        try:
+            heartbeat_threshold = now - timedelta(minutes=3)
+            for doc in db.batch_queue.find(
+                {"status": "running"}, {"_id": 0, "job_name": 1, "last_heartbeat": 1}
+            ):
+                key = str(doc.get("job_name") or "")
+                if not key or key not in _SCRIPT_BY_ACTION:
+                    continue
+                last_heartbeat = doc.get("last_heartbeat")
+                if isinstance(last_heartbeat, datetime):
+                    hb_utc = (
+                        last_heartbeat.astimezone(timezone.utc).replace(tzinfo=None)
+                        if last_heartbeat.tzinfo
+                        else last_heartbeat
+                    )
+                    if hb_utc < heartbeat_threshold:
+                        continue
+                running.add(key)
+        except Exception as exc:
+            _logger.warning("batch_queue running 조회 실패: %s", exc)
+
         return sorted(running)
     except Exception as exc:
         _logger.warning("batch_locks 조회 실패: %s", exc)
