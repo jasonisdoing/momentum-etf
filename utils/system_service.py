@@ -647,6 +647,15 @@ def load_system_data() -> dict[str, object]:
                 "error": q.get("error"),
             }
         )
+    estimated_by_job: dict[str, dict[str, object]] = {}
+    for row in SCHEDULE_ROWS:
+        key = str(row["key"])
+        seconds = _read_average_job_elapsed_seconds(key)
+        estimated_by_job[key] = {
+            "seconds": int(round(seconds)) if seconds is not None else None,
+            "display": _format_duration_seconds(seconds) if seconds is not None else None,
+        }
+
     return {
         "pool_rows": _build_pool_summary_rows(),
         "schedule_rows": SCHEDULE_ROWS,
@@ -661,6 +670,7 @@ def load_system_data() -> dict[str, object]:
         "is_deploying": is_deploying(),
         "last_run_by_job": {row["key"]: _read_last_job_run(str(row["key"])) for row in SCHEDULE_ROWS},
         "next_run_by_job": {row["key"]: _build_next_run_payload(row.get("schedule")) for row in SCHEDULE_ROWS},
+        "estimated_by_job": estimated_by_job,
     }
 
 
