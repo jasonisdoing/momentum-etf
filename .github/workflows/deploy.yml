@@ -63,13 +63,16 @@ jobs:
     steps:
       - name: Deploy to Oracle VM (pull & up)
         uses: appleboy/ssh-action@master
-        timeout-minutes: 10
+        # scheduler 컨테이너의 stop_grace_period (30분) 동안 진행 중 배치가 끝나길 기다리므로,
+        # 배포 액션 timeout 은 그것보다 충분히 커야 한다 (grace 30분 + 여유 10분 = 40분).
+        timeout-minutes: 40
         with:
           host: ${{ secrets.ORACLE_VM_HOST }}
           username: ${{ secrets.ORACLE_VM_USERNAME }}
           key: ${{ secrets.ORACLE_VM_SSH_KEY }}
           timeout: 60s
-          command_timeout: 8m
+          # scheduler 의 stop_grace_period(30m) + 여유. 8분이면 scheduler 교체 중 SSH 가 끊김.
+          command_timeout: 35m
           script: |
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
