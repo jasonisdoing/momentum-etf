@@ -30,6 +30,10 @@ type SystemScheduleRow = {
 type SystemLastRunInfo = {
   status?: string | null;
   display?: string | null;
+  owner_app_type?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  is_clickable?: boolean;
 };
 
 type SystemRunningJobDetail = {
@@ -88,6 +92,10 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   anyRunning: boolean;
   isDeploying: boolean;
   lastRunDisplay: string;
+  lastRunOwner: string | null;       // "Server" | "Local" | null — 어디서 실행됐나
+  lastRunClickable: boolean;          // 현재 인스턴스에서 다운로드 가능?
+  lastRunStartedAt: string | null;    // ISO — 로그 다운로드 파라미터
+  lastRunEndedAt: string | null;
   estimatedDisplay: string; // "4분 7초" 또는 "-" (이력 없음)
   runningCommandPrefix: string;
   nextRunAt: string | null;
@@ -237,9 +245,55 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   {
     field: "lastRunDisplay",
     headerName: "마지막 실행",
-    minWidth: 140,
-    width: 160,
-    cellRenderer: (params: { value: string }) => params.value || "-",
+    minWidth: 180,
+    width: 200,
+    tooltipValueGetter: (params) => {
+      const row = params.data as SystemScheduleGridRow | undefined;
+      if (!row || !row.lastRunOwner) return "";
+      if (row.lastRunClickable) {
+        return `클릭하면 [${row.lastRunOwner.toUpperCase()}] 의 실행 로그를 다운로드합니다.`;
+      }
+      return `이 작업은 [${row.lastRunOwner.toUpperCase()}] 에서 실행되었습니다. 해당 인스턴스의 시스템 페이지에서 다운로드할 수 있습니다.`;
+    },
+    cellStyle: (params): CellStyle => {
+      const row = params.data as SystemScheduleGridRow | undefined;
+      return row && row.lastRunClickable && row.lastRunStartedAt
+        ? { cursor: "pointer", textDecoration: "underline" }
+        : { cursor: "default" };
+    },
+    onCellClicked: async (event) => {
+      const row = event.data as SystemScheduleGridRow | undefined;
+      if (!row || !row.lastRunClickable || !row.lastRunStartedAt) return;
+      const params = new URLSearchParams({ key: row.key, started_at: row.lastRunStartedAt });
+      if (row.lastRunEndedAt) params.set("ended_at", row.lastRunEndedAt);
+      try {
+        const resp = await fetch(`/api/system/job-logs?${params.toString()}`, { cache: "no-store" });
+        if (!resp.ok) {
+          const payload = await resp.json().catch(() => ({}));
+          alert(`로그 다운로드 실패: ${payload.error ?? resp.status}`);
+          return;
+        }
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        const disposition = resp.headers.get("Content-Disposition") || "";
+        const match = disposition.match(/filename="([^"]+)"/);
+        a.download = match?.[1] ?? `${row.key}.log`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        alert(`로그 다운로드 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+    cellRenderer: (params: { value: string; data?: SystemScheduleGridRow }) => {
+      const row = params.data;
+      if (!row || !row.lastRunDisplay || row.lastRunDisplay === "-") return "-";
+      const ownerLabel = row.lastRunOwner ? ` [${row.lastRunOwner.toUpperCase()}]` : "";
+      return `${row.lastRunDisplay}${ownerLabel}`;
+    },
   },
   {
     field: "estimatedDisplay",
@@ -332,6 +386,10 @@ export function SystemManager({
       anyRunning,
       isDeploying,
       lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
+      lastRunOwner: lastRunByJob[row.key]?.owner_app_type ?? null,
+      lastRunClickable: Boolean(lastRunByJob[row.key]?.is_clickable),
+      lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
+      lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
       estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
       runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
       nextRunAt,

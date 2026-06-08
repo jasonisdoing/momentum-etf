@@ -20,6 +20,7 @@ services:
       - .env
     environment:
       - MONGO_DB_HOST=mongodb:27017
+      - APP_TYPE=Server
     volumes:
       - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더, 종목 리스트 등) — git 추적 제외, 서버에 직접 배치

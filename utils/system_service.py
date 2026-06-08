@@ -104,6 +104,8 @@ _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_R
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 _LOCK_DIR = _PROJECT_ROOT / "logs" / "cron"
 _LOG_DIR = _PROJECT_ROOT / "logs" / "cron"
+_DAILY_LOG_DIR = _PROJECT_ROOT / "logs"  # logs/YYYY-MM-DD.log (스크립트 stdout/stderr 통합 로그)
+_DAILY_LINE_TS_PATTERN = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})")
 DEPLOY_LOCK_DOC_ID = "__deploy__"
 
 
@@ -316,6 +318,76 @@ def _read_average_job_elapsed_seconds(job_key: str, sample_size: int = 5) -> flo
     return sum(samples) / len(samples)
 
 
+def extract_job_logs_for_run(
+    job_key: str,
+    started_at_iso: str,
+    ended_at_iso: str | None = None,
+) -> str | None:
+    """logs/YYYY-MM-DD.log 에서 시작/종료 시각 사이의 라인을 추출해 반환.
+
+    여러 작업이 같은 시각대에 끼어든 라인도 그대로 포함된다 (실패 진단 시 유용).
+    종료 시각이 없으면 시작 + 30분으로 보수적 cap.
+    반환: 추출된 텍스트(빈 문자열일 수 있음) 또는 파일을 못 찾으면 None.
+    """
+    try:
+        started_at = datetime.fromisoformat(started_at_iso)
+    except (TypeError, ValueError):
+        return None
+    if started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=ZoneInfo("Asia/Seoul"))
+    started_kst = started_at.astimezone(ZoneInfo("Asia/Seoul"))
+
+    ended_kst: datetime
+    if ended_at_iso:
+        try:
+            ended_at = datetime.fromisoformat(ended_at_iso)
+            if ended_at.tzinfo is None:
+                ended_at = ended_at.replace(tzinfo=ZoneInfo("Asia/Seoul"))
+            ended_kst = ended_at.astimezone(ZoneInfo("Asia/Seoul"))
+        except (TypeError, ValueError):
+            ended_kst = started_kst + timedelta(minutes=30)
+    else:
+        ended_kst = started_kst + timedelta(minutes=30)
+
+    collected: list[str] = []
+    found_any_file = False
+    cur_date = started_kst.date()
+    end_date = ended_kst.date()
+    while cur_date <= end_date:
+        log_path = _DAILY_LOG_DIR / f"{cur_date.isoformat()}.log"
+        if log_path.exists():
+            found_any_file = True
+            try:
+                for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    m = _DAILY_LINE_TS_PATTERN.match(line)
+                    if not m:
+                        continue
+                    try:
+                        ts_naive = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        continue
+                    ts = ts_naive.replace(tzinfo=ZoneInfo("Asia/Seoul"))
+                    if ts < started_kst:
+                        continue
+                    if ts > ended_kst:
+                        break
+                    collected.append(line)
+            except OSError:
+                pass
+        cur_date += timedelta(days=1)
+
+    if not found_any_file:
+        return None
+    header = (
+        f"# Job: {job_key}\n"
+        f"# Started: {started_kst.isoformat()}\n"
+        f"# Ended:   {ended_kst.isoformat()}\n"
+        f"# Lines extracted: {len(collected)}\n"
+        f"# ─────────────────────────────────────────────────────\n"
+    )
+    return header + "\n".join(collected) + "\n"
+
+
 def _read_last_job_run_from_log(job_key: str) -> tuple[str, datetime] | None:
     """logs/cron/{job_key}.log 의 마지막 END 라인을 찾아 (status, started_at) 반환.
 
@@ -352,10 +424,12 @@ def _read_last_job_run_from_log(job_key: str) -> tuple[str, datetime] | None:
     return (last_status, started_at)
 
 
-def _read_last_job_run_from_queue(job_key: str) -> tuple[str, datetime] | None:
-    """batch_queue 에서 가장 최근 종료된(done/failed) cache_refresh 의 결과를 반환.
+def _read_last_job_run_from_queue(
+    job_key: str,
+) -> tuple[str, datetime, str | None, datetime | None] | None:
+    """batch_queue 에서 가장 최근 종료된(done/failed) 항목의 (status, started_at, app_type, ended_at) 반환.
 
-    wrapper 가 SIGKILL/배포로 외부 종료되면 cache_refresh.log 에 END 라인이 남지
+    wrapper 가 SIGKILL/배포로 외부 종료되면 logs/cron/{job}.log 에 END 라인이 남지
     않으므로 batch_queue 의 ended_at + status 가 더 정확한 최근 정보를 갖는다.
     """
     try:
@@ -367,50 +441,92 @@ def _read_last_job_run_from_queue(job_key: str) -> tuple[str, datetime] | None:
         doc = db.batch_queue.find_one(
             {"job_name": job_key, "status": {"$in": ["done", "failed"]}, "ended_at": {"$ne": None}},
             sort=[("ended_at", -1)],
-            projection={"_id": 0, "status": 1, "started_at": 1, "ended_at": 1},
+            projection={"_id": 0, "status": 1, "started_at": 1, "ended_at": 1, "app_type": 1},
         )
         if not isinstance(doc, dict):
             return None
         started_raw = doc.get("started_at") or doc.get("ended_at")
+        ended_raw = doc.get("ended_at")
         if not isinstance(started_raw, datetime):
             return None
+        kst = ZoneInfo("Asia/Seoul")
         started_at = (
-            started_raw.astimezone(ZoneInfo("Asia/Seoul"))
+            started_raw.astimezone(kst)
             if started_raw.tzinfo
-            else started_raw.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+            else started_raw.replace(tzinfo=timezone.utc).astimezone(kst)
         )
+        ended_at: datetime | None = None
+        if isinstance(ended_raw, datetime):
+            ended_at = (
+                ended_raw.astimezone(kst) if ended_raw.tzinfo else ended_raw.replace(tzinfo=timezone.utc).astimezone(kst)
+            )
         status = "success" if str(doc.get("status")) == "done" else "failure"
-        return (status, started_at)
+        app_type = str(doc.get("app_type") or "").strip() or None
+        return (status, started_at, app_type, ended_at)
     except Exception as exc:
         _logger.warning("batch_queue 최근 종료 조회 실패 (job=%s): %s", job_key, exc)
         return None
 
 
-def _read_last_job_run(job_key: str) -> dict[str, str | None]:
+def _read_last_job_run(job_key: str) -> dict[str, object | None]:
     """마지막 실행 정보를 반환한다.
 
     두 소스를 보고 **더 최근 시점**의 것을 표시한다:
-      1) logs/cron/{job_key}.log 의 [run_batch] END 라인 (영구 이력)
-      2) batch_queue 의 가장 최근 done/failed 항목 (24h TTL — wrapper 가
-         외부 종료되어 END 라인을 못 쓴 케이스 보완)
+      1) logs/cron/{job_key}.log 의 [run_batch] END 라인 — 이 환경 worker 가 처리한 기록
+      2) batch_queue 의 가장 최근 done/failed — 다른 인스턴스(서버/로컬)에서 처리된 기록도 포함
+
+    반환 필드:
+      - status: "success"|"failure"|None
+      - display: 화면 표시용 한 줄
+      - owner_app_type: 어느 인스턴스가 처리했나 ("Server"|"Local"|None)
+      - started_at, ended_at: ISO 문자열 (로그 다운로드 endpoint 호출용)
+      - is_clickable: 현재 fastapi 인스턴스의 APP_TYPE 과 owner 가 일치하면 True
     """
     log_result = _read_last_job_run_from_log(job_key)
     queue_result = _read_last_job_run_from_queue(job_key)
+    my_app_type = (os.environ.get("APP_TYPE") or "Server").strip() or "Server"
 
-    chosen: tuple[str, datetime] | None
+    chosen_source: str | None = None
+    chosen_status: str | None = None
+    chosen_started_at: datetime | None = None
+    chosen_ended_at: datetime | None = None
+    chosen_owner: str | None = None
+
     if log_result and queue_result:
-        # 더 최근 시점 우선
-        chosen = log_result if log_result[1] >= queue_result[1] else queue_result
-    else:
-        chosen = log_result or queue_result
+        if log_result[1] >= queue_result[1]:
+            chosen_source = "log"
+        else:
+            chosen_source = "queue"
+    elif log_result:
+        chosen_source = "log"
+    elif queue_result:
+        chosen_source = "queue"
 
-    if chosen is None:
-        return {"status": None, "display": "-"}
-    status, started_at = chosen
-    icon = "✅" if status == "success" else "❌"
+    if chosen_source == "log" and log_result:
+        chosen_status, chosen_started_at = log_result
+        chosen_owner = my_app_type  # logs/cron 에 END 라인이 있다는 건 이 환경의 worker 가 처리했다는 뜻
+    elif chosen_source == "queue" and queue_result:
+        chosen_status, chosen_started_at, chosen_owner, chosen_ended_at = queue_result
+        chosen_owner = chosen_owner or my_app_type
+
+    if not chosen_status or not chosen_started_at:
+        return {
+            "status": None,
+            "display": "-",
+            "owner_app_type": None,
+            "started_at": None,
+            "ended_at": None,
+            "is_clickable": False,
+        }
+    icon = "✅" if chosen_status == "success" else "❌"
+    is_clickable = (chosen_owner or "").lower() == my_app_type.lower()
     return {
-        "status": status,
-        "display": f"{icon} {_format_elapsed_since(started_at)}",
+        "status": chosen_status,
+        "display": f"{icon} {_format_elapsed_since(chosen_started_at)}",
+        "owner_app_type": chosen_owner,
+        "started_at": chosen_started_at.isoformat(),
+        "ended_at": chosen_ended_at.isoformat() if chosen_ended_at else None,
+        "is_clickable": is_clickable,
     }
 
 

@@ -19,6 +19,9 @@ def _ensure_python_exists() -> None:
 
 def _start_fastapi() -> subprocess.Popen[bytes]:
     env = os.environ.copy()
+    # 로컬 fastapi 인스턴스는 자기가 LOCAL 임을 알아야 한다.
+    # (시스템 페이지의 "마지막 실행" 다운로드 클릭 권한 판정 등)
+    env.setdefault("APP_TYPE", "Local")
     return subprocess.Popen(
         [
             str(PYTHON_BIN),
