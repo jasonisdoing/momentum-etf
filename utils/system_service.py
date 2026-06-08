@@ -23,6 +23,7 @@ SystemAction = Literal[
     "metadata_updater",
     "asset_summary",
     "us_market_stocks",
+    "component_prices_updater",
 ]
 
 # 평일(월~금) / 월~토 weekday 셋. (Python: 0=월 ... 6=일)
@@ -87,6 +88,18 @@ SCHEDULE_ROWS = [
         "command": "python scripts/update_us_market_stocks.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
+    {
+        "key": "component_prices_updater",
+        "job": "ETF 구성종목 가격 갱신",
+        "target": "모든 ETF 의 holdings",
+        "cadence": "평일 08:00 ~ 17:00 매 10분 KST",
+        "command": "python scripts/component_prices_updater.py",
+        "schedule": {
+            "minutes": [0, 10, 20, 30, 40, 50],
+            "hours": list(range(8, 18)),
+            "weekdays": _WEEKDAYS_MON_FRI,
+        },
+    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -97,6 +110,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
+    "component_prices_updater": "scripts/component_prices_updater.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
