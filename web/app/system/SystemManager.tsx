@@ -142,17 +142,19 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
     detail && detail.owner_app_type
       ? `[${detail.owner_app_type.toUpperCase()}] `
       : "";
+  // 취소 요청이 들어온 상태는 라벨을 "중단 중" 으로 바꿔 사용자가 명확히 인지하도록 한다.
+  const stateLabel = detail?.cancel_requested ? "중단 중" : "실행 중";
 
   const estimatedSeconds = detail?.estimated_seconds;
   const estimatedDisplay = detail?.estimated_display;
   if (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0 || !detail?.started_at) {
-    return `▶ ${ownerLabel}실행 중... `;
+    return `▶ ${ownerLabel}${stateLabel}... `;
   }
   const startedMs = new Date(detail.started_at).getTime();
   if (Number.isNaN(startedMs)) {
     return estimatedDisplay
-      ? `▶ ${ownerLabel}실행 중(예상시간 ${estimatedDisplay})... `
-      : `▶ ${ownerLabel}실행 중... `;
+      ? `▶ ${ownerLabel}${stateLabel}(예상시간 ${estimatedDisplay})... `
+      : `▶ ${ownerLabel}${stateLabel}... `;
   }
   const elapsedSeconds = Math.max(0, Math.floor((nowMs - startedMs) / 1000));
   const remainingSeconds = Math.max(0, Math.round(estimatedSeconds - elapsedSeconds));
@@ -162,7 +164,7 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
     remainingSeconds > 0
       ? `${formatDurationSeconds(remainingSeconds)} 남음`
       : `+${formatDurationSeconds(overrunSeconds)} 초과`;
-  return `▶ ${ownerLabel}실행 중(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
+  return `▶ ${ownerLabel}${stateLabel}(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
 }
 
 function formatCount(value: number): string {
@@ -368,7 +370,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
                 }
               }}
             >
-              {alreadyRequested ? "중단 중…" : "❌ 중단"}
+              {alreadyRequested ? "⏳" : "❌"}
             </button>
           );
         }
