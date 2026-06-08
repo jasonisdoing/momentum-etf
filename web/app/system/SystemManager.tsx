@@ -323,6 +323,10 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
     minWidth: 320,
     flex: 1.6,
+    // 실행 중인 행은 prefix(▶ [SERVER] 실행 중...) + ✕ 버튼이 길어서 명령어가 잘림.
+    // autoHeight + wrapText 로 실행 중인 행만 2줄이 되도록 한다 (다른 행은 콘텐츠가 짧아 1줄 유지).
+    autoHeight: true,
+    wrapText: true,
     cellStyle: (params): CellStyle => {
       const row = params.data as SystemScheduleGridRow | undefined;
       if (!row) return { cursor: "default" };
@@ -391,6 +395,19 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
           </span>
         );
       }
+      // 실행 중: 2줄(첫 줄 prefix + ✕ / 둘째 줄 명령어) — 명령어가 잘리지 않도록.
+      if (row?.running) {
+        return (
+          <div className="appCodeText" style={{ whiteSpace: "normal", lineHeight: 1.4, padding: "4px 0" }}>
+            <div style={{ display: "flex", alignItems: "center" }}>
+              {badge}
+              {cancelBtn}
+            </div>
+            <div style={{ marginTop: 2 }}>{params.value}</div>
+          </div>
+        );
+      }
+      // 실행 중 아님: 기존 1줄 표시 유지.
       return (
         <span className="appCodeText">
           {badge}
