@@ -5,17 +5,20 @@
     fetch 하면 외부 API 응답 누적으로 30초 timeout 이 자주 발생한다. 이를 회피하기 위해
     가격 조회를 본 배치로 분리하고, ticker_detail 은 캐시된 값만 읽도록 한다.
 
-동작:
-    1. stock_cache_meta 의 모든 ETF (holdings_cache.items 존재) 조회
-    2. 구성종목의 unique set 을 통화별로 분류 → 한 번에 일괄 외부 API 호출
-       (네이버 ETF iNAV / 토스 미국주식 / 호주 QuoteAPI / 야후 일반)
-    3. 결과를 각 ETF 의 holdings_cache.items 의 항목에 current_price/change_pct 등으로 채움
-    4. 업데이트된 holdings_cache 를 다시 저장
+동작 (핵심: 외부 API 호출 횟수 최소화):
+    1. stock_cache_meta 의 모든 ETF (holdings_cache.items 존재) 조회 + 각 ETF 의 base_date 결정
+    2. ★ 모든 ETF 의 구성종목을 1개 리스트로 합본 → build_component_price_snapshot() 1회 호출
+       → 통화별 unique 종목 set 단위로 외부 API 1번씩만 호출 (KOR / US / AU / worldstock / yahoo)
+    3. ★ base_date 별로 baseline 종목 unique set 을 만들어 KOR/yahoo baseline 도 1번씩만 fetch
+    4. ETF 별 루프 — enrich_component_prices(external_fetch_enabled=False, snapshot+baseline 주입)
+       → 외부 호출 0, mongodb update 만 수행
 
 호출 주기:
-    평일 08:00 ~ 17:00 매 10분 KST (infra/cron/crontab 참조)
+    월~토 24시간 매 30분 KST (infra/cron/crontab 참조)
 
-이 배치는 가벼움 — 외부 API 호출이 unique 종목 수에 비례하고, ETF 별 mongodb 업데이트만 함.
+성능:
+    - 199 ETF × 평균 50종목 = 약 1만 호출 → unique 종목 수만큼(수백) + base_date 그룹 수만큼으로 축소
+    - 예상 소요: 2~5분 (KOR sleep 0.3s × unique KOR 종목 수가 가장 큰 비중)
 """
 
 from __future__ import annotations
@@ -23,6 +26,7 @@ from __future__ import annotations
 import os
 import sys
 import time
+from collections import defaultdict
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -30,7 +34,16 @@ from zoneinfo import ZoneInfo
 # 프로젝트 루트를 Python 경로에 추가 (scripts/ 안의 다른 스크립트와 동일한 패턴)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from services.component_price_service import enrich_component_prices
+from services.component_price_service import (
+    _is_cash_like_holding,
+    _is_korean_six_digit_holding,
+    _is_us_yahoo_symbol,
+    _normalize_upper,
+    _safe_fetch_cached_baseline_prices,
+    _safe_fetch_yahoo_baseline_prices,
+    build_component_price_snapshot,
+    enrich_component_prices,
+)
 from services.portfolio_change_service import determine_portfolio_change_base_date
 from services.stock_cache_service import refresh_stock_holdings_cache
 from utils.db_manager import get_db_connection
@@ -62,9 +75,15 @@ def update_component_prices() -> dict[str, int]:
     etfs = _iter_etfs_with_holdings()
     logger.info("[component_prices_updater] 대상 ETF: %d개", len(etfs))
 
-    processed = 0
-    updated = 0
-    failures = 0
+    # ─────────────────────────────────────────────────────────────
+    # 1) ETF 메타 정리 + 모든 holdings 합본 + base_date 별 baseline 그룹 구성
+    # ─────────────────────────────────────────────────────────────
+    etf_meta_list: list[tuple[str, str, str, str, str | None, list[dict[str, Any]], dict[str, Any]]] = []
+    all_items: list[dict[str, Any]] = []
+    # base_date -> {"kor": set[ticker], "yahoo": set[yahoo_symbol], "prev_day": set[yahoo_symbol]}
+    base_date_groups: dict[str, dict[str, set[str]]] = defaultdict(
+        lambda: {"kor": set(), "yahoo": set(), "prev_day": set()}
+    )
 
     for etf in etfs:
         ticker_type = str(etf.get("ticker_type") or "").strip()
@@ -77,16 +96,102 @@ def update_component_prices() -> dict[str, int]:
         holdings_items = list(holdings_cache.get("items") or [])
         if not holdings_items:
             continue
-        processed += 1
 
         try:
-            # ETF 의 base_date 를 결정해 baseline_price 도 같이 박는다.
-            # ticker_detail 은 외부 API 호출 없이 캐시된 가격 + baseline 으로 변동률을 계산한다.
             base_date = determine_portfolio_change_base_date(ticker_type, ticker)
+        except Exception as exc:
+            logger.warning(
+                "[component_prices_updater] %s/%s base_date 결정 실패: %s",
+                ticker_type.upper(),
+                ticker,
+                exc,
+            )
+            base_date = None
+
+        etf_meta_list.append(
+            (ticker_type, ticker, country_code, name, base_date, holdings_items, holdings_cache)
+        )
+        all_items.extend(holdings_items)
+
+        if base_date:
+            group = base_date_groups[base_date]
+            for item in holdings_items:
+                if _is_cash_like_holding(item):
+                    continue
+                component_ticker = _normalize_upper(item.get("ticker"))
+                if _is_korean_six_digit_holding(item):
+                    if component_ticker:
+                        group["kor"].add(component_ticker)
+                else:
+                    yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
+                    if yahoo_symbol:
+                        group["yahoo"].add(yahoo_symbol)
+                        if _is_us_yahoo_symbol(yahoo_symbol):
+                            group["prev_day"].add(yahoo_symbol)
+
+    if not etf_meta_list:
+        logger.info("[component_prices_updater] 처리할 ETF 없음")
+        return {"etfs_processed": 0, "etfs_updated": 0, "failures": 0}
+
+    logger.info(
+        "[component_prices_updater] 합본 holdings: %d개 / base_date 그룹: %d개",
+        len(all_items),
+        len(base_date_groups),
+    )
+
+    # ─────────────────────────────────────────────────────────────
+    # 2) ★ 통화별 unique 종목 단위로 현재가 snapshot 1회 fetch (외부 API 호출 핵심 구간)
+    # ─────────────────────────────────────────────────────────────
+    snapshot_started = time.perf_counter()
+    logger.info("[component_prices_updater] 현재가 snapshot 시작")
+    snapshot = build_component_price_snapshot(all_items)
+    logger.info(
+        "[component_prices_updater] 현재가 snapshot 완료: %d개 / %.1fs",
+        len(snapshot),
+        time.perf_counter() - snapshot_started,
+    )
+
+    # ─────────────────────────────────────────────────────────────
+    # 3) ★ base_date 별로 KOR/Yahoo baseline 도 unique 종목 set 단위로 1회 fetch
+    # ─────────────────────────────────────────────────────────────
+    # base_date -> (kor_baseline_map, yahoo_baseline_map)
+    baseline_by_date: dict[str, tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]] = {}
+    for bd, groups in base_date_groups.items():
+        bl_started = time.perf_counter()
+        kor_baseline_map = _safe_fetch_cached_baseline_prices("kor", sorted(groups["kor"]), bd)
+        yahoo_baseline_map = _safe_fetch_yahoo_baseline_prices(
+            sorted(groups["yahoo"]), bd, groups["prev_day"]
+        )
+        baseline_by_date[bd] = (kor_baseline_map, yahoo_baseline_map)
+        logger.info(
+            "[component_prices_updater] baseline %s: KOR %d / Yahoo %d / %.1fs",
+            bd,
+            len(kor_baseline_map),
+            len(yahoo_baseline_map),
+            time.perf_counter() - bl_started,
+        )
+
+    # ─────────────────────────────────────────────────────────────
+    # 4) ETF 별 매핑 — enrich 호출은 외부 API 호출 차단(snapshot + baseline 만 사용)
+    # ─────────────────────────────────────────────────────────────
+    map_started = time.perf_counter()
+    processed = 0
+    updated = 0
+    failures = 0
+    total = len(etf_meta_list)
+
+    for ticker_type, ticker, country_code, name, base_date, holdings_items, holdings_cache in etf_meta_list:
+        processed += 1
+        try:
+            kor_baseline_map, yahoo_baseline_map = baseline_by_date.get(base_date or "", ({}, {}))
             priced_items, price_as_of_date = enrich_component_prices(
                 holdings_items,
-                price_fetch_limit=None,  # 전 종목 처리
+                price_fetch_limit=None,
                 cumulative_base_date=base_date,
+                component_price_snapshot=snapshot,
+                external_fetch_enabled=False,  # ★ 외부 API 호출 완전 차단
+                korean_baseline_price_map=kor_baseline_map,
+                yahoo_baseline_price_map=yahoo_baseline_map,
             )
             holdings_cache["items"] = priced_items
             holdings_cache["price_updated_at"] = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
@@ -109,6 +214,15 @@ def update_component_prices() -> dict[str, int]:
                 ticker_type.upper(),
                 ticker,
                 exc,
+            )
+
+        # 50개마다 또는 마지막에 진행률 출력
+        if processed % 50 == 0 or processed == total:
+            logger.info(
+                "[component_prices_updater] 매핑 진행: %d / %d (%.1fs)",
+                processed,
+                total,
+                time.perf_counter() - map_started,
             )
 
     elapsed = time.perf_counter() - started

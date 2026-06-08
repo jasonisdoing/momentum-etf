@@ -40,6 +40,8 @@ def enrich_component_prices(
     cumulative_base_date: str | None = None,
     component_price_snapshot: dict[str, dict[str, Any]] | None = None,
     external_fetch_enabled: bool = True,
+    korean_baseline_price_map: dict[str, dict[str, Any]] | None = None,
+    yahoo_baseline_price_map: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """ETF 구성종목에 현재가/등락률/통화 정보를 붙인다."""
     holdings_list = [dict(item) for item in holdings]
@@ -123,8 +125,10 @@ def enrich_component_prices(
         au_price_map = {}
         worldstock_price_map = {}
         yahoo_exchange_price_map = {}
-        korean_baseline_price_map = {}
-        baseline_price_map = {}
+        # external_fetch_enabled=False 라도 호출자가 baseline 맵을 미리 만들어 주입했다면 사용.
+        # (component_prices_updater 가 base_date 별로 unique 종목 단위 1회 fetch 후 주입)
+        korean_baseline_price_map = korean_baseline_price_map or {}
+        baseline_price_map = yahoo_baseline_price_map or {}
 
     enriched: list[dict[str, Any]] = []
     price_as_of_dates: set[str] = set()
