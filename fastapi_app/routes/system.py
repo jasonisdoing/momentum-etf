@@ -7,9 +7,11 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from utils.system_service import (
     BatchAlreadyRunningError,
+    JobCancelForbiddenError,
     SystemAction,
     extract_job_logs_for_run,
     load_system_data,
+    request_cancel_running_job,
     trigger_system_action,
 )
 
@@ -30,6 +32,25 @@ def post_system_action(payload: SystemActionRequest, _: None = Depends(require_i
     try:
         return {"message": trigger_system_action(payload.action)}
     except BatchAlreadyRunningError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/cancel")
+def post_cancel_job(
+    payload: dict[str, str],
+    _: None = Depends(require_internal_token),
+) -> dict[str, str]:
+    """현재 fastapi 인스턴스의 APP_TYPE 과 일치하는 worker 가 처리 중일 때만 취소 가능."""
+    job_key = str(payload.get("key") or "").strip()
+    if not job_key:
+        raise HTTPException(status_code=400, detail="key 필드가 필요합니다.")
+    try:
+        return request_cancel_running_job(job_key)
+    except JobCancelForbiddenError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
