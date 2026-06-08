@@ -73,22 +73,6 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [45], "hours": list(range(9, 18)), "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "key": "market_hours_analysis",
-        "job": "장 시간 분석",
-        "target": "시장 스케줄",
-        "cadence": "평일 07:00 KST",
-        "command": "python scripts/analyze_market_hours.py",
-        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
-        "key": "us_market_stocks",
-        "job": "미국 개별주 업데이트",
-        "target": "S&P500, NASDAQ100",
-        "cadence": "평일 08:00 KST",
-        "command": "python scripts/update_us_market_stocks.py",
-        "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
         "key": "component_prices_updater",
         "job": "ETF 구성종목 가격 갱신",
         "target": "모든 ETF 의 holdings",
@@ -99,6 +83,22 @@ SCHEDULE_ROWS = [
             "hours": list(range(8, 18)),
             "weekdays": _WEEKDAYS_MON_FRI,
         },
+    },
+    {
+        "key": "us_market_stocks",
+        "job": "미국 개별주 업데이트",
+        "target": "S&P500, NASDAQ100",
+        "cadence": "평일 08:00 KST",
+        "command": "python scripts/update_us_market_stocks.py",
+        "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "market_hours_analysis",
+        "job": "장 시간 분석",
+        "target": "시장 스케줄",
+        "cadence": "평일 07:00 KST",
+        "command": "python scripts/analyze_market_hours.py",
+        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
 ]
 
