@@ -349,8 +349,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
               type="button"
               style={{
                 marginLeft: 8,
-                padding: 0,
-                fontSize: "14px",
+                padding: "0 4px",
+                fontSize: "20px",
                 fontWeight: 700,
                 lineHeight: 1,
                 color: alreadyRequested ? "#9ca3af" : "#dc2626",
