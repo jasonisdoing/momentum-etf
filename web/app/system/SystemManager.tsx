@@ -76,6 +76,7 @@ type SystemResponse = {
   last_run_by_job?: Record<string, SystemLastRunInfo>;
   running_job_details?: Record<string, SystemRunningJobDetail>;
   next_run_by_job?: Record<string, SystemNextRunInfo>;
+  estimated_by_job?: Record<string, { seconds: number | null; display: string | null }>;
   batch_queue?: BatchQueueItem[];
   error?: string;
 };
@@ -87,6 +88,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   anyRunning: boolean;
   isDeploying: boolean;
   lastRunDisplay: string;
+  estimatedDisplay: string; // "4분 7초" 또는 "-" (이력 없음)
   runningCommandPrefix: string;
   nextRunAt: string | null;
   nextRunDisplay: string;
@@ -241,6 +243,14 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
+    field: "estimatedDisplay",
+    headerName: "예상시간",
+    minWidth: 110,
+    width: 120,
+    tooltipValueGetter: () => "최근 성공한 5건의 평균 소요시간 (성공 이력 없으면 실패 포함). 출처: logs/cron/{job}.log",
+    cellRenderer: (params: { value: string }) => params.value || "-",
+  },
+  {
     field: "command",
     headerName: "실행 명령 (클릭하여 백그라운드 실행)",
     minWidth: 320,
@@ -295,6 +305,7 @@ export function SystemManager({
   const [lastRunByJob, setLastRunByJob] = useState<Record<string, SystemLastRunInfo>>({});
   const [runningJobDetails, setRunningJobDetails] = useState<Record<string, SystemRunningJobDetail>>({});
   const [nextRunByJob, setNextRunByJob] = useState<Record<string, SystemNextRunInfo>>({});
+  const [estimatedByJob, setEstimatedByJob] = useState<Record<string, { seconds: number | null; display: string | null }>>({});
   const [batchQueue, setBatchQueue] = useState<BatchQueueItem[]>([]);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
@@ -322,6 +333,7 @@ export function SystemManager({
       anyRunning,
       isDeploying,
       lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
+      estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
       runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
@@ -364,6 +376,7 @@ export function SystemManager({
         setLastRunByJob(payload.last_run_by_job ?? {});
         setRunningJobDetails(payload.running_job_details ?? {});
         setNextRunByJob(payload.next_run_by_job ?? {});
+        setEstimatedByJob(payload.estimated_by_job ?? {});
         if (initial) setError(null);
       } catch (loadError) {
         if (alive && initial) {
