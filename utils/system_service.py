@@ -76,12 +76,12 @@ SCHEDULE_ROWS = [
         "key": "component_prices_updater",
         "job": "ETF 구성종목 가격 갱신",
         "target": "모든 ETF 의 holdings",
-        "cadence": "평일 08:00 ~ 17:00 매 10분 KST",
+        "cadence": "월~토 24시간 매 30분 KST",
         "command": "python scripts/component_prices_updater.py",
         "schedule": {
-            "minutes": [0, 10, 20, 30, 40, 50],
-            "hours": list(range(8, 18)),
-            "weekdays": _WEEKDAYS_MON_FRI,
+            "minutes": [0, 30],
+            "hours": list(range(24)),
+            "weekdays": _WEEKDAYS_MON_SAT,
         },
     },
     {
