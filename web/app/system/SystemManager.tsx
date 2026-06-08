@@ -231,8 +231,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   {
     field: "cadence",
     headerName: "자동 주기",
-    minWidth: 260,
-    width: 300,
+    minWidth: 220,
+    width: 240,
     cellRenderer: (params: { value?: string }) => {
       const text = params.value ?? "";
       return text || "-";
@@ -241,8 +241,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   {
     field: "nextRunDisplay",
     headerName: "다음 실행",
-    minWidth: 140,
-    width: 160,
+    minWidth: 100,
+    width: 110,
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
   {
@@ -301,8 +301,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   {
     field: "estimatedDisplay",
     headerName: "예상시간",
-    minWidth: 110,
-    width: 120,
+    minWidth: 85,
+    width: 95,
     tooltipValueGetter: () => "최근 성공한 5건의 평균 소요시간 (성공 이력 없으면 실패 포함). 출처: logs/cron/{job}.log",
     cellRenderer: (params: { value: string }) => params.value || "-",
   },
