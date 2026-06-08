@@ -81,4 +81,7 @@ services:
       - ./infra/cron:/app/infra/cron:ro
       - ./logs:/app/logs
     command: ["python", "-u", "infra/server_scheduler.py"]
+    # 배포 시 진행 중인 배치(가격 캐시 등)가 끝날 때까지 SIGKILL 을 미룬다.
+    # subprocess timeout(30분) 과 같은 기준 — 30분 안에 자연 종료 또는 timeout 으로 정리.
+    stop_grace_period: 30m
     restart: unless-stopped
