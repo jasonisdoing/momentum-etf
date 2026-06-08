@@ -39,6 +39,7 @@ def enrich_component_prices(
     preserve_existing: bool = False,
     cumulative_base_date: str | None = None,
     component_price_snapshot: dict[str, dict[str, Any]] | None = None,
+    external_fetch_enabled: bool = True,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """ETF 구성종목에 현재가/등락률/통화 정보를 붙인다."""
     holdings_list = [dict(item) for item in holdings]
@@ -100,17 +101,30 @@ def enrich_component_prices(
             if _component_price_key(item) not in component_price_snapshot:
                 us_tickers.append(yahoo_symbol)
 
-    kor_price_map = _safe_fetch_snapshot("kor", sorted(set(korean_tickers)))
-    us_price_map = _safe_fetch_snapshot("us", sorted(set(us_tickers)))
-    au_price_map = _safe_fetch_snapshot("au", sorted(set(au_tickers)))
-    worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
-    yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
-    korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_baseline_tickers, cumulative_base_date)
-    baseline_price_map = _safe_fetch_yahoo_baseline_prices(
-        baseline_yahoo_symbols,
-        cumulative_base_date,
-        previous_trading_day_baseline_symbols,
-    )
+    # external_fetch_enabled=False 면 외부 API 호출을 일절 하지 않는다 (silent fallback 금지).
+    # 가격이 캐시에 없는 항목은 None 으로 유지된다 — 화면에서 0/− 으로 표시되게 한다.
+    if external_fetch_enabled:
+        kor_price_map = _safe_fetch_snapshot("kor", sorted(set(korean_tickers)))
+        us_price_map = _safe_fetch_snapshot("us", sorted(set(us_tickers)))
+        au_price_map = _safe_fetch_snapshot("au", sorted(set(au_tickers)))
+        worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
+        yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
+        korean_baseline_price_map = _safe_fetch_cached_baseline_prices(
+            "kor", korean_baseline_tickers, cumulative_base_date
+        )
+        baseline_price_map = _safe_fetch_yahoo_baseline_prices(
+            baseline_yahoo_symbols,
+            cumulative_base_date,
+            previous_trading_day_baseline_symbols,
+        )
+    else:
+        kor_price_map = {}
+        us_price_map = {}
+        au_price_map = {}
+        worldstock_price_map = {}
+        yahoo_exchange_price_map = {}
+        korean_baseline_price_map = {}
+        baseline_price_map = {}
 
     enriched: list[dict[str, Any]] = []
     price_as_of_dates: set[str] = set()
@@ -614,6 +628,19 @@ def _apply_price_snapshot(
 
 def _apply_cumulative_change(enriched_item: dict[str, Any], baseline_item: dict[str, Any] | None) -> None:
     current_price = enriched_item.get("current_price")
+    # baseline_item 이 None 이고 enriched_item 에 이미 baseline_price 가 있으면 보존한다.
+    # (component_prices_updater 배치가 미리 박아둔 값을 ticker_detail 의 external_fetch_enabled=False
+    # 흐름에서 그대로 사용하기 위함. cumulative_change_pct 는 현재가/baseline 으로 재계산.)
+    if not isinstance(baseline_item, dict) and enriched_item.get("baseline_price") is not None:
+        try:
+            base_val = float(enriched_item["baseline_price"])
+            current_val = float(current_price) if current_price is not None else None
+        except (TypeError, ValueError):
+            base_val = None
+            current_val = None
+        if base_val and base_val > 0 and current_val is not None:
+            enriched_item["cumulative_change_pct"] = ((current_val / base_val) - 1.0) * 100.0
+        return
     baseline_price = baseline_item.get("price") if isinstance(baseline_item, dict) else None
     if baseline_price is None or current_price is None:
         enriched_item["baseline_price"] = None
