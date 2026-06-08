@@ -125,12 +125,11 @@ function formatDurationSeconds(seconds: number): string {
 }
 
 function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, nowMs: number): string {
-  // 다른 인스턴스(예: 서버 scheduler)가 락을 잡고 있어도 진행률은 동일하게 표시한다.
-  // 진행률 데이터(started_at, estimated_seconds 등)는 batch_locks 에서 공유되므로
-  // 인스턴스 무관하게 보일 수 있다. owner 라벨만 추가로 붙인다.
+  // 어느 인스턴스(서버 scheduler / 로컬 worker)가 처리 중인지를 항상 표시한다.
+  // owner_app_type 이 있으면 is_mine 여부와 무관하게 [SERVER] / [LOCAL] 라벨을 붙인다.
   const ownerLabel =
-    detail && detail.is_mine === false
-      ? `[${(detail.owner_app_type ?? "다른 인스턴스").toUpperCase()}] `
+    detail && detail.owner_app_type
+      ? `[${detail.owner_app_type.toUpperCase()}] `
       : "";
 
   const estimatedSeconds = detail?.estimated_seconds;
@@ -464,10 +463,33 @@ export function SystemManager({
                 },
               }}
             />
-            {scheduleNote ? <div className="tableFooterMeta">{scheduleNote}</div> : null}
-            <div className="tableFooterMeta">
-              배치 실행이 30분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.
-            </div>
+            {(() => {
+              // 백엔드 schedule_note 한 문장 + 30분 timeout 안내 한 문장.
+              // 모두 한국어 문장이라 "다. " 단위로 split 하여 한 문장 한 줄로 표시.
+              const timeoutLine = "배치 실행이 30분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.";
+              const combined = scheduleNote ? `${scheduleNote} ${timeoutLine}` : timeoutLine;
+              // "다. " 뒤에서 split 후 종결 마침표 복원.
+              const sentences = combined
+                .split(/(?<=다\.) +/)
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0);
+              return (
+                <div
+                  className="tableFooterMeta"
+                  style={{
+                    color: "#000",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                    lineHeight: 1.6,
+                  }}
+                >
+                  {sentences.map((line, idx) => (
+                    <div key={idx}>{line}</div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       </section>
