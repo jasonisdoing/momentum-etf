@@ -382,8 +382,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       return (
         <span className="appCodeText">
           {badge}
-          {params.value}
           {cancelBtn}
+          {params.value}
         </span>
       );
     },
