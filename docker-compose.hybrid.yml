@@ -50,5 +50,5 @@ services:
       - ./accounts.json:/app/accounts.json:ro
       - ./logs:/app/logs   # 배치 로그를 호스트에 영구 저장
       - ./data:/app/data   # 캘린더/정적 데이터 공유
-    command: ["python", "-u", "run_local_scheduler.py"]
+    command: ["python", "-u", "run_scheduler.py"]
     restart: unless-stopped

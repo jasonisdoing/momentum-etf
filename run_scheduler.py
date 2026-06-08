@@ -1,20 +1,30 @@
 #!/usr/bin/env python3
-"""로컬(Mac) 배치 스케줄러.
+"""배치 스케줄러 / 큐 워커 (서버·로컬 공용).
 
-`run_local_dev.py` 와는 별도 프로세스로 실행하여, VM 의 cron 을 대체한다.
-배치 정의는 `infra/cron/crontab` 파일을 단일 진실 소스(single source of truth)
-로 읽어들이고, APScheduler 로 등록한다.
+역할 두 가지를 APP_TYPE 환경변수로 분리한다:
+
+  1) cron 스케줄러 (enqueue) — APP_TYPE=Server 일 때만 활성.
+     `infra/cron/crontab` 을 단일 진실 소스로 APScheduler 에 등록해
+     정해진 시각마다 batch_queue 에 작업을 추가한다.
+
+  2) 큐 워커 (claim) — 항상 활성.
+     batch_queue 의 pending 항목을 FIFO 로 한 건씩 atomic 하게 claim 해서
+     실제 배치를 실행한다.
+
+배치 흐름:
+  - 서버 docker scheduler 컨테이너: cron + worker 둘 다 동작 (APP_TYPE=Server)
+  - 로컬 사용자가 `python run_scheduler.py` 실행: worker 만 동작 (APP_TYPE=Local)
+  - 로컬이 켜져 있으면 로컬·서버 둘 다 worker 가 큐를 경쟁적으로 claim →
+    먼저 가져간 쪽이 처리. MongoDB find_one_and_update 가 동시성 보장.
+  - 로컬이 꺼져 있어도 서버 worker 가 모든 작업을 처리한다.
 
 사용법:
-    터미널1:  python run_local_dev.py        # 웹 (FastAPI + Next dev)
-    터미널2:  python run_local_scheduler.py  # 배치
+    터미널1:  python run_local_dev.py     # 웹 (FastAPI + Next dev)
+    터미널2:  python run_scheduler.py     # 큐 워커 (선택)
 
 특징:
   • crontab 파일을 그대로 파싱 — 주석(`#`, `# PAUSED`)은 모두 활성으로 간주.
-    (VM 에서는 cron 비활성 표시였으나, 로컬에서는 이 파일 자체가 활성 정의로 동작)
-  • APP_TYPE 환경변수가 "Local" 로 설정되어 batch_locks 의 owner 식별이 가능.
   • 노트북이 꺼져 있는 시각의 미실행 분은 무시(misfire_grace_time=0).
-  • 시작 시 즉시 실행은 하지 않음. 다음 예약 시각부터 동작.
   • Ctrl+C 로 깔끔히 종료.
 """
 
@@ -279,28 +289,38 @@ def main() -> int:
         log.error("run_batch.py 를 찾을 수 없습니다: %s", RUN_BATCH)
         return 1
 
+    # APP_TYPE 정책:
+    #   - Server: cron 트리거 활성 (enqueue) + worker 활성 (claim)
+    #   - 그 외(Local 등): cron 트리거 비활성, worker 만 활성
+    # 환경변수가 없으면 Local 로 간주해 cron 트리거를 띄우지 않는다.
+    # 이렇게 하면 로컬에서 실행해도 cron 중복 트리거 위험이 없다.
     os.environ.setdefault("APP_TYPE", "Local")
+    app_type = str(os.environ.get("APP_TYPE") or "Local").strip()
+    enable_scheduler = app_type.lower() == "server"
 
-    jobs = _parse_crontab(CRONTAB_FILE)
-    if not jobs:
-        log.warning("등록할 배치가 없습니다. crontab 파일을 확인하세요: %s", CRONTAB_FILE)
-        return 1
-
-    sched = BackgroundScheduler(timezone=KST)
-    for cron_expr, job_name, script_path in jobs:
-        trigger = _build_trigger(cron_expr)
-        sched.add_job(
-            _enqueue_from_schedule,
-            trigger=trigger,
-            args=(job_name, script_path),
-            id=job_name,
-            name=job_name,
-            misfire_grace_time=None,  # 노트북 꺼져있던 시간은 따라잡지 않음
-            coalesce=True,
-            max_instances=1,
-            replace_existing=True,
-        )
-        log.info("등록: %-25s  cron=\"%s\"  script=%s", job_name, cron_expr, script_path)
+    sched: BackgroundScheduler | None = None
+    if enable_scheduler:
+        jobs = _parse_crontab(CRONTAB_FILE)
+        if not jobs:
+            log.warning("등록할 배치가 없습니다. crontab 파일을 확인하세요: %s", CRONTAB_FILE)
+            return 1
+        sched = BackgroundScheduler(timezone=KST)
+        for cron_expr, job_name, script_path in jobs:
+            trigger = _build_trigger(cron_expr)
+            sched.add_job(
+                _enqueue_from_schedule,
+                trigger=trigger,
+                args=(job_name, script_path),
+                id=job_name,
+                name=job_name,
+                misfire_grace_time=None,  # 노트북 꺼져있던 시간은 따라잡지 않음
+                coalesce=True,
+                max_instances=1,
+                replace_existing=True,
+            )
+            log.info("등록: %-25s  cron=\"%s\"  script=%s", job_name, cron_expr, script_path)
+    else:
+        log.info("cron 스케줄러 비활성 — APP_TYPE=%s (worker 만 동작)", app_type)
 
     stop_event = threading.Event()
     worker_thread = threading.Thread(
@@ -310,17 +330,21 @@ def main() -> int:
     def _shutdown(signum: int, _frame) -> None:
         log.info("신호 %s 수신 — 스케줄러/워커 종료", signum)
         stop_event.set()
-        try:
-            sched.shutdown(wait=False)
-        except Exception:
-            pass
+        if sched is not None:
+            try:
+                sched.shutdown(wait=False)
+            except Exception:
+                pass
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    log.info("로컬 스케줄러 시작 (등록 %d건, APP_TYPE=Local)", len(jobs))
+    if sched is not None:
+        log.info("스케줄러 시작 (cron+worker, APP_TYPE=%s)", app_type)
+        sched.start()
+    else:
+        log.info("worker 단독 시작 (APP_TYPE=%s) — 큐만 처리, cron 트리거 없음", app_type)
     log.info("종료: Ctrl+C")
-    sched.start()
     worker_thread.start()
 
     try:
