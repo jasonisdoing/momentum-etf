@@ -452,6 +452,9 @@ export function SystemManager({
               }}
             />
             {scheduleNote ? <div className="tableFooterMeta">{scheduleNote}</div> : null}
+            <div className="tableFooterMeta">
+              배치 실행이 30분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.
+            </div>
           </div>
         </div>
       </section>

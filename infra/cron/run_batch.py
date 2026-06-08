@@ -31,9 +31,10 @@ from zoneinfo import ZoneInfo
 KST = ZoneInfo("Asia/Seoul")
 
 # 배치 실행 절대 상한 (초). 외부 API hang / 무한 루프로 인한 무한 대기 방지.
-# 정상 배치는 가장 큰 가격 캐시도 10분 안에 끝남. 2시간(7200s) = 정상의 ~20배.
+# 정상 배치(가격 캐시 / 메타 등)는 가장 큰 것도 최대 10분 안에 끝남.
+# 30분(1800s) = 정상의 ~3배 — 진짜 hang 만 잡고 정상 작업은 영향 없는 마진.
 # 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
-BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 7200)
+BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1800)
 
 # 프로젝트 루트를 파이썬 경로에 추가 (컨테이너 WORKDIR=/app)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
