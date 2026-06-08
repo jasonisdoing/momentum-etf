@@ -2,7 +2,7 @@
 """서버 docker scheduler 컨테이너의 entrypoint (cron + 큐 워커).
 
 이 파일은 **서버 전용**이다. 사용자가 직접 실행할 일은 없다.
-배포 흐름에서 `docker-compose.hybrid.yml` 의 `scheduler` 서비스가
+배포 흐름에서 `docker-compose.yml` 의 `scheduler` 서비스가
 `command: ["python", "-u", "infra/server_scheduler.py"]` 로 띄운다.
 
 역할:
