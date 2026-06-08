@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -99,15 +100,25 @@ def claim_next_pending() -> dict[str, Any] | None:
     """가장 오래된 pending 1건을 원자적으로 running 으로 변경하고 반환.
 
     동시 워커 안전 (find_one_and_update 사용).
+    워커를 실행 중인 인스턴스의 APP_TYPE 도 함께 기록해 시스템 UI 에서
+    "어느 인스턴스가 처리 중인지" 식별 가능하게 한다 (락이 만료된 장시간 작업도 인식).
     """
     db = get_db_connection()
     if db is None:
         return None
     coll = db[BATCH_QUEUE_COLLECTION]
     now = _now_utc()
+    worker_app_type = (os.environ.get("APP_TYPE") or "").strip() or "Server"
     return coll.find_one_and_update(
         {"status": STATUS_PENDING},
-        {"$set": {"status": STATUS_RUNNING, "started_at": now, "last_heartbeat": now}},
+        {
+            "$set": {
+                "status": STATUS_RUNNING,
+                "started_at": now,
+                "last_heartbeat": now,
+                "app_type": worker_app_type,
+            }
+        },
         sort=[("triggered_at", 1)],
         return_document=True,  # type: ignore[arg-type]
     )
