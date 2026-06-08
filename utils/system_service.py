@@ -481,7 +481,14 @@ def get_running_jobs() -> list[str]:
 
 
 def get_running_job_details() -> dict[str, dict[str, object]]:
-    """실행 중인 배치별 시작 시각, 예상 소요시간, 락 소유 인스턴스 정보를 반환한다."""
+    """실행 중인 배치별 시작 시각, 예상 소요시간, 인스턴스 정보를 반환한다.
+
+    두 소스를 합쳐서 본다:
+      1) batch_locks — 락이 살아있는 작업 (정상 흐름)
+      2) batch_queue status=running — 장시간 작업이라 락이 만료됐지만
+         heartbeat 가 살아있는 작업 (락 만료 후에도 worker 가 계속 처리 중)
+    같은 key 가 양쪽에 있으면 batch_locks 정보를 우선한다.
+    """
     try:
         from utils.db_manager import get_db_connection
 
@@ -492,6 +499,8 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
         now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
         my_app_type = (os.environ.get("APP_TYPE") or "PROD").strip() or "PROD"
         details: dict[str, dict[str, object]] = {}
+
+        # 1) batch_locks 기반 (락이 살아있는 작업)
         for doc in db.batch_locks.find(
             {}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}
         ):
@@ -530,6 +539,61 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                 "owner_app_type": owner_app_type,
                 "is_mine": is_mine,
             }
+
+        # 2) batch_queue 의 running 항목 (락 만료된 장시간 작업도 표시)
+        # heartbeat 가 최근 3분 안에 갱신된 것만 살아있다고 간주한다.
+        try:
+            heartbeat_threshold = now_utc_naive - timedelta(minutes=3)
+            for doc in db.batch_queue.find(
+                {"status": "running"},
+                {"_id": 0, "job_name": 1, "started_at": 1, "last_heartbeat": 1, "app_type": 1},
+            ):
+                key = str(doc.get("job_name") or "")
+                if not key or key not in _SCRIPT_BY_ACTION:
+                    continue
+                if key in details:
+                    continue  # batch_locks 정보 우선
+                last_heartbeat = doc.get("last_heartbeat")
+                if isinstance(last_heartbeat, datetime):
+                    hb_utc = (
+                        last_heartbeat.astimezone(timezone.utc).replace(tzinfo=None)
+                        if last_heartbeat.tzinfo
+                        else last_heartbeat
+                    )
+                    if hb_utc < heartbeat_threshold:
+                        continue  # 죽은 heartbeat — 표시하지 않음
+                started_raw = doc.get("started_at")
+                queue_started_at: datetime | None = None
+                if isinstance(started_raw, datetime):
+                    queue_started_at = (
+                        started_raw.astimezone(ZoneInfo("Asia/Seoul"))
+                        if started_raw.tzinfo
+                        else started_raw.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+                    )
+                q_estimated_seconds = _read_average_job_elapsed_seconds(key)
+                q_elapsed_seconds = (
+                    max(0, int((now_kst - queue_started_at).total_seconds())) if queue_started_at else None
+                )
+                q_remaining_seconds = (
+                    max(0, int(round(q_estimated_seconds)) - int(q_elapsed_seconds))
+                    if q_estimated_seconds is not None and q_elapsed_seconds is not None
+                    else None
+                )
+                owner_app_type = (str(doc.get("app_type") or "") or "Server").strip()
+                is_mine = owner_app_type.lower() == my_app_type.lower()
+                details[key] = {
+                    "started_at": queue_started_at.isoformat() if queue_started_at else None,
+                    "estimated_seconds": int(round(q_estimated_seconds)) if q_estimated_seconds is not None else None,
+                    "elapsed_seconds": q_elapsed_seconds,
+                    "remaining_seconds": q_remaining_seconds,
+                    "estimated_display": _format_duration_seconds(q_estimated_seconds),
+                    "remaining_display": _format_duration_seconds(q_remaining_seconds),
+                    "owner_app_type": owner_app_type,
+                    "is_mine": is_mine,
+                }
+        except Exception as exc:
+            _logger.warning("batch_queue running 조회 실패: %s", exc)
+
         return details
     except Exception as exc:
         _logger.warning("batch_locks 상세 조회 실패: %s", exc)
