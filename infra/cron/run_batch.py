@@ -36,6 +36,24 @@ KST = ZoneInfo("Asia/Seoul")
 # 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
 BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1800)
 
+
+def _format_duration(seconds: float) -> str:
+    """초 → 사람이 읽기 쉬운 표시. 예: 1800 → '30분', 75 → '1분 15초', 45 → '45초'."""
+    total = max(0, int(round(seconds)))
+    if total < 60:
+        return f"{total}초"
+    if total < 3600:
+        m, s = divmod(total, 60)
+        return f"{m}분 {s}초" if s else f"{m}분"
+    h, rem = divmod(total, 3600)
+    m, s = divmod(rem, 60)
+    parts = [f"{h}시간"]
+    if m:
+        parts.append(f"{m}분")
+    if s:
+        parts.append(f"{s}초")
+    return " ".join(parts)
+
 # 프로젝트 루트를 파이썬 경로에 추가 (컨테이너 WORKDIR=/app)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -205,7 +223,7 @@ def main(argv: list[str]) -> int:
         _notify(
             f"⏰ *[{app_label}] 배치 타임아웃*: `{job_name}`\n"
             f"• 시작: {started_at}\n"
-            f"• 소요: {elapsed:.1f}s (제한 {BATCH_TIMEOUT_SECONDS}s)\n"
+            f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(BATCH_TIMEOUT_SECONDS)})\n"
             f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
         )
         print(timeout_line, file=sys.stderr)
