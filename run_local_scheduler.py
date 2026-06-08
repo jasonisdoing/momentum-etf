@@ -36,7 +36,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 ROOT_DIR = Path(__file__).resolve().parent
-PYTHON_BIN = ROOT_DIR / ".venv" / "bin" / "python"
+# subprocess 로 배치를 띄울 때 사용할 python 인터프리터.
+# 로컬(.venv) 와 컨테이너(/opt/venv) 모두 sys.executable 이 정답이라 그것을 기본값으로.
+# 명시적으로 다른 인터프리터를 강제하고 싶을 때만 SCHEDULER_PYTHON_BIN 으로 override.
+PYTHON_BIN = Path(os.environ.get("SCHEDULER_PYTHON_BIN") or sys.executable)
 CRONTAB_FILE = ROOT_DIR / "infra" / "cron" / "crontab"
 RUN_BATCH = ROOT_DIR / "infra" / "cron" / "run_batch.py"
 
