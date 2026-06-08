@@ -44,9 +44,8 @@ _FX_SYMBOL_BY_CURRENCY = {
 def _build_snapshot_from_cached_holdings(holdings: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     """holdings_cache.items 에 component_prices_updater 가 미리 박아둔 가격을 snapshot 으로 변환.
 
-    enrich_component_prices 의 component_price_snapshot 인자에 그대로 전달하면 외부 API
-    호출이 우회된다. current_price 가 없는 항목은 snapshot 에 들어가지 않으므로 그런
-    항목만 enrich 가 외부에서 조회한다 (혼합 동작 안전).
+    enrich_component_prices(external_fetch_enabled=False) 와 함께 사용해 외부 API 호출 0 으로
+    실행한다. current_price 가 없는 항목은 snapshot 에 안 들어가고 → 화면에 0/− 으로 표시된다.
     """
     from services.component_price_service import _component_price_key, _is_cash_like_holding
 
@@ -596,10 +595,9 @@ def compute_portfolio_change_bundle(
                 }
             return persisted
 
-    # holdings_cache.items 에 component_prices_updater 배치가 미리 채워둔 가격이 있으면
-    # 그것을 snapshot 으로 전달해 enrich 가 외부 API 호출(토스/네이버/야후 등)을 우회한다.
-    # 호출자가 명시적으로 snapshot 을 전달했으면 그것을 우선한다 (예: 같은 화면 안에서
-    # 가격을 한 번만 갱신하고 여러 ETF 에 분배하는 케이스).
+    # ticker_detail 흐름은 component_prices_updater 배치가 holdings_cache.items 에 미리
+    # 박아둔 가격 + baseline 만 사용한다. 외부 API 호출은 일절 하지 않는다 (silent fallback 금지).
+    # 캐시가 없는 항목은 가격이 None — 화면에서 0/− 으로 표시된다.
     effective_snapshot = (
         component_price_snapshot
         if component_price_snapshot is not None
@@ -610,6 +608,7 @@ def compute_portfolio_change_bundle(
         price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
         cumulative_base_date=base_date,
         component_price_snapshot=effective_snapshot,
+        external_fetch_enabled=False,
     )
     rates = get_exchange_rates()
     # 합계 계산은 base_date 이후 누적 변동을 사용하므로 환율도 누적률을 적용한다.

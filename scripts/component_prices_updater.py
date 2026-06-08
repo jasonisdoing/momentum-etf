@@ -31,6 +31,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.component_price_service import enrich_component_prices
+from services.portfolio_change_service import determine_portfolio_change_base_date
 from services.stock_cache_service import refresh_stock_holdings_cache
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
@@ -79,16 +80,20 @@ def update_component_prices() -> dict[str, int]:
         processed += 1
 
         try:
-            # cumulative_base_date 는 ticker_detail 이 결정하는 값이라 여기선 빈값.
-            # 우리는 current_price/previous_close/change_pct 만 채우면 된다.
+            # ETF 의 base_date 를 결정해 baseline_price 도 같이 박는다.
+            # ticker_detail 은 외부 API 호출 없이 캐시된 가격 + baseline 으로 변동률을 계산한다.
+            base_date = determine_portfolio_change_base_date(ticker_type, ticker)
             priced_items, price_as_of_date = enrich_component_prices(
                 holdings_items,
                 price_fetch_limit=None,  # 전 종목 처리
+                cumulative_base_date=base_date,
             )
             holdings_cache["items"] = priced_items
             holdings_cache["price_updated_at"] = datetime.now(ZoneInfo("Asia/Seoul")).isoformat()
             if price_as_of_date:
                 holdings_cache["price_as_of_date"] = price_as_of_date
+            if base_date:
+                holdings_cache["base_date"] = base_date
             refresh_stock_holdings_cache(
                 ticker_type,
                 ticker,
