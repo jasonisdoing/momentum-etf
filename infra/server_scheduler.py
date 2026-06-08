@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
-"""배치 스케줄러 / 큐 워커 (서버·로컬 공용).
+"""서버 docker scheduler 컨테이너의 entrypoint (cron + 큐 워커).
 
-역할 두 가지를 APP_TYPE 환경변수로 분리한다:
+이 파일은 **서버 전용**이다. 사용자가 직접 실행할 일은 없다.
+배포 흐름에서 `docker-compose.hybrid.yml` 의 `scheduler` 서비스가
+`command: ["python", "-u", "infra/server_scheduler.py"]` 로 띄운다.
 
-  1) cron 스케줄러 (enqueue) — APP_TYPE=Server 일 때만 활성.
-     `infra/cron/crontab` 을 단일 진실 소스로 APScheduler 에 등록해
-     정해진 시각마다 batch_queue 에 작업을 추가한다.
+역할:
+  1) cron 스케줄러 (enqueue) — `infra/cron/crontab` 을 APScheduler 에 등록해
+     정해진 시각마다 batch_queue 에 작업을 추가.
+  2) 큐 워커 (claim) — batch_queue 의 pending 을 FIFO 로 한 건씩
+     atomic 하게 claim 해서 실제 배치 실행.
 
-  2) 큐 워커 (claim) — 항상 활성.
-     batch_queue 의 pending 항목을 FIFO 로 한 건씩 atomic 하게 claim 해서
-     실제 배치를 실행한다.
+환경변수:
+  • APP_TYPE: 서버 컨테이너는 `Server` (compose 가 자동 설정).
+    Server 일 때 cron 활성. 그 외(Local 등)면 cron 비활성, worker 만.
 
-배치 흐름:
-  - 서버 docker scheduler 컨테이너: cron + worker 둘 다 동작 (APP_TYPE=Server)
-  - 로컬 사용자가 `python run_scheduler.py` 실행: worker 만 동작 (APP_TYPE=Local)
-  - 로컬이 켜져 있으면 로컬·서버 둘 다 worker 가 큐를 경쟁적으로 claim →
-    먼저 가져간 쪽이 처리. MongoDB find_one_and_update 가 동시성 보장.
-  - 로컬이 꺼져 있어도 서버 worker 가 모든 작업을 처리한다.
+로컬 환경:
+  사용자는 `python run_local_dev.py` 한 명령으로 fastapi + next + worker
+  를 한 번에 띄운다. cron 은 서버에서만 동작.
 
-사용법:
-    터미널1:  python run_local_dev.py     # 웹 (FastAPI + Next dev)
-    터미널2:  python run_scheduler.py     # 큐 워커 (선택)
+큐 동시성:
+  서버 worker + 로컬 worker 가 동시에 큐를 polling 해도 MongoDB
+  `find_one_and_update` 가 한 곳에서만 작업을 claim 하도록 보장.
 
 특징:
   • crontab 파일을 그대로 파싱 — 주석(`#`, `# PAUSED`)은 모두 활성으로 간주.
   • 노트북이 꺼져 있는 시각의 미실행 분은 무시(misfire_grace_time=0).
-  • Ctrl+C 로 깔끔히 종료.
+  • Ctrl+C / SIGTERM 으로 깔끔히 종료.
 """
 
 from __future__ import annotations
@@ -45,7 +46,8 @@ from zoneinfo import ZoneInfo
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-ROOT_DIR = Path(__file__).resolve().parent
+# 이 파일이 `infra/` 아래에 있으므로 두 단계 위가 프로젝트 루트.
+ROOT_DIR = Path(__file__).resolve().parents[1]
 # subprocess 로 배치를 띄울 때 사용할 python 인터프리터.
 # 로컬(.venv) 와 컨테이너(/opt/venv) 모두 sys.executable 이 정답이라 그것을 기본값으로.
 # 명시적으로 다른 인터프리터를 강제하고 싶을 때만 SCHEDULER_PYTHON_BIN 으로 override.

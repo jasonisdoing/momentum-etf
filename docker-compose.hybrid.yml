@@ -36,11 +36,10 @@ services:
     restart: unless-stopped
 
   # 배치 스케줄러 — infra/cron/crontab 을 단일 진실 소스로 APScheduler 가 등록.
-  # fastapi 이미지를 그대로 재사용해 의존성/코드 일관성 유지. command 만 다르게.
+  # fastapi 와 동일한 ghcr 이미지를 재사용한다 (command 만 다름).
+  # CI/CD 가 fastapi 이미지를 빌드/푸시할 때 같이 적용되므로 별도 build 단계 불필요.
   scheduler:
-    build:
-      context: .
-      dockerfile: Dockerfile.fastapi
+    image: ghcr.io/jasonisdoing/momentum-etf-fastapi:latest
     env_file:
       - .env
     environment:
@@ -50,5 +49,5 @@ services:
       - ./accounts.json:/app/accounts.json:ro
       - ./logs:/app/logs   # 배치 로그를 호스트에 영구 저장
       - ./data:/app/data   # 캘린더/정적 데이터 공유
-    command: ["python", "-u", "run_scheduler.py"]
+    command: ["python", "-u", "infra/server_scheduler.py"]
     restart: unless-stopped

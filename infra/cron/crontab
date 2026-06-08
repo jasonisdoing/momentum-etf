@@ -2,16 +2,16 @@
 #
 # ⚠️ 운영 방식 변경 (2026-05 이후):
 #   VM (1 OCPU ARM) 의 CPU 100% 다운 이슈로 VM cron 은 제거되었고,
-#   모든 배치는 로컬(Mac) 의 `run_scheduler.py` 에서 실행한다.
+#   모든 배치는 로컬(Mac) 의 `infra/server_scheduler.py` 에서 실행한다.
 #   이 파일은 더 이상 VM 의 crontab 에 설치되지 않으며, 로컬 스케줄러가
 #   배치 정의를 읽기 위한 단일 진실 소스(single source of truth) 로 쓰인다.
 #
 # 로컬 실행:
 #   터미널1:  python run_local_dev.py        # 웹 (FastAPI + Next dev)
-#   터미널2:  python run_scheduler.py  # 배치 스케줄러
+#   터미널2:  python infra/server_scheduler.py  # 배치 스케줄러
 #
 # 동작 원리:
-#   `run_scheduler.py` 가 이 파일을 파싱하여 APScheduler 에 등록한다.
+#   `infra/server_scheduler.py` 가 이 파일을 파싱하여 APScheduler 에 등록한다.
 #   각 라인은 `docker compose exec -T fastapi_app python` 부분이 제거된
 #   뒤 호스트 venv 의 python 으로 직접 실행된다.
 #
