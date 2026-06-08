@@ -20,10 +20,15 @@
 
 from __future__ import annotations
 
+import os
+import sys
 import time
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
+
+# 프로젝트 루트를 Python 경로에 추가 (scripts/ 안의 다른 스크립트와 동일한 패턴)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from services.component_price_service import enrich_component_prices
 from services.stock_cache_service import refresh_stock_holdings_cache
