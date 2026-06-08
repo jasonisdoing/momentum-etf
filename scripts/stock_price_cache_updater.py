@@ -492,7 +492,14 @@ def refresh_cache_for_target(
                 )
 
         def _process_one(idx: int, etf_item: dict) -> tuple[bool, str, str]:
-            """단일 종목 처리. 반환: (성공여부, ticker, log_message)."""
+            """단일 종목 처리. 반환: (성공여부, ticker, log_message).
+
+            KOR 풀(pykrx 사용)은 KRX 가 단위 시간당 호출 빈도로 IP 차단을 거는 듯하다.
+            서버처럼 응답이 너무 빠른 환경(종목당 ~0.1s)에서는 30종목 즈음 차단되어 hang
+            상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_MS, 기본 300ms) 미만으로
+            끝났을 때 부족분만큼 동적으로 sleep 한다. 로컬처럼 자연 소요가 충분히 느린
+            환경(0.3s 이상)은 영향이 없다.
+            """
             t = str(etf_item.get("ticker") or "").strip().upper()
             n = etf_item.get("name") or "-"
             started = time.perf_counter()
@@ -504,12 +511,29 @@ def refresh_cache_for_target(
                     account_id=target_norm,
                 )
                 elapsed = time.perf_counter() - started
+
+                # KOR 풀에만 동적 sleep — 부족분만큼 채워 호출 빈도를 늦춘다.
+                sleep_secs = 0.0
+                if country_code == "kor":
+                    target = max(0.0, float(os.environ.get("KOR_FETCH_TARGET_MS") or 300) / 1000.0)
+                    sleep_secs = max(0.0, target - elapsed)
+                    if sleep_secs > 0:
+                        time.sleep(sleep_secs)
+                sleep_suffix = f" + {sleep_secs:.1f}s 대기(속도조절)" if sleep_secs > 0 else ""
+
                 if unresolved_days:
                     unresolved_text = ", ".join(day.strftime("%Y-%m-%d") for day in unresolved_days)
-                    msg = f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t}) - 최근 거래일 누락 유지: {unresolved_text} | 소요 {elapsed:.1f}s"
+                    msg = (
+                        f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t})"
+                        f" - 최근 거래일 누락 유지: {unresolved_text}"
+                        f" | 소요 {elapsed:.1f}s{sleep_suffix}"
+                    )
                     logger.warning(msg)
                 else:
-                    msg = f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t}) | 소요 {elapsed:.1f}s"
+                    msg = (
+                        f" -> 가격 캐시 갱신 완료: {idx}/{total_tickers} - {n}({t})"
+                        f" | 소요 {elapsed:.1f}s{sleep_suffix}"
+                    )
                     logger.info(msg)
                 return True, t, msg
             except PykrxDataUnavailableError as e:
