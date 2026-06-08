@@ -30,6 +30,11 @@ from zoneinfo import ZoneInfo
 
 KST = ZoneInfo("Asia/Seoul")
 
+# 배치 실행 절대 상한 (초). 외부 API hang / 무한 루프로 인한 무한 대기 방지.
+# 정상 배치는 가장 큰 가격 캐시도 10분 안에 끝남. 2시간(7200s) = 정상의 ~20배.
+# 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
+BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 7200)
+
 # 프로젝트 루트를 파이썬 경로에 추가 (컨테이너 WORKDIR=/app)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -177,7 +182,34 @@ def main(argv: list[str]) -> int:
             capture_output=True,
             text=True,
             check=False,
+            # 외부 API hang 등 무한 대기 방지. timeout 초과 시 자식 프로세스에
+            # 자동으로 SIGKILL 이 전달되고 TimeoutExpired 가 raise 된다.
+            timeout=BATCH_TIMEOUT_SECONDS,
         )
+    except subprocess.TimeoutExpired as exc:
+        elapsed = time.monotonic() - started_monotonic
+        timeout_line = (
+            f"[run_batch] TIMEOUT job={job_name} elapsed={elapsed:.1f}s "
+            f"limit={BATCH_TIMEOUT_SECONDS}s — 자식 프로세스 SIGKILL 처리됨"
+        )
+        _append_log_line(job_name, timeout_line)
+        # 자식 stdout 일부 (디버깅용)
+        try:
+            tail_stdout = (exc.stdout or "")[-2000:] if isinstance(exc.stdout, str) else ""
+            if tail_stdout:
+                _append_log_line(job_name, f"[run_batch] TIMEOUT stdout tail: {tail_stdout}")
+        except Exception:
+            pass
+        app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
+        _notify(
+            f"⏰ *[{app_label}] 배치 타임아웃*: `{job_name}`\n"
+            f"• 시작: {started_at}\n"
+            f"• 소요: {elapsed:.1f}s (제한 {BATCH_TIMEOUT_SECONDS}s)\n"
+            f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
+        )
+        print(timeout_line, file=sys.stderr)
+        _release_db_lock(db_lock)
+        return 124  # 표준 timeout exit code (Linux timeout(1) 호환)
     except FileNotFoundError as exc:
         elapsed = time.monotonic() - started_monotonic
         fail_line = f"[run_batch] FAIL {exc}"
