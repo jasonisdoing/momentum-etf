@@ -1,7 +1,9 @@
 """배치 작업 큐 (MongoDB `batch_queue`).
 
 설계 결정:
-    - 단일 워커가 FIFO 로 직렬 처리 (로컬의 run_local_scheduler 안에서 동작)
+    - 단일 작업 단위 FIFO 직렬 처리. 워커는 서버·로컬 다중 인스턴스 가능
+      (`run_scheduler.py` 의 worker thread). MongoDB find_one_and_update 로
+      동시 claim 안전.
     - 중복 enqueue 무시 (같은 job_name 이 pending/running 이면 추가 안 함)
     - 24시간 TTL — 워커가 꺼져 있는 동안 무한 누적되는 것 방지
     - heartbeat: 워커가 30초마다 last_heartbeat 갱신

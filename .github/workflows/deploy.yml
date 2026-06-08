@@ -124,7 +124,7 @@ jobs:
             sudo docker compose up -d --no-deps hybrid_proxy
             # 이미지 정리는 배포 중 CPU/디스크 I/O 피크를 만들기 때문에 배포 경로에서는 실행하지 않는다.
             # ⚠️ VM cron 자동 설치 비활성화. 모든 momentum-etf 자동 배치는 로컬(Mac) 의
-            # run_local_scheduler.py 에서 실행되므로 VM crontab 에 항목을 두지 않는다.
+            # run_scheduler.py 에서 실행되므로 VM crontab 에 항목을 두지 않는다.
             # 과거: bash infra/cron/install.sh (VM 1 OCPU 부하로 비활성)
             echo ">>> Oracle VM deployment completed."
 
