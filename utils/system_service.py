@@ -36,14 +36,6 @@ _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 # 서버와 로컬(`python infra/server_scheduler.py`) 양쪽에서 큐를 atomic 하게 claim 합니다.
 SCHEDULE_ROWS = [
     {
-        "key": "asset_summary",
-        "job": "전체 자산 요약 알림",
-        "target": "전체 계좌",
-        "cadence": "평일 09:40, 16:40 KST",
-        "command": "python scripts/slack_asset_summary.py",
-        "schedule": {"minutes": [40], "hours": [9, 16], "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
         "key": "data_aggregate",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
@@ -54,6 +46,14 @@ SCHEDULE_ROWS = [
             "hours": list(range(9, 17)),
             "weekdays": _WEEKDAYS_MON_FRI,
         },
+    },
+    {
+        "key": "asset_summary",
+        "job": "전체 자산 요약 알림",
+        "target": "전체 계좌",
+        "cadence": "평일 09:40, 16:40 KST",
+        "command": "python scripts/slack_asset_summary.py",
+        "schedule": {"minutes": [40], "hours": [9, 16], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "cache_refresh",
