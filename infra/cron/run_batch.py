@@ -70,7 +70,6 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "market_hours_analysis",
     "us_market_stocks",
     "data_aggregate",
-    "component_prices_updater",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
