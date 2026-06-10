@@ -90,6 +90,28 @@ TREND_OFFSETS_DAYS = {
 }
 
 
+def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] | None:
+    """yfinance intraday 1m 으로 오늘 ET 거래일의 가장 최근 종가를 반환.
+
+    Yahoo Finance daily 데이터가 정규장 마감 후에도 수시간~다음날까지 갱신되지 않는
+    지연이 종종 발생한다 (관측: KST 2026-06-10 시점 ET 6월 9일 row 가 NaN). 그 경우
+    intraday 1분봉은 정상 마감가가 들어와 있으므로, 그 값으로 daily 마지막을 보강한다.
+
+    실패 시 None — 호출자는 보강 없이 기존 daily 시리즈를 그대로 사용한다.
+    """
+    try:
+        df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
+    except Exception as exc:
+        logger.warning("intraday 보강 호출 실패 (%s): %s", yf_ticker, exc)
+        return None
+    if df is None or df.empty or "Close" not in df.columns:
+        return None
+    close = df["Close"].dropna()
+    if close.empty:
+        return None
+    return pd.Timestamp(close.index[-1]), float(close.iloc[-1])
+
+
 def _to_float(value: Any) -> float | None:
     try:
         result = float(value)
@@ -207,6 +229,30 @@ def _build_item(
                 return base
         except Exception:
             return base
+
+        # 미국 인덱스의 daily 마지막 종가가 Yahoo daily 갱신 지연으로 누락된 경우,
+        # intraday 1분봉 마감가로 보강한다. (한국 인덱스는 네이버라서 적용 안 함.)
+        intraday = _fetch_yf_intraday_last_close(yf_ticker)
+        if intraday is not None and close_series is not None and not close_series.empty:
+            try:
+                intraday_ts, intraday_close = intraday
+                intraday_date = (
+                    intraday_ts.tz_convert(None).normalize()
+                    if intraday_ts.tz is not None
+                    else intraday_ts.normalize()
+                )
+                last_ts = pd.Timestamp(close_series.index[-1])
+                last_date = (
+                    last_ts.tz_convert(None).normalize()
+                    if last_ts.tz is not None
+                    else last_ts.normalize()
+                )
+                if intraday_date > last_date:
+                    close_series = pd.concat(
+                        [close_series, pd.Series([intraday_close], index=[intraday_date])]
+                    )
+            except Exception as exc:
+                logger.warning("intraday 보강 머지 실패 (%s): %s", yf_ticker, exc)
 
     if close_series is None or close_series.empty or len(close_series) < 2:
         return base
