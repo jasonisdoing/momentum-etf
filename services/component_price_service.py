@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -505,6 +506,80 @@ import threading
 _YAHOO_BASELINE_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
 _YAHOO_BASELINE_LOCK = threading.Lock()
 
+# mongodb 영속 캐시 컬렉션명. baseline 은 "특정 base_date 의 종가" 라 한 번 구하면 불변 —
+# 프로세스 재시작/배포 후에도 yfinance 재호출 없이 재사용한다.
+_YAHOO_BASELINE_COLLECTION = "yahoo_baseline_prices"
+
+
+def _baseline_doc_id(symbol: str, base_date: str, is_prev: bool) -> str:
+    return f"{symbol}|{base_date}|{int(is_prev)}"
+
+
+def _load_persisted_yahoo_baselines(
+    keys: list[tuple[str, str, bool]],
+) -> dict[tuple[str, str, bool], dict[str, Any]]:
+    """mongodb 에서 (symbol, base_date, is_prev) 키들의 baseline 을 일괄 조회한다."""
+    if not keys:
+        return {}
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return {}
+        ids = [_baseline_doc_id(*key) for key in keys]
+        cursor = db[_YAHOO_BASELINE_COLLECTION].find(
+            {"_id": {"$in": ids}},
+            {"symbol": 1, "base_date": 1, "is_prev": 1, "price": 1, "date": 1},
+        )
+        result: dict[tuple[str, str, bool], dict[str, Any]] = {}
+        for doc in cursor:
+            key = (str(doc.get("symbol")), str(doc.get("base_date")), bool(doc.get("is_prev")))
+            price = doc.get("price")
+            if price is None:
+                continue
+            result[key] = {"price": float(price), "date": doc.get("date")}
+        return result
+    except Exception as exc:
+        logger.warning("yahoo baseline mongodb 조회 실패: %s", exc)
+        return {}
+
+
+def _persist_yahoo_baselines(entries: dict[tuple[str, str, bool], dict[str, Any]]) -> None:
+    """yfinance 로 새로 받은 baseline 을 mongodb 에 upsert 한다 (실패해도 동작에는 영향 없음)."""
+    if not entries:
+        return
+    try:
+        from pymongo import UpdateOne
+
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return
+        now = datetime.now()
+        ops = [
+            UpdateOne(
+                {"_id": _baseline_doc_id(symbol, base_date, is_prev)},
+                {
+                    "$set": {
+                        "symbol": symbol,
+                        "base_date": base_date,
+                        "is_prev": is_prev,
+                        "price": data.get("price"),
+                        "date": data.get("date"),
+                        "updated_at": now,
+                    }
+                },
+                upsert=True,
+            )
+            for (symbol, base_date, is_prev), data in entries.items()
+        ]
+        db[_YAHOO_BASELINE_COLLECTION].bulk_write(ops, ordered=False)
+    except Exception as exc:
+        logger.warning("yahoo baseline mongodb 저장 실패: %s", exc)
+
+
 def _fetch_yahoo_baseline_prices(
     symbols: list[str],
     base_date: str,
@@ -535,6 +610,24 @@ def _fetch_yahoo_baseline_prices(
             else:
                 symbols_to_fetch.append(symbol)
 
+        # 메모리 캐시 miss 분은 mongodb 영속 캐시에서 일괄 조회 — 프로세스 재시작 후에도
+        # yfinance 재호출 없이 복원된다 (cold start 시 30초 timeout 의 주범 제거).
+        if symbols_to_fetch:
+            persisted = _load_persisted_yahoo_baselines(
+                [(symbol, base_date, symbol in previous_day_symbols) for symbol in symbols_to_fetch]
+            )
+            if persisted:
+                still_missing: list[str] = []
+                for symbol in symbols_to_fetch:
+                    key = (symbol, base_date, symbol in previous_day_symbols)
+                    data = persisted.get(key)
+                    if data is not None:
+                        result[symbol] = data
+                        _YAHOO_BASELINE_CACHE[key] = data
+                    else:
+                        still_missing.append(symbol)
+                symbols_to_fetch = still_missing
+
         if not symbols_to_fetch:
             return result
 
@@ -563,6 +656,7 @@ def _fetch_yahoo_baseline_prices(
                 return None
             return downloaded.copy()
 
+        newly_fetched: dict[tuple[str, str, bool], dict[str, Any]] = {}
         for symbol in symbols_to_fetch:
             frame = _extract_symbol_frame(symbol)
             if frame is None or frame.empty or "Close" not in frame.columns:
@@ -588,7 +682,9 @@ def _fetch_yahoo_baseline_prices(
             }
             result[symbol] = data
             _YAHOO_BASELINE_CACHE[(symbol, base_date, is_prev)] = data
+            newly_fetched[(symbol, base_date, is_prev)] = data
 
+        _persist_yahoo_baselines(newly_fetched)
         return result
 
 

@@ -792,7 +792,17 @@ export function ComparePageClient() {
     setLoading(true);
     setError(null);
     try {
-      const details = await Promise.all(items.map((item) => loadTickerDetail(item)));
+      // 동시 2개씩 순차 호출 — 백엔드의 구성종목 가격/baseline 조회가 전역 lock 으로
+      // 직렬화되어 있어, 6개를 한꺼번에 쏘면 뒤쪽 요청이 30초 timeout 에 걸린다.
+      const details: TickerDetailResponse[] = new Array(items.length);
+      const CONCURRENCY = 2;
+      for (let start = 0; start < items.length; start += CONCURRENCY) {
+        const batch = items.slice(start, start + CONCURRENCY);
+        const batchResults = await Promise.all(batch.map((item) => loadTickerDetail(item)));
+        batchResults.forEach((detail, offset) => {
+          details[start + offset] = detail;
+        });
+      }
       setProducts(items.map((item, index) => ({ item, detail: details[index] })));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
