@@ -16,6 +16,9 @@ type SystemPoolRow = {
   stock_count: number;
   rising_count: number;
   rising_ratio: number;
+  score_up_count: number;
+  score_total_count: number;
+  score_up_ratio: number;
   etf_count: number;
 };
 
@@ -211,6 +214,26 @@ const poolColumns: ColDef<SystemPoolGridRow>[] = [
   {
     field: "rising_ratio",
     headerName: "상승비율(일간)",
+    minWidth: 100,
+    flex: 0.75,
+    type: "rightAligned",
+    cellStyle: { color: "#dc2626" },
+    cellRenderer: (params: { value: number }) => formatPercent(params.value),
+  },
+  {
+    field: "score_up_count",
+    headerName: "상승수",
+    minWidth: 100,
+    flex: 0.75,
+    type: "rightAligned",
+    cellRenderer: (params: { value: number; data?: SystemPoolGridRow }) => {
+      const total = params.data?.score_total_count ?? 0;
+      return `${formatCount(params.value)}/${formatCount(total)}`;
+    },
+  },
+  {
+    field: "score_up_ratio",
+    headerName: "상승비율",
     minWidth: 100,
     flex: 0.75,
     type: "rightAligned",

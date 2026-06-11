@@ -146,6 +146,14 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
     if db is None:
         raise RuntimeError("DB 연결 실패로 종목풀 요약을 조회할 수 없습니다.")
 
+    # cache_refresh 배치가 저장한 풀별 점수 양수 요약 (없으면 0 표시)
+    rank_summary_by_type: dict[str, dict[str, object]] = {}
+    try:
+        for doc in db.pool_rank_summary.find({}, {"ticker_type": 1, "score_up_count": 1, "score_total_count": 1}):
+            rank_summary_by_type[str(doc.get("ticker_type") or "")] = doc
+    except Exception:
+        rank_summary_by_type = {}
+
     rows: list[dict[str, object]] = []
     for config in load_ticker_type_configs():
         ticker_type = str(config["ticker_type"])
@@ -165,6 +173,10 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
         # 일간 등락 기준 — cache_refresh 배치(매시 0분)가 1_day_change_pct 를 저장한다.
         rising_count = sum(1 for doc in docs if _to_float(doc.get("1_day_change_pct")) > 0)
         etf_count = sum(1 for doc in docs if bool(doc.get("is_etf")))
+        # 점수 양수 기준 — cache_refresh 배치가 pool_rank_summary 에 저장한다.
+        rank_summary = rank_summary_by_type.get(ticker_type, {})
+        score_up_count = int(_to_float(rank_summary.get("score_up_count")))
+        score_total_count = int(_to_float(rank_summary.get("score_total_count")))
         rows.append(
             {
                 "id": ticker_type,
@@ -175,6 +187,9 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                 "stock_count": stock_count,
                 "rising_count": rising_count,
                 "rising_ratio": round((rising_count / stock_count) * 100, 2) if stock_count > 0 else 0.0,
+                "score_up_count": score_up_count,
+                "score_total_count": score_total_count,
+                "score_up_ratio": round((score_up_count / score_total_count) * 100, 2) if score_total_count > 0 else 0.0,
                 "etf_count": etf_count,
             }
         )
