@@ -23,7 +23,7 @@
       "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 9,
+      "MA_MONTHS": 6,
       "RSI_LIMIT": 100
     },
     {
@@ -37,7 +37,7 @@
       "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 9,
+      "MA_MONTHS": 12,
       "RSI_LIMIT": 100
     },
     {
@@ -76,7 +76,7 @@
       "TOP_N_HOLD": 4,
       "HOLDING_BONUS_SCORE": 10,
       "MA_TYPE": "ALMA",
-      "MA_MONTHS": 6,
+      "MA_MONTHS": 9,
       "RSI_LIMIT": 100
     }
   ]
