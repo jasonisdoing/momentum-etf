@@ -156,13 +156,14 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                     "_id": 0,
                     "ticker": 1,
                     "is_etf": 1,
-                    "1_week_earn_rate": 1,
+                    "1_day_change_pct": 1,
                 },
             )
         )
 
         stock_count = len(docs)
-        rising_count = sum(1 for doc in docs if _to_float(doc.get("1_week_earn_rate")) > 0)
+        # 일간 등락 기준 — cache_refresh 배치(매시 0분)가 1_day_change_pct 를 저장한다.
+        rising_count = sum(1 for doc in docs if _to_float(doc.get("1_day_change_pct")) > 0)
         etf_count = sum(1 for doc in docs if bool(doc.get("is_etf")))
         rows.append(
             {
