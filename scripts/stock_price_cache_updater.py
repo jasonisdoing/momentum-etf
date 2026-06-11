@@ -200,6 +200,71 @@ def _purge_suspicious_dates(
     return suspicious
 
 
+def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
+    """캐시된 종가 시계열의 마지막 2개로 일간 등락률을 계산해 stock_meta 에 저장한다.
+
+    /system 종목풀 표의 상승수(일간)/상승비율(일간) 이 이 필드를 읽는다.
+    가격 캐시가 이미 메모리에 적재된 직후라 추가 외부 호출 없이 공짜로 계산된다.
+    """
+    logger = get_app_logger()
+    if not tickers:
+        return
+    try:
+        from pymongo import UpdateOne
+
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            logger.warning("[%s] DB 연결 실패로 일간 등락률 저장 생략", target_id.upper())
+            return
+
+        ops: list[UpdateOne] = []
+        for ticker in tickers:
+            try:
+                df = load_cached_frame_with_fallback(target_id, ticker)
+            except Exception:
+                continue
+            if df is None or df.empty:
+                continue
+            close_col = next(
+                (c for c in ("unadjusted_close", "Close", "close") if c in df.columns),
+                None,
+            )
+            if close_col is None:
+                continue
+            close_series = pd.to_numeric(df[close_col], errors="coerce").dropna()
+            close_series = close_series[close_series > 0]
+            if len(close_series) < 2:
+                continue
+            latest = float(close_series.iloc[-1])
+            prev = float(close_series.iloc[-2])
+            if prev <= 0:
+                continue
+            change_pct = (latest / prev - 1.0) * 100.0
+            ops.append(
+                UpdateOne(
+                    {"ticker_type": target_id, "ticker": ticker},
+                    {
+                        "$set": {
+                            "1_day_change_pct": round(change_pct, 4),
+                            "1_day_change_date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
+                        }
+                    },
+                )
+            )
+        if ops:
+            result = db.stock_meta.bulk_write(ops, ordered=False)
+            logger.info(
+                "[%s] 일간 등락률 저장 완료: %d개 종목 (matched %d)",
+                target_id.upper(),
+                len(ops),
+                result.matched_count,
+            )
+    except Exception as exc:
+        logger.warning("[%s] 일간 등락률 저장 실패: %s", target_id.upper(), exc)
+
+
 def _refresh_portfolio_change_cache_for_target(
     target_id: str,
     target_items: list[dict],
@@ -615,6 +680,9 @@ def refresh_cache_for_target(
             _purge_suspicious_dates(target_norm, success_tickers)
         except Exception as exc:
             logger.warning("[%s] 의심 날짜 자동 정리 중 오류: %s", target_norm.upper(), exc)
+
+        # /system 종목풀 표용 일간 등락률을 stock_meta 에 저장
+        _update_daily_change_pct(target_norm, success_tickers)
 
         # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())

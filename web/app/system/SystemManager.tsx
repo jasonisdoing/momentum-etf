@@ -199,7 +199,7 @@ const poolColumns: ColDef<SystemPoolGridRow>[] = [
   },
   {
     field: "rising_count",
-    headerName: "상승수",
+    headerName: "상승수(일간)",
     minWidth: 100,
     flex: 0.75,
     type: "rightAligned",
@@ -210,7 +210,7 @@ const poolColumns: ColDef<SystemPoolGridRow>[] = [
   },
   {
     field: "rising_ratio",
-    headerName: "상승비율",
+    headerName: "상승비율(일간)",
     minWidth: 100,
     flex: 0.75,
     type: "rightAligned",
