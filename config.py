@@ -176,7 +176,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor_kr": {
@@ -184,7 +184,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor_us": {
@@ -192,7 +192,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [3],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "aus": {
@@ -200,7 +200,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [7],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "us": {
@@ -208,7 +208,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor": {
@@ -216,7 +216,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
         "TOP_N_HOLD": [4],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 4, 5, 6],
+        "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
 }
