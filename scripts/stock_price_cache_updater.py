@@ -265,6 +265,54 @@ def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
         logger.warning("[%s] 일간 등락률 저장 실패: %s", target_id.upper(), exc)
 
 
+def _update_pool_rank_summary(target_id: str) -> None:
+    """종목풀 순위(점수)를 계산해 점수 양수 개수를 pool_rank_summary 컬렉션에 저장한다.
+
+    /system 종목풀 표의 상승수(점수)/상승비율(점수) 가 이 문서를 읽는다.
+    점수 계산은 방금 갱신된 가격 캐시를 사용하므로 외부 호출이 없다.
+    """
+    logger = get_app_logger()
+    try:
+        from utils.db_manager import get_db_connection
+        from utils.rank_service import load_rank_data
+
+        payload = load_rank_data(ticker_type=target_id, held_bonus_score=None)
+        rows = payload.get("rows") or []
+        total_count = len(rows)
+        up_count = 0
+        for row in rows:
+            try:
+                if row.get("점수") is not None and float(row["점수"]) > 0:
+                    up_count += 1
+            except (TypeError, ValueError):
+                continue
+
+        db = get_db_connection()
+        if db is None:
+            logger.warning("[%s] DB 연결 실패로 점수 요약 저장 생략", target_id.upper())
+            return
+        db.pool_rank_summary.update_one(
+            {"_id": target_id},
+            {
+                "$set": {
+                    "ticker_type": target_id,
+                    "score_up_count": up_count,
+                    "score_total_count": total_count,
+                    "updated_at": pd.Timestamp.utcnow().to_pydatetime(),
+                }
+            },
+            upsert=True,
+        )
+        logger.info(
+            "[%s] 점수 요약 저장 완료: 양수 %d / 전체 %d",
+            target_id.upper(),
+            up_count,
+            total_count,
+        )
+    except Exception as exc:
+        logger.warning("[%s] 점수 요약 저장 실패: %s", target_id.upper(), exc)
+
+
 def _refresh_portfolio_change_cache_for_target(
     target_id: str,
     target_items: list[dict],
@@ -683,6 +731,9 @@ def refresh_cache_for_target(
 
         # /system 종목풀 표용 일간 등락률을 stock_meta 에 저장
         _update_daily_change_pct(target_norm, success_tickers)
+
+        # /system 종목풀 표용 점수 양수 요약을 pool_rank_summary 에 저장
+        _update_pool_rank_summary(target_norm)
 
         # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.
         set_cache_refresh_completed_at(target_norm, pd.Timestamp.utcnow().to_pydatetime())
