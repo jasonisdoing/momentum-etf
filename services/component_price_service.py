@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -195,6 +196,17 @@ def enrich_component_prices(
 
         if cumulative_base_date and yahoo_symbol and not _is_korean_six_digit_holding(item):
             baseline_item = baseline_price_map.get(yahoo_symbol)
+            if _is_baseline_suspicious(enriched_item, baseline_item):
+                # Yahoo 가 간헐적으로 가격을 10배 등 잘못된 스케일로 반환하는 glitch.
+                # (관측: 2026-06-12 KLAC baseline $2,411 vs 실제 $241 — 미국 그룹 -90% 오염)
+                # baseline 폐기 — 누적 변동은 None 으로 표시 (fallback 없음).
+                logger.warning(
+                    "구성종목 baseline 이상치 폐기: %s baseline=%s previous_close=%s",
+                    yahoo_symbol,
+                    baseline_item.get("price") if isinstance(baseline_item, dict) else None,
+                    enriched_item.get("previous_close"),
+                )
+                baseline_item = None
             _apply_cumulative_change(enriched_item, baseline_item)
 
         as_of_date = str(enriched_item.get("price_as_of_date") or "").strip()
@@ -682,7 +694,11 @@ def _fetch_yahoo_baseline_prices(
             }
             result[symbol] = data
             _YAHOO_BASELINE_CACHE[(symbol, base_date, is_prev)] = data
-            newly_fetched[(symbol, base_date, is_prev)] = data
+            # 당일 종가는 장중/마감 직후 잠정치일 수 있어 영속화하지 않는다 (메모리 캐시만).
+            # (관측: 6981.T 당일 잠정 종가 9,454 가 영속화돼 확정 종가 8,556 과 10% 괴리)
+            today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+            if str(data.get("date") or "") < today_kst:
+                newly_fetched[(symbol, base_date, is_prev)] = data
 
         _persist_yahoo_baselines(newly_fetched)
         return result
@@ -708,6 +724,32 @@ def _apply_price_snapshot(
     enriched_item["change_pct"] = float(change_pct) if change_pct is not None else None
     enriched_item["price_currency"] = currency
     enriched_item["price_as_of_date"] = snapshot.get("as_of_date")
+
+
+def _is_baseline_suspicious(enriched_item: dict[str, Any], baseline_item: dict[str, Any] | None) -> bool:
+    """Yahoo baseline 의 스케일 오류(10배 등) 를 토스 previous_close 와 교차 검증으로 감지한다.
+
+    baseline 과 전일 종가가 40% 이상 괴리하면서 당일 변동률은 정상 범위(<15%)면
+    데이터 오류로 판단한다. 일간 변동이 ±15% 이상인 급변동 장에서는 진짜 괴리일 수
+    있으므로 판정을 보류한다 (베이스라인 유지).
+    """
+    if not isinstance(baseline_item, dict):
+        return False
+    try:
+        baseline_price = float(baseline_item.get("price"))
+        previous_close = float(enriched_item.get("previous_close"))
+    except (TypeError, ValueError):
+        return False
+    if baseline_price <= 0 or previous_close <= 0:
+        return False
+    change_pct = enriched_item.get("change_pct")
+    try:
+        if change_pct is not None and abs(float(change_pct)) >= 15.0:
+            return False
+    except (TypeError, ValueError):
+        pass
+    ratio = baseline_price / previous_close
+    return not (0.6 <= ratio <= 1.67)
 
 
 def _apply_cumulative_change(enriched_item: dict[str, Any], baseline_item: dict[str, Any] | None) -> None:
