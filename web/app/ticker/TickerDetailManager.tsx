@@ -160,10 +160,7 @@ const MA_PERIODS = [
   { period: 120, color: "#9C27B0", label: "120" },
 ];
 
-const gridTheme = createAppGridTheme({
-  rowHeight: 34,
-  headerHeight: 36,
-});
+const gridTheme = createAppGridTheme();
 
 // --- 유틸 ---
 
@@ -1355,7 +1352,6 @@ export function TickerDetailManager({
                                 theme={gridTheme}
                                 gridOptions={{
                                   suppressMovableColumns: true,
-                                  rowHeight: 40,
                                   getRowId: (params) => String(params.data.id),
                                   onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
                                     holdingsGridApiRef.current = event.api;

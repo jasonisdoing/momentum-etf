@@ -83,13 +83,7 @@ function getDetailRowHeight(_count: number): number {
   return DETAIL_PANEL_HEIGHT + DETAIL_PANEL_PADDING * 2;
 }
 
-// ticker 페이지 gridTheme과 동일한 파라미터
-const constituentGridTheme = createAppGridTheme({
-  rowHeight: 34,
-  headerHeight: 36,
-  wrapperBorderRadius: 10,
-  fontSize: 14,
-});
+const constituentGridTheme = createAppGridTheme();
 
 const HOLDINGS_CACHE_KEY = "momentum-etf:holdings:assets";
 const HOLDINGS_CACHE_TTL_MS = 30_000;
