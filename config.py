@@ -174,14 +174,14 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "all": {
         "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 10],
+        "HOLDING_BONUS_SCORE": [10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6],
+        "MA_MONTHS": [6],
         "RSI_LIMIT": [100],
     },
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
-        "TOP_N_HOLD": [4],
+        "TOP_N_HOLD": [5],
         "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6],
