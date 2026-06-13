@@ -35,7 +35,7 @@ export function SystemPageClient() {
   );
 
   return (
-    <PageFrame title="정보" titleRight={titleRight}>
+    <PageFrame title="배치" titleRight={titleRight}>
       <SystemManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );

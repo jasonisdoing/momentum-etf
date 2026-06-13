@@ -115,19 +115,30 @@ def _load_pool_configs() -> list[dict[str, Any]]:
     return sorted(loaded, key=lambda item: (int(item["order"]), str(item["ticker_type"])))
 
 
-@cache
 def get_all_pool_settings() -> dict[str, Any]:
-    """pools.json의 0. 전체 가상 종목풀 설정을 로드합니다."""
+    """pools.json의 0. 전체 가상 종목풀 설정을 로드합니다.
+
+    편집 가능한 5개 값(TOP_N_HOLD/HOLDING_BONUS_SCORE/MA_TYPE/MA_MONTHS/RSI_LIMIT)은
+    DB(pool_settings)가 단일 소스다(시드 필요). 나머지(include 등)는 파일 값 유지.
+    """
+    from utils.pool_settings_store import ALL_POOL_ID, resolve_pool_values
+
+    return resolve_pool_values(ALL_POOL_ID, _get_all_pool_settings_raw())
+
+
+@cache
+def _get_all_pool_settings_raw() -> dict[str, Any]:
+    """pools.json의 'all' 섹션을 검증해 반환한다 (DB 오버라이드 적용 전 원본)."""
 
     payload = _load_pools_payload()
     all_settings = payload.get("all")
     if not isinstance(all_settings, dict):
         raise AccountSettingsError(f"'pools.json'의 'all'은 객체여야 합니다: {POOL_SETTINGS_PATH}")
 
-    required_keys = ["TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT", "include"]
-    missing_keys = [key for key in required_keys if key not in all_settings]
-    if missing_keys:
-        raise AccountSettingsError(f"'all' 설정에 필수 항목이 누락되었습니다: {', '.join(missing_keys)}")
+    # 편집 가능한 5개 값(TOP_N_HOLD/HOLDING_BONUS_SCORE/MA_TYPE/MA_MONTHS/RSI_LIMIT)은
+    # DB(pool_settings)가 단일 소스라 pools.json 에서는 더 이상 요구하지 않는다. include 만 필수.
+    if "include" not in all_settings:
+        raise AccountSettingsError(f"'all' 설정에 'include'가 필요합니다: {POOL_SETTINGS_PATH}")
 
     include_raw = all_settings.get("include")
     if not isinstance(include_raw, list):
@@ -206,16 +217,20 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
             return dict(settings)
     raise AccountSettingsError(f"계정 '{account}'에 해당하는 설정을 찾을 수 없습니다.")
 
-@cache
 def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
-    """pools.json에 정의된 개별 종목풀 설정을 로드합니다."""
+    """pools.json에 정의된 개별 종목풀 설정을 로드합니다.
+
+    편집 가능한 5개 값은 DB(pool_settings)가 단일 소스다(시드 필요).
+    """
+    from utils.pool_settings_store import resolve_pool_values
+
     t_id = (ticker_type or "").strip().lower()
     if not t_id:
         raise AccountSettingsError("종목타입을 지정해야 합니다.")
 
     for settings in _load_pool_configs():
         if settings["ticker_type"] == t_id:
-            return dict(settings)
+            return resolve_pool_values(t_id, dict(settings))
     raise AccountSettingsError(f"종목타입 '{t_id}'에 해당하는 설정을 찾을 수 없습니다.")
 
 
