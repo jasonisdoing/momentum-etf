@@ -70,7 +70,10 @@ const navGroups = [
     id: "system",
     title: "시스템",
     icon: IconSettings,
-    items: [{ href: "/system", label: "정보", icon: IconSettings }],
+    items: [
+      { href: "/batch", label: "배치", icon: IconListDetails },
+      { href: "/settings", label: "설정", icon: IconSettings },
+    ],
   },
 ] as const;
 
