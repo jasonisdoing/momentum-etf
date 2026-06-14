@@ -29,9 +29,22 @@ def _resolve_default_ma() -> tuple[str, int]:
 def get_market_trend_defaults(
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    """화면 진입 시 사용할 MA 기본값 (pools.json 의 all.MA_* 가 단일 진실 소스)."""
+    """화면 진입 시 사용할 MA 기본값 + 추세/권장투자 설정 (config.py 가 단일 진실 소스)."""
+    import config
+
     ma_type, ma_months = _resolve_default_ma()
-    return {"ma_type": ma_type, "ma_months": ma_months}
+    return {
+        "ma_type": ma_type,
+        "ma_months": ma_months,
+        "ma_types": ALLOWED_MA_TYPES,
+        "ma_months_max": config.MARKET_TREND_MA_MONTHS_MAX,
+        "score_anchor_percentile": config.MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
+        "alloc": {
+            "neutral_invest": config.MARKET_TREND_ALLOC_NEUTRAL_INVEST,
+            "up_span": config.MARKET_TREND_ALLOC_UP_SPAN,
+            "down_span": config.MARKET_TREND_ALLOC_DOWN_SPAN,
+        },
+    }
 
 
 @router.get("")

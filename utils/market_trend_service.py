@@ -17,7 +17,7 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from config import TRADING_DAYS_PER_MONTH
+from config import MARKET_TREND_SCORE_ANCHOR_PERCENTILE, TRADING_DAYS_PER_MONTH
 from utils.moving_averages import calculate_moving_average
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,6 @@ INDICES: list[dict[str, str]] = [
     {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
     {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
-    {"name": "나스닥", "yf_ticker": "^IXIC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
 ]
 
@@ -294,13 +293,17 @@ def _build_item(
                     "days": r["days"],
                 }
 
-    # MA 괴리율 0%를 0점으로 두고, 12개월 위쪽 최고/아래쪽 최저 괴리율로 점수 정규화.
+    # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
+    # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
+    # 상위 5% 구간에 들면 +100(권장 투자 100%)에 도달하도록 퍼센타일을 앵커로 쓴다.
     score_window = TRADING_DAYS_PER_MONTH * 12
     trend_series_12m = _trend_pct_series(close_series, ma_series, score_window)
     valid_12m = [v for v in trend_series_12m if v is not None]
     if valid_12m:
-        score_min = min(valid_12m)
-        score_max = max(valid_12m)
+        series_12m = pd.Series(valid_12m, dtype="float64")
+        upper_q = MARKET_TREND_SCORE_ANCHOR_PERCENTILE / 100.0
+        score_min = float(series_12m.quantile(1.0 - upper_q))
+        score_max = float(series_12m.quantile(upper_q))
         base["score_range_high"] = score_max
         base["score_range_low"] = score_min
         base["trend_score"] = _normalize_score(base["trend_pct"], score_min, score_max)
