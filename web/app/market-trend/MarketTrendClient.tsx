@@ -7,10 +7,8 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { PageFrame } from "../components/PageFrame";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { recommendedInvestPct } from "./allocation";
 import { MarketTrendChart } from "./MarketTrendChart";
-
-const MA_TYPE_OPTIONS = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"] as const;
-const MA_MONTHS_MAX = 12;
 
 type MarketTrendItem = {
   name: string;
@@ -202,9 +200,25 @@ function renderRegimeCell(params: { data?: GridRow }) {
 type MarketTrendClientProps = {
   defaultMaType: string;
   defaultMaMonths: number;
+  // config.py 단일 소스 (page.tsx 가 /defaults 응답으로 전달)
+  maTypes: string[];
+  maMonthsMax: number;
+  scoreAnchorPercentile: number;
+  allocNeutralInvest: number;
+  allocUpSpan: number;
+  allocDownSpan: number;
 };
 
-export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTrendClientProps) {
+export function MarketTrendClient({
+  defaultMaType,
+  defaultMaMonths,
+  maTypes,
+  maMonthsMax,
+  scoreAnchorPercentile,
+  allocNeutralInvest,
+  allocUpSpan,
+  allocDownSpan,
+}: MarketTrendClientProps) {
   const [maType, setMaType] = useState<string>(defaultMaType);
   const [maMonths, setMaMonths] = useState<number>(defaultMaMonths);
   const [items, setItems] = useState<MarketTrendItem[]>([]);
@@ -337,6 +351,29 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
           return <span style={{ color: "#1f2937" }}>{d}일째</span>;
         },
       },
+      {
+        headerName: "권장 투자",
+        flex: 0.7,
+        minWidth: 95,
+        sortable: true,
+        headerClass: "marketTrendRegimeHeader",
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+        },
+        valueGetter: (params) => {
+          const data = params.data as GridRow | undefined;
+          if (!data || isDetailRow(data)) return null;
+          return recommendedInvestPct(data.trend_score, allocNeutralInvest, allocUpSpan, allocDownSpan);
+        },
+        cellRenderer: (params: { value?: number | null }) => {
+          const invest = params.value;
+          if (invest === null || invest === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
+          return <span style={{ color: "#1971c2", fontWeight: 700 }}>{invest.toFixed(0)}%</span>;
+        },
+      },
       ...([1, 2, 3] as const).map<ColDef<GridRow>>((slot) => ({
         field: `prev_regime_${slot}` as keyof MarketTrendItem,
         headerName: `최근${slot}`,
@@ -353,7 +390,7 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
         cellRenderer: renderRegimeRangeCell,
       })),
     ],
-    [expandedTicker],
+    [expandedTicker, allocNeutralInvest, allocUpSpan, allocDownSpan],
   );
 
   const detailHeight = 640;
@@ -369,6 +406,9 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
             name={data.parentName}
             maType={maType}
             maMonths={maMonths}
+            allocNeutralInvest={allocNeutralInvest}
+            allocUpSpan={allocUpSpan}
+            allocDownSpan={allocDownSpan}
           />
         );
       },
@@ -385,7 +425,7 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
       },
       domLayout: "autoHeight",
     }),
-    [maType, maMonths],
+    [maType, maMonths, allocNeutralInvest, allocUpSpan, allocDownSpan],
   );
 
   const titleRight = useMemo(
@@ -420,7 +460,7 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
                           onChange={(event) => setMaType(event.target.value)}
                           disabled={loading}
                         >
-                          {MA_TYPE_OPTIONS.map((option) => (
+                          {maTypes.map((option) => (
                             <option key={option} value={option}>
                               {option}
                             </option>
@@ -432,7 +472,7 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
                           onChange={(event) => setMaMonths(Number(event.target.value))}
                           disabled={loading}
                         >
-                          {Array.from({ length: MA_MONTHS_MAX }, (_, index) => index + 1).map((month) => (
+                          {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
                             <option key={month} value={month}>
                               {month}개월
                             </option>
@@ -482,10 +522,19 @@ export function MarketTrendClient({ defaultMaType, defaultMaMonths }: MarketTren
                 <li>
                   추세 점수: 먼저 (종가 ÷ MA[{maType} {maMonths}개월] − 1) × 100 으로 원본 추세% 를
                   구한 뒤, MA와 같은 지점을 0점으로 둔 정규화 점수(−100 ~ +100). MA 위쪽은 최근 12개월
-                  위쪽 최대 괴리율을 +100, MA 아래쪽은 최근 12개월 아래쪽 최대 괴리율을 −100으로 환산합니다.
+                  괴리율의 상위 {100 - scoreAnchorPercentile}%({scoreAnchorPercentile}퍼센타일)를 +100,
+                  아래쪽은 하위 {100 - scoreAnchorPercentile}%({100 - scoreAnchorPercentile}퍼센타일)를 −100으로 환산합니다.
+                  (단발 극단치 대신 상위/하위 {100 - scoreAnchorPercentile}% 구간을 천장·바닥으로 봅니다.)
                   12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
                 </li>
                 <li>1·2·3·4주: 같은 점수 정의를 해당 시점(N주 전 거래일)에 적용한 값.</li>
+                <li>
+                  권장 투자: 추세점수를 구간 선형으로 매핑한 보조 지표입니다. 점수 0(중립)=투자 {allocNeutralInvest}%,
+                  +100={allocNeutralInvest + allocUpSpan}%, −100={allocNeutralInvest - allocDownSpan}% 를 앵커로,
+                  점수 ≥ 0 이면 {allocNeutralInvest} + (점수/100)×{allocUpSpan}, &lt; 0 이면
+                  {allocNeutralInvest} + (점수/100)×{allocDownSpan} (%). 현금 = 100 − 투자.{" "}
+                  <strong>참고용이며 자동 매매가 아닙니다.</strong>
+                </li>
                 <li>
                   레짐: 추세 부호(MA 위/아래) × 1·2·3·4주 전 추세% 평균 대비 변화 방향(가속/감속) 으로
                   상승·조정·진정·하락 4단계로 분류합니다.

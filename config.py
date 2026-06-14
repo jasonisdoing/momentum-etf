@@ -131,6 +131,11 @@ MARKET_SCHEDULES = {
     },
 }
 
+# 지원 이동평균(MA) 타입 — 시스템 전체 단일 진실 소스.
+# 백엔드(rankings/market_trend/pool_settings 검증·옵션) + 프론트(MA 드롭다운)에서 모두 이 값만 본다.
+# 프론트에는 API 응답(rank: ma_type_options / market-trend defaults: ma_types)으로 전달된다.
+ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
+
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
@@ -139,6 +144,28 @@ TRADING_DAYS_PER_MONTH = 20
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
+
+# -----------------------------------------------------------------------
+# 시장지수 추세 / 권장 투자 비율 (/market-trend)
+# -----------------------------------------------------------------------
+# 백엔드(추세점수 정규화) + 프론트(MA 선택/권장 투자 매핑)에서 함께 쓰는 단일 진실 소스.
+# 프론트에는 /internal/market-trend/defaults 응답으로 전달된다.
+
+# 추세점수 정규화 앵커 퍼센타일. 12개월 괴리율의 상위 P%를 +100, 하위 (100-P)%를 −100 으로
+# 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
+MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
+
+# MA 기간 선택 드롭다운 상한 (개월). 1 ~ 이 값.
+MARKET_TREND_MA_MONTHS_MAX = 12
+
+# 권장 투자비율 매핑 (추세점수 → 투자%). 기존 운용 직관을 연속화한 앵커:
+#   중립(점수 0) = NEUTRAL_INVEST(%), 점수 +100 = NEUTRAL+UP_SPAN, 점수 −100 = NEUTRAL−DOWN_SPAN
+#   점수 ≥ 0 : 투자% = NEUTRAL + (점수/100) × UP_SPAN
+#   점수 < 0 : 투자% = NEUTRAL + (점수/100) × DOWN_SPAN
+# 기본값 70/30/60 → 중립 70%, 완전상승 100%, 완전하락 10%.
+MARKET_TREND_ALLOC_NEUTRAL_INVEST = 70
+MARKET_TREND_ALLOC_UP_SPAN = 30
+MARKET_TREND_ALLOC_DOWN_SPAN = 60
 
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정

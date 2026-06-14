@@ -9,6 +9,8 @@ import {
 } from "lightweight-charts";
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
+import { recommendedInvestPct } from "./allocation";
+
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
 
 type HistoryPoint = {
@@ -47,6 +49,10 @@ type MarketTrendChartProps = {
   name: string;
   maType: string;
   maMonths: number;
+  // 권장 투자 매핑 앵커 (config.py → props)
+  allocNeutralInvest: number;
+  allocUpSpan: number;
+  allocDownSpan: number;
 };
 
 type RegimeRange = {
@@ -397,7 +403,15 @@ function formatShortMonthDay(date: string): string {
   return `${Number(m)}/${Number(d)}`;
 }
 
-export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrendChartProps) {
+export function MarketTrendChart({
+  ticker,
+  name,
+  maType,
+  maMonths,
+  allocNeutralInvest,
+  allocUpSpan,
+  allocDownSpan,
+}: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -530,11 +544,17 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
       const regimeText = point.regime
         ? `<div style="margin-top:4px;color:${REGIME_COLOR[point.regime]};font-weight:700">${REGIME_LABEL[point.regime]}</div>`
         : "";
+      const invest = recommendedInvestPct(point.trend_score, allocNeutralInvest, allocUpSpan, allocDownSpan);
+      const investText =
+        invest === null
+          ? ""
+          : `<div>권장 투자: <span style="color:#1971c2;font-weight:700">${invest.toFixed(0)}%</span></div>`;
       tooltip.innerHTML = `
         <div style="font-weight:700;margin-bottom:2px">${point.date}</div>
         <div>종가: ${formatNumber(point.close)}</div>
         <div>MA: ${formatNumber(point.ma)}</div>
         <div>추세 점수: ${formatScore(point.trend_score)}</div>
+        ${investText}
         ${regimeText}
       `;
       tooltip.style.display = "block";
@@ -578,7 +598,7 @@ export function MarketTrendChart({ ticker, name, maType, maMonths }: MarketTrend
       labelsOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
-  }, [visibleHistory]);
+  }, [visibleHistory, allocNeutralInvest, allocUpSpan, allocDownSpan]);
 
   return (
     <div
