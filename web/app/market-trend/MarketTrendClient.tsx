@@ -7,7 +7,6 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { PageFrame } from "../components/PageFrame";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { recommendedInvestPct, type RegimeCaps } from "./allocation";
 import { MarketTrendChart } from "./MarketTrendChart";
 
 type MarketTrendItem = {
@@ -178,10 +177,6 @@ type MarketTrendClientProps = {
   maTypes: string[];
   maMonthsMax: number;
   scoreAnchorPercentile: number;
-  allocNeutralInvest: number;
-  allocUpSpan: number;
-  allocDownSpan: number;
-  allocCaps: RegimeCaps;
 };
 
 export function MarketTrendClient({
@@ -190,10 +185,6 @@ export function MarketTrendClient({
   maTypes,
   maMonthsMax,
   scoreAnchorPercentile,
-  allocNeutralInvest,
-  allocUpSpan,
-  allocDownSpan,
-  allocCaps,
 }: MarketTrendClientProps) {
   const [maType, setMaType] = useState<string>(defaultMaType);
   const [maMonths, setMaMonths] = useState<number>(defaultMaMonths);
@@ -327,36 +318,6 @@ export function MarketTrendClient({
           return <span style={{ color: "#1f2937" }}>{d}일째</span>;
         },
       },
-      {
-        headerName: "권장 투자",
-        flex: 0.7,
-        minWidth: 95,
-        sortable: true,
-        headerClass: "marketTrendRegimeHeader",
-        cellStyle: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          textAlign: "center",
-        },
-        valueGetter: (params) => {
-          const data = params.data as GridRow | undefined;
-          if (!data || isDetailRow(data)) return null;
-          return recommendedInvestPct(
-            data.trend_score,
-            allocNeutralInvest,
-            allocUpSpan,
-            allocDownSpan,
-            data.current_regime,
-            allocCaps,
-          );
-        },
-        cellRenderer: (params: { value?: number | null }) => {
-          const invest = params.value;
-          if (invest === null || invest === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
-          return <span style={{ color: "#1971c2", fontWeight: 700 }}>{invest.toFixed(0)}%</span>;
-        },
-      },
       ...([1, 2, 3] as const).map<ColDef<GridRow>>((slot) => ({
         field: `prev_regime_${slot}` as keyof MarketTrendItem,
         headerName: `최근${slot}`,
@@ -373,7 +334,7 @@ export function MarketTrendClient({
         cellRenderer: renderRegimeRangeCell,
       })),
     ],
-    [expandedTicker, allocNeutralInvest, allocUpSpan, allocDownSpan, allocCaps],
+    [expandedTicker],
   );
 
   const detailHeight = 640;
@@ -389,10 +350,6 @@ export function MarketTrendClient({
             name={data.parentName}
             maType={maType}
             maMonths={maMonths}
-            allocNeutralInvest={allocNeutralInvest}
-            allocUpSpan={allocUpSpan}
-            allocDownSpan={allocDownSpan}
-            allocCaps={allocCaps}
           />
         );
       },
@@ -409,7 +366,7 @@ export function MarketTrendClient({
       },
       domLayout: "autoHeight",
     }),
-    [maType, maMonths, allocNeutralInvest, allocUpSpan, allocDownSpan, allocCaps],
+    [maType, maMonths],
   );
 
   const titleRight = useMemo(
@@ -510,15 +467,6 @@ export function MarketTrendClient({
                   아래쪽은 하위 {100 - scoreAnchorPercentile}%({100 - scoreAnchorPercentile}퍼센타일)를 −100으로 환산합니다.
                   (단발 극단치 대신 상위/하위 {100 - scoreAnchorPercentile}% 구간을 천장·바닥으로 봅니다.)
                   12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
-                </li>
-                <li>
-                  권장 투자: 추세점수를 구간 선형으로 매핑한 보조 지표입니다. 점수 0(중립)=투자 {allocNeutralInvest}%,
-                  +100={allocNeutralInvest + allocUpSpan}%, −100={allocNeutralInvest - allocDownSpan}% 를 앵커로,
-                  점수 ≥ 0 이면 {allocNeutralInvest} + (점수/100)×{allocUpSpan}, &lt; 0 이면
-                  {allocNeutralInvest} + (점수/100)×{allocDownSpan} (%). 여기에 레짐별 상한
-                  (조정 {allocCaps.decel_up}% / 하락 {allocCaps.accel_down}%)을 min 으로 씌워 고점에서 약화(조정)되면
-                  풀투자를 막습니다. 현금 = 100 − 투자.{" "}
-                  <strong>참고용이며 자동 매매가 아닙니다.</strong>
                 </li>
                 <li>
                   레짐: 방향(MA 위/아래) × 가속/감속으로 상승·조정·진정·하락 4단계로 분류합니다.
