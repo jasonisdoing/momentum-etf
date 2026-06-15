@@ -19,6 +19,7 @@ import yfinance as yf
 
 from config import (
     MARKET_TREND_REGIME_SLOPE_DEADBAND,
+    MARKET_TREND_REGIME_SLOPE_UP_WINDOW,
     MARKET_TREND_REGIME_SLOPE_WINDOW,
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     TRADING_DAYS_PER_MONTH,
@@ -392,9 +393,10 @@ def _build_daily_regime_ranges(
             date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         )
         trend = full_trend[idx]
-        slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
+        up_slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_UP_WINDOW)
+        down_slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
         regime, strengthening_prev = _regime_from_slope(
-            trend, slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
+            trend, up_slope, down_slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
         )
         if regime is None:
             if current:
@@ -439,13 +441,17 @@ def _trend_slope(full_trend: list[float | None], end_idx: int, window: int) -> f
 
 def _regime_from_slope(
     trend: float | None,
-    slope: float | None,
+    up_slope: float | None,
+    down_slope: float | None,
     prev_strengthening: bool | None,
     deadband: float,
 ) -> tuple[str | None, bool | None]:
-    """추세% 부호(방향) × 회귀 기울기(가속/감속, 데드밴드 히스테리시스)로 4단계 레짐 분류.
+    """추세% 부호(방향) × 회귀 기울기(가속/감속)로 4단계 레짐 분류. 비대칭 창 사용.
 
-    기울기 > +deadband → 강화, < −deadband → 약화, 그 사이면 직전 강화/약화 상태 유지.
+    강화는 짧은 창(up_slope), 약화는 긴 창(down_slope)으로 판정해 "상승은 빠르게, 약화는 천천히":
+        up_slope   > +deadband → 강화 (저점 반등을 빨리 포착)
+        down_slope < −deadband → 약화 (긴 창이라 노이즈에 둔감)
+        둘 다 아니면 직전 강화/약화 상태 유지 (데드밴드 히스테리시스)
         MA 위(추세≥0) + 강화 → accel_up   (상승)
         MA 위        + 약화 → decel_up   (조정)
         MA 아래      + 강화 → decel_down (진정)
@@ -454,14 +460,16 @@ def _regime_from_slope(
     """
     if trend is None:
         return None, prev_strengthening
-    if slope is None:
-        strengthening = prev_strengthening if prev_strengthening is not None else (trend >= 0)
-    elif slope > deadband:
+    if up_slope is not None and up_slope > deadband:
         strengthening = True
-    elif slope < -deadband:
+    elif down_slope is not None and down_slope < -deadband:
         strengthening = False
+    elif prev_strengthening is not None:
+        strengthening = prev_strengthening
     else:
-        strengthening = prev_strengthening if prev_strengthening is not None else (slope >= 0)
+        # 초기값: 사용 가능한 기울기 부호로, 없으면 방향(MA 위/아래)으로
+        ref = up_slope if up_slope is not None else down_slope
+        strengthening = (ref >= 0) if ref is not None else (trend >= 0)
     if trend >= 0:
         regime = "accel_up" if strengthening else "decel_up"
     else:
@@ -583,10 +591,11 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             else None
         )
 
-        # 레짐: 추세% 회귀 기울기 + 데드밴드(히스테리시스)로 분류.
-        slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
+        # 레짐: 추세% 회귀 기울기(비대칭 창) + 데드밴드(히스테리시스)로 분류.
+        up_slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_UP_WINDOW)
+        down_slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
         regime, strengthening_prev = _regime_from_slope(
-            trend, slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
+            trend, up_slope, down_slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
         )
 
         history.append(
