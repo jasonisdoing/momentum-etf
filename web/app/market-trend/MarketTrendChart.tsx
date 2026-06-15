@@ -9,7 +9,6 @@ import {
 } from "lightweight-charts";
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
-import { recommendedInvestPct, type RegimeCaps } from "./allocation";
 
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
 
@@ -38,11 +37,6 @@ type MarketTrendChartProps = {
   name: string;
   maType: string;
   maMonths: number;
-  // 권장 투자 매핑 앵커 + 레짐별 상한 (config.py → props)
-  allocNeutralInvest: number;
-  allocUpSpan: number;
-  allocDownSpan: number;
-  allocCaps: RegimeCaps;
 };
 
 type RegimeRange = {
@@ -329,10 +323,6 @@ export function MarketTrendChart({
   name,
   maType,
   maMonths,
-  allocNeutralInvest,
-  allocUpSpan,
-  allocDownSpan,
-  allocCaps,
 }: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -464,24 +454,11 @@ export function MarketTrendChart({
       const regimeText = point.regime
         ? `<div style="margin-top:4px;color:${REGIME_COLOR[point.regime]};font-weight:700">${REGIME_LABEL[point.regime]}</div>`
         : "";
-      const invest = recommendedInvestPct(
-        point.trend_score,
-        allocNeutralInvest,
-        allocUpSpan,
-        allocDownSpan,
-        point.regime,
-        allocCaps,
-      );
-      const investText =
-        invest === null
-          ? ""
-          : `<div>권장 투자: <span style="color:#1971c2;font-weight:700">${invest.toFixed(0)}%</span></div>`;
       tooltip.innerHTML = `
         <div style="font-weight:700;margin-bottom:2px">${point.date}</div>
         <div>종가: ${formatNumber(point.close)}</div>
         <div>MA: ${formatNumber(point.ma)}</div>
         <div>추세 점수: ${formatScore(point.trend_score)}</div>
-        ${investText}
         ${regimeText}
       `;
       tooltip.style.display = "block";
@@ -525,7 +502,7 @@ export function MarketTrendChart({
       labelsOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
-  }, [visibleHistory, allocNeutralInvest, allocUpSpan, allocDownSpan, allocCaps]);
+  }, [visibleHistory]);
 
   return (
     <div

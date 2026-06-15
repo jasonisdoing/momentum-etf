@@ -146,9 +146,9 @@ TRADING_DAYS_PER_MONTH = 20
 MIN_TRADING_DAYS = 5
 
 # -----------------------------------------------------------------------
-# 시장지수 추세 / 권장 투자 비율 (/market-trend)
+# 시장지수 추세 (/market-trend)
 # -----------------------------------------------------------------------
-# 백엔드(추세점수 정규화) + 프론트(MA 선택/권장 투자 매핑)에서 함께 쓰는 단일 진실 소스.
+# 백엔드(추세점수 정규화 / 레짐 판정) + 프론트(MA 선택)에서 함께 쓰는 단일 진실 소스.
 # 프론트에는 /internal/market-trend/defaults 응답으로 전달된다.
 
 # 추세점수 정규화 앵커 퍼센타일. 12개월 괴리율의 상위 P%를 +100, 하위 (100-P)%를 −100 으로
@@ -157,26 +157,6 @@ MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
 # MA 기간 선택 드롭다운 상한 (개월). 1 ~ 이 값.
 MARKET_TREND_MA_MONTHS_MAX = 12
-
-# 권장 투자비율 매핑 (추세점수 → 투자%). 기존 운용 직관을 연속화한 앵커:
-#   중립(점수 0) = NEUTRAL_INVEST(%), 점수 +100 = NEUTRAL+UP_SPAN, 점수 −100 = NEUTRAL−DOWN_SPAN
-#   점수 ≥ 0 : 투자% = NEUTRAL + (점수/100) × UP_SPAN
-#   점수 < 0 : 투자% = NEUTRAL + (점수/100) × DOWN_SPAN
-# 기본값 70/30/60 → 중립 70%, 완전상승 100%, 완전하락 10%.
-MARKET_TREND_ALLOC_NEUTRAL_INVEST = 70
-MARKET_TREND_ALLOC_UP_SPAN = 30
-MARKET_TREND_ALLOC_DOWN_SPAN = 60
-
-# 레짐별 투자 상한(%). 점수기반 권장투자에 min() 으로 천장을 씌운다.
-#   최종 투자% = min(점수기반%, 해당 레짐 상한)
-# 점수는 레벨(MA 대비 위치)이라 고점에서 +100(=100%)이 되는데, 그때 레짐이 약화(조정)면
-# 천장을 눌러 "꼭지 풀투자"를 막는다.
-# 실효 캡 2개만 둔다 — 상승(MA 위+강화)·진정(MA 아래+회복)은 base 가 이미 그 아래라
-# 천장이 안 걸리므로(no-op) 파라미터에서 제외했다.
-#   중립조정(decel_up): MA 위 + 약화(천장권) — base 최대 100 을 눌러줌
-#   하락(accel_down) : MA 아래 + 약화      — MA 근처 base 를 방어적으로 낮춤
-MARKET_TREND_ALLOC_CAP_DECEL_UP = 90
-MARKET_TREND_ALLOC_CAP_ACCEL_DOWN = 70
 
 # 레짐(가속/감속) 판정: 최근 4주 평균 비교 대신 추세%의 회귀 기울기 + 데드밴드(히스테리시스).
 #   최근 SLOPE_WINDOW 거래일 추세%에 최소제곱 직선을 적합해 기울기(%/일)를 구하고,

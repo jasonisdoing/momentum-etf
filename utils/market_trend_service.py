@@ -283,7 +283,7 @@ def _build_item(
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
-    # 상위 5% 구간에 들면 +100(권장 투자 100%)에 도달하도록 퍼센타일을 앵커로 쓴다.
+    # 상위 5% 구간에 들면 +100 에 도달하도록 퍼센타일을 앵커로 쓴다.
     score_window = TRADING_DAYS_PER_MONTH * 12
     trend_series_12m = _trend_pct_series(close_series, ma_series, score_window)
     valid_12m = [v for v in trend_series_12m if v is not None]
@@ -557,7 +557,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
 
     start = length - take
     # 추세점수 정규화 앵커는 표(_build_item)와 동일하게 — 최신 시점 기준 트레일링 12개월
-    # 퍼센타일(config) 을 쓴다. (이전엔 5년 min/max 라 표와 점수/권장투자가 어긋났다.)
+    # 퍼센타일(config) 을 쓴다. (이전엔 5년 min/max 라 표와 점수가 어긋났다.)
     score_window = TRADING_DAYS_PER_MONTH * 12
     anchor_window = [v for v in full_trend[max(0, length - score_window):length] if v is not None]
     if anchor_window:
