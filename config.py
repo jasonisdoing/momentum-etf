@@ -158,11 +158,15 @@ MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 # MA 기간 선택 드롭다운 상한 (개월). 1 ~ 이 값.
 MARKET_TREND_MA_MONTHS_MAX = 12
 
-# 레짐(가속/감속) 판정: 최근 4주 평균 비교 대신 추세%의 회귀 기울기 + 데드밴드(히스테리시스).
-#   최근 SLOPE_WINDOW 거래일 추세%에 최소제곱 직선을 적합해 기울기(%/일)를 구하고,
-#   기울기 > +DEADBAND → 강화, < −DEADBAND → 약화, 그 사이면 직전 상태 유지(라벨 휩소 차단).
-# 값↑(WINDOW) = 더 매끈/둔감, 값↑(DEADBAND) = 라벨이 덜 바뀜.
+# 레짐(가속/감속) 판정: 추세%의 회귀 기울기 + 데드밴드(히스테리시스). 비대칭 창을 쓴다 —
+# "상승은 빠르게, 약화는 천천히".
+#   강화(상향) 판정: 최근 UP_WINDOW 거래일 기울기 > +DEADBAND  → 짧게 잡아 저점 반등을 빨리 포착
+#   약화(하향) 판정: 최근 WINDOW    거래일 기울기 < −DEADBAND  → 길게 잡아 노이즈에 안 흔들림
+#   둘 다 아니면 직전 상태 유지(라벨 휩소 차단).
+# 값↑(WINDOW) = 하향 더 둔감 / 값↓(UP_WINDOW) = 상승 전환 더 빠름(대신 바닥 false 상승↑) /
+# 값↑(DEADBAND) = 라벨이 덜 바뀜.
 MARKET_TREND_REGIME_SLOPE_WINDOW = 20
+MARKET_TREND_REGIME_SLOPE_UP_WINDOW = 7
 MARKET_TREND_REGIME_SLOPE_DEADBAND = 0.05
 
 # -----------------------------------------------------------------------
