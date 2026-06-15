@@ -7,7 +7,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { PageFrame } from "../components/PageFrame";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { recommendedInvestPct } from "./allocation";
+import { recommendedInvestPct, type RegimeCaps } from "./allocation";
 import { MarketTrendChart } from "./MarketTrendChart";
 
 type MarketTrendItem = {
@@ -17,19 +17,12 @@ type MarketTrendItem = {
   change_pct: number | null;
   // 원본 추세 % (MA 괴리율 — 화면 미표시)
   trend_pct: number | null;
-  trend_pct_w1: number | null;
-  trend_pct_w2: number | null;
-  trend_pct_w3: number | null;
-  trend_pct_w4: number | null;
   // MA를 0점으로 두고 12개월 위/아래 괴리율로 정규화한 점수 (-100 ~ +100, 화면 표시용)
   trend_score: number | null;
-  trend_score_w1: number | null;
-  trend_score_w2: number | null;
-  trend_score_w3: number | null;
-  trend_score_w4: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
-  // 현재 레짐 지속일수 + 직전 3개 레짐 기간
+  // 현재 레짐(백엔드 slope 기반) + 지속일수 + 직전 3개 레짐 기간
+  current_regime: RegimeKey | null;
   current_regime_days: number | null;
   prev_regime_1: RegimeRange | null;
   prev_regime_2: RegimeRange | null;
@@ -156,38 +149,19 @@ const REGIME_COLORS: Record<RegimeKey, string> = {
 
 // 하단 설명도 3단계로.
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
-  { key: "accel_up", text: "⬆️ 상승: 가격이 MA 위에 있고, 추세가 최근 4주 평균보다 더 강한 국면입니다." },
+  { key: "accel_up", text: "⬆️ 상승: 가격이 MA 위에 있고, 추세 기울기가 상승(강화) 중인 국면입니다." },
   {
     key: "decel_up",
     text:
       "➡️ 중립: (조정) MA 위 + 추세 약화 / (진정) MA 아래 + 추세 회복.",
   },
-  { key: "accel_down", text: "⬇️ 하락: 가격이 MA 아래에 있고, 추세가 최근 4주 평균보다 더 약해진 위험 국면입니다." },
+  { key: "accel_down", text: "⬇️ 하락: 가격이 MA 아래에 있고, 추세 기울기가 하락(약화) 중인 위험 국면입니다." },
 ];
-
-/** 1·2·3·4주 전 추세% 평균. 4개 모두 유효해야 평균 반환. */
-function averageWeeklyTrend(item: MarketTrendItem): number | null {
-  const values = [item.trend_pct_w1, item.trend_pct_w2, item.trend_pct_w3, item.trend_pct_w4];
-  const valid = values.filter((v): v is number => v !== null && v !== undefined && !Number.isNaN(v));
-  if (valid.length < 4) return null;
-  return (valid[0] + valid[1] + valid[2] + valid[3]) / 4;
-}
-
-/** 추세 vs 1·2·3·4주 평균 비교로 4단계 분류. delta = trend - avgPast. */
-function classifyRegime(trend: number | null, avgPast: number | null): RegimeKey | null {
-  if (trend === null || trend === undefined || Number.isNaN(trend)) return null;
-  if (avgPast === null || avgPast === undefined || Number.isNaN(avgPast)) return null;
-  const delta = trend - avgPast;
-  if (trend >= 0) {
-    return delta >= 0 ? "accel_up" : "decel_up";
-  }
-  return delta > 0 ? "decel_down" : "accel_down";
-}
 
 function renderRegimeCell(params: { data?: GridRow }) {
   const data = params.data;
   if (!data || isDetailRow(data)) return null;
-  const key = classifyRegime(data.trend_pct, averageWeeklyTrend(data));
+  const key = data.current_regime;
   if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
   const fontWeight = key === "accel_up" || key === "accel_down" ? 700 : 500;
   return (
@@ -207,6 +181,7 @@ type MarketTrendClientProps = {
   allocNeutralInvest: number;
   allocUpSpan: number;
   allocDownSpan: number;
+  allocCaps: RegimeCaps;
 };
 
 export function MarketTrendClient({
@@ -218,6 +193,7 @@ export function MarketTrendClient({
   allocNeutralInvest,
   allocUpSpan,
   allocDownSpan,
+  allocCaps,
 }: MarketTrendClientProps) {
   const [maType, setMaType] = useState<string>(defaultMaType);
   const [maMonths, setMaMonths] = useState<number>(defaultMaMonths);
@@ -327,7 +303,7 @@ export function MarketTrendClient({
         valueGetter: (params) => {
           const data = params.data as GridRow | undefined;
           if (!data || isDetailRow(data)) return null;
-          const key = classifyRegime(data.trend_pct, averageWeeklyTrend(data));
+          const key = data.current_regime;
           return key ? REGIME_LABEL[key] : null;
         },
         cellRenderer: renderRegimeCell,
@@ -366,7 +342,14 @@ export function MarketTrendClient({
         valueGetter: (params) => {
           const data = params.data as GridRow | undefined;
           if (!data || isDetailRow(data)) return null;
-          return recommendedInvestPct(data.trend_score, allocNeutralInvest, allocUpSpan, allocDownSpan);
+          return recommendedInvestPct(
+            data.trend_score,
+            allocNeutralInvest,
+            allocUpSpan,
+            allocDownSpan,
+            data.current_regime,
+            allocCaps,
+          );
         },
         cellRenderer: (params: { value?: number | null }) => {
           const invest = params.value;
@@ -390,7 +373,7 @@ export function MarketTrendClient({
         cellRenderer: renderRegimeRangeCell,
       })),
     ],
-    [expandedTicker, allocNeutralInvest, allocUpSpan, allocDownSpan],
+    [expandedTicker, allocNeutralInvest, allocUpSpan, allocDownSpan, allocCaps],
   );
 
   const detailHeight = 640;
@@ -409,6 +392,7 @@ export function MarketTrendClient({
             allocNeutralInvest={allocNeutralInvest}
             allocUpSpan={allocUpSpan}
             allocDownSpan={allocDownSpan}
+            allocCaps={allocCaps}
           />
         );
       },
@@ -425,7 +409,7 @@ export function MarketTrendClient({
       },
       domLayout: "autoHeight",
     }),
-    [maType, maMonths, allocNeutralInvest, allocUpSpan, allocDownSpan],
+    [maType, maMonths, allocNeutralInvest, allocUpSpan, allocDownSpan, allocCaps],
   );
 
   const titleRight = useMemo(
@@ -527,17 +511,19 @@ export function MarketTrendClient({
                   (단발 극단치 대신 상위/하위 {100 - scoreAnchorPercentile}% 구간을 천장·바닥으로 봅니다.)
                   12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
                 </li>
-                <li>1·2·3·4주: 같은 점수 정의를 해당 시점(N주 전 거래일)에 적용한 값.</li>
                 <li>
                   권장 투자: 추세점수를 구간 선형으로 매핑한 보조 지표입니다. 점수 0(중립)=투자 {allocNeutralInvest}%,
                   +100={allocNeutralInvest + allocUpSpan}%, −100={allocNeutralInvest - allocDownSpan}% 를 앵커로,
                   점수 ≥ 0 이면 {allocNeutralInvest} + (점수/100)×{allocUpSpan}, &lt; 0 이면
-                  {allocNeutralInvest} + (점수/100)×{allocDownSpan} (%). 현금 = 100 − 투자.{" "}
+                  {allocNeutralInvest} + (점수/100)×{allocDownSpan} (%). 여기에 레짐별 상한
+                  (조정 {allocCaps.decel_up}% / 하락 {allocCaps.accel_down}%)을 min 으로 씌워 고점에서 약화(조정)되면
+                  풀투자를 막습니다. 현금 = 100 − 투자.{" "}
                   <strong>참고용이며 자동 매매가 아닙니다.</strong>
                 </li>
                 <li>
-                  레짐: 추세 부호(MA 위/아래) × 1·2·3·4주 전 추세% 평균 대비 변화 방향(가속/감속) 으로
-                  상승·조정·진정·하락 4단계로 분류합니다.
+                  레짐: 방향(MA 위/아래) × 가속/감속으로 상승·조정·진정·하락 4단계로 분류합니다.
+                  가속/감속은 최근 추세% 의 회귀 기울기(최소제곱)로 판정하며, 기울기가 작은 구간(데드밴드)에서는
+                  직전 상태를 유지해 잦은 라벨 변경(휩소)을 막습니다.
                 </li>
               </ul>
             </div>

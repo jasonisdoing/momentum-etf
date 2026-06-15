@@ -9,7 +9,7 @@ import {
 } from "lightweight-charts";
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
-import { recommendedInvestPct } from "./allocation";
+import { recommendedInvestPct, type RegimeCaps } from "./allocation";
 
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
 
@@ -19,14 +19,6 @@ type HistoryPoint = {
   ma: number | null;
   trend_pct: number | null;
   trend_score: number | null;
-  delta_pct: number | null;
-  regime: RegimeKey | null;
-};
-
-type WeekMarker = {
-  week: number;
-  date: string;
-  trend_pct: number | null;
   regime: RegimeKey | null;
 };
 
@@ -36,11 +28,8 @@ type HistoryResponse = {
   ma_type: string;
   ma_months: number;
   history: HistoryPoint[];
-  week_markers: WeekMarker[];
-  delta_abs_max: number | null;
   trend_min_12m: number | null;
   trend_max_12m: number | null;
-  latest_avg_past: number | null;
   error?: string;
 };
 
@@ -49,10 +38,11 @@ type MarketTrendChartProps = {
   name: string;
   maType: string;
   maMonths: number;
-  // 권장 투자 매핑 앵커 (config.py → props)
+  // 권장 투자 매핑 앵커 + 레짐별 상한 (config.py → props)
   allocNeutralInvest: number;
   allocUpSpan: number;
   allocDownSpan: number;
+  allocCaps: RegimeCaps;
 };
 
 type RegimeRange = {
@@ -119,61 +109,34 @@ function formatScore(value: number | null | undefined): string {
   return `${rounded > 0 ? "+" : ""}${rounded}`;
 }
 
-/** delta(추세 − 4주평균) 를 소수 1자리 + 부호로 포맷. 게이지 핀 라벨용. */
-function formatDelta(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  const fixed = value.toFixed(1);
-  return `${value > 0 ? "+" : ""}${fixed}`;
-}
-
 /** 추세% 값을 부호 포함 1자리 + % 로 포맷. 범례용. */
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
-type GaugeSegment = { regime: RegimeKey; fromPct: number; toPct: number };
-type GaugeMarker = { kind: "zero" | "avg"; pct: number; label: string };
 type GaugeData = {
-  segments: GaugeSegment[];
-  todayPct: number;
-  markers: GaugeMarker[];
-  avgPast: number;
+  todayPct: number; // 오늘 추세%의 막대 내 위치 (0~100)
+  zeroPct: number | null; // MA선(0%)의 위치 (범위가 0을 교차할 때만)
   trendMin: number;
   trendMax: number;
 };
 
 /**
  * 12개월 추세% 범위를 가로 막대로 표시.
- *
- * 바의 가로 좌표:
- *   0% = 12개월 최저 추세 (trendMin)
- *   100% = 12개월 최고 추세 (trendMax)
- *
- * 4주 평균과 0(MA)의 상대 위치에 따라 동적으로 2~3개 레짐 구간으로 분할.
- *   range crosses 0, avg_past >= 0  →  [하락][조정][상승]  (진정 N/A)
- *   range crosses 0, avg_past <  0  →  [하락][진정][상승]  (조정 N/A)
- *   range 모두 양수                  →  [조정][상승]
- *   range 모두 음수                  →  [하락][진정]
- *
- * 각 값 v 의 레짐 (avg_past = trend − delta 기준):
- *   v >= 0 AND v >= avg_past  →  상승
- *   v >= 0 AND v <  avg_past  →  조정
- *   v <  0 AND v >  avg_past  →  진정
- *   v <  0 AND v <= avg_past  →  하락
+ *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
+ * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
+ * 오늘 핀의 색은 현재 레짐(slope 기반)으로 칠한다. (가속/감속 밴드는 그리지 않음 —
+ * 레짐은 위치가 아니라 추세% 기울기로 결정되므로 1D 위치 밴드로 표현할 수 없다.)
  */
 function computeGaugeData({
   trend,
-  delta,
   trendMin,
   trendMax,
-  avgPastOverride,
 }: {
   trend: number | null | undefined;
-  delta: number | null | undefined;
   trendMin: number | null | undefined;
   trendMax: number | null | undefined;
-  avgPastOverride?: number | null;
 }): GaugeData | null {
   if (
     trend === null || trend === undefined || Number.isNaN(trend) ||
@@ -183,56 +146,14 @@ function computeGaugeData({
   ) {
     return null;
   }
-  const avgPast =
-    avgPastOverride !== undefined && avgPastOverride !== null && !Number.isNaN(avgPastOverride)
-      ? avgPastOverride
-      : delta !== null && delta !== undefined && !Number.isNaN(delta)
-      ? trend - delta
-      : null;
-  if (avgPast === null) return null;
-
   const project = (v: number) =>
     Math.max(0, Math.min(100, ((v - trendMin) / (trendMax - trendMin)) * 100));
 
-  const segments: GaugeSegment[] = [];
-  const markers: GaugeMarker[] = [];
-
-  if (trendMin >= 0) {
-    // 모두 양수: 조정/상승만
-    const avgPos = project(avgPast);
-    segments.push({ regime: "decel_up", fromPct: 0, toPct: avgPos });
-    segments.push({ regime: "accel_up", fromPct: avgPos, toPct: 100 });
-    markers.push({ kind: "avg", pct: avgPos, label: "4주평균" });
-  } else if (trendMax <= 0) {
-    // 모두 음수: 하락/진정만
-    const avgPos = project(avgPast);
-    segments.push({ regime: "accel_down", fromPct: 0, toPct: avgPos });
-    segments.push({ regime: "decel_down", fromPct: avgPos, toPct: 100 });
-    markers.push({ kind: "avg", pct: avgPos, label: "4주평균" });
-  } else {
-    // 0 교차 — avg_past 부호에 따라 케이스 A/B
-    const zeroPos = project(0);
-    const avgPos = project(avgPast);
-    if (avgPast >= 0) {
-      // 케이스 A: [하락][조정][상승]
-      segments.push({ regime: "accel_down", fromPct: 0, toPct: zeroPos });
-      segments.push({ regime: "decel_up", fromPct: zeroPos, toPct: avgPos });
-      segments.push({ regime: "accel_up", fromPct: avgPos, toPct: 100 });
-    } else {
-      // 케이스 B: [하락][진정][상승]
-      segments.push({ regime: "accel_down", fromPct: 0, toPct: avgPos });
-      segments.push({ regime: "decel_down", fromPct: avgPos, toPct: zeroPos });
-      segments.push({ regime: "accel_up", fromPct: zeroPos, toPct: 100 });
-    }
-    markers.push({ kind: "zero", pct: zeroPos, label: "MA" });
-    markers.push({ kind: "avg", pct: avgPos, label: "4주평균" });
-  }
+  const zeroPct = trendMin < 0 && trendMax > 0 ? project(0) : null;
 
   return {
-    segments,
     todayPct: project(trend),
-    markers,
-    avgPast,
+    zeroPct,
     trendMin,
     trendMax,
   };
@@ -411,6 +332,7 @@ export function MarketTrendChart({
   allocNeutralInvest,
   allocUpSpan,
   allocDownSpan,
+  allocCaps,
 }: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -458,10 +380,8 @@ export function MarketTrendChart({
   const latestPoint = data?.history.at(-1) ?? null;
   const gaugeData = computeGaugeData({
     trend: latestPoint?.trend_pct,
-    delta: latestPoint?.delta_pct,
     trendMin: data?.trend_min_12m,
     trendMax: data?.trend_max_12m,
-    avgPastOverride: data?.latest_avg_past,
   });
   const gaugeLeft = gaugeData?.todayPct ?? null;
   const latestRegime = latestPoint?.regime ?? null;
@@ -544,7 +464,14 @@ export function MarketTrendChart({
       const regimeText = point.regime
         ? `<div style="margin-top:4px;color:${REGIME_COLOR[point.regime]};font-weight:700">${REGIME_LABEL[point.regime]}</div>`
         : "";
-      const invest = recommendedInvestPct(point.trend_score, allocNeutralInvest, allocUpSpan, allocDownSpan);
+      const invest = recommendedInvestPct(
+        point.trend_score,
+        allocNeutralInvest,
+        allocUpSpan,
+        allocDownSpan,
+        point.regime,
+        allocCaps,
+      );
       const investText =
         invest === null
           ? ""
@@ -598,7 +525,7 @@ export function MarketTrendChart({
       labelsOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
-  }, [visibleHistory, allocNeutralInvest, allocUpSpan, allocDownSpan]);
+  }, [visibleHistory, allocNeutralInvest, allocUpSpan, allocDownSpan, allocCaps]);
 
   return (
     <div
@@ -632,42 +559,19 @@ export function MarketTrendChart({
             </div>
             {gaugeData ? (
               <>
-                {/* 세그먼트 위 라벨 */}
-                <div style={{ position: "relative", height: 18, marginBottom: 4 }}>
-                  {gaugeData.segments.map((segment) => {
-                    const widthPct = segment.toPct - segment.fromPct;
-                    if (widthPct <= 0) return null;
-                    return (
-                      <div
-                        key={`${segment.regime}:${segment.fromPct}`}
-                        style={{
-                          position: "absolute",
-                          left: `${segment.fromPct}%`,
-                          width: `${widthPct}%`,
-                          textAlign: "center",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          color: REGIME_COLOR[segment.regime],
-                          opacity: segment.regime === latestRegime ? 1 : 0.55,
-                        }}
-                      >
-                        {REGIME_LABEL[segment.regime].replace(/^[^\s]+\s/, "")}
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* 게이지 본체 */}
+                {/* 게이지 본체 — MA(0) 기준 아래(파랑)/위(빨강) 배경, 오늘 핀은 레짐색 */}
                 <div
                   style={{
                     position: "relative",
                     height: 34,
+                    marginTop: 18,
                     overflow: "visible",
                     borderRadius: 8,
                     border: "1px solid #e2e8f0",
                     background: "#fff",
                   }}
                 >
-                  {/* 컬러 세그먼트 */}
+                  {/* 방향 배경: MA 아래(파랑) / 위(빨강) */}
                   <div
                     style={{
                       position: "absolute",
@@ -677,37 +581,34 @@ export function MarketTrendChart({
                       overflow: "hidden",
                     }}
                   >
-                    {gaugeData.segments.map((segment) => {
-                      const widthPct = segment.toPct - segment.fromPct;
-                      if (widthPct <= 0) return null;
-                      return (
-                        <div
-                          key={`bar:${segment.regime}:${segment.fromPct}`}
-                          style={{
-                            width: `${widthPct}%`,
-                            background: REGIME_COLOR[segment.regime],
-                            opacity: segment.regime === latestRegime ? 0.48 : 0.22,
-                          }}
-                        />
-                      );
-                    })}
+                    {gaugeData.zeroPct === null ? (
+                      <div
+                        style={{
+                          width: "100%",
+                          background: gaugeData.trendMin >= 0 ? "#d62828" : "#1971c2",
+                          opacity: 0.14,
+                        }}
+                      />
+                    ) : (
+                      <>
+                        <div style={{ width: `${gaugeData.zeroPct}%`, background: "#1971c2", opacity: 0.14 }} />
+                        <div style={{ width: `${100 - gaugeData.zeroPct}%`, background: "#d62828", opacity: 0.14 }} />
+                      </>
+                    )}
                   </div>
-                  {/* 0 (MA) / 4주 평균 marker */}
-                  {gaugeData.markers.map((marker) => (
+                  {/* MA(0) marker */}
+                  {gaugeData.zeroPct !== null ? (
                     <div
-                      key={marker.kind}
                       style={{
                         position: "absolute",
-                        left: `${marker.pct}%`,
+                        left: `${gaugeData.zeroPct}%`,
                         top: 0,
                         bottom: 0,
                         width: 0,
-                        borderLeft: marker.kind === "zero"
-                          ? "1px dashed #475569"
-                          : "1px solid #1e293b",
+                        borderLeft: "1px dashed #475569",
                         transform: "translateX(-0.5px)",
                       }}
-                      title={`${marker.label}`}
+                      title="MA(0)"
                     >
                       <div
                         style={{
@@ -717,15 +618,15 @@ export function MarketTrendChart({
                           transform: "translateX(-50%)",
                           fontSize: "0.68rem",
                           fontWeight: 700,
-                          color: marker.kind === "zero" ? "#475569" : "#1e293b",
+                          color: "#475569",
                           whiteSpace: "nowrap",
                         }}
                       >
-                        {marker.label}
+                        MA
                       </div>
                     </div>
-                  ))}
-                  {/* 오늘 핀 */}
+                  ) : null}
+                  {/* 오늘 핀 — 색은 현재 레짐(slope 기반), 라벨은 추세% */}
                   {gaugeLeft !== null ? (
                     <div
                       style={{
@@ -741,13 +642,13 @@ export function MarketTrendChart({
                         fontWeight: 800,
                         boxShadow: "0 4px 12px rgba(15, 23, 42, 0.2)",
                       }}
-                      title="추세 − 4주 평균"
+                      title={`오늘 추세% (${latestRegime ? REGIME_LABEL[latestRegime] : "-"})`}
                     >
-                      {formatDelta(latestPoint?.delta_pct)}
+                      {formatPct(latestPoint?.trend_pct)}
                     </div>
                   ) : null}
                 </div>
-                {/* 범례: min / 4주평균 / max */}
+                {/* 범례: 최저 / MA / 최고 */}
                 <div
                   style={{
                     display: "flex",
@@ -758,7 +659,7 @@ export function MarketTrendChart({
                   }}
                 >
                   <span>최저: {formatPct(gaugeData.trendMin)}</span>
-                  <span>4주 평균: {formatPct(gaugeData.avgPast)}</span>
+                  <span>MA: 0%</span>
                   <span>최고: {formatPct(gaugeData.trendMax)}</span>
                 </div>
               </>

@@ -17,7 +17,12 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-from config import MARKET_TREND_SCORE_ANCHOR_PERCENTILE, TRADING_DAYS_PER_MONTH
+from config import (
+    MARKET_TREND_REGIME_SLOPE_DEADBAND,
+    MARKET_TREND_REGIME_SLOPE_WINDOW,
+    MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
+    TRADING_DAYS_PER_MONTH,
+)
 from utils.moving_averages import calculate_moving_average
 
 logger = logging.getLogger(__name__)
@@ -79,15 +84,6 @@ def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
     series = pd.Series(closes, index=pd.DatetimeIndex(dates))
     return series.sort_index()
 
-# 과거 시점 추세 계산용 trading-day offset (오늘 대비 N 거래일 전).
-TRADING_DAYS_PER_WEEK = 5
-TREND_OFFSETS_DAYS = {
-    "trend_pct_w1": TRADING_DAYS_PER_WEEK * 1,            # 1주 전
-    "trend_pct_w2": TRADING_DAYS_PER_WEEK * 2,            # 2주 전
-    "trend_pct_w3": TRADING_DAYS_PER_WEEK * 3,            # 3주 전
-    "trend_pct_w4": TRADING_DAYS_PER_WEEK * 4,            # 4주 전
-}
-
 
 def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] | None:
     """yfinance intraday 1m 으로 오늘 ET 거래일의 가장 최근 종가를 반환.
@@ -130,8 +126,8 @@ def compute_market_trend(ma_type: str, ma_months: int) -> dict[str, Any]:
 
     Returns:
         ``{"ma_type", "ma_months", "items": [{
-            name, ticker, price, change_pct,
-            trend_pct, trend_pct_w1, trend_pct_m1, trend_pct_m3,
+            name, ticker, price, change_pct, trend_pct, trend_score,
+            current_regime, current_regime_days, prev_regime_1..3,
         }, ...]}``
     """
 
@@ -193,20 +189,13 @@ def _build_item(
         "change_pct": None,
         # 원본 추세 % (MA 괴리율)
         "trend_pct": None,
-        "trend_pct_w1": None,
-        "trend_pct_w2": None,
-        "trend_pct_w3": None,
-        "trend_pct_w4": None,
         # 12개월 정규화 점수 (-100 ~ +100, 화면 표시용)
         "trend_score": None,
-        "trend_score_w1": None,
-        "trend_score_w2": None,
-        "trend_score_w3": None,
-        "trend_score_w4": None,
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
-        # 현재 레짐의 지속 일수 + 직전 3개 레짐 기간 (테이블 표시용)
+        # 현재 레짐 + 지속 일수 + 직전 3개 레짐 기간 (테이블 표시용)
+        "current_regime": None,
         "current_regime_days": None,
         "prev_regime_1": None,
         "prev_regime_2": None,
@@ -276,12 +265,11 @@ def _build_item(
         return base
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
-    for key, offset in TREND_OFFSETS_DAYS.items():
-        base[key] = _trend_pct_at(close_series, ma_series, offset=offset)
 
     # 최근 12개월 일별 레짐을 계산해 연속 구간으로 그룹화 → 현재 지속일수 + 직전 3개 레짐 기간.
     ranges = _build_daily_regime_ranges(close_series, ma_series)
     if ranges:
+        base["current_regime"] = ranges[-1]["regime"]
         base["current_regime_days"] = ranges[-1]["days"]
         for slot, offset in ((1, -2), (2, -3), (3, -4)):
             if len(ranges) >= -offset:
@@ -307,10 +295,6 @@ def _build_item(
         base["score_range_high"] = score_max
         base["score_range_low"] = score_min
         base["trend_score"] = _normalize_score(base["trend_pct"], score_min, score_max)
-        base["trend_score_w1"] = _normalize_score(base["trend_pct_w1"], score_min, score_max)
-        base["trend_score_w2"] = _normalize_score(base["trend_pct_w2"], score_min, score_max)
-        base["trend_score_w3"] = _normalize_score(base["trend_pct_w3"], score_min, score_max)
-        base["trend_score_w4"] = _normalize_score(base["trend_pct_w4"], score_min, score_max)
 
     return base
 
@@ -399,22 +383,19 @@ def _build_daily_regime_ranges(
 
     take = min(length, int(window_days))
     start_idx = length - take
-    week_offsets = (5, 10, 15, 20)
     ranges: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
+    strengthening_prev: bool | None = None
     for idx in range(start_idx, length):
         date_value = close_series.index[idx]
         date_str = (
             date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         )
         trend = full_trend[idx]
-        past_vals = []
-        for off in week_offsets:
-            j = idx - off
-            if j >= 0 and full_trend[j] is not None:
-                past_vals.append(full_trend[j])
-        avg_past = sum(past_vals) / 4 if len(past_vals) == 4 else None
-        regime = _classify_regime(trend, avg_past)
+        slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
+        regime, strengthening_prev = _regime_from_slope(
+            trend, slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
+        )
         if regime is None:
             if current:
                 ranges.append(current)
@@ -437,22 +418,55 @@ def _build_daily_regime_ranges(
     return ranges
 
 
-def _classify_regime(trend: float | None, avg_past: float | None) -> str | None:
-    """현재 추세%와 1·2·3·4주 전 추세% 평균으로 4단계 레짐을 분류한다.
+def _trend_slope(full_trend: list[float | None], end_idx: int, window: int) -> float | None:
+    """end_idx 까지 최근 ``window`` 거래일 추세%에 최소제곱 직선을 적합한 기울기(%/일).
 
-    규칙:
-        delta = trend - avg_past
-        trend >= 0  AND  delta >= 0  →  accel_up   (상승: MA 위 + 평균보다 강함)
-        trend >= 0  AND  delta < 0   →  decel_up   (조정: MA 위 + 평균보다 약함)
-        trend < 0   AND  delta > 0   →  decel_down (진정: MA 아래 + 평균보다 강함)
-        trend < 0   AND  delta <= 0  →  accel_down (하락: MA 아래 + 평균보다 약함/유지)
+    유효 점이 2개 미만이면 None. x 는 거래일 인덱스(결측은 건너뛰되 간격 보존).
     """
-    if trend is None or avg_past is None:
+    lo = max(0, end_idx - int(window) + 1)
+    pts = [(k, full_trend[k]) for k in range(lo, end_idx + 1) if full_trend[k] is not None]
+    if len(pts) < 2:
         return None
-    delta = trend - avg_past
+    n = len(pts)
+    mean_x = sum(x for x, _ in pts) / n
+    mean_y = sum(y for _, y in pts) / n
+    den = sum((x - mean_x) ** 2 for x, _ in pts)
+    if den == 0:
+        return None
+    num = sum((x - mean_x) * (y - mean_y) for x, y in pts)
+    return num / den
+
+
+def _regime_from_slope(
+    trend: float | None,
+    slope: float | None,
+    prev_strengthening: bool | None,
+    deadband: float,
+) -> tuple[str | None, bool | None]:
+    """추세% 부호(방향) × 회귀 기울기(가속/감속, 데드밴드 히스테리시스)로 4단계 레짐 분류.
+
+    기울기 > +deadband → 강화, < −deadband → 약화, 그 사이면 직전 강화/약화 상태 유지.
+        MA 위(추세≥0) + 강화 → accel_up   (상승)
+        MA 위        + 약화 → decel_up   (조정)
+        MA 아래      + 강화 → decel_down (진정)
+        MA 아래      + 약화 → accel_down (하락)
+    반환: (regime, 갱신된 strengthening 상태)
+    """
+    if trend is None:
+        return None, prev_strengthening
+    if slope is None:
+        strengthening = prev_strengthening if prev_strengthening is not None else (trend >= 0)
+    elif slope > deadband:
+        strengthening = True
+    elif slope < -deadband:
+        strengthening = False
+    else:
+        strengthening = prev_strengthening if prev_strengthening is not None else (slope >= 0)
     if trend >= 0:
-        return "accel_up" if delta >= 0 else "decel_up"
-    return "decel_down" if delta > 0 else "accel_down"
+        regime = "accel_up" if strengthening else "decel_up"
+    else:
+        regime = "decel_down" if strengthening else "accel_down"
+    return regime, strengthening
 
 
 def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[str, Any]:
@@ -460,8 +474,8 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
 
     Returns:
         ``{"ticker", "name", "ma_type", "ma_months",
-            "history": [{date, close, ma, trend_pct, regime}, ...],
-            "week_markers": [{week: 1, date, trend_pct}, ...]}``
+            "history": [{date, close, ma, trend_pct, trend_score, regime}, ...],
+            "trend_min_12m", "trend_max_12m"}``
         해당 ticker 가 알려진 인덱스가 아니면 name 은 ticker 그대로 사용.
     """
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
@@ -478,7 +492,8 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         "ma_type": ma_type,
         "ma_months": int(ma_months),
         "history": [],
-        "week_markers": [],
+        "trend_min_12m": None,
+        "trend_max_12m": None,
     }
 
     close_series: pd.Series | None = None
@@ -517,14 +532,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             close_raw = close_raw.iloc[:, 0]
         close_series = close_raw.dropna()
     if len(close_series) < 2:
-        return {
-            "ticker": yf_ticker,
-            "name": name,
-            "ma_type": ma_type,
-            "ma_months": int(ma_months),
-            "history": [],
-            "week_markers": [],
-        }
+        return empty_payload
 
     try:
         ma_series = calculate_moving_average(close_series, ma_days, ma_type)
@@ -548,12 +556,21 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             full_trend.append((c / m - 1.0) * 100.0)
 
     start = length - take
-    valid_trend_window = [v for v in full_trend[start:length] if v is not None]
-    score_min = min(valid_trend_window) if valid_trend_window else None
-    score_max = max(valid_trend_window) if valid_trend_window else None
+    # 추세점수 정규화 앵커는 표(_build_item)와 동일하게 — 최신 시점 기준 트레일링 12개월
+    # 퍼센타일(config) 을 쓴다. (이전엔 5년 min/max 라 표와 점수/권장투자가 어긋났다.)
+    score_window = TRADING_DAYS_PER_MONTH * 12
+    anchor_window = [v for v in full_trend[max(0, length - score_window):length] if v is not None]
+    if anchor_window:
+        anchor_series = pd.Series(anchor_window, dtype="float64")
+        upper_q = MARKET_TREND_SCORE_ANCHOR_PERCENTILE / 100.0
+        score_min = float(anchor_series.quantile(1.0 - upper_q))
+        score_max = float(anchor_series.quantile(upper_q))
+    else:
+        score_min = None
+        score_max = None
 
-    week_offsets = (5, 10, 15, 20)
     history: list[dict[str, Any]] = []
+    strengthening_prev: bool | None = None
     for idx in range(start, length):
         date_value = close_series.index[idx]
         date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
@@ -566,15 +583,11 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             else None
         )
 
-        # 해당 일자의 1·2·3·4주 전 추세% 평균과 비교 → 4단계 레짐 분류 + delta.
-        past_vals = []
-        for off in week_offsets:
-            j = idx - off
-            if j >= 0 and full_trend[j] is not None:
-                past_vals.append(full_trend[j])
-        avg_past = sum(past_vals) / len(past_vals) if len(past_vals) == len(week_offsets) else None
-        delta = (trend - avg_past) if (trend is not None and avg_past is not None) else None
-        regime = _classify_regime(trend, avg_past)
+        # 레짐: 추세% 회귀 기울기 + 데드밴드(히스테리시스)로 분류.
+        slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
+        regime, strengthening_prev = _regime_from_slope(
+            trend, slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
+        )
 
         history.append(
             {
@@ -583,35 +596,9 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
                 "ma": ma_v,
                 "trend_pct": trend,
                 "trend_score": trend_score,
-                "delta_pct": delta,
                 "regime": regime,
             }
         )
-
-    # 1~8주 마커 — history 시리즈에서 끝에서부터 5N 거래일 전. regime 도 포함.
-    week_markers: list[dict[str, Any]] = []
-    for week in range(1, 9):
-        offset = TRADING_DAYS_PER_WEEK * week
-        idx = len(history) - 1 - offset
-        if idx < 0:
-            continue
-        point = history[idx]
-        week_markers.append({
-            "week": week,
-            "date": point["date"],
-            "trend_pct": point["trend_pct"],
-            "regime": point.get("regime"),
-        })
-
-    # 게이지 정규화용: 12개월 |delta| 최대값.
-    valid_deltas = [p["delta_pct"] for p in history if p.get("delta_pct") is not None]
-    delta_abs_max = max(abs(d) for d in valid_deltas) if valid_deltas else None
-
-    # 12개월 추세% 범위 + 최신 4주 평균 (게이지 표시용)
-    latest = history[-1] if history else None
-    latest_avg_past = None
-    if latest and latest.get("trend_pct") is not None and latest.get("delta_pct") is not None:
-        latest_avg_past = latest["trend_pct"] - latest["delta_pct"]
 
     return {
         "ticker": yf_ticker,
@@ -619,11 +606,8 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         "ma_type": ma_type,
         "ma_months": int(ma_months),
         "history": history,
-        "week_markers": week_markers,
-        "delta_abs_max": delta_abs_max,
         "trend_min_12m": score_min,
         "trend_max_12m": score_max,
-        "latest_avg_past": latest_avg_past,
     }
 
 

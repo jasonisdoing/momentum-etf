@@ -167,6 +167,24 @@ MARKET_TREND_ALLOC_NEUTRAL_INVEST = 70
 MARKET_TREND_ALLOC_UP_SPAN = 30
 MARKET_TREND_ALLOC_DOWN_SPAN = 60
 
+# 레짐별 투자 상한(%). 점수기반 권장투자에 min() 으로 천장을 씌운다.
+#   최종 투자% = min(점수기반%, 해당 레짐 상한)
+# 점수는 레벨(MA 대비 위치)이라 고점에서 +100(=100%)이 되는데, 그때 레짐이 약화(조정)면
+# 천장을 눌러 "꼭지 풀투자"를 막는다.
+# 실효 캡 2개만 둔다 — 상승(MA 위+강화)·진정(MA 아래+회복)은 base 가 이미 그 아래라
+# 천장이 안 걸리므로(no-op) 파라미터에서 제외했다.
+#   중립조정(decel_up): MA 위 + 약화(천장권) — base 최대 100 을 눌러줌
+#   하락(accel_down) : MA 아래 + 약화      — MA 근처 base 를 방어적으로 낮춤
+MARKET_TREND_ALLOC_CAP_DECEL_UP = 90
+MARKET_TREND_ALLOC_CAP_ACCEL_DOWN = 70
+
+# 레짐(가속/감속) 판정: 최근 4주 평균 비교 대신 추세%의 회귀 기울기 + 데드밴드(히스테리시스).
+#   최근 SLOPE_WINDOW 거래일 추세%에 최소제곱 직선을 적합해 기울기(%/일)를 구하고,
+#   기울기 > +DEADBAND → 강화, < −DEADBAND → 약화, 그 사이면 직전 상태 유지(라벨 휩소 차단).
+# 값↑(WINDOW) = 더 매끈/둔감, 값↑(DEADBAND) = 라벨이 덜 바뀜.
+MARKET_TREND_REGIME_SLOPE_WINDOW = 20
+MARKET_TREND_REGIME_SLOPE_DEADBAND = 0.05
+
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
 # -----------------------------------------------------------------------

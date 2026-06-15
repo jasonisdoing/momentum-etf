@@ -43,6 +43,10 @@ def get_market_trend_defaults(
             "neutral_invest": config.MARKET_TREND_ALLOC_NEUTRAL_INVEST,
             "up_span": config.MARKET_TREND_ALLOC_UP_SPAN,
             "down_span": config.MARKET_TREND_ALLOC_DOWN_SPAN,
+            "caps": {
+                "decel_up": config.MARKET_TREND_ALLOC_CAP_DECEL_UP,
+                "accel_down": config.MARKET_TREND_ALLOC_CAP_ACCEL_DOWN,
+            },
         },
     }
 

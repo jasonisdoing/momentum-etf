@@ -9,7 +9,12 @@ type MarketTrendDefaults = {
   ma_types: string[];
   ma_months_max: number;
   score_anchor_percentile: number;
-  alloc: { neutral_invest: number; up_span: number; down_span: number };
+  alloc: {
+    neutral_invest: number;
+    up_span: number;
+    down_span: number;
+    caps: { decel_up: number; accel_down: number };
+  };
 };
 
 export default async function MarketTrendPage() {
@@ -25,6 +30,7 @@ export default async function MarketTrendPage() {
       allocNeutralInvest={defaults.alloc.neutral_invest}
       allocUpSpan={defaults.alloc.up_span}
       allocDownSpan={defaults.alloc.down_span}
+      allocCaps={defaults.alloc.caps}
     />
   );
 }
