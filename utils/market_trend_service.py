@@ -108,6 +108,32 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     return pd.Timestamp(close.index[-1]), float(close.iloc[-1])
 
 
+def _apply_intraday_boost(close_series: "pd.Series | None", yf_ticker: str) -> "pd.Series | None":
+    """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우, intraday 1분봉
+    마감가를 마지막 일봉으로 덧붙인다. 표(_build_item)와 차트(compute_index_history)가
+    동일한 최신 종가를 쓰도록 공통 사용한다. (한국 인덱스는 네이버라 호출자가 적용 안 함.)
+    """
+    if close_series is None or close_series.empty:
+        return close_series
+    intraday = _fetch_yf_intraday_last_close(yf_ticker)
+    if intraday is None:
+        return close_series
+    try:
+        intraday_ts, intraday_close = intraday
+        intraday_date = (
+            intraday_ts.tz_convert(None).normalize() if intraday_ts.tz is not None else intraday_ts.normalize()
+        )
+        last_ts = pd.Timestamp(close_series.index[-1])
+        last_date = (
+            last_ts.tz_convert(None).normalize() if last_ts.tz is not None else last_ts.normalize()
+        )
+        if intraday_date > last_date:
+            return pd.concat([close_series, pd.Series([intraday_close], index=[intraday_date])])
+    except Exception as exc:
+        logger.warning("intraday 보강 머지 실패 (%s): %s", yf_ticker, exc)
+    return close_series
+
+
 def _to_float(value: Any) -> float | None:
     try:
         result = float(value)
@@ -128,7 +154,7 @@ def compute_market_trend(ma_type: str, ma_months: int) -> dict[str, Any]:
     Returns:
         ``{"ma_type", "ma_months", "items": [{
             name, ticker, price, change_pct, trend_pct, trend_score,
-            current_regime, current_regime_days, prev_regime_1..3,
+            pct_from_high, current_regime, current_regime_days,
         }, ...]}``
     """
 
@@ -195,12 +221,11 @@ def _build_item(
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
-        # 현재 레짐 + 지속 일수 + 직전 3개 레짐 기간 (테이블 표시용)
+        # 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100 — 0 이하(고점=0)
+        "pct_from_high": None,
+        # 현재 레짐 + 지속 일수 (테이블 표시용)
         "current_regime": None,
         "current_regime_days": None,
-        "prev_regime_1": None,
-        "prev_regime_2": None,
-        "prev_regime_3": None,
     }
     # 한국 인덱스는 네이버에서 받은 close_series 를 우선 사용한다.
     if kor_close is not None and not kor_close.empty:
@@ -219,29 +244,8 @@ def _build_item(
         except Exception:
             return base
 
-        # 미국 인덱스의 daily 마지막 종가가 Yahoo daily 갱신 지연으로 누락된 경우,
-        # intraday 1분봉 마감가로 보강한다. (한국 인덱스는 네이버라서 적용 안 함.)
-        intraday = _fetch_yf_intraday_last_close(yf_ticker)
-        if intraday is not None and close_series is not None and not close_series.empty:
-            try:
-                intraday_ts, intraday_close = intraday
-                intraday_date = (
-                    intraday_ts.tz_convert(None).normalize()
-                    if intraday_ts.tz is not None
-                    else intraday_ts.normalize()
-                )
-                last_ts = pd.Timestamp(close_series.index[-1])
-                last_date = (
-                    last_ts.tz_convert(None).normalize()
-                    if last_ts.tz is not None
-                    else last_ts.normalize()
-                )
-                if intraday_date > last_date:
-                    close_series = pd.concat(
-                        [close_series, pd.Series([intraday_close], index=[intraday_date])]
-                    )
-            except Exception as exc:
-                logger.warning("intraday 보강 머지 실패 (%s): %s", yf_ticker, exc)
+        # 미국 인덱스 daily 마지막 종가가 지연 누락되면 intraday 마감가로 보강 (한국=네이버 제외).
+        close_series = _apply_intraday_boost(close_series, yf_ticker)
 
     if close_series is None or close_series.empty or len(close_series) < 2:
         return base
@@ -267,20 +271,17 @@ def _build_item(
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
 
-    # 최근 12개월 일별 레짐을 계산해 연속 구간으로 그룹화 → 현재 지속일수 + 직전 3개 레짐 기간.
+    # 52주(252거래일) 전고점 대비 등락률. 현재가가 고점이면 0, 아래면 음수.
+    high_window = close_series.tail(TRADING_DAYS_PER_MONTH * 12 + 12)
+    high_52w = _to_float(high_window.max()) if not high_window.empty else None
+    if high_52w is not None and high_52w > 0 and latest_price is not None:
+        base["pct_from_high"] = (latest_price / high_52w - 1.0) * 100.0
+
+    # 최근 12개월 일별 레짐을 계산해 연속 구간으로 그룹화 → 현재 레짐 + 지속일수.
     ranges = _build_daily_regime_ranges(close_series, ma_series)
     if ranges:
         base["current_regime"] = ranges[-1]["regime"]
         base["current_regime_days"] = ranges[-1]["days"]
-        for slot, offset in ((1, -2), (2, -3), (3, -4)):
-            if len(ranges) >= -offset:
-                r = ranges[offset]
-                base[f"prev_regime_{slot}"] = {
-                    "regime": r["regime"],
-                    "start_date": r["start_date"],
-                    "end_date": r["end_date"],
-                    "days": r["days"],
-                }
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
@@ -539,6 +540,8 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         if isinstance(close_raw, pd.DataFrame):
             close_raw = close_raw.iloc[:, 0]
         close_series = close_raw.dropna()
+        # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.
+        close_series = _apply_intraday_boost(close_series, yf_ticker)
     if len(close_series) < 2:
         return empty_payload
 

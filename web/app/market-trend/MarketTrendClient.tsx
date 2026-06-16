@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridOptions, ValueFormatterParams } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -20,19 +20,11 @@ type MarketTrendItem = {
   trend_score: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
-  // 현재 레짐(백엔드 slope 기반) + 지속일수 + 직전 3개 레짐 기간
+  // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
+  pct_from_high: number | null;
+  // 현재 레짐(백엔드 slope 기반) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
-  prev_regime_1: RegimeRange | null;
-  prev_regime_2: RegimeRange | null;
-  prev_regime_3: RegimeRange | null;
-};
-
-type RegimeRange = {
-  regime: RegimeKey;
-  start_date: string;
-  end_date: string;
-  days: number;
 };
 
 type MainRow = MarketTrendItem & { rowType: "main"; id: string };
@@ -81,51 +73,6 @@ function renderSignedPercentCell(params: { value: number | null | undefined }) {
 
 function renderSignedScoreCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatScore(params.value)}</span>;
-}
-
-/** 주간 레짐 셀 라벨. 중립은 sub-state 까지 명시 (좁은 셀에 맞춰 공백 제거). */
-const REGIME_SHORT_LABEL: Record<RegimeKey, string> = {
-  accel_up: "상승",
-  decel_up: "중립(조정)",
-  decel_down: "중립(진정)",
-  accel_down: "하락",
-};
-/** "4월 8일" 같은 한국어 월/일 표시 (연도 생략). */
-function formatKoreanDate(date: string | null | undefined): string {
-  if (!date) return "-";
-  const parts = date.split("-");
-  if (parts.length !== 3) return date;
-  const [, m, d] = parts;
-  return `${Number(m)}월 ${Number(d)}일`;
-}
-
-/** 직전 레짐 기간 셀: "상승: 4월 8일~5월 15일 (28일)" 형태. */
-function renderRegimeRangeCell(params: { value?: RegimeRange | null }) {
-  const range = params.value ?? null;
-  if (!range) return <span style={{ color: "#adb5bd" }}>-</span>;
-  const label = REGIME_SHORT_LABEL[range.regime];
-  const color = REGIME_COLORS[range.regime];
-  return (
-    <span style={{ color, fontWeight: 600, whiteSpace: "nowrap", fontSize: "0.85rem" }}>
-      <strong>{label}</strong>
-      <span style={{ fontWeight: 400, marginLeft: 6 }}>
-        {formatKoreanDate(range.start_date)} ~ {formatKoreanDate(range.end_date)}
-      </span>
-    </span>
-  );
-}
-
-function renderRegimeWeekCell(params: { value?: RegimeKey | null }) {
-  const key = params.value ?? null;
-  if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
-  const fontWeight = key === "accel_up" || key === "accel_down" ? 700 : 500;
-  // 중립 sub-state 는 글자가 길어 좁은 셀에서 잘리지 않도록 살짝 축소.
-  const fontSize = key === "decel_up" || key === "decel_down" ? "0.82rem" : "0.9rem";
-  return (
-    <span style={{ color: REGIME_COLORS[key], fontWeight, fontSize, whiteSpace: "nowrap" }}>
-      {REGIME_SHORT_LABEL[key]}
-    </span>
-  );
 }
 
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
@@ -192,6 +139,8 @@ export function MarketTrendClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
+  // 페이지 첫 진입 시 최상단(코스피) 행을 한 번 자동 확장한다 (이후엔 사용자 제어).
+  const didInitialExpandRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -207,7 +156,15 @@ export function MarketTrendClient({
         if (!response.ok) {
           throw new Error(payload.error ?? "시장지수 추세 데이터를 불러오지 못했습니다.");
         }
-        if (alive) setItems(payload.items ?? []);
+        if (alive) {
+          const loaded = payload.items ?? [];
+          setItems(loaded);
+          // 첫 로드 1회만 최상단 행 자동 확장 (MA 변경 재로드 때는 사용자 상태 유지).
+          if (!didInitialExpandRef.current && loaded.length > 0) {
+            didInitialExpandRef.current = true;
+            setExpandedTicker(loaded[0].ticker);
+          }
+        }
       } catch (loadError) {
         if (alive)
           setError(
@@ -318,21 +275,24 @@ export function MarketTrendClient({
           return <span style={{ color: "#1f2937" }}>{d}일째</span>;
         },
       },
-      ...([1, 2, 3] as const).map<ColDef<GridRow>>((slot) => ({
-        field: `prev_regime_${slot}` as keyof MarketTrendItem,
-        headerName: `최근${slot}`,
-        flex: 1.5,
-        minWidth: 190,
-        sortable: false,
-        cellDataType: false,
-        cellStyle: {
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-start",
-          textAlign: "left",
-        },
-        cellRenderer: renderRegimeRangeCell,
-      })),
+      {
+        field: "trend_score",
+        headerName: "추세 점수",
+        flex: 0.7,
+        minWidth: 100,
+        sortable: true,
+        type: "rightAligned",
+        cellRenderer: renderSignedScoreCell,
+      },
+      {
+        field: "pct_from_high",
+        headerName: "전고점 대비",
+        flex: 0.8,
+        minWidth: 110,
+        sortable: true,
+        type: "rightAligned",
+        cellRenderer: renderSignedPercentCell,
+      },
     ],
     [expandedTicker],
   );

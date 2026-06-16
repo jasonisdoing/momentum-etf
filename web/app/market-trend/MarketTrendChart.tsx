@@ -522,18 +522,6 @@ export function MarketTrendChart({
       ) : (
         <div style={{ display: "flex", height: "calc(100% - 32px)", minHeight: 300, flexDirection: "column" }}>
           <div style={{ marginBottom: 12 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 8 }}>
-              <div
-                style={{
-                  color: latestRegime ? REGIME_COLOR[latestRegime] : "#1f2937",
-                  fontSize: "1.7rem",
-                  fontWeight: 800,
-                  lineHeight: 1,
-                }}
-              >
-                {latestRegime ? REGIME_LABEL[latestRegime] : "레짐 없음"}
-              </div>
-            </div>
             {gaugeData ? (
               <>
                 {/* 게이지 본체 — MA(0) 기준 아래(파랑)/위(빨강) 배경, 오늘 핀은 레짐색 */}
@@ -619,9 +607,11 @@ export function MarketTrendChart({
                         fontWeight: 800,
                         boxShadow: "0 4px 12px rgba(15, 23, 42, 0.2)",
                       }}
-                      title={`오늘 추세% (${latestRegime ? REGIME_LABEL[latestRegime] : "-"})`}
+                      title={`추세 점수 ${formatScore(latestPoint?.trend_score)} (MA 괴리율 ${formatPct(
+                        latestPoint?.trend_pct,
+                      )}, ${latestRegime ? REGIME_LABEL[latestRegime] : "-"})`}
                     >
-                      {formatPct(latestPoint?.trend_pct)}
+                      {formatScore(latestPoint?.trend_score)}
                     </div>
                   ) : null}
                 </div>
