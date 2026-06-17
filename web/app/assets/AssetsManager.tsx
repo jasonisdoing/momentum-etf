@@ -2355,6 +2355,60 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
     },
     {
+      colId: "asset_weight",
+      headerName: "비중",
+      minWidth: 80,
+      flex: 0.6,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
+          return null;
+        }
+        // 합계 행의 총 자산을 분모로 사용
+        let totalSum = 0;
+        params.api.forEachNode((node) => {
+          const d = node.data as ParentGridRow | undefined;
+          if (d && isTotalRow(d)) {
+            totalSum = Number((d as Record<string, unknown>).total_assets_krw ?? 0);
+          }
+        });
+        if (totalSum <= 0) return null;
+        const own = Number((params.data as Record<string, unknown>).total_assets_krw ?? 0);
+        return (own / totalSum) * 100;
+      },
+      cellRenderer: (params: { value?: number | null }) =>
+        params.value !== null && params.value !== undefined
+          ? `${params.value.toFixed(2)}%`
+          : "",
+    },
+    {
+      field: "cash_ratio",
+      headerName: "현금 비중",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
+    },
+    {
+      colId: "daily_profit_pct",
+      headerName: "금일(%)",
+      minWidth: 88,
+      flex: 0.7,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data)) {
+          return null;
+        }
+        // 백엔드에서 계산된 daily_return_pct 사용 (입출금 영향 제거).
+        return Number(params.data.daily_return_pct ?? 0);
+      },
+      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
+        params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
+          ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
+          : "",
+    },
+    {
       field: "total_assets_krw",
       headerName: "총 자산",
       minWidth: 132,
@@ -2429,33 +2483,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) ? formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0)) : "",
     },
     {
-      colId: "asset_weight",
-      headerName: "비중",
-      minWidth: 80,
-      flex: 0.6,
-      type: "rightAligned",
-      valueGetter: (params) => {
-        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
-          return null;
-        }
-        // 합계 행의 총 자산을 분모로 사용
-        let totalSum = 0;
-        params.api.forEachNode((node) => {
-          const d = node.data as ParentGridRow | undefined;
-          if (d && isTotalRow(d)) {
-            totalSum = Number((d as Record<string, unknown>).total_assets_krw ?? 0);
-          }
-        });
-        if (totalSum <= 0) return null;
-        const own = Number((params.data as Record<string, unknown>).total_assets_krw ?? 0);
-        return (own / totalSum) * 100;
-      },
-      cellRenderer: (params: { value?: number | null }) =>
-        params.value !== null && params.value !== undefined
-          ? `${params.value.toFixed(2)}%`
-          : "",
-    },
-    {
       field: "cash_edit_value",
       headerName: "현금",
       minWidth: 124,
@@ -2472,15 +2499,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
     },
     {
-      field: "cash_ratio",
-      headerName: "현금 비중",
-      minWidth: 90,
-      flex: 0.7,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
-    },
-    {
       field: "daily_profit",
       headerName: "금일 손익",
       minWidth: 110,
@@ -2489,24 +2507,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
         params.data && !isDetailRow(params.data)
           ? <span className={getSignedClass(params.value ?? 0)}>{formatHiddenAmount(showAmounts, formatKrw(params.value ?? 0))}</span>
-          : "",
-    },
-    {
-      colId: "daily_profit_pct",
-      headerName: "금일(%)",
-      minWidth: 88,
-      flex: 0.7,
-      type: "rightAligned",
-      valueGetter: (params) => {
-        if (!params.data || isDetailRow(params.data)) {
-          return null;
-        }
-        // 백엔드에서 계산된 daily_return_pct 사용 (입출금 영향 제거).
-        return Number(params.data.daily_return_pct ?? 0);
-      },
-      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) =>
-        params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
-          ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
           : "",
     },
     {
