@@ -39,7 +39,9 @@ def _parse_int(value: Any) -> int | None:
     return int(parsed)
 
 
-def _fetch_us_market_value_page(market: str, start_idx: int, page_size: int) -> list[dict[str, Any]]:
+def _fetch_us_market_value_page(
+    market: str, start_idx: int, page_size: int, *, max_attempts: int = 3
+) -> list[dict[str, Any]]:
     params = {
         "nation": "USA",
         "tradeType": market,
@@ -47,17 +49,28 @@ def _fetch_us_market_value_page(market: str, start_idx: int, page_size: int) -> 
         "startIdx": str(start_idx),
         "pageSize": str(page_size),
     }
-    try:
-        resp = requests.get(NAVER_US_STOCK_MARKET_VALUE_URL, params=params, headers=NAVER_FINANCE_HEADERS, timeout=10)
-        resp.raise_for_status()
-        payload = resp.json()
-    except Exception as exc:
-        logger.error("네이버 미국 주식 리스트 조회 실패 (market=%s, page_size=%s): %s", market, page_size, exc)
-        raise RuntimeError(f"네이버 미국 주식 리스트 조회에 실패했습니다: {exc}") from exc
+    # 네이버 API 가 간헐적으로 5xx/타임아웃을 내므로 짧게 재시도한다 (일시 장애 흡수).
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = requests.get(NAVER_US_STOCK_MARKET_VALUE_URL, params=params, headers=NAVER_FINANCE_HEADERS, timeout=10)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            if attempt < max_attempts:
+                logger.warning(
+                    "네이버 미국 주식 리스트 일시 오류 재시도 (%d/%d, market=%s): %s",
+                    attempt, max_attempts, market, exc,
+                )
+                time.sleep(0.7 * attempt)
+                continue
+            logger.error("네이버 미국 주식 리스트 조회 실패 (market=%s, page_size=%s): %s", market, page_size, exc)
+            raise RuntimeError(f"네이버 미국 주식 리스트 조회에 실패했습니다: {exc}") from exc
 
-    if not isinstance(payload, list):
-        raise RuntimeError("네이버 미국 주식 리스트 응답 형식이 올바르지 않습니다.")
-    return payload
+        if not isinstance(payload, list):
+            raise RuntimeError("네이버 미국 주식 리스트 응답 형식이 올바르지 않습니다.")
+        return payload
+
+    raise RuntimeError("네이버 미국 주식 리스트 조회에 실패했습니다.")  # 도달 불가, 안전망
 
 
 def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -> dict[str, Any]:
@@ -200,7 +213,17 @@ def fetch_naver_us_stock_info_map(tickers: set[str] | list[str] | tuple[str, ...
     for market in ("NSQ", "NYS"):
         start_idx = 0
         while targets - set(found):
-            page = _fetch_us_market_value_page(market, start_idx=start_idx, page_size=_NAVER_US_PAGE_SIZE_MAX)
+            try:
+                page = _fetch_us_market_value_page(market, start_idx=start_idx, page_size=_NAVER_US_PAGE_SIZE_MAX)
+            except RuntimeError as exc:
+                # 업종/거래소/시총/배당은 보조 enrichment 다. 재시도 후에도 네이버가 실패하면
+                # 전체 메타 업데이트를 죽이지 않고, 지금까지 모은 부분 맵으로 진행한다.
+                # 누락된 종목은 호출측에서 enrichment 가 스킵되어 기존 DB 값이 보존된다 (가짜값 X).
+                logger.warning(
+                    "네이버 미국 업종맵 조회 실패 — 보조 데이터 일부/전체 생략하고 진행 (수집 %d건): %s",
+                    len(found), exc,
+                )
+                return found
             if not page:
                 break
 
