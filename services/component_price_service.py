@@ -75,7 +75,7 @@ def enrich_component_prices(
                 au_tickers.append(component_ticker[4:])
             continue
 
-        if _is_korean_six_digit_holding(item):
+        if _is_korean_listed_holding(item):
             if cumulative_base_date:
                 korean_baseline_tickers.append(component_ticker)
             if _component_price_key(item) not in component_price_snapshot:
@@ -149,9 +149,9 @@ def enrich_component_prices(
                 currency,
                 preserve_existing=preserve_existing,
             )
-            if cumulative_base_date and _is_korean_six_digit_holding(item):
+            if cumulative_base_date and _is_korean_listed_holding(item):
                 _apply_cumulative_change(enriched_item, korean_baseline_price_map.get(component_ticker))
-        elif _is_korean_six_digit_holding(item):
+        elif _is_korean_listed_holding(item):
             _apply_price_snapshot(
                 enriched_item,
                 kor_price_map.get(component_ticker, {}),
@@ -194,7 +194,7 @@ def enrich_component_prices(
                 preserve_existing=preserve_existing,
             )
 
-        if cumulative_base_date and yahoo_symbol and not _is_korean_six_digit_holding(item):
+        if cumulative_base_date and yahoo_symbol and not _is_korean_listed_holding(item):
             baseline_item = baseline_price_map.get(yahoo_symbol)
             if _is_baseline_suspicious(enriched_item, baseline_item):
                 # Yahoo 가 간헐적으로 가격을 10배 등 잘못된 스케일로 반환하는 glitch.
@@ -254,7 +254,7 @@ def build_component_price_snapshot(
             continue
         component_ticker = _normalize_upper(item.get("ticker"))
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
-        if _is_korean_six_digit_holding(item):
+        if _is_korean_listed_holding(item):
             korean_tickers.add(component_ticker)
         elif yahoo_symbol.endswith(".AX"):
             au_tickers.add(yahoo_symbol[:-3])
@@ -281,7 +281,7 @@ def build_component_price_snapshot(
         price_item: dict[str, Any] | None = None
         currency = _infer_component_currency(item)
 
-        if _is_korean_six_digit_holding(item):
+        if _is_korean_listed_holding(item):
             price_item = kor_price_map.get(component_ticker)
             currency = "KRW"
         elif yahoo_symbol.endswith(".AX"):
@@ -323,17 +323,25 @@ def _is_cash_like_holding(item: dict[str, Any]) -> bool:
     return ticker.startswith("KRD") or raw_code.startswith("KRD") or "현금" in name
 
 
-def _is_korean_six_digit_holding(item: dict[str, Any]) -> bool:
+def _is_korean_listed_holding(item: dict[str, Any]) -> bool:
+    """한국거래소 상장(.KS/.KQ) 구성종목 여부.
+
+    순수 6자리 숫자 코드뿐 아니라 알파벳이 섞인 신형 ETF 코드(예: 0043Y0.KS)도 포함한다.
+    한국 실시간 소스(네이버)는 bare 코드(0043Y0)로 가격을 조회할 수 있으므로, .KS/.KQ 면
+    한국 경로로 보내 수익률을 가져온다.
+    """
     component_ticker = _normalize_upper(item.get("ticker"))
     raw_code = _normalize_upper(item.get("raw_code"))
     yahoo_symbol = _normalize_upper(item.get("yahoo_symbol"))
-    if not component_ticker.isdigit() or len(component_ticker) != 6:
-        return False
-    if yahoo_symbol and not yahoo_symbol.endswith((".KS", ".KQ")):
-        return False
     if raw_code.startswith("CNE"):
         return False
-    return True
+    # 한국거래소 상장 접미사면 한국으로 간주 (알파벳 포함 코드 포함).
+    if yahoo_symbol.endswith((".KS", ".KQ")):
+        return True
+    # yahoo_symbol 이 없고 순수 6자리 숫자 코드면 한국으로 간주.
+    if not yahoo_symbol and component_ticker.isdigit() and len(component_ticker) == 6:
+        return True
+    return False
 
 
 def _is_worldstock_symbol(symbol: str) -> bool:
@@ -353,7 +361,7 @@ def _component_price_key(item: dict[str, Any]) -> str | None:
     if _is_cash_like_holding(item):
         return None
     component_ticker = _normalize_upper(item.get("ticker"))
-    if _is_korean_six_digit_holding(item):
+    if _is_korean_listed_holding(item):
         return f"kor:{component_ticker}"
 
     yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
@@ -373,7 +381,7 @@ def _component_price_key(item: dict[str, Any]) -> str | None:
 def _infer_component_currency(item: dict[str, Any]) -> str:
     component_ticker = _normalize_upper(item.get("ticker"))
     yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
-    if _is_korean_six_digit_holding(item):
+    if _is_korean_listed_holding(item):
         return "KRW"
     if yahoo_symbol.endswith(".AX"):
         return "AUD"
