@@ -20,6 +20,63 @@ logger = get_app_logger()
 BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체헷지"]
 
 
+def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """계좌별 benchmark(accounts.json) 의 일간 등락률을 계좌 country 소스로 일괄 조회한다.
+
+    가격 소스는 계좌의 country_code 로 정한다 (kor→네이버, au→QuoteAPI, us→토스).
+    각 계좌가 자기 통화 ETF 를 벤치마크하므로 환율 환산은 불필요하다.
+    반환: {account_id: {"name": 표시명, "pct": 일간%|None}}
+    """
+    from services.price_service import get_realtime_snapshot
+
+    # country -> 조회할 ticker 집합, account -> (country, fetch_ticker, name)
+    tickers_by_country: dict[str, set[str]] = {}
+    acc_meta: dict[str, dict[str, str]] = {}
+    for config in configs:
+        bench = (config.get("settings") or {}).get("benchmark") or {}
+        ticker = str(bench.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        country = str(config.get("country_code") or "").strip().lower()
+        # au 소스는 bare 코드를 받으므로 .AX 접미사는 제거.
+        fetch_ticker = ticker[:-3] if country == "au" and ticker.endswith(".AX") else ticker
+        tickers_by_country.setdefault(country, set()).add(fetch_ticker)
+        acc_meta[config["account_id"]] = {
+            "country": country,
+            "fetch_ticker": fetch_ticker,
+            "name": str(bench.get("name") or ticker),
+        }
+
+    snap_by_country: dict[str, dict[str, Any]] = {}
+    for country, tickers in tickers_by_country.items():
+        try:
+            snap_by_country[country] = get_realtime_snapshot(country, sorted(tickers))
+        except Exception as exc:
+            logger.warning("benchmark 일간%% 조회 실패 (country=%s): %s", country, exc)
+            snap_by_country[country] = {}
+
+    result: dict[str, dict[str, Any]] = {}
+    for account_id, meta in acc_meta.items():
+        snap = (snap_by_country.get(meta["country"]) or {}).get(meta["fetch_ticker"]) or {}
+        pct = snap.get("changeRate")
+        result[account_id] = {
+            "name": meta["name"],
+            "pct": float(pct) if pct is not None else None,
+        }
+    return result
+
+
+def _index_result(account_pct: float, benchmark_pct: float | None) -> str | None:
+    """계좌 금일% vs benchmark 금일% → 'win'/'lose'/'draw'. benchmark 없으면 None."""
+    if benchmark_pct is None:
+        return None
+    if account_pct > benchmark_pct:
+        return "win"
+    if account_pct < benchmark_pct:
+        return "lose"
+    return "draw"
+
+
 def _get_week_start_date_kst() -> str:
     now = datetime.now().astimezone()
     week_start = now.date() - timedelta(days=now.weekday())
@@ -140,6 +197,8 @@ def load_dashboard_data() -> dict[str, Any]:
         if isinstance(account, dict)
     }
 
+    account_benchmarks = _load_account_benchmarks(configs)
+
     accounts: list[dict[str, Any]] = []
     for config in configs:
         portfolio_account = portfolio_accounts.get(config["account_id"], {})
@@ -198,6 +257,11 @@ def load_dashboard_data() -> dict[str, Any]:
                 "net_profit_pct": net_profit_pct,
                 "daily_profit": daily_profit,
                 "daily_return_pct": daily_return_pct_acc,
+                "benchmark_name": (account_benchmarks.get(config["account_id"]) or {}).get("name"),
+                "benchmark_pct": (account_benchmarks.get(config["account_id"]) or {}).get("pct"),
+                "index_result": _index_result(
+                    daily_return_pct_acc, (account_benchmarks.get(config["account_id"]) or {}).get("pct")
+                ),
                 "weekly_profit": weekly_profit,
                 "weekly_return_pct": weekly_return_pct_acc,
                 "_df_live": df_live,  # 버킷 계산을 위해 임시 보관
