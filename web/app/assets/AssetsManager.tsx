@@ -64,6 +64,9 @@ type AccountSummary = {
   net_profit_pct: number;
   daily_profit: number;
   daily_return_pct: number;
+  benchmark_name?: string | null;
+  benchmark_pct?: number | null;
+  index_result?: "win" | "lose" | "draw" | null;
   weekly_profit: number;
   weekly_return_pct: number;
 };
@@ -2007,7 +2010,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         throw new Error(payload.error ?? "자산 정보를 불러오지 못했습니다.");
       }
       const dashData = dashResponse?.ok ? await dashResponse.json() : null;
-      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; daily_return_pct: number; weekly_profit: number; weekly_return_pct: number }> = {};
+      const dashAccounts: Record<string, { cash_ratio: number; net_profit: number; net_profit_pct: number; daily_profit: number; daily_return_pct: number; benchmark_name: string | null; benchmark_pct: number | null; index_result: "win" | "lose" | "draw" | null; weekly_profit: number; weekly_return_pct: number }> = {};
       if (dashData?.accounts) {
         for (const a of dashData.accounts) {
           dashAccounts[a.account_id] = {
@@ -2016,6 +2019,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             net_profit_pct: a.net_profit_pct ?? 0,
             daily_profit: a.daily_profit ?? 0,
             daily_return_pct: a.daily_return_pct ?? 0,
+            benchmark_name: a.benchmark_name ?? null,
+            benchmark_pct: a.benchmark_pct ?? null,
+            index_result: a.index_result ?? null,
             weekly_profit: a.weekly_profit ?? 0,
             weekly_return_pct: a.weekly_return_pct ?? 0,
           };
@@ -2023,7 +2029,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
       const dashTotals = dashData?.totals ?? null;
       setDashTotals(dashTotals);
-      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, daily_return_pct: 0, weekly_profit: 0, weekly_return_pct: 0 };
+      const defaultDash = { cash_ratio: 0, net_profit: 0, net_profit_pct: 0, daily_profit: 0, daily_return_pct: 0, benchmark_name: null, benchmark_pct: null, index_result: null, weekly_profit: 0, weekly_return_pct: 0 };
       const mergedSummaries = (payload.account_summaries ?? []).map((s) => ({
         ...s,
         ...(dashAccounts[s.account_id] ?? defaultDash),
@@ -2407,6 +2413,46 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.data && !isDetailRow(params.data) && params.value !== null && params.value !== undefined
           ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
           : "",
+    },
+    {
+      colId: "benchmark_pct",
+      headerName: "지수(%)",
+      minWidth: 88,
+      flex: 0.7,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        const data = params.data;
+        if (!data || isDetailRow(data) || isTotalRow(data)) return null;
+        const v = (data as AccountSummary).benchmark_pct;
+        return v === null || v === undefined ? null : Number(v);
+      },
+      headerTooltip: "각 계좌 벤치마크(accounts.json) 의 금일 등락률",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
+        const data = params.data;
+        if (!data || isDetailRow(data) || isTotalRow(data)) return "";
+        const v = params.value;
+        if (v === null || v === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
+        const name = (data as AccountSummary).benchmark_name ?? "";
+        return (
+          <span className={getSignedClass(v)} title={name}>{`${v.toFixed(2)}%`}</span>
+        );
+      },
+    },
+    {
+      colId: "index_result",
+      headerName: "승부",
+      minWidth: 70,
+      flex: 0.5,
+      cellStyle: { display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" },
+      cellRenderer: (params: { data?: ParentGridRow }) => {
+        const data = params.data;
+        if (!data || isDetailRow(data) || isTotalRow(data)) return "";
+        const r = (data as AccountSummary).index_result;
+        if (!r) return <span style={{ color: "#adb5bd" }}>-</span>;
+        if (r === "win") return <span style={{ color: "#dc2626", fontWeight: 700 }}>🏆 승</span>;
+        if (r === "lose") return <span style={{ color: "#1971c2", fontWeight: 700 }}>패</span>;
+        return <span style={{ color: "#6b7280" }}>무</span>;
+      },
     },
     {
       field: "total_assets_krw",
