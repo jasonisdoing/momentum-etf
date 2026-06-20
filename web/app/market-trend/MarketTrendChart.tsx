@@ -5,15 +5,19 @@ import {
   ColorType,
   CrosshairMode,
   LineSeries,
+  CandlestickSeries,
   createChart,
 } from "lightweight-charts";
-import type { IChartApi, LineData, Time } from "lightweight-charts";
+import type { IChartApi, LineData, CandlestickData, Time } from "lightweight-charts";
 
 
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
 
 type HistoryPoint = {
   date: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
   close: number | null;
   ma: number | null;
   trend_pct: number | null;
@@ -225,6 +229,24 @@ function buildLineData(history: HistoryPoint[], key: "close" | "ma"): LineData<T
     }));
 }
 
+function buildCandleData(history: HistoryPoint[]): CandlestickData<Time>[] {
+  return history
+    .filter(
+      (point) =>
+        point.open !== null &&
+        point.high !== null &&
+        point.low !== null &&
+        point.close !== null
+    )
+    .map((point) => ({
+      time: point.date as Time,
+      open: point.open as number,
+      high: point.high as number,
+      low: point.low as number,
+      close: point.close as number,
+    }));
+}
+
 function renderRegimeBands(
   chart: IChartApi,
   overlay: HTMLDivElement,
@@ -418,13 +440,17 @@ export function MarketTrendChart({
     });
     chartRef.current = chart;
 
-    const closeSeries = chart.addSeries(LineSeries, {
-      color: "#1f2937",
-      lineWidth: 2,
+    const candleSeries = chart.addSeries(CandlestickSeries, {
+      upColor: "#dc2626",
+      downColor: "#2563eb",
+      borderUpColor: "#dc2626",
+      borderDownColor: "#2563eb",
+      wickUpColor: "#dc2626",
+      wickDownColor: "#2563eb",
       priceLineVisible: false,
       lastValueVisible: true,
     });
-    closeSeries.setData(buildLineData(visibleHistory, "close"));
+    candleSeries.setData(buildCandleData(visibleHistory));
 
     chart.addSeries(LineSeries, {
       color: "#fa5252",
@@ -455,10 +481,15 @@ export function MarketTrendChart({
         ? `<div style="margin-top:4px;color:${REGIME_COLOR[point.regime]};font-weight:700">${REGIME_LABEL[point.regime]}</div>`
         : "";
       tooltip.innerHTML = `
-        <div style="font-weight:700;margin-bottom:2px">${point.date}</div>
-        <div>종가: ${formatNumber(point.close)}</div>
-        <div>MA: ${formatNumber(point.ma)}</div>
-        <div>추세 점수: ${formatScore(point.trend_score)}</div>
+        <div style="font-weight:700;margin-bottom:4px">${point.date}</div>
+        <div style="display: grid; grid-template-columns: auto auto; gap: 2px 10px; font-size: 11px; color: #475569;">
+          <span>시가:</span> <strong style="color: #0f172a">${formatNumber(point.open)}</strong>
+          <span>고가:</span> <strong style="color: #0f172a">${formatNumber(point.high)}</strong>
+          <span>저가:</span> <strong style="color: #0f172a">${formatNumber(point.low)}</strong>
+          <span>종가:</span> <strong style="color: #0f172a">${formatNumber(point.close)}</strong>
+          <span>MA:</span> <strong style="color: #fa5252">${formatNumber(point.ma)}</strong>
+          <span>추세 점수:</span> <strong style="color: #0f172a">${formatScore(point.trend_score)}</strong>
+        </div>
         ${regimeText}
       `;
       tooltip.style.display = "block";

@@ -42,6 +42,56 @@ _NAVER_INDEX_CHART_URL = "https://fchart.stock.naver.com/sise.nhn"
 _NAVER_ITEM_RE = re.compile(r'<item data="([^"]+)"')
 
 
+def _fetch_naver_kor_index_ohlc(symbol: str, count: int) -> pd.DataFrame | None:
+    """네이버 차트 API 에서 한국 인덱스 일봉 OHLC 시계열을 받아온다.
+
+    Returns:
+        DatetimeIndex 정렬된 pd.DataFrame(columns=['Open', 'High', 'Low', 'Close']) 또는 None.
+    """
+    try:
+        resp = requests.get(
+            _NAVER_INDEX_CHART_URL,
+            params={"symbol": symbol, "timeframe": "day", "count": int(count), "requestType": 0},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10,
+        )
+        resp.encoding = "EUC-KR"
+        items = _NAVER_ITEM_RE.findall(resp.text)
+    except Exception:
+        logger.exception("네이버 인덱스 차트 조회 실패: %s", symbol)
+        return None
+    if not items:
+        return None
+
+    dates: list[pd.Timestamp] = []
+    opens: list[float] = []
+    highs: list[float] = []
+    lows: list[float] = []
+    closes: list[float] = []
+    for raw in items:
+        parts = raw.split("|")
+        if len(parts) < 5:
+            continue
+        try:
+            ts = pd.Timestamp(parts[0])
+            open_val = float(parts[1])
+            high_val = float(parts[2])
+            low_val = float(parts[3])
+            close_val = float(parts[4])
+        except (ValueError, TypeError):
+            continue
+        dates.append(ts)
+        opens.append(open_val)
+        highs.append(high_val)
+        lows.append(low_val)
+        closes.append(close_val)
+
+    if not dates:
+        return None
+    df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows, "Close": closes}, index=pd.DatetimeIndex(dates))
+    return df.sort_index()
+
+
 def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
     """네이버 차트 API 에서 한국 인덱스 일봉 종가 시계열을 받아온다.
 
@@ -108,7 +158,7 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     return pd.Timestamp(close.index[-1]), float(close.iloc[-1])
 
 
-def _apply_intraday_boost(close_series: "pd.Series | None", yf_ticker: str) -> "pd.Series | None":
+def _apply_intraday_boost(close_series: pd.Series | None, yf_ticker: str) -> pd.Series | None:
     """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우, intraday 1분봉
     마감가를 마지막 일봉으로 덧붙인다. 표(_build_item)와 차트(compute_index_history)가
     동일한 최신 종가를 쓰도록 공통 사용한다. (한국 인덱스는 네이버라 호출자가 적용 안 함.)
@@ -124,9 +174,7 @@ def _apply_intraday_boost(close_series: "pd.Series | None", yf_ticker: str) -> "
             intraday_ts.tz_convert(None).normalize() if intraday_ts.tz is not None else intraday_ts.normalize()
         )
         last_ts = pd.Timestamp(close_series.index[-1])
-        last_date = (
-            last_ts.tz_convert(None).normalize() if last_ts.tz is not None else last_ts.normalize()
-        )
+        last_date = last_ts.tz_convert(None).normalize() if last_ts.tz is not None else last_ts.normalize()
         if intraday_date > last_date:
             return pd.concat([close_series, pd.Series([intraday_close], index=[intraday_date])])
     except Exception as exc:
@@ -390,9 +438,7 @@ def _build_daily_regime_ranges(
     strengthening_prev: bool | None = None
     for idx in range(start_idx, length):
         date_value = close_series.index[idx]
-        date_str = (
-            date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
-        )
+        date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         trend = full_trend[idx]
         up_slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_UP_WINDOW)
         down_slope = _trend_slope(full_trend, idx, MARKET_TREND_REGIME_SLOPE_WINDOW)
@@ -505,11 +551,11 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         "trend_max_12m": None,
     }
 
-    close_series: pd.Series | None = None
+    df: pd.DataFrame | None = None
     if naver_symbol:
         # 한국 인덱스: 네이버 차트에서 직접 받는다 (5년 ≈ 1250거래일, 여유 포함 1500).
-        close_series = _fetch_naver_kor_index_close(naver_symbol, count=1500)
-        if close_series is None:
+        df = _fetch_naver_kor_index_ohlc(naver_symbol, count=1500)
+        if df is None:
             return empty_payload
     else:
         try:
@@ -529,19 +575,27 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             return empty_payload
 
         # yfinance 가 단일 ticker 라도 컬럼을 멀티인덱스로 줄 수 있어 평탄화.
-        close_raw = df["Close"] if "Close" in df.columns else None
-        if close_raw is None:
-            try:
-                close_raw = df.xs("Close", axis=1, level=0)
-            except Exception:
-                close_raw = None
-        if close_raw is None:
-            return empty_payload
-        if isinstance(close_raw, pd.DataFrame):
-            close_raw = close_raw.iloc[:, 0]
-        close_series = close_raw.dropna()
-        # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.
-        close_series = _apply_intraday_boost(close_series, yf_ticker)
+        cleaned_cols = {}
+        for col in ["Open", "High", "Low", "Close"]:
+            col_raw = df[col] if col in df.columns else None
+            if col_raw is None:
+                try:
+                    col_raw = df.xs(col, axis=1, level=0)
+                except Exception:
+                    col_raw = None
+            if col_raw is not None:
+                if isinstance(col_raw, pd.DataFrame):
+                    col_raw = col_raw.iloc[:, 0]
+                cleaned_cols[col] = col_raw
+        df = pd.DataFrame(cleaned_cols).dropna()
+
+    close_series = df["Close"].dropna()
+    # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.
+    close_series = _apply_intraday_boost(close_series, yf_ticker)
+
+    # 보정된 close_series 를 df 에 다시 반영
+    df.loc[close_series.index, "Close"] = close_series
+
     if len(close_series) < 2:
         return empty_payload
 
@@ -570,7 +624,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
     # 추세점수 정규화 앵커는 표(_build_item)와 동일하게 — 최신 시점 기준 트레일링 12개월
     # 퍼센타일(config) 을 쓴다. (이전엔 5년 min/max 라 표와 점수가 어긋났다.)
     score_window = TRADING_DAYS_PER_MONTH * 12
-    anchor_window = [v for v in full_trend[max(0, length - score_window):length] if v is not None]
+    anchor_window = [v for v in full_trend[max(0, length - score_window) : length] if v is not None]
     if anchor_window:
         anchor_series = pd.Series(anchor_window, dtype="float64")
         upper_q = MARKET_TREND_SCORE_ANCHOR_PERCENTILE / 100.0
@@ -589,9 +643,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         ma_v = _to_float(ma_series.iloc[idx]) if ma_series is not None else None
         trend = full_trend[idx]
         trend_score = (
-            _normalize_score(trend, score_min, score_max)
-            if score_min is not None and score_max is not None
-            else None
+            _normalize_score(trend, score_min, score_max) if score_min is not None and score_max is not None else None
         )
 
         # 레짐: 추세% 회귀 기울기(비대칭 창) + 데드밴드(히스테리시스)로 분류.
@@ -604,6 +656,9 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         history.append(
             {
                 "date": date_str,
+                "open": _to_float(df["Open"].iloc[idx]),
+                "high": _to_float(df["High"].iloc[idx]),
+                "low": _to_float(df["Low"].iloc[idx]),
                 "close": close,
                 "ma": ma_v,
                 "trend_pct": trend,
