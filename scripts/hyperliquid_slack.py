@@ -47,7 +47,7 @@ def main():
         lines.append(
             f"{flag} *{q['name']}*: "
             f"{_fmt_price(q.get('hyper_price'), currency)} "
-            f"({_fmt_pct(q.get('change_24h_pct'))}) {_trend_emoji(q.get('change_24h_pct'))}\n"
+            f"(*{_fmt_pct(q.get('change_24h_pct'))}*) {_trend_emoji(q.get('change_24h_pct'))}\n"
             f"   • 실제가 대비: {_fmt_pct(q.get('diff_pct'))}"
         )
 
