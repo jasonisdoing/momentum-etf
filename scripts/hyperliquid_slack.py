@@ -7,8 +7,6 @@
 import logging
 import os
 import sys
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,7 +16,6 @@ from utils.notification import send_slack_message_v2
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-KST = ZoneInfo("Asia/Seoul")
 
 
 def _fmt_price(value, currency):
@@ -42,18 +39,16 @@ def _trend_emoji(value):
 def main():
     load_env_if_present()
     data = load_hyperliquid_quotes()
-    now_str = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
 
-    lines = [f"*🌐 하이퍼리퀴드 24시간 시세 ({now_str})*"]
+    lines = ["*🌐 하이퍼리퀴드 24시간 시세*"]
     for q in data.get("quotes", []):
         flag = "🇰🇷" if q.get("country") == "kor" else "🇺🇸"
         currency = q.get("currency", "USD")
         lines.append(
-            f"{flag} *{q['name']}* ({q['symbol']}): "
+            f"{flag} *{q['name']}*: "
             f"{_fmt_price(q.get('hyper_price'), currency)} "
             f"({_fmt_pct(q.get('change_24h_pct'))}) {_trend_emoji(q.get('change_24h_pct'))}\n"
-            f"   • 실제가 대비: {_fmt_pct(q.get('diff_pct'))} "
-            f"(실제 {_fmt_price(q.get('actual_price'), currency)})"
+            f"   • 실제가 대비: {_fmt_pct(q.get('diff_pct'))}"
         )
 
     send_slack_message_v2("\n".join(lines))
