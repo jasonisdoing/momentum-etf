@@ -90,7 +90,7 @@ SCHEDULE_ROWS = [
     {
         "key": "live_24h_slack",
         "job": "24H 시세 알림",
-        "target": "삼성전자/SK하이닉스/마이크론/S&P500",
+        "target": "하이퍼리퀴드/바이낸스",
         "cadence": "매일 24시간 매시 0분 KST",
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
