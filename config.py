@@ -117,7 +117,6 @@ HYPERLIQUID_SYMBOLS = [
         "type": "stock",
         "country": "kor",
         "actual_ticker": "005930",
-        "binance_symbol": "SAMSUNGUSDT",
     },
     {
         "symbol": "SKHX",
@@ -125,7 +124,6 @@ HYPERLIQUID_SYMBOLS = [
         "type": "stock",
         "country": "kor",
         "actual_ticker": "000660",
-        "binance_symbol": "SKHYNIXUSDT",
     },
     {
         "symbol": "MU",
@@ -133,15 +131,12 @@ HYPERLIQUID_SYMBOLS = [
         "type": "stock",
         "country": "us",
         "actual_ticker": "MU",
-        "binance_symbol": "MUUSDT",
     },
     {
         "symbol": "SP500",
         "name": "S&P500",
         "type": "index",
         "yahoo_symbol": "^GSPC",
-        "binance_symbol": "SPYUSDT",
-        "binance_multiplier": 10.0,
     },
     {"symbol": "KR200", "name": "코스피200", "type": "index", "naver_symbol": "KPI200"},
 ]
