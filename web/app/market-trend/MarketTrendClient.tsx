@@ -75,32 +75,24 @@ function renderSignedScoreCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatScore(params.value)}</span>;
 }
 
-type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
+type RegimeKey = "accel_up" | "neutral" | "accel_down";
 
-// 표시는 3단계(상승/중립/하락)로 통합. 중립은 sub-label 로 조정/진정 구분.
 const REGIME_LABEL: Record<RegimeKey, string> = {
   accel_up: "⬆️ 상승",
-  decel_up: "➡️ 중립 (조정)",
-  decel_down: "➡️ 중립 (진정)",
+  neutral: "➡️ 중립",
   accel_down: "⬇️ 하락",
 };
 
-// 색상도 3색으로 통합 (중립은 둘 다 녹색).
 const REGIME_COLORS: Record<RegimeKey, string> = {
   accel_up: "#d62828",   // 빨강
-  decel_up: "#2f9e44",   // 녹색 (중립 - 조정)
-  decel_down: "#2f9e44", // 녹색 (중립 - 진정)
+  neutral: "#2f9e44",    // 녹색 (중립)
   accel_down: "#1971c2", // 파랑
 };
 
 // 하단 설명도 3단계로.
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
   { key: "accel_up", text: "⬆️ 상승: 가격이 MA 위에 있고, 추세 기울기가 상승(강화) 중인 국면입니다." },
-  {
-    key: "decel_up",
-    text:
-      "➡️ 중립: (조정) MA 위 + 추세 약화 / (진정) MA 아래 + 추세 회복.",
-  },
+  { key: "neutral", text: "➡️ 중립: 추세 기울기가 약화되거나 가격이 MA 주위에 수렴하는 대기 국면입니다." },
   { key: "accel_down", text: "⬇️ 하락: 가격이 MA 아래에 있고, 추세 기울기가 하락(약화) 중인 위험 국면입니다." },
 ];
 

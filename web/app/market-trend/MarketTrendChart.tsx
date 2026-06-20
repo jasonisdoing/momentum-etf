@@ -12,7 +12,15 @@ import {
 import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "lightweight-charts";
 
 
-type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
+type RegimeKey = "accel_up" | "neutral" | "accel_down";
+
+// 그 일자 기준 '내일 종가 전환 예측' 경계 (상승↔중립=up, 중립↔하락=dn). 범위 밖이면 null.
+type ForecastThresholds = {
+  up_pct: number | null;
+  up_price: number | null;
+  dn_pct: number | null;
+  dn_price: number | null;
+};
 
 type HistoryPoint = {
   date: string;
@@ -25,6 +33,7 @@ type HistoryPoint = {
   trend_pct: number | null;
   trend_score: number | null;
   regime: RegimeKey | null;
+  forecast: ForecastThresholds | null;
 };
 
 type HistoryResponse = {
@@ -64,18 +73,16 @@ const CHART_RANGES: Array<{ key: ChartRangeKey; label: string; days?: number; yt
   { key: "5y", label: "5년", days: 365 * 5 },
 ];
 
-// 3단계 통합: 상승(빨강) / 중립(녹색) / 하락(파랑). 중립은 sub-label 로 조정/진정 구분.
+// 3단계: 상승(빨강) / 중립(녹색) / 하락(파랑).
 const REGIME_COLOR: Record<RegimeKey, string> = {
   accel_up: "#d62828",   // 빨강 — 상승
-  decel_up: "#2f9e44",   // 녹색 — 중립(조정)
-  decel_down: "#2f9e44", // 녹색 — 중립(진정)
+  neutral: "#2f9e44",    // 녹색 — 중립
   accel_down: "#1971c2", // 파랑 — 하락
 };
 
 const REGIME_LABEL: Record<RegimeKey, string> = {
   accel_up: "⬆️ 상승",
-  decel_up: "➡️ 중립 (조정)",
-  decel_down: "➡️ 중립 (진정)",
+  neutral: "➡️ 중립",
   accel_down: "⬇️ 하락",
 };
 
@@ -113,6 +120,27 @@ function formatScore(value: number | null | undefined): string {
 function formatPct(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function formatSignedPct(value: number): string {
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+/**
+ * 임계(up/dn)로부터 특정 레짐의 '내일 등락률' 밴드 표기.
+ *   상승: up_pct 이상 / 중립: up_pct ~ dn_pct / 하락: dn_pct 이하
+ * 해당 경계가 범위 밖(null)이면 한쪽이 열린 표기, 둘 다 없으면 "-".
+ */
+function formatBandPct(fc: ForecastThresholds, regime: RegimeKey): string {
+  const up = fc.up_pct;
+  const dn = fc.dn_pct;
+  if (regime === "accel_up") return up !== null ? `${formatSignedPct(up)} 이상` : "-";
+  if (regime === "accel_down") return dn !== null ? `${formatSignedPct(dn)} 이하` : "-";
+  // neutral
+  if (up !== null && dn !== null) return `${formatSignedPct(up)} ~ ${formatSignedPct(dn)}`;
+  if (up !== null) return `${formatSignedPct(up)} 이하`;
+  if (dn !== null) return `${formatSignedPct(dn)} 이상`;
+  return "-";
 }
 
 type GaugeData = {
@@ -410,6 +438,40 @@ export function MarketTrendChart({
     () => (data?.history ? filterHistoryByRange(data.history, rangeKey) : []),
     [data, rangeKey],
   );
+ 
+  // 현재 레짐에서 다른 레짐으로 넘어가는 '전환 임계'를 문장형으로 보여주기 위해 밴드에서 도출.
+  // 현재보다 약세 밴드는 그 밴드의 상단(pct_high)이 진입 경계, 강세 밴드는 하단(pct_low).
+  // 최신일 임계로부터 '현재 레짐 → 다른 레짐' 전환 문장을 도출(근접 순). 상승이면 중립·하락 2줄.
+  const forecastTransitions = useMemo(() => {
+    const latest = data?.history.at(-1) ?? null;
+    const fc = latest?.forecast;
+    const current = latest?.regime;
+    if (!fc || !current) return [];
+    const out: { next_regime: RegimeKey; target_price: number | null; change_pct: number | null }[] = [];
+    (["accel_up", "neutral", "accel_down"] as RegimeKey[]).forEach((rg) => {
+      if (rg === current) return;
+      let pct: number | null = null;
+      let price: number | null = null;
+      if (rg === "accel_up") {
+        pct = fc.up_pct;
+        price = fc.up_price;
+      } else if (rg === "accel_down") {
+        pct = fc.dn_pct;
+        price = fc.dn_price;
+      } else if (current === "accel_up") {
+        // 상승→중립: 가까운 경계는 상승 이탈선(up)
+        pct = fc.up_pct;
+        price = fc.up_price;
+      } else if (current === "accel_down") {
+        // 하락→중립: 가까운 경계는 하락 이탈선(dn)
+        pct = fc.dn_pct;
+        price = fc.dn_price;
+      }
+      out.push({ next_regime: rg, target_price: price, change_pct: pct });
+    });
+    out.sort((a, c) => Math.abs(a.change_pct ?? 0) - Math.abs(c.change_pct ?? 0));
+    return out.filter((t) => t.target_price !== null && t.change_pct !== null);
+  }, [data]);
 
   const latestPoint = data?.history.at(-1) ?? null;
   const gaugeData = computeGaugeData({
@@ -503,6 +565,27 @@ export function MarketTrendChart({
 
     const pointByDate = new Map(visibleHistory.map((point) => [point.date, point]));
 
+    // 각 날짜별 레짐 지속 일수를 계산
+    const regimeDaysByDate = new Map<string, number>();
+    let currentRegime: string | null = null;
+    let streak = 0;
+    if (data?.history) {
+      data.history.forEach((point) => {
+        if (!point.regime) {
+          currentRegime = null;
+          streak = 0;
+          return;
+        }
+        if (point.regime === currentRegime) {
+          streak += 1;
+        } else {
+          currentRegime = point.regime;
+          streak = 1;
+        }
+        regimeDaysByDate.set(point.date, streak);
+      });
+    }
+
     chart.subscribeCrosshairMove((param) => {
       if (!param.point || !param.time) {
         tooltip.style.display = "none";
@@ -516,21 +599,47 @@ export function MarketTrendChart({
         return;
       }
 
-      const regimeText = point.regime
-        ? `<div style="margin-top:4px;color:${REGIME_COLOR[point.regime]};font-weight:700">${REGIME_LABEL[point.regime]}</div>`
-        : "";
-      tooltip.innerHTML = `
-        <div style="font-weight:700;margin-bottom:4px">${point.date}</div>
-        <div style="display: grid; grid-template-columns: auto auto; gap: 2px 10px; font-size: 11px; color: #475569;">
-          <span>시가:</span> <strong style="color: #0f172a">${formatNumber(point.open)}</strong>
-          <span>고가:</span> <strong style="color: #0f172a">${formatNumber(point.high)}</strong>
-          <span>저가:</span> <strong style="color: #0f172a">${formatNumber(point.low)}</strong>
-          <span>종가:</span> <strong style="color: #0f172a">${formatNumber(point.close)}</strong>
-          <span>거래량:</span> <strong style="color: #0f172a">${formatNumber(point.volume)}</strong>
-          <span>MA:</span> <strong style="color: #fa5252">${formatNumber(point.ma)}</strong>
-          <span>추세 점수:</span> <strong style="color: #0f172a">${formatScore(point.trend_score)}</strong>
+      const days = regimeDaysByDate.get(point.date) || 1;
+      // 각 일자는 '그날 기준 내일 종가 전환 예측'을 자체적으로 갖는다(point.forecast).
+      const fc = point.forecast;
+
+      const getRegimeStatusText = (key: RegimeKey) => {
+        if (point.regime === key) {
+          return `<span style="color: #63e6be; font-weight: 700;">${days}일차</span>`;
+        }
+        if (fc) {
+          return `<span style="color: #ffc078; font-weight: 700;">${formatBandPct(fc, key)}</span>`;
+        }
+        return `<span style="color: #94a3b8;">-</span>`;
+      };
+
+      const statusRows = fc
+        ? `
+        <div style="margin-top: 6px; border-top: 1px dashed rgba(255,255,255,0.25); padding-top: 6px; display: flex; flex-direction: column; gap: 3px;">
+          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">내일 종가 기준 전환 예측</div>
+          <div style="display: flex; justify-content: space-between; gap: 15px;">
+            <span>상승:</span> <strong>${getRegimeStatusText("accel_up")}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; gap: 15px;">
+            <span>중립:</span> <strong>${getRegimeStatusText("neutral")}</strong>
+          </div>
+          <div style="display: flex; justify-content: space-between; gap: 15px;">
+            <span>하락:</span> <strong>${getRegimeStatusText("accel_down")}</strong>
+          </div>
         </div>
-        ${regimeText}
+      `
+        : "";
+
+      const regimeLabelText = point.regime ? REGIME_LABEL[point.regime] : "-";
+      const regimeTextColor = point.regime ? REGIME_COLOR[point.regime] : "#ffffff";
+
+      tooltip.innerHTML = `
+        <div style="font-weight:700;margin-bottom:6px;color:#ffffff;font-size:12px;">${point.date}</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #e2e8f0;">
+          <div>상태: <strong style="color: ${regimeTextColor}">${regimeLabelText} (${days}일차)</strong></div>
+          <div>추세 점수: <strong style="color: #ffffff">${formatScore(point.trend_score)}</strong></div>
+          ${statusRows}
+        </div>
       `;
       tooltip.style.display = "block";
 
@@ -703,6 +812,46 @@ export function MarketTrendChart({
               </>
             ) : null}
           </div>
+          {forecastTransitions.length > 0 && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "12px 16px",
+                borderRadius: "8px",
+                background: "rgba(245, 158, 11, 0.08)",
+                border: "1px solid rgba(245, 158, 11, 0.25)",
+                color: "#d97706",
+                fontSize: "0.82rem",
+                lineHeight: 1.5,
+                boxShadow: "0 2px 8px rgba(245, 158, 11, 0.03)",
+              }}
+            >
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
+                <span style={{ fontSize: "1.1rem", lineHeight: 1 }}>⚠️</span>
+                <strong style={{ fontSize: "0.85rem" }}>
+                  추세 전환 예측 <span style={{ fontWeight: 400, opacity: 0.85 }}>(내일 종가 기준)</span>
+                </strong>
+              </div>
+              <ul style={{ margin: 0, paddingLeft: 20 }}>
+                {forecastTransitions.map((item, idx) => (
+                  <li key={idx} style={{ marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4 }}>
+                    {data?.name} 지수가{" "}
+                    <span style={{ fontWeight: 800, textDecoration: "underline" }}>
+                      {formatNumber(item.target_price)}
+                    </span>
+                    pt에 도달할 경우 (현재 대비{" "}
+                    <span style={{ fontWeight: 800 }}>
+                      {item.change_pct! > 0 ? "+" : ""}
+                      {item.change_pct!.toFixed(1)}%
+                    </span>
+                    ), 시장 상태가{" "}
+                    <span style={{ fontWeight: 800 }}>{REGIME_LABEL[item.next_regime]}</span>
+                    으로 변경될 것으로 예상됩니다.
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
             <div className="appSegmentedToggle" role="group" aria-label="시장지수 추세 차트 기간">
               {CHART_RANGES.map((range) => (

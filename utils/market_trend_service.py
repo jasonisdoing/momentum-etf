@@ -499,15 +499,15 @@ def _regime_from_slope(
     prev_strengthening: bool | None,
     deadband: float,
 ) -> tuple[str | None, bool | None]:
-    """추세% 부호(방향) × 회귀 기울기(가속/감속)로 4단계 레짐 분류. 비대칭 창 사용.
+    """추세% 부호(방향) × 회귀 기울기(가속/감속)로 3단계 레짐 분류. 비대칭 창 사용.
 
-    강화는 짧은 창(up_slope), 약화는 긴 창(down_slope)으로 판정해 "상승은 빠르게, 약화는 천천히":
+    강화는 짧은 창(up_slope), 약화는 긴 창(down_slope)으로 판정:
         up_slope   > +deadband → 강화 (저점 반등을 빨리 포착)
         down_slope < −deadband → 약화 (긴 창이라 노이즈에 둔감)
         둘 다 아니면 직전 강화/약화 상태 유지 (데드밴드 히스테리시스)
         MA 위(추세≥0) + 강화 → accel_up   (상승)
-        MA 위        + 약화 → decel_up   (조정)
-        MA 아래      + 강화 → decel_down (진정)
+        MA 위        + 약화 → neutral    (중립)
+        MA 아래      + 강화 → neutral    (중립)
         MA 아래      + 약화 → accel_down (하락)
     반환: (regime, 갱신된 strengthening 상태)
     """
@@ -524,18 +524,112 @@ def _regime_from_slope(
         ref = up_slope if up_slope is not None else down_slope
         strengthening = (ref >= 0) if ref is not None else (trend >= 0)
     if trend >= 0:
-        regime = "accel_up" if strengthening else "decel_up"
+        regime = "accel_up" if strengthening else "neutral"
     else:
-        regime = "decel_down" if strengthening else "accel_down"
+        regime = "neutral" if strengthening else "accel_down"
     return regime, strengthening
+
+
+def _ma_newest_weight(close_series: pd.Series, ma_days: int, ma_type: str) -> float | None:
+    """이동평균(LTI 필터)에서 '가장 최근 종가 1단위'가 MA 마지막 값에 기여하는 가중치 w.
+
+    지원 MA(SMA/EMA/WMA/DEMA/TEMA/HMA/ALMA)는 모두 선형 시불변이라 이 가중치는
+    날짜·값과 무관한 상수다. 끝점을 미세 섭동해 수치적으로 한 번만 구한다. 이 w 로
+    가상의 다음날 종가 P 에 대한 다음날 MA 를 ``w*P + R`` 로 O(1) 평가할 수 있다.
+    """
+    if close_series is None or len(close_series) < ma_days + 1:
+        return None
+    try:
+        base_last = _to_float(calculate_moving_average(close_series, ma_days, ma_type).iloc[-1])
+        if base_last is None:
+            return None
+        delta = abs(_to_float(close_series.iloc[-1]) or 1.0) * 0.01 + 1.0
+        bumped = close_series.copy()
+        bumped.iloc[-1] = float(bumped.iloc[-1]) + delta
+        bumped_last = _to_float(calculate_moving_average(bumped, ma_days, ma_type).iloc[-1])
+        if bumped_last is None:
+            return None
+    except Exception:
+        return None
+    return (bumped_last - base_last) / delta
+
+
+def _forecast_thresholds(
+    full_trend: list[float | None],
+    idx: int,
+    current_close: float,
+    r_next: float,
+    ma_weight: float,
+    strengthening_prev: bool | None,
+) -> dict[str, Any] | None:
+    """``idx`` 시점에서 '다음 영업일 종가가 현재 대비 몇 %'일 때 레짐이 바뀌는 두 경계를 산출.
+
+    다음날 MA 를 ``ma_weight*P + r_next`` (LTI 선형)로 O(1) 평가하므로 날짜마다 MA 를
+    다시 돌리지 않는다. 등락률→레짐은 한 점만 바꾸므로 단조 → 경계를 이진 탐색한다.
+    히스테리시스 일관성을 위해 해당 시점의 ``strengthening_prev`` 를 그대로 이어 평가.
+
+    Returns:
+        ``{"up_pct","up_price","dn_pct","dn_price"}`` (상승↔중립=up, 중립↔하락=dn).
+        탐색 범위(+20%~−50%)에서 경계를 못 찾으면 해당 값은 None. 둘 다 None 이면 None.
+    """
+    if current_close <= 0 or idx < MARKET_TREND_REGIME_SLOPE_WINDOW:
+        return None
+    max_window = max(MARKET_TREND_REGIME_SLOPE_UP_WINDOW, MARKET_TREND_REGIME_SLOPE_WINDOW)
+    window_trend = full_trend[idx - max_window + 1 : idx + 1]
+    rank = {"accel_up": 2, "neutral": 1, "accel_down": 0}
+
+    def regime_for(pct: float) -> str | None:
+        price = current_close * (1.0 + pct / 100.0)
+        ma_next = ma_weight * price + r_next
+        if price <= 0 or ma_next == 0:
+            return None
+        trend_next = (price / ma_next - 1.0) * 100.0
+        ext = [*window_trend, trend_next]
+        up = _trend_slope(ext, len(ext) - 1, MARKET_TREND_REGIME_SLOPE_UP_WINDOW)
+        dn = _trend_slope(ext, len(ext) - 1, MARKET_TREND_REGIME_SLOPE_WINDOW)
+        regime, _ = _regime_from_slope(
+            trend_next, up, dn, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
+        )
+        return regime
+
+    pct_hi, pct_lo = 20.0, -50.0
+
+    def boundary(min_rank: int) -> float | None:
+        r_hi, r_lo = regime_for(pct_hi), regime_for(pct_lo)
+        if r_hi is None or r_lo is None:
+            return None
+        if (rank[r_hi] >= min_rank) == (rank[r_lo] >= min_rank):
+            return None
+        low, high = pct_lo, pct_hi
+        for _ in range(24):
+            mid = (low + high) / 2.0
+            r = regime_for(mid)
+            if r is not None and rank[r] >= min_rank:
+                high = mid
+            else:
+                low = mid
+        return round((low + high) / 2.0, 2)
+
+    t_up = boundary(2)
+    t_dn = boundary(1)
+    if t_up is None and t_dn is None:
+        return None
+
+    def price_at(pct: float | None) -> float | None:
+        return round(current_close * (1.0 + pct / 100.0), 2) if pct is not None else None
+
+    return {"up_pct": t_up, "up_price": price_at(t_up), "dn_pct": t_dn, "dn_price": price_at(t_dn)}
 
 
 def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[str, Any]:
     """단일 지수의 최근 12개월 가격/추세 히스토리 + 각 일자별 레짐을 반환한다 (행 펼침용).
 
+    각 history 항목의 ``forecast`` 는 그 일자 기준 '내일 종가 전환 예측'
+    ``{up_pct, up_price, dn_pct, dn_price}`` (없으면 None) 이다.
+
     Returns:
         ``{"ticker", "name", "ma_type", "ma_months",
-            "history": [{date, close, ma, trend_pct, trend_score, regime}, ...],
+            "history": [{date, close, ma, trend_pct, trend_score, regime, forecast}, ...],
             "trend_min_12m", "trend_max_12m"}``
         해당 ticker 가 알려진 인덱스가 아니면 name 은 ticker 그대로 사용.
     """
@@ -640,6 +734,24 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
         score_min = None
         score_max = None
 
+    # 일자별 '내일 종가 기준 전환 예측'을 위해 MA 최신가중치(LTI 상수)를 한 번만 구한다.
+    # 다음날 MA = ma_weight*P + R 로 O(1) 평가 → 날짜마다 MA 재계산 없이 forecast 산출.
+    ma_weight = _ma_newest_weight(close_series, ma_days, ma_type) if ma_series is not None else None
+    # 마지막 일자는 '내일'이 없으므로 가상 평탄일 1개를 붙여 R 을 한 번만 계산한다.
+    r_last: float | None = None
+    if ma_weight is not None and length >= 1:
+        last_close = _to_float(close_series.iloc[length - 1])
+        if last_close is not None:
+            try:
+                ext = pd.concat(
+                    [close_series, pd.Series([last_close], index=[close_series.index[-1] + pd.Timedelta(days=1)])]
+                )
+                ext_last = _to_float(calculate_moving_average(ext, ma_days, ma_type).iloc[-1])
+                if ext_last is not None:
+                    r_last = ext_last - ma_weight * last_close
+            except Exception:
+                r_last = None
+
     history: list[dict[str, Any]] = []
     strengthening_prev: bool | None = None
     for idx in range(start, length):
@@ -659,6 +771,20 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
             trend, up_slope, down_slope, strengthening_prev, MARKET_TREND_REGIME_SLOPE_DEADBAND
         )
 
+        # 그 시점 기준 '다음 영업일' 전환 예측 (과거 일자엔 그날의 예측이 그대로 보존된다).
+        point_forecast: dict[str, Any] | None = None
+        if ma_weight is not None and close is not None:
+            if idx < length - 1:
+                c_next = _to_float(close_series.iloc[idx + 1])
+                m_next = _to_float(ma_series.iloc[idx + 1]) if ma_series is not None else None
+                r_next = (m_next - ma_weight * c_next) if (c_next is not None and m_next is not None) else None
+            else:
+                r_next = r_last
+            if r_next is not None:
+                point_forecast = _forecast_thresholds(
+                    full_trend, idx, close, r_next, ma_weight, strengthening_prev
+                )
+
         history.append(
             {
                 "date": date_str,
@@ -671,6 +797,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
                 "trend_pct": trend,
                 "trend_score": trend_score,
                 "regime": regime,
+                "forecast": point_forecast,
             }
         )
 
