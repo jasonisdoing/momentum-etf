@@ -49,17 +49,88 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def _fetch_binance_ticker(symbol: str) -> dict[str, Any] | None:
-    """바이낸스 선물 24시간 ticker 정보를 조회한다."""
-    url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
-    try:
-        resp = requests.get(url, timeout=5)
-        resp.raise_for_status()
-        return resp.json()
-    except Exception as exc:
-        logger.warning("Binance ticker 조회 실패 (%s): %s", symbol, exc)
-        return None
 
+
+
+import threading
+
+# 24H 캔들 데이터 메모리 캐시 및 갱신 동기화용 변수 (OHLC 구조화)
+_HYPERLIQUID_CANDLE_CACHE: dict[str, list[dict[str, float]]] = {}
+_CACHE_LAST_UPDATED: float = 0.0
+_CACHE_LOCK = threading.Lock()
+_CACHE_UPDATING = False
+
+def _update_candle_caches_sync(usd_krw: float | None) -> None:
+    """모든 심볼의 24H OHLC 캔들 데이터를 동기적으로 갱신한다."""
+    global _CACHE_LAST_UPDATED
+    if usd_krw is None:
+        usd_krw = 1400.0
+
+    hl_temp: dict[str, list[dict[str, float]]] = {}
+    start_time = int((time.time() - 24 * 3600) * 1000)
+
+    for spec in HYPERLIQUID_SYMBOLS:
+        symbol = str(spec["symbol"]).upper()
+        # 1. Hyperliquid 캔들 (Spot 토큰이므로 xyz: 접두사 필수)
+        hl_symbol = f"xyz:{symbol}"
+        hl_candles = []
+        try:
+            url = "https://api.hyperliquid.xyz/info"
+            payload = {
+                "type": "candleSnapshot",
+                "req": {
+                    "coin": hl_symbol,
+                    "interval": "30m",
+                    "startTime": start_time
+                }
+            }
+            resp = requests.post(url, json=payload, timeout=5)
+            data = resp.json()
+            if isinstance(data, list):
+                raw_candles = []
+                for c in data:
+                    o = _to_float(c.get("o"))
+                    h = _to_float(c.get("h"))
+                    l = _to_float(c.get("l"))
+                    close_val = _to_float(c.get("c"))
+                    if None not in (o, h, l, close_val):
+                        if spec.get("type") == "stock" and spec.get("country") == "kor":
+                            o *= usd_krw
+                            h *= usd_krw
+                            l *= usd_krw
+                            close_val *= usd_krw
+                        raw_candles.append({"o": o, "h": h, "l": l, "c": close_val})
+                hl_candles = raw_candles[-48:]
+        except Exception as exc:
+            logger.warning("Hyperliquid 캔들 조회 실패 (%s): %s", hl_symbol, exc)
+
+        if hl_candles:
+            hl_temp[symbol] = hl_candles
+
+    with _CACHE_LOCK:
+        _HYPERLIQUID_CANDLE_CACHE.update(hl_temp)
+        _CACHE_LAST_UPDATED = time.time()
+
+def _trigger_candle_cache_update(usd_krw: float | None) -> None:
+    """비동기 스레드를 띄워 백그라운드에서 캐시를 업데이트한다."""
+    global _CACHE_UPDATING
+    with _CACHE_LOCK:
+        if _CACHE_UPDATING:
+            return
+        _CACHE_UPDATING = True
+
+    def run():
+        global _CACHE_UPDATING
+        try:
+            _update_candle_caches_sync(usd_krw)
+        except Exception as exc:
+            logger.error("비동기 캔들 캐시 갱신 중 예외 발생: %s", exc)
+        finally:
+            with _CACHE_LOCK:
+                _CACHE_UPDATING = False
+
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
 
 def load_live_24h_quotes() -> dict[str, Any]:
     """설정된 심볼들의 24H 실시간 시세 + 실제가 대비 차이를 반환한다."""
@@ -72,6 +143,23 @@ def load_live_24h_quotes() -> dict[str, Any]:
     except Exception as exc:
         logger.warning("Hyperliquid 환율 조회 실패: %s", exc)
         usd_krw = None
+
+    # 캐시 만료 여부 검사 및 비동기 업데이트 트리거 (만료 주기 5분)
+    now = time.time()
+    need_sync = False
+    with _CACHE_LOCK:
+        cache_age = now - _CACHE_LAST_UPDATED
+        is_empty = not _HYPERLIQUID_CANDLE_CACHE
+
+    if is_empty:
+        # 최초 1회는 화면 렌더링을 위해 동기적으로 조회
+        need_sync = True
+    elif cache_age > 300:
+        # 그 이후로는 백그라운드 비동기로 갱신하여 대기 딜레이 유발 방지
+        _trigger_candle_cache_update(usd_krw)
+
+    if need_sync:
+        _update_candle_caches_sync(usd_krw)
 
     # 실제 시장가 — 개별주는 국가별 스냅샷 일괄 조회
     kor_tickers = [
@@ -91,7 +179,6 @@ def load_live_24h_quotes() -> dict[str, Any]:
         change_24h = ((mark / prev - 1.0) * 100.0) if (mark and prev) else None
 
         if kind == "index":
-            # 지수: 포인트 그대로(통화 없음), 실제 지수값과 비교.
             currency = "POINT"
             country = "kor" if spec.get("naver_symbol") else "us"
             hyper_price = mark
@@ -113,38 +200,8 @@ def load_live_24h_quotes() -> dict[str, Any]:
             else None
         )
 
-        # 바이낸스 선물 시세 추가 정보 (SAMSUNGUSDT, SKHYNIXUSDT 등)
-        binance_data = None
-        binance_symbol = spec.get("binance_symbol")
-        if binance_symbol:
-            ticker = _fetch_binance_ticker(binance_symbol)
-            if ticker:
-                b_price_usd = _to_float(ticker.get("lastPrice"))
-                b_change = _to_float(ticker.get("priceChangePercent"))
-
-                if b_price_usd is not None:
-                    # 바이낸스 시세 승수 보정 (예: S&P500의 SPYUSDT의 경우 10.0배 보정)
-                    b_multiplier = spec.get("binance_multiplier", 1.0)
-                    b_price_usd = b_price_usd * b_multiplier
-
-                    # 국내 종목인 경우 환율을 적용하여 원화로 환산
-                    if spec.get("country") == "kor":
-                        b_price_converted = b_price_usd * usd_krw if usd_krw else None
-                    else:
-                        b_price_converted = b_price_usd
-
-                    b_diff_pct = (
-                        (b_price_converted / actual_price - 1.0) * 100.0
-                        if (b_price_converted is not None and actual_price and actual_price > 0)
-                        else None
-                    )
-
-                    binance_data = {
-                        "symbol": binance_symbol,
-                        "price": b_price_converted,
-                        "change_24h_pct": b_change,
-                        "diff_pct": b_diff_pct,
-                    }
+        # 1. Hyperliquid 캔들 데이터 매핑
+        hl_candles = _HYPERLIQUID_CANDLE_CACHE.get(symbol) or []
 
         quotes.append(
             {
@@ -157,7 +214,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "change_24h_pct": change_24h,
                 "actual_price": actual_price,
                 "diff_pct": diff_pct,
-                "binance": binance_data,
+                "candles": hl_candles,
             }
         )
 

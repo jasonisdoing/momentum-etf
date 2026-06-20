@@ -2,7 +2,7 @@
 """24H 실시간 주식 및 선물 시세를 슬랙으로 전송.
 
 한국 종목은 KRW(환율 환산), 미국 종목은 USD 로 현재가/24h 변동률/실제가 대비 차이를 보낸다.
-하이퍼리퀴드와 바이낸스 선물 시세를 모두 표기한다.
+하이퍼리퀴드 선물 시세를 표기한다.
 """
 
 import logging
@@ -61,27 +61,7 @@ def main():
             f"   • 실제가 대비: {_fmt_pct(hl_diff)}"
         )
 
-    lines.append("")  # 섹션 구분용 빈 줄
 
-    # 2. 바이낸스 시세 블록
-    lines.append("*🔶 바이낸스 24H 시세*")
-    for q in quotes:
-        b = q.get("binance")
-        if not b:
-            continue
-
-        flag = "🇰🇷" if q.get("country") == "kor" else "🇺🇸"
-        currency = q.get("currency", "USD")
-        bi_price = b.get("price")
-        bi_change = b.get("change_24h_pct")
-        bi_diff = b.get("diff_pct")
-        bi_symbol = b.get("symbol")
-
-        lines.append(
-            f"{flag} *{q['name']}*({bi_symbol})\n"
-            f"   • 바이낸스: {_fmt_price(bi_price, currency)} ({_fmt_pct(bi_change)}) {_trend_emoji(bi_change)}\n"
-            f"   • 실제가 대비: {_fmt_pct(bi_diff)}"
-        )
 
     send_slack_message_v2("\n".join(lines))
     logger.info("24H 시세 슬랙 전송 완료 (%d종목)", len(quotes))
