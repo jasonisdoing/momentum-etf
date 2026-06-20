@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
 
@@ -60,6 +60,23 @@ function formatPriceLabel(value: number, currency: "KRW" | "USD" | "POINT"): str
 }
 
 function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: "KRW" | "USD" | "POINT" }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(450);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const newWidth = entry.contentRect.width;
+        if (newWidth > 0) {
+          setWidth(newWidth);
+        }
+      }
+    });
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
+  }, []);
+
   if (!candles || candles.length < 2) return null;
 
   const lows = candles.map((c) => c.l);
@@ -68,7 +85,6 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const max = Math.max(...highs);
   const range = max - min === 0 ? 1 : max - min;
 
-  const width = 450;
   const height = 225;
   const chartWidth = width - 42;
   const chartHeight = height - 20;
@@ -81,65 +97,67 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const candleWidth = (chartWidth / candles.length) - 1.5;
 
   return (
-    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} style={{ overflow: "visible", marginTop: 12 }}>
-      {/* 가로 점선 가이드라인 */}
-      <line x1={0} y1={mapY(max)} x2={chartWidth} y2={mapY(max)} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
-      <line x1={0} y1={mapY(min)} x2={chartWidth} y2={mapY(min)} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
-      <line x1={0} y1={mapY((max + min) / 2)} x2={chartWidth} y2={mapY((max + min) / 2)} stroke="rgba(255,255,255,0.04)" strokeDasharray="3,3" />
+    <div ref={containerRef} style={{ width: "100%" }}>
+      <svg width={width} height={height} style={{ overflow: "visible", marginTop: 12 }}>
+        {/* 가로 점선 가이드라인 */}
+        <line x1={0} y1={mapY(max)} x2={chartWidth} y2={mapY(max)} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
+        <line x1={0} y1={mapY(min)} x2={chartWidth} y2={mapY(min)} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
+        <line x1={0} y1={mapY((max + min) / 2)} x2={chartWidth} y2={mapY((max + min) / 2)} stroke="rgba(255,255,255,0.04)" strokeDasharray="3,3" />
 
-      {/* Y축 가격 라벨 */}
-      <text x={chartWidth + 5} y={mapY(max) + 4} fill="#94a3b8" fontSize="9.5" fontWeight="600">
-        {formatPriceLabel(max, currency)}
-      </text>
-      <text x={chartWidth + 5} y={mapY((max + min) / 2) + 3} fill="#64748b" fontSize="9.5">
-        {formatPriceLabel((max + min) / 2, currency)}
-      </text>
-      <text x={chartWidth + 5} y={mapY(min) + 3} fill="#94a3b8" fontSize="9.5" fontWeight="600">
-        {formatPriceLabel(min, currency)}
-      </text>
+        {/* Y축 가격 라벨 */}
+        <text x={chartWidth + 5} y={mapY(max) + 4} fill="#94a3b8" fontSize="9.5" fontWeight="600">
+          {formatPriceLabel(max, currency)}
+        </text>
+        <text x={chartWidth + 5} y={mapY((max + min) / 2) + 3} fill="#64748b" fontSize="9.5">
+          {formatPriceLabel((max + min) / 2, currency)}
+        </text>
+        <text x={chartWidth + 5} y={mapY(min) + 3} fill="#94a3b8" fontSize="9.5" fontWeight="600">
+          {formatPriceLabel(min, currency)}
+        </text>
 
-      {/* X축 시간 라벨 */}
-      <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-      <text x={0} y={height - 4} fill="#64748b" fontSize="9.5">
-        24시간 전
-      </text>
-      <text x={chartWidth / 2 - 22} y={height - 4} fill="#64748b" fontSize="9.5">
-        12시간 전
-      </text>
-      <text x={chartWidth - 22} y={height - 4} fill="#94a3b8" fontSize="9.5" fontWeight="600">
-        실시간
-      </text>
+        {/* X축 시간 라벨 */}
+        <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
+        <text x={0} y={height - 4} fill="#64748b" fontSize="9.5">
+          24시간 전
+        </text>
+        <text x={chartWidth / 2 - 22} y={height - 4} fill="#64748b" fontSize="9.5">
+          12시간 전
+        </text>
+        <text x={chartWidth - 22} y={height - 4} fill="#94a3b8" fontSize="9.5" fontWeight="600">
+          실시간
+        </text>
 
-      {/* 캔들 그리기 */}
-      {candles.map((c, index) => {
-        const x = index * (chartWidth / candles.length) + 0.75;
-        const yOpen = mapY(c.o);
-        const yClose = mapY(c.c);
-        const yHigh = mapY(c.h);
-        const yLow = mapY(c.l);
+        {/* 캔들 그리기 */}
+        {candles.map((c, index) => {
+          const x = index * (chartWidth / candles.length) + 0.75;
+          const yOpen = mapY(c.o);
+          const yClose = mapY(c.c);
+          const yHigh = mapY(c.h);
+          const yLow = mapY(c.l);
 
-        const isBull = c.c > c.o;
-        const color = isBull ? "#ef4444" : "#3b82f6";
+          const isBull = c.c > c.o;
+          const color = isBull ? "#ef4444" : "#3b82f6";
 
-        const bodyY = Math.min(yOpen, yClose);
-        const bodyHeight = Math.max(1.5, Math.abs(yOpen - yClose));
+          const bodyY = Math.min(yOpen, yClose);
+          const bodyHeight = Math.max(1.5, Math.abs(yOpen - yClose));
 
-        return (
-          <g key={index}>
-            <line x1={x + candleWidth / 2} y1={yHigh} x2={x + candleWidth / 2} y2={yLow} stroke={color} strokeWidth="1" />
-            <rect
-              x={x}
-              y={bodyY}
-              width={candleWidth}
-              height={bodyHeight}
-              fill={color}
-              stroke={color}
-              strokeWidth="0.5"
-            />
-          </g>
-        );
-      })}
-    </svg>
+          return (
+            <g key={index}>
+              <line x1={x + candleWidth / 2} y1={yHigh} x2={x + candleWidth / 2} y2={yLow} stroke={color} strokeWidth="1" />
+              <rect
+                x={x}
+                y={bodyY}
+                width={candleWidth}
+                height={bodyHeight}
+                fill={color}
+                stroke={color}
+                strokeWidth="0.5"
+              />
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
