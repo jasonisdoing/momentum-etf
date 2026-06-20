@@ -111,11 +111,39 @@ HYPERLIQUID_DEX = "xyz"
 # type: "stock"=개별주(가격 USD, 한국은 환율로 KRW 환산 / 실제가=네이버·토스),
 #       "index"=지수(포인트 그대로, 통화 없음 / 실제가=네이버 KR 지수 또는 야후 심볼)
 HYPERLIQUID_SYMBOLS = [
-    {"symbol": "SMSN", "name": "삼성전자", "type": "stock", "country": "kor", "actual_ticker": "005930"},
-    {"symbol": "SKHX", "name": "SK하이닉스", "type": "stock", "country": "kor", "actual_ticker": "000660"},
-    {"symbol": "MU", "name": "마이크론", "type": "stock", "country": "us", "actual_ticker": "MU"},
+    {
+        "symbol": "SMSN",
+        "name": "삼성전자",
+        "type": "stock",
+        "country": "kor",
+        "actual_ticker": "005930",
+        "binance_symbol": "SAMSUNGUSDT",
+    },
+    {
+        "symbol": "SKHX",
+        "name": "SK하이닉스",
+        "type": "stock",
+        "country": "kor",
+        "actual_ticker": "000660",
+        "binance_symbol": "SKHYNIXUSDT",
+    },
+    {
+        "symbol": "MU",
+        "name": "마이크론",
+        "type": "stock",
+        "country": "us",
+        "actual_ticker": "MU",
+        "binance_symbol": "MUUSDT",
+    },
+    {
+        "symbol": "SP500",
+        "name": "S&P500",
+        "type": "index",
+        "yahoo_symbol": "^GSPC",
+        "binance_symbol": "SPYUSDT",
+        "binance_multiplier": 10.0,
+    },
     {"symbol": "KR200", "name": "코스피200", "type": "index", "naver_symbol": "KPI200"},
-    {"symbol": "SP500", "name": "S&P500", "type": "index", "yahoo_symbol": "^GSPC"},
 ]
 
 
