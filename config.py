@@ -202,8 +202,8 @@ MARKET_TREND_MA_MONTHS_MAX = 12
 #   둘 다 아니면 직전 상태 유지(라벨 휩소 차단).
 # 값↑(WINDOW) = 하향 더 둔감 / 값↓(UP_WINDOW) = 상승 전환 더 빠름(대신 바닥 false 상승↑) /
 # 값↑(DEADBAND) = 라벨이 덜 바뀜.
-MARKET_TREND_REGIME_SLOPE_WINDOW = 20
-MARKET_TREND_REGIME_SLOPE_UP_WINDOW = 7
+MARKET_TREND_REGIME_SLOPE_UP_WINDOW = 5
+MARKET_TREND_REGIME_SLOPE_WINDOW = 7
 MARKET_TREND_REGIME_SLOPE_DEADBAND = 0.05
 
 # -----------------------------------------------------------------------

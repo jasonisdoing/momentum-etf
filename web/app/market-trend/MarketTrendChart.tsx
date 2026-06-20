@@ -127,20 +127,29 @@ function formatSignedPct(value: number): string {
 }
 
 /**
- * 임계(up/dn)로부터 특정 레짐의 '내일 등락률' 밴드 표기.
- *   상승: up_pct 이상 / 중립: up_pct ~ dn_pct / 하락: dn_pct 이하
- * 해당 경계가 범위 밖(null)이면 한쪽이 열린 표기, 둘 다 없으면 "-".
+ * 현재 레짐에서 ``target`` 레짐으로 넘어가는 '내일 등락률 임계 + 그 지수'를 표기.
+ *   "−9.1% (8,355.38)" 형태. 이상/이하 표기는 생략(단일 임계값이면 사용자가 이해).
+ *   상승 진입=up, 하락 진입=dn, 중립 진입=현재가 상승이면 up·하락이면 dn.
+ * 해당 경계가 탐색 범위 밖(null)이면 "-".
  */
-function formatBandPct(fc: ForecastThresholds, regime: RegimeKey): string {
-  const up = fc.up_pct;
-  const dn = fc.dn_pct;
-  if (regime === "accel_up") return up !== null ? `${formatSignedPct(up)} 이상` : "-";
-  if (regime === "accel_down") return dn !== null ? `${formatSignedPct(dn)} 이하` : "-";
-  // neutral
-  if (up !== null && dn !== null) return `${formatSignedPct(up)} ~ ${formatSignedPct(dn)}`;
-  if (up !== null) return `${formatSignedPct(up)} 이하`;
-  if (dn !== null) return `${formatSignedPct(dn)} 이상`;
-  return "-";
+function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, target: RegimeKey): string {
+  let pct: number | null = null;
+  let price: number | null = null;
+  if (target === "accel_up") {
+    pct = fc.up_pct;
+    price = fc.up_price;
+  } else if (target === "accel_down") {
+    pct = fc.dn_pct;
+    price = fc.dn_price;
+  } else if (current === "accel_up") {
+    pct = fc.up_pct;
+    price = fc.up_price;
+  } else if (current === "accel_down") {
+    pct = fc.dn_pct;
+    price = fc.dn_price;
+  }
+  if (pct === null) return "-";
+  return price !== null ? `${formatSignedPct(pct)} (${formatNumber(price)})` : formatSignedPct(pct);
 }
 
 type GaugeData = {
@@ -608,7 +617,7 @@ export function MarketTrendChart({
           return `<span style="color: #63e6be; font-weight: 700;">${days}일차</span>`;
         }
         if (fc) {
-          return `<span style="color: #ffc078; font-weight: 700;">${formatBandPct(fc, key)}</span>`;
+          return `<span style="color: #ffc078; font-weight: 700;">${regimeEntryText(fc, point.regime, key)}</span>`;
         }
         return `<span style="color: #94a3b8;">-</span>`;
       };
@@ -897,13 +906,14 @@ export function MarketTrendChart({
                 display: "none",
                 position: "absolute",
                 zIndex: 3,
-                minWidth: 160,
-                padding: "8px 10px",
+                minWidth: 230,
+                whiteSpace: "nowrap",
+                padding: "10px 13px",
                 borderRadius: 6,
                 background: "rgba(30, 41, 59, 0.95)",
                 color: "#fff",
-                fontSize: "0.82rem",
-                lineHeight: 1.45,
+                fontSize: "0.84rem",
+                lineHeight: 1.5,
                 pointerEvents: "none",
                 boxShadow: "0 8px 20px rgba(15, 23, 42, 0.18)",
               }}
