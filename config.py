@@ -103,6 +103,17 @@ AU_QUOTEAPI_HEADERS = {
 KIS_KOSPI_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip"
 KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip"
 
+# Hyperliquid (24시간 토큰화 주식 시세) — /hyperliquid 화면.
+# 빌더 DEX `xyz` 가 SMSN(삼성전자)/SKHX(SK하이닉스)/MU(마이크론) 등 perp 을 24h 거래한다.
+# 가격은 USD. 한국 종목은 환율로 KRW 환산해 실제(KRX) 가와 비교하고, 미국 종목은 USD 그대로 비교.
+HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
+HYPERLIQUID_DEX = "xyz"
+HYPERLIQUID_SYMBOLS = [
+    {"symbol": "SMSN", "name": "삼성전자", "country": "kor", "actual_ticker": "005930"},
+    {"symbol": "SKHX", "name": "SK하이닉스", "country": "kor", "actual_ticker": "000660"},
+    {"symbol": "MU", "name": "마이크론", "country": "us", "actual_ticker": "MU"},
+]
+
 
 # 통합 시장 거래 시간표
 from datetime import time

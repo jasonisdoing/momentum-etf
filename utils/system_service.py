@@ -23,11 +23,13 @@ SystemAction = Literal[
     "metadata_updater",
     "asset_summary",
     "us_market_stocks",
+    "hyperliquid_slack",
 ]
 
-# 평일(월~금) / 월~토 weekday 셋. (Python: 0=월 ... 6=일)
+# 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
 _WEEKDAYS_MON_FRI = [0, 1, 2, 3, 4]
 _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
+_WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
@@ -87,6 +89,14 @@ SCHEDULE_ROWS = [
         "command": "python scripts/analyze_market_hours.py",
         "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
+    {
+        "key": "hyperliquid_slack",
+        "job": "하이퍼리퀴드 시세 알림",
+        "target": "삼성전자/SK하이닉스/마이크론",
+        "cadence": "매일 24시간 매시 0분 KST",
+        "command": "python scripts/hyperliquid_slack.py",
+        "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
+    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -97,6 +107,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
+    "hyperliquid_slack": "scripts/hyperliquid_slack.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
