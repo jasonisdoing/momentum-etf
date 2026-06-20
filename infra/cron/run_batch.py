@@ -54,6 +54,7 @@ def _format_duration(seconds: float) -> str:
         parts.append(f"{s}초")
     return " ".join(parts)
 
+
 # 프로젝트 루트를 파이썬 경로에 추가 (컨테이너 WORKDIR=/app)
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -70,7 +71,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "market_hours_analysis",
     "us_market_stocks",
     "data_aggregate",
-    "hyperliquid_slack",
+    "live_24h_slack",
 }
 EXIT_ALREADY_NOTIFIED = 66
 

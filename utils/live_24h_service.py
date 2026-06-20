@@ -1,9 +1,4 @@
-"""Hyperliquid 24시간 토큰화 주식 시세 (/hyperliquid 화면).
-
-빌더 DEX `xyz` 의 perp(SMSN/SKHX/MU 등) 24시간 가격을 가져와, 한국 종목은 환율로 KRW 환산,
-미국 종목은 USD 그대로 표시한다. 각 종목의 실제 시장가(네이버 KRX / 토스 US)와 비교해
-"24시간 가격이 실제 대비 얼마나 벌어졌나"(프리미엄/디스카운트) 도 함께 계산한다.
-"""
+"""24H 실시간 주식 및 선물 시세 서비스."""
 
 from __future__ import annotations
 
@@ -54,8 +49,20 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-def load_hyperliquid_quotes() -> dict[str, Any]:
-    """설정된 심볼들의 Hyperliquid 24h 시세 + 실제가 대비 차이를 반환한다."""
+def _fetch_binance_ticker(symbol: str) -> dict[str, Any] | None:
+    """바이낸스 선물 24시간 ticker 정보를 조회한다."""
+    url = f"https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={symbol}"
+    try:
+        resp = requests.get(url, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except Exception as exc:
+        logger.warning("Binance ticker 조회 실패 (%s): %s", symbol, exc)
+        return None
+
+
+def load_live_24h_quotes() -> dict[str, Any]:
+    """설정된 심볼들의 24H 실시간 시세 + 실제가 대비 차이를 반환한다."""
     ctx_map = _fetch_dex_ctxs()
 
     # 환율(USD→KRW) — 한국 개별주 환산용
@@ -67,7 +74,9 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
         usd_krw = None
 
     # 실제 시장가 — 개별주는 국가별 스냅샷 일괄 조회
-    kor_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "kor"]
+    kor_tickers = [
+        s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "kor"
+    ]
     us_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "us"]
     kor_snap = _safe_snapshot("kor", kor_tickers)
     us_snap = _safe_snapshot("us", us_tickers)
@@ -104,6 +113,39 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
             else None
         )
 
+        # 바이낸스 선물 시세 추가 정보 (SAMSUNGUSDT, SKHYNIXUSDT 등)
+        binance_data = None
+        binance_symbol = spec.get("binance_symbol")
+        if binance_symbol:
+            ticker = _fetch_binance_ticker(binance_symbol)
+            if ticker:
+                b_price_usd = _to_float(ticker.get("lastPrice"))
+                b_change = _to_float(ticker.get("priceChangePercent"))
+
+                if b_price_usd is not None:
+                    # 바이낸스 시세 승수 보정 (예: S&P500의 SPYUSDT의 경우 10.0배 보정)
+                    b_multiplier = spec.get("binance_multiplier", 1.0)
+                    b_price_usd = b_price_usd * b_multiplier
+
+                    # 국내 종목인 경우 환율을 적용하여 원화로 환산
+                    if spec.get("country") == "kor":
+                        b_price_converted = b_price_usd * usd_krw if usd_krw else None
+                    else:
+                        b_price_converted = b_price_usd
+
+                    b_diff_pct = (
+                        (b_price_converted / actual_price - 1.0) * 100.0
+                        if (b_price_converted is not None and actual_price and actual_price > 0)
+                        else None
+                    )
+
+                    binance_data = {
+                        "symbol": binance_symbol,
+                        "price": b_price_converted,
+                        "change_24h_pct": b_change,
+                        "diff_pct": b_diff_pct,
+                    }
+
         quotes.append(
             {
                 "symbol": symbol,
@@ -115,6 +157,7 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
                 "change_24h_pct": change_24h,
                 "actual_price": actual_price,
                 "diff_pct": diff_pct,
+                "binance": binance_data,
             }
         )
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 import os
 import re
-import subprocess
-import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
@@ -23,7 +21,7 @@ SystemAction = Literal[
     "metadata_updater",
     "asset_summary",
     "us_market_stocks",
-    "hyperliquid_slack",
+    "live_24h_slack",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -90,11 +88,11 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
-        "key": "hyperliquid_slack",
-        "job": "하이퍼리퀴드 시세 알림",
-        "target": "삼성전자/SK하이닉스/마이크론",
+        "key": "live_24h_slack",
+        "job": "24H 시세 알림",
+        "target": "삼성전자/SK하이닉스/마이크론/S&P500",
         "cadence": "매일 24시간 매시 0분 KST",
-        "command": "python scripts/hyperliquid_slack.py",
+        "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
 ]
@@ -107,7 +105,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "metadata_updater": "scripts/stock_meta_cache_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
-    "hyperliquid_slack": "scripts/hyperliquid_slack.py",
+    "live_24h_slack": "scripts/live_24h_slack.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
@@ -200,7 +198,9 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                 "rising_ratio": round((rising_count / stock_count) * 100, 2) if stock_count > 0 else 0.0,
                 "score_up_count": score_up_count,
                 "score_total_count": score_total_count,
-                "score_up_ratio": round((score_up_count / score_total_count) * 100, 2) if score_total_count > 0 else 0.0,
+                "score_up_ratio": round((score_up_count / score_total_count) * 100, 2)
+                if score_total_count > 0
+                else 0.0,
                 "etf_count": etf_count,
             }
         )
@@ -485,7 +485,9 @@ def _read_last_job_run_from_queue(
         ended_at: datetime | None = None
         if isinstance(ended_raw, datetime):
             ended_at = (
-                ended_raw.astimezone(kst) if ended_raw.tzinfo else ended_raw.replace(tzinfo=timezone.utc).astimezone(kst)
+                ended_raw.astimezone(kst)
+                if ended_raw.tzinfo
+                else ended_raw.replace(tzinfo=timezone.utc).astimezone(kst)
             )
         status = "success" if str(doc.get("status")) == "done" else "failure"
         app_type = str(doc.get("app_type") or "").strip() or None
@@ -591,16 +593,15 @@ def _cleanup_stale_locks() -> int:
             # (1) expires_at 기반 정리 — TTL 인덱스가 어떤 이유로 안 도는 경우의 안전망
             expires_at = doc.get("expires_at")
             if isinstance(expires_at, datetime):
-                expires_aware = (
-                    expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
-                )
+                expires_aware = expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)
                 if expires_aware < now_utc:
                     try:
                         db.batch_locks.delete_one({"_id": key})
                         deleted += 1
                         _logger.warning(
                             "Stale lock 제거(expires 초과): job=%s expires_at=%s",
-                            key, expires_at,
+                            key,
+                            expires_at,
                         )
                         continue
                     except Exception as exc:
@@ -636,7 +637,9 @@ def _cleanup_stale_locks() -> int:
                     deleted += 1
                     _logger.warning(
                         "Stale lock 제거: job=%s elapsed=%ds (%s)",
-                        key, elapsed_seconds, reason,
+                        key,
+                        elapsed_seconds,
+                        reason,
                     )
                 except Exception as exc:
                     _logger.warning("Stale lock 삭제 실패 (job=%s): %s", key, exc)
@@ -687,9 +690,7 @@ def get_running_jobs() -> list[str]:
         # 2) batch_queue running + heartbeat 살아있음 (3분 안)
         try:
             heartbeat_threshold = now - timedelta(minutes=3)
-            for doc in db.batch_queue.find(
-                {"status": "running"}, {"_id": 0, "job_name": 1, "last_heartbeat": 1}
-            ):
+            for doc in db.batch_queue.find({"status": "running"}, {"_id": 0, "job_name": 1, "last_heartbeat": 1}):
                 key = str(doc.get("job_name") or "")
                 if not key or key not in _SCRIPT_BY_ACTION:
                     continue
@@ -733,9 +734,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
         details: dict[str, dict[str, object]] = {}
 
         # 1) batch_locks 기반 (락이 살아있는 작업)
-        for doc in db.batch_locks.find(
-            {}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}
-        ):
+        for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}):
             key = str(doc.get("_id") or "")
             if key not in _SCRIPT_BY_ACTION:
                 continue
@@ -750,7 +749,11 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
             acquired_at = doc.get("acquired_at")
             started_at: datetime | None = None
             if isinstance(acquired_at, datetime):
-                started_at = acquired_at.astimezone(ZoneInfo("Asia/Seoul")) if acquired_at.tzinfo else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+                started_at = (
+                    acquired_at.astimezone(ZoneInfo("Asia/Seoul"))
+                    if acquired_at.tzinfo
+                    else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
+                )
 
             estimated_seconds = _read_average_job_elapsed_seconds(key)
             elapsed_seconds = max(0, int((now_kst - started_at).total_seconds())) if started_at else None

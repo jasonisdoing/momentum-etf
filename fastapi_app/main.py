@@ -6,12 +6,12 @@ from fastapi.responses import JSONResponse
 from utils.env import load_env_if_present
 
 from .routes.assets import router as assets_router
-from .routes.dashboard import router as dashboard_router
 from .routes.daily import router as daily_router
+from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
-from .routes.hyperliquid import router as hyperliquid_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
+from .routes.live_24h import router as live_24h_router
 from .routes.market import router as market_router
 from .routes.market_trend import router as market_trend_router
 from .routes.monthly import router as monthly_router
@@ -62,7 +62,7 @@ async def generic_exception_handler(_request: Request, exc: Exception) -> JSONRe
 
 app.include_router(assets_router)
 app.include_router(holdings_router)
-app.include_router(hyperliquid_router)
+app.include_router(live_24h_router)
 app.include_router(holdings_components_router)
 app.include_router(dashboard_router)
 app.include_router(daily_router)
@@ -74,9 +74,10 @@ app.include_router(pool_settings_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
-from pymongo.errors import PyMongoError, NetworkTimeout
 from fastapi import Request
+from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse
+
 
 @app.middleware("http")
 async def catch_mongodb_errors(request: Request, call_next):
@@ -91,12 +92,15 @@ async def catch_mongodb_errors(request: Request, call_next):
             is_db_timeout = True
         elif "pymongo" in str(exc).lower() and "timeout" in str(exc).lower():
             is_db_timeout = True
-            
+
         if is_db_timeout:
             global _LAST_DB_ERROR_TIME
             _LAST_DB_ERROR_TIME = time.time()
-            return JSONResponse(status_code=503, content={"detail": "몽고디비 서버 연결 지연(타임아웃)이 발생했습니다."})
+            return JSONResponse(
+                status_code=503, content={"detail": "몽고디비 서버 연결 지연(타임아웃)이 발생했습니다."}
+            )
         raise exc
+
 
 app.include_router(system_router)
 app.include_router(ticker_detail_router)
@@ -105,13 +109,16 @@ app.include_router(weekly_router)
 app.include_router(monthly_router)
 app.include_router(yearly_router)
 import time
+
 _LAST_DB_ERROR_TIME = 0.0
+
 
 @app.post("/internal/health/report_error")
 def report_error() -> dict[str, str]:
     global _LAST_DB_ERROR_TIME
     _LAST_DB_ERROR_TIME = time.time()
     return {"status": "ok"}
+
 
 @app.get("/internal/health")
 def health() -> dict[str, str]:
@@ -121,9 +128,11 @@ def health() -> dict[str, str]:
     if db is None:
         return JSONResponse(status_code=503, content={"status": "error", "detail": "DB 연결 실패"})
 
-    global _LAST_DB_ERROR_TIME
     if time.time() - _LAST_DB_ERROR_TIME < 60:
-        return JSONResponse(status_code=503, content={"status": "error", "detail": "다른 API에서 최근 DB 통신 타임아웃이 보고되었습니다."})
+        return JSONResponse(
+            status_code=503,
+            content={"status": "error", "detail": "다른 API에서 최근 DB 통신 타임아웃이 보고되었습니다."},
+        )
 
     try:
         db.command("ping")
