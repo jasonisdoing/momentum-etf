@@ -42,40 +42,49 @@ def _trend_emoji(value):
 def main():
     load_env_if_present()
     data = load_live_24h_quotes()
+    quotes = data.get("quotes", [])
 
-    lines = ["*⏰ 24H 시세*"]
-    for q in data.get("quotes", []):
+    lines = []
+
+    # 1. 하이퍼리퀴드 시세 블록
+    lines.append("*🌐 하이퍼리퀴드 24H 시세*")
+    for q in quotes:
         flag = "🇰🇷" if q.get("country") == "kor" else "🇺🇸"
         currency = q.get("currency", "USD")
-
-        # 하이퍼리퀴드(HL) 시세
         hl_price = q.get("hyper_price")
         hl_change = q.get("change_24h_pct")
         hl_diff = q.get("diff_pct")
 
-        # 바이낸스(BI) 시세
+        lines.append(
+            f"{flag} *{q['name']}*({q['symbol']})\n"
+            f"   • 하이퍼리퀴드: {_fmt_price(hl_price, currency)} ({_fmt_pct(hl_change)}) {_trend_emoji(hl_change)}\n"
+            f"   • 실제가 대비: {_fmt_pct(hl_diff)}"
+        )
+
+    lines.append("")  # 섹션 구분용 빈 줄
+
+    # 2. 바이낸스 시세 블록
+    lines.append("*🔶 바이낸스 24H 시세*")
+    for q in quotes:
         b = q.get("binance")
+        if not b:
+            continue
 
-        if b:
-            bi_price = b.get("price")
-            bi_change = b.get("change_24h_pct")
-            bi_diff = b.get("diff_pct")
+        flag = "🇰🇷" if q.get("country") == "kor" else "🇺🇸"
+        currency = q.get("currency", "USD")
+        bi_price = b.get("price")
+        bi_change = b.get("change_24h_pct")
+        bi_diff = b.get("diff_pct")
+        bi_symbol = b.get("symbol")
 
-            lines.append(
-                f"{flag} *{q['name']}*:\n"
-                f"   • 하이퍼리퀴드: {_fmt_price(hl_price, currency)} ({_fmt_pct(hl_change)}) {_trend_emoji(hl_change)}\n"
-                f"   • 바이낸스: {_fmt_price(bi_price, currency)} ({_fmt_pct(bi_change)}) {_trend_emoji(bi_change)}\n"
-                f"   • 실제가 대비: HL {_fmt_pct(hl_diff)} / BI {_fmt_pct(bi_diff)}"
-            )
-        else:
-            lines.append(
-                f"{flag} *{q['name']}*:\n"
-                f"   • 하이퍼리퀴드: {_fmt_price(hl_price, currency)} ({_fmt_pct(hl_change)}) {_trend_emoji(hl_change)}\n"
-                f"   • 실제가 대비: HL {_fmt_pct(hl_diff)}"
-            )
+        lines.append(
+            f"{flag} *{q['name']}*({bi_symbol})\n"
+            f"   • 바이낸스: {_fmt_price(bi_price, currency)} ({_fmt_pct(bi_change)}) {_trend_emoji(bi_change)}\n"
+            f"   • 실제가 대비: {_fmt_pct(bi_diff)}"
+        )
 
     send_slack_message_v2("\n".join(lines))
-    logger.info("24H 시세 슬랙 전송 완료 (%d종목)", len(data.get("quotes", [])))
+    logger.info("24H 시세 슬랙 전송 완료 (%d종목)", len(quotes))
 
 
 if __name__ == "__main__":
