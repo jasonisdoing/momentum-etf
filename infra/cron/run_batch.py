@@ -70,6 +70,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "market_hours_analysis",
     "us_market_stocks",
     "data_aggregate",
+    "hyperliquid_slack",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
