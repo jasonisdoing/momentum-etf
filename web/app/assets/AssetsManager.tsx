@@ -2441,17 +2441,23 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     {
       colId: "index_result",
       headerName: "승부",
-      minWidth: 70,
-      flex: 0.5,
+      minWidth: 130,
+      flex: 0.85,
       cellStyle: { display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" },
       cellRenderer: (params: { data?: ParentGridRow }) => {
         const data = params.data;
         if (!data || isDetailRow(data) || isTotalRow(data)) return "";
-        const r = (data as AccountSummary).index_result;
+        const summary = data as AccountSummary;
+        const r = summary.index_result;
         if (!r) return <span style={{ color: "#adb5bd" }}>-</span>;
-        if (r === "win") return <span style={{ color: "#dc2626", fontWeight: 700 }}>🏆 승</span>;
-        if (r === "lose") return <span style={{ color: "#1971c2", fontWeight: 700 }}>패</span>;
-        return <span style={{ color: "#6b7280" }}>무</span>;
+        // 격차 = 계좌 금일% − 지수 금일% (앞선/뒤쳐진 폭, 퍼센트포인트)
+        const acc = summary.daily_return_pct;
+        const bench = summary.benchmark_pct;
+        const diff = acc !== null && acc !== undefined && bench !== null && bench !== undefined ? acc - bench : null;
+        const diffText = diff !== null ? ` ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%p` : "";
+        if (r === "win") return <span style={{ color: "#dc2626", fontWeight: 700 }}>{`🏆 승${diffText}`}</span>;
+        if (r === "lose") return <span style={{ color: "#1971c2", fontWeight: 700 }}>{`😢 패${diffText}`}</span>;
+        return <span style={{ color: "#6b7280", fontWeight: 700 }}>🤝 무</span>;
       },
     },
     {
