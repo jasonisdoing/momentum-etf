@@ -69,7 +69,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const range = max - min === 0 ? 1 : max - min;
 
   const width = 450;
-  const height = 150;
+  const height = 225;
   const chartWidth = width - 42;
   const chartHeight = height - 20;
   const paddingY = 8;
@@ -189,9 +189,9 @@ export function HyperliquidClient() {
         {loading && quotes.length === 0 ? (
           <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
         ) : (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, maxWidth: 1280 }}>
+          <div className="row g-3" style={{ maxWidth: 1280, width: "100%" }}>
             {quotes.map((q) => (
-              <div key={q.symbol} style={{ flex: "1 1 400px", minWidth: 320, maxWidth: "calc(50% - 8px)" }}>
+              <div key={q.symbol} className="col-12 col-md-6">
                 {/* Hyperliquid Card */}
                 <div className="card appCard" style={{ height: "100%" }}>
                   <div className="card-body" style={{ padding: "1rem 1.25rem" }}>
