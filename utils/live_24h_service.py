@@ -180,7 +180,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
 
         if kind == "index":
             currency = "POINT"
-            country = "kor" if spec.get("naver_symbol") else "us"
+            country = "us"
             hyper_price = mark
             actual_price = _fetch_index_value(spec)
         elif spec["country"] == "kor":
@@ -222,15 +222,8 @@ def load_live_24h_quotes() -> dict[str, Any]:
 
 
 def _fetch_index_value(spec: dict[str, Any]) -> float | None:
-    """지수의 실제 현재값. 한국 지수는 네이버, 그 외는 야후(intraday 보강) 로 조회."""
+    """지수의 실제 현재값. 야후(intraday 보강) 로 조회."""
     try:
-        if spec.get("naver_symbol"):
-            from utils.market_trend_service import _fetch_naver_kor_index_close
-
-            series = _fetch_naver_kor_index_close(spec["naver_symbol"], count=3)
-            if series is not None and not series.empty:
-                return float(series.iloc[-1])
-            return None
         from utils.market_trend_service import _fetch_yf_intraday_last_close
 
         intraday = _fetch_yf_intraday_last_close(spec["yahoo_symbol"])
