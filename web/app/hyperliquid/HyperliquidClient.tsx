@@ -9,8 +9,9 @@ const REFRESH_MS = 10_000;
 type Quote = {
   symbol: string;
   name: string;
+  type: "stock" | "index";
   country: "kor" | "us";
-  currency: "KRW" | "USD";
+  currency: "KRW" | "USD" | "POINT";
   hyper_price: number | null;
   change_24h_pct: number | null;
   actual_price: number | null;
@@ -24,9 +25,10 @@ function signColor(v: number | null | undefined): string {
   return v > 0 ? "#dc2626" : "#1971c2";
 }
 
-function formatPrice(value: number | null, currency: "KRW" | "USD"): string {
+function formatPrice(value: number | null, currency: "KRW" | "USD" | "POINT"): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   if (currency === "KRW") return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
+  if (currency === "POINT") return `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}p`;
   return `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}`;
 }
 
@@ -92,7 +94,7 @@ export function HyperliquidClient() {
                     <span style={{ fontSize: "1.15rem", fontWeight: 800 }}>{q.name}</span>
                     <span style={{ color: "#64748b", fontWeight: 600 }}>{q.symbol}</span>
                     <span style={{ marginLeft: "auto", fontSize: "0.78rem", color: "#94a3b8" }}>
-                      {q.country === "kor" ? "🇰🇷 한국주식" : "🇺🇸 미국주식"}
+                      {`${q.country === "kor" ? "🇰🇷 한국" : "🇺🇸 미국"}${q.type === "index" ? "지수" : "주식"}`}
                     </span>
                   </div>
                   <div style={{ fontSize: "1.7rem", fontWeight: 800, lineHeight: 1.2, marginTop: 6 }}>

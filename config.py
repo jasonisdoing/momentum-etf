@@ -108,10 +108,14 @@ KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosda
 # 가격은 USD. 한국 종목은 환율로 KRW 환산해 실제(KRX) 가와 비교하고, 미국 종목은 USD 그대로 비교.
 HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
 HYPERLIQUID_DEX = "xyz"
+# type: "stock"=개별주(가격 USD, 한국은 환율로 KRW 환산 / 실제가=네이버·토스),
+#       "index"=지수(포인트 그대로, 통화 없음 / 실제가=네이버 KR 지수 또는 야후 심볼)
 HYPERLIQUID_SYMBOLS = [
-    {"symbol": "SMSN", "name": "삼성전자", "country": "kor", "actual_ticker": "005930"},
-    {"symbol": "SKHX", "name": "SK하이닉스", "country": "kor", "actual_ticker": "000660"},
-    {"symbol": "MU", "name": "마이크론", "country": "us", "actual_ticker": "MU"},
+    {"symbol": "SMSN", "name": "삼성전자", "type": "stock", "country": "kor", "actual_ticker": "005930"},
+    {"symbol": "SKHX", "name": "SK하이닉스", "type": "stock", "country": "kor", "actual_ticker": "000660"},
+    {"symbol": "MU", "name": "마이크론", "type": "stock", "country": "us", "actual_ticker": "MU"},
+    {"symbol": "KR200", "name": "코스피200", "type": "index", "naver_symbol": "KPI200"},
+    {"symbol": "SP500", "name": "S&P500", "type": "index", "yahoo_symbol": "^GSPC"},
 ]
 
 

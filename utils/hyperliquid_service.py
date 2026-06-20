@@ -58,7 +58,7 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
     """설정된 심볼들의 Hyperliquid 24h 시세 + 실제가 대비 차이를 반환한다."""
     ctx_map = _fetch_dex_ctxs()
 
-    # 환율(USD→KRW) — 한국 종목 환산용
+    # 환율(USD→KRW) — 한국 개별주 환산용
     try:
         rates = get_exchange_rates()
         usd_krw = _to_float((rates.get("USD") or {}).get("rate"))
@@ -66,31 +66,37 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
         logger.warning("Hyperliquid 환율 조회 실패: %s", exc)
         usd_krw = None
 
-    # 실제 시장가 — 국가별 일괄 조회
-    kor_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s["country"] == "kor"]
-    us_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s["country"] == "us"]
+    # 실제 시장가 — 개별주는 국가별 스냅샷 일괄 조회
+    kor_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "kor"]
+    us_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "us"]
     kor_snap = _safe_snapshot("kor", kor_tickers)
     us_snap = _safe_snapshot("us", us_tickers)
 
     quotes: list[dict[str, Any]] = []
     for spec in HYPERLIQUID_SYMBOLS:
         symbol = str(spec["symbol"]).upper()
+        kind = spec.get("type", "stock")
         ctx = ctx_map.get(symbol) or {}
-        mark_usd = _to_float(ctx.get("markPx"))
-        prev_usd = _to_float(ctx.get("prevDayPx"))
-        change_24h = ((mark_usd / prev_usd - 1.0) * 100.0) if (mark_usd and prev_usd) else None
+        mark = _to_float(ctx.get("markPx"))
+        prev = _to_float(ctx.get("prevDayPx"))
+        change_24h = ((mark / prev - 1.0) * 100.0) if (mark and prev) else None
 
-        country = spec["country"]
-        currency = "KRW" if country == "kor" else "USD"
-
-        # 표시 가격: 한국=USD×환율→KRW, 미국=USD 그대로
-        if country == "kor":
-            hyper_price = (mark_usd * usd_krw) if (mark_usd is not None and usd_krw) else None
-            actual = (kor_snap.get(spec["actual_ticker"]) or {}).get("nowVal")
+        if kind == "index":
+            # 지수: 포인트 그대로(통화 없음), 실제 지수값과 비교.
+            currency = "POINT"
+            country = "kor" if spec.get("naver_symbol") else "us"
+            hyper_price = mark
+            actual_price = _fetch_index_value(spec)
+        elif spec["country"] == "kor":
+            currency = "KRW"
+            country = "kor"
+            hyper_price = (mark * usd_krw) if (mark is not None and usd_krw) else None
+            actual_price = _to_float((kor_snap.get(spec["actual_ticker"]) or {}).get("nowVal"))
         else:
-            hyper_price = mark_usd
-            actual = (us_snap.get(spec["actual_ticker"]) or {}).get("nowVal")
-        actual_price = _to_float(actual)
+            currency = "USD"
+            country = "us"
+            hyper_price = mark
+            actual_price = _to_float((us_snap.get(spec["actual_ticker"]) or {}).get("nowVal"))
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
@@ -102,6 +108,7 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
             {
                 "symbol": symbol,
                 "name": spec["name"],
+                "type": kind,
                 "country": country,
                 "currency": currency,
                 "hyper_price": hyper_price,
@@ -112,6 +119,25 @@ def load_hyperliquid_quotes() -> dict[str, Any]:
         )
 
     return {"quotes": quotes, "usd_krw": usd_krw}
+
+
+def _fetch_index_value(spec: dict[str, Any]) -> float | None:
+    """지수의 실제 현재값. 한국 지수는 네이버, 그 외는 야후(intraday 보강) 로 조회."""
+    try:
+        if spec.get("naver_symbol"):
+            from utils.market_trend_service import _fetch_naver_kor_index_close
+
+            series = _fetch_naver_kor_index_close(spec["naver_symbol"], count=3)
+            if series is not None and not series.empty:
+                return float(series.iloc[-1])
+            return None
+        from utils.market_trend_service import _fetch_yf_intraday_last_close
+
+        intraday = _fetch_yf_intraday_last_close(spec["yahoo_symbol"])
+        return float(intraday[1]) if intraday else None
+    except Exception as exc:
+        logger.warning("Hyperliquid 지수 실제값 조회 실패 (%s): %s", spec.get("symbol"), exc)
+        return None
 
 
 def _safe_snapshot(country: str, tickers: list[str]) -> dict[str, dict[str, Any]]:

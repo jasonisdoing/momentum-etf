@@ -23,6 +23,8 @@ def _fmt_price(value, currency):
         return "-"
     if currency == "KRW":
         return f"{round(value):,}원"
+    if currency == "POINT":
+        return f"{value:,.2f}p"
     return f"${value:,.2f}"
 
 
