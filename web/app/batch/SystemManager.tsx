@@ -262,7 +262,6 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     valueGetter: (params) => (params.node ? (params.node.rowIndex ?? -1) + 1 : ""),
   },
   { field: "job", headerName: "작업", minWidth: 140, width: 150 },
-  { field: "target", headerName: "대상", minWidth: 140, width: 180 },
   {
     field: "cadence",
     headerName: "자동 주기",
