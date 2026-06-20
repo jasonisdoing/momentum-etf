@@ -138,7 +138,6 @@ HYPERLIQUID_SYMBOLS = [
         "type": "index",
         "yahoo_symbol": "^GSPC",
     },
-    {"symbol": "KR200", "name": "코스피200", "type": "index", "naver_symbol": "KPI200"},
 ]
 
 
