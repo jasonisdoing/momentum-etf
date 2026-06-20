@@ -6,9 +6,10 @@ import {
   CrosshairMode,
   LineSeries,
   CandlestickSeries,
+  HistogramSeries,
   createChart,
 } from "lightweight-charts";
-import type { IChartApi, LineData, CandlestickData, Time } from "lightweight-charts";
+import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "lightweight-charts";
 
 
 type RegimeKey = "accel_up" | "decel_up" | "accel_down" | "decel_down";
@@ -19,6 +20,7 @@ type HistoryPoint = {
   high: number | null;
   low: number | null;
   close: number | null;
+  volume: number | null;
   ma: number | null;
   trend_pct: number | null;
   trend_score: number | null;
@@ -247,6 +249,26 @@ function buildCandleData(history: HistoryPoint[]): CandlestickData<Time>[] {
     }));
 }
 
+function buildVolumeData(history: HistoryPoint[]): HistogramData<Time>[] {
+  return history
+    .filter(
+      (point) =>
+        point.volume !== null &&
+        point.open !== null &&
+        point.close !== null
+    )
+    .map((point) => {
+      const open = point.open as number;
+      const close = point.close as number;
+      const color = close >= open ? "rgba(220, 38, 38, 0.4)" : "rgba(37, 99, 235, 0.4)";
+      return {
+        time: point.date as Time,
+        value: point.volume as number,
+        color,
+      };
+    });
+}
+
 function renderRegimeBands(
   chart: IChartApi,
   overlay: HTMLDivElement,
@@ -452,6 +474,23 @@ export function MarketTrendChart({
     });
     candleSeries.setData(buildCandleData(visibleHistory));
 
+    const volumeSeries = chart.addSeries(HistogramSeries, {
+      priceFormat: {
+        type: "volume",
+      },
+      priceScaleId: "volume",
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+    volumeSeries.setData(buildVolumeData(visibleHistory));
+
+    chart.priceScale("volume").applyOptions({
+      scaleMargins: {
+        top: 0.75,
+        bottom: 0,
+      },
+    });
+
     chart.addSeries(LineSeries, {
       color: "#fa5252",
       lineWidth: 1,
@@ -487,6 +526,7 @@ export function MarketTrendChart({
           <span>고가:</span> <strong style="color: #0f172a">${formatNumber(point.high)}</strong>
           <span>저가:</span> <strong style="color: #0f172a">${formatNumber(point.low)}</strong>
           <span>종가:</span> <strong style="color: #0f172a">${formatNumber(point.close)}</strong>
+          <span>거래량:</span> <strong style="color: #0f172a">${formatNumber(point.volume)}</strong>
           <span>MA:</span> <strong style="color: #fa5252">${formatNumber(point.ma)}</strong>
           <span>추세 점수:</span> <strong style="color: #0f172a">${formatScore(point.trend_score)}</strong>
         </div>

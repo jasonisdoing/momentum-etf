@@ -68,6 +68,7 @@ def _fetch_naver_kor_index_ohlc(symbol: str, count: int) -> pd.DataFrame | None:
     highs: list[float] = []
     lows: list[float] = []
     closes: list[float] = []
+    volumes: list[float] = []
     for raw in items:
         parts = raw.split("|")
         if len(parts) < 5:
@@ -78,6 +79,7 @@ def _fetch_naver_kor_index_ohlc(symbol: str, count: int) -> pd.DataFrame | None:
             high_val = float(parts[2])
             low_val = float(parts[3])
             close_val = float(parts[4])
+            volume_val = float(parts[5]) if len(parts) >= 6 else 0.0
         except (ValueError, TypeError):
             continue
         dates.append(ts)
@@ -85,10 +87,14 @@ def _fetch_naver_kor_index_ohlc(symbol: str, count: int) -> pd.DataFrame | None:
         highs.append(high_val)
         lows.append(low_val)
         closes.append(close_val)
+        volumes.append(volume_val)
 
     if not dates:
         return None
-    df = pd.DataFrame({"Open": opens, "High": highs, "Low": lows, "Close": closes}, index=pd.DatetimeIndex(dates))
+    df = pd.DataFrame(
+        {"Open": opens, "High": highs, "Low": lows, "Close": closes, "Volume": volumes},
+        index=pd.DatetimeIndex(dates)
+    )
     return df.sort_index()
 
 
@@ -576,7 +582,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
 
         # yfinance 가 단일 ticker 라도 컬럼을 멀티인덱스로 줄 수 있어 평탄화.
         cleaned_cols = {}
-        for col in ["Open", "High", "Low", "Close"]:
+        for col in ["Open", "High", "Low", "Close", "Volume"]:
             col_raw = df[col] if col in df.columns else None
             if col_raw is None:
                 try:
@@ -660,6 +666,7 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
                 "high": _to_float(df["High"].iloc[idx]),
                 "low": _to_float(df["Low"].iloc[idx]),
                 "close": close,
+                "volume": _to_float(df["Volume"].iloc[idx]),
                 "ma": ma_v,
                 "trend_pct": trend,
                 "trend_score": trend_score,
