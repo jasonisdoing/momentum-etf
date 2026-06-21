@@ -108,6 +108,8 @@ KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosda
 # 가격은 USD. 한국 종목은 환율로 KRW 환산해 실제(KRX) 가와 비교하고, 미국 종목은 USD 그대로 비교.
 HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
 HYPERLIQUID_DEX = "xyz"
+# live-24h 슬랙 알림: 최근 1시간 |변동률| 이 이 값(%) 이상인 종목이 있으면 @channel 핑.
+LIVE_24H_ALERT_PCT = 3.0
 # type: "stock"=개별주(가격 USD, 한국은 환율로 KRW 환산 / 실제가=네이버·토스),
 #       "index"=지수(포인트 그대로, 통화 없음 / 실제가=네이버 KR 지수 또는 야후 심볼)
 HYPERLIQUID_SYMBOLS = [
