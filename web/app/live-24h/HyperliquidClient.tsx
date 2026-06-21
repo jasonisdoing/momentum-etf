@@ -40,6 +40,17 @@ function formatPct(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+// 30분봉 기준 최근 N시간 변동률(%). 2N봉 전 대비. 데이터 부족 시 null.
+function recentMove(candles: Candle[] | undefined, hours: number): number | null {
+  if (!candles) return null;
+  const idx = 2 * hours;
+  if (candles.length <= idx) return null;
+  const prev = candles[candles.length - 1 - idx]?.c;
+  const cur = candles[candles.length - 1]?.c;
+  if (!prev || !cur) return null;
+  return (cur / prev - 1) * 100;
+}
+
 // 정규장 대비 절대 금액차 (부호 포함). 예: +174,914원 / -3.20 / +2.5p
 function formatSignedPrice(value: number | null, currency: "KRW" | "USD" | "POINT"): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -218,7 +229,10 @@ export function HyperliquidClient() {
           <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
         ) : (
           <div className="row g-3" style={{ maxWidth: 1280, width: "100%" }}>
-            {quotes.map((q) => (
+            {quotes.map((q) => {
+              const m1 = recentMove(q.candles, 1);
+              const m3 = recentMove(q.candles, 3);
+              return (
               <div key={q.symbol} className="col-12 col-md-6">
                 {/* Hyperliquid Card */}
                 <div className="card appCard" style={{ height: "100%" }}>
@@ -260,12 +274,14 @@ export function HyperliquidClient() {
                         gap: 8,
                         flexWrap: "wrap",
                         marginTop: 4,
-                        fontSize: "0.85rem",
+                        fontSize: "0.95rem",
                         color: "#94a3b8",
                       }}
                     >
                       <span>
-                        24시간{" "}
+                        1시간 <strong style={{ color: signColor(m1) }}>{formatPct(m1)}</strong>
+                        {", "}3시간 <strong style={{ color: signColor(m3) }}>{formatPct(m3)}</strong>
+                        {", "}24시간{" "}
                         <strong style={{ color: signColor(q.change_24h_pct) }}>{formatPct(q.change_24h_pct)}</strong>
                       </span>
                       <span style={{ opacity: 0.5 }}>·</span>
@@ -275,7 +291,8 @@ export function HyperliquidClient() {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
