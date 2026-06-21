@@ -40,11 +40,14 @@ def _trend_emoji(value):
     return ":small_red_triangle:" if value > 0 else ":chart_with_downwards_trend:"
 
 
-def _recent_1h_move(candles):
-    """30분봉 기준 최근 1시간 변동률(%). 2봉 전(=1시간 전) 대비. 데이터 부족 시 None."""
-    if not candles or len(candles) < 3:
+def _recent_move(candles, hours):
+    """30분봉 기준 최근 N시간 변동률(%). 2N봉 전 대비. 데이터 부족 시 None."""
+    if not candles:
         return None
-    prev = candles[-3].get("c")
+    idx = 2 * hours  # N시간 = 2N개의 30분봉
+    if len(candles) <= idx:
+        return None
+    prev = candles[-1 - idx].get("c")
     cur = candles[-1].get("c")
     if not prev or not cur:
         return None
@@ -65,15 +68,19 @@ def main():
         hl_change = q.get("change_24h_pct")
         hl_diff = q.get("diff_pct")  # 정규장 대비 (메인)
 
-        move_1h = _recent_1h_move(q.get("candles"))
-        triggered = move_1h is not None and abs(move_1h) >= LIVE_24H_ALERT_PCT
+        candles = q.get("candles")
+        m1 = _recent_move(candles, 1)
+        m3 = _recent_move(candles, 3)
+        triggered = m1 is not None and abs(m1) >= LIVE_24H_ALERT_PCT
         if triggered:
-            alerts.append((q["name"], move_1h))
+            alerts.append((q["name"], m1))
 
         body.append(
             f"{flag} *{q['name']}*({q['symbol']}) {_fmt_pct(hl_diff)}({_fmt_price(hl_price, currency)}) {_trend_emoji(hl_diff)}"
             f"{' 🚨' if triggered else ''}\n"
-            f"   • 24시간: {_fmt_pct(hl_change)} {_trend_emoji(hl_change)}"
+            f"   • 1시간: {_fmt_pct(m1)} {_trend_emoji(m1)}, "
+            f"3시간: {_fmt_pct(m3)} {_trend_emoji(m3)}, "
+            f"24시간: {_fmt_pct(hl_change)} {_trend_emoji(hl_change)}"
         )
 
     lines = []
