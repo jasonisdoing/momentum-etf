@@ -114,18 +114,18 @@ LIVE_24H_ALERT_PCT = 3.0
 #       "index"=지수(포인트 그대로, 통화 없음 / 실제가=네이버 KR 지수 또는 야후 심볼)
 HYPERLIQUID_SYMBOLS = [
     {
-        "symbol": "SMSN",
-        "name": "삼성전자",
-        "type": "stock",
-        "country": "kor",
-        "actual_ticker": "005930",
-    },
-    {
         "symbol": "SKHX",
         "name": "SK하이닉스",
         "type": "stock",
         "country": "kor",
         "actual_ticker": "000660",
+    },
+    {
+        "symbol": "SMSN",
+        "name": "삼성전자",
+        "type": "stock",
+        "country": "kor",
+        "actual_ticker": "005930",
     },
     {
         "symbol": "MU",
