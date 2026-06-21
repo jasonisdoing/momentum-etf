@@ -49,16 +49,15 @@ def main():
     # 1. 하이퍼리퀴드 시세 블록
     lines.append("*🌐 하이퍼리퀴드 24H 시세*")
     for q in quotes:
-        flag = "🇰🇷" if q.get("country") == "kor" else "🇺🇸"
+        flag = ":kr:" if q.get("country") == "kor" else ":us:"
         currency = q.get("currency", "USD")
         hl_price = q.get("hyper_price")
         hl_change = q.get("change_24h_pct")
-        hl_diff = q.get("diff_pct")
+        hl_diff = q.get("diff_pct")  # 정규장 대비 (메인)
 
         lines.append(
-            f"{flag} *{q['name']}*({q['symbol']})\n"
-            f"   • 하이퍼리퀴드: {_fmt_price(hl_price, currency)} ({_fmt_pct(hl_change)}) {_trend_emoji(hl_change)}\n"
-            f"   • 실제가 대비: {_fmt_pct(hl_diff)}"
+            f"{flag} *{q['name']}*({q['symbol']}) {_fmt_pct(hl_diff)}({_fmt_price(hl_price, currency)}) {_trend_emoji(hl_diff)}\n"
+            f"   • 24시간: {_fmt_pct(hl_change)} {_trend_emoji(hl_change)}"
         )
 
 

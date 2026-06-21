@@ -40,6 +40,16 @@ function formatPct(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+// 정규장 대비 절대 금액차 (부호 포함). 예: +174,914원 / -3.20 / +2.5p
+function formatSignedPrice(value: number | null, currency: "KRW" | "USD" | "POINT"): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
+  const abs = Math.abs(value);
+  if (currency === "KRW") return `${sign}${new Intl.NumberFormat("ko-KR").format(Math.round(abs))}원`;
+  if (currency === "POINT") return `${sign}${abs.toFixed(2)}p`;
+  return `${sign}$${abs.toFixed(2)}`;
+}
+
 function getHyperliquidLink(symbol: string): string {
   const map: Record<string, string> = {
     SMSN: "SAMSUNG",
@@ -223,21 +233,43 @@ export function HyperliquidClient() {
                       >
                         {q.symbol}
                       </a>
-                      <span style={{ marginLeft: "auto", fontSize: "0.95rem", color: "#94a3b8", fontWeight: 600 }}>
-                        🌐 하이퍼리퀴드
-                      </span>
+                      {/* 우상단: 정규장 대비 변동률 + 금액차 (1줄, 금액은 작게) */}
+                      <div style={{ marginLeft: "auto", display: "flex", alignItems: "baseline", gap: 4, color: signColor(q.diff_pct) }}>
+                        <span style={{ fontSize: "1.4rem", fontWeight: 800 }}>{formatPct(q.diff_pct)}</span>
+                        <span style={{ fontSize: "0.92rem", fontWeight: 700 }}>
+                          (
+                          {formatSignedPrice(
+                            q.hyper_price !== null && q.actual_price !== null ? q.hyper_price - q.actual_price : null,
+                            q.currency,
+                          )}
+                          )
+                        </span>
+                      </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap", marginTop: 6 }}>
-                      <span style={{ fontSize: "1.35rem", fontWeight: 800 }}>
+                    {/* 메인: 하이퍼리퀴드 현재가 (크게) */}
+                    <div style={{ marginTop: 6 }}>
+                      <span style={{ fontSize: "1.95rem", fontWeight: 800 }}>
                         {formatPrice(q.hyper_price, q.currency)}
                       </span>
-                      <span style={{ color: signColor(q.change_24h_pct), fontWeight: 700, fontSize: "0.85rem" }}>
-                        {formatPct(q.change_24h_pct)}
+                    </div>
+                    {/* 서브: 24시간 롤링 변동률 + 정규장(실제) 가격 */}
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: 8,
+                        flexWrap: "wrap",
+                        marginTop: 4,
+                        fontSize: "0.85rem",
+                        color: "#94a3b8",
+                      }}
+                    >
+                      <span>
+                        24시간{" "}
+                        <strong style={{ color: signColor(q.change_24h_pct) }}>{formatPct(q.change_24h_pct)}</strong>
                       </span>
-                      <span style={{ color: "#94a3b8", fontSize: "0.92rem", marginLeft: "auto" }}>
-                        실제 {formatPrice(q.actual_price, q.currency)} (
-                        <strong style={{ color: signColor(q.diff_pct) }}>{formatPct(q.diff_pct)}</strong>)
-                      </span>
+                      <span style={{ opacity: 0.5 }}>·</span>
+                      <span>정규장 {formatPrice(q.actual_price, q.currency)}</span>
                     </div>
                     <CandlestickChart candles={q.candles || []} currency={q.currency} />
                   </div>
