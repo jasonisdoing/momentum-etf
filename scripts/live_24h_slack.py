@@ -76,8 +76,9 @@ def main():
             alerts.append((q["name"], m1))
 
         body.append(
-            f"{flag} *{q['name']}*({q['symbol']}) {_fmt_pct(hl_diff)}({_fmt_price(hl_price, currency)}) {_trend_emoji(hl_diff)}"
+            f"{flag} *{q['name']}*({q['symbol']}) *{_fmt_pct(hl_diff)}* {_trend_emoji(hl_diff)}"
             f"{' 🚨' if triggered else ''}\n"
+            f"   • {_fmt_price(hl_price, currency)}\n"
             f"   • 1시간: {_fmt_pct(m1)} {_trend_emoji(m1)}, "
             f"3시간: {_fmt_pct(m3)} {_trend_emoji(m3)}, "
             f"24시간: {_fmt_pct(hl_change)} {_trend_emoji(hl_change)}"
