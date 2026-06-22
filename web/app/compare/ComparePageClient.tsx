@@ -560,18 +560,26 @@ function buildHoldingExposureRows(products: SelectedProduct[]): CompareHoldingEx
   });
 }
 
-async function loadTickerDetail(item: TickerItem): Promise<TickerDetailResponse> {
-  const params = new URLSearchParams({
-    ticker: item.ticker,
-    ticker_type: item.ticker_type,
-    country_code: item.country_code,
+// 여러 ETF를 한 번에 — 서버에서 구성종목 합집합을 1회 조회해 공유한다.
+// 같은 종목(예: SK스퀘어)이 여러 ETF에 나와도 동일 시세/변동률로 나오고, 중복 조회가 사라진다.
+async function loadTickerDetailsBatch(items: TickerItem[]): Promise<TickerDetailResponse[]> {
+  const response = await fetch(`/api/ticker-detail-compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify({
+      items: items.map((item) => ({
+        ticker: item.ticker,
+        ticker_type: item.ticker_type,
+        country_code: item.country_code,
+      })),
+    }),
   });
-  const response = await fetch(`/api/ticker-detail?${params.toString()}`, { cache: "no-store" });
-  const payload = (await response.json()) as TickerDetailResponse;
+  const payload = (await response.json()) as { results?: TickerDetailResponse[]; error?: string };
   if (!response.ok || payload.error) {
     throw new Error(payload.error ?? "비교 데이터를 불러오지 못했습니다.");
   }
-  return payload;
+  return payload.results ?? [];
 }
 
 function ProductSearchField({
@@ -792,17 +800,9 @@ export function ComparePageClient() {
     setLoading(true);
     setError(null);
     try {
-      // 동시 2개씩 순차 호출 — 백엔드의 구성종목 가격/baseline 조회가 전역 lock 으로
-      // 직렬화되어 있어, 6개를 한꺼번에 쏘면 뒤쪽 요청이 30초 timeout 에 걸린다.
-      const details: TickerDetailResponse[] = new Array(items.length);
-      const CONCURRENCY = 2;
-      for (let start = 0; start < items.length; start += CONCURRENCY) {
-        const batch = items.slice(start, start + CONCURRENCY);
-        const batchResults = await Promise.all(batch.map((item) => loadTickerDetail(item)));
-        batchResults.forEach((detail, offset) => {
-          details[start + offset] = detail;
-        });
-      }
+      // 한 번의 일괄 호출 — 서버가 구성종목 합집합을 1회 조회해 공유하므로
+      // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
+      const details = await loadTickerDetailsBatch(items);
       setProducts(items.map((item, index) => ({ item, detail: details[index] })));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
