@@ -52,16 +52,6 @@ function recentMove(candles: Candle[] | undefined, hours: number): number | null
   return (cur / prev - 1) * 100;
 }
 
-// 정규장 대비 절대 금액차 (부호 포함). 예: +174,914원 / -3.20 / +2.5p
-function formatSignedPrice(value: number | null, currency: "KRW" | "USD" | "POINT"): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  const abs = Math.abs(value);
-  if (currency === "KRW") return `${sign}${new Intl.NumberFormat("ko-KR").format(Math.round(abs))}원`;
-  if (currency === "POINT") return `${sign}${abs.toFixed(2)}p`;
-  return `${sign}$${abs.toFixed(2)}`;
-}
-
 function getHyperliquidLink(symbol: string): string {
   const map: Record<string, string> = {
     SMSN: "SAMSUNG",
@@ -248,19 +238,23 @@ export function HyperliquidClient() {
                       >
                         {q.symbol}
                       </a>
-                      {/* 우상단: 정규장 종가 대비 변동률 + 장중/시간외 + 금액차 (1줄) */}
-                      <div style={{ marginLeft: "auto", display: "flex", alignItems: "baseline", gap: 4, color: signColor(q.diff_pct) }}>
-                        <span style={{ fontSize: "1.4rem", fontWeight: 800 }}>{formatPct(q.diff_pct)}</span>
-                        <span style={{ fontSize: "0.8rem", fontWeight: 600, color: "#94a3b8" }}>
-                          {q.session_open ? "장중" : "시간외"}
+                      {/* 우상단: 정규장 종가 대비 변동률 + 장중/시간외 배지 */}
+                      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7 }}>
+                        <span style={{ fontSize: "1.4rem", fontWeight: 800, color: signColor(q.diff_pct) }}>
+                          {formatPct(q.diff_pct)}
                         </span>
-                        <span style={{ fontSize: "0.92rem", fontWeight: 700 }}>
-                          (
-                          {formatSignedPrice(
-                            q.hyper_price !== null && q.actual_price !== null ? q.hyper_price - q.actual_price : null,
-                            q.currency,
-                          )}
-                          )
+                        <span
+                          style={{
+                            fontSize: "0.74rem",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: 999,
+                            whiteSpace: "nowrap",
+                            background: q.session_open ? "rgba(22, 163, 74, 0.12)" : "rgba(100, 116, 139, 0.16)",
+                            color: q.session_open ? "#16a34a" : "#475569",
+                          }}
+                        >
+                          {q.session_open ? "장중" : "시간외"}
                         </span>
                       </div>
                     </div>
