@@ -181,14 +181,12 @@ def load_live_24h_quotes() -> dict[str, Any]:
     if need_sync:
         _update_candle_caches_sync(usd_krw)
 
-    # 실제 시장가 — 개별주는 국가별 스냅샷 일괄 조회
+    # 실제 시장가 — 한국주는 네이버 스냅샷(시간외 오염 없음), 미국주/지수는 yfinance 정규장 일봉.
     kor_tickers = [
         s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "kor"
     ]
-    us_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "us"]
     kor_snap = _safe_snapshot("kor", kor_tickers)
-    us_snap = _safe_snapshot("us", us_tickers)
-    # 종목별 '장중/시간외' 표기에 쓸 각 시장의 정규장 개장 여부.
+    # 종목별 '장중/시간외' 표기 + 정규장 종가 기준에 쓸 각 시장의 정규장 개장 여부.
     us_market_open = _is_regular_session_open("us")
     kor_market_open = _is_regular_session_open("kor")
 
@@ -205,21 +203,22 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "POINT"
             country = "us"
             hyper_price = mark
-            actual_price = _fetch_index_value(spec, us_market_open)
+            actual_price, actual_change_pct = _fetch_regular_close(str(spec.get("yahoo_symbol") or ""), us_market_open)
         elif spec["country"] == "kor":
             currency = "KRW"
             country = "kor"
             hyper_price = (mark * usd_krw) if (mark is not None and usd_krw) else None
             # naver nowVal 은 시간외 오염이 없어 폐장 시 = 정규장 종가, 장중 = 실시간 정규장가.
-            actual_price = _to_float((kor_snap.get(spec["actual_ticker"]) or {}).get("nowVal"))
+            kor_data = kor_snap.get(spec["actual_ticker"]) or {}
+            actual_price = _to_float(kor_data.get("nowVal"))
+            actual_change_pct = _to_float(kor_data.get("changeRate"))
         else:
             currency = "USD"
             country = "us"
             hyper_price = mark
-            # 토스 'close'(nowVal)는 프리/애프터가를 포함하므로, 정규장 기준은 항상
-            # 'base'(prevClose=기준가=직전 정규장 종가)를 쓴다. → '정규장 종가 대비'가
-            # 장중엔 당일 상승분, 폐장 후엔 시간외 변동을 일관되게 보여준다.
-            actual_price = _to_float((us_snap.get(spec["actual_ticker"]) or {}).get("prevClose"))
+            # 토스 base 는 마감 후에도 '어제 종가'라 시간외 변동만 떼어내지 못한다.
+            # yfinance 정규장 일봉(세션 인지)으로 '직전 완료 정규장 종가'를 일관되게 쓴다.
+            actual_price, actual_change_pct = _fetch_regular_close(str(spec.get("actual_ticker") or ""), us_market_open)
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
@@ -243,6 +242,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "hyper_price": hyper_price,
                 "change_24h_pct": change_24h,
                 "actual_price": actual_price,
+                "actual_change_pct": actual_change_pct,
                 "diff_pct": diff_pct,
                 "session_open": session_open,
                 "candles": hl_candles,
@@ -252,38 +252,54 @@ def load_live_24h_quotes() -> dict[str, Any]:
     return {"quotes": quotes, "usd_krw": usd_krw}
 
 
-def _fetch_index_value(spec: dict[str, Any], session_open: bool) -> float | None:
-    """지수의 '직전 완료 정규장 종가'. (24시간 토큰의 '정규장 종가 대비' 기준값)
+_REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | None], float]] = {}
+_REGULAR_CLOSE_TTL = 60.0  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
 
-    intraday 1분봉은 휴장 중 며칠 stale 할 수 있어 정규장 일봉 종가를 쓴다.
-    장중에는 마지막 일봉이 '형성 중인 오늘' 값이므로, 개별주(prevClose)와 일관되게
-    당일 봉을 제외하고 직전(완료된) 종가를 기준으로 삼아 당일 상승분이 보이게 한다.
+
+def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None]:
+    """US 종목/지수의 '직전 완료 정규장 종가'와 그 정규장 변동률(종가 vs 직전 종가).
+
+    토스 base(기준가)는 마감 후에도 '어제 종가'에 머물러 시간외 변동만 떼어내지 못한다.
+    그래서 모든 세션에서 일관되게 yfinance 정규장 일봉 종가를 쓴다:
+        - 장중: 마지막 일봉은 '형성 중인 오늘'이므로 제외하고 직전(어제) 종가 → 당일 상승분
+        - 마감 후: 마지막 일봉이 '완료된 오늘' 종가 → 시간외 변동만
+        - 프리장: 오늘 일봉 없음 → 마지막(어제) 종가
+    반환: (정규장 종가, 정규장 변동률%) — 둘 중 못 구하면 해당 값 None.
     """
-    symbol = spec.get("yahoo_symbol")
-    if not symbol:
-        return None
+    if not yahoo_symbol:
+        return None, None
+    key = (yahoo_symbol, session_open)
+    now = time.time()
+    cached = _REGULAR_CLOSE_CACHE.get(key)
+    if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
+        return cached[0]
+    result: tuple[float | None, float | None] = (None, None)
     try:
         import yfinance as yf
 
-        hist = yf.Ticker(symbol).history(period="7d", interval="1d")
-        if hist is None or "Close" not in hist:
-            return None
-        closes = hist["Close"].dropna()
-        if closes.empty:
-            return None
-        # 장중이고 마지막 봉이 오늘(ET)이면 형성 중 → 직전 완료 종가 사용.
-        if session_open and len(closes) >= 2:
-            try:
-                last_date = closes.index[-1].date()
-                today_et = datetime.now(ZoneInfo("America/New_York")).date()
-                if last_date == today_et:
-                    return float(closes.iloc[-2])
-            except Exception:
-                pass
-        return float(closes.iloc[-1])
+        hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
+        closes = hist["Close"].dropna() if hist is not None and "Close" in hist else None
+        if closes is not None and not closes.empty:
+            anchor = -1
+            # 장중이고 마지막 봉이 오늘(ET)이면 형성 중 → 직전 완료 종가를 앵커로.
+            if session_open and len(closes) >= 2:
+                try:
+                    if closes.index[-1].date() == datetime.now(ZoneInfo("America/New_York")).date():
+                        anchor = -2
+                except Exception:
+                    pass
+            close = float(closes.iloc[anchor])
+            change = None
+            if len(closes) >= abs(anchor) + 1:
+                prev = float(closes.iloc[anchor - 1])
+                if prev:
+                    change = (close / prev - 1.0) * 100.0
+            result = (close, change)
     except Exception as exc:
-        logger.warning("Hyperliquid 지수 정규장 종가 조회 실패 (%s): %s", spec.get("symbol"), exc)
-        return None
+        logger.warning("Hyperliquid 정규장 종가 조회 실패 (%s): %s", yahoo_symbol, exc)
+        result = cached[0] if cached else (None, None)
+    _REGULAR_CLOSE_CACHE[key] = (result, now)
+    return result
 
 
 def _safe_snapshot(country: str, tickers: list[str]) -> dict[str, dict[str, Any]]:

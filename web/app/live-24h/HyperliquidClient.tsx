@@ -17,6 +17,7 @@ type Quote = {
   hyper_price: number | null;
   change_24h_pct: number | null;
   actual_price: number | null;
+  actual_change_pct: number | null;
   diff_pct: number | null;
   session_open: boolean;
   candles?: Candle[];
@@ -283,7 +284,12 @@ export function HyperliquidClient() {
                         <strong style={{ color: signColor(q.change_24h_pct) }}>{formatPct(q.change_24h_pct)}</strong>
                       </span>
                       <span style={{ opacity: 0.5 }}>·</span>
-                      <span>정규장 종가 {formatPrice(q.actual_price, q.currency)}</span>
+                      <span>
+                        정규장 종가 {formatPrice(q.actual_price, q.currency)}{" "}
+                        <strong style={{ color: signColor(q.actual_change_pct) }}>
+                          {formatPct(q.actual_change_pct)}
+                        </strong>
+                      </span>
                     </div>
                     <CandlestickChart candles={q.candles || []} currency={q.currency} />
                   </div>
