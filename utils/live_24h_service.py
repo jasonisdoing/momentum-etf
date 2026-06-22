@@ -91,15 +91,15 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
                 for c in data:
                     o = _to_float(c.get("o"))
                     h = _to_float(c.get("h"))
-                    l = _to_float(c.get("l"))
+                    low = _to_float(c.get("l"))
                     close_val = _to_float(c.get("c"))
-                    if None not in (o, h, l, close_val):
+                    if None not in (o, h, low, close_val):
                         if spec.get("type") == "stock" and spec.get("country") == "kor":
                             o *= usd_krw
                             h *= usd_krw
-                            l *= usd_krw
+                            low *= usd_krw
                             close_val *= usd_krw
-                        raw_candles.append({"o": o, "h": h, "l": l, "c": close_val})
+                        raw_candles.append({"o": o, "h": h, "l": low, "c": close_val})
                 hl_candles = raw_candles[-48:]
         except Exception as exc:
             logger.warning("Hyperliquid 캔들 조회 실패 (%s): %s", hl_symbol, exc)
@@ -192,7 +192,9 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "USD"
             country = "us"
             hyper_price = mark
-            actual_price = _to_float((us_snap.get(spec["actual_ticker"]) or {}).get("nowVal"))
+            # 토스 'close'(nowVal)는 프리/애프터 시장가를 포함해 '정규장 종가'가 아니다.
+            # 'base'(prevClose=기준가)가 직전 정규장 종가이므로 그것을 정규장 대비 기준으로 쓴다.
+            actual_price = _to_float((us_snap.get(spec["actual_ticker"]) or {}).get("prevClose"))
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
@@ -222,14 +224,24 @@ def load_live_24h_quotes() -> dict[str, Any]:
 
 
 def _fetch_index_value(spec: dict[str, Any]) -> float | None:
-    """지수의 실제 현재값. 야후(intraday 보강) 로 조회."""
-    try:
-        from utils.market_trend_service import _fetch_yf_intraday_last_close
+    """지수의 직전 정규장 종가. (24시간 토큰의 '정규장 대비' 기준값)
 
-        intraday = _fetch_yf_intraday_last_close(spec["yahoo_symbol"])
-        return float(intraday[1]) if intraday else None
+    지수는 프리/애프터에 거래되지 않고, intraday 1분봉은 휴장 중 며칠 stale 한 값을
+    줄 수 있다. 그래서 intraday 가 아니라 정규장 일봉 종가(가장 최근 완료된 종가)를 쓴다.
+    """
+    symbol = spec.get("yahoo_symbol")
+    if not symbol:
+        return None
+    try:
+        import yfinance as yf
+
+        hist = yf.Ticker(symbol).history(period="5d", interval="1d")
+        if hist is None or "Close" not in hist:
+            return None
+        closes = hist["Close"].dropna()
+        return float(closes.iloc[-1]) if not closes.empty else None
     except Exception as exc:
-        logger.warning("Hyperliquid 지수 실제값 조회 실패 (%s): %s", spec.get("symbol"), exc)
+        logger.warning("Hyperliquid 지수 정규장 종가 조회 실패 (%s): %s", spec.get("symbol"), exc)
         return None
 
 
