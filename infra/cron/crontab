@@ -27,7 +27,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 
 0 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 45 9-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py metadata_updater python scripts/stock_meta_cache_updater.py >> logs/cron/metadata_updater.log 2>&1
-15 9-16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
+10,40 9-15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
 20 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 35 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
