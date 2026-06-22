@@ -329,13 +329,16 @@ def main() -> int:
             log.warning("등록할 배치가 없습니다. crontab 파일을 확인하세요: %s", CRONTAB_FILE)
             return 1
         sched = BackgroundScheduler(timezone=KST)
-        for cron_expr, job_name, script_path in jobs:
+        # 같은 배치(job_name)가 서로 다른 시각으로 여러 크론 줄을 가질 수 있으므로
+        # (예: asset_summary 09:20·15:35) APScheduler id 는 줄마다 유니크하게 둔다.
+        # id 를 job_name 으로 두면 뒷줄이 앞줄을 덮어써 한 시각만 등록된다.
+        for index, (cron_expr, job_name, script_path) in enumerate(jobs):
             trigger = _build_trigger(cron_expr)
             sched.add_job(
                 _enqueue_from_schedule,
                 trigger=trigger,
                 args=(job_name, script_path),
-                id=job_name,
+                id=f"{job_name}#{index}",
                 name=job_name,
                 misfire_grace_time=None,  # 노트북 꺼져있던 시간은 따라잡지 않음
                 coalesce=True,
