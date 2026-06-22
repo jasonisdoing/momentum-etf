@@ -4,14 +4,34 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
-from config import HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS
+from config import HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 
 logger = logging.getLogger(__name__)
+
+
+def _is_us_regular_session_open() -> bool:
+    """미국 정규장(09:30~16:00 ET)이 진행 중인지 — 정확한 ET 시간창 + 평일.
+
+    휴장일(평일 공휴일 포함)엔 토스 nowVal 이 직전 종가와 같으므로, 평일만 보면 충분하다.
+    (get_latest_trading_day 기반 판정은 진행 중 세션을 '미완료 거래일'로 보고 놓치는 문제가 있다.)
+    """
+    schedule = MARKET_SCHEDULES.get("us") or {}
+    tz_name = schedule.get("timezone")
+    open_t = schedule.get("open")
+    close_t = schedule.get("close")
+    if not tz_name or open_t is None or close_t is None:
+        return False
+    now_et = datetime.now(ZoneInfo(tz_name))
+    if now_et.weekday() >= 5:
+        return False
+    return open_t <= now_et.time() <= close_t
 
 
 def _fetch_dex_ctxs(*, max_attempts: int = 3) -> dict[str, dict[str, Any]]:
@@ -168,6 +188,9 @@ def load_live_24h_quotes() -> dict[str, Any]:
     us_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "us"]
     kor_snap = _safe_snapshot("kor", kor_tickers)
     us_snap = _safe_snapshot("us", us_tickers)
+    # 미국 정규장 진행 중이면 toss nowVal(실시간 정규장가), 휴장이면 prevClose(직전 종가)를
+    # '정규장' 기준으로 쓴다. (휴장 중 nowVal 은 프리/애프터가라 종가가 아님)
+    us_market_open = _is_us_regular_session_open()
 
     quotes: list[dict[str, Any]] = []
     for spec in HYPERLIQUID_SYMBOLS:
@@ -192,9 +215,10 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "USD"
             country = "us"
             hyper_price = mark
-            # 토스 'close'(nowVal)는 프리/애프터 시장가를 포함해 '정규장 종가'가 아니다.
-            # 'base'(prevClose=기준가)가 직전 정규장 종가이므로 그것을 정규장 대비 기준으로 쓴다.
-            actual_price = _to_float((us_snap.get(spec["actual_ticker"]) or {}).get("prevClose"))
+            # 정규장 진행 중: nowVal(실시간 정규장가). 휴장 중: 토스 'close'(nowVal)는 프리/애프터가라
+            # 정규장 종가가 아니므로 'base'(prevClose=기준가=직전 정규장 종가)를 쓴다.
+            us_data = us_snap.get(spec["actual_ticker"]) or {}
+            actual_price = _to_float(us_data.get("nowVal") if us_market_open else us_data.get("prevClose"))
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
