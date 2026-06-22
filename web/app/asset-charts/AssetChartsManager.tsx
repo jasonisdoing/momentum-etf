@@ -280,11 +280,11 @@ export function AssetChartsManager({
               {loading ? (
                 <AppLoadingState label="자산 차트를 불러오는 중입니다." />
               ) : (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={400}>
+                <ResponsiveContainer width="100%" height={420} minWidth={0}>
                   <BarChart data={visibleRows} margin={{ top: 12, right: 18, bottom: 8, left: 8 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="week_date" tickFormatter={formatMonthAxisLabel} minTickGap={18} tick={{ fontSize: 12 }} />
-                    <YAxis hide={!showAmounts} tickFormatter={formatCompactMoney} width={showAmounts ? 88 : 0} tick={{ fontSize: 12 }} />
+                    <YAxis hide={!showAmounts} tickFormatter={formatCompactMoney} width={showAmounts ? 56 : 0} tick={{ fontSize: 12 }} />
                     <Tooltip content={<ChartTooltip />} />
                     <Legend />
                     {BUCKET_KEYS.map((key, index) => (
@@ -314,7 +314,7 @@ export function AssetChartsManager({
               {loading ? (
                 <AppLoadingState label="자산 차트를 불러오는 중입니다." />
               ) : (
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={400}>
+                <ResponsiveContainer width="100%" height={420} minWidth={0}>
                   <AreaChart data={visibleRows} margin={{ top: 12, right: 18, bottom: 8, left: 8 }}>
                     <defs>
                       <linearGradient id="assetChartTotal" x1="0" y1="0" x2="0" y2="1">
@@ -332,7 +332,7 @@ export function AssetChartsManager({
                     </defs>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} />
                     <XAxis dataKey="week_date" tickFormatter={formatMonthAxisLabel} minTickGap={18} tick={{ fontSize: 12 }} />
-                    <YAxis hide={!showAmounts} tickFormatter={formatCompactMoney} width={showAmounts ? 88 : 0} tick={{ fontSize: 12 }} />
+                    <YAxis hide={!showAmounts} tickFormatter={formatCompactMoney} width={showAmounts ? 56 : 0} tick={{ fontSize: 12 }} />
                     <Tooltip content={<ChartTooltip />} />
                     <Legend />
                     <Area
