@@ -2174,6 +2174,31 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return result
 
 
+def _us_session_state() -> str:
+    """미국 정규장 세션 상태: "pre" | "regular" | "post" (ET 기준, 주말은 "post").
+
+    - regular(09:30~16:00): 현재가=close, 변동=전일 종가 대비
+    - pre(04:00~09:30): close=프리장가, 변동=전일 종가 대비
+    - post(16:00~다음날 04:00 + 주말): 현재가=afterMarketClose, 변동=정규장 종가 대비
+    판정 불가 시 "regular"(기존 동작) 로 폴백한다.
+    """
+    schedule = (MARKET_SCHEDULES or {}).get("us") or {}
+    tz_name = schedule.get("timezone")
+    open_t = schedule.get("open")
+    close_t = schedule.get("close")
+    if not tz_name or ZoneInfo is None or open_t is None or close_t is None:
+        return "regular"
+    now = datetime.now(ZoneInfo(tz_name))
+    if now.weekday() >= 5:
+        return "post"
+    t = now.time()
+    if time(4, 0) <= t < open_t:
+        return "pre"
+    if open_t <= t < close_t:
+        return "regular"
+    return "post"
+
+
 def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
 
@@ -2207,6 +2232,9 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
     all_codes = list(symbol_to_code.values())
     snapshot: dict[str, dict[str, float]] = {}
+
+    # 정규장 마감 후(애프터마켓/야간)면 현재가=애프터, 변동=정규장 종가 대비로 본다.
+    us_post_close = _us_session_state() == "post"
 
     chunk_size = 50
     for i in range(0, len(all_codes), chunk_size):
@@ -2244,24 +2272,26 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             except (TypeError, ValueError):
                 continue
 
-            entry: dict[str, float] = {"nowVal": close_val}
+            base_val = _safe_float(item.get("base"))
+            after_val = _safe_float(item.get("afterMarketClose"))
 
-            volume = item.get("volume")
+            # 정규장 마감 후 + 애프터가 있으면: 현재가=애프터, 기준=정규장 종가(close).
+            # 그 외(정규장/프리장): 현재가=close, 기준=전일 종가(base).
+            if us_post_close and after_val and after_val > 0 and close_val > 0:
+                now_val: float = after_val
+                prev_val = close_val
+            else:
+                now_val = close_val
+                prev_val = base_val
+
+            entry: dict[str, float] = {"nowVal": now_val}
+            if prev_val is not None and prev_val > 0:
+                entry["prevClose"] = prev_val
+                entry["changeRate"] = ((now_val - prev_val) / prev_val) * 100.0
+
+            volume = _safe_float(item.get("volume"))
             if volume is not None:
-                try:
-                    entry["volume"] = float(volume)
-                except (TypeError, ValueError):
-                    pass
-
-            base_price = item.get("base")
-            if base_price is not None:
-                try:
-                    base_val = float(base_price)
-                    entry["prevClose"] = base_val
-                    if base_val > 0:
-                        entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
-                except (TypeError, ValueError):
-                    pass
+                entry["volume"] = volume
 
             snapshot[sym] = entry
 
