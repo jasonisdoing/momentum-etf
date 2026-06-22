@@ -63,14 +63,9 @@ def main():
     body = []
     for q in quotes:
         flag = ":kr:" if q.get("country") == "kor" else ":us:"
-        currency = q.get("currency", "USD")
-        hl_price = q.get("hyper_price")
-        hl_change = q.get("change_24h_pct")
-        hl_diff = q.get("diff_pct")  # 정규장 대비 (메인)
+        hl_diff = q.get("diff_pct")  # 정규장 종가 대비 (메인)
 
-        candles = q.get("candles")
-        m1 = _recent_move(candles, 1)
-        m3 = _recent_move(candles, 3)
+        m1 = _recent_move(q.get("candles"), 1)
         triggered = m1 is not None and abs(m1) >= LIVE_24H_ALERT_PCT
         if triggered:
             alerts.append((q["name"], m1))
@@ -78,11 +73,7 @@ def main():
         session = "장중" if q.get("session_open") else "시간외"
         body.append(
             f"{flag} *{q['name']}*({q['symbol']}) *{_fmt_pct(hl_diff)}* ({session}) {_trend_emoji(hl_diff)}"
-            f"{' 🚨' if triggered else ''}\n"
-            f"   • {_fmt_price(hl_price, currency)}\n"
-            f"   • 1시간: {_fmt_pct(m1)} {_trend_emoji(m1)}, "
-            f"3시간: {_fmt_pct(m3)} {_trend_emoji(m3)}, "
-            f"24시간: {_fmt_pct(hl_change)} {_trend_emoji(hl_change)}"
+            f"{' 🚨' if triggered else ''}"
         )
 
     lines = []
@@ -90,7 +81,8 @@ def main():
     if alerts:
         tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
         lines.append(f"<!channel> 🚨 *최근 1시간 급변* — {tags}")
-    lines.append("*🌐 하이퍼리퀴드 24H 시세*")
+    # 헤더 클릭 시 live-24h 페이지로 이동
+    lines.append("*<https://etf.dojason.com/live-24h|🌐 하이퍼리퀴드 24H 시세>*")
     lines.extend(body)
 
     send_slack_message_v2("\n".join(lines))
