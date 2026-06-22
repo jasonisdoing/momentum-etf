@@ -16,22 +16,22 @@ from services.price_service import get_exchange_rates, get_realtime_snapshot
 logger = logging.getLogger(__name__)
 
 
-def _is_us_regular_session_open() -> bool:
-    """미국 정규장(09:30~16:00 ET)이 진행 중인지 — 정확한 ET 시간창 + 평일.
+def _is_regular_session_open(country: str) -> bool:
+    """해당 국가 정규장이 진행 중인지 — 정확한 현지 시간창 + 평일.
 
-    휴장일(평일 공휴일 포함)엔 토스 nowVal 이 직전 종가와 같으므로, 평일만 보면 충분하다.
-    (get_latest_trading_day 기반 판정은 진행 중 세션을 '미완료 거래일'로 보고 놓치는 문제가 있다.)
+    (get_latest_trading_day 기반 판정은 진행 중 세션을 '미완료 거래일'로 보고 놓치므로 쓰지 않는다.
+    평일 공휴일엔 시세 소스의 현재가가 직전 종가와 같아 평일만 보면 충분하다.)
     """
-    schedule = MARKET_SCHEDULES.get("us") or {}
+    schedule = MARKET_SCHEDULES.get(country) or {}
     tz_name = schedule.get("timezone")
     open_t = schedule.get("open")
     close_t = schedule.get("close")
     if not tz_name or open_t is None or close_t is None:
         return False
-    now_et = datetime.now(ZoneInfo(tz_name))
-    if now_et.weekday() >= 5:
+    now_local = datetime.now(ZoneInfo(tz_name))
+    if now_local.weekday() >= 5:
         return False
-    return open_t <= now_et.time() <= close_t
+    return open_t <= now_local.time() <= close_t
 
 
 def _fetch_dex_ctxs(*, max_attempts: int = 3) -> dict[str, dict[str, Any]]:
@@ -188,9 +188,9 @@ def load_live_24h_quotes() -> dict[str, Any]:
     us_tickers = [s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "us"]
     kor_snap = _safe_snapshot("kor", kor_tickers)
     us_snap = _safe_snapshot("us", us_tickers)
-    # 미국 정규장 진행 중이면 toss nowVal(실시간 정규장가), 휴장이면 prevClose(직전 종가)를
-    # '정규장' 기준으로 쓴다. (휴장 중 nowVal 은 프리/애프터가라 종가가 아님)
-    us_market_open = _is_us_regular_session_open()
+    # 종목별 '장중/시간외' 표기에 쓸 각 시장의 정규장 개장 여부.
+    us_market_open = _is_regular_session_open("us")
+    kor_market_open = _is_regular_session_open("kor")
 
     quotes: list[dict[str, Any]] = []
     for spec in HYPERLIQUID_SYMBOLS:
@@ -205,26 +205,30 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "POINT"
             country = "us"
             hyper_price = mark
-            actual_price = _fetch_index_value(spec)
+            actual_price = _fetch_index_value(spec, us_market_open)
         elif spec["country"] == "kor":
             currency = "KRW"
             country = "kor"
             hyper_price = (mark * usd_krw) if (mark is not None and usd_krw) else None
+            # naver nowVal 은 시간외 오염이 없어 폐장 시 = 정규장 종가, 장중 = 실시간 정규장가.
             actual_price = _to_float((kor_snap.get(spec["actual_ticker"]) or {}).get("nowVal"))
         else:
             currency = "USD"
             country = "us"
             hyper_price = mark
-            # 정규장 진행 중: nowVal(실시간 정규장가). 휴장 중: 토스 'close'(nowVal)는 프리/애프터가라
-            # 정규장 종가가 아니므로 'base'(prevClose=기준가=직전 정규장 종가)를 쓴다.
-            us_data = us_snap.get(spec["actual_ticker"]) or {}
-            actual_price = _to_float(us_data.get("nowVal") if us_market_open else us_data.get("prevClose"))
+            # 토스 'close'(nowVal)는 프리/애프터가를 포함하므로, 정규장 기준은 항상
+            # 'base'(prevClose=기준가=직전 정규장 종가)를 쓴다. → '정규장 종가 대비'가
+            # 장중엔 당일 상승분, 폐장 후엔 시간외 변동을 일관되게 보여준다.
+            actual_price = _to_float((us_snap.get(spec["actual_ticker"]) or {}).get("prevClose"))
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
             if (hyper_price is not None and actual_price and actual_price > 0)
             else None
         )
+
+        # 종목 자기 시장의 정규장 개장 여부 (헤드라인 '장중/시간외' 표기용)
+        session_open = kor_market_open if country == "kor" else us_market_open
 
         # 1. Hyperliquid 캔들 데이터 매핑
         hl_candles = _HYPERLIQUID_CANDLE_CACHE.get(symbol) or []
@@ -240,6 +244,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "change_24h_pct": change_24h,
                 "actual_price": actual_price,
                 "diff_pct": diff_pct,
+                "session_open": session_open,
                 "candles": hl_candles,
             }
         )
@@ -247,11 +252,12 @@ def load_live_24h_quotes() -> dict[str, Any]:
     return {"quotes": quotes, "usd_krw": usd_krw}
 
 
-def _fetch_index_value(spec: dict[str, Any]) -> float | None:
-    """지수의 직전 정규장 종가. (24시간 토큰의 '정규장 대비' 기준값)
+def _fetch_index_value(spec: dict[str, Any], session_open: bool) -> float | None:
+    """지수의 '직전 완료 정규장 종가'. (24시간 토큰의 '정규장 종가 대비' 기준값)
 
-    지수는 프리/애프터에 거래되지 않고, intraday 1분봉은 휴장 중 며칠 stale 한 값을
-    줄 수 있다. 그래서 intraday 가 아니라 정규장 일봉 종가(가장 최근 완료된 종가)를 쓴다.
+    intraday 1분봉은 휴장 중 며칠 stale 할 수 있어 정규장 일봉 종가를 쓴다.
+    장중에는 마지막 일봉이 '형성 중인 오늘' 값이므로, 개별주(prevClose)와 일관되게
+    당일 봉을 제외하고 직전(완료된) 종가를 기준으로 삼아 당일 상승분이 보이게 한다.
     """
     symbol = spec.get("yahoo_symbol")
     if not symbol:
@@ -259,11 +265,22 @@ def _fetch_index_value(spec: dict[str, Any]) -> float | None:
     try:
         import yfinance as yf
 
-        hist = yf.Ticker(symbol).history(period="5d", interval="1d")
+        hist = yf.Ticker(symbol).history(period="7d", interval="1d")
         if hist is None or "Close" not in hist:
             return None
         closes = hist["Close"].dropna()
-        return float(closes.iloc[-1]) if not closes.empty else None
+        if closes.empty:
+            return None
+        # 장중이고 마지막 봉이 오늘(ET)이면 형성 중 → 직전 완료 종가 사용.
+        if session_open and len(closes) >= 2:
+            try:
+                last_date = closes.index[-1].date()
+                today_et = datetime.now(ZoneInfo("America/New_York")).date()
+                if last_date == today_et:
+                    return float(closes.iloc[-2])
+            except Exception:
+                pass
+        return float(closes.iloc[-1])
     except Exception as exc:
         logger.warning("Hyperliquid 지수 정규장 종가 조회 실패 (%s): %s", spec.get("symbol"), exc)
         return None
