@@ -66,3 +66,15 @@ export async function loadTickerDetailData(params: {
   }
   return fetchFastApiJson<TickerDetailData>(`/internal/ticker-detail?${search.toString()}`);
 }
+
+// 여러 ETF 상세를 한 번에 — 구성종목 합집합을 1회만 조회해 공유한다.
+// 같은 구성종목이 여러 ETF에 나와도 동일 시세/변동률로 보이고 중복 조회가 사라진다.
+export async function loadTickerDetailCompare(
+  items: { ticker: string; ticker_type: string; country_code: string }[],
+): Promise<{ results: TickerDetailData[] }> {
+  return fetchFastApiJson<{ results: TickerDetailData[] }>(`/internal/ticker-detail/compare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+}
