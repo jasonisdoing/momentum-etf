@@ -75,8 +75,9 @@ def main():
         if triggered:
             alerts.append((q["name"], m1))
 
+        session = "장중" if q.get("session_open") else "시간외"
         body.append(
-            f"{flag} *{q['name']}*({q['symbol']}) *{_fmt_pct(hl_diff)}* {_trend_emoji(hl_diff)}"
+            f"{flag} *{q['name']}*({q['symbol']}) *{_fmt_pct(hl_diff)}* ({session}) {_trend_emoji(hl_diff)}"
             f"{' 🚨' if triggered else ''}\n"
             f"   • {_fmt_price(hl_price, currency)}\n"
             f"   • 1시간: {_fmt_pct(m1)} {_trend_emoji(m1)}, "
