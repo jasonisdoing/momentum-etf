@@ -51,9 +51,9 @@ SCHEDULE_ROWS = [
         "key": "asset_summary",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "cadence": "평일 09:40, 16:40 KST",
+        "cadence": "평일 09:20, 15:35 KST",
         "command": "python scripts/slack_asset_summary.py",
-        "schedule": {"minutes": [40], "hours": [9, 16], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"slots": [{"hour": 9, "minute": 20}, {"hour": 15, "minute": 35}], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "cache_refresh",
@@ -218,18 +218,37 @@ def _parse_kst_datetime(value: str) -> datetime | None:
         return None
 
 
-def _compute_next_run(schedule: dict[str, list[int]] | None) -> datetime | None:
-    """주어진 스케줄(minutes/hours/weekdays)에 맞는 가장 가까운 다음 실행 시각(KST)을 반환한다."""
+def _compute_next_run(schedule: dict | None) -> datetime | None:
+    """주어진 스케줄에 맞는 가장 가까운 다음 실행 시각(KST)을 반환한다.
+
+    minutes×hours 교차곱으로 표현 못 하는 시각(예: 09:20·15:35)은 ``slots``
+    (``[{"hour":9,"minute":20}, ...]``)로 명시한다. slots 가 있으면 그것을 우선한다.
+    """
     if not schedule:
         return None
-    minutes = sorted(set(int(m) for m in schedule.get("minutes", [])))
-    hours = sorted(set(int(h) for h in schedule.get("hours", [])))
     weekdays = sorted(set(int(w) for w in schedule.get("weekdays", [])))
-    if not minutes or not hours or not weekdays:
+    if not weekdays:
         return None
 
     tz = ZoneInfo("Asia/Seoul")
     now = datetime.now(tz)
+
+    slots = schedule.get("slots")
+    if slots:
+        slot_set = {(int(s["hour"]), int(s["minute"])) for s in slots}
+        candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
+        end = candidate + timedelta(days=8)
+        while candidate < end:
+            if candidate.weekday() in weekdays and (candidate.hour, candidate.minute) in slot_set:
+                return candidate
+            candidate += timedelta(minutes=1)
+        return None
+
+    minutes = sorted(set(int(m) for m in schedule.get("minutes", [])))
+    hours = sorted(set(int(h) for h in schedule.get("hours", [])))
+    if not minutes or not hours:
+        return None
+
     # 다음 분 단위부터 검사 (현재 분은 이미 지났다고 보수적으로 가정)
     candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
     # 최대 8일까지 탐색 (어떤 weekday/hour/minute 조합이라도 이 범위 내에 반드시 매치)
