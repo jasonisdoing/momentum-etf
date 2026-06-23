@@ -592,7 +592,7 @@ def _forecast_thresholds(
         )
         return regime
 
-    pct_hi, pct_lo = 20.0, -90.0
+    pct_hi, pct_lo = 90.0, -90.0  # 내일 단일일 등락률 탐색 범위(상승/하락 경계 대칭)
 
     def boundary(min_rank: int) -> float | None:
         r_hi, r_lo = regime_for(pct_hi), regime_for(pct_lo)

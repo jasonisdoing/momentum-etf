@@ -478,7 +478,9 @@ export function MarketTrendChart({
       }
       out.push({ next_regime: rg, target_price: price, change_pct: pct });
     });
-    out.sort((a, c) => Math.abs(a.change_pct ?? 0) - Math.abs(c.change_pct ?? 0));
+    // 상승 → 중립 → 하락 고정 순서로 배치.
+    const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, neutral: 1, accel_down: 2 };
+    out.sort((a, c) => regimeOrder[a.next_regime] - regimeOrder[c.next_regime]);
     return out.filter((t) => t.target_price !== null && t.change_pct !== null);
   }, [data]);
 
