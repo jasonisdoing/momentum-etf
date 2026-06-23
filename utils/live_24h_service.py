@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 import requests
 
 from config import HYPERLIQUID_DEX, HYPERLIQUID_INFO_URL, HYPERLIQUID_SYMBOLS, MARKET_SCHEDULES
-from services.price_service import get_exchange_rates, get_realtime_snapshot
+from services.price_service import get_exchange_rates
+from utils.market_trend_service import _fetch_naver_kor_index_close
 
 logger = logging.getLogger(__name__)
 
@@ -181,12 +182,8 @@ def load_live_24h_quotes() -> dict[str, Any]:
     if need_sync:
         _update_candle_caches_sync(usd_krw)
 
-    # 실제 시장가 — 한국주는 네이버 스냅샷(시간외 오염 없음), 미국주/지수는 yfinance 정규장 일봉.
-    kor_tickers = [
-        s["actual_ticker"] for s in HYPERLIQUID_SYMBOLS if s.get("type") == "stock" and s["country"] == "kor"
-    ]
-    kor_snap = _safe_snapshot("kor", kor_tickers)
     # 종목별 '장중/시간외' 표기 + 정규장 종가 기준에 쓸 각 시장의 정규장 개장 여부.
+    # (정규장 종가/변동률은 한국주=네이버 일봉, 미국주/지수=yfinance 일봉으로 세션 인지 산출)
     us_market_open = _is_regular_session_open("us")
     kor_market_open = _is_regular_session_open("kor")
 
@@ -208,10 +205,9 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "KRW"
             country = "kor"
             hyper_price = (mark * usd_krw) if (mark is not None and usd_krw) else None
-            # naver nowVal 은 시간외 오염이 없어 폐장 시 = 정규장 종가, 장중 = 실시간 정규장가.
-            kor_data = kor_snap.get(spec["actual_ticker"]) or {}
-            actual_price = _to_float(kor_data.get("nowVal"))
-            actual_change_pct = _to_float(kor_data.get("changeRate"))
+            # US 와 동일: 네이버 정규장 일봉(세션 인지, 원화). 장중=전일 종가 기준(당일 변화),
+            # 마감 후=당일 종가 기준. naver nowVal(실시간가) 기준의 '프리미엄만' 보이던 문제 해결.
+            actual_price, actual_change_pct = _fetch_kr_regular_close(spec["actual_ticker"], kor_market_open)
         else:
             currency = "USD"
             country = "us"
@@ -256,19 +252,38 @@ _REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | N
 _REGULAR_CLOSE_TTL = 60.0  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
 
 
-def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None]:
-    """US 종목/지수의 '직전 완료 정규장 종가'와 그 정규장 변동률(종가 vs 직전 종가).
+def _regular_close_from_series(closes, session_open: bool, tz_name: str) -> tuple[float | None, float | None]:
+    """일봉 종가 시리즈에서 '직전 완료 정규장 종가 + 그 변동률'을 세션 인지로 뽑는다.
 
-    토스 base(기준가)는 마감 후에도 '어제 종가'에 머물러 시간외 변동만 떼어내지 못한다.
-    그래서 모든 세션에서 일관되게 yfinance 정규장 일봉 종가를 쓴다:
-        - 장중: 마지막 일봉은 '형성 중인 오늘'이므로 제외하고 직전(어제) 종가 → 당일 상승분
-        - 마감 후: 마지막 일봉이 '완료된 오늘' 종가 → 시간외 변동만
-        - 프리장: 오늘 일봉 없음 → 마지막(어제) 종가
-    반환: (정규장 종가, 정규장 변동률%) — 둘 중 못 구하면 해당 값 None.
+    장중이고 마지막 봉이 '오늘'(현지 기준)이면 형성 중이므로 제외하고 직전(어제) 종가를 앵커로 한다.
+    → 장중엔 전일 종가 기준(당일 변화), 마감 후엔 당일 종가 기준(시간외 변화).
+    """
+    if closes is None or closes.empty:
+        return None, None
+    anchor = -1
+    if session_open and len(closes) >= 2:
+        try:
+            if closes.index[-1].date() == datetime.now(ZoneInfo(tz_name)).date():
+                anchor = -2
+        except Exception:
+            pass
+    close = float(closes.iloc[anchor])
+    change = None
+    if len(closes) >= abs(anchor) + 1:
+        prev = float(closes.iloc[anchor - 1])
+        if prev:
+            change = (close / prev - 1.0) * 100.0
+    return close, change
+
+
+def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None]:
+    """US 종목/지수의 '직전 완료 정규장 종가'와 그 정규장 변동률 (yfinance 정규장 일봉, 세션 인지).
+
+    토스 base/naver nowVal 은 실시간/시간외가라 '직전 완료 종가'를 안정적으로 못 주므로 일봉을 쓴다.
     """
     if not yahoo_symbol:
         return None, None
-    key = (yahoo_symbol, session_open)
+    key = (f"us:{yahoo_symbol}", session_open)
     now = time.time()
     cached = _REGULAR_CLOSE_CACHE.get(key)
     if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
@@ -279,22 +294,7 @@ def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float |
 
         hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
         closes = hist["Close"].dropna() if hist is not None and "Close" in hist else None
-        if closes is not None and not closes.empty:
-            anchor = -1
-            # 장중이고 마지막 봉이 오늘(ET)이면 형성 중 → 직전 완료 종가를 앵커로.
-            if session_open and len(closes) >= 2:
-                try:
-                    if closes.index[-1].date() == datetime.now(ZoneInfo("America/New_York")).date():
-                        anchor = -2
-                except Exception:
-                    pass
-            close = float(closes.iloc[anchor])
-            change = None
-            if len(closes) >= abs(anchor) + 1:
-                prev = float(closes.iloc[anchor - 1])
-                if prev:
-                    change = (close / prev - 1.0) * 100.0
-            result = (close, change)
+        result = _regular_close_from_series(closes, session_open, "America/New_York")
     except Exception as exc:
         logger.warning("Hyperliquid 정규장 종가 조회 실패 (%s): %s", yahoo_symbol, exc)
         result = cached[0] if cached else (None, None)
@@ -302,11 +302,27 @@ def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float |
     return result
 
 
-def _safe_snapshot(country: str, tickers: list[str]) -> dict[str, dict[str, Any]]:
-    if not tickers:
-        return {}
+def _fetch_kr_regular_close(ticker: str, session_open: bool) -> tuple[float | None, float | None]:
+    """한국 종목의 '직전 완료 정규장 종가'와 변동률 (네이버 일봉, 세션 인지). US 와 동일 의미.
+
+    naver nowVal 은 장중에 실시간 정규장가라 '전일 종가 기준 당일 변화'를 못 준다.
+    그래서 일봉으로 장중엔 전일 종가, 마감 후엔 당일 종가를 앵커로 쓴다.
+    """
+    if not ticker:
+        return None, None
+    key = (f"kr:{ticker}", session_open)
+    now = time.time()
+    cached = _REGULAR_CLOSE_CACHE.get(key)
+    if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
+        return cached[0]
+    result: tuple[float | None, float | None] = (None, None)
     try:
-        return get_realtime_snapshot(country, tickers)
+        closes = _fetch_naver_kor_index_close(ticker, 10)
+        result = _regular_close_from_series(closes, session_open, "Asia/Seoul")
     except Exception as exc:
-        logger.warning("Hyperliquid 실제가(%s) 조회 실패: %s", country, exc)
-        return {}
+        logger.warning("Hyperliquid 한국 정규장 종가 조회 실패 (%s): %s", ticker, exc)
+        result = cached[0] if cached else (None, None)
+    _REGULAR_CLOSE_CACHE[key] = (result, now)
+    return result
+
+
