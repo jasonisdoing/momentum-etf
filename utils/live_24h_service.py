@@ -101,7 +101,7 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
                 "type": "candleSnapshot",
                 "req": {
                     "coin": hl_symbol,
-                    "interval": "30m",
+                    "interval": "15m",
                     "startTime": start_time
                 }
             }
@@ -112,16 +112,16 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
                 for c in data:
                     o = _to_float(c.get("o"))
                     h = _to_float(c.get("h"))
-                    low = _to_float(c.get("l"))
+                    l = _to_float(c.get("l"))
                     close_val = _to_float(c.get("c"))
-                    if None not in (o, h, low, close_val):
+                    if None not in (o, h, l, close_val):
                         if spec.get("type") == "stock" and spec.get("country") == "kor":
                             o *= usd_krw
                             h *= usd_krw
-                            low *= usd_krw
+                            l *= usd_krw
                             close_val *= usd_krw
-                        raw_candles.append({"o": o, "h": h, "l": low, "c": close_val})
-                hl_candles = raw_candles[-48:]
+                        raw_candles.append({"o": o, "h": h, "l": l, "c": close_val})
+                hl_candles = raw_candles[-96:]
         except Exception as exc:
             logger.warning("Hyperliquid 캔들 조회 실패 (%s): %s", hl_symbol, exc)
 

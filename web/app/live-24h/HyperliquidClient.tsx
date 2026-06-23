@@ -208,7 +208,7 @@ export function HyperliquidClient() {
     <div className="appHeaderMetrics rankToolbarMeta">
       <div className="appHeaderMetric">
         <span>갱신:</span>
-        <span className="appHeaderMetricValue">{updatedAt ?? "-"} · 10초</span>
+        <span className="appHeaderMetricValue">{updatedAt ?? "-"} · 10초 · 차트: 15분봉</span>
       </div>
     </div>
   );
