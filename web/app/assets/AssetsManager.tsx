@@ -94,6 +94,8 @@ type ParentGridRow =
     daily_return_pct: number;
     weekly_profit: number;
     weekly_return_pct: number;
+    benchmark_pct: number | null;
+    index_result: "win" | "lose" | "draw" | null;
   }
   | {
     id: string;
@@ -2094,6 +2096,29 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
 
   const parentRows = useMemo<ParentGridRow[]>(() => {
+    // 합계 지수(%) = 각 계좌 지수(%)를 자산 비중(total_assets_krw)으로 가중평균.
+    // 승부 = 합계 금일(%) − 가중 지수(%). (지수 없는 계좌는 가중에서 제외 후 재정규화)
+    let benchWeightedSum = 0;
+    let benchAssetSum = 0;
+    for (const s of summaries) {
+      const b = s.benchmark_pct;
+      const a = Number(s.total_assets_krw ?? 0);
+      if (b !== null && b !== undefined && a > 0) {
+        benchWeightedSum += a * b;
+        benchAssetSum += a;
+      }
+    }
+    const totalBenchmarkPct = benchAssetSum > 0 ? benchWeightedSum / benchAssetSum : null;
+    const totalDailyPct = dashTotals?.daily_return_pct ?? 0;
+    const totalIndexResult: "win" | "lose" | "draw" | null =
+      totalBenchmarkPct === null
+        ? null
+        : totalDailyPct - totalBenchmarkPct > 0
+          ? "win"
+          : totalDailyPct - totalBenchmarkPct < 0
+            ? "lose"
+            : "draw";
+
     const totalRow: ParentGridRow = {
       id: "__total__",
       rowType: "total",
@@ -2111,6 +2136,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       daily_return_pct: dashTotals?.daily_return_pct ?? 0,
       weekly_profit: dashTotals?.weekly_profit ?? summaries.reduce((sum, s) => sum + (s.weekly_profit ?? 0), 0),
       weekly_return_pct: dashTotals?.weekly_return_pct ?? 0,
+      benchmark_pct: totalBenchmarkPct,
+      index_result: totalIndexResult,
     };
 
     const detailRows = summaries.flatMap((summary): ParentGridRow[] => {
@@ -2388,15 +2415,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           : "",
     },
     {
-      field: "cash_ratio",
-      headerName: "현금 비중",
-      minWidth: 90,
-      flex: 0.7,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
-    },
-    {
       colId: "daily_profit_pct",
       headerName: "금일(%)",
       minWidth: 88,
@@ -2422,17 +2440,17 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       type: "rightAligned",
       valueGetter: (params) => {
         const data = params.data;
-        if (!data || isDetailRow(data) || isTotalRow(data)) return null;
-        const v = (data as AccountSummary).benchmark_pct;
+        if (!data || isDetailRow(data)) return null;
+        const v = (data as { benchmark_pct?: number | null }).benchmark_pct;
         return v === null || v === undefined ? null : Number(v);
       },
-      headerTooltip: "각 계좌 벤치마크(accounts.json) 의 금일 등락률",
+      headerTooltip: "각 계좌 벤치마크(accounts.json) 의 금일 등락률 (합계는 비중 가중평균)",
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
         const data = params.data;
-        if (!data || isDetailRow(data) || isTotalRow(data)) return "";
+        if (!data || isDetailRow(data)) return "";
         const v = params.value;
         if (v === null || v === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
-        const name = (data as AccountSummary).benchmark_name ?? "";
+        const name = isTotalRow(data) ? "비중 가중 지수" : (data as AccountSummary).benchmark_name ?? "";
         return (
           <span className={getSignedClass(v)} title={name}>{`${v.toFixed(2)}%`}</span>
         );
@@ -2446,11 +2464,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       cellStyle: { display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" },
       cellRenderer: (params: { data?: ParentGridRow }) => {
         const data = params.data;
-        if (!data || isDetailRow(data) || isTotalRow(data)) return "";
-        const summary = data as AccountSummary;
+        if (!data || isDetailRow(data)) return "";
+        const summary = data as {
+          index_result?: "win" | "lose" | "draw" | null;
+          daily_return_pct?: number | null;
+          benchmark_pct?: number | null;
+        };
         const r = summary.index_result;
         if (!r) return <span style={{ color: "#adb5bd" }}>-</span>;
-        // 격차 = 계좌 금일% − 지수 금일% (앞선/뒤쳐진 폭, 퍼센트포인트)
+        // 격차 = 금일% − 지수 금일% (앞선/뒤쳐진 폭, 퍼센트포인트). 합계는 비중 가중 기준.
         const acc = summary.daily_return_pct;
         const bench = summary.benchmark_pct;
         const diff = acc !== null && acc !== undefined && bench !== null && bench !== undefined ? acc - bench : null;
@@ -2459,6 +2481,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (r === "lose") return <span style={{ color: "#1971c2", fontWeight: 700 }}>{`😢 패${diffText}`}</span>;
         return <span style={{ color: "#6b7280", fontWeight: 700 }}>🤝 무</span>;
       },
+    },
+    {
+      field: "cash_ratio",
+      headerName: "현금 비중",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
     },
     {
       field: "total_assets_krw",
