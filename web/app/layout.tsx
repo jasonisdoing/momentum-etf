@@ -9,8 +9,8 @@ import { HideMoneyProvider } from "@/lib/hide-money-context";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Jason 투자",
-  description: "Jason 투자 운영 UI",
+  title: "Jason Momentum",
+  description: "투자는 원칙에 맞춰서 합시다",
 };
 
 type RootLayoutProps = {
