@@ -72,9 +72,15 @@ export async function loadTickerDetailData(params: {
 export async function loadTickerDetailCompare(
   items: { ticker: string; ticker_type: string; country_code: string }[],
 ): Promise<{ results: TickerDetailData[] }> {
-  return fetchFastApiJson<{ results: TickerDetailData[] }>(`/internal/ticker-detail/compare`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items }),
-  });
+  // 여러 ETF를 한 요청에서 계산하므로(특히 미국 구성종목 ETF) 첫 콜드 호출은 오래 걸릴 수 있다.
+  // 기본 30초로는 잘리므로 90초로 늘린다(이후 결과 캐시로 즉시 응답).
+  return fetchFastApiJson<{ results: TickerDetailData[] }>(
+    `/internal/ticker-detail/compare`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    },
+    90_000,
+  );
 }
