@@ -21,6 +21,7 @@ web/next-env.d.ts
 
 # 백테스트 결과
 backtest/results
+leverage/zresults
 
 
 # 노트 파일

@@ -1,0 +1,31 @@
+{
+    "backtested_date": "2026-06-21",
+    "strategy": "buy",
+    "market": "kor",
+    "months_range": 12,
+    "target": {
+        "ticker": "122630",
+        "name": "KODEX 레버리지"
+    },
+    "divisions": 5,
+    "take_profit_pct": 12.0,
+    "slippage": 0.5,
+    "benchmarks": [
+        {
+            "ticker": "226490",
+            "name": "KODEX 코스피"
+        },
+        {
+            "ticker": "069500",
+            "name": "KODEX 200"
+        },
+        {
+            "ticker": "122630",
+            "name": "KODEX 레버리지"
+        },
+        {
+            "ticker": "243880",
+            "name": "TIGER 200IT레버리지"
+        }
+    ]
+}
