@@ -258,8 +258,8 @@ export function KorMarketStockManager({
       {
         headerName: "종목풀",
         field: "ticker_pools",
-        width: 108,
-        maxWidth: 160,
+        width: 180,
+        maxWidth: 320,
         cellRenderer: (params: { value: string }) => String(params.value ?? "").trim() || "-",
       },
       {

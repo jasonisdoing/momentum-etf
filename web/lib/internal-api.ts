@@ -18,7 +18,11 @@ function getFastApiToken(): string {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export async function fetchFastApiJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function fetchFastApiJson<T>(
+  path: string,
+  init?: RequestInit,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
   headers.set("X-Internal-Token", getFastApiToken());
@@ -27,7 +31,7 @@ export async function fetchFastApiJson<T>(path: string, init?: RequestInit): Pro
   if (init?.signal) {
     init.signal.addEventListener("abort", () => controller.abort(init.signal!.reason));
   }
-  const timeoutId = setTimeout(() => controller.abort("timeout"), DEFAULT_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort("timeout"), timeoutMs);
 
   let response: Response;
   try {
@@ -51,7 +55,7 @@ export async function fetchFastApiJson<T>(path: string, init?: RequestInit): Pro
           headers: { "X-Internal-Token": getFastApiToken() },
         }).catch(() => { });
       } catch (e) { }
-      throw new Error(`FastAPI 요청이 ${DEFAULT_TIMEOUT_MS / 1_000}초 내에 응답하지 않았습니다. (${path})`);
+      throw new Error(`FastAPI 요청이 ${timeoutMs / 1_000}초 내에 응답하지 않았습니다. (${path})`);
     }
     throw error;
   } finally {

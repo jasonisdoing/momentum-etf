@@ -87,7 +87,7 @@ momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.s
 
 ### 로컬 스케줄러로 전환
 
-모든 momentum-etf 자동 배치는 로컬(Mac) 의 `run_local_scheduler.py` 가 실행한다.
+모든 momentum-etf 자동 배치는 로컬(Mac) 의 `infra/server_scheduler.py` 가 실행한다.
 이 프로세스는 `infra/cron/crontab` 파일을 단일 진실 소스로 파싱하여
 APScheduler 에 등록한다.
 
@@ -100,3 +100,24 @@ APScheduler 에 등록한다.
 
 - Docker 컨테이너 (웹 + FastAPI + MongoDB + nginx-proxy) 만 가동
 - 자동 배치 없음. 수동 실행이 필요하면 `/system` 화면의 버튼으로 트리거
+
+### 가격 캐시 — KOR 풀 동적 sleep (KRX rate-limit 회피)
+
+**증상**: 서버(OCI 춘천) 에서 가격 캐시 KOR 풀 처리 중 30~33 종목 즈음 KRX 응답이
+멈추면서 작업이 hang 으로 빠진다. 로컬(한국 ISP)에서는 발생하지 않는다.
+
+**원인**: KRX 가 단위 시간당 호출 빈도로 IP 차단을 거는 것으로 보인다. 서버는
+응답이 너무 빨라 (종목당 ~0.1s) 분당 600회 호출이 발생하면서 차단된다.
+
+**대응 (구현)**: `scripts/stock_price_cache_updater.py` 의 KOR 풀 직렬 루프에
+**종목당 동적 sleep** 을 적용한다. 종목 처리 elapsed 가 목표 간격 미만이면
+부족분만큼 채워서 호출 빈도를 일정 수준 이하로 유지한다.
+
+- 목표 간격: `KOR_FETCH_TARGET_MS` 환경변수 (기본 **300ms**)
+- 적용 대상: `country_code == "kor"` 풀만 (US/AUS 는 yfinance 일괄 prefetch 라 무영향)
+- 로그 표시 예: `소요 0.1s + 0.2s 대기(속도조절)`
+- 로컬은 종목당 자연 소요(0.2~0.4s) 가 이미 충분히 느려 sleep 0 → 영향 없음
+- 서버는 0.1s × ~60종목 부족분 = 약 +12s 보충 → 풀 전체 +1~2분, 30분 timeout 한참 여유
+
+**튜닝**: 위 기본값으로도 차단되면 환경변수를 늘린다 (예: `500` → 분당 ~100회).
+컨테이너에 환경변수가 없으면 코드 기본값(300ms) 이 적용된다.

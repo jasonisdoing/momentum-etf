@@ -2,16 +2,16 @@
 #
 # ⚠️ 운영 방식 변경 (2026-05 이후):
 #   VM (1 OCPU ARM) 의 CPU 100% 다운 이슈로 VM cron 은 제거되었고,
-#   모든 배치는 로컬(Mac) 의 `run_local_scheduler.py` 에서 실행한다.
+#   모든 배치는 로컬(Mac) 의 `infra/server_scheduler.py` 에서 실행한다.
 #   이 파일은 더 이상 VM 의 crontab 에 설치되지 않으며, 로컬 스케줄러가
 #   배치 정의를 읽기 위한 단일 진실 소스(single source of truth) 로 쓰인다.
 #
 # 로컬 실행:
 #   터미널1:  python run_local_dev.py        # 웹 (FastAPI + Next dev)
-#   터미널2:  python run_local_scheduler.py  # 배치 스케줄러
+#   터미널2:  python infra/server_scheduler.py  # 배치 스케줄러
 #
 # 동작 원리:
-#   `run_local_scheduler.py` 가 이 파일을 파싱하여 APScheduler 에 등록한다.
+#   `infra/server_scheduler.py` 가 이 파일을 파싱하여 APScheduler 에 등록한다.
 #   각 라인은 `docker compose exec -T fastapi_app python` 부분이 제거된
 #   뒤 호스트 venv 의 python 으로 직접 실행된다.
 #
@@ -27,7 +27,9 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 
 0 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 45 9-17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py metadata_updater python scripts/stock_meta_cache_updater.py >> logs/cron/metadata_updater.log 2>&1
-15 9-16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
-40 9,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
+10,40 9-15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
+20 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
+35 15 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
+0 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py live_24h_slack python scripts/live_24h_slack.py >> logs/cron/live_24h_slack.log 2>&1

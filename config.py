@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-CACHE_START_DATE = "2020-01-01"
+CACHE_START_DATE = "2024-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
 
@@ -103,6 +103,45 @@ AU_QUOTEAPI_HEADERS = {
 KIS_KOSPI_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip"
 KIS_KOSDAQ_MASTER_URL = "https://new.real.download.dws.co.kr/common/master/kosdaq_code.mst.zip"
 
+# Hyperliquid (24시간 토큰화 주식 시세) — /hyperliquid 화면.
+# 빌더 DEX `xyz` 가 SMSN(삼성전자)/SKHX(SK하이닉스)/MU(마이크론) 등 perp 을 24h 거래한다.
+# 가격은 USD. 한국 종목은 환율로 KRW 환산해 실제(KRX) 가와 비교하고, 미국 종목은 USD 그대로 비교.
+HYPERLIQUID_INFO_URL = "https://api.hyperliquid.xyz/info"
+HYPERLIQUID_DEX = "xyz"
+# live-24h 슬랙 알림: 최근 1시간 |변동률| 이 이 값(%) 이상인 종목이 있으면 @channel 핑.
+LIVE_24H_ALERT_PCT = 3.0
+# type: "stock"=개별주(가격 USD, 한국은 환율로 KRW 환산 / 실제가=네이버·토스),
+#       "index"=지수(포인트 그대로, 통화 없음 / 실제가=네이버 KR 지수 또는 야후 심볼)
+HYPERLIQUID_SYMBOLS = [
+    {
+        "symbol": "SKHX",
+        "name": "SK하이닉스",
+        "type": "stock",
+        "country": "kor",
+        "actual_ticker": "000660",
+    },
+    {
+        "symbol": "SMSN",
+        "name": "삼성전자",
+        "type": "stock",
+        "country": "kor",
+        "actual_ticker": "005930",
+    },
+    {
+        "symbol": "MU",
+        "name": "마이크론",
+        "type": "stock",
+        "country": "us",
+        "actual_ticker": "MU",
+    },
+    {
+        "symbol": "SP500",
+        "name": "S&P500",
+        "type": "index",
+        "yahoo_symbol": "^GSPC",
+    },
+]
+
 
 # 통합 시장 거래 시간표
 from datetime import time
@@ -131,6 +170,11 @@ MARKET_SCHEDULES = {
     },
 }
 
+# 지원 이동평균(MA) 타입 — 시스템 전체 단일 진실 소스.
+# 백엔드(rankings/market_trend/pool_settings 검증·옵션) + 프론트(MA 드롭다운)에서 모두 이 값만 본다.
+# 프론트에는 API 응답(rank: ma_type_options / market-trend defaults: ma_types)으로 전달된다.
+ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
+
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
@@ -139,6 +183,30 @@ TRADING_DAYS_PER_MONTH = 20
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
+
+# -----------------------------------------------------------------------
+# 시장지수 추세 (/market-trend)
+# -----------------------------------------------------------------------
+# 백엔드(추세점수 정규화 / 레짐 판정) + 프론트(MA 선택)에서 함께 쓰는 단일 진실 소스.
+# 프론트에는 /internal/market-trend/defaults 응답으로 전달된다.
+
+# 추세점수 정규화 앵커 퍼센타일. 12개월 괴리율의 상위 P%를 +100, 하위 (100-P)%를 −100 으로
+# 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
+MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
+
+# MA 기간 선택 드롭다운 상한 (개월). 1 ~ 이 값.
+MARKET_TREND_MA_MONTHS_MAX = 12
+
+# 레짐(가속/감속) 판정: 추세%의 회귀 기울기 + 데드밴드(히스테리시스). 비대칭 창을 쓴다 —
+# "상승은 빠르게, 약화는 천천히".
+#   강화(상향) 판정: 최근 UP_WINDOW 거래일 기울기 > +DEADBAND  → 짧게 잡아 저점 반등을 빨리 포착
+#   약화(하향) 판정: 최근 WINDOW    거래일 기울기 < −DEADBAND  → 길게 잡아 노이즈에 안 흔들림
+#   둘 다 아니면 직전 상태 유지(라벨 휩소 차단).
+# 값↑(WINDOW) = 하향 더 둔감 / 값↓(UP_WINDOW) = 상승 전환 더 빠름(대신 바닥 false 상승↑) /
+# 값↑(DEADBAND) = 라벨이 덜 바뀜.
+MARKET_TREND_REGIME_SLOPE_UP_WINDOW = 5
+MARKET_TREND_REGIME_SLOPE_WINDOW = 7
+MARKET_TREND_REGIME_SLOPE_DEADBAND = 0.05
 
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
@@ -174,31 +242,31 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "all": {
         "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10],
+        "HOLDING_BONUS_SCORE": [10],
         "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6, 9, 12],
+        "MA_MONTHS": [6],
         "RSI_LIMIT": [100],
     },
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
-        "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10],
+        "TOP_N_HOLD": [5],
+        "HOLDING_BONUS_SCORE": [0, 10, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
-        "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10],
+        "TOP_N_HOLD": [3],
+        "HOLDING_BONUS_SCORE": [0, 10, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
     },
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
-        "TOP_N_HOLD": [7],
-        "HOLDING_BONUS_SCORE": [0, 5, 10],
+        "TOP_N_HOLD": [8],
+        "HOLDING_BONUS_SCORE": [0, 10, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
@@ -206,7 +274,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "us": {
         "BENCHMARK": {"ticker": "QQQ", "name": "인베스코 QQQ ETF"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 5, 10],
+        "HOLDING_BONUS_SCORE": [0, 10, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
@@ -214,7 +282,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 5, 10],
+        "HOLDING_BONUS_SCORE": [0, 10, 20],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],

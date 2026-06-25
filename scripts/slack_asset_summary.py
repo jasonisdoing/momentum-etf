@@ -367,6 +367,14 @@ def main():
         cash_pct = (global_cash / total_assets * 100) if total_assets > 0 else 0.0
         comp_details.append(f"• 5. 현금: {cash_pct:.1f}%")
 
+        # 레버리지 비율 — 종목명이 한글이면서 "레버리지" 가 포함된 보유 종목의 평가금액 비중.
+        if "종목명" in combined_df.columns:
+            names = combined_df["종목명"].astype(str)
+            lev_mask = names.str.contains("레버리지", na=False) & names.str.contains("[가-힣]", regex=True, na=False)
+            lev_val = combined_df.loc[lev_mask, "평가금액(KRW)"].sum()
+            lev_pct = (lev_val / total_assets * 100) if total_assets > 0 else 0.0
+            comp_details.append(f"• ⚡ 레버리지: {lev_pct:.1f}%")
+
         send_slack_message_v2("\n".join(comp_details), thread_ts=main_ts)
 
     # 4. Compose Account Cash Ratio (Thread)

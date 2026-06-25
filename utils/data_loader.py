@@ -49,6 +49,17 @@ try:
 except ImportError:
     yf = None
 
+# yfinance HTTP keep-alive 패치: yf.download 가 session 인자를 안 주면 매 호출마다
+# curl_cffi.Session 을 새로 만들어 TLS handshake 비용이 누적된다. 모듈 레벨에서 한 번만
+# Session 을 만들고 모든 호출에 주입한다. (yfinance 0.2.x 부터는 curl_cffi.Session 만 받음)
+_YF_SESSION = None
+try:
+    from curl_cffi import requests as _ccr  # type: ignore
+
+    _YF_SESSION = _ccr.Session(impersonate="chrome")
+except Exception:
+    _YF_SESSION = None
+
 # pykrx가 설치되지 않았을 경우를 대비한 예외 처리
 _pykrx_import_error = None
 try:
@@ -58,6 +69,28 @@ except ImportError:
 
     _pykrx_import_error = traceback.format_exc()
     _stock = None
+
+# HTTP keep-alive 패치: pykrx 가 매 호출마다 requests.get() 으로 새 connection 을 만들어
+# TLS handshake 비용(약 100~300ms/호출)이 누적된다. pykrx 내부 webio 모듈의 requests
+# 참조를 모듈 레벨 Session 으로 교체해 connection pool 을 재사용한다.
+# (Session 객체에도 .get/.post 메서드가 있으므로 webio.py 의 `requests.get(...)` 호출이
+# 그대로 Session 메서드 호출로 동작한다.)
+_PYKRX_HTTP_SESSION = None
+if requests is not None:
+    try:
+        from pykrx.website.comm import webio as _pykrx_webio  # type: ignore
+
+        _PYKRX_HTTP_SESSION = requests.Session()
+        # urllib3 connection pool 크기 확대 (직렬이라 10 도 충분하지만 여유)
+        from requests.adapters import HTTPAdapter
+
+        _pykrx_adapter = HTTPAdapter(pool_connections=10, pool_maxsize=10)
+        _PYKRX_HTTP_SESSION.mount("http://", _pykrx_adapter)
+        _PYKRX_HTTP_SESSION.mount("https://", _pykrx_adapter)
+        _pykrx_webio.requests = _PYKRX_HTTP_SESSION  # type: ignore[attr-defined]
+    except Exception:
+        # 패치 실패해도 동작 자체에는 문제 없음 (속도만 손해)
+        _PYKRX_HTTP_SESSION = None
 
 # from utils.notification import send_verbose_log_to_slack
 
@@ -887,6 +920,105 @@ def _fetch_ohlcv_with_cache(
     return sliced
 
 
+# -------------------------------------------------------------------------
+# yfinance 일괄 prefetch 캐시.
+# 가격 캐시 배치에서 풀(US/AUS) 시작 시 전체 티커를 1회 yf.download(...) 로 받아
+# 이 dict 에 종목별 DataFrame 으로 저장하면, _fetch_ohlcv_core 가 종목별 호출 대신
+# 캐시 hit 으로 처리한다. force_refresh=True 정책 하에 종목당 TLS/round-trip 비용
+# 을 한 번으로 압축한다.
+# -------------------------------------------------------------------------
+_YF_BULK_PREFETCH: dict[str, pd.DataFrame] = {}
+
+
+def reset_yf_bulk_prefetch() -> None:
+    """배치 진입 시 일괄 prefetch 캐시를 초기화한다."""
+    _YF_BULK_PREFETCH.clear()
+
+
+def prefetch_yfinance_bulk(
+    tickers: list[str],
+    country_code: str,
+    start_dt: pd.Timestamp,
+    end_dt: pd.Timestamp,
+) -> int:
+    """US/AUS 풀의 전체 티커를 한 번에 다운로드해 모듈 캐시에 저장한다.
+
+    Returns: 캐시에 저장된 종목 수 (0이면 prefetch 실패 — fallback 으로 종목별 호출 유지).
+    """
+    if yf is None or not tickers:
+        return 0
+    country_norm = (country_code or "").strip().lower()
+    if country_norm not in ("us", "au"):
+        return 0
+
+    # AU 는 .AX 접미사 필요
+    download_tickers: list[str] = []
+    ticker_to_download = {}
+    for t in tickers:
+        t_norm = str(t or "").strip().upper()
+        if not t_norm or t_norm.startswith("^"):
+            continue
+        dl = t_norm
+        if country_norm == "au" and not dl.endswith(".AX"):
+            dl = f"{t_norm}.AX"
+        download_tickers.append(dl)
+        ticker_to_download[t_norm] = dl
+
+    if not download_tickers:
+        return 0
+
+    saved = 0
+    try:
+        with _silence_yfinance_output():
+            df = yf.download(
+                download_tickers,
+                start=start_dt.strftime("%Y-%m-%d"),
+                end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
+                progress=False,
+                auto_adjust=True,
+                group_by="ticker",
+                threads=False,  # 종목별 분리는 우리가 수행
+                session=_YF_SESSION,
+            )
+    except Exception as exc:
+        logger.warning("yfinance 일괄 prefetch 실패 (%s): %s — 종목별 호출로 fallback", country_norm, exc)
+        return 0
+
+    if df is None or df.empty:
+        return 0
+
+    if df.index.tz is not None:
+        df.index = df.index.tz_localize(None)
+
+    # 응답 구조 처리 (다중 티커는 MultiIndex columns)
+    if isinstance(df.columns, pd.MultiIndex):
+        # group_by='ticker' 라 level 0 == ticker
+        available_dl = set(df.columns.get_level_values(0))
+        for orig_ticker, dl_ticker in ticker_to_download.items():
+            if dl_ticker not in available_dl:
+                continue
+            try:
+                sub = df[dl_ticker].dropna(how="all")
+            except Exception:
+                continue
+            if sub is None or sub.empty:
+                continue
+            sub = sub.loc[:, ~sub.columns.duplicated()]
+            _YF_BULK_PREFETCH[orig_ticker] = sub
+            saved += 1
+    else:
+        # 단일 티커 응답 (download_tickers 가 1건일 때)
+        if len(ticker_to_download) == 1:
+            orig_ticker = next(iter(ticker_to_download))
+            df2 = df.dropna(how="all")
+            if not df2.empty:
+                df2 = df2.loc[:, ~df2.columns.duplicated()]
+                _YF_BULK_PREFETCH[orig_ticker] = df2
+                saved = 1
+
+    return saved
+
+
 def _fetch_ohlcv_core(
     ticker: str,
     country: str,
@@ -907,6 +1039,13 @@ def _fetch_ohlcv_core(
                 # 하지만 여기선 원천 조회 우선이므로 fallback은 호출 실패 시 사용
                 pass
 
+        # 일괄 prefetch 캐시 hit 시 그것을 그대로 반환 (yfinance 호출 1회로 풀 전체 처리).
+        bulk_df = _YF_BULK_PREFETCH.get(str(ticker).strip().upper())
+        if bulk_df is not None and not bulk_df.empty:
+            sliced = bulk_df[(bulk_df.index >= start_dt) & (bulk_df.index <= end_dt)]
+            if not sliced.empty:
+                return sliced.copy()
+
         if yf is None:
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
@@ -924,6 +1063,7 @@ def _fetch_ohlcv_core(
                     end=(end_dt + pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
                     progress=False,
                     auto_adjust=True,
+                    session=_YF_SESSION,
                 )
         except Exception as exc:
             error_msg = str(exc)
@@ -996,6 +1136,10 @@ def _fetch_ohlcv_core(
         all_dfs = []
         pykrx_failed = False
         pykrx_error_msg = None
+        # 첫 청크에서 성공한 pykrx 함수를 기억해 두 번째 청크부터 곧바로 사용 → 불필요한 폴백 호출 제거.
+        # ETF 풀(get_etf), 일반주 풀(get_market), ETN 풀(get_etn) 중 무엇인지 한 번만 결정한다.
+        chosen_fn = None  # type: Any
+        get_etn_func = getattr(_stock, "get_etn_ohlcv_by_date", None)
 
         current_start = start_dt
         while current_start <= end_dt:
@@ -1004,13 +1148,21 @@ def _fetch_ohlcv_core(
             end_str = current_end.strftime("%Y%m%d")
 
             try:
-                df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
-                if df_part is None or df_part.empty:
-                    df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
-                if df_part is None or df_part.empty:
-                    get_etn_func = getattr(_stock, "get_etn_ohlcv_by_date", None)
-                    if callable(get_etn_func):
-                        df_part = get_etn_func(start_str, end_str, ticker)
+                if chosen_fn is not None:
+                    # 종목 유형이 이미 확정된 경우: 해당 함수만 호출 (폴백 제거).
+                    df_part = chosen_fn(start_str, end_str, ticker)
+                else:
+                    df_part = _stock.get_etf_ohlcv_by_date(start_str, end_str, ticker)
+                    if df_part is not None and not df_part.empty:
+                        chosen_fn = _stock.get_etf_ohlcv_by_date
+                    else:
+                        df_part = _stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
+                        if df_part is not None and not df_part.empty:
+                            chosen_fn = _stock.get_market_ohlcv_by_date
+                        elif callable(get_etn_func):
+                            df_part = get_etn_func(start_str, end_str, ticker)
+                            if df_part is not None and not df_part.empty:
+                                chosen_fn = get_etn_func
                 if df_part is not None and not df_part.empty:
                     all_dfs.append(df_part)
             except (json.JSONDecodeError, KeyError) as err:
@@ -2022,6 +2174,31 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return result
 
 
+def _us_session_state() -> str:
+    """미국 정규장 세션 상태: "pre" | "regular" | "post" (ET 기준, 주말은 "post").
+
+    - regular(09:30~16:00): 현재가=close, 변동=전일 종가 대비
+    - pre(04:00~09:30): close=프리장가, 변동=전일 종가 대비
+    - post(16:00~다음날 04:00 + 주말): 현재가=afterMarketClose, 변동=정규장 종가 대비
+    판정 불가 시 "regular"(기존 동작) 로 폴백한다.
+    """
+    schedule = (MARKET_SCHEDULES or {}).get("us") or {}
+    tz_name = schedule.get("timezone")
+    open_t = schedule.get("open")
+    close_t = schedule.get("close")
+    if not tz_name or ZoneInfo is None or open_t is None or close_t is None:
+        return "regular"
+    now = datetime.now(ZoneInfo(tz_name))
+    if now.weekday() >= 5:
+        return "post"
+    t = now.time()
+    if time(4, 0) <= t < open_t:
+        return "pre"
+    if open_t <= t < close_t:
+        return "regular"
+    return "post"
+
+
 def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
 
@@ -2055,6 +2232,9 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
     all_codes = list(symbol_to_code.values())
     snapshot: dict[str, dict[str, float]] = {}
+
+    # 정규장 마감 후(애프터마켓/야간)면 현재가=애프터, 변동=정규장 종가 대비로 본다.
+    us_post_close = _us_session_state() == "post"
 
     chunk_size = 50
     for i in range(0, len(all_codes), chunk_size):
@@ -2092,24 +2272,26 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             except (TypeError, ValueError):
                 continue
 
-            entry: dict[str, float] = {"nowVal": close_val}
+            base_val = _safe_float(item.get("base"))
+            after_val = _safe_float(item.get("afterMarketClose"))
 
-            volume = item.get("volume")
+            # 정규장 마감 후 + 애프터가 있으면: 현재가=애프터, 기준=정규장 종가(close).
+            # 그 외(정규장/프리장): 현재가=close, 기준=전일 종가(base).
+            if us_post_close and after_val and after_val > 0 and close_val > 0:
+                now_val: float = after_val
+                prev_val = close_val
+            else:
+                now_val = close_val
+                prev_val = base_val
+
+            entry: dict[str, float] = {"nowVal": now_val}
+            if prev_val is not None and prev_val > 0:
+                entry["prevClose"] = prev_val
+                entry["changeRate"] = ((now_val - prev_val) / prev_val) * 100.0
+
+            volume = _safe_float(item.get("volume"))
             if volume is not None:
-                try:
-                    entry["volume"] = float(volume)
-                except (TypeError, ValueError):
-                    pass
-
-            base_price = item.get("base")
-            if base_price is not None:
-                try:
-                    base_val = float(base_price)
-                    entry["prevClose"] = base_val
-                    if base_val > 0:
-                        entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
-                except (TypeError, ValueError):
-                    pass
+                entry["volume"] = volume
 
             snapshot[sym] = entry
 
@@ -2232,9 +2414,8 @@ def _load_naver_kor_stock_map() -> dict[str, dict[str, str]]:
     try:
         import time as _time
 
-        import requests
-
         from config import NAVER_STOCK_MARKET_VALUE_HEADERS, NAVER_STOCK_MARKET_VALUE_URL
+        from utils.http_session import shared_session
 
         for market in ["KOSPI", "KOSDAQ"]:
             page = 1
@@ -2242,7 +2423,7 @@ def _load_naver_kor_stock_map() -> dict[str, dict[str, str]]:
             while True:
                 try:
                     url = NAVER_STOCK_MARKET_VALUE_URL.format(market=market)
-                    resp = requests.get(
+                    resp = shared_session.get(
                         url,
                         params={"page": page, "pageSize": page_size},
                         headers=NAVER_STOCK_MARKET_VALUE_HEADERS,
@@ -2452,6 +2633,7 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
             auto_adjust=True,
             progress=False,
             show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
+            session=_YF_SESSION,
         )
 
         if df is not None and not df.empty:

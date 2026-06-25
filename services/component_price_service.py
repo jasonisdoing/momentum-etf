@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 
@@ -73,7 +75,7 @@ def enrich_component_prices(
                 au_tickers.append(component_ticker[4:])
             continue
 
-        if _is_korean_six_digit_holding(item):
+        if _is_korean_listed_holding(item):
             if cumulative_base_date:
                 korean_baseline_tickers.append(component_ticker)
             if _component_price_key(item) not in component_price_snapshot:
@@ -105,7 +107,9 @@ def enrich_component_prices(
     au_price_map = _safe_fetch_snapshot("au", sorted(set(au_tickers)))
     worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
     yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
-    korean_baseline_price_map = _safe_fetch_cached_baseline_prices("kor", korean_baseline_tickers, cumulative_base_date)
+    korean_baseline_price_map = _safe_fetch_cached_baseline_prices(
+        "kor", korean_baseline_tickers, cumulative_base_date
+    )
     baseline_price_map = _safe_fetch_yahoo_baseline_prices(
         baseline_yahoo_symbols,
         cumulative_base_date,
@@ -145,9 +149,9 @@ def enrich_component_prices(
                 currency,
                 preserve_existing=preserve_existing,
             )
-            if cumulative_base_date and _is_korean_six_digit_holding(item):
+            if cumulative_base_date and _is_korean_listed_holding(item):
                 _apply_cumulative_change(enriched_item, korean_baseline_price_map.get(component_ticker))
-        elif _is_korean_six_digit_holding(item):
+        elif _is_korean_listed_holding(item):
             _apply_price_snapshot(
                 enriched_item,
                 kor_price_map.get(component_ticker, {}),
@@ -190,8 +194,19 @@ def enrich_component_prices(
                 preserve_existing=preserve_existing,
             )
 
-        if cumulative_base_date and yahoo_symbol and not _is_korean_six_digit_holding(item):
+        if cumulative_base_date and yahoo_symbol and not _is_korean_listed_holding(item):
             baseline_item = baseline_price_map.get(yahoo_symbol)
+            if _is_baseline_suspicious(enriched_item, baseline_item):
+                # Yahoo 가 간헐적으로 가격을 10배 등 잘못된 스케일로 반환하는 glitch.
+                # (관측: 2026-06-12 KLAC baseline $2,411 vs 실제 $241 — 미국 그룹 -90% 오염)
+                # baseline 폐기 — 누적 변동은 None 으로 표시 (fallback 없음).
+                logger.warning(
+                    "구성종목 baseline 이상치 폐기: %s baseline=%s previous_close=%s",
+                    yahoo_symbol,
+                    baseline_item.get("price") if isinstance(baseline_item, dict) else None,
+                    enriched_item.get("previous_close"),
+                )
+                baseline_item = None
             _apply_cumulative_change(enriched_item, baseline_item)
 
         as_of_date = str(enriched_item.get("price_as_of_date") or "").strip()
@@ -239,7 +254,7 @@ def build_component_price_snapshot(
             continue
         component_ticker = _normalize_upper(item.get("ticker"))
         yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
-        if _is_korean_six_digit_holding(item):
+        if _is_korean_listed_holding(item):
             korean_tickers.add(component_ticker)
         elif yahoo_symbol.endswith(".AX"):
             au_tickers.add(yahoo_symbol[:-3])
@@ -266,7 +281,7 @@ def build_component_price_snapshot(
         price_item: dict[str, Any] | None = None
         currency = _infer_component_currency(item)
 
-        if _is_korean_six_digit_holding(item):
+        if _is_korean_listed_holding(item):
             price_item = kor_price_map.get(component_ticker)
             currency = "KRW"
         elif yahoo_symbol.endswith(".AX"):
@@ -308,17 +323,25 @@ def _is_cash_like_holding(item: dict[str, Any]) -> bool:
     return ticker.startswith("KRD") or raw_code.startswith("KRD") or "현금" in name
 
 
-def _is_korean_six_digit_holding(item: dict[str, Any]) -> bool:
+def _is_korean_listed_holding(item: dict[str, Any]) -> bool:
+    """한국거래소 상장(.KS/.KQ) 구성종목 여부.
+
+    순수 6자리 숫자 코드뿐 아니라 알파벳이 섞인 신형 ETF 코드(예: 0043Y0.KS)도 포함한다.
+    한국 실시간 소스(네이버)는 bare 코드(0043Y0)로 가격을 조회할 수 있으므로, .KS/.KQ 면
+    한국 경로로 보내 수익률을 가져온다.
+    """
     component_ticker = _normalize_upper(item.get("ticker"))
     raw_code = _normalize_upper(item.get("raw_code"))
     yahoo_symbol = _normalize_upper(item.get("yahoo_symbol"))
-    if not component_ticker.isdigit() or len(component_ticker) != 6:
-        return False
-    if yahoo_symbol and not yahoo_symbol.endswith((".KS", ".KQ")):
-        return False
     if raw_code.startswith("CNE"):
         return False
-    return True
+    # 한국거래소 상장 접미사면 한국으로 간주 (알파벳 포함 코드 포함).
+    if yahoo_symbol.endswith((".KS", ".KQ")):
+        return True
+    # yahoo_symbol 이 없고 순수 6자리 숫자 코드면 한국으로 간주.
+    if not yahoo_symbol and component_ticker.isdigit() and len(component_ticker) == 6:
+        return True
+    return False
 
 
 def _is_worldstock_symbol(symbol: str) -> bool:
@@ -338,7 +361,7 @@ def _component_price_key(item: dict[str, Any]) -> str | None:
     if _is_cash_like_holding(item):
         return None
     component_ticker = _normalize_upper(item.get("ticker"))
-    if _is_korean_six_digit_holding(item):
+    if _is_korean_listed_holding(item):
         return f"kor:{component_ticker}"
 
     yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
@@ -358,7 +381,7 @@ def _component_price_key(item: dict[str, Any]) -> str | None:
 def _infer_component_currency(item: dict[str, Any]) -> str:
     component_ticker = _normalize_upper(item.get("ticker"))
     yahoo_symbol = _normalize_upper(item.get("yahoo_symbol")) or component_ticker
-    if _is_korean_six_digit_holding(item):
+    if _is_korean_listed_holding(item):
         return "KRW"
     if yahoo_symbol.endswith(".AX"):
         return "AUD"
@@ -503,6 +526,80 @@ import threading
 _YAHOO_BASELINE_CACHE: dict[tuple[str, str, bool], dict[str, Any]] = {}
 _YAHOO_BASELINE_LOCK = threading.Lock()
 
+# mongodb 영속 캐시 컬렉션명. baseline 은 "특정 base_date 의 종가" 라 한 번 구하면 불변 —
+# 프로세스 재시작/배포 후에도 yfinance 재호출 없이 재사용한다.
+_YAHOO_BASELINE_COLLECTION = "yahoo_baseline_prices"
+
+
+def _baseline_doc_id(symbol: str, base_date: str, is_prev: bool) -> str:
+    return f"{symbol}|{base_date}|{int(is_prev)}"
+
+
+def _load_persisted_yahoo_baselines(
+    keys: list[tuple[str, str, bool]],
+) -> dict[tuple[str, str, bool], dict[str, Any]]:
+    """mongodb 에서 (symbol, base_date, is_prev) 키들의 baseline 을 일괄 조회한다."""
+    if not keys:
+        return {}
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return {}
+        ids = [_baseline_doc_id(*key) for key in keys]
+        cursor = db[_YAHOO_BASELINE_COLLECTION].find(
+            {"_id": {"$in": ids}},
+            {"symbol": 1, "base_date": 1, "is_prev": 1, "price": 1, "date": 1},
+        )
+        result: dict[tuple[str, str, bool], dict[str, Any]] = {}
+        for doc in cursor:
+            key = (str(doc.get("symbol")), str(doc.get("base_date")), bool(doc.get("is_prev")))
+            price = doc.get("price")
+            if price is None:
+                continue
+            result[key] = {"price": float(price), "date": doc.get("date")}
+        return result
+    except Exception as exc:
+        logger.warning("yahoo baseline mongodb 조회 실패: %s", exc)
+        return {}
+
+
+def _persist_yahoo_baselines(entries: dict[tuple[str, str, bool], dict[str, Any]]) -> None:
+    """yfinance 로 새로 받은 baseline 을 mongodb 에 upsert 한다 (실패해도 동작에는 영향 없음)."""
+    if not entries:
+        return
+    try:
+        from pymongo import UpdateOne
+
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return
+        now = datetime.now()
+        ops = [
+            UpdateOne(
+                {"_id": _baseline_doc_id(symbol, base_date, is_prev)},
+                {
+                    "$set": {
+                        "symbol": symbol,
+                        "base_date": base_date,
+                        "is_prev": is_prev,
+                        "price": data.get("price"),
+                        "date": data.get("date"),
+                        "updated_at": now,
+                    }
+                },
+                upsert=True,
+            )
+            for (symbol, base_date, is_prev), data in entries.items()
+        ]
+        db[_YAHOO_BASELINE_COLLECTION].bulk_write(ops, ordered=False)
+    except Exception as exc:
+        logger.warning("yahoo baseline mongodb 저장 실패: %s", exc)
+
+
 def _fetch_yahoo_baseline_prices(
     symbols: list[str],
     base_date: str,
@@ -533,6 +630,24 @@ def _fetch_yahoo_baseline_prices(
             else:
                 symbols_to_fetch.append(symbol)
 
+        # 메모리 캐시 miss 분은 mongodb 영속 캐시에서 일괄 조회 — 프로세스 재시작 후에도
+        # yfinance 재호출 없이 복원된다 (cold start 시 30초 timeout 의 주범 제거).
+        if symbols_to_fetch:
+            persisted = _load_persisted_yahoo_baselines(
+                [(symbol, base_date, symbol in previous_day_symbols) for symbol in symbols_to_fetch]
+            )
+            if persisted:
+                still_missing: list[str] = []
+                for symbol in symbols_to_fetch:
+                    key = (symbol, base_date, symbol in previous_day_symbols)
+                    data = persisted.get(key)
+                    if data is not None:
+                        result[symbol] = data
+                        _YAHOO_BASELINE_CACHE[key] = data
+                    else:
+                        still_missing.append(symbol)
+                symbols_to_fetch = still_missing
+
         if not symbols_to_fetch:
             return result
 
@@ -561,6 +676,7 @@ def _fetch_yahoo_baseline_prices(
                 return None
             return downloaded.copy()
 
+        newly_fetched: dict[tuple[str, str, bool], dict[str, Any]] = {}
         for symbol in symbols_to_fetch:
             frame = _extract_symbol_frame(symbol)
             if frame is None or frame.empty or "Close" not in frame.columns:
@@ -586,7 +702,13 @@ def _fetch_yahoo_baseline_prices(
             }
             result[symbol] = data
             _YAHOO_BASELINE_CACHE[(symbol, base_date, is_prev)] = data
+            # 당일 종가는 장중/마감 직후 잠정치일 수 있어 영속화하지 않는다 (메모리 캐시만).
+            # (관측: 6981.T 당일 잠정 종가 9,454 가 영속화돼 확정 종가 8,556 과 10% 괴리)
+            today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+            if str(data.get("date") or "") < today_kst:
+                newly_fetched[(symbol, base_date, is_prev)] = data
 
+        _persist_yahoo_baselines(newly_fetched)
         return result
 
 
@@ -610,6 +732,32 @@ def _apply_price_snapshot(
     enriched_item["change_pct"] = float(change_pct) if change_pct is not None else None
     enriched_item["price_currency"] = currency
     enriched_item["price_as_of_date"] = snapshot.get("as_of_date")
+
+
+def _is_baseline_suspicious(enriched_item: dict[str, Any], baseline_item: dict[str, Any] | None) -> bool:
+    """Yahoo baseline 의 스케일 오류(10배 등) 를 토스 previous_close 와 교차 검증으로 감지한다.
+
+    baseline 과 전일 종가가 40% 이상 괴리하면서 당일 변동률은 정상 범위(<15%)면
+    데이터 오류로 판단한다. 일간 변동이 ±15% 이상인 급변동 장에서는 진짜 괴리일 수
+    있으므로 판정을 보류한다 (베이스라인 유지).
+    """
+    if not isinstance(baseline_item, dict):
+        return False
+    try:
+        baseline_price = float(baseline_item.get("price"))
+        previous_close = float(enriched_item.get("previous_close"))
+    except (TypeError, ValueError):
+        return False
+    if baseline_price <= 0 or previous_close <= 0:
+        return False
+    change_pct = enriched_item.get("change_pct")
+    try:
+        if change_pct is not None and abs(float(change_pct)) >= 15.0:
+            return False
+    except (TypeError, ValueError):
+        pass
+    ratio = baseline_price / previous_close
+    return not (0.6 <= ratio <= 1.67)
 
 
 def _apply_cumulative_change(enriched_item: dict[str, Any], baseline_item: dict[str, Any] | None) -> None:

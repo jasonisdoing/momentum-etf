@@ -6,12 +6,12 @@ import { PageFrame } from "../components/PageFrame";
 import { SystemManager } from "./SystemManager";
 
 type SystemHeaderSummary = {
-  accountCount: number;
+  poolCount: number;
   scheduleCount: number;
 };
 
 const DEFAULT_SUMMARY: SystemHeaderSummary = {
-  accountCount: 0,
+  poolCount: 0,
   scheduleCount: 0,
 };
 
@@ -22,8 +22,8 @@ export function SystemPageClient() {
     () => (
       <div className="appHeaderMetrics rankToolbarMeta">
         <div className="appHeaderMetric">
-          <span>계좌 요약:</span>
-          <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.accountCount)}개</span>
+          <span>종목풀:</span>
+          <span className="appHeaderMetricValue">{new Intl.NumberFormat("ko-KR").format(summary.poolCount)}개</span>
         </div>
         <div className="appHeaderMetric">
           <span>배치:</span>
@@ -35,7 +35,7 @@ export function SystemPageClient() {
   );
 
   return (
-    <PageFrame title="정보" titleRight={titleRight}>
+    <PageFrame title="배치" titleRight={titleRight}>
       <SystemManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );
