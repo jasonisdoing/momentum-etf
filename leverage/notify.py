@@ -1,19 +1,13 @@
-"""Slack 알림 전송 유틸리티."""
+"""Slack 알림 전송 유틸리티.
 
-import os
+전송은 momentum-etf 의 공용 Slack 전송기(utils.notification.send_slack_message_v2)를 사용한다.
+(봇 토큰 + settings_loader.get_slack_channel 기준 채널)
+"""
+
 from datetime import datetime
 from typing import Any
 
-from dotenv import load_dotenv
-
-try:
-    from slack_sdk import WebClient
-    from slack_sdk.errors import SlackApiError
-except ImportError:
-    WebClient = None
-    SlackApiError = None
-
-load_dotenv()
+from utils.notification import send_slack_message_v2
 
 
 def _format_display_name(ticker: str, name: str | None) -> str:
@@ -22,19 +16,14 @@ def _format_display_name(ticker: str, name: str | None) -> str:
     return ticker
 
 
-def _get_slack_client() -> tuple[object | None, str | None]:
-    token = os.environ.get("SLACK_BOT_TOKEN")
-    channel_id = os.environ.get("TARGET_CHANNEL_ID")
-
-    if not token or not channel_id:
-        print(" [SLACK] SLACK_BOT_TOKEN 또는 TARGET_CHANNEL_ID가 설정되지 않았습니다.")
-        return None, None
-
-    if WebClient is None:
-        print(" [SLACK] slack-sdk가 설치되지 않았습니다.")
-        return None, None
-
-    return WebClient(token=token), channel_id
+def _post(text: str, blocks: list[dict], label: str) -> bool:
+    """momentum-etf 공용 전송기로 blocks 메시지를 보낸다."""
+    ts = send_slack_message_v2(text=text, blocks=blocks)
+    if ts:
+        print(f" [SLACK] {label} 전송 완료")
+        return True
+    print(f" [SLACK] {label} 전송 실패")
+    return False
 
 
 def send_slack_recommendation(
@@ -50,9 +39,6 @@ def send_slack_recommendation(
     market_phase: str = "장 마감 후",
 ) -> bool:
     """나스닥 스위칭 추천 결과를 Slack으로 전송합니다."""
-    client, channel_id = _get_slack_client()
-    if client is None or channel_id is None:
-        return False
     market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
     phase_tag = f"[{market_phase}]"
 
@@ -223,17 +209,7 @@ def send_slack_recommendation(
             }
         )
 
-    try:
-        client.chat_postMessage(
-            channel=channel_id,
-            text=f"[{market_name}] {header_text} ({as_of})",
-            blocks=blocks,
-        )
-        print(f" [SLACK] Slack 알림 전송 완료 (channel={channel_id})")
-        return True
-    except Exception as e:
-        print(f" [SLACK] Slack 전송 실패: {e}")
-        return False
+    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "스위칭 추천")
 
 
 def send_slack_tuning_result(
@@ -247,9 +223,6 @@ def send_slack_tuning_result(
     log_path: str | None = None,
 ) -> bool:
     """튜닝 완료 결과를 Slack으로 전송합니다."""
-    client, channel_id = _get_slack_client()
-    if client is None or channel_id is None:
-        return False
 
     market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
     params = best_result.get("params", {})
@@ -306,17 +279,7 @@ def send_slack_tuning_result(
             }
         )
 
-    try:
-        client.chat_postMessage(
-            channel=channel_id,
-            text=f"[{market_name}] 튜닝 완료 ({ended_at.date().isoformat()})",
-            blocks=blocks,
-        )
-        print(f" [SLACK] 튜닝 결과 Slack 알림 전송 완료 (channel={channel_id})")
-        return True
-    except Exception as e:
-        print(f" [SLACK] 튜닝 결과 Slack 전송 실패: {e}")
-        return False
+    return _post(f"[{market_name}] 튜닝 완료 ({ended_at.date().isoformat()})", blocks, "튜닝 결과")
 
 
 def send_slack_buy_recommendation(
@@ -334,9 +297,6 @@ def send_slack_buy_recommendation(
 
     기존 스위칭 추천 알림(send_slack_recommendation)과 동일한 스타일을 따른다.
     """
-    client, channel_id = _get_slack_client()
-    if client is None or channel_id is None:
-        return False
 
     market_name = "🇺🇸 미국" if market.lower() == "us" else "🇰🇷 한국"
     phase_tag = f"[{market_phase}]"
@@ -424,17 +384,7 @@ def send_slack_buy_recommendation(
             }
         )
 
-    try:
-        client.chat_postMessage(
-            channel=channel_id,
-            text=f"[{market_name}] {header_text} ({as_of})",
-            blocks=blocks,
-        )
-        print(f" [SLACK] 무한매수법 추천 Slack 알림 전송 완료 (channel={channel_id})")
-        return True
-    except Exception as e:
-        print(f" [SLACK] 무한매수법 추천 Slack 전송 실패: {e}")
-        return False
+    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "무한매수법 추천")
 
 
 def send_slack_buy_tuning_result(
@@ -449,9 +399,6 @@ def send_slack_buy_tuning_result(
     log_path: str | None = None,
 ) -> bool:
     """무한매수법(buy) 튜닝 결과를 Slack으로 전송합니다."""
-    client, channel_id = _get_slack_client()
-    if client is None or channel_id is None:
-        return False
 
     market_name = "🇺🇸 미국" if market.lower() == "us" else "🇰🇷 한국"
     params = best_result.get("params", {})
@@ -491,14 +438,6 @@ def send_slack_buy_tuning_result(
         blocks.append({"type": "divider"})
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": f"*상위 튜닝 결과*\n```{top_text}```"}})
 
-    try:
-        client.chat_postMessage(
-            channel=channel_id,
-            text=f"[{market_name}] 무한매수법 튜닝 완료 ({ended_at.date().isoformat()})",
-            blocks=blocks,
-        )
-        print(f" [SLACK] 무한매수법 튜닝 결과 Slack 알림 전송 완료 (channel={channel_id})")
-        return True
-    except Exception as e:
-        print(f" [SLACK] 무한매수법 튜닝 결과 Slack 전송 실패: {e}")
-        return False
+    return _post(
+        f"[{market_name}] 무한매수법 튜닝 완료 ({ended_at.date().isoformat()})", blocks, "무한매수법 튜닝 결과"
+    )
