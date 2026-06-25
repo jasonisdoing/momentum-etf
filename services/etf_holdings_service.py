@@ -66,15 +66,23 @@ def _is_cache_alive(cache_entry: dict[str, Any] | None, now: datetime) -> bool:
 
 
 def _create_naver_session() -> requests.Session:
-    session = requests.Session()
-    session.headers.update(
-        {
-            "User-Agent": DEFAULT_USER_AGENT,
-            "Referer": "https://stock.naver.com/",
-            "Accept": "application/json, text/plain, */*",
-        }
-    )
-    return session
+    """모듈 레벨 단일 Session 반환 (HTTP keep-alive 활용을 위해 재사용).
+
+    이전엔 호출마다 새 Session 을 만들어 매 종목 fetch 때 TCP/TLS handshake 가
+    누적되었다. 모듈 전역 Session 으로 connection pool 을 공유한다.
+    """
+    return _NAVER_SESSION
+
+
+_NAVER_SESSION = requests.Session()
+_NAVER_SESSION.headers.update(
+    {
+        "User-Agent": DEFAULT_USER_AGENT,
+        "Referer": "https://stock.naver.com/",
+        "Accept": "application/json, text/plain, */*",
+    }
+)
+_NAVER_SESSION.mount("https://", requests.adapters.HTTPAdapter(pool_connections=20, pool_maxsize=20))
 
 
 # Yahoo Finance 에서 쓰는 주요 거래소 접미사 화이트리스트.

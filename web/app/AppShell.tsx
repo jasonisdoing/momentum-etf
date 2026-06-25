@@ -64,13 +64,17 @@ const navGroups = [
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
+      { href: "/live-24h", label: "24H 시세", icon: "⏰" },
     ],
   },
   {
     id: "system",
     title: "시스템",
     icon: IconSettings,
-    items: [{ href: "/system", label: "정보", icon: IconSettings }],
+    items: [
+      { href: "/batch", label: "배치", icon: IconListDetails },
+      { href: "/settings", label: "설정", icon: IconSettings },
+    ],
   },
 ] as const;
 

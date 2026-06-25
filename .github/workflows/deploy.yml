@@ -63,13 +63,16 @@ jobs:
     steps:
       - name: Deploy to Oracle VM (pull & up)
         uses: appleboy/ssh-action@master
-        timeout-minutes: 10
+        # scheduler 컨테이너의 stop_grace_period (30분) 동안 진행 중 배치가 끝나길 기다리므로,
+        # 배포 액션 timeout 은 그것보다 충분히 커야 한다 (grace 30분 + 여유 10분 = 40분).
+        timeout-minutes: 40
         with:
           host: ${{ secrets.ORACLE_VM_HOST }}
           username: ${{ secrets.ORACLE_VM_USERNAME }}
           key: ${{ secrets.ORACLE_VM_SSH_KEY }}
           timeout: 60s
-          command_timeout: 8m
+          # scheduler 의 stop_grace_period(30m) + 여유. 8분이면 scheduler 교체 중 SSH 가 끊김.
+          command_timeout: 35m
           script: |
             set -euo pipefail
             echo ">>> Connecting to Oracle VM and starting deployment..."
@@ -94,6 +97,8 @@ jobs:
             # GHCR 이미지도 순차로 받는다. A1 1 OCPU에서는 병렬 pull/압축 해제가 배포 중 CPU 피크를 만든다.
             sudo docker compose pull fastapi_app
             sudo docker compose pull node_app
+            # scheduler 는 fastapi 와 같은 이미지를 쓰므로 pull 은 캐시 hit (실제 다운로드 없음).
+            sudo docker compose pull scheduler
             # 앱 서비스만 순차 교체한다. MongoDB는 배포마다 건드리지 않는다.
             sudo docker compose up -d --no-deps fastapi_app
             for i in $(seq 1 30); do
@@ -122,9 +127,12 @@ jobs:
               sleep 1
             done
             sudo docker compose up -d --no-deps hybrid_proxy
+            # scheduler 도 새 이미지로 재배포. fastapi 가 health check 통과한 다음에 띄워
+            # mongodb/fastapi 가 안정된 후 worker 가 큐 처리를 시작하도록 한다.
+            sudo docker compose up -d --no-deps scheduler
             # 이미지 정리는 배포 중 CPU/디스크 I/O 피크를 만들기 때문에 배포 경로에서는 실행하지 않는다.
-            # ⚠️ VM cron 자동 설치 비활성화. 모든 momentum-etf 자동 배치는 로컬(Mac) 의
-            # run_local_scheduler.py 에서 실행되므로 VM crontab 에 항목을 두지 않는다.
+            # ⚠️ VM cron 자동 설치 비활성화. 자동 배치는 서버 scheduler 컨테이너
+            # (`infra/server_scheduler.py`) 의 APScheduler 가 큐에 enqueue 한다.
             # 과거: bash infra/cron/install.sh (VM 1 OCPU 부하로 비활성)
             echo ">>> Oracle VM deployment completed."
 
@@ -168,7 +176,7 @@ jobs:
         if: ${{ failure() }}
         run: |
           curl -X POST -H 'Content-type: application/json' \
-            --data "{\"text\":\"❌ Oracle VM (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
+            --data "{\"text\":\"<!channel> ❌ Oracle VM (momentum-etf) 배포 실패 (branch: upgrade)\nRepo: ${{ github.repository }}\nCommit: ${{ github.sha }}\nDISK_FREE: ${{ steps.disk_usage.outputs.disk_free }}\nDISK_USE: ${{ steps.disk_usage.outputs.disk_use }}\"}" \
             ${{ secrets.LOGS_SLACK_WEBHOOK }}
 
       - name: Notify Slack on Failure
@@ -178,4 +186,5 @@ jobs:
           SLACK_WEBHOOK: ${{ secrets.LOGS_SLACK_WEBHOOK }}
           SLACK_COLOR: danger
           SLACK_TITLE: "❌ GitHub Action Failed: ${{ github.workflow }}"
-          SLACK_MESSAGE: "Job failed in ${{ github.repository }}! View run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_MESSAGE: "<!channel> Job failed in ${{ github.repository }}! View run: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          SLACK_LINK_NAMES: 1

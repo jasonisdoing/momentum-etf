@@ -2369,14 +2369,13 @@ a {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.75rem;
   min-height: 0;
-  flex: 1 1 auto;
+  align-items: start;
 }
 
 .assetChartsCard {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 34rem;
   overflow: hidden;
 }
 
@@ -2403,8 +2402,6 @@ a {
 }
 
 .assetChartsBody {
-  flex: 1 1 auto;
-  min-height: 28rem;
   padding: 0.5rem 0.75rem 0.75rem;
 }
 
@@ -2459,7 +2456,7 @@ a {
 
 .compareMatrix {
   display: grid;
-  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(12rem, 1fr));
+  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(11rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2467,7 +2464,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 4.75rem 6.8rem repeat(5, minmax(11rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(10rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2709,7 +2706,7 @@ a {
 }
 
 .compareMatrixWide {
-  grid-column: span 5;
+  grid-column: span 6;
   min-width: 0;
   padding: 1rem;
   border-bottom: 1px solid #d6deea;

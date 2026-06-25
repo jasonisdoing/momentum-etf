@@ -1,9 +1,15 @@
 import { fetchFastApiJson } from "./internal-api";
 
-type SystemSummaryRow = {
-  category: string;
-  count: number;
-  target: string;
+type SystemPoolRow = {
+  id: string;
+  order: number;
+  pool: string;
+  ticker_type: string;
+  country_code: string;
+  stock_count: number;
+  rising_count: number;
+  rising_ratio: number;
+  etf_count: number;
 };
 
 type SystemScheduleRow = {
@@ -29,7 +35,7 @@ type SystemRunningJobDetail = {
 };
 
 type SystemData = {
-  summary_rows: SystemSummaryRow[];
+  pool_rows: SystemPoolRow[];
   schedule_rows: SystemScheduleRow[];
   schedule_note: string;
   running_jobs: string[];
@@ -43,7 +49,8 @@ type SystemAction =
   | "market_hours_analysis"
   | "metadata_updater"
   | "asset_summary"
-  | "us_market_stocks";
+  | "us_market_stocks"
+  | "live_24h_slack";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");
@@ -63,5 +70,5 @@ export type {
   SystemLastRunInfo,
   SystemRunningJobDetail,
   SystemScheduleRow,
-  SystemSummaryRow,
+  SystemPoolRow,
 };

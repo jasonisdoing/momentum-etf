@@ -41,11 +41,11 @@
 python run_local_dev.py
 
 # 터미널 2 — 배치 스케줄러 (APScheduler)
-python run_local_scheduler.py
+python infra/server_scheduler.py
 ```
 
 - `run_local_dev.py` 는 FastAPI(`uvicorn`, 포트 8000) 와 Next dev(`npm run dev`, 포트 3000) 를 함께 띄웁니다.
-- `run_local_scheduler.py` 는 `infra/cron/crontab` 을 파싱해 APScheduler 로 자동 배치를 돌립니다.
+- `infra/server_scheduler.py` 는 `infra/cron/crontab` 을 파싱해 APScheduler 로 자동 배치를 돌립니다.
   - `APP_TYPE=Local` 로 자동 설정되어 `batch_locks` 의 owner 가 구분됩니다.
   - 노트북이 꺼져 있었던 시간의 누락 분은 따라잡지 않습니다 (다음 예약 시각부터 동작).
   - Ctrl+C 로 깔끔히 종료됩니다.

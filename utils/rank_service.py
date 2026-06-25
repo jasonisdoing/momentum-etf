@@ -297,6 +297,88 @@ def _build_missing_ticker_labels(ticker_type: str, missing_tickers: list[str]) -
     return labels
 
 
+def _build_missing_ticker_rows(
+    selected_ticker_type: str,
+    missing_tickers: list[str],
+    is_all: bool,
+) -> list[dict[str, Any]]:
+    """캐시 누락 ETF를 그리드에서 선택·삭제할 수 있도록 placeholder 행으로 만든다.
+
+    점수/순위 등 지표는 None(그리드에 "-")으로 두고, 식별·삭제에 필요한
+    티커/종목명/source_ticker_type 만 채운다. (캐시 누락으로 순위 계산이 막혀도
+    사용자가 신규 ETF를 제거할 수 있게 한다 — 경고 배너는 그대로 표시됨.)
+    """
+    if not missing_tickers:
+        return []
+
+    name_maps: dict[str, dict[str, str]] = {}
+
+    def _name_of(src: str, ticker: str) -> str:
+        cached = name_maps.get(src)
+        if cached is None:
+            cached = {
+                str(item.get("ticker") or "").strip().upper(): str(item.get("name") or "").strip()
+                for item in get_etfs(src)
+                if str(item.get("ticker") or "").strip()
+            }
+            name_maps[src] = cached
+        return cached.get(ticker, "")
+
+    rows: list[dict[str, Any]] = []
+    for entry in missing_tickers:
+        text = str(entry or "").strip()
+        if is_all and ":" in text:
+            source, _, ticker = text.partition(":")
+            source = source.strip().lower() or selected_ticker_type
+            ticker = ticker.strip().upper()
+        else:
+            source = selected_ticker_type
+            ticker = text.upper()
+        if not ticker:
+            continue
+        rows.append(
+            {
+                "티커": ticker,
+                "종목명": _name_of(source, ticker),
+                "source_ticker_type": source,
+                "순번": "-",
+                "순위": None,
+                "이전순위": None,
+                "1주순위": None,
+                "버킷": "",
+                "bucket": None,
+                "상장일": "-",
+                "분류": "",
+                "전체 분류": "",
+                "점수": None,
+                "보유": "",
+                "현재가": None,
+                "exclude_from_ranking": False,
+                "cache_missing": True,
+            }
+        )
+    return rows
+
+
+def _rows_with_missing_placeholders(
+    dataframe: pd.DataFrame,
+    selected_ticker_type: str,
+    is_all: bool,
+) -> list[dict[str, Any]]:
+    """직렬화된 행 + 캐시 누락 ETF placeholder 행. 누락 종목을 그리드에서 제거할 수 있게 한다."""
+    rows = _serialize_rows(dataframe)
+    missing = [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])]
+    if not missing:
+        return rows
+    existing = {str(row.get("티커") or "").strip().upper() for row in rows}
+    placeholders = [
+        row
+        for row in _build_missing_ticker_rows(selected_ticker_type, missing, is_all)
+        if str(row.get("티커") or "").strip().upper() not in existing
+    ]
+    return rows + placeholders
+
+
 def _get_nth_previous_trading_day(
     country_code: str,
     reference_date: pd.Timestamp | None,
@@ -658,7 +740,7 @@ def _compute_rank_data_payload(
             MONTHLY_RETURN_LABEL_COUNT,
             reference_date=effective_as_of_date,
         ),
-        "rows": _serialize_rows(dataframe),
+        "rows": _rows_with_missing_placeholders(dataframe, selected_ticker_type, is_all_ticker_type),
         "held_bonus_score": bonus_score,
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),

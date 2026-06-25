@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from config import (
+    ALLOWED_MA_TYPES,
     BUCKET_MAPPING,
     CACHE_START_DATE,
     MARKET_SCHEDULES,
@@ -26,7 +27,7 @@ from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
-ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
+# ALLOWED_MA_TYPES 는 config.py 가 단일 소스 — 여기서는 import 후 re-export(__all__) 만 한다.
 logger = get_app_logger()
 MONTHLY_RETURN_LABEL_COUNT = 13
 RSI_PERIOD = 14
