@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import threading
+import time as _time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -39,6 +42,12 @@ from utils.stock_list_io import get_active_holding_tickers, get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
+
+# 비교(/compare) 결과 캐시 — 같은 ETF 세트의 반복 로드/갱신이 매번 재계산·외부 API 호출을
+# 하지 않도록 짧은 TTL 로 캐시한다(타임아웃 후 재시도도 즉시 응답).
+_COMPARE_CACHE: dict[str, tuple[dict[str, object], float]] = {}
+_COMPARE_CACHE_LOCK = threading.Lock()
+_COMPARE_CACHE_TTL = 20.0
 
 
 def _load_us_pool_ticker_set() -> set[str]:
@@ -944,6 +953,23 @@ def get_ticker_detail_compare(
     raw_items = payload.get("items") if isinstance(payload, dict) else None
     items = [it for it in raw_items if isinstance(it, dict)] if isinstance(raw_items, list) else []
 
+    # 0) 결과 캐시 — 같은 ETF 세트면 TTL 내 재계산 없이 즉시 반환.
+    cache_key = json.dumps(
+        sorted(
+            (
+                str(it.get("ticker") or ""),
+                str(it.get("ticker_type") or ""),
+                str(it.get("country_code") or "kor"),
+            )
+            for it in items
+        )
+    )
+    now_ts = _time.time()
+    with _COMPARE_CACHE_LOCK:
+        cached = _COMPARE_CACHE.get(cache_key)
+        if cached and now_ts - cached[1] < _COMPARE_CACHE_TTL:
+            return cached[0]
+
     # 1) 한국 ETF 구성종목 합집합 → 공유 가격 스냅샷 1회 구성 (build_component_price_snapshot 가 중복 제거)
     union_holdings: list[dict[str, object]] = []
     for item in items:
@@ -969,4 +995,7 @@ def get_ticker_detail_compare(
                 use_bundle_cache=False,
             )
         )
-    return {"results": results}
+    result = {"results": results}
+    with _COMPARE_CACHE_LOCK:
+        _COMPARE_CACHE[cache_key] = (result, now_ts)
+    return result
