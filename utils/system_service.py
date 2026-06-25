@@ -22,6 +22,7 @@ SystemAction = Literal[
     "asset_summary",
     "us_market_stocks",
     "live_24h_slack",
+    "leverage_switch",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -95,6 +96,14 @@ SCHEDULE_ROWS = [
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
+    {
+        "key": "leverage_switch",
+        "job": "레버리지 스위칭 추천",
+        "target": "한국 레버리지 ETF (switch)",
+        "cadence": "평일 09:05 ~ 16:05 매시 5분 KST",
+        "command": "python scripts/leverage_recommend_switch.py",
+        "schedule": {"minutes": [5], "hours": list(range(9, 17)), "weekdays": _WEEKDAYS_MON_FRI},
+    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -106,6 +115,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
+    "leverage_switch": "scripts/leverage_recommend_switch.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
