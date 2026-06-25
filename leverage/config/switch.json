@@ -1,0 +1,63 @@
+{
+    "backtested_date": "2026-06-25",
+    "strategy": "switch",
+    "market": "kor",
+    "months_range": 12,
+    "signal": {
+        "ticker": "226490",
+        "name": "KODEX 코스피"
+    },
+    "offense": {
+        "ticker": "243880",
+        "name": "TIGER 200IT레버리지"
+    },
+    "defense": {
+        "ticker": "237350",
+        "name": "KODEX 코스피100"
+    },
+    "slippage": 0.5,
+    "drawdown_buy_cutoff": 3.0,
+    "drawdown_sell_cutoff": 5.0,
+    "benchmarks": [
+        {
+            "ticker": "226490",
+            "name": "KODEX 코스피"
+        },
+        {
+            "ticker": "069500",
+            "name": "KODEX 200"
+        },
+        {
+            "ticker": "122630",
+            "name": "KODEX 레버리지"
+        },
+        {
+            "ticker": "161510",
+            "name": "PLUS 고배당주"
+        },
+        {
+            "ticker": "091170",
+            "name": "KODEX 은행"
+        },
+        {
+            "ticker": "279530",
+            "name": "KODEX 고배당주"
+        },
+        {
+            "ticker": "484880",
+            "name": "SOL 금융지주플러스고배당"
+        },
+        {
+            "ticker": "140700",
+            "name": "KODEX 보험"
+        },
+        {
+            "ticker": "000660",
+            "name": "SK 하이닉스"
+        },
+        {
+            "ticker": "243880",
+            "name": "TIGER 200IT레버리지"
+        }
+    ]
+}
