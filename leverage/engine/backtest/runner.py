@@ -1,8 +1,5 @@
 """백테스트 핵심 로직."""
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -11,6 +8,7 @@ from leverage.constants import INITIAL_CAPITAL_KRW
 from leverage.data_adapter import (
     _extract_field,
     compute_bounds,
+    current_trading_day,
     download_fx,
     download_opens,
     download_prices,
@@ -52,8 +50,8 @@ def run_backtest(
     # 장중(미완성 봉) 제외: 신호는 "마지막으로 닫힌 거래일 종가"로만 확정한다.
     # drop_today=True 이면 오늘(현지 기준) 세션을 신호 계산에서 제외한다.
     if drop_today and len(common_index) > 0:
-        kst_today = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date())
-        common_index = common_index[common_index < kst_today]
+        cutoff = current_trading_day(settings.get("market", "kor"))
+        common_index = common_index[common_index < cutoff]
         if len(common_index) == 0:
             raise ValueError("오늘 세션을 제외하면 사용할 수 있는 거래일이 없습니다.")
 
