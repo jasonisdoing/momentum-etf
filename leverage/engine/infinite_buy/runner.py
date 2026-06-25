@@ -11,14 +11,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
 import numpy as np
 import pandas as pd
 
 from leverage.constants import INITIAL_CAPITAL_KRW
-from leverage.data_adapter import compute_bounds, download_opens, download_prices
+from leverage.data_adapter import compute_bounds, current_trading_day, download_opens, download_prices
 from leverage.report import format_kr_money, render_table_eaw
 
 
@@ -172,8 +169,8 @@ def _load_target_series(settings: dict, drop_today: bool = False):
 
     index = full_index
     if drop_today and len(index) > 0:
-        kst_today = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date())
-        index = index[index < kst_today]
+        cutoff = current_trading_day(settings.get("market", "kor"))
+        index = index[index < cutoff]
     if len(index) == 0:
         raise ValueError("대상 종목의 거래 데이터가 비어 있습니다. 기간/티커 설정을 확인하세요.")
 
