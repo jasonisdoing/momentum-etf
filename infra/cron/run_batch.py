@@ -72,6 +72,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "us_market_stocks",
     "data_aggregate",
     "live_24h_slack",
+    "leverage_switch",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
