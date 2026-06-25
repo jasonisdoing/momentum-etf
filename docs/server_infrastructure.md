@@ -83,7 +83,13 @@ location = /robots.txt {
 
 1 OCPU ARM VM 에서 배치 실행 시 CPU 100% 폭주로 시스템 다운이 반복돼,
 momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.sh --uninstall`).
-같은 VM 의 `leverage-switching` cron 은 영향받지 않는다.
+
+> **leverage-switching 앱 통합(2026-06)**: 같은 VM 에서 별도 호스트 cron 으로 돌던
+> `leverage-switching`(레버리지 스위칭) 앱은 폐기되었고, 전략이 momentum-etf 의
+> `leverage/` 패키지로 이전되었다. 추천 배치는 momentum-etf 배치 체계의 `leverage_switch`
+> 잡(`scripts/leverage_recommend_switch.py`)으로 편입되어 동일한 crontab·스케줄러·큐로 실행된다.
+> 상세는 [leverage_migration.md](leverage_migration.md). leverage-switching VM cron 제거는
+> `bash ~/apps/leverage-switching/infra/cron/install.sh --uninstall`.
 
 ### 로컬 스케줄러로 전환
 

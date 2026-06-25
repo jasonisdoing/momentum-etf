@@ -1,7 +1,4 @@
-"""백테스트 실행 엔트리 포인트.
-
-전략 프로파일(switch/buy)을 인자로 받는다. 시장은 config 의 'market' 필드로 결정된다.
-"""
+"""백테스트 실행 엔트리 포인트 (스위칭 전략). 시장은 config 의 'market' 필드로 결정된다."""
 
 import sys
 from datetime import datetime
@@ -9,7 +6,6 @@ from datetime import datetime
 from leverage.constants import CONFIG_DIR, INITIAL_CAPITAL_KRW, ZRESULTS_DIR
 from leverage.engine.backtest.runner import run_backtest
 from leverage.engine.backtest.settings import load_settings
-from leverage.engine.infinite_buy.runner import run_buy_backtest
 
 
 def main() -> None:
@@ -23,10 +19,7 @@ def main() -> None:
 
     settings = load_settings(config_path)
     try:
-        if settings["strategy"] == "buy":
-            _run_buy(profile, settings)
-        else:
-            _run_switch(profile, settings)
+        _run_switch(profile, settings)
     except Exception as exc:
         if "YFRateLimitError" in repr(exc) or "rate limit" in repr(exc).lower():
             print("YFRateLimitError: 요청이 너무 많습니다. 잠시 후 다시 실행하세요.")
@@ -86,37 +79,6 @@ def _run_switch(profile: str, settings: dict) -> None:
         for line in report["bench_table_lines"]:
             print(line)
 
-    print(f"백테스트 결과 저장: {out_path}")
-
-
-def _run_buy(profile: str, settings: dict) -> None:
-    report = run_buy_backtest(settings)
-
-    out_dir = ZRESULTS_DIR / profile
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"backtest_{datetime.now().date()}.log"
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(f"백테스트 로그 생성: {datetime.now().isoformat()}\n")
-        f.write(f"프로파일: {profile}(무한매수법) | 초기자본: {INITIAL_CAPITAL_KRW:,}\n")
-        f.write(f"시작일: {report['start']} | 종료일: {report['end']}\n\n")
-        f.write("=== 일자별 상세 ===\n")
-        for line in report["daily_log"]:
-            f.write(line + "\n")
-        f.write("\n")
-        for line in report["used_settings_lines"]:
-            f.write(line + "\n")
-        f.write("\n=== 종목 요약 ===\n")
-        for line in report["asset_summary_lines"]:
-            f.write(line + "\n")
-        f.write("\n=== 성과 요약 ===\n")
-        for line in report["summary_lines"]:
-            f.write(line + "\n")
-
-    print(f"=== Backtest 결과 ({profile} / 무한매수법) ===")
-    print("\n".join(report["asset_summary_lines"]))
-    print("\n".join(report["summary_lines"]))
-    rec = report["recommendation"]
-    print(f"\n오늘의 행동: [{rec['action']}] {rec['message']}")
     print(f"백테스트 결과 저장: {out_path}")
 
 
