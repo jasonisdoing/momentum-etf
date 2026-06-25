@@ -61,7 +61,8 @@ type SystemJobKey =
   | "market_hours_analysis"
   | "metadata_updater"
   | "asset_summary"
-  | "us_market_stocks";
+  | "us_market_stocks"
+  | "leverage_switch";
 
 type BatchQueueItem = {
   id: string;
