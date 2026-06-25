@@ -41,12 +41,13 @@
 - 자동: 서버 scheduler 가 crontab 의 `leverage_switch` 를 enqueue → worker 실행
 
 ## 4. 남은 작업
-1. **UI 서브메뉴** — recommend 결과(dict)를 보여줄 FastAPI route(`fastapi_app/routes/leverage.py`) + service(`utils/leverage_service.py`) + Next 페이지(`web/app/leverage-switching/`) + `AppShell.tsx` 메뉴. (momentum-etf 패턴: market-trend 라우트/서비스/페이지 복제)
-2. **설정 파일 → DB/UI 전환** — `leverage/config/*.json` → momentum-etf 설정 시스템(settings_loader/DB)으로. UI 에서 파라미터 편집.
+1. **UI 서브메뉴** — recommend 결과(dict)를 보여줄 FastAPI route(`fastapi_app/routes/leverage.py`) + service(`utils/leverage_service.py`) + Next 페이지 + 메뉴. (momentum-etf 패턴: market-trend 라우트/서비스/페이지 복제)
+   - 사이드바 **레버리지 그룹 + "설정" 메뉴**(`/leverage-settings`, `web/app/leverage-settings/`)는 **빈 페이지로 추가됨**. 내용 구현 남음.
+2. **설정 파일 → DB/UI 전환** — `leverage/config/switch.json` → momentum-etf 설정 시스템(settings_loader/DB)으로. UI 에서 파라미터 편집.
 3. **`tune.py` 검증** — momentum-etf 데이터로 `python -m leverage.tune switch` 1회 확인(현재 backtest/recommend 만 검증됨).
-4. **leverage-switching 앱 폐기 마무리** — VM 에서 `install.sh --uninstall`, repo 아카이브.
 
 (완료: 문서 갱신 — `docs/server_infrastructure.md` 에 leverage 배치 반영됨.
+ 완료: leverage-switching 앱 폐기 — VM `install.sh --uninstall` + repo 아카이브 (수동, 2026-06).
  결정/완료: 무한매수법(buy)은 운영 안 함 → 코드·설정·문서에서 제거.)
 
 ## 5. 주의/참고
