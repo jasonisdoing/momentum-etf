@@ -68,6 +68,14 @@ const navGroups = [
     ],
   },
   {
+    id: "leverage",
+    title: "레버리지",
+    icon: IconChartLine,
+    items: [
+      { href: "/leverage-settings", label: "설정", icon: IconSettings },
+    ],
+  },
+  {
     id: "system",
     title: "시스템",
     icon: IconSettings,
