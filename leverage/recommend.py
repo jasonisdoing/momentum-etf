@@ -6,8 +6,7 @@ from zoneinfo import ZoneInfo
 from leverage.constants import CONFIG_DIR, MARKET_SCHEDULES, STATE_DIR, ZRESULTS_DIR
 from leverage.engine.backtest.runner import run_backtest
 from leverage.engine.backtest.settings import load_settings
-from leverage.engine.infinite_buy.runner import run_buy_backtest
-from leverage.notify import send_slack_buy_recommendation, send_slack_recommendation
+from leverage.notify import send_slack_recommendation
 
 
 def get_market_status(market: str) -> str:
@@ -128,7 +127,7 @@ def _build_ticker_names(settings: dict, prev_state: dict, display_target: str | 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="추천 실행 엔트리 포인트")
-    parser.add_argument("profile", nargs="?", default="switch", help="전략 프로파일 (switch/buy)")
+    parser.add_argument("profile", nargs="?", default="switch", help="전략 프로파일 (switch)")
     parser.add_argument("--slack", action="store_true", help="결과를 Slack으로 전송")
     args = parser.parse_args()
 
@@ -149,10 +148,7 @@ def main() -> None:
     print(f"[{profile}] 실행 시작 (현지시각: {now_local}, status: {status} [{market_phase}], slack={args.slack})")
 
     try:
-        if settings["strategy"] == "buy":
-            _recommend_buy(profile, settings, market, status, market_phase, args)
-        else:
-            _recommend_switch(profile, settings, market, status, market_phase, args)
+        _recommend_switch(profile, settings, market, status, market_phase, args)
     except Exception as exc:
         if "YFRateLimitError" in repr(exc) or "rate limit" in repr(exc).lower():
             print("YFRateLimitError: 요청이 너무 많습니다. 잠시 후 다시 실행하세요.")
@@ -378,100 +374,6 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
             warning_target_display=warning_target_display,
             market_phase=market_phase,
         )
-
-
-def _recommend_buy(profile: str, settings: dict, market: str, status: str, market_phase: str, args) -> None:
-    is_warning = status == "OPEN"
-
-    # 장중에는 오늘 미완성 봉을 제외하고 마지막으로 닫힌 거래일까지로 행동을 확정한다.
-    report = run_buy_backtest(settings, drop_today=is_warning)
-    rec = report["recommendation"]
-    end_date = report["end"]
-    target_display = _format_display_name(settings["target_ticker"], settings["target_name"])
-
-    prev_state = load_previous_state(profile)
-    prev_action = prev_state.get("action")
-    is_changed = (not is_warning) and (prev_action is not None) and (prev_action != rec["action"])
-
-    if status != "OPEN":
-        save_current_state(
-            profile,
-            {
-                "date": end_date,
-                "action": rec["action"],
-                "buys_done": rec["buys_done"],
-                "avg": rec["avg"],
-                "updated_at": datetime.now().isoformat(),
-            },
-        )
-
-    price_fmt = ",.0f" if market == "kor" else ",.2f"
-    suffix = "원" if market == "kor" else ""
-
-    def _p(v):
-        return f"{format(v, price_fmt)}{suffix}" if v else "-"
-
-    # 장중(C안): 행동/평단은 종가 확정 유지, '현재가'만 오늘 실시간값으로 표시
-    live_close = report["meta"].get("live_close") if is_warning else None
-    if live_close:
-        price_line = f"  현재가: {_p(live_close)} (장중 실시간)"
-    else:
-        price_line = f"  현재가(종가): {_p(rec['last_close'])}"
-
-    table_lines = [
-        f"🎯 {target_display}",
-        f"  진행: {rec['buys_done']}/{rec['divisions']}회차",
-        f"  평단: {_p(rec['avg'])}",
-        price_line,
-        f"  익절 목표가: {_p(rec['target_price'])}",
-    ]
-
-    strategy_meta = {
-        "divisions": settings["divisions"],
-        "take_profit_pct": settings["take_profit_pct"],
-        "cagr": report["cagr"],
-        "mdd": report["mdd"],
-        "cycles": report["cycles"],
-        "period_start": report["meta"]["period_start"],
-        "period_end": report["meta"]["period_end"],
-    }
-
-    out_dir = ZRESULTS_DIR / profile
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / f"recommend_{datetime.now().date()}.log"
-    with out_path.open("w", encoding="utf-8") as f:
-        f.write(f"추천 로그 생성: {datetime.now().isoformat()}\n")
-        f.write(f"프로파일: {profile}(무한매수법) | 시장: {market}\n\n")
-        f.write("=== 추천 ===\n")
-        for line in table_lines:
-            f.write(line + "\n")
-        f.write(f"\n[INFO] 기준일: {end_date}\n")
-
-    print(f"\n추천 결과 저장: {out_path}")
-    if is_changed:
-        print(f"⚠️ 행동 변경 감지: {prev_action} -> {rec['action']}")
-    else:
-        print(f"ℹ️ 행동: {rec['action']}")
-
-    print("\n=== Slack 전송 요약 ===")
-    for line in table_lines:
-        print(line)
-    print(f"🛒 오늘 행동: [{rec['action']}] {rec['message']}")
-    print("========================\n")
-
-    if args.slack:
-        send_slack_buy_recommendation(
-            market=market,
-            as_of=end_date,
-            target_display=target_display,
-            recommendation=rec,
-            table_lines=table_lines,
-            strategy_meta=strategy_meta,
-            is_changed=is_changed,
-            is_warning=is_warning,
-            market_phase=market_phase,
-        )
-
 
 if __name__ == "__main__":
     main()

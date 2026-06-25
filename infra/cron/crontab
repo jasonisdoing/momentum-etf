@@ -39,7 +39,3 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 장중에는 현재가만 실시간, 신호/포지션은 어제 종가 확정.
 # (스케줄러는 무인자 스크립트만 실행하므로 scripts/ 래퍼를 통해 호출한다.)
 5 9-16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_switch python scripts/leverage_recommend_switch.py >> logs/cron/leverage_switch.log 2>&1
-# ⏸️ 무한매수법(buy)은 현재 미사용이라 cron 라인을 두지 않는다.
-#    (이 스케줄러는 주석 처리된 cron 라인도 활성으로 파싱하므로, 라인 자체를 넣으면 안 됨)
-#    재개: leverage_switch 줄을 복사해 job 을 leverage_buy, 스크립트를
-#    scripts/leverage_recommend_buy.py 로 바꾼 cron 라인을 추가하면 된다.

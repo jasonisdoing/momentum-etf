@@ -34,6 +34,11 @@
 3.  **서비스 계층 (`services/price_service.py`, `services/reference_data_service.py`, `services/etf_holdings_service.py`)**: 실시간 가격/환율, 저빈도 참조 데이터, 한국 ETF 구성종목 조회의 공식 진입점을 제공합니다.
 4.  **데이터 계층 (`utils/cache_utils.py`, `utils/data_loader.py`, `utils/stock_list_io.py`, `utils/stock_cache_meta_io.py`, `utils/account_notes.py`)**: 가격 캐시, 종목 메타, 종목 메타 캐시, 실제 보유 데이터와 계좌 메모를 읽습니다.
 
+> **부가 전략 모듈 (`leverage/`)**: 별도 앱 `leverage-switching` 에서 이전된 레버리지 스위칭 전략 패키지입니다.
+> 자체 엔진(`leverage/engine/`)을 두되, 시세는 `data_adapter` 로 `utils.data_loader` 를, Slack 은 `utils.notification` 을 재사용합니다.
+> 추천은 `leverage_switch` 배치(`scripts/leverage_recommend_switch.py`)와 `/batch` 수동 트리거로 실행됩니다.
+> 상세는 [leverage_migration.md](leverage_migration.md).
+
 ### 서비스 계층 역할
 
 *   **`services/price_service.py`**: 한국/호주 실시간 가격과 USD/AUD 환율 조회를 통합하고 TTL 캐시를 관리합니다.
