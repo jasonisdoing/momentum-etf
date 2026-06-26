@@ -254,9 +254,9 @@ def run_tuning(
 ) -> tuple[list[dict], dict]:
     start_ts = datetime.now()
 
-    # config_path가 주어지면 해당 파일 사용, 아니면 기본값
+    # 설정은 호출자가 파일 경로로 명시해야 한다(임의 기본 경로 없음).
     if config_path is None:
-        config_path = Path("config/switch.json")
+        raise ValueError("run_tuning: config_path 가 필요합니다.")
     settings = load_settings(config_path)
 
     market = settings.get("market", "us")

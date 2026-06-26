@@ -35,7 +35,7 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 0 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py live_24h_slack python scripts/live_24h_slack.py >> logs/cron/live_24h_slack.log 2>&1
 
 # ── leverage 스위칭 전략 (한국, 월-금) ─────────────────────────────
-# 09:05~16:05 KST 매시간 5분. 저장된 leverage/config/switch.json 기준 추천만 실행.
+# 09:05~16:05 KST 매시간 5분. DB(leverage_config) 저장 설정 기준 추천만 실행.
 # 장중에는 현재가만 실시간, 신호/포지션은 어제 종가 확정.
 # (스케줄러는 무인자 스크립트만 실행하므로 scripts/ 래퍼를 통해 호출한다.)
 5 9-16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_switch python scripts/leverage_recommend_switch.py >> logs/cron/leverage_switch.log 2>&1

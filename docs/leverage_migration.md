@@ -14,10 +14,10 @@
 ### 2.1 전략 코어 패키지 — `leverage/`
 - `leverage/engine/` — 엔진(backtest/runner.py, signals.py, settings.py, tune/runner.py). 원본 `logic/` 를 그대로 이식.
 - `leverage/data_adapter.py` — **핵심 글루**. 원본 `data.py`(pykrx/yfinance 직접) 대신 momentum-etf `utils.data_loader.fetch_ohlcv(ticker_type="etf")` 로 시/종가 조회. `current_trading_day()`(=`get_latest_trading_day`), `realtime_price()`(=`fetch_naver_realtime_price`) 제공.
-- `leverage/constants.py` — `INITIAL_CAPITAL_KRW`, `MARKET_SCHEDULES`, 경로 상수(`CONFIG_DIR/ZRESULTS_DIR/STATE_DIR`).
+- `leverage/constants.py` — `INITIAL_CAPITAL_KRW`, `MARKET_SCHEDULES`, 경로 상수(`ZRESULTS_DIR`). 설정·상태는 DB 이관으로 `CONFIG_DIR/STATE_DIR` 제거됨.
 - `leverage/notify.py` — Slack 전송을 momentum-etf `utils.notification.send_slack_message_v2` 로 위임(블록 구성 로직은 유지).
 - `leverage/report.py` — 표/금액 포맷(원본 utils/report.py).
-- `leverage/config/switch.json` — 전략 설정(파일 기반, 추후 DB화).
+- 전략 설정·상태 — DB 단일 소스(`leverage_config`/`leverage_state` 컬렉션, `leverage/config_store.py`). 옛 파일(`leverage/config/switch.json`, `leverage/state/last_recommendation_switch.json`)은 제거됨. 설정이 DB 에 없으면 임의 기본값 없이 에러(loud fail).
 - `leverage/{backtest,recommend,tune}.py` — CLI 엔트리. 실행: `python -m leverage.backtest switch` 등.
 
 ### 2.2 검증
@@ -41,10 +41,9 @@
 - 자동: 서버 scheduler 가 crontab 의 `leverage_switch` 를 enqueue → worker 실행
 
 ## 4. 남은 작업
-1. **UI 서브메뉴** — recommend 결과(dict)를 보여줄 FastAPI route(`fastapi_app/routes/leverage.py`) + service(`utils/leverage_service.py`) + Next 페이지 + 메뉴. (momentum-etf 패턴: market-trend 라우트/서비스/페이지 복제)
-   - 사이드바 **레버리지 그룹 + "설정" 메뉴**(`/leverage-settings`, `web/app/leverage-settings/`)는 **빈 페이지로 추가됨**. 내용 구현 남음.
-2. **설정 파일 → DB/UI 전환** — `leverage/config/switch.json` → momentum-etf 설정 시스템(settings_loader/DB)으로. UI 에서 파라미터 편집.
-3. **`tune.py` 검증** — momentum-etf 데이터로 `python -m leverage.tune switch` 1회 확인(현재 backtest/recommend 만 검증됨).
+1. ~~**UI 서브메뉴**~~ — **완료**. 설정·상태 조회 route(`fastapi_app/routes/leverage.py`) + service(`utils/leverage_service.py`) + Next 페이지(`web/app/leverage-settings/`) + 사이드바 레버리지 그룹/설정 메뉴 구현됨.
+2. ~~**설정 파일 → DB/UI 전환**~~ — **완료**. `switch.json`/상태 파일 → DB(`leverage_config`/`leverage_state`) 단일 소스로 이관, 레버리지-설정 화면에서 편집/저장. 설정 누락 시 임의 기본값 없이 에러(silent fallback 제거). 옛 파일 제거됨.
+3. **`tune.py` 검증** — momentum-etf 데이터로 `python -m leverage.tune switch` 1회 확인(현재 backtest/recommend 만 검증됨). 튜닝은 DB 설정을 임시 파일로 엔진에 전달 후 결과를 DB 에 저장한다.
 
 (완료: 문서 갱신 — `docs/server_infrastructure.md` 에 leverage 배치 반영됨.
  완료: leverage-switching 앱 폐기 — VM `install.sh --uninstall` + repo 아카이브 (수동, 2026-06).

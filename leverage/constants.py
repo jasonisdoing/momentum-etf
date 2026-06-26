@@ -3,11 +3,9 @@
 from datetime import time
 from pathlib import Path
 
-# leverage 패키지 루트 (config/zresults/state 등 상대경로 기준점)
+# leverage 패키지 루트 (zresults 등 상대경로 기준점). 설정·상태는 DB 가 단일 소스.
 LEVERAGE_DIR = Path(__file__).resolve().parent
-CONFIG_DIR = LEVERAGE_DIR / "config"
 ZRESULTS_DIR = LEVERAGE_DIR / "zresults"
-STATE_DIR = LEVERAGE_DIR / "state"
 
 # 백테스트 시뮬레이션 시작 기준일 (start_date 미지정 시 사용하지 않음; 참고용)
 SIMULATION_START_DATE = "2020-01-01"
