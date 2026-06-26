@@ -15,6 +15,7 @@ from leverage.config_store import (
 )
 from leverage.engine.backtest.settings import normalize_settings
 from leverage.holding import count_holding_trading_days
+from leverage.tuning_config import validate_tuning_section
 
 
 def load_leverage_settings(profile: str = "switch") -> dict[str, Any]:
@@ -56,6 +57,10 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
     for entry in benchmarks:
         if not isinstance(entry, dict) or not str(entry.get("ticker") or "").strip():
             raise ValueError("벤치마크 항목에 티커가 필요합니다.")
+
+    # 튜닝 탐색 공간(있으면) 검증 — tune.py 와 동일한 공통 검증기를 사용.
+    if "tuning" in config:
+        validate_tuning_section(config.get("tuning"))
 
     # 엔진 정규화로 추가 검증 (사본으로 — 파생 키가 저장값에 섞이지 않게).
     normalize_settings(dict(config))

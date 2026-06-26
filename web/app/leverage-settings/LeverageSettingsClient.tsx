@@ -7,6 +7,17 @@ import { useToast } from "../components/ToastProvider";
 
 type AssetRef = { ticker: string; name?: string };
 
+type CutoffRange = { min?: number; max?: number; step?: number };
+
+type TuningConfig = {
+  offense_candidates?: AssetRef[];
+  defense_candidates?: AssetRef[];
+  buy_cutoff_range?: CutoffRange;
+  sell_cutoff_range?: CutoffRange;
+};
+
+type CandidateKey = "offense_candidates" | "defense_candidates";
+
 type LeverageConfig = {
   backtested_date?: string;
   strategy?: string;
@@ -20,8 +31,17 @@ type LeverageConfig = {
   drawdown_buy_cutoff?: number;
   drawdown_sell_cutoff?: number;
   benchmarks?: AssetRef[];
+  tuning?: TuningConfig;
   [key: string]: unknown;
 };
+
+/** min~max(끝값 포함)를 step 간격으로 나열 (백엔드 _arange_inclusive 와 동일 의미). */
+function rangeValues(r?: CutoffRange): number[] {
+  if (!r || r.min == null || r.max == null || !r.step || r.step <= 0 || r.max < r.min) return [];
+  const out: number[] = [];
+  for (let v = r.min; v <= r.max + r.step / 2; v += r.step) out.push(Number(v.toFixed(4)));
+  return out;
+}
 
 type LeverageState = {
   date?: string;
@@ -125,7 +145,7 @@ export function LeverageSettingsClient() {
     }), []);
 
   const resolveTickerName = useCallback(async (
-    type: "signal" | "offense" | "defense" | "benchmark",
+    type: "signal" | "offense" | "defense" | "benchmark" | CandidateKey,
     value: string,
     index?: number
   ) => {
@@ -133,6 +153,8 @@ export function LeverageSettingsClient() {
     setNotice(null);
     const cleanTicker = value.trim();
     if (!cleanTicker) return;
+
+    const isCandidate = type === "offense_candidates" || type === "defense_candidates";
 
     // 벤치마크 내 중복 검사
     if (type === "benchmark" && config?.benchmarks) {
@@ -145,11 +167,29 @@ export function LeverageSettingsClient() {
       }
     }
 
-    const { name, error: fetchError } = await fetchTickerName(cleanTicker);
+    // 후보군 내 중복 검사
+    if (isCandidate && config?.tuning) {
+      const list = config.tuning[type as CandidateKey] ?? [];
+      const isDuplicate = list.some(
+        (c, idx) => c.ticker.trim().toUpperCase() === cleanTicker.toUpperCase() && idx !== index && c.name
+      );
+      if (isDuplicate) {
+        toast.error("이미 등록된 후보 종목입니다.");
+        return;
+      }
+    }
 
-    if (fetchError) {
-      toast.error(fetchError);
-      return;
+    // 현금(CASH)은 종목풀에 없으므로 조회 없이 허용 (방어 후보 전용)
+    let name: string;
+    if (cleanTicker.toUpperCase() === "CASH") {
+      name = "현금";
+    } else {
+      const resolved = await fetchTickerName(cleanTicker);
+      if (resolved.error) {
+        toast.error(resolved.error);
+        return;
+      }
+      name = resolved.name;
     }
 
     if (type === "benchmark" && index !== undefined) {
@@ -164,7 +204,21 @@ export function LeverageSettingsClient() {
       if (success) {
         toast.success(`[벤치마크] ${name}(${cleanTicker}) 추가 및 저장 완료`);
       }
-    } else if (type !== "benchmark") {
+    } else if (isCandidate && index !== undefined) {
+      if (!config) return;
+      const listKey = type as CandidateKey;
+      const list = [...(config.tuning?.[listKey] ?? [])];
+      list[index] = { ticker: cleanTicker, name };
+      const updated = { ...config, tuning: { ...(config.tuning ?? {}), [listKey]: list } };
+
+      setConfig(updated);
+
+      const success = await saveConfigDirect(updated);
+      if (success) {
+        const label = listKey === "offense_candidates" ? "공격 후보" : "방어 후보";
+        toast.success(`[${label}] ${name}(${cleanTicker}) 추가 및 저장 완료`);
+      }
+    } else if (type === "signal" || type === "offense" || type === "defense") {
       setAsset(type, "name", name);
       toast.success(`[추천] ${name}(${cleanTicker}) 확인 완료`);
     }
@@ -172,7 +226,7 @@ export function LeverageSettingsClient() {
 
   const handleKeyDown = useCallback((
     e: React.KeyboardEvent<HTMLInputElement>,
-    type: "signal" | "offense" | "defense" | "benchmark",
+    type: "signal" | "offense" | "defense" | "benchmark" | CandidateKey,
     value: string,
     index?: number
   ) => {
@@ -222,6 +276,33 @@ export function LeverageSettingsClient() {
   const numField = (key: keyof LeverageConfig, raw: string) =>
     setField(key, raw === "" ? undefined : Number(raw));
 
+  // ── 튜닝 탐색 공간 핸들러 ──
+  const setTuning = (updater: (t: TuningConfig) => TuningConfig) =>
+    setConfig((c) => (c ? { ...c, tuning: updater(c.tuning ?? {}) } : c));
+
+  const addCandidate = (listKey: CandidateKey) =>
+    setTuning((t) => ({ ...t, [listKey]: [...(t[listKey] ?? []), { ticker: "", name: "" }] }));
+
+  const setCandidate = (listKey: CandidateKey, i: number, field: "ticker" | "name", value: string) =>
+    setTuning((t) => {
+      const list = [...(t[listKey] ?? [])];
+      list[i] = { ...list[i], [field]: value };
+      return { ...t, [listKey]: list };
+    });
+
+  const removeCandidate = useCallback(async (listKey: CandidateKey, i: number) => {
+    if (!config) return;
+    const list = (config.tuning?.[listKey] ?? []).filter((_, idx) => idx !== i);
+    const updated = { ...config, tuning: { ...(config.tuning ?? {}), [listKey]: list } };
+    const success = await saveConfigDirect(updated);
+    if (success) {
+      toast.success("[튜닝 후보] 종목 삭제 및 저장 완료");
+    }
+  }, [config, saveConfigDirect, toast]);
+
+  const setRange = (key: "buy_cutoff_range" | "sell_cutoff_range", field: "min" | "max" | "step", raw: string) =>
+    setTuning((t) => ({ ...t, [key]: { ...(t[key] ?? {}), [field]: raw === "" ? undefined : Number(raw) } }));
+
   const save = async () => {
     if (!config) return;
     const success = await saveConfigDirect(config);
@@ -257,6 +338,70 @@ export function LeverageSettingsClient() {
       </div>
     </FieldRow>
   );
+
+  const candidateList = (listKey: CandidateKey, label: string) => {
+    const list = config?.tuning?.[listKey] ?? [];
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <span style={{ fontWeight: 700, color: "#334155" }}>{label} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({list.length})</span></span>
+          <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => addCandidate(listKey)}>+ 추가</button>
+        </div>
+        {list.map((c, i) => {
+          const isExisting = !!c.name;
+          return (
+            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", padding: "4px 0", flexWrap: "wrap" }}>
+              <input
+                style={{ ...inputStyle, width: 110, backgroundColor: isExisting ? "#f8fafc" : undefined, color: isExisting ? "#64748b" : undefined, cursor: isExisting ? "not-allowed" : undefined }}
+                placeholder="티커"
+                value={c.ticker ?? ""}
+                onChange={(e) => setCandidate(listKey, i, "ticker", e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, listKey, e.currentTarget.value, i)}
+                readOnly={isExisting}
+              />
+              {!isExisting && (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary"
+                  style={{ padding: "4px 8px", fontSize: "0.82rem" }}
+                  onClick={() => void resolveTickerName(listKey, c.ticker ?? "", i)}
+                >
+                  확인
+                </button>
+              )}
+              <input
+                style={{ ...inputStyle, flex: 1, minWidth: 120, backgroundColor: "#f8fafc", color: "#64748b", cursor: "not-allowed" }}
+                placeholder="이름 (티커 입력 후 확인)"
+                value={c.name ?? ""}
+                readOnly
+              />
+              <button type="button" className="btn btn-sm btn-outline-danger" onClick={() => removeCandidate(listKey, i)}>삭제</button>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const rangeEditor = (key: "buy_cutoff_range" | "sell_cutoff_range", label: string) => {
+    const r = config?.tuning?.[key];
+    return (
+      <FieldRow label={label}>
+        {(["min", "max", "step"] as const).map((f) => (
+          <span key={f} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>{f}</span>
+            <input
+              type="number"
+              step="0.1"
+              style={{ ...inputStyle, width: 70 }}
+              value={r?.[f] ?? ""}
+              onChange={(e) => setRange(key, f, e.target.value)}
+            />
+          </span>
+        ))}
+      </FieldRow>
+    );
+  };
 
   if (!mounted) {
     return (
@@ -357,6 +502,39 @@ export function LeverageSettingsClient() {
                       </div>
                     );
                   })}
+                </div>
+              </div>
+
+              <div className="card appCard">
+                <div className="card-body">
+                  <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>튜닝 탐색 공간</h2>
+                  <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+                    튜닝(<code>python -m leverage.tune switch</code>)이 이 후보군·범위를 전수 탐색해 최적값을 위 전략 설정에 기록합니다.
+                  </p>
+                  {candidateList("offense_candidates", "공격 후보")}
+                  <div style={{ height: 12 }} />
+                  {candidateList("defense_candidates", "방어 후보 (CASH = 현금)")}
+                  <div style={{ height: 12, borderTop: "1px solid rgba(148,163,184,0.2)", marginTop: 4 }} />
+                  {rangeEditor("buy_cutoff_range", "매수컷 범위(%)")}
+                  {rangeEditor("sell_cutoff_range", "매도컷 범위(%)")}
+                  {(() => {
+                    const t = config.tuning;
+                    const buys = rangeValues(t?.buy_cutoff_range);
+                    const sells = rangeValues(t?.sell_cutoff_range);
+                    const pairs = buys.reduce((acc, b) => acc + sells.filter((s) => b < s).length, 0);
+                    const combos = pairs * (t?.offense_candidates?.length ?? 0) * (t?.defense_candidates?.length ?? 0);
+                    return (
+                      <div style={{ marginTop: 8, fontSize: "0.85rem", color: combos > 0 ? "#475569" : "#dc2626" }}>
+                        유효 조합수: <b>{combos.toLocaleString()}</b>개
+                        <span style={{ color: "#94a3b8" }}> (매수컷&lt;매도컷 {pairs}쌍 × 공격 {t?.offense_candidates?.length ?? 0} × 방어 {t?.defense_candidates?.length ?? 0})</span>
+                      </div>
+                    );
+                  })()}
+                  <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+                    <button type="button" className="btn btn-dark" disabled={saving} onClick={save}>
+                      {saving ? "저장 중…" : "범위·전략 설정 저장"}
+                    </button>
+                  </div>
                 </div>
               </div>
 
