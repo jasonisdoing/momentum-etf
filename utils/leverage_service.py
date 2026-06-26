@@ -94,3 +94,41 @@ def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, An
     _validate_leverage_config(config)
     save_leverage_config_raw(profile, config)
     return load_leverage_settings(profile)
+
+
+def resolve_pool_ticker(ticker: str) -> dict[str, Any]:
+    """종목풀(stock_meta)에서 해당 티커를 가진 활성 종목을 찾아 종목명을 반환합니다."""
+    from utils.db_manager import get_db_connection
+
+    ticker_norm = str(ticker or "").strip().upper()
+    if not ticker_norm:
+        raise ValueError("조회할 티커가 필요합니다.")
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결에 실패했습니다.")
+
+    # active stocks 중 일치하는 종목 조회 (is_deleted가 참이 아닌 것)
+    doc = db.stock_meta.find_one(
+        {
+            "ticker": ticker_norm,
+            "is_deleted": {"$ne": True}
+        },
+        {"ticker": 1, "name": 1, "ticker_type": 1}
+    )
+
+    if doc is None:
+        # fallback: 삭제 상태이더라도 종목풀에 등록된 적이 있는 종목 검색
+        doc = db.stock_meta.find_one(
+            {"ticker": ticker_norm},
+            {"ticker": 1, "name": 1, "ticker_type": 1}
+        )
+
+    if doc is None:
+        raise ValueError(f"종목풀에서 티커 '{ticker_norm}'를 찾을 수 없습니다.")
+
+    return {
+        "ticker": doc["ticker"],
+        "name": doc["name"],
+        "ticker_type": doc["ticker_type"]
+    }

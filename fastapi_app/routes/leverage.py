@@ -28,3 +28,13 @@ def post_leverage_config(
     if not isinstance(config, dict):
         raise ValueError("저장할 'config' 가 필요합니다.")
     return save_leverage_settings(profile, config)
+
+
+@router.get("/resolve-ticker")
+def resolve_leverage_ticker(
+    ticker: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """종목풀(db.stock_meta) 내에서 티커를 조회하여 종목명을 반환합니다."""
+    from utils.leverage_service import resolve_pool_ticker
+    return resolve_pool_ticker(ticker)

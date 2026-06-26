@@ -111,6 +111,16 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
         forced_ticker_type = "us"
         if not ticker_key:
             raise ValueError("US: 뒤에 티커가 필요합니다.")
+    elif ticker_key.startswith("KOR:"):
+        ticker_key = ticker_key[len("KOR:"):]
+        forced_ticker_type = "kor"
+        if not ticker_key:
+            raise ValueError("KOR: 뒤에 티커가 필요합니다.")
+    elif ticker_key.startswith("ETF:"):
+        ticker_key = ticker_key[len("ETF:"):]
+        forced_ticker_type = "etf"
+        if not ticker_key:
+            raise ValueError("ETF: 뒤에 티커가 필요합니다.")
 
     configs = load_ticker_type_configs()
     matches: list[dict[str, object]] = []
