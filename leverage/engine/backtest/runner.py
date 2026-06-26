@@ -141,7 +141,9 @@ def run_backtest(
             segment_lines.append(f" - 손익(%): {pct_val * 100:+.4f}%")
 
     hold_days = {s: 0 for s in assets}
+    hold_start_dates = {s: None for s in assets}
     pre_switch_hold_days = {s: 0 for s in assets}
+    pre_switch_hold_start_dates = {s: None for s in assets}
     pre_switch_prev_target = None
     asset_pnl = {s: 0.0 for s in assets}
     prev_pos_value = {s: 0.0 for s in assets}
@@ -158,6 +160,7 @@ def run_backtest(
     for date in common_index:
         # 매 반복 시작 전 상태 스냅샷 (경고 모드에서 전환 전 상태 복원용)
         pre_switch_hold_days = dict(hold_days)
+        pre_switch_hold_start_dates = dict(hold_start_dates)
         pre_switch_prev_target = prev_target
         start_value_today = last_total_value
         target = signal_df.at[date, "target"]
@@ -254,8 +257,11 @@ def run_backtest(
                     win_days[sym] += 1
                 if prev_target != sym:
                     trade_counts[sym] += 1
+                if prev_target != sym or hold_start_dates[sym] is None:
+                    hold_start_dates[sym] = date.strftime("%Y-%m-%d")
             else:
                 hold_days[sym] = 0
+                hold_start_dates[sym] = None
 
         if target == "CASH":
             weights = {s: 0.0 for s in assets}
@@ -789,6 +795,7 @@ def run_backtest(
     pre_switch_data = {
         "target": pre_switch_prev_target,
         "hold_days": pre_switch_hold_days,
+        "holding_start_date": pre_switch_hold_start_dates.get(pre_switch_prev_target),
     }
     # 전환 전 타깃의 누적 수익률 계산
     ps_target = pre_switch_prev_target
@@ -834,5 +841,6 @@ def run_backtest(
         "segment_lines": segment_lines,
         "recommendation_data": recommendation_data,
         "holding_days": hold_days.get(last_target, 0),
+        "holding_start_date": hold_start_dates.get(last_target),
         "pre_switch_data": pre_switch_data,
     }

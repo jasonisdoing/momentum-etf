@@ -180,6 +180,8 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
                 "offense_name" if last_target == settings["offense_ticker"] else "defense_name",
                 last_target,
             ),
+            "holding_days": result.get("holding_days", 0),
+            "holding_start_date": result.get("holding_start_date"),
             "updated_at": datetime.now().isoformat(),
         }
         save_current_state(profile, current_state)

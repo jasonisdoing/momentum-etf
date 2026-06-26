@@ -16,12 +16,45 @@ from leverage.config_store import (
 from leverage.engine.backtest.settings import normalize_settings
 
 
+def calculate_holding_days(target: str, start_date_str: str) -> int:
+    """start_date_str(YYYY-MM-DD)부터 오늘(장중 포함)까지의 거래 영업일수를 계산합니다."""
+    import pandas as pd
+    from utils.data_loader import fetch_ohlcv, is_trading_day
+
+    ticker = "237350" if target == "CASH" or not target else target
+    country = "kor"
+
+    try:
+        df = fetch_ohlcv(ticker, country, months_back=None, date_range=[start_date_str, None], ticker_type="etf")
+        if df is not None and not df.empty:
+            count = len(df)
+            today_ts = pd.Timestamp.today().normalize()
+            if is_trading_day(country, today_ts):
+                df_last_day = pd.Timestamp(df.index[-1]).normalize()
+                if today_ts > df_last_day:
+                    count += 1
+            return count
+    except Exception as e:
+        print(f"[calculate_holding_days] fetch_ohlcv 실패 ({ticker}, {start_date_str}): {e}")
+
+    try:
+        start_date = pd.Timestamp(start_date_str).normalize()
+        today = pd.Timestamp.today().normalize()
+        return len(pd.bdate_range(start_date, today))
+    except Exception:
+        return 0
+
+
 def load_leverage_settings(profile: str = "switch") -> dict[str, Any]:
     """레버리지 설정(편집 대상) + 직전 추천 상태(읽기 전용)를 함께 반환한다."""
+    state = load_leverage_state(profile)
+    if state and state.get("holding_start_date"):
+        state["holding_days"] = calculate_holding_days(state.get("target", ""), state["holding_start_date"])
+
     return {
         "profile": profile,
         "config": load_leverage_config_raw(profile),
-        "state": load_leverage_state(profile),
+        "state": state,
     }
 
 

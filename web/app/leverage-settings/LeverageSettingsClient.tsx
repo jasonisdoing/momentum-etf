@@ -26,6 +26,7 @@ type LeverageState = {
   date?: string;
   target?: string;
   target_name?: string;
+  holding_days?: number;
   updated_at?: string;
 };
 
@@ -221,6 +222,7 @@ export function LeverageSettingsClient() {
                 <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>추천 배치가 자동 갱신합니다 (읽기 전용).</p>
                 <ReadRow label="확정일" value={state?.date ?? "-"} />
                 <ReadRow label="보유 종목" value={state?.target_name ? `${state.target_name} (${state.target ?? ""})` : "-"} />
+                <ReadRow label="보유일" value={state?.holding_days !== undefined ? `${state.holding_days}거래일째` : "-"} />
                 <ReadRow label="갱신 시각" value={state?.updated_at ?? "-"} />
               </div>
             </div>
