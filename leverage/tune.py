@@ -10,40 +10,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-import numpy as np
-
 from leverage.config_store import load_leverage_config_raw, save_leverage_config_raw
 from leverage.constants import ZRESULTS_DIR
 from leverage.engine.backtest.settings import normalize_settings
 from leverage.engine.tune.runner import render_top_table, run_tuning
 from leverage.notify import send_slack_tuning_result
 from leverage.recommend import get_market_status
-
-# 전략 프로파일별 튜닝 탐색 공간
-TUNING_CONFIG: dict[str, dict] = {
-    # 스위칭 전략: 매수/매도 컷오프 + 공격 자산 후보 + 방어 자산 후보
-    "switch": {
-        "drawdown_buy_cutoff": np.arange(1, 6, 1),
-        "drawdown_sell_cutoff": np.arange(1, 6, 1),
-        "offense": [
-            {"ticker": "122630", "name": "KODEX 레버리지"},
-            {"ticker": "243880", "name": "TIGER 200IT레버리지"},
-            # {"ticker": "0193W0", "name": "KODEX 삼성전자단일종목레버리지"},
-            # {"ticker": "0193T0", "name": "KODEX SK하이닉스단일종목레버리지"},
-        ],
-        "defense": [
-            {"ticker": "CASH", "name": "현금"},
-            {"ticker": "237350", "name": "KODEX 코스피100"},
-            {"ticker": "161510", "name": "PLUS 고배당주"},
-            {"ticker": "091170", "name": "KODEX 은행"},
-            {"ticker": "279530", "name": "KODEX 고배당주"},
-            {"ticker": "484880", "name": "SOL 금융지주플러스고배당"},
-            {"ticker": "140700", "name": "KODEX 보험"},
-            {"ticker": "498860", "name": "RISE 코리아금융고배당"},
-            {"ticker": "466940", "name": "TIGER 은행고배당플러스TOP10"},
-        ],
-    },
-}
+from leverage.tuning_config import build_tuning_search_space
 
 
 def format_seconds(sec: float) -> str:
@@ -63,11 +36,6 @@ def main() -> None:
 
     profile = args.profile
 
-    if profile not in TUNING_CONFIG:
-        print(f"지원하지 않는 전략 프로파일입니다: {profile}")
-        print(f"지원 프로파일: {list(TUNING_CONFIG.keys())}")
-        return
-
     try:
         raw_config = load_leverage_config_raw(profile)
     except Exception as exc:
@@ -76,6 +44,13 @@ def main() -> None:
 
     settings = normalize_settings(dict(raw_config))
     market = settings.get("market", "kor")
+
+    # 튜닝 탐색 공간을 DB config 의 'tuning' 섹션에서 구성(하드코딩 제거).
+    try:
+        tuning_config = build_tuning_search_space(raw_config)
+    except ValueError as exc:
+        print(f"튜닝 탐색 공간 오류: {exc}")
+        return
 
     # 자동 실행 모드일 때만 장 운영 시간 체크
     if args.auto and get_market_status(market) == "CLOSED":
@@ -89,14 +64,15 @@ def main() -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(raw_config, f, ensure_ascii=False, indent=4)
-        _tune_switch(profile, config_path, settings, market, args)
+        _tune_switch(profile, config_path, settings, market, args, tuning_config)
     finally:
         config_path.unlink(missing_ok=True)
 
 
-def _tune_switch(profile: str, config_path: Path, settings: dict, market: str, args) -> None:
+def _tune_switch(
+    profile: str, config_path: Path, settings: dict, market: str, args, tuning_config: dict
+) -> None:
     """스위칭 전략 튜닝 (전수 조사 + config 갱신)."""
-    tuning_config = TUNING_CONFIG[profile]
     start_ts = datetime.now()
 
     out_dir = ZRESULTS_DIR / profile
