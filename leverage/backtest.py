@@ -3,21 +3,20 @@
 import sys
 from datetime import datetime
 
-from leverage.constants import CONFIG_DIR, INITIAL_CAPITAL_KRW, ZRESULTS_DIR
+from leverage.config_store import load_config
+from leverage.constants import INITIAL_CAPITAL_KRW, ZRESULTS_DIR
 from leverage.engine.backtest.runner import run_backtest
-from leverage.engine.backtest.settings import load_settings
 
 
 def main() -> None:
     # CLI 인자로 전략 프로파일 지정 (기본값: switch)
     profile = sys.argv[1] if len(sys.argv) > 1 else "switch"
-    config_path = CONFIG_DIR / f"{profile}.json"
-
-    if not config_path.exists():
-        print(f"설정 파일을 찾을 수 없습니다: {config_path}")
+    try:
+        settings = load_config(profile)
+    except Exception as exc:
+        print(f"설정을 불러올 수 없습니다: {exc}")
         return
 
-    settings = load_settings(config_path)
     try:
         _run_switch(profile, settings)
     except Exception as exc:

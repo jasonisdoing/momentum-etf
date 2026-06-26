@@ -29,19 +29,21 @@ REQUIRED_KEYS_OLD: list[str] = [
     "slippage",
 ]
 
-def load_settings(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as f:
-        settings = json.load(f)
-
+def normalize_settings(settings: dict) -> dict:
+    """raw 설정 dict 를 검증·정규화한다(파일/DB 공용)."""
     # 전략 구분 (기본값: switch - 하위 호환)
-    strategy = settings.get("strategy", "switch")
-    settings["strategy"] = strategy
+    settings["strategy"] = settings.get("strategy", "switch")
 
     # start_date 또는 months_range 중 하나는 있어야 함
     if "start_date" not in settings and "months_range" not in settings:
-        raise ValueError("설정 파일에 'start_date' 또는 'months_range'가 필요합니다.")
+        raise ValueError("설정에 'start_date' 또는 'months_range'가 필요합니다.")
 
     return _normalize_switch_settings(settings)
+
+
+def load_settings(path: Path) -> dict:
+    with path.open("r", encoding="utf-8") as f:
+        return normalize_settings(json.load(f))
 
 
 def _normalize_switch_settings(settings: dict) -> dict:
