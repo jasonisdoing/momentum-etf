@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from leverage.config_store import load_config, load_leverage_state, save_leverage_state
 from leverage.constants import MARKET_SCHEDULES, ZRESULTS_DIR
 from leverage.engine.backtest.runner import run_backtest
+from leverage.holding import count_holding_trading_days, resolve_holding_start_date
 from leverage.notify import send_slack_recommendation
 
 
@@ -154,12 +155,10 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     last_target = result["last_target"]
     rec_data = result["recommendation_data"]
 
-    # 장중(is_warning)일 때 오늘 아침에 이미 실행된 매매와 보유를 반영하기 위해 날짜와 보유일 보정
-    display_holding_days = result.get("holding_days", 0)
+    # 표시 기준일: 장중이면 오늘, 아니면 마지막으로 닫힌 거래일.
     if is_warning:
         tz_name = "Asia/Seoul" if market == "kor" else "America/New_York"
         end_date = datetime.now(ZoneInfo(tz_name)).date().isoformat()
-        display_holding_days += 1
     else:
         end_date = rec_data["last_date"]
 
@@ -171,6 +170,14 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     prev_target = prev_state.get("target")
     is_changed = (not is_warning) and (prev_target is not None) and (prev_target != last_target)
 
+    # 보유시작일: 포지션이 바뀐 날에만 새로 기록하고, 유지되면 기존 값을 그대로 둔다.
+    # (매번 백테스트로 재추정하지 않음 → 보유일이 신호/실행 프레임 어긋남으로 리셋되는 버그 방지)
+    holding_start_date = resolve_holding_start_date(
+        prev_target, prev_state.get("holding_start_date"), last_target, end_date
+    )
+    # 보유일수도 확정된 보유시작일에서 거래일을 세어 UI(leverage_service)와 동일 소스로 맞춘다.
+    display_holding_days = count_holding_trading_days(last_target, holding_start_date)
+
     # 상태 저장: 장중이 아닐 때(종가 확정)만 저장
     if status != "OPEN":
         current_state = {
@@ -180,8 +187,7 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
                 "offense_name" if last_target == settings["offense_ticker"] else "defense_name",
                 last_target,
             ),
-            "holding_days": result.get("holding_days", 0),
-            "holding_start_date": result.get("holding_start_date"),
+            "holding_start_date": holding_start_date,
             "updated_at": datetime.now().isoformat(),
         }
         save_current_state(profile, current_state)
@@ -281,11 +287,8 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
 
         cum_text = f"  누적: {_format_metric_pct(c_ret)}"
         if sym == display_target:
-            h_days = result.get("holding_days", 0)
-            if is_warning:
-                h_days += 1
-            if h_days > 0:
-                cum_text += f"({h_days}거래일째 보유중)"
+            if display_holding_days > 0:
+                cum_text += f"({display_holding_days}거래일째 보유중)"
         else:
             cum_text += "(미보유)"
         table_lines.append(cum_text)
