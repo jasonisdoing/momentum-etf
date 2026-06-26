@@ -5,13 +5,15 @@
 
 import argparse
 import json
+import os
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
 from leverage.config_store import load_leverage_config_raw, save_leverage_config_raw
-from leverage.constants import CONFIG_DIR, ZRESULTS_DIR
+from leverage.constants import ZRESULTS_DIR
 from leverage.engine.backtest.settings import normalize_settings
 from leverage.engine.tune.runner import render_top_table, run_tuning
 from leverage.notify import send_slack_tuning_result
@@ -71,11 +73,6 @@ def main() -> None:
     except Exception as exc:
         print(f"설정을 불러올 수 없습니다: {exc}")
         return
-    # 엔진(run_tuning)이 설정 파일을 읽으므로 DB 설정을 파일로 미러링한다(파일은 임시 작업본).
-    config_path = CONFIG_DIR / f"{profile}.json"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    with config_path.open("w", encoding="utf-8") as f:
-        json.dump(raw_config, f, ensure_ascii=False, indent=4)
 
     settings = normalize_settings(dict(raw_config))
     market = settings.get("market", "kor")
@@ -85,7 +82,16 @@ def main() -> None:
         print(f"[{profile}] 장 운영 시간이 아닙니다. 튜닝을 건너뜁니다.")
         return
 
-    _tune_switch(profile, config_path, settings, market, args)
+    # 엔진(run_tuning)은 설정을 '파일'로 읽으므로 DB 설정을 임시 파일로 전달한다.
+    # 단일 소스는 DB 이며, 임시 파일은 작업 종료 후 삭제한다(레포에 남기지 않음).
+    fd, tmp_name = tempfile.mkstemp(prefix=f"leverage_{profile}_", suffix=".json")
+    config_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(raw_config, f, ensure_ascii=False, indent=4)
+        _tune_switch(profile, config_path, settings, market, args)
+    finally:
+        config_path.unlink(missing_ok=True)
 
 
 def _tune_switch(profile: str, config_path: Path, settings: dict, market: str, args) -> None:

@@ -18,6 +18,7 @@ type HoldingsRow = {
   buy_amount_krw: number;
   valuation_krw: number;
   target_ratio?: number | null;
+  memo?: string | null;
   target_quantity?: number | null;
   target_amount?: number | null;
   sort_order: number;

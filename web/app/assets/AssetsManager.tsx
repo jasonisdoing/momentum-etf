@@ -31,6 +31,7 @@ type HoldingsRow = {
   buy_amount_krw: number;
   valuation_krw: number;
   target_ratio?: number | null;
+  memo?: string | null;
   sort_order?: number | null;
   original_quantity?: number;
   original_average_buy_price?: number;
@@ -122,7 +123,7 @@ type AddingRowState = {
   ticker: string;
   quantity: string;
   average_buy_price: string;
-  target_ratio: string;
+  memo: string;
   isValidatingTicker?: boolean;
   name?: string;
   bucketId?: number;
@@ -134,7 +135,7 @@ const CASH_ROW_TICKER = "__CASH__";
 type HoldingEditableSnapshot = {
   quantity: number;
   average_buy_price: number;
-  target_ratio: number;
+  memo: string;
 };
 
 const assetsGridTheme = createAppGridTheme();
@@ -184,14 +185,6 @@ function getSignedNullableClass(value: number | null | undefined): string {
   return value > 0 ? "metricPositive" : "metricNegative";
 }
 
-function getWeightTextColor(weightPct: number, targetRatio: number | null | undefined): string {
-  if (targetRatio === null || targetRatio === undefined || Number.isNaN(targetRatio) || targetRatio <= 0) {
-    return ASSETS_WEIGHT_TEXT_COLOR;
-  }
-
-  const allowedDelta = targetRatio * 0.1;
-  return Math.abs(weightPct - targetRatio) > allowedDelta ? "#dc3545" : ASSETS_WEIGHT_TEXT_COLOR;
-}
 
 function getBucketCellClass(bucketId: number): string {
   if (!bucketId) return "appBucketCell";
@@ -213,11 +206,11 @@ function parseEditableQuantity(value: unknown): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price" | "target_ratio">): HoldingEditableSnapshot {
+function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price" | "memo">): HoldingEditableSnapshot {
   return {
     quantity: parseEditableQuantity(row.quantity),
     average_buy_price: safeParseFloat(row.average_buy_price),
-    target_ratio: Number(row.target_ratio ?? 0),
+    memo: String(row.memo ?? ""),
   };
 }
 
@@ -256,8 +249,8 @@ function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "currency">, 
   if (before.average_buy_price !== after.average_buy_price) {
     changes.push(`매입단가 ${formatPrice(before.average_buy_price, row.currency)}→${formatPrice(after.average_buy_price, row.currency)}`);
   }
-  if (before.target_ratio !== after.target_ratio) {
-    changes.push(`목표비중 ${formatRatioPercent(before.target_ratio)}→${formatRatioPercent(after.target_ratio)}`);
+  if (before.memo !== after.memo) {
+    changes.push(`메모 "${before.memo}"→"${after.memo}"`);
   }
   if (changes.length === 0) {
     return null;
@@ -652,7 +645,7 @@ function AccountHoldingsDetailPanel({
   const [isReorderDirty, setIsReorderDirty] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
-  const targetRatioRef = useRef<HTMLInputElement>(null);
+  const memoRef = useRef<HTMLInputElement>(null);
   const rowsRef = useRef<HoldingsRow[]>(initialRows);
   const summaryRef = useRef(summary);
   const dirtyRowIdsRef = useRef<string[]>([]);
@@ -740,6 +733,7 @@ function AccountHoldingsDetailPanel({
         quantity: typeof row.quantity === "number" ? row.quantity : parseInt(String(row.quantity), 10) || 0,
         average_buy_price: safeParseFloat(row.average_buy_price),
         target_ratio: row.target_ratio ?? 0,
+        memo: row.memo ?? "",
       }));
 
     if (!addingRow) {
@@ -766,6 +760,7 @@ function AccountHoldingsDetailPanel({
         buy_amount_krw: 0,
         valuation_krw: 0,
         target_ratio: 0,
+        memo: "",
       } as GridRow,
       ...baseRows,
     ];
@@ -874,17 +869,13 @@ function AccountHoldingsDetailPanel({
 
     const rawQuantity = qtyRef.current?.value ?? "";
     const rawPrice = priceRef.current?.value ?? "";
-    const rawTargetRatio = targetRatioRef.current?.value ?? "0";
+    const rawMemo = memoRef.current?.value ?? "";
 
     const quantity = parseInt(parseRawPrice(rawQuantity), 10);
     const averageBuyPrice = safeParseFloat(rawPrice);
-    const targetRatio = parseFloat(rawTargetRatio);
 
     if (Number.isNaN(quantity) || quantity < 0 || Number.isNaN(averageBuyPrice) || averageBuyPrice < 0) {
       throw new Error("수량과 매입 단가를 확인해 주세요.");
-    }
-    if (Number.isNaN(targetRatio) || targetRatio < 0 || targetRatio > 100) {
-      throw new Error("목표비중은 0~100 사이여야 합니다.");
     }
 
     const response = await fetch("/api/assets", {
@@ -895,7 +886,7 @@ function AccountHoldingsDetailPanel({
         ticker: addingRow.ticker,
         quantity,
         average_buy_price: averageBuyPrice,
-        target_ratio: parseFloat(targetRatio.toFixed(1)),
+        memo: rawMemo.trim(),
       }),
     });
     const payload = await response.json();
@@ -907,13 +898,10 @@ function AccountHoldingsDetailPanel({
   const processRowUpdate = useCallback(async (row: GridRow) => {
     const quantity = parseEditableQuantity(row.quantity);
     const averageBuyPrice = safeParseFloat(row.average_buy_price);
-    const targetRatio = Number(row.target_ratio ?? 0);
+    const memo = String(row.memo ?? "").trim();
 
     if (Number.isNaN(quantity) || quantity < 0 || Number.isNaN(averageBuyPrice) || averageBuyPrice < 0) {
       throw new Error("입력값이 올바르지 않습니다.");
-    }
-    if (Number.isNaN(targetRatio) || targetRatio < 0 || targetRatio > 100) {
-      throw new Error("목표비중은 0~100 사이여야 합니다.");
     }
 
     const response = await fetch("/api/assets", {
@@ -924,7 +912,7 @@ function AccountHoldingsDetailPanel({
         ticker: row.ticker.replace("ASX:", ""),
         quantity,
         average_buy_price: averageBuyPrice,
-        target_ratio: parseFloat(targetRatio.toFixed(1)),
+        memo,
       }),
     });
     const payload = await response.json();
@@ -1044,7 +1032,7 @@ function AccountHoldingsDetailPanel({
         id: rowId,
         quantity: typeof sourceRow.quantity === "number" ? sourceRow.quantity : parseInt(String(sourceRow.quantity), 10) || 0,
         average_buy_price: safeParseFloat(sourceRow.average_buy_price),
-        target_ratio: sourceRow.target_ratio ?? 0,
+        memo: sourceRow.memo ?? "",
       });
       lastSavedSnapshotsRef.current.set(rowId, nextSnapshot);
       const message = buildAutoSaveToastMessage(sourceRow, previousSnapshot, nextSnapshot);
@@ -1324,7 +1312,7 @@ function AccountHoldingsDetailPanel({
         ...currentRow,
         quantity: parseEditableQuantity(row.quantity),
         average_buy_price: safeParseFloat(row.average_buy_price),
-        target_ratio: Number(row.target_ratio ?? 0),
+        memo: String(row.memo ?? ""),
       };
     });
     rowsRef.current = nextRows;
@@ -1492,35 +1480,28 @@ function AccountHoldingsDetailPanel({
 
         const weightPct = getPreviewWeightPct(params.data, rowsRef.current, summaryRef.current);
         return (
-          <span style={{ color: getWeightTextColor(weightPct, params.data.target_ratio), fontWeight: 700 }}>
+          <span style={{ color: "#000000", fontWeight: 700 }}>
             {weightPct.toFixed(1)}%
           </span>
         );
       },
     },
     {
-      field: "target_ratio",
-      headerName: "목표비중",
-      width: 88,
-      type: "rightAligned",
+      field: "memo",
+      headerName: "메모",
+      width: 126,
       editable: (params) =>
-        Boolean(params.data && processingId !== params.data?.id && (isEditableHoldingRow(params.data) || isCashGridRow(params.data))),
+        Boolean(params.data && processingId !== params.data?.id && isEditableHoldingRow(params.data)),
       cellClass: (params) => {
-        if (!isEditableHoldingRow(params.data) && !isCashGridRow(params.data)) {
+        if (!isEditableHoldingRow(params.data)) {
           return undefined;
         }
-        return isDirtyEditableCell(params.data?.id, "target_ratio")
+        return isDirtyEditableCell(params.data?.id, "memo")
           ? "assetsEditableCell assetsDirtyCell"
           : "assetsEditableCell";
       },
-      valueParser: (params) => {
-        const parsed = Number(params.newValue);
-        if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
-          return params.oldValue;
-        }
-        return parsed;
-      },
-      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+      valueParser: (params) => String(params.newValue ?? "").trim(),
+      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
         const row = params.data;
         if (!row) {
           return null;
@@ -1528,20 +1509,17 @@ function AccountHoldingsDetailPanel({
         if (row.id === "__adding__") {
           return (
             <input
-              type="number"
-              step="0.1"
-              min="0"
-              max="100"
-              ref={targetRatioRef}
+              type="text"
+              ref={memoRef}
               className="form-control form-control-sm assetsInlineInput"
-              defaultValue={addingRow?.target_ratio ?? "0"}
+              defaultValue={addingRow?.memo ?? ""}
               disabled={!addingRow?.isValidated}
             />
           );
         }
         return (
-          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 700 }}>
-            {params.value === null || params.value === undefined ? "-" : `${params.value.toFixed(1)}%`}
+          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 500 }}>
+            {params.value || "-"}
           </span>
         );
       },
@@ -1549,7 +1527,7 @@ function AccountHoldingsDetailPanel({
     {
       field: "quantity",
       headerName: "수량",
-      width: 80,
+      width: 64,
       type: "rightAligned",
       editable: (params) => isEditableHoldingRow(params.data) && processingId !== params.data?.id,
       cellClass: (params) => {
@@ -1768,7 +1746,7 @@ function AccountHoldingsDetailPanel({
                   ticker: "",
                   quantity: "",
                   average_buy_price: "",
-                  target_ratio: "0",
+                  memo: "",
                   isValidated: false,
                 })
               }
@@ -2643,24 +2621,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ? <span className={getSignedClass(params.value)}>{`${params.value.toFixed(2)}%`}</span>
           : "",
     },
-    {
-      field: "target_ratio_total",
-      headerName: "목표비중합",
-      minWidth: 108,
-      flex: 0.8,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) => {
-        if (!params.data || isDetailRow(params.data)) {
-          return "";
-        }
-        if (isTotalRow(params.data)) {
-          return "-";
-        }
-        const value = Number(params.value ?? 0);
-        const colorClass = Math.abs(value - 100) < 0.05 ? "is-success" : "is-danger";
-        return <span className={`appHeaderMetricValue ${colorClass}`}>{value.toFixed(1)}%</span>;
-      },
-    },
+
     {
       field: "holdings_count",
       headerName: "종목수",
