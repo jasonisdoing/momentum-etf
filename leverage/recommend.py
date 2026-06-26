@@ -1,11 +1,10 @@
 import argparse
-import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from leverage.constants import CONFIG_DIR, MARKET_SCHEDULES, STATE_DIR, ZRESULTS_DIR
+from leverage.config_store import load_config, load_leverage_state, save_leverage_state
+from leverage.constants import MARKET_SCHEDULES, ZRESULTS_DIR
 from leverage.engine.backtest.runner import run_backtest
-from leverage.engine.backtest.settings import load_settings
 from leverage.notify import send_slack_recommendation
 
 
@@ -67,24 +66,13 @@ def _market_label(market: str) -> str:
 
 
 def load_previous_state(profile: str) -> dict:
-    """저장된 이전 추천 상태를 로드합니다."""
-    state_path = STATE_DIR / f"last_recommendation_{profile}.json"
-    if not state_path.exists():
-        return {}
-    try:
-        with state_path.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    """저장된 이전 추천 상태를 로드합니다 (DB)."""
+    return load_leverage_state(profile)
 
 
 def save_current_state(profile: str, state: dict) -> None:
-    """현재 추천 상태를 저장합니다."""
-    state_dir = STATE_DIR
-    state_dir.mkdir(exist_ok=True)
-    state_path = state_dir / f"last_recommendation_{profile}.json"
-    with state_path.open("w", encoding="utf-8") as f:
-        json.dump(state, f, indent=4, ensure_ascii=False)
+    """현재 추천 상태를 저장합니다 (DB)."""
+    save_leverage_state(profile, state)
 
 
 def _format_metric_pct(value: float | None) -> str:
@@ -132,12 +120,11 @@ def main() -> None:
     args = parser.parse_args()
 
     profile = args.profile
-    config_path = CONFIG_DIR / f"{profile}.json"
-    if not config_path.exists():
-        print(f"설정 파일을 찾을 수 없습니다: {config_path}")
+    try:
+        settings = load_config(profile)
+    except Exception as exc:
+        print(f"설정을 불러올 수 없습니다: {exc}")
         return
-
-    settings = load_settings(config_path)
     market = settings.get("market", "kor")
 
     schedule = MARKET_SCHEDULES.get(market, {})

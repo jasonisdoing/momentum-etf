@@ -10,8 +10,9 @@ from pathlib import Path
 
 import numpy as np
 
+from leverage.config_store import load_leverage_config_raw, save_leverage_config_raw
 from leverage.constants import CONFIG_DIR, ZRESULTS_DIR
-from leverage.engine.backtest.settings import load_settings
+from leverage.engine.backtest.settings import normalize_settings
 from leverage.engine.tune.runner import render_top_table, run_tuning
 from leverage.notify import send_slack_tuning_result
 from leverage.recommend import get_market_status
@@ -65,12 +66,18 @@ def main() -> None:
         print(f"지원 프로파일: {list(TUNING_CONFIG.keys())}")
         return
 
-    config_path = CONFIG_DIR / f"{profile}.json"
-    if not config_path.exists():
-        print(f"설정 파일을 찾을 수 없습니다: {config_path}")
+    try:
+        raw_config = load_leverage_config_raw(profile)
+    except Exception as exc:
+        print(f"설정을 불러올 수 없습니다: {exc}")
         return
+    # 엔진(run_tuning)이 설정 파일을 읽으므로 DB 설정을 파일로 미러링한다(파일은 임시 작업본).
+    config_path = CONFIG_DIR / f"{profile}.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with config_path.open("w", encoding="utf-8") as f:
+        json.dump(raw_config, f, ensure_ascii=False, indent=4)
 
-    settings = load_settings(config_path)
+    settings = normalize_settings(dict(raw_config))
     market = settings.get("market", "kor")
 
     # 자동 실행 모드일 때만 장 운영 시간 체크
@@ -168,7 +175,9 @@ def _tune_switch(profile: str, config_path: Path, settings: dict, market: str, a
 
     with config_path.open("w", encoding="utf-8") as f:
         json.dump(ordered_config, f, ensure_ascii=False, indent=4)
-    print(f"{config_path}을 최적 파라미터로 업데이트했습니다. (backtested_date={ordered_config['backtested_date']})")
+    # 단일 소스(DB)에도 최적 파라미터를 반영한다(추천 배치가 DB 를 읽으므로).
+    save_leverage_config_raw(profile, ordered_config)
+    print(f"최적 파라미터로 업데이트했습니다 (DB+파일, backtested_date={ordered_config['backtested_date']})")
 
     table_lines = render_top_table(results, top_n=100, months_range=months_range)
     end_ts = datetime.now()
