@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 from leverage.config_store import load_config, load_leverage_state, save_leverage_state
 from leverage.constants import MARKET_SCHEDULES, ZRESULTS_DIR
 from leverage.engine.backtest.runner import run_backtest
-from leverage.holding import count_holding_trading_days, resolve_holding_start_date
+from leverage.holding import holding_period_info, resolve_holding_start_date
 from leverage.notify import send_slack_recommendation
 
 
@@ -175,8 +175,9 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     holding_start_date = resolve_holding_start_date(
         prev_target, prev_state.get("holding_start_date"), last_target, end_date
     )
-    # 보유일수도 확정된 보유시작일에서 거래일을 세어 UI(leverage_service)와 동일 소스로 맞춘다.
-    display_holding_days = count_holding_trading_days(last_target, holding_start_date)
+    # 보유일수·누적기준가 모두 확정된 보유시작일에서 1회 조회로 구해 UI(leverage_service)와 동일 소스로 맞춘다.
+    # (누적도 백테스트 hold_days 의존을 끊고 보유시작일 종가 기준으로 계산 → 누적 0 버그 해소)
+    display_holding_days, holding_start_close = holding_period_info(last_target, holding_start_date)
 
     # 상태 저장: 장중이 아닐 때(종가 확정)만 저장
     if status != "OPEN":
@@ -200,7 +201,6 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     last_prices = rec_data["last_prices"]
     daily_returns = rec_data.get("daily_returns", {})
     cum_returns = rec_data.get("cum_returns", {})
-    holding_start_prices = rec_data.get("holding_start_prices", {})
     buy_cutoff = rec_data["buy_cutoff"]
     sell_cutoff = rec_data["sell_cutoff"]
 
@@ -243,15 +243,16 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
         day_ret = daily_returns.get(sym) if has_market_data else None
         c_ret = cum_returns.get(sym) if has_market_data else None
 
-        # 장중: 현재가/일간/누적을 오늘 실시간값으로 표시 (보유 종목·보유일은 확정 유지)
+        # 장중: 현재가/일간을 오늘 실시간값으로 표시 (보유 종목·보유일은 확정 유지)
         is_live_price = sym in live_prices and last_prices.get(sym)
         if is_live_price:
             confirmed_close = last_prices[sym]
             price = live_prices[sym]
             day_ret = live_prices[sym] / confirmed_close - 1
-            # 보유 종목의 누적 수익률도 실시간(오늘가 / 보유 시작가)으로 갱신
-            if sym == display_target and holding_start_prices.get(sym):
-                c_ret = live_prices[sym] / holding_start_prices[sym] - 1
+
+        # 보유 종목의 누적 수익률 = 현재가 / 보유시작일 종가 - 1 (장중이면 현재가=실시간가)
+        if sym == display_target and holding_start_close:
+            c_ret = price / holding_start_close - 1
 
         sell_cutoff_val = -sell_cutoff / 100
         needed_drop = (current_dd - sell_cutoff_val) * 100 if current_dd > sell_cutoff_val else 0
