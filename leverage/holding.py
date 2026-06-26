@@ -24,8 +24,12 @@ def resolve_holding_start_date(
     return confirmed_date
 
 
-def count_holding_trading_days(target: str, start_date_str: str) -> int:
-    """start_date_str(YYYY-MM-DD)부터 오늘(장중 포함)까지의 거래 영업일수를 계산한다."""
+def holding_period_info(target: str, start_date_str: str) -> tuple[int, float | None]:
+    """보유시작일(start_date_str) 기준 (보유 거래일수, 보유시작일 종가)를 한 번의 조회로 반환한다.
+
+    - 보유 거래일수: start_date_str 부터 오늘(장중 포함)까지의 거래 영업일수.
+    - 보유시작일 종가: 누적 수익률 기준가(현재가 / 이 값 - 1). 조회 실패 시 None.
+    """
     import pandas as pd
 
     from utils.data_loader import fetch_ohlcv, is_trading_day
@@ -42,13 +46,19 @@ def count_holding_trading_days(target: str, start_date_str: str) -> int:
                 df_last_day = pd.Timestamp(df.index[-1]).normalize()
                 if today_ts > df_last_day:
                     count += 1
-            return count
+            start_close = float(df["Close"].iloc[0])
+            return count, start_close
     except Exception as e:
-        print(f"[count_holding_trading_days] fetch_ohlcv 실패 ({ticker}, {start_date_str}): {e}")
+        print(f"[holding_period_info] fetch_ohlcv 실패 ({ticker}, {start_date_str}): {e}")
 
     try:
         start_date = pd.Timestamp(start_date_str).normalize()
         today = pd.Timestamp.today().normalize()
-        return len(pd.bdate_range(start_date, today))
+        return len(pd.bdate_range(start_date, today)), None
     except Exception:
-        return 0
+        return 0, None
+
+
+def count_holding_trading_days(target: str, start_date_str: str) -> int:
+    """start_date_str 부터 오늘(장중 포함)까지의 거래 영업일수."""
+    return holding_period_info(target, start_date_str)[0]
