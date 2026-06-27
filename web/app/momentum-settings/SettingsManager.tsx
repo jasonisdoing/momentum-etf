@@ -44,7 +44,7 @@ type PoolSettingsResponse = {
 /** 한 행의 편집 중인 값 (모두 문자열로 보관, 저장 시 파싱). */
 type RowDraft = Record<EditableKey, string>;
 
-/** 보유보너스 셀렉트 옵션 — /pools 와 동일한 0/5/10/15/20. 현재값이 비표준이면 포함해 보존. */
+/** 보유보너스 셀렉트 옵션 — /momentum-pools 와 동일한 0/5/10/15/20. 현재값이 비표준이면 포함해 보존. */
 function bonusOptions(current: string): number[] {
   const base = [0, 5, 10, 15, 20];
   const cur = Number(current);
