@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from utils.env import load_env_if_present
 
 from .routes.assets import router as assets_router
+from .routes.backtest_config import router as backtest_config_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
@@ -73,6 +74,7 @@ app.include_router(market_router)
 app.include_router(market_trend_router)
 app.include_router(note_router)
 app.include_router(pool_settings_router)
+app.include_router(backtest_config_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
