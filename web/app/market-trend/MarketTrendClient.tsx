@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ColDef, GridOptions, ValueFormatterParams } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { PageFrame } from "../components/PageFrame";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { SystemPoolGrid } from "../components/SystemPoolGrid";
 import { MarketTrendChart } from "./MarketTrendChart";
 
 type MarketTrendItem = {
@@ -131,8 +132,6 @@ export function MarketTrendClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
-  // 페이지 첫 진입 시 최상단(코스피) 행을 한 번 자동 확장한다 (이후엔 사용자 제어).
-  const didInitialExpandRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -149,13 +148,7 @@ export function MarketTrendClient({
           throw new Error(payload.error ?? "시장지수 추세 데이터를 불러오지 못했습니다.");
         }
         if (alive) {
-          const loaded = payload.items ?? [];
-          setItems(loaded);
-          // 첫 로드 1회만 최상단 행 자동 확장 (MA 변경 재로드 때는 사용자 상태 유지).
-          if (!didInitialExpandRef.current && loaded.length > 0) {
-            didInitialExpandRef.current = true;
-            setExpandedTicker(loaded[0].ticker);
-          }
+          setItems(payload.items ?? []);
         }
       } catch (loadError) {
         if (alive)
@@ -430,6 +423,7 @@ export function MarketTrendClient({
             </div>
           </div>
         </section>
+        <SystemPoolGrid />
       </div>
 
       <style jsx global>{`

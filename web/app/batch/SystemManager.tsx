@@ -7,21 +7,6 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
-type SystemPoolRow = {
-  id: string;
-  order: number;
-  pool: string;
-  ticker_type: string;
-  country_code: string;
-  stock_count: number;
-  rising_count: number;
-  rising_ratio: number;
-  score_up_count: number;
-  score_total_count: number;
-  score_up_ratio: number;
-  etf_count: number;
-};
-
 type SystemScheduleRow = {
   key: string;
   job: string;
@@ -79,7 +64,6 @@ type BatchQueueItem = {
 };
 
 type SystemResponse = {
-  pool_rows?: SystemPoolRow[];
   schedule_rows?: SystemScheduleRow[];
   schedule_note?: string;
   running_jobs?: string[];
@@ -92,7 +76,6 @@ type SystemResponse = {
   error?: string;
 };
 
-type SystemPoolGridRow = SystemPoolRow;
 type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
   running: boolean;
@@ -173,85 +156,7 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
   return `▶ ${ownerLabel}${stateLabel}(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
 }
 
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("ko-KR").format(value);
-}
-
-function formatPercent(value: number): string {
-  return `${new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}%`;
-}
-
 const appGridTheme = createAppGridTheme();
-
-const poolColumns: ColDef<SystemPoolGridRow>[] = [
-  {
-    field: "order",
-    headerName: "순서",
-    minWidth: 72,
-    flex: 0.45,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
-  { field: "pool", headerName: "종목풀", minWidth: 180, flex: 1.8 },
-  { field: "ticker_type", headerName: "ID", minWidth: 100, flex: 0.7 },
-  { field: "country_code", headerName: "국가", minWidth: 82, flex: 0.55 },
-  {
-    field: "stock_count",
-    headerName: "종목수",
-    minWidth: 100,
-    flex: 0.65,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
-  {
-    field: "rising_count",
-    headerName: "상승수(일간)",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number; data?: SystemPoolGridRow }) => {
-      const total = params.data?.stock_count ?? 0;
-      return `${formatCount(params.value)}/${formatCount(total)}`;
-    },
-  },
-  {
-    field: "rising_ratio",
-    headerName: "상승비율(일간)",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellStyle: { color: "#dc2626" },
-    cellRenderer: (params: { value: number }) => formatPercent(params.value),
-  },
-  {
-    field: "score_up_count",
-    headerName: "상승수",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number; data?: SystemPoolGridRow }) => {
-      const total = params.data?.score_total_count ?? 0;
-      return `${formatCount(params.value)}/${formatCount(total)}`;
-    },
-  },
-  {
-    field: "score_up_ratio",
-    headerName: "상승비율",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellStyle: { color: "#dc2626" },
-    cellRenderer: (params: { value: number }) => formatPercent(params.value),
-  },
-  {
-    field: "etf_count",
-    headerName: "ETF",
-    minWidth: 82,
-    flex: 0.55,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
-];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   {
@@ -447,9 +352,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
 export function SystemManager({
   onHeaderSummaryChange,
 }: {
-  onHeaderSummaryChange?: (summary: { poolCount: number; scheduleCount: number }) => void;
+  onHeaderSummaryChange?: (summary: { scheduleCount: number }) => void;
 }) {
-  const [poolRows, setPoolRows] = useState<SystemPoolRow[]>([]);
   const [scheduleRows, setScheduleRows] = useState<SystemScheduleRow[]>([]);
   const [scheduleNote, setScheduleNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -476,7 +380,6 @@ export function SystemManager({
         pendingOrder.set(q.job_name, idx + 1);
       }
     });
-  const poolGridRows: SystemPoolGridRow[] = poolRows;
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
     const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
@@ -509,10 +412,9 @@ export function SystemManager({
 
   useEffect(() => {
     onHeaderSummaryChange?.({
-      poolCount: poolRows.length,
       scheduleCount: scheduleRows.length,
     });
-  }, [onHeaderSummaryChange, poolRows.length, scheduleRows.length]);
+  }, [onHeaderSummaryChange, scheduleRows.length]);
 
   useEffect(() => {
     let alive = true;
@@ -529,7 +431,6 @@ export function SystemManager({
 
         if (!alive) return;
 
-        setPoolRows(payload.pool_rows ?? []);
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
@@ -661,29 +562,6 @@ export function SystemManager({
         </div>
       </section>
 
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">종목풀</span>
-              </div>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <AppAgGrid
-              rowData={poolGridRows}
-              columnDefs={poolColumns}
-              loading={loading}
-              minHeight="18rem"
-              theme={appGridTheme}
-              // 행 단위 diff 업데이트 — polling 시 전체 그리드 재마운트 방지(깜박임 제거).
-              getRowId={(params) => params.data.id}
-              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
-            />
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
