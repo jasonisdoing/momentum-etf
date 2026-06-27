@@ -450,14 +450,7 @@ export function KorMarketStockManager({
               loading={loading}
               theme={korMarketStockGridTheme}
               minHeight="32rem"
-              getRowClass={(params) => {
-                const classes = [];
-                if (params.data?.is_held) classes.push("appHeldRow");
-                if (params.data?.ticker && registeredTickers.has(params.data.ticker.toUpperCase())) {
-                  classes.push("usMarketStockGridRowRegistered");
-                }
-                return classes.join(" ");
-              }}
+              getRowClass={(params) => (params.data?.is_held ? "appHeldRow" : "")}
               gridOptions={{
                 overlayNoRowsTemplate: '<span style="color:#667382;">데이터 없음</span>',
                 suppressMovableColumns: true,
