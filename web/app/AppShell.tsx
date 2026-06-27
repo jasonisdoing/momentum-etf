@@ -27,7 +27,6 @@ import { useHideMoney } from "@/lib/hide-money-context";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
 const homeItem = { href: "/", label: "홈", icon: IconHome };
-const marketTrendItem = { href: "/market-trend", label: "시장지수 추세", icon: IconChartLine };
 const holdingsItem = { href: "/holdings", label: "보유종목", icon: IconActivity };
 const holdingsDetailsItem = { href: "/holdings_details", label: "보유종목 상세", icon: IconListDetails };
 
@@ -59,6 +58,7 @@ const navGroups = [
     title: "정보",
     icon: IconTrendingUp,
     items: [
+      { href: "/market-trend", label: "시장지수 추세", icon: IconChartLine },
       { href: "/compare", label: "ETF 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
@@ -71,8 +71,8 @@ const navGroups = [
     title: "모멘텀",
     icon: IconTrendingUp,
     items: [
-      { href: "/pools", label: "종목풀 순위", icon: IconMedal2 },
-      { href: "/settings", label: "설정", icon: IconSettings },
+      { href: "/momentum-pools", label: "종목풀 순위", icon: IconMedal2 },
+      { href: "/momentum-settings", label: "설정", icon: IconSettings },
     ],
   },
   {
@@ -370,7 +370,6 @@ export function AppShell({ children }: AppShellProps) {
   }
 
   const HomeIcon = homeItem.icon;
-  const MarketTrendIcon = marketTrendItem.icon;
   const HoldingsIcon = holdingsItem.icon;
   const fearGreedDelta =
     fearGreed?.score !== null &&
@@ -443,14 +442,6 @@ export function AppShell({ children }: AppShellProps) {
               <HomeIcon size={18} stroke={1.9} />
             </span>
             <span className="nav-link-title">{homeItem.label}</span>
-          </Link>
-        </div>
-        <div className="nav-item appSidebarItem">
-          <Link href={marketTrendItem.href} className={pathname === marketTrendItem.href ? "nav-link active" : "nav-link"}>
-            <span className="appSidebarIcon" aria-hidden="true">
-              <MarketTrendIcon size={18} stroke={1.9} />
-            </span>
-            <span className="nav-link-title">{marketTrendItem.label}</span>
           </Link>
         </div>
         <div className="nav-item appSidebarItem">
