@@ -70,8 +70,8 @@ a {
   top: 0;
   height: 100vh;
   flex: 0 0 11rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: #1f2937;
+  border-right: 1px solid var(--line);
+  background: #ffffff;
   z-index: 1035;
   overflow-y: auto;
   transition:
@@ -126,7 +126,7 @@ a {
 .appSidebarNavGroups {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.3rem;
   flex: 0 0 auto;
   min-height: auto;
   width: 100%;
@@ -146,7 +146,7 @@ a {
   min-height: 1.9rem;
   padding: 0.3rem 0.5rem;
   border-radius: 0.375rem;
-  color: rgba(241, 245, 249, 0.78);
+  color: #475569;
   font-size: 0.92rem;
   font-weight: 500;
   line-height: 1.2;
@@ -168,7 +168,7 @@ a {
   border: 0;
   border-radius: 0.375rem;
   background: transparent;
-  color: rgba(241, 245, 249, 0.78);
+  color: #334155;
   font-size: 0.92rem;
   font-weight: 500;
   line-height: 1.2;
@@ -177,12 +177,12 @@ a {
 }
 
 .appSidebarGroupToggle:hover {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.04);
+  color: #1e293b;
+  background: rgba(15, 23, 42, 0.05);
 }
 
 .appSidebarGroupToggle.is-active {
-  color: #f8fafc;
+  color: #1e293b;
 }
 
 .appSidebarGroupLead {
@@ -201,7 +201,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(241, 245, 249, 0.68);
+  color: #94a3b8;
   transition: transform 160ms ease;
 }
 
@@ -219,15 +219,15 @@ a {
 }
 
 .appSidebarItem .nav-link:hover {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.04);
+  color: #1e293b;
+  background: rgba(15, 23, 42, 0.05);
 }
 
 .appSidebarItem .nav-link.active {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f8fafc;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
   font-weight: 600;
-  box-shadow: inset 2px 0 0 #206bc4;
+  box-shadow: inset 2px 0 0 #2563eb;
 }
 
 .appSidebarIcon {
@@ -268,9 +268,9 @@ a {
   gap: 0.35rem;
   padding: 0.6rem 0.65rem;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
+  background: #f1f5f9;
   font-size: 0.88rem;
-  color: #f1f5f9;
+  color: #334155;
 }
 
 .appSidebarSentimentItem {
@@ -278,7 +278,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  color: #f1f5f9;
+  color: #334155;
   text-decoration: none;
   padding: 0.25rem 0.3rem;
   border-radius: 5px;
@@ -286,15 +286,15 @@ a {
 }
 
 .appSidebarSentimentItem:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
 }
 
 .appSidebarSentimentLabel {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #cbd5e1;
+  color: #64748b;
   white-space: nowrap;
   font-weight: 600;
 }
@@ -308,11 +308,11 @@ a {
 
 .appSidebarSentimentValue strong {
   font-size: 0.95rem;
-  color: #ffffff;
+  color: #1e293b;
 }
 
 .appSidebarSentimentSub {
-  color: #cbd5e1;
+  color: #64748b;
   font-size: 0.78rem;
 }
 
@@ -388,8 +388,8 @@ a {
 .appMobileMenuInner {
   padding-top: 0.375rem;
   padding-bottom: 0.625rem;
-  background: #1f2937;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: #ffffff;
+  border-bottom: 1px solid var(--line);
 }
 
 .appMobileMenuFooter {

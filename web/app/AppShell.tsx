@@ -517,7 +517,7 @@ export function AppShell({ children }: AppShellProps) {
           {navList}
           <div className="appSidebarFooter">
             {sentimentWidget}
-            <button className="btn btn-outline-light btn-sm w-100" type="button" onClick={handleLogout}>
+            <button className="btn btn-outline-secondary btn-sm w-100" type="button" onClick={handleLogout}>
               로그아웃
             </button>
           </div>
@@ -646,7 +646,7 @@ export function AppShell({ children }: AppShellProps) {
             {navList}
             <div className="appSidebarFooter appMobileMenuFooter">
               {sentimentWidget}
-              <button className="btn btn-outline-light btn-sm w-100" type="button" onClick={handleLogout}>
+              <button className="btn btn-outline-secondary btn-sm w-100" type="button" onClick={handleLogout}>
                 로그아웃
               </button>
             </div>
