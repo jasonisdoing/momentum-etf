@@ -29,12 +29,79 @@ type ChartRow = {
   // 누적 인출을 안 했다고 가정한 총자산 (= total_assets + 누적 인출)
   total_assets_if_no_withdraw: number;
   total_principal: number;
+  // 입출금 영향을 뺀 주간 전략 수익률(%) · 누적 손익(원) — 성과 지표 계산용
+  weekly_return_pct: number;
+  cumulative_profit: number;
   bucket_1: number;
   bucket_2: number;
   bucket_3: number;
   bucket_4: number;
   bucket_5: number;
 };
+
+type PerfMetrics = {
+  weeks: number;
+  totalReturn: number | null; // 누적 수익률(소수, 0.1=10%)
+  cagr: number | null; // 연평균 수익률(소수)
+  mdd: number | null; // 최대 낙폭(음수 소수)
+  vol: number | null; // 연 변동성(소수)
+  bestWeek: number | null;
+  worstWeek: number | null;
+  winRate: number | null;
+  profitAmount: number | null; // 구간 누적 손익(원)
+};
+
+function computeMetrics(rows: ChartRow[]): PerfMetrics {
+  const empty: PerfMetrics = {
+    weeks: rows.length,
+    totalReturn: null, cagr: null, mdd: null, vol: null,
+    bestWeek: null, worstWeek: null, winRate: null, profitAmount: null,
+  };
+  if (rows.length < 2) return empty;
+
+  // 구간 진입점(첫 행) 이후의 주간 수익률을 체인 → 구간 내 NAV 곡선
+  const steps = rows.slice(1).map((r) => toNumber(r.weekly_return_pct) / 100);
+  const nav = [1];
+  for (const r of steps) nav.push(nav[nav.length - 1] * (1 + r));
+  const totalReturn = nav[nav.length - 1] - 1;
+
+  const first = rows[0];
+  const last = rows[rows.length - 1];
+  const days = (new Date(last.week_date).getTime() - new Date(first.week_date).getTime()) / 86_400_000;
+  const years = days / 365.25;
+  const cagr = years > 0 && totalReturn > -1 ? Math.pow(1 + totalReturn, 1 / years) - 1 : null;
+
+  let peak = nav[0];
+  let mdd = 0;
+  for (const v of nav) {
+    if (v > peak) peak = v;
+    const dd = v / peak - 1;
+    if (dd < mdd) mdd = dd;
+  }
+
+  const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
+  const variance = steps.reduce((a, b) => a + (b - mean) ** 2, 0) / steps.length;
+  const vol = Math.sqrt(variance) * Math.sqrt(52);
+
+  return {
+    weeks: rows.length,
+    totalReturn,
+    cagr,
+    mdd,
+    vol,
+    bestWeek: Math.max(...steps),
+    worstWeek: Math.min(...steps),
+    winRate: steps.filter((r) => r > 0).length / steps.length,
+    profitAmount: toNumber(last.cumulative_profit) - toNumber(first.cumulative_profit),
+  };
+}
+
+function formatPct(value: number | null, withSign = false): string {
+  if (value == null || !Number.isFinite(value)) return "-";
+  const pct = value * 100;
+  const sign = withSign && pct > 0 ? "+" : "";
+  return `${sign}${pct.toFixed(2)}%`;
+}
 
 const RANGE_OPTIONS: Array<{ key: RangeKey; label: string; weeks: number | null }> = [
   { key: "1m", label: "1개월", weeks: 5 },
@@ -108,6 +175,8 @@ function buildChartRows(rows: WeeklyRow[]): ChartRow[] {
       total_assets: totalAssets,
       total_assets_if_no_withdraw: totalAssets - runningExpense,
       total_principal: totalPrincipal,
+      weekly_return_pct: toNumber(row.weekly_return_pct),
+      cumulative_profit: toNumber(row.cumulative_profit),
       bucket_1: totalAssets * (toNumber(row.bucket_pct_momentum) / 100),
       bucket_2: totalAssets * (toNumber(row.bucket_pct_market) / 100),
       bucket_3: totalAssets * (toNumber(row.bucket_pct_dividend) / 100),
@@ -209,6 +278,7 @@ export function AssetChartsManager({
   const chartRows = useMemo(() => buildChartRows(rows), [rows]);
   const visibleRows = useMemo(() => filterRowsByRange(chartRows, rangeKey), [chartRows, rangeKey]);
   const visiblePeriod = useMemo(() => formatVisiblePeriod(visibleRows), [visibleRows]);
+  const metrics = useMemo(() => computeMetrics(visibleRows), [visibleRows]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(getLatestSummary(chartRows));
@@ -366,6 +436,63 @@ export function AssetChartsManager({
           </div>
         </div>
       </section>
+
+      <section className="appSection">
+        <div className="assetChartsGrid">
+          <div className="card appCard assetChartsCard">
+            <div className="assetChartsCardHeader">
+              <div>
+                <h2>포트 성과 지표</h2>
+                <p>선택 기간 기준 · 입출금 영향 제외(주간 전략 수익률 기반)</p>
+              </div>
+            </div>
+            <div className="assetChartsBody" style={{ display: "block" }}>
+              {loading ? (
+                <AppLoadingState label="성과 지표를 계산하는 중입니다." />
+              ) : (
+                <div>
+                  {[
+                    { label: "운용 기간", value: `${visiblePeriod} (${metrics.weeks}주)` },
+                    { label: "누적 수익률", value: formatPct(metrics.totalReturn, true), color: signColor(metrics.totalReturn) },
+                    { label: "연평균 수익률 (CAGR)", value: formatPct(metrics.cagr, true), color: signColor(metrics.cagr) },
+                    { label: "최대 낙폭 (MDD)", value: formatPct(metrics.mdd), color: metrics.mdd != null ? "#dc2626" : undefined },
+                    { label: "연 변동성", value: formatPct(metrics.vol) },
+                    { label: "최고 주간 수익률", value: formatPct(metrics.bestWeek, true), color: signColor(metrics.bestWeek) },
+                    { label: "최저 주간 수익률", value: formatPct(metrics.worstWeek, true), color: signColor(metrics.worstWeek) },
+                    { label: "수익 주 비율", value: metrics.winRate != null ? `${(metrics.winRate * 100).toFixed(1)}%` : "-" },
+                    { label: "누적 손익", value: showAmounts ? (metrics.profitAmount != null ? formatMoney(metrics.profitAmount) : "-") : "•••", color: showAmounts ? signColor(metrics.profitAmount) : undefined },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "11px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)" }}
+                    >
+                      <span style={{ color: "#64748b", fontWeight: 600, fontSize: "0.9rem" }}>{item.label}</span>
+                      <span style={{ fontWeight: 700, color: item.color ?? "#1e293b", textAlign: "right" }}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card appCard assetChartsCard">
+            <div className="assetChartsCardHeader">
+              <div>
+                <h2>&nbsp;</h2>
+                <p>&nbsp;</p>
+              </div>
+            </div>
+            <div className="assetChartsBody" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", minHeight: 120 }}>
+              추후 추가 예정
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   );
+}
+
+function signColor(value: number | null): string | undefined {
+  if (value == null || !Number.isFinite(value) || value === 0) return undefined;
+  return value > 0 ? "#16a34a" : "#dc2626";
 }
