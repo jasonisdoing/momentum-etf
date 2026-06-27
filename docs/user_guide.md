@@ -24,7 +24,7 @@ npm run dev
 
 ### 레버리지 전략 (`leverage/`) 실행
 
-폐기된 `leverage-switching` 앱에서 이전된 레버리지 스위칭 전략입니다 (상세: [leverage_migration.md](leverage_migration.md)).
+폐기된 `leverage-switching` 앱에서 이전된 레버리지 스위칭 전략입니다.
 * CLI: `python -m leverage.backtest switch` (백테스트) / `python -m leverage.recommend switch --slack` (추천+Slack) / `python -m leverage.tune switch` (튜닝)
 * 자동: `leverage_switch` 배치가 평일 09:05~16:05 매시 :05 에 추천을 Slack 으로 발송
 * 수동: `/batch` 화면에서 **"레버리지 스위칭 추천"** 클릭 → 큐 등록 → worker 실행
