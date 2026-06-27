@@ -102,6 +102,20 @@ APScheduler 에 등록한다.
 - 락 소유자 식별: `APP_TYPE` 환경변수 (`Local` vs 미설정 시 `PROD`)
 - 노트북이 꺼져 있던 시간의 미실행 분은 따라잡지 않는다 (misfire_grace_time=None)
 
+### 로컬 전용 잡 (워커 친화도)
+
+큐는 서버·로컬 워커가 공유하지만, **무거운 계산 + 결과가 로컬 파일에 남는** 잡은 로컬 워커만
+픽하게 한다 (`utils/batch_queue.py` 의 `LOCAL_ONLY_JOBS = {"leverage_tune", "momentum_backtest"}`).
+
+- `enqueue` 가 잡 doc 에 `local_only` 플래그를 자동 기록(잡 이름 기준) → 모든 트리거 경로
+  (레버리지·모멘텀 화면 버튼 / `/batch` 클릭 / 스케줄러)에 일관 적용.
+- `claim_next_pending` 은 워커가 `APP_TYPE != "Local"` 이면 `local_only: {$ne: True}` 로 필터 →
+  **서버 워커는 튜닝/백테스트를 claim 하지 않는다.** 로컬 워커는 전부 claim.
+- 이유: ① 결과 파일(`leverage/zresults/`, `backtest/results/`)이 실행한 머신 FS 에만 남아
+  로컬 UI 에서만 보임(공유 스토리지 아님), ② 약한 서버 VM 에서 멀티프로세스 돌리면 CPU 폭주.
+- 주의: **로컬 워커가 꺼져 있으면 이 두 잡은 pending 으로 대기**(서버가 안 가져감). `/batch` 에는
+  "수동 실행 · 로컬 전용" 으로 표시된다.
+
 ### 스케줄러·배치 작성 시 주의
 
 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱할 때의 비자명한 동작:
