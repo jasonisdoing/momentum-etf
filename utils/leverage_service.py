@@ -105,32 +105,61 @@ def _parse_tune_log(text: str) -> dict[str, Any]:
     return {"done": done, "progress_pct": progress_pct, "completed": completed, "total": total}
 
 
-def _read_latest_tune_log(profile: str) -> dict[str, Any]:
-    """가장 최근 튜닝 로그(zresults/<profile>/tune_*.log)의 내용·진행률을 반환한다."""
+def list_tune_log_dates(profile: str = "switch") -> list[str]:
+    """저장된 튜닝 로그 날짜(YYYY-MM-DD) 목록을 최신순으로 반환한다."""
     from leverage.constants import ZRESULTS_DIR
 
     out_dir = ZRESULTS_DIR / profile
-    logs = sorted(out_dir.glob("tune_*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if out_dir.exists() else []
-    if not logs:
-        return {"log_text": "", "log_file": None, "done": False, "progress_pct": None, "completed": None, "total": None}
+    if not out_dir.exists():
+        return []
+    dates = {p.stem[len("tune_"):] for p in out_dir.glob("tune_*.log")}
+    # YYYY-MM-DD 형식만(파일명 안전), 최신순 정렬(문자열 정렬 = 날짜순)
+    import re
 
-    latest = logs[0]
+    return sorted((d for d in dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)), reverse=True)
+
+
+def _read_tune_log(profile: str, date: str | None = None) -> dict[str, Any]:
+    """튜닝 로그(zresults/<profile>/tune_<date>.log)의 내용·진행률을 반환한다.
+
+    date 가 없으면 가장 최근 로그를 읽는다. 잘못된 date 형식은 무시(경로 조작 방지).
+    """
+    import re
+
+    from leverage.constants import ZRESULTS_DIR
+
+    out_dir = ZRESULTS_DIR / profile
+    empty = {"log_text": "", "log_file": None, "selected_date": None, "done": False, "progress_pct": None, "completed": None, "total": None}
+
+    if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
+        date = None  # 형식이 아니면 무시 (디렉터리 탈출 방지)
+
+    if date:
+        path = out_dir / f"tune_{date}.log"
+        if not path.exists():
+            return {**empty, "selected_date": date}
+    else:
+        logs = sorted(out_dir.glob("tune_*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if out_dir.exists() else []
+        if not logs:
+            return empty
+        path = logs[0]
+
     try:
-        text = latest.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8")
     except OSError:
         text = ""
     parsed = _parse_tune_log(text)
-    return {"log_text": text, "log_file": latest.name, **parsed}
+    return {"log_text": text, "log_file": path.name, "selected_date": date or path.stem[len("tune_"):], **parsed}
 
 
-def leverage_tune_status(profile: str = "switch") -> dict[str, Any]:
-    """튜닝 실행 상태 + 최근 로그(진행도/결과)를 반환한다(프론트 폴링용)."""
+def leverage_tune_status(profile: str = "switch", date: str | None = None) -> dict[str, Any]:
+    """튜닝 실행 상태 + 선택 날짜(없으면 최신) 로그(진행도/결과) + 날짜 목록을 반환한다."""
     from utils.batch_queue import get_latest_item
 
     item = get_latest_item(_TUNE_JOB_NAME)
     queue_status = item.get("status") if item else None  # pending/running/done/failed/None
 
-    log = _read_latest_tune_log(profile)
+    log = _read_tune_log(profile, date)
 
     def _iso(value: Any) -> str | None:
         return value.isoformat() if hasattr(value, "isoformat") else value
@@ -143,6 +172,7 @@ def leverage_tune_status(profile: str = "switch") -> dict[str, Any]:
         "triggered_at": _iso(item.get("triggered_at")) if item else None,
         "started_at": _iso(item.get("started_at")) if item else None,
         "ended_at": _iso(item.get("ended_at")) if item else None,
+        "dates": list_tune_log_dates(profile),
         **log,
     }
 
