@@ -1,6 +1,6 @@
 """모멘텀 ETF 파라미터 스윕 백테스트 엔진.
 
-``backtest/run.py`` 에서 호출되며, 종목풀별 ``BACKTEST_CONFIG`` 와
+``backtest/run.py`` 에서 호출되며, 종목풀별 탐색공간(DB `backtest_config`)과
 전역 공통값 ``BACKTEST_START_DATE``, ``BACKTEST_INITIAL_KRW_AMOUNT`` 를 사용한다.
 멀티프로세스 병렬 실행을 지원하며, 실행 중에도 중간 결과를 파일에 주기적으로 기록한다.
 """
@@ -29,6 +29,7 @@ from core.strategy.scoring import (
     compute_eligibility_mask,
     compute_rule_percentile_frame,
 )
+from utils.backtest_config_store import load_backtest_config
 from utils.cache_utils import load_cached_frames_bulk_from_ticker_types, load_cached_frames_bulk_with_fallback
 from utils.data_loader import get_exchange_rate_series, get_trading_days
 from utils.formatters import format_pct_change, format_price, format_trading_days
@@ -1727,25 +1728,20 @@ def _write_details_file(
 _FLUSH_EVERY_N_RESULTS = 100
 
 
-def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
-    """주어진 풀 ID 와 설정으로 파라미터 스윕 백테스트를 실행한다.
+def run_backtest(pool_id: str) -> Path:
+    """주어진 풀 ID 의 백테스트 탐색공간(DB)으로 파라미터 스윕 백테스트를 실행한다.
 
     멀티프로세스 병렬 실행을 사용하며, 실행 중 ``_FLUSH_EVERY_N_RESULTS`` 건마다
     중간 결과를 로그 파일에 갱신한다.
 
     Args:
         pool_id: 종목풀 식별자 (예: ``"kor_kr"``).
-        config: ``BACKTEST_CONFIG`` 딕셔너리. ``pool_id`` 키가 존재해야 한다.
 
     Returns:
         결과 로그 파일 경로.
     """
-    if pool_id not in config:
-        raise ValueError(
-            f"BACKTEST_CONFIG 에 '{pool_id}' 설정이 없습니다."
-        )
-
-    cfg = config[pool_id]
+    # 백테스트 탐색공간은 DB(backtest_config)가 단일 소스. 없으면 명시적 에러.
+    cfg = load_backtest_config(pool_id)
     start_target = pd.Timestamp(BACKTEST_START_DATE).normalize()
     initial_cash = float(BACKTEST_INITIAL_KRW_AMOUNT)
 
@@ -1772,7 +1768,7 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
         benchmark_name = str(benchmark_config.get("name") or "").strip()
         if not benchmark_ticker or not benchmark_name:
             raise ValueError(
-                f"BACKTEST_CONFIG['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
+                f"backtest_config['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
             )
 
     # 기간 설정
