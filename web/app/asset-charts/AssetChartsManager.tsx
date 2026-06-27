@@ -442,7 +442,7 @@ export function AssetChartsManager({
           <div className="card appCard assetChartsCard">
             <div className="assetChartsCardHeader">
               <div>
-                <h2>포트 성과 지표</h2>
+                <h2>포트폴리오 성과 지표</h2>
                 <p>선택 기간 기준 · 입출금 영향 제외(주간 전략 수익률 기반)</p>
               </div>
             </div>

@@ -250,7 +250,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor_kr": {
         "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
@@ -258,7 +258,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor_us": {
         "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
         "TOP_N_HOLD": [3],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
@@ -266,7 +266,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "aus": {
         "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
         "TOP_N_HOLD": [8],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
@@ -274,7 +274,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "us": {
         "BENCHMARK": {"ticker": "QQQ", "name": "인베스코 QQQ ETF"},
         "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
@@ -282,7 +282,7 @@ BACKTEST_CONFIG: dict[str, dict] = {
     "kor": {
         "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
         "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
+        "HOLDING_BONUS_SCORE": [0, 10],
         "MA_TYPE": ["ALMA"],
         "MA_MONTHS": [3, 6, 9, 12],
         "RSI_LIMIT": [100],
