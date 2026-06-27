@@ -94,9 +94,9 @@ a {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.375rem;
+  gap: 0.2rem;
   min-height: 100vh;
-  padding: 0.625rem 0.375rem 0.75rem;
+  padding: 0.4rem 0.375rem 0.4rem;
   transition: opacity 120ms ease;
 }
 
@@ -126,7 +126,7 @@ a {
 .appSidebarNavGroups {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.12rem;
   flex: 0 0 auto;
   min-height: auto;
   width: 100%;
@@ -143,8 +143,8 @@ a {
   align-items: center;
   justify-content: flex-start;
   gap: 0.625rem;
-  min-height: 1.9rem;
-  padding: 0.3rem 0.5rem;
+  min-height: 1.65rem;
+  padding: 0.2rem 0.5rem;
   border-radius: 0.375rem;
   color: #475569;
   font-size: 0.92rem;
@@ -163,8 +163,8 @@ a {
   justify-content: space-between;
   gap: 0.5rem;
   width: 100%;
-  min-height: 1.9rem;
-  padding: 0.3rem 0.5rem;
+  min-height: 1.65rem;
+  padding: 0.2rem 0.5rem;
   border: 0;
   border-radius: 0.375rem;
   background: transparent;
