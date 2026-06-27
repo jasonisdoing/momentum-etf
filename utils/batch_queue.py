@@ -36,6 +36,11 @@ STATUS_FAILED = "failed"
 _TTL_HOURS = 24
 _HEARTBEAT_STALE_MINUTES = 5
 
+# 무거운 계산이라 서버(약한 VM)에서 돌리면 안 되고, 결과가 로컬 파일시스템에 남아
+# 로컬 UI 에서만 조회되므로 **로컬 워커(APP_TYPE=Local)만** 픽하게 하는 잡들.
+# (서버 워커는 이 잡들을 claim 하지 않는다 → 로컬이 꺼져 있으면 pending 으로 대기)
+LOCAL_ONLY_JOBS: set[str] = {"leverage_tune", "momentum_backtest"}
+
 
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -86,6 +91,7 @@ def enqueue(
         "triggered_by": triggered_by,
         "triggered_at": now,
         "status": STATUS_PENDING,
+        "local_only": job_name in LOCAL_ONLY_JOBS,
         "started_at": None,
         "ended_at": None,
         "last_heartbeat": None,
@@ -111,8 +117,12 @@ def claim_next_pending() -> dict[str, Any] | None:
     coll = db[BATCH_QUEUE_COLLECTION]
     now = _now_utc()
     worker_app_type = (os.environ.get("APP_TYPE") or "").strip() or "Server"
+    # 로컬 워커가 아니면 local_only 잡(튜닝/백테스트)은 픽하지 않는다.
+    claim_filter: dict[str, Any] = {"status": STATUS_PENDING}
+    if worker_app_type != "Local":
+        claim_filter["local_only"] = {"$ne": True}
     return coll.find_one_and_update(
-        {"status": STATUS_PENDING},
+        claim_filter,
         {
             "$set": {
                 "status": STATUS_RUNNING,
