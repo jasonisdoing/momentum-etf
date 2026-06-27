@@ -73,6 +73,7 @@ const navGroups = [
     items: [
       { href: "/momentum-pools", label: "종목풀 순위", icon: IconMedal2 },
       { href: "/momentum-settings", label: "설정", icon: IconSettings },
+      { href: "/momentum-backtest", label: "백테스트", icon: IconListDetails },
     ],
   },
   {

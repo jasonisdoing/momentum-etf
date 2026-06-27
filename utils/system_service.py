@@ -24,6 +24,7 @@ SystemAction = Literal[
     "live_24h_slack",
     "leverage_switch",
     "leverage_tune",
+    "momentum_backtest",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -113,6 +114,14 @@ SCHEDULE_ROWS = [
         "command": "python scripts/leverage_tune_switch.py",
         "schedule": None,  # 스케줄 없음(수동 전용) → 다음 실행 표시 "-"
     },
+    {
+        "key": "momentum_backtest",
+        "job": "모멘텀 백테스트",
+        "target": "모든 종목풀 (탐색공간 전수)",
+        "cadence": "수동 실행 (모멘텀-백테스트 화면)",
+        "command": "python scripts/momentum_backtest.py",
+        "schedule": None,  # 스케줄 없음(수동 전용)
+    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -126,6 +135,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_switch": "scripts/leverage_recommend_switch.py",
     "leverage_tune": "scripts/leverage_tune_switch.py",
+    "momentum_backtest": "scripts/momentum_backtest.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
