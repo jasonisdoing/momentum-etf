@@ -121,13 +121,13 @@ a {
 .appSidebarNav {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0;
 }
 
 .appSidebarNavGroups {
   display: flex;
   flex-direction: column;
-  gap: 0.12rem;
+  gap: 0;
   flex: 0 0 auto;
   min-height: auto;
   width: 100%;
@@ -136,7 +136,7 @@ a {
 .appSidebarGroup {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0;
 }
 
 /* 그룹 사이 얇은 구분선 — 간격을 키우지 않고 그룹 경계를 명확히 한다. */
