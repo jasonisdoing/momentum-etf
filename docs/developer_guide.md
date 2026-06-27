@@ -55,7 +55,7 @@ python infra/server_scheduler.py
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
-*   `backtest/`: 백테스트 전용 실행기, 스윕 설정, 결과 로그 생성 엔진
+*   `backtest/`: 백테스트 전용 파라미터 스윕 실행기·결과 로그 엔진 (탐색공간은 DB `backtest_config`, `/momentum-backtest` 화면에서 실행)
 *   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
@@ -238,6 +238,16 @@ python infra/server_scheduler.py
 * 전체 종목풀: `all.TOP_N_HOLD`, `all.HOLDING_BONUS_SCORE`, `all.MA_TYPE`, `all.MA_MONTHS`, `all.RSI_LIMIT`, `all.include` 필수
 * 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
+* 위 5개 편집값(TOP_N_HOLD 등)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-settings` 화면에서 편집.
+
+### 백테스트 탐색 공간 (`backtest_config`)
+
+모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
+DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
+
+* `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(백테스트 탐색 차원에서 제외).
+* 라이브 단일 적용값(`pool_settings`)과 백테스트 탐색공간(`backtest_config`)은 **별개**다(같은 파라미터명, 다른 역할: 단일값 vs 리스트).
+* 편집: `/momentum-settings` 하단 "백테스트 탐색 공간" 카드. 실행: `/momentum-backtest` 화면 또는 `/batch` 의 `momentum_backtest` 잡(둘 다 같은 큐, **로컬 전용**). 결과는 풀별 `backtest/results/<prefix>-backtest_<date>.log`.
 
 ## 4. 테스트 및 검증
 
@@ -265,7 +275,7 @@ python infra/server_scheduler.py
 
 ## 6. 화면 UI 표준
 
-AG Grid 기반 주요 화면은 현재 `/pools`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
+AG Grid 기반 주요 화면은 현재 `/momentum-pools`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
 
 ### 공통 레이아웃 순서
 1.  **메뉴 헤더**
