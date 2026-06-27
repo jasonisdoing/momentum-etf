@@ -106,6 +106,7 @@ export function UsMarketStockManager({
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [registeredTickers, setRegisteredTickers] = useState<Set<string>>(new Set());
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
@@ -120,9 +121,10 @@ export function UsMarketStockManager({
     setError(null);
     try {
       const minCap = String(minCapUkmText || "").trim() || "0";
-      const [resp, stocksPayload] = await Promise.all([
+      const [resp, allStocksPayload, usStocksPayload] = await Promise.all([
         fetch(`/api/us-market-stocks?index=${encodeURIComponent(idx)}&min_market_cap_ukm=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
+        loadStocksTable("us").catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as UsMarketStocksResponse;
       if (!resp.ok) {
@@ -130,7 +132,15 @@ export function UsMarketStockManager({
       }
       setRows(data.rows ?? []);
       setTotalCount(data.total_count ?? 0);
-      setTickerPools(stocksPayload.ticker_types ?? []);
+      setTickerPools(allStocksPayload.ticker_types ?? []);
+
+      const registered = new Set<string>();
+      (usStocksPayload.rows ?? []).forEach((row: any) => {
+        if (row.ticker) {
+          registered.add(String(row.ticker).trim().toUpperCase());
+        }
+      });
+      setRegisteredTickers(registered);
     } catch (e) {
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
@@ -148,10 +158,10 @@ export function UsMarketStockManager({
 
   const gridRows = useMemo(() => [...rows], [rows]);
 
-  const allVisibleSelected = useMemo(
-    () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
-    [gridRows, selectedTickers],
-  );
+  const allVisibleSelected = useMemo(() => {
+    const selectableRows = gridRows.filter((row) => !registeredTickers.has(row.ticker.toUpperCase()));
+    return selectableRows.length > 0 && selectableRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [gridRows, selectedTickers, registeredTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -160,16 +170,18 @@ export function UsMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const visibleTickers = gridRows.map((row) => row.ticker);
+    const selectableTickers = gridRows
+      .filter((row) => !registeredTickers.has(row.ticker.toUpperCase()))
+      .map((row) => row.ticker);
     setSelectedTickers((current) => {
-      if (visibleTickers.length === 0) return current;
-      const allSelected = visibleTickers.every((ticker) => current.includes(ticker));
+      if (selectableTickers.length === 0) return current;
+      const allSelected = selectableTickers.every((ticker) => current.includes(ticker));
       if (allSelected) {
-        return current.filter((ticker) => !visibleTickers.includes(ticker));
+        return current.filter((ticker) => !selectableTickers.includes(ticker));
       }
-      return [...new Set([...current, ...visibleTickers])];
+      return [...new Set([...current, ...selectableTickers])];
     });
-  }, [gridRows]);
+  }, [gridRows, registeredTickers]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
@@ -359,6 +371,10 @@ export function UsMarketStockManager({
         cellRenderer: (params: { data?: UsMarketStockGridRow }) => {
           const ticker = String(params.data?.ticker ?? "").trim();
           if (!ticker) return null;
+          const isAlreadyRegistered = registeredTickers.has(ticker.toUpperCase());
+          if (isAlreadyRegistered) {
+            return null;
+          }
           return (
             <input
               type="checkbox"
@@ -371,7 +387,7 @@ export function UsMarketStockManager({
         },
       },
     ],
-    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection, registeredTickers],
   );
 
   return (
@@ -438,7 +454,14 @@ export function UsMarketStockManager({
               loading={loading}
               theme={usMarketStockGridTheme}
               minHeight="32rem"
-              getRowClass={(params) => (params.data?.is_held ? "appHeldRow" : "")}
+              getRowClass={(params) => {
+                const classes = [];
+                if (params.data?.is_held) classes.push("appHeldRow");
+                if (params.data?.ticker && registeredTickers.has(params.data.ticker.toUpperCase())) {
+                  classes.push("usMarketStockGridRowRegistered");
+                }
+                return classes.join(" ");
+              }}
               gridOptions={{
                 overlayNoRowsTemplate: '<span style="color:#667382;">데이터 없음</span>',
                 suppressMovableColumns: true,
