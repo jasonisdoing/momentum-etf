@@ -16,6 +16,7 @@ from .routes.leverage import router as leverage_router
 from .routes.live_24h import router as live_24h_router
 from .routes.market import router as market_router
 from .routes.market_trend import router as market_trend_router
+from .routes.momentum_backtest import router as momentum_backtest_router
 from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.pool_settings import router as pool_settings_router
@@ -75,6 +76,7 @@ app.include_router(market_trend_router)
 app.include_router(note_router)
 app.include_router(pool_settings_router)
 app.include_router(backtest_config_router)
+app.include_router(momentum_backtest_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
