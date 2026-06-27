@@ -47,10 +47,11 @@ def post_leverage_tune(
 @router.get("/tune/status")
 def get_leverage_tune_status(
     profile: str = Query(default="switch"),
+    date: str | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """튜닝 실행 상태 + 최근 로그(진행도/결과)를 반환한다."""
-    return leverage_tune_status(profile)
+    """튜닝 실행 상태 + 선택 날짜(없으면 최신) 로그 + 날짜 목록을 반환한다."""
+    return leverage_tune_status(profile, date)
 
 
 @router.get("/resolve-ticker")

@@ -8,7 +8,9 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const profile = request.nextUrl.searchParams.get("profile") ?? "switch";
-    const data = await fetchFastApiJson(`/internal/leverage/tune/status?profile=${encodeURIComponent(profile)}`);
+    const date = request.nextUrl.searchParams.get("date");
+    const qs = `profile=${encodeURIComponent(profile)}${date ? `&date=${encodeURIComponent(date)}` : ""}`;
+    const data = await fetchFastApiJson(`/internal/leverage/tune/status?${qs}`);
     return jsonNoStore(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "튜닝 상태를 불러오지 못했습니다.";
