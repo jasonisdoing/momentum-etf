@@ -233,6 +233,17 @@ def get_running_item() -> dict[str, Any] | None:
     return db[BATCH_QUEUE_COLLECTION].find_one({"status": STATUS_RUNNING})
 
 
+def get_latest_item(job_name: str) -> dict[str, Any] | None:
+    """해당 job_name 의 가장 최근 큐 항목 1건 (상태 조회용)."""
+    db = get_db_connection()
+    if db is None:
+        return None
+    return db[BATCH_QUEUE_COLLECTION].find_one(
+        {"job_name": job_name},
+        sort=[("triggered_at", -1)],
+    )
+
+
 def cancel_pending(item_id: Any) -> bool:
     """pending 항목 취소 (running 은 취소 불가)."""
     db = get_db_connection()

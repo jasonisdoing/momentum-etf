@@ -44,7 +44,8 @@
 1. ~~**UI 서브메뉴**~~ — **완료**. 설정·상태 조회 route(`fastapi_app/routes/leverage.py`) + service(`utils/leverage_service.py`) + Next 페이지(`web/app/leverage-settings/`) + 사이드바 레버리지 그룹/설정 메뉴 구현됨.
 2. ~~**설정 파일 → DB/UI 전환**~~ — **완료**. `switch.json`/상태 파일 → DB(`leverage_config`/`leverage_state`) 단일 소스로 이관, 레버리지-설정 화면에서 편집/저장. 설정 누락 시 임의 기본값 없이 에러(silent fallback 제거). 옛 파일 제거됨.
 3. ~~**튜닝 탐색 공간 → DB/UI 전환**~~ — **완료**. `tune.py` 하드코딩 `TUNING_CONFIG` 제거, DB `leverage_config.tuning`(공격/방어 후보군 + 매수컷/매도컷 범위 min/max/step)을 단일 소스로 사용(`leverage/tuning_config.py` 공통 검증·빌드). 레버리지-설정 화면 "튜닝 탐색 공간" 카드에서 후보 추가/삭제·범위 편집. 누락 시 임의 기본값 없이 에러.
-4. **`tune.py` 실행 검증** — momentum-etf 데이터로 `python -m leverage.tune switch` 1회 확인(현재 backtest/recommend 만 검증됨). 튜닝은 DB 설정을 임시 파일로 엔진에 전달 후 결과를 DB 에 저장한다.
+4. ~~**튜닝 웹 실행 UI**~~ — **완료**. 설정 화면을 둘로 분리: 레버리지-설정(`/leverage-settings`, 전략·상태)과 레버리지-튜닝(`/leverage-tune`, 탐색공간 편집 + "튜닝 시작" 버튼 + 진행도/결과). 버튼 → `batch_queue.enqueue("leverage_tune", scripts/leverage_tune_switch.py)` → 워커 실행. 진행도/결과는 `zresults/switch/tune_<날짜>.log` 를 폴링(`/api/leverage-tune/status`)해 표시.
+5. **`tune.py` 실행 검증** — momentum-etf 데이터로 `python -m leverage.tune switch` 1회 확인(현재 backtest/recommend 만 검증됨). 튜닝은 DB 설정을 임시 파일로 엔진에 전달 후 결과를 DB 에 저장한다.
 
 (완료: 문서 갱신 — `docs/server_infrastructure.md` 에 leverage 배치 반영됨.
  완료: leverage-switching 앱 폐기 — VM `install.sh --uninstall` + repo 아카이브 (수동, 2026-06).
