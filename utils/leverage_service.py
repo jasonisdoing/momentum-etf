@@ -15,7 +15,7 @@ from leverage.config_store import (
 )
 from leverage.engine.backtest.settings import normalize_settings
 from leverage.holding import count_holding_trading_days
-from leverage.tuning_config import validate_tuning_section
+from leverage.tuning_config import derive_benchmarks, validate_tuning_section
 
 
 def load_leverage_settings(profile: str = "switch") -> dict[str, Any]:
@@ -51,26 +51,100 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
     if not config.get("start_date") and not has_months:
         raise ValueError("'months_range'(0보다 큰 수) 또는 'start_date' 가 필요합니다.")
 
-    benchmarks = config.get("benchmarks")
-    if not isinstance(benchmarks, list) or len(benchmarks) == 0:
-        raise ValueError("벤치마크가 1개 이상 필요합니다.")
-    for entry in benchmarks:
-        if not isinstance(entry, dict) or not str(entry.get("ticker") or "").strip():
-            raise ValueError("벤치마크 항목에 티커가 필요합니다.")
-
-    # 튜닝 탐색 공간(있으면) 검증 — tune.py 와 동일한 공통 검증기를 사용.
-    if "tuning" in config:
-        validate_tuning_section(config.get("tuning"))
+    # 튜닝 탐색 공간 검증 — tune.py 와 동일한 공통 검증기를 사용.
+    # 벤치마크는 더 이상 직접 입력하지 않고 후보군에서 파생하므로 tuning 은 필수.
+    validate_tuning_section(config.get("tuning"))
 
     # 엔진 정규화로 추가 검증 (사본으로 — 파생 키가 저장값에 섞이지 않게).
-    normalize_settings(dict(config))
+    # benchmarks 는 후보군에서 파생해 주입(엔진 필수 키 충족).
+    check = dict(config)
+    check["benchmarks"] = derive_benchmarks(config)
+    normalize_settings(check)
 
 
 def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, Any]:
-    """검증 후 설정을 DB 에 저장하고, 갱신된 설정+상태를 반환한다."""
+    """검증 후 설정을 DB 에 저장하고, 갱신된 설정+상태를 반환한다.
+
+    벤치마크는 후보군(tuning)에서 파생해 DB 에 함께 저장한다(단일 소스 유지).
+    """
     _validate_leverage_config(config)
+    config = dict(config)
+    config["benchmarks"] = derive_benchmarks(config)
     save_leverage_config_raw(profile, config)
     return load_leverage_settings(profile)
+
+
+_TUNE_JOB_NAME = "leverage_tune"
+_TUNE_SCRIPT = "scripts/leverage_tune_switch.py"
+
+
+def trigger_leverage_tune(profile: str = "switch") -> dict[str, Any]:
+    """튜닝 작업을 배치 큐에 추가한다(워커가 순서대로 실행). 이미 대기/실행 중이면 무시."""
+    from utils.batch_queue import enqueue
+
+    result = enqueue(_TUNE_JOB_NAME, _TUNE_SCRIPT, triggered_by="manual")
+    return {
+        "enqueued": bool(result.get("enqueued")),
+        "reason": result.get("reason"),
+    }
+
+
+def _parse_tune_log(text: str) -> dict[str, Any]:
+    """튜닝 로그에서 진행률/완료 여부를 파싱한다."""
+    import re
+
+    done = "종료 시각" in text
+    progress_pct: float | None = None
+    completed = total = None
+    m = re.search(r"진행률:\s*(\d+)/(\d+)\s*\(([\d.]+)%\)", text)
+    if m:
+        completed, total = int(m.group(1)), int(m.group(2))
+        progress_pct = float(m.group(3))
+    if done:
+        progress_pct = 100.0
+    return {"done": done, "progress_pct": progress_pct, "completed": completed, "total": total}
+
+
+def _read_latest_tune_log(profile: str) -> dict[str, Any]:
+    """가장 최근 튜닝 로그(zresults/<profile>/tune_*.log)의 내용·진행률을 반환한다."""
+    from leverage.constants import ZRESULTS_DIR
+
+    out_dir = ZRESULTS_DIR / profile
+    logs = sorted(out_dir.glob("tune_*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if out_dir.exists() else []
+    if not logs:
+        return {"log_text": "", "log_file": None, "done": False, "progress_pct": None, "completed": None, "total": None}
+
+    latest = logs[0]
+    try:
+        text = latest.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+    parsed = _parse_tune_log(text)
+    return {"log_text": text, "log_file": latest.name, **parsed}
+
+
+def leverage_tune_status(profile: str = "switch") -> dict[str, Any]:
+    """튜닝 실행 상태 + 최근 로그(진행도/결과)를 반환한다(프론트 폴링용)."""
+    from utils.batch_queue import get_latest_item
+
+    item = get_latest_item(_TUNE_JOB_NAME)
+    queue_status = item.get("status") if item else None  # pending/running/done/failed/None
+
+    log = _read_latest_tune_log(profile)
+
+    def _iso(value: Any) -> str | None:
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    return {
+        "queue_status": queue_status,  # None=이력 없음
+        "running": queue_status in ("pending", "running"),
+        "exit_code": item.get("exit_code") if item else None,
+        "error": item.get("error") if item else None,
+        "triggered_at": _iso(item.get("triggered_at")) if item else None,
+        "started_at": _iso(item.get("started_at")) if item else None,
+        "ended_at": _iso(item.get("ended_at")) if item else None,
+        **log,
+    }
 
 
 def resolve_pool_ticker(ticker: str) -> dict[str, Any]:

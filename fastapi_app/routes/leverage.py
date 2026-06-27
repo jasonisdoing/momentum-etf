@@ -3,7 +3,12 @@
 from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
-from utils.leverage_service import load_leverage_settings, save_leverage_settings
+from utils.leverage_service import (
+    leverage_tune_status,
+    load_leverage_settings,
+    save_leverage_settings,
+    trigger_leverage_tune,
+)
 
 router = APIRouter(prefix="/internal/leverage", tags=["leverage"])
 
@@ -28,6 +33,24 @@ def post_leverage_config(
     if not isinstance(config, dict):
         raise ValueError("저장할 'config' 가 필요합니다.")
     return save_leverage_settings(profile, config)
+
+
+@router.post("/tune")
+def post_leverage_tune(
+    profile: str = Query(default="switch"),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """튜닝 작업을 배치 큐에 추가한다(워커가 실행). 이미 대기/실행 중이면 무시."""
+    return trigger_leverage_tune(profile)
+
+
+@router.get("/tune/status")
+def get_leverage_tune_status(
+    profile: str = Query(default="switch"),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """튜닝 실행 상태 + 최근 로그(진행도/결과)를 반환한다."""
+    return leverage_tune_status(profile)
 
 
 @router.get("/resolve-ticker")

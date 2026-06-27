@@ -56,6 +56,29 @@ def validate_tuning_section(tuning: object) -> None:
         raise ValueError("매수컷 범위의 최솟값이 매도컷 범위의 최댓값보다 작아야 유효한 조합이 생깁니다.")
 
 
+def derive_benchmarks(config: dict) -> list[dict]:
+    """벤치마크 = 공격 후보 ∪ 방어 후보 (티커 중복 제거, CASH 제외).
+
+    후보군이 단일 소스이므로 벤치마크는 따로 입력하지 않고 여기서 파생한다
+    (별도 silent default 가 아니라 후보로부터의 명시적 변환).
+    """
+    tuning = config.get("tuning") or {}
+    seen: set[str] = set()
+    result: list[dict] = []
+    for key in ("offense_candidates", "defense_candidates"):
+        for entry in tuning.get(key) or []:
+            if not isinstance(entry, dict):
+                continue
+            ticker = str(entry.get("ticker") or "").strip()
+            if not ticker or ticker.upper() == "CASH":
+                continue
+            if ticker.upper() in seen:
+                continue
+            seen.add(ticker.upper())
+            result.append({"ticker": ticker, "name": entry.get("name") or ticker})
+    return result
+
+
 def _arange_inclusive(rng: dict) -> list[float]:
     """min~max(끝값 포함)를 step 간격으로 나열한다."""
     import numpy as np
