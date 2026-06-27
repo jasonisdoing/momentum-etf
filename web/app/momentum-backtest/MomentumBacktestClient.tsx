@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -23,11 +23,28 @@ type BacktestStatus = {
   total?: number | null;
 };
 
+type FileEntry = { file: string; pool: string; date: string; order: number };
+
+/** `<order>_<pool>-backtest_<date>.log` → {pool, date, order}. */
+function parseFile(name: string): FileEntry | null {
+  const m = name.match(/^(.*)-backtest_(\d{4}-\d{2}-\d{2})\.log$/);
+  if (!m) return null;
+  const prefix = m[1];
+  const om = prefix.match(/^(\d+)_(.*)$/);
+  return {
+    file: name,
+    pool: om ? om[2] : prefix,
+    date: m[2],
+    order: om ? parseInt(om[1], 10) : 999,
+  };
+}
+
 export function MomentumBacktestClient() {
   const toast = useToast();
   const [bt, setBt] = useState<BacktestStatus | null>(null);
   const [files, setFiles] = useState<string[]>([]);
-  const [viewFile, setViewFile] = useState<string | null>(null); // null = 최신 따라가기
+  const [selectedPool, setSelectedPool] = useState<string>("");
+  const [selectedDate, setSelectedDate] = useState<string>("");
   const [triggering, setTriggering] = useState(false);
   const [mounted, setMounted] = useState(false);
 
@@ -45,21 +62,57 @@ export function MomentumBacktestClient() {
     }
   }, []);
 
+  const entries = useMemo(
+    () => files.map(parseFile).filter((e): e is FileEntry => e !== null),
+    [files],
+  );
+  const pools = useMemo(() => {
+    const order = new Map<string, number>();
+    for (const e of entries) if (!order.has(e.pool)) order.set(e.pool, e.order);
+    return [...order.entries()].sort((a, b) => a[1] - b[1]).map(([p]) => p);
+  }, [entries]);
+  const datesFor = useCallback(
+    (pool: string) => [...new Set(entries.filter((e) => e.pool === pool).map((e) => e.date))].sort((a, b) => b.localeCompare(a)),
+    [entries],
+  );
+  const viewFile = useMemo(
+    () => entries.find((e) => e.pool === selectedPool && e.date === selectedDate)?.file ?? null,
+    [entries, selectedPool, selectedDate],
+  );
+
   useEffect(() => {
     setMounted(true);
-  }, []);
+    void refetch(null);
+  }, [refetch]);
 
+  // 파일 목록이 바뀌면 선택을 유효하게 정규화(없으면 최신 파일의 풀/날짜로).
   useEffect(() => {
-    void refetch(viewFile);
+    if (entries.length === 0) return;
+    const pool = selectedPool && pools.includes(selectedPool) ? selectedPool : entries[0].pool;
+    const dates = datesFor(pool);
+    const date = selectedDate && dates.includes(selectedDate) ? selectedDate : dates[0];
+    if (pool !== selectedPool) setSelectedPool(pool);
+    if (date !== selectedDate) setSelectedDate(date ?? "");
+  }, [entries, pools, datesFor, selectedPool, selectedDate]);
+
+  // 선택 파일이 정해지면 그 내용을 불러온다.
+  useEffect(() => {
+    if (viewFile) void refetch(viewFile);
   }, [viewFile, refetch]);
 
-  const isLatest = viewFile === null || (files.length > 0 && viewFile === files[0]);
+  const running = !!bt?.running;
+  const isLatest = files.length > 0 && viewFile === files[0];
 
   useEffect(() => {
-    if (!bt?.running || !isLatest) return;
+    if (!running) return;
     const id = setInterval(() => void refetch(viewFile), 2500);
     return () => clearInterval(id);
-  }, [bt?.running, isLatest, viewFile, refetch]);
+  }, [running, viewFile, refetch]);
+
+  const onPoolChange = (p: string) => {
+    setSelectedPool(p);
+    setSelectedDate(datesFor(p)[0] ?? "");
+  };
 
   const start = async () => {
     setTriggering(true);
@@ -71,7 +124,9 @@ export function MomentumBacktestClient() {
         return;
       }
       toast.success(data.enqueued ? "백테스트를 시작했습니다. 워커가 순서대로 실행합니다." : (data.reason ?? "이미 진행 중입니다."));
-      setViewFile(null);
+      // 최신(새 실행) 따라가도록 선택 초기화 → 정규화가 최신 파일로 맞춤
+      setSelectedPool("");
+      setSelectedDate("");
       await refetch(null);
     } finally {
       setTriggering(false);
@@ -88,14 +143,13 @@ export function MomentumBacktestClient() {
     );
   }
 
-  const running = !!bt?.running;
   const pct = bt?.progress_pct ?? null;
   const statusLabel = bt?.queue_status === "running" ? "실행 중"
     : bt?.queue_status === "pending" ? "대기 중(워커 시작 대기)"
     : bt?.queue_status === "done" ? (bt?.exit_code === 0 ? "완료" : `실패 (exit ${bt?.exit_code})`)
     : bt?.queue_status === "failed" ? "실패"
     : "대기";
-  const selectedFile = viewFile ?? bt?.selected_file ?? "";
+  const selectStyle: React.CSSProperties = { border: "1px solid rgba(148,163,184,0.4)", borderRadius: 6, padding: "5px 8px", fontSize: "0.85rem" };
 
   return (
     <PageFrame title="모멘텀 백테스트">
@@ -122,16 +176,17 @@ export function MomentumBacktestClient() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>진행도 / 결과</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: "#64748b", fontSize: "0.85rem", fontWeight: 600 }}>결과 파일</span>
-                <select
-                  style={{ border: "1px solid rgba(148,163,184,0.4)", borderRadius: 6, padding: "5px 8px", fontSize: "0.85rem", maxWidth: 320 }}
-                  value={selectedFile}
-                  onChange={(e) => setViewFile(e.target.value || null)}
-                  disabled={files.length === 0}
-                >
-                  {files.length === 0 ? <option value="">결과 없음</option> : null}
-                  {files.map((f) => (
-                    <option key={f} value={f}>{f}{f === files[0] ? " (최신)" : ""}</option>
+                <span style={{ color: "#64748b", fontSize: "0.85rem", fontWeight: 600 }}>종목풀</span>
+                <select style={selectStyle} value={selectedPool} onChange={(e) => onPoolChange(e.target.value)} disabled={pools.length === 0}>
+                  {pools.length === 0 ? <option value="">결과 없음</option> : null}
+                  {pools.map((p) => (
+                    <option key={p} value={p}>{p}</option>
+                  ))}
+                </select>
+                <span style={{ color: "#64748b", fontSize: "0.85rem", fontWeight: 600 }}>날짜</span>
+                <select style={selectStyle} value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} disabled={!selectedPool}>
+                  {datesFor(selectedPool).map((d, i) => (
+                    <option key={d} value={d}>{d}{i === 0 ? " (최신)" : ""}</option>
                   ))}
                 </select>
                 {running && isLatest ? <span style={{ color: "#2563eb", fontSize: "0.8rem" }}>● 실시간</span> : null}
@@ -155,7 +210,7 @@ export function MomentumBacktestClient() {
               </pre>
             ) : (
               <div style={{ color: "#94a3b8", padding: 12 }}>
-                {files.length === 0 ? "아직 백테스트 결과가 없습니다. \"백테스트 시작\"을 눌러 실행하세요." : "선택한 파일이 비어 있습니다."}
+                {pools.length === 0 ? "아직 백테스트 결과가 없습니다. \"백테스트 시작\"을 눌러 실행하세요." : "선택한 결과가 비어 있습니다."}
               </div>
             )}
           </div>
