@@ -133,6 +133,15 @@ def _resolve_slippage_for_backtest(pool_id: str, include_ticker_types: list[str]
     return next(iter(resolved))
 
 
+def _resolve_top_n_hold(pool_id: str) -> int:
+    """풀별 TOP_N_HOLD 를 DB(pool_settings) 단일 소스에서 조회한다(라이브와 동일).
+
+    값이 DB 에 없으면 settings_loader 가 명시적 에러를 낸다(임의 기본값 없음).
+    """
+    settings = get_all_pool_settings() if pool_id == ALL_POOL_ID else get_ticker_type_settings(pool_id)
+    return int(settings["TOP_N_HOLD"])
+
+
 def _resolve_backtest_pool_inputs(pool_id: str) -> tuple[str, list[dict[str, Any]], list[str], str]:
     """백테스트용 국가 코드, 종목 목록, 캐시 키, 결과 파일 접두사를 만든다."""
     if pool_id != ALL_POOL_ID:
@@ -1740,7 +1749,8 @@ def run_backtest(pool_id: str, config: dict[str, dict]) -> Path:
     start_target = pd.Timestamp(BACKTEST_START_DATE).normalize()
     initial_cash = float(BACKTEST_INITIAL_KRW_AMOUNT)
 
-    top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
+    # TOP_N_HOLD 는 라이브와 동일하게 DB(pool_settings)를 단일 소스로 사용한다.
+    top_n_values = [_resolve_top_n_hold(pool_id)]
     bonus_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
     ma_types = [str(v).upper() for v in cfg["MA_TYPE"]]
     ma_months_list = [int(v) for v in cfg["MA_MONTHS"]]

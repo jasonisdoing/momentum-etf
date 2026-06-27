@@ -37,7 +37,7 @@
 > **부가 전략 모듈 (`leverage/`)**: 별도 앱 `leverage-switching` 에서 이전된 레버리지 스위칭 전략 패키지입니다.
 > 자체 엔진(`leverage/engine/`)을 두되, 시세는 `data_adapter` 로 `utils.data_loader` 를, Slack 은 `utils.notification` 을 재사용합니다.
 > 추천은 `leverage_switch` 배치(`scripts/leverage_recommend_switch.py`)와 `/batch` 수동 트리거로 실행됩니다.
-> 상세는 [leverage_migration.md](leverage_migration.md).
+> 튜닝은 `leverage_tune` 잡(레버리지-튜닝 화면 또는 `/batch`)으로 실행되며, 설정·튜닝 탐색공간·상태는 MongoDB 가 단일 소스입니다.
 
 ### 서비스 계층 역할
 
