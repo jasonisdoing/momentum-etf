@@ -514,9 +514,6 @@ export function AppShell({ children }: AppShellProps) {
     <div className={`appLayout ${isSidebarCollapsed ? "appLayoutSidebarCollapsed" : ""}`.trim()}>
       <aside className="navbar navbar-vertical navbar-expand-lg appSidebar appSidebarDesktop">
         <div className="container-fluid appSidebarInner">
-          <Link href="/" className="navbar-brand navbar-brand-autodark appSidebarBrand">
-            Jason 투자
-          </Link>
           {navList}
           <div className="appSidebarFooter">
             {sentimentWidget}
