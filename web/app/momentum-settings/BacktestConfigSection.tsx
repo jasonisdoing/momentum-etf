@@ -9,7 +9,6 @@ type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
   BENCHMARK?: Benchmark;
   HOLDING_BONUS_SCORE?: number[];
-  ATH_BONUS?: number[];
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
@@ -35,19 +34,42 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const c = pool.config;
   const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
   const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
-  const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? []).join(", "));
-  const [athText, setAthText] = useState((c.ATH_BONUS ?? []).join(", "));
+  const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
   const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
   const [saving, setSaving] = useState(false);
+  const [resolving, setResolving] = useState(false);
+
+  // 벤치마크 티커 → 종목명 조회(stock_meta). 이름은 수동 편집 불가(확인으로만 채움).
+  const resolveBench = async () => {
+    const t = benchTicker.trim();
+    if (!t) {
+      toast.error("티커를 입력해주세요.");
+      return;
+    }
+    try {
+      setResolving(true);
+      const resp = await fetch(`/api/leverage-config/resolve?ticker=${encodeURIComponent(t)}`);
+      const data = (await resp.json()) as { name?: string; error?: string };
+      if (!resp.ok || data.error || !data.name) {
+        toast.error(data.error ?? "종목명을 찾을 수 없습니다.");
+        return;
+      }
+      setBenchName(data.name);
+      toast.success(`${data.name}(${t}) 확인 완료`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
+    } finally {
+      setResolving(false);
+    }
+  };
 
   const bonus = parseNums(bonusText);
-  const ath = parseNums(athText);
   const months = parseNums(monthsText);
   const rsi = parseNums(rsiText);
-  const combos = bonus.length * Math.max(1, ath.length) * maSet.size * months.length * rsi.length;
+  const combos = bonus.length * maSet.size * months.length * rsi.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -61,7 +83,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     const config: BtConfig = {
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       HOLDING_BONUS_SCORE: bonus,
-      ATH_BONUS: ath,
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
@@ -105,10 +126,9 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       </div>
 
       <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 56 }}>보유보너스</span>
-        <input style={{ ...inputStyle, width: 110 }} placeholder="0, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
-        <span style={{ ...labelStyle, marginLeft: 8 }}>ATH 보너스</span>
-        <input style={{ ...inputStyle, width: 130 }} placeholder="0, 10, 20, 30" value={athText} onChange={(e) => setAthText(e.target.value)} />
+        <span style={{ ...labelStyle, width: 84 }}>보유보너스(%)</span>
+        <input style={{ ...inputStyle, width: 130 }} placeholder="0, 5, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
+        <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>추세·ATH는 (100−보유)/2 로 자동 배분</span>
       </div>
 
       <div style={rowStyle}>

@@ -34,7 +34,7 @@ RSI_PERIOD = 14
 
 
 def _build_ma_rule_score_column() -> str:
-    return "추세"
+    return "추세(기본)"
 
 
 def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
@@ -507,7 +507,6 @@ def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
     ma_rules: list[dict[str, Any]],
-    ath_bonus: float = 0.0,
     held_bonus_score: float = 0.0,
 ) -> pd.DataFrame:
     """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
@@ -554,13 +553,11 @@ def _apply_common_rank_scores(
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     eval_date = close_frame.index.max()
 
-    ath_bonus_scores = pd.Series(0.0, index=close_frame.columns)
-    if ath_bonus:
-        ath_pct_frame = compute_ath_proximity_percentile(close_frame)
-        ath_valid = composite_frame.notna() & ath_pct_frame.notna()
-        if eval_date in ath_pct_frame.index:
-            ath_bonus_scores = ath_bonus * ath_pct_frame.loc[eval_date]
-        composite_frame[ath_valid] += ath_bonus * ath_pct_frame[ath_valid]
+    # ATH 근접도 단면 백분위(0~1) → 0~100 원점수 (백테스트와 동일 정의)
+    ath_pct_scores = pd.Series(0.0, index=close_frame.columns)
+    ath_pct_frame = compute_ath_proximity_percentile(close_frame)
+    if eval_date in ath_pct_frame.index:
+        ath_pct_scores = ath_pct_frame.loc[eval_date] * 100.0
 
     # 티커별 값 매핑
     composite_row = composite_frame.loc[eval_date]
@@ -581,34 +578,42 @@ def _apply_common_rank_scores(
         else:
             trend_maps[column] = {}
 
-    # composite 가 NaN 이면 개별 추세 점수도 표시하지 않는다 (자격 미달 일관성).
     tickers_col = df["티커"].astype(str)
-    df["점수"] = tickers_col.map(composite_map).astype("object")
+    
+    # 백테스트와 동일한 가중치: 추세 = ATH = (100 - 보유%) / 2, 보유 = 보유%
+    hold_pct = float(held_bonus_score)
+    w_side = (100.0 - hold_pct) / 2.0 / 100.0
 
-    # ATH 보너스 개별 가점 컬럼 추가
-    ath_bonus_map = {
+    # 1. '추세' 원점수 (-100 ~ +100): composite_score 의 규칙 평균
+    num_rules = len(ma_rules) if ma_rules else 1
+    df["추세"] = tickers_col.map(composite_map).astype(float) / num_rules
+
+    # 2. 'ATH' 원점수 (0 ~ 100): 신고가 근접 단면 백분위
+    ath_map = {
         ticker: (0.0 if pd.isna(val) else float(val))
-        for ticker, val in ath_bonus_scores.items()
+        for ticker, val in ath_pct_scores.items()
     }
-    df["ATH"] = tickers_col.map(ath_bonus_map).fillna(0.0)
+    df["ATH"] = tickers_col.map(ath_map).fillna(0.0)
 
-    # 보유 보너스 개별 가점 컬럼 추가 (단, 고정종목인 exclude_from_ranking이 참이면 보유가점은 0.0으로 제외)
+    # 3. '보유가점': 보유 종목이면 보유%(= 점수 기여분), 아니면 0 (고정종목 exclude 시 0)
     if "exclude_from_ranking" in df.columns:
         df["보유가점"] = df.apply(
-            lambda r: 0.0 if bool(r.get("exclude_from_ranking")) else (float(held_bonus_score) if r.get("보유") == "보유" else 0.0),
-            axis=1
+            lambda r: 0.0 if bool(r.get("exclude_from_ranking")) else (hold_pct if r.get("보유") == "보유" else 0.0),
+            axis=1,
         )
     else:
-        df["보유가점"] = df["보유"].map(lambda x: float(held_bonus_score) if x == "보유" else 0.0)
+        df["보유가점"] = df["보유"].map(lambda x: hold_pct if x == "보유" else 0.0)
 
-    # 점수가 실재하는 행에 한해 보유 가점 가산 (ATH 보너스는 composite_frame에 이미 가산되어 있음)
-    valid_score = df["점수"].notna()
-    if not valid_score.empty:
-        df.loc[valid_score, "점수"] = df.loc[valid_score, "점수"].astype(float) + df.loc[valid_score, "보유가점"]
+    # 4. 최종 '점수' = 가중합 (백테스트와 동일): w_side×추세 + w_side×ATH + 보유가점
+    composite_missing = df["추세"].isna()
+    df["점수"] = w_side * df["추세"] + w_side * df["ATH"] + df["보유가점"]
 
-    composite_missing = df["점수"].isna()
+    # 자격 미달 종목(결손 행) 일관성 마스킹 처리
+    df.loc[composite_missing, "점수"] = None
+    df.loc[composite_missing, "추세"] = None
     df.loc[composite_missing, "ATH"] = 0.0
     df.loc[composite_missing, "보유가점"] = 0.0
+
 
     for column, trend_map in trend_maps.items():
         df[column] = tickers_col.map(trend_map).astype("object")
@@ -624,8 +629,8 @@ def build_ticker_type_rankings(
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
-    ath_bonus: float = 0.0,
     held_bonus_score: float = 0.0,
+    ath_bonus: float = 0.0,  # deprecated: ATH 비중은 보유%에서 (100-보유)/2 로 유도되어 점수에 직접 쓰지 않음(호출 체인 호환용으로만 수용).
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -769,7 +774,6 @@ def build_ticker_type_rankings(
         df,
         effective_close_series_map,
         effective_ma_rules,
-        ath_bonus=ath_bonus,
         held_bonus_score=held_bonus_score,
     )
     process_elapsed += perf_counter() - process_started_at

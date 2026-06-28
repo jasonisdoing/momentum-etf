@@ -57,6 +57,7 @@ type RankRow = {
   "12달(%)": number | null;
   고점: number | null;
   RSI: number | null;
+  추세: number | null;
 };
 
 type RankData = {

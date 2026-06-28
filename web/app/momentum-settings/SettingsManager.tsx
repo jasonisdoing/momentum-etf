@@ -8,7 +8,6 @@ import { useToast } from "../components/ToastProvider";
 const EDITABLE_KEYS = [
   "TOP_N_HOLD",
   "HOLDING_BONUS_SCORE",
-  "ATH_BONUS",
   "MA_TYPE",
   "MA_MONTHS",
   "RSI_LIMIT",
@@ -18,11 +17,10 @@ type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
-  HOLDING_BONUS_SCORE: "보유 보너스",
+  HOLDING_BONUS_SCORE: "보유보너스(%)",
   MA_TYPE: "MA 타입",
   MA_MONTHS: "MA 개월",
   RSI_LIMIT: "RSI 상한",
-  ATH_BONUS: "ATH 보너스",
 };
 
 type SettingField = { value: string | number | null };
@@ -49,9 +47,9 @@ type PoolSettingsResponse = {
 /** 한 행의 편집 중인 값 (모두 문자열로 보관, 저장 시 파싱). */
 type RowDraft = Record<EditableKey, string>;
 
-/** 보유/ATH 보너스 셀렉트 옵션 — /momentum-pools 와 동일한 0~50 (5단위). 현재값이 비표준이면 포함해 보존. */
+/** 보유보너스(%) 셀렉트 옵션 — 백테스트 탐색값과 동일한 0/5/10. 현재값이 비표준이면 포함해 보존. */
 function bonusOptions(current: string): number[] {
-  const base = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
+  const base = [0, 5, 10];
   const cur = Number(current);
   if (Number.isFinite(cur) && !base.includes(cur)) {
     return [...base, cur].sort((a, b) => a - b);
@@ -221,7 +219,7 @@ export function SettingsManager() {
                                   </option>
                                 ))}
                               </select>
-                            ) : key === "HOLDING_BONUS_SCORE" || key === "ATH_BONUS" ? (
+                            ) : key === "HOLDING_BONUS_SCORE" ? (
                               <select
                                 className="form-select form-select-sm"
                                 value={draft[key]}

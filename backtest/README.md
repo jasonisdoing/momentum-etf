@@ -31,13 +31,15 @@ python backtest/run.py
 
 ## 스윕 대상 파라미터
 
-- `TOP_N_HOLD`
-- `HOLDING_BONUS_SCORE`
+- `HOLDING_BONUS_SCORE` (보유보너스 %, 예 `[0,10,20]`) — 가중치 탐색 차원. 각 보유값마다 **추세 = ATH = `(100 − 보유)/2`** 로 묶여 조합이 결정된다.
 - `MA_TYPE`
 - `MA_MONTHS`
 - `RSI_LIMIT` (`us`, `kor` 종목풀만 사용)
+- `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(탐색 차원 제외).
 
-세부 스윕 범위는 프로젝트 루트의 [config.py](../config.py) 안 `BACKTEST_CONFIG`에서 관리한다.
+> 점수식: `점수 = w×추세(±100) + w×ATH(0~100) + 보유가점`, `w = (100−보유%)/200`, `보유가점 = 보유 시 보유%`. 라이브(`utils/rankings.py`)와 동일하다. (ST/슈퍼트렌드 팩터는 OOS 기여 부재로 제거됨.)
+
+세부 탐색공간은 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩은 제거됨.
 
 공통 전역값은 같은 파일 상단에서 별도로 관리한다.
 
@@ -95,7 +97,7 @@ BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
   - 모든 종목이 하락 추세일 때는 신규 진입이 없으므로 현금 비중이 자동 증가한다
 - 매수는 단주만 허용하며, 남는 자금은 현금으로 유지
 - 수동 집행 규칙 한 줄: **"교체가 있으면 신규 K개에 `min(현금÷K, 총자산÷N)` 만큼씩 단주 매수"**
-- `HOLDING_BONUS_SCORE`는 백테스트 내부에서만 적용
+- `HOLDING_BONUS_SCORE`(보유보너스 %)는 가중치 탐색값이며, 최적 조합의 보유%는 백테스트 종료 시 라이브 `pool_settings`에 자동 저장된다(추세·ATH 비중은 보유%에서 유도되므로 별도 저장 없음)
 - 종목풀의 `고정 종목`(`exclude_from_ranking=true`)은 다른 곳에서 개별 보유하는 종목이므로 백테스트 후보군에서 제외한다
 - `RSI_LIMIT`가 설정된 개별주 종목풀(`us`, `kor`)은 신호일 기준 `RSI > RSI_LIMIT`이면
   다음 거래일 시초가에 즉시 전량 매도하고, 신규 편입 후보에서도 제외한다
@@ -104,8 +106,10 @@ BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 
 - `run.py`
   - CLI 엔트리 포인트
+- `utils/backtest_config_store.py`
+  - 풀별 탐색공간(`backtest_config` DB) 단일 소스
 - `config.py` (프로젝트 루트)
-  - 종목풀별 스윕 설정
+  - 백테스트 공통 전역값(시작일·초기자본·슬리피지 등)
 - `engine.py`
   - 조합 실행, 시뮬레이션, 결과 파일 생성
 - `core/strategy/scoring.py`

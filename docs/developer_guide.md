@@ -238,20 +238,25 @@ python infra/server_scheduler.py
 * 전체 종목풀: `all.TOP_N_HOLD`, `all.HOLDING_BONUS_SCORE`, `all.MA_TYPE`, `all.MA_MONTHS`, `all.RSI_LIMIT`, `all.include` 필수
 * 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
-* 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`ATH_BONUS`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
+* 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
 
-#### ATH(52주 고점) 근접 보너스
+#### 점수 = 추세·ATH·보유 가중 블렌딩 (합 100%)
 
-순위 점수에 "고점에 가까운 정도"를 가점한다. 추세 점수(`가격 vs MA`)와 별개의 단면 팩터다.
+순위 점수는 세 요소를 합이 100%인 비중으로 가중 합산한다. `HOLDING_BONUS_SCORE`(보유보너스 %)를 `보유%`라 하면 **추세·ATH 비중은 각각 `(100 − 보유%) / 2`** 로 자동 결정된다(별도 ATH 설정 없음).
 
-* `dd = 종가 / 12개월 rolling 고점 − 1` → 매 일자 **풀 내 단면 백분위(0~1)** 로 환산(ATH 근접=1.0). `점수 += ATH_BONUS × 백분위`.
-* 계산은 공통 엔진 `core/strategy/scoring.py`의 `compute_ath_proximity_percentile()` 단일 함수 — **라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일 식**을 쓴다.
-* `ATH_BONUS` 는 라이브 단일값(`pool_settings`)과 백테스트 탐색값(`backtest_config` 리스트, 예 `[0,5,10]`) 둘 다로 운영한다(보유보너스와 동일 패턴).
+* **추세 원점수(−100~+100)**: `가격 vs MA` signed-percentile.
+* **ATH 원점수(0~100)**: `dd = 종가 / 12개월 rolling 고점 − 1` → 매 일자 **풀 내 단면 백분위(0~1)** 로 환산(ATH 근접=1.0) 후 ×100. 공통 엔진 `core/strategy/scoring.py`의 `compute_ath_proximity_percentile()`.
+* **보유 원점수**: 실보유 100, 아니면 0.
+* **점수** `= w×추세 + w×ATH + 보유가점` (`w = (100−보유%)/200`, `보유가점 = 보유 시 보유%`). **라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일 식**을 쓴다.
+* (참고) 한때 도입했던 ST(슈퍼트렌드) 팩터는 out-of-sample 검증에서 기여가 없어 **제거**되었다.
 
 ### 백테스트 탐색 공간 (`backtest_config`)
 
-모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `HOLDING_BONUS_SCORE`/`ATH_BONUS`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
+모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
+
+* 가중치는 `HOLDING_BONUS_SCORE`(보유보너스 %, 예 `[0,10,20]`)만 탐색한다. 각 보유값마다 추세=ATH=`(100−보유)/2` 로 묶여 조합이 결정되므로 `ATH_BONUS` 탐색 차원은 없다(제거됨).
+* 백테스트 결과/리포트 표에는 `W_HOLD`(보유 비중)만 표기한다(`W_TREND`·`W_ATH`는 보유값에서 유도되어 생략).
 
 * `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(백테스트 탐색 차원에서 제외).
 * 라이브 단일 적용값(`pool_settings`)과 백테스트 탐색공간(`backtest_config`)은 **별개**다(같은 파라미터명, 다른 역할: 단일값 vs 리스트).
@@ -268,7 +273,7 @@ DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.
     *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 점수가 즉시 갱신되는지 확인
     *   실제 보유 종목이 녹색 행으로 표시되는지 확인
 3.  **확인**:
-    *   `점수`, `추세` 컬럼이 `현재가` 뒤에 표시되는지 확인
+    *   `점수`, `추세`, `ATH` 컬럼이 `현재가` 뒤에 순서대로 표시되는지 확인(`보유` 컬럼은 숨김)
 
 ## 5. 순위 화면의 정의
 
