@@ -28,6 +28,7 @@ router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 class PoolSettingsUpdatePayload(BaseModel):
     pool_id: str
     values: dict[str, Any]
+    save_method: str = "사용자"
 
 
 def _editable(settings: dict[str, Any]) -> dict[str, Any]:
@@ -50,6 +51,8 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
                 "icon": config["icon"],
                 "order": config["order"],
                 "settings": _editable(settings),
+                "updated_at": settings.get("updated_at"),
+                "save_method": settings.get("save_method"),
             }
         )
 
@@ -58,6 +61,8 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "pool_id": ALL_POOL_ID,
             "name": "전체 (가상 종목풀)",
             "settings": _editable(all_settings),
+            "updated_at": all_settings.get("updated_at"),
+            "save_method": all_settings.get("save_method"),
         },
         "pools": pools,
         "constraints": {
@@ -74,7 +79,7 @@ def put_pool_settings(
 ) -> dict[str, object]:
     """편집한 값을 저장한다 (pool_id = '__all__' 또는 ticker_type)."""
     try:
-        saved = save_pool_settings(payload.pool_id, payload.values)
+        saved = save_pool_settings(payload.pool_id, payload.values, save_method=payload.save_method)
     except PoolSettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "pool_id": payload.pool_id, "saved": saved}

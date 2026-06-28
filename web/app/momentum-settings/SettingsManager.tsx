@@ -7,6 +7,7 @@ import { useToast } from "../components/ToastProvider";
 const EDITABLE_KEYS = [
   "TOP_N_HOLD",
   "HOLDING_BONUS_SCORE",
+  "ATH_BONUS",
   "MA_TYPE",
   "MA_MONTHS",
   "RSI_LIMIT",
@@ -20,6 +21,7 @@ const KEY_LABELS: Record<EditableKey, string> = {
   MA_TYPE: "MA 타입",
   MA_MONTHS: "MA 개월",
   RSI_LIMIT: "RSI 상한",
+  ATH_BONUS: "ATH 보너스",
 };
 
 type SettingField = { value: string | number | null };
@@ -32,7 +34,25 @@ type PoolEntry = {
   icon?: string;
   order?: number;
   settings: SettingsMap;
+  updated_at?: string;
+  save_method?: string;
 };
+
+function formatDateTime(utcString: string): string {
+  try {
+    let formattedStr = utcString;
+    // 타임존 식별자가 없고 'T'가 포함된 ISO 날짜 형식이면 UTC 시간으로 해석하도록 끝에 Z 추가
+    if (utcString.includes("T") && !utcString.endsWith("Z") && !utcString.includes("+")) {
+      formattedStr = utcString + "Z";
+    }
+    const date = new Date(formattedStr);
+    if (Number.isNaN(date.getTime())) return utcString;
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  } catch {
+    return utcString;
+  }
+}
 
 type PoolSettingsResponse = {
   all: PoolEntry;
@@ -44,9 +64,9 @@ type PoolSettingsResponse = {
 /** 한 행의 편집 중인 값 (모두 문자열로 보관, 저장 시 파싱). */
 type RowDraft = Record<EditableKey, string>;
 
-/** 보유보너스 셀렉트 옵션 — /momentum-pools 와 동일한 0/5/10/15/20. 현재값이 비표준이면 포함해 보존. */
+/** 보유/ATH 보너스 셀렉트 옵션 — /momentum-pools 와 동일한 0~50 (5단위). 현재값이 비표준이면 포함해 보존. */
 function bonusOptions(current: string): number[] {
-  const base = [0, 5, 10, 15, 20];
+  const base = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50];
   const cur = Number(current);
   if (Number.isFinite(cur) && !base.includes(cur)) {
     return [...base, cur].sort((a, b) => a - b);
@@ -173,9 +193,9 @@ export function SettingsManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBodyTight">
-            <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#000" }}>
-              종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 5개 값은 DB 에서 저장·수정합니다.
-              값을 바꿔도 커밋이 필요 없습니다.
+            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목풀 설정</h2>
+            <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#94a3b8", fontSize: "0.85rem" }}>
+              종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 6개 값은 DB 에서 저장·수정합니다.
             </p>
             <div style={{ overflowX: "auto" }}>
               <table className="table table-sm appSettingsTable" style={{ minWidth: 720 }}>
@@ -188,6 +208,7 @@ export function SettingsManager() {
                       </th>
                     ))}
                     <th style={{ textAlign: "center", minWidth: 80 }}>저장</th>
+                    <th style={{ textAlign: "left", minWidth: 160 }}>마지막 저장</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -215,7 +236,7 @@ export function SettingsManager() {
                                   </option>
                                 ))}
                               </select>
-                            ) : key === "HOLDING_BONUS_SCORE" ? (
+                            ) : key === "HOLDING_BONUS_SCORE" || key === "ATH_BONUS" ? (
                               <select
                                 className="form-select form-select-sm"
                                 value={draft[key]}
@@ -249,6 +270,20 @@ export function SettingsManager() {
                           >
                             {savingId === id ? "저장 중…" : "저장"}
                           </button>
+                        </td>
+                        <td style={{ textAlign: "left", fontSize: "0.82rem", color: "#64748b", verticalAlign: "middle" }}>
+                          {entry.updated_at ? (
+                            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
+                              <span style={{ fontWeight: 600, color: "#475569" }}>
+                                {formatDateTime(entry.updated_at)}
+                              </span>
+                              <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>
+                                방식: {entry.save_method || "미지정"}
+                              </span>
+                            </div>
+                          ) : (
+                            <span style={{ color: "#cbd5e1" }}>기록 없음</span>
+                          )}
                         </td>
                       </tr>
                     );

@@ -507,6 +507,8 @@ def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
     ma_rules: list[dict[str, Any]],
+    ath_bonus: float = 0.0,
+    held_bonus_score: float = 0.0,
 ) -> pd.DataFrame:
     """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
 
@@ -552,6 +554,16 @@ def _apply_common_rank_scores(
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     eval_date = close_frame.index.max()
 
+    ath_bonus_scores = pd.Series(0.0, index=close_frame.columns)
+    if ath_bonus:
+        from core.strategy.scoring import compute_ath_proximity_percentile
+        import numpy as np
+        ath_pct_frame = compute_ath_proximity_percentile(close_frame)
+        ath_valid = composite_frame.notna() & ath_pct_frame.notna()
+        if eval_date in ath_pct_frame.index:
+            ath_bonus_scores = ath_bonus * ath_pct_frame.loc[eval_date]
+        composite_frame[ath_valid] += ath_bonus * ath_pct_frame[ath_valid]
+
     # 티커별 값 매핑
     composite_row = composite_frame.loc[eval_date]
     composite_map = {
@@ -574,7 +586,32 @@ def _apply_common_rank_scores(
     # composite 가 NaN 이면 개별 추세 점수도 표시하지 않는다 (자격 미달 일관성).
     tickers_col = df["티커"].astype(str)
     df["점수"] = tickers_col.map(composite_map).astype("object")
+
+    # ATH 보너스 개별 가점 컬럼 추가
+    ath_bonus_map = {
+        ticker: (0.0 if pd.isna(val) else float(val))
+        for ticker, val in ath_bonus_scores.items()
+    }
+    df["ATH"] = tickers_col.map(ath_bonus_map).fillna(0.0)
+
+    # 보유 보너스 개별 가점 컬럼 추가 (단, 고정종목인 exclude_from_ranking이 참이면 보유가점은 0.0으로 제외)
+    if "exclude_from_ranking" in df.columns:
+        df["보유가점"] = df.apply(
+            lambda r: 0.0 if bool(r.get("exclude_from_ranking")) else (float(held_bonus_score) if r.get("보유") == "보유" else 0.0),
+            axis=1
+        )
+    else:
+        df["보유가점"] = df["보유"].map(lambda x: float(held_bonus_score) if x == "보유" else 0.0)
+
+    # 점수가 실재하는 행에 한해 보유 가점 가산 (ATH 보너스는 composite_frame에 이미 가산되어 있음)
+    valid_score = df["점수"].notna()
+    if not valid_score.empty:
+        df.loc[valid_score, "점수"] = df.loc[valid_score, "점수"].astype(float) + df.loc[valid_score, "보유가점"]
+
     composite_missing = df["점수"].isna()
+    df.loc[composite_missing, "ATH"] = 0.0
+    df.loc[composite_missing, "보유가점"] = 0.0
+
     for column, trend_map in trend_maps.items():
         df[column] = tickers_col.map(trend_map).astype("object")
         df.loc[composite_missing, column] = None
@@ -589,6 +626,8 @@ def build_ticker_type_rankings(
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
+    ath_bonus: float = 0.0,
+    held_bonus_score: float = 0.0,
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -728,7 +767,13 @@ def build_ticker_type_rankings(
 
     # 공통 엔진 호출: rankings 와 backtest 가 동일한 점수식을 사용하도록 강제.
     process_started_at = perf_counter()
-    df = _apply_common_rank_scores(df, effective_close_series_map, effective_ma_rules)
+    df = _apply_common_rank_scores(
+        df,
+        effective_close_series_map,
+        effective_ma_rules,
+        ath_bonus=ath_bonus,
+        held_bonus_score=held_bonus_score,
+    )
     process_elapsed += perf_counter() - process_started_at
 
     realtime_active = bool(realtime_snapshot)

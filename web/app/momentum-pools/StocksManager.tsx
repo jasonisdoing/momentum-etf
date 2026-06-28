@@ -25,6 +25,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
+  ath_bonus?: number;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -84,6 +85,8 @@ type RankRow = {
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
   exclude_from_ranking?: boolean;
+  ATH?: number;
+  보유가점?: number;
 };
 
 type RankResponse = {
@@ -102,6 +105,7 @@ type RankResponse = {
   realtime_fetched_at?: string | null;
   previous_trading_day?: string | null;
   held_bonus_score?: number;
+  ath_bonus?: number;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -288,8 +292,18 @@ function clampHeldBonusScore(value: number): number {
   if (Number.isNaN(value) || value < 0) {
     return 0;
   }
-  if (value > 20) {
-    return 20;
+  if (value > 50) {
+    return 50;
+  }
+  return Math.round(value / 5) * 5;
+}
+
+function clampAthBonus(value: number): number {
+  if (Number.isNaN(value) || value < 0) {
+    return 0;
+  }
+  if (value > 50) {
+    return 50;
   }
   return Math.round(value / 5) * 5;
 }
@@ -317,6 +331,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
+  const [athBonus, setAthBonus] = useState(0);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -392,6 +407,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setHeldBonusScore(configuredHeldBonusScore);
     }
 
+    const configuredAthBonus =
+      currentConfig && typeof currentConfig.ath_bonus === "number"
+        ? currentConfig.ath_bonus
+        : payload.ath_bonus;
+    if (typeof payload.ath_bonus === "number") {
+      setAthBonus(payload.ath_bonus);
+    } else if (typeof configuredAthBonus === "number") {
+      setAthBonus(configuredAthBonus);
+    }
+
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -419,6 +444,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         : payload.held_bonus_score;
     if (typeof configuredHeldBonusScore === "number") {
       setHeldBonusScore(configuredHeldBonusScore);
+    }
+    const configuredAthBonus =
+      currentConfig && typeof currentConfig.ath_bonus === "number"
+        ? currentConfig.ath_bonus
+        : payload.ath_bonus;
+    if (typeof configuredAthBonus === "number") {
+      setAthBonus(configuredAthBonus);
     }
 
     rankToolbarCache = {
@@ -471,6 +503,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
     held_bonus_score?: number;
+    ath_bonus?: number;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -490,6 +523,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
       if (typeof next?.held_bonus_score === "number") {
         search.set("held_bonus_score", String(next.held_bonus_score));
+      } else if (next?.bootstrap) {
+        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
+      } else {
+        search.set("held_bonus_score", String(heldBonusScore));
+      }
+
+      if (typeof next?.ath_bonus === "number") {
+        search.set("ath_bonus", String(next.ath_bonus));
+      } else if (next?.bootstrap) {
+        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
+      } else {
+        search.set("ath_bonus", String(athBonus));
       }
       if (next?.ma_rule_override) {
         search.set("ma_type", next.ma_rule_override.ma_type);
@@ -575,6 +620,19 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ma_rule_override: maRule ?? undefined,
       as_of_date: selectedAsOfDate,
       held_bonus_score: normalized,
+      skip_session_cache: true,
+    });
+  }
+
+  function handleAthBonusChange(nextValue: number) {
+    const normalized = clampAthBonus(nextValue);
+    setAthBonus(normalized);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      as_of_date: selectedAsOfDate,
+      ath_bonus: normalized,
+      skip_session_cache: true,
     });
   }
 
@@ -1087,16 +1145,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
       {
-        field: maRule?.score_column ?? "추세",
-        headerName: "추세",
+        field: "보유가점",
+        headerName: "보유",
+        minWidth: 76,
+        width: 76,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? 0, 0),
+      },
+      {
+        field: "ATH",
+        headerName: "ATH",
         minWidth: 72,
         width: 72,
         type: "rightAligned",
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          const currency = String(params.data?.currency || selectedTickerTypeItem?.currency || "").toUpperCase();
-          const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
-          return formatNumber(params.value ?? null, decimals);
-        },
+        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? 0, 1),
       },
       {
         field: "RSI",
@@ -1725,7 +1787,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       value={String(heldBonusScore)}
                       onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
                     >
-                      {Array.from({ length: 5 }, (_, index) => index * 5).map((score) => (
+                      {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
+                        <option key={score} value={score}>
+                          {score}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">ATH 보너스</span>
+                    <select
+                      className="form-select"
+                      value={String(athBonus)}
+                      onChange={(event) => handleAthBonusChange(Number(event.target.value))}
+                    >
+                      {Array.from({ length: 11 }, (_, index) => index * 5).map((score) => (
                         <option key={score} value={score}>
                           {score}
                         </option>

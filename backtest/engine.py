@@ -26,6 +26,7 @@ from config import (
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import (
+    compute_ath_proximity_percentile,
     compute_eligibility_mask,
     compute_rule_percentile_frame,
 )
@@ -361,6 +362,8 @@ _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
 _W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
+# ATH(52주 고점) 근접도 단면 백분위 [일자 × 티커] — ATH_BONUS 가산용 (close 만으로 결정, MA 무관).
+_W_ATH_PCT_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 
 
 def _init_worker(
@@ -374,10 +377,11 @@ def _init_worker(
     rsi_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
+    ath_pct_values: np.ndarray,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
     global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
-    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES  # noqa: PLW0603
+    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES, _W_ATH_PCT_VALUES  # noqa: PLW0603
     _W_PCT_VALUES = pct_specs_values
     _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
@@ -388,11 +392,12 @@ def _init_worker(
     _W_CLOSE_VALUES = close_values
     _W_FX_VALUES = fx_values
     _W_RSI_VALUES = rsi_values
+    _W_ATH_PCT_VALUES = ath_pct_values
 
 
-def _run_single_combo(args: tuple[int, float, str, int, float | None]) -> dict[str, Any]:
+def _run_single_combo(args: tuple[int, float, str, int, float | None, float]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, bonus, ma_t, ma_m, rsi_limit = args
+    top_n, bonus, ma_t, ma_m, rsi_limit, ath_bonus = args
     composite_values = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
     total_ret, cagr, mdd, trades = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
@@ -407,10 +412,13 @@ def _run_single_combo(args: tuple[int, float, str, int, float | None]) -> dict[s
         rsi_limit=rsi_limit,
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
+        ath_bonus=ath_bonus,
+        ath_pct_values=_W_ATH_PCT_VALUES,
     )
     return {
         "TOP_N_HOLD": top_n,
         "HOLDING_BONUS_SCORE": bonus,
+        "ATH_BONUS": ath_bonus,
         "MA_TYPE": ma_t,
         "MA_MONTHS": ma_m,
         "RSI_LIMIT": rsi_limit,
@@ -438,6 +446,8 @@ def _simulate_one_combo(
     rsi_limit: float | None,
     buy_slippage: float,
     sell_slippage: float,
+    ath_bonus: float = 0.0,
+    ath_pct_values: np.ndarray | None = None,
 ) -> tuple[float, float, float, int]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
@@ -466,6 +476,11 @@ def _simulate_one_combo(
         if bonus:
             held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
             composite_today[held_bonus_mask] += bonus
+        # ATH(52주 고점) 근접 보너스: 풀 내 단면 백분위(0~1) × ath_bonus 를 점수에 가산.
+        if ath_bonus and ath_pct_values is not None:
+            ath_today = ath_pct_values[signal_idx]
+            ath_mask = ~np.isnan(composite_today) & ~np.isnan(ath_today)
+            composite_today[ath_mask] += ath_bonus * ath_today[ath_mask]
 
         rsi_sell_mask = np.zeros_like(shares, dtype=bool)
         if rsi_limit is not None:
@@ -709,6 +724,7 @@ def _write_results_file(
     initial_cash: float,
     top_n_values: list[int],
     bonus_values: list[float],
+    ath_bonus_values: list[float],
     ma_types: list[str],
     ma_months_list: list[int],
     rsi_limits: list[float] | None,
@@ -751,6 +767,7 @@ def _write_results_file(
     )
     lines.append(
         f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 x HOLDING_BONUS_SCORE {len(bonus_values)}개 "
+        f"x ATH_BONUS {len(ath_bonus_values)}개 "
         f"x MA_TYPE {len(ma_types)}개 x MA_MONTHS {len(ma_months_list)}개 "
         f"{f'x RSI_LIMIT {len(rsi_limits)}개 ' if rsi_limits is not None else ''}"
         f"= {total_combos}개 조합"
@@ -758,6 +775,7 @@ def _write_results_file(
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
     lines.append(f'"HOLDING_BONUS_SCORE": {[int(b) if float(b).is_integer() else b for b in bonus_values]},')
+    lines.append(f'"ATH_BONUS": {[int(b) if float(b).is_integer() else b for b in ath_bonus_values]},')
     lines.append(f'"MA_TYPE": {ma_types},')
     lines.append(f'"MA_MONTHS": {ma_months_list},')
     if rsi_limits is not None:
@@ -778,6 +796,7 @@ def _write_results_file(
     headers = [
         "TOP_N",
         "BONUS",
+        "ATH",
         "MA_TYPE",
         "MA_M",
         "RSI",
@@ -786,10 +805,11 @@ def _write_results_file(
         "MDD(%)",
         "Trades",
     ]
-    aligns = ["left", "left", "left", "left", "left", "left", "left", "right", "right", "right", "right"]
+    aligns = ["left", "left", "left", "left", "left", "left", "left", "left", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
+            "-",
             "-",
             "-",
             "-",
@@ -809,6 +829,7 @@ def _write_results_file(
             [
                 str(r["TOP_N_HOLD"]),
                 f"{r['HOLDING_BONUS_SCORE']:g}",
+                f"{float(r.get('ATH_BONUS', 0)):g}",
                 r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
                 "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
@@ -1052,6 +1073,8 @@ def _simulate_one_combo_details(
     initial_cash_local: float,
     top_n: int,
     bonus: float,
+    ath_bonus: float = 0.0,
+    ath_pct_frame: pd.DataFrame | None = None,
     composite_frame: pd.DataFrame,
     rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
@@ -1134,6 +1157,7 @@ def _simulate_one_combo_details(
     lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
     lines.append(f"TOP_N_HOLD: {top_n}")
     lines.append(f"HOLDING_BONUS_SCORE: {bonus:g}")
+    lines.append(f"ATH_BONUS: {ath_bonus:g}")
     lines.append(f"MA_TYPE: {rule_frame.attrs.get('ma_type', '-')}")
     lines.append(f"MA_MONTHS: {rule_frame.attrs.get('ma_months', '-')}")
     if rsi_limit is not None:
@@ -1254,6 +1278,10 @@ def _simulate_one_combo_details(
             for holding in shares:
                 if holding in composite.index and not pd.isna(composite.loc[holding]):
                     composite.loc[holding] += bonus
+        if ath_bonus and ath_pct_frame is not None and signal_day in ath_pct_frame.index:
+            ath_row = ath_pct_frame.loc[signal_day].reindex(composite.index)
+            ath_valid = composite.notna() & ath_row.notna()
+            composite.loc[ath_valid] += ath_bonus * ath_row.loc[ath_valid]
 
         rsi_sell_tickers: set[str] = set()
         if rsi_limit is not None:
@@ -1753,6 +1781,8 @@ def run_backtest(pool_id: str) -> Path:
     rsi_limits: list[float] | None = None
     if "RSI_LIMIT" in cfg:
         rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
+    # ATH(52주 고점) 근접 보너스 탐색값. 없으면 [0.0](미적용) — 하위호환.
+    ath_bonus_values = [float(v) for v in cfg.get("ATH_BONUS", [0])] or [0.0]
 
     country_code, etfs, cache_ticker_types, display_prefix = _resolve_backtest_pool_inputs(pool_id)
     buy_slippage, sell_slippage = _resolve_slippage_for_backtest(pool_id, cache_ticker_types)
@@ -1905,6 +1935,10 @@ def run_backtest(pool_id: str) -> Path:
     rsi_frame = _compute_rsi_frame(strategy_close_frame, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
     rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
+    # ATH 근접도 단면 백분위 (전체 프레임으로 12개월 rolling 고점 워밍업 후 백테스트 구간 슬라이스).
+    ath_pct_frame = compute_ath_proximity_percentile(strategy_close_frame)
+    ath_pct_win = ath_pct_frame.loc[backtest_days]
+    ath_pct_values = ath_pct_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
 
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
@@ -1959,6 +1993,7 @@ def run_backtest(pool_id: str) -> Path:
             ma_types,
             ma_months_list,
             rsi_limits if rsi_limits is not None else [None],
+            ath_bonus_values,
         )
     )
     total_combos = len(combos)
@@ -1978,6 +2013,7 @@ def run_backtest(pool_id: str) -> Path:
         "initial_cash": initial_cash,
         "top_n_values": top_n_values,
         "bonus_values": bonus_values,
+        "ath_bonus_values": ath_bonus_values,
         "ma_types": ma_types,
         "ma_months_list": ma_months_list,
         "rsi_limits": rsi_limits,
@@ -2017,6 +2053,7 @@ def run_backtest(pool_id: str) -> Path:
             rsi_values,
             buy_slippage,
             sell_slippage,
+            ath_pct_values,
         ),
     ) as pool:
         for i, result in enumerate(
@@ -2060,6 +2097,30 @@ def run_backtest(pool_id: str) -> Path:
     sorted_results = sorted(results, key=_result_sort_key)
     if sorted_results:
         best_result = sorted_results[0]
+
+        # 최상 성과 파라미터를 라이브 종목풀 설정(pool_settings)으로 자동 저장
+        try:
+            from utils.pool_settings_store import save_pool_settings
+
+            rsi_val = best_result.get("RSI_LIMIT")
+            if rsi_val is None:
+                rsi_val = 100
+
+            db_values = {
+                "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
+                "HOLDING_BONUS_SCORE": int(best_result["HOLDING_BONUS_SCORE"]),
+                "ATH_BONUS": int(best_result.get("ATH_BONUS", 0)),
+                "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
+                "MA_MONTHS": int(best_result["MA_MONTHS"]),
+                "RSI_LIMIT": int(rsi_val),
+            }
+            target_pool_id = "__all__" if pool_id == "all" else pool_id
+            logger.info("[%s] 최적 파라미터 라이브 자동 저장 시도: %s (target_id=%s)", pool_id, db_values, target_pool_id)
+            save_pool_settings(target_pool_id, db_values, save_method="백테스트 결과")
+            logger.info("[%s] 최적 파라미터 라이브 자동 저장 성공! (target_id=%s)", pool_id, target_pool_id)
+        except Exception as db_exc:
+            logger.error("[%s] 최적 파라미터 라이브 자동 저장 중 에러 발생: %s", pool_id, db_exc)
+
         best_rule_frame = percentile_by_spec_win[(best_result["MA_TYPE"], int(best_result["MA_MONTHS"]))].copy()
         best_rule_frame.attrs["ma_type"] = best_result["MA_TYPE"]
         best_rule_frame.attrs["ma_months"] = int(best_result["MA_MONTHS"])
@@ -2084,6 +2145,8 @@ def run_backtest(pool_id: str) -> Path:
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
             bonus=float(best_result["HOLDING_BONUS_SCORE"]),
+            ath_bonus=float(best_result.get("ATH_BONUS", 0)),
+            ath_pct_frame=ath_pct_win,
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,
