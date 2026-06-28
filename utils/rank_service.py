@@ -8,8 +8,10 @@ from typing import Any
 
 import pandas as pd
 
+from config import NAVER_ETF_CATEGORY_CONFIG
 from core.strategy.scoring import calculate_signed_percentile_score
 from services.stock_cache_service import get_stock_cache_meta_map
+from utils.data_loader import get_trading_days
 from utils.rankings import (
     ALLOWED_MA_TYPES,
     MONTHLY_RETURN_LABEL_COUNT,
@@ -18,11 +20,9 @@ from utils.rankings import (
     get_rank_months_max,
     get_recent_monthly_return_labels,
 )
-from utils.data_loader import get_trading_days
 from utils.settings_loader import get_all_pool_settings
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
-from config import NAVER_ETF_CATEGORY_CONFIG
 
 ALL_TICKER_TYPE = "all"
 _RANK_DATA_CACHE_TTL_SECONDS = 300.0
