@@ -1,5 +1,5 @@
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from leverage.config_store import load_config, load_leverage_state, save_leverage_state
@@ -189,7 +189,7 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
                 last_target,
             ),
             "holding_start_date": holding_start_date,
-            "updated_at": datetime.now().isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
         }
         save_current_state(profile, current_state)
 
