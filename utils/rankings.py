@@ -16,7 +16,7 @@ from config import (
     NAVER_ETF_CATEGORY_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
-from core.strategy.scoring import build_composite_rank_scores
+from core.strategy.scoring import build_composite_rank_scores, compute_ath_proximity_percentile
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
@@ -556,8 +556,6 @@ def _apply_common_rank_scores(
 
     ath_bonus_scores = pd.Series(0.0, index=close_frame.columns)
     if ath_bonus:
-        from core.strategy.scoring import compute_ath_proximity_percentile
-        import numpy as np
         ath_pct_frame = compute_ath_proximity_percentile(close_frame)
         ath_valid = composite_frame.notna() & ath_pct_frame.notna()
         if eval_date in ath_pct_frame.index:
