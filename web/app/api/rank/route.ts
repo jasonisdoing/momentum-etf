@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
             ma_type: maType ?? "",
             ma_months: maMonthsRaw ? Number(maMonthsRaw) : 0,
             ma_days: 0,
-            score_column: "추세",
+            score_column: "추세(수동)",
           }
         : undefined;
     const data = await loadRankData({
