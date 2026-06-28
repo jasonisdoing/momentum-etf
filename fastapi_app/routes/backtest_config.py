@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from config import ALLOWED_MA_TYPES
 from fastapi_app.dependencies import require_internal_token
 from utils.backtest_config_store import (
+    get_backtest_config_updated_at,
     list_backtest_pools,
     load_backtest_config,
     save_backtest_config,
@@ -47,7 +48,14 @@ def get_backtest_configs(_: None = Depends(require_internal_token)) -> dict[str,
     pools: list[dict[str, Any]] = []
     for pid in _ordered_pools(db_pools):
         name = "전체 (가상 종목풀)" if pid == _ALL_POOL_ID else name_by_type.get(pid, pid)
-        pools.append({"pool_id": pid, "name": name, "config": load_backtest_config(pid)})
+        pools.append(
+            {
+                "pool_id": pid,
+                "name": name,
+                "config": load_backtest_config(pid),
+                "updated_at": get_backtest_config_updated_at(pid),
+            }
+        )
 
     return {"pools": pools, "constraints": {"ma_types": ALLOWED_MA_TYPES}}
 
@@ -61,4 +69,9 @@ def put_backtest_config(
         save_backtest_config(payload.pool_id, payload.config)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"ok": True, "pool_id": payload.pool_id, "config": load_backtest_config(payload.pool_id)}
+    return {
+        "ok": True,
+        "pool_id": payload.pool_id,
+        "config": load_backtest_config(payload.pool_id),
+        "updated_at": get_backtest_config_updated_at(payload.pool_id),
+    }
