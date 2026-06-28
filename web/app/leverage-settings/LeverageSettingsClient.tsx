@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 
+import { formatKstDateTime } from "@/lib/datetime";
 import { PageFrame } from "../components/PageFrame";
 import { CandidateKey, inputStyle, LeverageConfig, rangeValues, TuningConfig, useLeverageConfig } from "./useLeverageConfig";
 
@@ -296,7 +297,7 @@ export function LeverageSettingsClient() {
                   <ReadRow label="확정일" value={state?.date ?? "-"} />
                   <ReadRow label="보유 종목" value={state?.target_name ? `${state.target_name} (${state.target ?? ""})` : "-"} />
                   <ReadRow label="보유일" value={state?.holding_days !== undefined ? `${state.holding_days}거래일째` : "-"} />
-                  <ReadRow label="갱신 시각" value={state?.updated_at ?? "-"} />
+                  <ReadRow label="갱신 시각" value={state?.updated_at ? formatKstDateTime(state.updated_at) : "-"} />
                 </div>
               </div>
             </div>

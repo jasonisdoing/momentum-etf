@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { formatKstDateTime } from "@/lib/datetime";
 import { useToast } from "../components/ToastProvider";
 
 const EDITABLE_KEYS = [
@@ -37,22 +38,6 @@ type PoolEntry = {
   updated_at?: string;
   save_method?: string;
 };
-
-function formatDateTime(utcString: string): string {
-  try {
-    let formattedStr = utcString;
-    // 타임존 식별자가 없고 'T'가 포함된 ISO 날짜 형식이면 UTC 시간으로 해석하도록 끝에 Z 추가
-    if (utcString.includes("T") && !utcString.endsWith("Z") && !utcString.includes("+")) {
-      formattedStr = utcString + "Z";
-    }
-    const date = new Date(formattedStr);
-    if (Number.isNaN(date.getTime())) return utcString;
-    const pad = (n: number) => String(n).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
-  } catch {
-    return utcString;
-  }
-}
 
 type PoolSettingsResponse = {
   all: PoolEntry;
@@ -275,7 +260,7 @@ export function SettingsManager() {
                           {entry.updated_at ? (
                             <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
                               <span style={{ fontWeight: 600, color: "#475569" }}>
-                                {formatDateTime(entry.updated_at)}
+                                {formatKstDateTime(entry.updated_at)}
                               </span>
                               <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>
                                 방식: {entry.save_method || "미지정"}

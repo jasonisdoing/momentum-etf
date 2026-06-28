@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { formatKstDateTime } from "@/lib/datetime";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 
@@ -165,8 +166,8 @@ export function MomentumBacktestClient() {
             </button>
             <div style={{ marginTop: 12, fontSize: "0.85rem", color: "#475569" }}>
               상태: <b>{statusLabel}</b>
-              {bt?.started_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>시작: {new Date(bt.started_at).toLocaleString("ko-KR")}</span> : null}
-              {bt?.ended_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>종료: {new Date(bt.ended_at).toLocaleString("ko-KR")}</span> : null}
+              {bt?.started_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>시작: {formatKstDateTime(bt.started_at)}</span> : null}
+              {bt?.ended_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>종료: {formatKstDateTime(bt.ended_at)}</span> : null}
             </div>
           </div>
         </div>

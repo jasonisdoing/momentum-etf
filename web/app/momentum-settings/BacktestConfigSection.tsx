@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { formatKstDateTime } from "@/lib/datetime";
 import { useToast } from "../components/ToastProvider";
 
 type Benchmark = { ticker?: string; name?: string };
@@ -26,14 +27,6 @@ const labelStyle: React.CSSProperties = { color: "#64748b", fontWeight: 600, fon
 
 function parseNums(text: string): number[] {
   return text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
-}
-
-/** UTC ISO → KST 표시 문자열. */
-function formatKst(iso?: string | null): string {
-  if (!iso) return "저장 이력 없음";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "-";
-  return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
 }
 
 /** 풀 1개 백테스트 탐색공간 인라인 편집 행 (자체 저장). */
@@ -98,7 +91,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontWeight: 800 }}>{pool.name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({pool.pool_id})</span></span>
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>마지막 저장: {formatKst(updatedAt)}</span>
+          <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}</span>
           <button type="button" className="btn btn-sm btn-dark" disabled={saving || combos === 0} onClick={() => void save()}>
             {saving ? "저장 중…" : "저장"}
           </button>
