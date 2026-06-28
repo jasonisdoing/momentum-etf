@@ -13,7 +13,15 @@ type BtConfig = {
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
 };
-type PoolEntry = { pool_id: string; name: string; config: BtConfig };
+type PoolEntry = { pool_id: string; name: string; config: BtConfig; updated_at?: string | null };
+
+/** UTC ISO → KST 표시 문자열. */
+function formatKst(iso?: string | null): string {
+  if (!iso) return "저장 이력 없음";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
+}
 type ApiResponse = { pools?: PoolEntry[]; constraints?: { ma_types?: string[] }; error?: string };
 
 const inputStyle: React.CSSProperties = {
@@ -127,9 +135,9 @@ export function BacktestConfigSection() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pool_id: selected, config }),
       });
-      const data = (await resp.json()) as { config?: BtConfig; error?: string; detail?: string };
+      const data = (await resp.json()) as { config?: BtConfig; updated_at?: string | null; error?: string; detail?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
-      setPools((prev) => prev.map((p) => (p.pool_id === selected && data.config ? { ...p, config: data.config } : p)));
+      setPools((prev) => prev.map((p) => (p.pool_id === selected && data.config ? { ...p, config: data.config, updated_at: data.updated_at } : p)));
       toast.success(`[백테스트] ${selected} 탐색공간 저장 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -190,10 +198,13 @@ export function BacktestConfigSection() {
               조합수: <b>{combos.toLocaleString()}</b>개
               <span style={{ color: "#94a3b8" }}> (보너스 {bonus.length} × ATH {Math.max(1, ath.length)} × MA타입 {maSet.size} × MA개월 {months.length} × RSI {rsi.length} × TOP_N_HOLD 1)</span>
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+            <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center" }}>
               <button type="button" className="btn btn-dark" disabled={saving || combos === 0} onClick={() => void save()}>
                 {saving ? "저장 중…" : "저장"}
               </button>
+              <span style={{ color: "#94a3b8", fontSize: "0.82rem" }}>
+                마지막 저장: {formatKst(pools.find((p) => p.pool_id === selected)?.updated_at)} (KST)
+              </span>
             </div>
           </>
         )}

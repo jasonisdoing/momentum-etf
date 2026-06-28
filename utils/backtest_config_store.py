@@ -124,3 +124,19 @@ def list_backtest_pools() -> list[str]:
     """백테스트 설정이 등록된 풀 id 목록."""
     db = _db()
     return [str(doc["_id"]) for doc in db[_COLLECTION].find({}, {"_id": 1})]
+
+
+def get_backtest_config_updated_at(pool_id: str) -> str | None:
+    """풀 설정의 마지막 저장 시각(UTC ISO 문자열, tz 표기 포함). 없으면 None.
+
+    pymongo 가 naive(UTC) datetime 을 돌려주므로 UTC tz 를 붙여 반환한다
+    (프론트가 KST 로 정확히 변환하도록).
+    """
+    db = _db()
+    doc = db[_COLLECTION].find_one({"_id": pool_id}, {"updated_at": 1})
+    ua = doc.get("updated_at") if doc else None
+    if not hasattr(ua, "isoformat"):
+        return ua
+    if ua.tzinfo is None:
+        ua = ua.replace(tzinfo=timezone.utc)
+    return ua.isoformat()
