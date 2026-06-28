@@ -8,6 +8,7 @@ type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
   BENCHMARK?: Benchmark;
   HOLDING_BONUS_SCORE?: number[];
+  ATH_BONUS?: number[];
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
@@ -52,6 +53,7 @@ export function BacktestConfigSection() {
   const [benchTicker, setBenchTicker] = useState("");
   const [benchName, setBenchName] = useState("");
   const [bonusText, setBonusText] = useState("");
+  const [athText, setAthText] = useState("");
   const [monthsText, setMonthsText] = useState("");
   const [rsiText, setRsiText] = useState("");
   const [maSet, setMaSet] = useState<Set<string>>(new Set());
@@ -60,6 +62,7 @@ export function BacktestConfigSection() {
     setBenchTicker(cfg.BENCHMARK?.ticker ?? "");
     setBenchName(cfg.BENCHMARK?.name ?? "");
     setBonusText((cfg.HOLDING_BONUS_SCORE ?? []).join(", "));
+    setAthText((cfg.ATH_BONUS ?? []).join(", "));
     setMonthsText((cfg.MA_MONTHS ?? []).join(", "));
     setRsiText((cfg.RSI_LIMIT ?? []).join(", "));
     setMaSet(new Set((cfg.MA_TYPE ?? []).map((m) => m.toUpperCase())));
@@ -103,14 +106,16 @@ export function BacktestConfigSection() {
     });
 
   const bonus = useMemo(() => parseNums(bonusText), [bonusText]);
+  const ath = useMemo(() => parseNums(athText), [athText]);
   const months = useMemo(() => parseNums(monthsText), [monthsText]);
   const rsi = useMemo(() => parseNums(rsiText), [rsiText]);
-  const combos = bonus.length * maSet.size * months.length * rsi.length;
+  const combos = bonus.length * Math.max(1, ath.length) * maSet.size * months.length * rsi.length;
 
   const save = async () => {
     const config: BtConfig = {
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       HOLDING_BONUS_SCORE: bonus,
+      ATH_BONUS: ath,
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
@@ -161,6 +166,9 @@ export function BacktestConfigSection() {
             <Row label="보유보너스 점수">
               <input style={{ ...inputStyle, flex: 1 }} placeholder="예: 0, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
             </Row>
+            <Row label="ATH 보너스(고점근접)">
+              <input style={{ ...inputStyle, flex: 1 }} placeholder="예: 0, 5, 10" value={athText} onChange={(e) => setAthText(e.target.value)} />
+            </Row>
             <Row label="MA 타입">
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                 {maTypes.map((t) => (
@@ -180,7 +188,7 @@ export function BacktestConfigSection() {
 
             <div style={{ marginTop: 10, fontSize: "0.85rem", color: combos > 0 ? "#475569" : "#dc2626" }}>
               조합수: <b>{combos.toLocaleString()}</b>개
-              <span style={{ color: "#94a3b8" }}> (보너스 {bonus.length} × MA타입 {maSet.size} × MA개월 {months.length} × RSI {rsi.length} × TOP_N_HOLD 1)</span>
+              <span style={{ color: "#94a3b8" }}> (보너스 {bonus.length} × ATH {Math.max(1, ath.length)} × MA타입 {maSet.size} × MA개월 {months.length} × RSI {rsi.length} × TOP_N_HOLD 1)</span>
             </div>
             <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
               <button type="button" className="btn btn-dark" disabled={saving || combos === 0} onClick={() => void save()}>

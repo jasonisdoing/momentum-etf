@@ -20,6 +20,7 @@ web/next-env.d.ts
 .DS_Store
 
 # 백테스트 결과
+backtest/backup
 backtest/results
 leverage/zresults
 

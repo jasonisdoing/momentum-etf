@@ -31,16 +31,17 @@ logger = get_app_logger()
 ALL_POOL_ID = "__all__"
 COLLECTION = "pool_settings"
 
-# DB 오버라이드 대상 키 (이 5개만 수정 가능)
+# DB 오버라이드 대상 키 (ATH_BONUS 추가)
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "HOLDING_BONUS_SCORE",
     "MA_TYPE",
     "MA_MONTHS",
     "RSI_LIMIT",
+    "ATH_BONUS",
 )
 
-_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_MONTHS", "RSI_LIMIT")
+_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_MONTHS", "RSI_LIMIT", "ATH_BONUS")
 
 _CACHE_TTL_SECONDS = 30.0
 _overlay_cache: dict[str, dict[str, Any]] | None = None
@@ -74,6 +75,10 @@ def _load_overrides_from_db() -> dict[str, dict[str, Any]]:
             if not pool_id:
                 continue
             overrides = {k: doc[k] for k in OVERRIDABLE_KEYS if k in doc and doc[k] is not None}
+            if "updated_at" in doc and doc["updated_at"] is not None:
+                overrides["updated_at"] = doc["updated_at"]
+            if "save_method" in doc and doc["save_method"] is not None:
+                overrides["save_method"] = doc["save_method"]
             if overrides:
                 result[pool_id] = overrides
         return result
@@ -117,6 +122,10 @@ def resolve_pool_values(pool_id: str, base: dict[str, Any]) -> dict[str, Any]:
     merged = dict(base)
     for key in OVERRIDABLE_KEYS:
         merged[key] = overrides[key]
+    if "updated_at" in overrides:
+        merged["updated_at"] = overrides["updated_at"]
+    if "save_method" in overrides:
+        merged["save_method"] = overrides["save_method"]
     return merged
 
 
@@ -203,6 +212,9 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         elif key == "HOLDING_BONUS_SCORE":
             if not (0 <= num <= 1000):
                 raise PoolSettingsError(f"HOLDING_BONUS_SCORE 는 0 ~ 1000 범위여야 합니다: {num}")
+        elif key == "ATH_BONUS":
+            if not (0 <= num <= 100):
+                raise PoolSettingsError(f"ATH_BONUS 는 0 ~ 100 범위여야 합니다: {num}")
 
         cleaned[key] = num
 
@@ -211,7 +223,7 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
-def save_pool_settings(pool_id: str, values: dict[str, Any]) -> dict[str, Any]:
+def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
     """편집한 5개 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
 
     pool_id 는 ALL_POOL_ID("__all__") 또는 유효한 ticker_type.
@@ -233,7 +245,7 @@ def save_pool_settings(pool_id: str, values: dict[str, Any]) -> dict[str, Any]:
         raise PoolSettingsError("DB 연결 실패로 설정을 저장할 수 없습니다.")
     db[COLLECTION].update_one(
         {"_id": norm_id},
-        {"$set": {**cleaned, "updated_at": datetime.utcnow()}},
+        {"$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method}},
         upsert=True,
     )
 

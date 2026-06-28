@@ -75,6 +75,15 @@ def validate_backtest_config(config: Any) -> None:
         if str(v).upper() not in ALLOWED_MA_TYPES:
             raise ValueError(f"'MA_TYPE' 값이 허용되지 않습니다: {v} (허용: {', '.join(ALLOWED_MA_TYPES)})")
 
+    # ATH(52주 고점) 근접 보너스 — 선택 키(하위호환). 있으면 0 이상 숫자 리스트.
+    if "ATH_BONUS" in config:
+        ath = config["ATH_BONUS"]
+        if not isinstance(ath, list) or len(ath) == 0:
+            raise ValueError("'ATH_BONUS' 는 1개 이상의 값을 가진 리스트여야 합니다.")
+        for v in ath:
+            if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
+                raise ValueError("'ATH_BONUS' 는 0 이상의 숫자여야 합니다.")
+
 
 def load_backtest_config(pool_id: str) -> dict:
     """풀의 백테스트 탐색공간 dict. 없으면 임의 기본값 없이 에러."""

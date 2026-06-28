@@ -39,9 +39,18 @@ def get_rank_data(
         except ValueError as exc:
             raise ValueError(f"보유보너스점수 형식이 올바르지 않습니다: {raw_held_bonus_score}") from exc
 
+    raw_ath_bonus = request.query_params.get("ath_bonus")
+    ath_bonus: int | None = None
+    if raw_ath_bonus is not None:
+        try:
+            ath_bonus = int(raw_ath_bonus)
+        except ValueError as exc:
+            raise ValueError(f"ATH보너스 형식이 올바르지 않습니다: {raw_ath_bonus}") from exc
+
     return load_rank_data(
         ticker_type=ticker_type,
         ma_rule_override=ma_rule_override,
         as_of_date=as_of_date,
         held_bonus_score=held_bonus_score,
+        ath_bonus=ath_bonus,
     )
