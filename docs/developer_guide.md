@@ -248,7 +248,6 @@ python infra/server_scheduler.py
 * **ATH 원점수(0~100)**: `dd = 종가 / 12개월 rolling 고점 − 1` → 매 일자 **풀 내 단면 백분위(0~1)** 로 환산(ATH 근접=1.0) 후 ×100. 공통 엔진 `core/strategy/scoring.py`의 `compute_ath_proximity_percentile()`.
 * **보유 원점수**: 실보유 100, 아니면 0.
 * **점수** `= w×추세 + w×ATH + 보유가점` (`w = (100−보유%)/200`, `보유가점 = 보유 시 보유%`). **라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일 식**을 쓴다.
-* (참고) 한때 도입했던 ST(슈퍼트렌드) 팩터는 out-of-sample 검증에서 기여가 없어 **제거**되었다.
 
 ### 백테스트 탐색 공간 (`backtest_config`)
 
