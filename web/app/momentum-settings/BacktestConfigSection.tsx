@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { useToast } from "../components/ToastProvider";
 
@@ -14,6 +14,19 @@ type BtConfig = {
   RSI_LIMIT?: number[];
 };
 type PoolEntry = { pool_id: string; name: string; config: BtConfig; updated_at?: string | null };
+type ApiResponse = { pools?: PoolEntry[]; constraints?: { ma_types?: string[] }; error?: string };
+
+const inputStyle: React.CSSProperties = {
+  border: "1px solid rgba(148,163,184,0.4)",
+  borderRadius: 6,
+  padding: "4px 8px",
+  fontSize: "0.88rem",
+};
+const labelStyle: React.CSSProperties = { color: "#64748b", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
+
+function parseNums(text: string): number[] {
+  return text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
+}
 
 /** UTC ISO → KST 표시 문자열. */
 function formatKst(iso?: string | null): string {
@@ -22,88 +35,26 @@ function formatKst(iso?: string | null): string {
   if (Number.isNaN(d.getTime())) return "-";
   return d.toLocaleString("ko-KR", { timeZone: "Asia/Seoul", dateStyle: "medium", timeStyle: "short" });
 }
-type ApiResponse = { pools?: PoolEntry[]; constraints?: { ma_types?: string[] }; error?: string };
 
-const inputStyle: React.CSSProperties = {
-  border: "1px solid rgba(148,163,184,0.4)",
-  borderRadius: 6,
-  padding: "5px 8px",
-  fontSize: "0.9rem",
-};
-
-function parseNums(text: string): number[] {
-  return text
-    .split(/[,\s]+/)
-    .map((t) => t.trim())
-    .filter(Boolean)
-    .map(Number)
-    .filter((n) => Number.isFinite(n));
-}
-
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "7px 0", borderBottom: "1px solid rgba(148,163,184,0.15)" }}>
-      <span style={{ width: 150, flexShrink: 0, color: "#64748b", fontWeight: 600 }}>{label}</span>
-      <div style={{ flex: 1, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{children}</div>
-    </div>
-  );
-}
-
-export function BacktestConfigSection() {
+/** 풀 1개 백테스트 탐색공간 인라인 편집 행 (자체 저장). */
+function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const toast = useToast();
-  const [pools, setPools] = useState<PoolEntry[]>([]);
-  const [maTypes, setMaTypes] = useState<string[]>([]);
-  const [selected, setSelected] = useState<string>("");
-  const [loading, setLoading] = useState(true);
+  const c = pool.config;
+  const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
+  const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
+  const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? []).join(", "));
+  const [athText, setAthText] = useState((c.ATH_BONUS ?? []).join(", "));
+  const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
+  const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
+  const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
+  const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
   const [saving, setSaving] = useState(false);
 
-  // 선택 풀의 편집 버퍼
-  const [benchTicker, setBenchTicker] = useState("");
-  const [benchName, setBenchName] = useState("");
-  const [bonusText, setBonusText] = useState("");
-  const [athText, setAthText] = useState("");
-  const [monthsText, setMonthsText] = useState("");
-  const [rsiText, setRsiText] = useState("");
-  const [maSet, setMaSet] = useState<Set<string>>(new Set());
-
-  const fillBuffers = useCallback((cfg: BtConfig) => {
-    setBenchTicker(cfg.BENCHMARK?.ticker ?? "");
-    setBenchName(cfg.BENCHMARK?.name ?? "");
-    setBonusText((cfg.HOLDING_BONUS_SCORE ?? []).join(", "));
-    setAthText((cfg.ATH_BONUS ?? []).join(", "));
-    setMonthsText((cfg.MA_MONTHS ?? []).join(", "));
-    setRsiText((cfg.RSI_LIMIT ?? []).join(", "));
-    setMaSet(new Set((cfg.MA_TYPE ?? []).map((m) => m.toUpperCase())));
-  }, []);
-
-  const selectPool = useCallback((poolId: string, list: PoolEntry[]) => {
-    setSelected(poolId);
-    const entry = list.find((p) => p.pool_id === poolId);
-    if (entry) fillBuffers(entry.config);
-  }, [fillBuffers]);
-
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      const resp = await fetch("/api/backtest-config", { cache: "no-store" });
-      const data = (await resp.json()) as ApiResponse;
-      if (!resp.ok || data.error) throw new Error(data.error ?? "백테스트 설정을 불러오지 못했습니다.");
-      const list = data.pools ?? [];
-      setPools(list);
-      setMaTypes(data.constraints?.ma_types ?? []);
-      if (list.length > 0) selectPool(selected && list.some((p) => p.pool_id === selected) ? selected : list[0].pool_id, list);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "백테스트 설정을 불러오지 못했습니다.");
-    } finally {
-      setLoading(false);
-    }
-  }, [selected, selectPool, toast]);
-
-  useEffect(() => {
-    void load();
-    // 최초 1회만 로드
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const bonus = parseNums(bonusText);
+  const ath = parseNums(athText);
+  const months = parseNums(monthsText);
+  const rsi = parseNums(rsiText);
+  const combos = bonus.length * Math.max(1, ath.length) * maSet.size * months.length * rsi.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -112,12 +63,6 @@ export function BacktestConfigSection() {
       else next.add(t);
       return next;
     });
-
-  const bonus = useMemo(() => parseNums(bonusText), [bonusText]);
-  const ath = useMemo(() => parseNums(athText), [athText]);
-  const months = useMemo(() => parseNums(monthsText), [monthsText]);
-  const rsi = useMemo(() => parseNums(rsiText), [rsiText]);
-  const combos = bonus.length * Math.max(1, ath.length) * maSet.size * months.length * rsi.length;
 
   const save = async () => {
     const config: BtConfig = {
@@ -133,18 +78,94 @@ export function BacktestConfigSection() {
       const resp = await fetch("/api/backtest-config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pool_id: selected, config }),
+        body: JSON.stringify({ pool_id: pool.pool_id, config }),
       });
-      const data = (await resp.json()) as { config?: BtConfig; updated_at?: string | null; error?: string; detail?: string };
+      const data = (await resp.json()) as { updated_at?: string | null; error?: string; detail?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
-      setPools((prev) => prev.map((p) => (p.pool_id === selected && data.config ? { ...p, config: data.config, updated_at: data.updated_at } : p)));
-      toast.success(`[백테스트] ${selected} 탐색공간 저장 완료`);
+      setUpdatedAt(data.updated_at);
+      toast.success(`[백테스트] ${pool.pool_id} 저장 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "저장에 실패했습니다.");
     } finally {
       setSaving(false);
     }
   };
+
+  const rowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 };
+
+  return (
+    <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 800 }}>{pool.name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({pool.pool_id})</span></span>
+        <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>마지막 저장: {formatKst(updatedAt)}</span>
+          <button type="button" className="btn btn-sm btn-dark" disabled={saving || combos === 0} onClick={() => void save()}>
+            {saving ? "저장 중…" : "저장"}
+          </button>
+        </span>
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 56 }}>벤치마크</span>
+        <input style={{ ...inputStyle, width: 110 }} placeholder="티커" value={benchTicker} onChange={(e) => setBenchTicker(e.target.value)} />
+        <input style={{ ...inputStyle, flex: 1, minWidth: 140 }} placeholder="이름" value={benchName} onChange={(e) => setBenchName(e.target.value)} />
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 56 }}>보유보너스</span>
+        <input style={{ ...inputStyle, width: 110 }} placeholder="0, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
+        <span style={{ ...labelStyle, marginLeft: 8 }}>ATH 보너스</span>
+        <input style={{ ...inputStyle, width: 130 }} placeholder="0, 10, 20, 30" value={athText} onChange={(e) => setAthText(e.target.value)} />
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 56 }}>MA 타입</span>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+          {maTypes.map((t) => (
+            <label key={t} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
+              <input type="checkbox" checked={maSet.has(t)} onChange={() => toggleMa(t)} />
+              {t}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div style={{ ...rowStyle, marginBottom: 0 }}>
+        <span style={{ ...labelStyle, width: 56 }}>MA 개월</span>
+        <input style={{ ...inputStyle, width: 130 }} placeholder="3, 6, 9, 12" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
+        <span style={{ ...labelStyle, marginLeft: 8 }}>RSI 상한</span>
+        <input style={{ ...inputStyle, width: 150 }} placeholder="80, 90, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
+        <span style={{ marginLeft: "auto", fontSize: "0.82rem", color: combos > 0 ? "#475569" : "#dc2626" }}>조합수 <b>{combos.toLocaleString()}</b></span>
+      </div>
+    </div>
+  );
+}
+
+export function BacktestConfigSection() {
+  const toast = useToast();
+  const [pools, setPools] = useState<PoolEntry[]>([]);
+  const [maTypes, setMaTypes] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      setLoading(true);
+      const resp = await fetch("/api/backtest-config", { cache: "no-store" });
+      const data = (await resp.json()) as ApiResponse;
+      if (!resp.ok || data.error) throw new Error(data.error ?? "백테스트 설정을 불러오지 못했습니다.");
+      setPools(data.pools ?? []);
+      setMaTypes(data.constraints?.ma_types ?? []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "백테스트 설정을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="card appCard" style={{ marginTop: 16 }}>
@@ -159,54 +180,7 @@ export function BacktestConfigSection() {
         ) : pools.length === 0 ? (
           <div style={{ color: "#94a3b8", padding: 12 }}>등록된 백테스트 설정이 없습니다.</div>
         ) : (
-          <>
-            <Row label="종목풀">
-              <select style={inputStyle} value={selected} onChange={(e) => selectPool(e.target.value, pools)}>
-                {pools.map((p) => (
-                  <option key={p.pool_id} value={p.pool_id}>{p.name} ({p.pool_id})</option>
-                ))}
-              </select>
-            </Row>
-            <Row label="벤치마크">
-              <input style={{ ...inputStyle, width: 120 }} placeholder="티커" value={benchTicker} onChange={(e) => setBenchTicker(e.target.value)} />
-              <input style={{ ...inputStyle, flex: 1, minWidth: 160 }} placeholder="이름" value={benchName} onChange={(e) => setBenchName(e.target.value)} />
-            </Row>
-            <Row label="보유보너스 점수">
-              <input style={{ ...inputStyle, flex: 1 }} placeholder="예: 0, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
-            </Row>
-            <Row label="ATH 보너스(고점근접)">
-              <input style={{ ...inputStyle, flex: 1 }} placeholder="예: 0, 5, 10" value={athText} onChange={(e) => setAthText(e.target.value)} />
-            </Row>
-            <Row label="MA 타입">
-              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {maTypes.map((t) => (
-                  <label key={t} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.85rem", cursor: "pointer" }}>
-                    <input type="checkbox" checked={maSet.has(t)} onChange={() => toggleMa(t)} />
-                    {t}
-                  </label>
-                ))}
-              </div>
-            </Row>
-            <Row label="MA 개월">
-              <input style={{ ...inputStyle, flex: 1 }} placeholder="예: 3, 6, 9, 12" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
-            </Row>
-            <Row label="RSI 상한">
-              <input style={{ ...inputStyle, flex: 1 }} placeholder="예: 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
-            </Row>
-
-            <div style={{ marginTop: 10, fontSize: "0.85rem", color: combos > 0 ? "#475569" : "#dc2626" }}>
-              조합수: <b>{combos.toLocaleString()}</b>개
-              <span style={{ color: "#94a3b8" }}> (보너스 {bonus.length} × ATH {Math.max(1, ath.length)} × MA타입 {maSet.size} × MA개월 {months.length} × RSI {rsi.length} × TOP_N_HOLD 1)</span>
-            </div>
-            <div style={{ display: "flex", gap: 10, marginTop: 14, alignItems: "center" }}>
-              <button type="button" className="btn btn-dark" disabled={saving || combos === 0} onClick={() => void save()}>
-                {saving ? "저장 중…" : "저장"}
-              </button>
-              <span style={{ color: "#94a3b8", fontSize: "0.82rem" }}>
-                마지막 저장: {formatKst(pools.find((p) => p.pool_id === selected)?.updated_at)} (KST)
-              </span>
-            </div>
-          </>
+          pools.map((p) => <PoolRow key={p.pool_id} pool={p} maTypes={maTypes} />)
         )}
       </div>
     </div>
