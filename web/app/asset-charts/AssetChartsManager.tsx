@@ -44,9 +44,12 @@ type PerfMetrics = {
   totalReturn: number | null; // 누적 수익률(소수, 0.1=10%)
   cagr: number | null; // 연평균 수익률(소수)
   mdd: number | null; // 최대 낙폭(음수 소수)
+  mddPeriod: string | null; // 최대 낙폭 발생 기간
   vol: number | null; // 연 변동성(소수)
   bestWeek: number | null;
+  bestWeekDate: string | null; // 최고 수익 주간 날짜
   worstWeek: number | null;
+  worstWeekDate: string | null; // 최저 수익 주간 날짜
   winRate: number | null;
   profitAmount: number | null; // 구간 누적 손익(원)
 };
@@ -54,15 +57,18 @@ type PerfMetrics = {
 function computeMetrics(rows: ChartRow[]): PerfMetrics {
   const empty: PerfMetrics = {
     weeks: rows.length,
-    totalReturn: null, cagr: null, mdd: null, vol: null,
-    bestWeek: null, worstWeek: null, winRate: null, profitAmount: null,
+    totalReturn: null, cagr: null, mdd: null, mddPeriod: null, vol: null,
+    bestWeek: null, bestWeekDate: null, worstWeek: null, worstWeekDate: null, winRate: null, profitAmount: null,
   };
   if (rows.length < 2) return empty;
 
   // 구간 진입점(첫 행) 이후의 주간 수익률을 체인 → 구간 내 NAV 곡선
-  const steps = rows.slice(1).map((r) => toNumber(r.weekly_return_pct) / 100);
+  const steps = rows.slice(1).map((r) => ({
+    val: toNumber(r.weekly_return_pct) / 100,
+    date: r.week_date,
+  }));
   const nav = [1];
-  for (const r of steps) nav.push(nav[nav.length - 1] * (1 + r));
+  for (const r of steps) nav.push(nav[nav.length - 1] * (1 + r.val));
   const totalReturn = nav[nav.length - 1] - 1;
 
   const first = rows[0];
@@ -71,16 +77,50 @@ function computeMetrics(rows: ChartRow[]): PerfMetrics {
   const years = days / 365.25;
   const cagr = years > 0 && totalReturn > -1 ? Math.pow(1 + totalReturn, 1 / years) - 1 : null;
 
-  let peak = nav[0];
+  // MDD 및 해당 고점/저점 날짜 추적
+  let peakVal = nav[0];
+  let peakIndex = 0;
   let mdd = 0;
-  for (const v of nav) {
-    if (v > peak) peak = v;
-    const dd = v / peak - 1;
-    if (dd < mdd) mdd = dd;
+  let mddPeakIndex = 0;
+  let mddTroughIndex = 0;
+
+  for (let i = 0; i < nav.length; i++) {
+    const v = nav[i];
+    if (v > peakVal) {
+      peakVal = v;
+      peakIndex = i;
+    }
+    const dd = v / peakVal - 1;
+    if (dd < mdd) {
+      mdd = dd;
+      mddPeakIndex = peakIndex;
+      mddTroughIndex = i;
+    }
   }
 
-  const mean = steps.reduce((a, b) => a + b, 0) / steps.length;
-  const variance = steps.reduce((a, b) => a + (b - mean) ** 2, 0) / steps.length;
+  const mddPeriod = mdd < 0 
+    ? `${rows[mddPeakIndex].week_date} ~ ${rows[mddTroughIndex].week_date}`
+    : null;
+
+  // 최고/최저 주간 수익률 및 발생일 추적
+  let bestVal = -Infinity;
+  let bestDate = null;
+  let worstVal = Infinity;
+  let worstDate = null;
+
+  for (const step of steps) {
+    if (step.val > bestVal) {
+      bestVal = step.val;
+      bestDate = step.date;
+    }
+    if (step.val < worstVal) {
+      worstVal = step.val;
+      worstDate = step.date;
+    }
+  }
+
+  const mean = steps.reduce((sum, step) => sum + step.val, 0) / steps.length;
+  const variance = steps.reduce((sum, step) => sum + (step.val - mean) ** 2, 0) / steps.length;
   const vol = Math.sqrt(variance) * Math.sqrt(52);
 
   return {
@@ -88,10 +128,13 @@ function computeMetrics(rows: ChartRow[]): PerfMetrics {
     totalReturn,
     cagr,
     mdd,
+    mddPeriod,
     vol,
-    bestWeek: Math.max(...steps),
-    worstWeek: Math.min(...steps),
-    winRate: steps.filter((r) => r > 0).length / steps.length,
+    bestWeek: bestVal !== -Infinity ? bestVal : null,
+    bestWeekDate: bestDate,
+    worstWeek: worstVal !== Infinity ? worstVal : null,
+    worstWeekDate: worstDate,
+    winRate: steps.filter((step) => step.val > 0).length / steps.length,
     profitAmount: toNumber(last.cumulative_profit) - toNumber(first.cumulative_profit),
   };
 }
@@ -455,10 +498,25 @@ export function AssetChartsManager({
                     { label: "운용 기간", value: `${visiblePeriod} (${metrics.weeks}주)` },
                     { label: "누적 수익률", value: formatPct(metrics.totalReturn, true), color: signColor(metrics.totalReturn) },
                     { label: "연평균 수익률 (CAGR)", value: formatPct(metrics.cagr, true), color: signColor(metrics.cagr) },
-                    { label: "최대 낙폭 (MDD)", value: formatPct(metrics.mdd), color: metrics.mdd != null ? "#dc2626" : undefined },
+                    { 
+                      label: "최대 낙폭 (MDD)", 
+                      value: formatPct(metrics.mdd), 
+                      subValue: metrics.mddPeriod ? `${metrics.mddPeriod}` : undefined,
+                      color: metrics.mdd != null ? "#dc2626" : undefined 
+                    },
                     { label: "연 변동성", value: formatPct(metrics.vol) },
-                    { label: "최고 주간 수익률", value: formatPct(metrics.bestWeek, true), color: signColor(metrics.bestWeek) },
-                    { label: "최저 주간 수익률", value: formatPct(metrics.worstWeek, true), color: signColor(metrics.worstWeek) },
+                    { 
+                      label: "최고 주간 수익률", 
+                      value: formatPct(metrics.bestWeek, true), 
+                      subValue: metrics.bestWeekDate ? `${metrics.bestWeekDate} 주` : undefined,
+                      color: signColor(metrics.bestWeek) 
+                    },
+                    { 
+                      label: "최저 주간 수익률", 
+                      value: formatPct(metrics.worstWeek, true), 
+                      subValue: metrics.worstWeekDate ? `${metrics.worstWeekDate} 주` : undefined,
+                      color: signColor(metrics.worstWeek) 
+                    },
                     { label: "수익 주 비율", value: metrics.winRate != null ? `${(metrics.winRate * 100).toFixed(1)}%` : "-" },
                     { label: "누적 손익", value: showAmounts ? (metrics.profitAmount != null ? formatMoney(metrics.profitAmount) : "-") : "•••", color: showAmounts ? signColor(metrics.profitAmount) : undefined },
                   ].map((item) => (
@@ -467,7 +525,14 @@ export function AssetChartsManager({
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "11px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)" }}
                     >
                       <span style={{ color: "#64748b", fontWeight: 600, fontSize: "0.9rem" }}>{item.label}</span>
-                      <span style={{ fontWeight: 700, color: item.color ?? "#1e293b", textAlign: "right" }}>{item.value}</span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                        <span style={{ fontWeight: 700, color: item.color ?? "#1e293b", textAlign: "right" }}>{item.value}</span>
+                        {item.subValue && (
+                          <span style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: 2, fontWeight: 500 }}>
+                            {item.subValue}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
