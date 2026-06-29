@@ -50,7 +50,10 @@ def run_backtest(
     # 장중(미완성 봉) 제외: 신호는 "마지막으로 닫힌 거래일 종가"로만 확정한다.
     # drop_today=True 이면 오늘(현지 기준) 세션을 신호 계산에서 제외한다.
     if drop_today and len(common_index) > 0:
-        cutoff = current_trading_day(settings.get("market", "kor"))
+        from zoneinfo import ZoneInfo
+        market = settings.get("market", "kor")
+        tz_name = "Asia/Seoul" if market == "kor" else "America/New_York"
+        cutoff = pd.Timestamp.now(ZoneInfo(tz_name)).normalize()
         common_index = common_index[common_index < cutoff]
         if len(common_index) == 0:
             raise ValueError("오늘 세션을 제외하면 사용할 수 있는 거래일이 없습니다.")
