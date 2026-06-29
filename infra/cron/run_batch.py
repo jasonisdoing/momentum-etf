@@ -64,18 +64,6 @@ MAX_TAIL_LINES = 15
 MAX_TAIL_CHARS = 1500
 
 LOCK_DIR = PROJECT_ROOT / "logs" / "cron"
-SUCCESS_NOTIFICATION_DISABLED_JOBS = {
-    "cache_refresh",
-    "metadata_updater",
-    "asset_summary",
-    "market_hours_analysis",
-    "us_market_stocks",
-    "data_aggregate",
-    "live_24h_slack",
-    "leverage_switch",
-    "momentum_backtest",
-    "leverage_tune",
-}
 EXIT_ALREADY_NOTIFIED = 66
 
 
@@ -280,9 +268,7 @@ def main(argv: list[str]) -> int:
     app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
 
     already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
-    should_notify = ((not success) and (not already_notified_failure)) or (
-        success and (job_name not in SUCCESS_NOTIFICATION_DISABLED_JOBS)
-    )
+    should_notify = (not success) and (not already_notified_failure)
     if should_notify:
         _notify(
             f"{emoji} *[{app_label}] 배치 {status}*: `{job_name}`\n"
