@@ -74,6 +74,7 @@ SUCCESS_NOTIFICATION_DISABLED_JOBS = {
     "live_24h_slack",
     "leverage_switch",
     "momentum_backtest",
+    "leverage_tune",
 }
 EXIT_ALREADY_NOTIFIED = 66
 
