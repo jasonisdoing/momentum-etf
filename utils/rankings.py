@@ -14,6 +14,7 @@ from config import (
     CACHE_START_DATE,
     MARKET_SCHEDULES,
     NAVER_ETF_CATEGORY_CONFIG,
+    SCORE_TREND_WEIGHT_RATIO,
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import build_composite_rank_scores, compute_ath_proximity_percentile
@@ -580,9 +581,12 @@ def _apply_common_rank_scores(
 
     tickers_col = df["티커"].astype(str)
     
-    # 백테스트와 동일한 가중치: 추세 = ATH = (100 - 보유%) / 2, 보유 = 보유%
+    # 백테스트와 동일한 가중치: 나머지(100-보유%)를 추세 : ATH = ratio% : (100-ratio)% 로 나눈다.
     hold_pct = float(held_bonus_score)
-    w_side = (100.0 - hold_pct) / 2.0 / 100.0
+    trend_share = SCORE_TREND_WEIGHT_RATIO / 100.0
+    remainder = (100.0 - hold_pct) / 100.0
+    w_trend = remainder * trend_share
+    w_ath = remainder * (1.0 - trend_share)
 
     # 1. '추세' 원점수 (-100 ~ +100): composite_score 의 규칙 평균
     num_rules = len(ma_rules) if ma_rules else 1
@@ -604,9 +608,9 @@ def _apply_common_rank_scores(
     else:
         df["보유가점"] = df["보유"].map(lambda x: hold_pct if x == "보유" else 0.0)
 
-    # 4. 최종 '점수' = 가중합 (백테스트와 동일): w_side×추세 + w_side×ATH + 보유가점
+    # 4. 최종 '점수' = 가중합 (백테스트와 동일): w_trend×추세 + w_ath×ATH + 보유가점
     composite_missing = df["추세"].isna()
-    df["점수"] = w_side * df["추세"] + w_side * df["ATH"] + df["보유가점"]
+    df["점수"] = w_trend * df["추세"] + w_ath * df["ATH"] + df["보유가점"]
 
     # 자격 미달 종목(결손 행) 일관성 마스킹 처리
     df.loc[composite_missing, "점수"] = None

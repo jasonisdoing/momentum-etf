@@ -22,6 +22,7 @@ from config import (
     BACKTEST_INITIAL_KRW_AMOUNT,
     BACKTEST_START_DATE,
     MARKET_SCHEDULES,
+    SCORE_TREND_WEIGHT_RATIO,
     SLIPPAGE_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
@@ -778,7 +779,10 @@ def _write_results_file(
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
-    lines.append('"WEIGHT": "추세 = ATH = (100 - 보유) / 2, 보유보너스(%)만 탐색",')
+    lines.append(
+        f'"WEIGHT": "추세:ATH = {SCORE_TREND_WEIGHT_RATIO:g}:{100 - SCORE_TREND_WEIGHT_RATIO:g} '
+        f'(나머지 = 100-보유), 보유보너스(%)만 탐색",'
+    )
     lines.append(f'"MA_TYPE": {ma_types},')
     lines.append(f'"MA_MONTHS": {ma_months_list},')
     if rsi_limits is not None:
@@ -1989,15 +1993,18 @@ def run_backtest(pool_id: str) -> Path:
             "TRADES": benchmark_trades,
         }
 
-    # 가중치 그리드 생성: 추세 = ATH 로 묶어(한쪽 올인 방지·국면 강건·과적합 축소)
-    # 보유 비중만 탐색공간(DB의 보유보너스(%))에서 가져온다.
-    # 각 보유값 h(%) → 추세 = ATH = (100 - h) / 2 %. 합계는 항상 100%.
+    # 가중치 그리드 생성: 보유 비중만 탐색공간(DB의 보유보너스(%))에서 가져오고,
+    # 나머지(100-보유)를 추세 : ATH = SCORE_TREND_WEIGHT_RATIO% : (100-ratio)% 로 나눈다.
+    # 각 보유값 h(%) → 추세 = (100-h)×(ratio/100), ATH = (100-h)×(1-ratio/100). 합계는 항상 100%.
+    trend_share = SCORE_TREND_WEIGHT_RATIO / 100.0
     weight_combos = []
     for hold in hold_pct_values:
-        side = (100.0 - hold) / 2.0
-        if side < 0:
+        remainder = 100.0 - hold
+        if remainder < 0:
             raise ValueError(f"보유보너스(%)는 100 이하여야 합니다: {hold}")
-        weight_combos.append((side / 100.0, hold / 100.0, side / 100.0))
+        w_trend = remainder * trend_share
+        w_ath = remainder * (1.0 - trend_share)
+        weight_combos.append((w_trend / 100.0, hold / 100.0, w_ath / 100.0))
 
     # 조합 생성
     raw_combos = list(
