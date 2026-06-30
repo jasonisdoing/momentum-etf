@@ -70,9 +70,9 @@ SCHEDULE_ROWS = [
         "key": "metadata_updater",
         "job": "종목 메타데이터 업데이트",
         "target": "모든 종목타입",
-        "cadence": "평일 09:45 ~ 17:45 매시 45분 KST",
+        "cadence": "평일 07:45 KST",
         "command": "python scripts/stock_meta_cache_updater.py",
-        "schedule": {"minutes": [45], "hours": list(range(9, 18)), "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "us_market_stocks",
