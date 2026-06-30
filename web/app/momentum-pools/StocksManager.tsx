@@ -1175,9 +1175,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           const value = params.value ?? null;
           const isHighlighted = value !== null && value >= -5;
+          const formatted = value === 0 ? `⭐${formatPercent(value)}` : formatPercent(value);
           return (
             <span style={{ color: isHighlighted ? "#7952b3" : "inherit", fontWeight: isHighlighted ? 700 : 400 }}>
-              {formatPercent(value)}
+              {formatted}
             </span>
           );
         },
