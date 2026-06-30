@@ -60,12 +60,13 @@ type DailyRow = {
 type DetailData = {
   constituents: ConstituentRow[];
   priceRows: DailyRow[];
+  source?: string;
 };
 
 // 부모 그리드에 올라갈 row 타입: main 행 또는 detail(자식) 행
 type ParentRow =
   | (AggregatedHoldingRow & { rowType: "main" })
-  | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean };
+  | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean; source?: string };
 
 const holdingsGridTheme = createAppGridTheme();
 
@@ -342,7 +343,7 @@ export function HoldingsManager({
         constituentsCacheRef.current.set(ticker, null);
         return null;
       }
-      const result: DetailData = { constituents: items, priceRows };
+      const result: DetailData = { constituents: items, priceRows, source: data.etf_info?.source };
       constituentsCacheRef.current.set(ticker, result);
       return result;
     } catch {
@@ -391,6 +392,7 @@ export function HoldingsManager({
           constituents: cached?.constituents ?? [],
           priceRows: cached?.priceRows ?? [],
           loading: detailLoading,
+          source: cached?.source,
         });
       }
     }
@@ -564,7 +566,10 @@ export function HoldingsManager({
           <div className="tickerDetailHoldingsPanel" style={{ flex: 1, minWidth: 0, height: DETAIL_PANEL_HEIGHT }}>
             <div className="tickerDetailTableHeader">
               <span className="tickerDetailTableTitle">구성종목</span>
-              <span className="tickerDetailTableMeta">상위 {constituents.length}개</span>
+              <span className="tickerDetailTableMeta">
+                상위 {constituents.length}개
+                {params.data.source === "yfinance_holdings" && " (yfinance 무료 API 제약으로 상위 10개만 제공)"}
+              </span>
             </div>
             <div className="appGridFillWrap">
               <AppAgGrid
