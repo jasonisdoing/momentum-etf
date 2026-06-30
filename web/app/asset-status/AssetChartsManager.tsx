@@ -498,10 +498,10 @@ export function AssetChartsManager({
     const startYear = startDate ? startDate.substring(0, 4) : "";
     const endYear = endDate ? endDate.substring(0, 4) : "";
 
-    // 1. 일간 극단치
+    // 1. 일간 극단치 (2026년 4월 27일 이전에는 일별 데이터가 부재하므로 해당 일자 이후 데이터만 산출에 포함)
     const visibleDaily = dailyRows.filter((r) => {
       const d = r.date || "";
-      return (!startDate || d >= startDate) && (!endDate || d <= endDate);
+      return d >= "2026-04-27" && (!startDate || d >= startDate) && (!endDate || d <= endDate);
     });
     let bestDailyVal = -Infinity;
     let bestDailyDate = null;
