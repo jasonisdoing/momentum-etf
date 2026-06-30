@@ -22,6 +22,12 @@ import type { AssetChartsHeaderSummary } from "./AssetChartsPageClient";
 
 type RangeKey = "1m" | "3m" | "6m" | "12m" | "all";
 
+type DailyRow = {
+  date: string;
+  daily_return_pct: number;
+  [key: string]: any;
+};
+
 type ChartRow = {
   week_date: string;
   label: string;
@@ -52,13 +58,41 @@ type PerfMetrics = {
   worstWeekDate: string | null; // 최저 수익 주간 날짜
   winRate: number | null;
   profitAmount: number | null; // 구간 누적 손익(원)
+  // 새로 추가할 지표들
+  sharpeRatio: number | null;
+  sortinoRatio: number | null;
+  calmarRatio: number | null;
+  // 주기별 극단치 지표
+  bestMonth: number | null;
+  bestMonthDate: string | null;
+  worstMonth: number | null;
+  worstMonthDate: string | null;
+  bestQuarter: number | null;
+  bestQuarterDate: string | null;
+  worstQuarter: number | null;
+  worstQuarterDate: string | null;
+  bestYear: number | null;
+  bestYearDate: string | null;
+  worstYear: number | null;
+  worstYearDate: string | null;
 };
+
+function getQuarterKey(dateStr: string): string {
+  const year = dateStr.substring(0, 4);
+  const month = Number(dateStr.substring(5, 7));
+  const q = Math.ceil(month / 3);
+  return `${year}-Q${q}`;
+}
 
 function computeMetrics(rows: ChartRow[]): PerfMetrics {
   const empty: PerfMetrics = {
     weeks: rows.length,
     totalReturn: null, cagr: null, mdd: null, mddPeriod: null, vol: null,
     bestWeek: null, bestWeekDate: null, worstWeek: null, worstWeekDate: null, winRate: null, profitAmount: null,
+    sharpeRatio: null, sortinoRatio: null, calmarRatio: null,
+    bestMonth: null, bestMonthDate: null, worstMonth: null, worstMonthDate: null,
+    bestQuarter: null, bestQuarterDate: null, worstQuarter: null, worstQuarterDate: null,
+    bestYear: null, bestYearDate: null, worstYear: null, worstYearDate: null,
   };
   if (rows.length < 2) return empty;
 
@@ -123,6 +157,99 @@ function computeMetrics(rows: ChartRow[]): PerfMetrics {
   const variance = steps.reduce((sum, step) => sum + (step.val - mean) ** 2, 0) / steps.length;
   const vol = Math.sqrt(variance) * Math.sqrt(52);
 
+  // 1. 샤프 지수 (Sharpe Ratio) - 무위험 이자율 연 3%(0.03) 가정
+  const sharpeRatio = (cagr !== null && vol > 0) ? (cagr - 0.03) / vol : null;
+
+  // 2. 소르티노 지수 (Sortino Ratio) - 하방 변동성 기준
+  const downsideVariance = steps.reduce((sum, step) => sum + Math.min(0, step.val) ** 2, 0) / steps.length;
+  const downsideVol = Math.sqrt(downsideVariance) * Math.sqrt(52);
+  const sortinoRatio = (cagr !== null && downsideVol > 0) ? (cagr - 0.03) / downsideVol : null;
+
+  // 3. 캘마 지수 (Calmar Ratio)
+  const calmarRatio = (cagr !== null && mdd !== null && mdd < 0) ? cagr / Math.abs(mdd) : null;
+
+  // 4. 월간 / 분기별 / 년간 극단 수익률 계산 (NAV 체인 기준 복리 리샘플링)
+  // 4-1. 월간 극단치
+  const monthEndIndices = new Map<string, number>();
+  for (let i = 0; i < rows.length; i++) {
+    const key = rows[i].week_date.substring(0, 7); // "YYYY-MM"
+    monthEndIndices.set(key, i);
+  }
+  const months = Array.from(monthEndIndices.keys()).sort();
+  let bestMonthVal = -Infinity;
+  let bestMonthDateStr = null;
+  let worstMonthVal = Infinity;
+  let worstMonthDateStr = null;
+
+  for (let i = 0; i < months.length; i++) {
+    const currIdx = monthEndIndices.get(months[i])!;
+    const prevIdx = i > 0 ? monthEndIndices.get(months[i - 1])! : 0;
+    const monthReturn = (nav[currIdx] / nav[prevIdx]) - 1;
+
+    if (monthReturn > bestMonthVal) {
+      bestMonthVal = monthReturn;
+      bestMonthDateStr = months[i];
+    }
+    if (monthReturn < worstMonthVal) {
+      worstMonthVal = monthReturn;
+      worstMonthDateStr = months[i];
+    }
+  }
+
+  // 4-2. 분기별 극단치
+  const quarterEndIndices = new Map<string, number>();
+  for (let i = 0; i < rows.length; i++) {
+    const key = getQuarterKey(rows[i].week_date);
+    quarterEndIndices.set(key, i);
+  }
+  const quarters = Array.from(quarterEndIndices.keys()).sort();
+  let bestQuarterVal = -Infinity;
+  let bestQuarterDateStr = null;
+  let worstQuarterVal = Infinity;
+  let worstQuarterDateStr = null;
+
+  for (let i = 0; i < quarters.length; i++) {
+    const currIdx = quarterEndIndices.get(quarters[i])!;
+    const prevIdx = i > 0 ? quarterEndIndices.get(quarters[i - 1])! : 0;
+    const quarterReturn = (nav[currIdx] / nav[prevIdx]) - 1;
+
+    if (quarterReturn > bestQuarterVal) {
+      bestQuarterVal = quarterReturn;
+      bestQuarterDateStr = quarters[i];
+    }
+    if (quarterReturn < worstQuarterVal) {
+      worstQuarterVal = quarterReturn;
+      worstQuarterDateStr = quarters[i];
+    }
+  }
+
+  // 4-3. 년간 극단치
+  const yearEndIndices = new Map<string, number>();
+  for (let i = 0; i < rows.length; i++) {
+    const key = rows[i].week_date.substring(0, 4); // "YYYY"
+    yearEndIndices.set(key, i);
+  }
+  const yearsList = Array.from(yearEndIndices.keys()).sort();
+  let bestYearVal = -Infinity;
+  let bestYearDateStr = null;
+  let worstYearVal = Infinity;
+  let worstYearDateStr = null;
+
+  for (let i = 0; i < yearsList.length; i++) {
+    const currIdx = yearEndIndices.get(yearsList[i])!;
+    const prevIdx = i > 0 ? yearEndIndices.get(yearsList[i - 1])! : 0;
+    const yearReturn = (nav[currIdx] / nav[prevIdx]) - 1;
+
+    if (yearReturn > bestYearVal) {
+      bestYearVal = yearReturn;
+      bestYearDateStr = yearsList[i];
+    }
+    if (yearReturn < worstYearVal) {
+      worstYearVal = yearReturn;
+      worstYearDateStr = yearsList[i];
+    }
+  }
+
   return {
     weeks: rows.length,
     totalReturn,
@@ -136,6 +263,21 @@ function computeMetrics(rows: ChartRow[]): PerfMetrics {
     worstWeekDate: worstDate,
     winRate: steps.filter((step) => step.val > 0).length / steps.length,
     profitAmount: toNumber(last.cumulative_profit) - toNumber(first.cumulative_profit),
+    sharpeRatio,
+    sortinoRatio,
+    calmarRatio,
+    bestMonth: bestMonthVal !== -Infinity ? bestMonthVal : null,
+    bestMonthDate: bestMonthDateStr,
+    worstMonth: worstMonthVal !== Infinity ? worstMonthVal : null,
+    worstMonthDate: worstMonthDateStr,
+    bestQuarter: bestQuarterVal !== -Infinity ? bestQuarterVal : null,
+    bestQuarterDate: bestQuarterDateStr,
+    worstQuarter: worstQuarterVal !== Infinity ? worstQuarterVal : null,
+    worstQuarterDate: worstQuarterDateStr,
+    bestYear: bestYearVal !== -Infinity ? bestYearVal : null,
+    bestYearDate: bestYearDateStr,
+    worstYear: worstYearVal !== Infinity ? worstYearVal : null,
+    worstYearDate: worstYearDateStr,
   };
 }
 
@@ -280,6 +422,9 @@ export function AssetChartsManager({
   onHeaderSummaryChange?: (summary: AssetChartsHeaderSummary) => void;
 }) {
   const [rows, setRows] = useState<WeeklyRow[]>([]);
+  const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
+  const [monthlyRows, setMonthlyRows] = useState<any[]>([]);
+  const [yearlyRows, setYearlyRows] = useState<any[]>([]);
   const [rangeKey, setRangeKey] = useState<RangeKey>("all");
   const [showAmounts, setShowAmounts] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -292,18 +437,37 @@ export function AssetChartsManager({
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch("/api/weekly", { cache: "no-store" });
-        const payload = (await response.json()) as WeeklyTableData & { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error ?? "주별 데이터를 불러오지 못했습니다.");
+        const [weeklyRes, dailyRes, monthlyRes, yearlyRes] = await Promise.all([
+          fetch("/api/weekly", { cache: "no-store" }),
+          fetch("/api/daily", { cache: "no-store" }),
+          fetch("/api/monthly", { cache: "no-store" }),
+          fetch("/api/yearly", { cache: "no-store" }),
+        ]);
+
+        if (!weeklyRes.ok || !dailyRes.ok || !monthlyRes.ok || !yearlyRes.ok) {
+          throw new Error("일부 데이터를 불러오는 데 실패했습니다.");
         }
+
+        const [weeklyData, dailyData, monthlyData, yearlyData] = await Promise.all([
+          weeklyRes.json(),
+          dailyRes.json(),
+          monthlyRes.json(),
+          yearlyRes.json(),
+        ]);
+
         if (!cancelled) {
-          setRows(payload.rows ?? []);
+          setRows(weeklyData.rows ?? []);
+          setDailyRows(dailyData.rows ?? []);
+          setMonthlyRows(monthlyData.rows ?? []);
+          setYearlyRows(yearlyData.rows ?? []);
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "주별 데이터를 불러오지 못했습니다.");
+          setError(loadError instanceof Error ? loadError.message : "데이터를 불러오지 못했습니다.");
           setRows([]);
+          setDailyRows([]);
+          setMonthlyRows([]);
+          setYearlyRows([]);
         }
       } finally {
         if (!cancelled) {
@@ -322,6 +486,118 @@ export function AssetChartsManager({
   const visibleRows = useMemo(() => filterRowsByRange(chartRows, rangeKey), [chartRows, rangeKey]);
   const visiblePeriod = useMemo(() => formatVisiblePeriod(visibleRows), [visibleRows]);
   const metrics = useMemo(() => computeMetrics(visibleRows), [visibleRows]);
+
+  // 일/주/월/년 극단값 실시간 계산 useMemo
+  const extremeReturns = useMemo(() => {
+    const startDate = visibleRows.length > 0 ? visibleRows[0].week_date : null;
+    const endDate = visibleRows.length > 0 ? visibleRows[visibleRows.length - 1].week_date : null;
+
+    const startMonth = startDate ? startDate.substring(0, 7) : "";
+    const endMonth = endDate ? endDate.substring(0, 7) : "";
+
+    const startYear = startDate ? startDate.substring(0, 4) : "";
+    const endYear = endDate ? endDate.substring(0, 4) : "";
+
+    // 1. 일간 극단치
+    const visibleDaily = dailyRows.filter((r) => {
+      const d = r.date || "";
+      return (!startDate || d >= startDate) && (!endDate || d <= endDate);
+    });
+    let bestDailyVal = -Infinity;
+    let bestDailyDate = null;
+    let worstDailyVal = Infinity;
+    let worstDailyDate = null;
+    for (const r of visibleDaily) {
+      const val = toNumber(r.daily_return_pct) / 100;
+      if (val > bestDailyVal) {
+        bestDailyVal = val;
+        bestDailyDate = r.date;
+      }
+      if (val < worstDailyVal) {
+        worstDailyVal = val;
+        worstDailyDate = r.date;
+      }
+    }
+
+    // 2. 주간 극단치
+    let bestWeeklyVal = -Infinity;
+    let bestWeeklyDate = null;
+    let worstWeeklyVal = Infinity;
+    let worstWeeklyDate = null;
+    for (let i = 1; i < visibleRows.length; i++) {
+      const val = toNumber(visibleRows[i].weekly_return_pct) / 100;
+      const date = visibleRows[i].week_date;
+      if (val > bestWeeklyVal) {
+        bestWeeklyVal = val;
+        bestWeeklyDate = date;
+      }
+      if (val < worstWeeklyVal) {
+        worstWeeklyVal = val;
+        worstWeeklyDate = date;
+      }
+    }
+
+    // 3. 월간 극단치
+    const visibleMonthly = monthlyRows.filter((r) => {
+      const m = (r.month_date || "").substring(0, 7);
+      return (!startMonth || m >= startMonth) && (!endMonth || m <= endMonth);
+    });
+    let bestMonthlyVal = -Infinity;
+    let bestMonthlyDate = null;
+    let worstMonthlyVal = Infinity;
+    let worstMonthlyDate = null;
+    for (const r of visibleMonthly) {
+      const val = toNumber(r.monthly_return_pct) / 100;
+      if (val > bestMonthlyVal) {
+        bestMonthlyVal = val;
+        bestMonthlyDate = r.month_date;
+      }
+      if (val < worstMonthlyVal) {
+        worstMonthlyVal = val;
+        worstMonthlyDate = r.month_date;
+      }
+    }
+
+    // 4. 년간 극단치
+    const visibleYearly = yearlyRows.filter((r) => {
+      const y = (r.year_date || "").substring(0, 4);
+      return y !== "2023" && (!startYear || y >= startYear) && (!endYear || y <= endYear);
+    });
+    let bestYearlyVal = -Infinity;
+    let bestYearlyDate = null;
+    let worstYearlyVal = Infinity;
+    let worstYearlyDate = null;
+    for (const r of visibleYearly) {
+      const val = toNumber(r.yearly_return_pct) / 100;
+      if (val > bestYearlyVal) {
+        bestYearlyVal = val;
+        bestYearlyDate = r.year_date;
+      }
+      if (val < worstYearlyVal) {
+        worstYearlyVal = val;
+        worstYearlyDate = r.year_date;
+      }
+    }
+
+    return {
+      bestDaily: bestDailyVal !== -Infinity ? bestDailyVal : null,
+      bestDailyDate,
+      worstDaily: worstDailyVal !== Infinity ? worstDailyVal : null,
+      worstDailyDate,
+      bestWeekly: bestWeeklyVal !== -Infinity ? bestWeeklyVal : null,
+      bestWeeklyDate,
+      worstWeekly: worstWeeklyVal !== Infinity ? worstWeeklyVal : null,
+      worstWeeklyDate,
+      bestMonthly: bestMonthlyVal !== -Infinity ? bestMonthlyVal : null,
+      bestMonthlyDate,
+      worstMonthly: worstMonthlyVal !== Infinity ? worstMonthlyVal : null,
+      worstMonthlyDate,
+      bestYearly: bestYearlyVal !== -Infinity ? bestYearlyVal : null,
+      bestYearlyDate,
+      worstYearly: worstYearlyVal !== Infinity ? worstYearlyVal : null,
+      worstYearlyDate,
+    };
+  }, [visibleRows, dailyRows, monthlyRows, yearlyRows]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(getLatestSummary(chartRows));
@@ -481,7 +757,7 @@ export function AssetChartsManager({
       </section>
 
       <section className="appSection">
-        <div className="assetChartsGrid">
+        <div className="assetChartsGrid" style={{ alignItems: "stretch" }}>
           <div className="card appCard assetChartsCard">
             <div className="assetChartsCardHeader">
               <div>
@@ -493,7 +769,7 @@ export function AssetChartsManager({
               {loading ? (
                 <AppLoadingState label="성과 지표를 계산하는 중입니다." />
               ) : (
-                <div>
+                <div style={{ padding: "0 1rem" }}>
                   {[
                     { label: "운용 기간", value: `${visiblePeriod} (${metrics.weeks}주)` },
                     { label: "누적 수익률", value: formatPct(metrics.totalReturn, true), color: signColor(metrics.totalReturn) },
@@ -504,31 +780,24 @@ export function AssetChartsManager({
                       subValue: metrics.mddPeriod ? `${metrics.mddPeriod}` : undefined,
                       color: metrics.mdd != null ? "#dc2626" : undefined 
                     },
-                    { label: "연 변동성", value: formatPct(metrics.vol) },
+                    { label: "연 변동성", value: formatPct(metrics.vol), color: "#16a34a" },
                     { 
-                      label: "최고 주간 수익률", 
-                      value: formatPct(metrics.bestWeek, true), 
-                      subValue: metrics.bestWeekDate ? `${metrics.bestWeekDate} 주` : undefined,
-                      color: signColor(metrics.bestWeek) 
+                      label: "샤프 지수 (Sharpe)", 
+                      value: metrics.sharpeRatio !== null ? metrics.sharpeRatio.toFixed(2) : "-",
+                      color: "#16a34a"
                     },
-                    { 
-                      label: "최저 주간 수익률", 
-                      value: formatPct(metrics.worstWeek, true), 
-                      subValue: metrics.worstWeekDate ? `${metrics.worstWeekDate} 주` : undefined,
-                      color: signColor(metrics.worstWeek) 
-                    },
-                    { label: "수익 주 비율", value: metrics.winRate != null ? `${(metrics.winRate * 100).toFixed(1)}%` : "-" },
+                    { label: "주간 승률 (Win Rate)", value: metrics.winRate != null ? `${(metrics.winRate * 100).toFixed(1)}%` : "-", color: "#16a34a" },
                     { label: "누적 손익", value: showAmounts ? (metrics.profitAmount != null ? formatMoney(metrics.profitAmount) : "-") : "•••", color: showAmounts ? signColor(metrics.profitAmount) : undefined },
                   ].map((item) => (
                     <div
                       key={item.label}
-                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "11px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)" }}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)", height: "48px" }}
                     >
-                      <span style={{ color: "#64748b", fontWeight: 600, fontSize: "0.9rem" }}>{item.label}</span>
+                      <span style={{ color: "#475569", fontWeight: 700, fontSize: "0.9rem" }}>{item.label}</span>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                        <span style={{ fontWeight: 700, color: item.color ?? "#1e293b", textAlign: "right" }}>{item.value}</span>
+                        <span style={{ fontWeight: 800, color: item.color ?? "#0f172a", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
                         {item.subValue && (
-                          <span style={{ fontSize: "0.75rem", color: "#94a3b8", marginTop: 2, fontWeight: 500 }}>
+                          <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2, fontWeight: 600 }}>
                             {item.subValue}
                           </span>
                         )}
@@ -543,12 +812,82 @@ export function AssetChartsManager({
           <div className="card appCard assetChartsCard">
             <div className="assetChartsCardHeader">
               <div>
-                <h2>&nbsp;</h2>
-                <p>&nbsp;</p>
+                <h2>최고 / 최저 수익률 요약</h2>
+                <p>각 주기별 최고 및 최저 성과 지표(발생 시점)</p>
               </div>
             </div>
-            <div className="assetChartsBody" style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", minHeight: 120 }}>
-              추후 추가 예정
+            <div className="assetChartsBody" style={{ display: "block" }}>
+              {loading ? (
+                <AppLoadingState label="극단 성과를 계산하는 중입니다." />
+              ) : (
+                <div style={{ padding: "0 1rem" }}>
+                  {[
+                    { 
+                      label: "최고 일간 수익률", 
+                      value: formatPct(extremeReturns.bestDaily, true), 
+                      subValue: extremeReturns.bestDailyDate ? `${extremeReturns.bestDailyDate}` : undefined,
+                      color: signColor(extremeReturns.bestDaily) 
+                    },
+                    { 
+                      label: "최저 일간 수익률", 
+                      value: formatPct(extremeReturns.worstDaily, true), 
+                      subValue: extremeReturns.worstDailyDate ? `${extremeReturns.worstDailyDate}` : undefined,
+                      color: signColor(extremeReturns.worstDaily) 
+                    },
+                    { 
+                      label: "최고 주간 수익률", 
+                      value: formatPct(extremeReturns.bestWeekly, true), 
+                      subValue: extremeReturns.bestWeeklyDate ? `${extremeReturns.bestWeeklyDate} 주` : undefined,
+                      color: signColor(extremeReturns.bestWeekly) 
+                    },
+                    { 
+                      label: "최저 주간 수익률", 
+                      value: formatPct(extremeReturns.worstWeekly, true), 
+                      subValue: extremeReturns.worstWeeklyDate ? `${extremeReturns.worstWeeklyDate} 주` : undefined,
+                      color: signColor(extremeReturns.worstWeekly) 
+                    },
+                    { 
+                      label: "최고 월간 수익률", 
+                      value: formatPct(extremeReturns.bestMonthly, true), 
+                      subValue: extremeReturns.bestMonthlyDate ? `${extremeReturns.bestMonthlyDate}` : undefined,
+                      color: signColor(extremeReturns.bestMonthly) 
+                    },
+                    { 
+                      label: "최저 월간 수익률", 
+                      value: formatPct(extremeReturns.worstMonthly, true), 
+                      subValue: extremeReturns.worstMonthlyDate ? `${extremeReturns.worstMonthlyDate}` : undefined,
+                      color: signColor(extremeReturns.worstMonthly) 
+                    },
+                    { 
+                      label: "최고 년간 수익률", 
+                      value: formatPct(extremeReturns.bestYearly, true), 
+                      subValue: extremeReturns.bestYearlyDate ? `${extremeReturns.bestYearlyDate} 년` : undefined,
+                      color: signColor(extremeReturns.bestYearly) 
+                    },
+                    { 
+                      label: "최저 년간 수익률", 
+                      value: formatPct(extremeReturns.worstYearly, true), 
+                      subValue: extremeReturns.worstYearlyDate ? `${extremeReturns.worstYearlyDate} 년` : undefined,
+                      color: signColor(extremeReturns.worstYearly) 
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)", height: "48px" }}
+                    >
+                      <span style={{ color: "#475569", fontWeight: 700, fontSize: "0.9rem" }}>{item.label}</span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
+                        <span style={{ fontWeight: 800, color: item.color ?? "#0f172a", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
+                        {item.subValue && (
+                          <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2, fontWeight: 600 }}>
+                            {item.subValue}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -559,5 +898,5 @@ export function AssetChartsManager({
 
 function signColor(value: number | null): string | undefined {
   if (value == null || !Number.isFinite(value) || value === 0) return undefined;
-  return value > 0 ? "#16a34a" : "#dc2626";
+  return value > 0 ? "#dc2626" : "#2563eb";
 }
