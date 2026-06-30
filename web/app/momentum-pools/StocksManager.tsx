@@ -1072,7 +1072,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "분류",
             headerName: "분류",
-            hide: metricMode !== "cumulative",
+            hide: metricMode === "info",
             minWidth: 120,
             flex: 1,
             cellClass: "appTextEllipsisCell",
