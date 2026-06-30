@@ -35,6 +35,7 @@ INDICES: list[dict[str, str]] = [
     {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
+    {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},
 ]
 
 # 네이버 차트 (legacy XML) — 인덱스 일봉 OHLCV. count 만큼 최신부터 거꾸로 N건 반환.
