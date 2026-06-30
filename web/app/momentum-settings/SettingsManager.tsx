@@ -40,7 +40,7 @@ type PoolEntry = {
 type PoolSettingsResponse = {
   all: PoolEntry;
   pools: PoolEntry[];
-  global?: { SCORE_TREND_WEIGHT_RATIO: number };
+  global?: { SCORE_TREND_WEIGHT_RATIO: number; updated_at?: string };
   constraints: { ma_types: string[]; ma_months_max: number; editable_keys: string[] };
   error?: string;
 };
@@ -207,7 +207,7 @@ export function SettingsManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBodyTight">
-            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>순위 점수 가중치 설정</h2>
+            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>Config</h2>
             <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#94a3b8", fontSize: "0.85rem" }}>
               보유보너스(%)를 제외한 나머지 비중 중 &apos;추세 몫&apos;을 % 로 지정합니다 (나머지는 ATH 비중에 배분됩니다).
             </p>
@@ -225,14 +225,19 @@ export function SettingsManager() {
                 />
                 <span style={{ fontSize: "0.9rem", color: "#64748b" }}>% (나머지 {100 - Number(globalRatio || 0)}%는 ATH)</span>
               </div>
-              <button
-                type="button"
-                className="btn btn-sm btn-primary"
-                disabled={!globalDirty || globalSaving}
-                onClick={handleSaveGlobal}
-              >
-                {globalSaving ? "저장 중…" : "저장"}
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-primary"
+                  disabled={!globalDirty || globalSaving}
+                  onClick={handleSaveGlobal}
+                >
+                  {globalSaving ? "저장 중…" : "저장"}
+                </button>
+                <span style={{ fontSize: "0.82rem", color: "#64748b", fontWeight: 500 }}>
+                  마지막 저장: {data.global?.updated_at ? formatKstDateTime(data.global.updated_at) : "기록 없음"}
+                </span>
+              </div>
             </div>
           </div>
         </div>

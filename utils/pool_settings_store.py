@@ -267,22 +267,46 @@ DEFAULT_TREND_WEIGHT_RATIO = 80
 
 def get_global_score_trend_weight_ratio() -> int:
     """DB 에서 전역 SCORE_TREND_WEIGHT_RATIO 값을 읽어온다. 없으면 config.py 의 값(기본 80)을 쓴다."""
+    return get_global_settings()["SCORE_TREND_WEIGHT_RATIO"]
+
+
+def get_global_settings() -> dict[str, Any]:
+    """DB 에서 전역 가중치와 updated_at 을 포함한 설정을 가져온다. 없으면 자동 생성한다."""
+    res = {
+        "SCORE_TREND_WEIGHT_RATIO": DEFAULT_TREND_WEIGHT_RATIO,
+        "updated_at": None
+    }
     try:
         from utils.db_manager import get_db_connection
         db = get_db_connection()
         if db is not None:
             doc = db[COLLECTION].find_one({"_id": GLOBAL_POOL_ID})
-            if doc and "SCORE_TREND_WEIGHT_RATIO" in doc:
-                return int(doc["SCORE_TREND_WEIGHT_RATIO"])
+            if doc:
+                if "SCORE_TREND_WEIGHT_RATIO" in doc:
+                    res["SCORE_TREND_WEIGHT_RATIO"] = int(doc["SCORE_TREND_WEIGHT_RATIO"])
+                if "updated_at" in doc and doc["updated_at"] is not None:
+                    res["updated_at"] = doc["updated_at"]
+            else:
+                # 문서가 전혀 없으면 자동 시드 생성
+                ratio = DEFAULT_TREND_WEIGHT_RATIO
+                try:
+                    import config
+                    ratio = int(getattr(config, "SCORE_TREND_WEIGHT_RATIO", DEFAULT_TREND_WEIGHT_RATIO))
+                except Exception:
+                    pass
+                from datetime import datetime
+                now = datetime.utcnow()
+                db[COLLECTION].update_one(
+                    {"_id": GLOBAL_POOL_ID},
+                    {"$set": {"SCORE_TREND_WEIGHT_RATIO": ratio, "updated_at": now, "save_method": "시스템"}},
+                    upsert=True,
+                )
+                res["SCORE_TREND_WEIGHT_RATIO"] = ratio
+                res["updated_at"] = now
     except Exception as exc:
-        logger.warning("전역 SCORE_TREND_WEIGHT_RATIO 조회 실패: %s", exc)
+        logger.warning("전역 설정 상세 조회 및 시드 실패: %s", exc)
 
-    # fallback to config.py
-    try:
-        import config
-        return int(getattr(config, "SCORE_TREND_WEIGHT_RATIO", DEFAULT_TREND_WEIGHT_RATIO))
-    except Exception:
-        return DEFAULT_TREND_WEIGHT_RATIO
+    return res
 
 
 def save_global_score_trend_weight_ratio(ratio: int, save_method: str = "사용자") -> int:

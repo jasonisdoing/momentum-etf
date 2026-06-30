@@ -19,6 +19,7 @@ from utils.pool_settings_store import (
     save_pool_settings,
     get_global_score_trend_weight_ratio,
     save_global_score_trend_weight_ratio,
+    get_global_settings,
 )
 from utils.rankings import ALLOWED_MA_TYPES, get_rank_months_max
 from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
@@ -67,9 +68,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "save_method": all_settings.get("save_method"),
         },
         "pools": pools,
-        "global": {
-            "SCORE_TREND_WEIGHT_RATIO": get_global_score_trend_weight_ratio()
-        },
+        "global": get_global_settings(),
         "constraints": {
             "ma_types": ALLOWED_MA_TYPES,
             "ma_months_max": get_rank_months_max(),
