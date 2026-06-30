@@ -845,7 +845,13 @@ export function MarketTrendChart({
               </div>
               <ul style={{ margin: 0, paddingLeft: 20 }}>
                 {forecastTransitions.map((item, idx) => (
-                  <li key={idx} style={{ marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4 }}>
+                  <li
+                    key={idx}
+                    style={{
+                      marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4,
+                      color: REGIME_COLOR[item.next_regime],
+                    }}
+                  >
                     {data?.name} 지수가{" "}
                     <span style={{ fontWeight: 800, textDecoration: "underline" }}>
                       {formatNumber(item.target_price)}
