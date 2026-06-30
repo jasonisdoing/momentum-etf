@@ -1054,6 +1054,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "분류",
             headerName: "분류",
+            hide: metricMode !== "cumulative",
             minWidth: 120,
             flex: 1,
             cellClass: "appTextEllipsisCell",
@@ -1067,6 +1068,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "현재가",
         headerName: "현재가",
+        hide: metricMode !== "cumulative",
         minWidth: 88,
         width: 88,
         type: "rightAligned",
@@ -1080,6 +1082,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "일간(%)",
         headerName: "일간(%)",
+        hide: metricMode !== "cumulative",
         minWidth: 96,
         width: 96,
         type: "rightAligned",
@@ -1253,38 +1256,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }) as ColDef<RankGridRow>,
     );
 
-    const monthlyLeadingColumns: ColDef<RankGridRow>[] = [
-      {
-        field: "점수",
-        headerName: "점수",
-        minWidth: 72,
-        width: 72,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
-      },
-      {
-        field: maRule?.score_column ?? "추세(수동)",
-        headerName: "추세",
-        minWidth: 72,
-        width: 72,
-        type: "rightAligned",
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          const currency = String(params.data?.currency || selectedTickerTypeItem?.currency || "").toUpperCase();
-          const decimals = currency === "USD" || currency === "AUD" ? 2 : 1;
-          return formatNumber(params.value ?? null, decimals);
-        },
-      },
-      {
-        field: "RSI",
-        headerName: "RSI",
-        minWidth: 86,
-        width: 86,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) =>
-          renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
-      },
-    ];
-
     const isUsTickerType = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us";
     const infoColumns: ColDef<RankGridRow>[] = [
       {
@@ -1353,8 +1324,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ...(metricMode === "cumulative"
         ? cumulativeColumns
         : metricMode === "monthly"
-          ? [...monthlyLeadingColumns, ...monthlyColumns]
-          : [...monthlyLeadingColumns, ...infoColumns]),
+          ? monthlyColumns
+          : infoColumns),
     ];
   }, [
     addingRow,
