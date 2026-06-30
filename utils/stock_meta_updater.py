@@ -431,6 +431,224 @@ def _refresh_us_stock_meta_cache(
     )
 
 
+def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
+    """BetaShares 공식 홈페이지에서 portfolio holdings CSV를 긁어서 구성종목 딕셔너리를 반환합니다."""
+    import urllib.request
+    import csv
+    from datetime import datetime
+
+    logger = get_app_logger()
+    ticker_clean = str(ticker).strip().upper()
+    url = f"https://www.betashares.com.au/files/csv/{ticker_clean}_Portfolio_Holdings.csv"
+
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+        )
+        with urllib.request.urlopen(req, timeout=12) as response:
+            content = response.read().decode('utf-8', errors='ignore')
+
+        lines = content.splitlines()
+
+        # 날짜(Date) 파싱 시도 (보통 4번째 라인: "Date,2026-06-29")
+        reference_date = None
+        for line in lines[:8]:
+            if line.startswith("Date,"):
+                parts = line.split(",")
+                if len(parts) > 1 and parts[1].strip():
+                    reference_date = parts[1].strip()
+                    break
+        if not reference_date:
+            reference_date = datetime.now().strftime("%Y-%m-%d")
+
+        # "Ticker," 로 시작하는 헤더 찾기
+        header_idx = -1
+        for idx, line in enumerate(lines[:12]):
+            if line.startswith("Ticker,"):
+                header_idx = idx
+                break
+
+        if header_idx == -1:
+            logger.warning(f"[BetaShares] {ticker_clean} CSV 헤더 시작부(Ticker,)를 찾지 못했습니다.")
+            return None
+
+        # 데이터 파싱
+        reader = csv.reader(lines[header_idx:])
+        headers = next(reader)
+
+        try:
+            ticker_col = headers.index("Ticker")
+            name_col = headers.index("Name")
+            weight_col = headers.index("Weight (%)")
+        except ValueError as e:
+            logger.warning(f"[BetaShares] {ticker_clean} CSV 필수 열 매핑 실패: {e}")
+            return None
+
+        items = []
+        for row in reader:
+            if not row or len(row) <= max(ticker_col, name_col, weight_col):
+                continue
+            t_val = str(row[ticker_col]).strip()
+            if not t_val or t_val.lower() == "ticker":
+                continue
+            # Ticker 정제: "AVGO UW" -> "AVGO" (공백 뒤 거래소 구분자 제거)
+            t_clean = t_val.split()[0].upper()
+            name_val = str(row[name_col]).strip()
+
+            try:
+                # weight는 백분율(%) 그대로 적재 (예: 4.16)
+                weight_val = float(row[weight_col])
+            except ValueError:
+                continue
+
+            items.append({
+                "ticker": t_clean,
+                "name": name_val,
+                "weight": weight_val,
+            })
+
+        if not items:
+            return None
+
+        # 가중치 순으로 정렬
+        items.sort(key=lambda x: x.get("weight") or 0.0, reverse=True)
+
+        return {
+            "source": "betashares_csv",
+            "fetched_at": datetime.now().isoformat(),
+            "as_of_date": reference_date,
+            "holdings_count": len(items),
+            "holdings": items,
+        }
+    except Exception as exc:
+        logger.warning(f"[BetaShares] {ticker_clean} CSV 수집 실패: {exc}")
+        return None
+
+
+def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[str, Any] | None:
+    """yfinance를 활용해 Top 10 구성종목 정보를 가져옵니다."""
+    import yfinance as yf
+    from datetime import datetime
+
+    logger = get_app_logger()
+    symbol = f"{ticker.upper()}.AX" if is_australian else ticker.upper()
+    try:
+        t_data = yf.Ticker(symbol)
+        funds_data = getattr(t_data, "funds_data", None)
+        if funds_data is None:
+            return None
+        top_h = getattr(funds_data, "top_holdings", None)
+        if top_h is None or top_h.empty:
+            return None
+
+        items = []
+        for idx, row in top_h.iterrows():
+            t_code = str(idx).strip().upper()
+            t_clean = t_code.split(".")[0].split()[0]
+            name_val = str(row.get("Name") or "").strip() or t_clean
+            try:
+                # yfinance의 Holding Percent 값(예: 0.0493)을 백분율(4.93)로 변환
+                weight_val = float(row.get("Holding Percent") or 0.0) * 100.0
+            except ValueError:
+                weight_val = 0.0
+
+            items.append({
+                "ticker": t_clean,
+                "name": name_val,
+                "weight": weight_val,
+            })
+
+        if not items:
+            return None
+
+        items.sort(key=lambda x: x.get("weight") or 0.0, reverse=True)
+
+        return {
+            "source": "yfinance_holdings",
+            "fetched_at": datetime.now().isoformat(),
+            "as_of_date": datetime.now().strftime("%Y-%m-%d"),
+            "holdings_count": len(items),
+            "holdings": items,
+        }
+    except Exception as exc:
+        logger.warning(f"[yfinance] {symbol} 수집 실패: {exc}")
+        return None
+
+
+def _refresh_overseas_etf_meta_cache(
+    ticker_type: str,
+    ticker: str,
+    name: str,
+    country_code: str,
+) -> None:
+    """호주/미국 등 해외 ETF 메타와 holdings 캐시를 수집 및 저장한다."""
+    from datetime import datetime
+    logger = get_app_logger()
+    ticker_type_norm = str(ticker_type or "").strip().lower()
+    ticker_norm = str(ticker or "").strip().upper()
+    name_norm = str(name or "").strip() or ticker_norm
+    country_norm = str(country_code or "").strip().lower()
+
+    holdings_info = None
+
+    # 호주 ETF인 경우 BetaShares CSV 우선 시도 후 yfinance로 fallback
+    if country_norm == "au":
+        holdings_info = fetch_betashares_holdings(ticker_norm)
+        if not holdings_info:
+            holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=True)
+    else:
+        holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
+
+    if not holdings_info:
+        logger.warning(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF holdings 수집 실패 (건너뜀)")
+        return
+
+    holdings_cache = {
+        "source": holdings_info["source"],
+        "updated_at": holdings_info["fetched_at"],
+        "reference_date": holdings_info["as_of_date"],
+        "holdings_count": holdings_info["holdings_count"],
+        "items": holdings_info["holdings"],
+    }
+
+    meta_cache = {
+        "source": "overseas_etf_meta",
+        "updated_at": datetime.now().isoformat(),
+        "listed_date": None,
+        "dividend_yield_ttm": None,
+        "expense_ratio": None,
+        "total_net_assets": None,
+        "issue_name": name_norm,
+    }
+
+    # yfinance를 통해 추가적인 ETF 메타 정보 보완
+    try:
+        import yfinance as yf
+        symbol = f"{ticker_norm}.AX" if country_norm == "au" else ticker_norm
+        t_data = yf.Ticker(symbol)
+        t_info = getattr(t_data, "info", {})
+        if t_info:
+            meta_cache["dividend_yield_ttm"] = t_info.get("trailingAnnualDividendYield") or t_info.get("dividendYield")
+            meta_cache["expense_ratio"] = t_info.get("feesExpensesTotal") or t_info.get("expenseRatio")
+            meta_cache["total_net_assets"] = t_info.get("totalAssets") or t_info.get("marketCap")
+            if t_info.get("firstTradeDateEpochUtc") or t_info.get("startDate"):
+                raw_start = t_info.get("firstTradeDateEpochUtc") or t_info.get("startDate")
+                meta_cache["listed_date"] = _format_iso_date(raw_start)
+    except Exception as e:
+        logger.debug(f"yfinance 추가 메타데이터 수집 건너뜀: {e}")
+
+    refresh_stock_cache(
+        ticker_type_norm,
+        ticker_norm,
+        country_code=country_norm,
+        name=name_norm,
+        meta_cache=meta_cache,
+        holdings_cache=holdings_cache,
+    )
+    logger.info(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF 구성종목 캐시 갱신 완료 ({holdings_info['holdings_count']}개 종목)")
+
+
 def update_ticker_type_metadata(
     ticker_type: str, progress_callback: Callable[[int, int, str], None] | None = None
 ):
@@ -590,7 +808,14 @@ def update_ticker_type_metadata(
                     )
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
+            elif country_code == "au":
+                # 호주 ETF
+                try:
+                    _refresh_overseas_etf_meta_cache(type_norm, str(ticker), str(name), country_code)
+                except Exception as e:
+                    logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
             elif country_code == "us":
+                # 미국 개별주
                 naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
                 if naver_entry:
                     try:
@@ -803,6 +1028,11 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
             _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
         except Exception as meta_cache_error:
             logger.error(f"[{type_norm.upper()}/{ticker_norm}] ETF 메타 캐시 갱신 실패: {meta_cache_error}")
+    elif country_code == "au":
+        try:
+            _refresh_overseas_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), country_code)
+        except Exception as meta_cache_error:
+            logger.error(f"[{type_norm.upper()}/{ticker_norm}] 호주 ETF 상세 캐시 갱신 실패: {meta_cache_error}")
     elif country_code == "us":
         naver_entry = naver_us_stock_map.get(ticker_norm, {})
         if naver_entry:
@@ -927,7 +1157,7 @@ def update_single_stock_metadata(
         # 해외 주식 플래그 설정
         if country_code == "au":
             stock["is_etf"] = True
-            stock["has_holdings"] = False
+            stock["has_holdings"] = True
         else:
             stock["is_etf"] = False
             stock["has_holdings"] = False

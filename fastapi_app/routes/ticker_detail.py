@@ -784,10 +784,11 @@ def build_ticker_detail_payload(
     if not cache_start_date:
         raise RuntimeError("CACHE_START_DATE 설정이 필요합니다.")
 
+    db_ticker = ticker.split(":")[-1] if ":" in ticker else ticker
     fetch_error: str | None = None
     try:
         df = fetch_ohlcv(
-            ticker,
+            db_ticker,
             country=country_code,
             months_back=None,
             date_range=[cache_start_date, None],
@@ -807,12 +808,12 @@ def build_ticker_detail_payload(
             "holdings_as_of_date": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
-            "my_average_buy_price": _calculate_consolidated_average_buy_price(ticker),
+            "my_average_buy_price": _calculate_consolidated_average_buy_price(db_ticker),
             "error": fetch_error or "가격 데이터를 가져오지 못했습니다.",
         }
 
     df = df.sort_index()
-    df = _apply_realtime_snapshot_to_dataframe(df, ticker=ticker, country_code=country_code)
+    df = _apply_realtime_snapshot_to_dataframe(df, ticker=db_ticker, country_code=country_code)
 
     close_col = "Close" if "Close" in df.columns else "close"
     open_col = "Open" if "Open" in df.columns else "open"
@@ -856,17 +857,25 @@ def build_ticker_detail_payload(
     us_pool_tickers: set[str] = set()
     kor_pool_tickers: set[str] = set()
     domestic_etf_tickers: set[str] = set()
-    if str(country_code or "").strip().lower() == "kor":
-        cache_document = get_stock_cache_meta(ticker_type, ticker)
+    country_clean = str(country_code or "").strip().lower()
+    if country_clean in ("kor", "au", "us"):
+        db_ticker = ticker.split(":")[-1] if ":" in ticker else ticker
+        cache_document = get_stock_cache_meta(ticker_type, db_ticker)
         holdings_cache = dict(cache_document.get("holdings_cache") or {}) if isinstance(cache_document, dict) else {}
         holdings = list(holdings_cache.get("items") or [])
-        etf_info = _build_korean_etf_info_payload(
-            ticker=ticker,
-            ticker_type=ticker_type,
-            cache_document=cache_document if isinstance(cache_document, dict) else None,
-            latest_row=rows[-1] if rows else None,
-            holdings=holdings,
-        )
+        if country_clean == "kor":
+            etf_info = _build_korean_etf_info_payload(
+                ticker=db_ticker,
+                ticker_type=ticker_type,
+                cache_document=cache_document if isinstance(cache_document, dict) else None,
+                latest_row=rows[-1] if rows else None,
+                holdings=holdings,
+            )
+        else:
+            etf_info = {
+                "source": holdings_cache.get("source"),
+                "reference_date": holdings_cache.get("reference_date"),
+            }
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
         if not holdings:
             holdings_error = (
@@ -883,7 +892,7 @@ def build_ticker_detail_payload(
             # /holdings 엔드포인트와 동일한 캐시 결과를 공유한다.
             # 공유 스냅샷이 주어지면(비교 화면) 캐시를 우회해 동일 시세로 재계산한다.
             bundle = compute_portfolio_change_bundle(
-                ticker,
+                db_ticker,
                 ticker_type,
                 use_cache=use_bundle_cache,
                 component_price_snapshot=component_price_snapshot,
@@ -936,7 +945,7 @@ def build_ticker_detail_payload(
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
-        "my_average_buy_price": _calculate_consolidated_average_buy_price(ticker),
+        "my_average_buy_price": _calculate_consolidated_average_buy_price(db_ticker),
     }
 
 

@@ -165,33 +165,33 @@ const gridTheme = createAppGridTheme();
 // --- 유틸 ---
 
 function formatNumber(value: number | null, digits = 0): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   return new Intl.NumberFormat("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
 }
 
 function formatPercent(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   return `${value.toFixed(2)}%`;
 }
 
 function formatSignedPercent(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
 function formatUnsignedPercent(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   return `${value.toFixed(2)}%`;
 }
 
 function formatRatioPercent(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   return `${value.toFixed(2)}%`;
 }
 
 function formatEok(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return "-";
+    return "N/A";
   }
   const jo = Math.floor(value / 10_000);
   const eok = Math.round(value % 10_000);
@@ -206,13 +206,13 @@ function formatEok(value: number | null): string {
 
 function formatEokFromKrw(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return "-";
+    return "N/A";
   }
   return formatEok(value / 100_000_000);
 }
 
 function formatSignedPriceDelta(value: number | null, countryCode: string): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
+  if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   const absValue = Math.abs(value);
   if (absValue === 0) {
     return "0";
@@ -338,7 +338,7 @@ function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
 
 function formatTickerPrice(value: number | null, countryCode: string): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
-    return "-";
+    return "N/A";
   }
 
   const normalized = String(countryCode || "").trim().toLowerCase();
@@ -1025,8 +1025,11 @@ export function TickerDetailManager({
     return formatNumber(volume, 0);
   }, [etfInfo?.volume, lastPriceRow]);
 
-  const showKoreanEtfInfoSection = Boolean(
-    selectedTicker?.country_code === "kor" && selectedTicker?.is_etf && selectedTicker?.has_holdings,
+  const showEtfInfoSection = Boolean(
+    selectedTicker?.is_etf && selectedTicker?.has_holdings,
+  );
+  const showHoldingsSection = Boolean(
+    selectedTicker?.is_etf && selectedTicker?.has_holdings,
   );
   const navDelta = etfInfo?.nav_change ?? null;
   const navChangePct = etfInfo?.nav_change_pct ?? null;
@@ -1250,123 +1253,123 @@ export function TickerDetailManager({
                     <span className="spinner-border" />
                   </div>
                 ) : rows.length > 0 ? (
-                  <div className={showKoreanEtfInfoSection ? "tickerDetailLayoutGrid" : "tickerDetailClassicLayout"}>
-                    {showKoreanEtfInfoSection ? (
-                      <>
-                        <div className="tickerDetailInfoPanel">
-                          <div className="tickerDetailTableHeader">
-                            <span className="tickerDetailTableTitle">ETF정보</span>
+                  <div className={(showEtfInfoSection || showHoldingsSection) ? "tickerDetailLayoutGrid" : "tickerDetailClassicLayout"}>
+                    {showEtfInfoSection && (
+                      <div className="tickerDetailInfoPanel">
+                        <div className="tickerDetailTableHeader">
+                          <span className="tickerDetailTableTitle">ETF정보</span>
+                        </div>
+                        <div className="tickerDetailInfoCard">
+                          <div className="tickerDetailInfoSummary">
+                            <div className="tickerDetailInfoSummaryRow">
+                              <span className="tickerDetailInfoLabel">현재가</span>
+                              <div className="tickerDetailInfoMain">
+                                <strong>{formatTickerPrice(latestClose, selectedCountryCode)}</strong>
+                                <span className={getSignedClass(latestChangeAmount ?? latestChangePct)}>
+                                  {formatSignedPriceDelta(latestChangeAmount, selectedCountryCode)}
+                                </span>
+                                <span className={getSignedClass(latestChangePct)}>{formatPercent(latestChangePct)}</span>
+                              </div>
+                            </div>
+                            <div className="tickerDetailInfoSummaryRow">
+                              <span className="tickerDetailInfoLabel">iNAV</span>
+                              <div className="tickerDetailInfoMain">
+                                <strong>{formatTickerPrice(etfInfo?.nav ?? null, "kor")}</strong>
+                                <span className={getSignedClass(navDelta)}>{formatSignedPriceDelta(navDelta, "kor")}</span>
+                                <span className={getSignedClass(navChangePct)}>{formatPercent(navChangePct)}</span>
+                              </div>
+                            </div>
+                            <div className="tickerDetailInfoSummaryGrid">
+                              <div className="tickerDetailInfoMetric">
+                                <span className="tickerDetailInfoLabel">괴리율</span>
+                                <strong>{formatPercent(etfInfo?.deviation ?? null)}</strong>
+                              </div>
+                              <div className="tickerDetailInfoMetric">
+                                <span className="tickerDetailInfoLabel">거래량</span>
+                                <strong>{latestVolumeText}</strong>
+                              </div>
+                              <div className="tickerDetailInfoMetric">
+                                <span className="tickerDetailInfoLabel">운용보수</span>
+                                <strong>{formatRatioPercent(etfInfo?.expense_ratio ?? null)}</strong>
+                              </div>
+                              <div className="tickerDetailInfoMetric">
+                                <span className="tickerDetailInfoLabel">시가총액</span>
+                                <strong>{formatEokFromKrw(etfInfo?.market_cap_krw ?? null)}</strong>
+                              </div>
+                              <div className="tickerDetailInfoMetric">
+                                <span className="tickerDetailInfoLabel">배당수익률</span>
+                                <strong>{formatRatioPercent(etfInfo?.dividend_yield_ttm ?? null)}</strong>
+                              </div>
+                              <div className="tickerDetailInfoMetric">
+                                <span className="tickerDetailInfoLabel">배당주기</span>
+                                <strong>-</strong>
+                              </div>
+                            </div>
                           </div>
-                          <div className="tickerDetailInfoCard">
-                            <div className="tickerDetailInfoSummary">
-                              <div className="tickerDetailInfoSummaryRow">
-                                <span className="tickerDetailInfoLabel">현재가</span>
-                                <div className="tickerDetailInfoMain">
-                                  <strong>{formatTickerPrice(latestClose, selectedCountryCode)}</strong>
-                                  <span className={getSignedClass(latestChangeAmount ?? latestChangePct)}>
-                                    {formatSignedPriceDelta(latestChangeAmount, selectedCountryCode)}
-                                  </span>
-                                  <span className={getSignedClass(latestChangePct)}>{formatPercent(latestChangePct)}</span>
+                          <div className="tickerDetailInfoTracker">
+                            <div className="tickerDetailInfoTrackerRow">
+                              <div>
+                                <div className="tickerDetailInfoTrackerLabel">
+                                  포트폴리오 변동
+                                  {portfolioChangeBaseDate
+                                    ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)`
+                                    : ""}
                                 </div>
-                              </div>
-                              <div className="tickerDetailInfoSummaryRow">
-                                <span className="tickerDetailInfoLabel">iNAV</span>
-                                <div className="tickerDetailInfoMain">
-                                  <strong>{formatTickerPrice(etfInfo?.nav ?? null, "kor")}</strong>
-                                  <span className={getSignedClass(navDelta)}>{formatSignedPriceDelta(navDelta, "kor")}</span>
-                                  <span className={getSignedClass(navChangePct)}>{formatPercent(navChangePct)}</span>
-                                </div>
-                              </div>
-                              <div className="tickerDetailInfoSummaryGrid">
-                                <div className="tickerDetailInfoMetric">
-                                  <span className="tickerDetailInfoLabel">괴리율</span>
-                                  <strong>{formatPercent(etfInfo?.deviation ?? null)}</strong>
-                                </div>
-                                <div className="tickerDetailInfoMetric">
-                                  <span className="tickerDetailInfoLabel">거래량</span>
-                                  <strong>{latestVolumeText}</strong>
-                                </div>
-                                <div className="tickerDetailInfoMetric">
-                                  <span className="tickerDetailInfoLabel">운용보수</span>
-                                  <strong>{formatRatioPercent(etfInfo?.expense_ratio ?? null)}</strong>
-                                </div>
-                                <div className="tickerDetailInfoMetric">
-                                  <span className="tickerDetailInfoLabel">시가총액</span>
-                                  <strong>{formatEokFromKrw(etfInfo?.market_cap_krw ?? null)}</strong>
-                                </div>
-                                <div className="tickerDetailInfoMetric">
-                                  <span className="tickerDetailInfoLabel">배당수익률</span>
-                                  <strong>{formatRatioPercent(etfInfo?.dividend_yield_ttm ?? null)}</strong>
-                                </div>
-                                <div className="tickerDetailInfoMetric">
-                                  <span className="tickerDetailInfoLabel">배당주기</span>
-                                  <strong>-</strong>
+                                <div className="tickerDetailInfoTrackerHint">
+                                  <PortfolioChangeBreakdown
+                                    items={portfolioChangeBreakdown}
+                                    fxRates={displayFxRates}
+                                    variant="detail"
+                                    emptyText="구성종목 가중 평균"
+                                  />
                                 </div>
                               </div>
                             </div>
-                            <div className="tickerDetailInfoTracker">
-                              <div className="tickerDetailInfoTrackerRow">
-                                <div>
-                                  <div className="tickerDetailInfoTrackerLabel">
-                                    포트폴리오 변동
-                                    {portfolioChangeBaseDate
-                                      ? `(${formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)`
-                                      : ""}
-                                  </div>
-                                  <div className="tickerDetailInfoTrackerHint">
-                                    <PortfolioChangeBreakdown
-                                      items={portfolioChangeBreakdown}
-                                      fxRates={displayFxRates}
-                                      variant="detail"
-                                      emptyText="구성종목 가중 평균"
-                                    />
-                                  </div>
-                                </div>
+                            <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
+                              <div>
+                                <div className="tickerDetailInfoTrackerLabel">구성종목 방향</div>
+                                <div className="tickerDetailInfoTrackerHint">상승/보합/하락</div>
                               </div>
-                              <div className="tickerDetailInfoTrackerRow tickerDetailInfoTrackerRowLast">
-                                <div>
-                                  <div className="tickerDetailInfoTrackerLabel">구성종목 방향</div>
-                                  <div className="tickerDetailInfoTrackerHint">상승/보합/하락</div>
-                                </div>
-                                <div className="tickerDetailInfoTrackerCounts">
-                                  <span className="metricPositive">▲ {holdingsDirectionCounts.rising}종목</span>
-                                  <span>■ {holdingsDirectionCounts.neutral}종목</span>
-                                  <span className="metricNegative">▼ {holdingsDirectionCounts.falling}종목</span>
-                                </div>
+                              <div className="tickerDetailInfoTrackerCounts">
+                                <span className="metricPositive">▲ {holdingsDirectionCounts.rising}종목</span>
+                                <span>■ {holdingsDirectionCounts.neutral}종목</span>
+                                <span className="metricNegative">▼ {holdingsDirectionCounts.falling}종목</span>
                               </div>
                             </div>
                           </div>
                         </div>
-                        <div className="tickerDetailHoldingsPanel">
-                          <div className="tickerDetailTableHeader">
-                            <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
-                            <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
-                          </div>
-                          {holdingsRows.length > 0 ? (
-                            <div className="appGridFillWrap">
-                              <AppAgGrid
-                                className="tickerDetailHoldingsGrid"
-                                rowData={holdingsRows}
-                                columnDefs={holdingColumns}
-                                loading={loading}
-                                theme={gridTheme}
-                                gridOptions={{
-                                  suppressMovableColumns: true,
-                                  getRowId: (params) => String(params.data.id),
-                                  onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
-                                    holdingsGridApiRef.current = event.api;
-                                  },
-                                }}
-                              />
-                            </div>
-                          ) : (
-                            <div className="tickerDetailHoldingsEmpty">
-                              {holdingsError ?? "구성종목 데이터를 확인할 수 없습니다."}
-                            </div>
-                          )}
+                      </div>
+                    )}
+                    {showHoldingsSection && (
+                      <div className="tickerDetailHoldingsPanel">
+                        <div className="tickerDetailTableHeader">
+                          <span className="tickerDetailTableTitle">{holdingsPanelTitle}</span>
+                          <span className="tickerDetailTableMeta">{holdingsPanelMeta}</span>
                         </div>
-                      </>
-                    ) : null}
+                        {holdingsRows.length > 0 ? (
+                          <div className="appGridFillWrap">
+                            <AppAgGrid
+                              className="tickerDetailHoldingsGrid"
+                              rowData={holdingsRows}
+                              columnDefs={holdingColumns}
+                              loading={loading}
+                              theme={gridTheme}
+                              gridOptions={{
+                                suppressMovableColumns: true,
+                                getRowId: (params) => String(params.data.id),
+                                onGridReady: (event: GridReadyEvent<TickerHoldingRow>) => {
+                                  holdingsGridApiRef.current = event.api;
+                                },
+                              }}
+                            />
+                          </div>
+                        ) : (
+                          <div className="tickerDetailHoldingsEmpty">
+                            {holdingsError ?? "구성종목 데이터를 확인할 수 없습니다."}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="tickerDetailChartWrap">
                       <div className="tickerDetailChartToolbar">
                         <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="차트 봉 기준">
@@ -1408,7 +1411,7 @@ export function TickerDetailManager({
                         </div>
                       ))}
                     </div>
-                    {showKoreanEtfInfoSection ? (
+                    {true ? (
                       <div className="tickerDetailTablePanel">
                         <div className="tickerDetailTableHeader tickerDetailTableHeaderBetween">
                           <div className="appSegmentedToggle appSegmentedToggleCompact" role="tablist" aria-label="가격 이력 탭">
