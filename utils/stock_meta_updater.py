@@ -771,7 +771,6 @@ def update_ticker_type_metadata(
                 "listing_date",
                 "market",
                 "is_etf",
-                "has_holdings",
                 "1_week_avg_volume",
                 "volume",
                 "1_week_earn_rate",
@@ -1047,7 +1046,6 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "listing_date",
         "market",
         "is_etf",
-        "has_holdings",
         "1_week_avg_volume",
         "volume",
         "1_week_earn_rate",
@@ -1125,10 +1123,8 @@ def update_single_stock_metadata(
         if new_name:
             stock["name"] = new_name
             stock["is_etf"] = True
-            stock["has_holdings"] = True
         elif not stock.get("name") or stock.get("name") == ticker:
             stock["is_etf"] = False
-            stock["has_holdings"] = False
             # 일반주/ETN은 네이버 marketValue 통합 맵 → pykrx 폴백 순서로 조회
             try:
                 fetched_name = fetch_pykrx_name(ticker)
@@ -1140,7 +1136,6 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
         else:
             stock["is_etf"] = False
-            stock["has_holdings"] = False
 
         # 3. 마켓(KOSPI/KOSDAQ) 조회 — 네이버 marketValue 통합 맵 사용
         if not stock.get("market"):
@@ -1157,10 +1152,8 @@ def update_single_stock_metadata(
         # 해외 주식 플래그 설정
         if country_code == "au":
             stock["is_etf"] = True
-            stock["has_holdings"] = True
         else:
             stock["is_etf"] = False
-            stock["has_holdings"] = False
 
         if country_code == "us" and naver_us_stock_map:
             naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})

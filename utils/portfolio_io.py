@@ -153,10 +153,9 @@ def load_real_holdings_table(
         name_map = {}
         type_map = {}
         is_etf_map = {}
-        has_holdings_map = {}
         cursor = db.stock_meta.find(
             {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
-            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1, "has_holdings": 1}
+            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1}
         )
         for doc in cursor:
             t = doc["ticker"]
@@ -168,21 +167,6 @@ def load_real_holdings_table(
                 type_map[t] = doc.get("ticker_type")
             if t not in is_etf_map:
                 is_etf_map[t] = doc.get("is_etf", False)
-            if t not in has_holdings_map:
-                has_holdings_map[t] = doc.get("has_holdings", False)
-
-        cache_cursor = db.stock_cache_meta.find(
-            {"ticker": {"$in": all_tickers}},
-            {"ticker": 1, "holdings_cache.items": 1},
-        )
-        for doc in cache_cursor:
-            ticker = str(doc.get("ticker") or "").strip().upper()
-            if not ticker:
-                continue
-            items = (((doc.get("holdings_cache") or {}).get("items")) or [])
-            has_items = bool(items)
-            if has_items:
-                has_holdings_map[ticker] = True
 
         # 데이터 업데이트 (종목풀 정보 우선 적용)
         df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
@@ -192,7 +176,6 @@ def load_real_holdings_table(
         )
         df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
         df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
-        df_holdings["has_holdings"] = df_holdings["ticker"].map(lambda t: has_holdings_map.get(t, False))
 
         # 계좌의 country_code 찾아와서 부여
         try:
@@ -449,7 +432,6 @@ def load_real_holdings_table(
             "평가금액(KRW)": intl_val_krw,
             "일간(%)": intl_daily_pct,
             "is_etf": False,
-            "has_holdings": False,
             "country_code": "au",
             "ticker_type": "aus",
         }

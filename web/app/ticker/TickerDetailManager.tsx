@@ -39,7 +39,6 @@ type TickerItem = {
   ticker_type: string;
   country_code: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 type PriceRow = {
@@ -127,7 +126,6 @@ type TickerResolveItem = {
   ticker_type: string;
   country_code: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 type CrosshairInfo = {
@@ -587,7 +585,6 @@ export function TickerDetailManager({
           ticker_type: resolved.ticker_type,
           country_code: resolved.country_code,
           is_etf: resolved.is_etf,
-          has_holdings: resolved.has_holdings,
         };
         setSelectedTicker(resolvedItem);
         await loadTickerData(resolvedItem);
@@ -1025,12 +1022,8 @@ export function TickerDetailManager({
     return formatNumber(volume, 0);
   }, [etfInfo?.volume, lastPriceRow]);
 
-  const showEtfInfoSection = Boolean(
-    selectedTicker?.is_etf && selectedTicker?.has_holdings,
-  );
-  const showHoldingsSection = Boolean(
-    selectedTicker?.is_etf && selectedTicker?.has_holdings,
-  );
+  const showEtfInfoSection = Boolean(selectedTicker?.is_etf);
+  const showHoldingsSection = Boolean(selectedTicker?.is_etf);
   const navDelta = etfInfo?.nav_change ?? null;
   const navChangePct = etfInfo?.nav_change_pct ?? null;
 

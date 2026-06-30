@@ -20,7 +20,6 @@ type TickerItem = {
   ticker_type: string;
   country_code: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 type TickerTypeItem = {
@@ -785,9 +784,9 @@ export function ComparePageClient() {
     return map;
   }, [tickerItems]);
 
-  /** has_holdings === true 인 ETF 만 검색 대상. (국내상장 국내/해외 ETF) */
+  /** is_etf === true 인 ETF 만 검색 대상. (국내상장 국내/해외 ETF) */
   const searchableItems = useMemo(
-    () => tickerItems.filter((item) => item.has_holdings === true),
+    () => tickerItems.filter((item) => item.is_etf === true),
     [tickerItems],
   );
 
