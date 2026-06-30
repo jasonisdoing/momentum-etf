@@ -40,6 +40,7 @@ type PoolEntry = {
 type PoolSettingsResponse = {
   all: PoolEntry;
   pools: PoolEntry[];
+  global?: { SCORE_TREND_WEIGHT_RATIO: number };
   constraints: { ma_types: string[]; ma_months_max: number; editable_keys: string[] };
   error?: string;
 };
@@ -72,6 +73,8 @@ export function SettingsManager() {
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [globalRatio, setGlobalRatio] = useState<string>("80");
+  const [globalSaving, setGlobalSaving] = useState(false);
 
   const rows = useMemo(() => {
     if (!data) return [] as { id: string; entry: PoolEntry }[];
@@ -92,6 +95,7 @@ export function SettingsManager() {
         throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
       }
       setData(payload);
+      setGlobalRatio(String(payload.global?.SCORE_TREND_WEIGHT_RATIO ?? "80"));
       const nextDrafts: Record<string, RowDraft> = {};
       nextDrafts[payload.all.pool_id ?? "__all__"] = toDraft(payload.all.settings);
       payload.pools.forEach((p) => {
@@ -156,6 +160,33 @@ export function SettingsManager() {
     [drafts, load, toast],
   );
 
+  const origGlobalRatio = String(data?.global?.SCORE_TREND_WEIGHT_RATIO ?? "80");
+  const globalDirty = globalRatio !== origGlobalRatio;
+
+  const handleSaveGlobal = useCallback(async () => {
+    setGlobalSaving(true);
+    try {
+      const resp = await fetch("/api/pool-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pool_id: "__global__",
+          values: { SCORE_TREND_WEIGHT_RATIO: Number(globalRatio) },
+        }),
+      });
+      const payload = await resp.json();
+      if (!resp.ok || payload.error) {
+        throw new Error(payload.error ?? payload.detail ?? "전역 설정 저장에 실패했습니다.");
+      }
+      toast.success("전역 순위 가중치 설정을 저장했습니다.");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "저장에 실패했습니다.");
+    } finally {
+      setGlobalSaving(false);
+    }
+  }, [globalRatio, load, toast]);
+
   if (loading && !data) {
     return <div className="appPageStack">불러오는 중…</div>;
   }
@@ -176,6 +207,40 @@ export function SettingsManager() {
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBodyTight">
+            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>순위 점수 가중치 설정</h2>
+            <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#94a3b8", fontSize: "0.85rem" }}>
+              보유보너스(%)를 제외한 나머지 비중 중 &apos;추세 몫&apos;을 % 로 지정합니다 (나머지는 ATH 비중에 배분됩니다).
+            </p>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "#475569" }}>추세 가중치 비율:</span>
+                <input
+                  type="number"
+                  className="form-control form-control-sm"
+                  style={{ width: 80, textAlign: "right" }}
+                  value={globalRatio}
+                  min={0}
+                  max={100}
+                  onChange={(e) => setGlobalRatio(e.target.value)}
+                />
+                <span style={{ fontSize: "0.9rem", color: "#64748b" }}>% (나머지 {100 - Number(globalRatio || 0)}%는 ATH)</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm btn-primary"
+                disabled={!globalDirty || globalSaving}
+                onClick={handleSaveGlobal}
+              >
+                {globalSaving ? "저장 중…" : "저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="appSection">
+        <div className="card appCard">
+          <div className="card-body appCardBodyTight">
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목풀 설정</h2>
             <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#94a3b8", fontSize: "0.85rem" }}>
               종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 6개 값은 DB 에서 저장·수정합니다.
@@ -192,6 +257,7 @@ export function SettingsManager() {
                     ))}
                     <th style={{ textAlign: "center", minWidth: 80 }}>저장</th>
                     <th style={{ textAlign: "left", minWidth: 160 }}>마지막 저장</th>
+                    <th style={{ textAlign: "left", minWidth: 240 }}>실제 계산 비중 (추세 / ATH / 보유)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,6 +265,14 @@ export function SettingsManager() {
                     const draft = drafts[id] ?? toDraft(entry.settings);
                     const dirty = isDirty(id, entry.settings);
                     const isAll = id === "__all__";
+
+                    // 실시간 가중 비중 계산
+                    const h = Number(draft["HOLDING_BONUS_SCORE"] || 0);
+                    const r = Number(globalRatio || 80);
+                    const w_trend = (100 - h) * (r / 100);
+                    const w_ath = (100 - h) * (1 - r / 100);
+                    const w_hold = h;
+
                     return (
                       <tr key={id} style={isAll ? { background: "#f8fafc", fontWeight: 600 } : undefined}>
                         <td>
@@ -267,6 +341,19 @@ export function SettingsManager() {
                           ) : (
                             <span style={{ color: "#cbd5e1" }}>기록 없음</span>
                           )}
+                        </td>
+                        <td style={{ textAlign: "left", fontSize: "0.82rem", verticalAlign: "middle" }}>
+                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                            <span style={{ background: "rgba(37,99,235,0.08)", color: "#2563eb", fontWeight: 700, fontSize: "0.74rem", padding: "3px 7px", borderRadius: 4 }}>
+                              추세 {w_trend.toFixed(1)}%
+                            </span>
+                            <span style={{ background: "rgba(124,58,237,0.08)", color: "#7c3aed", fontWeight: 700, fontSize: "0.74rem", padding: "3px 7px", borderRadius: 4 }}>
+                              ATH {w_ath.toFixed(1)}%
+                            </span>
+                            <span style={{ background: "rgba(22,163,74,0.08)", color: "#16a34a", fontWeight: 700, fontSize: "0.74rem", padding: "3px 7px", borderRadius: 4 }}>
+                              보유 {w_hold.toFixed(1)}%
+                            </span>
+                          </div>
                         </td>
                       </tr>
                     );

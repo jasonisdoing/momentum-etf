@@ -259,3 +259,53 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         logger.warning("랭킹 캐시 무효화 실패(설정 저장 후): %s", exc)
 
     return cleaned
+
+
+GLOBAL_POOL_ID = "__global__"
+DEFAULT_TREND_WEIGHT_RATIO = 80
+
+
+def get_global_score_trend_weight_ratio() -> int:
+    """DB 에서 전역 SCORE_TREND_WEIGHT_RATIO 값을 읽어온다. 없으면 config.py 의 값(기본 80)을 쓴다."""
+    try:
+        from utils.db_manager import get_db_connection
+        db = get_db_connection()
+        if db is not None:
+            doc = db[COLLECTION].find_one({"_id": GLOBAL_POOL_ID})
+            if doc and "SCORE_TREND_WEIGHT_RATIO" in doc:
+                return int(doc["SCORE_TREND_WEIGHT_RATIO"])
+    except Exception as exc:
+        logger.warning("전역 SCORE_TREND_WEIGHT_RATIO 조회 실패: %s", exc)
+
+    # fallback to config.py
+    try:
+        import config
+        return int(getattr(config, "SCORE_TREND_WEIGHT_RATIO", DEFAULT_TREND_WEIGHT_RATIO))
+    except Exception:
+        return DEFAULT_TREND_WEIGHT_RATIO
+
+
+def save_global_score_trend_weight_ratio(ratio: int, save_method: str = "사용자") -> int:
+    """전역 SCORE_TREND_WEIGHT_RATIO 값을 DB 에 저장하고 캐시를 무효화한다."""
+    if not (0 <= ratio <= 100):
+        raise PoolSettingsError(f"SCORE_TREND_WEIGHT_RATIO 는 0 ~ 100 범위여야 합니다: {ratio}")
+
+    from utils.db_manager import get_db_connection
+    db = get_db_connection()
+    if db is None:
+        raise PoolSettingsError("DB 연결 실패로 전역 설정을 저장할 수 없습니다.")
+
+    db[COLLECTION].update_one(
+        {"_id": GLOBAL_POOL_ID},
+        {"$set": {"SCORE_TREND_WEIGHT_RATIO": ratio, "updated_at": datetime.utcnow(), "save_method": save_method}},
+        upsert=True,
+    )
+
+    # 캐시 무효화
+    try:
+        from utils.rank_service import invalidate_rank_data_cache
+        invalidate_rank_data_cache()
+    except Exception as exc:
+        logger.warning("랭킹 캐시 무효화 실패: %s", exc)
+
+    return ratio

@@ -15,10 +15,17 @@ export async function GET() {
   }
 }
 
-/** 종목풀 편집 가능 설정 저장 — `{ pool_id, values }`. */
+/** 종목풀 편집 가능 설정 저장 — `{ pool_id, values }` 또는 전역 가중치. */
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
+    if (body.pool_id === "__global__") {
+      const data = await fetchFastApiJson("/internal/pool-settings/global", {
+        method: "PUT",
+        body: JSON.stringify({ SCORE_TREND_WEIGHT_RATIO: Number(body.values.SCORE_TREND_WEIGHT_RATIO) }),
+      });
+      return NextResponse.json(data);
+    }
     const data = await fetchFastApiJson("/internal/pool-settings", {
       method: "PUT",
       body: JSON.stringify(body),

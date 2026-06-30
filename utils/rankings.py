@@ -14,7 +14,6 @@ from config import (
     CACHE_START_DATE,
     MARKET_SCHEDULES,
     NAVER_ETF_CATEGORY_CONFIG,
-    SCORE_TREND_WEIGHT_RATIO,
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import build_composite_rank_scores, compute_ath_proximity_percentile
@@ -27,6 +26,7 @@ from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
+from utils.pool_settings_store import get_global_score_trend_weight_ratio
 
 # ALLOWED_MA_TYPES 는 config.py 가 단일 소스 — 여기서는 import 후 re-export(__all__) 만 한다.
 logger = get_app_logger()
@@ -583,7 +583,7 @@ def _apply_common_rank_scores(
     
     # 백테스트와 동일한 가중치: 나머지(100-보유%)를 추세 : ATH = ratio% : (100-ratio)% 로 나눈다.
     hold_pct = float(held_bonus_score)
-    trend_share = SCORE_TREND_WEIGHT_RATIO / 100.0
+    trend_share = get_global_score_trend_weight_ratio() / 100.0
     remainder = (100.0 - hold_pct) / 100.0
     w_trend = remainder * trend_share
     w_ath = remainder * (1.0 - trend_share)
