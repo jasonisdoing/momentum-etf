@@ -90,6 +90,7 @@ type TickerEtfInfo = {
   fx_change_pct?: number | null;
   fx_rates?: TickerFxRate[];
   portfolio_change_base_date?: string | null;
+  source?: string | null;
 };
 
 type TickerFxRate = {
@@ -973,8 +974,12 @@ export function TickerDetailManager({
   const holdingsPanelTitle = showHoldingsWeightColumn ? "구성종목비중" : "구성종목";
   const holdingsPanelMeta = useMemo(() => {
     if (holdingsRows.length === 0) return "데이터 없음";
-    return `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
-  }, [holdingsRows.length]);
+    const baseText = `상위 ${new Intl.NumberFormat("ko-KR").format(holdingsRows.length)}개`;
+    if (etfInfo?.source === "yfinance_holdings") {
+      return `${baseText} (yfinance 무료 API 제약으로 상위 10개만 제공)`;
+    }
+    return baseText;
+  }, [holdingsRows.length, etfInfo?.source]);
   const holdingsDirectionCounts = useMemo(() => {
     let rising = 0;
     let neutral = 0;
