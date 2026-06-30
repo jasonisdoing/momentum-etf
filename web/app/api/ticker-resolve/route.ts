@@ -11,7 +11,6 @@ type TickerResolveItem = {
   ticker_type: string;
   country_code: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 export async function GET(request: NextRequest) {

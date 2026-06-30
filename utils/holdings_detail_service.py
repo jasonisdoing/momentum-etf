@@ -255,7 +255,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     "ticker_type": str(row.get("ticker_type") or "").strip(),
                     "country_code": str(row.get("country_code") or "").strip(),
                     "is_etf": bool(row.get("is_etf")),
-                    "has_holdings": bool(row.get("has_holdings")),
                 }
             )
 

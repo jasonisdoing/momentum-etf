@@ -140,7 +140,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
                     "ticker_type": ticker_type,
                     "country_code": country_code,
                     "is_etf": bool(item.get("is_etf", False)),
-                    "has_holdings": bool(item.get("has_holdings", False)),
                 }
             )
 
@@ -162,7 +161,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "ticker_type": "aus",
             "country_code": "au",
             "is_etf": True,
-            "has_holdings": False,
         }
 
     holding_matches = [
@@ -188,7 +186,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "ticker_type": holding_type,
             "country_code": str(holding_config.get("country_code") or "").strip().lower(),
             "is_etf": holding_type != "kor",
-            "has_holdings": bool(holdings_cache.get("items")),
         }
     if len(holding_matches) > 1:
         joined = ", ".join(sorted(holding_matches))
@@ -203,7 +200,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
                 "ticker_type": "kor_kr",
                 "country_code": "kor",
                 "is_etf": True,
-                "has_holdings": True,
             }
         return {
             "ticker": ticker_key,
@@ -211,7 +207,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "ticker_type": "kor",
             "country_code": "kor",
             "is_etf": False,
-            "has_holdings": False,
         }
 
     if ticker_key.endswith(".AX"):
@@ -221,7 +216,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "ticker_type": "aus",
             "country_code": "au",
             "is_etf": True,
-            "has_holdings": False,
         }
 
     if ticker_key.isalpha() or "." in ticker_key:
@@ -231,7 +225,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "ticker_type": "us",
             "country_code": "us",
             "is_etf": False,
-            "has_holdings": False,
         }
 
     raise RuntimeError(f"{ticker_key} 티커를 찾지 못했습니다.")
@@ -640,7 +633,6 @@ def get_all_tickers(
                     "ticker_type": ticker_type,
                     "country_code": country_code,
                     "is_etf": bool(etf.get("is_etf", False)),
-                    "has_holdings": bool(etf.get("has_holdings", False)),
                 })
     return result
 
@@ -725,7 +717,6 @@ def get_ticker_search_data(
                 "ticker_type": ticker_type,
                 "country_code": country_code,
                 "is_etf": bool(etf.get("is_etf", False)),
-                "has_holdings": bool(etf.get("has_holdings", False)),
                 "current_price": current_price,
                 "change_pct": change_pct,
             }

@@ -29,7 +29,6 @@ type HoldingsRow = {
   ticker_type?: string;
   country_code?: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 type AccountSummary = {
@@ -73,7 +72,7 @@ const holdingsGridTheme = createAppGridTheme();
 // 구성종목이 있을 수 있는 종목인지 판별 (ETF 및 구성종목 추적 가능 여부)
 function canHaveConstituents(row: AggregatedHoldingRow): boolean {
   if (row.ticker === "__CASH__") return false;
-  return row.has_holdings === true;
+  return row.is_etf === true;
 }
 
 const DETAIL_PANEL_HEIGHT = 460;
@@ -550,18 +549,6 @@ export function HoldingsManager({
         const row = params.data as AggregatedHoldingRow;
         if (isCashRow(row)) return "-";
         return row.is_etf ? <span className="holdingsCheckMark">✅</span> : "-";
-      },
-    },
-    {
-      headerName: "구성종목보유",
-      field: "has_holdings",
-      width: 116,
-      cellClass: "tableAlignCenter",
-      cellRenderer: (params: { data?: ParentRow }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        const row = params.data as AggregatedHoldingRow;
-        if (isCashRow(row)) return "-";
-        return row.has_holdings ? <span className="holdingsCheckMark">✅</span> : "-";
       },
     },
   ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
