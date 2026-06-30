@@ -825,6 +825,24 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
+        field: "고점",
+        headerName: "고점",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          const value = params.value ?? null;
+          if (value === 0) {
+            return (
+              <span style={{ color: "#d93025", fontWeight: 700 }}>
+                ⭐신고점
+              </span>
+            );
+          }
+          return <span>{formatPercent(value)}</span>;
+        },
+      },
+      {
         field: "버킷",
         headerName: "버킷",
         minWidth: 108,
@@ -1140,15 +1158,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? 0, 0),
       },
-      {
-        field: "RSI",
-        headerName: "RSI",
-        minWidth: 76,
-        width: 76,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) =>
-          renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
-      },
       ...(showDeviationColumn
         ? [
           {
@@ -1170,21 +1179,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ]
         : []),
       {
-        field: "고점",
-        headerName: "고점",
-        minWidth: 80,
-        width: 80,
+        field: "RSI",
+        headerName: "RSI",
+        minWidth: 76,
+        width: 76,
         type: "rightAligned",
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          const value = params.value ?? null;
-          const isHighlighted = value !== null && value >= -5;
-          const formatted = value === 0 ? `⭐${formatPercent(value)}` : formatPercent(value);
-          return (
-            <span style={{ color: isHighlighted ? "#7952b3" : "inherit", fontWeight: isHighlighted ? 700 : 400 }}>
-              {formatted}
-            </span>
-          );
-        },
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
       },
       {
         field: "1주(%)",
