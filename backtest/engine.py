@@ -22,7 +22,6 @@ from config import (
     BACKTEST_INITIAL_KRW_AMOUNT,
     BACKTEST_START_DATE,
     MARKET_SCHEDULES,
-    SCORE_TREND_WEIGHT_RATIO,
     SLIPPAGE_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
@@ -39,6 +38,7 @@ from utils.formatters import format_pct_change, format_price, format_trading_day
 from utils.report import render_table_eaw
 from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
+from utils.pool_settings_store import get_global_score_trend_weight_ratio
 
 logger = logging.getLogger(__name__)
 RSI_PERIOD = 14
@@ -779,8 +779,9 @@ def _write_results_file(
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
+    ratio = get_global_score_trend_weight_ratio()
     lines.append(
-        f'"WEIGHT": "추세:ATH = {SCORE_TREND_WEIGHT_RATIO:g}:{100 - SCORE_TREND_WEIGHT_RATIO:g} '
+        f'"WEIGHT": "추세:ATH = {ratio:g}:{100 - ratio:g} '
         f'(나머지 = 100-보유), 보유보너스(%)만 탐색",'
     )
     lines.append(f'"MA_TYPE": {ma_types},')
@@ -1994,9 +1995,9 @@ def run_backtest(pool_id: str) -> Path:
         }
 
     # 가중치 그리드 생성: 보유 비중만 탐색공간(DB의 보유보너스(%))에서 가져오고,
-    # 나머지(100-보유)를 추세 : ATH = SCORE_TREND_WEIGHT_RATIO% : (100-ratio)% 로 나눈다.
+    # 나머지(100-보유)를 추세 : ATH = ratio% : (100-ratio)% 로 나눈다.
     # 각 보유값 h(%) → 추세 = (100-h)×(ratio/100), ATH = (100-h)×(1-ratio/100). 합계는 항상 100%.
-    trend_share = SCORE_TREND_WEIGHT_RATIO / 100.0
+    trend_share = get_global_score_trend_weight_ratio() / 100.0
     weight_combos = []
     for hold in hold_pct_values:
         remainder = 100.0 - hold

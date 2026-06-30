@@ -17,6 +17,8 @@ from utils.pool_settings_store import (
     OVERRIDABLE_KEYS,
     PoolSettingsError,
     save_pool_settings,
+    get_global_score_trend_weight_ratio,
+    save_global_score_trend_weight_ratio,
 )
 from utils.rankings import ALLOWED_MA_TYPES, get_rank_months_max
 from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
@@ -65,6 +67,9 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "save_method": all_settings.get("save_method"),
         },
         "pools": pools,
+        "global": {
+            "SCORE_TREND_WEIGHT_RATIO": get_global_score_trend_weight_ratio()
+        },
         "constraints": {
             "ma_types": ALLOWED_MA_TYPES,
             "ma_months_max": get_rank_months_max(),
@@ -83,3 +88,19 @@ def put_pool_settings(
     except PoolSettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "pool_id": payload.pool_id, "saved": saved}
+
+
+class GlobalSettingsUpdatePayload(BaseModel):
+    SCORE_TREND_WEIGHT_RATIO: int
+
+
+@router.put("/global")
+def put_global_settings(
+    payload: GlobalSettingsUpdatePayload, _: None = Depends(require_internal_token)
+) -> dict[str, object]:
+    """전역 모멘텀 가중치 비율 설정을 저장한다."""
+    try:
+        saved = save_global_score_trend_weight_ratio(payload.SCORE_TREND_WEIGHT_RATIO)
+    except PoolSettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "SCORE_TREND_WEIGHT_RATIO": saved}
