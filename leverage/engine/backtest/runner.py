@@ -53,7 +53,7 @@ def run_backtest(
         from zoneinfo import ZoneInfo
         market = settings.get("market", "kor")
         tz_name = "Asia/Seoul" if market == "kor" else "America/New_York"
-        cutoff = pd.Timestamp.now(ZoneInfo(tz_name)).normalize()
+        cutoff = pd.Timestamp.now(ZoneInfo(tz_name)).normalize().tz_localize(None)
         common_index = common_index[common_index < cutoff]
         if len(common_index) == 0:
             raise ValueError("오늘 세션을 제외하면 사용할 수 있는 거래일이 없습니다.")
