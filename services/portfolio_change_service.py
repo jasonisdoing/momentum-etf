@@ -562,11 +562,17 @@ def compute_portfolio_change_bundle(
                 }
             return persisted
 
+    # base_date 가 국내 당일이면 국내 구성종목 baseline 을 '당일 시초가'로 써서 장중 변동을 보여준다.
+    # (미국·호주 등 해외 구성종목은 시차상 base_date 당일 시초가가 없어 종가 baseline 을 유지한다.)
+    today_kst = datetime.now(ZoneInfo("Asia/Seoul")).strftime("%Y-%m-%d")
+    use_open_baseline = norm_type.startswith("kor") and base_date == today_kst
+
     priced_holdings, _ = enrich_component_prices(
         holdings,
         price_fetch_limit=_HOLDINGS_PRICE_FETCH_LIMIT,
         cumulative_base_date=base_date,
         component_price_snapshot=component_price_snapshot,
+        use_open_baseline=use_open_baseline,
     )
     rates = get_exchange_rates()
     # 합계 계산은 base_date 이후 누적 변동을 사용하므로 환율도 누적률을 적용한다.
@@ -586,6 +592,7 @@ def compute_portfolio_change_bundle(
     result = {
         "calc_version": _PORTFOLIO_CHANGE_CALC_VERSION,
         "base_date": base_date,
+        "base_is_open": use_open_baseline,
         "priced_holdings": priced_holdings,
         "fx_rates": fx_rates,
         "total_pct": total_pct,

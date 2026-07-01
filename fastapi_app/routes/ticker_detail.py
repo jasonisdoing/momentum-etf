@@ -175,7 +175,6 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             {},
         )
         cache_doc = get_stock_cache_meta(holding_type, ticker_key)
-        holdings_cache = dict(cache_doc.get("holdings_cache") or {}) if isinstance(cache_doc, dict) else {}
         cache_name = cache_doc.get("name") if isinstance(cache_doc, dict) else None
         if not cache_name and ticker_key.isdigit() and len(ticker_key) == 6:
             cache_name = _lookup_domestic_etf_name(ticker_key)
@@ -894,6 +893,7 @@ def build_ticker_detail_payload(
                 bundle_fx_rates = bundle.get("fx_rates") or []
                 if etf_info is not None:
                     etf_info["portfolio_change_base_date"] = bundle.get("base_date")
+                    etf_info["portfolio_change_base_is_open"] = bool(bundle.get("base_is_open"))
             else:
                 priced_holdings, holdings_price_as_of_date = enrich_component_prices(
                     holdings,
