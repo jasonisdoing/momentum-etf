@@ -1,7 +1,7 @@
 """종목풀 편집 가능 설정(pool_settings) 조회/저장 API.
 
-pools.json 의 구조는 유지하고, 자주 바뀌는 5개 값(TOP_N_HOLD/HOLDING_BONUS_SCORE/
-MA_TYPE/MA_MONTHS/RSI_LIMIT)만 DB 오버라이드로 수정한다 (utils.pool_settings_store).
+pools.json 의 구조는 유지하고, 자주 바뀌는 편집값(TOP_N_HOLD/HOLDING_BONUS_SCORE/
+TREND_WEIGHT_RATIO/MA_TYPE/MA_MONTHS/RSI_LIMIT)만 DB 오버라이드로 수정한다 (utils.pool_settings_store).
 """
 
 from __future__ import annotations
@@ -17,9 +17,6 @@ from utils.pool_settings_store import (
     OVERRIDABLE_KEYS,
     PoolSettingsError,
     save_pool_settings,
-    get_global_score_trend_weight_ratio,
-    save_global_score_trend_weight_ratio,
-    get_global_settings,
 )
 from utils.rankings import ALLOWED_MA_TYPES, get_rank_months_max
 from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
@@ -68,7 +65,6 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "save_method": all_settings.get("save_method"),
         },
         "pools": pools,
-        "global": get_global_settings(),
         "constraints": {
             "ma_types": ALLOWED_MA_TYPES,
             "ma_months_max": get_rank_months_max(),
@@ -87,19 +83,3 @@ def put_pool_settings(
     except PoolSettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "pool_id": payload.pool_id, "saved": saved}
-
-
-class GlobalSettingsUpdatePayload(BaseModel):
-    SCORE_TREND_WEIGHT_RATIO: int
-
-
-@router.put("/global")
-def put_global_settings(
-    payload: GlobalSettingsUpdatePayload, _: None = Depends(require_internal_token)
-) -> dict[str, object]:
-    """전역 모멘텀 가중치 비율 설정을 저장한다."""
-    try:
-        saved = save_global_score_trend_weight_ratio(payload.SCORE_TREND_WEIGHT_RATIO)
-    except PoolSettingsError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"ok": True, "SCORE_TREND_WEIGHT_RATIO": saved}

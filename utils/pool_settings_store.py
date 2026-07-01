@@ -1,10 +1,10 @@
 """종목풀 편집 가능 설정의 DB 오버라이드 레이어.
 
 pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_source 등)를 정의하는
-단일 진실 소스로 유지하고, 자주 바뀌는 아래 5개 값만 MongoDB `pool_settings` 컬렉션에
+단일 진실 소스로 유지하고, 자주 바뀌는 아래 6개 값만 MongoDB `pool_settings` 컬렉션에
 저장해 화면에서 수정한다 (값 변경 때마다 커밋하던 번거로움 제거).
 
-    TOP_N_HOLD, HOLDING_BONUS_SCORE, MA_TYPE, MA_MONTHS, RSI_LIMIT
+    TOP_N_HOLD, HOLDING_BONUS_SCORE, TREND_WEIGHT_RATIO, MA_TYPE, MA_MONTHS, RSI_LIMIT
 
 읽기: settings_loader 가 pools.json 값 위에 DB 오버라이드를 덮어쓴다. DB 문서/키가 없으면
       pools.json 값을 그대로 사용한다 (silent fallback 아님 — 기본값이 명시적 소스).
@@ -12,7 +12,7 @@ pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_sour
       쓴다. 저장한 프로세스는 즉시 무효화하고, 나머지는 TTL 내 자동 반영된다.
 
 컬렉션 문서 형태:
-    {_id: "__all__",  TOP_N_HOLD, HOLDING_BONUS_SCORE, MA_TYPE, MA_MONTHS, RSI_LIMIT, updated_at}
+    {_id: "__all__",  TOP_N_HOLD, HOLDING_BONUS_SCORE, TREND_WEIGHT_RATIO, MA_TYPE, MA_MONTHS, RSI_LIMIT, updated_at}
     {_id: <ticker_type>, ...동일...}
 """
 
@@ -31,17 +31,18 @@ logger = get_app_logger()
 ALL_POOL_ID = "__all__"
 COLLECTION = "pool_settings"
 
-# DB 오버라이드 대상 키 (ATH_BONUS 추가)
+# DB 오버라이드 대상 키
+# TREND_WEIGHT_RATIO: 보유 제외 나머지 비중 중 추세 몫(%) — ATH 몫은 (100 - 이 값).
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "HOLDING_BONUS_SCORE",
+    "TREND_WEIGHT_RATIO",
     "MA_TYPE",
     "MA_MONTHS",
     "RSI_LIMIT",
-    "ATH_BONUS",
 )
 
-_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_MONTHS", "RSI_LIMIT", "ATH_BONUS")
+_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_MONTHS", "RSI_LIMIT")
 
 _CACHE_TTL_SECONDS = 30.0
 _overlay_cache: dict[str, dict[str, Any]] | None = None
@@ -210,11 +211,11 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
         elif key == "HOLDING_BONUS_SCORE":
-            if not (0 <= num <= 1000):
-                raise PoolSettingsError(f"HOLDING_BONUS_SCORE 는 0 ~ 1000 범위여야 합니다: {num}")
-        elif key == "ATH_BONUS":
             if not (0 <= num <= 100):
-                raise PoolSettingsError(f"ATH_BONUS 는 0 ~ 100 범위여야 합니다: {num}")
+                raise PoolSettingsError(f"HOLDING_BONUS_SCORE 는 0 ~ 100 범위여야 합니다: {num}")
+        elif key == "TREND_WEIGHT_RATIO":
+            if not (0 <= num <= 100):
+                raise PoolSettingsError(f"TREND_WEIGHT_RATIO 는 0 ~ 100 범위여야 합니다: {num}")
 
         cleaned[key] = num
 
@@ -259,77 +260,3 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         logger.warning("랭킹 캐시 무효화 실패(설정 저장 후): %s", exc)
 
     return cleaned
-
-
-GLOBAL_POOL_ID = "__global__"
-DEFAULT_TREND_WEIGHT_RATIO = 80
-
-
-def get_global_score_trend_weight_ratio() -> int:
-    """DB 에서 전역 SCORE_TREND_WEIGHT_RATIO 값을 읽어온다. 없으면 config.py 의 값(기본 80)을 쓴다."""
-    return get_global_settings()["SCORE_TREND_WEIGHT_RATIO"]
-
-
-def get_global_settings() -> dict[str, Any]:
-    """DB 에서 전역 가중치와 updated_at 을 포함한 설정을 가져온다. 없으면 자동 생성한다."""
-    res = {
-        "SCORE_TREND_WEIGHT_RATIO": DEFAULT_TREND_WEIGHT_RATIO,
-        "updated_at": None
-    }
-    try:
-        from utils.db_manager import get_db_connection
-        db = get_db_connection()
-        if db is not None:
-            doc = db[COLLECTION].find_one({"_id": GLOBAL_POOL_ID})
-            if doc:
-                if "SCORE_TREND_WEIGHT_RATIO" in doc:
-                    res["SCORE_TREND_WEIGHT_RATIO"] = int(doc["SCORE_TREND_WEIGHT_RATIO"])
-                if "updated_at" in doc and doc["updated_at"] is not None:
-                    res["updated_at"] = doc["updated_at"]
-            else:
-                # 문서가 전혀 없으면 자동 시드 생성
-                ratio = DEFAULT_TREND_WEIGHT_RATIO
-                try:
-                    import config
-                    ratio = int(getattr(config, "SCORE_TREND_WEIGHT_RATIO", DEFAULT_TREND_WEIGHT_RATIO))
-                except Exception:
-                    pass
-                from datetime import datetime
-                now = datetime.utcnow()
-                db[COLLECTION].update_one(
-                    {"_id": GLOBAL_POOL_ID},
-                    {"$set": {"SCORE_TREND_WEIGHT_RATIO": ratio, "updated_at": now, "save_method": "시스템"}},
-                    upsert=True,
-                )
-                res["SCORE_TREND_WEIGHT_RATIO"] = ratio
-                res["updated_at"] = now
-    except Exception as exc:
-        logger.warning("전역 설정 상세 조회 및 시드 실패: %s", exc)
-
-    return res
-
-
-def save_global_score_trend_weight_ratio(ratio: int, save_method: str = "사용자") -> int:
-    """전역 SCORE_TREND_WEIGHT_RATIO 값을 DB 에 저장하고 캐시를 무효화한다."""
-    if not (0 <= ratio <= 100):
-        raise PoolSettingsError(f"SCORE_TREND_WEIGHT_RATIO 는 0 ~ 100 범위여야 합니다: {ratio}")
-
-    from utils.db_manager import get_db_connection
-    db = get_db_connection()
-    if db is None:
-        raise PoolSettingsError("DB 연결 실패로 전역 설정을 저장할 수 없습니다.")
-
-    db[COLLECTION].update_one(
-        {"_id": GLOBAL_POOL_ID},
-        {"$set": {"SCORE_TREND_WEIGHT_RATIO": ratio, "updated_at": datetime.utcnow(), "save_method": save_method}},
-        upsert=True,
-    )
-
-    # 캐시 무효화
-    try:
-        from utils.rank_service import invalidate_rank_data_cache
-        invalidate_rank_data_cache()
-    except Exception as exc:
-        logger.warning("랭킹 캐시 무효화 실패: %s", exc)
-
-    return ratio

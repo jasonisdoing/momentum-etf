@@ -26,7 +26,6 @@ from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
-from utils.pool_settings_store import get_global_score_trend_weight_ratio
 
 # ALLOWED_MA_TYPES 는 config.py 가 단일 소스 — 여기서는 import 후 re-export(__all__) 만 한다.
 logger = get_app_logger()
@@ -508,7 +507,9 @@ def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
     ma_rules: list[dict[str, Any]],
+    *,
     held_bonus_score: float = 0.0,
+    trend_weight_ratio: float,
 ) -> pd.DataFrame:
     """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
 
@@ -583,7 +584,7 @@ def _apply_common_rank_scores(
     
     # 백테스트와 동일한 가중치: 나머지(100-보유%)를 추세 : ATH = ratio% : (100-ratio)% 로 나눈다.
     hold_pct = float(held_bonus_score)
-    trend_share = get_global_score_trend_weight_ratio() / 100.0
+    trend_share = float(trend_weight_ratio) / 100.0
     remainder = (100.0 - hold_pct) / 100.0
     w_trend = remainder * trend_share
     w_ath = remainder * (1.0 - trend_share)
@@ -618,7 +619,6 @@ def _apply_common_rank_scores(
     df.loc[composite_missing, "ATH"] = 0.0
     df.loc[composite_missing, "보유가점"] = 0.0
 
-
     for column, trend_map in trend_maps.items():
         df[column] = tickers_col.map(trend_map).astype("object")
         df.loc[composite_missing, column] = None
@@ -634,7 +634,7 @@ def build_ticker_type_rankings(
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
     held_bonus_score: float = 0.0,
-    ath_bonus: float = 0.0,  # deprecated: ATH 비중은 보유%에서 (100-보유)/2 로 유도되어 점수에 직접 쓰지 않음(호출 체인 호환용으로만 수용).
+    trend_weight_ratio: float,  # 보유 제외 나머지 비중 중 추세 몫(%) — 풀별 pool_settings 가 단일 소스.
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -779,6 +779,7 @@ def build_ticker_type_rankings(
         effective_close_series_map,
         effective_ma_rules,
         held_bonus_score=held_bonus_score,
+        trend_weight_ratio=trend_weight_ratio,
     )
     process_elapsed += perf_counter() - process_started_at
 

@@ -62,7 +62,7 @@ a {
   overflow-x: hidden;
 }
 
-.appLayout > .navbar-vertical.appSidebar,
+.appLayout>.navbar-vertical.appSidebar,
 .appSidebar {
   width: 11rem;
   min-width: 11rem;
@@ -82,7 +82,7 @@ a {
     border-color 180ms ease;
 }
 
-.appLayoutSidebarCollapsed > .navbar-vertical.appSidebar,
+.appLayoutSidebarCollapsed>.navbar-vertical.appSidebar,
 .appLayoutSidebarCollapsed .appSidebar {
   width: 0;
   min-width: 0;
@@ -140,7 +140,7 @@ a {
 }
 
 /* 그룹 사이 얇은 구분선 — 간격을 키우지 않고 그룹 경계를 명확히 한다. */
-.appSidebarNavGroups .appSidebarGroup + .appSidebarGroup,
+.appSidebarNavGroups .appSidebarGroup+.appSidebarGroup,
 .appSidebarNavGroups {
   border-top: 1px solid var(--line);
   padding-top: 0.1rem;
@@ -490,8 +490,8 @@ a {
   min-height: 0;
 }
 
-.pageFrameBody > *,
-.pageFrameBodyFullHeight > * {
+.pageFrameBody>*,
+.pageFrameBodyFullHeight>* {
   min-width: 0;
 }
 
@@ -798,6 +798,7 @@ a {
     opacity: 0;
     transform: translateY(-8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1824,11 +1825,11 @@ a {
   flex-direction: column;
 }
 
-.tickerDetailInfoSummary > .tickerDetailInfoSummaryRow {
+.tickerDetailInfoSummary>.tickerDetailInfoSummaryRow {
   flex: 1;
 }
 
-.tickerDetailInfoSummary > .tickerDetailInfoSummaryGrid {
+.tickerDetailInfoSummary>.tickerDetailInfoSummaryGrid {
   flex: 3;
 }
 
@@ -1893,7 +1894,7 @@ a {
   border-bottom: 1px solid #e6edf5;
 }
 
-.tickerDetailInfoSummaryGrid > .tickerDetailInfoMetric:nth-last-child(-n + 2) {
+.tickerDetailInfoSummaryGrid>.tickerDetailInfoMetric:nth-last-child(-n + 2) {
   border-bottom: 0;
 }
 
@@ -1906,7 +1907,7 @@ a {
   flex-direction: column;
 }
 
-.tickerDetailInfoTracker > .tickerDetailInfoTrackerRow {
+.tickerDetailInfoTracker>.tickerDetailInfoTrackerRow {
   flex: 1;
 }
 
@@ -1989,7 +1990,7 @@ a {
   border-bottom: 0;
 }
 
-.portfolioChangeBreakdownDetailRow > span {
+.portfolioChangeBreakdownDetailRow>span {
   white-space: nowrap;
 }
 
@@ -2538,7 +2539,7 @@ a {
 }
 
 .compareGroupControl select.form-select {
-  width: 14rem;
+  width: 22rem;
   flex: 0 0 auto;
 }
 
@@ -2819,12 +2820,12 @@ a {
   font-weight: 800;
 }
 
-.compareHoldingLine + .compareHoldingLine {
+.compareHoldingLine+.compareHoldingLine {
   margin-top: 0.08rem;
 }
 
-.compareHoldingLine > span,
-.compareHoldingLine > strong {
+.compareHoldingLine>span,
+.compareHoldingLine>strong {
   flex: 0 0 auto;
 }
 
@@ -2929,15 +2930,15 @@ a {
   flex-direction: column;
 }
 
-.tickerDetailLayoutGrid > .tickerDetailChartWrap {
+.tickerDetailLayoutGrid>.tickerDetailChartWrap {
   grid-area: chart;
 }
 
-.tickerDetailLayoutGrid > .tickerDetailTablePanel {
+.tickerDetailLayoutGrid>.tickerDetailTablePanel {
   grid-area: table;
 }
 
-.tickerDetailClassicLayout > .tickerDetailChartWrap {
+.tickerDetailClassicLayout>.tickerDetailChartWrap {
   min-height: 520px;
 }
 
@@ -3761,7 +3762,7 @@ a {
   padding: 0.75rem 1rem;
 }
 
-.appCard > .card-header {
+.appCard>.card-header {
   padding: 0.375rem 1rem;
 }
 
@@ -4074,7 +4075,7 @@ a {
   padding: 0.875rem 1rem 1rem;
 }
 
-.appCardSection + .appCardSection {
+.appCardSection+.appCardSection {
   margin-top: 0.375rem;
 }
 

@@ -25,7 +25,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
-  ath_bonus?: number;
+  trend_weight_ratio?: number;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -105,7 +105,7 @@ type RankResponse = {
   realtime_fetched_at?: string | null;
   previous_trading_day?: string | null;
   held_bonus_score?: number;
-  ath_bonus?: number;
+  trend_weight_ratio?: number;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -298,6 +298,16 @@ function formatAudMarketCap(value: number | null): string {
   return `${formatNumber(value, 0)} AUD`;
 }
 
+function clampTrendWeightRatio(value: number): number {
+  if (Number.isNaN(value) || value < 0) {
+    return 0;
+  }
+  if (value > 100) {
+    return 100;
+  }
+  return Math.round(value);
+}
+
 function clampHeldBonusScore(value: number): number {
   if (Number.isNaN(value) || value < 0) {
     return 0;
@@ -331,6 +341,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
+  const [trendWeightRatio, setTrendWeightRatio] = useState(0);
+  const [trendRatioText, setTrendRatioText] = useState("0");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -406,6 +418,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setHeldBonusScore(configuredHeldBonusScore);
     }
 
+    const configuredTrendWeightRatio =
+      currentConfig && typeof currentConfig.trend_weight_ratio === "number"
+        ? currentConfig.trend_weight_ratio
+        : payload.trend_weight_ratio;
+    if (typeof payload.trend_weight_ratio === "number") {
+      applyTrendWeightRatioState(payload.trend_weight_ratio);
+    } else if (typeof configuredTrendWeightRatio === "number") {
+      applyTrendWeightRatioState(configuredTrendWeightRatio);
+    }
+
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -433,6 +455,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         : payload.held_bonus_score;
     if (typeof configuredHeldBonusScore === "number") {
       setHeldBonusScore(configuredHeldBonusScore);
+    }
+    const configuredTrendWeightRatio =
+      currentConfig && typeof currentConfig.trend_weight_ratio === "number"
+        ? currentConfig.trend_weight_ratio
+        : payload.trend_weight_ratio;
+    if (typeof configuredTrendWeightRatio === "number") {
+      applyTrendWeightRatioState(configuredTrendWeightRatio);
     }
 
     rankToolbarCache = {
@@ -485,6 +514,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
     held_bonus_score?: number;
+    trend_weight_ratio?: number;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -508,6 +538,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
       } else {
         search.set("held_bonus_score", String(heldBonusScore));
+      }
+
+      if (typeof next?.trend_weight_ratio === "number") {
+        search.set("trend_weight_ratio", String(next.trend_weight_ratio));
+      } else if (next?.bootstrap) {
+        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
+      } else {
+        search.set("trend_weight_ratio", String(trendWeightRatio));
       }
 
       if (next?.ma_rule_override) {
@@ -585,6 +623,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   // 초기 로딩 시 보유 보너스 점수는 선택된 종목풀 설정을 서버에서 적용한다.
 
+
+  function applyTrendWeightRatioState(value: number) {
+    setTrendWeightRatio(value);
+    setTrendRatioText(String(value));
+  }
+
+  function commitTrendWeightRatio() {
+    const normalized = clampTrendWeightRatio(Number(trendRatioText));
+    const changed = normalized !== trendWeightRatio;
+    applyTrendWeightRatioState(normalized);
+    if (!changed) return;
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      as_of_date: selectedAsOfDate,
+      trend_weight_ratio: normalized,
+      skip_session_cache: true,
+    });
+  }
 
   function handleHeldBonusScoreChange(nextValue: number) {
     const normalized = clampHeldBonusScore(nextValue);
@@ -1761,6 +1818,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">추세 가중치(%)</span>
+                    <input
+                      type="number"
+                      className="form-control"
+                      style={{ width: 88, textAlign: "right" }}
+                      min={0}
+                      max={100}
+                      value={trendRatioText}
+                      onChange={(event) => setTrendRatioText(event.target.value)}
+                      onBlur={commitTrendWeightRatio}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
+                      }}
+                    />
                   </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">컬럼</span>

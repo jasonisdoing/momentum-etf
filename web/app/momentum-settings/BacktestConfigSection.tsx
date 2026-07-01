@@ -9,6 +9,7 @@ type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
   BENCHMARK?: Benchmark;
   HOLDING_BONUS_SCORE?: number[];
+  TREND_WEIGHT_RATIO?: number[];
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
@@ -35,6 +36,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
   const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
   const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
+  const [ratioText, setRatioText] = useState((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).join(", "));
   const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
@@ -67,9 +69,10 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   };
 
   const bonus = parseNums(bonusText);
+  const ratios = parseNums(ratioText);
   const months = parseNums(monthsText);
   const rsi = parseNums(rsiText);
-  const combos = bonus.length * maSet.size * months.length * rsi.length;
+  const combos = bonus.length * ratios.length * maSet.size * months.length * rsi.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -83,6 +86,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     const config: BtConfig = {
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       HOLDING_BONUS_SCORE: bonus,
+      TREND_WEIGHT_RATIO: ratios.map((n) => Math.trunc(n)),
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
@@ -128,7 +132,9 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       <div style={rowStyle}>
         <span style={{ ...labelStyle, width: 84 }}>보유보너스(%)</span>
         <input style={{ ...inputStyle, width: 130 }} placeholder="0, 5, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
-        <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>추세·ATH는 (100−보유)/2 로 자동 배분</span>
+        <span style={{ ...labelStyle, marginLeft: 8 }}>추세 가중치(%)</span>
+        <input style={{ ...inputStyle, width: 140 }} placeholder="50, 60, 70, 80" value={ratioText} onChange={(e) => setRatioText(e.target.value)} />
+        <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>ATH = (100−보유) × (100−추세비율)%</span>
       </div>
 
       <div style={rowStyle}>
