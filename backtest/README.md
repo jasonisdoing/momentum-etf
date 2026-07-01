@@ -31,13 +31,14 @@ python backtest/run.py
 
 ## 스윕 대상 파라미터
 
-- `HOLDING_BONUS_SCORE` (보유보너스 %, 예 `[0,10,20]`) — 가중치 탐색 차원. 각 보유값마다 **추세 = ATH = `(100 − 보유)/2`** 로 묶여 조합이 결정된다.
+- `HOLDING_BONUS_SCORE` (보유보너스 %, 예 `[0,5,10]`) — 가중치 탐색 차원.
+- `TREND_WEIGHT_RATIO` (추세 가중치 %, 예 `[50,60,70,80]`) — 보유 제외 나머지 비중 중 추세 몫. **추세 = `(100−보유)×r/100`, ATH = `(100−보유)×(100−r)/100`**.
 - `MA_TYPE`
 - `MA_MONTHS`
 - `RSI_LIMIT` (`us`, `kor` 종목풀만 사용)
 - `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(탐색 차원 제외).
 
-> 점수식: `점수 = w×추세(±100) + w×ATH(0~100) + 보유가점`, `w = (100−보유%)/200`, `보유가점 = 보유 시 보유%`. 라이브(`utils/rankings.py`)와 동일하다.
+> 점수식: `점수 = w_trend×추세(±100) + w_ath×ATH(0~100) + 보유가점`, `보유가점 = 보유 시 보유%`. 라이브(`utils/rankings.py`)와 동일하다.
 
 세부 탐색공간은 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩은 제거됨.
 

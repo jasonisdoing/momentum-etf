@@ -3,7 +3,8 @@
 기존 `config.py` 의 하드코딩 `BACKTEST_CONFIG` 를 DB 로 이관한다. 풀별로 1개 문서.
 
     {_id: <pool_id>, BENCHMARK:{ticker,name},
-     HOLDING_BONUS_SCORE:[...], MA_TYPE:[...], MA_MONTHS:[...], RSI_LIMIT:[...], updated_at}
+     HOLDING_BONUS_SCORE:[...], TREND_WEIGHT_RATIO:[...], MA_TYPE:[...], MA_MONTHS:[...],
+     RSI_LIMIT:[...], updated_at}
 
 DB 가 유일한 소스다. 설정이 없으면 임의 기본값으로 보정하지 않고 **명확히 에러**를 낸다.
 멀티프로세스(fastapi/scheduler/worker) 반영을 위해 짧은 TTL 캐시 + 저장 시 무효화를 쓴다.
@@ -25,7 +26,7 @@ _COLLECTION = "backtest_config"
 _CACHE_TTL_SECONDS = 30.0
 
 # 풀별 문서 필수 키
-_REQUIRED_LIST_KEYS = ("HOLDING_BONUS_SCORE", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT")
+_REQUIRED_LIST_KEYS = ("HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT")
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[dict, float]] = {}  # pool_id -> (config, cached_at)
@@ -65,6 +66,9 @@ def validate_backtest_config(config: Any) -> None:
     for v in config["HOLDING_BONUS_SCORE"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
             raise ValueError("'HOLDING_BONUS_SCORE' 는 0 이상의 숫자여야 합니다.")
+    for v in config["TREND_WEIGHT_RATIO"]:
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 100):
+            raise ValueError("'TREND_WEIGHT_RATIO' 는 0~100 범위의 숫자여야 합니다.")
     for v in config["MA_MONTHS"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or int(v) <= 0:
             raise ValueError("'MA_MONTHS' 는 0보다 큰 정수여야 합니다.")
@@ -74,15 +78,6 @@ def validate_backtest_config(config: Any) -> None:
     for v in config["MA_TYPE"]:
         if str(v).upper() not in ALLOWED_MA_TYPES:
             raise ValueError(f"'MA_TYPE' 값이 허용되지 않습니다: {v} (허용: {', '.join(ALLOWED_MA_TYPES)})")
-
-    # ATH(52주 고점) 근접 보너스 — 선택 키(하위호환). 있으면 0 이상 숫자 리스트.
-    if "ATH_BONUS" in config:
-        ath = config["ATH_BONUS"]
-        if not isinstance(ath, list) or len(ath) == 0:
-            raise ValueError("'ATH_BONUS' 는 1개 이상의 값을 가진 리스트여야 합니다.")
-        for v in ath:
-            if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
-                raise ValueError("'ATH_BONUS' 는 0 이상의 숫자여야 합니다.")
 
 
 def load_backtest_config(pool_id: str) -> dict:

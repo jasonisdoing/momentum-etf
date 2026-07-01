@@ -8,6 +8,7 @@ import { useToast } from "../components/ToastProvider";
 const EDITABLE_KEYS = [
   "TOP_N_HOLD",
   "HOLDING_BONUS_SCORE",
+  "TREND_WEIGHT_RATIO",
   "MA_TYPE",
   "MA_MONTHS",
   "RSI_LIMIT",
@@ -18,6 +19,7 @@ type EditableKey = (typeof EDITABLE_KEYS)[number];
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
   HOLDING_BONUS_SCORE: "보유보너스(%)",
+  TREND_WEIGHT_RATIO: "추세 가중치(%)",
   MA_TYPE: "MA 타입",
   MA_MONTHS: "MA 개월",
   RSI_LIMIT: "RSI 상한",
@@ -40,7 +42,6 @@ type PoolEntry = {
 type PoolSettingsResponse = {
   all: PoolEntry;
   pools: PoolEntry[];
-  global?: { SCORE_TREND_WEIGHT_RATIO: number; updated_at?: string };
   constraints: { ma_types: string[]; ma_months_max: number; editable_keys: string[] };
   error?: string;
 };
@@ -73,8 +74,6 @@ export function SettingsManager() {
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, RowDraft>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [globalRatio, setGlobalRatio] = useState<string>("80");
-  const [globalSaving, setGlobalSaving] = useState(false);
 
   const rows = useMemo(() => {
     if (!data) return [] as { id: string; entry: PoolEntry }[];
@@ -95,7 +94,6 @@ export function SettingsManager() {
         throw new Error(payload.error ?? "설정을 불러오지 못했습니다.");
       }
       setData(payload);
-      setGlobalRatio(String(payload.global?.SCORE_TREND_WEIGHT_RATIO ?? "80"));
       const nextDrafts: Record<string, RowDraft> = {};
       nextDrafts[payload.all.pool_id ?? "__all__"] = toDraft(payload.all.settings);
       payload.pools.forEach((p) => {
@@ -160,33 +158,6 @@ export function SettingsManager() {
     [drafts, load, toast],
   );
 
-  const origGlobalRatio = String(data?.global?.SCORE_TREND_WEIGHT_RATIO ?? "80");
-  const globalDirty = globalRatio !== origGlobalRatio;
-
-  const handleSaveGlobal = useCallback(async () => {
-    setGlobalSaving(true);
-    try {
-      const resp = await fetch("/api/pool-settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pool_id: "__global__",
-          values: { SCORE_TREND_WEIGHT_RATIO: Number(globalRatio) },
-        }),
-      });
-      const payload = await resp.json();
-      if (!resp.ok || payload.error) {
-        throw new Error(payload.error ?? payload.detail ?? "전역 설정 저장에 실패했습니다.");
-      }
-      toast.success("전역 순위 가중치 설정을 저장했습니다.");
-      await load();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "저장에 실패했습니다.");
-    } finally {
-      setGlobalSaving(false);
-    }
-  }, [globalRatio, load, toast]);
-
   if (loading && !data) {
     return <div className="appPageStack">불러오는 중…</div>;
   }
@@ -204,45 +175,6 @@ export function SettingsManager() {
 
   return (
     <div className="appPageStack appPageStackFill">
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBodyTight">
-            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>Config</h2>
-            <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#94a3b8", fontSize: "0.85rem" }}>
-              보유보너스(%)를 제외한 나머지 비중 중 &apos;추세 몫&apos;을 % 로 지정합니다 (나머지는 ATH 비중에 배분됩니다).
-            </p>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontSize: "0.9rem", fontWeight: 600, color: "#475569" }}>추세 가중치 비율:</span>
-                <input
-                  type="number"
-                  className="form-control form-control-sm"
-                  style={{ width: 80, textAlign: "right" }}
-                  value={globalRatio}
-                  min={0}
-                  max={100}
-                  onChange={(e) => setGlobalRatio(e.target.value)}
-                />
-                <span style={{ fontSize: "0.9rem", color: "#64748b" }}>% (나머지 {100 - Number(globalRatio || 0)}%는 ATH)</span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <button
-                  type="button"
-                  className="btn btn-sm btn-primary"
-                  disabled={!globalDirty || globalSaving}
-                  onClick={handleSaveGlobal}
-                >
-                  {globalSaving ? "저장 중…" : "저장"}
-                </button>
-                <span style={{ fontSize: "0.82rem", color: "#64748b", fontWeight: 500 }}>
-                  마지막 저장: {data.global?.updated_at ? formatKstDateTime(data.global.updated_at) : "기록 없음"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <section className="appSection">
         <div className="card appCard">
           <div className="card-body appCardBodyTight">
@@ -271,9 +203,9 @@ export function SettingsManager() {
                     const dirty = isDirty(id, entry.settings);
                     const isAll = id === "__all__";
 
-                    // 실시간 가중 비중 계산
+                    // 실시간 가중 비중 계산 (풀별 추세 가중치 기준)
                     const h = Number(draft["HOLDING_BONUS_SCORE"] || 0);
-                    const r = Number(globalRatio || 80);
+                    const r = Number(draft["TREND_WEIGHT_RATIO"] || 0);
                     const w_trend = (100 - h) * (r / 100);
                     const w_ath = (100 - h) * (1 - r / 100);
                     const w_hold = h;
@@ -316,8 +248,14 @@ export function SettingsManager() {
                                 className="form-control form-control-sm"
                                 style={{ textAlign: "right" }}
                                 value={draft[key]}
-                                min={1}
-                                max={key === "MA_MONTHS" ? monthsMax : key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}
+                                min={key === "TREND_WEIGHT_RATIO" ? 0 : 1}
+                                max={
+                                  key === "MA_MONTHS"
+                                    ? monthsMax
+                                    : key === "RSI_LIMIT" || key === "TOP_N_HOLD" || key === "TREND_WEIGHT_RATIO"
+                                      ? 100
+                                      : undefined
+                                }
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               />
                             )}

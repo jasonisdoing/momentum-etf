@@ -37,11 +37,11 @@ def _build_rank_cache_key(
     as_of_date: pd.Timestamp | None,
     ma_rules: list[dict[str, Any]],
     held_bonus_score: int,
-    ath_bonus: int,
+    trend_weight_ratio: int,
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
     ma_rule_key = tuple((str(rule.get("ma_type") or ""), int(rule.get("ma_months") or 0)) for rule in ma_rules)
-    return ticker_type, as_of_date_key, ma_rule_key, int(held_bonus_score), int(ath_bonus)
+    return ticker_type, as_of_date_key, ma_rule_key, int(held_bonus_score), int(trend_weight_ratio)
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
@@ -249,7 +249,7 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "icon": str(cfg.get("icon") or ""),
             "country_code": str(cfg.get("country_code") or ""),
             "holding_bonus_score": int(cfg["settings"].get("HOLDING_BONUS_SCORE", 0)),
-            "ath_bonus": int(cfg["settings"].get("ATH_BONUS", 0)),
+            "trend_weight_ratio": int(cfg["settings"]["TREND_WEIGHT_RATIO"]),
             "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
             "rsi_limit": (
                 float(cfg["settings"]["RSI_LIMIT"])
@@ -268,7 +268,7 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
         "icon": "🌐",
         "country_code": all_country_code,
         "holding_bonus_score": int(all_settings["HOLDING_BONUS_SCORE"]),
-        "ath_bonus": int(all_settings.get("ATH_BONUS", 0)),
+        "trend_weight_ratio": int(all_settings["TREND_WEIGHT_RATIO"]),
         "top_n_hold": int(all_settings["TOP_N_HOLD"]),
         "rsi_limit": float(all_settings["RSI_LIMIT"]),
         "type_source": "",
@@ -547,7 +547,7 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
         "held_bonus_score": int(selected_config["holding_bonus_score"]),
-        "ath_bonus": int(selected_config.get("ath_bonus", 0)),
+        "trend_weight_ratio": int(selected_config["trend_weight_ratio"]),
     }
 
 
@@ -557,8 +557,8 @@ def _build_all_ticker_type_rankings(
     include_ticker_types: list[str],
     ma_rules: list[dict[str, Any]],
     selected_as_of_date: pd.Timestamp | None,
-    ath_bonus: float | None = None,
     held_bonus_score: float | None = None,
+    trend_weight_ratio: float | None = None,
 ) -> pd.DataFrame:
     frames: list[pd.DataFrame] = []
     missing_tickers: list[str] = []
@@ -581,33 +581,27 @@ def _build_all_ticker_type_rankings(
             continue
         source_name = _strip_pool_order_prefix(str(config.get("name") or source_ticker_type))
         
-        # 툴바 조작 오버라이드가 있으면 우선 적용하고, 없으면 DB 설정을 가져온다.
-        if ath_bonus is not None:
-            pool_ath_bonus = float(ath_bonus)
+        # 툴바 조작 오버라이드가 있으면 우선 적용하고, 없으면 풀별 DB(pool_settings) 설정을 쓴다.
+        # (DB 값 누락 시 명시적 에러 — fallback 없음.)
+        from utils.settings_loader import get_ticker_type_settings
+
+        pool_settings = get_ticker_type_settings(source_ticker_type)
+        if trend_weight_ratio is not None:
+            pool_trend_weight_ratio = float(trend_weight_ratio)
         else:
-            try:
-                from utils.settings_loader import get_ticker_type_settings
-                pool_settings = get_ticker_type_settings(source_ticker_type)
-                pool_ath_bonus = float(pool_settings.get("ATH_BONUS", 0.0))
-            except Exception:
-                pool_ath_bonus = 0.0
+            pool_trend_weight_ratio = float(pool_settings["TREND_WEIGHT_RATIO"])
 
         if held_bonus_score is not None:
             pool_holding_bonus = float(held_bonus_score)
         else:
-            try:
-                from utils.settings_loader import get_ticker_type_settings
-                pool_settings = get_ticker_type_settings(source_ticker_type)
-                pool_holding_bonus = float(pool_settings.get("HOLDING_BONUS_SCORE", 0.0))
-            except Exception:
-                pool_holding_bonus = 0.0
+            pool_holding_bonus = float(pool_settings["HOLDING_BONUS_SCORE"])
 
         source_df = build_ticker_type_rankings(
             source_ticker_type,
             ma_rules=ma_rules,
             as_of_date=selected_as_of_date,
-            ath_bonus=pool_ath_bonus,
             held_bonus_score=pool_holding_bonus,
+            trend_weight_ratio=pool_trend_weight_ratio,
         )
         for ticker in source_df.attrs.get("missing_tickers") or []:
             missing_tickers.append(f"{source_name}:{ticker}")
@@ -670,7 +664,7 @@ def _compute_rank_data_payload(
     ma_rules: list[dict[str, Any]],
     selected_as_of_date: pd.Timestamp | None,
     bonus_score: int,
-    ath_bonus: float = 0.0,
+    trend_weight_ratio: float,
 ) -> dict[str, Any]:
     is_all_ticker_type = selected_ticker_type == ALL_TICKER_TYPE
     if is_all_ticker_type:
@@ -680,16 +674,16 @@ def _compute_rank_data_payload(
             include_ticker_types=[str(ticker_type) for ticker_type in all_settings["include"]],
             ma_rules=ma_rules,
             selected_as_of_date=selected_as_of_date,
-            ath_bonus=ath_bonus,
             held_bonus_score=bonus_score,
+            trend_weight_ratio=trend_weight_ratio,
         )
     else:
         dataframe = build_ticker_type_rankings(
             selected_ticker_type,
             ma_rules=ma_rules,
             as_of_date=selected_as_of_date,
-            ath_bonus=ath_bonus,
             held_bonus_score=bonus_score,
+            trend_weight_ratio=trend_weight_ratio,
         )
     effective_as_of_date = selected_as_of_date
     raw_as_of_date = dataframe.attrs.get("as_of_date")
@@ -723,16 +717,16 @@ def _compute_rank_data_payload(
                 include_ticker_types=[str(ticker_type) for ticker_type in all_settings["include"]],
                 ma_rules=ma_rules,
                 selected_as_of_date=previous_trading_day,
-                ath_bonus=ath_bonus,
                 held_bonus_score=bonus_score,
+                trend_weight_ratio=trend_weight_ratio,
             )
         else:
             previous_dataframe = build_ticker_type_rankings(
                 selected_ticker_type,
                 ma_rules=ma_rules,
                 as_of_date=previous_trading_day,
-                ath_bonus=ath_bonus,
                 held_bonus_score=bonus_score,
+                trend_weight_ratio=trend_weight_ratio,
             )
         previous_rows = _build_score_ranked_rows(previous_dataframe)
         previous_rank_map = _build_rank_map_from_rows(previous_rows)
@@ -744,16 +738,16 @@ def _compute_rank_data_payload(
                 include_ticker_types=[str(ticker_type) for ticker_type in all_settings["include"]],
                 ma_rules=ma_rules,
                 selected_as_of_date=weekly_rank_trading_day,
-                ath_bonus=ath_bonus,
                 held_bonus_score=bonus_score,
+                trend_weight_ratio=trend_weight_ratio,
             )
         else:
             weekly_dataframe = build_ticker_type_rankings(
                 selected_ticker_type,
                 ma_rules=ma_rules,
                 as_of_date=weekly_rank_trading_day,
-                ath_bonus=ath_bonus,
                 held_bonus_score=bonus_score,
+                trend_weight_ratio=trend_weight_ratio,
             )
         weekly_rows = _build_score_ranked_rows(weekly_dataframe)
         weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
@@ -785,7 +779,7 @@ def _compute_rank_data_payload(
         ),
         "rows": _rows_with_missing_placeholders(dataframe, selected_ticker_type, is_all_ticker_type),
         "held_bonus_score": bonus_score,
-        "ath_bonus": ath_bonus,
+        "trend_weight_ratio": trend_weight_ratio,
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),
         "cache_updated_at": _serialize_datetime(dataframe.attrs.get("cache_updated_at")),
@@ -813,7 +807,7 @@ def load_rank_data(
     ma_rule_override: dict[str, Any] | None = None,
     as_of_date: str | None = None,
     held_bonus_score: int | None = None,
-    ath_bonus: int | None = None,
+    trend_weight_ratio: int | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -852,14 +846,17 @@ def load_rank_data(
     else:
         bonus_score = int(held_bonus_score)
 
-    if ath_bonus is None:
-        if selected_config is None:
-            raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
-        ath_val = int(selected_config.get("ath_bonus", 0))
+    # TREND_WEIGHT_RATIO: 툴바 오버라이드가 있으면 우선, 없으면 풀별 DB(pool_settings) 값.
+    if selected_config is None:
+        raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
+    if trend_weight_ratio is None:
+        trend_ratio = int(selected_config["trend_weight_ratio"])
     else:
-        ath_val = int(ath_bonus)
+        trend_ratio = int(trend_weight_ratio)
+        if not (0 <= trend_ratio <= 100):
+            raise ValueError(f"추세 가중치(%)는 0 ~ 100 범위여야 합니다: {trend_ratio}")
 
-    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules, bonus_score, ath_val)
+    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules, bonus_score, trend_ratio)
     cached_payload = _get_rank_data_cache(cache_key)
     if cached_payload is not None:
         return cached_payload
@@ -877,7 +874,7 @@ def load_rank_data(
             ma_rules=ma_rules,
             selected_as_of_date=selected_as_of_date,
             bonus_score=bonus_score,
-            ath_bonus=ath_val,
+            trend_weight_ratio=trend_ratio,
         )
         _set_rank_data_cache(cache_key, payload)
         return payload

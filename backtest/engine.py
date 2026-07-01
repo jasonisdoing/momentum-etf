@@ -38,13 +38,13 @@ from utils.formatters import format_pct_change, format_price, format_trading_day
 from utils.report import render_table_eaw
 from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
-from utils.pool_settings_store import get_global_score_trend_weight_ratio
 
 logger = logging.getLogger(__name__)
 RSI_PERIOD = 14
 ALL_POOL_ID = "all"
 
 # ----------------------------- 헬퍼 ----------------------------- #
+
 
 def _select_close_column(columns: list[str]) -> str:
     for candidate in ("unadjusted_close", "Close", "close"):
@@ -363,7 +363,7 @@ _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
 _W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
-# ATH(52주 고점) 근접도 단면 백분위 [일자 × 티커] — ATH_BONUS 가산용 (close 만으로 결정, MA 무관).
+# ATH(52주 고점) 근접도 단면 백분위 [일자 × 티커] — ATH 가중 가산용 (close 만으로 결정, MA 무관).
 _W_ATH_PCT_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 
 
@@ -418,10 +418,13 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         w_ath=w_ath,
         ath_pct_values=_W_ATH_PCT_VALUES,
     )
+    # 추세 가중치(%) 복원: w_trend/w_ath 는 (100-보유)에 비율을 곱한 값이므로 비율로 되돌린다.
+    side_sum = w_trend + w_ath
+    trend_weight_ratio = round(100.0 * w_trend / side_sum) if side_sum > 0 else 0
     return {
         "TOP_N_HOLD": top_n,
         "HOLDING_BONUS_SCORE": w_hold * 100.0,
-        "ATH_BONUS": w_ath * 100.0,
+        "TREND_WEIGHT_RATIO": trend_weight_ratio,
         "W_TREND": w_trend,
         "W_HOLD": w_hold,
         "W_ATH": w_ath,
@@ -732,6 +735,7 @@ def _write_results_file(
     ma_types: list[str],
     ma_months_list: list[int],
     hold_pct_values: list[float],
+    trend_ratio_values: list[float],
     rsi_limits: list[float] | None,
     total_combos: int,
     done_count: int,
@@ -775,14 +779,14 @@ def _write_results_file(
         f"x MA_TYPE {len(ma_types)}개 x MA_MONTHS {len(ma_months_list)}개 "
         f"{f'x RSI_LIMIT {len(rsi_limits)}개 ' if rsi_limits is not None else ''}"
         f"x 보유보너스(%) {len(hold_pct_values)}개 "
+        f"x 추세가중치(%) {len(trend_ratio_values)}개 "
         f"= {total_combos}개 조합"
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
-    ratio = get_global_score_trend_weight_ratio()
     lines.append(
-        f'"WEIGHT": "추세:ATH = {ratio:g}:{100 - ratio:g} '
-        f'(나머지 = 100-보유), 보유보너스(%)만 탐색",'
+        f'"WEIGHT": "추세:ATH = r:(100-r), r={[int(v) for v in trend_ratio_values]} 탐색 '
+        f'(나머지 = 100-보유)",'
     )
     lines.append(f'"MA_TYPE": {ma_types},')
     lines.append(f'"MA_MONTHS": {ma_months_list},')
@@ -801,10 +805,11 @@ def _write_results_file(
         out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    # 추세=ATH=(100-보유)/2 로 묶여 있어 W_TREND·W_ATH 는 보유%만 알면 결정되므로 표에서 생략한다.
+    # W_TREND·W_ATH 절대값 대신 (보유%, 추세:ATH 비율) 두 축으로 표기한다.
     headers = [
         "TOP_N",
         "W_HOLD",
+        "TR:ATH",
         "MA_TYPE",
         "MA_M",
         "RSI",
@@ -813,10 +818,11 @@ def _write_results_file(
         "MDD(%)",
         "Trades",
     ]
-    aligns = ["left", "right", "left", "left", "left", "right", "right", "right", "right"]
+    aligns = ["left", "right", "right", "left", "left", "left", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
+            "-",
             "-",
             "-",
             "-",
@@ -832,10 +838,12 @@ def _write_results_file(
     if benchmark_metric_row is not None:
         formatted_rows.append(benchmark_metric_row)
     for r in top_rows:
+        ratio = int(r.get("TREND_WEIGHT_RATIO", 0))
         formatted_rows.append(
             [
                 str(r["TOP_N_HOLD"]),
                 f"{float(r.get('W_HOLD', 0.0)):.2f}",
+                f"{ratio}:{100 - ratio}",
                 r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
                 "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
@@ -1790,6 +1798,13 @@ def run_backtest(pool_id: str) -> Path:
     # 보유보너스(%) 탐색값 — DB(backtest_config)의 HOLDING_BONUS_SCORE 를 단일 소스로 사용.
     # 각 보유값 h(%)에 대해 추세 = ATH = (100 - h) / 2 % 로 묶어 가중치 그리드를 만든다.
     hold_pct_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
+    # 추세 가중치(%) 탐색값 — 보유 제외 나머지 비중 중 추세 몫. ATH 몫 = 100 - 이 값.
+    if "TREND_WEIGHT_RATIO" not in cfg:
+        raise ValueError(
+            f"backtest_config['{pool_id}'] 에 TREND_WEIGHT_RATIO 리스트가 없습니다. "
+            "백테스트 탐색 공간 화면에서 저장해주세요."
+        )
+    trend_ratio_values = [float(v) for v in cfg["TREND_WEIGHT_RATIO"]]
     rsi_limits: list[float] | None = None
     if "RSI_LIMIT" in cfg:
         rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
@@ -1994,18 +2009,20 @@ def run_backtest(pool_id: str) -> Path:
             "TRADES": benchmark_trades,
         }
 
-    # 가중치 그리드 생성: 보유 비중만 탐색공간(DB의 보유보너스(%))에서 가져오고,
-    # 나머지(100-보유)를 추세 : ATH = ratio% : (100-ratio)% 로 나눈다.
-    # 각 보유값 h(%) → 추세 = (100-h)×(ratio/100), ATH = (100-h)×(1-ratio/100). 합계는 항상 100%.
-    trend_share = get_global_score_trend_weight_ratio() / 100.0
+    # 가중치 그리드 생성: 보유보너스(%) × 추세 가중치(%) 를 탐색공간(DB)에서 가져와 조합한다.
+    # 각 (보유 h, 추세비율 r) → 추세 = (100-h)×(r/100), ATH = (100-h)×(1-r/100). 합계는 항상 100%.
     weight_combos = []
     for hold in hold_pct_values:
         remainder = 100.0 - hold
         if remainder < 0:
             raise ValueError(f"보유보너스(%)는 100 이하여야 합니다: {hold}")
-        w_trend = remainder * trend_share
-        w_ath = remainder * (1.0 - trend_share)
-        weight_combos.append((w_trend / 100.0, hold / 100.0, w_ath / 100.0))
+        for ratio in trend_ratio_values:
+            if not (0 <= ratio <= 100):
+                raise ValueError(f"TREND_WEIGHT_RATIO 는 0 ~ 100 범위여야 합니다: {ratio}")
+            trend_share = ratio / 100.0
+            w_trend = remainder * trend_share
+            w_ath = remainder * (1.0 - trend_share)
+            weight_combos.append((w_trend / 100.0, hold / 100.0, w_ath / 100.0))
 
     # 조합 생성
     raw_combos = list(
@@ -2039,6 +2056,7 @@ def run_backtest(pool_id: str) -> Path:
         "ma_types": ma_types,
         "ma_months_list": ma_months_list,
         "hold_pct_values": hold_pct_values,
+        "trend_ratio_values": trend_ratio_values,
         "rsi_limits": rsi_limits,
         "total_combos": total_combos,
         "period_start": period_start,
@@ -2129,11 +2147,11 @@ def run_backtest(pool_id: str) -> Path:
             if rsi_val is None:
                 rsi_val = 100
 
-            # 추세=ATH=(100-보유)/2 구조이므로 보유보너스(%)만 라이브에 반영한다.
-            # (ATH 비중은 보유%에서 유도되므로 별도 저장하지 않는다.)
+            # 최적 (보유%, 추세가중치%) 를 라이브에 반영한다. ATH 비중 = (100-보유)×(100-추세비율)/100.
             db_values = {
                 "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
                 "HOLDING_BONUS_SCORE": int(best_result["HOLDING_BONUS_SCORE"]),
+                "TREND_WEIGHT_RATIO": int(best_result["TREND_WEIGHT_RATIO"]),
                 "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
                 "RSI_LIMIT": int(rsi_val),
