@@ -8,7 +8,10 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from services.price_service import get_realtime_snapshot, get_worldstock_snapshot, get_yahoo_symbol_snapshot
-from utils.cache_utils import load_cached_close_series_bulk_with_fallback
+from utils.cache_utils import (
+    load_cached_close_series_bulk_with_fallback,
+    load_cached_frames_bulk_with_fallback,
+)
 from utils.formatters import clean_holding_display_name
 from utils.logger import get_app_logger
 
@@ -41,6 +44,7 @@ def enrich_component_prices(
     preserve_existing: bool = False,
     cumulative_base_date: str | None = None,
     component_price_snapshot: dict[str, dict[str, Any]] | None = None,
+    use_open_baseline: bool = False,
 ) -> tuple[list[dict[str, Any]], str | None]:
     """ETF 구성종목에 현재가/등락률/통화 정보를 붙인다."""
     holdings_list = [dict(item) for item in holdings]
@@ -108,7 +112,7 @@ def enrich_component_prices(
     worldstock_price_map = _safe_fetch_worldstock(sorted(set(worldstock_codes)))
     yahoo_exchange_price_map = _safe_fetch_yahoo(sorted(set(yahoo_exchange_symbols)))
     korean_baseline_price_map = _safe_fetch_cached_baseline_prices(
-        "kor", korean_baseline_tickers, cumulative_base_date
+        "kor", korean_baseline_tickers, cumulative_base_date, use_open=use_open_baseline
     )
     baseline_price_map = _safe_fetch_yahoo_baseline_prices(
         baseline_yahoo_symbols,
@@ -436,26 +440,62 @@ def _safe_fetch_cached_baseline_prices(
     ticker_type: str,
     tickers: list[str],
     base_date: str | None,
+    use_open: bool = False,
 ) -> dict[str, dict[str, Any]]:
     if not tickers or not base_date:
         return {}
     try:
-        return _fetch_cached_baseline_prices(ticker_type, tickers, base_date)
+        return _fetch_cached_baseline_prices(ticker_type, tickers, base_date, use_open=use_open)
     except Exception as exc:
         logger.warning("구성종목 국내 기준일 가격 조회 실패(base_date=%s): %s", base_date, exc)
         return {}
+
+
+def _fetch_cached_baseline_open_prices(
+    ticker_type: str,
+    normalized_tickers: list[str],
+    base_ts: pd.Timestamp,
+) -> dict[str, dict[str, Any]]:
+    """base_date 당일 시초가(Open)를 baseline 으로 반환한다(당일 장중 변동용)."""
+    frames = load_cached_frames_bulk_with_fallback(ticker_type, normalized_tickers)
+    result: dict[str, dict[str, Any]] = {}
+    for ticker, frame in frames.items():
+        if frame is None or frame.empty:
+            continue
+        open_col = "시가" if "시가" in frame.columns else "Open" if "Open" in frame.columns else None
+        if open_col is None:
+            continue
+        idx = pd.to_datetime(frame.index)
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        idx = idx.normalize()
+        open_series = pd.to_numeric(frame[open_col], errors="coerce")
+        open_at_base = open_series[idx == base_ts].dropna()
+        open_at_base = open_at_base[open_at_base > 0]
+        if open_at_base.empty:
+            continue
+        result[str(ticker).strip().upper()] = {
+            "price": float(open_at_base.iloc[-1]),
+            "date": base_ts.strftime("%Y-%m-%d"),
+        }
+    return result
 
 
 def _fetch_cached_baseline_prices(
     ticker_type: str,
     tickers: list[str],
     base_date: str,
+    use_open: bool = False,
 ) -> dict[str, dict[str, Any]]:
     normalized_tickers = sorted({str(ticker or "").strip().upper() for ticker in tickers if str(ticker or "").strip()})
     if not normalized_tickers:
         return {}
 
     base_ts = pd.Timestamp(base_date).normalize()
+    # base_date 가 당일이면 시초가 baseline 을 써서 장중 변동을 보여준다(국내 한정).
+    if use_open:
+        return _fetch_cached_baseline_open_prices(ticker_type, normalized_tickers, base_ts)
+
     close_series_map = load_cached_close_series_bulk_with_fallback(ticker_type, normalized_tickers)
     result: dict[str, dict[str, Any]] = {}
     for ticker, series in close_series_map.items():
