@@ -408,7 +408,7 @@ export function MarketTrendChart({
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rangeKey, setRangeKey] = useState<ChartRangeKey>("ytd");
+  const [rangeKey, setRangeKey] = useState<ChartRangeKey>("6m");
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const bandOverlayRef = useRef<HTMLDivElement | null>(null);
   const labelOverlayRef = useRef<HTMLDivElement | null>(null);
