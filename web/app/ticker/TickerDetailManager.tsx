@@ -210,6 +210,29 @@ function formatEokFromKrw(value: number | null): string {
   return formatEok(value / 100_000_000);
 }
 
+function formatUsdMarketCap(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "N/A";
+  }
+  if (value >= 1_000_000_000_000) {
+    return `${formatNumber(value / 1_000_000_000_000, 2)}조 달러`;
+  }
+  if (value >= 100_000_000) {
+    return `${formatNumber(value / 100_000_000, 1)}억 달러`;
+  }
+  return `${formatNumber(value, 0)}달러`;
+}
+
+function formatAudMarketCap(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "N/A";
+  }
+  if (value >= 100_000_000) {
+    return `${formatNumber(value / 100_000_000, 1)}억 AUD`;
+  }
+  return `${formatNumber(value, 0)} AUD`;
+}
+
 function formatSignedPriceDelta(value: number | null, countryCode: string): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "N/A";
   const absValue = Math.abs(value);
@@ -1021,9 +1044,6 @@ export function TickerDetailManager({
     if (volume === null || Number.isNaN(volume)) {
       return "-";
     }
-    if (volume >= 10_000) {
-      return `${formatNumber(Math.floor(volume / 10_000), 0)}만`;
-    }
     return formatNumber(volume, 0);
   }, [etfInfo?.volume, lastPriceRow]);
 
@@ -1292,7 +1312,18 @@ export function TickerDetailManager({
                               </div>
                               <div className="tickerDetailInfoMetric">
                                 <span className="tickerDetailInfoLabel">시가총액</span>
-                                <strong>{formatEokFromKrw(etfInfo?.market_cap_krw ?? null)}</strong>
+                                <strong>
+                                  {(() => {
+                                    const tickerUpper = String(qTicker || "").toUpperCase();
+                                    const countryCode = String(selectedTicker?.country_code ?? qCountryCode ?? "").toLowerCase();
+                                    const isUs = countryCode === "us";
+                                    const isAu = countryCode === "au" || tickerUpper.startsWith("ASX:") || tickerUpper.endsWith(".AX");
+                                    const capVal = etfInfo?.market_cap_krw ?? null;
+                                    if (isUs) return formatUsdMarketCap(capVal);
+                                    if (isAu) return formatAudMarketCap(capVal);
+                                    return formatEokFromKrw(capVal);
+                                  })()}
+                                </strong>
                               </div>
                               <div className="tickerDetailInfoMetric">
                                 <span className="tickerDetailInfoLabel">배당수익률</span>

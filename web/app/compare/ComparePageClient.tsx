@@ -282,6 +282,29 @@ function formatEokFromKrw(value: number | null | undefined): string {
   return `${formatNumber(jo, 0)}조 ${formatNumber(eok, 0)}억`;
 }
 
+function formatUsdMarketCap(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  if (value >= 1_000_000_000_000) {
+    return `${formatNumber(value / 1_000_000_000_000, 2)}조 달러`;
+  }
+  if (value >= 100_000_000) {
+    return `${formatNumber(value / 100_000_000, 1)}억 달러`;
+  }
+  return `${formatNumber(value, 0)}달러`;
+}
+
+function formatAudMarketCap(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  if (value >= 100_000_000) {
+    return `${formatNumber(value / 100_000_000, 1)}억 AUD`;
+  }
+  return `${formatNumber(value, 0)} AUD`;
+}
+
 function formatVolume(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   if (value >= 10_000) return `${formatNumber(Math.floor(value / 10_000), 0)}만`;
@@ -692,7 +715,20 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
   }
 
   if (metric === "시가총액") {
-    return <strong>{formatEokFromKrw(etfInfo?.market_cap_krw ?? null)}</strong>;
+    const country = String(product.item.country_code || "").toLowerCase();
+    const ticker = String(product.item.ticker || "").toUpperCase();
+    const isUs = country === "us";
+    const isAu = country === "au" || ticker.startsWith("ASX:") || ticker.endsWith(".AX");
+    const val = etfInfo?.market_cap_krw ?? null;
+    return (
+      <strong>
+        {isUs
+          ? formatUsdMarketCap(val)
+          : isAu
+          ? formatAudMarketCap(val)
+          : formatEokFromKrw(val)}
+      </strong>
+    );
   }
 
   if (metric === "배당 수익률") {

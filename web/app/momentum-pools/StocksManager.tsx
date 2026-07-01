@@ -288,6 +288,16 @@ function formatUsdMarketCap(value: number | null): string {
   return `${formatNumber(value, 0)}달러`;
 }
 
+function formatAudMarketCap(value: number | null): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  if (value >= 100_000_000) {
+    return `${formatNumber(value / 100_000_000, 1)}억 AUD`;
+  }
+  return `${formatNumber(value, 0)} AUD`;
+}
+
 function clampHeldBonusScore(value: number): number {
   if (Number.isNaN(value) || value < 0) {
     return 0;
@@ -1258,6 +1268,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     );
 
     const isUsTickerType = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us";
+    const isAuTickerType = String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "au";
     const infoColumns: ColDef<RankGridRow>[] = [
       {
         field: "배당률",
@@ -1285,8 +1296,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 132,
         width: 132,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) =>
-          isUsTickerType ? formatUsdMarketCap(params.value ?? null) : formatAssetInEok(params.value ?? null),
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          const val = params.value ?? null;
+          if (isUsTickerType) return formatUsdMarketCap(val);
+          if (isAuTickerType) return formatAudMarketCap(val);
+          return formatAssetInEok(val);
+        },
       },
       {
         field: "거래량",
