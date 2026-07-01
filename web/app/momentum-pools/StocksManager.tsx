@@ -342,7 +342,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [trendWeightRatio, setTrendWeightRatio] = useState(0);
-  const [trendRatioText, setTrendRatioText] = useState("0");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -626,14 +625,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   function applyTrendWeightRatioState(value: number) {
     setTrendWeightRatio(value);
-    setTrendRatioText(String(value));
   }
 
-  function commitTrendWeightRatio() {
-    const normalized = clampTrendWeightRatio(Number(trendRatioText));
-    const changed = normalized !== trendWeightRatio;
-    applyTrendWeightRatioState(normalized);
-    if (!changed) return;
+  function handleTrendWeightRatioChange(nextValue: number) {
+    const normalized = clampTrendWeightRatio(nextValue);
+    setTrendWeightRatio(normalized);
     void load({
       ticker_type: selectedTickerType,
       ma_rule_override: maRule ?? undefined,
@@ -1821,19 +1817,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">추세 가중치(%)</span>
-                    <input
-                      type="number"
-                      className="form-control"
-                      style={{ width: 88, textAlign: "right" }}
-                      min={0}
-                      max={100}
-                      value={trendRatioText}
-                      onChange={(event) => setTrendRatioText(event.target.value)}
-                      onBlur={commitTrendWeightRatio}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") (event.target as HTMLInputElement).blur();
-                      }}
-                    />
+                    <select
+                      className="form-select"
+                      value={String(trendWeightRatio)}
+                      onChange={(event) => handleTrendWeightRatioChange(Number(event.target.value))}
+                    >
+                      {([100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0].includes(trendWeightRatio)
+                        ? [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0]
+                        : [...[100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0], trendWeightRatio].sort((a, b) => b - a)
+                      ).map((ratio) => (
+                        <option key={ratio} value={ratio}>
+                          {ratio}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">컬럼</span>

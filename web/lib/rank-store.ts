@@ -7,7 +7,7 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
-  ath_bonus?: number;
+  trend_weight_ratio?: number;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -76,7 +76,7 @@ type RankData = {
   realtime_fetched_at: string | null;
   previous_trading_day: string | null;
   held_bonus_score: number;
-  ath_bonus: number;
+  trend_weight_ratio: number;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];
@@ -89,7 +89,7 @@ type RankToolbarData = {
   ma_type_options: string[];
   ma_months_max: number;
   held_bonus_score: number;
-  ath_bonus: number;
+  trend_weight_ratio: number;
 };
 
 export async function loadRankToolbarData(params?: {
@@ -109,7 +109,7 @@ export async function loadRankData(params?: {
   ma_rule_override?: RankMaRule;
   as_of_date?: string;
   held_bonus_score?: number;
-  ath_bonus?: number;
+  trend_weight_ratio?: number;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -121,8 +121,8 @@ export async function loadRankData(params?: {
   if (typeof params?.held_bonus_score === "number") {
     search.set("held_bonus_score", String(params.held_bonus_score));
   }
-  if (typeof params?.ath_bonus === "number") {
-    search.set("ath_bonus", String(params.ath_bonus));
+  if (typeof params?.trend_weight_ratio === "number") {
+    search.set("trend_weight_ratio", String(params.trend_weight_ratio));
   }
   if (params?.ma_rule_override) {
     search.set("ma_type", params.ma_rule_override.ma_type);
