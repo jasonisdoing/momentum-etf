@@ -59,6 +59,16 @@ function bonusOptions(current: string): number[] {
   return base;
 }
 
+/** 추세 가중치(%) 셀렉트 옵션 — 100~0 역순(10 단위). 현재값이 비표준이면 포함해 보존. */
+function ratioOptions(current: string): number[] {
+  const base = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
+  const cur = Number(current);
+  if (Number.isFinite(cur) && !base.includes(cur)) {
+    return [...base, cur].sort((a, b) => b - a);
+  }
+  return base;
+}
+
 function toDraft(settings: SettingsMap): RowDraft {
   return EDITABLE_KEYS.reduce((acc, key) => {
     const v = settings[key]?.value;
@@ -242,20 +252,26 @@ export function SettingsManager() {
                                   </option>
                                 ))}
                               </select>
+                            ) : key === "TREND_WEIGHT_RATIO" ? (
+                              <select
+                                className="form-select form-select-sm"
+                                value={draft[key]}
+                                onChange={(e) => updateDraft(id, key, e.target.value)}
+                              >
+                                {ratioOptions(draft[key]).map((ratio) => (
+                                  <option key={ratio} value={String(ratio)}>
+                                    {ratio}
+                                  </option>
+                                ))}
+                              </select>
                             ) : (
                               <input
                                 type="number"
                                 className="form-control form-control-sm"
                                 style={{ textAlign: "right" }}
                                 value={draft[key]}
-                                min={key === "TREND_WEIGHT_RATIO" ? 0 : 1}
-                                max={
-                                  key === "MA_MONTHS"
-                                    ? monthsMax
-                                    : key === "RSI_LIMIT" || key === "TOP_N_HOLD" || key === "TREND_WEIGHT_RATIO"
-                                      ? 100
-                                      : undefined
-                                }
+                                min={1}
+                                max={key === "MA_MONTHS" ? monthsMax : key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               />
                             )}
