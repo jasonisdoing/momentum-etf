@@ -32,16 +32,15 @@ from core.strategy.scoring import (
 )
 from services.price_service import get_realtime_snapshot
 from utils.backtest_config_store import load_backtest_config
-from utils.cache_utils import load_cached_frames_bulk_from_ticker_types, load_cached_frames_bulk_with_fallback
+from utils.cache_utils import load_cached_frames_bulk_with_fallback
 from utils.data_loader import get_exchange_rate_series, get_trading_days
 from utils.formatters import format_pct_change, format_price, format_trading_days
 from utils.report import render_table_eaw
-from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
+from utils.settings_loader import get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
 logger = logging.getLogger(__name__)
 RSI_PERIOD = 14
-ALL_POOL_ID = "all"
 
 # ----------------------------- 헬퍼 ----------------------------- #
 
@@ -122,18 +121,7 @@ def _resolve_slippage(pool_id: str) -> tuple[float, float]:
 
 def _resolve_slippage_for_backtest(pool_id: str, include_ticker_types: list[str]) -> tuple[float, float]:
     """백테스트 대상 종목풀의 매수/매도 슬리피지 비율을 반환한다."""
-    if pool_id != ALL_POOL_ID:
-        return _resolve_slippage(pool_id)
-
-    if pool_id in SLIPPAGE_CONFIG:
-        return _resolve_slippage(pool_id)
-
-    resolved = {_resolve_slippage(ticker_type) for ticker_type in include_ticker_types}
-    if len(resolved) != 1:
-        raise ValueError(
-            "SLIPPAGE_CONFIG['all'] 설정이 없고 all.include 종목풀들의 슬리피지가 서로 다릅니다."
-        )
-    return next(iter(resolved))
+    return _resolve_slippage(pool_id)
 
 
 def _resolve_top_n_hold(pool_id: str) -> int:
@@ -141,57 +129,19 @@ def _resolve_top_n_hold(pool_id: str) -> int:
 
     값이 DB 에 없으면 settings_loader 가 명시적 에러를 낸다(임의 기본값 없음).
     """
-    settings = get_all_pool_settings() if pool_id == ALL_POOL_ID else get_ticker_type_settings(pool_id)
+    settings = get_ticker_type_settings(pool_id)
     return int(settings["TOP_N_HOLD"])
 
 
 def _resolve_backtest_pool_inputs(pool_id: str) -> tuple[str, list[dict[str, Any]], list[str], str]:
     """백테스트용 국가 코드, 종목 목록, 캐시 키, 결과 파일 접두사를 만든다."""
-    if pool_id != ALL_POOL_ID:
-        settings = get_ticker_type_settings(pool_id)
-        country_code = str(settings.get("country_code") or "").strip().lower()
-        if not country_code:
-            raise ValueError(f"'{pool_id}' 설정에 country_code 가 없습니다.")
-        pool_order = int(settings.get("order", 0))
-        display_prefix = f"{pool_order}_{pool_id}" if pool_order > 0 else pool_id
-        return country_code, _exclude_fixed_holdings(get_etfs(pool_id)), [pool_id], display_prefix
-
-    all_settings = get_all_pool_settings()
-    include_ticker_types = [str(ticker_type).strip().lower() for ticker_type in all_settings["include"]]
-    included_settings = [get_ticker_type_settings(ticker_type) for ticker_type in include_ticker_types]
-    country_codes = {
-        str(settings.get("country_code") or "").strip().lower()
-        for settings in included_settings
-        if str(settings.get("country_code") or "").strip()
-    }
-    if len(country_codes) != 1:
-        raise ValueError(
-            "'all' 백테스트는 같은 country_code 종목풀만 지원합니다. "
-            f"현재 all.include={include_ticker_types}, country_codes={sorted(country_codes)}"
-        )
-
-    etfs: list[dict[str, Any]] = []
-    ticker_sources: dict[str, str] = {}
-    duplicated: list[str] = []
-    for ticker_type in include_ticker_types:
-        for item in _exclude_fixed_holdings(get_etfs(ticker_type)):
-            ticker = str(item.get("ticker") or "").strip().upper()
-            if not ticker:
-                continue
-            if ticker in ticker_sources:
-                duplicated.append(f"{ticker}({ticker_sources[ticker]}, {ticker_type})")
-                continue
-            ticker_sources[ticker] = ticker_type
-            new_item = dict(item)
-            new_item["source_ticker_type"] = ticker_type
-            etfs.append(new_item)
-
-    if duplicated:
-        joined = ", ".join(duplicated[:10])
-        suffix = "..." if len(duplicated) > 10 else ""
-        raise RuntimeError(f"'all' 백테스트 대상에 중복 티커가 있습니다: {joined}{suffix}")
-
-    return next(iter(country_codes)), etfs, include_ticker_types, "0_all"
+    settings = get_ticker_type_settings(pool_id)
+    country_code = str(settings.get("country_code") or "").strip().lower()
+    if not country_code:
+        raise ValueError(f"'{pool_id}' 설정에 country_code 가 없습니다.")
+    pool_order = int(settings.get("order", 0))
+    display_prefix = f"{pool_order}_{pool_id}" if pool_order > 0 else pool_id
+    return country_code, _exclude_fixed_holdings(get_etfs(pool_id)), [pool_id], display_prefix
 
 
 def _exclude_fixed_holdings(etfs: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1848,10 +1798,7 @@ def run_backtest(pool_id: str) -> Path:
     # OHLCV 캐시 로드
     load_tickers = sorted(set(tickers + ([benchmark_ticker] if benchmark_ticker else [])))
     logger.info("[%s] OHLCV 캐시 로드: %s tickers ...", pool_id, len(load_tickers))
-    if pool_id == ALL_POOL_ID:
-        frames = load_cached_frames_bulk_from_ticker_types(cache_ticker_types, load_tickers)
-    else:
-        frames = load_cached_frames_bulk_with_fallback(pool_id, load_tickers)
+    frames = load_cached_frames_bulk_with_fallback(pool_id, load_tickers)
     _augment_frames_with_intraday_open(frames, load_tickers, country_code, calendar_days[-1], today)
     missing = [t for t in tickers if t not in frames or frames[t] is None or frames[t].empty]
     if missing:
@@ -2156,7 +2103,7 @@ def run_backtest(pool_id: str) -> Path:
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
                 "RSI_LIMIT": int(rsi_val),
             }
-            target_pool_id = "__all__" if pool_id == "all" else pool_id
+            target_pool_id = pool_id
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 시도: %s (target_id=%s)", pool_id, db_values, target_pool_id)
             save_pool_settings(target_pool_id, db_values, save_method="백테스트 결과")
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 성공! (target_id=%s)", pool_id, target_pool_id)

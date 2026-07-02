@@ -40,7 +40,6 @@ type PoolEntry = {
 };
 
 type PoolSettingsResponse = {
-  all: PoolEntry;
   pools: PoolEntry[];
   constraints: { ma_types: string[]; ma_months_max: number; editable_keys: string[] };
   error?: string;
@@ -87,11 +86,9 @@ export function SettingsManager() {
 
   const rows = useMemo(() => {
     if (!data) return [] as { id: string; entry: PoolEntry }[];
-    const all = { id: data.all.pool_id ?? "__all__", entry: data.all };
-    const pools = [...data.pools]
+    return [...data.pools]
       .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
       .map((p) => ({ id: p.ticker_type ?? "", entry: p }));
-    return [all, ...pools];
   }, [data]);
 
   const load = useCallback(async () => {
@@ -105,7 +102,6 @@ export function SettingsManager() {
       }
       setData(payload);
       const nextDrafts: Record<string, RowDraft> = {};
-      nextDrafts[payload.all.pool_id ?? "__all__"] = toDraft(payload.all.settings);
       payload.pools.forEach((p) => {
         if (p.ticker_type) nextDrafts[p.ticker_type] = toDraft(p.settings);
       });
@@ -211,7 +207,6 @@ export function SettingsManager() {
                   {rows.map(({ id, entry }) => {
                     const draft = drafts[id] ?? toDraft(entry.settings);
                     const dirty = isDirty(id, entry.settings);
-                    const isAll = id === "__all__";
 
                     // 실시간 가중 비중 계산 (풀별 추세 가중치 기준)
                     const h = Number(draft["HOLDING_BONUS_SCORE"] || 0);
@@ -221,7 +216,7 @@ export function SettingsManager() {
                     const w_hold = h;
 
                     return (
-                      <tr key={id} style={isAll ? { background: "#f8fafc", fontWeight: 600 } : undefined}>
+                      <tr key={id}>
                         <td>
                           {entry.icon ? `${entry.icon} ` : ""}
                           {entry.name}

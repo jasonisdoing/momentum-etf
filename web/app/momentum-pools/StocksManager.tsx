@@ -132,7 +132,7 @@ const rankGridTheme = createAppGridTheme();
 const MAX_SELECTABLE_MA_MONTHS = 24;
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
 const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
-const DEFAULT_TICKER_TYPE = "all";
+const DEFAULT_TICKER_TYPE = "";
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];

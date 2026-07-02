@@ -283,6 +283,8 @@ def _build_item(
         "current_regime_days": None,
         # 현재 레짐이 상승이 아닐 때: 마지막 상승 구간 종료 후 경과 거래일 (12개월 내 상승 없으면 None)
         "days_since_last_up": None,
+        # 현재 레짐이 하락일 때: 마지막 중립 구간 종료 후 경과 거래일 (12개월 내 중립 없으면 None)
+        "days_since_last_neutral": None,
     }
     # 한국 인덱스는 네이버에서 받은 close_series 를 우선 사용한다.
     if kor_close is not None and not kor_close.empty:
@@ -344,15 +346,19 @@ def _build_item(
     if ranges:
         base["current_regime"] = ranges[-1]["regime"]
         base["current_regime_days"] = ranges[-1]["days"]
-        if ranges[-1]["regime"] != "accel_up":
+
+        def _days_since_last(target_regime: str) -> int | None:
             elapsed = 0
-            found_up = False
             for seg in reversed(ranges):
-                if seg["regime"] == "accel_up":
-                    found_up = True
-                    break
+                if seg["regime"] == target_regime:
+                    return elapsed
                 elapsed += int(seg["days"])
-            base["days_since_last_up"] = elapsed if found_up else None
+            return None
+
+        if ranges[-1]["regime"] != "accel_up":
+            base["days_since_last_up"] = _days_since_last("accel_up")
+        if ranges[-1]["regime"] == "accel_down":
+            base["days_since_last_neutral"] = _days_since_last("neutral")
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,

@@ -26,6 +26,7 @@ type MarketTrendItem = {
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
   days_since_last_up: number | null;
+  days_since_last_neutral: number | null;
 };
 
 type MainRow = MarketTrendItem & { rowType: "main"; id: string };
@@ -181,8 +182,8 @@ export function MarketTrendClient({
       {
         field: "name",
         headerName: "지수",
-        flex: 1,
-        minWidth: 95,
+        flex: 0.8,
+        minWidth: 85,
         sortable: true,
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const data = params.data;
@@ -199,8 +200,8 @@ export function MarketTrendClient({
       {
         field: "price",
         headerName: "현재가",
-        flex: 0.9,
-        minWidth: 90,
+        flex: 0.6,
+        minWidth: 78,
         sortable: true,
         type: "rightAligned",
         valueFormatter: (params: ValueFormatterParams<GridRow>) =>
@@ -209,16 +210,16 @@ export function MarketTrendClient({
       {
         field: "change_pct",
         headerName: "일간(%)",
-        flex: 0.7,
-        minWidth: 75,
+        flex: 0.5,
+        minWidth: 66,
         sortable: true,
         type: "rightAligned",
         cellRenderer: renderSignedPercentCell,
       },
       {
         headerName: "추세",
-        flex: 0.9,
-        minWidth: 95,
+        flex: 0.6,
+        minWidth: 80,
         sortable: true,
         headerClass: "marketTrendRegimeHeader",
         cellStyle: {
@@ -238,8 +239,8 @@ export function MarketTrendClient({
       {
         field: "current_regime_days",
         headerName: "기간(거래일)",
-        flex: 1.1,
-        minWidth: 170,
+        flex: 1.4,
+        minWidth: 240,
         sortable: true,
         cellStyle: {
           display: "flex",
@@ -251,15 +252,19 @@ export function MarketTrendClient({
         cellRenderer: (params: { value?: number | null; data?: MarketTrendItem }) => {
           const d = params.value;
           if (d === null || d === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
-          // 상승이 아닐 때는 '마지막 상승 추세 후 경과 거래일'을 보여준다.
-          if (params.data?.current_regime !== "accel_up") {
-            const since = params.data?.days_since_last_up;
-            if (since !== null && since !== undefined) {
-              return <span style={{ color: "#1f2937" }}>마지막 상승 추세 후 {since}일째</span>;
-            }
-            return <span style={{ color: "#adb5bd" }}>1년 내 상승 없음</span>;
+          const regime = params.data?.current_regime;
+          if (regime === "accel_up") {
+            return <span style={{ color: "#1f2937" }}>상승 {d}일째</span>;
           }
-          return <span style={{ color: "#1f2937" }}>{d}일째</span>;
+          const sinceUp = params.data?.days_since_last_up;
+          const upText = sinceUp !== null && sinceUp !== undefined ? `마지막 상승 후 ${sinceUp}일째` : "1년 내 상승 없음";
+          if (regime === "accel_down") {
+            const sinceNeutral = params.data?.days_since_last_neutral;
+            const neutralText =
+              sinceNeutral !== null && sinceNeutral !== undefined ? `, 마지막 중립 후 ${sinceNeutral}일째` : "";
+            return <span style={{ color: "#1f2937" }}>{upText}{neutralText}</span>;
+          }
+          return <span style={{ color: "#1f2937" }}>{upText}</span>;
         },
       },
       {
