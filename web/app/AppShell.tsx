@@ -256,16 +256,19 @@ export function AppShell({ children }: AppShellProps) {
   const [isDbError, setIsDbError] = useState(false);
   const isLoginPage = pathname === "/login";
 
-  const loadTopBarData = useCallback(async () => {
+  const loadTopBarData = useCallback(async (initial = false) => {
     if (isLoginPage) {
       return;
     }
 
     try {
-      setIsFxLoading(true);
-      setIsFearGreedLoading(true);
-      setIsVkospiLoading(true);
-      setIsDashboardSummaryLoading(true);
+      if (initial) {
+        setIsFxLoading(true);
+        setIsFearGreedLoading(true);
+        setIsVkospiLoading(true);
+        setIsDashboardSummaryLoading(true);
+        setIsNqLoading(true);
+      }
 
       const [fxResponse, fearGreedSummary, vkospiResponse, dashboardResponse, nqResponse] = await Promise.all([
         fetch("/api/fx", { cache: "no-store" }),
@@ -283,39 +286,44 @@ export function AppShell({ children }: AppShellProps) {
       const nqPayload = nqResponse?.ok ? ((await nqResponse.json()) as NqFutureSummary) : null;
 
       setFx(payload);
-      setIsFxLoading(false);
       setFearGreed(fearGreedSummary);
-      setIsFearGreedLoading(false);
       setVkospi(vkospiPayload);
-      setIsVkospiLoading(false);
       setDashboardSummary(dashboardPayload);
-      setIsDashboardSummaryLoading(false);
       setNqFuture(nqPayload);
-      setIsNqLoading(false);
+
+      if (initial) {
+        setIsFxLoading(false);
+        setIsFearGreedLoading(false);
+        setIsVkospiLoading(false);
+        setIsDashboardSummaryLoading(false);
+        setIsNqLoading(false);
+      }
     } catch {
       setFx(null);
-      setIsFxLoading(false);
       setFearGreed(null);
-      setIsFearGreedLoading(false);
       setVkospi(null);
-      setIsVkospiLoading(false);
       setDashboardSummary(null);
-      setIsDashboardSummaryLoading(false);
       setNqFuture(null);
-      setIsNqLoading(false);
+      if (initial) {
+        setIsFxLoading(false);
+        setIsFearGreedLoading(false);
+        setIsVkospiLoading(false);
+        setIsDashboardSummaryLoading(false);
+        setIsNqLoading(false);
+      }
     }
   }, [isLoginPage]);
 
   useEffect(() => {
-    void loadTopBarData();
+    void loadTopBarData(true);
 
     // 10초마다 상단 헤더 데이터(나스닥 선물, 환율 등)를 자동으로 갱신
     const timerId = setInterval(() => {
-      void loadTopBarData();
+      void loadTopBarData(false);
     }, 10000);
 
     function handlePageShow() {
-      void loadTopBarData();
+      void loadTopBarData(false);
     }
 
     window.addEventListener("pageshow", handlePageShow);
