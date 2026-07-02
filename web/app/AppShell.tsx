@@ -394,28 +394,25 @@ export function AppShell({ children }: AppShellProps) {
       : null;
 
   const periodProfits = dashboardSummary?.period_profits;
-  const renderPeriodRow = (label: string, pct: number | undefined) => (
-    <div className="appSidebarSentimentItem">
-      <span className="appSidebarSentimentLabel">
-        <span>{label}</span>
-      </span>
+  const renderPeriodItem = (label: string, pct: number | undefined) => (
+    <span className="topbarFxItem">
+      {label}:{" "}
       {isDashboardSummaryLoading ? (
-        <span className="topbarSpinner" aria-label={`${label} 로딩 중`} />
-      ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
-        <span className="appSidebarSentimentValue">
-          <strong className={getFxChangeClass(pct)}>{`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}</strong>
+        <span className="topbarFxLoading" aria-label={`${label} 로딩 중`}>
+          <span className="topbarSpinner" />
         </span>
+      ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
+        <strong className={getFxChangeClass(pct)} style={{ fontSize: "14.5px" }}>
+          {`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}
+        </strong>
       ) : (
         <strong>-</strong>
       )}
-    </div>
+    </span>
   );
 
   const sentimentWidget = (
     <div className="appSidebarSentiment">
-      {renderPeriodRow("금일", periodProfits?.daily?.return_pct)}
-      {renderPeriodRow("금주", periodProfits?.weekly?.return_pct)}
-      {renderPeriodRow("금월", periodProfits?.monthly?.return_pct)}
       <a
         href="https://fear-and-greed.jason.ai.kr"
         target="_blank"
@@ -573,6 +570,11 @@ export function AppShell({ children }: AppShellProps) {
                   <IconLayoutSidebarLeftCollapse size={18} stroke={1.9} />
                 )}
               </button>
+              <div className="topbarFx" style={{ marginLeft: "0.75rem" }}>
+                {renderPeriodItem("금일", periodProfits?.daily?.return_pct)}
+                {renderPeriodItem("금주", periodProfits?.weekly?.return_pct)}
+                {renderPeriodItem("금월", periodProfits?.monthly?.return_pct)}
+              </div>
               {dashboardSummary?.is_deploying ? (
                 <span
                   title="서버 배포 진행 중 — DB가 일시적으로 느려질 수 있습니다"
