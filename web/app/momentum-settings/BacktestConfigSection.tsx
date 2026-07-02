@@ -8,13 +8,20 @@ import { useToast } from "../components/ToastProvider";
 type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
   BENCHMARK?: Benchmark;
+  TOP_N_HOLD?: number[];
   HOLDING_BONUS_SCORE?: number[];
   TREND_WEIGHT_RATIO?: number[];
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
 };
-type PoolEntry = { pool_id: string; name: string; config: BtConfig; updated_at?: string | null };
+type PoolEntry = {
+  pool_id: string;
+  name: string;
+  config: BtConfig;
+  live_top_n_hold?: number | null;
+  updated_at?: string | null;
+};
 type ApiResponse = { pools?: PoolEntry[]; constraints?: { ma_types?: string[] }; error?: string };
 
 const inputStyle: React.CSSProperties = {
@@ -35,6 +42,10 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const c = pool.config;
   const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
   const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
+  // TOP_N_HOLD 초기값: 저장된 리스트가 없으면 종목풀 설정의 라이브 N 으로 시작.
+  const [topNText, setTopNText] = useState(
+    (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
+  );
   const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
   const [ratioText, setRatioText] = useState((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).join(", "));
   const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
@@ -68,11 +79,12 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     }
   };
 
+  const topNs = parseNums(topNText);
   const bonus = parseNums(bonusText);
   const ratios = parseNums(ratioText);
   const months = parseNums(monthsText);
   const rsi = parseNums(rsiText);
-  const combos = bonus.length * ratios.length * maSet.size * months.length * rsi.length;
+  const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -85,6 +97,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const save = async () => {
     const config: BtConfig = {
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
+      TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
       HOLDING_BONUS_SCORE: bonus,
       TREND_WEIGHT_RATIO: ratios.map((n) => Math.trunc(n)),
       MA_TYPE: [...maSet],
@@ -130,8 +143,13 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       </div>
 
       <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 84 }}>보유 종목수</span>
+        <input style={{ ...inputStyle, width: 110 }} placeholder="4, 5" value={topNText} onChange={(e) => setTopNText(e.target.value)} />
+      </div>
+
+      <div style={rowStyle}>
         <span style={{ ...labelStyle, width: 84 }}>보유보너스(%)</span>
-        <input style={{ ...inputStyle, width: 130 }} placeholder="0, 5, 10" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
+        <input style={{ ...inputStyle, width: 130 }} placeholder="0, 10, 20" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
         <span style={{ ...labelStyle, marginLeft: 8 }}>추세 가중치(%)</span>
         <input style={{ ...inputStyle, width: 140 }} placeholder="50, 60, 70, 80" value={ratioText} onChange={(e) => setRatioText(e.target.value)} />
         <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>ATH = (100−보유) × (100−추세비율)%</span>

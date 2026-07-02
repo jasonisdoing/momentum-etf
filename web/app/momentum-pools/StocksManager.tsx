@@ -1805,9 +1805,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       value={String(heldBonusScore)}
                       onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
                     >
-                      {([0, 5, 10].includes(heldBonusScore)
-                        ? [0, 5, 10]
-                        : [...[0, 5, 10], heldBonusScore].sort((a, b) => a - b)
+                      {([0, 10, 20].includes(heldBonusScore)
+                        ? [0, 10, 20]
+                        : [...[0, 10, 20], heldBonusScore].sort((a, b) => a - b)
                       ).map((score) => (
                         <option key={score} value={score}>
                           {score}
