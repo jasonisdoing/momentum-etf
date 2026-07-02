@@ -14,7 +14,6 @@
 
 종목풀(`pools.json`)은 등록된 전체 종목을 유니버스로 사용하고, `MA_TYPE`, `MA_MONTHS` 기준으로 각 종목의 점수를 계산합니다.
 버킷은 분류/표시용 참고 정보로만 사용합니다.
-`0. 전체` 가상 종목풀은 `all` 설정의 기준과 `all.include`에 명시한 종목풀만 합산합니다.
 
 ### 핵심 파라미터
 
@@ -23,7 +22,6 @@
 * `TOP_N_HOLD`: 보유 상위 종목 수
 * `HOLDING_BONUS_SCORE`: 보유보너스(%) — 보유 종목 점수 비중.
 * `TREND_WEIGHT_RATIO`: 추세 가중치(%) — 보유 제외 나머지 비중 중 추세 몫. 추세 = `(100−보유%)×r/100`, ATH = `(100−보유%)×(100−r)/100` (풀별 설정).
-* `all.include`: `0. 전체` 가상 종목풀 포함 대상
 * 위 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`TREND_WEIGHT_RATIO`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 DB `pool_settings` 가 단일 소스이며 종목풀 순위·설정 화면에서 편집한다.
 
 ### 동작 요약

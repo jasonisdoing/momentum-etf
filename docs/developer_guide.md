@@ -208,14 +208,6 @@ python infra/server_scheduler.py
 
 ```json
 {
-  "all": {
-    "TOP_N_HOLD": 3,
-    "HOLDING_BONUS_SCORE": 10,
-    "MA_TYPE": "ALMA",
-    "MA_MONTHS": 5,
-    "RSI_LIMIT": 100,
-    "include": ["kor_kr", "kor_us", "kor"]
-  },
   "pools": [
     {
       "order": 1,
@@ -235,7 +227,6 @@ python infra/server_scheduler.py
 
 검증 원칙(현재 운영):
 
-* 전체 종목풀: `all.TOP_N_HOLD`, `all.HOLDING_BONUS_SCORE`, `all.MA_TYPE`, `all.MA_MONTHS`, `all.RSI_LIMIT`, `all.include` 필수
 * 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
 * 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`TREND_WEIGHT_RATIO`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.

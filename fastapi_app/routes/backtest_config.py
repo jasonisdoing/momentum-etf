@@ -23,8 +23,6 @@ from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/backtest-config", tags=["backtest-config"])
 
-_ALL_POOL_ID = "all"
-
 
 class BacktestConfigUpdatePayload(BaseModel):
     pool_id: str
@@ -33,7 +31,7 @@ class BacktestConfigUpdatePayload(BaseModel):
 
 def _ordered_pools(db_pools: set[str]) -> list[str]:
     """all 을 맨 앞에, 그다음 ticker_type 순서로 정렬한다."""
-    order = [_ALL_POOL_ID] + [str(c["ticker_type"]) for c in load_ticker_type_configs()]
+    order = [str(c["ticker_type"]) for c in load_ticker_type_configs()]
     ordered = [p for p in order if p in db_pools]
     ordered += [p for p in sorted(db_pools) if p not in order]
     return ordered
@@ -47,7 +45,7 @@ def get_backtest_configs(_: None = Depends(require_internal_token)) -> dict[str,
 
     pools: list[dict[str, Any]] = []
     for pid in _ordered_pools(db_pools):
-        name = "전체 (가상 종목풀)" if pid == _ALL_POOL_ID else name_by_type.get(pid, pid)
+        name = name_by_type.get(pid, pid)
         pools.append(
             {
                 "pool_id": pid,

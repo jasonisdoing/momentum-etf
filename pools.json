@@ -1,11 +1,4 @@
 {
-  "all": {
-    "_comment_MA": "MA_TYPE/MA_MONTHS는 종목 순위(/순위 화면)와 시장지수 추세(/market-trend 드롭다운 초기값) 모두에 사용된다. 둘을 같은 기준으로 본다.",
-    "include": [
-      "kor_kr",
-      "kor_us"
-    ]
-  },
   "pools": [
     {
       "order": 1,

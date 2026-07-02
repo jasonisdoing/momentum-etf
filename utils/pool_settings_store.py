@@ -12,8 +12,7 @@ pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_sour
       쓴다. 저장한 프로세스는 즉시 무효화하고, 나머지는 TTL 내 자동 반영된다.
 
 컬렉션 문서 형태:
-    {_id: "__all__",  TOP_N_HOLD, HOLDING_BONUS_SCORE, TREND_WEIGHT_RATIO, MA_TYPE, MA_MONTHS, RSI_LIMIT, updated_at}
-    {_id: <ticker_type>, ...동일...}
+    {_id: <ticker_type>, TOP_N_HOLD, HOLDING_BONUS_SCORE, TREND_WEIGHT_RATIO, MA_TYPE, MA_MONTHS, RSI_LIMIT, updated_at}
 """
 
 from __future__ import annotations
@@ -27,8 +26,6 @@ from utils.logger import get_app_logger
 
 logger = get_app_logger()
 
-# 전체 가상 종목풀(all) 의 문서 id
-ALL_POOL_ID = "__all__"
 COLLECTION = "pool_settings"
 
 # DB 오버라이드 대상 키
@@ -139,16 +136,14 @@ def seed_from_pools_json(*, overwrite: bool = False) -> dict[str, Any]:
     반환: {"seeded": [...], "skipped": [...], "overwritten": [...]} 요약.
     """
     from utils.db_manager import get_db_connection
-    from utils.settings_loader import _get_all_pool_settings_raw, _load_pool_configs
+    from utils.settings_loader import _load_pool_configs
 
     db = get_db_connection()
     if db is None:
         raise PoolSettingsError("DB 연결 실패로 시드할 수 없습니다.")
 
-    # 시드 대상: (_id, {5개 값}) 목록 구성
+    # 시드 대상: (_id, {편집값}) 목록 구성
     targets: list[tuple[str, dict[str, Any]]] = []
-    all_raw = _get_all_pool_settings_raw()
-    targets.append((ALL_POOL_ID, {k: all_raw[k] for k in OVERRIDABLE_KEYS if k in all_raw}))
     for config in _load_pool_configs():
         pid = str(config["ticker_type"])
         targets.append((pid, {k: config[k] for k in OVERRIDABLE_KEYS if k in config}))
@@ -227,17 +222,15 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
 def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
     """편집한 5개 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
 
-    pool_id 는 ALL_POOL_ID("__all__") 또는 유효한 ticker_type.
+    pool_id 는 유효한 ticker_type.
     반환: 저장된(정규화된) 값.
     """
     from utils.db_manager import get_db_connection
     from utils.settings_loader import list_available_ticker_types
 
-    norm_id = str(pool_id or "").strip()
-    if norm_id != ALL_POOL_ID:
-        norm_id = norm_id.lower()
-        if norm_id not in list_available_ticker_types():
-            raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
+    norm_id = str(pool_id or "").strip().lower()
+    if norm_id not in list_available_ticker_types():
+        raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
 
     cleaned = _validate_values(values)
 
