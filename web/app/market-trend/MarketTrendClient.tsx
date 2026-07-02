@@ -6,7 +6,6 @@ import type { ColDef, GridOptions, ValueFormatterParams } from "ag-grid-communit
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { PageFrame } from "../components/PageFrame";
-import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { SystemPoolGrid } from "../components/SystemPoolGrid";
 import { MarketTrendChart } from "./MarketTrendChart";
 
@@ -23,9 +22,10 @@ type MarketTrendItem = {
   score_range_low: number | null;
   // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
   pct_from_high: number | null;
-  // 현재 레짐(백엔드 slope 기반) + 지속일수
+  // 현재 레짐(백엔드 레벨 기반: 장기MA 방향 × 단기MA±버퍼 모멘텀) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
+  days_since_last_up: number | null;
 };
 
 type MainRow = MarketTrendItem & { rowType: "main"; id: string };
@@ -92,9 +92,9 @@ const REGIME_COLORS: Record<RegimeKey, string> = {
 
 // 하단 설명도 3단계로.
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
-  { key: "accel_up", text: "⬆️ 상승: 가격이 MA 위에 있고, 추세 기울기가 상승(강화) 중인 국면입니다." },
-  { key: "neutral", text: "➡️ 중립: 추세 기울기가 약화되거나 가격이 MA 주위에 수렴하는 대기 국면입니다." },
-  { key: "accel_down", text: "⬇️ 하락: 가격이 MA 아래에 있고, 추세 기울기가 하락(약화) 중인 위험 국면입니다." },
+  { key: "accel_up", text: "⬆️ 상승: 가격이 장기 MA 위에 있고, 단기 MA(+버퍼) 위 흐름을 지키고 있는 강세 국면입니다." },
+  { key: "neutral", text: "➡️ 중립: 장기 MA 위지만 단기 흐름이 꺾였거나, 장기 MA 아래에서 반등을 시도하는 대기 국면입니다." },
+  { key: "accel_down", text: "⬇️ 하락: 가격이 장기 MA 아래에 있고, 단기 MA 아래로도 밀려 있는 위험 국면입니다." },
 ];
 
 function renderRegimeCell(params: { data?: GridRow }) {
@@ -111,23 +111,19 @@ function renderRegimeCell(params: { data?: GridRow }) {
 }
 
 type MarketTrendClientProps = {
-  defaultMaType: string;
-  defaultMaMonths: number;
-  // config.py 단일 소스 (page.tsx 가 /defaults 응답으로 전달)
-  maTypes: string[];
-  maMonthsMax: number;
+  // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
+  maType: string;
+  maMonths: number;
+  shortMaDays: number;
   scoreAnchorPercentile: number;
 };
 
 export function MarketTrendClient({
-  defaultMaType,
-  defaultMaMonths,
-  maTypes,
-  maMonthsMax,
+  maType,
+  maMonths,
+  shortMaDays,
   scoreAnchorPercentile,
 }: MarketTrendClientProps) {
-  const [maType, setMaType] = useState<string>(defaultMaType);
-  const [maMonths, setMaMonths] = useState<number>(defaultMaMonths);
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -139,10 +135,7 @@ export function MarketTrendClient({
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch(
-          `/api/market-trend?ma_type=${encodeURIComponent(maType)}&ma_months=${encodeURIComponent(String(maMonths))}`,
-          { cache: "no-store" },
-        );
+        const response = await fetch("/api/market-trend", { cache: "no-store" });
         const payload = (await response.json()) as MarketTrendResponse;
         if (!response.ok) {
           throw new Error(payload.error ?? "시장지수 추세 데이터를 불러오지 못했습니다.");
@@ -163,7 +156,8 @@ export function MarketTrendClient({
     return () => {
       alive = false;
     };
-  }, [maType, maMonths]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rowData = useMemo<GridRow[]>(() => {
     const result: GridRow[] = [];
@@ -243,9 +237,9 @@ export function MarketTrendClient({
       },
       {
         field: "current_regime_days",
-        headerName: "기간",
-        flex: 0.6,
-        minWidth: 75,
+        headerName: "기간(거래일)",
+        flex: 1.1,
+        minWidth: 170,
         sortable: true,
         cellStyle: {
           display: "flex",
@@ -254,9 +248,17 @@ export function MarketTrendClient({
           textAlign: "center",
         },
         headerClass: "marketTrendRegimeHeader",
-        cellRenderer: (params: { value?: number | null }) => {
+        cellRenderer: (params: { value?: number | null; data?: MarketTrendItem }) => {
           const d = params.value;
           if (d === null || d === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
+          // 상승이 아닐 때는 '마지막 상승 추세 후 경과 거래일'을 보여준다.
+          if (params.data?.current_regime !== "accel_up") {
+            const since = params.data?.days_since_last_up;
+            if (since !== null && since !== undefined) {
+              return <span style={{ color: "#1f2937" }}>마지막 상승 추세 후 {since}일째</span>;
+            }
+            return <span style={{ color: "#adb5bd" }}>1년 내 상승 없음</span>;
+          }
           return <span style={{ color: "#1f2937" }}>{d}일째</span>;
         },
       },
@@ -293,8 +295,6 @@ export function MarketTrendClient({
           <MarketTrendChart
             ticker={data.parentTicker}
             name={data.parentName}
-            maType={maType}
-            maMonths={maMonths}
           />
         );
       },
@@ -320,12 +320,12 @@ export function MarketTrendClient({
         <div className="appHeaderMetric">
           <span>기준:</span>
           <span className="appHeaderMetricValue">
-            MA: {maType} {maMonths}개월
+            MA: {maType} {maMonths}개월 · 단기 {shortMaDays}일
           </span>
         </div>
       </div>
     ),
-    [maType, maMonths],
+    [maType, maMonths, shortMaDays],
   );
 
   return (
@@ -333,43 +333,6 @@ export function MarketTrendClient({
       <div className="appPageStack">
         <section className="appSection">
           <div className="card appCard">
-            <div className="card-header">
-              <ResponsiveFiltersSection>
-                <div className="appMainHeader">
-                  <div className="appMainHeaderLeft">
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">MA</span>
-                      <div className="rankRuleFieldRow">
-                        <select
-                          className="form-select"
-                          value={maType}
-                          onChange={(event) => setMaType(event.target.value)}
-                          disabled={loading}
-                        >
-                          {maTypes.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="form-select"
-                          value={String(maMonths)}
-                          onChange={(event) => setMaMonths(Number(event.target.value))}
-                          disabled={loading}
-                        >
-                          {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                            <option key={month} value={month}>
-                              {month}개월
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-              </ResponsiveFiltersSection>
-            </div>
             <div className="card-body appCardBodyTight">
               {error ? <div className="alert alert-danger mb-2">{error}</div> : null}
               <AppAgGrid<GridRow>
@@ -414,10 +377,11 @@ export function MarketTrendClient({
                   12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
                 </li>
                 <li>
-                  레짐: 방향(MA 위/아래) × 가속/감속으로 상승·조정·진정·하락 4단계로 분류합니다.
-                  가속/감속은 추세% 의 회귀 기울기로 판정하되 비대칭 창을 씁니다 — 강화는 짧은 창으로
-                  빨리(저점 반등 포착), 약화는 긴 창으로 천천히. 기울기가 작은 구간(데드밴드)에서는
-                  직전 상태를 유지해 잦은 라벨 변경(휩소)을 막습니다.
+                  레짐: 그날의 지수 위치만으로 상승·중립·하락 3단계로 분류합니다 (기울기 없음).
+                  방향은 장기 MA({maType} {maMonths}개월) 위/아래, 모멘텀은 단기 MA({shortMaDays}거래일, 동일 타입) ±1% 버퍼 기준 —
+                  종가가 버퍼 위에서 3거래일 연속 마감해야 강세로 승격되고(며칠짜리 반등 휩소 차단),
+                  버퍼 아래로 내려오면 즉시 약세, 버퍼 안에서는 직전 상태를 유지합니다.
+                  장기 MA 위+강세=상승, 위+약세=중립, 아래+강세=중립, 아래+약세=하락.
                 </li>
               </ul>
             </div>

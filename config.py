@@ -184,8 +184,6 @@ TRADING_DAYS_PER_MONTH = 20
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
 
-
-
 # -----------------------------------------------------------------------
 # 시장지수 추세 (/market-trend)
 # -----------------------------------------------------------------------
@@ -196,19 +194,21 @@ MIN_TRADING_DAYS = 5
 # 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
 MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
-# MA 기간 선택 드롭다운 상한 (개월). 1 ~ 이 값.
-MARKET_TREND_MA_MONTHS_MAX = 12
+# 시장지수 추세 화면 전용 장기 MA (화면 고정값 — 종목풀 설정과 무관).
+# 단기 MA 는 MARKET_TREND_REGIME_SHORT_MA_DAYS(거래일), 타입은 이 값을 따른다.
+MARKET_TREND_MA_TYPE = "ALMA"
+MARKET_TREND_MA_MONTHS = 6
 
-# 레짐(가속/감속) 판정: 추세%의 회귀 기울기 + 데드밴드(히스테리시스). 비대칭 창을 쓴다 —
-# "상승은 빠르게, 약화는 천천히".
-#   강화(상향) 판정: 최근 UP_WINDOW 거래일 기울기 > +DEADBAND  → 짧게 잡아 저점 반등을 빨리 포착
-#   약화(하향) 판정: 최근 WINDOW    거래일 기울기 < −DEADBAND  → 길게 잡아 노이즈에 안 흔들림
-#   둘 다 아니면 직전 상태 유지(라벨 휩소 차단).
-# 값↑(WINDOW) = 하향 더 둔감 / 값↓(UP_WINDOW) = 상승 전환 더 빠름(대신 바닥 false 상승↑) /
-# 값↑(DEADBAND) = 라벨이 덜 바뀜.
-MARKET_TREND_REGIME_SLOPE_UP_WINDOW = 5
-MARKET_TREND_REGIME_SLOPE_WINDOW = 7
-MARKET_TREND_REGIME_SLOPE_DEADBAND = 0.05
+# 레짐 판정(레벨 기반): 그날의 '지수 위치'만 본다 (기울기 없음).
+#   방향  = 지수 vs 장기MA(화면 선택 MA)  /  모멘텀 = 지수 vs 단기MA ± 버퍼
+#   강세 승격: 종가 > 단기MA×(1+버퍼) 가 CONFIRM_DAYS 연속일 때만 (며칠짜리 반등 휩소 차단)
+#   약세 전환: 종가 < 단기MA×(1−버퍼) → 즉시 (하락은 기민하게)
+#   버퍼 안: 직전 강/약세 상태 유지 (연속 카운트는 리셋)
+#   매핑: 장기MA 위+강세=상승, 위+약세=중립, 아래+강세=중립, 아래+약세=하락.
+# 값↑(SHORT_MA_DAYS)=모멘텀 더 느긋 / 값↑(BUFFER)=라벨 덜 바뀜 / 값↑(CONFIRM)=상승 승격 더 신중.
+MARKET_TREND_REGIME_SHORT_MA_DAYS = 20
+MARKET_TREND_REGIME_BUFFER_PCT = 1.0
+MARKET_TREND_REGIME_CONFIRM_DAYS = 3
 
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정

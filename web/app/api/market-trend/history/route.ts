@@ -8,8 +8,6 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const ticker = url.searchParams.get("ticker") ?? "";
-  const maType = url.searchParams.get("ma_type") ?? "ALMA";
-  const maMonths = url.searchParams.get("ma_months") ?? "4";
 
   if (!ticker) {
     return NextResponse.json({ error: "ticker 파라미터가 필요합니다." }, { status: 400 });
@@ -17,7 +15,7 @@ export async function GET(request: Request) {
 
   try {
     const data = await fetchFastApiJson<unknown>(
-      `/internal/market-trend/history?ticker=${encodeURIComponent(ticker)}&ma_type=${encodeURIComponent(maType)}&ma_months=${encodeURIComponent(maMonths)}`,
+      `/internal/market-trend/history?ticker=${encodeURIComponent(ticker)}`,
     );
     return jsonNoStore(data as Record<string, unknown>);
   } catch (error) {
