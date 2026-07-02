@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
+import { PeriodNavTabs } from "../components/PeriodNavTabs";
 import { WeeklyManager } from "./WeeklyManager";
 
 type WeeklyHeaderSummary = {
@@ -46,6 +47,7 @@ export function WeeklyPageClient() {
 
   return (
     <PageFrame title="주별" fullHeight fullWidth titleRight={titleRight}>
+      <PeriodNavTabs />
       <WeeklyManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );

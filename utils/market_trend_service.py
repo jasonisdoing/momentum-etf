@@ -4,6 +4,7 @@
 가격 소스:
     - 한국 인덱스(KOSPI/KOSPI200): 네이버 차트 API (yfinance 가 1거래일 지연되는 이슈 회피)
     - 미국 인덱스(S&P500/나스닥/나스닥100): yfinance
+    - 나스닥 100 선물: 이력은 yfinance(NQ=F), 최신 봉은 토스(RFU.NQc1, REAL_TIME)로 보강
 MA 계산은 utils.moving_averages 사용.
 """
 
@@ -165,13 +166,46 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     return pd.Timestamp(close.index[-1]), float(close.iloc[-1])
 
 
+# 토스 실시간 일봉으로 최신 종가를 보강할 심볼 (yfinance 지연 회피 — REAL_TIME 피드)
+_TOSS_DAILY_OVERLAY = {"NQ=F": "RFU.NQc1"}
+
+
+def _apply_toss_latest_overlay(close_series: pd.Series, toss_code: str) -> pd.Series | None:
+    """토스 최신 일봉(형성 중 포함)으로 마지막 종가를 갱신/추가한다. 실패 시 None."""
+    try:
+        from services.toss_market_service import fetch_toss_latest_daily_close
+
+        date_str, latest_close = fetch_toss_latest_daily_close(toss_code)
+        latest_date = pd.Timestamp(date_str)
+        series = close_series.copy()
+        idx = pd.to_datetime(series.index)
+        if idx.tz is not None:
+            idx = idx.tz_localize(None)
+        series.index = idx.normalize()
+        if series.index[-1] == latest_date:
+            series.iloc[-1] = latest_close
+        elif series.index[-1] < latest_date:
+            series = pd.concat([series, pd.Series([latest_close], index=[latest_date])])
+        return series
+    except Exception as exc:
+        logger.warning("토스 최신 일봉 보강 실패 (%s): %s", toss_code, exc)
+        return None
+
+
 def _apply_intraday_boost(close_series: pd.Series | None, yf_ticker: str) -> pd.Series | None:
-    """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우, intraday 1분봉
-    마감가를 마지막 일봉으로 덧붙인다. 표(_build_item)와 차트(compute_index_history)가
-    동일한 최신 종가를 쓰도록 공통 사용한다. (한국 인덱스는 네이버라 호출자가 적용 안 함.)
+    """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우 최신 종가를 보강한다.
+
+    나스닥 100 선물 등 토스 REAL_TIME 심볼은 토스 최신 일봉으로 갱신/추가(오늘 형성 중 봉 포함)하고,
+    그 외/토스 실패 시엔 기존 Yahoo intraday 1분봉 마감가를 덧붙인다. 표(_build_item)와
+    차트(compute_index_history)가 동일한 최신 종가를 쓰도록 공통 사용한다.
     """
     if close_series is None or close_series.empty:
         return close_series
+    toss_code = _TOSS_DAILY_OVERLAY.get(yf_ticker)
+    if toss_code:
+        boosted = _apply_toss_latest_overlay(close_series, toss_code)
+        if boosted is not None:
+            return boosted
     intraday = _fetch_yf_intraday_last_close(yf_ticker)
     if intraday is None:
         return close_series
