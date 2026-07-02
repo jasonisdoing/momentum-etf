@@ -6,20 +6,18 @@ export const dynamic = "force-dynamic";
 type MarketTrendDefaults = {
   ma_type: string;
   ma_months: number;
-  ma_types: string[];
-  ma_months_max: number;
+  short_ma_days: number;
   score_anchor_percentile: number;
 };
 
 export default async function MarketTrendPage() {
-  // config.py 의 단일 진실 소스에서 기본 MA 설정 + 추세점수 설정을 받아온다.
+  // config.py 의 화면 고정 MA 설정 + 추세점수 설정을 받아온다 (표시 전용).
   const defaults = await fetchFastApiJson<MarketTrendDefaults>("/internal/market-trend/defaults");
   return (
     <MarketTrendClient
-      defaultMaType={defaults.ma_type}
-      defaultMaMonths={defaults.ma_months}
-      maTypes={defaults.ma_types}
-      maMonthsMax={defaults.ma_months_max}
+      maType={defaults.ma_type}
+      maMonths={defaults.ma_months}
+      shortMaDays={defaults.short_ma_days}
       scoreAnchorPercentile={defaults.score_anchor_percentile}
     />
   );

@@ -20,6 +20,10 @@ type ForecastThresholds = {
   up_price: number | null;
   dn_pct: number | null;
   dn_price: number | null;
+  // 상승 승격이 연속 확인일 요건으로 내일 하루로는 불가능할 때의 요건 안내.
+  up_confirm_pct?: number | null;
+  up_confirm_price?: number | null;
+  up_confirm_days?: number | null;
 };
 
 type HistoryPoint = {
@@ -50,8 +54,6 @@ type HistoryResponse = {
 type MarketTrendChartProps = {
   ticker: string;
   name: string;
-  maType: string;
-  maMonths: number;
 };
 
 type RegimeRange = {
@@ -148,7 +150,13 @@ function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, targ
     pct = fc.dn_pct;
     price = fc.dn_price;
   }
-  if (pct === null) return "-";
+  if (pct === null) {
+    if (target === "accel_up" && fc.up_confirm_price != null && fc.up_confirm_days != null) {
+      const pctText = fc.up_confirm_pct != null ? `${formatSignedPct(fc.up_confirm_pct)} ` : "";
+      return `${pctText}(${formatNumber(fc.up_confirm_price)}) 위 ${fc.up_confirm_days}일 연속`;
+    }
+    return "-";
+  }
   return price !== null ? `${formatSignedPct(pct)} (${formatNumber(price)})` : formatSignedPct(pct);
 }
 
@@ -163,8 +171,8 @@ type GaugeData = {
  * 12개월 추세% 범위를 가로 막대로 표시.
  *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
  * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
- * 오늘 핀의 색은 현재 레짐(slope 기반)으로 칠한다. (가속/감속 밴드는 그리지 않음 —
- * 레짐은 위치가 아니라 추세% 기울기로 결정되므로 1D 위치 밴드로 표현할 수 없다.)
+ * 오늘 핀의 색은 현재 레짐(레벨 기반: 장기MA 방향 × 단기MA±버퍼 모멘텀)으로 칠한다.
+ * (레짐 밴드는 그리지 않음 — 단기MA 조건·연속일 상태가 있어 1D 위치 밴드로 표현할 수 없다.)
  */
 function computeGaugeData({
   trend,
@@ -402,8 +410,6 @@ function formatShortMonthDay(date: string): string {
 export function MarketTrendChart({
   ticker,
   name,
-  maType,
-  maMonths,
 }: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -422,7 +428,7 @@ export function MarketTrendChart({
         setLoading(true);
         setError(null);
         const response = await fetch(
-          `/api/market-trend/history?ticker=${encodeURIComponent(ticker)}&ma_type=${encodeURIComponent(maType)}&ma_months=${encodeURIComponent(String(maMonths))}`,
+          `/api/market-trend/history?ticker=${encodeURIComponent(ticker)}`,
           { cache: "no-store" },
         );
         const payload = (await response.json()) as HistoryResponse;
@@ -441,7 +447,7 @@ export function MarketTrendChart({
     return () => {
       alive = false;
     };
-  }, [ticker, maType, maMonths]);
+  }, [ticker]);
 
   const visibleHistory = useMemo(
     () => (data?.history ? filterHistoryByRange(data.history, rangeKey) : []),
@@ -456,14 +462,25 @@ export function MarketTrendChart({
     const fc = latest?.forecast;
     const current = latest?.regime;
     if (!fc || !current) return [];
-    const out: { next_regime: RegimeKey; target_price: number | null; change_pct: number | null }[] = [];
+    const out: {
+      next_regime: RegimeKey;
+      target_price: number | null;
+      change_pct: number | null;
+      confirm_days?: number | null;
+    }[] = [];
     (["accel_up", "neutral", "accel_down"] as RegimeKey[]).forEach((rg) => {
       if (rg === current) return;
       let pct: number | null = null;
       let price: number | null = null;
+      let confirmDays: number | null = null;
       if (rg === "accel_up") {
         pct = fc.up_pct;
         price = fc.up_price;
+        if (pct === null && fc.up_confirm_price != null && fc.up_confirm_days != null) {
+          pct = fc.up_confirm_pct ?? null;
+          price = fc.up_confirm_price;
+          confirmDays = fc.up_confirm_days;
+        }
       } else if (rg === "accel_down") {
         pct = fc.dn_pct;
         price = fc.dn_price;
@@ -476,7 +493,7 @@ export function MarketTrendChart({
         pct = fc.dn_pct;
         price = fc.dn_price;
       }
-      out.push({ next_regime: rg, target_price: price, change_pct: pct });
+      out.push({ next_regime: rg, target_price: price, change_pct: pct, confirm_days: confirmDays });
     });
     // 상승 → 중립 → 하락 고정 순서로 배치.
     const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, neutral: 1, accel_down: 2 };
@@ -782,7 +799,7 @@ export function MarketTrendChart({
                       </div>
                     </div>
                   ) : null}
-                  {/* 오늘 핀 — 색은 현재 레짐(slope 기반), 라벨은 추세% */}
+                  {/* 오늘 핀 — 색은 현재 레짐(레벨 기반), 라벨은 추세% */}
                   {gaugeLeft !== null ? (
                     <div
                       style={{
@@ -856,12 +873,19 @@ export function MarketTrendChart({
                     <span style={{ fontWeight: 800, textDecoration: "underline" }}>
                       {formatNumber(item.target_price)}
                     </span>
-                    pt에 도달할 경우 (현재 대비{" "}
+                    pt{item.confirm_days ? " 위에서" : "에 도달할 경우"} (현재 대비{" "}
                     <span style={{ fontWeight: 800 }}>
                       {item.change_pct! > 0 ? "+" : ""}
                       {item.change_pct!.toFixed(1)}%
                     </span>
-                    ), 시장 상태가{" "}
+                    ){item.confirm_days ? (
+                      <>
+                        {" "}
+                        <span style={{ fontWeight: 800 }}>{item.confirm_days}거래일 연속 마감하면</span>, 시장 상태가{" "}
+                      </>
+                    ) : (
+                      <>, 시장 상태가{" "}</>
+                    )}
                     <span style={{ fontWeight: 800 }}>{REGIME_LABEL[item.next_regime]}</span>
                     으로 변경될 것으로 예상됩니다.
                   </li>
