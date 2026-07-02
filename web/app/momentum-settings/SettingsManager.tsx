@@ -50,7 +50,7 @@ type RowDraft = Record<EditableKey, string>;
 
 /** 보유보너스(%) 셀렉트 옵션 — 백테스트 탐색값과 동일한 0/5/10. 현재값이 비표준이면 포함해 보존. */
 function bonusOptions(current: string): number[] {
-  const base = [0, 5, 10];
+  const base = [0, 10, 20];
   const cur = Number(current);
   if (Number.isFinite(cur) && !base.includes(cur)) {
     return [...base, cur].sort((a, b) => a - b);

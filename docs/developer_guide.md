@@ -242,7 +242,7 @@ python infra/server_scheduler.py
 
 ### 백테스트 탐색 공간 (`backtest_config`)
 
-모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `HOLDING_BONUS_SCORE`/`TREND_WEIGHT_RATIO`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
+모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`TREND_WEIGHT_RATIO`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
 
 * 가중치는 `HOLDING_BONUS_SCORE`(보유보너스 %, 예 `[0,5,10]`) × `TREND_WEIGHT_RATIO`(추세 가중치 %, 예 `[50,60,70,80]`) 를 탐색한다. 최적 조합의 두 값은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.

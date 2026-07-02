@@ -92,7 +92,13 @@ function parseDateKey(date: string): Date {
   return new Date(`${date}T00:00:00`);
 }
 
-function formatKoreanAxisMonth(time: Time): string {
+function formatKoreanAxisMonth(time: Time, tickMarkType: number): string {
+  // tickMarkType이 0(Year) 또는 1(Month) 일 때만 년월을 출력하고,
+  // 2(Day) 이하의 상세 일별 틱마크는 빈 문자열로 리턴하여 중복 출력을 차단합니다.
+  if (tickMarkType !== 0 && tickMarkType !== 1) {
+    return "";
+  }
+
   if (typeof time === "string") {
     const [year, month] = time.split("-");
     if (year && month) return `${year}년 ${Number(month)}월`;
@@ -456,7 +462,7 @@ export function MarketTrendChart({
     () => (data?.history ? filterHistoryByRange(data.history, rangeKey) : []),
     [data, rangeKey],
   );
- 
+
   // 현재 레짐에서 다른 레짐으로 넘어가는 '전환 임계'를 문장형으로 보여주기 위해 밴드에서 도출.
   // 현재보다 약세 밴드는 그 밴드의 상단(pct_high)이 진입 경계, 강세 밴드는 하단(pct_low).
   // 최신일 임계로부터 '현재 레짐 → 다른 레짐' 전환 문장을 도출(근접 순). 상승이면 중립·하락 2줄.
@@ -558,7 +564,7 @@ export function MarketTrendChart({
         borderColor: "#e2e8f0",
         timeVisible: false,
         secondsVisible: false,
-        tickMarkFormatter: (time: Time) => formatKoreanAxisMonth(time),
+        tickMarkFormatter: (time: Time, tickMarkType: number) => formatKoreanAxisMonth(time, tickMarkType),
         rightOffset: 0,
         barSpacing: Math.max(6, Math.min(12, container.clientWidth / Math.max(visibleHistory.length, 1))),
       },

@@ -289,7 +289,7 @@ export function MarketTrendClient({
     [expandedTicker],
   );
 
-  const detailHeight = 640;
+  const detailHeight = 768;
   const gridOptions = useMemo<GridOptions<GridRow>>(
     () => ({
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data ?? undefined),
