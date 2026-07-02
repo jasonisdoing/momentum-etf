@@ -58,6 +58,9 @@ def main():
     load_env_if_present()
     data = load_live_24h_quotes()
     quotes = data.get("quotes", [])
+    # 화면(live-24h)과 동일한 배치 순서
+    symbol_order = {"NQ_FUT": 0, "MU": 1, "USDKRW": 2, "SKHX": 3, "VIX": 4, "SMSN": 5}
+    quotes = sorted(quotes, key=lambda q: symbol_order.get(str(q.get("symbol") or ""), 99))
 
     alerts = []  # 최근 1시간 |변동| ≥ 임계 인 종목 (name, move)
     body = []
@@ -70,7 +73,7 @@ def main():
         if triggered:
             alerts.append((q["name"], m1))
 
-        session = "장중" if q.get("session_open") else "시간외"
+        session = "실시간" if q.get("type") == "toss" else ("장중" if q.get("session_open") else "시간외")
         body.append(
             f"{flag} *{q['name']}*({q['symbol']}) *{_fmt_pct(hl_diff)}* ({session}) {_trend_emoji(hl_diff)}"
             f"{' 🚨' if triggered else ''}"
@@ -82,7 +85,7 @@ def main():
         tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
         lines.append(f"<!channel> 🚨 *최근 1시간 급변* — {tags}")
     # 헤더 클릭 시 live-24h 페이지로 이동
-    lines.append("*<https://etf.dojason.com/live-24h|🌐 하이퍼리퀴드 24H 시세>*")
+    lines.append("*<https://etf.dojason.com/live-24h|🌐 24H 시세>*")
     lines.extend(body)
 
     send_slack_message_v2("\n".join(lines))

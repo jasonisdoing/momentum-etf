@@ -54,8 +54,9 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-# 토스증권 API 설정 (미국 주식 실시간)
+# 토스증권 API 설정 (미국 주식 실시간 / 시장지표 mini-chart)
 TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
+TOSS_INVEST_CERT_API_BASE_URL = "https://wts-cert-api.tossinvest.com"
 TOSS_INVEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://tossinvest.com/",
@@ -133,12 +134,6 @@ HYPERLIQUID_SYMBOLS = [
         "type": "stock",
         "country": "us",
         "actual_ticker": "MU",
-    },
-    {
-        "symbol": "SP500",
-        "name": "S&P500",
-        "type": "index",
-        "yahoo_symbol": "^GSPC",
     },
 ]
 
