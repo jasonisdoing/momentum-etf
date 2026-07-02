@@ -33,6 +33,8 @@ const holdingsDetailsItem = { href: "/holdings_details", label: "보유종목 �
 function isNavItemActive(itemHref: string, currentPathname: string | null): boolean {
   if (!currentPathname) return false;
   if (itemHref === currentPathname) return true;
+  // 기간별 통합 메뉴(/daily)는 주별/월별/년별에서도 활성 표시
+  if (itemHref === "/daily" && ["/weekly", "/monthly", "/yearly"].includes(currentPathname)) return true;
   // /ticker → /ticker/XXX 같은 동적 라우트 매칭
   if (itemHref !== "/" && currentPathname.startsWith(itemHref + "/")) return true;
   return false;
@@ -46,10 +48,7 @@ const navGroups = [
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
       { href: "/asset-status", label: "자산 현황", icon: IconTrendingUp },
-      { href: "/daily", label: "일별", icon: IconReceipt2 },
-      { href: "/weekly", label: "주별", icon: IconReceipt2 },
-      { href: "/monthly", label: "월별", icon: IconReceipt2 },
-      { href: "/yearly", label: "년별", icon: IconReceipt2 },
+      { href: "/daily", label: "기간별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
     ],
   },
@@ -136,6 +135,12 @@ type DashboardSummary = {
     yearly?: { profit: number; return_pct: number };
   };
   is_deploying?: boolean;
+};
+
+type NqFutureSummary = {
+  price?: number | null;
+  change_pct?: number | null;
+  error?: string;
 };
 
 type ProfitMetric = {
@@ -243,6 +248,8 @@ export function AppShell({ children }: AppShellProps) {
   const [isVkospiLoading, setIsVkospiLoading] = useState(true);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [isDashboardSummaryLoading, setIsDashboardSummaryLoading] = useState(true);
+  const [nqFuture, setNqFuture] = useState<NqFutureSummary | null>(null);
+  const [isNqLoading, setIsNqLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
@@ -260,11 +267,12 @@ export function AppShell({ children }: AppShellProps) {
       setIsVkospiLoading(true);
       setIsDashboardSummaryLoading(true);
 
-      const [fxResponse, fearGreedSummary, vkospiResponse, dashboardResponse] = await Promise.all([
+      const [fxResponse, fearGreedSummary, vkospiResponse, dashboardResponse, nqResponse] = await Promise.all([
         fetch("/api/fx", { cache: "no-store" }),
         loadFearGreedSummary().catch(() => null),
         fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
         fetch("/api/dashboard", { cache: "no-store" }).catch(() => null),
+        fetch("/api/nq-future", { cache: "no-store" }).catch(() => null),
       ]);
 
       const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
@@ -272,6 +280,7 @@ export function AppShell({ children }: AppShellProps) {
       const dashboardPayload = dashboardResponse?.ok
         ? ((await dashboardResponse.json()) as DashboardSummary)
         : null;
+      const nqPayload = nqResponse?.ok ? ((await nqResponse.json()) as NqFutureSummary) : null;
 
       setFx(payload);
       setIsFxLoading(false);
@@ -281,6 +290,8 @@ export function AppShell({ children }: AppShellProps) {
       setIsVkospiLoading(false);
       setDashboardSummary(dashboardPayload);
       setIsDashboardSummaryLoading(false);
+      setNqFuture(nqPayload);
+      setIsNqLoading(false);
     } catch {
       setFx(null);
       setIsFxLoading(false);
@@ -290,6 +301,8 @@ export function AppShell({ children }: AppShellProps) {
       setIsVkospiLoading(false);
       setDashboardSummary(null);
       setIsDashboardSummaryLoading(false);
+      setNqFuture(null);
+      setIsNqLoading(false);
     }
   }, [isLoginPage]);
 
@@ -380,8 +393,29 @@ export function AppShell({ children }: AppShellProps) {
       ? fearGreed.score - fearGreed.previous_close_score
       : null;
 
+  const periodProfits = dashboardSummary?.period_profits;
+  const renderPeriodRow = (label: string, pct: number | undefined) => (
+    <div className="appSidebarSentimentItem">
+      <span className="appSidebarSentimentLabel">
+        <span>{label}</span>
+      </span>
+      {isDashboardSummaryLoading ? (
+        <span className="topbarSpinner" aria-label={`${label} 로딩 중`} />
+      ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
+        <span className="appSidebarSentimentValue">
+          <strong className={getFxChangeClass(pct)}>{`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}</strong>
+        </span>
+      ) : (
+        <strong>-</strong>
+      )}
+    </div>
+  );
+
   const sentimentWidget = (
     <div className="appSidebarSentiment">
+      {renderPeriodRow("금일", periodProfits?.daily?.return_pct)}
+      {renderPeriodRow("금주", periodProfits?.weekly?.return_pct)}
+      {renderPeriodRow("금월", periodProfits?.monthly?.return_pct)}
       <a
         href="https://fear-and-greed.jason.ai.kr"
         target="_blank"
@@ -579,35 +613,23 @@ export function AppShell({ children }: AppShellProps) {
               <span className="topbarFxItem topbarTickerSearchItem">
                 <GlobalTickerSearch />
               </span>
-              {(() => {
-                const periods = dashboardSummary?.period_profits;
-                const renderPctItem = (label: string, pct: number | undefined) => (
-                  <span className="topbarFxItem">
-                    {label}:{" "}
-                    {isDashboardSummaryLoading ? (
-                      <span className="topbarFxLoading" aria-label={`${label} 로딩 중`}>
-                        <span className="topbarSpinner" />
-                      </span>
-                    ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
-                      <strong
-                        className={getFxChangeClass(pct)}
-                        style={{ fontSize: "14.5px" }}
-                      >
-                        {`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}
-                      </strong>
-                    ) : (
-                      <strong>-</strong>
-                    )}
+              <span className="topbarFxItem">
+                나스닥선물:{" "}
+                {isNqLoading ? (
+                  <span className="topbarFxLoading" aria-label="나스닥선물 로딩 중">
+                    <span className="topbarSpinner" />
                   </span>
-                );
-                return (
+                ) : nqFuture?.price != null ? (
                   <>
-                    {renderPctItem("금일", periods?.daily?.return_pct)}
-                    {renderPctItem("금주", periods?.weekly?.return_pct)}
-                    {renderPctItem("금월", periods?.monthly?.return_pct)}
+                    <strong>{new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(nqFuture.price)}</strong>
+                    <span className={getFxChangeClass(nqFuture.change_pct ?? undefined)}>
+                      {formatChangePct(nqFuture.change_pct ?? undefined)}
+                    </span>
                   </>
-                );
-              })()}
+                ) : (
+                  <strong>-</strong>
+                )}
+              </span>
               <span className="topbarFxItem">
                 USD/KRW:{" "}
                 {isFxLoading ? (

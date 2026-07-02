@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
+import { PeriodNavTabs } from "../components/PeriodNavTabs";
 import { YearlyManager } from "./YearlyManager";
 
 type YearlyHeaderSummary = {
@@ -46,6 +47,7 @@ export function YearlyPageClient() {
 
   return (
     <PageFrame title="년별" fullHeight fullWidth titleRight={titleRight}>
+      <PeriodNavTabs />
       <YearlyManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );
