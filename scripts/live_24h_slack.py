@@ -59,7 +59,7 @@ def main():
     data = load_live_24h_quotes()
     quotes = data.get("quotes", [])
     # 화면(live-24h)과 동일한 배치 순서
-    symbol_order = {"NQ_FUT": 0, "MU": 1, "USDKRW": 2, "SKHX": 3, "VIX": 4, "SMSN": 5}
+    symbol_order = {"NQ_FUT": 0, "MU": 1, "USDKRW": 2, "VIX": 3, "SKHX": 4, "SMSN": 5}
     quotes = sorted(quotes, key=lambda q: symbol_order.get(str(q.get("symbol") or ""), 99))
 
     alerts = []  # 최근 1시간 |변동| ≥ 임계 인 종목 (name, move)
@@ -84,9 +84,9 @@ def main():
     if alerts:
         tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
         lines.append(f"<!channel> 🚨 *최근 1시간 급변* — {tags}")
-    # 헤더 클릭 시 live-24h 페이지로 이동
-    lines.append("*<https://etf.dojason.com/live-24h|🌐 24H 시세>*")
     lines.extend(body)
+    # 타이틀(링크)은 목록 아래에 — 클릭 시 live-24h 페이지로 이동
+    lines.append("*<https://etf.dojason.com/live-24h|🌐 24H 시세>*")
 
     send_slack_message_v2("\n".join(lines))
     logger.info("24H 시세 슬랙 전송 완료 (%d종목, 1시간 급변 %d건)", len(quotes), len(alerts))

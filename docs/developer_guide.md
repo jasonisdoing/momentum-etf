@@ -58,7 +58,8 @@ python infra/server_scheduler.py
 *   `backtest/`: 백테스트 전용 파라미터 스윕 실행기·결과 로그 엔진 (탐색공간은 DB `backtest_config`, `/momentum-backtest` 화면에서 실행)
 *   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
-    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
+    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 USD/KRW 만 토스 실시간(REAL_TIME, 5초 TTL) 우선 + 실패 시 야후(KRW=X) 백업이며, AUD 등 나머지 통화는 야후(1시간 TTL).
+    *   `toss_market_service.py`: 토스 시장지표(mini-chart)·차트(c-chart) 연동 — /live-24h 카드(나스닥 100 선물·달러 환율·VIX), 헤더 나스닥선물, USD 환율, market-trend 나스닥 선물 최신 봉 보강에 사용
     *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
     *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 조회해 메타 캐시에 저장할 형태로 정규화합니다. 국내 구성종목은 6자리 종목코드, 해외 구성종목은 `componentReutersCode`에서 추출한 심볼을 표시용 `ticker`로 사용하고, 원본 ISIN은 `raw_code`에 저장합니다. 해외 구성종목 가격 조회는 응답 시점에 Yahoo를 사용하고 서비스 메모리 TTL 캐시를 적용합니다.
     *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시

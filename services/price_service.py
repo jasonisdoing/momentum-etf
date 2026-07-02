@@ -9,8 +9,8 @@ from config import MARKET_SCHEDULES
 from utils.data_loader import (
     fetch_au_quoteapi_snapshot,
     fetch_naver_etf_inav_snapshot,
-    fetch_naver_worldstock_snapshot,
     fetch_naver_stock_realtime_snapshot,
+    fetch_naver_worldstock_snapshot,
     fetch_toss_us_stock_snapshot,
     get_latest_trading_day,
 )
@@ -217,22 +217,47 @@ def get_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, flo
     return {**cached_result, **fetched_filtered}
 
 
+def _overlay_toss_usd_rate(rates: dict[str, Any]) -> dict[str, Any]:
+    """USD/KRW 를 토스 실시간 환율(REAL_TIME, 5초 TTL)로 덮어쓴다.
+
+    실패 시 야후(KRW=X) 값이 백업으로 그대로 유지된다. AUD 등 나머지 통화는 야후 소스.
+    """
+    result = dict(rates)
+    try:
+        from services.toss_market_service import fetch_toss_indicator_prices
+
+        fx = fetch_toss_indicator_prices().get("EXCHANGE_RATE") or {}
+        latest = fx.get("latest")
+        base = fx.get("base")
+        if latest and base:
+            result["USD"] = {
+                "rate": float(latest),
+                "change_pct": (float(latest) / float(base) - 1.0) * 100.0,
+            }
+    except Exception as exc:
+        logger.warning("토스 달러 환율 조회 실패 — 야후 백업 사용: %s", exc)
+    return result
+
+
 def get_exchange_rates() -> dict[str, Any]:
-    """주요 통화의 원화 환율을 반환한다."""
+    """주요 통화의 원화 환율을 반환한다.
+
+    USD 는 토스 실시간 환율 우선(+야후 백업), 나머지 통화는 야후(1시간 TTL 캐시).
+    """
 
     cache_key = "fx:major"
     cached_entry = _FX_CACHE.get(cache_key)
     now = datetime.now()
 
     if _is_cache_alive(cached_entry, now):
-        return dict(cached_entry["data"])
+        return _overlay_toss_usd_rate(cached_entry["data"])
 
     try:
         rates = _fetch_exchange_rates()
     except Exception as exc:
         stale_rates = _reuse_stale_fx_cache(cache_key, exc)
         if stale_rates is not None:
-            return stale_rates
+            return _overlay_toss_usd_rate(stale_rates)
         raise
 
     _FX_CACHE[cache_key] = {
@@ -241,7 +266,7 @@ def get_exchange_rates() -> dict[str, Any]:
         "expires_at": now + timedelta(seconds=_FX_TTL_SECONDS),
         "is_stale": False,
     }
-    return dict(rates)
+    return _overlay_toss_usd_rate(rates)
 
 
 def get_exchange_rate_series(
@@ -550,6 +575,7 @@ def _fetch_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, 
         }
 
     return result
+
 
 __all__ = [
     "clear_price_service_cache",
