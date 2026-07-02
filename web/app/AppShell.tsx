@@ -309,12 +309,18 @@ export function AppShell({ children }: AppShellProps) {
   useEffect(() => {
     void loadTopBarData();
 
+    // 10초마다 상단 헤더 데이터(나스닥 선물, 환율 등)를 자동으로 갱신
+    const timerId = setInterval(() => {
+      void loadTopBarData();
+    }, 10000);
+
     function handlePageShow() {
       void loadTopBarData();
     }
 
     window.addEventListener("pageshow", handlePageShow);
     return () => {
+      clearInterval(timerId);
       window.removeEventListener("pageshow", handlePageShow);
     };
   }, [loadTopBarData]);
