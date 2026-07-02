@@ -11,9 +11,9 @@ type Candle = { o: number; h: number; l: number; c: number };
 type Quote = {
   symbol: string;
   name: string;
-  type: "stock" | "index";
+  type: "stock" | "index" | "toss";
   country: "kor" | "us";
-  currency: "KRW" | "USD" | "POINT";
+  currency: "KRW" | "USD" | "POINT" | "FX";
   hyper_price: number | null;
   change_24h_pct: number | null;
   actual_price: number | null;
@@ -30,9 +30,10 @@ function signColor(v: number | null | undefined): string {
   return v > 0 ? "#dc2626" : "#1971c2";
 }
 
-function formatPrice(value: number | null, currency: "KRW" | "USD" | "POINT"): string {
+function formatPrice(value: number | null, currency: "KRW" | "USD" | "POINT" | "FX"): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
   if (currency === "KRW") return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
+  if (currency === "FX") return `${new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}원`;
   if (currency === "POINT") return `${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}p`;
   return `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}`;
 }
@@ -53,18 +54,45 @@ function recentMove(candles: Candle[] | undefined, hours: number): number | null
   return (cur / prev - 1) * 100;
 }
 
-function getHyperliquidLink(symbol: string): string {
+// 카드 배치 순서 (2열 기준: 토스나선-마이크론 / 달러환율-SK하이닉스 / 토스VIX-삼성전자)
+const SYMBOL_ORDER: Record<string, number> = {
+  NQ_FUT: 0,
+  MU: 1,
+  USDKRW: 2,
+  SKHX: 3,
+  VIX: 4,
+  SMSN: 5,
+};
+
+const SYMBOL_DISPLAY: Record<string, string> = {
+  NQ_FUT: "토스 나스닥 100 선물",
+  USDKRW: "토스 환율",
+  VIX: "토스 VIX",
+};
+
+function displaySymbol(symbol: string): string {
+  return SYMBOL_DISPLAY[symbol.toUpperCase()] ?? symbol;
+}
+
+function getQuoteLink(symbol: string): string {
+  const upper = symbol.toUpperCase();
+  if (upper === "NQ_FUT") return "https://www.tossinvest.com/indices/RFU.NQc1";
+  if (upper === "USDKRW") return "https://www.tossinvest.com/indices/exchange-rate";
+  if (upper === "VIX") return "https://www.tossinvest.com/indices/RGI..VIX";
   const map: Record<string, string> = {
     SMSN: "SAMSUNG",
     SKHX: "SKHYNIX",
   };
-  const target = map[symbol.toUpperCase()] || symbol;
+  const target = map[upper] || upper;
   return `https://app.hyperliquid.xyz/trade/xyz:${target}`;
 }
 
-function formatPriceLabel(value: number, currency: "KRW" | "USD" | "POINT"): string {
+function formatPriceLabel(value: number, currency: "KRW" | "USD" | "POINT" | "FX"): string {
   if (currency === "KRW") {
     return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}`;
+  }
+  if (currency === "FX") {
+    return `${value.toFixed(1)}`;
   }
   if (currency === "POINT") {
     return `${value.toFixed(1)}p`;
@@ -72,7 +100,7 @@ function formatPriceLabel(value: number, currency: "KRW" | "USD" | "POINT"): str
   return `$${value.toFixed(2)}`;
 }
 
-function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: "KRW" | "USD" | "POINT" }) {
+function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: "KRW" | "USD" | "POINT" | "FX" }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(450);
 
@@ -98,7 +126,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const max = Math.max(...highs);
   const range = max - min === 0 ? 1 : max - min;
 
-  const height = 225;
+  const height = 185;
   const chartWidth = width - 42;
   const chartHeight = height - 20;
   const paddingY = 8;
@@ -221,7 +249,9 @@ export function HyperliquidClient() {
           <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
         ) : (
           <div className="row g-3" style={{ maxWidth: 1280, width: "100%" }}>
-            {quotes.map((q) => {
+            {[...quotes]
+              .sort((a, b) => (SYMBOL_ORDER[a.symbol] ?? 99) - (SYMBOL_ORDER[b.symbol] ?? 99))
+              .map((q) => {
               const m1 = recentMove(q.candles, 1);
               const m3 = recentMove(q.candles, 3);
               return (
@@ -230,18 +260,18 @@ export function HyperliquidClient() {
                 <div className="card appCard" style={{ height: "100%" }}>
                   <div className="card-body" style={{ padding: "1rem 1.25rem" }}>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: "1.15rem", fontWeight: 800 }}>{q.name}</span>
+                      <span style={{ fontSize: "1.05rem", fontWeight: 800 }}>{q.name}</span>
                       <a
-                        href={getHyperliquidLink(q.symbol)}
+                        href={getQuoteLink(q.symbol)}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{ color: "#228be6", fontWeight: 600, textDecoration: "underline" }}
                       >
-                        {q.symbol}
+                        {displaySymbol(q.symbol)}
                       </a>
                       {/* 우상단: 정규장 종가 대비 변동률 + 장중/시간외 배지 */}
                       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7 }}>
-                        <span style={{ fontSize: "1.4rem", fontWeight: 800, color: signColor(q.diff_pct) }}>
+                        <span style={{ fontSize: "1.25rem", fontWeight: 800, color: signColor(q.diff_pct) }}>
                           {formatPct(q.diff_pct)}
                         </span>
                         <span
@@ -255,13 +285,13 @@ export function HyperliquidClient() {
                             color: q.session_open ? "#16a34a" : "#475569",
                           }}
                         >
-                          {q.session_open ? "장중" : "시간외"}
+                          {q.type === "toss" ? "실시간" : q.session_open ? "장중" : "시간외"}
                         </span>
                       </div>
                     </div>
                     {/* 메인: 하이퍼리퀴드 현재가 (크게) */}
                     <div style={{ marginTop: 6 }}>
-                      <span style={{ fontSize: "1.95rem", fontWeight: 800 }}>
+                      <span style={{ fontSize: "1.7rem", fontWeight: 800 }}>
                         {formatPrice(q.hyper_price, q.currency)}
                       </span>
                     </div>
@@ -285,10 +315,15 @@ export function HyperliquidClient() {
                       </span>
                       <span style={{ opacity: 0.5 }}>·</span>
                       <span>
-                        정규장 종가 {formatPrice(q.actual_price, q.currency)}{" "}
-                        <strong style={{ color: signColor(q.actual_change_pct) }}>
-                          {formatPct(q.actual_change_pct)}
-                        </strong>
+                        {q.type === "toss" ? "전일 기준" : "정규장 종가"} {formatPrice(q.actual_price, q.currency)}
+                        {q.type !== "toss" && (
+                          <>
+                            {" "}
+                            <strong style={{ color: signColor(q.actual_change_pct) }}>
+                              {formatPct(q.actual_change_pct)}
+                            </strong>
+                          </>
+                        )}
                       </span>
                     </div>
                     <CandlestickChart candles={q.candles || []} currency={q.currency} />

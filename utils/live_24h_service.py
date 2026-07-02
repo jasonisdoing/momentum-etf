@@ -70,9 +70,6 @@ def _to_float(value: Any) -> float | None:
         return None
 
 
-
-
-
 import threading
 
 # 24H 캔들 데이터 메모리 캐시 및 갱신 동기화용 변수 (OHLC 구조화)
@@ -80,6 +77,7 @@ _HYPERLIQUID_CANDLE_CACHE: dict[str, list[dict[str, float]]] = {}
 _CACHE_LAST_UPDATED: float = 0.0
 _CACHE_LOCK = threading.Lock()
 _CACHE_UPDATING = False
+
 
 def _update_candle_caches_sync(usd_krw: float | None) -> None:
     """모든 심볼의 24H OHLC 캔들 데이터를 동기적으로 갱신한다."""
@@ -112,15 +110,15 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
                 for c in data:
                     o = _to_float(c.get("o"))
                     h = _to_float(c.get("h"))
-                    l = _to_float(c.get("l"))
+                    low = _to_float(c.get("l"))
                     close_val = _to_float(c.get("c"))
-                    if None not in (o, h, l, close_val):
+                    if None not in (o, h, low, close_val):
                         if spec.get("type") == "stock" and spec.get("country") == "kor":
                             o *= usd_krw
                             h *= usd_krw
-                            l *= usd_krw
+                            low *= usd_krw
                             close_val *= usd_krw
-                        raw_candles.append({"o": o, "h": h, "l": l, "c": close_val})
+                        raw_candles.append({"o": o, "h": h, "l": low, "c": close_val})
                 hl_candles = raw_candles[-96:]
         except Exception as exc:
             logger.warning("Hyperliquid 캔들 조회 실패 (%s): %s", hl_symbol, exc)
@@ -128,9 +126,34 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
         if hl_candles:
             hl_temp[symbol] = hl_candles
 
+    # 토스 15분봉 (최근 24시간 = 96개) — 나스닥 100 선물 · VIX
+    from services.toss_market_service import fetch_toss_candles
+
+    for cache_key, toss_code in (("NQ_FUT", "RFU.NQc1"), ("VIX", "RGI..VIX")):
+        try:
+            hl_temp[cache_key] = fetch_toss_candles(toss_code, interval="min:15", count=96)
+        except Exception as exc:
+            logger.warning("토스 캔들 조회 실패 (%s): %s", toss_code, exc)
+
+    # 달러 환율(USD/KRW) 15분봉 — 토스는 환율 캔들 API 미확인이라 야후(KRW=X) 사용
+    try:
+        import yfinance as yf
+
+        fx = yf.Ticker("KRW=X").history(period="2d", interval="15m")
+        fx_candles = []
+        for _, row in fx.iterrows():
+            o, h, low, c = (_to_float(row.get(k)) for k in ("Open", "High", "Low", "Close"))
+            if None not in (o, h, low, c):
+                fx_candles.append({"o": o, "h": h, "l": low, "c": c})
+        if fx_candles:
+            hl_temp["USDKRW"] = fx_candles[-96:]
+    except Exception as exc:
+        logger.warning("환율(KRW=X) 캔들 조회 실패: %s", exc)
+
     with _CACHE_LOCK:
         _HYPERLIQUID_CANDLE_CACHE.update(hl_temp)
         _CACHE_LAST_UPDATED = time.time()
+
 
 def _trigger_candle_cache_update(usd_krw: float | None) -> None:
     """비동기 스레드를 띄워 백그라운드에서 캐시를 업데이트한다."""
@@ -152,6 +175,7 @@ def _trigger_candle_cache_update(usd_krw: float | None) -> None:
 
     t = threading.Thread(target=run, daemon=True)
     t.start()
+
 
 def load_live_24h_quotes() -> dict[str, Any]:
     """설정된 심볼들의 24H 실시간 시세 + 실제가 대비 차이를 반환한다."""
@@ -188,6 +212,43 @@ def load_live_24h_quotes() -> dict[str, Any]:
     kor_market_open = _is_regular_session_open("kor")
 
     quotes: list[dict[str, Any]] = []
+
+    # ── 토스 실시간 지표 카드 (나스닥 100 선물 · 달러 환율) — 실패 시 카드만 생략 ──
+    try:
+        from services.toss_market_service import fetch_toss_indicator_prices
+
+        toss = fetch_toss_indicator_prices()
+        for symbol, code, currency in (
+            ("NQ_FUT", "RFU.NQc1", "POINT"),
+            ("USDKRW", "EXCHANGE_RATE", "FX"),
+            ("VIX", "RGI..VIX", "POINT"),
+        ):
+            info = toss.get(code) or {}
+            latest = _to_float(info.get("latest"))
+            base = _to_float(info.get("base"))
+            candles = _HYPERLIQUID_CANDLE_CACHE.get(symbol) or []
+            change_24h = None
+            if len(candles) >= 2 and candles[0].get("c"):
+                change_24h = (candles[-1]["c"] / candles[0]["c"] - 1.0) * 100.0
+            quotes.append(
+                {
+                    "symbol": symbol,
+                    "name": str(info.get("name") or symbol),
+                    "type": "toss",
+                    "country": "us",
+                    "currency": currency,
+                    "hyper_price": latest,
+                    "change_24h_pct": change_24h,
+                    "actual_price": base,
+                    "actual_change_pct": None,
+                    "diff_pct": ((latest / base - 1.0) * 100.0) if (latest and base) else None,
+                    "session_open": True,
+                    "candles": candles,
+                }
+            )
+    except Exception as exc:
+        logger.warning("토스 지표 카드 구성 실패: %s", exc)
+
     for spec in HYPERLIQUID_SYMBOLS:
         symbol = str(spec["symbol"]).upper()
         kind = spec.get("type", "stock")
@@ -324,5 +385,3 @@ def _fetch_kr_regular_close(ticker: str, session_open: bool) -> tuple[float | No
         result = cached[0] if cached else (None, None)
     _REGULAR_CLOSE_CACHE[key] = (result, now)
     return result
-
-
