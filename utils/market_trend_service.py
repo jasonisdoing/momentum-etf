@@ -694,8 +694,10 @@ def compute_index_history(yf_ticker: str, ma_type: str, ma_months: int) -> dict[
     # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.
     close_series = _apply_intraday_boost(close_series, yf_ticker)
 
-    # 보정된 close_series 를 df 에 다시 반영
-    df.loc[close_series.index, "Close"] = close_series
+    # 보정된 close_series 를 df 에 다시 반영 (인덱스가 확장되었을 경우 대비 reindex 적용)
+    df = df.reindex(close_series.index)
+    df["Close"] = close_series
+    df = df.ffill()
 
     if len(close_series) < 2:
         return empty_payload
