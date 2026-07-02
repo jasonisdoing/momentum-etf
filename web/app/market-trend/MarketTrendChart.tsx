@@ -157,7 +157,10 @@ function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, targ
     }
     return "-";
   }
-  return price !== null ? `${formatSignedPct(pct)} (${formatNumber(price)})` : formatSignedPct(pct);
+  // 약세 방향 전환(랭크 하락)은 '경계 미만', 강세 방향 전환은 '경계 이상'에서 발생한다.
+  const rank: Record<RegimeKey, number> = { accel_up: 2, neutral: 1, accel_down: 0 };
+  const suffix = current !== null && rank[target] < rank[current] ? " 미만" : " 이상";
+  return price !== null ? `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}` : formatSignedPct(pct);
 }
 
 type GaugeData = {
@@ -462,11 +465,14 @@ export function MarketTrendChart({
     const fc = latest?.forecast;
     const current = latest?.regime;
     if (!fc || !current) return [];
+    const rank: Record<RegimeKey, number> = { accel_up: 2, neutral: 1, accel_down: 0 };
     const out: {
       next_regime: RegimeKey;
       target_price: number | null;
       change_pct: number | null;
       confirm_days?: number | null;
+      // 문구 방향: 약세 전환인데 경계가 현재가 위면 '회복 실패 시', 아래면 '내려가면'.
+      mode: "confirm" | "recover_fail" | "drop_below" | "rise_above";
     }[] = [];
     (["accel_up", "neutral", "accel_down"] as RegimeKey[]).forEach((rg) => {
       if (rg === current) return;
@@ -493,7 +499,16 @@ export function MarketTrendChart({
         pct = fc.dn_pct;
         price = fc.dn_price;
       }
-      out.push({ next_regime: rg, target_price: price, change_pct: pct, confirm_days: confirmDays });
+      const weaker = rank[rg] < rank[current];
+      let mode: "confirm" | "recover_fail" | "drop_below" | "rise_above";
+      if (confirmDays) {
+        mode = "confirm";
+      } else if (weaker) {
+        mode = pct !== null && pct >= 0 ? "recover_fail" : "drop_below";
+      } else {
+        mode = "rise_above";
+      }
+      out.push({ next_regime: rg, target_price: price, change_pct: pct, confirm_days: confirmDays, mode });
     });
     // 상승 → 중립 → 하락 고정 순서로 배치.
     const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, neutral: 1, accel_down: 2 };
@@ -873,15 +888,22 @@ export function MarketTrendChart({
                     <span style={{ fontWeight: 800, textDecoration: "underline" }}>
                       {formatNumber(item.target_price)}
                     </span>
-                    pt{item.confirm_days ? " 위에서" : "에 도달할 경우"} (현재 대비{" "}
+                    pt
+                    {item.mode === "confirm" ? " 위에서" : item.mode === "recover_fail" ? "" : item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
+                    {" "}(현재 대비{" "}
                     <span style={{ fontWeight: 800 }}>
                       {item.change_pct! > 0 ? "+" : ""}
                       {item.change_pct!.toFixed(1)}%
                     </span>
-                    ){item.confirm_days ? (
+                    ){item.mode === "confirm" ? (
                       <>
                         {" "}
                         <span style={{ fontWeight: 800 }}>{item.confirm_days}거래일 연속 마감하면</span>, 시장 상태가{" "}
+                      </>
+                    ) : item.mode === "recover_fail" ? (
+                      <>
+                        {" "}
+                        <span style={{ fontWeight: 800 }}>위로 회복하지 못하면</span>, 시장 상태가{" "}
                       </>
                     ) : (
                       <>, 시장 상태가{" "}</>
