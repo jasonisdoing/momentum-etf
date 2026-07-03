@@ -2,7 +2,7 @@
 
 기존 `config.py` 의 하드코딩 `BACKTEST_CONFIG` 를 DB 로 이관한다. 풀별로 1개 문서.
 
-    {_id: <pool_id>, BENCHMARK:{ticker,name},
+    {_id: <pool_id>, BACKTEST_MONTHS: <개월수>, BENCHMARK:{ticker,name},
      TOP_N_HOLD:[...], HOLDING_BONUS_SCORE:[...], TREND_WEIGHT_RATIO:[...], MA_TYPE:[...],
      MA_MONTHS:[...], RSI_LIMIT:[...], updated_at}
 
@@ -57,6 +57,10 @@ def validate_backtest_config(config: Any) -> None:
     benchmark = config.get("BENCHMARK")
     if not isinstance(benchmark, dict) or not str(benchmark.get("ticker") or "").strip() or not str(benchmark.get("name") or "").strip():
         raise ValueError("'BENCHMARK' 에는 ticker/name 이 모두 필요합니다.")
+
+    months_back = config.get("BACKTEST_MONTHS")
+    if not isinstance(months_back, (int, float)) or isinstance(months_back, bool) or not (1 <= int(months_back) <= 240):
+        raise ValueError("'BACKTEST_MONTHS' 는 1~240 범위의 개월수여야 합니다.")
 
     for key in _REQUIRED_LIST_KEYS:
         values = config.get(key)

@@ -7,6 +7,7 @@ import { useToast } from "../components/ToastProvider";
 
 type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
+  BACKTEST_MONTHS?: number;
   BENCHMARK?: Benchmark;
   TOP_N_HOLD?: number[];
   HOLDING_BONUS_SCORE?: number[];
@@ -40,6 +41,7 @@ function parseNums(text: string): number[] {
 function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const toast = useToast();
   const c = pool.config;
+  const [backtestMonths, setBacktestMonths] = useState(c.BACKTEST_MONTHS != null ? String(c.BACKTEST_MONTHS) : "");
   const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
   const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
   // 저장된 벤치마크가 있으면 잠금 상태로 시작 — [변경] 을 눌러야 편집 가능.
@@ -97,6 +99,13 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       return next;
     });
 
+  // 백테스트기간(Month) 셀렉트 옵션 — 저장된 비표준 값은 포함해 보존.
+  const monthsBase = [6, 9, 12, 15, 18, 24];
+  const curMonths = Math.trunc(Number(backtestMonths));
+  const monthsOptions = curMonths >= 1 && !monthsBase.includes(curMonths)
+    ? [...monthsBase, curMonths].sort((a, b) => a - b)
+    : monthsBase;
+
   // 추세 가중치(%) 체크박스 옵션 — 100~0 역순(10 단위). 저장된 비표준 값은 포함해 보존.
   const ratioOptions = [...new Set([100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0, ...ratioSet])].sort((a, b) => b - a);
   const toggleRatio = (r: number) =>
@@ -109,6 +118,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
 
   const save = async () => {
     const config: BtConfig = {
+      BACKTEST_MONTHS: Math.trunc(Number(backtestMonths)),
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
       HOLDING_BONUS_SCORE: bonus,
@@ -146,7 +156,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
           <button
             type="button"
             className="btn btn-sm btn-dark"
-            disabled={saving || combos === 0 || !benchTicker.trim() || !benchName.trim()}
+            disabled={saving || combos === 0 || !benchTicker.trim() || !benchName.trim() || !(Math.trunc(Number(backtestMonths)) >= 1)}
             onClick={() => void save()}
           >
             {saving ? "저장 중…" : "저장"}
@@ -155,7 +165,21 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       </div>
 
       <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 84 }}>벤치마크</span>
+        <span style={labelStyle}>백테스트기간(Month)</span>
+        <select
+          className="form-select form-select-sm"
+          style={{ width: 74 }}
+          value={backtestMonths}
+          onChange={(e) => setBacktestMonths(e.target.value)}
+        >
+          {backtestMonths === "" && <option value="">선택</option>}
+          {monthsOptions.map((m) => (
+            <option key={m} value={String(m)}>
+              {m}
+            </option>
+          ))}
+        </select>
+        <span style={{ ...labelStyle, marginLeft: 8 }}>벤치마크</span>
         {benchEditing ? (
           <>
             <input
