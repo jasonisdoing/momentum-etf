@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 INDICES: list[dict[str, str]] = [
     {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
     {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
+    {"name": "다우존스", "yf_ticker": "^DJI"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
     {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},
