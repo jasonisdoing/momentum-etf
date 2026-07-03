@@ -43,13 +43,14 @@ function isNavItemActive(itemHref: string, currentPathname: string | null): bool
 const navGroups = [
   {
     id: "assets",
-    title: "자산",
+    title: "계좌",
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
       { href: "/asset-status", label: "자산 현황", icon: IconTrendingUp },
       { href: "/daily", label: "기간별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
+      { href: "/account-settings", label: "설정", icon: IconSettings },
     ],
   },
   {

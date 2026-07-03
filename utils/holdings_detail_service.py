@@ -547,7 +547,7 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     from utils.settings_loader import get_account_settings
     from utils.stocks_service import validate_stock_candidate
 
-    # 1. 계좌 설정 로드 (accounts.json의 계좌 설정 읽기)
+    # 1. 계좌 설정 로드 (DB account_settings 읽기)
     try:
         settings = get_account_settings(account_id)
         # account_settings["settings"]가 아닌 top-level에 있는 경우가 많음

@@ -15,58 +15,26 @@ class AccountSettingsError(RuntimeError):
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ACCOUNT_SETTINGS_PATH = PROJECT_ROOT / "accounts.json"
+
 POOL_SETTINGS_PATH = PROJECT_ROOT / "pools.json"
 logger = get_app_logger()
-
-
-def _load_accounts_payload() -> dict[str, Any]:
-    return _load_json(ACCOUNT_SETTINGS_PATH)
 
 
 def _load_pools_payload() -> dict[str, Any]:
     return _load_json(POOL_SETTINGS_PATH)
 
 
-@cache
 def _load_account_configs() -> list[dict[str, Any]]:
-    payload = _load_accounts_payload()
-    accounts = payload.get("accounts")
-    if not isinstance(accounts, list):
-        raise AccountSettingsError(f"'accounts.json'의 'accounts'는 배열이어야 합니다: {ACCOUNT_SETTINGS_PATH}")
+    """계좌 설정을 DB(account_settings) 단일 소스에서 읽는다 (store 가 TTL 캐시 담당).
 
-    loaded: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    문서가 없으면 명시적 에러.
+    """
+    from utils.account_settings_store import AccountSettingsStoreError, load_account_docs
 
-    for raw_entry in accounts:
-        if not isinstance(raw_entry, dict):
-            raise AccountSettingsError(f"'accounts' 항목은 객체여야 합니다: {ACCOUNT_SETTINGS_PATH}")
-
-        account_id = str(raw_entry.get("account_id") or "").strip().lower()
-        if not account_id:
-            raise AccountSettingsError(f"'account_id'는 필수입니다: {ACCOUNT_SETTINGS_PATH}")
-        if account_id in seen_ids:
-            raise AccountSettingsError(f"중복된 account_id가 있습니다: {account_id}")
-
-        order = raw_entry.get("order")
-        if not isinstance(order, int):
-            raise AccountSettingsError(f"계정 '{account_id}'의 'order'는 정수여야 합니다.")
-
-        country_code = str(raw_entry.get("country_code") or "").strip().lower()
-        if country_code not in {"kor", "au", "us"}:
-            raise AccountSettingsError(f"계정 '{account_id}'의 country_code는 kor, au, us만 허용합니다: {country_code}")
-
-        loaded.append(
-            {
-                **raw_entry,
-                "account_id": account_id,
-                "order": order,
-                "country_code": country_code,
-            }
-        )
-        seen_ids.add(account_id)
-
-    return sorted(loaded, key=lambda item: (int(item["order"]), str(item["account_id"])))
+    try:
+        return load_account_docs()
+    except AccountSettingsStoreError as exc:
+        raise AccountSettingsError(str(exc)) from exc
 
 
 @cache
@@ -122,7 +90,7 @@ def list_available_ticker_types() -> list[str]:
 
 def list_available_accounts() -> list[str]:
     """
-    accounts.json에 정의된 유효한 계정 목록을 반환합니다.
+    DB(account_settings)에 정의된 유효한 계정 목록을 반환합니다.
     """
     return [str(item["account_id"]) for item in _load_account_configs()]
 
@@ -153,13 +121,12 @@ def get_account_order(account_id: str) -> int:
 
 @cache
 def get_account_settings(account_id: str) -> dict[str, Any]:
-    """accounts.json에 정의된 개별 계정 설정을 로드합니다."""
+    """DB(account_settings)에 정의된 개별 계정 설정을 로드합니다."""
 
     account = (account_id or "").strip().lower()
     if not account:
         raise AccountSettingsError("계정 식별자를 지정해야 합니다.")
 
-    logger.debug("계정 설정 로드: %s (%s)", ACCOUNT_SETTINGS_PATH, account)
     for settings in _load_account_configs():
         if settings["account_id"] == account:
             return dict(settings)

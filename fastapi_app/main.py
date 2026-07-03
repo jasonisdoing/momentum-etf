@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 
 from utils.env import load_env_if_present
 
+from .routes.account_settings import router as account_settings_router
 from .routes.assets import router as assets_router
 from .routes.backtest_config import router as backtest_config_router
 from .routes.daily import router as daily_router
@@ -76,6 +77,7 @@ app.include_router(market_trend_router)
 app.include_router(note_router)
 app.include_router(pool_settings_router)
 app.include_router(backtest_config_router)
+app.include_router(account_settings_router)
 app.include_router(momentum_backtest_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
