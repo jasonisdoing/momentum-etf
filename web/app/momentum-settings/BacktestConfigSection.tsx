@@ -42,6 +42,8 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const c = pool.config;
   const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
   const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
+  // 저장된 벤치마크가 있으면 잠금 상태로 시작 — [변경] 을 눌러야 편집 가능.
+  const [benchEditing, setBenchEditing] = useState(!(c.BENCHMARK?.ticker && c.BENCHMARK?.name));
   // TOP_N_HOLD 초기값: 저장된 리스트가 없으면 종목풀 설정의 라이브 N 으로 시작.
   const [topNText, setTopNText] = useState(
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
@@ -71,6 +73,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         return;
       }
       setBenchName(data.name);
+      setBenchEditing(false);
       toast.success(`${data.name}(${t}) 확인 완료`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
@@ -130,16 +133,56 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         <span style={{ fontWeight: 800 }}>{pool.name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({pool.pool_id})</span></span>
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}</span>
-          <button type="button" className="btn btn-sm btn-dark" disabled={saving || combos === 0} onClick={() => void save()}>
+          <button
+            type="button"
+            className="btn btn-sm btn-dark"
+            disabled={saving || combos === 0 || !benchTicker.trim() || !benchName.trim()}
+            onClick={() => void save()}
+          >
             {saving ? "저장 중…" : "저장"}
           </button>
         </span>
       </div>
 
       <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 56 }}>벤치마크</span>
-        <input style={{ ...inputStyle, width: 110 }} placeholder="티커" value={benchTicker} onChange={(e) => setBenchTicker(e.target.value)} />
-        <input style={{ ...inputStyle, flex: 1, minWidth: 140 }} placeholder="이름" value={benchName} onChange={(e) => setBenchName(e.target.value)} />
+        <span style={{ ...labelStyle, width: 84 }}>벤치마크</span>
+        {benchEditing ? (
+          <>
+            <input
+              style={{ ...inputStyle, width: 110 }}
+              placeholder="티커"
+              value={benchTicker}
+              onChange={(e) => {
+                setBenchTicker(e.target.value);
+                setBenchName(""); // 티커가 바뀌면 이름 불일치 방지를 위해 초기화
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  void resolveBench();
+                }
+              }}
+            />
+            <button type="button" className="btn btn-sm btn-outline-secondary" disabled={resolving} onClick={() => void resolveBench()}>
+              {resolving ? "조회 중…" : "조회"}
+            </button>
+            <input
+              style={{ ...inputStyle, flex: 1, minWidth: 140, background: "#f8fafc", color: "#64748b" }}
+              placeholder="이름 (티커 입력 후 조회)"
+              value={benchName}
+              readOnly
+            />
+          </>
+        ) : (
+          <>
+            <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
+              {benchName} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({benchTicker})</span>
+            </span>
+            <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setBenchEditing(true)}>
+              변경
+            </button>
+          </>
+        )}
       </div>
 
       <div style={rowStyle}>
