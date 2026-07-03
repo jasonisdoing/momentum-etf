@@ -49,7 +49,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
   const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
-  const [ratioText, setRatioText] = useState((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).join(", "));
+  const [ratioSet, setRatioSet] = useState<Set<number>>(new Set(c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]));
   const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
@@ -84,7 +84,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
 
   const topNs = parseNums(topNText);
   const bonus = parseNums(bonusText);
-  const ratios = parseNums(ratioText);
+  const ratios = [...ratioSet].sort((a, b) => a - b);
   const months = parseNums(monthsText);
   const rsi = parseNums(rsiText);
   const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length;
@@ -97,12 +97,22 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       return next;
     });
 
+  // 추세 가중치(%) 체크박스 옵션 — 100~0 역순(10 단위). 저장된 비표준 값은 포함해 보존.
+  const ratioOptions = [...new Set([100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0, ...ratioSet])].sort((a, b) => b - a);
+  const toggleRatio = (r: number) =>
+    setRatioSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(r)) next.delete(r);
+      else next.add(r);
+      return next;
+    });
+
   const save = async () => {
     const config: BtConfig = {
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
       HOLDING_BONUS_SCORE: bonus,
-      TREND_WEIGHT_RATIO: ratios.map((n) => Math.trunc(n)),
+      TREND_WEIGHT_RATIO: ratios,
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
@@ -167,7 +177,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
               {resolving ? "조회 중…" : "조회"}
             </button>
             <input
-              style={{ ...inputStyle, flex: 1, minWidth: 140, background: "#f8fafc", color: "#64748b" }}
+              style={{ ...inputStyle, width: 180, background: "#f8fafc", color: "#64748b" }}
               placeholder="이름 (티커 입력 후 조회)"
               value={benchName}
               readOnly
@@ -183,23 +193,29 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
             </button>
           </>
         )}
+        <span style={{ ...labelStyle, marginLeft: 8 }}>보유 종목수</span>
+        <input style={{ ...inputStyle, width: 70 }} placeholder="4, 5" value={topNText} onChange={(e) => setTopNText(e.target.value)} />
+        <span style={{ ...labelStyle, marginLeft: 8 }}>보유보너스(%)</span>
+        <input style={{ ...inputStyle, width: 110 }} placeholder="0, 10, 20" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
+        <span style={{ ...labelStyle, marginLeft: 8 }}>RSI 상한</span>
+        <input style={{ ...inputStyle, width: 110 }} placeholder="80, 90, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
       </div>
 
       <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 84 }}>보유 종목수</span>
-        <input style={{ ...inputStyle, width: 110 }} placeholder="4, 5" value={topNText} onChange={(e) => setTopNText(e.target.value)} />
-      </div>
-
-      <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 84 }}>보유보너스(%)</span>
-        <input style={{ ...inputStyle, width: 130 }} placeholder="0, 10, 20" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
-        <span style={{ ...labelStyle, marginLeft: 8 }}>추세 가중치(%)</span>
-        <input style={{ ...inputStyle, width: 140 }} placeholder="50, 60, 70, 80" value={ratioText} onChange={(e) => setRatioText(e.target.value)} />
+        <span style={{ ...labelStyle, width: 84 }}>추세 가중치(%)</span>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
+          {ratioOptions.map((r) => (
+            <label key={r} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
+              <input type="checkbox" checked={ratioSet.has(r)} onChange={() => toggleRatio(r)} />
+              {r}
+            </label>
+          ))}
+        </div>
         <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>ATH = (100−보유) × (100−추세비율)%</span>
       </div>
 
-      <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 56 }}>MA 타입</span>
+      <div style={{ ...rowStyle, marginBottom: 0 }}>
+        <span style={{ ...labelStyle, width: 84 }}>MA 타입</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           {maTypes.map((t) => (
             <label key={t} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
@@ -208,13 +224,8 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
             </label>
           ))}
         </div>
-      </div>
-
-      <div style={{ ...rowStyle, marginBottom: 0 }}>
-        <span style={{ ...labelStyle, width: 56 }}>MA 개월</span>
-        <input style={{ ...inputStyle, width: 130 }} placeholder="3, 6, 9, 12" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
-        <span style={{ ...labelStyle, marginLeft: 8 }}>RSI 상한</span>
-        <input style={{ ...inputStyle, width: 150 }} placeholder="80, 90, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
+        <span style={{ ...labelStyle, marginLeft: 8 }}>MA 개월</span>
+        <input style={{ ...inputStyle, width: 110 }} placeholder="3, 6, 9, 12" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
         <span style={{ marginLeft: "auto", fontSize: "0.82rem", color: combos > 0 ? "#475569" : "#dc2626" }}>조합수 <b>{combos.toLocaleString()}</b></span>
       </div>
     </div>
