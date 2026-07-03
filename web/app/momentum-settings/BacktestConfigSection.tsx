@@ -37,6 +37,9 @@ function parseNums(text: string): number[] {
   return text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
 }
 
+// 추세 가중치(%) 체크박스 옵션 — 100~50 역순(10 단위)
+const RATIO_OPTIONS = [100, 90, 80, 70, 60, 50];
+
 /** 풀 1개 백테스트 탐색공간 인라인 편집 행 (자체 저장). */
 function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const toast = useToast();
@@ -51,7 +54,10 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
   const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
-  const [ratioSet, setRatioSet] = useState<Set<number>>(new Set(c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]));
+  // 탐색 범위를 100~50 으로 제한 — 저장값 중 범위 밖(50 미만)은 버린다.
+  const [ratioSet, setRatioSet] = useState<Set<number>>(
+    new Set((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).filter((v) => RATIO_OPTIONS.includes(v))),
+  );
   const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
@@ -106,8 +112,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     ? [...monthsBase, curMonths].sort((a, b) => a - b)
     : monthsBase;
 
-  // 추세 가중치(%) 체크박스 옵션 — 100~0 역순(10 단위). 저장된 비표준 값은 포함해 보존.
-  const ratioOptions = [...new Set([100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0, ...ratioSet])].sort((a, b) => b - a);
   const toggleRatio = (r: number) =>
     setRatioSet((prev) => {
       const next = new Set(prev);
@@ -228,7 +232,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       <div style={rowStyle}>
         <span style={{ ...labelStyle, width: 84 }}>추세 가중치(%)</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-          {ratioOptions.map((r) => (
+          {RATIO_OPTIONS.map((r) => (
             <label key={r} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
               <input type="checkbox" checked={ratioSet.has(r)} onChange={() => toggleRatio(r)} />
               {r}
