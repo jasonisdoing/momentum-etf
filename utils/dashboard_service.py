@@ -21,7 +21,7 @@ BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체
 
 
 def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """계좌별 benchmark(accounts.json) 의 일간 등락률을 계좌 country 소스로 일괄 조회한다.
+    """계좌별 benchmark(DB account_settings) 의 일간 등락률을 계좌 country 소스로 일괄 조회한다.
 
     가격 소스는 계좌의 country_code 로 정한다 (kor→네이버, au→QuoteAPI, us→토스).
     각 계좌가 자기 통화 ETF 를 벤치마크하므로 환율 환산은 불필요하다.

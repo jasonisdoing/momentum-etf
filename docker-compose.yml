@@ -22,7 +22,6 @@ services:
       - MONGO_DB_HOST=mongodb:27017
       - APP_TYPE=Server
     volumes:
-      - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더, 종목 리스트 등) — git 추적 제외, 서버에 직접 배치
       - ./data:/app/data:ro
       # cron 래퍼 hotfix 용 bind mount (이미지 재빌드 없이 반영)
@@ -44,7 +43,6 @@ services:
       - FASTAPI_INTERNAL_URL=http://fastapi_app:8000
       - MONGO_DB_HOST=mongodb:27017
     volumes:
-      - ./accounts.json:/app/accounts.json:ro
       # 정적 참조 데이터 (거래일 캘린더 등) — fastapi_app 와 동일하게 bind-mount
       - ./data:/app/data:ro
     restart: always
@@ -77,7 +75,6 @@ services:
       - TZ=Asia/Seoul
       - MONGO_DB_HOST=mongodb:27017
     volumes:
-      - ./accounts.json:/app/accounts.json:ro
       - ./data:/app/data
       - ./infra/cron:/app/infra/cron:ro
       - ./logs:/app/logs

@@ -75,7 +75,7 @@ python infra/server_scheduler.py
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
-*   `accounts.json`: 계좌 메타데이터 단일 설정 파일. 각 계좌의 `ticker_types`는 해당 계좌가 보유할 수 있는 종목풀 목록이며, 보유종목이 종목풀에서 제거된 뒤에도 가격/메타 캐시 갱신 대상의 ticker_type을 결정하는 기준입니다.
+*   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.

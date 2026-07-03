@@ -2422,7 +2422,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         const v = (data as { benchmark_pct?: number | null }).benchmark_pct;
         return v === null || v === undefined ? null : Number(v);
       },
-      headerTooltip: "각 계좌 벤치마크(accounts.json) 의 금일 등락률 (합계는 비중 가중평균)",
+      headerTooltip: "각 계좌 벤치마크(계좌 설정) 의 금일 등락률 (합계는 비중 가중평균)",
       cellRenderer: (params: { data?: ParentGridRow; value?: number | null }) => {
         const data = params.data;
         if (!data || isDetailRow(data)) return "";
