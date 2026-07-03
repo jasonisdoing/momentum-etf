@@ -38,9 +38,11 @@ python backtest/run.py
 공통 전역값은 같은 파일 상단에서 별도로 관리한다.
 
 ```python
-BACKTEST_START_DATE = "2023-01-01"
 BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
 ```
+
+백테스트 기간은 풀별 `BACKTEST_MONTHS`(개월수, DB `backtest_config`)로 정한다.
+N개월이면 오늘 기준 N개월 전 날짜 이후의 첫 거래일부터 시작한다.
 
 종목풀별 슬리피지 설정은 같은 파일의 `SLIPPAGE_CONFIG`에서 별도로 관리한다.
 

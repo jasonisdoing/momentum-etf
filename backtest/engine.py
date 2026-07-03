@@ -1,7 +1,8 @@
 """모멘텀 ETF 파라미터 스윕 백테스트 엔진.
 
 ``backtest/run.py`` 에서 호출되며, 종목풀별 탐색공간(DB `backtest_config`)과
-전역 공통값 ``BACKTEST_START_DATE``, ``BACKTEST_INITIAL_KRW_AMOUNT`` 를 사용한다.
+전역 공통값 ``BACKTEST_INITIAL_KRW_AMOUNT`` 를 사용한다.
+백테스트 기간은 풀별 ``BACKTEST_MONTHS``(개월수)로 정한다.
 멀티프로세스 병렬 실행을 지원하며, 실행 중에도 중간 결과를 파일에 주기적으로 기록한다.
 """
 
@@ -20,7 +21,6 @@ import pandas as pd
 
 from config import (
     BACKTEST_INITIAL_KRW_AMOUNT,
-    BACKTEST_START_DATE,
     MARKET_SCHEDULES,
     SLIPPAGE_CONFIG,
     TRADING_DAYS_PER_MONTH,
@@ -1729,8 +1729,15 @@ def run_backtest(pool_id: str) -> Path:
     """
     # 백테스트 탐색공간은 DB(backtest_config)가 단일 소스. 없으면 명시적 에러.
     cfg = load_backtest_config(pool_id)
-    start_target = pd.Timestamp(BACKTEST_START_DATE).normalize()
     initial_cash = float(BACKTEST_INITIAL_KRW_AMOUNT)
+
+    # 백테스트 기간(개월수) — 오늘 기준 N개월 전 이후의 첫 거래일부터 시작한다.
+    if "BACKTEST_MONTHS" not in cfg:
+        raise ValueError(
+            f"backtest_config['{pool_id}'] 에 BACKTEST_MONTHS 가 없습니다. "
+            "백테스트 탐색 공간 화면에서 저장해주세요."
+        )
+    months = int(cfg["BACKTEST_MONTHS"])
 
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
@@ -1772,10 +1779,9 @@ def run_backtest(pool_id: str) -> Path:
                 f"backtest_config['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
             )
 
-    # 기간 설정
+    # 기간 설정 — BACKTEST_MONTHS 개월 전 날짜 이후의 첫 거래일이 시작일이 된다.
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    # 로그 출력용으로 근사 개월 수 계산
-    months = int(round((today - start_target).days / 30.436875))
+    start_target = (today - pd.DateOffset(months=months)).normalize()
 
     # 워밍업: 최대 MA 개월 + 여유 2개월
     max_ma_months = max(ma_months_list, default=0)
