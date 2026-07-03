@@ -11,6 +11,7 @@ type SystemScheduleRow = {
   key: string;
   job: string;
   target: string;
+  run_location?: string;
   cadence: string;
   command: string;
 };
@@ -170,6 +171,16 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     valueGetter: (params) => (params.node ? (params.node.rowIndex ?? -1) + 1 : ""),
   },
   { field: "job", headerName: "작업", minWidth: 140, width: 150 },
+  {
+    field: "run_location",
+    headerName: "실행 위치",
+    minWidth: 110,
+    width: 120,
+    cellRenderer: (params: { value?: string }) => {
+      const text = params.value ?? "";
+      return text || "-";
+    },
+  },
   {
     field: "cadence",
     headerName: "자동 주기",
