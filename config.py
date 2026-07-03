@@ -202,7 +202,7 @@ MARKET_TREND_MA_MONTHS = 6
 #   매핑: 장기MA 위+강세=상승, 위+약세=중립, 아래+강세=중립, 아래+약세=하락.
 # 값↑(SHORT_MA_DAYS)=모멘텀 더 느긋 / 값↑(BUFFER)=라벨 덜 바뀜 / 값↑(CONFIRM)=상승 승격 더 신중.
 MARKET_TREND_REGIME_SHORT_MA_DAYS = 20
-MARKET_TREND_REGIME_BUFFER_PCT = 1.0
+MARKET_TREND_REGIME_BUFFER_PCT = 0.5
 MARKET_TREND_REGIME_CONFIRM_DAYS = 3
 
 # -----------------------------------------------------------------------
