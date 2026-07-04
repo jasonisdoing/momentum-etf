@@ -739,7 +739,7 @@ def _write_results_file(
     lines.append(f"=== {status_label} - 기간: {months} 개월 | 정렬 기준: CAGR ===")
 
     # 테이블
-    top_limit = 20
+    top_limit = 100
     top_rows = sorted_results[:top_limit]
     if not top_rows:
         lines.append("(결과 없음)")

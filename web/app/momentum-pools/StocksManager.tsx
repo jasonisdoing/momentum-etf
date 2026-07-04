@@ -209,7 +209,6 @@ const NAME_HIGHLIGHT_KEYWORDS: Record<string, string> = {
   레버리지: "#d63939",
   Geared: "#d63939",
   "3X": "#d63939",
-  UltraPro: "#d63939",
   Ultra: "#d63939",
   액티브: "#2f9e44",
 };
@@ -1845,9 +1844,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       value={String(heldBonusScore)}
                       onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
                     >
-                      {([0, 10, 20].includes(heldBonusScore)
-                        ? [0, 10, 20]
-                        : [...[0, 10, 20], heldBonusScore].sort((a, b) => a - b)
+                      {([0, 5, 10].includes(heldBonusScore)
+                        ? [0, 5, 10]
+                        : [...[0, 5, 10], heldBonusScore].sort((a, b) => a - b)
                       ).map((score) => (
                         <option key={score} value={score}>
                           {score}
