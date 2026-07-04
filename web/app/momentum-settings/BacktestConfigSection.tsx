@@ -37,8 +37,8 @@ function parseNums(text: string): number[] {
   return text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
 }
 
-// 추세 가중치(%) 체크박스 옵션 — 100~50 역순(10 단위)
-const RATIO_OPTIONS = [100, 90, 80, 70, 60, 50];
+// 추세 가중치(%) 체크박스 옵션 — 100~0 역순(10 단위)
+const RATIO_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 
 /** 풀 1개 백테스트 탐색공간 인라인 편집 행 (자체 저장). */
 function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
@@ -54,7 +54,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
   const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
-  // 탐색 범위를 100~50 으로 제한 — 저장값 중 범위 밖(50 미만)은 버린다.
+  // 저장값 중 옵션 밖(10 단위가 아닌 값)은 버린다.
   const [ratioSet, setRatioSet] = useState<Set<number>>(
     new Set((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).filter((v) => RATIO_OPTIONS.includes(v))),
   );
