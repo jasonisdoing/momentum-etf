@@ -8,7 +8,6 @@ from leverage.constants import INITIAL_CAPITAL_KRW
 from leverage.data_adapter import (
     _extract_field,
     compute_bounds,
-    current_trading_day,
     download_fx,
     download_opens,
     download_prices,
@@ -33,12 +32,39 @@ def run_backtest(
     prices_full = pre_prices.copy() if pre_prices is not None else download_prices(settings, warmup_start)
     opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
 
-    offense = settings["offense_ticker"]
     defense = settings["defense_ticker"]
-    assets = list({offense, defense})
+    # 공격 후보군 — 진입 시점마다 ALMA 6개월 이격도 1위를 선택한다 (후보 1개면 기존 단일 동작).
+    offense_entries = settings.get("offense_candidates") or [
+        {"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}
+    ]
+    offense_tickers = [str(c["ticker"]) for c in offense_entries]
+    offense_set = set(offense_tickers)
+    assets = list(dict.fromkeys([*offense_tickers, defense]))
 
     signal_df_full = compute_signals(prices_full[settings["signal_ticker"]], settings)
     returns_full = opens_full[assets].pct_change(fill_method=None)
+
+    # 공격 후보별 ALMA 6개월 이격도 (종가 / ALMA - 1). 부분 계산(min_periods=1) 지원.
+    from config import TRADING_DAYS_PER_MONTH
+    from utils.moving_averages import calculate_moving_average
+
+    _alma_days = 6 * int(TRADING_DAYS_PER_MONTH)
+    _gap_cols: dict[str, pd.Series] = {}
+    for _t in offense_tickers:
+        _series = prices_full[_t].dropna()
+        if _series.empty:
+            raise ValueError(f"공격 후보 {_t} 의 가격 데이터가 비어 있습니다.")
+        _ma = calculate_moving_average(_series, _alma_days, "ALMA")
+        _gap_cols[_t] = (_series / _ma - 1.0).reindex(prices_full.index)
+    offense_gap_frame = pd.DataFrame(_gap_cols, index=prices_full.index)
+
+    def select_offense(date) -> str:
+        """해당 일자 기준 ALMA 6개월 이격도가 가장 큰 공격 후보를 반환한다."""
+        gaps = offense_gap_frame.loc[offense_gap_frame.index.asof(date)] if date not in offense_gap_frame.index else offense_gap_frame.loc[date]
+        gaps = gaps.dropna()
+        if gaps.empty:
+            raise ValueError(f"{pd.Timestamp(date).date()} 기준 공격 후보의 ALMA 이격도를 계산할 수 없습니다.")
+        return str(gaps.idxmax())
 
     common_index = (
         signal_df_full.index.intersection(prices_full.index)
@@ -61,9 +87,14 @@ def run_backtest(
     opens = opens_full.loc[common_index]
     # 종가 신호는 다음 거래일 시초가에만 매매할 수 있으므로 실행 타깃은 하루 늦춘다.
     signal_targets = []
-    prev_signal_target = settings["offense_ticker"]
+    # 초기 상태: 첫 신호일 기준 이격도 1위 후보를 보유 중이라고 가정 (기존 단일 offense 가정의 일반화).
+    # 첫 신호일에 상장된 후보가 하나도 없으면 방어 자산에서 시작한다 (워밍업 구간에서 수렴).
+    try:
+        prev_signal_target = select_offense(signal_df_full.index[0])
+    except ValueError:
+        prev_signal_target = defense
     for _, row in signal_df_full.iterrows():
-        signal_target = pick_target(row, prev_signal_target, settings)
+        signal_target = pick_target(row, prev_signal_target, settings, offense_set=offense_set, select_offense=select_offense)
         signal_targets.append(signal_target)
         prev_signal_target = signal_target
     signal_target_series = pd.Series(signal_targets, index=signal_df_full.index, name="signal_target")
@@ -77,7 +108,8 @@ def run_backtest(
     signal_df["signal_target"] = signal_target_series.loc[common_index]
     signal_df["target"] = execution_target_series.loc[common_index]
     returns = returns_full.loc[common_index]
-    if returns.dropna().empty:
+    # 최근 상장 후보는 앞 구간이 NaN 이므로 "모든 값이 빈 행"만 없으면 진행한다.
+    if returns.dropna(how="all").empty:
         raise ValueError("수익률 데이터가 비어 있습니다. 가격/기간 설정을 확인하세요.")
 
     # 환율 데이터(원/달러) - 한국 시장은 1.0 고정
@@ -120,7 +152,7 @@ def run_backtest(
 
     # 티커-이름 매핑 (구간 요약에서 사용)
     _ticker_names = {
-        settings["offense_ticker"]: settings.get("offense_name", settings["offense_ticker"]),
+        **{str(c["ticker"]): c.get("name", c["ticker"]) for c in offense_entries},
         settings["defense_ticker"]: settings.get("defense_name", settings["defense_ticker"]),
         settings["signal_ticker"]: settings.get("signal_name", settings["signal_ticker"]),
         "CASH": "현금",
@@ -271,7 +303,10 @@ def run_backtest(
             cash_value = cash_usd
             total_value = cash_usd
         else:
-            position_value = {s: qty[s] * prices_today[s] for s in assets}
+            # 상장 전(가격 NaN) 후보는 0 으로 평가 (미보유 자산이라 수량도 0)
+            position_value = {
+                s: (qty[s] * prices_today[s] if not pd.isna(prices_today[s]) else 0.0) for s in assets
+            }
             total_pos = sum(position_value.values())
             total_value = cash_usd + total_pos
             weights = {s: (position_value[s] / total_value if total_value > 0 else 0.0) for s in assets}
@@ -334,9 +369,12 @@ def run_backtest(
         row_idx = 2
         for sym in assets:
             price = prices_today[sym]
+            has_price = not pd.isna(price)  # 상장 전(데이터 없음) 후보는 표시만 '-' 처리
             ret = returns.at[date, sym] if sym in returns.columns else 0.0
+            if pd.isna(ret):
+                ret = 0.0
             weight = weights[sym]
-            position_value = qty[sym] * price
+            position_value = qty[sym] * price if has_price else 0.0
             qty_disp = qty[sym]
 
             if sym == target and prev_target != sym:
@@ -354,7 +392,7 @@ def run_backtest(
             note = ""
             if sym == target:
                 note = "타깃"
-            elif sym == settings["offense_ticker"] and state in ["WAIT", "SELL"]:
+            elif sym in offense_set and target not in offense_set and sym == select_offense(date) and state in ["WAIT", "SELL"]:
                 # Trade Ticker가 선택되지 않은 경우 드로다운 정보 표시
                 current_dd = signal_df.at[date, "drawdown"]
 
@@ -377,7 +415,7 @@ def run_backtest(
                     _get_display_name(sym),
                     state,
                     str(hold_days[sym]),
-                    f"{price:,.0f}" if market == "kor" else f"{price:,.2f}",
+                    ("-" if not has_price else (f"{price:,.0f}" if market == "kor" else f"{price:,.2f}")),
                     f"{ret:+.2%}",
                     f"{qty_disp:,.0f}",
                     format_kr_money(position_value) if market == "kor" else f"{position_value:,.2f}",
@@ -527,10 +565,11 @@ def run_backtest(
     )
 
     # 전략 vs 벤치마크 비교 테이블
-    trade_display = settings["offense_ticker"]
+    if len(offense_tickers) > 1:
+        trade_display = f"동적공격({len(offense_tickers)}종)"
+    else:
+        trade_display = _get_display_name(offense_tickers[0])
     defense_display = settings["defense_ticker"]
-    if settings.get("offense_name") and settings["offense_name"] != settings["offense_ticker"]:
-        trade_display = f"{settings['offense_name']}({settings['offense_ticker']})"
     if settings.get("defense_name") and settings["defense_name"] != settings["defense_ticker"]:
         defense_display = f"{settings['defense_name']}({settings['defense_ticker']})"
     strat_label = f"{trade_display}<->{defense_display}"
@@ -590,12 +629,7 @@ def run_backtest(
 
     # 종목별 성과 요약
     # 티커+이름 매핑
-    ticker_names = {
-        settings["offense_ticker"]: settings.get("offense_name", settings["offense_ticker"]),
-        settings["defense_ticker"]: settings.get("defense_name", settings["defense_ticker"]),
-        settings["signal_ticker"]: settings.get("signal_name", settings["signal_ticker"]),
-        "CASH": "현금",
-    }
+    ticker_names = dict(_ticker_names)
 
     asset_rows = []
     for idx, sym in enumerate(["CASH"] + assets, start=1):
@@ -730,7 +764,7 @@ def run_backtest(
             f"| buy_cutoff: {settings['drawdown_buy_cutoff']}%",
             f"| sell_cutoff: {settings['drawdown_sell_cutoff']}%",
             f"| signal_ticker: {settings['signal_ticker']}",
-            f"| offense_ticker: {settings['offense_ticker']}",
+            f"| offense_candidates: {', '.join(offense_tickers)} (진입 시 ALMA 6개월 이격도 1위 선택)",
             f"| defense_ticker: {settings['defense_ticker']}",
             f"| slippage: {settings['slippage']}%",
         ]
@@ -776,8 +810,15 @@ def run_backtest(
     # 장중 정보용: 오늘(미완성 봉 포함) 실시간 시그널 드로다운
     live_drawdown = float(signal_df_full["drawdown"].iloc[-1])
 
+    # 공격 후보별 최근(확정 신호일) ALMA 6개월 이격도 + 다음 진입 시 선택될 후보
+    last_gaps = offense_gap_frame.loc[last_date].dropna() if last_date in offense_gap_frame.index else pd.Series(dtype=float)
+    offense_gaps = {str(t): float(v) for t, v in last_gaps.items()}
+    next_offense = select_offense(last_date)
+
     recommendation_data = {
         "last_date": last_date.date().isoformat(),
+        "offense_gaps": offense_gaps,
+        "next_offense": next_offense,
         "last_prices": last_prices,
         "daily_returns": {
             sym: (last_prices[sym] / prev_prices[sym] - 1) if sym in prev_prices else 0.0 for sym in assets
