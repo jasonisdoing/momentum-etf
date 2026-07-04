@@ -11,11 +11,9 @@ MA 계산은 utils.moving_averages 사용.
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any
 
 import pandas as pd
-import requests
 import yfinance as yf
 
 from config import (
@@ -40,9 +38,7 @@ INDICES: list[dict[str, str]] = [
     {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},
 ]
 
-# 네이버 차트 (legacy XML) — 인덱스 일봉 OHLCV. count 만큼 최신부터 거꾸로 N건 반환.
-_NAVER_INDEX_CHART_URL = "https://fchart.stock.naver.com/sise.nhn"
-_NAVER_ITEM_RE = re.compile(r'<item data="([^"]+)"')
+# 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
 
 
 def _fetch_naver_kor_index_ohlc(symbol: str, count: int) -> pd.DataFrame | None:
@@ -51,54 +47,9 @@ def _fetch_naver_kor_index_ohlc(symbol: str, count: int) -> pd.DataFrame | None:
     Returns:
         DatetimeIndex 정렬된 pd.DataFrame(columns=['Open', 'High', 'Low', 'Close']) 또는 None.
     """
-    try:
-        resp = requests.get(
-            _NAVER_INDEX_CHART_URL,
-            params={"symbol": symbol, "timeframe": "day", "count": int(count), "requestType": 0},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
-        )
-        resp.encoding = "EUC-KR"
-        items = _NAVER_ITEM_RE.findall(resp.text)
-    except Exception:
-        logger.exception("네이버 인덱스 차트 조회 실패: %s", symbol)
-        return None
-    if not items:
-        return None
+    from utils.naver_chart import fetch_naver_daily_ohlc
 
-    dates: list[pd.Timestamp] = []
-    opens: list[float] = []
-    highs: list[float] = []
-    lows: list[float] = []
-    closes: list[float] = []
-    volumes: list[float] = []
-    for raw in items:
-        parts = raw.split("|")
-        if len(parts) < 5:
-            continue
-        try:
-            ts = pd.Timestamp(parts[0])
-            open_val = float(parts[1])
-            high_val = float(parts[2])
-            low_val = float(parts[3])
-            close_val = float(parts[4])
-            volume_val = float(parts[5]) if len(parts) >= 6 else 0.0
-        except (ValueError, TypeError):
-            continue
-        dates.append(ts)
-        opens.append(open_val)
-        highs.append(high_val)
-        lows.append(low_val)
-        closes.append(close_val)
-        volumes.append(volume_val)
-
-    if not dates:
-        return None
-    df = pd.DataFrame(
-        {"Open": opens, "High": highs, "Low": lows, "Close": closes, "Volume": volumes},
-        index=pd.DatetimeIndex(dates)
-    )
-    return df.sort_index()
+    return fetch_naver_daily_ohlc(symbol, count)
 
 
 def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
@@ -111,38 +62,10 @@ def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
     Returns:
         DatetimeIndex 정렬된 pd.Series(Close) 또는 None (실패 시).
     """
-    try:
-        resp = requests.get(
-            _NAVER_INDEX_CHART_URL,
-            params={"symbol": symbol, "timeframe": "day", "count": int(count), "requestType": 0},
-            headers={"User-Agent": "Mozilla/5.0"},
-            timeout=10,
-        )
-        resp.encoding = "EUC-KR"
-        items = _NAVER_ITEM_RE.findall(resp.text)
-    except Exception:
-        logger.exception("네이버 인덱스 차트 조회 실패: %s", symbol)
+    df = _fetch_naver_kor_index_ohlc(symbol, count)
+    if df is None or df.empty:
         return None
-    if not items:
-        return None
-
-    dates: list[pd.Timestamp] = []
-    closes: list[float] = []
-    for raw in items:
-        parts = raw.split("|")
-        if len(parts) < 5:
-            continue
-        try:
-            ts = pd.Timestamp(parts[0])
-            close = float(parts[4])
-        except (ValueError, TypeError):
-            continue
-        dates.append(ts)
-        closes.append(close)
-    if not dates:
-        return None
-    series = pd.Series(closes, index=pd.DatetimeIndex(dates))
-    return series.sort_index()
+    return df["Close"]
 
 
 def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] | None:

@@ -119,6 +119,8 @@ def load_market_data() -> dict[str, Any]:
             "listed_at": normalize_text(row.get("상장일")),
             "prev_volume": int(normalize_number(row.get("전일거래량"))),
             "market_cap": int(normalize_number(row.get("시가총액"))),
+            "base_close_1m": normalize_nullable_number(row.get("기준종가_1m")),
+            "base_close_2m": normalize_nullable_number(row.get("기준종가_2m")),
         }
         for row in rows
     ]
@@ -129,19 +131,34 @@ def load_market_data() -> dict[str, Any]:
     from utils.portfolio_io import load_all_holding_tickers
     held_tickers = load_all_holding_tickers()
 
-    return {
-        "updated_at": to_iso_string(doc.get("updated_at")),
-        "rows": [
+    def _return_pct(now_val: float | None, base_close: float | None) -> float | None:
+        """실시간 현재가 대비 기준종가 수익률(%). 기준종가는 일일 배치가 저장한다."""
+        if now_val is None or base_close in (None, 0):
+            return None
+        return round((now_val / base_close - 1.0) * 100.0, 4)
+
+    result_rows = []
+    for row in normalized_rows:
+        snap = snapshot.get(row["ticker"], {})
+        now_val = snap.get("nowVal")
+        base_1m = row.pop("base_close_1m", None)
+        base_2m = row.pop("base_close_2m", None)
+        result_rows.append(
             {
                 **row,
                 "ticker_pools": ", ".join(ticker_pool_map.get(row["ticker"], [])),
                 "is_held": row["ticker"] in held_tickers,
-                "daily_change_pct": snapshot.get(row["ticker"], {}).get("changeRate"),
-                "current_price": snapshot.get(row["ticker"], {}).get("nowVal"),
-                "nav": snapshot.get(row["ticker"], {}).get("nav"),
-                "deviation": snapshot.get(row["ticker"], {}).get("deviation"),
-                "return_3m_pct": snapshot.get(row["ticker"], {}).get("threeMonthEarnRate"),
+                "daily_change_pct": snap.get("changeRate"),
+                "current_price": now_val,
+                "nav": snap.get("nav"),
+                "deviation": snap.get("deviation"),
+                "return_1m_pct": _return_pct(now_val, base_1m),
+                "return_2m_pct": _return_pct(now_val, base_2m),
+                "return_3m_pct": snap.get("threeMonthEarnRate"),
             }
-            for row in normalized_rows
-        ],
+        )
+
+    return {
+        "updated_at": to_iso_string(doc.get("updated_at")),
+        "rows": result_rows,
     }
