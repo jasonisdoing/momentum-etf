@@ -203,23 +203,24 @@ function renderRankDelta(value: number | null | undefined) {
   );
 }
 
-/** 종목명 강조 키워드 → 색상 (대소문자 무관, 볼드 공통).
- *  키워드를 추가하려면 여기에 한 줄만 더하면 된다. 겹치는 키워드는 긴 것을 앞에 둘 것 (예: UltraPro > Ultra). */
-const NAME_HIGHLIGHT_KEYWORDS: Record<string, string> = {
-  레버리지: "#d63939",
-  Geared: "#d63939",
-  "3X": "#d63939",
-  Ultra: "#d63939",
-  액티브: "#2f9e44",
+/** 종목명 강조 키워드 → 색상/이모지 (대소문자 무관, 볼드 공통).
+ *  키워드를 추가하려면 여기에 한 줄만 더하면 된다. 겹치는 키워드는 긴 것을 앞에 둘 것 (예: UltraPro > Ultra).
+ *  emoji 는 종목명 맨 뒤에 붙는다 (여러 키워드 매칭 시 중복 없이 순서대로). */
+const NAME_HIGHLIGHT_KEYWORDS: Record<string, { color: string; emoji: string }> = {
+  레버리지: { color: "#d63939", emoji: "💣" },
+  Geared: { color: "#d63939", emoji: "💣" },
+  "3X": { color: "#d63939", emoji: "💣" },
+  Ultra: { color: "#d63939", emoji: "💣" },
+  액티브: { color: "#206bc4", emoji: "✋" },
 };
 
 const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).join("|")})`, "i");
 
-function getNameHighlightColor(part: string): string | undefined {
+function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
   const lower = part.toLowerCase();
-  for (const [keyword, color] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
+  for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
     if (keyword.toLowerCase() === lower) {
-      return color;
+      return style;
     }
   }
   return undefined;
@@ -230,16 +231,27 @@ function renderNameWithLeverageHighlight(name: string) {
   if (parts.length === 1) {
     return name;
   }
-  return parts.map((part, index) => {
-    const color = index % 2 === 1 ? getNameHighlightColor(part) : undefined;
-    return color ? (
-      <span key={index} style={{ color, fontWeight: 700 }}>
+  const emojis: string[] = [];
+  const rendered = parts.map((part, index) => {
+    const style = index % 2 === 1 ? getNameHighlight(part) : undefined;
+    if (!style) {
+      return <span key={index}>{part}</span>;
+    }
+    if (!emojis.includes(style.emoji)) {
+      emojis.push(style.emoji);
+    }
+    return (
+      <span key={index} style={{ color: style.color, fontWeight: 700 }}>
         {part}
       </span>
-    ) : (
-      <span key={index}>{part}</span>
     );
   });
+  return (
+    <>
+      {rendered}
+      {emojis.length > 0 && <span> {emojis.join("")}</span>}
+    </>
+  );
 }
 
 function getBucketCellClass(bucketLabel: string): string {
@@ -1093,8 +1105,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "티커",
         headerName: "티커",
-        minWidth: 105,
-        width: 105,
+        minWidth: 95,
+        width: 95,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             return (
@@ -1129,8 +1141,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "종목명",
         headerName: "종목명",
-        minWidth: 286,
-        flex: 1.32,
+        minWidth: 277,
+        flex: 1.17,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             const draftTicker = normalizeTicker(addingTickerDraftRef.current);
@@ -1203,8 +1215,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         field: "일간(%)",
         headerName: "일간(%)",
         hide: metricMode !== "cumulative",
-        minWidth: 96,
-        width: 96,
+        minWidth: 86,
+        width: 86,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
@@ -1265,8 +1277,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           {
             field: "괴리율",
             headerName: "괴리율",
-            minWidth: 88,
-            width: 88,
+            minWidth: 78,
+            width: 78,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => {
               const val = params.value ?? 0;
@@ -1283,8 +1295,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "RSI",
         headerName: "RSI",
-        minWidth: 76,
-        width: 76,
+        minWidth: 68,
+        width: 68,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
           renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
