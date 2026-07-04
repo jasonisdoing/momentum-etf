@@ -26,6 +26,8 @@ type MarketRowItem = {
   current_price: number | null;
   nav: number | null;
   deviation: number | null;
+  return_1m_pct: number | null;
+  return_2m_pct: number | null;
   return_3m_pct: number | null;
   prev_volume: number;
   market_cap: number;
@@ -51,18 +53,18 @@ type MarketGridRow = MarketRowItem & {
 };
 
 const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
-  인버스: ["인버스"],
-  "2X": ["2X"],
-  선물: ["선물"],
   "채권(모든종류)": ["채권", "미국채", "국채", "회사채", "단기채", "장기채"],
   혼합: ["혼합"],
   리츠: ["리츠"],
+  인버스: ["인버스"],
+  "2X": ["2X"],
   레버리지: ["레버리지"],
   합성: ["합성"],
   커버드콜: ["커버드콜"],
+  선물: ["선물"],
 };
 
-const DEFAULT_EXCLUDED_GROUPS = ["인버스", "2X", "선물", "채권(모든종류)", "혼합", "리츠"];
+const DEFAULT_EXCLUDED_GROUPS = ["채권(모든종류)", "혼합", "리츠"];
 
 const marketGridTheme = createAppGridTheme();
 
@@ -407,6 +409,26 @@ export function MarketManager({
         type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getDeviationClass(params.value)}>{formatPercent(params.value)}</span>
+        ),
+      },
+      {
+        field: "return_1m_pct",
+        headerName: "1달(%)",
+        width: 96,
+        type: "rightAligned",
+        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
+        ),
+      },
+      {
+        field: "return_2m_pct",
+        headerName: "2달(%)",
+        width: 96,
+        type: "rightAligned",
+        comparator: (a, b) => (a ?? Number.NEGATIVE_INFINITY) - (b ?? Number.NEGATIVE_INFINITY),
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedMetricClass(params.value)}>{formatPercent(params.value)}</span>
         ),
       },
       {
