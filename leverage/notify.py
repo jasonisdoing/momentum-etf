@@ -226,10 +226,12 @@ def send_slack_tuning_result(
 
     market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
     params = best_result.get("params", {})
-    offense_display = _format_display_name(
-        str(params.get("offense_ticker", "N/A")),
-        params.get("offense_name"),
-    )
+    # 공격 자산은 튜닝 조합 차원이 아님 — 진입 시점마다 후보 중 ALMA 이격도 1위를 동적 선택
+    if params.get("offense_ticker"):
+        offense_display = _format_display_name(str(params["offense_ticker"]), params.get("offense_name"))
+    else:
+        candidates = params.get("offense_candidates") or []
+        offense_display = f"동적 선택 (후보 {len(candidates)}종, 진입 시 ALMA 6개월 이격도 1위)"
     defense_display = _format_display_name(
         str(params.get("defense_ticker", "N/A")),
         params.get("defense_name"),

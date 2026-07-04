@@ -23,6 +23,7 @@ def realtime_price(ticker: str, market: str) -> float | None:
         return None
     return fetch_naver_realtime_price(ticker)
 
+
 # 신호 계산용 워밍업(영업일). 기존 엔진과 동일하게 12개월(252영업일) 사용.
 _WARMUP_BDAYS = 252
 
@@ -46,8 +47,14 @@ def compute_bounds(settings: dict, end_bound: pd.Timestamp | None = None):
 
 
 def _requested_tickers(settings: dict) -> list[str]:
+    # 공격 후보군(동적 선택 대상) 전체 + 신호/방어. 후보가 없으면 단일 offense (하위 호환).
+    offense_tickers = [
+        str(c.get("ticker") or "").strip()
+        for c in (settings.get("offense_candidates") or [])
+        if isinstance(c, dict) and str(c.get("ticker") or "").strip()
+    ] or [settings["offense_ticker"]]
     return [
-        settings["offense_ticker"],
+        *offense_tickers,
         settings["signal_ticker"],
         settings["defense_ticker"],
     ]
@@ -108,8 +115,9 @@ def _fetch_field(settings: dict, start, field: str) -> pd.DataFrame:
     if settings.get("defense_ticker") == "CASH":
         out["CASH"] = 1.0
 
-    # 요청 티커가 모두 있는 날짜만 사용
-    needed = [t for t in _requested_tickers(settings) if t in out.columns]
+    # 신호/방어 자산이 있는 날짜만 사용한다. 공격 후보는 최근 상장으로 앞 구간이
+    # 비어 있을 수 있으며(NaN 허용), 엔진이 상장 이후 구간에서만 선택 대상으로 쓴다.
+    needed = [t for t in (settings["signal_ticker"], settings["defense_ticker"]) if t in out.columns]
     out = out.dropna(subset=needed)
     if out.empty:
         raise ValueError(f"{field} 데이터가 비어 있습니다: {_requested_tickers(settings)}")

@@ -54,15 +54,18 @@ def _extract_candidate_tickers(items: list) -> list[str]:
     return tickers
 
 
-def _validate_candidates_kor(candidates: list, start_bound) -> list[str]:
-    """한국 시장 후보 티커(offense/defense) 데이터 가용성 검증 (백테스트 시작일 기준)."""
+def _validate_candidates_kor(candidates: list, start_bound) -> list[tuple[str, str]]:
+    """한국 시장 후보 티커 데이터 가용성 검증 (백테스트 시작일 기준).
+
+    반환: (kind, 설명) 리스트 — kind 는 "missing"(데이터 전무) 또는 "late"(상장이 늦어 앞 구간 없음).
+    """
     if pykrx_stock is None:
         raise ImportError("pykrx 패키지가 설치되어 있지 않습니다. pip install pykrx")
 
     start_str = pd.Timestamp(start_bound).strftime("%Y%m%d")
     end_str = pd.Timestamp.today().strftime("%Y%m%d")
 
-    errors = []
+    entries: list[tuple[str, str]] = []
     for d in candidates:
         if isinstance(d, dict):
             ticker = d.get("ticker", "")
@@ -76,22 +79,22 @@ def _validate_candidates_kor(candidates: list, start_bound) -> list[str]:
 
         df = pykrx_stock.get_market_ohlcv_by_date(start_str, end_str, ticker)
         if df is None or df.empty:
-            errors.append(f"  - {name}({ticker}): 데이터 없음")
+            entries.append(("missing", f"  - {name}({ticker}): 데이터 없음"))
         else:
             data_start = df.index[0].strftime("%Y-%m-%d")
             # start_bound가 주말/휴일일 수 있으므로 첫 영업일 기준으로 비교
-            # 데이터 시작일이 start_bound + 5영업일 이후면 오류
+            # 데이터 시작일이 start_bound + 5영업일 이후면 상장 지연으로 판정
             adjusted_start = pd.Timestamp(start_bound) + pd.offsets.BDay(5)
             if df.index[0] > adjusted_start:
                 required_start = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
-                errors.append(f"  - {name}({ticker}): 데이터 시작일 {data_start} (필요: {required_start})")
+                entries.append(("late", f"  - {name}({ticker}): 데이터 시작일 {data_start} (필요: {required_start})"))
 
-    return errors
+    return entries
 
 
-def _validate_candidates_us(candidates: list, start_bound) -> list[str]:
-    """미국 시장 후보 티커(offense/defense) 데이터 가용성 검증 (백테스트 시작일 기준)."""
-    errors = []
+def _validate_candidates_us(candidates: list, start_bound) -> list[tuple[str, str]]:
+    """미국 시장 후보 티커 데이터 가용성 검증 (백테스트 시작일 기준). 반환 형식은 kor 과 동일."""
+    entries: list[tuple[str, str]] = []
     for d in candidates:
         if isinstance(d, dict):
             ticker = d.get("ticker", "")
@@ -105,16 +108,16 @@ def _validate_candidates_us(candidates: list, start_bound) -> list[str]:
 
         df = yf.download(ticker, start=start_bound, auto_adjust=True, progress=False)
         if df is None or df.empty:
-            errors.append(f"  - {name}({ticker}): 데이터 없음")
+            entries.append(("missing", f"  - {name}({ticker}): 데이터 없음"))
         else:
             data_start = df.index[0].strftime("%Y-%m-%d")
             # start_bound가 주말/휴일일 수 있으므로 첫 영업일 기준으로 비교
-            # 데이터 시작일이 start_bound + 5영업일 이후면 오류
+            # 데이터 시작일이 start_bound + 5영업일 이후면 상장 지연으로 판정
             adjusted_start = pd.Timestamp(start_bound) + pd.offsets.BDay(5)
             if df.index[0] > adjusted_start:
                 required_start = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
-                errors.append(f"  - {name}({ticker}): 데이터 시작일 {data_start} (필요: {required_start})")
-    return errors
+                entries.append(("late", f"  - {name}({ticker}): 데이터 시작일 {data_start} (필요: {required_start})"))
+    return entries
 
 
 def _run_single(args: tuple[dict, dict, pd.DataFrame, pd.DataFrame, pd.Series, pd.DataFrame, pd.Timestamp]) -> dict:
@@ -263,23 +266,33 @@ def run_tuning(
     start_bound, warmup_start, end_bound = compute_bounds(settings)
 
     # 튜닝 시작 전 offense/defense 후보 티커 데이터 가용성 검증 (백테스트 시작일 기준)
+    # - 방어 후보: 전 기간 데이터 필수 (신호 부재 시 대피처라 공백 불가) → 부족하면 중단
+    # - 공격 후보: 최근 상장은 허용 — 엔진이 상장 이후 구간에서만 선택 대상으로 쓴다
     print("[데이터 검증] offense/defense 후보 티커 데이터 가용성 확인 중...")
-    candidates = list(tuning_config.get("offense", [])) + list(tuning_config.get("defense", []))
-    if market == "kor":
-        validation_errors = _validate_candidates_kor(candidates, start_bound)
-    else:
-        validation_errors = _validate_candidates_us(candidates, start_bound)
+    offense_cands = list(tuning_config.get("offense", []))
+    defense_cands = list(tuning_config.get("defense", []))
+    validator = _validate_candidates_kor if market == "kor" else _validate_candidates_us
+    offense_entries = validator(offense_cands, start_bound)
+    defense_entries = validator(defense_cands, start_bound)
+
+    validation_errors = [line for _, line in defense_entries]
+    validation_errors += [line for kind, line in offense_entries if kind == "missing"]
+    late_offense = [line for kind, line in offense_entries if kind == "late"]
 
     if validation_errors:
         required_date = pd.Timestamp(start_bound).strftime("%Y-%m-%d")
         error_msg = (
-            f"\n❌ 튜닝을 중단합니다: 일부 defense 티커에 {required_date}부터의 데이터가 없습니다.\n"
+            f"\n❌ 튜닝을 중단합니다: 일부 티커에 {required_date}부터의 데이터가 없습니다.\n"
             f"\n문제가 있는 티커:\n" + "\n".join(validation_errors) + f"\n\n해결 방법:\n"
-            f"  1. tune.py의 TUNING_CONFIG에서 해당 티커를 제거하거나\n"
+            f"  1. 튜닝 탐색 공간에서 해당 티커를 제거하거나\n"
             f"  2. {config_path}의 months_range를 줄여서 더 최근 기간만 사용하세요.\n"
         )
         raise ValueError(error_msg)
-    print("[데이터 검증] 모든 defense 티커 데이터 확인 완료 ✅")
+    if late_offense:
+        print("[데이터 검증] 최근 상장 공격 후보 감지 — 상장 이후 구간에서만 선택 대상으로 사용합니다:")
+        for line in late_offense:
+            print(line)
+    print("[데이터 검증] 후보 티커 데이터 확인 완료 ✅")
 
     try:
         if market == "kor":
@@ -291,11 +304,8 @@ def run_tuning(
             raise SystemExit("yfinance YFRateLimitError: 잠시 후 다시 실행하세요.") from exc
         raise RuntimeError(f"프리패치 단계에서 데이터 로드에 실패했습니다: {exc}") from exc
 
-    # 공격 자산 후보: tuning_config에 offense가 없으면 settings의 단일 offense 사용 (하위 호환)
-    offense_candidates = tuning_config.get("offense") or [
-        {"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}
-    ]
-
+    # 공격 자산은 조합 차원이 아니다 — 백테스트가 진입 시점마다 후보 중
+    # ALMA 6개월 이격도 1위를 동적으로 선택한다 (라이브와 동일 규칙).
     combos: list[dict] = []
     for buy_cut in tuning_config["drawdown_buy_cutoff"]:
         for sell_cut in tuning_config["drawdown_sell_cutoff"]:
@@ -303,35 +313,23 @@ def run_tuning(
             if buy_cut >= sell_cut:
                 continue
 
-            for off_t in offense_candidates:
-                # offense_ticker가 {ticker, name} 형식이면 티커만 추출
-                if isinstance(off_t, dict):
-                    off_ticker = off_t.get("ticker", "")
-                    offense_obj = off_t
+            for def_t in tuning_config["defense"]:
+                # defense_ticker가 {ticker, name} 형식이면 티커만 추출
+                if isinstance(def_t, dict):
+                    ticker = def_t.get("ticker", "")
+                    defense_obj = def_t  # 전체 객체 저장
                 else:
-                    off_ticker = str(off_t)
-                    offense_obj = {"ticker": off_ticker, "name": off_ticker}
-
-                for def_t in tuning_config["defense"]:
-                    # defense_ticker가 {ticker, name} 형식이면 티커만 추출
-                    if isinstance(def_t, dict):
-                        ticker = def_t.get("ticker", "")
-                        defense_obj = def_t  # 전체 객체 저장
-                    else:
-                        ticker = str(def_t)
-                        defense_obj = {"ticker": ticker, "name": ticker}
-                    combos.append(
-                        {
-                            "drawdown_buy_cutoff": float(buy_cut),
-                            "drawdown_sell_cutoff": float(sell_cut),
-                            "offense_ticker": off_ticker,
-                            "offense_name": offense_obj.get("name", off_ticker),
-                            "_offense_obj": offense_obj,  # 전체 객체 저장 (결과에 포함용)
-                            "defense_ticker": ticker,
-                            "defense_name": defense_obj.get("name", ticker),
-                            "_defense_obj": defense_obj,  # 전체 객체 저장 (결과에 포함용)
-                        }
-                    )
+                    ticker = str(def_t)
+                    defense_obj = {"ticker": ticker, "name": ticker}
+                combos.append(
+                    {
+                        "drawdown_buy_cutoff": float(buy_cut),
+                        "drawdown_sell_cutoff": float(sell_cut),
+                        "defense_ticker": ticker,
+                        "defense_name": defense_obj.get("name", ticker),
+                        "_defense_obj": defense_obj,  # 전체 객체 저장 (결과에 포함용)
+                    }
+                )
 
     total_cases = len(combos)
     workers = max_workers or cpu_count() or 1
@@ -398,7 +396,6 @@ def render_top_table(
     else:
         pr_label = "기간 수익률(%)"
     headers = [
-        "offense_ticker",
         "defense_ticker",
         "buy_cutoff",
         "sell_cutoff",
@@ -413,12 +410,6 @@ def render_top_table(
     for row in results[:top_n]:
         p = row["params"]
 
-        # offense 표시 (_offense_obj 우선)
-        off_ticker = str(p.get("offense_ticker", ""))
-        offense_obj = p.get("_offense_obj")
-        off_name = offense_obj.get("name", "") if isinstance(offense_obj, dict) else ""
-        off_display = f"{off_name}({off_ticker})" if off_name else off_ticker
-
         # defense 표시 (_defense_obj 우선, 없으면 defense_names)
         ticker = str(p.get("defense_ticker", ""))
         defense_obj = p.get("_defense_obj")
@@ -429,7 +420,6 @@ def render_top_table(
         display = f"{name}({ticker})" if name else ticker
         rows.append(
             [
-                off_display,
                 display,
                 f"{p['drawdown_buy_cutoff']:.2f}",
                 f"{p['drawdown_sell_cutoff']:.2f}",

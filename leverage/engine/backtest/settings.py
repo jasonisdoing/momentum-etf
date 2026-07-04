@@ -29,6 +29,7 @@ REQUIRED_KEYS_OLD: list[str] = [
     "slippage",
 ]
 
+
 def normalize_settings(settings: dict) -> dict:
     """raw 설정 dict 를 검증·정규화한다(파일/DB 공용)."""
     # 전략 구분 (기본값: switch - 하위 호환)
@@ -44,6 +45,29 @@ def normalize_settings(settings: dict) -> dict:
 def load_settings(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as f:
         return normalize_settings(json.load(f))
+
+
+def _normalize_offense_candidates(settings: dict) -> None:
+    """공격 후보군을 정규화한다.
+
+    tuning.offense_candidates 가 있으면 그것이 공격 후보군(동적 선택 대상)이고,
+    없으면 단일 offense 로 동작한다(하위 호환). CASH 는 공격 후보가 될 수 없다.
+    """
+    tuning = settings.get("tuning") or {}
+    raw = tuning.get("offense_candidates") or []
+    candidates: list[dict] = []
+    seen: set[str] = set()
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        ticker = str(entry.get("ticker") or "").strip()
+        if not ticker or ticker.upper() == "CASH" or ticker in seen:
+            continue
+        seen.add(ticker)
+        candidates.append({"ticker": ticker, "name": entry.get("name") or ticker})
+    if not candidates:
+        candidates = [{"ticker": settings["offense_ticker"], "name": settings["offense_name"]}]
+    settings["offense_candidates"] = candidates
 
 
 def _normalize_switch_settings(settings: dict) -> dict:
@@ -75,4 +99,5 @@ def _normalize_switch_settings(settings: dict) -> dict:
         settings["offense_name"] = settings.get("offense_name", settings["offense_ticker"])
         settings["defense_name"] = settings.get("defense_name", settings["defense_ticker"])
 
+    _normalize_offense_candidates(settings)
     return settings
