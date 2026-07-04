@@ -203,6 +203,46 @@ function renderRankDelta(value: number | null | undefined) {
   );
 }
 
+/** 종목명 강조 키워드 → 색상 (대소문자 무관, 볼드 공통).
+ *  키워드를 추가하려면 여기에 한 줄만 더하면 된다. 겹치는 키워드는 긴 것을 앞에 둘 것 (예: UltraPro > Ultra). */
+const NAME_HIGHLIGHT_KEYWORDS: Record<string, string> = {
+  레버리지: "#d63939",
+  Geared: "#d63939",
+  "3X": "#d63939",
+  UltraPro: "#d63939",
+  Ultra: "#d63939",
+  액티브: "#2f9e44",
+};
+
+const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).join("|")})`, "i");
+
+function getNameHighlightColor(part: string): string | undefined {
+  const lower = part.toLowerCase();
+  for (const [keyword, color] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
+    if (keyword.toLowerCase() === lower) {
+      return color;
+    }
+  }
+  return undefined;
+}
+
+function renderNameWithLeverageHighlight(name: string) {
+  const parts = name.split(NAME_HIGHLIGHT_RE);
+  if (parts.length === 1) {
+    return name;
+  }
+  return parts.map((part, index) => {
+    const color = index % 2 === 1 ? getNameHighlightColor(part) : undefined;
+    return color ? (
+      <span key={index} style={{ color, fontWeight: 700 }}>
+        {part}
+      </span>
+    ) : (
+      <span key={index}>{part}</span>
+    );
+  });
+}
+
 function getBucketCellClass(bucketLabel: string): string {
   const match = /^(\d+)/.exec(String(bucketLabel || "").trim());
   if (!match) {
@@ -1090,8 +1130,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "종목명",
         headerName: "종목명",
-        minWidth: 260,
-        flex: 1.2,
+        minWidth: 286,
+        flex: 1.32,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             const draftTicker = normalizeTicker(addingTickerDraftRef.current);
@@ -1125,7 +1165,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          return <span className="rankNameCellText" title={value}>{value}</span>;
+          return <span className="rankNameCellText" title={value}>{renderNameWithLeverageHighlight(value)}</span>;
         },
       },
       ...(isAllTickerType ||
