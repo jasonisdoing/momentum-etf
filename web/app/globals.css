@@ -3503,13 +3503,18 @@ a {
   min-width: 0;
 }
 
+/* 종목명 — 원래 글씨 크기를 유지한 채 줄간격만 줄여 최대 2줄까지 표시 (그래도 넘치면 말줄임) */
 .rankAgGrid .rankNameCellText {
-  display: block;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.1;
 }
 
 .rankAgGrid .ag-cell[col-id="종목명"] {
