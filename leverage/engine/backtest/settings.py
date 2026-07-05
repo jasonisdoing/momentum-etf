@@ -7,7 +7,6 @@ from pathlib import Path
 # 기존 형식: signal_ticker, offense_ticker, defense_ticker는 문자열
 REQUIRED_KEYS_NEW: list[str] = [
     "signal",
-    "offense",
     "defense",
     "drawdown_buy_cutoff",
     "drawdown_sell_cutoff",
@@ -16,6 +15,8 @@ REQUIRED_KEYS_NEW: list[str] = [
     # "start_date",    <-- 추가됨 (필수)
     "slippage",
 ]
+# 참고: 공격 자산(offense)은 더 이상 설정 키가 아니다 — 진입 시점마다
+# tuning.offense_candidates 중 ALMA 6개월 이격도 1위를 동적으로 선택한다.
 
 REQUIRED_KEYS_OLD: list[str] = [
     "signal_ticker",
@@ -65,8 +66,11 @@ def _normalize_offense_candidates(settings: dict) -> None:
             continue
         seen.add(ticker)
         candidates.append({"ticker": ticker, "name": entry.get("name") or ticker})
+    if not candidates and settings.get("offense_ticker"):
+        # 하위 호환: 옛 설정(단일 offense)만 있으면 그것을 후보 1개로 사용
+        candidates = [{"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}]
     if not candidates:
-        candidates = [{"ticker": settings["offense_ticker"], "name": settings["offense_name"]}]
+        raise ValueError("공격 후보(tuning.offense_candidates)가 1개 이상 필요합니다. 레버리지-설정 화면에서 저장하세요.")
     settings["offense_candidates"] = candidates
 
 
@@ -81,11 +85,13 @@ def _normalize_switch_settings(settings: dict) -> dict:
             raise ValueError(f"설정 파일에 필수 키가 없습니다: {missing}")
 
         # 새 형식을 내부적으로 사용할 수 있도록 정규화
-        # ticker/name을 별도 필드로 추출
+        # ticker/name을 별도 필드로 추출 (offense 는 옵션 — 있으면 후보 폴백으로만 사용)
         settings["signal_ticker"] = settings["signal"]["ticker"]
         settings["signal_name"] = settings["signal"].get("name", settings["signal"]["ticker"])
-        settings["offense_ticker"] = settings["offense"]["ticker"]
-        settings["offense_name"] = settings["offense"].get("name", settings["offense"]["ticker"])
+        offense = settings.get("offense")
+        if isinstance(offense, dict) and offense.get("ticker"):
+            settings["offense_ticker"] = offense["ticker"]
+            settings["offense_name"] = offense.get("name", offense["ticker"])
         settings["defense_ticker"] = settings["defense"]["ticker"]
         settings["defense_name"] = settings["defense"].get("name", settings["defense"]["ticker"])
     else:

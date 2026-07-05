@@ -36,7 +36,8 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    for key in ("signal", "offense", "defense"):
+    # 공격 자산은 설정 키가 아니다 — 진입 시점마다 공격 후보 중 ALMA 이격도 1위를 동적 선택.
+    for key in ("signal", "defense"):
         asset = config.get(key)
         if not isinstance(asset, dict) or not str(asset.get("ticker") or "").strip():
             raise ValueError(f"'{key}' 자산의 티커가 필요합니다.")
@@ -69,6 +70,7 @@ def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, An
     """
     _validate_leverage_config(config)
     config = dict(config)
+    config.pop("offense", None)  # 폐기된 필드 — 저장 시 DB 에서도 제거된다
     config["benchmarks"] = derive_benchmarks(config)
     save_leverage_config_raw(profile, config)
     return load_leverage_settings(profile)

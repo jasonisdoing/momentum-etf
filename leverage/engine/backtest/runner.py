@@ -34,9 +34,8 @@ def run_backtest(
 
     defense = settings["defense_ticker"]
     # 공격 후보군 — 진입 시점마다 ALMA 6개월 이격도 1위를 선택한다 (후보 1개면 기존 단일 동작).
-    offense_entries = settings.get("offense_candidates") or [
-        {"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}
-    ]
+    # normalize_settings 가 후보 1개 이상을 보장한다.
+    offense_entries = settings["offense_candidates"]
     offense_tickers = [str(c["ticker"]) for c in offense_entries]
     offense_set = set(offense_tickers)
     assets = list(dict.fromkeys([*offense_tickers, defense]))

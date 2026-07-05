@@ -101,7 +101,6 @@ def _build_ticker_names(settings: dict, prev_state: dict, display_target: str | 
             for c in (settings.get("offense_candidates") or [])
             if isinstance(c, dict) and c.get("ticker")
         },
-        settings["offense_ticker"]: settings.get("offense_name", settings["offense_ticker"]),
         settings["defense_ticker"]: settings.get("defense_name", settings["defense_ticker"]),
         settings["signal_ticker"]: settings.get("signal_name", settings["signal_ticker"]),
     }
@@ -184,10 +183,8 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     # (누적도 백테스트 hold_days 의존을 끊고 보유시작일 종가 기준으로 계산 → 누적 0 버그 해소)
     display_holding_days, holding_start_close = holding_period_info(last_target, holding_start_date)
 
-    # 공격 후보군 (진입 시점마다 ALMA 6개월 이격도 1위를 선택)
-    offense_candidates = settings.get("offense_candidates") or [
-        {"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}
-    ]
+    # 공격 후보군 (진입 시점마다 ALMA 6개월 이격도 1위를 선택, normalize 가 1개 이상 보장)
+    offense_candidates = settings["offense_candidates"]
     offense_tickers = [str(c["ticker"]) for c in offense_candidates]
     offense_set = set(offense_tickers)
     candidate_names = {str(c["ticker"]): c.get("name", c["ticker"]) for c in offense_candidates}
@@ -208,17 +205,8 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
         }
         save_current_state(profile, current_state)
 
-        # 공격 자산 보유가 확정되면 config.offense 도 현재 자산으로 동기화한다
-        # (엔진은 후보에서 동적 선택하므로 표시/화면용 정보 갱신).
-        if last_target in offense_set and settings.get("offense_ticker") != last_target:
-            from leverage.config_store import load_leverage_config_raw, save_leverage_config_raw
-
-            raw_config = load_leverage_config_raw(profile)
-            raw_config["offense"] = {"ticker": last_target, "name": candidate_names.get(last_target, last_target)}
-            save_leverage_config_raw(profile, raw_config)
-            print(f"[{profile}] config.offense 를 현재 공격 자산으로 갱신: {last_target}")
-
     # 표시용 공격 자산: 보유 중이면 그 자산, 아니면 다음 진입 시 선택될 후보
+    # (config.offense 필드는 폐기 — 현재 공격 자산은 상태(leverage_state)가 단일 소스)
     offense_ticker = last_target if last_target in offense_set else next_offense
     offense_name = candidate_names.get(offense_ticker, offense_ticker)
 

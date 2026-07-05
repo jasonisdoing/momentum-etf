@@ -47,12 +47,12 @@ def compute_bounds(settings: dict, end_bound: pd.Timestamp | None = None):
 
 
 def _requested_tickers(settings: dict) -> list[str]:
-    # 공격 후보군(동적 선택 대상) 전체 + 신호/방어. 후보가 없으면 단일 offense (하위 호환).
+    # 공격 후보군(동적 선택 대상) 전체 + 신호/방어 (normalize_settings 가 후보 1개 이상을 보장).
     offense_tickers = [
         str(c.get("ticker") or "").strip()
         for c in (settings.get("offense_candidates") or [])
         if isinstance(c, dict) and str(c.get("ticker") or "").strip()
-    ] or [settings["offense_ticker"]]
+    ]
     return [
         *offense_tickers,
         settings["signal_ticker"],

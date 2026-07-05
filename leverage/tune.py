@@ -100,6 +100,19 @@ def _tune_switch(
         pct = int(completed / total * 100)
         print(f"[튜닝 진행률] {pct}% ({completed}/{total})")
 
+    def write_error_log(error_text: str, failures: list[str] | None = None) -> None:
+        """튜닝 실패 내용을 결과 로그 파일에 기록한다 (/leverage-tune 화면에서 표시)."""
+        with out_path.open("w", encoding="utf-8") as f:
+            f.write(f"실행 시각: {start_ts.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"종료 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"프로파일: {profile} | 시장: {market}\n\n")
+            f.write("❌ ========= 튜닝 실패 ==========\n\n")
+            f.write(error_text.rstrip() + "\n")
+            if failures:
+                f.write(f"\n=== 실패한 조합 ({len(failures)}개) ===\n")
+                for line in failures:
+                    f.write(f"  - {line}\n")
+
     print(f"[튜닝 시작] {start_ts.strftime('%Y-%m-%d %H:%M:%S')} ({profile})")
     # 공격 자산은 조합 차원이 아님 — 백테스트 내부에서 진입 시점마다 동적 선택된다.
     total_cases = 1
@@ -120,15 +133,24 @@ def _tune_switch(
         )
     except SystemExit as exc:
         msg = str(exc)
+        write_error_log(f"튜닝이 중단되었습니다: {msg or 'SystemExit'}")
         if "YFRateLimitError" in msg or "rate" in msg.lower():
             print("YFRateLimitError: 요청이 너무 많습니다. 잠시 후 다시 실행하세요.")
             raise SystemExit(1) from exc
+        raise
+    except Exception as exc:
+        # 검증 실패(ValueError) 등 — 에러를 로그 파일에 남겨 화면에서도 보이게 한다.
+        write_error_log(str(exc))
         raise
 
     results.sort(key=lambda x: x["cagr"], reverse=True)
     top_n = results[:100]
 
     if not results:
+        write_error_log(
+            "유효한 튜닝 결과가 없습니다 (모든 조합 실패). 설정을 변경하지 않습니다.",
+            failures=meta.get("failures"),
+        )
         print(f"튜닝 결과가 없습니다. {config_path}을 변경하지 않습니다.")
         raise SystemExit(1)
 
@@ -183,6 +205,11 @@ def _tune_switch(
             f.write(line + "\n")
         if len(results) > len(top_n):
             f.write(f"... (총 {total_cases}개 중 상위 {len(top_n)}개 표시)\n")
+        combo_failures = meta.get("failures") or []
+        if combo_failures:
+            f.write(f"\n⚠️ === 실패한 조합 ({len(combo_failures)}개) ===\n")
+            for line in combo_failures:
+                f.write(f"  - {line}\n")
 
     print(f"튜닝 결과 저장: {out_path}")
 

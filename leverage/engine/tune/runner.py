@@ -147,7 +147,7 @@ def _prefetch_data_us(settings: dict, tuning_config: dict, warmup_start):
     # offense/defense 후보가 {ticker, name} 형식일 수 있으므로 티커만 추출
     all_defs = _extract_candidate_tickers(tuning_config.get("defense", []))
     all_offs = _extract_candidate_tickers(tuning_config.get("offense", []))
-    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs, *all_offs} - {"CASH"})
+    tickers = list({settings["signal_ticker"], settings["defense_ticker"], *all_defs, *all_offs} - {"CASH"})
     price_raw = yf.download(tickers, start=warmup_start, auto_adjust=True, progress=False)
     if price_raw is None or len(price_raw) == 0:
         raise ValueError(f"가격 데이터를 받아오지 못했습니다: {tickers}")
@@ -189,7 +189,7 @@ def _prefetch_data_kor(settings: dict, tuning_config: dict, warmup_start):
     # offense/defense 후보가 {ticker, name} 형식일 수 있으므로 티커만 추출
     all_defs = _extract_candidate_tickers(tuning_config.get("defense", []))
     all_offs = _extract_candidate_tickers(tuning_config.get("offense", []))
-    tickers = list({settings["offense_ticker"], settings["signal_ticker"], *all_defs, *all_offs} - {"CASH"})
+    tickers = list({settings["signal_ticker"], settings["defense_ticker"], *all_defs, *all_offs} - {"CASH"})
 
     start_str = pd.Timestamp(warmup_start).strftime("%Y%m%d")
     end_str = pd.Timestamp.today().strftime("%Y%m%d")
@@ -353,6 +353,7 @@ def run_tuning(
             ): overrides
             for overrides in combos
         }
+        failures: list[str] = []
         for fut in as_completed(future_map):
             try:
                 res = fut.result()
@@ -362,6 +363,10 @@ def run_tuning(
                 if _is_rate_limit_error(exc) or _is_network_or_data_error(exc):
                     print(f"[튜닝 중단] 네트워크/데이터 오류 감지: {exc}")
                     raise SystemExit(1) from exc
+                failures.append(
+                    f"buy {overrides.get('drawdown_buy_cutoff')} / sell {overrides.get('drawdown_sell_cutoff')}"
+                    f" / defense {overrides.get('defense_ticker')}: {exc}"
+                )
                 print(f"[튜닝 경고] 조합 {overrides} 실패: {exc}")
             completed += 1
             progress = int(completed / total_cases * 100)
@@ -382,6 +387,7 @@ def run_tuning(
         "period_start": start_bound.strftime("%Y-%m-%d"),
         "period_end": end_bound.strftime("%Y-%m-%d"),
         "period_months": months_range,
+        "failures": failures,
     }
 
 
@@ -396,6 +402,7 @@ def render_top_table(
     else:
         pr_label = "기간 수익률(%)"
     headers = [
+        "offense_ticker",
         "defense_ticker",
         "buy_cutoff",
         "sell_cutoff",
@@ -410,6 +417,10 @@ def render_top_table(
     for row in results[:top_n]:
         p = row["params"]
 
+        # 공격 자산은 고정이 아니라 진입 시점마다 후보 중 ALMA 이격도 1위를 동적 선택
+        candidate_count = len(p.get("offense_candidates") or [])
+        offense_display = f"동적선택({candidate_count}종)" if candidate_count else "동적선택"
+
         # defense 표시 (_defense_obj 우선, 없으면 defense_names)
         ticker = str(p.get("defense_ticker", ""))
         defense_obj = p.get("_defense_obj")
@@ -420,6 +431,7 @@ def render_top_table(
         display = f"{name}({ticker})" if name else ticker
         rows.append(
             [
+                offense_display,
                 display,
                 f"{p['drawdown_buy_cutoff']:.2f}",
                 f"{p['drawdown_sell_cutoff']:.2f}",
