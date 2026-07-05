@@ -31,7 +31,7 @@ def pick_target(row, prev_target: str, settings: dict, *, offense_set=None, sele
     buy_cut = -settings["drawdown_buy_cutoff"] / 100
     sell_cut = -settings["drawdown_sell_cutoff"] / 100
 
-    offense = settings["offense_ticker"]
+    offense = settings.get("offense_ticker")
     defense = settings["defense_ticker"]
     offenses = offense_set or {offense}
 
@@ -47,5 +47,7 @@ def pick_target(row, prev_target: str, settings: dict, *, offense_set=None, sele
         if current_dd > buy_cut:
             if select_offense is not None:
                 return select_offense(row.name)
+            if offense is None:
+                raise ValueError("공격 자산을 결정할 수 없습니다 (select_offense 또는 offense_ticker 필요).")
             return offense
         return defense

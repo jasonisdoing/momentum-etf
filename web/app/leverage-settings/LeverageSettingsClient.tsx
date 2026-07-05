@@ -29,7 +29,7 @@ export function LeverageSettingsClient() {
     useLeverageConfig();
 
   // ── 전략 설정 ──
-  const setAsset = useCallback((key: "signal" | "offense" | "defense", field: "ticker" | "name", value: string) =>
+  const setAsset = useCallback((key: "signal" | "defense", field: "ticker" | "name", value: string) =>
     setConfig((c) => (c ? { ...c, [key]: { ...(c[key] ?? { ticker: "" }), [field]: value } } : c)), [setConfig]);
 
   const setField = (key: keyof LeverageConfig, value: unknown) =>
@@ -38,7 +38,7 @@ export function LeverageSettingsClient() {
   const numField = (key: keyof LeverageConfig, raw: string) =>
     setField(key, raw === "" ? undefined : Number(raw));
 
-  const resolveAsset = useCallback(async (key: "signal" | "offense" | "defense", value: string) => {
+  const resolveAsset = useCallback(async (key: "signal" | "defense", value: string) => {
     setError(null);
     const cleanTicker = value.trim();
     if (!cleanTicker) return;
@@ -57,7 +57,7 @@ export function LeverageSettingsClient() {
     if (success) toast.success("전략 설정 저장 완료");
   };
 
-  const asset = (key: "signal" | "offense" | "defense", label: string) => (
+  const asset = (key: "signal" | "defense", label: string) => (
     <FieldRow label={label}>
       <div style={{ display: "flex", gap: 6, alignItems: "center", flex: 1, flexWrap: "wrap" }}>
         <input
@@ -217,7 +217,8 @@ export function LeverageSettingsClient() {
   const buys = rangeValues(t?.buy_cutoff_range);
   const sells = rangeValues(t?.sell_cutoff_range);
   const pairs = buys.reduce((acc, b) => acc + sells.filter((s) => b < s).length, 0);
-  const combos = pairs * (t?.offense_candidates?.length ?? 0) * (t?.defense_candidates?.length ?? 0);
+  // 공격 후보는 조합 차원이 아님 (진입 시 동적 선택) — 조합수 = 컷 쌍 × 방어 후보
+  const combos = pairs * (t?.defense_candidates?.length ?? 0);
 
   return (
     <PageFrame title="레버리지 설정">
@@ -239,7 +240,14 @@ export function LeverageSettingsClient() {
                     </select>
                   </FieldRow>
                   {asset("signal", "시그널 지수")}
-                  {asset("offense", "공격 자산")}
+                  <ReadRow
+                    label="현재 공격 자산"
+                    value={
+                      state?.target && config.tuning?.offense_candidates?.some((c) => c.ticker === state.target)
+                        ? `${state.target_name ?? state.target}(${state.target}) — 진입 시 자동 선택됨`
+                        : "진입 시 자동 선택 (공격 후보 중 ALMA 6개월 이격도 1위)"
+                    }
+                  />
                   {asset("defense", "방어 자산")}
                   <FieldRow label="매수 컷(%)">
                     <input type="number" step="0.1" style={{ ...inputStyle, width: 100 }} value={config.drawdown_buy_cutoff ?? ""} onChange={(e) => numField("drawdown_buy_cutoff", e.target.value)} />
@@ -277,7 +285,7 @@ export function LeverageSettingsClient() {
                   {rangeEditor("sell_cutoff_range", "매도컷 범위(%)")}
                   <div style={{ marginTop: 8, fontSize: "0.85rem", color: combos > 0 ? "#475569" : "#dc2626" }}>
                     유효 조합수: <b>{combos.toLocaleString()}</b>개
-                    <span style={{ color: "#94a3b8" }}> (매수컷&lt;매도컷 {pairs}쌍 × 공격 {t?.offense_candidates?.length ?? 0} × 방어 {t?.defense_candidates?.length ?? 0})</span>
+                    <span style={{ color: "#94a3b8" }}> (매수컷&lt;매도컷 {pairs}쌍 × 방어 {t?.defense_candidates?.length ?? 0} — 공격 {t?.offense_candidates?.length ?? 0}종은 진입 시 동적 선택)</span>
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                     <button type="button" className="btn btn-outline-dark" disabled={saving} onClick={save}>

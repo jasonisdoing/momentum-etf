@@ -22,7 +22,6 @@ export type LeverageConfig = {
   months_range?: number;
   start_date?: string;
   signal?: AssetRef;
-  offense?: AssetRef;
   defense?: AssetRef;
   slippage?: number;
   drawdown_buy_cutoff?: number;
