@@ -27,6 +27,16 @@ const KEY_LABELS: Record<EditableKey, string> = {
   RSI_LIMIT: "RSI 상한",
 };
 
+const KEY_WIDTHS: Record<EditableKey, number> = {
+  TOP_N_HOLD: 90,
+  HOLDING_BONUS_SCORE: 110,
+  TREND_WEIGHT_RATIO: 110,
+  SECONDARY_METRIC: 120,
+  MA_TYPE: 110,
+  MA_MONTHS: 90,
+  RSI_LIMIT: 90,
+};
+
 const SECONDARY_OPTIONS = ["ATH", "SHARPE"];
 
 type SettingField = { value: string | number | null };
@@ -52,9 +62,9 @@ type PoolSettingsResponse = {
 /** 한 행의 편집 중인 값 (모두 문자열로 보관, 저장 시 파싱). */
 type RowDraft = Record<EditableKey, string>;
 
-/** 보유보너스(%) 셀렉트 옵션 — 백테스트 탐색값과 동일한 0/5/10. 현재값이 비표준이면 포함해 보존. */
+/** 보유보너스(%) 셀렉트 옵션 — 백테스트 탐색값과 동일한 0/10/20. 현재값이 비표준이면 포함해 보존. */
 function bonusOptions(current: string): number[] {
-  const base = [0, 5, 10];
+  const base = [0, 10, 20];
   const cur = Number(current);
   if (Number.isFinite(cur) && !base.includes(cur)) {
     return [...base, cur].sort((a, b) => a - b);
@@ -193,12 +203,12 @@ export function SettingsManager() {
               종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 6개 값은 DB 에서 저장·수정합니다.
             </p>
             <div style={{ overflowX: "auto" }}>
-              <table className="table table-sm appSettingsTable" style={{ minWidth: 720 }}>
+              <table className="table table-sm appSettingsTable" style={{ minWidth: 880 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 140, whiteSpace: "nowrap" }}>종목풀</th>
                     {EDITABLE_KEYS.map((key) => (
-                      <th key={key} style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <th key={key} style={{ textAlign: "right", whiteSpace: "nowrap", width: KEY_WIDTHS[key], minWidth: KEY_WIDTHS[key] }}>
                         {KEY_LABELS[key]}
                       </th>
                     ))}
@@ -223,7 +233,7 @@ export function SettingsManager() {
                             {key === "MA_TYPE" ? (
                               <select
                                 className="form-select form-select-sm"
-                                style={{ width: 86, marginLeft: "auto" }}
+                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -236,7 +246,7 @@ export function SettingsManager() {
                             ) : key === "SECONDARY_METRIC" ? (
                               <select
                                 className="form-select form-select-sm"
-                                style={{ width: 88, marginLeft: "auto" }}
+                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={(draft[key] || "ATH").toUpperCase()}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -249,7 +259,7 @@ export function SettingsManager() {
                             ) : key === "HOLDING_BONUS_SCORE" ? (
                               <select
                                 className="form-select form-select-sm"
-                                style={{ width: 64, marginLeft: "auto" }}
+                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -262,7 +272,7 @@ export function SettingsManager() {
                             ) : key === "TREND_WEIGHT_RATIO" ? (
                               <select
                                 className="form-select form-select-sm"
-                                style={{ width: 72, marginLeft: "auto" }}
+                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -275,7 +285,7 @@ export function SettingsManager() {
                             ) : key === "MA_MONTHS" ? (
                               <select
                                 className="form-select form-select-sm"
-                                style={{ width: 72, marginLeft: "auto" }}
+                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -289,7 +299,7 @@ export function SettingsManager() {
                               <input
                                 type="number"
                                 className="form-control form-control-sm"
-                                style={{ textAlign: "right", width: 60, marginLeft: "auto" }}
+                                style={{ textAlign: "right", width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 min={1}
                                 max={key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}

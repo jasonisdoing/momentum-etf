@@ -58,7 +58,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const [topNText, setTopNText] = useState(
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
-  const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 5, 10]).join(", "));
+  const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 10, 20]).join(", "));
   // 저장값 중 옵션 밖(10 단위가 아닌 값)은 버린다.
   const [ratioSet, setRatioSet] = useState<Set<number>>(
     new Set((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).filter((v) => RATIO_OPTIONS.includes(v))),
