@@ -169,22 +169,30 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     else:
         end_date = rec_data["last_date"]
 
-    # 확정된 보유 종목 = 마지막으로 닫힌 거래일의 신호 (장중에도 뒤집지 않음)
-    display_target = last_target
-
-    # 이전 상태 로드 및 변경 여부 확인 (확정은 장 마감 후에만 의미가 있음)
+    # 이전 상태 로드 (실제 보유 = DB 단일 소스). 변경 확정은 장 마감 후에만 의미가 있음.
     prev_state = load_previous_state(profile)
     prev_target = prev_state.get("target")
     is_changed = (not is_warning) and (prev_target is not None) and (prev_target != last_target)
 
-    # 보유시작일: 포지션이 바뀐 날에만 새로 기록하고, 유지되면 기존 값을 그대로 둔다.
-    # (매번 백테스트로 재추정하지 않음 → 보유일이 신호/실행 프레임 어긋남으로 리셋되는 버그 방지)
-    holding_start_date = resolve_holding_start_date(
-        prev_target, prev_state.get("holding_start_date"), last_target, end_date
-    )
+    # 표시/보유일 기준:
+    # - 미확정(장전/장중): 오늘 매매가 실행되지 않았으므로 '실제 보유(DB prev_target)'를 그대로 표시하고,
+    #   백테스트 신호(last_target)가 다르면 '전환 예정(warning)'으로만 안내한다. 보유일도 실제 보유 기준.
+    # - 확정(장 마감 후): 백테스트 신호가 곧 확정 보유. 변경 시 보유시작일을 새로 기록한다.
+    pending_target: str | None = None
+    if is_warning and prev_target is not None:
+        display_target = prev_target
+        holding_target = prev_target
+        holding_start_date = prev_state.get("holding_start_date")
+        if last_target != prev_target:
+            pending_target = last_target
+    else:
+        display_target = last_target
+        holding_target = last_target
+        holding_start_date = resolve_holding_start_date(
+            prev_target, prev_state.get("holding_start_date"), last_target, end_date
+        )
     # 보유일수·누적기준가 모두 확정된 보유시작일에서 1회 조회로 구해 UI(leverage_service)와 동일 소스로 맞춘다.
-    # (누적도 백테스트 hold_days 의존을 끊고 보유시작일 종가 기준으로 계산 → 누적 0 버그 해소)
-    display_holding_days, holding_start_close = holding_period_info(last_target, holding_start_date)
+    display_holding_days, holding_start_close = holding_period_info(holding_target, holding_start_date)
 
     # 공격 후보군 (진입 시점마다 ALMA 6개월 이격도 1위를 선택, normalize 가 1개 이상 보장)
     offense_candidates = settings["offense_candidates"]
@@ -265,9 +273,12 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
             price = live_prices[sym]
             day_ret = live_prices[sym] / confirmed_close - 1
 
-        # 보유 종목의 누적 수익률 = 현재가 / 보유시작일 종가 - 1 (장중이면 현재가=실시간가)
-        if sym == display_target and holding_start_close:
-            c_ret = price / holding_start_close - 1
+        # 누적 수익률: 보유 종목만 보유시작일 종가 기준. 미보유 종목은 표시하지 않는다(-).
+        # (백테스트가 시뮬레이션상 보유한 자산의 누적이 미보유 표시에 새어나오는 것 방지)
+        if sym == display_target:
+            c_ret = price / holding_start_close - 1 if holding_start_close else c_ret
+        else:
+            c_ret = None
 
         sell_cutoff_val = -sell_cutoff / 100
         needed_drop = (current_dd - sell_cutoff_val) * 100 if current_dd > sell_cutoff_val else 0
@@ -322,7 +333,12 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     target_name = ticker_names.get(display_target, display_target)
     target_display = _format_display_name(display_target, target_name)
 
-    warning_target_display = None
+    # 미확정 모드에서 신호가 실제 보유와 다르면 '전환 예정' 안내에 쓸 대상.
+    warning_target_display = (
+        _format_display_name(pending_target, ticker_names.get(pending_target, pending_target))
+        if pending_target
+        else None
+    )
 
     out_dir = ZRESULTS_DIR / profile
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -343,11 +359,19 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
 
     if is_changed:
         print(f"⚠️ 포지션 변경 감지: {prev_target} -> {target_display}")
+    elif warning_target_display:
+        print(f"⚠️ 전환 예상(미확정): {target_display} -> {warning_target_display}")
     else:
         print(f"ℹ️ 포지션 유지: {target_display}")
 
     market_name = _market_label(market)
-    header_text = f"{market_name} 스위칭 {'포지션 변경 알림' if is_changed else '정기 보고'}"
+    if is_changed:
+        header_label = "포지션 변경 알림"
+    elif warning_target_display:
+        header_label = "포지션 변경 예상 (경고)"
+    else:
+        header_label = "정기 보고"
+    header_text = f"{market_name} 스위칭 {header_label}"
     print("\n=== Slack 전송 요약 ===")
     print(f"{header_text} (기준일: {end_date})")
     print(f"🏆 최적 파라미터 (CAGR: {result.get('cagr', 0) * 100:.2f}%)")

@@ -44,8 +44,8 @@ def send_slack_recommendation(
 
     # 이모지 및 타이틀 분기
     if is_warning:
-        # 장중 / 장전 (미확정)
-        if is_changed:
+        # 장중 / 장전 (미확정). 신호가 실제 보유와 다르면(warning_target_display) '변경 예상'.
+        if is_changed or warning_target_display:
             header_emoji = "⚠️"
             header_text = f"{market_name} {phase_tag} 포지션 변경 예상 (경고)"
         else:
@@ -141,7 +141,7 @@ def send_slack_recommendation(
         summary_text += f"\n💼 *현재 보유*: *{target_display}*"
         summary_text += holding_days_text
         summary_text += (
-            f"\n\n*⚠️ 장중 경고*: 이대로 장 마감 시 "
+            f"\n\n*⚠️ 전환 예상*: 이대로 장 마감 시 "
             f"*{warning_target_display}*(으)로 전환될 수 있습니다. "
             "장 마감 후 최종 확정 알림을 기다려주세요."
         )
