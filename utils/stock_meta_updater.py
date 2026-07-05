@@ -9,6 +9,7 @@ import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
+import numpy as np
 from config import (
     NAVER_ETF_CATEGORY_CONFIG,
     NAVER_ETF_CATEGORY_HEADERS,
@@ -23,11 +24,47 @@ from utils.data_loader import (
     fetch_naver_kor_market,
     fetch_naver_kor_stock_map,
     fetch_pykrx_name,
+    fetch_ohlcv,
 )
 from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
+from utils.indicators import calculate_moving_average_signals
+from utils.perf_metrics import curve_metrics
+
+
+def _simulate_single_stock_ma_strategy(close_prices: pd.Series, ma_months: int) -> dict[str, Any]:
+    """단일 종목에 대해 지정 개월수(ma_months) 동안의 단순 보유(Buy & Hold) 성과 지표(CAGR, MDD, Sharpe)를 구합니다.
+    상장일이 시작일보다 뒤에 있는 경우, 가용한 전체 기간으로 계산하고 is_partial=True 플래그를 반환합니다.
+    """
+    if close_prices.empty:
+        return {"cagr": 0.0, "mdd": 0.0, "sharpe": 0.0, "is_partial": False}
+
+    try:
+        last_date = close_prices.index[-1]
+        start_date = last_date - pd.DateOffset(months=ma_months)
+        
+        # 상장일이 시작일보다 나중인지 여부 판정
+        first_price_date = close_prices.index[0]
+        is_partial = first_price_date > start_date
+
+        target_series = close_prices.loc[start_date:]
+        if len(target_series) < 2:
+            return {"cagr": 0.0, "mdd": 0.0, "sharpe": 0.0, "is_partial": is_partial}
+
+        start_val = float(target_series.iloc[0])
+        values = target_series.iloc[1:].to_numpy()
+
+        metrics = curve_metrics(start_val, values)
+        return {
+            "cagr": round(float(metrics.get("total_return_pct", 0.0)), 2),  # CAGR 대신 단순 누적 수익률(%) 저장
+            "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
+            "sharpe": round(float(metrics.get("sharpe", 0.0)), 2),
+            "is_partial": is_partial,
+        }
+    except Exception:
+        return {"cagr": 0.0, "mdd": 0.0, "sharpe": 0.0, "is_partial": False}
 
 # -------------------------------------------------------------------------
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
@@ -321,6 +358,7 @@ def _refresh_korean_etf_meta_cache(
     category_data: dict[str, Any] | None = None,
     *,
     existing_cache_doc: dict[str, Any] | None = None,
+    backtest_stats: dict[str, Any] | None = None,
 ) -> None:
     """한국 ETF 메타/구성종목 캐시를 네이버 기준으로 갱신한다.
 
@@ -364,6 +402,9 @@ def _refresh_korean_etf_meta_cache(
                 if k.startswith("cat_"):
                     meta_cache[k] = v
 
+    if meta_cache is not None:
+        meta_cache["backtest_stats"] = backtest_stats
+
     # 2) holdings 는 항상 갱신 (TTL 미적용)
     holdings_info = fetch_korean_etf_holdings_from_naver(ticker_norm)
     holdings_cache = {
@@ -401,6 +442,7 @@ def _refresh_us_stock_meta_cache(
     ticker: str,
     name: str,
     naver_entry: dict[str, Any],
+    backtest_stats: dict[str, Any] | None = None,
 ) -> None:
     """미국 개별주 메타 캐시를 네이버 미국 종목 API 기준으로 갱신한다."""
     ticker_type_norm = str(ticker_type or "").strip().lower()
@@ -420,6 +462,7 @@ def _refresh_us_stock_meta_cache(
         "issue_name": name_norm,
         "market": naver_entry.get("market"),
         "industry": naver_entry.get("industry"),
+        "backtest_stats": backtest_stats,
     }
 
     refresh_stock_cache(
@@ -581,6 +624,7 @@ def _refresh_overseas_etf_meta_cache(
     ticker: str,
     name: str,
     country_code: str,
+    backtest_stats: dict[str, Any] | None = None,
 ) -> None:
     """호주/미국 등 해외 ETF 메타와 holdings 캐시를 수집 및 저장한다."""
     from datetime import datetime
@@ -620,6 +664,7 @@ def _refresh_overseas_etf_meta_cache(
         "expense_ratio": None,
         "total_net_assets": None,
         "issue_name": name_norm,
+        "backtest_stats": backtest_stats,
     }
 
     # yfinance를 통해 추가적인 ETF 메타 정보 보완
@@ -762,8 +807,19 @@ def update_ticker_type_metadata(
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
 
+            # 5년치(60개월) 일봉 데이터 로드하여 MA 통계 지표 계산 (CAGR, MDD, Sharpe)
+            backtest_stats = {}
+            try:
+                df = fetch_ohlcv(ticker, country=country_code, months_back=60, ticker_type=type_norm)
+                if df is not None and not df.empty and "Close" in df.columns:
+                    close_prices = df["Close"].dropna()
+                    # 최근 3개월의 성과 지표(단순 보유 CAGR, MDD, Sharpe)만 구합니다.
+                    backtest_stats = _simulate_single_stock_ma_strategy(close_prices, 3)
+            except Exception as exc:
+                logger.warning(f"  -> [{ticker}] 백테스트 지표 연산 중 오류 발생: {exc}")
+
             # 저장할 필드들을 딕셔너리로 구성
-            update_doc = {"ticker": ticker}
+            update_doc = {"ticker": ticker, "backtest_stats": backtest_stats}
 
             # 메타데이터 업데이트 시 갱신되는 주요 필드 지정
             fields_to_update = [
@@ -782,12 +838,15 @@ def update_ticker_type_metadata(
                 "etf_category",
                 "dividend_yield_ttm",
                 "market_cap",
+                "backtest_stats",
             ]
             # 개별 분류 컬럼들을 업데이트 필드에 추가
             for cat in NAVER_ETF_CATEGORY_CONFIG:
                 fields_to_update.append(f"cat_{cat['code']}")
 
             for f in fields_to_update:
+                if f == "backtest_stats":
+                    continue
                 if f in stock:
                     update_doc[f] = stock[f]
 
@@ -804,13 +863,14 @@ def update_ticker_type_metadata(
                         str(name),
                         category_data=cat_info,
                         existing_cache_doc=existing_doc,
+                        backtest_stats=backtest_stats,
                     )
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
             elif country_code == "au":
                 # 호주 ETF
                 try:
-                    _refresh_overseas_etf_meta_cache(type_norm, str(ticker), str(name), country_code)
+                    _refresh_overseas_etf_meta_cache(type_norm, str(ticker), str(name), country_code, backtest_stats=backtest_stats)
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
             elif country_code == "us":
@@ -818,7 +878,7 @@ def update_ticker_type_metadata(
                 naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
                 if naver_entry:
                     try:
-                        _refresh_us_stock_meta_cache(type_norm, str(ticker), str(name), naver_entry)
+                        _refresh_us_stock_meta_cache(type_norm, str(ticker), str(name), naver_entry, backtest_stats=backtest_stats)
                     except Exception as e:
                         logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 개별주 메타 캐시 갱신 건너뜀: {e}")
 

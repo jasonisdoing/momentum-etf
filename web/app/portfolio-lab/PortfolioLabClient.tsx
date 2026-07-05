@@ -286,10 +286,10 @@ export function PortfolioLabClient() {
   return (
     <PageFrame title="🧪 포트폴리오 실험">
       <div className="appPageStack" style={{ maxWidth: 1400 }}>
-        {/* 상단: 포트폴리오 구성 | 결과 (가로) */}
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div style={{ flex: "1 1 460px", minWidth: 0 }}>
-            <div className="card appCard">
+        {/* 상단: 포트폴리오 구성 | 결과 (가로, 높이 맞춤) */}
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "stretch" }}>
+          <div style={{ flex: "1 1 460px", minWidth: 0, display: "flex" }}>
+            <div className="card appCard" style={{ width: "100%" }}>
               <div className="card-body">
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>포트폴리오 구성 (한국 전용)</h2>
                 <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
@@ -401,9 +401,9 @@ export function PortfolioLabClient() {
           </div>
 
           {/* 상단 오른쪽: 결과 (요약 + 차트) */}
-          <div style={{ flex: "1 1 460px", minWidth: 0 }}>
+          <div style={{ flex: "1 1 460px", minWidth: 0, display: "flex" }}>
             {result ? (
-              <div className="card appCard">
+              <div className="card appCard" style={{ width: "100%" }}>
                 <div className="card-body">
                   <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>
                     결과 — {result.buy_date} ~ {result.end_date} ({result.months}개월)
@@ -425,7 +425,7 @@ export function PortfolioLabClient() {
                 </div>
               </div>
             ) : (
-              <div className="card appCard" style={{ height: "100%" }}>
+              <div className="card appCard" style={{ width: "100%" }}>
                 <div className="card-body" style={{ color: "#94a3b8", padding: 24 }}>
                   종목을 확인한 뒤 실행을 누르면 결과가 여기에 표시됩니다.
                 </div>

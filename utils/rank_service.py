@@ -167,6 +167,14 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
     if dataframe.empty:
         return dataframe
 
+    from utils.stock_list_io import get_all_etfs_including_deleted
+    meta_docs = get_all_etfs_including_deleted(ticker_type)
+    meta_stats_map = {}
+    for d in meta_docs:
+        t = str(d.get("ticker") or "").strip().upper()
+        if t and "backtest_stats" in d:
+            meta_stats_map[t] = d["backtest_stats"]
+
     tickers = [
         str(record.get("티커") or "").strip().upper()
         for record in dataframe.to_dict(orient="records")
@@ -179,6 +187,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["보수"] = None
         enriched["순자산총액"] = None
         enriched["상장일"] = None
+        enriched["backtest_stats"] = enriched["티커"].map(lambda t: meta_stats_map.get(str(t).strip().upper()))
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 
@@ -192,6 +201,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["보수"] = meta_cache.get("expense_ratio")
         row["순자산총액"] = meta_cache.get("total_net_assets")
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
+        row["backtest_stats"] = meta_stats_map.get(ticker)
 
         # Naver 상세 분류 정보(cat_*) 추가
         for cat in NAVER_ETF_CATEGORY_CONFIG:

@@ -5,16 +5,22 @@ from __future__ import annotations
 import numpy as np
 
 
-def sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float) -> float:
-    """Sharpe = CAGR ÷ 연율화 변동성 (일간 수익률 표준편차 × √252). 계산 불가 시 0."""
+def sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float = 0.0) -> float:
+    """Sharpe = 연율화 평균 수익률(일간 평균 수익률 × 252) ÷ 연율화 변동성(일간 수익률 표준편차 × √252). 계산 불가 시 0."""
     curve = np.concatenate(([start_val], np.asarray(values, dtype=np.float64)))
     if curve.size < 3 or np.any(curve[:-1] <= 0):
         return 0.0
     daily_rets = np.diff(curve) / curve[:-1]
+    
+    # 일간 평균 수익률의 단순 연율화 (분자)
+    ann_ret = float(np.mean(daily_rets)) * 252.0
+    
+    # 일간 변동성의 연율화 (분모)
     vol = float(np.std(daily_rets, ddof=1)) * float(np.sqrt(252.0))
+    
     if vol <= 0:
         return 0.0
-    return (cagr_pct / 100.0) / vol
+    return ann_ret / vol
 
 
 def mdd_span(values: np.ndarray) -> tuple[int, int, float]:
