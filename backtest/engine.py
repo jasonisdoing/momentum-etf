@@ -1060,6 +1060,7 @@ def _simulate_one_combo_details(
     w_ath: float = 0.0,
     w_trend: float = 1.0,
     secondary_points_frame: pd.DataFrame | None = None,
+    secondary_metric: str = "ATH",
     composite_frame: pd.DataFrame,
     rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
@@ -1109,6 +1110,7 @@ def _simulate_one_combo_details(
         "비중",
         "점수(D-1)",
         "추세(D-1)",
+        f"{secondary_metric}(D-1)",
         "RSI(D-1)",
         "문구",
     ]
@@ -1117,6 +1119,7 @@ def _simulate_one_combo_details(
         "left",
         "left",
         "left",
+        "right",
         "right",
         "right",
         "right",
@@ -1142,7 +1145,7 @@ def _simulate_one_combo_details(
     lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
     lines.append(f"TOP_N_HOLD: {top_n}")
     lines.append(
-        "가중치(추세/보유/ATH): "
+        f"가중치(추세/보유/{secondary_metric}): "
         f"{w_trend * 100:g}% / {w_hold * 100:g}% / {w_ath * 100:g}%"
     )
     lines.append(f"MA_TYPE: {rule_frame.attrs.get('ma_type', '-')}")
@@ -1203,11 +1206,10 @@ def _simulate_one_combo_details(
             "-",
             "-",
             _format_weight_pct(cash_weight),
-            "-",
-            "-",
-            "-",
-            "-",
-            "-",
+            "-",  # 점수(D-1)
+            "-",  # 추세(D-1)
+            "-",  # 보조지표(D-1)
+            "-",  # RSI(D-1)
             note,
         ]
         day_rows.append(cash_row)
@@ -1229,6 +1231,7 @@ def _simulate_one_combo_details(
                     row["weight"],
                     row["score"],
                     row["trend"],
+                    row["secondary"],
                     row["rsi"],
                     row["message"],
                 ]
@@ -1262,14 +1265,18 @@ def _simulate_one_combo_details(
         composite = composite_frame.loc[signal_day].copy()
         rule_signal = rule_frame.loc[signal_day].copy()
         rsi_signal = rsi_frame.loc[signal_day].copy()
+        # 보조지표(ATH/SHARPE) 시그널 시리즈 — 상세 행 표시 및 점수 가산에 공용.
+        if secondary_points_frame is not None and signal_day in secondary_points_frame.index:
+            sec_signal = secondary_points_frame.loc[signal_day].reindex(composite.index)
+        else:
+            sec_signal = pd.Series(np.nan, index=composite.index, dtype=float)
         if w_hold > 0:
             for holding in shares:
                 if holding in composite.index and not pd.isna(composite.loc[holding]):
                     composite.loc[holding] += w_hold * 100.0
-        if w_ath > 0 and secondary_points_frame is not None and signal_day in secondary_points_frame.index:
-            sec_row = secondary_points_frame.loc[signal_day].reindex(composite.index)
-            sec_valid = composite.notna() & sec_row.notna()
-            composite.loc[sec_valid] += w_ath * sec_row.loc[sec_valid]
+        if w_ath > 0:
+            sec_valid = composite.notna() & sec_signal.notna()
+            composite.loc[sec_valid] += w_ath * sec_signal.loc[sec_valid]
 
         rsi_sell_tickers: set[str] = set()
         if rsi_limit is not None:
@@ -1325,6 +1332,9 @@ def _simulate_one_combo_details(
                         ),
                         "trend": _format_score_value(
                             None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
+                        ),
+                        "secondary": _format_score_value(
+                            None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
                         ),
                         "rsi": _format_score_value(
                             None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -1409,6 +1419,9 @@ def _simulate_one_combo_details(
                     ),
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
+                    ),
+                    "secondary": _format_score_value(
+                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
                     ),
                     "rsi": _format_score_value(
                         None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -1498,6 +1511,9 @@ def _simulate_one_combo_details(
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
                     ),
+                    "secondary": _format_score_value(
+                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
+                    ),
                     "rsi": _format_score_value(
                         None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
                     ),
@@ -1541,6 +1557,9 @@ def _simulate_one_combo_details(
                     ),
                     "trend": _format_score_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
+                    ),
+                    "secondary": _format_score_value(
+                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
                     ),
                     "rsi": _format_score_value(
                         None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -2211,6 +2230,7 @@ def run_backtest(pool_id: str) -> Path:
             w_ath=w_ath,
             w_trend=w_trend,
             secondary_points_frame=best_secondary_frame,
+            secondary_metric=best_secondary,
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,

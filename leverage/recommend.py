@@ -149,10 +149,13 @@ def main() -> None:
 
 
 def _recommend_switch(profile: str, settings: dict, market: str, status: str, market_phase: str, args) -> None:
-    is_warning = status == "OPEN"
+    # 미확정(표시 전용) 시점: 장중(OPEN) + 장전(PRE_OPEN).
+    # 장전에는 오늘 종가가 아직 없으므로 오늘을 새 확정일로 잡으면 안 된다 → 장중과 동일 취급.
+    # 확정(포지션/보유일 저장)은 오직 장 마감 후(CLOSED_JUST_NOW / CLOSED)에만.
+    is_warning = status in ("OPEN", "PRE_OPEN")
 
-    # 장중에는 오늘의 미완성 봉을 제외하고 "마지막으로 닫힌 거래일 종가"로 신호를 확정한다.
-    # (설계 원칙: 당일 종가로 확정 → 익일 시초가 실행. 장중에는 포지션을 바꾸지 않는다.)
+    # 미확정 시점에는 오늘의 미완성 봉을 제외하고 "마지막으로 닫힌 거래일 종가"로 신호를 확정한다.
+    # (설계 원칙: 당일 종가로 확정 → 익일 시초가 실행. 장중/장전에는 포지션을 바꾸지 않는다.)
     result = run_backtest(settings, drop_today=is_warning)
 
     # 마지막(확정) 거래일 추천 정보 추출
@@ -194,8 +197,8 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     defense_ticker = settings["defense_ticker"]
     defense_name = settings.get("defense_name", defense_ticker)
 
-    # 상태 저장: 장중이 아닐 때(종가 확정)만 저장
-    if status != "OPEN":
+    # 상태 저장: 장 마감 후(종가 확정)에만 저장. 장중(OPEN)·장전(PRE_OPEN)은 미확정이라 저장하지 않는다.
+    if not is_warning:
         current_state = {
             "date": end_date,
             "target": last_target,
