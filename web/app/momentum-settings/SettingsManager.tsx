@@ -255,6 +255,19 @@ export function SettingsManager() {
                                   </option>
                                 ))}
                               </select>
+                            ) : key === "MA_MONTHS" ? (
+                              <select
+                                className="form-select form-select-sm"
+                                style={{ width: 72, marginLeft: "auto" }}
+                                value={draft[key]}
+                                onChange={(e) => updateDraft(id, key, e.target.value)}
+                              >
+                                {[3, 6, 9, 12, 18, 24].map((m) => (
+                                  <option key={m} value={String(m)}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </select>
                             ) : (
                               <input
                                 type="number"
@@ -262,7 +275,7 @@ export function SettingsManager() {
                                 style={{ textAlign: "right", width: 60, marginLeft: "auto" }}
                                 value={draft[key]}
                                 min={1}
-                                max={key === "MA_MONTHS" ? monthsMax : key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}
+                                max={key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               />
                             )}

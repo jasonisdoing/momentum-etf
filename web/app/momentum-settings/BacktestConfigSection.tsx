@@ -60,7 +60,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const [ratioSet, setRatioSet] = useState<Set<number>>(
     new Set((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).filter((v) => RATIO_OPTIONS.includes(v))),
   );
-  const [monthsText, setMonthsText] = useState((c.MA_MONTHS ?? []).join(", "));
+  const [maMonthsSet, setMaMonthsSet] = useState<Set<number>>(new Set(c.MA_MONTHS ?? [6, 12]));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
@@ -95,7 +95,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const topNs = parseNums(topNText);
   const bonus = parseNums(bonusText);
   const ratios = [...ratioSet].sort((a, b) => a - b);
-  const months = parseNums(monthsText);
+  const months = [...maMonthsSet].sort((a, b) => a - b);
   const rsi = parseNums(rsiText);
   const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length;
 
@@ -270,7 +270,25 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
           ))}
         </div>
         <span style={{ ...labelStyle, marginLeft: 8 }}>MA 개월</span>
-        <input style={{ ...inputStyle, width: 110 }} placeholder="3, 6, 9, 12" value={monthsText} onChange={(e) => setMonthsText(e.target.value)} />
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
+          {[3, 6, 9, 12, 18, 24].map((m) => (
+            <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={maMonthsSet.has(m)}
+                onChange={() => {
+                  setMaMonthsSet((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(m)) next.delete(m);
+                    else next.add(m);
+                    return next;
+                  });
+                }}
+              />
+              {m}
+            </label>
+          ))}
+        </div>
         <span style={{ marginLeft: "auto", fontSize: "0.82rem", color: combos > 0 ? "#475569" : "#dc2626" }}>조합수 <b>{combos.toLocaleString()}</b></span>
       </div>
     </div>

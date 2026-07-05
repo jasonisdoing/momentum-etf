@@ -1840,7 +1840,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           onChange={(event) => handleMaRuleMonthsChange(Number(event.target.value))}
                           disabled={maTypeOptions.length === 0}
                         >
-                          {Array.from({ length: selectableMaMonthsMax }, (_, index) => index + 1).map((month) => (
+                          {[3, 6, 9, 12, 18, 24].map((month) => (
                             <option key={month} value={month}>
                               {month}개월
                             </option>
