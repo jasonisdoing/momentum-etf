@@ -9,6 +9,7 @@ const EDITABLE_KEYS = [
   "TOP_N_HOLD",
   "HOLDING_BONUS_SCORE",
   "TREND_WEIGHT_RATIO",
+  "SECONDARY_METRIC",
   "MA_TYPE",
   "MA_MONTHS",
   "RSI_LIMIT",
@@ -20,10 +21,13 @@ const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
   HOLDING_BONUS_SCORE: "보유보너스(%)",
   TREND_WEIGHT_RATIO: "추세 가중치(%)",
+  SECONDARY_METRIC: "보조지표",
   MA_TYPE: "MA 타입",
   MA_MONTHS: "MA 개월",
   RSI_LIMIT: "RSI 상한",
 };
+
+const SECONDARY_OPTIONS = ["ATH", "SHARPE"];
 
 type SettingField = { value: string | number | null };
 type SettingsMap = Record<EditableKey, SettingField>;
@@ -226,6 +230,19 @@ export function SettingsManager() {
                                 {maTypes.map((t) => (
                                   <option key={t} value={t}>
                                     {t}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : key === "SECONDARY_METRIC" ? (
+                              <select
+                                className="form-select form-select-sm"
+                                style={{ width: 88, marginLeft: "auto" }}
+                                value={(draft[key] || "ATH").toUpperCase()}
+                                onChange={(e) => updateDraft(id, key, e.target.value)}
+                              >
+                                {SECONDARY_OPTIONS.map((m) => (
+                                  <option key={m} value={m}>
+                                    {m}
                                   </option>
                                 ))}
                               </select>
