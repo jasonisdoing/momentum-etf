@@ -26,9 +26,10 @@ from config import (
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import (
-    compute_ath_proximity_percentile,
+    SECONDARY_METRICS,
     compute_eligibility_mask,
     compute_rule_percentile_frame,
+    compute_secondary_metric_points,
 )
 from services.price_service import get_realtime_snapshot
 from utils.backtest_config_store import load_backtest_config
@@ -304,8 +305,8 @@ _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
 _W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
-# ATH(52주 고점) 근접도 단면 백분위 [일자 × 티커] — ATH 가중 가산용 (close 만으로 결정, MA 무관).
-_W_ATH_PCT_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
+# 보조지표(ATH|SHARPE) 포인트 [일자 × 티커] — {지표: 배열}. 가중 가산용 (close 만으로 결정, MA 무관).
+_W_SECONDARY_VALUES: dict[str, np.ndarray] = {}
 
 
 def _init_worker(
@@ -319,11 +320,11 @@ def _init_worker(
     rsi_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
-    ath_pct_values: np.ndarray,
+    secondary_values_map: dict[str, np.ndarray],
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
     global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
-    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES, _W_ATH_PCT_VALUES  # noqa: PLW0603
+    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES, _W_SECONDARY_VALUES  # noqa: PLW0603
     _W_PCT_VALUES = pct_specs_values
     _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
@@ -334,14 +335,14 @@ def _init_worker(
     _W_CLOSE_VALUES = close_values
     _W_FX_VALUES = fx_values
     _W_RSI_VALUES = rsi_values
-    _W_ATH_PCT_VALUES = ath_pct_values
+    _W_SECONDARY_VALUES = secondary_values_map
 
 
-def _run_single_combo(args: tuple[int, str, int, float | None, float, float, float]) -> dict[str, Any]:
+def _run_single_combo(args: tuple[int, str, int, float | None, float, float, float, str]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold, w_ath = args
+    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold, w_ath, secondary_metric = args
     raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
-    # 가중치 비율 결합 (추세 단독 + 보유·ATH 가산)
+    # 가중치 비율 결합 (추세 단독 + 보유·보조지표 가산)
     composite_values = w_trend * raw_composite
     total_ret, cagr, mdd, trades, sharpe = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
@@ -357,7 +358,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
         w_ath=w_ath,
-        ath_pct_values=_W_ATH_PCT_VALUES,
+        secondary_points=_W_SECONDARY_VALUES[secondary_metric],
     )
     # 추세 가중치(%) 복원: w_trend/w_ath 는 (100-보유)에 비율을 곱한 값이므로 비율로 되돌린다.
     side_sum = w_trend + w_ath
@@ -369,6 +370,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         "W_TREND": w_trend,
         "W_HOLD": w_hold,
         "W_ATH": w_ath,
+        "SECONDARY_METRIC": secondary_metric,
         "MA_TYPE": ma_t,
         "MA_MONTHS": ma_m,
         "RSI_LIMIT": rsi_limit,
@@ -405,7 +407,7 @@ def _simulate_one_combo(
     buy_slippage: float,
     sell_slippage: float,
     w_ath: float = 0.0,
-    ath_pct_values: np.ndarray | None = None,
+    secondary_points: np.ndarray | None = None,
 ) -> tuple[float, float, float, int, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
@@ -434,11 +436,11 @@ def _simulate_one_combo(
         if w_hold > 0:
             held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
             composite_today[held_bonus_mask] += w_hold * 100.0
-        # ATH(52주 고점) 근접 보너스: 풀 내 단면 백분위(0~1) × w_ath × 100.0 을 점수에 가산.
-        if w_ath > 0 and ath_pct_values is not None:
-            ath_today = ath_pct_values[signal_idx]
-            ath_mask = ~np.isnan(composite_today) & ~np.isnan(ath_today)
-            composite_today[ath_mask] += w_ath * 100.0 * ath_today[ath_mask]
+        # 보조지표 보너스: 이미 포인트로 스케일된 값(ATH 0~100 / SHARPE ±100) × w_ath 를 점수에 가산.
+        if w_ath > 0 and secondary_points is not None:
+            sec_today = secondary_points[signal_idx]
+            sec_mask = ~np.isnan(composite_today) & ~np.isnan(sec_today)
+            composite_today[sec_mask] += w_ath * sec_today[sec_mask]
 
         rsi_sell_mask = np.zeros_like(shares, dtype=bool)
         if rsi_limit is not None:
@@ -767,11 +769,12 @@ def _write_results_file(
         out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    # W_TREND·W_ATH 절대값 대신 (보유%, 추세:ATH 비율) 두 축으로 표기한다.
+    # W_TREND·W_ATH 절대값 대신 (보유%, 추세:보조 비율, 보조지표) 축으로 표기한다.
     headers = [
         "TOP_N",
         "W_HOLD",
-        "TR:ATH",
+        "TR:2nd",
+        "2nd",
         "MA_TYPE",
         "MA_M",
         "RSI",
@@ -781,10 +784,11 @@ def _write_results_file(
         "Sharpe",
         "Trades",
     ]
-    aligns = ["left", "right", "right", "left", "left", "left", "right", "right", "right", "right", "right"]
+    aligns = ["left", "right", "right", "left", "left", "left", "left", "right", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
+            "-",
             "-",
             "-",
             "-",
@@ -808,6 +812,7 @@ def _write_results_file(
                 str(r["TOP_N_HOLD"]),
                 f"{float(r.get('W_HOLD', 0.0)):.2f}",
                 f"{ratio}:{100 - ratio}",
+                str(r.get("SECONDARY_METRIC") or "ATH"),
                 r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
                 "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
@@ -1054,7 +1059,7 @@ def _simulate_one_combo_details(
     w_hold: float,
     w_ath: float = 0.0,
     w_trend: float = 1.0,
-    ath_pct_frame: pd.DataFrame | None = None,
+    secondary_points_frame: pd.DataFrame | None = None,
     composite_frame: pd.DataFrame,
     rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
@@ -1261,10 +1266,10 @@ def _simulate_one_combo_details(
             for holding in shares:
                 if holding in composite.index and not pd.isna(composite.loc[holding]):
                     composite.loc[holding] += w_hold * 100.0
-        if w_ath > 0 and ath_pct_frame is not None and signal_day in ath_pct_frame.index:
-            ath_row = ath_pct_frame.loc[signal_day].reindex(composite.index)
-            ath_valid = composite.notna() & ath_row.notna()
-            composite.loc[ath_valid] += w_ath * 100.0 * ath_row.loc[ath_valid]
+        if w_ath > 0 and secondary_points_frame is not None and signal_day in secondary_points_frame.index:
+            sec_row = secondary_points_frame.loc[signal_day].reindex(composite.index)
+            sec_valid = composite.notna() & sec_row.notna()
+            composite.loc[sec_valid] += w_ath * sec_row.loc[sec_valid]
 
         rsi_sell_tickers: set[str] = set()
         if rsi_limit is not None:
@@ -1720,6 +1725,7 @@ def _write_details_file(
         "=== 상위 1개 조합 설정 ===",
         f"TOP_N_HOLD: {top_result['TOP_N_HOLD']}",
         f"HOLDING_BONUS_SCORE: {top_result['HOLDING_BONUS_SCORE']:g}",
+        f"SECONDARY_METRIC: {top_result.get('SECONDARY_METRIC') or 'ATH'}",
         f"MA_TYPE: {top_result['MA_TYPE']}",
         f"MA_MONTHS: {top_result['MA_MONTHS']}",
         f"RSI_LIMIT: {rsi_limit_text}",
@@ -1768,6 +1774,18 @@ def run_backtest(pool_id: str) -> Path:
     sort_metric = str(cfg.get("SORT_METRIC") or "CAGR").upper()
     if sort_metric not in ("CAGR", "MDD", "SHARPE"):
         raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD/SHARPE 중 하나여야 합니다: {sort_metric}")
+
+    # 보조지표 탐색값 (ATH | SHARPE) — 미저장 시 ATH 단일. 추세와 함께 점수를 구성하는 두 번째 축.
+    secondary_raw = cfg.get("SECONDARY_METRIC") or ["ATH"]
+    if not isinstance(secondary_raw, list):
+        secondary_raw = [secondary_raw]
+    secondary_metrics = [str(v).upper() for v in secondary_raw]
+    for sm in secondary_metrics:
+        if sm not in SECONDARY_METRICS:
+            raise ValueError(
+                f"backtest_config['{pool_id}'] 의 SECONDARY_METRIC 값이 올바르지 않습니다: {sm} "
+                f"(지원: {', '.join(SECONDARY_METRICS)})"
+            )
 
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
@@ -1938,10 +1956,13 @@ def run_backtest(pool_id: str) -> Path:
     rsi_frame = _compute_rsi_frame(strategy_close_frame, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
     rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
-    # ATH 근접도 단면 백분위 (전체 프레임으로 12개월 rolling 고점 워밍업 후 백테스트 구간 슬라이스).
-    ath_pct_frame = compute_ath_proximity_percentile(strategy_close_frame)
-    ath_pct_win = ath_pct_frame.loc[backtest_days]
-    ath_pct_values = ath_pct_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
+    # 보조지표(ATH|SHARPE) 포인트 프레임 — 탐색 대상 지표만 계산해 {지표: [일자×티커] 배열} 로 보관.
+    # 전체 프레임으로 워밍업(ATH 12개월 rolling 고점 / SHARPE 3개월 rolling) 후 백테스트 구간 슬라이스.
+    secondary_values_map: dict[str, np.ndarray] = {}
+    for sm in secondary_metrics:
+        sm_frame = compute_secondary_metric_points(strategy_close_frame, sm)
+        sm_win = sm_frame.loc[backtest_days]
+        secondary_values_map[sm] = sm_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
 
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
@@ -2004,7 +2025,7 @@ def run_backtest(pool_id: str) -> Path:
             w_ath = remainder * (1.0 - trend_share)
             weight_combos.append((w_trend / 100.0, hold / 100.0, w_ath / 100.0))
 
-    # 조합 생성
+    # 조합 생성 (보조지표 축 추가)
     raw_combos = list(
         itertools.product(
             top_n_values,
@@ -2012,11 +2033,12 @@ def run_backtest(pool_id: str) -> Path:
             ma_months_list,
             rsi_limits if rsi_limits is not None else [None],
             weight_combos,
+            secondary_metrics,
         )
     )
     combos = []
-    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold, w_ath) in raw_combos:
-        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold, w_ath))
+    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold, w_ath), sec in raw_combos:
+        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold, w_ath, sec))
     total_combos = len(combos)
 
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
@@ -2075,7 +2097,7 @@ def run_backtest(pool_id: str) -> Path:
             rsi_values,
             buy_slippage,
             sell_slippage,
-            ath_pct_values,
+            secondary_values_map,
         ),
     ) as pool:
         for i, result in enumerate(
@@ -2128,11 +2150,12 @@ def run_backtest(pool_id: str) -> Path:
             if rsi_val is None:
                 rsi_val = 100
 
-            # 최적 (보유%, 추세가중치%) 를 라이브에 반영한다. ATH 비중 = (100-보유)×(100-추세비율)/100.
+            # 최적 (보유%, 추세가중치%, 보조지표) 를 라이브에 반영한다. 보조지표 비중 = (100-보유)×(100-추세비율)/100.
             db_values = {
                 "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
                 "HOLDING_BONUS_SCORE": int(best_result["HOLDING_BONUS_SCORE"]),
                 "TREND_WEIGHT_RATIO": int(best_result["TREND_WEIGHT_RATIO"]),
+                "SECONDARY_METRIC": str(best_result.get("SECONDARY_METRIC") or "ATH").upper(),
                 "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
                 "RSI_LIMIT": int(rsi_val),
@@ -2178,13 +2201,16 @@ def run_backtest(pool_id: str) -> Path:
                 initial_cash_local=initial_cash_local,
                 buy_slippage=buy_slippage,
             )
+        # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 최적 결과가 고른 지표로 재구성.
+        best_secondary = str(best_result.get("SECONDARY_METRIC") or "ATH").upper()
+        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame, best_secondary).loc[backtest_days]
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
             w_hold=w_hold,
             w_ath=w_ath,
             w_trend=w_trend,
-            ath_pct_frame=ath_pct_win,
+            secondary_points_frame=best_secondary_frame,
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,

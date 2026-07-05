@@ -16,7 +16,7 @@ from config import (
     NAVER_ETF_CATEGORY_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
-from core.strategy.scoring import build_composite_rank_scores, compute_ath_proximity_percentile
+from core.strategy.scoring import build_composite_rank_scores, compute_secondary_metric_points
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
@@ -510,6 +510,7 @@ def _apply_common_rank_scores(
     *,
     held_bonus_score: float = 0.0,
     trend_weight_ratio: float,
+    secondary_metric: str = "ATH",
 ) -> pd.DataFrame:
     """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
 
@@ -555,11 +556,11 @@ def _apply_common_rank_scores(
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     eval_date = close_frame.index.max()
 
-    # ATH 근접도 단면 백분위(0~1) → 0~100 원점수 (백테스트와 동일 정의)
+    # 보조지표(ATH 0~100 | SHARPE ±100) 포인트 — 백테스트와 동일 함수/스케일. 점수식에 w_ath 로 가산.
     ath_pct_scores = pd.Series(0.0, index=close_frame.columns)
-    ath_pct_frame = compute_ath_proximity_percentile(close_frame)
-    if eval_date in ath_pct_frame.index:
-        ath_pct_scores = ath_pct_frame.loc[eval_date] * 100.0
+    secondary_points_frame = compute_secondary_metric_points(close_frame, secondary_metric)
+    if eval_date in secondary_points_frame.index:
+        ath_pct_scores = secondary_points_frame.loc[eval_date]
 
     # 티커별 값 매핑
     composite_row = composite_frame.loc[eval_date]
@@ -773,6 +774,8 @@ def build_ticker_type_rankings(
         return df
 
     # 공통 엔진 호출: rankings 와 backtest 가 동일한 점수식을 사용하도록 강제.
+    # 보조지표(ATH|SHARPE)는 풀별 pool_settings 의 SECONDARY_METRIC (미저장 시 ATH).
+    secondary_metric = str(settings.get("SECONDARY_METRIC") or "ATH").upper()
     process_started_at = perf_counter()
     df = _apply_common_rank_scores(
         df,
@@ -780,6 +783,7 @@ def build_ticker_type_rankings(
         effective_ma_rules,
         held_bonus_score=held_bonus_score,
         trend_weight_ratio=trend_weight_ratio,
+        secondary_metric=secondary_metric,
     )
     process_elapsed += perf_counter() - process_started_at
 
