@@ -41,10 +41,16 @@ type RankMaRule = {
 };
 
 type RankRow = {
-  [key: string]: string | number | boolean | null | undefined;
+  [key: string]: any;
   source_ticker_type?: string;
   종목풀?: string;
   currency?: string;
+  backtest_stats?: {
+    cagr: number;
+    mdd: number;
+    sharpe: number;
+    is_partial?: boolean;
+  } | null;
   순번: string;
   순위: number | null;
   이전순위: number | null;
@@ -819,6 +825,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [gridRows, heldBonusScore, selectedTickerTypeItem?.top_n_hold, selectedTickerTypeItem?.rsi_limit]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
+    const activeMaMonths = maRule?.ma_months ?? 12;
     const leadingColumns: ColDef<RankGridRow>[] = [
       {
         field: "순위",
@@ -1141,8 +1148,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "종목명",
         headerName: "종목명",
-        minWidth: 277,
-        flex: 1.17,
+        minWidth: 249,
+        flex: 1.05,
         cellRenderer: (params: { value: string | null | undefined; data?: RankGridRow }) => {
           if (params.data?.__isAddingRow) {
             const draftTicker = normalizeTicker(addingTickerDraftRef.current);
@@ -1226,8 +1233,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "점수",
         headerName: "점수",
-        minWidth: 72,
-        width: 72,
+        minWidth: 64,
+        width: 64,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
       },
@@ -1302,6 +1309,75 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
       },
       {
+        headerName: "수익3달",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        valueGetter: (params) => {
+          const stats = params.data?.backtest_stats;
+          const val = stats?.cagr;
+          return val != null ? val : null;
+        },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return `${params.value.toFixed(2)}%`;
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          const stats = params.data?.backtest_stats;
+          const isPartial = stats?.is_partial;
+          if (isPartial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
+      },
+      {
+        headerName: "MDD3달",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        valueGetter: (params) => {
+          const stats = params.data?.backtest_stats;
+          const val = stats?.mdd;
+          return val != null ? val : null;
+        },
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return `${params.value.toFixed(2)}%`;
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          const stats = params.data?.backtest_stats;
+          const isPartial = stats?.is_partial;
+          if (isPartial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
+      },
+      {
+        headerName: "샤프3달",
+        minWidth: 72,
+        width: 72,
+        type: "rightAligned",
+        valueGetter: (params) => {
+          const stats = params.data?.backtest_stats;
+          const val = stats?.sharpe;
+          return val != null ? val : null;
+        },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return params.value.toFixed(2);
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          const stats = params.data?.backtest_stats;
+          const isPartial = stats?.is_partial;
+          if (isPartial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
+      },
+      {
         field: "1주(%)",
         headerName: "1주(%)",
         minWidth: 88,
@@ -1317,34 +1393,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
-      {
-        field: "3주(%)",
-        headerName: "3주(%)",
-        minWidth: 88,
-        width: 88,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
-      {
-        field: "4주(%)",
-        headerName: "4주(%)",
-        minWidth: 88,
-        width: 88,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
       ...[
         "1달(%)",
-        "2달(%)",
         "3달(%)",
-        "4달(%)",
-        "5달(%)",
         "6달(%)",
-        "7달(%)",
-        "8달(%)",
         "9달(%)",
-        "10달(%)",
-        "11달(%)",
         "12달(%)",
       ].map(
         (field) =>
