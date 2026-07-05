@@ -636,6 +636,7 @@ def build_ticker_type_rankings(
     status_callback: Any | None = None,
     held_bonus_score: float = 0.0,
     trend_weight_ratio: float,  # 보유 제외 나머지 비중 중 추세 몫(%) — 풀별 pool_settings 가 단일 소스.
+    secondary_metric: str | None = None,  # None 이면 pool_settings 의 SECONDARY_METRIC, 있으면 툴바 오버라이드.
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -774,8 +775,8 @@ def build_ticker_type_rankings(
         return df
 
     # 공통 엔진 호출: rankings 와 backtest 가 동일한 점수식을 사용하도록 강제.
-    # 보조지표(ATH|SHARPE)는 풀별 pool_settings 의 SECONDARY_METRIC (미저장 시 ATH).
-    secondary_metric = str(settings.get("SECONDARY_METRIC") or "ATH").upper()
+    # 보조지표(ATH|SHARPE): 오버라이드가 있으면 우선, 없으면 풀별 pool_settings (미저장 시 ATH).
+    effective_secondary = str(secondary_metric or settings.get("SECONDARY_METRIC") or "ATH").upper()
     process_started_at = perf_counter()
     df = _apply_common_rank_scores(
         df,
@@ -783,7 +784,7 @@ def build_ticker_type_rankings(
         effective_ma_rules,
         held_bonus_score=held_bonus_score,
         trend_weight_ratio=trend_weight_ratio,
-        secondary_metric=secondary_metric,
+        secondary_metric=effective_secondary,
     )
     process_elapsed += perf_counter() - process_started_at
 

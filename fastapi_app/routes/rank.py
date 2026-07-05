@@ -47,10 +47,13 @@ def get_rank_data(
         except ValueError as exc:
             raise ValueError(f"추세 가중치(%) 형식이 올바르지 않습니다: {raw_trend_weight_ratio}") from exc
 
+    secondary_metric = request.query_params.get("secondary_metric")
+
     return load_rank_data(
         ticker_type=ticker_type,
         ma_rule_override=ma_rule_override,
         as_of_date=as_of_date,
         held_bonus_score=held_bonus_score,
         trend_weight_ratio=trend_weight_ratio,
+        secondary_metric=secondary_metric,
     )

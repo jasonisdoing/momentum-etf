@@ -26,6 +26,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   trend_weight_ratio?: number;
+  secondary_metric?: string;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -112,6 +113,7 @@ type RankResponse = {
   previous_trading_day?: string | null;
   held_bonus_score?: number;
   trend_weight_ratio?: number;
+  secondary_metric?: string;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -399,6 +401,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [trendWeightRatio, setTrendWeightRatio] = useState(0);
+  const [secondaryMetric, setSecondaryMetric] = useState("ATH");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -484,6 +487,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       applyTrendWeightRatioState(configuredTrendWeightRatio);
     }
 
+    const configuredSecondary =
+      (currentConfig && currentConfig.secondary_metric) || payload.secondary_metric;
+    if (configuredSecondary) {
+      setSecondaryMetric(String(configuredSecondary).toUpperCase());
+    }
+
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -518,6 +527,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         : payload.trend_weight_ratio;
     if (typeof configuredTrendWeightRatio === "number") {
       applyTrendWeightRatioState(configuredTrendWeightRatio);
+    }
+    const configuredSecondary =
+      (currentConfig && currentConfig.secondary_metric) || payload.secondary_metric;
+    if (configuredSecondary) {
+      setSecondaryMetric(String(configuredSecondary).toUpperCase());
     }
 
     rankToolbarCache = {
@@ -571,6 +585,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     as_of_date?: string;
     held_bonus_score?: number;
     trend_weight_ratio?: number;
+    secondary_metric?: string;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -602,6 +617,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
       } else {
         search.set("trend_weight_ratio", String(trendWeightRatio));
+      }
+
+      if (next?.secondary_metric) {
+        search.set("secondary_metric", next.secondary_metric);
+      } else if (next?.bootstrap) {
+        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
+      } else if (secondaryMetric) {
+        search.set("secondary_metric", secondaryMetric);
       }
 
       if (next?.ma_rule_override) {
@@ -692,6 +715,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ma_rule_override: maRule ?? undefined,
       as_of_date: selectedAsOfDate,
       trend_weight_ratio: normalized,
+      skip_session_cache: true,
+    });
+  }
+
+  function handleSecondaryMetricChange(nextValue: string) {
+    const normalized = nextValue.toUpperCase() === "SHARPE" ? "SHARPE" : "ATH";
+    setSecondaryMetric(normalized);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      as_of_date: selectedAsOfDate,
+      secondary_metric: normalized,
       skip_session_cache: true,
     });
   }
@@ -1256,9 +1291,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       {
         field: "ATH",
-        headerName: "ATH",
-        minWidth: 72,
-        width: 72,
+        headerName: secondaryMetric === "SHARPE" ? "SHARPE" : "ATH",
+        minWidth: 78,
+        width: 78,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (params.value === null || params.value === undefined) return "-";
@@ -1309,29 +1344,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
       },
       {
-        headerName: "수익3달",
-        minWidth: 80,
-        width: 80,
-        type: "rightAligned",
-        valueGetter: (params) => {
-          const stats = params.data?.backtest_stats;
-          const val = stats?.cagr;
-          return val != null ? val : null;
-        },
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          if (params.value == null) return "-";
-          return `${params.value.toFixed(2)}%`;
-        },
-        cellStyle: (params: { data?: RankGridRow }) => {
-          const stats = params.data?.backtest_stats;
-          const isPartial = stats?.is_partial;
-          if (isPartial) {
-            return { color: "#ca8a04", fontWeight: 700 };
-          }
-          return null;
-        },
-      },
-      {
         headerName: "MDD3달",
         minWidth: 80,
         width: 80,
@@ -1344,29 +1356,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (params.value == null) return "-";
           return `${params.value.toFixed(2)}%`;
-        },
-        cellStyle: (params: { data?: RankGridRow }) => {
-          const stats = params.data?.backtest_stats;
-          const isPartial = stats?.is_partial;
-          if (isPartial) {
-            return { color: "#ca8a04", fontWeight: 700 };
-          }
-          return null;
-        },
-      },
-      {
-        headerName: "샤프3달",
-        minWidth: 72,
-        width: 72,
-        type: "rightAligned",
-        valueGetter: (params) => {
-          const stats = params.data?.backtest_stats;
-          const val = stats?.sharpe;
-          return val != null ? val : null;
-        },
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          if (params.value == null) return "-";
-          return params.value.toFixed(2);
         },
         cellStyle: (params: { data?: RankGridRow }) => {
           const stats = params.data?.backtest_stats;
@@ -1505,6 +1494,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     dirtyCellKeys,
     maRule,
     metricMode,
+    secondaryMetric,
     monthlyReturnLabels,
     pageMode,
     selectedTickerType,
@@ -1935,6 +1925,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         </option>
                       ))}
                     </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">보조지표</span>
+                    <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="보조지표">
+                      <button
+                        type="button"
+                        className={secondaryMetric === "ATH" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => handleSecondaryMetricChange("ATH")}
+                      >
+                        ATH
+                      </button>
+                      <button
+                        type="button"
+                        className={secondaryMetric === "SHARPE" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                        onClick={() => handleSecondaryMetricChange("SHARPE")}
+                      >
+                        SHARPE
+                      </button>
+                    </div>
                   </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">컬럼</span>
