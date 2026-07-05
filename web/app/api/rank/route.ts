@@ -12,6 +12,7 @@ export async function GET(request: NextRequest) {
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
     const heldBonusScore = searchParams.get("held_bonus_score");
     const trendWeightRatio = searchParams.get("trend_weight_ratio");
+    const secondaryMetric = searchParams.get("secondary_metric") ?? undefined;
     const maType = searchParams.get("ma_type");
     const maMonthsRaw = searchParams.get("ma_months");
     const maRuleOverride =
@@ -29,6 +30,7 @@ export async function GET(request: NextRequest) {
       as_of_date: asOfDate,
       held_bonus_score: heldBonusScore === null || heldBonusScore === undefined ? undefined : Number(heldBonusScore),
       trend_weight_ratio: trendWeightRatio === null || trendWeightRatio === undefined ? undefined : Number(trendWeightRatio),
+      secondary_metric: secondaryMetric,
     }, request.signal);
     return jsonNoStore(data);
   } catch (error) {

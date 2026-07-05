@@ -23,7 +23,7 @@ from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 
 _RANK_DATA_CACHE_TTL_SECONDS = 300.0
-_RankCacheKey = tuple[str, str, tuple[tuple[str, int], ...], int, int]
+_RankCacheKey = tuple[str, str, tuple[tuple[str, int], ...], int, int, str]
 _RANK_DATA_CACHE: dict[_RankCacheKey, tuple[float, dict[str, Any]]] = {}
 _RANK_DATA_CACHE_LOCK = Lock()
 _RANK_DATA_INFLIGHT_LOCKS: dict[_RankCacheKey, Lock] = {}
@@ -35,10 +35,18 @@ def _build_rank_cache_key(
     ma_rules: list[dict[str, Any]],
     held_bonus_score: int,
     trend_weight_ratio: int,
+    secondary_metric: str,
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
     ma_rule_key = tuple((str(rule.get("ma_type") or ""), int(rule.get("ma_months") or 0)) for rule in ma_rules)
-    return ticker_type, as_of_date_key, ma_rule_key, int(held_bonus_score), int(trend_weight_ratio)
+    return (
+        ticker_type,
+        as_of_date_key,
+        ma_rule_key,
+        int(held_bonus_score),
+        int(trend_weight_ratio),
+        str(secondary_metric).upper(),
+    )
 
 
 def invalidate_rank_data_cache(ticker_type: str | None = None) -> None:
@@ -231,6 +239,7 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "country_code": str(cfg.get("country_code") or ""),
             "holding_bonus_score": int(cfg["settings"].get("HOLDING_BONUS_SCORE", 0)),
             "trend_weight_ratio": int(cfg["settings"]["TREND_WEIGHT_RATIO"]),
+            "secondary_metric": str(cfg["settings"].get("SECONDARY_METRIC") or "ATH").upper(),
             "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
             "rsi_limit": (
                 float(cfg["settings"]["RSI_LIMIT"])
@@ -492,6 +501,7 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ma_months_max": get_rank_months_max(),
         "held_bonus_score": int(selected_config["holding_bonus_score"]),
         "trend_weight_ratio": int(selected_config["trend_weight_ratio"]),
+        "secondary_metric": str(selected_config.get("secondary_metric") or "ATH").upper(),
     }
 
 
@@ -504,6 +514,7 @@ def _compute_rank_data_payload(
     selected_as_of_date: pd.Timestamp | None,
     bonus_score: int,
     trend_weight_ratio: float,
+    secondary_metric: str,
 ) -> dict[str, Any]:
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
@@ -511,6 +522,7 @@ def _compute_rank_data_payload(
         as_of_date=selected_as_of_date,
         held_bonus_score=bonus_score,
         trend_weight_ratio=trend_weight_ratio,
+        secondary_metric=secondary_metric,
     )
     effective_as_of_date = selected_as_of_date
     raw_as_of_date = dataframe.attrs.get("as_of_date")
@@ -535,6 +547,7 @@ def _compute_rank_data_payload(
             as_of_date=previous_trading_day,
             held_bonus_score=bonus_score,
             trend_weight_ratio=trend_weight_ratio,
+            secondary_metric=secondary_metric,
         )
         previous_rows = _build_score_ranked_rows(previous_dataframe)
         previous_rank_map = _build_rank_map_from_rows(previous_rows)
@@ -545,6 +558,7 @@ def _compute_rank_data_payload(
             as_of_date=weekly_rank_trading_day,
             held_bonus_score=bonus_score,
             trend_weight_ratio=trend_weight_ratio,
+            secondary_metric=secondary_metric,
         )
         weekly_rows = _build_score_ranked_rows(weekly_dataframe)
         weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
@@ -577,6 +591,7 @@ def _compute_rank_data_payload(
         "rows": _rows_with_missing_placeholders(dataframe, selected_ticker_type, False),
         "held_bonus_score": bonus_score,
         "trend_weight_ratio": trend_weight_ratio,
+        "secondary_metric": str(secondary_metric).upper(),
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),
         "cache_updated_at": _serialize_datetime(dataframe.attrs.get("cache_updated_at")),
@@ -601,6 +616,7 @@ def load_rank_data(
     as_of_date: str | None = None,
     held_bonus_score: int | None = None,
     trend_weight_ratio: int | None = None,
+    secondary_metric: str | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -643,7 +659,17 @@ def load_rank_data(
         if not (0 <= trend_ratio <= 100):
             raise ValueError(f"추세 가중치(%)는 0 ~ 100 범위여야 합니다: {trend_ratio}")
 
-    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules, bonus_score, trend_ratio)
+    # SECONDARY_METRIC: 툴바 오버라이드 우선, 없으면 풀별 DB(pool_settings) 값.
+    if secondary_metric is None:
+        secondary = str(selected_config.get("secondary_metric") or "ATH").upper()
+    else:
+        secondary = str(secondary_metric).strip().upper()
+        if secondary not in ("ATH", "SHARPE"):
+            raise ValueError(f"보조지표는 ATH, SHARPE 중 하나여야 합니다: {secondary_metric}")
+
+    cache_key = _build_rank_cache_key(
+        selected_ticker_type, selected_as_of_date, ma_rules, bonus_score, trend_ratio, secondary
+    )
     cached_payload = _get_rank_data_cache(cache_key)
     if cached_payload is not None:
         return cached_payload
@@ -662,6 +688,7 @@ def load_rank_data(
             selected_as_of_date=selected_as_of_date,
             bonus_score=bonus_score,
             trend_weight_ratio=trend_ratio,
+            secondary_metric=secondary,
         )
         _set_rank_data_cache(cache_key, payload)
         return payload
