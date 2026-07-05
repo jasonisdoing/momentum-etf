@@ -21,6 +21,7 @@ from .routes.momentum_backtest import router as momentum_backtest_router
 from .routes.monthly import router as monthly_router
 from .routes.note import router as note_router
 from .routes.pool_settings import router as pool_settings_router
+from .routes.portfolio_lab import router as portfolio_lab_router
 from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
@@ -76,6 +77,7 @@ app.include_router(market_router)
 app.include_router(market_trend_router)
 app.include_router(note_router)
 app.include_router(pool_settings_router)
+app.include_router(portfolio_lab_router)
 app.include_router(backtest_config_router)
 app.include_router(account_settings_router)
 app.include_router(momentum_backtest_router)

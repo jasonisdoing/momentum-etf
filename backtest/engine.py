@@ -384,15 +384,10 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
 
 
 def _sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float) -> float:
-    """Sharpe = CAGR ÷ 연율화 변동성 (일간 수익률 표준편차 × √252). 계산 불가 시 0."""
-    curve = np.concatenate(([start_val], np.asarray(values, dtype=np.float64)))
-    if curve.size < 3 or np.any(curve[:-1] <= 0):
-        return 0.0
-    daily_rets = np.diff(curve) / curve[:-1]
-    vol = float(np.std(daily_rets, ddof=1)) * float(np.sqrt(252.0))
-    if vol <= 0:
-        return 0.0
-    return (cagr_pct / 100.0) / vol
+    """공용 지표(utils.perf_metrics)의 Sharpe 계산을 그대로 사용한다."""
+    from utils.perf_metrics import sharpe_from_curve
+
+    return sharpe_from_curve(start_val, values, cagr_pct)
 
 
 def _simulate_one_combo(
