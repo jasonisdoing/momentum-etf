@@ -7,6 +7,7 @@ import { useToast } from "../components/ToastProvider";
 
 type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
+  SORT_METRIC?: string;
   BACKTEST_MONTHS?: number;
   BENCHMARK?: Benchmark;
   TOP_N_HOLD?: number[];
@@ -44,6 +45,7 @@ const RATIO_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const toast = useToast();
   const c = pool.config;
+  const [sortMetric, setSortMetric] = useState((c.SORT_METRIC ?? "CAGR").toUpperCase());
   const [backtestMonths, setBacktestMonths] = useState(c.BACKTEST_MONTHS != null ? String(c.BACKTEST_MONTHS) : "");
   const [benchTicker, setBenchTicker] = useState(c.BENCHMARK?.ticker ?? "");
   const [benchName, setBenchName] = useState(c.BENCHMARK?.name ?? "");
@@ -122,6 +124,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
 
   const save = async () => {
     const config: BtConfig = {
+      SORT_METRIC: sortMetric,
       BACKTEST_MONTHS: Math.trunc(Number(backtestMonths)),
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
@@ -169,7 +172,17 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       </div>
 
       <div style={rowStyle}>
-        <span style={labelStyle}>백테스트기간(Month)</span>
+        <span style={labelStyle}>정렬기준</span>
+        <select
+          className="form-select form-select-sm"
+          style={{ width: 84 }}
+          value={sortMetric}
+          onChange={(e) => setSortMetric(e.target.value)}
+        >
+          <option value="CAGR">CAGR</option>
+          <option value="MDD">MDD</option>
+        </select>
+        <span style={{ ...labelStyle, marginLeft: 8 }}>백테스트기간(Month)</span>
         <select
           className="form-select form-select-sm"
           style={{ width: 74 }}
@@ -221,8 +234,11 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
             </button>
           </>
         )}
-        <span style={{ ...labelStyle, marginLeft: 8 }}>보유 종목수</span>
-        <input style={{ ...inputStyle, width: 70 }} placeholder="4, 5" value={topNText} onChange={(e) => setTopNText(e.target.value)} />
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 84 }}>보유 종목수</span>
+        <input style={{ ...inputStyle, width: 190 }} placeholder="3, 4, 5, 6, 7, 8, 9, 10" value={topNText} onChange={(e) => setTopNText(e.target.value)} />
         <span style={{ ...labelStyle, marginLeft: 8 }}>보유보너스(%)</span>
         <input style={{ ...inputStyle, width: 110 }} placeholder="0, 10, 20" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
         <span style={{ ...labelStyle, marginLeft: 8 }}>RSI 상한</span>

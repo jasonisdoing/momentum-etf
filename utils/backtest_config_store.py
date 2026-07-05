@@ -62,6 +62,10 @@ def validate_backtest_config(config: Any) -> None:
     if not isinstance(months_back, (int, float)) or isinstance(months_back, bool) or not (1 <= int(months_back) <= 240):
         raise ValueError("'BACKTEST_MONTHS' 는 1~240 범위의 개월수여야 합니다.")
 
+    sort_metric = config.get("SORT_METRIC")
+    if sort_metric is not None and str(sort_metric).upper() not in ("CAGR", "MDD"):
+        raise ValueError("'SORT_METRIC' 은 CAGR 또는 MDD 여야 합니다.")
+
     for key in _REQUIRED_LIST_KEYS:
         values = config.get(key)
         if not isinstance(values, list) or len(values) == 0:
