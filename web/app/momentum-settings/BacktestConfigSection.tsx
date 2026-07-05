@@ -181,6 +181,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         >
           <option value="CAGR">CAGR</option>
           <option value="MDD">MDD</option>
+          <option value="SHARPE">Sharpe</option>
         </select>
         <span style={{ ...labelStyle, marginLeft: 8 }}>백테스트기간(Month)</span>
         <select
