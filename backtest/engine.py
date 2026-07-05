@@ -657,10 +657,17 @@ def _build_benchmark_value_curve(
 # --------------------------- 결과 기록 --------------------------- #
 
 
-def _result_sort_key(result: dict[str, Any]) -> tuple[float, float, float]:
-    """백테스트 결과 정렬 키를 반환한다."""
+def _result_sort_key(result: dict[str, Any], sort_metric: str = "CAGR") -> tuple[float, float, float]:
+    """백테스트 결과 정렬 키를 반환한다.
+
+    sort_metric:
+        - "CAGR": CAGR 높은 순 (동률이면 MDD)
+        - "MDD": 낙폭이 얕은 순 (MDD_PCT 가 0 에 가까운 순, 동률이면 CAGR 높은 순)
+    """
     rsi_limit = result.get("RSI_LIMIT")
     sortable_rsi = float(rsi_limit) if rsi_limit is not None else float("-inf")
+    if sort_metric == "MDD":
+        return (-float(result["MDD_PCT"]), -float(result["CAGR_PCT"]), -sortable_rsi)
     return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -sortable_rsi)
 
 
@@ -686,9 +693,10 @@ def _write_results_file(
     elapsed_sec: int,
     n_workers: int,
     is_final: bool,
+    sort_metric: str = "CAGR",
 ) -> None:
     """결과를 로그 파일에 기록한다. 중간/최종 모두 동일 형식."""
-    sorted_results = sorted(results, key=_result_sort_key)
+    sorted_results = sorted(results, key=lambda r: _result_sort_key(r, sort_metric))
 
     def _render_full_width_row(border_line: str, text: str) -> str:
         """테이블 전체 너비를 차지하는 단일 텍스트 row를 렌더링한다."""
@@ -736,7 +744,7 @@ def _write_results_file(
     lines.append("")
 
     status_label = "최종 결과" if is_final else f"중간 결과 ({done_count}/{total_combos})"
-    lines.append(f"=== {status_label} - 기간: {months} 개월 | 정렬 기준: CAGR ===")
+    lines.append(f"=== {status_label} - 기간: {months} 개월 | 정렬 기준: {sort_metric} ===")
 
     # 테이블
     top_limit = 100
@@ -1739,6 +1747,11 @@ def run_backtest(pool_id: str) -> Path:
         )
     months = int(cfg["BACKTEST_MONTHS"])
 
+    # 결과 정렬 기준 (CAGR | MDD) — 미저장 시 CAGR
+    sort_metric = str(cfg.get("SORT_METRIC") or "CAGR").upper()
+    if sort_metric not in ("CAGR", "MDD"):
+        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR 또는 MDD 여야 합니다: {sort_metric}")
+
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
         raise ValueError(
@@ -2012,6 +2025,7 @@ def run_backtest(pool_id: str) -> Path:
         "period_end": period_end,
         "n_workers": n_workers,
         "benchmark_result": benchmark_result,
+        "sort_metric": sort_metric,
     }
 
     logger.info(
@@ -2084,7 +2098,7 @@ def run_backtest(pool_id: str) -> Path:
         is_final=True,
         **write_kwargs,
     )
-    sorted_results = sorted(results, key=_result_sort_key)
+    sorted_results = sorted(results, key=lambda r: _result_sort_key(r, sort_metric))
     if sorted_results:
         best_result = sorted_results[0]
 
