@@ -2143,14 +2143,13 @@ def run_backtest(pool_id: str) -> Path:
                 "RSI_LIMIT": int(rsi_val),
             }
             target_pool_id = pool_id
-            # 저장 방식에 "어떤 기준으로 어떤 성과였는지"를 함께 남긴다 (예: "백테스트 결과, Sharpe, 9.42")
+            # 저장 방식(2줄): 기간·정렬기준 + 최적 조합의 성과 요약을 함께 남긴다.
             metric_label = {"CAGR": "CAGR", "MDD": "MDD", "SHARPE": "Sharpe"}[sort_metric]
-            metric_value = {
-                "CAGR": float(best_result["CAGR_PCT"]),
-                "MDD": float(best_result["MDD_PCT"]),
-                "SHARPE": float(best_result.get("SHARPE", 0.0)),
-            }[sort_metric]
-            save_method = f"백테스트 결과, {metric_label}, {metric_value:.2f}"
+            save_method = (
+                f"{months}개월 백테스트 결과, {metric_label} 기준 정렬\n"
+                f"CAGR: {float(best_result['CAGR_PCT']):.2f}%, MDD: {float(best_result['MDD_PCT']):.2f}%, "
+                f"Sharpe: {float(best_result.get('SHARPE', 0.0)):.2f}, Trades: {int(best_result['TRADES'])}"
+            )
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 시도: %s (target_id=%s)", pool_id, db_values, target_pool_id)
             save_pool_settings(target_pool_id, db_values, save_method=save_method)
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 성공! (target_id=%s)", pool_id, target_pool_id)

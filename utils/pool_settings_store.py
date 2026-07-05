@@ -219,7 +219,7 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
     return cleaned
 
 
-def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "사용자") -> dict[str, Any]:
+def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "수동") -> dict[str, Any]:
     """편집한 5개 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
 
     pool_id 는 유효한 ticker_type.

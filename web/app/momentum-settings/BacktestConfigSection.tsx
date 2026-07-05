@@ -175,7 +175,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         <span style={labelStyle}>정렬기준</span>
         <select
           className="form-select form-select-sm"
-          style={{ width: 84 }}
+          style={{ width: 100 }}
           value={sortMetric}
           onChange={(e) => setSortMetric(e.target.value)}
         >
@@ -243,7 +243,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         <span style={{ ...labelStyle, marginLeft: 8 }}>보유보너스(%)</span>
         <input style={{ ...inputStyle, width: 110 }} placeholder="0, 10, 20" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
         <span style={{ ...labelStyle, marginLeft: 8 }}>RSI 상한</span>
-        <input style={{ ...inputStyle, width: 110 }} placeholder="80, 90, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
+        <input style={{ ...inputStyle, width: 170 }} placeholder="80, 85, 90, 95, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
       </div>
 
       <div style={rowStyle}>

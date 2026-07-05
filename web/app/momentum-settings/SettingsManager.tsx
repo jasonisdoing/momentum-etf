@@ -192,7 +192,7 @@ export function SettingsManager() {
               <table className="table table-sm appSettingsTable" style={{ minWidth: 720 }}>
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 160 }}>종목풀</th>
+                    <th style={{ width: 140, whiteSpace: "nowrap" }}>종목풀</th>
                     {EDITABLE_KEYS.map((key) => (
                       <th key={key} style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         {KEY_LABELS[key]}
@@ -200,7 +200,7 @@ export function SettingsManager() {
                     ))}
                     <th style={{ textAlign: "center", minWidth: 80 }}>저장</th>
                     <th style={{ textAlign: "left", minWidth: 160 }}>마지막 저장</th>
-                    <th style={{ textAlign: "left", minWidth: 240 }}>실제 계산 비중 (추세 / ATH / 보유)</th>
+                    <th style={{ textAlign: "left", minWidth: 300 }}>방식</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -208,16 +208,9 @@ export function SettingsManager() {
                     const draft = drafts[id] ?? toDraft(entry.settings);
                     const dirty = isDirty(id, entry.settings);
 
-                    // 실시간 가중 비중 계산 (풀별 추세 가중치 기준)
-                    const h = Number(draft["HOLDING_BONUS_SCORE"] || 0);
-                    const r = Number(draft["TREND_WEIGHT_RATIO"] || 0);
-                    const w_trend = (100 - h) * (r / 100);
-                    const w_ath = (100 - h) * (1 - r / 100);
-                    const w_hold = h;
-
                     return (
                       <tr key={id}>
-                        <td>
+                        <td style={{ whiteSpace: "nowrap" }}>
                           {entry.icon ? `${entry.icon} ` : ""}
                           {entry.name}
                         </td>
@@ -226,6 +219,7 @@ export function SettingsManager() {
                             {key === "MA_TYPE" ? (
                               <select
                                 className="form-select form-select-sm"
+                                style={{ width: 86, marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -238,6 +232,7 @@ export function SettingsManager() {
                             ) : key === "HOLDING_BONUS_SCORE" ? (
                               <select
                                 className="form-select form-select-sm"
+                                style={{ width: 64, marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -250,6 +245,7 @@ export function SettingsManager() {
                             ) : key === "TREND_WEIGHT_RATIO" ? (
                               <select
                                 className="form-select form-select-sm"
+                                style={{ width: 72, marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
@@ -263,7 +259,7 @@ export function SettingsManager() {
                               <input
                                 type="number"
                                 className="form-control form-control-sm"
-                                style={{ textAlign: "right" }}
+                                style={{ textAlign: "right", width: 60, marginLeft: "auto" }}
                                 value={draft[key]}
                                 min={1}
                                 max={key === "MA_MONTHS" ? monthsMax : key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}
@@ -284,30 +280,25 @@ export function SettingsManager() {
                         </td>
                         <td style={{ textAlign: "left", fontSize: "0.82rem", color: "#64748b", verticalAlign: "middle" }}>
                           {entry.updated_at ? (
-                            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.25 }}>
-                              <span style={{ fontWeight: 600, color: "#475569" }}>
-                                {formatKstDateTime(entry.updated_at)}
-                              </span>
-                              <span style={{ fontSize: "0.72rem", color: "#94a3b8" }}>
-                                방식: {entry.save_method || "미지정"}
-                              </span>
-                            </div>
+                            <span style={{ fontWeight: 600, color: "#475569" }}>
+                              {formatKstDateTime(entry.updated_at)}
+                            </span>
                           ) : (
                             <span style={{ color: "#cbd5e1" }}>기록 없음</span>
                           )}
                         </td>
-                        <td style={{ textAlign: "left", fontSize: "0.82rem", verticalAlign: "middle" }}>
-                          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                            <span style={{ background: "rgba(37,99,235,0.08)", color: "#2563eb", fontWeight: 700, fontSize: "0.74rem", padding: "3px 7px", borderRadius: 4 }}>
-                              추세 {w_trend.toFixed(1)}%
-                            </span>
-                            <span style={{ background: "rgba(124,58,237,0.08)", color: "#7c3aed", fontWeight: 700, fontSize: "0.74rem", padding: "3px 7px", borderRadius: 4 }}>
-                              ATH {w_ath.toFixed(1)}%
-                            </span>
-                            <span style={{ background: "rgba(22,163,74,0.08)", color: "#16a34a", fontWeight: 700, fontSize: "0.74rem", padding: "3px 7px", borderRadius: 4 }}>
-                              보유 {w_hold.toFixed(1)}%
-                            </span>
-                          </div>
+                        <td style={{ textAlign: "left", fontSize: "0.8rem", color: "#64748b", verticalAlign: "middle" }}>
+                          {entry.save_method ? (
+                            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.35 }}>
+                              {entry.save_method.split("\n").map((line, idx) => (
+                                <span key={idx} style={idx === 0 ? { fontWeight: 600, color: "#475569" } : undefined}>
+                                  {line}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: "#cbd5e1" }}>미지정</span>
+                          )}
                         </td>
                       </tr>
                     );
