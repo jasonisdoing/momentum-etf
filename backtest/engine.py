@@ -343,7 +343,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
     raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
     # 가중치 비율 결합 (추세 단독 + 보유·ATH 가산)
     composite_values = w_trend * raw_composite
-    total_ret, cagr, mdd, trades = _simulate_one_combo(
+    total_ret, cagr, mdd, trades, sharpe = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
         w_hold=w_hold,
@@ -375,11 +375,24 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
         "MDD_PCT": mdd,
+        "SHARPE": sharpe,
         "TRADES": trades,
     }
 
 
 # --------------------------- 시뮬레이션 --------------------------- #
+
+
+def _sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float) -> float:
+    """Sharpe = CAGR ÷ 연율화 변동성 (일간 수익률 표준편차 × √252). 계산 불가 시 0."""
+    curve = np.concatenate(([start_val], np.asarray(values, dtype=np.float64)))
+    if curve.size < 3 or np.any(curve[:-1] <= 0):
+        return 0.0
+    daily_rets = np.diff(curve) / curve[:-1]
+    vol = float(np.std(daily_rets, ddof=1)) * float(np.sqrt(252.0))
+    if vol <= 0:
+        return 0.0
+    return (cagr_pct / 100.0) / vol
 
 
 def _simulate_one_combo(
@@ -398,14 +411,14 @@ def _simulate_one_combo(
     sell_slippage: float,
     w_ath: float = 0.0,
     ath_pct_values: np.ndarray | None = None,
-) -> tuple[float, float, float, int]:
+) -> tuple[float, float, float, int, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
     모든 체결/보유/현금은 현지 통화로 관리한다. 평가 일자마다 당일 환율을 곱해
-    KRW 기준 value_curve 를 만들고 총수익률/CAGR/MDD 를 계산한다.
+    KRW 기준 value_curve 를 만들고 총수익률/CAGR/MDD/Sharpe 를 계산한다.
 
     Returns:
-        (total_return_pct, cagr_pct, mdd_pct) — 모두 KRW 기준.
+        (total_return_pct, cagr_pct, mdd_pct, trades, sharpe) — 모두 KRW 기준.
     """
     shares = np.zeros(composite_values.shape[1], dtype=np.int64)
     cash = float(initial_cash_local)
@@ -413,7 +426,7 @@ def _simulate_one_combo(
     value_curve: list[float] = []
     trade_count = 0
     if len(backtest_days) < 2:
-        return 0.0, 0.0, 0.0, 0
+        return 0.0, 0.0, 0.0, 0, 0.0
 
     # 첫 거래일은 전일 종가 신호를 사용해 당일 시초가에 첫 진입한다.
     for exec_idx in range(1, len(backtest_days)):
@@ -540,7 +553,7 @@ def _simulate_one_combo(
         value_curve.append(portfolio_value_local * fx_today)
 
     if not value_curve:
-        return 0.0, 0.0, 0.0, 0
+        return 0.0, 0.0, 0.0, 0, 0.0
 
     values = np.asarray(value_curve, dtype=np.float64)
     start_val = initial_cash_local * float(fx_values[0])
@@ -559,7 +572,8 @@ def _simulate_one_combo(
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(np.min(drawdown)) if drawdown.size else 0.0
 
-    return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count)
+    sharpe = _sharpe_from_curve(start_val, values, cagr_pct)
+    return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count), float(sharpe)
 
 
 def _simulate_benchmark_buy_and_hold(
@@ -598,7 +612,8 @@ def _simulate_benchmark_buy_and_hold(
     running_max = drawdown_base.cummax()
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
-    return float(total_return_pct), float(cagr_pct), float(mdd_pct), 1
+    sharpe = _sharpe_from_curve(start_val, values.to_numpy(dtype=np.float64), cagr_pct)
+    return float(total_return_pct), float(cagr_pct), float(mdd_pct), 1, float(sharpe)
 
 
 def _build_benchmark_value_curve(
@@ -663,11 +678,14 @@ def _result_sort_key(result: dict[str, Any], sort_metric: str = "CAGR") -> tuple
     sort_metric:
         - "CAGR": CAGR 높은 순 (동률이면 MDD)
         - "MDD": 낙폭이 얕은 순 (MDD_PCT 가 0 에 가까운 순, 동률이면 CAGR 높은 순)
+        - "SHARPE": Sharpe 높은 순 (동률이면 CAGR 높은 순)
     """
     rsi_limit = result.get("RSI_LIMIT")
     sortable_rsi = float(rsi_limit) if rsi_limit is not None else float("-inf")
     if sort_metric == "MDD":
         return (-float(result["MDD_PCT"]), -float(result["CAGR_PCT"]), -sortable_rsi)
+    if sort_metric == "SHARPE":
+        return (-float(result.get("SHARPE", 0.0)), -float(result["CAGR_PCT"]), -sortable_rsi)
     return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -sortable_rsi)
 
 
@@ -765,9 +783,10 @@ def _write_results_file(
         "수익률(%)",
         "CAGR(%)",
         "MDD(%)",
+        "Sharpe",
         "Trades",
     ]
-    aligns = ["left", "right", "right", "left", "left", "left", "right", "right", "right", "right"]
+    aligns = ["left", "right", "right", "left", "left", "left", "right", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
@@ -780,6 +799,7 @@ def _write_results_file(
             f"{benchmark_result['TOTAL_RETURN_PCT']:.2f}",
             f"{benchmark_result['CAGR_PCT']:.2f}",
             f"{benchmark_result['MDD_PCT']:.2f}",
+            f"{float(benchmark_result.get('SHARPE', 0.0)):.2f}",
             str(benchmark_result["TRADES"]),
         ]
 
@@ -799,6 +819,7 @@ def _write_results_file(
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
                 f"{r['MDD_PCT']:.2f}",
+                f"{float(r.get('SHARPE', 0.0)):.2f}",
                 str(r["TRADES"]),
             ]
         )
@@ -1710,6 +1731,7 @@ def _write_details_file(
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
         f"MDD_PCT: {top_result['MDD_PCT']:.2f}",
+        f"SHARPE: {float(top_result.get('SHARPE', 0.0)):.2f}",
         "",
     ]
     lines.extend(detail_lines)
@@ -1747,10 +1769,10 @@ def run_backtest(pool_id: str) -> Path:
         )
     months = int(cfg["BACKTEST_MONTHS"])
 
-    # 결과 정렬 기준 (CAGR | MDD) — 미저장 시 CAGR
+    # 결과 정렬 기준 (CAGR | MDD | SHARPE) — 미저장 시 CAGR
     sort_metric = str(cfg.get("SORT_METRIC") or "CAGR").upper()
-    if sort_metric not in ("CAGR", "MDD"):
-        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR 또는 MDD 여야 합니다: {sort_metric}")
+    if sort_metric not in ("CAGR", "MDD", "SHARPE"):
+        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD/SHARPE 중 하나여야 합니다: {sort_metric}")
 
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
@@ -1953,7 +1975,7 @@ def run_backtest(pool_id: str) -> Path:
 
     benchmark_result: dict[str, Any] | None = None
     if benchmark_config is not None:
-        benchmark_total_ret, benchmark_cagr, benchmark_mdd, benchmark_trades = _simulate_benchmark_buy_and_hold(
+        benchmark_total_ret, benchmark_cagr, benchmark_mdd, benchmark_trades, benchmark_sharpe = _simulate_benchmark_buy_and_hold(
             ticker=benchmark_ticker,
             open_frame=benchmark_open_win,
             close_frame=benchmark_close_win,
@@ -1968,6 +1990,7 @@ def run_backtest(pool_id: str) -> Path:
             "TOTAL_RETURN_PCT": benchmark_total_ret,
             "CAGR_PCT": benchmark_cagr,
             "MDD_PCT": benchmark_mdd,
+            "SHARPE": benchmark_sharpe,
             "TRADES": benchmark_trades,
         }
 
@@ -2120,8 +2143,16 @@ def run_backtest(pool_id: str) -> Path:
                 "RSI_LIMIT": int(rsi_val),
             }
             target_pool_id = pool_id
+            # 저장 방식에 "어떤 기준으로 어떤 성과였는지"를 함께 남긴다 (예: "백테스트 결과, Sharpe, 9.42")
+            metric_label = {"CAGR": "CAGR", "MDD": "MDD", "SHARPE": "Sharpe"}[sort_metric]
+            metric_value = {
+                "CAGR": float(best_result["CAGR_PCT"]),
+                "MDD": float(best_result["MDD_PCT"]),
+                "SHARPE": float(best_result.get("SHARPE", 0.0)),
+            }[sort_metric]
+            save_method = f"백테스트 결과, {metric_label}, {metric_value:.2f}"
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 시도: %s (target_id=%s)", pool_id, db_values, target_pool_id)
-            save_pool_settings(target_pool_id, db_values, save_method="백테스트 결과")
+            save_pool_settings(target_pool_id, db_values, save_method=save_method)
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 성공! (target_id=%s)", pool_id, target_pool_id)
         except Exception as db_exc:
             logger.error("[%s] 최적 파라미터 라이브 자동 저장 중 에러 발생: %s", pool_id, db_exc)

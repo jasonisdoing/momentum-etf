@@ -194,7 +194,7 @@ export function SettingsManager() {
                   <tr>
                     <th style={{ minWidth: 160 }}>종목풀</th>
                     {EDITABLE_KEYS.map((key) => (
-                      <th key={key} style={{ textAlign: "right", minWidth: 96 }}>
+                      <th key={key} style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                         {KEY_LABELS[key]}
                       </th>
                     ))}
