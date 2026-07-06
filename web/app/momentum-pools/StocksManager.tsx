@@ -487,10 +487,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       applyTrendWeightRatioState(configuredTrendWeightRatio);
     }
 
-    const configuredSecondary =
-      (currentConfig && currentConfig.secondary_metric) || payload.secondary_metric;
-    if (configuredSecondary) {
-      setSecondaryMetric(String(configuredSecondary).toUpperCase());
+    // 임시 토글 반영: 이번 계산에 실제로 쓰인 값(payload) 우선 → 토글이 DB 값으로 되돌아가지 않음.
+    if (payload.secondary_metric) {
+      setSecondaryMetric(String(payload.secondary_metric).toUpperCase());
+    } else if (currentConfig && currentConfig.secondary_metric) {
+      setSecondaryMetric(String(currentConfig.secondary_metric).toUpperCase());
     }
 
     setRankingComputedAt(payload.ranking_computed_at ?? null);
