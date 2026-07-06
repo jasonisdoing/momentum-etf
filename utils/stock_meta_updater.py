@@ -35,11 +35,11 @@ from utils.perf_metrics import curve_metrics
 
 
 def _simulate_single_stock_ma_strategy(close_prices: pd.Series, ma_months: int) -> dict[str, Any]:
-    """단일 종목에 대해 지정 개월수(ma_months) 동안의 단순 보유(Buy & Hold) 성과 지표(CAGR, MDD, Sharpe)를 구합니다.
+    """단일 종목에 대해 지정 개월수(ma_months) 동안의 단순 보유(Buy & Hold) 성과 지표(수익률, MDD, Sortino)를 구합니다.
     상장일이 시작일보다 뒤에 있는 경우, 가용한 전체 기간으로 계산하고 is_partial=True 플래그를 반환합니다.
     """
     if close_prices.empty:
-        return {"cagr": 0.0, "mdd": 0.0, "sharpe": 0.0, "is_partial": False}
+        return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
 
     try:
         last_date = close_prices.index[-1]
@@ -51,7 +51,7 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, ma_months: int) 
 
         target_series = close_prices.loc[start_date:]
         if len(target_series) < 2:
-            return {"cagr": 0.0, "mdd": 0.0, "sharpe": 0.0, "is_partial": is_partial}
+            return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": is_partial}
 
         start_val = float(target_series.iloc[0])
         values = target_series.iloc[1:].to_numpy()
@@ -60,11 +60,11 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, ma_months: int) 
         return {
             "cagr": round(float(metrics.get("total_return_pct", 0.0)), 2),  # CAGR 대신 단순 누적 수익률(%) 저장
             "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
-            "sharpe": round(float(metrics.get("sharpe", 0.0)), 2),
+            "sortino": round(float(metrics.get("sortino", 0.0)), 2),
             "is_partial": is_partial,
         }
     except Exception:
-        return {"cagr": 0.0, "mdd": 0.0, "sharpe": 0.0, "is_partial": False}
+        return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
 
 # -------------------------------------------------------------------------
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
@@ -807,13 +807,13 @@ def update_ticker_type_metadata(
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
 
-            # 5년치(60개월) 일봉 데이터 로드하여 MA 통계 지표 계산 (CAGR, MDD, Sharpe)
+            # 5년치(60개월) 일봉 데이터 로드하여 MA 통계 지표 계산 (CAGR, MDD, Sortino)
             backtest_stats = {}
             try:
                 df = fetch_ohlcv(ticker, country=country_code, months_back=60, ticker_type=type_norm)
                 if df is not None and not df.empty and "Close" in df.columns:
                     close_prices = df["Close"].dropna()
-                    # 최근 3개월의 성과 지표(단순 보유 CAGR, MDD, Sharpe)만 구합니다.
+                    # 최근 3개월의 성과 지표(단순 보유 CAGR, MDD, Sortino)만 구합니다.
                     backtest_stats = _simulate_single_stock_ma_strategy(close_prices, 3)
             except Exception as exc:
                 logger.warning(f"  -> [{ticker}] 백테스트 지표 연산 중 오류 발생: {exc}")

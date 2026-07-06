@@ -555,9 +555,9 @@ def _apply_common_rank_scores(
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     eval_date = close_frame.index.max()
 
-    # 보조지표(SHARPE, -100~+100) 포인트 — 백테스트와 동일 함수/스케일. 점수식에 w_sec 로 가산.
+    # 보조지표(SORTINO, -100~+100) 포인트 — 백테스트와 동일 함수/스케일. 점수식에 w_sec 로 가산.
     sec_pct_scores = pd.Series(0.0, index=close_frame.columns)
-    secondary_points_frame = compute_secondary_metric_points(close_frame, "SHARPE")
+    secondary_points_frame = compute_secondary_metric_points(close_frame, "SORTINO")
     if eval_date in secondary_points_frame.index:
         sec_pct_scores = secondary_points_frame.loc[eval_date]
 
@@ -593,12 +593,12 @@ def _apply_common_rank_scores(
     num_rules = len(ma_rules) if ma_rules else 1
     df["추세"] = tickers_col.map(composite_map).astype(float) / num_rules
 
-    # 2. '샤프' 원점수 (-100 ~ +100): 3개월 샤프의 단면 signed-백분위
+    # 2. '소르티노' 원점수 (-100 ~ +100): 3개월 소르티노의 단면 signed-백분위
     sec_map = {
         ticker: (0.0 if pd.isna(val) else float(val))
         for ticker, val in sec_pct_scores.items()
     }
-    df["SHARPE"] = tickers_col.map(sec_map).fillna(0.0)
+    df["SORTINO"] = tickers_col.map(sec_map).fillna(0.0)
 
     # 3. '보유가점': 보유 종목이면 보유%(= 점수 기여분), 아니면 0 (고정종목 exclude 시 0)
     if "exclude_from_ranking" in df.columns:
@@ -609,14 +609,14 @@ def _apply_common_rank_scores(
     else:
         df["보유가점"] = df["보유"].map(lambda x: hold_pct if x == "보유" else 0.0)
 
-    # 4. 최종 '점수' = 가중합 (백테스트와 동일): w_trend×추세 + w_sec×SHARPE + 보유가점
+    # 4. 최종 '점수' = 가중합 (백테스트와 동일): w_trend×추세 + w_sec×SORTINO + 보유가점
     composite_missing = df["추세"].isna()
-    df["점수"] = w_trend * df["추세"] + w_sec * df["SHARPE"] + df["보유가점"]
+    df["점수"] = w_trend * df["추세"] + w_sec * df["SORTINO"] + df["보유가점"]
 
     # 자격 미달 종목(결손 행) 일관성 마스킹 처리
     df.loc[composite_missing, "점수"] = None
     df.loc[composite_missing, "추세"] = None
-    df.loc[composite_missing, "SHARPE"] = 0.0
+    df.loc[composite_missing, "SORTINO"] = 0.0
     df.loc[composite_missing, "보유가점"] = 0.0
 
     for column, trend_map in trend_maps.items():
