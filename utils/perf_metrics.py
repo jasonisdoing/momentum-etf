@@ -23,6 +23,25 @@ def sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float = 0.
     return ann_ret / vol
 
 
+def sortino_from_curve(start_val: float, values: np.ndarray) -> float:
+    """Sortino = 연율화 평균 수익률 ÷ 연율화 하방 변동성 (일간 음수 수익률 표준편차 × √252). 계산 불가 시 0."""
+    curve = np.concatenate(([start_val], np.asarray(values, dtype=np.float64)))
+    if curve.size < 3 or np.any(curve[:-1] <= 0):
+        return 0.0
+    daily_rets = np.diff(curve) / curve[:-1]
+    
+    # 일간 평균 수익률의 단순 연율화 (분자)
+    ann_ret = float(np.mean(daily_rets)) * 252.0
+    
+    # 하방 변동성(Downside Deviation) 계산: 음수 수익률의 제곱합 기준 (분모)
+    downside_rets = np.minimum(0, daily_rets)
+    downside_std = float(np.sqrt(np.sum(downside_rets ** 2) / (daily_rets.size - 1))) * float(np.sqrt(252.0))
+    
+    if downside_std <= 0:
+        return 0.0
+    return ann_ret / downside_std
+
+
 def mdd_span(values: np.ndarray) -> tuple[int, int, float]:
     """곡선에서 최대낙폭(MDD)의 (고점 인덱스, 저점 인덱스, MDD%)를 반환한다.
 
@@ -43,7 +62,7 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
     """KRW 평가 곡선에서 (총수익률%, CAGR%, MDD%, Sharpe) 를 계산한다."""
     values = np.asarray(values, dtype=np.float64)
     if values.size == 0 or start_val <= 0:
-        return {"total_return_pct": 0.0, "cagr_pct": 0.0, "mdd_pct": 0.0, "sharpe": 0.0}
+        return {"total_return_pct": 0.0, "cagr_pct": 0.0, "mdd_pct": 0.0, "sharpe": 0.0, "sortino": 0.0}
 
     end_val = float(values[-1])
     total_return_pct = (end_val / start_val - 1.0) * 100.0
@@ -61,4 +80,5 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
         "cagr_pct": float(cagr_pct),
         "mdd_pct": mdd_pct,
         "sharpe": sharpe_from_curve(start_val, values, cagr_pct),
+        "sortino": sortino_from_curve(start_val, values),
     }

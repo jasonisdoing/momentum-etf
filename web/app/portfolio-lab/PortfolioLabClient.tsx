@@ -10,7 +10,7 @@ import { useToast } from "../components/ToastProvider";
 
 type LabTicker = { ticker: string; name?: string };
 
-type LabSummary = { total_return_pct: number; cagr_pct: number; mdd_pct: number; sharpe: number };
+type LabSummary = { total_return_pct: number; cagr_pct: number; mdd_pct: number; sortino: number };
 
 type LabPosition = LabTicker & {
   buy_date: string;
@@ -22,7 +22,7 @@ type LabPosition = LabTicker & {
   mdd_pct: number;
   mdd_start: string;
   mdd_end: string;
-  sharpe: number;
+  sortino: number;
   value: number;
 };
 
@@ -415,11 +415,11 @@ export function PortfolioLabClient() {
                     {summaryChip("총수익률", `${result.summary.total_return_pct.toFixed(2)}%`, signedClass(result.summary.total_return_pct))}
                     {summaryChip("CAGR", `${result.summary.cagr_pct.toFixed(2)}%`, signedClass(result.summary.cagr_pct))}
                     {summaryChip("MDD", `${result.summary.mdd_pct.toFixed(2)}%`, "#d63939")}
-                    {summaryChip("Sharpe", result.summary.sharpe.toFixed(2))}
+                    {summaryChip("Sortino", result.summary.sortino.toFixed(2))}
                   </div>
                   <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginBottom: 10 }}>
                     벤치마크 {result.benchmark.name}: 총 {result.benchmark.summary.total_return_pct.toFixed(2)}% · MDD{" "}
-                    {result.benchmark.summary.mdd_pct.toFixed(2)}% · Sharpe {result.benchmark.summary.sharpe.toFixed(2)}
+                    {result.benchmark.summary.mdd_pct.toFixed(2)}% · Sortino {result.benchmark.summary.sortino.toFixed(2)}
                   </div>
                   <LabChart result={result} />
                 </div>
@@ -455,7 +455,7 @@ export function PortfolioLabClient() {
                             <th style={{ textAlign: "right" }}>현재가</th>
                             <th style={{ textAlign: "right" }}>수익률</th>
                             <th style={{ textAlign: "right" }}>MDD</th>
-                            <th style={{ textAlign: "right" }}>Sharpe</th>
+                            <th style={{ textAlign: "right" }}>Sortino</th>
                             <th style={{ textAlign: "right" }}>평가금액</th>
                           </tr>
                         </thead>
@@ -480,7 +480,7 @@ export function PortfolioLabClient() {
                                   ({p.mdd_start.replaceAll("-", "/")}~{p.mdd_end.replaceAll("-", "/")})
                                 </span>
                               </td>
-                              <td style={{ textAlign: "right" }}>{p.sharpe.toFixed(2)}</td>
+                              <td style={{ textAlign: "right" }}>{p.sortino.toFixed(2)}</td>
                               <td style={{ textAlign: "right" }}>{formatKrw(p.value)}</td>
                             </tr>
                           ))}

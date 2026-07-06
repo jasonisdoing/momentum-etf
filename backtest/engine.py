@@ -26,7 +26,6 @@ from config import (
     TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import (
-    SECONDARY_METRICS,
     compute_eligibility_mask,
     compute_rule_percentile_frame,
     compute_secondary_metric_points,
@@ -305,7 +304,7 @@ _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
 _W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
-# 보조지표(ATH|SHARPE) 포인트 [일자 × 티커] — {지표: 배열}. 가중 가산용 (close 만으로 결정, MA 무관).
+# 보조지표(SHARPE) 포인트 [일자 × 티커] — {지표: 배열}. 가중 가산용 (close 만으로 결정, MA 무관).
 _W_SECONDARY_VALUES: dict[str, np.ndarray] = {}
 
 
@@ -340,7 +339,7 @@ def _init_worker(
 
 def _run_single_combo(args: tuple[int, str, int, float | None, float, float, float, str]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold, w_ath, secondary_metric = args
+    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold, w_sec, secondary_metric = args
     raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
     # 가중치 비율 결합 (추세 단독 + 보유·보조지표 가산)
     composite_values = w_trend * raw_composite
@@ -357,11 +356,11 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         rsi_limit=rsi_limit,
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
-        w_ath=w_ath,
+        w_sec=w_sec,
         secondary_points=_W_SECONDARY_VALUES[secondary_metric],
     )
-    # 추세 가중치(%) 복원: w_trend/w_ath 는 (100-보유)에 비율을 곱한 값이므로 비율로 되돌린다.
-    side_sum = w_trend + w_ath
+    # 추세 가중치(%) 복원: w_trend/w_sec 는 (100-보유)에 비율을 곱한 값이므로 비율로 되돌린다.
+    side_sum = w_trend + w_sec
     trend_weight_ratio = round(100.0 * w_trend / side_sum) if side_sum > 0 else 0
     return {
         "TOP_N_HOLD": top_n,
@@ -369,7 +368,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         "TREND_WEIGHT_RATIO": trend_weight_ratio,
         "W_TREND": w_trend,
         "W_HOLD": w_hold,
-        "W_ATH": w_ath,
+        "W_SEC": w_sec,
         "SECONDARY_METRIC": secondary_metric,
         "MA_TYPE": ma_t,
         "MA_MONTHS": ma_m,
@@ -406,7 +405,7 @@ def _simulate_one_combo(
     rsi_limit: float | None,
     buy_slippage: float,
     sell_slippage: float,
-    w_ath: float = 0.0,
+    w_sec: float = 0.0,
     secondary_points: np.ndarray | None = None,
 ) -> tuple[float, float, float, int, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
@@ -436,11 +435,11 @@ def _simulate_one_combo(
         if w_hold > 0:
             held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
             composite_today[held_bonus_mask] += w_hold * 100.0
-        # 보조지표 보너스: 이미 포인트로 스케일된 값(ATH 0~100 / SHARPE ±100) × w_ath 를 점수에 가산.
-        if w_ath > 0 and secondary_points is not None:
+        # 보조지표 보너스: 이미 포인트로 스케일된 값(SHARPE, -100~+100) × w_sec 를 점수에 가산.
+        if w_sec > 0 and secondary_points is not None:
             sec_today = secondary_points[signal_idx]
             sec_mask = ~np.isnan(composite_today) & ~np.isnan(sec_today)
-            composite_today[sec_mask] += w_ath * sec_today[sec_mask]
+            composite_today[sec_mask] += w_sec * sec_today[sec_mask]
 
         rsi_sell_mask = np.zeros_like(shares, dtype=bool)
         if rsi_limit is not None:
@@ -749,7 +748,7 @@ def _write_results_file(
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
     lines.append(
-        f'"WEIGHT": "추세:ATH = r:(100-r), r={[int(v) for v in trend_ratio_values]} 탐색 '
+        f'"WEIGHT": "추세:샤프 = r:(100-r), r={[int(v) for v in trend_ratio_values]} 탐색 '
         f'(나머지 = 100-보유)",'
     )
     lines.append(f'"MA_TYPE": {ma_types},')
@@ -769,14 +768,13 @@ def _write_results_file(
         out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    # W_TREND·W_ATH 절대값 대신 (보유%, 추세:보조 비율, 보조지표) 축으로 표기한다.
+    # W_TREND·W_SEC 절대값 대신 (보유%, 추세:샤프 비율) 축으로 표기한다.
     headers = [
         "TOP_N",
         "W_HOLD",
-        "TR:2nd",
-        "2nd",
-        "MA_TYPE",
-        "MA_M",
+        "추세:샤프",
+        "추세타입",
+        "추세개월",
         "RSI",
         "수익률(%)",
         "CAGR(%)",
@@ -784,11 +782,10 @@ def _write_results_file(
         "Sharpe",
         "Trades",
     ]
-    aligns = ["left", "right", "right", "left", "left", "left", "left", "right", "right", "right", "right", "right"]
+    aligns = ["left", "right", "right", "left", "left", "left", "right", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
-            "-",
             "-",
             "-",
             "-",
@@ -812,7 +809,6 @@ def _write_results_file(
                 str(r["TOP_N_HOLD"]),
                 f"{int(round(float(r.get('W_HOLD', 0.0)) * 100))}%",
                 f"{ratio}:{100 - ratio}",
-                str(r.get("SECONDARY_METRIC") or "ATH"),
                 r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
                 "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
@@ -1057,10 +1053,10 @@ def _simulate_one_combo_details(
     initial_cash_local: float,
     top_n: int,
     w_hold: float,
-    w_ath: float = 0.0,
+    w_sec: float = 0.0,
     w_trend: float = 1.0,
     secondary_points_frame: pd.DataFrame | None = None,
-    secondary_metric: str = "ATH",
+    secondary_metric: str = "샤프",
     composite_frame: pd.DataFrame,
     rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
@@ -1146,7 +1142,7 @@ def _simulate_one_combo_details(
     lines.append(f"TOP_N_HOLD: {top_n}")
     lines.append(
         f"가중치(추세/보유/{secondary_metric}): "
-        f"{w_trend * 100:g}% / {w_hold * 100:g}% / {w_ath * 100:g}%"
+        f"{w_trend * 100:g}% / {w_hold * 100:g}% / {w_sec * 100:g}%"
     )
     lines.append(f"MA_TYPE: {rule_frame.attrs.get('ma_type', '-')}")
     lines.append(f"MA_MONTHS: {rule_frame.attrs.get('ma_months', '-')}")
@@ -1265,7 +1261,7 @@ def _simulate_one_combo_details(
         composite = composite_frame.loc[signal_day].copy()
         rule_signal = rule_frame.loc[signal_day].copy()
         rsi_signal = rsi_frame.loc[signal_day].copy()
-        # 보조지표(ATH/SHARPE) 시그널 시리즈 — 상세 행 표시 및 점수 가산에 공용.
+        # 보조지표(SHARPE) 시그널 시리즈 — 상세 행 표시 및 점수 가산에 공용.
         if secondary_points_frame is not None and signal_day in secondary_points_frame.index:
             sec_signal = secondary_points_frame.loc[signal_day].reindex(composite.index)
         else:
@@ -1274,9 +1270,9 @@ def _simulate_one_combo_details(
             for holding in shares:
                 if holding in composite.index and not pd.isna(composite.loc[holding]):
                     composite.loc[holding] += w_hold * 100.0
-        if w_ath > 0:
+        if w_sec > 0:
             sec_valid = composite.notna() & sec_signal.notna()
-            composite.loc[sec_valid] += w_ath * sec_signal.loc[sec_valid]
+            composite.loc[sec_valid] += w_sec * sec_signal.loc[sec_valid]
 
         rsi_sell_tickers: set[str] = set()
         if rsi_limit is not None:
@@ -1334,7 +1330,7 @@ def _simulate_one_combo_details(
                             None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
                         ),
                         "secondary": _format_score_value(
-                            None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
+                            None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
                         ),
                         "rsi": _format_score_value(
                             None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -1421,7 +1417,7 @@ def _simulate_one_combo_details(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
                     ),
                     "secondary": _format_score_value(
-                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
+                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
                     ),
                     "rsi": _format_score_value(
                         None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -1512,7 +1508,7 @@ def _simulate_one_combo_details(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
                     ),
                     "secondary": _format_score_value(
-                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
+                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
                     ),
                     "rsi": _format_score_value(
                         None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -1559,7 +1555,7 @@ def _simulate_one_combo_details(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
                     ),
                     "secondary": _format_score_value(
-                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_ath
+                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
                     ),
                     "rsi": _format_score_value(
                         None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
@@ -1744,9 +1740,8 @@ def _write_details_file(
         "=== 상위 1개 조합 설정 ===",
         f"TOP_N_HOLD: {top_result['TOP_N_HOLD']}",
         f"HOLDING_BONUS_SCORE: {top_result['HOLDING_BONUS_SCORE']:g}",
-        f"SECONDARY_METRIC: {top_result.get('SECONDARY_METRIC') or 'ATH'}",
-        f"MA_TYPE: {top_result['MA_TYPE']}",
-        f"MA_MONTHS: {top_result['MA_MONTHS']}",
+        f"추세_타입: {top_result['MA_TYPE']}",
+        f"추세_개월: {top_result['MA_MONTHS']}",
         f"RSI_LIMIT: {rsi_limit_text}",
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
@@ -1794,17 +1789,8 @@ def run_backtest(pool_id: str) -> Path:
     if sort_metric not in ("CAGR", "MDD", "SHARPE"):
         raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD/SHARPE 중 하나여야 합니다: {sort_metric}")
 
-    # 보조지표 탐색값 (ATH | SHARPE) — 미저장 시 ATH 단일. 추세와 함께 점수를 구성하는 두 번째 축.
-    secondary_raw = cfg.get("SECONDARY_METRIC") or ["ATH"]
-    if not isinstance(secondary_raw, list):
-        secondary_raw = [secondary_raw]
-    secondary_metrics = [str(v).upper() for v in secondary_raw]
-    for sm in secondary_metrics:
-        if sm not in SECONDARY_METRICS:
-            raise ValueError(
-                f"backtest_config['{pool_id}'] 의 SECONDARY_METRIC 값이 올바르지 않습니다: {sm} "
-                f"(지원: {', '.join(SECONDARY_METRICS)})"
-            )
+    # 보조지표는 SHARPE 로 고정한다. 옛 SECONDARY_METRIC 저장값은 무시.
+    secondary_metrics = ["SHARPE"]
 
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
@@ -1816,9 +1802,9 @@ def run_backtest(pool_id: str) -> Path:
     ma_types = [str(v).upper() for v in cfg["MA_TYPE"]]
     ma_months_list = [int(v) for v in cfg["MA_MONTHS"]]
     # 보유보너스(%) 탐색값 — DB(backtest_config)의 HOLDING_BONUS_SCORE 를 단일 소스로 사용.
-    # 각 보유값 h(%)에 대해 추세 = ATH = (100 - h) / 2 % 로 묶어 가중치 그리드를 만든다.
+    # 각 보유값 h(%)에 대해 추세 = 샤프 = (100 - h) / 2 % 로 묶어 가중치 그리드를 만든다.
     hold_pct_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
-    # 추세 가중치(%) 탐색값 — 보유 제외 나머지 비중 중 추세 몫. ATH 몫 = 100 - 이 값.
+    # 추세 가중치(%) 탐색값 — 보유 제외 나머지 비중 중 추세 몫. 샤프 몫 = 100 - 이 값.
     if "TREND_WEIGHT_RATIO" not in cfg:
         raise ValueError(
             f"backtest_config['{pool_id}'] 에 TREND_WEIGHT_RATIO 리스트가 없습니다. "
@@ -1975,8 +1961,8 @@ def run_backtest(pool_id: str) -> Path:
     rsi_frame = _compute_rsi_frame(strategy_close_frame, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
     rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
-    # 보조지표(ATH|SHARPE) 포인트 프레임 — 탐색 대상 지표만 계산해 {지표: [일자×티커] 배열} 로 보관.
-    # 전체 프레임으로 워밍업(ATH 12개월 rolling 고점 / SHARPE 3개월 rolling) 후 백테스트 구간 슬라이스.
+    # 보조지표(SHARPE) 포인트 프레임 — 탐색 대상 지표만 계산해 {지표: [일자×티커] 배열} 로 보관.
+    # 전체 프레임으로 워밍업(SHARPE 3개월 rolling) 후 백테스트 구간 슬라이스.
     secondary_values_map: dict[str, np.ndarray] = {}
     for sm in secondary_metrics:
         sm_frame = compute_secondary_metric_points(strategy_close_frame, sm)
@@ -2030,7 +2016,7 @@ def run_backtest(pool_id: str) -> Path:
         }
 
     # 가중치 그리드 생성: 보유보너스(%) × 추세 가중치(%) 를 탐색공간(DB)에서 가져와 조합한다.
-    # 각 (보유 h, 추세비율 r) → 추세 = (100-h)×(r/100), ATH = (100-h)×(1-r/100). 합계는 항상 100%.
+    # 각 (보유 h, 추세비율 r) → 추세 = (100-h)×(r/100), 샤프 = (100-h)×(1-r/100). 합계는 항상 100%.
     weight_combos = []
     for hold in hold_pct_values:
         remainder = 100.0 - hold
@@ -2041,8 +2027,8 @@ def run_backtest(pool_id: str) -> Path:
                 raise ValueError(f"TREND_WEIGHT_RATIO 는 0 ~ 100 범위여야 합니다: {ratio}")
             trend_share = ratio / 100.0
             w_trend = remainder * trend_share
-            w_ath = remainder * (1.0 - trend_share)
-            weight_combos.append((w_trend / 100.0, hold / 100.0, w_ath / 100.0))
+            w_sec = remainder * (1.0 - trend_share)
+            weight_combos.append((w_trend / 100.0, hold / 100.0, w_sec / 100.0))
 
     # 조합 생성 (보조지표 축 추가)
     raw_combos = list(
@@ -2056,8 +2042,8 @@ def run_backtest(pool_id: str) -> Path:
         )
     )
     combos = []
-    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold, w_ath), sec in raw_combos:
-        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold, w_ath, sec))
+    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold, w_sec), sec in raw_combos:
+        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold, w_sec, sec))
     total_combos = len(combos)
 
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
@@ -2169,12 +2155,11 @@ def run_backtest(pool_id: str) -> Path:
             if rsi_val is None:
                 rsi_val = 100
 
-            # 최적 (보유%, 추세가중치%, 보조지표) 를 라이브에 반영한다. 보조지표 비중 = (100-보유)×(100-추세비율)/100.
+            # 최적 (보유%, 추세가중치%) 를 라이브에 반영한다. 샤프 비중 = (100-보유)×(100-추세비율)/100.
             db_values = {
                 "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
                 "HOLDING_BONUS_SCORE": int(best_result["HOLDING_BONUS_SCORE"]),
                 "TREND_WEIGHT_RATIO": int(best_result["TREND_WEIGHT_RATIO"]),
-                "SECONDARY_METRIC": str(best_result.get("SECONDARY_METRIC") or "ATH").upper(),
                 "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
                 "RSI_LIMIT": int(rsi_val),
@@ -2200,7 +2185,7 @@ def run_backtest(pool_id: str) -> Path:
         # 동적 비율 가중치 추출
         w_trend = float(best_result.get("W_TREND", 1.0))
         w_hold = float(best_result.get("W_HOLD", 0.0))
-        w_ath = float(best_result.get("W_ATH", 0.0))
+        w_sec = float(best_result.get("W_SEC", 0.0))
 
         # 동적 가중치 결합 (추세 단독)
         best_composite = w_trend * best_composite
@@ -2220,17 +2205,16 @@ def run_backtest(pool_id: str) -> Path:
                 initial_cash_local=initial_cash_local,
                 buy_slippage=buy_slippage,
             )
-        # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 최적 결과가 고른 지표로 재구성.
-        best_secondary = str(best_result.get("SECONDARY_METRIC") or "ATH").upper()
-        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame, best_secondary).loc[backtest_days]
+        # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 보조지표는 SHARPE 고정.
+        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame, "SHARPE").loc[backtest_days]
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
             w_hold=w_hold,
-            w_ath=w_ath,
+            w_sec=w_sec,
             w_trend=w_trend,
             secondary_points_frame=best_secondary_frame,
-            secondary_metric=best_secondary,
+            secondary_metric="샤프",
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,

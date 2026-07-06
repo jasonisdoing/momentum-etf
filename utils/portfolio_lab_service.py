@@ -260,7 +260,7 @@ def run_portfolio_lab(
                 "mdd_pct": round(sec_metrics["mdd_pct"], 2),
                 "mdd_start": seg_dates[mdd_peak].date().isoformat(),
                 "mdd_end": seg_dates[mdd_trough].date().isoformat(),
-                "sharpe": round(sec_metrics["sharpe"], 2),
+                "sortino": round(sec_metrics["sortino"], 2),
             }
         )
 

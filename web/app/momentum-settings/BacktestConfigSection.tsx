@@ -8,7 +8,6 @@ import { useToast } from "../components/ToastProvider";
 type Benchmark = { ticker?: string; name?: string };
 type BtConfig = {
   SORT_METRIC?: string;
-  SECONDARY_METRIC?: string[];
   BACKTEST_MONTHS?: number;
   BENCHMARK?: Benchmark;
   TOP_N_HOLD?: number[];
@@ -19,7 +18,6 @@ type BtConfig = {
   RSI_LIMIT?: number[];
 };
 
-const SECONDARY_OPTIONS = ["ATH", "SHARPE"];
 type PoolEntry = {
   pool_id: string;
   name: string;
@@ -66,9 +64,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const [maMonthsSet, setMaMonthsSet] = useState<Set<number>>(new Set(c.MA_MONTHS ?? [6, 12]));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
-  const [secondarySet, setSecondarySet] = useState<Set<string>>(
-    new Set((c.SECONDARY_METRIC ?? ["ATH"]).map((m) => m.toUpperCase()).filter((m) => SECONDARY_OPTIONS.includes(m))),
-  );
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
   const [saving, setSaving] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -103,21 +98,13 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const ratios = [...ratioSet].sort((a, b) => a - b);
   const months = [...maMonthsSet].sort((a, b) => a - b);
   const rsi = parseNums(rsiText);
-  const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length * secondarySet.size;
+  const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
       const next = new Set(prev);
       if (next.has(t)) next.delete(t);
       else next.add(t);
-      return next;
-    });
-
-  const toggleSecondary = (m: string) =>
-    setSecondarySet((prev) => {
-      const next = new Set(prev);
-      if (next.has(m)) next.delete(m);
-      else next.add(m);
       return next;
     });
 
@@ -144,7 +131,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
       HOLDING_BONUS_SCORE: bonus,
       TREND_WEIGHT_RATIO: ratios,
-      SECONDARY_METRIC: [...secondarySet],
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
@@ -274,21 +260,8 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>보조 = (100−보유) × (100−추세비율)%</span>
       </div>
 
-      <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 84 }}>보조지표</span>
-        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-          {SECONDARY_OPTIONS.map((m) => (
-            <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
-              <input type="checkbox" checked={secondarySet.has(m)} onChange={() => toggleSecondary(m)} />
-              {m === "ATH" ? "ATH(고점근접)" : "SHARPE(3개월)"}
-            </label>
-          ))}
-        </div>
-        <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>추세와 함께 점수를 구성하는 두 번째 축 (탐색 비교용)</span>
-      </div>
-
       <div style={{ ...rowStyle, marginBottom: 0 }}>
-        <span style={{ ...labelStyle, width: 84 }}>MA 타입</span>
+        <span style={{ ...labelStyle, width: 84 }}>추세 타입</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
           {maTypes.map((t) => (
             <label key={t} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
@@ -297,7 +270,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
             </label>
           ))}
         </div>
-        <span style={{ ...labelStyle, marginLeft: 8 }}>MA 개월</span>
+        <span style={{ ...labelStyle, marginLeft: 8 }}>추세 개월</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
           {[3, 6, 9, 12, 18, 24].map((m) => (
             <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>

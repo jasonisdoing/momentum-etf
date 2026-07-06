@@ -29,12 +29,11 @@ logger = get_app_logger()
 COLLECTION = "pool_settings"
 
 # DB 오버라이드 대상 키
-# TREND_WEIGHT_RATIO: 보유 제외 나머지 비중 중 추세 몫(%) — ATH 몫은 (100 - 이 값).
+# TREND_WEIGHT_RATIO: 보유 제외 나머지 비중 중 추세 몫(%) — 샤프 몫은 (100 - 이 값).
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "HOLDING_BONUS_SCORE",
     "TREND_WEIGHT_RATIO",
-    "SECONDARY_METRIC",
     "MA_TYPE",
     "MA_MONTHS",
     "RSI_LIMIT",
@@ -43,7 +42,7 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
 _INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_MONTHS", "RSI_LIMIT")
 
 # 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
-_OPTIONAL_DEFAULTS: dict[str, Any] = {"SECONDARY_METRIC": "ATH"}
+_OPTIONAL_DEFAULTS: dict[str, Any] = {}
 
 _CACHE_TTL_SECONDS = 30.0
 _overlay_cache: dict[str, dict[str, Any]] | None = None
@@ -197,13 +196,6 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
                     f"MA_TYPE 은 {', '.join(ALLOWED_MA_TYPES)} 중 하나여야 합니다: {raw}"
                 )
             cleaned[key] = ma_type
-            continue
-
-        if key == "SECONDARY_METRIC":
-            secondary = str(raw or "").strip().upper()
-            if secondary not in ("ATH", "SHARPE"):
-                raise PoolSettingsError(f"SECONDARY_METRIC 은 ATH, SHARPE 중 하나여야 합니다: {raw}")
-            cleaned[key] = secondary
             continue
 
         try:

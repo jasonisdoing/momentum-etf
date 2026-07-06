@@ -142,33 +142,7 @@ def compute_eligibility_mask(close_frame: pd.DataFrame) -> pd.DataFrame:
     return close_frame.notna().cumsum() >= int(MIN_TRADING_DAYS)
 
 
-# 고점(신고가) 윈도우: 12개월(≈52주). 시스템 공통 월→거래일 환산을 따른다.
-ATH_HIGH_WINDOW_MONTHS = 12
-
-
-def compute_ath_proximity_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
-    """[일자 × 티커] 종가 프레임에서 12개월 고점 대비 낙폭의 **풀 내 단면 백분위(0~1)** 를 계산한다.
-
-    - ``dd = 종가 / rolling_max(12개월) - 1`` (0이면 신고가, 음수일수록 낙폭 큼)
-    - 매 일자, 풀 내 종목들끼리 ``dd`` 를 백분위로 환산 → ATH 에 가장 가까운 종목 ≈ 1.0,
-      가장 먼 종목 ≈ 0. 데이터가 윈도우보다 짧으면 가용 기간 최고가로 처리(``min_periods=1``).
-
-    추세 percentile 과 동일한 단면 순위 방식이라, ``ATH_BONUS × (이 값)`` 을 점수에 더하면
-    "풀 안에서 고점에 가까운 정도"에 비례한 보너스가 된다. **라이브·백테스트 공통**으로 쓴다.
-    """
-    if close_frame is None or close_frame.empty:
-        return pd.DataFrame(
-            index=getattr(close_frame, "index", None),
-            columns=getattr(close_frame, "columns", None),
-            dtype=float,
-        )
-    window = max(1, int(ATH_HIGH_WINDOW_MONTHS) * int(TRADING_DAYS_PER_MONTH))
-    rolling_high = close_frame.rolling(window=window, min_periods=1).max()
-    drawdown = close_frame / rolling_high.replace(0, np.nan) - 1.0  # <= 0 (0=신고가)
-    return drawdown.rank(axis=1, method="average", pct=True)
-
-
-# 보조지표(ATH 대체용) 샤프 롤링 윈도우: 3개월(≈63거래일). 화면 "샤프3달" 과 동일 개념.
+# 보조지표 샤프 롤링 윈도우: 3개월(≈63거래일). 화면 "샤프3달" 과 동일 개념.
 SHARPE_WINDOW_MONTHS = 3
 
 
@@ -179,9 +153,8 @@ def compute_sharpe_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
     - 추세와 동일한 ``calculate_signed_percentile_score`` 로 -100~+100 로 환산한다
       (양수 샤프는 양수끼리, 음수 샤프는 음수끼리 단면 랭킹).
 
-    ATH(0~100) 자리에 교체 투입 가능한 보조지표. **라이브·백테스트 공통**으로 쓴다.
-    단, 점수식은 ``w_ath × (이 값/100)`` 스케일에 맞춰 0~100 로 넘길 수도 있으므로,
-    signed-percentile(-100~+100) 을 그대로 반환하고 호출부에서 가중한다.
+    추세와 함께 점수를 구성하는 보조지표. **라이브·백테스트 공통**으로 쓰며,
+    signed-percentile(-100~+100) 을 그대로 반환하고 호출부에서 ``w_sec ×`` 로 가중한다.
     """
     if close_frame is None or close_frame.empty:
         return pd.DataFrame(
@@ -197,24 +170,16 @@ def compute_sharpe_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
     return calculate_signed_percentile_score(sharpe)
 
 
-# 지원하는 보조지표 (추세와 함께 점수를 구성하는 두 번째 축)
-SECONDARY_METRICS = ("ATH", "SHARPE")
+def compute_secondary_metric_points(close_frame: pd.DataFrame, metric: str = "SHARPE") -> pd.DataFrame:
+    """보조지표를 점수 가산용 '포인트' 프레임(-100~+100)으로 반환한다 (호출부는 ``w_sec ×`` 만).
 
-
-def compute_secondary_metric_points(close_frame: pd.DataFrame, metric: str) -> pd.DataFrame:
-    """보조지표를 점수 가산용 '포인트' 프레임으로 반환한다 (호출부는 ``w_ath ×`` 만 하면 됨).
-
-    - ``ATH``   : 12개월 고점 근접 단면 백분위 × 100 → 0~100
-    - ``SHARPE``: 3개월 롤링 샤프 단면 signed-percentile → -100~+100
-
+    현재 보조지표는 SHARPE(3개월 롤링 샤프의 단면 signed-percentile) 하나로 고정되어 있다.
     라이브·백테스트가 동일 함수를 통해 보조지표를 얻어 점수식이 갈라지지 않게 한다.
     """
-    metric_norm = str(metric or "").upper()
-    if metric_norm == "ATH":
-        return compute_ath_proximity_percentile(close_frame) * 100.0
+    metric_norm = str(metric or "SHARPE").upper()
     if metric_norm == "SHARPE":
         return compute_sharpe_signed_percentile(close_frame)
-    raise ValueError(f"지원하지 않는 보조지표입니다: {metric} (지원: {', '.join(SECONDARY_METRICS)})")
+    raise ValueError(f"지원하지 않는 보조지표입니다: {metric} (지원: SHARPE)")
 
 
 def combine_rule_percentiles(
@@ -271,10 +236,8 @@ __all__ = [
     "compute_trend_frame",
     "compute_rule_percentile_frame",
     "compute_eligibility_mask",
-    "compute_ath_proximity_percentile",
     "compute_sharpe_signed_percentile",
     "compute_secondary_metric_points",
-    "SECONDARY_METRICS",
     "combine_rule_percentiles",
     "build_composite_rank_scores",
 ]
