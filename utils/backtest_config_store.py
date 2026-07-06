@@ -66,16 +66,6 @@ def validate_backtest_config(config: Any) -> None:
     if sort_metric is not None and str(sort_metric).upper() not in ("CAGR", "MDD", "SHARPE"):
         raise ValueError("'SORT_METRIC' 은 CAGR/MDD/SHARPE 중 하나여야 합니다.")
 
-    # 보조지표 탐색값 (ATH | SHARPE) — 리스트. 미저장이면 엔진이 ["ATH"] 기본.
-    secondary = config.get("SECONDARY_METRIC")
-    if secondary is not None:
-        sec_list = secondary if isinstance(secondary, list) else [secondary]
-        if len(sec_list) == 0:
-            raise ValueError("'SECONDARY_METRIC' 은 1개 이상의 값을 가진 리스트여야 합니다.")
-        for v in sec_list:
-            if str(v).upper() not in ("ATH", "SHARPE"):
-                raise ValueError(f"'SECONDARY_METRIC' 값이 올바르지 않습니다: {v} (지원: ATH, SHARPE)")
-
     for key in _REQUIRED_LIST_KEYS:
         values = config.get(key)
         if not isinstance(values, list) or len(values) == 0:

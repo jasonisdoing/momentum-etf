@@ -26,7 +26,6 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   trend_weight_ratio?: number;
-  secondary_metric?: string;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -92,7 +91,7 @@ type RankRow = {
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
   exclude_from_ranking?: boolean;
-  ATH?: number;
+  SHARPE?: number;
   보유가점?: number;
 };
 
@@ -113,7 +112,6 @@ type RankResponse = {
   previous_trading_day?: string | null;
   held_bonus_score?: number;
   trend_weight_ratio?: number;
-  secondary_metric?: string;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -401,7 +399,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [trendWeightRatio, setTrendWeightRatio] = useState(0);
-  const [secondaryMetric, setSecondaryMetric] = useState("ATH");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -487,13 +484,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       applyTrendWeightRatioState(configuredTrendWeightRatio);
     }
 
-    // 임시 토글 반영: 이번 계산에 실제로 쓰인 값(payload) 우선 → 토글이 DB 값으로 되돌아가지 않음.
-    if (payload.secondary_metric) {
-      setSecondaryMetric(String(payload.secondary_metric).toUpperCase());
-    } else if (currentConfig && currentConfig.secondary_metric) {
-      setSecondaryMetric(String(currentConfig.secondary_metric).toUpperCase());
-    }
-
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -528,11 +518,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         : payload.trend_weight_ratio;
     if (typeof configuredTrendWeightRatio === "number") {
       applyTrendWeightRatioState(configuredTrendWeightRatio);
-    }
-    const configuredSecondary =
-      (currentConfig && currentConfig.secondary_metric) || payload.secondary_metric;
-    if (configuredSecondary) {
-      setSecondaryMetric(String(configuredSecondary).toUpperCase());
     }
 
     rankToolbarCache = {
@@ -586,7 +571,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     as_of_date?: string;
     held_bonus_score?: number;
     trend_weight_ratio?: number;
-    secondary_metric?: string;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -618,14 +602,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
       } else {
         search.set("trend_weight_ratio", String(trendWeightRatio));
-      }
-
-      if (next?.secondary_metric) {
-        search.set("secondary_metric", next.secondary_metric);
-      } else if (next?.bootstrap) {
-        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
-      } else if (secondaryMetric) {
-        search.set("secondary_metric", secondaryMetric);
       }
 
       if (next?.ma_rule_override) {
@@ -716,18 +692,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ma_rule_override: maRule ?? undefined,
       as_of_date: selectedAsOfDate,
       trend_weight_ratio: normalized,
-      skip_session_cache: true,
-    });
-  }
-
-  function handleSecondaryMetricChange(nextValue: string) {
-    const normalized = nextValue.toUpperCase() === "SHARPE" ? "SHARPE" : "ATH";
-    setSecondaryMetric(normalized);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: selectedAsOfDate,
-      secondary_metric: normalized,
       skip_session_cache: true,
     });
   }
@@ -1291,8 +1255,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        field: "ATH",
-        headerName: secondaryMetric === "SHARPE" ? "SHARPE" : "ATH",
+        field: "SHARPE",
+        headerName: "샤프",
+        headerTooltip: "3개월 샤프의 풀 내 단면 순위 (-100~+100, 점수 계산에 사용)",
         minWidth: 78,
         width: 78,
         type: "rightAligned",
@@ -1495,7 +1460,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     dirtyCellKeys,
     maRule,
     metricMode,
-    secondaryMetric,
     monthlyReturnLabels,
     pageMode,
     selectedTickerType,
@@ -1926,25 +1890,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         </option>
                       ))}
                     </select>
-                  </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">보조지표</span>
-                    <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="보조지표">
-                      <button
-                        type="button"
-                        className={secondaryMetric === "ATH" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => handleSecondaryMetricChange("ATH")}
-                      >
-                        ATH
-                      </button>
-                      <button
-                        type="button"
-                        className={secondaryMetric === "SHARPE" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => handleSecondaryMetricChange("SHARPE")}
-                      >
-                        SHARPE
-                      </button>
-                    </div>
                   </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">컬럼</span>

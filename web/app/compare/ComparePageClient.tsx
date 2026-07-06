@@ -532,6 +532,37 @@ function getSharpeRatio(rows: PriceRow[], dateRange: ChartDateRange | null): num
   return (mean / std) * Math.sqrt(252);
 }
 
+/**
+ * 소르티노지수 = (일간 수익률 평균 / 하방 표준편차) × √252.
+ * 무위험 수익률 = 0 으로 단순화.
+ */
+function getSortinoRatio(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+  if (!dateRange) return null;
+  const seriesRows = getPricedRows(rows).filter(
+    (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
+  );
+  if (seriesRows.length < 3) return null;
+  const dailyReturns: number[] = [];
+  for (let i = 1; i < seriesRows.length; i++) {
+    const prev = seriesRows[i - 1].close ?? 0;
+    const curr = seriesRows[i].close ?? 0;
+    if (prev <= 0 || curr <= 0) continue;
+    dailyReturns.push(curr / prev - 1);
+  }
+  if (dailyReturns.length < 2) return null;
+  const mean = dailyReturns.reduce((acc, v) => acc + v, 0) / dailyReturns.length;
+  
+  // 하방 편차(Downside Deviation) 계산: 음수 수익률의 제곱합을 구함
+  const downsideSquareSum = dailyReturns.reduce((acc, v) => {
+    const negativeRet = Math.min(0, v);
+    return acc + negativeRet ** 2;
+  }, 0);
+  
+  const downsideStd = Math.sqrt(downsideSquareSum / (dailyReturns.length - 1));
+  if (downsideStd === 0) return null;
+  return (mean / downsideStd) * Math.sqrt(252);
+}
+
 function buildReturnSeries(rows: PriceRow[], dateRange: ChartDateRange | null): LineData[] {
   if (!dateRange) return [];
   const seriesRows = getPricedRows(rows).filter((row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate);
@@ -1418,7 +1449,7 @@ export function ComparePageClient() {
             ))}
 
             <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
-              샤프 지수
+              소르티노 지수
               <div className="compareMatrixLabelHint">
                 {chartDateRange?.shortened
                   ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
@@ -1426,18 +1457,18 @@ export function ComparePageClient() {
               </div>
             </div>
             {sortedProducts.map((product) => {
-              const value = getSharpeRatio(product.detail.rows, chartDateRange);
+              const value = getSortinoRatio(product.detail.rows, chartDateRange);
               return (
-                <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                <div key={`sortino-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
                   {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
                 </div>
               );
             })}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+              <div key={`empty-sortino-${index}`} className="compareMetricCell">-</div>
             ))}
             <div className="compareSharpeLegend">
-              샤프 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (무위험 수익률 0 기준, 연율화)
+              소르티노 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (하방 변동성(Downside Deviation)만을 기준으로 손실 위험 대비 초과수익을 측정, 연율화)
             </div>
           </section>
         ) : activeTab === "basic" ? (
