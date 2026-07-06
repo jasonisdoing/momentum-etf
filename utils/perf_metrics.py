@@ -59,10 +59,10 @@ def mdd_span(values: np.ndarray) -> tuple[int, int, float]:
 
 
 def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
-    """KRW 평가 곡선에서 (총수익률%, CAGR%, MDD%, Sharpe) 를 계산한다."""
+    """KRW 평가 곡선에서 (총수익률%, CAGR%, MDD%, Sortino) 를 계산한다."""
     values = np.asarray(values, dtype=np.float64)
     if values.size == 0 or start_val <= 0:
-        return {"total_return_pct": 0.0, "cagr_pct": 0.0, "mdd_pct": 0.0, "sharpe": 0.0, "sortino": 0.0}
+        return {"total_return_pct": 0.0, "cagr_pct": 0.0, "mdd_pct": 0.0, "sortino": 0.0}
 
     end_val = float(values[-1])
     total_return_pct = (end_val / start_val - 1.0) * 100.0
@@ -79,6 +79,5 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
         "total_return_pct": float(total_return_pct),
         "cagr_pct": float(cagr_pct),
         "mdd_pct": mdd_pct,
-        "sharpe": sharpe_from_curve(start_val, values, cagr_pct),
         "sortino": sortino_from_curve(start_val, values),
     }

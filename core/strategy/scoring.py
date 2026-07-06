@@ -142,19 +142,15 @@ def compute_eligibility_mask(close_frame: pd.DataFrame) -> pd.DataFrame:
     return close_frame.notna().cumsum() >= int(MIN_TRADING_DAYS)
 
 
-# 보조지표 샤프 롤링 윈도우: 3개월(≈63거래일). 화면 "샤프3달" 과 동일 개념.
-SHARPE_WINDOW_MONTHS = 3
+# 보조지표 소르티노 롤링 윈도우: 3개월(≈63거래일). 화면 "소르티노3달" 과 동일 개념.
+SORTINO_WINDOW_MONTHS = 3
 
 
-def compute_sharpe_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
-    """[일자 × 티커] 종가에서 3개월 롤링 샤프의 **풀 내 단면 signed-percentile(-100~+100)** 를 계산한다.
+def compute_sortino_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
+    """[일자 × 티커] 종가에서 3개월 롤링 소르티노의 **풀 내 단면 signed-percentile(-100~+100)** 를 계산한다.
 
-    - 일수익률 = 종가.pct_change(), 롤링 윈도우(3개월) 평균/표준편차로 연율화 샤프.
-    - 추세와 동일한 ``calculate_signed_percentile_score`` 로 -100~+100 로 환산한다
-      (양수 샤프는 양수끼리, 음수 샤프는 음수끼리 단면 랭킹).
-
-    추세와 함께 점수를 구성하는 보조지표. **라이브·백테스트 공통**으로 쓰며,
-    signed-percentile(-100~+100) 을 그대로 반환하고 호출부에서 ``w_sec ×`` 로 가중한다.
+    - 일수익률 = 종가.pct_change(), 롤링 윈도우(3개월) 평균/하방변동성로 연율화 소르티노.
+    - 추세와 동일한 ``calculate_signed_percentile_score`` 로 -100~+100 로 환산한다.
     """
     if close_frame is None or close_frame.empty:
         return pd.DataFrame(
@@ -162,24 +158,33 @@ def compute_sharpe_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
             columns=getattr(close_frame, "columns", None),
             dtype=float,
         )
-    window = max(2, int(SHARPE_WINDOW_MONTHS) * int(TRADING_DAYS_PER_MONTH))
+    window = max(2, int(SORTINO_WINDOW_MONTHS) * int(TRADING_DAYS_PER_MONTH))
     daily_ret = close_frame.pct_change(fill_method=None)
     mean = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).mean()
-    std = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).std(ddof=1)
-    sharpe = (mean / std.replace(0, np.nan)) * np.sqrt(252.0)
-    return calculate_signed_percentile_score(sharpe)
+
+    # 롤링 하방 표준편차 계산
+    def _calc_downside_std(x):
+        downside = np.minimum(0.0, x)
+        n = len(x)
+        if n <= 1:
+            return np.nan
+        val = np.sqrt(np.sum(downside ** 2) / (n - 1))
+        return val if val > 0 else np.nan
+
+    downside_std = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).apply(_calc_downside_std, raw=True)
+    sortino = (mean / downside_std.replace(0, np.nan)) * np.sqrt(252.0)
+    return calculate_signed_percentile_score(sortino)
 
 
-def compute_secondary_metric_points(close_frame: pd.DataFrame, metric: str = "SHARPE") -> pd.DataFrame:
+def compute_secondary_metric_points(close_frame: pd.DataFrame, metric: str = "SORTINO") -> pd.DataFrame:
     """보조지표를 점수 가산용 '포인트' 프레임(-100~+100)으로 반환한다 (호출부는 ``w_sec ×`` 만).
 
-    현재 보조지표는 SHARPE(3개월 롤링 샤프의 단면 signed-percentile) 하나로 고정되어 있다.
-    라이브·백테스트가 동일 함수를 통해 보조지표를 얻어 점수식이 갈라지지 않게 한다.
+    현재 보조지표는 SORTINO(3개월 롤링 소르티노의 단면 signed-percentile) 하나로 고정되어 있다.
     """
-    metric_norm = str(metric or "SHARPE").upper()
-    if metric_norm == "SHARPE":
-        return compute_sharpe_signed_percentile(close_frame)
-    raise ValueError(f"지원하지 않는 보조지표입니다: {metric} (지원: SHARPE)")
+    metric_norm = str(metric or "SORTINO").upper()
+    if metric_norm == "SORTINO":
+        return compute_sortino_signed_percentile(close_frame)
+    raise ValueError(f"지원하지 않는 보조지표입니다: {metric} (지원: SORTINO)")
 
 
 def combine_rule_percentiles(
@@ -236,7 +241,7 @@ __all__ = [
     "compute_trend_frame",
     "compute_rule_percentile_frame",
     "compute_eligibility_mask",
-    "compute_sharpe_signed_percentile",
+    "compute_sortino_signed_percentile",
     "compute_secondary_metric_points",
     "combine_rule_percentiles",
     "build_composite_rank_scores",

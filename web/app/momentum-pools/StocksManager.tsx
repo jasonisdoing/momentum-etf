@@ -91,7 +91,7 @@ type RankRow = {
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
   exclude_from_ranking?: boolean;
-  SHARPE?: number;
+  SORTINO?: number;
   보유가점?: number;
 };
 
@@ -1255,11 +1255,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        field: "SHARPE",
-        headerName: "샤프",
-        headerTooltip: "3개월 샤프의 풀 내 단면 순위 (-100~+100, 점수 계산에 사용)",
-        minWidth: 78,
-        width: 78,
+        field: "SORTINO",
+        headerName: "Sortino",
+        headerTooltip: "3개월 소르티노의 풀 내 단면 순위 (-100~+100, 점수 계산에 사용)",
+        minWidth: 90,
+        width: 90,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (params.value === null || params.value === undefined) return "-";
@@ -1826,9 +1826,26 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </button>
                     </div>
                   </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">보유보너스(%)</span>
+                    <select
+                      className="form-select"
+                      value={String(heldBonusScore)}
+                      onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
+                    >
+                      {([0, 10, 20].includes(heldBonusScore)
+                        ? [0, 10, 20]
+                        : [...[0, 10, 20], heldBonusScore].sort((a, b) => a - b)
+                      ).map((score) => (
+                        <option key={score} value={score}>
+                          {score}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   {pageMode === "rank" && maRule ? (
                     <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">MA</span>
+                      <span className="appLabeledFieldLabel">추세</span>
                       <div className="rankRuleFieldRow">
                         <select
                           className="form-select"
@@ -1857,23 +1874,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       </div>
                     </label>
                   ) : null}
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">보유보너스(%)</span>
-                    <select
-                      className="form-select"
-                      value={String(heldBonusScore)}
-                      onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
-                    >
-                      {([0, 10, 20].includes(heldBonusScore)
-                        ? [0, 10, 20]
-                        : [...[0, 10, 20], heldBonusScore].sort((a, b) => a - b)
-                      ).map((score) => (
-                        <option key={score} value={score}>
-                          {score}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">추세 가중치(%)</span>
                     <select

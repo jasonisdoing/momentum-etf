@@ -343,7 +343,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
     raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
     # 가중치 비율 결합 (추세 단독 + 보유·보조지표 가산)
     composite_values = w_trend * raw_composite
-    total_ret, cagr, mdd, trades, sharpe = _simulate_one_combo(
+    total_ret, cagr, mdd, trades, sortino = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
         w_hold=w_hold,
@@ -376,7 +376,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
         "MDD_PCT": mdd,
-        "SHARPE": sharpe,
+        "SORTINO": sortino,
         "TRADES": trades,
     }
 
@@ -384,11 +384,11 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
 # --------------------------- 시뮬레이션 --------------------------- #
 
 
-def _sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float) -> float:
-    """공용 지표(utils.perf_metrics)의 Sharpe 계산을 그대로 사용한다."""
-    from utils.perf_metrics import sharpe_from_curve
+def _sortino_from_curve(start_val: float, values: np.ndarray) -> float:
+    """공용 지표(utils.perf_metrics)의 Sortino 계산을 그대로 사용한다."""
+    from utils.perf_metrics import sortino_from_curve
 
-    return sharpe_from_curve(start_val, values, cagr_pct)
+    return sortino_from_curve(start_val, values)
 
 
 def _simulate_one_combo(
@@ -568,8 +568,8 @@ def _simulate_one_combo(
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(np.min(drawdown)) if drawdown.size else 0.0
 
-    sharpe = _sharpe_from_curve(start_val, values, cagr_pct)
-    return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count), float(sharpe)
+    sortino = _sortino_from_curve(start_val, values)
+    return float(total_return_pct), float(cagr_pct), float(mdd_pct), int(trade_count), float(sortino)
 
 
 def _simulate_benchmark_buy_and_hold(
@@ -581,7 +581,7 @@ def _simulate_benchmark_buy_and_hold(
     fx_series: pd.Series,
     initial_cash_local: float,
     buy_slippage: float,
-) -> tuple[float, float, float, int]:
+) -> tuple[float, float, float, int, float]:
     """벤치마크 1종목을 첫 체결일 시초가에 1회 매수 후 끝까지 보유한다."""
     values = _build_benchmark_value_curve(
         ticker=ticker,
@@ -608,8 +608,8 @@ def _simulate_benchmark_buy_and_hold(
     running_max = drawdown_base.cummax()
     drawdown = (drawdown_base / running_max - 1.0) * 100.0
     mdd_pct = float(drawdown.min()) if not drawdown.empty else 0.0
-    sharpe = _sharpe_from_curve(start_val, values.to_numpy(dtype=np.float64), cagr_pct)
-    return float(total_return_pct), float(cagr_pct), float(mdd_pct), 1, float(sharpe)
+    sortino = _sortino_from_curve(start_val, values.to_numpy(dtype=np.float64))
+    return float(total_return_pct), float(cagr_pct), float(mdd_pct), 1, float(sortino)
 
 
 def _build_benchmark_value_curve(
@@ -674,14 +674,14 @@ def _result_sort_key(result: dict[str, Any], sort_metric: str = "CAGR") -> tuple
     sort_metric:
         - "CAGR": CAGR 높은 순 (동률이면 MDD)
         - "MDD": 낙폭이 얕은 순 (MDD_PCT 가 0 에 가까운 순, 동률이면 CAGR 높은 순)
-        - "SHARPE": Sharpe 높은 순 (동률이면 CAGR 높은 순)
+        - "SORTINO": Sortino 높은 순 (동률이면 CAGR 높은 순)
     """
     rsi_limit = result.get("RSI_LIMIT")
     sortable_rsi = float(rsi_limit) if rsi_limit is not None else float("-inf")
     if sort_metric == "MDD":
         return (-float(result["MDD_PCT"]), -float(result["CAGR_PCT"]), -sortable_rsi)
-    if sort_metric == "SHARPE":
-        return (-float(result.get("SHARPE", 0.0)), -float(result["CAGR_PCT"]), -sortable_rsi)
+    if sort_metric == "SORTINO":
+        return (-float(result.get("SORTINO", 0.0)), -float(result["CAGR_PCT"]), -sortable_rsi)
     return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -sortable_rsi)
 
 
@@ -748,7 +748,7 @@ def _write_results_file(
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
     lines.append(
-        f'"WEIGHT": "추세:샤프 = r:(100-r), r={[int(v) for v in trend_ratio_values]} 탐색 '
+        f'"WEIGHT": "추세:Sortino = r:(100-r), r={[int(v) for v in trend_ratio_values]} 탐색 '
         f'(나머지 = 100-보유)",'
     )
     lines.append(f'"MA_TYPE": {ma_types},')
@@ -768,18 +768,18 @@ def _write_results_file(
         out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    # W_TREND·W_SEC 절대값 대신 (보유%, 추세:샤프 비율) 축으로 표기한다.
+    # W_TREND·W_SEC 절대값 대신 (보유%, 추세:소르티노 비율) 축으로 표기한다.
     headers = [
         "TOP_N",
         "W_HOLD",
-        "추세:샤프",
+        "추세:Sortino",
         "추세타입",
         "추세개월",
         "RSI",
         "수익률(%)",
         "CAGR(%)",
         "MDD(%)",
-        "Sharpe",
+        "Sortino",
         "Trades",
     ]
     aligns = ["left", "right", "right", "left", "left", "left", "right", "right", "right", "right", "right"]
@@ -795,7 +795,7 @@ def _write_results_file(
             f"{benchmark_result['TOTAL_RETURN_PCT']:.2f}",
             f"{benchmark_result['CAGR_PCT']:.2f}",
             f"{benchmark_result['MDD_PCT']:.2f}",
-            f"{float(benchmark_result.get('SHARPE', 0.0)):.2f}",
+            f"{float(benchmark_result.get('SORTINO', 0.0)):.2f}",
             str(benchmark_result["TRADES"]),
         ]
 
@@ -815,7 +815,7 @@ def _write_results_file(
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
                 f"{r['MDD_PCT']:.2f}",
-                f"{float(r.get('SHARPE', 0.0)):.2f}",
+                f"{float(r.get('SORTINO', 0.0)):.2f}",
                 str(r["TRADES"]),
             ]
         )
@@ -1056,7 +1056,7 @@ def _simulate_one_combo_details(
     w_sec: float = 0.0,
     w_trend: float = 1.0,
     secondary_points_frame: pd.DataFrame | None = None,
-    secondary_metric: str = "샤프",
+    secondary_metric: str = "Sortino",
     composite_frame: pd.DataFrame,
     rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
@@ -1746,7 +1746,7 @@ def _write_details_file(
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
         f"MDD_PCT: {top_result['MDD_PCT']:.2f}",
-        f"SHARPE: {float(top_result.get('SHARPE', 0.0)):.2f}",
+        f"SORTINO: {float(top_result.get('SORTINO', 0.0)):.2f}",
         "",
     ]
     lines.extend(detail_lines)
@@ -1784,13 +1784,13 @@ def run_backtest(pool_id: str) -> Path:
         )
     months = int(cfg["BACKTEST_MONTHS"])
 
-    # 결과 정렬 기준 (CAGR | MDD | SHARPE) — 미저장 시 CAGR
+    # 결과 정렬 기준 (CAGR | MDD | SORTINO) — 미저장 시 CAGR
     sort_metric = str(cfg.get("SORT_METRIC") or "CAGR").upper()
-    if sort_metric not in ("CAGR", "MDD", "SHARPE"):
-        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD/SHARPE 중 하나여야 합니다: {sort_metric}")
+    if sort_metric not in ("CAGR", "MDD", "SORTINO"):
+        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD/SORTINO 중 하나여야 합니다: {sort_metric}")
 
-    # 보조지표는 SHARPE 로 고정한다. 옛 SECONDARY_METRIC 저장값은 무시.
-    secondary_metrics = ["SHARPE"]
+    # 보조지표는 SORTINO 로 고정한다. 옛 SECONDARY_METRIC 저장값은 무시.
+    secondary_metrics = ["SORTINO"]
 
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
@@ -1996,7 +1996,7 @@ def run_backtest(pool_id: str) -> Path:
 
     benchmark_result: dict[str, Any] | None = None
     if benchmark_config is not None:
-        benchmark_total_ret, benchmark_cagr, benchmark_mdd, benchmark_trades, benchmark_sharpe = _simulate_benchmark_buy_and_hold(
+        benchmark_total_ret, benchmark_cagr, benchmark_mdd, benchmark_trades, benchmark_sortino = _simulate_benchmark_buy_and_hold(
             ticker=benchmark_ticker,
             open_frame=benchmark_open_win,
             close_frame=benchmark_close_win,
@@ -2011,7 +2011,7 @@ def run_backtest(pool_id: str) -> Path:
             "TOTAL_RETURN_PCT": benchmark_total_ret,
             "CAGR_PCT": benchmark_cagr,
             "MDD_PCT": benchmark_mdd,
-            "SHARPE": benchmark_sharpe,
+            "SORTINO": benchmark_sortino,
             "TRADES": benchmark_trades,
         }
 
@@ -2166,11 +2166,11 @@ def run_backtest(pool_id: str) -> Path:
             }
             target_pool_id = pool_id
             # 저장 방식(2줄): 기간·정렬기준 + 최적 조합의 성과 요약을 함께 남긴다.
-            metric_label = {"CAGR": "CAGR", "MDD": "MDD", "SHARPE": "Sharpe"}[sort_metric]
+            metric_label = {"CAGR": "CAGR", "MDD": "MDD", "SORTINO": "Sortino"}[sort_metric]
             save_method = (
                 f"{months}개월 백테스트 결과, {metric_label} 기준 정렬\n"
                 f"CAGR: {float(best_result['CAGR_PCT']):.2f}%, MDD: {float(best_result['MDD_PCT']):.2f}%, "
-                f"Sharpe: {float(best_result.get('SHARPE', 0.0)):.2f}, Trades: {int(best_result['TRADES'])}"
+                f"Sortino: {float(best_result.get('SORTINO', 0.0)):.2f}, Trades: {int(best_result['TRADES'])}"
             )
             logger.info("[%s] 최적 파라미터 라이브 자동 저장 시도: %s (target_id=%s)", pool_id, db_values, target_pool_id)
             save_pool_settings(target_pool_id, db_values, save_method=save_method)
@@ -2205,8 +2205,8 @@ def run_backtest(pool_id: str) -> Path:
                 initial_cash_local=initial_cash_local,
                 buy_slippage=buy_slippage,
             )
-        # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 보조지표는 SHARPE 고정.
-        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame, "SHARPE").loc[backtest_days]
+        # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 보조지표는 SORTINO 고정.
+        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame, "SORTINO").loc[backtest_days]
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
@@ -2214,7 +2214,7 @@ def run_backtest(pool_id: str) -> Path:
             w_sec=w_sec,
             w_trend=w_trend,
             secondary_points_frame=best_secondary_frame,
-            secondary_metric="샤프",
+            secondary_metric="Sortino",
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,
