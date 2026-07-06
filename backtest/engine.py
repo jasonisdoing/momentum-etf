@@ -810,7 +810,7 @@ def _write_results_file(
         formatted_rows.append(
             [
                 str(r["TOP_N_HOLD"]),
-                f"{float(r.get('W_HOLD', 0.0)):.2f}",
+                f"{int(round(float(r.get('W_HOLD', 0.0)) * 100))}%",
                 f"{ratio}:{100 - ratio}",
                 str(r.get("SECONDARY_METRIC") or "ATH"),
                 r["MA_TYPE"],
