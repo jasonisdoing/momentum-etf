@@ -94,6 +94,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   nextRunAt: string | null;
   nextRunDisplay: string;
   pendingPosition: number; // 0 = 대기 없음, 1~ = N번째 대기
+  pendingDisplay?: string; // 대기 중인 모든 항목 상세 나열 (예: "⏳ 대기 1: 미국 ETF | ⏳ 대기 2: 호주 ETF")
 };
 
 function formatRelativeUntil(iso: string | null | undefined, nowMs: number): string | null {
@@ -286,7 +287,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       let badge: React.ReactNode = null;
       let cancelBtn: React.ReactNode = null;
       if (row?.running) {
-        badge = <span style={{ color: "#d97706", fontWeight: 700, marginRight: 6 }}>{row.runningCommandPrefix}</span>;
+        const pendingPart = row.pendingDisplay ? ` | ${row.pendingDisplay}` : "";
+        badge = <span style={{ color: "#d97706", fontWeight: 700, marginRight: 6 }}>{row.runningCommandPrefix}{pendingPart}</span>;
         if (row.runningCancellable) {
           const alreadyRequested = row.runningCancelRequested;
           cancelBtn = (
@@ -329,10 +331,10 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
             </button>
           );
         }
-      } else if (row && row.pendingPosition > 0) {
+      } else if (row && row.pendingDisplay) {
         badge = (
           <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>
-            ⏳ 대기 {row.pendingPosition} ▶
+            {row.pendingDisplay} ▶
           </span>
         );
       }
@@ -394,6 +396,29 @@ export function SystemManager({
         pendingOrder.set(baseJobName, idx + 1);
       }
     });
+
+  const buildPendingQueueDisplay = (jobKey: string) => {
+    const POOL_NAME_MAP: Record<string, string> = {
+      kor_kr: "한국 ETF",
+      kor_us: "한국 미국주식",
+      aus: "호주 ETF",
+      us: "미국 ETF",
+      kor: "한국 개별주",
+    };
+    const matchedPendings = batchQueue
+      .filter((q) => q.status === "pending" && (q.job_name === jobKey || q.job_name.startsWith(`${jobKey}:`)))
+      .sort((a, b) => String(a.triggered_at ?? "").localeCompare(String(b.triggered_at ?? "")));
+    
+    if (matchedPendings.length === 0) return "";
+    
+    const parts = matchedPendings.map((q, idx) => {
+      const suffix = q.job_name.includes(":") ? q.job_name.split(":")[1] : "";
+      const label = POOL_NAME_MAP[suffix] || suffix;
+      return `⏳ 대기 ${idx + 1}${label ? `: ${label}` : ""}`;
+    });
+    return parts.join(" | ");
+  };
+
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
     const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
@@ -401,6 +426,19 @@ export function SystemManager({
     const runningDetailKey = Object.keys(runningJobDetails).find(
       (k) => k === row.key || k.startsWith(`${row.key}:`)
     ) ?? row.key;
+    const suffix = runningDetailKey.includes(":") ? runningDetailKey.split(":")[1] : "";
+    const POOL_NAME_MAP: Record<string, string> = {
+      kor_kr: "한국 ETF",
+      kor_us: "한국 미국주식",
+      aus: "호주 ETF",
+      us: "미국 ETF",
+      kor: "한국 개별주",
+    };
+    const suffixLabel = suffix ? `(${POOL_NAME_MAP[suffix] || suffix})` : "";
+    const rawPrefix = formatRunningCommandPrefix(runningJobDetails[runningDetailKey], nowTick);
+    const runningCommandPrefix = suffixLabel && rawPrefix.includes("실행 중")
+      ? rawPrefix.replace("실행 중", `실행 중${suffixLabel}`)
+      : rawPrefix;
     return {
       ...row,
       id: row.key,
@@ -413,13 +451,14 @@ export function SystemManager({
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
       estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
-      runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[runningDetailKey], nowTick),
+      runningCommandPrefix,
       runningCancellable:
         isRunning && Boolean(runningJobDetails[runningDetailKey]?.is_mine),
       runningCancelRequested: Boolean(runningJobDetails[runningDetailKey]?.cancel_requested),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
       pendingPosition: pendingOrder.get(row.key) ?? 0,
+      pendingDisplay: buildPendingQueueDisplay(row.key),
     };
   });
 

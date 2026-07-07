@@ -119,7 +119,7 @@ SCHEDULE_ROWS = [
         "job": "레버리지 튜닝",
         "target": "한국 레버리지 ETF (switch)",
         "run_location": "LOCAL",
-        "cadence": "수동 실행 · 로컬 전용 (레버리지-튜닝 화면)",
+        "cadence": "수동 실행",
         "command": "python scripts/leverage_tune_switch.py",
         "schedule": None,  # 스케줄 없음(수동 전용) → 다음 실행 표시 "-"
     },
@@ -128,7 +128,7 @@ SCHEDULE_ROWS = [
         "job": "모멘텀 백테스트",
         "target": "모든 종목풀 (탐색공간 전수)",
         "run_location": "LOCAL",
-        "cadence": "수동 실행 · 로컬 전용 (모멘텀-백테스트 화면)",
+        "cadence": "수동 실행",
         "command": "python scripts/momentum_backtest.py",
         "schedule": None,  # 스케줄 없음(수동 전용)
     },
