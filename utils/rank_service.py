@@ -23,7 +23,7 @@ from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 
 _RANK_DATA_CACHE_TTL_SECONDS = 300.0
-_RankCacheKey = tuple[str, str, tuple[tuple[str, int], ...], int, int]
+_RankCacheKey = tuple[str, str, tuple[tuple[str, int], ...], int, int, int]
 _RANK_DATA_CACHE: dict[_RankCacheKey, tuple[float, dict[str, Any]]] = {}
 _RANK_DATA_CACHE_LOCK = Lock()
 _RANK_DATA_INFLIGHT_LOCKS: dict[_RankCacheKey, Lock] = {}
@@ -35,6 +35,7 @@ def _build_rank_cache_key(
     ma_rules: list[dict[str, Any]],
     held_bonus_score: int,
     trend_weight_ratio: int,
+    sortino_months: int,
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
     ma_rule_key = tuple((str(rule.get("ma_type") or ""), int(rule.get("ma_months") or 0)) for rule in ma_rules)
@@ -44,6 +45,7 @@ def _build_rank_cache_key(
         ma_rule_key,
         int(held_bonus_score),
         int(trend_weight_ratio),
+        int(sortino_months),
     )
 
 
@@ -237,6 +239,7 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "country_code": str(cfg.get("country_code") or ""),
             "holding_bonus_score": int(cfg["settings"].get("HOLDING_BONUS_SCORE", 0)),
             "trend_weight_ratio": int(cfg["settings"]["TREND_WEIGHT_RATIO"]),
+            "sortino_months": int(cfg["settings"].get("SORTINO_MONTHS", 3)),
             "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
             "rsi_limit": (
                 float(cfg["settings"]["RSI_LIMIT"])
@@ -498,6 +501,7 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ma_months_max": get_rank_months_max(),
         "held_bonus_score": int(selected_config["holding_bonus_score"]),
         "trend_weight_ratio": int(selected_config["trend_weight_ratio"]),
+        "sortino_months": int(selected_config["sortino_months"]),
     }
 
 
@@ -510,6 +514,7 @@ def _compute_rank_data_payload(
     selected_as_of_date: pd.Timestamp | None,
     bonus_score: int,
     trend_weight_ratio: float,
+    sortino_months: int,
 ) -> dict[str, Any]:
     dataframe = build_ticker_type_rankings(
         selected_ticker_type,
@@ -517,6 +522,7 @@ def _compute_rank_data_payload(
         as_of_date=selected_as_of_date,
         held_bonus_score=bonus_score,
         trend_weight_ratio=trend_weight_ratio,
+        sortino_months=sortino_months,
     )
     effective_as_of_date = selected_as_of_date
     raw_as_of_date = dataframe.attrs.get("as_of_date")
@@ -541,6 +547,7 @@ def _compute_rank_data_payload(
             as_of_date=previous_trading_day,
             held_bonus_score=bonus_score,
             trend_weight_ratio=trend_weight_ratio,
+            sortino_months=sortino_months,
         )
         previous_rows = _build_score_ranked_rows(previous_dataframe)
         previous_rank_map = _build_rank_map_from_rows(previous_rows)
@@ -551,6 +558,7 @@ def _compute_rank_data_payload(
             as_of_date=weekly_rank_trading_day,
             held_bonus_score=bonus_score,
             trend_weight_ratio=trend_weight_ratio,
+            sortino_months=sortino_months,
         )
         weekly_rows = _build_score_ranked_rows(weekly_dataframe)
         weekly_rank_map = _build_rank_map_from_rows(weekly_rows)
@@ -583,6 +591,7 @@ def _compute_rank_data_payload(
         "rows": _rows_with_missing_placeholders(dataframe, selected_ticker_type, False),
         "held_bonus_score": bonus_score,
         "trend_weight_ratio": trend_weight_ratio,
+        "sortino_months": sortino_months,
         "cache_blocked": bool(dataframe.attrs.get("cache_blocked", False)),
         "latest_trading_day": _serialize_datetime(dataframe.attrs.get("latest_trading_day")),
         "cache_updated_at": _serialize_datetime(dataframe.attrs.get("cache_updated_at")),
@@ -607,6 +616,7 @@ def load_rank_data(
     as_of_date: str | None = None,
     held_bonus_score: int | None = None,
     trend_weight_ratio: int | None = None,
+    sortino_months: int | None = None,
 ) -> dict[str, Any]:
     configs_payload, default_config = _build_configs_payload()
 
@@ -649,8 +659,17 @@ def load_rank_data(
         if not (0 <= trend_ratio <= 100):
             raise ValueError(f"추세 가중치(%)는 0 ~ 100 범위여야 합니다: {trend_ratio}")
 
+    if sortino_months is None:
+        if selected_config is None:
+            raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
+        sort_m = int(selected_config.get("sortino_months", 3))
+    else:
+        sort_m = int(sortino_months)
+        if not (1 <= sort_m <= 6):
+            raise ValueError(f"Sortino 개월은 1 ~ 6 범위여야 합니다: {sort_m}")
+
     cache_key = _build_rank_cache_key(
-        selected_ticker_type, selected_as_of_date, ma_rules, bonus_score, trend_ratio
+        selected_ticker_type, selected_as_of_date, ma_rules, bonus_score, trend_ratio, sort_m
     )
     cached_payload = _get_rank_data_cache(cache_key)
     if cached_payload is not None:
@@ -670,6 +689,7 @@ def load_rank_data(
             selected_as_of_date=selected_as_of_date,
             bonus_score=bonus_score,
             trend_weight_ratio=trend_ratio,
+            sortino_months=sort_m,
         )
         _set_rank_data_cache(cache_key, payload)
         return payload

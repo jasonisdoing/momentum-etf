@@ -146,10 +146,10 @@ def compute_eligibility_mask(close_frame: pd.DataFrame) -> pd.DataFrame:
 SORTINO_WINDOW_MONTHS = 3
 
 
-def compute_sortino_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame:
-    """[일자 × 티커] 종가에서 3개월 롤링 소르티노의 **풀 내 단면 signed-percentile(-100~+100)** 를 계산한다.
+def compute_sortino_signed_percentile(close_frame: pd.DataFrame, window_months: int = 3) -> pd.DataFrame:
+    """[일자 × 티커] 종가에서 window_months개월 롤링 소르티노의 **풀 내 단면 signed-percentile(-100~+100)** 를 계산한다.
 
-    - 일수익률 = 종가.pct_change(), 롤링 윈도우(3개월) 평균/하방변동성로 연율화 소르티노.
+    - 일수익률 = 종가.pct_change(), 롤링 윈도우 평균/하방변동성로 연율화 소르티노.
     - 추세와 동일한 ``calculate_signed_percentile_score`` 로 -100~+100 로 환산한다.
     """
     if close_frame is None or close_frame.empty:
@@ -158,7 +158,7 @@ def compute_sortino_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame
             columns=getattr(close_frame, "columns", None),
             dtype=float,
         )
-    window = max(2, int(SORTINO_WINDOW_MONTHS) * int(TRADING_DAYS_PER_MONTH))
+    window = max(2, int(window_months) * int(TRADING_DAYS_PER_MONTH))
     daily_ret = close_frame.pct_change(fill_method=None)
     mean = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).mean()
 
@@ -176,14 +176,14 @@ def compute_sortino_signed_percentile(close_frame: pd.DataFrame) -> pd.DataFrame
     return calculate_signed_percentile_score(sortino)
 
 
-def compute_secondary_metric_points(close_frame: pd.DataFrame, metric: str = "SORTINO") -> pd.DataFrame:
+def compute_secondary_metric_points(close_frame: pd.DataFrame, metric: str = "SORTINO", window_months: int = 3) -> pd.DataFrame:
     """보조지표를 점수 가산용 '포인트' 프레임(-100~+100)으로 반환한다 (호출부는 ``w_sec ×`` 만).
 
-    현재 보조지표는 SORTINO(3개월 롤링 소르티노의 단면 signed-percentile) 하나로 고정되어 있다.
+    현재 보조지표는 SORTINO(롤링 소르티노의 단면 signed-percentile) 하나로 고정되어 있다.
     """
     metric_norm = str(metric or "SORTINO").upper()
     if metric_norm == "SORTINO":
-        return compute_sortino_signed_percentile(close_frame)
+        return compute_sortino_signed_percentile(close_frame, window_months=window_months)
     raise ValueError(f"지원하지 않는 보조지표입니다: {metric} (지원: SORTINO)")
 
 

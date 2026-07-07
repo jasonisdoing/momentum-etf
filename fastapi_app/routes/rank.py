@@ -47,10 +47,19 @@ def get_rank_data(
         except ValueError as exc:
             raise ValueError(f"추세 가중치(%) 형식이 올바르지 않습니다: {raw_trend_weight_ratio}") from exc
 
+    raw_sortino_months = request.query_params.get("sortino_months")
+    sortino_months: int | None = None
+    if raw_sortino_months is not None:
+        try:
+            sortino_months = int(raw_sortino_months)
+        except ValueError as exc:
+            raise ValueError(f"Sortino 개월 형식이 올바르지 않습니다: {raw_sortino_months}") from exc
+
     return load_rank_data(
         ticker_type=ticker_type,
         ma_rule_override=ma_rule_override,
         as_of_date=as_of_date,
         held_bonus_score=held_bonus_score,
         trend_weight_ratio=trend_weight_ratio,
+        sortino_months=sortino_months,
     )

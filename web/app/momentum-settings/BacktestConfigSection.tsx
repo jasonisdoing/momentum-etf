@@ -16,6 +16,7 @@ type BtConfig = {
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
+  SORTINO_MONTHS?: number[];
 };
 
 type PoolEntry = {
@@ -62,11 +63,57 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     new Set((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).filter((v) => RATIO_OPTIONS.includes(v))),
   );
   const [maMonthsSet, setMaMonthsSet] = useState<Set<number>>(new Set(c.MA_MONTHS ?? [6, 12]));
+  const [sortinoMonthsSet, setSortinoMonthsSet] = useState<Set<number>>(new Set(c.SORTINO_MONTHS ?? [3]));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
   const [saving, setSaving] = useState(false);
   const [resolving, setResolving] = useState(false);
+
+  // 백테스트 실행 및 상태 관련 훅
+  const [backtestRunning, setBacktestRunning] = useState(false);
+  const [queueStatus, setQueueStatus] = useState<string | null>(null);
+  const [triggeredAt, setTriggeredAt] = useState<string | null>(null);
+  const [startedAt, setStartedAt] = useState<string | null>(null);
+  const [endedAt, setEndedAt] = useState<string | null>(null);
+
+  const checkStatus = useCallback(async () => {
+    try {
+      const resp = await fetch(`/api/momentum-backtest/status?pool_id=${pool.pool_id}`, { cache: "no-store" });
+      if (!resp.ok) return;
+      const data = await resp.json();
+      setBacktestRunning(Boolean(data.running));
+      setQueueStatus(data.queue_status ?? null);
+      setTriggeredAt(data.triggered_at ?? null);
+      setStartedAt(data.started_at ?? null);
+      setEndedAt(data.ended_at ?? null);
+    } catch (err) {
+      // 백그라운드 폴링 실패 무시
+    }
+  }, [pool.pool_id]);
+
+  useEffect(() => {
+    checkStatus();
+    const id = window.setInterval(checkStatus, 3000);
+    return () => window.clearInterval(id);
+  }, [checkStatus]);
+
+  const handleStartBacktest = async () => {
+    if (backtestRunning) return;
+    if (!window.confirm(`"${pool.name}" 풀의 백테스트를 시작할까요?`)) return;
+    try {
+      const resp = await fetch(`/api/momentum-backtest?pool_id=${pool.pool_id}`, { method: "POST" });
+      const data = await resp.json();
+      if (!resp.ok || data.error) {
+        toast.error(data.error ?? "백테스트 시작 실패");
+      } else {
+        toast.success("백테스트 작업을 큐에 추가했습니다.");
+        checkStatus();
+      }
+    } catch (err) {
+      toast.error("백테스트 시작 실패");
+    }
+  };
 
   // 벤치마크 티커 → 종목명 조회(stock_meta). 이름은 수동 편집 불가(확인으로만 채움).
   const resolveBench = async () => {
@@ -97,8 +144,9 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const bonus = parseNums(bonusText);
   const ratios = [...ratioSet].sort((a, b) => a - b);
   const months = [...maMonthsSet].sort((a, b) => a - b);
+  const sortinoMonths = [...sortinoMonthsSet].sort((a, b) => a - b);
   const rsi = parseNums(rsiText);
-  const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length;
+  const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length * sortinoMonths.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -134,6 +182,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
+      SORTINO_MONTHS: sortinoMonths.map((n) => Math.trunc(n)),
     };
     try {
       setSaving(true);
@@ -290,7 +339,70 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
             </label>
           ))}
         </div>
+        <span style={{ ...labelStyle, marginLeft: 8 }}>Sortino 개월</span>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
+          {[1, 2, 3, 4, 5, 6].map((m) => (
+            <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={sortinoMonthsSet.has(m)}
+                onChange={() => {
+                  setSortinoMonthsSet((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(m)) next.delete(m);
+                    else next.add(m);
+                    return next;
+                  });
+                }}
+              />
+              {m}
+            </label>
+          ))}
+        </div>
         <span style={{ marginLeft: "auto", fontSize: "0.82rem", color: combos > 0 ? "#475569" : "#dc2626" }}>조합수 <b>{combos.toLocaleString()}</b></span>
+      </div>
+
+      {/* 백테스트 실행 및 상태 조회 영역 */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 12, paddingTop: 12, borderTop: "1px dashed rgba(148,163,184,0.2)", fontSize: "0.83rem" }}>
+        <button
+          type="button"
+          className="btn btn-secondary btn-sm"
+          style={{
+            padding: "4px 12px",
+            backgroundColor: backtestRunning ? "#64748b" : "#475569",
+            color: "#ffffff",
+            border: "none",
+            borderRadius: 6,
+            cursor: backtestRunning ? "not-allowed" : "pointer",
+            fontWeight: 600,
+          }}
+          disabled={backtestRunning}
+          onClick={handleStartBacktest}
+        >
+          {backtestRunning ? "백테스트 진행 중" : "백테스트 시작"}
+        </button>
+
+        <div style={{ display: "flex", gap: 12, color: "#64748b", alignItems: "center" }}>
+          <span>
+            상태: <b style={{ color: queueStatus === "running" ? "#2563eb" : queueStatus === "pending" ? "#d97706" : "#1e293b" }}>
+              {queueStatus === "running"
+                ? "실행 중"
+                : queueStatus === "pending"
+                ? "대기 중"
+                : queueStatus === "done"
+                ? "완료"
+                : queueStatus === "failed"
+                ? "실패"
+                : "시작 대기"}
+            </b>
+          </span>
+          {startedAt && (
+            <span>시작: {formatKstDateTime(startedAt)}</span>
+          )}
+          {endedAt && (
+            <span>종료: {formatKstDateTime(endedAt)}</span>
+          )}
+        </div>
       </div>
     </div>
   );

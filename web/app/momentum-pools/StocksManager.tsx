@@ -26,6 +26,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   trend_weight_ratio?: number;
+  sortino_months?: number;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -112,6 +113,7 @@ type RankResponse = {
   previous_trading_day?: string | null;
   held_bonus_score?: number;
   trend_weight_ratio?: number;
+  sortino_months?: number;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -399,6 +401,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [trendWeightRatio, setTrendWeightRatio] = useState(0);
+  const [sortinoMonths, setSortinoMonths] = useState(3);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -484,6 +487,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       applyTrendWeightRatioState(configuredTrendWeightRatio);
     }
 
+    const configuredSortinoMonths =
+      currentConfig && typeof currentConfig.sortino_months === "number"
+        ? currentConfig.sortino_months
+        : payload.sortino_months;
+    if (typeof payload.sortino_months === "number") {
+      setSortinoMonths(payload.sortino_months);
+    } else if (typeof configuredSortinoMonths === "number") {
+      setSortinoMonths(configuredSortinoMonths);
+    }
+
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -518,6 +531,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         : payload.trend_weight_ratio;
     if (typeof configuredTrendWeightRatio === "number") {
       applyTrendWeightRatioState(configuredTrendWeightRatio);
+    }
+
+    const configuredSortinoMonths =
+      currentConfig && typeof currentConfig.sortino_months === "number"
+        ? currentConfig.sortino_months
+        : payload.sortino_months;
+    if (typeof configuredSortinoMonths === "number") {
+      setSortinoMonths(configuredSortinoMonths);
     }
 
     rankToolbarCache = {
@@ -571,6 +592,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     as_of_date?: string;
     held_bonus_score?: number;
     trend_weight_ratio?: number;
+    sortino_months?: number;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -602,6 +624,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
       } else {
         search.set("trend_weight_ratio", String(trendWeightRatio));
+      }
+
+      if (typeof next?.sortino_months === "number") {
+        search.set("sortino_months", String(next.sortino_months));
+      } else if (next?.bootstrap) {
+        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
+      } else {
+        search.set("sortino_months", String(sortinoMonths));
       }
 
       if (next?.ma_rule_override) {
@@ -692,6 +722,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ma_rule_override: maRule ?? undefined,
       as_of_date: selectedAsOfDate,
       trend_weight_ratio: normalized,
+      skip_session_cache: true,
+    });
+  }
+
+  function handleSortinoMonthsChange(nextValue: number) {
+    const clamped = Math.max(1, Math.min(6, nextValue));
+    setSortinoMonths(clamped);
+    void load({
+      ticker_type: selectedTickerType,
+      ma_rule_override: maRule ?? undefined,
+      as_of_date: selectedAsOfDate,
+      sortino_months: clamped,
       skip_session_cache: true,
     });
   }
@@ -1887,6 +1929,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       ).map((ratio) => (
                         <option key={ratio} value={ratio}>
                           {ratio}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">Sortino 개월</span>
+                    <select
+                      className="form-select"
+                      value={String(sortinoMonths)}
+                      onChange={(event) => handleSortinoMonthsChange(Number(event.target.value))}
+                    >
+                      {[1, 2, 3, 4, 5, 6].map((m) => (
+                        <option key={m} value={m}>
+                          {m}개월
                         </option>
                       ))}
                     </select>

@@ -510,6 +510,7 @@ def _apply_common_rank_scores(
     *,
     held_bonus_score: float = 0.0,
     trend_weight_ratio: float,
+    sortino_months: int = 3,
 ) -> pd.DataFrame:
     """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
 
@@ -557,7 +558,7 @@ def _apply_common_rank_scores(
 
     # 보조지표(SORTINO, -100~+100) 포인트 — 백테스트와 동일 함수/스케일. 점수식에 w_sec 로 가산.
     sec_pct_scores = pd.Series(0.0, index=close_frame.columns)
-    secondary_points_frame = compute_secondary_metric_points(close_frame, "SORTINO")
+    secondary_points_frame = compute_secondary_metric_points(close_frame, "SORTINO", window_months=sortino_months)
     if eval_date in secondary_points_frame.index:
         sec_pct_scores = secondary_points_frame.loc[eval_date]
 
@@ -635,6 +636,7 @@ def build_ticker_type_rankings(
     status_callback: Any | None = None,
     held_bonus_score: float = 0.0,
     trend_weight_ratio: float,  # 보유 제외 나머지 비중 중 추세 몫(%) — 풀별 pool_settings 가 단일 소스.
+    sortino_months: int = 3,
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -780,6 +782,7 @@ def build_ticker_type_rankings(
         effective_ma_rules,
         held_bonus_score=held_bonus_score,
         trend_weight_ratio=trend_weight_ratio,
+        sortino_months=sortino_months,
     )
     process_elapsed += perf_counter() - process_started_at
 
