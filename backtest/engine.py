@@ -449,7 +449,7 @@ def _simulate_one_combo(
             composite_today[rsi_sell_mask] = np.nan
 
         open_exec = open_values[exec_idx]
-        valid_mask = ~np.isnan(composite_today) & ~np.isnan(open_exec) & (open_exec > 0)
+        valid_mask = ~np.isnan(composite_today) & (composite_today > 0.0) & ~np.isnan(open_exec) & (open_exec > 0)
         valid_idx = np.flatnonzero(valid_mask)
         if valid_idx.size == 0:
             close_exec = close_values[exec_idx]
@@ -1284,6 +1284,7 @@ def _simulate_one_combo_details(
             rsi_sell_tickers = set(rsi_signal.index[rsi_sell_mask].tolist())
             composite.loc[list(rsi_sell_tickers)] = np.nan
 
+        composite = composite[composite > 0.0]
         valid = composite.dropna()
         if not valid.empty:
             tradable_mask = open_exec.reindex(valid.index).notna() & (open_exec.reindex(valid.index) > 0)
