@@ -14,5 +14,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from backtest.run import main  # noqa: E402
 
 if __name__ == "__main__":
-    # 인자 없이 호출 → BACKTEST 설정이 있는 모든 풀을 순차 실행
-    sys.exit(main(["backtest.run"]))
+    # sys.argv[1:] 의 인자(예: kor_kr)가 존재하면 main에 전달
+    args = ["backtest.run"] + sys.argv[1:]
+    sys.exit(main(args))

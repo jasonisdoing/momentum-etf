@@ -15,11 +15,13 @@ _SCRIPT = "scripts/momentum_backtest.py"
 _RESULTS_DIR = Path(__file__).resolve().parents[1] / "backtest" / "results"
 
 
-def trigger_momentum_backtest() -> dict[str, Any]:
+def trigger_momentum_backtest(pool_id: str | None = None) -> dict[str, Any]:
     """백테스트 작업을 배치 큐에 추가한다. 이미 대기/실행 중이면 무시."""
     from utils.batch_queue import enqueue
 
-    result = enqueue(_JOB_NAME, _SCRIPT, triggered_by="manual")
+    job_name = f"{_JOB_NAME}:{pool_id}" if pool_id else _JOB_NAME
+    args_list = [pool_id] if pool_id else None
+    result = enqueue(job_name, _SCRIPT, triggered_by="manual", arguments=args_list)
     return {"enqueued": bool(result.get("enqueued")), "reason": result.get("reason")}
 
 
@@ -37,7 +39,7 @@ def _parse_backtest_log(text: str) -> dict[str, Any]:
     return {"done": done, "progress_pct": progress_pct, "completed": completed, "total": total}
 
 
-def list_backtest_result_files() -> list[str]:
+def list_backtest_result_files(pool_id: str | None = None) -> list[str]:
     """메인 결과 로그 파일명을 최신(수정시각)순으로 반환한다.
 
     엔진은 결과(`<prefix>-backtest_<date>.log`)와 상세(`<prefix>-backtest_details_<date>.log`)를
@@ -45,14 +47,15 @@ def list_backtest_result_files() -> list[str]:
     """
     if not _RESULTS_DIR.exists():
         return []
-    files = [p for p in _RESULTS_DIR.glob("*-backtest_*.log") if "-backtest_details_" not in p.name]
+    pattern = f"*{pool_id}-backtest_*.log" if pool_id else "*-backtest_*.log"
+    files = [p for p in _RESULTS_DIR.glob(pattern) if "-backtest_details_" not in p.name]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return [p.name for p in files]
 
 
-def _read_result_file(file: str | None) -> dict[str, Any]:
+def _read_result_file(file: str | None, pool_id: str | None = None) -> dict[str, Any]:
     """선택 파일(없으면 최신) 결과 로그 내용·진행률을 반환한다(화이트리스트로 경로 조작 차단)."""
-    files = list_backtest_result_files()
+    files = list_backtest_result_files(pool_id)
     empty = {"log_text": "", "log_file": None, "selected_file": None, "done": False, "progress_pct": None, "completed": None, "total": None}
     if not files:
         return empty
@@ -66,14 +69,15 @@ def _read_result_file(file: str | None) -> dict[str, Any]:
     return {"log_text": text, "log_file": selected, "selected_file": selected, **_parse_backtest_log(text)}
 
 
-def momentum_backtest_status(file: str | None = None) -> dict[str, Any]:
+def momentum_backtest_status(file: str | None = None, pool_id: str | None = None) -> dict[str, Any]:
     """백테스트 실행 상태 + 선택(없으면 최신) 결과 로그 + 파일 목록을 반환한다."""
     from utils.batch_queue import get_latest_item
 
-    item = get_latest_item(_JOB_NAME)
+    job_name = f"{_JOB_NAME}:{pool_id}" if pool_id else _JOB_NAME
+    item = get_latest_item(job_name)
     queue_status = item.get("status") if item else None  # pending/running/done/failed/None
 
-    log = _read_result_file(file)
+    log = _read_result_file(file, pool_id)
 
     def _iso(value: Any) -> str | None:
         return value.isoformat() if hasattr(value, "isoformat") else value
@@ -86,6 +90,6 @@ def momentum_backtest_status(file: str | None = None) -> dict[str, Any]:
         "triggered_at": _iso(item.get("triggered_at")) if item else None,
         "started_at": _iso(item.get("started_at")) if item else None,
         "ended_at": _iso(item.get("ended_at")) if item else None,
-        "files": list_backtest_result_files(),
+        "files": list_backtest_result_files(pool_id),
         **log,
     }

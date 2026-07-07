@@ -67,6 +67,7 @@ def enqueue(
     job_name: str,
     script_path: str,
     triggered_by: str = "manual",
+    arguments: list[str] | None = None,
 ) -> dict[str, Any]:
     """배치 작업을 큐에 추가한다.
 
@@ -91,7 +92,8 @@ def enqueue(
         "triggered_by": triggered_by,
         "triggered_at": now,
         "status": STATUS_PENDING,
-        "local_only": job_name in LOCAL_ONLY_JOBS,
+        "local_only": job_name.split(":")[0] in LOCAL_ONLY_JOBS,
+        "arguments": arguments,
         "started_at": None,
         "ended_at": None,
         "last_heartbeat": None,

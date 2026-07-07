@@ -379,25 +379,32 @@ export function SystemManager({
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
   const toast = useToast();
-  const runningSet = new Set(runningJobs);
-  const anyRunning = runningSet.size > 0;
+  const isJobRunning = (jobKey: string) => {
+    return runningJobs.some((j) => j === jobKey || j.startsWith(`${jobKey}:`));
+  };
+  const anyRunning = runningJobs.length > 0;
   // 대기 중 (pending) 큐 항목 — 오래된 순. FIFO 처리 순번 매핑.
   const pendingOrder = new Map<string, number>();
   batchQueue
     .filter((q) => q.status === "pending")
     .sort((a, b) => String(a.triggered_at ?? "").localeCompare(String(b.triggered_at ?? "")))
     .forEach((q, idx) => {
-      if (!pendingOrder.has(q.job_name)) {
-        pendingOrder.set(q.job_name, idx + 1);
+      const baseJobName = q.job_name.split(":")[0];
+      if (!pendingOrder.has(baseJobName)) {
+        pendingOrder.set(baseJobName, idx + 1);
       }
     });
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
     const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
+    const isRunning = isJobRunning(row.key);
+    const runningDetailKey = Object.keys(runningJobDetails).find(
+      (k) => k === row.key || k.startsWith(`${row.key}:`)
+    ) ?? row.key;
     return {
       ...row,
       id: row.key,
-      running: runningSet.has(row.key),
+      running: isRunning,
       anyRunning,
       isDeploying,
       lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
@@ -406,10 +413,10 @@ export function SystemManager({
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
       estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
-      runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
+      runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[runningDetailKey], nowTick),
       runningCancellable:
-        runningSet.has(row.key) && Boolean(runningJobDetails[row.key]?.is_mine),
-      runningCancelRequested: Boolean(runningJobDetails[row.key]?.cancel_requested),
+        isRunning && Boolean(runningJobDetails[runningDetailKey]?.is_mine),
+      runningCancelRequested: Boolean(runningJobDetails[runningDetailKey]?.cancel_requested),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
       pendingPosition: pendingOrder.get(row.key) ?? 0,
@@ -472,7 +479,7 @@ export function SystemManager({
   }, []);
 
   function handleTriggerJob(action: SystemJobKey, label: string) {
-    if (runningSet.has(action)) {
+    if (isJobRunning(action)) {
       toast.success(`${label} 은(는) 현재 실행 중입니다.`);
       return;
     }

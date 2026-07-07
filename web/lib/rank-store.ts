@@ -8,6 +8,7 @@ type RankTickerType = {
   country_code: string;
   holding_bonus_score?: number;
   trend_weight_ratio?: number;
+  sortino_months?: number;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -77,6 +78,7 @@ type RankData = {
   previous_trading_day: string | null;
   held_bonus_score: number;
   trend_weight_ratio: number;
+  sortino_months: number;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];
@@ -90,6 +92,7 @@ type RankToolbarData = {
   ma_months_max: number;
   held_bonus_score: number;
   trend_weight_ratio: number;
+  sortino_months: number;
 };
 
 export async function loadRankToolbarData(params?: {
@@ -110,6 +113,7 @@ export async function loadRankData(params?: {
   as_of_date?: string;
   held_bonus_score?: number;
   trend_weight_ratio?: number;
+  sortino_months?: number;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -123,6 +127,9 @@ export async function loadRankData(params?: {
   }
   if (typeof params?.trend_weight_ratio === "number") {
     search.set("trend_weight_ratio", String(params.trend_weight_ratio));
+  }
+  if (typeof params?.sortino_months === "number") {
+    search.set("sortino_months", String(params.sortino_months));
   }
   if (params?.ma_rule_override) {
     search.set("ma_type", params.ma_rule_override.ma_type);

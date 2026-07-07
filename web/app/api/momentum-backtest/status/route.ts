@@ -8,7 +8,11 @@ export const dynamic = "force-dynamic";
 export async function GET(request: NextRequest) {
   try {
     const file = request.nextUrl.searchParams.get("file");
-    const qs = file ? `?file=${encodeURIComponent(file)}` : "";
+    const poolId = request.nextUrl.searchParams.get("pool_id");
+    const params = new URLSearchParams();
+    if (file) params.set("file", file);
+    if (poolId) params.set("pool_id", poolId);
+    const qs = params.size > 0 ? `?${params.toString()}` : "";
     const data = await fetchFastApiJson(`/internal/momentum/backtest/status${qs}`);
     return jsonNoStore(data);
   } catch (error) {

@@ -26,7 +26,7 @@ _COLLECTION = "backtest_config"
 _CACHE_TTL_SECONDS = 30.0
 
 # 풀별 문서 필수 키
-_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT")
+_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT", "SORTINO_MONTHS")
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[dict, float]] = {}  # pool_id -> (config, cached_at)
@@ -86,6 +86,9 @@ def validate_backtest_config(config: Any) -> None:
     for v in config["RSI_LIMIT"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 100):
             raise ValueError("'RSI_LIMIT' 는 0~100 범위의 숫자여야 합니다.")
+    for v in config["SORTINO_MONTHS"]:
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not (1 <= int(v) <= 6):
+            raise ValueError("'SORTINO_MONTHS' 는 1~6 범위의 정수여야 합니다.")
     for v in config["MA_TYPE"]:
         if str(v).upper() not in ALLOWED_MA_TYPES:
             raise ValueError(f"'MA_TYPE' 값이 허용되지 않습니다: {v} (허용: {', '.join(ALLOWED_MA_TYPES)})")
