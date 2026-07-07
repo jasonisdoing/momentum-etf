@@ -1843,6 +1843,9 @@ def run_backtest(pool_id: str) -> Path:
                 f"backtest_config['{pool_id}']['BENCHMARK']에는 ticker/name이 모두 필요합니다."
             )
 
+    if benchmark_ticker:
+        tickers = [t for t in tickers if t != benchmark_ticker]
+
     # 기간 설정 — BACKTEST_MONTHS 개월 전 날짜 이후의 첫 거래일이 시작일이 된다.
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
     start_target = (today - pd.DateOffset(months=months)).normalize()

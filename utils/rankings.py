@@ -642,6 +642,17 @@ def build_ticker_type_rankings(
         status_callback("최신 거래일 기준 캐시 상태 확인")
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
+    benchmark_ticker = ""
+    try:
+        from utils.backtest_config_store import load_backtest_config
+        bt_cfg = load_backtest_config(ticker_type)
+        benchmark_config = bt_cfg.get("BENCHMARK")
+        if isinstance(benchmark_config, dict):
+            benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
+    except Exception:
+        benchmark_config = settings.get("BENCHMARK")
+        if isinstance(benchmark_config, dict):
+            benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
     country_code = str(settings.get("country_code") or "").strip().lower()
 
     etfs = get_etfs(ticker_type)
@@ -752,6 +763,7 @@ def build_ticker_type_rankings(
             "country_code": country_code,
             "currency": str(settings.get("currency") or ""),
             "source_ticker_type": ticker_type,
+            "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
             "분류": etf.get("etf_category", "") or "",
             "점수": None,
