@@ -441,7 +441,12 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
     for row in rows_with_index:
         normalized = dict(row)
         normalized.pop("__base_index", None)
-        if normalized.get("exclude_from_ranking"):
+        is_excl = bool(normalized.get("exclude_from_ranking"))
+        is_bm = bool(normalized.get("is_benchmark"))
+        score = normalized.get("점수")
+        is_non_pos = score is not None and float(score) <= 0.0
+
+        if is_excl or is_bm or is_non_pos:
             normalized["순위"] = None
         else:
             normalized["순위"] = current_rank
