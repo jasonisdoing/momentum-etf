@@ -92,6 +92,7 @@ type RankRow = {
   순자산총액: number | null;
   "전일 거래량(주)": number | null;
   exclude_from_ranking?: boolean;
+  is_benchmark?: boolean;
   SORTINO?: number;
   보유가점?: number;
 };
@@ -876,6 +877,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 54,
         cellStyle: { justifyContent: "center", textAlign: "center", overflow: "hidden", paddingLeft: 2, paddingRight: 2 },
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (params.data?.is_benchmark) {
+            return (
+              <span style={{ fontSize: "1.1rem", display: "inline-flex", alignItems: "center" }} title="벤치마크 종목">
+                ⭐
+              </span>
+            );
+          }
           if (pageMode === "rank" && params.data?.exclude_from_ranking) {
             return (
               <span
@@ -1225,7 +1233,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
-          return <span className="rankNameCellText" title={value}>{renderNameWithLeverageHighlight(value)}</span>;
+          return (
+            <span className="rankNameCellText" title={value}>
+              {renderNameWithLeverageHighlight(value)}
+            </span>
+          );
         },
       },
       ...(isAllTickerType ||

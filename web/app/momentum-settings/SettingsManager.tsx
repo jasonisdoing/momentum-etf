@@ -11,6 +11,7 @@ const EDITABLE_KEYS = [
   "TREND_WEIGHT_RATIO",
   "MA_TYPE",
   "MA_MONTHS",
+  "SORTINO_MONTHS",
   "RSI_LIMIT",
 ] as const;
 
@@ -22,6 +23,7 @@ const KEY_LABELS: Record<EditableKey, string> = {
   TREND_WEIGHT_RATIO: "추세 가중치(%)",
   MA_TYPE: "추세 타입",
   MA_MONTHS: "추세 개월",
+  SORTINO_MONTHS: "Sortino 개월",
   RSI_LIMIT: "RSI 상한",
 };
 
@@ -31,6 +33,7 @@ const KEY_WIDTHS: Record<EditableKey, number> = {
   TREND_WEIGHT_RATIO: 110,
   MA_TYPE: 110,
   MA_MONTHS: 90,
+  SORTINO_MONTHS: 100,
   RSI_LIMIT: 90,
 };
 
@@ -272,6 +275,19 @@ export function SettingsManager() {
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
                                 {[3, 6, 9, 12, 18, 24].map((m) => (
+                                  <option key={m} value={String(m)}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : key === "SORTINO_MONTHS" ? (
+                              <select
+                                className="form-select form-select-sm"
+                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
+                                value={draft[key]}
+                                onChange={(e) => updateDraft(id, key, e.target.value)}
+                              >
+                                {[1, 2, 3, 4, 5, 6].map((m) => (
                                   <option key={m} value={String(m)}>
                                     {m}
                                   </option>

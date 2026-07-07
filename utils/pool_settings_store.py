@@ -36,13 +36,16 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TREND_WEIGHT_RATIO",
     "MA_TYPE",
     "MA_MONTHS",
+    "SORTINO_MONTHS",
     "RSI_LIMIT",
 )
 
-_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_MONTHS", "RSI_LIMIT")
+_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_MONTHS", "SORTINO_MONTHS", "RSI_LIMIT")
 
 # 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
-_OPTIONAL_DEFAULTS: dict[str, Any] = {}
+_OPTIONAL_DEFAULTS: dict[str, Any] = {
+    "SORTINO_MONTHS": 3,
+}
 
 _CACHE_TTL_SECONDS = 30.0
 _overlay_cache: dict[str, dict[str, Any]] | None = None
