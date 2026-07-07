@@ -524,8 +524,13 @@ def _read_last_job_run_from_queue(
         db = get_db_connection()
         if db is None:
             return None
+        import re
         doc = db.batch_queue.find_one(
-            {"job_name": job_key, "status": {"$in": ["done", "failed"]}, "ended_at": {"$ne": None}},
+            {
+                "job_name": {"$regex": f"^{re.escape(job_key)}(:|$)"},
+                "status": {"$in": ["done", "failed"]},
+                "ended_at": {"$ne": None},
+            },
             sort=[("ended_at", -1)],
             projection={"_id": 0, "status": 1, "started_at": 1, "ended_at": 1, "app_type": 1},
         )
@@ -646,7 +651,7 @@ def _cleanup_stale_locks() -> int:
         deleted = 0
         for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
-            if key not in _SCRIPT_BY_ACTION:
+            if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
 
             # (1) expires_at 기반 정리 — TTL 인덱스가 어떤 이유로 안 도는 경우의 안전망
@@ -730,7 +735,7 @@ def get_running_jobs() -> list[str]:
         # 1) batch_locks
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
-            if key not in _SCRIPT_BY_ACTION:
+            if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
             expires_at = doc.get("expires_at")
             # MongoDB는 datetime을 UTC 기준으로 저장하고 naive datetime으로 반환할 수 있다.
@@ -751,7 +756,7 @@ def get_running_jobs() -> list[str]:
             heartbeat_threshold = now - timedelta(minutes=3)
             for doc in db.batch_queue.find({"status": "running"}, {"_id": 0, "job_name": 1, "last_heartbeat": 1}):
                 key = str(doc.get("job_name") or "")
-                if not key or key not in _SCRIPT_BY_ACTION:
+                if not key or key.split(":")[0] not in _SCRIPT_BY_ACTION:
                     continue
                 last_heartbeat = doc.get("last_heartbeat")
                 if isinstance(last_heartbeat, datetime):
@@ -795,7 +800,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
         # 1) batch_locks 기반 (락이 살아있는 작업)
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}):
             key = str(doc.get("_id") or "")
-            if key not in _SCRIPT_BY_ACTION:
+            if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
             expires_at = doc.get("expires_at")
             if isinstance(expires_at, datetime):
@@ -814,7 +819,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                     else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
                 )
 
-            estimated_seconds = _read_average_job_elapsed_seconds(key)
+            estimated_seconds = _read_average_job_elapsed_seconds(key.split(":")[0])
             elapsed_seconds = max(0, int((now_kst - started_at).total_seconds())) if started_at else None
             remaining_seconds = (
                 max(0, int(round(estimated_seconds)) - int(elapsed_seconds))
@@ -850,7 +855,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                 },
             ):
                 key = str(doc.get("job_name") or "")
-                if not key or key not in _SCRIPT_BY_ACTION:
+                if not key or key.split(":")[0] not in _SCRIPT_BY_ACTION:
                     continue
                 if key in details:
                     continue  # batch_locks 정보 우선
@@ -871,7 +876,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                         if started_raw.tzinfo
                         else started_raw.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
                     )
-                q_estimated_seconds = _read_average_job_elapsed_seconds(key)
+                q_estimated_seconds = _read_average_job_elapsed_seconds(key.split(":")[0])
                 q_elapsed_seconds = (
                     max(0, int((now_kst - queue_started_at).total_seconds())) if queue_started_at else None
                 )
