@@ -308,6 +308,10 @@ _W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_SECONDARY_VALUES: dict[str, np.ndarray] = {}
 
 
+_W_BM_PCT_VALUES: dict[tuple[str, int], np.ndarray] = {}
+_W_BM_SEC_VALUES: dict[tuple[str, int], np.ndarray] = {}
+
+
 def _init_worker(
     pct_specs_values: dict[tuple[str, int], np.ndarray],
     eligibility_values: np.ndarray,
@@ -320,10 +324,13 @@ def _init_worker(
     buy_slippage: float,
     sell_slippage: float,
     secondary_values_map: dict[str, np.ndarray],
+    bm_pct_specs_values: dict[tuple[str, int], np.ndarray] = None,
+    bm_secondary_values_map: dict[str, np.ndarray] = None,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
     global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
     global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES, _W_SECONDARY_VALUES  # noqa: PLW0603
+    global _W_BM_PCT_VALUES, _W_BM_SEC_VALUES  # noqa: PLW0603
     _W_PCT_VALUES = pct_specs_values
     _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
@@ -335,6 +342,8 @@ def _init_worker(
     _W_FX_VALUES = fx_values
     _W_RSI_VALUES = rsi_values
     _W_SECONDARY_VALUES = secondary_values_map
+    _W_BM_PCT_VALUES = bm_pct_specs_values or {}
+    _W_BM_SEC_VALUES = bm_secondary_values_map or {}
 
 
 def _run_single_combo(args: tuple[int, str, int, float | None, float, float, float, str, int]) -> dict[str, Any]:
@@ -343,6 +352,17 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
     raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
     # 가중치 비율 결합 (추세 단독 + 보유·보조지표 가산)
     composite_values = w_trend * raw_composite
+
+    # 벤치마크 점수 빌드
+    bm_composite = None
+    bm_pct = _W_BM_PCT_VALUES.get((ma_t, ma_m))
+    bm_sec = _W_BM_SEC_VALUES.get((secondary_metric, sortino_m))
+    if bm_pct is not None:
+        bm_composite = w_trend * bm_pct.copy()
+        if w_sec > 0 and bm_sec is not None:
+            bm_sec_non_nan = ~np.isnan(bm_composite) & ~np.isnan(bm_sec)
+            bm_composite[bm_sec_non_nan] += w_sec * bm_sec[bm_sec_non_nan]
+
     total_ret, cagr, mdd, trades, sortino = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
@@ -358,6 +378,7 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         sell_slippage=_W_SELL_SLIPPAGE,
         w_sec=w_sec,
         secondary_points=_W_SECONDARY_VALUES[(secondary_metric, sortino_m)],
+        benchmark_composite_scores=bm_composite,
     )
     # 추세 가중치(%) 복원: w_trend/w_sec 는 (100-보유)에 비율을 곱한 값이므로 비율로 되돌린다.
     side_sum = w_trend + w_sec
@@ -408,6 +429,7 @@ def _simulate_one_combo(
     sell_slippage: float,
     w_sec: float = 0.0,
     secondary_points: np.ndarray | None = None,
+    benchmark_composite_scores: np.ndarray | None = None,
 ) -> tuple[float, float, float, int, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
 
@@ -433,6 +455,10 @@ def _simulate_one_combo(
         portfolio_value_local = cash + float(np.dot(shares[priced_mask], close_today[priced_mask]))
 
         composite_today = composite_values[signal_idx].copy()
+        if benchmark_composite_scores is not None:
+            bm_score = benchmark_composite_scores[signal_idx]
+            if not np.isnan(bm_score):
+                composite_today[composite_today < bm_score] = np.nan
         if w_hold > 0:
             held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
             composite_today[held_bonus_mask] += w_hold * 100.0
@@ -1262,7 +1288,14 @@ def _simulate_one_combo_details(
         open_exec = open_frame.loc[exec_day]
         close_exec = close_frame.loc[exec_day]
 
-        composite = composite_frame.loc[signal_day].copy()
+        bm_score = np.nan
+        target_tickers = list(composite_frame.columns)
+        bm_ticker_name = str(benchmark_values_krw.name) if benchmark_values_krw is not None else ""
+        if bm_ticker_name and bm_ticker_name in composite_frame.columns:
+            bm_score = composite_frame.loc[signal_day, bm_ticker_name]
+            target_tickers = [c for c in target_tickers if c != bm_ticker_name]
+
+        composite = composite_frame.loc[signal_day].reindex(target_tickers).copy()
         rule_signal = rule_frame.loc[signal_day].copy()
         rsi_signal = rsi_frame.loc[signal_day].copy()
         # 보조지표(SHARPE) 시그널 시리즈 — 상세 행 표시 및 점수 가산에 공용.
@@ -1284,6 +1317,8 @@ def _simulate_one_combo_details(
             rsi_sell_tickers = set(rsi_signal.index[rsi_sell_mask].tolist())
             composite.loc[list(rsi_sell_tickers)] = np.nan
 
+        if not pd.isna(bm_score):
+            composite = composite[composite >= bm_score]
         composite = composite[composite > 0.0]
         valid = composite.dropna()
         if not valid.empty:
@@ -1868,7 +1903,8 @@ def run_backtest(pool_id: str) -> Path:
     # OHLCV 캐시 로드
     load_tickers = sorted(set(tickers + ([benchmark_ticker] if benchmark_ticker else [])))
     logger.info("[%s] OHLCV 캐시 로드: %s tickers ...", pool_id, len(load_tickers))
-    frames = load_cached_frames_bulk_with_fallback(pool_id, load_tickers)
+    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    frames = load_cached_frames_bulk_from_all_ticker_types(load_tickers)
     _augment_frames_with_intraday_open(frames, load_tickers, country_code, calendar_days[-1], today)
     missing = [t for t in tickers if t not in frames or frames[t] is None or frames[t].empty]
     if missing:
@@ -1901,6 +1937,10 @@ def run_backtest(pool_id: str) -> Path:
 
     close_frame = pd.DataFrame(close_cols, index=index)
     open_frame = pd.DataFrame(open_cols, index=index)
+    tickers_with_bm = list(tickers)
+    if benchmark_ticker and benchmark_ticker not in tickers_with_bm:
+        tickers_with_bm.append(benchmark_ticker)
+    strategy_close_frame_with_bm = close_frame.reindex(columns=tickers_with_bm)
     strategy_close_frame = close_frame.reindex(columns=tickers)
     strategy_open_frame = open_frame.reindex(columns=tickers)
 
@@ -1949,11 +1989,11 @@ def run_backtest(pool_id: str) -> Path:
     for mtype, m_months in unique_ma_specs:
         # rankings 와 동일한 공통 엔진 함수를 통해 규칙별 percentile 프레임 생성.
         percentile_by_spec[(mtype, int(m_months))] = compute_rule_percentile_frame(
-            strategy_close_frame, mtype, int(m_months)
+            strategy_close_frame_with_bm, mtype, int(m_months)
         )
 
     # 자격 마스크도 공통 엔진으로 생성 (MIN_TRADING_DAYS 기준) — rankings 와 동일.
-    eligibility_frame = compute_eligibility_mask(strategy_close_frame)
+    eligibility_frame = compute_eligibility_mask(strategy_close_frame_with_bm)
 
     # 워커에 전달할 데이터를 백테스트 기간으로 미리 슬라이스 (메모리 절감)
     percentile_by_spec_win = {
@@ -1970,20 +2010,31 @@ def run_backtest(pool_id: str) -> Path:
         key: pf.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
         for key, pf in percentile_by_spec_win.items()
     }
+    
+    # 벤치마크 전용 percentile 어레이 추출
+    bm_pct_specs_values = {}
+    if benchmark_ticker:
+        for key, pf in percentile_by_spec_win.items():
+            if benchmark_ticker in pf.columns:
+                bm_pct_specs_values[key] = pf[benchmark_ticker].to_numpy(dtype=np.float64, copy=True)
+
     eligibility_values = eligibility_win.reindex(columns=ticker_columns).to_numpy(dtype=bool, copy=True)
     open_values = open_win.to_numpy(dtype=np.float64, copy=True)
     close_values = valuation_close_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
-    rsi_frame = _compute_rsi_frame(strategy_close_frame, RSI_PERIOD)
+    rsi_frame = _compute_rsi_frame(strategy_close_frame_with_bm, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
-    rsi_values = rsi_win.to_numpy(dtype=np.float64, copy=True)
+    rsi_values = rsi_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
     # 보조지표(SORTINO) 포인트 프레임 — 탐색 대상 지표와 개월수별로 계산해 {(지표, 개월수): [일자×티커] 배열} 로 보관.
     # 전체 프레임으로 워밍업 후 백테스트 구간 슬라이스.
     secondary_values_map: dict[tuple[str, int], np.ndarray] = {}
+    bm_secondary_values_map: dict[tuple[str, int], np.ndarray] = {}
     for sm in secondary_metrics:
         for sortino_m in sortino_months_list:
-            sm_frame = compute_secondary_metric_points(strategy_close_frame, sm, window_months=sortino_m)
+            sm_frame = compute_secondary_metric_points(strategy_close_frame_with_bm, sm, window_months=sortino_m)
             sm_win = sm_frame.loc[backtest_days]
             secondary_values_map[(sm, sortino_m)] = sm_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
+            if benchmark_ticker and benchmark_ticker in sm_win.columns:
+                bm_secondary_values_map[(sm, sortino_m)] = sm_win[benchmark_ticker].to_numpy(dtype=np.float64, copy=True)
 
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
@@ -2120,6 +2171,8 @@ def run_backtest(pool_id: str) -> Path:
             buy_slippage,
             sell_slippage,
             secondary_values_map,
+            bm_pct_specs_values,
+            bm_secondary_values_map,
         ),
     ) as pool:
         for i, result in enumerate(
@@ -2224,7 +2277,7 @@ def run_backtest(pool_id: str) -> Path:
                 buy_slippage=buy_slippage,
             )
         # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 보조지표는 SORTINO 고정.
-        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame, "SORTINO", window_months=int(best_result["SORTINO_MONTHS"])).loc[backtest_days]
+        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame_with_bm, "SORTINO", window_months=int(best_result["SORTINO_MONTHS"])).loc[backtest_days]
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
