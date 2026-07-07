@@ -436,6 +436,12 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
         )
     )
 
+    bm_score = None
+    for row in rows_with_index:
+        if row.get("is_benchmark") and row.get("점수") is not None:
+            bm_score = float(row["점수"])
+            break
+
     ranked_rows: list[dict[str, Any]] = []
     current_rank = 1
     for row in rows_with_index:
@@ -446,7 +452,13 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
         score = normalized.get("점수")
         is_non_pos = score is not None and float(score) <= 0.0
 
-        if is_excl or is_bm or is_non_pos:
+        is_below_bm = False
+        if bm_score is not None and score is not None:
+            is_below_bm = float(score) < bm_score
+
+        normalized["is_below_benchmark"] = is_below_bm
+
+        if is_excl or is_bm or is_non_pos or is_below_bm:
             normalized["순위"] = None
         else:
             normalized["순위"] = current_rank

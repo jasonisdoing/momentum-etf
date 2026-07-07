@@ -93,6 +93,7 @@ type RankRow = {
   "전일 거래량(주)": number | null;
   exclude_from_ranking?: boolean;
   is_benchmark?: boolean;
+  is_below_benchmark?: boolean;
   SORTINO?: number;
   보유가점?: number;
 };
@@ -2035,7 +2036,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  if ((params.data?.점수 ?? 0) < 0) {
+                  const scoreVal = params.data?.점수 ?? 0;
+                  if (scoreVal <= 0 || params.data?.is_below_benchmark) {
                     classes.push("rankNegativeTrendRow");
                   }
                   if (params.data?.exclude_from_ranking) {
