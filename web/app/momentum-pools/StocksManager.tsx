@@ -1786,7 +1786,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
     const totalCount = gridRows.length;
-    const upCount = gridRows.filter((r) => (r["점수"] ?? 0) > 0).length;
+    const upCount = gridRows.filter(
+      (r) => (r["점수"] ?? 0) > 0 && !r.is_below_benchmark && !r.is_benchmark && !r.exclude_from_ranking
+    ).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
     const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
     const configuredTopN = selectedTickerTypeItem?.top_n_hold;
