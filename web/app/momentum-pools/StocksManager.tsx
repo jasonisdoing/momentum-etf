@@ -840,7 +840,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     const rsiLimit = selectedTickerTypeItem?.rsi_limit;
     const bonusScore = Number(heldBonusScore ?? 0);
     const sorted = [...gridRows]
-      .filter((r) => r.순위 != null && !r.exclude_from_ranking)
+      .filter(
+        (r) =>
+          r.순위 != null &&
+          !r.exclude_from_ranking &&
+          !r.is_benchmark &&
+          !r.is_below_benchmark &&
+          (r.점수 ?? 0) > 0
+      )
       .sort((a, b) => {
         const aScore = typeof a.점수 === "number" && !Number.isNaN(a.점수) ? a.점수 : null;
         const bScore = typeof b.점수 === "number" && !Number.isNaN(b.점수) ? b.점수 : null;
