@@ -458,11 +458,8 @@ def _build_score_ranked_rows(dataframe: pd.DataFrame) -> list[dict[str, Any]]:
 
         normalized["is_below_benchmark"] = is_below_bm
 
-        if is_excl or is_bm or is_non_pos or is_below_bm:
-            normalized["순위"] = None
-        else:
-            normalized["순위"] = current_rank
-            current_rank += 1
+        normalized["순위"] = current_rank
+        current_rank += 1
         ranked_rows.append(normalized)
     return ranked_rows
 

@@ -874,14 +874,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         field: "순위",
         headerName: "순위",
-        minWidth: 54,
-        width: 54,
+        minWidth: 86,
+        width: 86,
         cellStyle: { justifyContent: "center", textAlign: "center", overflow: "hidden", paddingLeft: 2, paddingRight: 2 },
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (params.data?.is_benchmark) {
             return (
-              <span style={{ fontSize: "1.1rem", display: "inline-flex", alignItems: "center" }} title="벤치마크 종목">
-                ⭐
+              <span style={{ fontSize: "0.95rem", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 700 }} title="벤치마크 종목">
+                ⭐ {params.value == null ? "-" : formatNumber(params.value, 0)}
               </span>
             );
           }
@@ -892,19 +892,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   display: "inline-flex",
                   alignItems: "center",
                   justifyContent: "center",
+                  gap: "4px",
                   borderRadius: "999px",
                   border: "1px solid #c7d2fe",
                   background: "#eef2ff",
                   color: "#4338ca",
-                  fontSize: "0.58rem",
+                  fontSize: "0.75rem",
                   fontWeight: 700,
                   lineHeight: 1,
-                  padding: "0.12rem 0.22rem",
+                  padding: "0.15rem 0.4rem",
                   whiteSpace: "nowrap",
                   maxWidth: "100%",
                 }}
               >
-                📌고정
+                📌고정 {params.value == null ? "-" : formatNumber(params.value, 0)}
               </span>
             );
           }
