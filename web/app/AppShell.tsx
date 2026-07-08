@@ -77,6 +77,15 @@ const navGroups = [
     ],
   },
   {
+    id: "top-pick",
+    title: "탑픽",
+    icon: IconMedal2,
+    items: [
+      { href: "/top-pick", label: "비중", icon: IconListDetails },
+      { href: "/top-pick-settings", label: "설정", icon: IconSettings },
+    ],
+  },
+  {
     id: "leverage",
     title: "레버리지",
     icon: IconChartLine,
