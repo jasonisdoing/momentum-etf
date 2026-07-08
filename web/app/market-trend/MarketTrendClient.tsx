@@ -22,7 +22,7 @@ type MarketTrendItem = {
   score_range_low: number | null;
   // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
   pct_from_high: number | null;
-  // 현재 레짐(백엔드 레벨 기반: 장기MA 방향 × 단기MA±버퍼 모멘텀) + 지속일수
+  // 현재 레짐(종가 vs SMA ± 버퍼) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
   days_since_last_up: number | null;
@@ -38,8 +38,7 @@ function isDetailRow(row: GridRow | undefined): row is DetailRow {
 }
 
 type MarketTrendResponse = {
-  ma_type: string;
-  ma_months: number;
+  ma_days: number;
   items: MarketTrendItem[];
   error?: string;
 };
@@ -113,16 +112,12 @@ function renderRegimeCell(params: { data?: GridRow }) {
 
 type MarketTrendClientProps = {
   // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
-  maType: string;
-  maMonths: number;
-  shortMaDays: number;
+  maDays: number;
   scoreAnchorPercentile: number;
 };
 
 export function MarketTrendClient({
-  maType,
-  maMonths,
-  shortMaDays,
+  maDays,
   scoreAnchorPercentile,
 }: MarketTrendClientProps) {
   const [items, setItems] = useState<MarketTrendItem[]>([]);
@@ -316,7 +311,7 @@ export function MarketTrendClient({
       },
       domLayout: "autoHeight",
     }),
-    [maType, maMonths],
+    [maDays],
   );
 
   const titleRight = useMemo(
@@ -325,12 +320,12 @@ export function MarketTrendClient({
         <div className="appHeaderMetric">
           <span>기준:</span>
           <span className="appHeaderMetricValue">
-            MA: {maType} {maMonths}개월 · 단기 {shortMaDays}일
+            SMA {maDays}일
           </span>
         </div>
       </div>
     ),
-    [maType, maMonths, shortMaDays],
+    [maDays],
   );
 
   return (
@@ -374,7 +369,7 @@ export function MarketTrendClient({
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
                 <li>일간(%): (오늘 종가 ÷ 전일 종가 − 1) × 100.</li>
                 <li>
-                  추세 점수: 먼저 (종가 ÷ MA[{maType} {maMonths}개월] − 1) × 100 으로 원본 추세% 를
+                  추세 점수: 먼저 (종가 ÷ SMA[{maDays}일] − 1) × 100 으로 원본 추세% 를
                   구한 뒤, MA와 같은 지점을 0점으로 둔 정규화 점수(−100 ~ +100). MA 위쪽은 최근 12개월
                   괴리율의 상위 {100 - scoreAnchorPercentile}%({scoreAnchorPercentile}퍼센타일)를 +100,
                   아래쪽은 하위 {100 - scoreAnchorPercentile}%({100 - scoreAnchorPercentile}퍼센타일)를 −100으로 환산합니다.
@@ -382,11 +377,8 @@ export function MarketTrendClient({
                   12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
                 </li>
                 <li>
-                  레짐: 그날의 지수 위치만으로 상승·중립·하락 3단계로 분류합니다 (기울기 없음).
-                  방향은 장기 MA({maType} {maMonths}개월) 위/아래, 모멘텀은 단기 MA({shortMaDays}거래일, 동일 타입) ±0.5% 버퍼 기준 —
-                  종가가 버퍼 위에서 3거래일 연속 마감해야 강세로 승격되고(며칠짜리 반등 휩소 차단),
-                  버퍼 아래로 내려오면 즉시 약세, 버퍼 안에서는 직전 상태를 유지합니다.
-                  장기 MA 위+강세=상승, 위+약세=중립, 아래+강세=중립, 아래+약세=하락.
+                  레짐: 그날의 종가와 SMA({maDays}일) ± 버퍼(0.5%) 비교로 상승·중립·하락 3단계로 분류합니다.
+                  종가 {'>'} SMA × 1.005 → 상승, 종가 {'<'} SMA × 0.995 → 하락, 그 외 → 중립.
                 </li>
               </ul>
             </div>

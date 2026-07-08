@@ -182,28 +182,34 @@ MIN_TRADING_DAYS = 5
 # -----------------------------------------------------------------------
 # 시장지수 추세 (/market-trend)
 # -----------------------------------------------------------------------
-# 백엔드(추세점수 정규화 / 레짐 판정) + 프론트(MA 선택)에서 함께 쓰는 단일 진실 소스.
-# 프론트에는 /internal/market-trend/defaults 응답으로 전달된다.
+# 백엔드(추세점수 정규화 / 레짐 판정)에서 쓰는 단일 진실 소스.
 
 # 추세점수 정규화 앵커 퍼센타일. 12개월 괴리율의 상위 P%를 +100, 하위 (100-P)%를 −100 으로
 # 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
 MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
-# 시장지수 추세 화면 전용 장기 MA (화면 고정값 — 종목풀 설정과 무관).
-# 단기 MA 는 MARKET_TREND_REGIME_SHORT_MA_DAYS(거래일), 타입은 이 값을 따른다.
-MARKET_TREND_MA_TYPE = "ALMA"
-MARKET_TREND_MA_MONTHS = 6
+# 레짐 판정 + 차트 MA 공용 이동평균 설정.
+# MA 타입은 MARKET_TREND_REGIME_MA_TYPE 설정에 따르며, ALLOWED_MA_TYPES 중 하나여야 합니다.
+# 기간은 SHORT_MA_DAYS(거래일) 하나만 쓴다.
+# 레짐 판정: 종가 vs MA ± 버퍼 비율.
+#   종가 > MA × (1 + 버퍼) → 상승 (accel_up)
+#   종가 < MA × (1 − 버퍼) → 하락 (accel_down)
+#   그 외 → 중립 (neutral)
+# 값↑(SHORT_MA_DAYS)=추세 더 느긋 / 값↑(BUFFER)=라벨 덜 바뀜.
+# [SMA 20 vs ALMA 48 시차 비교 주석]
+#   - SMA 20일의 평균 시차(Lag)는 정확히 9.5일입니다.
+#   - ALMA 48일의 평균 시차(Lag)는 약 9.52일로, SMA 20일과 반응 속도(타이밍)가 거의 같습니다.
+#   - 따라서 ALMA 48로 변경하면 기존의 빠른 추세 포착 템포는 그대로 유지하면서, 
+#     48일의 넓은 가우시안 가중치 필터를 통해 단기 노이즈(휩쏘)만 매우 강력하게 차단합니다.
+MARKET_TREND_REGIME_MA_TYPE = "ALMA"
+MARKET_TREND_REGIME_SHORT_MA_DAYS = 48
+MARKET_TREND_REGIME_BUFFER_PCT = 1.5
 
-# 레짐 판정(레벨 기반): 그날의 '지수 위치'만 본다 (기울기 없음).
-#   방향  = 지수 vs 장기MA(화면 선택 MA)  /  모멘텀 = 지수 vs 단기MA ± 버퍼
-#   강세 승격: 종가 > 단기MA×(1+버퍼) 가 CONFIRM_DAYS 연속일 때만 (며칠짜리 반등 휩소 차단)
-#   약세 전환: 종가 < 단기MA×(1−버퍼) → 즉시 (하락은 기민하게)
-#   버퍼 안: 직전 강/약세 상태 유지 (연속 카운트는 리셋)
-#   매핑: 장기MA 위+강세=상승, 위+약세=중립, 아래+강세=중립, 아래+약세=하락.
-# 값↑(SHORT_MA_DAYS)=모멘텀 더 느긋 / 값↑(BUFFER)=라벨 덜 바뀜 / 값↑(CONFIRM)=상승 승격 더 신중.
-MARKET_TREND_REGIME_SHORT_MA_DAYS = 20
-MARKET_TREND_REGIME_BUFFER_PCT = 0.5
-MARKET_TREND_REGIME_CONFIRM_DAYS = 3
+# 슈퍼트렌드(SuperTrend) 지표 설정.
+# ATR 계산 기간(PERIOD)과 곱수(MULTIPLIER)를 정의한다.
+# 값↑(MULTIPLIER)=노이즈 필터링 강화(신호가 뜸해짐) / 값↓(MULTIPLIER)=추세 전환에 민감.
+MARKET_TREND_SUPERTREND_PERIOD = 10
+MARKET_TREND_SUPERTREND_MULTIPLIER = 2.0
 
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
