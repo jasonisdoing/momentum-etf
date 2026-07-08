@@ -270,7 +270,7 @@ export function HoldingsManager({
     }, new Map<string, HoldingsRow>()).values(),
   );
 
-  const visibleBaseHoldings = aggregatedBaseHoldings.filter((row) => normalizeDisplayTicker(row.ticker) !== "IS");
+  const visibleBaseHoldings = aggregatedBaseHoldings;
   const holdingsValuation = visibleBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
   const totalValuation = holdingsValuation + totalCashKrw;
   const aggregatedHoldings: AggregatedHoldingRow[] = visibleBaseHoldings.map((row) => ({

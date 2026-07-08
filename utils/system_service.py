@@ -212,13 +212,11 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                 {
                     "_id": 0,
                     "ticker": 1,
-                    "is_etf": 1,
                 },
             )
         )
 
         stock_count = len(docs)
-        etf_count = sum(1 for doc in docs if bool(doc.get("is_etf")))
         # 매수 후보 기준 — cache_refresh 배치가 pool_rank_summary 에 저장한다.
         rank_summary = rank_summary_by_type.get(ticker_type, {})
         score_up_count = int(_to_float(rank_summary.get("score_up_count")))
@@ -236,7 +234,6 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                 "score_up_ratio": round((score_up_count / score_total_count) * 100, 2)
                 if score_total_count > 0
                 else 0.0,
-                "etf_count": etf_count,
             }
         )
 
