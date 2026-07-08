@@ -135,7 +135,7 @@ export function PortfolioLabClient() {
 
   const loadSaved = useCallback(async () => {
     try {
-      const resp = await fetch("/api/portfolio-lab/saved", { cache: "no-store" });
+      const resp = await fetch("/api/backtest-lab/saved", { cache: "no-store" });
       const data = (await resp.json()) as { portfolios?: SavedPortfolio[]; error?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? "저장 목록을 불러오지 못했습니다.");
       setSaved(data.portfolios ?? []);
@@ -161,7 +161,7 @@ export function PortfolioLabClient() {
       return;
     }
     try {
-      const resp = await fetch(`/api/portfolio-lab/resolve?ticker=${encodeURIComponent(raw)}`);
+      const resp = await fetch(`/api/backtest-lab/resolve?ticker=${encodeURIComponent(raw)}`);
       const data = (await resp.json()) as { ticker?: string; name?: string; error?: string; detail?: string };
       if (!resp.ok || data.error || !data.name) throw new Error(data.error ?? data.detail ?? "존재하지 않는 티커입니다.");
       setTickers((list) => list.map((t, i) => (i === index ? { ticker: data.ticker ?? raw, name: data.name } : t)));
@@ -178,7 +178,7 @@ export function PortfolioLabClient() {
       return;
     }
     try {
-      const resp = await fetch(`/api/portfolio-lab/resolve?ticker=${encodeURIComponent(raw)}`);
+      const resp = await fetch(`/api/backtest-lab/resolve?ticker=${encodeURIComponent(raw)}`);
       const data = (await resp.json()) as { ticker?: string; name?: string; error?: string; detail?: string };
       if (!resp.ok || data.error || !data.name) throw new Error(data.error ?? data.detail ?? "존재하지 않는 티커입니다.");
       setBenchmark({ ticker: data.ticker ?? raw, name: data.name });
@@ -205,7 +205,7 @@ export function PortfolioLabClient() {
     try {
       setRunning(true);
       setResult(null);
-      const resp = await fetch("/api/portfolio-lab/run", {
+      const resp = await fetch("/api/backtest-lab/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tickers: validTickers, months, benchmark, rebalance }),
@@ -231,7 +231,7 @@ export function PortfolioLabClient() {
     }
     try {
       setSaving(true);
-      const resp = await fetch("/api/portfolio-lab/saved", {
+      const resp = await fetch("/api/backtest-lab/saved", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), tickers: validTickers, months, benchmark, rebalance }),
@@ -262,7 +262,7 @@ export function PortfolioLabClient() {
 
   const deletePortfolio = async (p: SavedPortfolio) => {
     try {
-      const resp = await fetch("/api/portfolio-lab/saved", {
+      const resp = await fetch("/api/backtest-lab/saved", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: p.name }),
@@ -284,7 +284,7 @@ export function PortfolioLabClient() {
   );
 
   return (
-    <PageFrame title="🧪 포트폴리오 실험">
+    <PageFrame title="🧪 백테스트 실험">
       <div className="appPageStack" style={{ maxWidth: 1400 }}>
         {/* 상단: 포트폴리오 구성 | 결과 (가로, 높이 맞춤) */}
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "stretch" }}>
