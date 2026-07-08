@@ -1100,6 +1100,7 @@ def _simulate_one_combo_details(
     country_code: str,
     buy_slippage: float,
     sell_slippage: float,
+    benchmark_ticker: str | None = None,
 ) -> list[str]:
     """상위 1개 조합의 거래일별 보유 상세 로그를 생성한다.
 
@@ -1275,6 +1276,15 @@ def _simulate_one_combo_details(
         lines.append("")
         prev_total_equity_krw = total_equity_krw
 
+    bm_ticker_name = str(benchmark_ticker or "").strip().upper()
+    bm_composite_series = pd.Series(np.nan, index=backtest_days)
+    if bm_ticker_name and bm_ticker_name in rule_frame.columns:
+        bm_composite_series = w_trend * rule_frame[bm_ticker_name]
+        if w_sec > 0 and secondary_points_frame is not None and bm_ticker_name in secondary_points_frame.columns:
+            bm_sec = secondary_points_frame[bm_ticker_name]
+            non_nan = bm_composite_series.notna() & bm_sec.notna()
+            bm_composite_series.loc[non_nan] += w_sec * bm_sec.loc[non_nan]
+
     for exec_idx in range(1, len(backtest_days)):
         signal_day = backtest_days[exec_idx - 1]
         exec_day = backtest_days[exec_idx]
@@ -1289,11 +1299,9 @@ def _simulate_one_combo_details(
         close_exec = close_frame.loc[exec_day]
 
         bm_score = np.nan
-        target_tickers = list(composite_frame.columns)
-        bm_ticker_name = str(benchmark_values_krw.name) if benchmark_values_krw is not None else ""
-        if bm_ticker_name and bm_ticker_name in composite_frame.columns:
-            bm_score = composite_frame.loc[signal_day, bm_ticker_name]
-            target_tickers = [c for c in target_tickers if c != bm_ticker_name]
+        if bm_ticker_name:
+            bm_score = bm_composite_series.get(signal_day, np.nan)
+        target_tickers = [c for c in composite_frame.columns if c != bm_ticker_name]
 
         composite = composite_frame.loc[signal_day].reindex(target_tickers).copy()
         rule_signal = rule_frame.loc[signal_day].copy()
@@ -2299,6 +2307,7 @@ def run_backtest(pool_id: str) -> Path:
             country_code=country_code,
             buy_slippage=buy_slippage,
             sell_slippage=sell_slippage,
+            benchmark_ticker=benchmark_ticker,
         )
         detail_path = results_dir / f"{display_prefix}-backtest_details_{today.strftime('%Y-%m-%d')}.log"
         _write_details_file(
