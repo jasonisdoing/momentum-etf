@@ -13,12 +13,9 @@ type SystemPoolRow = {
   ticker_type: string;
   country_code: string;
   stock_count: number;
-  rising_count: number;
-  rising_ratio: number;
   score_up_count: number;
   score_total_count: number;
   score_up_ratio: number;
-  etf_count: number;
 };
 
 function formatCount(value: number): string {
@@ -52,34 +49,8 @@ const poolColumns: ColDef<SystemPoolRow>[] = [
     cellRenderer: (params: { value: number }) => formatCount(params.value),
   },
   {
-    field: "rising_count",
-    headerName: "상승수(일간)",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number; data?: SystemPoolRow }) => {
-      const total = params.data?.stock_count ?? 0;
-      return `${formatCount(params.value)}/${formatCount(total)}`;
-    },
-  },
-  {
-    field: "rising_ratio",
-    headerName: "상승비율(일간)",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellStyle: (params: { value: number }) => {
-      const val = params.value;
-      if (val === null || val === undefined || Number.isNaN(val)) return undefined;
-      if (val > 50) return { color: "#dc2626" };
-      if (val < 50) return { color: "#2563eb" };
-      return { color: "#0f172a" };
-    },
-    cellRenderer: (params: { value: number }) => formatPercent(params.value),
-  },
-  {
     field: "score_up_count",
-    headerName: "상승수",
+    headerName: "매수 후보",
     minWidth: 100,
     flex: 0.75,
     type: "rightAligned",
@@ -90,7 +61,7 @@ const poolColumns: ColDef<SystemPoolRow>[] = [
   },
   {
     field: "score_up_ratio",
-    headerName: "상승비율",
+    headerName: "매수 후보 비율",
     minWidth: 100,
     flex: 0.75,
     type: "rightAligned",

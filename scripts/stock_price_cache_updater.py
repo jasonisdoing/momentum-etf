@@ -282,7 +282,11 @@ def _update_pool_rank_summary(target_id: str) -> None:
         up_count = 0
         for row in rows:
             try:
-                if row.get("점수") is not None and float(row["점수"]) > 0:
+                score = row.get("점수")
+                is_below = bool(row.get("is_below_benchmark"))
+                is_bm = bool(row.get("is_benchmark"))
+                is_excl = bool(row.get("exclude_from_ranking"))
+                if score is not None and float(score) > 0 and not is_below and not is_bm and not is_excl:
                     up_count += 1
             except (TypeError, ValueError):
                 continue
@@ -304,7 +308,7 @@ def _update_pool_rank_summary(target_id: str) -> None:
             upsert=True,
         )
         logger.info(
-            "[%s] 점수 요약 저장 완료: 양수 %d / 전체 %d",
+            "[%s] 매수 후보 요약 저장 완료: 후보 %d / 전체 %d",
             target_id.upper(),
             up_count,
             total_count,
