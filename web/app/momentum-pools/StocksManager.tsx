@@ -1920,7 +1920,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           onChange={(event) => handleMaRuleMonthsChange(Number(event.target.value))}
                           disabled={maTypeOptions.length === 0}
                         >
-                          {[3, 6, 9, 12, 18, 24].map((month) => (
+                          {[1, 2, 3, 6, 9, 12, 18, 24].map((month) => (
                             <option key={month} value={month}>
                               {month}개월
                             </option>
@@ -2028,6 +2028,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="appGridFillWrap">
               <AppAgGrid
+                key={`${selectedTickerType}:${selectedAsOfDate}:${maRule?.ma_type}:${maRule?.ma_months}:${trendWeightRatio}:${sortinoMonths}`}
                 className="rankAgGrid"
                 rowData={displayGridRows}
                 columnDefs={columns}
