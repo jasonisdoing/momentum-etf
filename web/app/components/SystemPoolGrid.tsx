@@ -74,14 +74,6 @@ const poolColumns: ColDef<SystemPoolRow>[] = [
     },
     cellRenderer: (params: { value: number }) => formatPercent(params.value),
   },
-  {
-    field: "etf_count",
-    headerName: "ETF",
-    minWidth: 82,
-    flex: 0.55,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
 ];
 
 /** 종목풀 요약 그리드 — `/api/system` 의 pool_rows 를 자체 조회해 렌더링한다. */

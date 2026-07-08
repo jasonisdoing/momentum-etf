@@ -2280,7 +2280,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ...summary,
           valuation_krw: nextValuation,
           total_assets_krw: nextValuation + Number(summary.cash_balance_krw ?? 0),
-          holdings_count: nextRows.filter((r) => r.ticker !== "IS").length,
+          holdings_count: nextRows.length,
           target_ratio_total: nextTargetRatioTotal,
         };
       }),
