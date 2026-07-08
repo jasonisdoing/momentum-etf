@@ -2,6 +2,6 @@ import { PortfolioLabClient } from "./PortfolioLabClient";
 
 export const dynamic = "force-dynamic";
 
-export default function PortfolioLabPage() {
+export default function BacktestLabPage() {
   return <PortfolioLabClient />;
 }
