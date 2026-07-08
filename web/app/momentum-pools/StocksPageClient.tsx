@@ -26,7 +26,7 @@ export function StocksPageClient() {
     () => (
       <div className="appHeaderMetrics rankToolbarMeta">
         <div className="appHeaderMetric">
-          <span>점수 양수:</span>
+          <span>매수 후보:</span>
           <span className="appHeaderMetricValue is-danger">
             {summary.upCount}개 ({summary.upPct}%)
           </span>
