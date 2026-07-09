@@ -95,6 +95,10 @@ function renderTruncatedText(value: string | null | undefined) {
   );
 }
 
+function isUsTickerPool(pool: StocksAccountItem): boolean {
+  return String(pool.country_code ?? "").trim().toLowerCase() === "us";
+}
+
 export function UsMarketStockManager({
   onSummaryChange,
 }: {
@@ -186,7 +190,7 @@ export function UsMarketStockManager({
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
 
-    const stockPools = tickerPools.filter((p) => p.name.includes("미국 개별주"));
+    const stockPools = tickerPools.filter(isUsTickerPool);
     const remembered = readRememberedTickerType();
 
     if (remembered && stockPools.some((p) => p.ticker_type === remembered)) {
@@ -499,7 +503,7 @@ export function UsMarketStockManager({
             >
               <option value="">종목풀 선택</option>
               {tickerPools
-                .filter((p) => p.name.includes("미국 개별주"))
+                .filter(isUsTickerPool)
                 .map((pool) => (
                   <option key={pool.ticker_type} value={pool.ticker_type}>
                     {pool.name}

@@ -44,6 +44,7 @@ INDICES: list[dict[str, str]] = [
     {"name": "다우존스", "yf_ticker": "^DJI"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
+    {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
 ]
 
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
@@ -194,25 +195,25 @@ def compute_market_trend() -> dict[str, Any]:
         logger.exception("yfinance 시장지수 다운로드 실패")
         df = None
 
-    # 한국 인덱스(KOSPI/KPI200) 종가는 네이버 차트 API 로 조회 (2년치 ≈ 500거래일).
-    kor_close_by_ticker: dict[str, pd.Series] = {}
+    # 한국 인덱스(KOSPI/KPI200) OHLC 는 네이버 차트 API 로 조회 (2년치 ≈ 500거래일).
+    # 종가뿐 아니라 고가/저가도 받아야 SuperTrend(레짐 판정의 주 신호)를 계산할 수 있다.
+    kor_ohlc_by_ticker: dict[str, pd.DataFrame] = {}
     for idx in INDICES:
         naver_symbol = idx.get("kor_naver_symbol")
         if not naver_symbol:
             continue
-        series = _fetch_naver_kor_index_close(naver_symbol, count=500)
-        if series is not None and not series.empty:
-            kor_close_by_ticker[idx["yf_ticker"]] = series
+        ohlc = _fetch_naver_kor_index_ohlc(naver_symbol, count=500)
+        if ohlc is not None and not ohlc.empty:
+            kor_ohlc_by_ticker[idx["yf_ticker"]] = ohlc
 
     items: list[dict[str, Any]] = []
     for idx in INDICES:
-        kor_close = kor_close_by_ticker.get(idx["yf_ticker"])
-        item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, kor_close)
+        kor_ohlc = kor_ohlc_by_ticker.get(idx["yf_ticker"])
+        item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, kor_ohlc)
         items.append(item)
 
     return {
         "ma_days": ma_days,
-        "buffer_pct": MARKET_TREND_REGIME_BUFFER_PCT,
         "items": items,
     }
 
@@ -222,7 +223,7 @@ def _build_item(
     yf_ticker: str,
     name: str,
     ma_days: int,
-    kor_close: pd.Series | None = None,
+    kor_ohlc: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     base: dict[str, Any] = {
         "name": name,
@@ -246,7 +247,8 @@ def _build_item(
         # 현재 레짐이 하락일 때: 마지막 중립 구간 종료 후 경과 거래일 (12개월 내 중립 없으면 None)
         "days_since_last_neutral": None,
     }
-    # 한국 인덱스는 네이버에서 받은 close_series 를 우선 사용한다.
+    # 한국 인덱스는 네이버에서 받은 OHLC 의 종가를 우선 사용한다.
+    kor_close = kor_ohlc["Close"] if (kor_ohlc is not None and "Close" in kor_ohlc.columns) else None
     if kor_close is not None and not kor_close.empty:
         close_series = kor_close.dropna()
     elif df is None or df.empty:
@@ -296,32 +298,40 @@ def _build_item(
     if high_52w is not None and high_52w > 0 and latest_price is not None:
         base["pct_from_high"] = (latest_price / high_52w - 1.0) * 100.0
 
-    # SuperTrend 계산
+    # SuperTrend 계산 — 한국 인덱스는 네이버 OHLC, 미국 인덱스는 yfinance df 에서 OHLC 를 취한다.
     supertrend_dir_series = None
-    if df is not None and not df.empty:
-        try:
+    try:
+        ticker_df: pd.DataFrame | None = None
+        if kor_ohlc is not None and not kor_ohlc.empty:
+            ticker_df = kor_ohlc.reindex(close_series.index)
+        elif df is not None and not df.empty:
             ticker_df = pd.DataFrame(index=close_series.index)
             for col in ["Open", "High", "Low", "Close", "Volume"]:
                 if (yf_ticker, col) in df.columns:
                     ticker_df[col] = df[(yf_ticker, col)]
                 elif col in df.columns:
                     ticker_df[col] = df[col]
-            ticker_df = ticker_df.dropna()
-            if not ticker_df.empty:
-                st_df = _calculate_supertrend(
-                    ticker_df,
-                    period=MARKET_TREND_SUPERTREND_PERIOD,
-                    multiplier=MARKET_TREND_SUPERTREND_MULTIPLIER,
-                )
-                if st_df is not None and "direction" in st_df.columns:
-                    supertrend_dir_series = st_df["direction"]
-        except Exception:
-            logger.exception("_build_item 내 SuperTrend 계산 실패: %s", yf_ticker)
+        if ticker_df is not None:
+            ticker_df = ticker_df.dropna(subset=["High", "Low", "Close"])
+        if ticker_df is not None and not ticker_df.empty:
+            st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
+            st_df = _calculate_supertrend(
+                ticker_df,
+                period=st_period,
+                multiplier=st_multiplier,
+            )
+            if st_df is not None and "direction" in st_df.columns:
+                supertrend_dir_series = st_df["direction"]
+    except Exception:
+        logger.exception("_build_item 내 SuperTrend 계산 실패: %s", yf_ticker)
 
     # 최근 12개월 일별 레짐을 계산해 연속 구간으로 그룹화 → 현재 레짐 + 지속일수.
     # 레짐 판정용 MA도 같은 SMA {ma_days}일이므로 ma_series를 재활용한다.
     short_ma_series = ma_series
-    ranges = _build_daily_regime_ranges(close_series, ma_series, short_ma_series, supertrend_dir_series)
+    buffer_pct = _resolve_regime_buffer(yf_ticker)
+    ranges = _build_daily_regime_ranges(
+        close_series, ma_series, short_ma_series, buffer_pct, supertrend_dir_series
+    )
     if ranges:
         base["current_regime"] = ranges[-1]["regime"]
         base["current_regime_days"] = ranges[-1]["days"]
@@ -416,52 +426,57 @@ def _trend_pct_at(
 def _regime_step(
     close_raw: float | None,
     close_smooth: float | None,
-    long_ma: float | None,
-    short_ma: float | None,
-    prev_strong: bool | None,
-    streak: int,
-    supertrend_dir: int | None = None,
-    prev_regime: str | None = None,
-) -> tuple[str | None, bool | None, int]:
-    """20일 SMA(close_smooth) 대비 당일 종가(close_raw)의 버퍼 비율로 추세를 즉각 판정한다.
-    추가로 슈퍼트렌드 방향(supertrend_dir)과 직전 레짐(prev_regime)을 결합하여 휩쏘를 방지한다 (제안 2).
+    supertrend_dir: int | None,
+    buffer_pct: float,
+) -> str | None:
+    """레짐 판정 — **슈퍼트렌드(ST) 방향이 주(主), MA±버퍼가 보조(강도 확인)**.
 
-    판정 기준:
-        종가 > SMA × (1 + 버퍼) → 상승 (accel_up)
-        종가 < SMA × (1 − 버퍼) → 하락 (accel_down)
-        그 외 → 중립 (neutral)
+    ST가 방향(상승/하락)을 정하고, MA 는 방향을 뒤집지 못하며 '아직 확인 안 됨 → 중립'
+    으로만 끌어내린다(ST 는 자체 추세추종이라 별도 히스테리시스 불필요).
+    버퍼는 지수별로 다르다(``buffer_pct`` 로 주입).
+
+    판정 기준(close_smooth = MA):
+        ST ▲ 이고 종가 > MA × (1 + 버퍼) → 상승 (accel_up)
+        ST ▼ 이고 종가 < MA × (1 − 버퍼) → 하락 (accel_down)
+        그 외(ST·가격 방향 불일치, MA 근처 등) → 중립 (neutral)
+    ST 방향이 없으면(데이터 부족) 레짐도 판정하지 않는다(None).
     """
-    if close_raw is None or close_smooth is None or close_smooth <= 0:
-        return None, prev_strong, streak
+    if close_raw is None or close_smooth is None or close_smooth <= 0 or supertrend_dir is None:
+        return None
 
-    buffer_ratio = MARKET_TREND_REGIME_BUFFER_PCT / 100.0
-    if close_raw > close_smooth * (1.0 + buffer_ratio):
-        regime_raw = "accel_up"
-    elif close_raw < close_smooth * (1.0 - buffer_ratio):
-        regime_raw = "accel_down"
-    else:
-        regime_raw = "neutral"
+    buffer_ratio = buffer_pct / 100.0
+    if supertrend_dir == 1 and close_raw > close_smooth * (1.0 + buffer_ratio):
+        return "accel_up"
+    if supertrend_dir == -1 and close_raw < close_smooth * (1.0 - buffer_ratio):
+        return "accel_down"
+    return "neutral"
 
-    regime = regime_raw
-    if supertrend_dir is not None:
-        if supertrend_dir == 1:  # 슈퍼트렌드 상승 중
-            if regime_raw == "accel_down":
-                regime = "neutral"  # 휩쏘 방지 (중립으로 유보)
-            elif regime_raw in ("accel_up", "neutral"):
-                if prev_regime == "accel_up":
-                    regime = "accel_up"  # 상승 유지 (중립으로 붕괴 방지)
-                elif prev_regime == "accel_down":
-                    regime = "neutral"
-        elif supertrend_dir == -1:  # 슈퍼트렌드 하락 중
-            if regime_raw == "accel_up":
-                regime = "neutral"  # 휩쏘 방지 (중립으로 유보)
-            elif regime_raw in ("accel_down", "neutral"):
-                if prev_regime == "accel_down":
-                    regime = "accel_down"  # 하락 유지 (중립으로 붕괴 방지)
-                elif prev_regime == "accel_up":
-                    regime = "neutral"
 
-    return regime, prev_strong, streak
+def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
+    """지수(yf_ticker)별 슈퍼트렌드 (기간, 곱수)를 반환한다.
+
+    기간은 전 지수 공통(MARKET_TREND_SUPERTREND_PERIOD), 곱수는 지수별로 등록된 값을 쓴다.
+    등록되지 않은 지수는 설정 누락이므로 명시적으로 오류를 낸다.
+    """
+    if yf_ticker not in MARKET_TREND_SUPERTREND_MULTIPLIER:
+        raise ValueError(
+            f"MARKET_TREND_SUPERTREND_MULTIPLIER 에 지수 '{yf_ticker}' 의 곱수가 등록되지 않았습니다. "
+            "config.py 에 해당 지수를 등록해주세요."
+        )
+    return MARKET_TREND_SUPERTREND_PERIOD, MARKET_TREND_SUPERTREND_MULTIPLIER[yf_ticker]
+
+
+def _resolve_regime_buffer(yf_ticker: str) -> float:
+    """지수(yf_ticker)별 레짐 판정 버퍼(%)를 반환한다.
+
+    지수별로 등록된 값을 쓰며, 등록되지 않은 지수는 설정 누락이므로 명시적으로 오류를 낸다.
+    """
+    if yf_ticker not in MARKET_TREND_REGIME_BUFFER_PCT:
+        raise ValueError(
+            f"MARKET_TREND_REGIME_BUFFER_PCT 에 지수 '{yf_ticker}' 의 버퍼가 등록되지 않았습니다. "
+            "config.py 에 해당 지수를 등록해주세요."
+        )
+    return MARKET_TREND_REGIME_BUFFER_PCT[yf_ticker]
 
 
 def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
@@ -534,12 +549,13 @@ def _build_daily_regime_ranges(
     close_series: pd.Series,
     ma_series: pd.Series,
     short_ma_series: pd.Series | None,
+    buffer_pct: float,
     supertrend_dir_series: pd.Series | None = None,
     window_days: int = TRADING_DAYS_PER_MONTH * 12,
 ) -> list[dict[str, Any]]:
-    """최근 ``window_days`` 거래일의 일별 레짐(레벨 기반)을 연속 구간으로 그룹화한다.
+    """최근 ``window_days`` 거래일의 일별 레짐(ST 주도 + MA 보조)을 연속 구간으로 그룹화한다.
 
-    상태(강/약세, 연속일)는 시리즈 처음부터 워밍업해 창 시작일에도 정확하게 이어진다.
+    레짐은 당일 (종가·MA·ST방향) 만의 함수라 상태 워밍업이 필요 없다.
     반환 형식: [{"regime": str, "start_date": str, "end_date": str, "days": int}, ...]
     오래된 순서 → 최신 순서.
     """
@@ -561,35 +577,25 @@ def _build_daily_regime_ranges(
     start_idx = length - take
     ranges: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
-    strong: bool | None = None
-    streak = 0
-    prev_regime: str | None = None
 
     # 슈퍼트렌드 방향 매핑 맵
     st_dir_map = {}
     if supertrend_dir_series is not None:
         st_dir_map = supertrend_dir_series.dropna().to_dict()
 
-    for idx in range(length):
+    for idx in range(start_idx, length):  # 레짐은 당일 (종가·MA·ST방향) 만의 함수 → 워밍업 불필요
         date_value = close_series.index[idx]
         st_dir = st_dir_map.get(date_value)
         if st_dir is not None:
             st_dir = int(st_dir)
 
-        regime, strong, streak = _regime_step(
+        regime = _regime_step(
             _to_float(close_series.iloc[idx]),
             _to_float(close_smooth.iloc[idx]),
-            _to_float(ma_series.iloc[idx]),
-            _to_float(short_ma_series.iloc[idx]),
-            strong,
-            streak,
-            supertrend_dir=st_dir,
-            prev_regime=prev_regime,
+            st_dir,
+            buffer_pct,
         )
-        prev_regime = regime
 
-        if idx < start_idx:
-            continue  # 워밍업 구간: 상태만 누적
         date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         if regime is None:
             if current:
@@ -643,18 +649,18 @@ def _forecast_thresholds(
     r_long: float,
     w_short: float,
     r_short: float,
-    prev_strong: bool | None,
-    streak: int,
+    st_line: float,
+    buffer_pct: float,
 ) -> dict[str, Any] | None:
     """'다음 영업일 종가가 현재 대비 몇 %'일 때 레짐이 바뀌는 두 경계를 산출 (레벨 기반).
 
-    다음날 장기/단기 MA 를 각각 ``w*P + r`` (LTI 선형)로 O(1) 평가한다. 오늘까지의
-    상태(strong, streak)를 이어 내일 하루만 판정하므로 등락률→레짐은 단조 → 이진 탐색.
+    다음날 MA 를 ``w*P + r`` (LTI 선형)로 O(1) 평가한다. 내일 ST 방향은 내일 종가 P 가
+    현재 ST 밴드선(st_line)을 넘는지로 결정된다(P > st_line → 상승, 그 외 → 하락).
+    레짐은 (종가·MA·ST방향) 만의 함수라 등락률→레짐이 단조 → 이진 탐색.
 
     Returns:
         ``{"up_pct","up_price","dn_pct","dn_price"}`` (상승↔중립=up, 중립↔하락=dn).
-        탐색 범위에서 경계를 못 찾으면 해당 값은 None (예: 상승 승격에 연속일이 모자라
-        내일 하루로는 상승 전환이 불가능한 경우). 둘 다 None 이면 None.
+        탐색 범위에서 경계를 못 찾으면 해당 값은 None. 둘 다 None 이면 None.
     """
     if current_close <= 0:
         return None
@@ -664,10 +670,9 @@ def _forecast_thresholds(
         price = current_close * (1.0 + pct / 100.0)
         if price <= 0:
             return None
-        lm = w_long * price + r_long
-        sm = w_short * price + r_short
-        regime, _, _ = _regime_step(price, sm, lm, sm, prev_strong, streak)
-        return regime
+        sm = w_short * price + r_short  # 내일 MA
+        st_dir_next = 1 if price > st_line else -1  # 내일 ST 방향 (밴드선 돌파 여부)
+        return _regime_step(price, sm, st_dir_next, buffer_pct)
 
     pct_hi, pct_lo = 90.0, -90.0  # 내일 단일일 등락률 탐색 범위(상승/하락 경계 대칭)
 
@@ -723,12 +728,13 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     naver_symbol = (index_meta or {}).get("kor_naver_symbol")
 
     ma_days = MARKET_TREND_REGIME_SHORT_MA_DAYS
+    buffer_pct = _resolve_regime_buffer(yf_ticker)
 
     empty_payload = {
         "ticker": yf_ticker,
         "name": name,
         "ma_days": ma_days,
-        "buffer_pct": MARKET_TREND_REGIME_BUFFER_PCT,
+        "buffer_pct": buffer_pct,
         "history": [],
         "trend_min_12m": None,
         "trend_max_12m": None,
@@ -781,12 +787,13 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     df["Close"] = close_series
     df = df.ffill()
 
-    # SuperTrend 계산
+    # SuperTrend 계산 (지수별 파라미터 적용)
     try:
+        st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
         st_df = _calculate_supertrend(
             df,
-            period=MARKET_TREND_SUPERTREND_PERIOD,
-            multiplier=MARKET_TREND_SUPERTREND_MULTIPLIER,
+            period=st_period,
+            multiplier=st_multiplier,
         )
     except Exception:
         logger.exception("SuperTrend 계산 실패: %s", yf_ticker)
@@ -864,9 +871,6 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         close_smooth = close_series
 
     history: list[dict[str, Any]] = []
-    strong_state: bool | None = None
-    streak_state = 0
-    prev_regime: str | None = None
 
     for idx in range(start, length):
         date_value = close_series.index[idx]
@@ -878,27 +882,18 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
             _normalize_score(trend, score_min, score_max) if score_min is not None and score_max is not None else None
         )
 
+        st_val = _to_float(st_df["supertrend"].iloc[idx]) if st_df is not None else None
         st_dir = None
         if st_df is not None and "direction" in st_df.columns:
             st_dir = int(st_df["direction"].iloc[idx])
 
-        # 레짐: 종가 vs 20일 SMA ± 버퍼 비율로 분류.
-        sm_v = _to_float(short_ma_series.iloc[idx]) if short_ma_series is not None else None
-        regime, strong_state, streak_state = _regime_step(
-            close,
-            _to_float(close_smooth.iloc[idx]),
-            ma_v,
-            sm_v,
-            strong_state,
-            streak_state,
-            supertrend_dir=st_dir,
-            prev_regime=prev_regime,
-        )
-        prev_regime = regime
+        # 레짐: ST 방향(주) + MA±버퍼(보조).
+        regime = _regime_step(close, _to_float(close_smooth.iloc[idx]), st_dir, buffer_pct)
 
         # 그 시점 기준 '다음 영업일' 전환 예측 (과거 일자엔 그날의 예측이 그대로 보존된다).
+        # 내일 ST 방향은 '내일 종가 vs 현재 ST 밴드선(st_val)' 으로 결정된다.
         point_forecast: dict[str, Any] | None = None
-        if ma_weight is not None and short_weight is not None and close is not None:
+        if ma_weight is not None and short_weight is not None and close is not None and st_val is not None:
             if idx < length - 1:
                 c_next = _to_float(close_series.iloc[idx + 1])
                 m_next = _to_float(ma_series.iloc[idx + 1]) if ma_series is not None else None
@@ -912,11 +907,8 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
                 r_next_short = r_last_short
             if r_next is not None and r_next_short is not None:
                 point_forecast = _forecast_thresholds(
-                    close, ma_weight, r_next, short_weight, r_next_short, strong_state, streak_state
+                    close, ma_weight, r_next, short_weight, r_next_short, st_val, buffer_pct
                 )
-
-        st_val = _to_float(st_df["supertrend"].iloc[idx]) if st_df is not None else None
-        st_dir = int(st_df["direction"].iloc[idx]) if st_df is not None else None
 
         history.append(
             {
@@ -940,7 +932,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "ticker": yf_ticker,
         "name": name,
         "ma_days": ma_days,
-        "buffer_pct": MARKET_TREND_REGIME_BUFFER_PCT,
+        "buffer_pct": buffer_pct,
         "history": history,
         "trend_min_12m": score_min,
         "trend_max_12m": score_max,

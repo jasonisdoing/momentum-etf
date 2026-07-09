@@ -23,6 +23,7 @@ type StocksAccountItem = {
   order: number;
   name: string;
   icon: string;
+  country_code?: string;
 };
 
 type StocksRowItem = {

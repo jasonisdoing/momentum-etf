@@ -199,17 +199,45 @@ MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 # [SMA 20 vs ALMA 48 시차 비교 주석]
 #   - SMA 20일의 평균 시차(Lag)는 정확히 9.5일입니다.
 #   - ALMA 48일의 평균 시차(Lag)는 약 9.52일로, SMA 20일과 반응 속도(타이밍)가 거의 같습니다.
-#   - 따라서 ALMA 48로 변경하면 기존의 빠른 추세 포착 템포는 그대로 유지하면서, 
+#   - 따라서 ALMA 48로 변경하면 기존의 빠른 추세 포착 템포는 그대로 유지하면서,
 #     48일의 넓은 가우시안 가중치 필터를 통해 단기 노이즈(휩쏘)만 매우 강력하게 차단합니다.
 MARKET_TREND_REGIME_MA_TYPE = "ALMA"
 MARKET_TREND_REGIME_SHORT_MA_DAYS = 48
-MARKET_TREND_REGIME_BUFFER_PCT = 1.5
+
+# 레짐 판정 버퍼(%) — 지수별로 개별 등록 (ST 곱수처럼). INDICES 의 모든 지수를 등록한다.
+# ST▲ + 종가 > MA×(1+버퍼) → 상승 / ST▼ + 종가 < MA×(1−버퍼) → 하락 / 그 외 중립.
+# 값↑=중립 범위가 넓어져 작은 딥·랠리를 중립으로 흡수(지연 없음) / 값↓=작은 움직임에도 상승·하락 확정.
+# yf_ticker: ^KS11=코스피, ^KS200=코스피200, ^DJI=다우존스, ^GSPC=S&P500, ^NDX=나스닥100, ^SOX=필라델피아 반도체.
+MARKET_TREND_REGIME_BUFFER_PCT: dict[str, float] = {
+    "^KS11": 1.5,    # 코스피
+    "^KS200": 1.5,   # 코스피200
+    "^DJI": 0.5,     # 다우존스 (저변동 — 완만한 상승도 포착하도록 좁게)
+    "^GSPC": 1.5,    # S&P500
+    "^NDX": 2.5,     # 나스닥100 (중립↔하락 1일 스파이크 억제)
+    "^SOX": 1.5,     # 필라델피아 반도체
+}
+
+# 위 지수 목록에 없는 종목(예: 탑픽 벤치마크 ETF)의 버퍼(%) 기본값.
+MARKET_TREND_REGIME_BUFFER_PCT_DEFAULT = 1.5
 
 # 슈퍼트렌드(SuperTrend) 지표 설정.
-# ATR 계산 기간(PERIOD)과 곱수(MULTIPLIER)를 정의한다.
-# 값↑(MULTIPLIER)=노이즈 필터링 강화(신호가 뜸해짐) / 값↓(MULTIPLIER)=추세 전환에 민감.
+# ATR 계산 기간(PERIOD)은 전 지수 공통. 곱수(MULTIPLIER)는 지수마다 개별 등록한다.
 MARKET_TREND_SUPERTREND_PERIOD = 10
-MARKET_TREND_SUPERTREND_MULTIPLIER = 2.0
+
+# 지수별 슈퍼트렌드 곱수 (yf_ticker → multiplier). INDICES 의 모든 지수를 각각 등록한다.
+# 값↑=방향 전환이 뜸해져 휩쏘↓(지연 없음) / 값↓=추세 전환에 민감. 지수마다 변동성이 달라 개별 설정.
+# yf_ticker: ^KS11=코스피, ^KS200=코스피200, ^DJI=다우존스, ^GSPC=S&P500, ^NDX=나스닥100, ^SOX=필라델피아 반도체.
+MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
+    "^KS11": 2.0,    # 코스피
+    "^KS200": 2.0,   # 코스피200
+    "^DJI": 3.0,     # 다우존스
+    "^GSPC": 3.0,    # S&P500
+    "^NDX": 3.0,     # 나스닥100 (휩쏘가 잦아 둔감하게)
+    "^SOX": 2.0,     # 필라델피아 반도체
+}
+
+# 위 지수 목록에 없는 종목(예: 탑픽 벤치마크 ETF)의 슈퍼트렌드 곱수 기본값.
+MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT = 2.0
 
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정

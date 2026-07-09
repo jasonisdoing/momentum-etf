@@ -92,9 +92,9 @@ const REGIME_COLORS: Record<RegimeKey, string> = {
 
 // 하단 설명도 3단계로.
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
-  { key: "accel_up", text: "⬆️ 상승: 가격이 장기 MA 위에 있고, 단기 MA(+버퍼) 위 흐름을 지키고 있는 강세 국면입니다." },
-  { key: "neutral", text: "➡️ 중립: 장기 MA 위지만 단기 흐름이 꺾였거나, 장기 MA 아래에서 반등을 시도하는 대기 국면입니다." },
-  { key: "accel_down", text: "⬇️ 하락: 가격이 장기 MA 아래에 있고, 단기 MA 아래로도 밀려 있는 위험 국면입니다." },
+  { key: "accel_up", text: "⬆️ 상승: 슈퍼트렌드가 상승이고 종가도 MA(+버퍼) 위로 확인된 강세 국면입니다." },
+  { key: "neutral", text: "➡️ 중립: 슈퍼트렌드와 가격이 엇갈리거나 가격이 MA 근처라 방향이 아직 확인되지 않은 대기 국면입니다." },
+  { key: "accel_down", text: "⬇️ 하락: 슈퍼트렌드가 하락이고 종가도 MA(−버퍼) 아래로 밀린 위험 국면입니다." },
 ];
 
 function renderRegimeCell(params: { data?: GridRow }) {
@@ -112,15 +112,15 @@ function renderRegimeCell(params: { data?: GridRow }) {
 
 type MarketTrendClientProps = {
   // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
+  maType: string;
   maDays: number;
   scoreAnchorPercentile: number;
-  bufferPct: number;
 };
 
 export function MarketTrendClient({
+  maType,
   maDays,
   scoreAnchorPercentile,
-  bufferPct,
 }: MarketTrendClientProps) {
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -322,12 +322,12 @@ export function MarketTrendClient({
         <div className="appHeaderMetric">
           <span>기준:</span>
           <span className="appHeaderMetricValue">
-            SMA {maDays}일
+            {maType} {maDays}일
           </span>
         </div>
       </div>
     ),
-    [maDays],
+    [maType, maDays],
   );
 
   return (
@@ -369,18 +369,16 @@ export function MarketTrendClient({
                 }}
               >
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
-                <li>일간(%): (오늘 종가 ÷ 전일 종가 − 1) × 100.</li>
+                <li>일간(%): 전일 종가 대비 등락률.</li>
                 <li>
-                  추세 점수: 먼저 (종가 ÷ SMA[{maDays}일] − 1) × 100 으로 원본 추세% 를
-                  구한 뒤, MA와 같은 지점을 0점으로 둔 정규화 점수(−100 ~ +100). MA 위쪽은 최근 12개월
-                  괴리율의 상위 {100 - scoreAnchorPercentile}%({scoreAnchorPercentile}퍼센타일)를 +100,
-                  아래쪽은 하위 {100 - scoreAnchorPercentile}%({100 - scoreAnchorPercentile}퍼센타일)를 −100으로 환산합니다.
-                  (단발 극단치 대신 상위/하위 {100 - scoreAnchorPercentile}% 구간을 천장·바닥으로 봅니다.)
-                  12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
+                  추세 점수: 종가의 {maType}({maDays}일) 대비 괴리율을 −100~+100 으로 정규화한 값(0 = MA선).
+                  최근 12개월 괴리율의 상위/하위 {100 - scoreAnchorPercentile}% 를 각각 천장(+100)·바닥(−100)으로 봅니다.
+                  MA 위면 양수, 아래면 음수 — <strong>수익률이 아니라 MA 대비 위치입니다.</strong>
                 </li>
                 <li>
-                  레짐: 그날의 종가와 SMA({maDays}일) ± 버퍼(0.5%) 비교로 상승·중립·하락 3단계로 분류합니다.
-                  종가 {'>'} SMA × 1.005 → 상승, 종가 {'<'} SMA × 0.995 → 하락, 그 외 → 중립.
+                  레짐: <strong>슈퍼트렌드(ST) 방향이 주 신호, {maType}({maDays}일)±버퍼(지수별)가 보조</strong>입니다.
+                  ST ▲ 이고 종가가 MA+버퍼 위면 상승, ST ▼ 이고 종가가 MA−버퍼 아래면 하락, 그 외(ST·가격 불일치)는 중립.
+                  MA는 방향을 뒤집지 못하고 '아직 확인 안 됨 → 중립'으로만 유보합니다. 버퍼는 지수별로 설정됩니다.
                 </li>
               </ul>
             </div>

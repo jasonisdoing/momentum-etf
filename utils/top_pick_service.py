@@ -1413,11 +1413,11 @@ def _calculate_benchmark_regimes(bench_df: pd.DataFrame) -> pd.Series:
         _regime_step,
     )
     from config import (
-        MARKET_TREND_REGIME_BUFFER_PCT,
+        MARKET_TREND_REGIME_BUFFER_PCT_DEFAULT,
         MARKET_TREND_REGIME_MA_TYPE,
         MARKET_TREND_REGIME_SHORT_MA_DAYS,
+        MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT,
         MARKET_TREND_SUPERTREND_PERIOD,
-        MARKET_TREND_SUPERTREND_MULTIPLIER,
     )
     from utils.moving_averages import calculate_moving_average
 
@@ -1437,25 +1437,22 @@ def _calculate_benchmark_regimes(bench_df: pd.DataFrame) -> pd.Series:
     # 2. 휩소 방지용 부드러운 종가 (20일 MA)
     close_smooth = ma_series
     
-    # 3. 슈퍼트렌드 계산
+    # 3. 슈퍼트렌드 계산 (벤치마크는 시장추세 지수 목록에 없으므로 공통 기본 곱수를 쓴다)
     supertrend_dir_series = None
     try:
         st_df = _calculate_supertrend(
             df,
             period=MARKET_TREND_SUPERTREND_PERIOD,
-            multiplier=MARKET_TREND_SUPERTREND_MULTIPLIER,
+            multiplier=MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT,
         )
         if st_df is not None and "direction" in st_df.columns:
             supertrend_dir_series = st_df["direction"]
     except Exception:
         pass
 
-    # 4. 일별 레짐 계산 step 실행
+    # 4. 일별 레짐 계산 (ST 방향 주도 + MA±버퍼 보조)
     regimes = {}
-    prev_regime = None
-    strong = None
-    streak = 0
-    
+
     st_dir_map = {}
     if supertrend_dir_series is not None:
         st_dir_map = supertrend_dir_series.dropna().to_dict()
@@ -1465,18 +1462,12 @@ def _calculate_benchmark_regimes(bench_df: pd.DataFrame) -> pd.Series:
         st_dir = st_dir_map.get(date_value)
         if st_dir is not None:
             st_dir = int(st_dir)
-            
-        regime, strong, streak = _regime_step(
+
+        regimes[date_value] = _regime_step(
             float(close_series.iloc[idx]),
             float(close_smooth.iloc[idx]),
-            float(ma_series.iloc[idx]),
-            float(ma_series.iloc[idx]),
-            strong,
-            streak,
-            supertrend_dir=st_dir,
-            prev_regime=prev_regime,
+            st_dir,
+            MARKET_TREND_REGIME_BUFFER_PCT_DEFAULT,
         )
-        prev_regime = regime
-        regimes[date_value] = regime
-        
+
     return pd.Series(regimes)

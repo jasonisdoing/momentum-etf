@@ -4,9 +4,9 @@ import { MarketTrendClient } from "./MarketTrendClient";
 export const dynamic = "force-dynamic";
 
 type MarketTrendDefaults = {
+  ma_type: string;
   ma_days: number;
   score_anchor_percentile: number;
-  buffer_pct: number;
 };
 
 export default async function MarketTrendPage() {
@@ -14,9 +14,9 @@ export default async function MarketTrendPage() {
   const defaults = await fetchFastApiJson<MarketTrendDefaults>("/internal/market-trend/defaults");
   return (
     <MarketTrendClient
+      maType={defaults.ma_type}
       maDays={defaults.ma_days}
       scoreAnchorPercentile={defaults.score_anchor_percentile}
-      bufferPct={defaults.buffer_pct}
     />
   );
 }
