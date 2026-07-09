@@ -388,6 +388,7 @@ export function TopPickSettingsClient() {
   const [approving, setApproving] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
   const [approvedAt, setApprovedAt] = useState<string | null>(null);
+  const [approvedWeights, setApprovedWeights] = useState<TopPickWeightPreview | null>(null);
   const [preview, setPreview] = useState<TopPickWeightPreview | null>(null);
   const [previewMode, setPreviewMode] = useState<"weights" | "backtest">("weights");
   const [backtestResult, setBacktestResult] = useState<LabResult | null>(null);
@@ -425,7 +426,8 @@ export function TopPickSettingsClient() {
       setSettings({ ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? null);
-      setPreview(data.approved_weights ?? null);
+      setApprovedWeights(data.approved_weights ?? null);
+      setPreview(null);
       const backtestSettings = data.backtest_settings ?? DEFAULT_BACKTEST_SETTINGS;
       const benchmark = backtestSettings.benchmark ?? DEFAULT_BACKTEST_BENCHMARK;
       setBacktestBenchmarkTicker(benchmark.ticker || DEFAULT_BACKTEST_BENCHMARK.ticker);
@@ -577,16 +579,6 @@ export function TopPickSettingsClient() {
     }
   }, [settings, toast, validTickers]);
 
-  useEffect(() => {
-    if (loading || autoRunStartedRef.current) {
-      return;
-    }
-    autoRunStartedRef.current = true;
-    if (validTickers.length >= 3 && settings.ACCOUNT_ID) {
-      void runPreview();
-    }
-  }, [loading, runPreview, settings.ACCOUNT_ID, validTickers.length]);
-
   const approvePreview = async () => {
     if (!preview) {
       toast.error("먼저 실행해서 계산 결과를 확인해주세요.");
@@ -603,6 +595,7 @@ export function TopPickSettingsClient() {
       if (!resp.ok || data.error) {
         throw new Error(data.error ?? "탑픽 비중 확인 저장에 실패했습니다.");
       }
+      setApprovedWeights(data);
       setPreview(data);
       setApprovedAt(data.approved_at ?? null);
       if (data.tickers && data.tickers.length > 0) {
@@ -981,17 +974,19 @@ export function TopPickSettingsClient() {
                       onChange={(event) => updateSetting("MAX_WEIGHT", event.target.value)}
                     />
                   </label>
-                  <label className="appLabeledField" style={{ minWidth: 130 }}>
+                  <label className="appLabeledField" style={{ minWidth: 140 }}>
                     <span className="appLabeledFieldLabel">현금 최대 비중(%)</span>
-                    <input
-                      type="number"
-                      className="form-control form-control-sm"
-                      min={0}
-                      max={100}
-                      step={0.1}
+                    <select
+                      className="form-select form-select-sm"
                       value={settings.CASH_MAX_WEIGHT}
                       onChange={(event) => updateSetting("CASH_MAX_WEIGHT", event.target.value)}
-                    />
+                    >
+                      {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((ratio) => (
+                        <option key={ratio} value={ratio}>
+                          {ratio}
+                        </option>
+                      ))}
+                    </select>
                   </label>
                   <label className="appLabeledField" style={{ minWidth: 180 }}>
                     <span className="appLabeledFieldLabel">적용 계좌</span>
@@ -1212,25 +1207,18 @@ export function TopPickSettingsClient() {
             </div>
           </div>
         </div>
-        <div className="card appCard">
-          <div className="card-body">
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
-              <div>
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>
-                  {previewMode === "backtest" ? "백테스트 결과" : "비중 미리보기"}
-                </h2>
-                <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>
-                  {previewMode === "backtest"
-                    ? "백테스트 결과와 종목별 성과를 검토합니다."
-                    : "실행 결과를 검토한 뒤 확인 저장하면 확정 비중으로 저장됩니다."}
-                </p>
+        {previewMode === "backtest" ? (
+          <div className="card appCard">
+            <div className="card-body">
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+                <div>
+                  <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>백테스트 결과</h2>
+                  <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>
+                    백테스트 결과와 종목별 성과를 검토합니다.
+                  </p>
+                </div>
               </div>
-              {previewMode === "weights" ? (
-                <div style={{ color: "#64748b", fontSize: "0.82rem", whiteSpace: "nowrap" }}>마지막 확인 저장: {approvedLabel}</div>
-              ) : null}
-            </div>
-            {previewMode === "backtest" ? (
-              backtestResult ? (
+              {backtestResult ? (
                 <div className="topPickBacktestResultLayout">
                   <div className="topPickBacktestTopLayout">
                     <div className="topPickBacktestResultPanel">
@@ -1286,33 +1274,86 @@ export function TopPickSettingsClient() {
                 <div style={{ color: "#64748b", fontSize: "0.9rem" }}>
                   {backtestRunning ? "백테스트 실행 중..." : "백테스트 버튼을 누르면 결과가 여기에 표시됩니다."}
                 </div>
-              )
-            ) : preview?.rows && preview.rows.length > 0 ? (
-              <>
-                <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
-                  기준일 {preview.as_of_date ?? "-"} · {preview.settings?.MA_TYPE ?? settings.MA_TYPE}{" "}
-                  {preview.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
+              )}
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, width: "100%" }}>
+            {/* 1. 저장된 비중 카드 */}
+            <div className="card appCard">
+              <div className="card-body">
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+                  <div>
+                    <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>저장된 비중</h2>
+                    <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>
+                      실제 계좌에 적용되어 운용 중인 확정 포트폴리오 비중입니다.
+                    </p>
+                  </div>
+                  <div style={{ color: "#64748b", fontSize: "0.82rem", whiteSpace: "nowrap" }}>마지막 확인 저장: {approvedLabel}</div>
                 </div>
-                <AppAgGrid<TopPickWeightRow>
-                  rowData={preview.rows}
-                  columnDefs={previewColumns}
-                  minHeight="auto"
-                  className="topPickPreviewGrid"
-                  theme={previewGridTheme}
-                  getRowId={(params) => params.data.ticker}
-                  gridOptions={previewGridOptions}
-                />
-                {preview.missing_tickers && preview.missing_tickers.length > 0 && (
-                  <div style={{ color: "#b45309", fontSize: "0.85rem", marginTop: 10 }}>
-                    가격 캐시 누락: {preview.missing_tickers.join(", ")}
+                {approvedWeights?.rows && approvedWeights.rows.length > 0 ? (
+                  <>
+                    <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
+                      기준일 {approvedWeights.as_of_date ?? "-"} · {approvedWeights.settings?.MA_TYPE ?? settings.MA_TYPE}{" "}
+                      {approvedWeights.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
+                    </div>
+                    <AppAgGrid<TopPickWeightRow>
+                      rowData={approvedWeights.rows}
+                      columnDefs={previewColumns}
+                      minHeight="auto"
+                      className="topPickPreviewGrid"
+                      theme={previewGridTheme}
+                      getRowId={(params) => params.data.ticker}
+                      gridOptions={previewGridOptions}
+                    />
+                  </>
+                ) : (
+                  <div style={{ color: "#64748b", fontSize: "0.9rem", padding: "10px 0" }}>저장된 비중 정보가 없습니다.</div>
+                )}
+              </div>
+            </div>
+
+            {/* 2. 계산된 비중 카드 */}
+            <div className="card appCard">
+              <div className="card-body">
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}>
+                  <div>
+                    <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>계산된 비중</h2>
+                    <p style={{ color: "#64748b", fontSize: "0.9rem", margin: 0 }}>
+                      현재 설정 조건으로 계산된 실시간 시뮬레이션 비중입니다.
+                    </p>
+                  </div>
+                </div>
+                {preview?.rows && preview.rows.length > 0 ? (
+                  <>
+                    <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
+                      기준일 {preview.as_of_date ?? "-"} · {preview.settings?.MA_TYPE ?? settings.MA_TYPE}{" "}
+                      {preview.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
+                    </div>
+                    <AppAgGrid<TopPickWeightRow>
+                      rowData={preview.rows}
+                      columnDefs={previewColumns}
+                      minHeight="auto"
+                      className="topPickPreviewGrid"
+                      theme={previewGridTheme}
+                      getRowId={(params) => params.data.ticker}
+                      gridOptions={previewGridOptions}
+                    />
+                    {preview.missing_tickers && preview.missing_tickers.length > 0 && (
+                      <div style={{ color: "#b45309", fontSize: "0.85rem", marginTop: 10 }}>
+                        가격 캐시 누락: {preview.missing_tickers.join(", ")}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div style={{ color: "#64748b", fontSize: "0.9rem", padding: "10px 0" }}>
+                    실시간 계산을 수행하거나 설정을 변경하면 새로운 계산 비중 결과가 여기에 표시됩니다.
                   </div>
                 )}
-              </>
-            ) : (
-              <div style={{ color: "#64748b", fontSize: "0.9rem" }}>아직 실행 결과가 없습니다.</div>
-            )}
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </div>
       <style jsx global>{`
         .topPickSettingsLayout {
