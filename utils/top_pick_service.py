@@ -27,6 +27,8 @@ ALLOWED_MA_TYPES = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"}
 DEFAULT_SETTINGS: dict[str, Any] = {
     "MA_TYPE": "SMA",
     "MA_MONTHS": 6,
+    "TREND_WEIGHT_RATIO": 100,
+    "SORTINO_MONTHS": 3,
     "MIN_WEIGHT": 5,
     "MAX_WEIGHT": 40,
     "CASH_MAX_WEIGHT": 40,
@@ -113,6 +115,9 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
             row["country_code"] = country_code
         if isinstance(item.get("is_etf"), bool):
             row["is_etf"] = item["is_etf"]
+        nickname = str(item.get("nickname") or "").strip()
+        if nickname:
+            row["nickname"] = nickname
         clean.append(row)
     return clean
 
@@ -133,6 +138,22 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     if not (1 <= ma_months <= 24):
         raise ValueError(f"MA_MONTHS 은 1 ~ 24 범위여야 합니다: {ma_months}")
     cleaned["MA_MONTHS"] = ma_months
+
+    try:
+        trend_weight_ratio = int(source.get("TREND_WEIGHT_RATIO"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"TREND_WEIGHT_RATIO 은 정수여야 합니다: {source.get('TREND_WEIGHT_RATIO')}") from exc
+    if not (0 <= trend_weight_ratio <= 100):
+        raise ValueError(f"TREND_WEIGHT_RATIO 은 0 ~ 100 범위여야 합니다: {trend_weight_ratio}")
+    cleaned["TREND_WEIGHT_RATIO"] = trend_weight_ratio
+
+    try:
+        sortino_months = int(source.get("SORTINO_MONTHS"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"SORTINO_MONTHS 은 정수여야 합니다: {source.get('SORTINO_MONTHS')}") from exc
+    if not (1 <= sortino_months <= 6):
+        raise ValueError(f"SORTINO_MONTHS 은 1 ~ 6 범위여야 합니다: {sortino_months}")
+    cleaned["SORTINO_MONTHS"] = sortino_months
 
     float_ranges = {
         "MIN_WEIGHT": (1.0, 100.0),
@@ -215,8 +236,8 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
         "settings": settings,
         "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings")),
         "approved_weights": _enrich_weight_rows_with_returns(approved_weights, tickers),
-        "approved_at": approved_at.isoformat() if isinstance(approved_at, datetime) else None,
-        "updated_at": updated_at.isoformat() if isinstance(updated_at, datetime) else None,
+        "approved_at": (approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at).isoformat() if isinstance(approved_at, datetime) else None,
+        "updated_at": (updated_at.replace(tzinfo=timezone.utc) if updated_at.tzinfo is None else updated_at).isoformat() if isinstance(updated_at, datetime) else None,
     }
 
 
@@ -250,10 +271,6 @@ def save_top_pick_settings(
                 "backtest_settings": clean_backtest_settings,
                 "updated_at": updated_at,
             },
-            "$unset": {
-                "approved_weights": "",
-                "approved_at": "",
-            },
         },
         upsert=True,
     )
@@ -261,6 +278,8 @@ def save_top_pick_settings(
         "tickers": clean_tickers,
         "settings": clean_settings,
         "backtest_settings": clean_backtest_settings,
+        "approved_weights": current.get("approved_weights"),
+        "approved_at": current.get("approved_at"),
         "updated_at": updated_at.isoformat(),
     }
 
@@ -582,10 +601,13 @@ def _apply_trade_plan(
         row["return_pct"] = None
         row["pnl_krw"] = None
         row["bucket"] = None
+        if "nickname" not in row:
+            row["nickname"] = None
 
         if ticker == "__CASH__":
             row["current_amount_krw"] = account_snapshot["cash_balance_krw"]
             row["bucket"] = "5. 현금"
+            row["nickname"] = None
             continue
 
         current_price = current_price_map.get(ticker)
@@ -696,7 +718,7 @@ def _enrich_weight_rows_with_returns(payload: Any, tickers: list[dict[str, Any]]
     daily_change_map = _build_daily_change_map(tickers, close_frame)
     settings = _clean_settings(payload.get("settings") if isinstance(payload.get("settings"), dict) else None)
     eval_date = close_frame.index.max() if not close_frame.empty else None
-    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, 3)
+    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, int(settings["SORTINO_MONTHS"]))
     sortino_raw_row = (
         sortino_raw_frame.loc[eval_date]
         if eval_date is not None and eval_date in sortino_raw_frame.index
@@ -723,12 +745,84 @@ def _enrich_weight_rows_with_returns(payload: Any, tickers: list[dict[str, Any]]
                 "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
             }
         )
+    _normalize_target_weight_pct_rows(enriched_rows)
     trade_summary = (
         _apply_trade_plan(enriched_rows, settings=settings, tickers=tickers, close_frame=close_frame)
         if settings.get("ACCOUNT_ID")
         else {}
     )
     return {**payload, "rows": enriched_rows, "trade_summary": trade_summary}
+
+
+def _normalize_target_weight_pct_rows(rows: list[dict[str, Any]]) -> None:
+    weight_rows = [
+        row
+        for row in rows
+        if row.get("target_weight_pct") is not None
+    ]
+    if not weight_rows:
+        return
+
+    floors: list[int] = []
+    remainders: list[float] = []
+    raw_values: list[float] = []
+    for row in weight_rows:
+        raw_value = max(0.0, float(row.get("target_weight_pct") or 0.0))
+        raw_tenths = raw_value * 10.0
+        floor_tenths = int(np.floor(raw_tenths))
+        floors.append(floor_tenths)
+        remainders.append(raw_tenths - floor_tenths)
+        raw_values.append(raw_value)
+
+    tenths = floors[:]
+    diff = 1000 - sum(tenths)
+    if diff > 0:
+        order = sorted(range(len(weight_rows)), key=lambda idx: (remainders[idx], raw_values[idx]), reverse=True)
+        for idx in range(diff):
+            tenths[order[idx % len(order)]] += 1
+    elif diff < 0:
+        order = sorted(range(len(weight_rows)), key=lambda idx: (remainders[idx], -raw_values[idx]))
+        for _ in range(abs(diff)):
+            for idx in order:
+                if tenths[idx] > 0:
+                    tenths[idx] -= 1
+                    break
+
+    for row, value in zip(weight_rows, tenths):
+        row["target_weight_pct"] = round(value / 10.0, 1)
+
+
+def _normalize_weight_ratio_map(weights: dict[str, float]) -> dict[str, float]:
+    if not weights:
+        return weights
+
+    keys = list(weights.keys())
+    floors: list[int] = []
+    remainders: list[float] = []
+    raw_values: list[float] = []
+    for key in keys:
+        raw_value = max(0.0, float(weights.get(key) or 0.0))
+        raw_tenths = raw_value * 1000.0
+        floor_tenths = int(np.floor(raw_tenths))
+        floors.append(floor_tenths)
+        remainders.append(raw_tenths - floor_tenths)
+        raw_values.append(raw_value)
+
+    tenths = floors[:]
+    diff = 1000 - sum(tenths)
+    if diff > 0:
+        order = sorted(range(len(keys)), key=lambda idx: (remainders[idx], raw_values[idx]), reverse=True)
+        for idx in range(diff):
+            tenths[order[idx % len(order)]] += 1
+    elif diff < 0:
+        order = sorted(range(len(keys)), key=lambda idx: (remainders[idx], -raw_values[idx]))
+        for _ in range(abs(diff)):
+            for idx in order:
+                if tenths[idx] > 0:
+                    tenths[idx] -= 1
+                    break
+
+    return {key: round(value / 1000.0, 4) for key, value in zip(keys, tenths)}
 
 
 def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) -> pd.DataFrame:
@@ -757,6 +851,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
     min_weight = float(settings["MIN_WEIGHT"]) / 100.0
     max_weight = float(settings["MAX_WEIGHT"]) / 100.0
     cash_max_weight = float(settings["CASH_MAX_WEIGHT"]) / 100.0
+    forced_cash_weight: float | None = None
     if min_weight * len(tickers) > 1.0:
         raise ValueError("최소 비중과 종목 수가 맞지 않습니다. 최소 비중을 낮추거나 종목 수를 줄이세요.")
     if (max_weight * len(tickers)) + cash_max_weight < 1.0:
@@ -778,6 +873,8 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
                     current_regime = regimes.loc[latest_date]
                     if current_regime == "accel_up":
                         cash_max_weight = 0.0
+                    elif current_regime == "accel_down":
+                        forced_cash_weight = cash_max_weight
     except Exception:
         pass
 
@@ -794,8 +891,11 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
         }
     ]
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
-    sortino_frame = compute_secondary_metric_points(close_frame, "SORTINO", window_months=3)
-    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, 3)
+    sortino_months = int(settings["SORTINO_MONTHS"])
+    trend_share = float(settings["TREND_WEIGHT_RATIO"]) / 100.0
+    sortino_share = 1.0 - trend_share
+    sortino_frame = compute_secondary_metric_points(close_frame, "SORTINO", window_months=sortino_months)
+    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, sortino_months)
 
     eval_date = close_frame.index.max()
     composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
@@ -816,7 +916,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
         sortino_raw_value = sortino_raw_row.get(ticker)
         point_trend = None if pd.isna(trend_value) else float(trend_value)
         point_sortino = 0.0 if pd.isna(sortino_value) else float(sortino_value)
-        score = point_trend
+        score = None if point_trend is None else (trend_share * point_trend) + (sortino_share * point_sortino)
         if score is not None:
             raw_scores[ticker] = score
 
@@ -829,6 +929,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
             {
                 "ticker": ticker,
                 "name": meta.get("name") or ticker,
+                "nickname": meta.get("nickname"),
                 "ticker_type": meta.get("ticker_type"),
                 "country_code": meta.get("country_code"),
                 **return_map.get(
@@ -859,11 +960,12 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
         min_weight=min_weight,
         max_weight=max_weight,
         cash_max_weight=cash_max_weight,
+        forced_cash_weight=forced_cash_weight,
     )
     for row in rows:
         weight = weights.get(row["ticker"])
         if weight is not None:
-            row["target_weight_pct"] = round(weight * 100.0, 2)
+            row["target_weight_pct"] = weight * 100.0
 
     cash_weight = weights.get("__CASH__")
     if cash_weight is not None and cash_weight > 0:
@@ -882,10 +984,11 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
                 "sortino_score": None,
                 "sortino": None,
                 "score": None,
-                "target_weight_pct": round(cash_weight * 100.0, 2),
+                "target_weight_pct": cash_weight * 100.0,
                 "rebalance_needed": None,
             }
         )
+    _normalize_target_weight_pct_rows(rows)
 
     # 1. top-pick-settings 에 저장된 tickers 순서 로드
     ordered_tickers = []
@@ -1020,12 +1123,17 @@ def _calculate_top_pick_weights_on_date(
     settings: dict[str, Any],
     composite_frame: pd.DataFrame,
     trend_frame: pd.DataFrame,
+    sortino_frame: pd.DataFrame,
+    forced_cash_weight: float | None = None,
 ) -> dict[str, float] | None:
     if eval_date not in composite_frame.index:
         return None
 
     composite_row = composite_frame.loc[eval_date]
     trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
+    sortino_row = sortino_frame.loc[eval_date] if eval_date in sortino_frame.index else pd.Series(dtype=float)
+    trend_share = float(settings["TREND_WEIGHT_RATIO"]) / 100.0
+    sortino_share = 1.0 - trend_share
     raw_scores: dict[str, float] = {}
     defensive_tickers: set[str] = set()
 
@@ -1035,7 +1143,9 @@ def _calculate_top_pick_weights_on_date(
         if pd.isna(trend_value):
             continue
         point_trend = float(trend_value)
-        raw_scores[ticker] = point_trend
+        sortino_value = sortino_row.get(ticker)
+        point_sortino = 0.0 if pd.isna(sortino_value) else float(sortino_value)
+        raw_scores[ticker] = (trend_share * point_trend) + (sortino_share * point_sortino)
 
         trend_pct = trend_row.get(ticker)
         if not pd.isna(trend_pct) and float(trend_pct) <= 0:
@@ -1044,13 +1154,15 @@ def _calculate_top_pick_weights_on_date(
     if len(raw_scores) < 3:
         return None
 
-    return calculate_ranked_score_weights_with_cash(
+    weights = calculate_ranked_score_weights_with_cash(
         raw_scores,
         defensive_tickers=defensive_tickers,
         min_weight=float(settings["MIN_WEIGHT"]) / 100.0,
         max_weight=float(settings["MAX_WEIGHT"]) / 100.0,
         cash_max_weight=float(settings["CASH_MAX_WEIGHT"]) / 100.0,
+        forced_cash_weight=forced_cash_weight,
     )
+    return _normalize_weight_ratio_map(weights)
 
 
 def run_top_pick_backtest(
@@ -1084,6 +1196,11 @@ def run_top_pick_backtest(
     candidate_close = close_frame[ticker_order].sort_index()
     composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
     trend_frame = trend_by_order[1]
+    sortino_frame = compute_secondary_metric_points(
+        candidate_close,
+        "SORTINO",
+        window_months=int(clean_settings["SORTINO_MONTHS"]),
+    )
 
     simulation_columns = list(dict.fromkeys(ticker_order + [benchmark["ticker"]]))
     simulation_frame = close_frame[simulation_columns].sort_index()
@@ -1109,10 +1226,14 @@ def run_top_pick_backtest(
     for date in requested_rebalance_dates:
         # 그날의 벤치마크 시장 레짐에 따라 동적으로 현금 비중 제어
         adjusted_settings = clean_settings.copy()
+        forced_cash_weight = None
         regime = benchmark_regimes.get(date)
         if regime == "accel_up":
             # 시장 상승 시 현금 최대 비중을 0%로 강제 (100% 주식 가동)
             adjusted_settings["CASH_MAX_WEIGHT"] = 0
+        elif regime == "accel_down":
+            # 시장 하락 시 설정된 현금 최대 비중을 우선 확보한다.
+            forced_cash_weight = float(clean_settings["CASH_MAX_WEIGHT"]) / 100.0
 
         weights = _calculate_top_pick_weights_on_date(
             date,
@@ -1120,6 +1241,8 @@ def run_top_pick_backtest(
             adjusted_settings,
             composite_frame,
             trend_frame,
+            sortino_frame,
+            forced_cash_weight=forced_cash_weight,
         )
         if weights is not None:
             weights_by_date[date] = weights
@@ -1357,4 +1480,3 @@ def _calculate_benchmark_regimes(bench_df: pd.DataFrame) -> pd.Series:
         regimes[date_value] = regime
         
     return pd.Series(regimes)
-
