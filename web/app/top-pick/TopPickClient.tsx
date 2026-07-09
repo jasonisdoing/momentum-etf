@@ -213,14 +213,6 @@ export function TopPickClient() {
           return <span style={{ color }}>{formatted}</span>;
         },
       },      {
-        field: "target_weight_pct",
-        headerName: "목표비중",
-        width: 110,
-        type: "rightAligned",
-        cellStyle: { fontWeight: 800 },
-        cellRenderer: (params: { value: number | null | undefined }) => formatWeightPct(params.value),
-      },
-      {
         field: "current_price",
         headerName: "현재가",
         width: 112,
@@ -228,11 +220,12 @@ export function TopPickClient() {
         cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
       },
       {
-        field: "target_amount_krw",
-        headerName: "목표금액",
-        width: 128,
+        field: "target_weight_pct",
+        headerName: "목표비중",
+        width: 110,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
+        cellStyle: { fontWeight: 800 },
+        cellRenderer: (params: { value: number | null | undefined }) => formatWeightPct(params.value),
       },
       {
         field: "target_quantity",
