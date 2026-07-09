@@ -499,12 +499,25 @@ def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
                 "current_quantity": 0,
                 "current_amount_krw": 0,
                 "name": str(row.get("name") or ticker),
+                "pnl_krw": 0.0,
+                "buy_amount_krw": 0.0,
+                "return_pct": 0.0,
             },
         )
         current["current_quantity"] += int(float(row.get("quantity") or 0))
         current["current_amount_krw"] += int(round(float(row.get("valuation_krw") or 0)))
+        current["pnl_krw"] += float(row.get("pnl_krw_num") or 0.0)
+        current["buy_amount_krw"] += float(row.get("buy_amount_krw") or 0.0)
         if not current.get("name"):
             current["name"] = str(row.get("name") or ticker)
+
+    for ticker, current in holdings.items():
+        buy_amt = current["buy_amount_krw"]
+        pnl = current["pnl_krw"]
+        if buy_amt > 0:
+            current["return_pct"] = round((pnl / buy_amt) * 100.0, 2)
+        else:
+            current["return_pct"] = 0.0
 
     return {
         "account_id": account_id,
@@ -545,6 +558,8 @@ def _apply_trade_plan(
         row["current_amount_krw"] = None
         row["change_quantity"] = None
         row["unallocated_amount_krw"] = target_amount
+        row["return_pct"] = None
+        row["pnl_krw"] = None
 
         if ticker == "__CASH__":
             row["current_amount_krw"] = account_snapshot["cash_balance_krw"]
@@ -557,6 +572,8 @@ def _apply_trade_plan(
         current_amount = int(holding.get("current_amount_krw") or 0)
         row["current_quantity"] = current_quantity
         row["current_amount_krw"] = current_amount
+        row["return_pct"] = holding.get("return_pct")
+        row["pnl_krw"] = holding.get("pnl_krw")
         if target_amount is None or current_price is None or current_price <= 0:
             continue
 
@@ -598,6 +615,8 @@ def _apply_trade_plan(
                 "current_amount_krw": current_amount,
                 "change_quantity": -current_quantity,
                 "unallocated_amount_krw": 0,
+                "return_pct": holding.get("return_pct"),
+                "pnl_krw": holding.get("pnl_krw"),
             }
         )
 
@@ -612,6 +631,7 @@ def _apply_trade_plan(
         target_weight = float(row.get("target_weight_pct") or 0.0)
         current_amount = float(row.get("current_amount_krw") or 0.0)
         current_weight = (current_amount / account_amount_krw) * 100.0 if account_amount_krw > 0 else 0.0
+        row["current_weight_pct"] = round(current_weight, 2)
         row["change_weight_pct"] = round(target_weight - current_weight, 2)
 
     return {

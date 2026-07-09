@@ -13,11 +13,11 @@ type TopPickRow = {
   name: string;
   ticker_type?: string;
   country_code?: string;
-  trend_pct: number | null;
-  trend_score: number | null;
-  sortino_score: number | null;
+  trend_pct?: number | null;
+  trend_score?: number | null;
+  sortino_score?: number | null;
   sortino?: number | null;
-  score: number | null;
+  score?: number | null;
   target_weight_pct: number | null;
   current_price?: number | null;
   target_amount_krw?: number | null;
@@ -27,6 +27,9 @@ type TopPickRow = {
   change_quantity?: number | null;
   change_weight_pct?: number | null;
   unallocated_amount_krw?: number | null;
+  return_pct?: number | null;
+  pnl_krw?: number | null;
+  current_weight_pct?: number | null;
 };
 
 type TopPickTradeSummary = {
@@ -183,25 +186,32 @@ export function TopPickClient() {
         flex: 1,
       },
       {
-        field: "trend_pct",
-        headerName: "추세(%)",
+        field: "return_pct",
+        headerName: "수익률",
         width: 100,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null || Number.isNaN(params.value)) return "-";
+          const val = params.value;
+          const formatted = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+          const color = val === 0 ? "#1e293b" : val > 0 ? "#d63939" : "#206bc4";
+          return <span style={{ color }}>{formatted}</span>;
+        },
       },
       {
-        field: "trend_score",
-        headerName: "추세점수",
-        width: 100,
+        field: "pnl_krw",
+        headerName: "평가손익",
+        width: 128,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
-      },
-      {
-        field: "sortino",
-        headerName: "Sortino",
-        width: 100,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null || Number.isNaN(params.value)) return "-";
+          const val = params.value;
+          const formatted = `${val > 0 ? "+" : ""}${val.toLocaleString()}원`;
+          const color = val === 0 ? "#1e293b" : val > 0 ? "#d63939" : "#206bc4";
+          return <span style={{ color }}>{formatted}</span>;
+        },
       },      {
         field: "target_weight_pct",
         headerName: "목표비중",
@@ -245,6 +255,16 @@ export function TopPickClient() {
         width: 128,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
+      },
+      {
+        field: "current_weight_pct",
+        headerName: "현재비중",
+        width: 100,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null || Number.isNaN(params.value)) return "-";
+          return `${params.value.toFixed(1)}%`;
+        },
       },
       {
         field: "change_weight_pct",

@@ -1915,7 +1915,7 @@ function AccountHoldingsDetailPanel({
         />
       </div>
 
-      <div className="assetsNoteSection mt-3 pt-3 border-top">
+      <div className="assetsNoteSection mt-1 pt-2 border-top">
         <div className="assetsNoteSectionHeader">
           <div className="noteMetaRow">
             {noteLoading ? (
@@ -2645,8 +2645,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return 38;
         }
         const rowCount = (params.data.rows?.length ?? 0) + 1;
-        // 기본 테이블 높이 + 메모 섹션(약 220px) 추가
-        return 50 + 34 + rowCount * 42 + 48 + 220;
+        // 기본 테이블 높이 + 메모 섹션(약 130px) 추가
+        return 50 + 34 + rowCount * 42 + 48 + 130;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
