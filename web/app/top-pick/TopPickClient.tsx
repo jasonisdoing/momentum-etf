@@ -30,6 +30,7 @@ type TopPickRow = {
   return_pct?: number | null;
   pnl_krw?: number | null;
   current_weight_pct?: number | null;
+  bucket?: string | null;
 };
 
 type TopPickTradeSummary = {
@@ -173,6 +174,23 @@ export function TopPickClient() {
   const columns = useMemo<ColDef<TopPickRow>[]>(
     () => [
       {
+        field: "bucket",
+        headerName: "버킷",
+        width: 100,
+        cellClass: (params) => {
+          const match = /^(\d+)/.exec(String(params.value || "").trim());
+          const num = match ? match[1] : "";
+          if (params.data?.ticker === "__CASH__" || params.value?.includes("현금")) {
+            return "appBucketCell";
+          }
+          return num ? `appBucketCell appBucketCell${num}` : "appBucketCell";
+        },
+        cellRenderer: (params: { value: string | null | undefined; data?: TopPickRow }) => {
+          if (!params.value || params.data?.ticker === "__CASH__" || params.value.includes("현금")) return "-";
+          return params.value;
+        },
+      },
+      {
         field: "ticker",
         headerName: "티커",
         width: 110,
@@ -197,6 +215,17 @@ export function TopPickClient() {
           const formatted = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
           const color = val === 0 ? "#1e293b" : val > 0 ? "#d63939" : "#206bc4";
           return <span style={{ color }}>{formatted}</span>;
+        },
+      },
+      {
+        field: "current_weight_pct",
+        headerName: "현재비중",
+        width: 100,
+        type: "rightAligned",
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null || Number.isNaN(params.value)) return "-";
+          return `${params.value.toFixed(1)}%`;
         },
       },
       {
@@ -248,16 +277,6 @@ export function TopPickClient() {
         width: 128,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
-      },
-      {
-        field: "current_weight_pct",
-        headerName: "현재비중",
-        width: 100,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          if (params.value == null || Number.isNaN(params.value)) return "-";
-          return `${params.value.toFixed(1)}%`;
-        },
       },
       {
         field: "change_weight_pct",
@@ -334,7 +353,7 @@ export function TopPickClient() {
               columnDefs={columns}
               loading={loading}
               minHeight="auto"
-              className="topPickWeightGrid"
+              className="topPickWeightGrid assetsAgGrid"
               theme={gridTheme}
               getRowId={(params) => params.data.ticker}
               gridOptions={gridOptions}

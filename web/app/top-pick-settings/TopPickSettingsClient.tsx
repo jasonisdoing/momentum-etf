@@ -532,6 +532,7 @@ export function TopPickSettingsClient() {
       setSettings({ ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(null);
+      setApprovedWeights(null);
       setPreview(null);
       const backtestSettings = data.backtest_settings ?? DEFAULT_BACKTEST_SETTINGS;
       const benchmark = backtestSettings.benchmark ?? DEFAULT_BACKTEST_BENCHMARK;
@@ -1319,7 +1320,7 @@ export function TopPickSettingsClient() {
                       {approvedWeights.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
                     </div>
                     <AppAgGrid<TopPickWeightRow>
-                      rowData={approvedWeights.rows}
+                      rowData={approvedWeights.rows.filter(r => r.ticker === "__CASH__" || validTickers.some(vt => vt.ticker === r.ticker))}
                       columnDefs={previewColumns}
                       minHeight="auto"
                       className="topPickPreviewGrid"
@@ -1352,7 +1353,7 @@ export function TopPickSettingsClient() {
                       {preview.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
                     </div>
                     <AppAgGrid<TopPickWeightRow>
-                      rowData={preview.rows}
+                      rowData={preview.rows.filter(r => r.ticker === "__CASH__" || validTickers.some(vt => vt.ticker === r.ticker))}
                       columnDefs={previewColumns}
                       minHeight="auto"
                       className="topPickPreviewGrid"
