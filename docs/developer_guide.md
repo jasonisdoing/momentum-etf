@@ -74,6 +74,7 @@ python infra/server_scheduler.py
     *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
+    *   `top_pick_service.py`: 탑픽 설정 저장, 적용 계좌 기준 목표 비중·목표수량 계산, 탑픽 전용 백테스트와 가격 변동이 반영된 매주 금요일 기준 종목·현금별 평가금액 이력(`weight_history`) 생성을 담당합니다. Next API `/api/top-pick-settings/backtest`는 FastAPI `/internal/top-pick/backtest`로 프록시합니다.
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
 

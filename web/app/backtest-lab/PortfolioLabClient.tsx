@@ -1,12 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ColDef, GridOptions } from "ag-grid-community";
 import { ColorType, LineSeries, createChart } from "lightweight-charts";
 import type { Time } from "lightweight-charts";
 
+import { AppAgGrid } from "../components/AppAgGrid";
 import { AppModal } from "../components/AppModal";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
+import { createAppGridTheme } from "../components/app-grid-theme";
 
 type LabTicker = { ticker: string; name?: string };
 
@@ -44,6 +47,7 @@ type LabResult = {
 type SavedPortfolio = { name: string; tickers: LabTicker[]; months: number; benchmark?: LabTicker; rebalance?: string; updated_at?: string | null };
 
 const DEFAULT_BENCHMARK: LabTicker = { ticker: "069500", name: "KODEX 200" };
+const positionGridTheme = createAppGridTheme();
 
 const REBALANCE_OPTIONS: { value: string; label: string }[] = [
   { value: "none", label: "리밸런싱 없음 (보유)" },
@@ -70,6 +74,13 @@ function signedClass(value: number): string {
   if (value > 0) return "#d63939";
   if (value < 0) return "#206bc4";
   return "#475569";
+}
+
+function renderSignedPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  return <span style={{ color: signedClass(value) }}>{value.toFixed(2)}%</span>;
 }
 
 /** 포트폴리오 vs 벤치마크 누적수익률(%) 라인 차트. */
@@ -283,6 +294,86 @@ export function PortfolioLabClient() {
     </div>
   );
 
+  const positionColumns = useMemo<ColDef<LabPosition>[]>(
+    () => [
+      {
+        field: "name",
+        headerName: "종목",
+        minWidth: 240,
+        flex: 1,
+        cellRenderer: (params: { data?: LabPosition }) => {
+          const row = params.data;
+          return row ? `${row.name ?? row.ticker} (${row.ticker})` : "-";
+        },
+      },
+      {
+        field: "buy_date",
+        headerName: "매수일",
+        width: 110,
+        cellRenderer: (params: { data?: LabPosition; value?: string }) => {
+          const suffix = params.data?.late_entry ? " ↩" : "";
+          return `${params.value ?? "-"}${suffix}`;
+        },
+      },
+      {
+        field: "buy_price",
+        headerName: "매수가",
+        width: 110,
+        type: "rightAligned",
+        cellRenderer: (params: { value?: number | null }) =>
+          params.value == null ? "-" : new Intl.NumberFormat("ko-KR").format(params.value),
+      },
+      {
+        field: "last_price",
+        headerName: "현재가",
+        width: 110,
+        type: "rightAligned",
+        cellRenderer: (params: { value?: number | null }) =>
+          params.value == null ? "-" : new Intl.NumberFormat("ko-KR").format(params.value),
+      },
+      {
+        field: "return_pct",
+        headerName: "수익률",
+        width: 100,
+        type: "rightAligned",
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value?: number | null }) => renderSignedPercent(params.value),
+      },
+      {
+        field: "mdd_pct",
+        headerName: "MDD",
+        width: 100,
+        type: "rightAligned",
+        cellRenderer: (params: { value?: number | null }) =>
+          params.value == null ? "-" : <span style={{ color: "#d63939" }}>{params.value.toFixed(2)}%</span>,
+      },
+      {
+        field: "sortino",
+        headerName: "Sortino",
+        width: 100,
+        type: "rightAligned",
+        cellRenderer: (params: { value?: number | null }) =>
+          params.value == null || Number.isNaN(params.value) ? "-" : params.value.toFixed(2),
+      },
+      {
+        field: "value",
+        headerName: "평가금액",
+        width: 140,
+        type: "rightAligned",
+        cellRenderer: (params: { value?: number | null }) => (params.value == null ? "-" : formatKrw(params.value)),
+      },
+    ],
+    [],
+  );
+
+  const positionGridOptions = useMemo<GridOptions<LabPosition>>(
+    () => ({
+      domLayout: "autoHeight",
+      suppressMovableColumns: true,
+    }),
+    [],
+  );
+
   return (
     <PageFrame title="🧪 백테스트 실험">
       <div className="appPageStack" style={{ maxWidth: 1400 }}>
@@ -436,60 +527,25 @@ export function PortfolioLabClient() {
 
         {/* 하단: 종목별 성과 (전체 폭) */}
         {result ? (
-          <>
-                <div className="card appCard">
-                  <div className="card-body">
-                    <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 8 }}>종목별 성과</h2>
-                    {result.has_late_entry ? (
-                      <p style={{ color: "#b45309", background: "rgba(245,158,11,0.08)", fontSize: "0.8rem", padding: "6px 10px", borderRadius: 6, marginBottom: 10 }}>
-                        ⚠️ 실험 시작 이후 상장된 종목은 배정 예산을 현금으로 대기시켰다가 상장일 종가에 편입합니다 (상장 전 구간은 합성하지 않음).
-                      </p>
-                    ) : null}
-                    <div style={{ overflowX: "auto" }}>
-                      <table className="table table-sm" style={{ fontSize: "0.85rem" }}>
-                        <thead>
-                          <tr>
-                            <th>종목</th>
-                            <th>매수일</th>
-                            <th style={{ textAlign: "right" }}>매수가</th>
-                            <th style={{ textAlign: "right" }}>현재가</th>
-                            <th style={{ textAlign: "right" }}>수익률</th>
-                            <th style={{ textAlign: "right" }}>MDD</th>
-                            <th style={{ textAlign: "right" }}>Sortino</th>
-                            <th style={{ textAlign: "right" }}>평가금액</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {result.positions.map((p) => (
-                            <tr key={p.ticker}>
-                              <td>
-                                {p.name} <span style={{ color: "#94a3b8" }}>({p.ticker})</span>
-                              </td>
-                              <td style={{ whiteSpace: "nowrap", color: p.late_entry ? "#b45309" : "#64748b" }}>
-                                {p.buy_date}
-                                {p.late_entry ? " ↩" : ""}
-                              </td>
-                              <td style={{ textAlign: "right" }}>{new Intl.NumberFormat("ko-KR").format(p.buy_price)}</td>
-                              <td style={{ textAlign: "right" }}>{new Intl.NumberFormat("ko-KR").format(p.last_price)}</td>
-                              <td style={{ textAlign: "right", fontWeight: 700, color: signedClass(p.return_pct) }}>
-                                {p.return_pct.toFixed(2)}%
-                              </td>
-                              <td style={{ textAlign: "right", color: "#d63939", whiteSpace: "nowrap" }}>
-                                {p.mdd_pct.toFixed(2)}%
-                                <span style={{ color: "#94a3b8", fontSize: "0.72rem", marginLeft: 4 }}>
-                                  ({p.mdd_start.replaceAll("-", "/")}~{p.mdd_end.replaceAll("-", "/")})
-                                </span>
-                              </td>
-                              <td style={{ textAlign: "right" }}>{p.sortino.toFixed(2)}</td>
-                              <td style={{ textAlign: "right" }}>{formatKrw(p.value)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </div>
-          </>
+          <div className="card appCard">
+            <div className="card-body">
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 8 }}>종목별 성과</h2>
+              {result.has_late_entry ? (
+                <p style={{ color: "#b45309", background: "rgba(245,158,11,0.08)", fontSize: "0.8rem", padding: "6px 10px", borderRadius: 6, marginBottom: 10 }}>
+                  ⚠️ 실험 시작 이후 상장된 종목은 배정 예산을 현금으로 대기시켰다가 상장일 종가에 편입합니다 (상장 전 구간은 합성하지 않음).
+                </p>
+              ) : null}
+              <AppAgGrid<LabPosition>
+                rowData={result.positions}
+                columnDefs={positionColumns}
+                minHeight="auto"
+                className="portfolioLabPositionGrid"
+                theme={positionGridTheme}
+                getRowId={(params) => params.data.ticker}
+                gridOptions={positionGridOptions}
+              />
+            </div>
+          </div>
         ) : null}
       </div>
 
@@ -513,6 +569,15 @@ export function PortfolioLabClient() {
           ))
         )}
       </AppModal>
+      <style jsx global>{`
+        .portfolioLabPositionGrid {
+          height: auto !important;
+        }
+
+        .portfolioLabPositionGrid .appAgGridTheme {
+          height: auto;
+        }
+      `}</style>
     </PageFrame>
   );
 }
