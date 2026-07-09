@@ -846,21 +846,18 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
             }
         )
 
-    # 1. 적용 계좌(ACCOUNT_ID)에 저장된 holdings 순서 로드
+    # 1. top-pick-settings 에 저장된 tickers 순서 로드
     ordered_tickers = []
-    account_id = str(settings.get("ACCOUNT_ID") or "").strip()
-    if account_id:
-        try:
-            from utils.holdings_detail_service import load_portfolio_master
-            master = load_portfolio_master(account_id)
-            if master:
-                holdings = master.get("holdings", []) or []
-                ordered_tickers = [
-                    str(h.get("ticker") or "").strip().upper().replace("KR:", "")
-                    for h in holdings
-                ]
-        except Exception:
-            pass
+    try:
+        doc = _db()[COLLECTION].find_one({"_id": SETTINGS_ID})
+        if doc:
+            tickers_list = doc.get("tickers") or []
+            ordered_tickers = [
+                str(t.get("ticker") or "").strip().upper().replace("KR:", "")
+                for t in tickers_list
+            ]
+    except Exception:
+        pass
 
     # 2. 정렬 매핑 테이블 구축 및 정렬 적용
     ticker_order_map = {ticker: idx for idx, ticker in enumerate(ordered_tickers)}
