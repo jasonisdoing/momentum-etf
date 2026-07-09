@@ -845,7 +845,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           r.순위 != null &&
           !r.exclude_from_ranking &&
           !r.is_benchmark &&
-          !r.is_below_benchmark &&
           (r.점수 ?? 0) > 0
       )
       .sort((a, b) => {
@@ -1794,7 +1793,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const headerSummary = useMemo<RankHeaderSummary>(() => {
     const totalCount = gridRows.length;
     const upCount = gridRows.filter(
-      (r) => (r["점수"] ?? 0) > 0 && !r.is_below_benchmark && !r.is_benchmark && !r.exclude_from_ranking
+      (r) => (r["점수"] ?? 0) > 0 && !r.is_benchmark && !r.exclude_from_ranking
     ).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
     const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
@@ -2048,7 +2047,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
                   const scoreVal = params.data?.점수 ?? 0;
-                  if (scoreVal <= 0 || params.data?.is_below_benchmark) {
+                  if (scoreVal <= 0) {
                     classes.push("rankNegativeTrendRow");
                   }
                   if (params.data?.exclude_from_ranking) {

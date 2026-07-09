@@ -254,9 +254,9 @@ export function TopPickClient() {
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (params.value == null || Number.isNaN(params.value)) return "-";
-          const val = params.value;
-          const formatted = `${val > 0 ? "+" : ""}${val.toFixed(1)}%`;
-          const color = val === 0 ? "#475569" : val > 0 ? "#d63939" : "#206bc4";
+          const val1d = Number(params.value.toFixed(1));
+          const formatted = `${val1d > 0 ? "+" : ""}${val1d.toFixed(1)}%`;
+          const color = val1d === 0 ? "#475569" : val1d > 0 ? "#d63939" : "#206bc4";
           return <span style={{ color }}>{formatted}</span>;
         },
       },
