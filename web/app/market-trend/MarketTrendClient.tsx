@@ -114,11 +114,13 @@ type MarketTrendClientProps = {
   // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
   maDays: number;
   scoreAnchorPercentile: number;
+  bufferPct: number;
 };
 
 export function MarketTrendClient({
   maDays,
   scoreAnchorPercentile,
+  bufferPct,
 }: MarketTrendClientProps) {
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);

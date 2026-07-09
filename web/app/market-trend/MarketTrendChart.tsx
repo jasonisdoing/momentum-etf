@@ -600,8 +600,8 @@ export function MarketTrendChart({
         if (point.supertrend_dir === null || point.supertrend_dir === undefined) return;
         if (prevDir !== null && point.supertrend_dir !== prevDir) {
           const isUp = point.supertrend_dir === 1;
-          const lowVal = (point.low !== null && point.low !== undefined) ? point.low : point.close;
-          const highVal = (point.high !== null && point.high !== undefined) ? point.high : point.close;
+          const lowVal = ((point.low !== null && point.low !== undefined) ? point.low : point.close) as number;
+          const highVal = ((point.high !== null && point.high !== undefined) ? point.high : point.close) as number;
           
           // 캔들 고가/저가로부터 수직으로 한참 먼 6.5% 간격을 벌려 공중에 띄웁니다.
           const offsetPrice = isUp ? lowVal * 0.935 : highVal * 1.065;

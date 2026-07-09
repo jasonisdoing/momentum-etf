@@ -27,6 +27,7 @@ from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
+from .routes.top_pick import router as top_pick_router
 from .routes.us_market_stocks import router as us_market_stocks_router
 from .routes.weekly import router as weekly_router
 from .routes.yearly import router as yearly_router
@@ -84,6 +85,7 @@ app.include_router(momentum_backtest_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
+app.include_router(top_pick_router)
 from fastapi import Request
 from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse
