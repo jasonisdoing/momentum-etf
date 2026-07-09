@@ -184,8 +184,8 @@ type GaugeData = {
  * 12개월 추세% 범위를 가로 막대로 표시.
  *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
  * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
- * 오늘 핀의 색은 현재 레짐(레벨 기반: 장기MA 방향 × 단기MA±버퍼 모멘텀)으로 칠한다.
- * (레짐 밴드는 그리지 않음 — 단기MA 조건·연속일 상태가 있어 1D 위치 밴드로 표현할 수 없다.)
+ * 오늘 핀의 색은 현재 레짐(슈퍼트렌드 방향 주도 + MA±버퍼 보조)으로 칠한다.
+ * (레짐 밴드는 그리지 않음 — 슈퍼트렌드 방향 조건이 있어 1D 위치 밴드로 표현할 수 없다.)
  */
 function computeGaugeData({
   trend,
@@ -418,7 +418,7 @@ export function MarketTrendChart({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rangeKey, setRangeKey] = useState<ChartRangeKey>("6m");
-  const [showSuperTrend, setShowSuperTrend] = useState<boolean>(true);
+  const showSuperTrend = true; // 슈퍼트렌드 지표는 항상 표시 (체크박스 제거)
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const bandOverlayRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -616,7 +616,6 @@ export function MarketTrendChart({
             position: "inBar", // 오프셋된 가격선 바로 그 자리에 정교하게 안착시킴
             color: isUp ? "#fa5252" : "#228be6",
             shape: isUp ? "arrowUp" : "arrowDown",
-            text: isUp ? "상승 시작" : "하락 시작",
             size: 1.5,
           });
         }
@@ -1049,16 +1048,6 @@ export function MarketTrendChart({
                 </button>
               ))}
             </div>
-
-            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.82rem", color: "#495057", cursor: "pointer", userSelect: "none" }}>
-              <input
-                type="checkbox"
-                checked={showSuperTrend}
-                onChange={(e) => setShowSuperTrend(e.target.checked)}
-                style={{ cursor: "pointer" }}
-              />
-              <strong>슈퍼트렌드(SuperTrend) 지표 표시</strong>
-            </label>
           </div>
           <div style={{ position: "relative", width: "100%", minHeight: 220, flex: "1 1 auto" }}>
             <div

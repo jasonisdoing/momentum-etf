@@ -38,6 +38,7 @@ def _load_ticker_types_payload() -> list[dict[str, Any]]:
             "order": config["order"],
             "name": config["name"],
             "icon": config["icon"],
+            "country_code": config.get("country_code", ""),
         }
         for config in configs
     ]

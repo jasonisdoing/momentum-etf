@@ -15,9 +15,9 @@ def get_market_trend_defaults(
 ) -> dict[str, object]:
     """화면 표시용 MA/추세점수 설정 (config.py 가 단일 진실 소스)."""
     return {
+        "ma_type": config.MARKET_TREND_REGIME_MA_TYPE,
         "ma_days": config.MARKET_TREND_REGIME_SHORT_MA_DAYS,
         "score_anchor_percentile": config.MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
-        "buffer_pct": config.MARKET_TREND_REGIME_BUFFER_PCT,
     }
 
 

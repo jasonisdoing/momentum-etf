@@ -1410,7 +1410,7 @@ export function TopPickSettingsClient() {
                 {approvedWeights?.rows && approvedWeights.rows.length > 0 ? (
                   <>
                     <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
-                      기준일 {approvedWeights.as_of_date ?? "-"} · {formatScoreSettingLabel(approvedWeights.settings)}
+                      기준일 {approvedWeights.as_of_date ?? "-"} · {formatScoreSettingLabel(approvedWeights.settings)} · 벤치마크 {backtestBenchmarkName || backtestBenchmarkTicker || "-"}
                     </div>
                     <AppAgGrid<TopPickWeightRow>
                       rowData={approvedWeights.rows.filter(r => r.ticker === "__CASH__" || validTickers.some(vt => vt.ticker === r.ticker))}
@@ -1442,7 +1442,7 @@ export function TopPickSettingsClient() {
                 {preview?.rows && preview.rows.length > 0 ? (
                   <>
                     <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
-                      기준일 {preview.as_of_date ?? "-"} · {formatScoreSettingLabel(preview.settings)}
+                      기준일 {preview.as_of_date ?? "-"} · {formatScoreSettingLabel(preview.settings)} · 벤치마크 {backtestBenchmarkName || backtestBenchmarkTicker || "-"}
                     </div>
                     <AppAgGrid<TopPickWeightRow>
                       rowData={preview.rows.filter(r => r.ticker === "__CASH__" || validTickers.some(vt => vt.ticker === r.ticker))}
