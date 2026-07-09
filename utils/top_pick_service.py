@@ -502,6 +502,7 @@ def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
                 "pnl_krw": 0.0,
                 "buy_amount_krw": 0.0,
                 "return_pct": 0.0,
+                "bucket": row.get("bucket"),
             },
         )
         current["current_quantity"] += int(float(row.get("quantity") or 0))
@@ -526,6 +527,26 @@ def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
         "cash_balance_krw": int(round(float(summary.get("cash_balance_krw") or 0))),
         "holdings": holdings,
     }
+
+
+def _normalize_bucket_label(bucket_val: Any) -> str | None:
+    if not bucket_val:
+        return None
+    val_str = str(bucket_val).strip()
+    if not val_str:
+        return None
+    import re
+    pure_name = re.sub(r"^(\d+\.\s*)+", "", val_str).strip()
+
+    mapping = {
+        "모멘텀": "1. 모멘텀",
+        "시장지수": "2. 시장지수",
+        "배당방어": "3. 배당방어",
+        "비당방어": "3. 배당방어",
+        "대체헷지": "4. 대체헷지",
+        "현금": "5. 현금"
+    }
+    return mapping.get(pure_name, val_str)
 
 
 def _apply_trade_plan(
@@ -560,9 +581,11 @@ def _apply_trade_plan(
         row["unallocated_amount_krw"] = target_amount
         row["return_pct"] = None
         row["pnl_krw"] = None
+        row["bucket"] = None
 
         if ticker == "__CASH__":
             row["current_amount_krw"] = account_snapshot["cash_balance_krw"]
+            row["bucket"] = "5. 현금"
             continue
 
         current_price = current_price_map.get(ticker)
@@ -574,6 +597,23 @@ def _apply_trade_plan(
         row["current_amount_krw"] = current_amount
         row["return_pct"] = holding.get("return_pct")
         row["pnl_krw"] = holding.get("pnl_krw")
+        bucket_val = holding.get("bucket")
+        if not bucket_val:
+            try:
+                from utils.db_manager import get_db_connection
+                db = get_db_connection()
+                if db is not None:
+                    meta_doc = db.stock_meta.find_one({"ticker_type": row.get("ticker_type"), "ticker": ticker})
+                    if meta_doc:
+                        b_id = meta_doc.get("bucket")
+                        if b_id is not None:
+                            from config import ALL_BUCKET_MAPPING
+                            bucket_name = ALL_BUCKET_MAPPING.get(int(b_id))
+                            if bucket_name:
+                                bucket_val = f"{b_id}. {bucket_name}"
+            except Exception:
+                pass
+        row["bucket"] = _normalize_bucket_label(bucket_val)
         if target_amount is None or current_price is None or current_price <= 0:
             continue
 
@@ -617,6 +657,7 @@ def _apply_trade_plan(
                 "unallocated_amount_krw": 0,
                 "return_pct": holding.get("return_pct"),
                 "pnl_krw": holding.get("pnl_krw"),
+                "bucket": _normalize_bucket_label(holding.get("bucket")),
             }
         )
 
