@@ -773,6 +773,27 @@ export function TopPickSettingsClient() {
     [],
   );
 
+  const calculatedGridOptions = useMemo<GridOptions<TopPickWeightRow>>(
+    () => ({
+      domLayout: "autoHeight",
+      suppressMovableColumns: true,
+      getRowStyle: (params) => {
+        if (!params.data) return undefined;
+        const ticker = params.data.ticker;
+        const targetW = Number((params.data.target_weight_pct ?? 0).toFixed(1));
+        
+        const approvedItem = approvedWeights?.rows?.find((r) => r.ticker === ticker);
+        const approvedW = Number((approvedItem ? (approvedItem.target_weight_pct ?? 0) : 0).toFixed(1));
+        
+        if (targetW !== approvedW) {
+          return { backgroundColor: "rgba(249, 115, 22, 0.08)" };
+        }
+        return undefined;
+      },
+    }),
+    [approvedWeights],
+  );
+
   const backtestPositionColumns = useMemo<ColDef<LabPosition>[]>(
     () => [
       {
@@ -1337,7 +1358,7 @@ export function TopPickSettingsClient() {
                       className="topPickPreviewGrid"
                       theme={previewGridTheme}
                       getRowId={(params) => params.data.ticker}
-                      gridOptions={previewGridOptions}
+                      gridOptions={calculatedGridOptions}
                     />
                     {preview.missing_tickers && preview.missing_tickers.length > 0 && (
                       <div style={{ color: "#b45309", fontSize: "0.85rem", marginTop: 10 }}>
