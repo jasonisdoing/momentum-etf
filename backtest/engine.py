@@ -455,10 +455,6 @@ def _simulate_one_combo(
         portfolio_value_local = cash + float(np.dot(shares[priced_mask], close_today[priced_mask]))
 
         composite_today = composite_values[signal_idx].copy()
-        if benchmark_composite_scores is not None:
-            bm_score = benchmark_composite_scores[signal_idx]
-            if not np.isnan(bm_score):
-                composite_today[composite_today < bm_score] = np.nan
         if w_hold > 0:
             held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
             composite_today[held_bonus_mask] += w_hold * 100.0
