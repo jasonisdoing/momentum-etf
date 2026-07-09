@@ -7,6 +7,7 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 
 type TopPickRow = {
   ticker: string;
@@ -31,6 +32,8 @@ type TopPickRow = {
   pnl_krw?: number | null;
   current_weight_pct?: number | null;
   bucket?: string | null;
+  daily_change_pct?: number | null;
+  nickname?: string | null;
 };
 
 type TopPickTradeSummary = {
@@ -68,7 +71,7 @@ function formatWeightPct(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
   }
-  return `${Number(value.toFixed(1))}%`;
+  return `${value.toFixed(1)}%`;
 }
 
 function formatKrw(value: number | null | undefined): string {
@@ -142,6 +145,36 @@ export function TopPickClient() {
   const tradeSummary = payload?.trade_summary ?? {};
   const cashWeight = rows.find((row) => row.ticker === "__CASH__")?.target_weight_pct ?? null;
   const etfCount = rows.filter((row) => row.ticker !== "__CASH__").length;
+ 
+  const totalDailyReturn = useMemo(() => {
+    if (!rows || rows.length === 0) return 0;
+    let sumWeight = 0;
+    let weightedReturnSum = 0;
+    for (const row of rows) {
+      const weight = row.current_weight_pct ?? 0;
+      const dailyChange = row.daily_change_pct ?? 0;
+      weightedReturnSum += dailyChange * weight;
+      sumWeight += weight;
+    }
+    return sumWeight > 0 ? weightedReturnSum / sumWeight : 0;
+  }, [rows]);
+ 
+  const accountActualReturn = useMemo(() => {
+    if (!rows || rows.length === 0) return 0;
+    let totalBuyAmount = 0;
+    let totalPnl = 0;
+    for (const row of rows) {
+      if (row.ticker === "__CASH__") continue;
+      const pnl = row.pnl_krw ?? 0;
+      const currentAmount = row.current_amount_krw ?? 0;
+      totalPnl += pnl;
+      const buyAmount = currentAmount - pnl;
+      if (buyAmount > 0) {
+        totalBuyAmount += buyAmount;
+      }
+    }
+    return totalBuyAmount > 0 ? (totalPnl / totalBuyAmount) * 100.0 : 0;
+  }, [rows]);
 
   const titleRight = useMemo(
     () => (
@@ -193,9 +226,10 @@ export function TopPickClient() {
       {
         field: "ticker",
         headerName: "티커",
-        width: 110,
-        cellStyle: { fontWeight: 700 },
-        cellRenderer: (params: { value: string | null | undefined }) => formatTicker(params.value),
+        width: 98,
+        cellRenderer: (params: { value: string | null | undefined }) => (
+          <TickerDetailLink ticker={params.value} />
+        ),
       },
       {
         field: "name",
@@ -204,9 +238,26 @@ export function TopPickClient() {
         flex: 1,
       },
       {
-        field: "return_pct",
-        headerName: "수익률",
-        width: 100,
+        field: "nickname",
+        headerName: "설명",
+        width: 192,
+        cellRenderer: (params: { value: string | null | undefined }) => params.value || "-",
+      },
+      {
+        field: "current_weight_pct",
+        headerName: "현재비중",
+        width: 88,
+        type: "rightAligned",
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null || Number.isNaN(params.value)) return "-";
+          return `${params.value.toFixed(1)}%`;
+        },
+      },
+      {
+        field: "daily_change_pct",
+        headerName: "일간(%)",
+        width: 88,
         type: "rightAligned",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => {
@@ -218,20 +269,30 @@ export function TopPickClient() {
         },
       },
       {
-        field: "current_weight_pct",
-        headerName: "현재비중",
-        width: 100,
+        field: "current_price",
+        headerName: "현재가",
+        width: 98,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
+      },
+      {
+        field: "return_pct",
+        headerName: "수익률",
+        width: 88,
         type: "rightAligned",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (params.value == null || Number.isNaN(params.value)) return "-";
-          return `${params.value.toFixed(1)}%`;
+          const val = params.value;
+          const formatted = `${val > 0 ? "+" : ""}${val.toFixed(2)}%`;
+          const color = val === 0 ? "#1e293b" : val > 0 ? "#d63939" : "#206bc4";
+          return <span style={{ color }}>{formatted}</span>;
         },
       },
       {
         field: "pnl_krw",
         headerName: "평가손익",
-        width: 128,
+        width: 114,
         type: "rightAligned",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => {
@@ -242,16 +303,9 @@ export function TopPickClient() {
           return <span style={{ color }}>{formatted}</span>;
         },
       },      {
-        field: "current_price",
-        headerName: "현재가",
-        width: 112,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
-      },
-      {
         field: "target_weight_pct",
         headerName: "목표비중",
-        width: 110,
+        width: 84,
         type: "rightAligned",
         cellStyle: { fontWeight: 800 },
         cellRenderer: (params: { value: number | null | undefined }) => formatWeightPct(params.value),
@@ -259,7 +313,7 @@ export function TopPickClient() {
       {
         field: "target_quantity",
         headerName: "목표수량",
-        width: 110,
+        width: 84,
         type: "rightAligned",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => formatQuantity(params.value),
@@ -267,21 +321,21 @@ export function TopPickClient() {
       {
         field: "current_quantity",
         headerName: "현재수량",
-        width: 110,
+        width: 84,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatQuantity(params.value),
       },
       {
         field: "current_amount_krw",
         headerName: "현재금액",
-        width: 128,
+        width: 114,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatKrw(params.value),
       },
       {
         field: "change_weight_pct",
         headerName: "변동비중",
-        width: 100,
+        width: 84,
         type: "rightAligned",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => {
@@ -295,7 +349,7 @@ export function TopPickClient() {
       {
         field: "change_quantity",
         headerName: "변동수량",
-        width: 110,
+        width: 84,
         type: "rightAligned",
         cellStyle: { fontWeight: 800 },
         cellRenderer: (params: { value: number | null | undefined }) => (
@@ -308,7 +362,6 @@ export function TopPickClient() {
 
   const gridOptions = useMemo<GridOptions<TopPickRow>>(
     () => ({
-      domLayout: "autoHeight",
       suppressMovableColumns: true,
       overlayNoRowsTemplate: '<span style="color:#667382;">표시할 탑픽 비중이 없습니다.</span>',
     }),
@@ -325,6 +378,7 @@ export function TopPickClient() {
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>목표 비중</h2>
                 <div style={{ color: "#64748b", fontSize: "0.86rem" }}>
                   기준일 {payload?.as_of_date ?? "-"} · {settings ? `${settings.MA_TYPE} ${settings.MA_MONTHS}개월 (추세 100%)` : "설정 없음"}
+                  {settings ? ` · 적용계좌 ${tradeSummary.account_name ?? settings.ACCOUNT_ID} · 최소 ${settings.MIN_WEIGHT}% · 최대 ${settings.MAX_WEIGHT}% · 현금 최대 ${settings.CASH_MAX_WEIGHT}%` : ""}
                 </div>
               </div>
               <div className="appMainHeaderRight">
@@ -334,8 +388,20 @@ export function TopPickClient() {
               </div>
             </div>
             {settings ? (
-              <div style={{ color: "#64748b", fontSize: "0.82rem", marginTop: 8 }}>
-                적용계좌 {tradeSummary.account_name ?? settings.ACCOUNT_ID} · 최소 {settings.MIN_WEIGHT}% · 최대 {settings.MAX_WEIGHT}% · 현금 최대 {settings.CASH_MAX_WEIGHT}%
+              <div style={{ fontSize: "0.86rem", marginTop: 8, display: "flex", gap: 16, alignItems: "center" }}>
+                <div>
+                  포트폴리오 수익률{" "}
+                  <span style={{ color: totalDailyReturn === 0 ? "#1e293b" : totalDailyReturn > 0 ? "#d63939" : "#206bc4", fontWeight: 700 }}>
+                    {totalDailyReturn > 0 ? "+" : ""}{totalDailyReturn.toFixed(2)}%
+                  </span>
+                </div>
+                <div style={{ color: "#cbd5e1" }}>|</div>
+                <div>
+                  계좌 수익률(실제수익){" "}
+                  <span style={{ color: accountActualReturn === 0 ? "#1e293b" : accountActualReturn > 0 ? "#d63939" : "#206bc4", fontWeight: 700 }}>
+                    {accountActualReturn > 0 ? "+" : ""}{accountActualReturn.toFixed(2)}%
+                  </span>
+                </div>
               </div>
             ) : null}
             {missing.length > 0 ? (
@@ -347,12 +413,12 @@ export function TopPickClient() {
         </div>
 
         <div className="card appCard">
-          <div className="card-body appCardBodyTight">
+          <div className="card-body p-2">
             <AppAgGrid<TopPickRow>
               rowData={rows}
               columnDefs={columns}
               loading={loading}
-              minHeight="auto"
+              minHeight="480px"
               className="topPickWeightGrid assetsAgGrid"
               theme={gridTheme}
               getRowId={(params) => params.data.ticker}
@@ -363,11 +429,10 @@ export function TopPickClient() {
       </div>
       <style jsx global>{`
         .topPickWeightGrid {
-          height: auto !important;
+          height: 480px !important;
         }
-
         .topPickWeightGrid .appAgGridTheme {
-          height: auto;
+          height: 480px !important;
         }
       `}</style>
     </PageFrame>

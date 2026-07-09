@@ -114,12 +114,14 @@ def calculate_ranked_score_weights_with_cash(
     min_weight: float = 0.10,
     max_weight: float = 0.30,
     cash_max_weight: float = 0.40,
+    forced_cash_weight: float | None = None,
     cash_ticker: str = "__CASH__",
 ) -> dict[str, float]:
     """방어 대상 종목을 최소 비중에 가깝게 두고 남는 비중 일부를 현금으로 배분한다.
 
     방어 대상은 추세가 음수인 종목처럼 추가 비중을 주기 꺼려지는 대상을 뜻한다.
     현금 비중은 `방어 대상 비율 × 현금 최대 비중`을 기본값으로 사용한다.
+    `forced_cash_weight`가 있으면 벤치마크 레짐 같은 상위 정책이 지정한 현금 비중을 우선한다.
     """
     if not scores:
         raise ValueError("비중 계산에 필요한 종목 점수가 없습니다.")
@@ -145,7 +147,10 @@ def calculate_ranked_score_weights_with_cash(
     tickers = list(scores.keys())
     defensive = {ticker for ticker in defensive_tickers if ticker in scores}
     cash_capacity = min(float(cash_max_weight), max(0.0, 1.0 - (len(tickers) * min_weight)))
-    cash_weight = cash_capacity * (len(defensive) / n) if defensive else 0.0
+    if forced_cash_weight is None:
+        cash_weight = cash_capacity * (len(defensive) / n) if defensive else 0.0
+    else:
+        cash_weight = min(max(0.0, float(forced_cash_weight)), cash_capacity)
 
     weights = {ticker: float(min_weight) for ticker in tickers}
     remaining = max(0.0, 1.0 - cash_weight - (len(tickers) * min_weight))

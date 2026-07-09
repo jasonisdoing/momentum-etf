@@ -18,6 +18,7 @@ type TopPickTicker = {
   ticker_type?: string;
   country_code?: string;
   is_etf?: boolean;
+  nickname?: string;
 };
 
 type TopPickSettingsPayload = {
@@ -56,6 +57,8 @@ type TopPickWeightPreview = {
 type TopPickSettings = {
   MA_TYPE: string;
   MA_MONTHS: number;
+  TREND_WEIGHT_RATIO: number;
+  SORTINO_MONTHS: number;
   MIN_WEIGHT: number;
   MAX_WEIGHT: number;
   CASH_MAX_WEIGHT: number;
@@ -136,6 +139,8 @@ type TopPickWeightItem = {
 const DEFAULT_SETTINGS: TopPickSettings = {
   MA_TYPE: "SMA",
   MA_MONTHS: 6,
+  TREND_WEIGHT_RATIO: 100,
+  SORTINO_MONTHS: 3,
   MIN_WEIGHT: 5,
   MAX_WEIGHT: 40,
   CASH_MAX_WEIGHT: 40,
@@ -143,6 +148,8 @@ const DEFAULT_SETTINGS: TopPickSettings = {
 };
 
 const MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"];
+const TREND_WEIGHT_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
+const SORTINO_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6];
 const TOP_PICK_SLOT_COUNT = 10;
 const previewGridTheme = createAppGridTheme();
 const DEFAULT_BACKTEST_BENCHMARK: TopPickTicker = { ticker: "069500", name: "KODEX 200" };
@@ -194,6 +201,7 @@ function buildTickerSlots(items: TopPickTicker[] | undefined): TopPickTicker[] {
   return slots.map((item) => ({
     ...item,
     ticker: item.ticker ?? "",
+    nickname: item.nickname ?? "",
   }));
 }
 
@@ -215,7 +223,7 @@ function formatWeightPct(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) {
     return "-";
   }
-  return `${Number(value.toFixed(1))}%`;
+  return `${value.toFixed(1)}%`;
 }
 
 function formatKrw(value: number): string {
@@ -531,8 +539,8 @@ export function TopPickSettingsClient() {
       setTickers(buildTickerSlots(data.tickers));
       setSettings({ ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
       setUpdatedAt(data.updated_at ?? null);
-      setApprovedAt(null);
-      setApprovedWeights(null);
+      setApprovedAt(data.approved_at ?? approvedAt);
+      setApprovedWeights(data.approved_weights ?? approvedWeights);
       setPreview(null);
       const backtestSettings = data.backtest_settings ?? DEFAULT_BACKTEST_SETTINGS;
       const benchmark = backtestSettings.benchmark ?? DEFAULT_BACKTEST_BENCHMARK;
@@ -580,6 +588,19 @@ export function TopPickSettingsClient() {
     }
   }, [settings, toast, validTickers]);
 
+  useEffect(() => {
+    if (
+      !loading &&
+      !approvedWeights &&
+      validTickers.length >= 3 &&
+      settings.ACCOUNT_ID &&
+      !autoRunStartedRef.current
+    ) {
+      autoRunStartedRef.current = true;
+      void runPreview();
+    }
+  }, [loading, approvedWeights, validTickers, settings.ACCOUNT_ID, runPreview]);
+
   const approvePreview = async () => {
     if (!preview) {
       toast.error("먼저 실행해서 계산 결과를 확인해주세요.");
@@ -610,14 +631,28 @@ export function TopPickSettingsClient() {
     }
   };
 
-  const updatedLabel = updatedAt ? new Date(updatedAt).toLocaleString("ko-KR") : "-";
-  const approvedLabel = approvedAt ? new Date(approvedAt).toLocaleString("ko-KR") : "-";
+  const parseUtcDate = (val: string | null | undefined): string => {
+    if (!val) return "-";
+    const dateStr = val.endsWith("Z") || val.includes("+") ? val : `${val}Z`;
+    return new Date(dateStr).toLocaleString("ko-KR");
+  };
+
+  const updatedLabel = parseUtcDate(updatedAt);
+  const approvedLabel = parseUtcDate(approvedAt);
   const updateSetting = (key: keyof TopPickSettings, value: string) => {
     setPreview(null);
     setSettings((current) => ({
       ...current,
       [key]: key === "MA_TYPE" || key === "ACCOUNT_ID" ? value : Number(value),
     }));
+  };
+
+  const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
+    const maType = source?.MA_TYPE ?? settings.MA_TYPE;
+    const maMonths = source?.MA_MONTHS ?? settings.MA_MONTHS;
+    const trendWeight = source?.TREND_WEIGHT_RATIO ?? settings.TREND_WEIGHT_RATIO;
+    const sortinoMonths = source?.SORTINO_MONTHS ?? settings.SORTINO_MONTHS;
+    return `${maType} ${maMonths}개월 · 추세 ${trendWeight}% · Sortino ${100 - trendWeight}%/${sortinoMonths}개월`;
   };
 
   const resolveBacktestBenchmark = async () => {
@@ -937,94 +972,149 @@ export function TopPickSettingsClient() {
   return (
     <PageFrame title="탑픽 설정">
       <div className="appPageStack">
+        <div className="appActionHeader" style={{ padding: "0.25rem 0 0" }}>
+          <div className="appActionHeaderInner" style={{ justifyContent: "flex-end", gap: 10 }}>
+            <span style={{ color: "#64748b", fontSize: "0.82rem", whiteSpace: "nowrap" }}>마지막 저장: {updatedLabel}</span>
+            <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void saveSettings()}>
+              {saving ? "저장 중..." : "설정 저장"}
+            </button>
+          </div>
+        </div>
         <div className="topPickSettingsLayout">
           <div className="topPickSettingsLeft">
             <div className="card appCard">
               <div className="card-body">
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                  <label className="appLabeledField" style={{ minWidth: 110 }}>
-                    <span className="appLabeledFieldLabel">MA 타입</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={settings.MA_TYPE}
-                      onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
-                    >
-                      {MA_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="appLabeledField" style={{ minWidth: 110 }}>
-                    <span className="appLabeledFieldLabel">MA 개월</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={settings.MA_MONTHS}
-                      onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
-                    >
-                      {[1, 2, 3, 5, 6, 9, 12, 18, 24].map((month) => (
-                        <option key={month} value={month}>
-                          {month}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                    <label className="appLabeledField" style={{ minWidth: 110 }}>
+                      <span className="appLabeledFieldLabel">추세 타입</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings.MA_TYPE}
+                        onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
+                      >
+                        {MA_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 110 }}>
+                      <span className="appLabeledFieldLabel">추세 개월</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings.MA_MONTHS}
+                        onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
+                      >
+                        {[1, 2, 3, 5, 6, 9, 12, 18, 24].map((month) => (
+                          <option key={month} value={month}>
+                            {month}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 130 }}>
+                      <span className="appLabeledFieldLabel">추세 가중치(%)</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings.TREND_WEIGHT_RATIO}
+                        onChange={(event) => updateSetting("TREND_WEIGHT_RATIO", event.target.value)}
+                      >
+                        {TREND_WEIGHT_OPTIONS.map((ratio) => (
+                          <option key={ratio} value={ratio}>
+                            {ratio}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 120 }}>
+                      <span className="appLabeledFieldLabel">Sortino 개월</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings.SORTINO_MONTHS}
+                        onChange={(event) => updateSetting("SORTINO_MONTHS", event.target.value)}
+                      >
+                        {SORTINO_MONTH_OPTIONS.map((month) => (
+                          <option key={month} value={month}>
+                            {month}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div style={{ display: "flex", alignItems: "flex-end" }}>
+                      <button type="button" className="btn btn-sm btn-outline-primary" disabled={running} onClick={() => void runPreview()}>
+                        {running ? "비중 계산 중..." : "비중 계산"}
+                      </button>
+                    </div>
+                  </div>
 
-                  <label className="appLabeledField" style={{ minWidth: 110 }}>
-                    <span className="appLabeledFieldLabel">최소 비중(%)</span>
-                    <input
-                      type="number"
-                      className="form-control form-control-sm"
-                      min={1}
-                      max={100}
-                      step={0.1}
-                      value={settings.MIN_WEIGHT}
-                      onChange={(event) => updateSetting("MIN_WEIGHT", event.target.value)}
-                    />
-                  </label>
-                  <label className="appLabeledField" style={{ minWidth: 110 }}>
-                    <span className="appLabeledFieldLabel">최대 비중(%)</span>
-                    <input
-                      type="number"
-                      className="form-control form-control-sm"
-                      min={1}
-                      max={100}
-                      step={0.1}
-                      value={settings.MAX_WEIGHT}
-                      onChange={(event) => updateSetting("MAX_WEIGHT", event.target.value)}
-                    />
-                  </label>
-                  <label className="appLabeledField" style={{ minWidth: 140 }}>
-                    <span className="appLabeledFieldLabel">현금 최대 비중(%)</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={settings.CASH_MAX_WEIGHT}
-                      onChange={(event) => updateSetting("CASH_MAX_WEIGHT", event.target.value)}
-                    >
-                      {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((ratio) => (
-                        <option key={ratio} value={ratio}>
-                          {ratio}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="appLabeledField" style={{ minWidth: 180 }}>
-                    <span className="appLabeledFieldLabel">적용 계좌</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={settings.ACCOUNT_ID}
-                      onChange={(event) => updateSetting("ACCOUNT_ID", event.target.value)}
-                    >
-                      <option value="">계좌 선택</option>
-                      {accounts.map((account) => (
-                        <option key={account.account_id} value={account.account_id}>
-                          {account.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                    <label className="appLabeledField" style={{ minWidth: 110 }}>
+                      <span className="appLabeledFieldLabel">최소 비중(%)</span>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        min={1}
+                        max={100}
+                        step={0.1}
+                        value={settings.MIN_WEIGHT}
+                        onChange={(event) => updateSetting("MIN_WEIGHT", event.target.value)}
+                      />
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 110 }}>
+                      <span className="appLabeledFieldLabel">최대 비중(%)</span>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        min={1}
+                        max={100}
+                        step={0.1}
+                        value={settings.MAX_WEIGHT}
+                        onChange={(event) => updateSetting("MAX_WEIGHT", event.target.value)}
+                      />
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 140 }}>
+                      <span className="appLabeledFieldLabel">현금 최대 비중(%)</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings.CASH_MAX_WEIGHT}
+                        onChange={(event) => updateSetting("CASH_MAX_WEIGHT", event.target.value)}
+                      >
+                        {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((ratio) => (
+                          <option key={ratio} value={ratio}>
+                            {ratio}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 180 }}>
+                      <span className="appLabeledFieldLabel">적용 계좌</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings.ACCOUNT_ID}
+                        onChange={(event) => updateSetting("ACCOUNT_ID", event.target.value)}
+                      >
+                        <option value="">계좌 선택</option>
+                        {accounts.map((account) => (
+                          <option key={account.account_id} value={account.account_id}>
+                            {account.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div style={{ display: "flex", alignItems: "flex-end" }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm btn-success"
+                        disabled={previewMode !== "weights" || !preview || approving}
+                        onClick={() => void approvePreview()}
+                      >
+                        {approving ? "확인 저장 중..." : "확인 저장"}
+                      </button>
+                    </div>
+                  </div>
                   <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 16, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
                     💡 <strong>시장 연동형 현금 제어:</strong> 벤치마크 시장지수가 상승 추세(accel_up)일 때는 수익 극대화를 위해 현금 한도를 자동으로 <strong>0%</strong>로 낮추어 상승 종목에 풀 투자합니다.
                   </div>
@@ -1111,6 +1201,16 @@ export function TopPickSettingsClient() {
                       ))}
                     </select>
                   </label>
+                  <div style={{ display: "flex", alignItems: "flex-end" }}>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-dark"
+                      disabled={backtestRunning || validTickers.length < 3 || !backtestBenchmarkName.trim()}
+                      onClick={() => void runBacktest()}
+                    >
+                      {backtestRunning ? "백테스트 중..." : "백테스트"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -1126,7 +1226,6 @@ export function TopPickSettingsClient() {
                   티커를 입력하고 확인한 뒤 저장합니다. 저장된 종목명은 비중 화면에서 조회 기준으로 사용합니다.
                 </p>
               </div>
-              <div style={{ color: "#64748b", fontSize: "0.82rem", whiteSpace: "nowrap" }}>마지막 저장: {updatedLabel}</div>
             </div>
 
             {loading ? (
@@ -1164,11 +1263,33 @@ export function TopPickSettingsClient() {
                             }
                           }}
                         />
-                        <input
+                         <input
                           style={{ ...inputStyle, width: "100%", minWidth: 0, backgroundColor: "#f8fafc", color: "#64748b" }}
                           placeholder="종목명 (티커 입력 후 확인)"
                           value={item.name ?? ""}
                           readOnly
+                        />
+                        <input
+                          style={{
+                            ...inputStyle,
+                            width: "100%",
+                            minWidth: 0,
+                            backgroundColor: confirmed ? undefined : "#f8fafc",
+                            color: confirmed ? undefined : "#64748b",
+                          }}
+                          placeholder=""
+                          value={item.nickname ?? ""}
+                          disabled={!confirmed}
+                          onChange={(event) => {
+                            setTickers((current) =>
+                              current.map((currentItem, itemIndex) =>
+                                itemIndex === index
+                                  ? { ...currentItem, nickname: event.target.value }
+                                  : currentItem,
+                              ),
+                            );
+                            setPreview(null);
+                          }}
                         />
                         {confirmed ? (
                           <button
@@ -1196,33 +1317,6 @@ export function TopPickSettingsClient() {
                       </div>
                     );
                   })}
-                </div>
-
-                <div className="appActionHeader" style={{ marginTop: 6, padding: "0.5rem 0 0" }}>
-                  <div className="appActionHeaderInner">
-                    <button type="button" className="btn btn-sm btn-primary" disabled={saving} onClick={() => void saveSettings()}>
-                      {saving ? "저장 중..." : "저장"}
-                    </button>
-                    <button type="button" className="btn btn-sm btn-outline-primary" disabled={running} onClick={() => void runPreview()}>
-                      {running ? "비중 계산 중..." : "비중 계산"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-dark"
-                      disabled={backtestRunning || validTickers.length < 3 || !backtestBenchmarkName.trim()}
-                      onClick={() => void runBacktest()}
-                    >
-                      {backtestRunning ? "백테스트 중..." : "백테스트"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-success"
-                      disabled={previewMode !== "weights" || !preview || approving}
-                      onClick={() => void approvePreview()}
-                    >
-                      {approving ? "확인 저장 중..." : "확인 저장"}
-                    </button>
-                  </div>
                 </div>
               </div>
             )}
@@ -1316,8 +1410,7 @@ export function TopPickSettingsClient() {
                 {approvedWeights?.rows && approvedWeights.rows.length > 0 ? (
                   <>
                     <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
-                      기준일 {approvedWeights.as_of_date ?? "-"} · {approvedWeights.settings?.MA_TYPE ?? settings.MA_TYPE}{" "}
-                      {approvedWeights.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
+                      기준일 {approvedWeights.as_of_date ?? "-"} · {formatScoreSettingLabel(approvedWeights.settings)}
                     </div>
                     <AppAgGrid<TopPickWeightRow>
                       rowData={approvedWeights.rows.filter(r => r.ticker === "__CASH__" || validTickers.some(vt => vt.ticker === r.ticker))}
@@ -1349,8 +1442,7 @@ export function TopPickSettingsClient() {
                 {preview?.rows && preview.rows.length > 0 ? (
                   <>
                     <div style={{ color: "#64748b", fontSize: "0.9rem", marginBottom: 10 }}>
-                      기준일 {preview.as_of_date ?? "-"} · {preview.settings?.MA_TYPE ?? settings.MA_TYPE}{" "}
-                      {preview.settings?.MA_MONTHS ?? settings.MA_MONTHS}개월 (추세 100%)
+                      기준일 {preview.as_of_date ?? "-"} · {formatScoreSettingLabel(preview.settings)}
                     </div>
                     <AppAgGrid<TopPickWeightRow>
                       rowData={preview.rows.filter(r => r.ticker === "__CASH__" || validTickers.some(vt => vt.ticker === r.ticker))}
@@ -1432,7 +1524,7 @@ export function TopPickSettingsClient() {
 
         .topPickSlotRow {
           display: grid;
-          grid-template-columns: 28px minmax(84px, 112px) minmax(0, 1fr) 64px;
+          grid-template-columns: 28px minmax(84px, 112px) 280px 280px 64px;
           gap: 8px;
           align-items: center;
           min-width: 0;
