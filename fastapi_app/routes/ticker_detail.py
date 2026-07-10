@@ -509,28 +509,35 @@ def _apply_realtime_snapshot_to_dataframe(
     *,
     ticker: str,
     country_code: str,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, float | None]:
     country = str(country_code or "").strip().lower()
     if country not in {"kor", "au", "us"}:
-        return df
+        return df, None
 
     try:
         realtime_map = get_realtime_snapshot(country, [ticker])
     except Exception:
-        return df
+        return df, None
 
     realtime_entry = realtime_map.get(str(ticker or "").strip().upper()) or {}
     now_val = realtime_entry.get("nowVal")
     if now_val is None:
-        return df
+        return df, None
 
     try:
         realtime_price = float(now_val)
     except (TypeError, ValueError):
-        return df
+        return df, None
 
     if realtime_price <= 0:
-        return df
+        return df, None
+
+    realtime_change_pct: float | None = None
+    if country == "us" and realtime_entry.get("changeRate") is not None:
+        try:
+            realtime_change_pct = round(float(realtime_entry["changeRate"]), 2)
+        except (TypeError, ValueError):
+            realtime_change_pct = None
 
     target_trading_day = _resolve_realtime_target_trading_day(country)
     if country == "kor" and realtime_entry.get("is_pre_market") is True:
@@ -539,7 +546,7 @@ def _apply_realtime_snapshot_to_dataframe(
     adjusted = df.copy()
 
     if adjusted.empty:
-        return adjusted
+        return adjusted, realtime_change_pct
 
     close_col = "Close" if "Close" in adjusted.columns else "close"
     open_col = "Open" if "Open" in adjusted.columns else "open"
@@ -577,7 +584,7 @@ def _apply_realtime_snapshot_to_dataframe(
         adjusted.loc[latest_trading_day] = new_row
 
     adjusted.sort_index(inplace=True)
-    return adjusted
+    return adjusted, realtime_change_pct
 
 
 def _resolve_realtime_target_trading_day(country_code: str) -> pd.Timestamp | None:
@@ -803,7 +810,11 @@ def build_ticker_detail_payload(
         }
 
     df = df.sort_index()
-    df = _apply_realtime_snapshot_to_dataframe(df, ticker=db_ticker, country_code=country_code)
+    df, realtime_change_pct = _apply_realtime_snapshot_to_dataframe(
+        df,
+        ticker=db_ticker,
+        country_code=country_code,
+    )
 
     close_col = "Close" if "Close" in df.columns else "close"
     open_col = "Open" if "Open" in df.columns else "open"
@@ -838,6 +849,10 @@ def build_ticker_detail_payload(
         )
         if close is not None:
             prev_close = close
+
+    # 미국 프리·애프터마켓은 토스가 세션에 맞는 기준가로 계산한 등락률을 사용한다.
+    if rows and realtime_change_pct is not None:
+        rows[-1]["change_pct"] = realtime_change_pct
 
     holdings: list[dict[str, object]] = []
     holdings_as_of_date: str | None = None
