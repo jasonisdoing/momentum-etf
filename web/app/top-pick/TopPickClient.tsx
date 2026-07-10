@@ -55,6 +55,8 @@ type TopPickPayload = {
     MAX_WEIGHT: number;
     CASH_MAX_WEIGHT: number;
     ACCOUNT_ID: string;
+    START_AMOUNT_MANWON?: number | null;
+    START_DATE?: string | null;
   };
   trade_summary?: TopPickTradeSummary;
   error?: string;
@@ -159,22 +161,13 @@ export function TopPickClient() {
     return sumWeight > 0 ? weightedReturnSum / sumWeight : 0;
   }, [rows]);
  
-  const accountActualReturn = useMemo(() => {
-    if (!rows || rows.length === 0) return 0;
-    let totalBuyAmount = 0;
-    let totalPnl = 0;
-    for (const row of rows) {
-      if (row.ticker === "__CASH__") continue;
-      const pnl = row.pnl_krw ?? 0;
-      const currentAmount = row.current_amount_krw ?? 0;
-      totalPnl += pnl;
-      const buyAmount = currentAmount - pnl;
-      if (buyAmount > 0) {
-        totalBuyAmount += buyAmount;
-      }
-    }
-    return totalBuyAmount > 0 ? (totalPnl / totalBuyAmount) * 100.0 : 0;
-  }, [rows]);
+  // 누적 수익률 = (현재 계좌 총평가액 ÷ 시작금액 − 1) × 100. 시작금액/현재액이 없으면 null.
+  const cumulativeReturn = useMemo(() => {
+    const startKrw = (settings?.START_AMOUNT_MANWON ?? 0) * 10000;
+    const currentKrw = tradeSummary.account_amount_krw ?? 0;
+    if (startKrw <= 0 || currentKrw <= 0) return null;
+    return (currentKrw / startKrw - 1) * 100.0;
+  }, [settings?.START_AMOUNT_MANWON, tradeSummary.account_amount_krw]);
 
   const titleRight = useMemo(
     () => (
@@ -390,17 +383,21 @@ export function TopPickClient() {
             {settings ? (
               <div style={{ fontSize: "0.86rem", marginTop: 8, display: "flex", gap: 16, alignItems: "center" }}>
                 <div>
-                  포트폴리오 수익률{" "}
+                  포트폴리오 일간수익률{" "}
                   <span style={{ color: totalDailyReturn === 0 ? "#1e293b" : totalDailyReturn > 0 ? "#d63939" : "#206bc4", fontWeight: 700 }}>
                     {totalDailyReturn > 0 ? "+" : ""}{totalDailyReturn.toFixed(2)}%
                   </span>
                 </div>
                 <div style={{ color: "#cbd5e1" }}>|</div>
-                <div>
-                  계좌 수익률(실제수익){" "}
-                  <span style={{ color: accountActualReturn === 0 ? "#1e293b" : accountActualReturn > 0 ? "#d63939" : "#206bc4", fontWeight: 700 }}>
-                    {accountActualReturn > 0 ? "+" : ""}{accountActualReturn.toFixed(2)}%
-                  </span>
+                <div title={cumulativeReturn === null ? "설정 화면에서 시작금액·시작일자를 입력해야 누적수익률이 계산됩니다" : `${settings.START_DATE} · 시작금액 ${settings.START_AMOUNT_MANWON?.toLocaleString()}만원 기준`}>
+                  누적 수익률{cumulativeReturn !== null && settings.START_DATE ? `(${settings.START_DATE}~)` : ""}{" "}
+                  {cumulativeReturn === null ? (
+                    <span style={{ color: "#d63939", fontWeight: 700 }}>⚠ 시작금액 미설정</span>
+                  ) : (
+                    <span style={{ color: cumulativeReturn === 0 ? "#1e293b" : cumulativeReturn > 0 ? "#d63939" : "#206bc4", fontWeight: 700 }}>
+                      {cumulativeReturn > 0 ? "+" : ""}{cumulativeReturn.toFixed(2)}%
+                    </span>
+                  )}
                 </div>
               </div>
             ) : null}
