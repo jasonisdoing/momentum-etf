@@ -63,6 +63,8 @@ type TopPickSettings = {
   MAX_WEIGHT: number;
   CASH_MAX_WEIGHT: number;
   ACCOUNT_ID: string;
+  START_AMOUNT_MANWON: number | null;
+  START_DATE: string | null;
 };
 
 type TopPickBacktestSettings = {
@@ -136,16 +138,8 @@ type TopPickWeightItem = {
   label: string;
 };
 
-const DEFAULT_SETTINGS: TopPickSettings = {
-  MA_TYPE: "SMA",
-  MA_MONTHS: 6,
-  TREND_WEIGHT_RATIO: 100,
-  SORTINO_MONTHS: 3,
-  MIN_WEIGHT: 5,
-  MAX_WEIGHT: 40,
-  CASH_MAX_WEIGHT: 40,
-  ACCOUNT_ID: "",
-};
+// 코드 기본값 없음(silent default 금지). 설정값은 전적으로 DB(/top-pick-settings 저장)에서 온다.
+// 로드 전에는 settings=null 이며 폼은 빈 상태로 렌더되고, 로드 후 DB 값으로 채워진다.
 
 const MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"];
 const TREND_WEIGHT_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
@@ -388,7 +382,7 @@ function TopPickWeightHistoryChart({
 export function TopPickSettingsClient() {
   const toast = useToast();
   const [tickers, setTickers] = useState<TopPickTicker[]>(() => buildTickerSlots(undefined));
-  const [settings, setSettings] = useState<TopPickSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<TopPickSettings | null>(null);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -431,7 +425,7 @@ export function TopPickSettingsClient() {
       }
       setAccounts(accountsData);
       setTickers(buildTickerSlots(data.tickers));
-      setSettings({ ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
+      setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? null);
       setApprovedWeights(data.approved_weights ?? null);
@@ -508,7 +502,7 @@ export function TopPickSettingsClient() {
       toast.error("확인된 종목이 1개 이상 필요합니다.");
       return;
     }
-    if (!settings.ACCOUNT_ID) {
+    if (!settings || !settings.ACCOUNT_ID) {
       toast.error("탑픽 적용 계좌를 선택해주세요.");
       return;
     }
@@ -537,7 +531,7 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정 저장에 실패했습니다.");
       }
       setTickers(buildTickerSlots(data.tickers));
-      setSettings({ ...DEFAULT_SETTINGS, ...(data.settings ?? {}) });
+      setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? approvedAt);
       setApprovedWeights(data.approved_weights ?? approvedWeights);
@@ -562,7 +556,7 @@ export function TopPickSettingsClient() {
       toast.error("비중 계산에는 확인된 종목이 3개 이상 필요합니다.");
       return;
     }
-    if (!settings.ACCOUNT_ID) {
+    if (!settings || !settings.ACCOUNT_ID) {
       toast.error("탑픽 적용 계좌를 선택해주세요.");
       return;
     }
@@ -593,13 +587,13 @@ export function TopPickSettingsClient() {
       !loading &&
       !approvedWeights &&
       validTickers.length >= 3 &&
-      settings.ACCOUNT_ID &&
+      settings?.ACCOUNT_ID &&
       !autoRunStartedRef.current
     ) {
       autoRunStartedRef.current = true;
       void runPreview();
     }
-  }, [loading, approvedWeights, validTickers, settings.ACCOUNT_ID, runPreview]);
+  }, [loading, approvedWeights, validTickers, settings?.ACCOUNT_ID, runPreview]);
 
   const approvePreview = async () => {
     if (!preview) {
@@ -641,18 +635,27 @@ export function TopPickSettingsClient() {
   const approvedLabel = parseUtcDate(approvedAt);
   const updateSetting = (key: keyof TopPickSettings, value: string) => {
     setPreview(null);
-    setSettings((current) => ({
-      ...current,
-      [key]: key === "MA_TYPE" || key === "ACCOUNT_ID" ? value : Number(value),
-    }));
+    setSettings((current) => {
+      if (!current) return current; // 로드 전에는 편집 불가
+      let next: string | number | null;
+      if (key === "MA_TYPE" || key === "ACCOUNT_ID" || key === "START_DATE") {
+        next = value; // 문자열 그대로 (빈 값은 저장 시 백엔드가 None 처리)
+      } else if (key === "START_AMOUNT_MANWON") {
+        next = value === "" ? null : Number(value); // 미설정은 null (임의 0 보정 금지)
+      } else {
+        next = Number(value);
+      }
+      return { ...current, [key]: next };
+    });
   };
 
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
-    const maType = source?.MA_TYPE ?? settings.MA_TYPE;
-    const maMonths = source?.MA_MONTHS ?? settings.MA_MONTHS;
-    const trendWeight = source?.TREND_WEIGHT_RATIO ?? settings.TREND_WEIGHT_RATIO;
-    const sortinoMonths = source?.SORTINO_MONTHS ?? settings.SORTINO_MONTHS;
-    return `${maType} ${maMonths}개월 · 추세 ${trendWeight}% · Sortino ${100 - trendWeight}%/${sortinoMonths}개월`;
+    const maType = source?.MA_TYPE ?? "-";
+    const maMonths = source?.MA_MONTHS ?? "-";
+    const trendWeight = source?.TREND_WEIGHT_RATIO;
+    const sortinoMonths = source?.SORTINO_MONTHS ?? "-";
+    const sortinoWeight = typeof trendWeight === "number" ? 100 - trendWeight : "-";
+    return `${maType} ${maMonths}개월 · 추세 ${trendWeight ?? "-"}% · Sortino ${sortinoWeight}%/${sortinoMonths}개월`;
   };
 
   const resolveBacktestBenchmark = async () => {
@@ -991,7 +994,7 @@ export function TopPickSettingsClient() {
                       <span className="appLabeledFieldLabel">추세 타입</span>
                       <select
                         className="form-select form-select-sm"
-                        value={settings.MA_TYPE}
+                        value={settings?.MA_TYPE ?? ""}
                         onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
                       >
                         {MA_TYPES.map((type) => (
@@ -1005,7 +1008,7 @@ export function TopPickSettingsClient() {
                       <span className="appLabeledFieldLabel">추세 개월</span>
                       <select
                         className="form-select form-select-sm"
-                        value={settings.MA_MONTHS}
+                        value={settings?.MA_MONTHS ?? ""}
                         onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
                       >
                         {[1, 2, 3, 5, 6, 9, 12, 18, 24].map((month) => (
@@ -1019,7 +1022,7 @@ export function TopPickSettingsClient() {
                       <span className="appLabeledFieldLabel">추세 가중치(%)</span>
                       <select
                         className="form-select form-select-sm"
-                        value={settings.TREND_WEIGHT_RATIO}
+                        value={settings?.TREND_WEIGHT_RATIO ?? ""}
                         onChange={(event) => updateSetting("TREND_WEIGHT_RATIO", event.target.value)}
                       >
                         {TREND_WEIGHT_OPTIONS.map((ratio) => (
@@ -1033,7 +1036,7 @@ export function TopPickSettingsClient() {
                       <span className="appLabeledFieldLabel">Sortino 개월</span>
                       <select
                         className="form-select form-select-sm"
-                        value={settings.SORTINO_MONTHS}
+                        value={settings?.SORTINO_MONTHS ?? ""}
                         onChange={(event) => updateSetting("SORTINO_MONTHS", event.target.value)}
                       >
                         {SORTINO_MONTH_OPTIONS.map((month) => (
@@ -1059,7 +1062,7 @@ export function TopPickSettingsClient() {
                         min={1}
                         max={100}
                         step={0.1}
-                        value={settings.MIN_WEIGHT}
+                        value={settings?.MIN_WEIGHT ?? ""}
                         onChange={(event) => updateSetting("MIN_WEIGHT", event.target.value)}
                       />
                     </label>
@@ -1071,7 +1074,7 @@ export function TopPickSettingsClient() {
                         min={1}
                         max={100}
                         step={0.1}
-                        value={settings.MAX_WEIGHT}
+                        value={settings?.MAX_WEIGHT ?? ""}
                         onChange={(event) => updateSetting("MAX_WEIGHT", event.target.value)}
                       />
                     </label>
@@ -1079,7 +1082,7 @@ export function TopPickSettingsClient() {
                       <span className="appLabeledFieldLabel">현금 최대 비중(%)</span>
                       <select
                         className="form-select form-select-sm"
-                        value={settings.CASH_MAX_WEIGHT}
+                        value={settings?.CASH_MAX_WEIGHT ?? ""}
                         onChange={(event) => updateSetting("CASH_MAX_WEIGHT", event.target.value)}
                       >
                         {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((ratio) => (
@@ -1093,7 +1096,7 @@ export function TopPickSettingsClient() {
                       <span className="appLabeledFieldLabel">적용 계좌</span>
                       <select
                         className="form-select form-select-sm"
-                        value={settings.ACCOUNT_ID}
+                        value={settings?.ACCOUNT_ID ?? ""}
                         onChange={(event) => updateSetting("ACCOUNT_ID", event.target.value)}
                       >
                         <option value="">계좌 선택</option>
@@ -1103,6 +1106,27 @@ export function TopPickSettingsClient() {
                           </option>
                         ))}
                       </select>
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 130 }}>
+                      <span className="appLabeledFieldLabel">시작금액(만원)</span>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        min={0}
+                        step={1}
+                        placeholder="미설정"
+                        value={settings?.START_AMOUNT_MANWON ?? ""}
+                        onChange={(event) => updateSetting("START_AMOUNT_MANWON", event.target.value)}
+                      />
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 150 }}>
+                      <span className="appLabeledFieldLabel">시작일자</span>
+                      <input
+                        type="date"
+                        className="form-control form-control-sm"
+                        value={settings?.START_DATE ?? ""}
+                        onChange={(event) => updateSetting("START_DATE", event.target.value)}
+                      />
                     </label>
                     <div style={{ display: "flex", alignItems: "flex-end" }}>
                       <button

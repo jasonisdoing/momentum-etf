@@ -24,18 +24,31 @@ TOP_PICK_MAX_TICKERS = 10
 
 ALLOWED_MA_TYPES = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"}
 
-DEFAULT_SETTINGS: dict[str, Any] = {
-    "MA_TYPE": "SMA",
-    "MA_MONTHS": 6,
-    "TREND_WEIGHT_RATIO": 100,
-    "SORTINO_MONTHS": 3,
-    "MIN_WEIGHT": 5,
-    "MAX_WEIGHT": 40,
-    "CASH_MAX_WEIGHT": 40,
-    "ACCOUNT_ID": "",
-}
-
-SETTING_KEYS = tuple(DEFAULT_SETTINGS.keys())
+# 탑픽 설정 스키마 — 코드 기본값(silent default) 없음. 값은 전적으로 DB에서 온다.
+# 전략 필수 필드는 DB에 없으면 명시적 에러(fail loud). 사용자 선택 필드(계좌·누적수익률 기준)는
+# 미설정 허용(빈값/None)이며, 그 값을 실제로 쓰는 지점에서 막는다.
+SETTING_KEYS = (
+    "MA_TYPE",
+    "MA_MONTHS",
+    "TREND_WEIGHT_RATIO",
+    "SORTINO_MONTHS",
+    "MIN_WEIGHT",
+    "MAX_WEIGHT",
+    "CASH_MAX_WEIGHT",
+    "ACCOUNT_ID",
+    "START_AMOUNT_MANWON",
+    "START_DATE",
+)
+# DB에 반드시 있어야 하는(없으면 에러) 전략 필수 필드. 코드 기본값으로 대체하지 않는다.
+REQUIRED_SETTING_KEYS = (
+    "MA_TYPE",
+    "MA_MONTHS",
+    "TREND_WEIGHT_RATIO",
+    "SORTINO_MONTHS",
+    "MIN_WEIGHT",
+    "MAX_WEIGHT",
+    "CASH_MAX_WEIGHT",
+)
 DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
     "months": 12,
     "rebalance": "none",
@@ -125,7 +138,14 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
 def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | None = None) -> dict[str, Any]:
     base_clean = {key: value for key, value in (base or {}).items() if value is not None}
     value_clean = {key: value for key, value in (values or {}).items() if value is not None}
-    source = {**DEFAULT_SETTINGS, **base_clean, **value_clean}
+    # 코드 기본값 없음 — 값은 base(DB)/values(요청)에서만 온다.
+    source = {**base_clean, **value_clean}
+    # 전략 필수 필드가 하나라도 없으면 코드 기본값으로 대체하지 않고 명시적 에러(fail loud).
+    missing_required = [key for key in REQUIRED_SETTING_KEYS if source.get(key) is None]
+    if missing_required:
+        raise ValueError(
+            f"탑픽 설정값이 없습니다(DB 미설정): {', '.join(missing_required)}. 설정 화면에서 저장해주세요."
+        )
     ma_type = str(source.get("MA_TYPE") or "").strip().upper()
     if ma_type not in ALLOWED_MA_TYPES:
         raise ValueError(f"MA_TYPE 은 {', '.join(sorted(ALLOWED_MA_TYPES))} 중 하나여야 합니다: {ma_type}")
@@ -178,6 +198,30 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
         if account_id not in set(list_available_accounts()):
             raise ValueError(f"존재하지 않는 탑픽 적용 계좌입니다: {account_id}")
     cleaned["ACCOUNT_ID"] = account_id
+
+    # 누적수익률 기준 시작금액(만원). 미설정(None/빈값)은 그대로 None 유지 — 임의 보정 금지.
+    raw_start_amount = source.get("START_AMOUNT_MANWON")
+    if raw_start_amount in (None, ""):
+        cleaned["START_AMOUNT_MANWON"] = None
+    else:
+        try:
+            start_amount_manwon = int(raw_start_amount)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"시작금액(만원)은 정수여야 합니다: {raw_start_amount}") from exc
+        if not (1 <= start_amount_manwon <= 1_000_000_000):
+            raise ValueError(f"시작금액(만원)은 1 ~ 1000000000 범위여야 합니다: {start_amount_manwon}")
+        cleaned["START_AMOUNT_MANWON"] = start_amount_manwon
+
+    # 누적수익률 기준 시작일자 (YYYY-MM-DD). 미설정은 None 유지.
+    start_date = str(source.get("START_DATE") or "").strip()
+    if not start_date:
+        cleaned["START_DATE"] = None
+    else:
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError(f"시작일자는 YYYY-MM-DD 형식이어야 합니다: {start_date}") from exc
+        cleaned["START_DATE"] = start_date
     return cleaned
 
 
@@ -852,6 +896,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
     max_weight = float(settings["MAX_WEIGHT"]) / 100.0
     cash_max_weight = float(settings["CASH_MAX_WEIGHT"]) / 100.0
     forced_cash_weight: float | None = None
+    regime_forced_cash_zero = False  # 상승장 자동 현금 제어로 현금 최대가 0%로 강제됐는지
     if min_weight * len(tickers) > 1.0:
         raise ValueError("최소 비중과 종목 수가 맞지 않습니다. 최소 비중을 낮추거나 종목 수를 줄이세요.")
     if (max_weight * len(tickers)) + cash_max_weight < 1.0:
@@ -873,6 +918,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
                     current_regime = regimes.loc[latest_date]
                     if current_regime == "accel_up":
                         cash_max_weight = 0.0
+                        regime_forced_cash_zero = True
                     elif current_regime == "accel_down":
                         forced_cash_weight = cash_max_weight
     except Exception:
@@ -954,14 +1000,27 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
     if len(raw_scores) < 3:
         raise ValueError(f"비중 계산 가능한 종목이 3개 미만입니다. 가격 캐시 누락: {', '.join(missing) or '-'}")
 
-    weights = calculate_ranked_score_weights_with_cash(
-        raw_scores,
-        defensive_tickers=defensive_tickers,
-        min_weight=min_weight,
-        max_weight=max_weight,
-        cash_max_weight=cash_max_weight,
-        forced_cash_weight=forced_cash_weight,
-    )
+    try:
+        weights = calculate_ranked_score_weights_with_cash(
+            raw_scores,
+            defensive_tickers=defensive_tickers,
+            min_weight=min_weight,
+            max_weight=max_weight,
+            cash_max_weight=cash_max_weight,
+            forced_cash_weight=forced_cash_weight,
+        )
+    except ValueError as exc:
+        # 상승장 자동 현금 제어(현금 0%)로 인한 실패면, UI 설정값(현금 최대 %)과 달라 혼란스러우므로 사유를 명시한다.
+        if regime_forced_cash_zero and "채울 수 없습니다" in str(exc):
+            n_scored = len(raw_scores)
+            need_pct = 100.0 / n_scored if n_scored else 100.0
+            raise ValueError(
+                f"현재 벤치마크가 상승장이라 '시장 연동형 현금 제어'로 현금 비중이 0%로 적용됩니다"
+                f"(설정한 현금 최대 {float(settings['CASH_MAX_WEIGHT']):.0f}%는 상승장에서 무시). "
+                f"이 상태에서는 최대 비중 {max_weight * 100:.1f}% × {n_scored}종목 = {max_weight * n_scored * 100:.0f}%로 "
+                f"100%를 채울 수 없습니다. 최대 비중을 {need_pct:.1f}% 이상으로 높이거나 종목 수를 늘리세요."
+            ) from exc
+        raise
     for row in rows:
         weight = weights.get(row["ticker"])
         if weight is not None:
