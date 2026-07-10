@@ -2169,7 +2169,6 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
         except Exception as exc:
             logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
-            mark_failed(sym, source="토스", reason=f"API 오류: {exc}")
 
     return result
 
