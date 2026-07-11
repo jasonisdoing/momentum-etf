@@ -4,9 +4,17 @@ from fastapi import APIRouter, Depends, Query
 
 import config
 from fastapi_app.dependencies import require_internal_token
-from utils.market_trend_service import compute_index_history, compute_market_trend
+from utils.market_trend_service import INDICES, compute_index_history, compute_market_trend
 
 router = APIRouter(prefix="/internal/market-trend", tags=["market-trend"])
+
+
+@router.get("/indices")
+def get_market_trend_indices(
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """시장추세 지수 목록 (탑픽 시장 레짐 셀렉터 등에서 사용)."""
+    return {"indices": [{"ticker": idx["yf_ticker"], "name": idx["name"]} for idx in INDICES]}
 
 
 @router.get("/defaults")

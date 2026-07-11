@@ -819,7 +819,7 @@ export function TickerDetailManager({
     if (myAverageBuyPrice !== null && Number.isFinite(myAverageBuyPrice) && myAverageBuyPrice > 0) {
       candleSeries.createPriceLine({
         price: myAverageBuyPrice,
-        color: "#6b7280",
+        color: "var(--text-muted)",
         lineWidth: 1,
         lineStyle: LineStyle.Dashed,
         axisLabelVisible: true,

@@ -2427,7 +2427,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         const data = params.data;
         if (!data || isDetailRow(data)) return "";
         const v = params.value;
-        if (v === null || v === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
+        if (v === null || v === undefined) return <span style={{ color: "var(--text-muted)" }}>-</span>;
         const name = isTotalRow(data) ? "비중 가중 지수" : (data as AccountSummary).benchmark_name ?? "";
         return (
           <span className={getSignedClass(v)} title={name}>{`${v.toFixed(2)}%`}</span>
@@ -2449,7 +2449,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           benchmark_pct?: number | null;
         };
         const r = summary.index_result;
-        if (!r) return <span style={{ color: "#adb5bd" }}>-</span>;
+        if (!r) return <span style={{ color: "var(--text-muted)" }}>-</span>;
         // 격차 = 금일% − 지수 금일% (앞선/뒤쳐진 폭, 퍼센트포인트). 합계는 비중 가중 기준.
         const acc = summary.daily_return_pct;
         const bench = summary.benchmark_pct;
@@ -2457,7 +2457,7 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         const diffText = diff !== null ? ` ${diff >= 0 ? "+" : ""}${diff.toFixed(2)}%p` : "";
         if (r === "win") return <span style={{ color: "#dc2626", fontWeight: 700 }}>{`🏆 승${diffText}`}</span>;
         if (r === "lose") return <span style={{ color: "#1971c2", fontWeight: 700 }}>{`😢 패${diffText}`}</span>;
-        return <span style={{ color: "#6b7280", fontWeight: 700 }}>🤝 무</span>;
+        return <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>🤝 무</span>;
       },
     },
     {

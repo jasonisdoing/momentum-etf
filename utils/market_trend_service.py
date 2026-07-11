@@ -710,6 +710,55 @@ def _forecast_thresholds(
     return result
 
 
+def is_market_trend_index(ticker: str) -> bool:
+    """시장추세 지수 목록(INDICES)에 등록된 yf_ticker 인지 여부."""
+    return any(idx["yf_ticker"] == ticker for idx in INDICES)
+
+
+def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
+    """단일 지수의 일별 OHLC 히스토리를 반환한다 (한국: 네이버 5년, 미국: yfinance 10년).
+
+    compute_index_history 와 탑픽 시장 레짐 계산이 공유하는 단일 소스.
+    """
+    index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
+    naver_symbol = (index_meta or {}).get("kor_naver_symbol")
+
+    if naver_symbol:
+        # 한국 인덱스: 네이버 차트에서 직접 받는다 (5년 ≈ 1250거래일, 여유 포함 1500).
+        return _fetch_naver_kor_index_ohlc(naver_symbol, count=1500)
+
+    try:
+        df = yf.download(
+            tickers=yf_ticker,
+            period="10y",
+            interval="1d",
+            progress=False,
+            auto_adjust=True,
+            threads=False,
+        )
+    except Exception:
+        logger.exception("yfinance 단일 인덱스 다운로드 실패: %s", yf_ticker)
+        return None
+
+    if df is None or df.empty:
+        return None
+
+    # yfinance 가 단일 ticker 라도 컬럼을 멀티인덱스로 줄 수 있어 평탄화.
+    cleaned_cols = {}
+    for col in ["Open", "High", "Low", "Close", "Volume"]:
+        col_raw = df[col] if col in df.columns else None
+        if col_raw is None:
+            try:
+                col_raw = df.xs(col, axis=1, level=0)
+            except Exception:
+                col_raw = None
+        if col_raw is not None:
+            if isinstance(col_raw, pd.DataFrame):
+                col_raw = col_raw.iloc[:, 0]
+            cleaned_cols[col] = col_raw
+    return pd.DataFrame(cleaned_cols).dropna()
+
+
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     """단일 지수의 최근 12개월 가격/추세 히스토리 + 각 일자별 레짐을 반환한다 (행 펼침용).
 
@@ -741,42 +790,9 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     }
 
     df: pd.DataFrame | None = None
-    if naver_symbol:
-        # 한국 인덱스: 네이버 차트에서 직접 받는다 (5년 ≈ 1250거래일, 여유 포함 1500).
-        df = _fetch_naver_kor_index_ohlc(naver_symbol, count=1500)
-        if df is None:
-            return empty_payload
-    else:
-        try:
-            df = yf.download(
-                tickers=yf_ticker,
-                period="10y",
-                interval="1d",
-                progress=False,
-                auto_adjust=True,
-                threads=False,
-            )
-        except Exception:
-            logger.exception("yfinance 단일 인덱스 다운로드 실패: %s", yf_ticker)
-            df = None
-
-        if df is None or df.empty:
-            return empty_payload
-
-        # yfinance 가 단일 ticker 라도 컬럼을 멀티인덱스로 줄 수 있어 평탄화.
-        cleaned_cols = {}
-        for col in ["Open", "High", "Low", "Close", "Volume"]:
-            col_raw = df[col] if col in df.columns else None
-            if col_raw is None:
-                try:
-                    col_raw = df.xs(col, axis=1, level=0)
-                except Exception:
-                    col_raw = None
-            if col_raw is not None:
-                if isinstance(col_raw, pd.DataFrame):
-                    col_raw = col_raw.iloc[:, 0]
-                cleaned_cols[col] = col_raw
-        df = pd.DataFrame(cleaned_cols).dropna()
+    df = load_index_ohlc(yf_ticker)
+    if df is None or df.empty:
+        return empty_payload
 
     close_series = df["Close"].dropna()
     # 표(_build_item)와 동일하게 intraday 보정 — 마지막 점/레짐이 일치하도록.

@@ -34,7 +34,7 @@ const inputStyle: React.CSSProperties = {
   padding: "4px 8px",
   fontSize: "0.88rem",
 };
-const labelStyle: React.CSSProperties = { color: "#64748b", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
+const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
 
 function parseNums(text: string): number[] {
   return text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
@@ -207,9 +207,9 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   return (
     <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 800 }}>{pool.name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({pool.pool_id})</span></span>
+        <span style={{ fontWeight: 800 }}>{pool.name} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({pool.pool_id})</span></span>
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}</span>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}</span>
           <button
             type="button"
             className="btn btn-sm btn-dark"
@@ -269,7 +269,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
               {resolving ? "조회 중…" : "조회"}
             </button>
             <input
-              style={{ ...inputStyle, width: 180, background: "#f8fafc", color: "#64748b" }}
+              style={{ ...inputStyle, width: 180, background: "#f8fafc", color: "var(--text-muted)" }}
               placeholder="이름 (티커 입력 후 조회)"
               value={benchName}
               readOnly
@@ -278,7 +278,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         ) : (
           <>
             <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
-              {benchName} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({benchTicker})</span>
+              {benchName} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({benchTicker})</span>
             </span>
             <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setBenchEditing(true)}>
               변경
@@ -306,7 +306,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
             </label>
           ))}
         </div>
-        <span style={{ color: "#94a3b8", fontSize: "0.78rem", marginLeft: 8 }}>보조 = (100−보유) × (100−추세비율)%</span>
+        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginLeft: 8 }}>보조 = (100−보유) × (100−추세비율)%</span>
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
@@ -382,7 +382,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
           {backtestRunning ? "백테스트 진행 중" : "백테스트 시작"}
         </button>
 
-        <div style={{ display: "flex", gap: 12, color: "#64748b", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 12, color: "var(--text-muted)", alignItems: "center" }}>
           <span>
             상태: <b style={{ color: queueStatus === "running" ? "#2563eb" : queueStatus === "pending" ? "#d97706" : "#1e293b" }}>
               {queueStatus === "running"
@@ -438,14 +438,14 @@ export function BacktestConfigSection() {
     <div className="card appCard" style={{ marginTop: 16 }}>
       <div className="card-body">
         <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>백테스트 탐색 공간</h2>
-        <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
           모멘텀-백테스트(`python backtest/run.py`)가 풀별로 전수 탐색하는 값입니다. (라이브 적용값과 별개 — TOP_N_HOLD는 위 종목풀 설정에서 관리)
         </p>
 
         {loading ? (
-          <div style={{ color: "#868e96", padding: 12 }}>불러오는 중…</div>
+          <div style={{ color: "var(--text-muted)", padding: 12 }}>불러오는 중…</div>
         ) : pools.length === 0 ? (
-          <div style={{ color: "#94a3b8", padding: 12 }}>등록된 백테스트 설정이 없습니다.</div>
+          <div style={{ color: "var(--text-muted)", padding: 12 }}>등록된 백테스트 설정이 없습니다.</div>
         ) : (
           pools.map((p) => <PoolRow key={p.pool_id} pool={p} maTypes={maTypes} />)
         )}

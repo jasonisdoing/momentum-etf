@@ -24,7 +24,7 @@ logger = get_app_logger()
 COLLECTION = "account_settings"
 
 # 화면에서 수정 가능한 키 (account_id 는 원장/포트폴리오의 FK 라 불변)
-EDITABLE_KEYS: tuple[str, ...] = ("name", "icon", "order", "country_code", "currency", "benchmark", "URL")
+EDITABLE_KEYS: tuple[str, ...] = ("name", "icon", "order", "country_code", "currency", "benchmark", "ticker_types", "URL")
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 
@@ -114,6 +114,24 @@ def _validate_values(account_id: str, values: dict[str, Any]) -> dict[str, Any]:
             if not ticker or not bench_name:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 benchmark 에는 ticker/name 이 모두 필요합니다.")
             cleaned[key] = {"ticker": ticker, "name": bench_name}
+        elif key == "ticker_types":
+            if not isinstance(raw, (list, tuple)):
+                raise AccountSettingsStoreError(f"'{account_id}' 의 ticker_types 는 목록이어야 합니다.")
+            from utils.settings_loader import list_available_ticker_types
+
+            available = set(list_available_ticker_types())
+            selected: list[str] = []
+            for item in raw:
+                pool_id = str(item or "").strip()
+                if not pool_id:
+                    continue
+                if pool_id not in available:
+                    raise AccountSettingsStoreError(
+                        f"'{account_id}' 의 ticker_types 에 알 수 없는 종목풀이 있습니다: {item}"
+                    )
+                if pool_id not in selected:
+                    selected.append(pool_id)
+            cleaned[key] = selected
         elif key == "URL":
             cleaned[key] = str(raw or "").strip()
     if not cleaned:

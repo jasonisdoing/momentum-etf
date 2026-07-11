@@ -300,7 +300,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
                 fontSize: "20px",
                 fontWeight: 700,
                 lineHeight: 1,
-                color: alreadyRequested ? "#9ca3af" : "#dc2626",
+                color: alreadyRequested ? "var(--text-muted)" : "#dc2626",
                 background: "transparent",
                 border: "none",
                 cursor: alreadyRequested ? "not-allowed" : "pointer",

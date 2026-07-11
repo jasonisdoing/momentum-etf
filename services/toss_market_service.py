@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import time
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -25,6 +26,13 @@ logger = get_app_logger()
 _INDICATOR_TTL_SECONDS = 5.0
 _indicator_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
 _indicator_lock = threading.Lock()
+
+
+def _parse_candle_timestamp_ms(value: Any) -> int:
+    timestamp = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if timestamp.tzinfo is None:
+        raise ValueError("토스 캔들 시간대 정보가 없습니다.")
+    return int(timestamp.timestamp() * 1000)
 
 
 def fetch_toss_indicator_prices() -> dict[str, dict[str, Any]]:
@@ -75,10 +83,45 @@ def fetch_toss_candles(code: str, interval: str = "min:15", count: int = 96) -> 
         try:
             candles.append(
                 {
+                    "t": _parse_candle_timestamp_ms(c["dt"]),
                     "o": float(c["open"]),
                     "h": float(c["high"]),
                     "l": float(c["low"]),
                     "c": float(c["close"]),
+                }
+            )
+        except (KeyError, TypeError, ValueError):
+            continue
+    return candles
+
+
+def fetch_toss_stock_candles(
+    code: str,
+    *,
+    securities_type: str,
+    interval: str,
+    count: int,
+) -> list[dict[str, float]]:
+    """토스 국내·미국 주식 c-chart 캔들을 과거→최신 순으로 반환한다."""
+    if securities_type not in {"kr-s", "us-s"}:
+        raise ValueError(f"지원하지 않는 토스 증권 유형입니다: {securities_type}")
+    url = f"{TOSS_INVEST_API_BASE_URL}/api/v1/c-chart/{securities_type}/{code}/{interval}"
+    resp = requests.get(url, headers=TOSS_INVEST_HEADERS, params={"count": int(count)}, timeout=8)
+    resp.raise_for_status()
+    candles_raw = ((resp.json().get("result") or {}).get("candles")) or []
+    if not candles_raw:
+        raise RuntimeError(f"토스 주식 캔들 응답이 비어 있습니다: {code}")
+
+    candles: list[dict[str, float]] = []
+    for candle in reversed(candles_raw):
+        try:
+            candles.append(
+                {
+                    "t": _parse_candle_timestamp_ms(candle["dt"]),
+                    "o": float(candle["open"]),
+                    "h": float(candle["high"]),
+                    "l": float(candle["low"]),
+                    "c": float(candle["close"]),
                 }
             )
         except (KeyError, TypeError, ValueError):

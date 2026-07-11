@@ -10,6 +10,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit --no-fund
 
 COPY shared /shared
+COPY static /static
 COPY web .
 
 RUN --mount=type=cache,target=/app/.next/cache \

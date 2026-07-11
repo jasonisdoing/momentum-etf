@@ -101,7 +101,7 @@ function renderRegimeCell(params: { data?: GridRow }) {
   const data = params.data;
   if (!data || isDetailRow(data)) return null;
   const key = data.current_regime;
-  if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
+  if (!key) return <span style={{ color: "var(--text-muted)" }}>-</span>;
   const fontWeight = key === "accel_up" || key === "accel_down" ? 700 : 500;
   return (
     <span style={{ color: REGIME_COLORS[key], fontWeight }}>
@@ -188,7 +188,7 @@ export function MarketTrendClient({
           const isExpanded = expandedTicker === data.ticker;
           return (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <span style={{ fontSize: "0.8rem", color: "#868e96" }}>{isExpanded ? "▾" : "▸"}</span>
+              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{isExpanded ? "▾" : "▸"}</span>
               <span>{params.value}</span>
             </span>
           );
@@ -248,10 +248,10 @@ export function MarketTrendClient({
         headerClass: "marketTrendRegimeHeader",
         cellRenderer: (params: { value?: number | null; data?: MarketTrendItem }) => {
           const d = params.value;
-          if (d === null || d === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
+          if (d === null || d === undefined) return <span style={{ color: "var(--text-muted)" }}>-</span>;
           const regime = params.data?.current_regime;
           if (regime === "accel_up") {
-            return <span style={{ color: "#1f2937" }}>상승 {d}일째</span>;
+            return <span style={{ color: "var(--text-strong)" }}>상승 {d}일째</span>;
           }
           const sinceUp = params.data?.days_since_last_up;
           const upText = sinceUp !== null && sinceUp !== undefined ? `마지막 상승 후 ${sinceUp}일째` : "1년 내 상승 없음";
@@ -259,9 +259,9 @@ export function MarketTrendClient({
             const sinceNeutral = params.data?.days_since_last_neutral;
             const neutralText =
               sinceNeutral !== null && sinceNeutral !== undefined ? `, 마지막 중립 후 ${sinceNeutral}일째` : "";
-            return <span style={{ color: "#1f2937" }}>{upText}{neutralText}</span>;
+            return <span style={{ color: "var(--text-strong)" }}>{upText}{neutralText}</span>;
           }
-          return <span style={{ color: "#1f2937" }}>{upText}</span>;
+          return <span style={{ color: "var(--text-strong)" }}>{upText}</span>;
         },
       },
       {

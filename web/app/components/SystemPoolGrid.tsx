@@ -70,7 +70,7 @@ const poolColumns: ColDef<SystemPoolRow>[] = [
       if (val === null || val === undefined || Number.isNaN(val)) return undefined;
       if (val > 50) return { color: "#dc2626" };
       if (val < 50) return { color: "#2563eb" };
-      return { color: "#0f172a" };
+      return { color: "var(--text-strong)" };
     },
     cellRenderer: (params: { value: number }) => formatPercent(params.value),
   },

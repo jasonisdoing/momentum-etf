@@ -82,7 +82,7 @@ export function LeverageTuneClient() {
     return (
       <PageFrame title="레버리지 튜닝">
         <div className="appPageStack" style={{ maxWidth: 1000 }}>
-          <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
+          <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
         </div>
       </PageFrame>
     );
@@ -103,7 +103,7 @@ export function LeverageTuneClient() {
         <div className="card appCard">
           <div className="card-body">
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 8 }}>튜닝 실행</h2>
-            <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
               후보군·범위는 레버리지-설정에서 편집합니다. 버튼을 누르면 배치 큐에 등록되고 워커가 전수 탐색을 실행하며, 결과는 전략 설정(공격/방어/컷오프)에 자동 반영됩니다.
             </p>
             <button type="button" className="btn btn-dark" disabled={triggering || running} onClick={() => void startTune()} style={{ minWidth: 200 }}>
@@ -111,8 +111,8 @@ export function LeverageTuneClient() {
             </button>
             <div style={{ marginTop: 12, fontSize: "0.85rem", color: "#475569" }}>
               상태: <b>{statusLabel}</b>
-              {tune?.started_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>시작: {new Date(tune.started_at).toLocaleString("ko-KR")}</span> : null}
-              {tune?.ended_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>종료: {new Date(tune.ended_at).toLocaleString("ko-KR")}</span> : null}
+              {tune?.started_at ? <span style={{ color: "var(--text-muted)", marginLeft: 12 }}>시작: {new Date(tune.started_at).toLocaleString("ko-KR")}</span> : null}
+              {tune?.ended_at ? <span style={{ color: "var(--text-muted)", marginLeft: 12 }}>종료: {new Date(tune.ended_at).toLocaleString("ko-KR")}</span> : null}
             </div>
           </div>
         </div>
@@ -122,7 +122,7 @@ export function LeverageTuneClient() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>진행도 / 결과</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: "#64748b", fontSize: "0.85rem", fontWeight: 600 }}>날짜</span>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600 }}>날짜</span>
                 <select
                   style={{ border: "1px solid rgba(148,163,184,0.4)", borderRadius: 6, padding: "5px 8px", fontSize: "0.85rem" }}
                   value={selectedDate}
@@ -154,11 +154,11 @@ export function LeverageTuneClient() {
                 {tune.log_text}
               </pre>
             ) : (
-              <div style={{ color: "#94a3b8", padding: 12 }}>
+              <div style={{ color: "var(--text-muted)", padding: 12 }}>
                 {dates.length === 0 ? "아직 튜닝 결과가 없습니다. \"튜닝 시작\"을 눌러 실행하세요." : "선택한 날짜의 로그가 없습니다."}
               </div>
             )}
-            {tune?.log_file ? <div style={{ color: "#94a3b8", fontSize: "0.78rem", marginTop: 6 }}>로그: {tune.log_file}</div> : null}
+            {tune?.log_file ? <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginTop: 6 }}>로그: {tune.log_file}</div> : null}
           </div>
         </div>
       </div>

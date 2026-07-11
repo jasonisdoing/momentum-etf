@@ -70,11 +70,7 @@ def _load_domestic_etf_ticker_set() -> set[str]:
     df, _ = load_cached_kis_domestic_etf_master()
     if "티커" not in df.columns:
         raise RuntimeError("KIS ETF 마스터 캐시에 티커 컬럼이 없습니다.")
-    return {
-        str(value or "").strip().upper()
-        for value in df["티커"].tolist()
-        if str(value or "").strip()
-    }
+    return {str(value or "").strip().upper() for value in df["티커"].tolist() if str(value or "").strip()}
 
 
 def _lookup_domestic_etf_name(ticker: str) -> str | None:
@@ -94,30 +90,34 @@ def _lookup_domestic_etf_name(ticker: str) -> str | None:
     return name or None
 
 
-def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
+def _resolve_ticker_meta_item(ticker: str, allowed_ticker_types: set[str] | None = None) -> dict[str, object]:
     ticker_key = str(ticker or "").strip().upper()
     if not ticker_key:
         raise ValueError("ticker 파라미터가 필요합니다.")
 
+    # 계좌에 연결된 종목풀로 검색 범위를 제한할 때 사용 (None 이면 전체 검색).
+    def _allowed(ticker_type: str) -> bool:
+        return allowed_ticker_types is None or ticker_type in allowed_ticker_types
+
     # 시장 명시 접두사가 있으면 해당 시장으로 강제 지정. 동일 심볼이 여러 풀에 있을 때 구분.
     forced_ticker_type: str | None = None
     if ticker_key.startswith("ASX:"):
-        ticker_key = ticker_key[len("ASX:"):]
+        ticker_key = ticker_key[len("ASX:") :]
         forced_ticker_type = "aus"
         if not ticker_key:
             raise ValueError("ASX: 뒤에 티커가 필요합니다.")
     elif ticker_key.startswith("US:"):
-        ticker_key = ticker_key[len("US:"):]
+        ticker_key = ticker_key[len("US:") :]
         forced_ticker_type = "us"
         if not ticker_key:
             raise ValueError("US: 뒤에 티커가 필요합니다.")
     elif ticker_key.startswith("KOR:"):
-        ticker_key = ticker_key[len("KOR:"):]
+        ticker_key = ticker_key[len("KOR:") :]
         forced_ticker_type = "kor"
         if not ticker_key:
             raise ValueError("KOR: 뒤에 티커가 필요합니다.")
     elif ticker_key.startswith("ETF:"):
-        ticker_key = ticker_key[len("ETF:"):]
+        ticker_key = ticker_key[len("ETF:") :]
         forced_ticker_type = "etf"
         if not ticker_key:
             raise ValueError("ETF: 뒤에 티커가 필요합니다.")
@@ -127,6 +127,8 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
     for config in configs:
         ticker_type = config["ticker_type"]
         if forced_ticker_type is not None and ticker_type != forced_ticker_type:
+            continue
+        if not _allowed(str(ticker_type)):
             continue
         country_code = config.get("country_code", "")
         for item in get_etfs(ticker_type):
@@ -140,6 +142,7 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
                     "ticker_type": ticker_type,
                     "country_code": country_code,
                     "is_etf": bool(item.get("is_etf", False)),
+                    "bucket": int(item.get("bucket") or 1),
                 }
             )
 
@@ -154,7 +157,7 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
         raise RuntimeError(f"동일한 티커 {ticker_key}가 여러 종목풀에 등록되어 있습니다.")
 
     # ASX: 접두사로 호주를 명시했는데 풀에 없으면 즉시 호주로 결정 (미국 폴백 차단)
-    if forced_ticker_type == "aus":
+    if forced_ticker_type == "aus" and _allowed("aus"):
         return {
             "ticker": ticker_key,
             "name": ticker_key,
@@ -166,7 +169,7 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
     holding_matches = [
         ticker_type
         for ticker_type, tickers in get_active_holding_tickers().items()
-        if ticker_key in tickers
+        if ticker_key in tickers and _allowed(str(ticker_type))
     ]
     if len(holding_matches) == 1:
         holding_type = holding_matches[0]
@@ -185,6 +188,7 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "ticker_type": holding_type,
             "country_code": str(holding_config.get("country_code") or "").strip().lower(),
             "is_etf": holding_type != "kor",
+            "bucket": int(cache_doc.get("bucket") or 1) if isinstance(cache_doc, dict) else 1,
         }
     if len(holding_matches) > 1:
         joined = ", ".join(sorted(holding_matches))
@@ -192,7 +196,7 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
 
     if ticker_key.isdigit() and len(ticker_key) == 6:
         domestic_etf_tickers = _load_domestic_etf_ticker_set()
-        if ticker_key in domestic_etf_tickers:
+        if ticker_key in domestic_etf_tickers and _allowed("kor_kr"):
             return {
                 "ticker": ticker_key,
                 "name": _lookup_domestic_etf_name(ticker_key) or ticker_key,
@@ -200,15 +204,16 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
                 "country_code": "kor",
                 "is_etf": True,
             }
-        return {
-            "ticker": ticker_key,
-            "name": ticker_key,
-            "ticker_type": "kor",
-            "country_code": "kor",
-            "is_etf": False,
-        }
+        if ticker_key not in domestic_etf_tickers and _allowed("kor"):
+            return {
+                "ticker": ticker_key,
+                "name": ticker_key,
+                "ticker_type": "kor",
+                "country_code": "kor",
+                "is_etf": False,
+            }
 
-    if ticker_key.endswith(".AX"):
+    if ticker_key.endswith(".AX") and _allowed("aus"):
         return {
             "ticker": ticker_key,
             "name": ticker_key,
@@ -217,7 +222,7 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "is_etf": True,
         }
 
-    if ticker_key.isalpha() or "." in ticker_key:
+    if (ticker_key.isalpha() or "." in ticker_key) and _allowed("us"):
         return {
             "ticker": ticker_key,
             "name": ticker_key,
@@ -226,6 +231,9 @@ def _resolve_ticker_meta_item(ticker: str) -> dict[str, object]:
             "is_etf": False,
         }
 
+    if allowed_ticker_types is not None:
+        joined = ", ".join(sorted(allowed_ticker_types)) or "없음"
+        raise RuntimeError(f"{ticker_key} 티커를 연결된 종목풀({joined})에서 찾지 못했습니다.")
     raise RuntimeError(f"{ticker_key} 티커를 찾지 못했습니다.")
 
 
@@ -289,7 +297,9 @@ def _infer_yahoo_symbol_currency(symbol: str) -> str | None:
     return None
 
 
-def _build_fx_rates_for_holdings(holdings: list[dict[str, object]], rates: dict[str, object]) -> list[dict[str, object]]:
+def _build_fx_rates_for_holdings(
+    holdings: list[dict[str, object]], rates: dict[str, object]
+) -> list[dict[str, object]]:
     currencies: set[str] = set()
     for item in holdings:
         ticker = str(item.get("ticker") or "").strip().upper()
@@ -353,7 +363,9 @@ def _calculate_consolidated_average_buy_price(ticker: str) -> float | None:
             total_buy_amount += quantity * average_buy_price
 
     if len(currencies) > 1:
-        raise RuntimeError(f"{ticker_key} 보유 통화가 여러 개라 통합 평균단가를 계산할 수 없습니다: {sorted(currencies)}")
+        raise RuntimeError(
+            f"{ticker_key} 보유 통화가 여러 개라 통합 평균단가를 계산할 수 없습니다: {sorted(currencies)}"
+        )
     if total_quantity <= 0:
         return None
     return total_buy_amount / total_quantity
@@ -399,9 +411,7 @@ def _build_korean_etf_info_payload(
         raw_base_date = str(latest_history.get("date") or "").strip() or None
         # 한국 종목 풀: base_date 가 휴장일이면 직전 거래일로 보정
         if raw_base_date and str(ticker_type or "").strip().lower().startswith("kor"):
-            portfolio_change_base_date = _resolve_base_date_to_trading_day(
-                ticker_type, ticker, raw_base_date
-            )
+            portfolio_change_base_date = _resolve_base_date_to_trading_day(ticker_type, ticker, raw_base_date)
         else:
             portfolio_change_base_date = raw_base_date
         if (
@@ -439,7 +449,9 @@ def _build_korean_etf_info_payload(
         "portfolio_change_base_date": portfolio_change_base_date,
         "deviation": float(deviation_value) if deviation_value is not None else None,
         "expense_ratio": float(meta_cache["expense_ratio"]) if meta_cache.get("expense_ratio") is not None else None,
-        "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"]) if meta_cache.get("dividend_yield_ttm") is not None else None,
+        "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"])
+        if meta_cache.get("dividend_yield_ttm") is not None
+        else None,
         "total_net_assets_eok": float(total_net_assets) if total_net_assets is not None else None,
         "market_cap_krw": market_cap_krw,
         "volume": int(latest_row["volume"]) if latest_row and latest_row.get("volume") is not None else None,
@@ -477,9 +489,13 @@ def _is_pre_open_cache_timestamp(value: datetime | None) -> bool:
     if market_open is None:
         return False
 
-    local_value = value.astimezone(ZoneInfo(timezone_name)) if value.tzinfo else value.replace(
-        tzinfo=timezone.utc,
-    ).astimezone(ZoneInfo(timezone_name))
+    local_value = (
+        value.astimezone(ZoneInfo(timezone_name))
+        if value.tzinfo
+        else value.replace(
+            tzinfo=timezone.utc,
+        ).astimezone(ZoneInfo(timezone_name))
+    )
     now_local = datetime.now(ZoneInfo(timezone_name))
     return local_value.date() == now_local.date() and local_value.time() < market_open
 
@@ -633,24 +649,33 @@ def get_all_tickers(
             tkr = etf.get("ticker", "")
             name = etf.get("name", "")
             if tkr:
-                result.append({
-                    "ticker": tkr,
-                    "name": name,
-                    "ticker_type": ticker_type,
-                    "country_code": country_code,
-                    "is_etf": bool(etf.get("is_etf", False)),
-                })
+                result.append(
+                    {
+                        "ticker": tkr,
+                        "name": name,
+                        "ticker_type": ticker_type,
+                        "country_code": country_code,
+                        "is_etf": bool(etf.get("is_etf", False)),
+                    }
+                )
     return result
 
 
 @router.get("/resolve")
 def resolve_ticker(
     ticker: str = Query(...),
+    ticker_types: str | None = Query(None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    """직접 진입용 티커 메타데이터를 반환합니다."""
+    """직접 진입용 티커 메타데이터를 반환합니다.
 
-    return _resolve_ticker_meta_item(ticker)
+    ``ticker_types`` (쉼표 구분)를 주면 해당 종목풀로 검색 범위를 제한한다.
+    """
+
+    allowed: set[str] | None = None
+    if ticker_types is not None:
+        allowed = {part.strip() for part in ticker_types.split(",") if part.strip()}
+    return _resolve_ticker_meta_item(ticker, allowed_ticker_types=allowed)
 
 
 @router.get("/search-data")
@@ -883,10 +908,7 @@ def build_ticker_detail_payload(
             }
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
         if not holdings:
-            holdings_error = (
-                "구성종목 캐시가 없습니다. "
-                "python scripts/stock_meta_cache_updater.py 실행이 필요합니다."
-            )
+            holdings_error = "구성종목 캐시가 없습니다. python scripts/stock_meta_cache_updater.py 실행이 필요합니다."
         elif not holdings_as_of_date:
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:

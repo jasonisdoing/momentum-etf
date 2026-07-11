@@ -15,10 +15,13 @@ type AccountEntry = {
   country_code?: string;
   currency?: string;
   benchmark?: Benchmark;
+  ticker_types?: string[];
   URL?: string;
   updated_at?: string | null;
   save_method?: string | null;
 };
+
+type PoolOption = { ticker_type: string; name?: string; icon?: string };
 
 type ApiResponse = { accounts?: AccountEntry[]; error?: string };
 
@@ -28,10 +31,10 @@ const inputStyle: React.CSSProperties = {
   padding: "4px 8px",
   fontSize: "0.88rem",
 };
-const labelStyle: React.CSSProperties = { color: "#64748b", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
+const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
 
 /** 계좌 1개 편집 행 (자체 저장). account_id 는 원장 FK 라 수정 불가. */
-function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () => void }) {
+function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools: PoolOption[]; onSaved: () => void }) {
   const toast = useToast();
   const [name, setName] = useState(account.name ?? "");
   const [icon, setIcon] = useState(account.icon ?? "");
@@ -39,6 +42,7 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
   const [countryCode, setCountryCode] = useState(account.country_code ?? "kor");
   const [currency, setCurrency] = useState(account.currency ?? "KRW");
   const [url, setUrl] = useState(account.URL ?? "");
+  const [tickerTypes, setTickerTypes] = useState<string[]>(account.ticker_types ?? []);
   const [benchTicker, setBenchTicker] = useState(account.benchmark?.ticker ?? "");
   const [benchName, setBenchName] = useState(account.benchmark?.name ?? "");
   const [benchEditing, setBenchEditing] = useState(!(account.benchmark?.ticker && account.benchmark?.name));
@@ -86,6 +90,7 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
             country_code: countryCode,
             currency: currency.trim().toUpperCase(),
             benchmark: { ticker: benchTicker.trim(), name: benchName.trim() },
+            ticker_types: tickerTypes,
             URL: url.trim(),
           },
         }),
@@ -102,16 +107,20 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
     }
   };
 
+  const togglePool = (poolId: string) => {
+    setTickerTypes((prev) => (prev.includes(poolId) ? prev.filter((p) => p !== poolId) : [...prev, poolId]));
+  };
+
   const rowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 };
 
   return (
     <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 8, padding: "10px 12px", marginBottom: 10 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
         <span style={{ fontWeight: 800 }}>
-          {icon} {name} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({account.account_id})</span>
+          {icon} {name} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({account.account_id})</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>
+          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
             마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}
           </span>
           <button
@@ -139,7 +148,11 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
           <option value="us">us</option>
         </select>
         <span style={{ ...labelStyle, marginLeft: 8 }}>통화</span>
-        <input style={{ ...inputStyle, width: 70 }} value={currency} onChange={(e) => setCurrency(e.target.value)} />
+        <select className="form-select form-select-sm" style={{ width: 96 }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <option value="KRW">KRW</option>
+          <option value="AUD">AUD</option>
+          <option value="USD">USD</option>
+        </select>
       </div>
 
       <div style={rowStyle}>
@@ -165,7 +178,7 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
               {resolving ? "조회 중…" : "조회"}
             </button>
             <input
-              style={{ ...inputStyle, flex: 1, minWidth: 140, background: "#f8fafc", color: "#64748b" }}
+              style={{ ...inputStyle, flex: 1, minWidth: 140, background: "#f8fafc", color: "var(--text-muted)" }}
               placeholder="이름 (티커 입력 후 조회)"
               value={benchName}
               readOnly
@@ -174,13 +187,37 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
         ) : (
           <>
             <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
-              {benchName} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({benchTicker})</span>
+              {benchName} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({benchTicker})</span>
             </span>
             <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setBenchEditing(true)}>
               변경
             </button>
           </>
         )}
+        <span style={{ ...labelStyle, marginLeft: 16 }}>종목풀</span>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          {pools.length === 0 ? (
+            <span style={{ color: "var(--text-muted)", fontSize: "0.83rem" }}>등록된 종목풀이 없습니다</span>
+          ) : (
+            pools.map((pool) => (
+              <label
+                key={pool.ticker_type}
+                style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.85rem", cursor: "pointer" }}
+              >
+                <input
+                  type="checkbox"
+                  checked={tickerTypes.includes(pool.ticker_type)}
+                  onChange={() => togglePool(pool.ticker_type)}
+                />
+                <span>
+                  {pool.icon ? `${pool.icon} ` : ""}
+                  {pool.name ?? pool.ticker_type}
+                  <span style={{ color: "var(--text-muted)", fontWeight: 500 }}> ({pool.ticker_type})</span>
+                </span>
+              </label>
+            ))
+          )}
+        </div>
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
@@ -194,15 +231,22 @@ function AccountRow({ account, onSaved }: { account: AccountEntry; onSaved: () =
 export function AccountSettingsManager() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
+  const [pools, setPools] = useState<PoolOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const resp = await fetch("/api/account-settings", { cache: "no-store" });
-      const data = (await resp.json()) as ApiResponse;
-      if (!resp.ok || data.error) throw new Error(data.error ?? "계좌 설정을 불러오지 못했습니다.");
-      setAccounts(data.accounts ?? []);
+      const [accResp, poolResp] = await Promise.all([
+        fetch("/api/account-settings", { cache: "no-store" }),
+        fetch("/api/pool-settings", { cache: "no-store" }),
+      ]);
+      const accData = (await accResp.json()) as ApiResponse;
+      if (!accResp.ok || accData.error) throw new Error(accData.error ?? "계좌 설정을 불러오지 못했습니다.");
+      const poolData = (await poolResp.json()) as { pools?: PoolOption[]; error?: string };
+      if (!poolResp.ok || poolData.error) throw new Error(poolData.error ?? "종목풀을 불러오지 못했습니다.");
+      setAccounts(accData.accounts ?? []);
+      setPools(poolData.pools ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "계좌 설정을 불러오지 못했습니다.");
     } finally {
@@ -219,15 +263,15 @@ export function AccountSettingsManager() {
     <div className="card appCard">
       <div className="card-body">
         <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>계좌 설정</h2>
-        <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
           계좌 메타(이름/순서/벤치마크 등)는 DB(account_settings)가 단일 소스입니다. 계좌 추가/삭제는 화면에서 지원하지 않습니다.
         </p>
         {loading ? (
-          <div style={{ color: "#868e96", padding: 12 }}>불러오는 중…</div>
+          <div style={{ color: "var(--text-muted)", padding: 12 }}>불러오는 중…</div>
         ) : accounts.length === 0 ? (
-          <div style={{ color: "#94a3b8", padding: 12 }}>등록된 계좌가 없습니다.</div>
+          <div style={{ color: "var(--text-muted)", padding: 12 }}>등록된 계좌가 없습니다.</div>
         ) : (
-          accounts.map((a) => <AccountRow key={a.account_id} account={a} onSaved={() => {}} />)
+          accounts.map((a) => <AccountRow key={a.account_id} account={a} pools={pools} onSaved={() => {}} />)
         )}
       </div>
     </div>
