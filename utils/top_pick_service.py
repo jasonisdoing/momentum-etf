@@ -863,23 +863,37 @@ def _apply_trade_plan(
         row["unallocated_amount_krw"] = round(unallocated_amount, 2) if native_mode else int(unallocated_amount)
         target_asset_amount += target_buy_amount
 
-    for ticker, holding in sorted(holdings.items()):
-        if ticker in target_tickers:
-            continue
+    extra_holdings = [
+        (ticker, holding)
+        for ticker, holding in sorted(holdings.items())
+        if ticker not in target_tickers
+        and (int(holding.get("current_quantity") or 0) > 0 or float(holding.get("current_amount_krw") or 0) > 0)
+    ]
+    extra_ticker_items = [
+        {
+            "ticker": ticker,
+            "ticker_type": holding_ticker_type,
+            "country_code": holding_country_code,
+        }
+        for ticker, _holding in extra_holdings
+    ]
+    extra_close_frame, _extra_missing = _load_close_frame(extra_ticker_items)
+    extra_return_map = _build_return_map(extra_close_frame)
+
+    for ticker, holding in extra_holdings:
         current_quantity = int(holding.get("current_quantity") or 0)
         current_amount = float(holding.get("current_amount_krw") or 0)
-        if current_quantity <= 0 and current_amount <= 0:
-            continue
+        period_returns = extra_return_map.get(ticker, {})
         rows.append(
             {
                 "ticker": ticker,
                 "name": holding.get("name") or ticker,
                 "ticker_type": holding_ticker_type,
                 "country_code": holding_country_code,
-                "return_1m_pct": None,
-                "return_3m_pct": None,
-                "return_6m_pct": None,
-                "return_12m_pct": None,
+                "return_1m_pct": period_returns.get("return_1m_pct"),
+                "return_3m_pct": period_returns.get("return_3m_pct"),
+                "return_6m_pct": period_returns.get("return_6m_pct"),
+                "return_12m_pct": period_returns.get("return_12m_pct"),
                 "daily_change_pct": holding.get("daily_change_pct"),
                 "trend_pct": None,
                 "trend_score": None,
@@ -1562,29 +1576,35 @@ def run_top_pick_backtest(
 
     def allocate_with_slippage(
         total_value: float, weights: dict[str, float], current_values: dict[str, float]
-    ) -> tuple[dict[str, float], float, float]:
+    ) -> tuple[dict[str, float], float, float, dict[str, float]]:
         """총자산을 목표비중으로 재배치하며 종목별 매수/매도 금액 × 슬리피지율을 비용으로 차감한다."""
         cost = 0.0
+        costs_by_ticker: dict[str, float] = {}
         for ticker in ticker_order:
             target = total_value * float(weights.get(ticker, 0.0))
             delta = target - float(current_values.get(ticker, 0.0))
             buy_ratio, sell_ratio = slippage_by_ticker[ticker]
+            ticker_cost = 0.0
             if delta > 0:
-                cost += delta * buy_ratio
+                ticker_cost = delta * buy_ratio
             elif delta < 0:
-                cost += (-delta) * sell_ratio
+                ticker_cost = (-delta) * sell_ratio
+            costs_by_ticker[ticker] = ticker_cost
+            cost += ticker_cost
         net_total = total_value - cost
         values = {ticker: net_total * float(weights.get(ticker, 0.0)) for ticker in ticker_order}
         cash = net_total * float(weights.get("__CASH__", 0.0))
-        return values, cash, cost
+        return values, cash, cost, costs_by_ticker
 
     current_weights = weights_by_date[start_date]
+    profit_by_ticker = {ticker: 0.0 for ticker in ticker_order}
     # 최초 편입 — 전액 현금에서 매수하므로 매수 슬리피지가 발생한다.
-    asset_values, cash_value, initial_cost = allocate_with_slippage(
+    asset_values, cash_value, initial_cost, initial_costs_by_ticker = allocate_with_slippage(
         initial_capital_krw, current_weights, {ticker: 0.0 for ticker in ticker_order}
     )
     total_slippage_cost += initial_cost
-    profit_by_ticker = {ticker: 0.0 for ticker in ticker_order}
+    for ticker, ticker_cost in initial_costs_by_ticker.items():
+        profit_by_ticker[ticker] -= ticker_cost
     curve_values: list[float] = [initial_capital_krw]
     weight_history: list[dict[str, Any]] = []
     friday_history_dates = _select_friday_history_dates(sim.index)
@@ -1631,10 +1651,12 @@ def run_top_pick_backtest(
         if date in weights_by_date and date != start_date:
             current_weights = weights_by_date[date]
             total_value = sum(asset_values.values()) + cash_value
-            asset_values, cash_value, rebalance_cost = allocate_with_slippage(
+            asset_values, cash_value, rebalance_cost, rebalance_costs_by_ticker = allocate_with_slippage(
                 total_value, current_weights, asset_values
             )
             total_slippage_cost += rebalance_cost
+            for ticker, ticker_cost in rebalance_costs_by_ticker.items():
+                profit_by_ticker[ticker] -= ticker_cost
 
         curve_values.append(sum(asset_values.values()) + cash_value)
         # 매일 최종 자산 상태 기준 비중 기록

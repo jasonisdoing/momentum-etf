@@ -113,6 +113,7 @@ type LabPosition = TopPickTicker & {
   mdd_end: string;
   sortino: number | null;
   profit: number;
+  profit_contribution_pct?: number | null;
   value: number;
   min_weight?: number;
   max_weight?: number;
@@ -1058,8 +1059,8 @@ export function TopPickSettingsClient() {
       },
       {
         field: "return_pct",
-        headerName: "수익률",
-        width: 100,
+        headerName: `수익률(${backtestResult?.months ?? "-"}개월)`,
+        width: 150,
         type: "rightAligned",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) => (
@@ -1068,16 +1069,16 @@ export function TopPickSettingsClient() {
       },
       {
         field: "mdd_pct",
-        headerName: "MDD",
-        width: 100,
+        headerName: `MDD(${backtestResult?.months ?? "-"}개월)`,
+        width: 150,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
           params.value == null ? "-" : <span style={{ color: "#d63939" }}>{formatReturnPct(params.value)}</span>,
       },
       {
         field: "sortino",
-        headerName: "Sortino",
-        width: 100,
+        headerName: `Sortino(${backtestResult?.months ?? "-"}개월)`,
+        width: 150,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
       },
@@ -1089,6 +1090,15 @@ export function TopPickSettingsClient() {
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: number | null | undefined }) =>
           params.value == null ? "-" : <span style={{ color: signedColor(params.value) }}>{formatKrw(params.value)}</span>,
+      },
+      {
+        field: "profit_contribution_pct",
+        headerName: "수익기여",
+        width: 100,
+        type: "rightAligned",
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value: number | null | undefined }) =>
+          params.value == null ? "-" : <span style={{ color: signedColor(params.value) }}>{params.value.toFixed(1)}%</span>,
       },
       {
         field: "min_weight",
@@ -1107,7 +1117,7 @@ export function TopPickSettingsClient() {
           params.value == null ? "-" : `${formatNumber(params.value, 1)}%`,
       },
     ],
-    [backtestResult?.weight_items, displayTickerOf],
+    [backtestResult?.months, backtestResult?.weight_items, displayTickerOf],
   );
 
   const backtestGridOptions = useMemo<GridOptions<LabPosition>>(
@@ -1122,8 +1132,13 @@ export function TopPickSettingsClient() {
     if (!backtestResult) return [];
     const lastWeightRow = backtestResult.weight_history?.[backtestResult.weight_history.length - 1];
     const cashValue = Number(lastWeightRow?.__CASH__ ?? 0);
+    const totalProfit = backtestResult.final_value - backtestResult.initial_capital;
+    const withContribution = (position: LabPosition): LabPosition => ({
+      ...position,
+      profit_contribution_pct: totalProfit === 0 ? null : (position.profit / totalProfit) * 100,
+    });
     return [
-      {
+      withContribution({
         ticker: "__CASH__",
         name: "현금",
         bucket: 5,
@@ -1141,8 +1156,8 @@ export function TopPickSettingsClient() {
         value: Number.isFinite(cashValue) ? cashValue : 0,
         min_weight: backtestResult.cash_min_weight ?? 0,
         max_weight: backtestResult.cash_max_weight ?? 0,
-      },
-      ...backtestResult.positions,
+      }),
+      ...backtestResult.positions.map(withContribution),
     ];
   }, [backtestResult]);
 
@@ -1625,7 +1640,7 @@ export function TopPickSettingsClient() {
                     </div>
                   </div>
                   <div className="topPickBacktestPerformancePanel">
-                    <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 8 }}>종목별 성과</h3>
+                    <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 8 }}>백테스트 종목별 성과</h3>
                     {backtestResult.has_late_entry ? (
                       <p style={{ color: "#b45309", background: "rgba(245,158,11,0.08)", fontSize: "0.8rem", padding: "6px 10px", borderRadius: 6, marginBottom: 10 }}>
                         실험 시작 이후 상장된 종목은 배정 예산을 현금으로 대기시켰다가 상장일 종가에 편입합니다.
