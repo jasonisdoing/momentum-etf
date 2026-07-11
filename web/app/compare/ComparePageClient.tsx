@@ -1481,7 +1481,7 @@ export function ComparePageClient() {
                 >
                   <div className="compareMatrixLabelText">{metric.label}</div>
                   {metric.label === "포트폴리오 변동" && portfolioChangeBaseDate && (
-                    <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal", marginTop: "4px" }}>
+                    <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
                       ({formatKoreanDateLabel(portfolioChangeBaseDate)}
                       {portfolioChangeBaseIsOpen ? " 시초가" : ""} 이후)
                     </div>
@@ -1512,7 +1512,7 @@ export function ComparePageClient() {
             <div className="compareMatrixLabel compareMatrixLabelWide" style={{ flexDirection: "column" }}>
               <div className="compareMatrixLabelText">포트폴리오 변동</div>
               {portfolioChangeBaseDate && (
-                <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "#64748b", fontWeight: "normal", marginTop: "4px" }}>
+                <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
                   ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
                 </div>
               )}

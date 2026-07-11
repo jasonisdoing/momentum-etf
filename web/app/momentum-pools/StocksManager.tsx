@@ -999,7 +999,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return recommendedTickerSet.has(rowId) ? 1 : 0;
         },
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          if (!params.value) return <span style={{ color: "#adb5bd" }}>-</span>;
+          if (!params.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
           return <span style={{ fontSize: "1rem" }}>✅</span>;
         },
       },

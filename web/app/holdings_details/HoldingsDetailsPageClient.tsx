@@ -160,7 +160,7 @@ function HoldingsBoxView({
           justifyContent: "center",
           padding: "3rem 1.5rem",
           minHeight: "240px",
-          color: "#64748b",
+          color: "var(--text-muted)",
         }}
       >
         구성종목 불러오는 중...
@@ -177,7 +177,7 @@ function HoldingsBoxView({
           justifyContent: "center",
           padding: "3rem 1.5rem",
           minHeight: "240px",
-          color: "#64748b",
+          color: "var(--text-muted)",
         }}
       >
         표시할 구성종목이 없습니다.
@@ -231,7 +231,7 @@ function HoldingsBoxView({
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
-                color: "#1f2937",
+                color: "var(--text-strong)",
                 fontSize: "1rem",
                 fontWeight: 800,
                 lineHeight: 1.25,
@@ -249,7 +249,7 @@ function HoldingsBoxView({
                 marginTop: "0.15rem",
               }}
             >
-              <div style={{ flex: "0 0 auto", color: "#9ca3af", fontSize: "0.85rem" }}>
+              <div style={{ flex: "0 0 auto", color: "var(--text-muted)", fontSize: "0.85rem" }}>
                 {stripAsxPrefix(row.ticker)}
               </div>
               <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
@@ -639,7 +639,7 @@ export function HoldingsDetailsPageClient() {
           >
             {formatSignedPercentWithPlus(averageStats.avgPct)}
           </span>
-          <span style={{ color: "#94a3b8", marginLeft: "0.25rem", fontSize: "0.85rem" }}>
+          <span style={{ color: "var(--text-muted)", marginLeft: "0.25rem", fontSize: "0.85rem" }}>
             (추적 {averageStats.trackedWeight.toFixed(0)}%)
           </span>
         </div>

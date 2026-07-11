@@ -92,7 +92,7 @@ function LabChart({ result }: { result: LabResult }) {
     if (!container) return;
     const chart = createChart(container, {
       height: 280,
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#64748b" },
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#5b6675" },
       grid: { vertLines: { color: "rgba(148,163,184,0.12)" }, horzLines: { color: "rgba(148,163,184,0.12)" } },
       rightPriceScale: { borderVisible: false },
       // 마지막 데이터가 우측 끝에 붙지 않도록 여백을 준다 (값 라벨과의 겹침 완화)
@@ -108,7 +108,7 @@ function LabChart({ result }: { result: LabResult }) {
       .addSeries(LineSeries, { color: "#2563eb", lineWidth: 2, lastValueVisible: false, priceLineVisible: false })
       .setData(toLine(result.chart.portfolio_pct));
     chart
-      .addSeries(LineSeries, { color: "#94a3b8", lineWidth: 1, lastValueVisible: false, priceLineVisible: false })
+      .addSeries(LineSeries, { color: "var(--text-muted)", lineWidth: 1, lastValueVisible: false, priceLineVisible: false })
       .setData(toLine(result.chart.benchmark_pct));
     chart.timeScale().fitContent();
 
@@ -121,7 +121,7 @@ function LabChart({ result }: { result: LabResult }) {
         <span style={{ display: "flex", alignItems: "center", gap: 5, color: "#2563eb" }}>
           <span style={{ width: 14, height: 3, background: "#2563eb", borderRadius: 2 }} /> 포트폴리오
         </span>
-        <span style={{ display: "flex", alignItems: "center", gap: 5, color: "#94a3b8" }}>
+        <span style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--text-muted)" }}>
           <span style={{ width: 14, height: 3, background: "#94a3b8", borderRadius: 2 }} /> {result.benchmark.name}
         </span>
       </div>
@@ -289,7 +289,7 @@ export function PortfolioLabClient() {
 
   const summaryChip = (label: string, value: string, color?: string) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 96 }}>
-      <span style={{ color: "#94a3b8", fontSize: "0.78rem", fontWeight: 600 }}>{label}</span>
+      <span style={{ color: "var(--text-muted)", fontSize: "0.78rem", fontWeight: 600 }}>{label}</span>
       <span style={{ fontWeight: 800, fontSize: "1.02rem", color: color ?? "#182433" }}>{value}</span>
     </div>
   );
@@ -297,13 +297,22 @@ export function PortfolioLabClient() {
   const positionColumns = useMemo<ColDef<LabPosition>[]>(
     () => [
       {
+        field: "ticker",
+        headerName: "티커",
+        width: 110,
+        cellRenderer: (params: { data?: LabPosition }) => {
+          const row = params.data;
+          return row ? row.ticker : "-";
+        },
+      },
+      {
         field: "name",
-        headerName: "종목",
-        minWidth: 240,
+        headerName: "종목명",
+        minWidth: 200,
         flex: 1,
         cellRenderer: (params: { data?: LabPosition }) => {
           const row = params.data;
-          return row ? `${row.name ?? row.ticker} (${row.ticker})` : "-";
+          return row ? row.name ?? row.ticker : "-";
         },
       },
       {
@@ -383,7 +392,7 @@ export function PortfolioLabClient() {
             <div className="card appCard" style={{ width: "100%" }}>
               <div className="card-body">
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>포트폴리오 구성 (한국 전용)</h2>
-                <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+                <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
                   N개월 전 첫 거래일에 균등비중 매수 후 그대로 보유했다고 가정합니다. (수정주가 기준, 슬리피지 0.5%)
                 </p>
 
@@ -410,7 +419,7 @@ export function PortfolioLabClient() {
                         </button>
                       )}
                       <input
-                        style={{ ...inputStyle, flex: 1, minWidth: 150, backgroundColor: "#f8fafc", color: "#64748b" }}
+                        style={{ ...inputStyle, flex: 1, minWidth: 150, backgroundColor: "#f8fafc", color: "var(--text-muted)" }}
                         placeholder="이름 (티커 입력 후 확인)"
                         value={t.name ?? ""}
                         readOnly
@@ -435,7 +444,7 @@ export function PortfolioLabClient() {
                 </button>
 
                 <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14, flexWrap: "wrap" }}>
-                  <span style={{ color: "#64748b", fontWeight: 600, fontSize: "0.85rem", flexShrink: 0 }}>벤치마크</span>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 600, fontSize: "0.85rem", flexShrink: 0 }}>벤치마크</span>
                   <input
                     style={{ ...inputStyle, width: 110 }}
                     placeholder="티커"
@@ -457,7 +466,7 @@ export function PortfolioLabClient() {
                 </div>
 
                 <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
-                  <span style={{ color: "#64748b", fontWeight: 600, fontSize: "0.85rem" }}>기간(개월)</span>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 600, fontSize: "0.85rem" }}>기간(개월)</span>
                   <select className="form-select form-select-sm" style={{ width: 80 }} value={months} onChange={(e) => setMonths(Number(e.target.value))}>
                     {[6, 12, 24].map((m) => (
                       <option key={m} value={m}>
@@ -465,7 +474,7 @@ export function PortfolioLabClient() {
                       </option>
                     ))}
                   </select>
-                  <span style={{ color: "#64748b", fontWeight: 600, fontSize: "0.85rem" }}>리밸런싱</span>
+                  <span style={{ color: "var(--text-muted)", fontWeight: 600, fontSize: "0.85rem" }}>리밸런싱</span>
                   <select className="form-select form-select-sm" style={{ width: 170 }} value={rebalance} onChange={(e) => setRebalance(e.target.value)}>
                     {REBALANCE_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>
@@ -499,7 +508,7 @@ export function PortfolioLabClient() {
                   <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>
                     결과 — {result.buy_date} ~ {result.end_date} ({result.months}개월)
                   </h2>
-                  <p style={{ color: "#94a3b8", fontSize: "0.82rem", marginBottom: 12 }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 12 }}>
                     초기 {formatKrw(result.initial_capital)} → 최종 {formatKrw(result.final_value)} · 리밸런싱: {rebalanceLabel(result.rebalance)}
                   </p>
                   <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 8 }}>
@@ -508,7 +517,7 @@ export function PortfolioLabClient() {
                     {summaryChip("MDD", `${result.summary.mdd_pct.toFixed(2)}%`, "#d63939")}
                     {summaryChip("Sortino", result.summary.sortino.toFixed(2))}
                   </div>
-                  <div style={{ color: "#94a3b8", fontSize: "0.8rem", marginBottom: 10 }}>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginBottom: 10 }}>
                     벤치마크 {result.benchmark.name}: 총 {result.benchmark.summary.total_return_pct.toFixed(2)}% · MDD{" "}
                     {result.benchmark.summary.mdd_pct.toFixed(2)}% · Sortino {result.benchmark.summary.sortino.toFixed(2)}
                   </div>
@@ -517,7 +526,7 @@ export function PortfolioLabClient() {
               </div>
             ) : (
               <div className="card appCard" style={{ width: "100%" }}>
-                <div className="card-body" style={{ color: "#94a3b8", padding: 24 }}>
+                <div className="card-body" style={{ color: "var(--text-muted)", padding: 24 }}>
                   종목을 확인한 뒤 실행을 누르면 결과가 여기에 표시됩니다.
                 </div>
               </div>
@@ -551,12 +560,12 @@ export function PortfolioLabClient() {
 
       <AppModal open={showLoadModal} title="저장된 포트폴리오" size="xl" onClose={() => setShowLoadModal(false)}>
         {saved.length === 0 ? (
-          <div style={{ color: "#94a3b8", fontSize: "0.9rem", padding: 8 }}>저장된 포트폴리오가 없습니다.</div>
+          <div style={{ color: "var(--text-muted)", fontSize: "0.9rem", padding: 8 }}>저장된 포트폴리오가 없습니다.</div>
         ) : (
           saved.map((p) => (
             <div key={p.name} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 0", borderBottom: "1px solid rgba(148,163,184,0.15)" }}>
               <span style={{ fontWeight: 700, flexShrink: 0, minWidth: 120 }}>{p.name}</span>
-              <span style={{ color: "#94a3b8", fontSize: "0.82rem", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ color: "var(--text-muted)", fontSize: "0.82rem", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {p.months}개월 · {rebalanceLabel(p.rebalance)} · vs {(p.benchmark ?? DEFAULT_BENCHMARK).name} · {p.tickers.map((t) => t.name ?? t.ticker).join(", ")}
               </span>
               <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => loadPortfolio(p)}>

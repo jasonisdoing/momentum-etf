@@ -127,8 +127,8 @@ def calculate_ranked_score_weights_with_cash(
         raise ValueError("비중 계산에 필요한 종목 점수가 없습니다.")
 
     n = len(scores)
-    if min_weight <= 0:
-        raise ValueError("최소 비중은 0보다 커야 합니다.")
+    if min_weight < 0:
+        raise ValueError("최소 비중은 0 이상이어야 합니다.")
     if max_weight <= 0:
         raise ValueError("최대 비중은 0보다 커야 합니다.")
     if max_weight < min_weight:

@@ -9,6 +9,10 @@
   --panel: var(--tblr-bg-surface, #ffffff);
   --ink: var(--tblr-body-color, #182433);
   --muted: var(--tblr-secondary-color, #667382);
+  /* 텍스트 3단계 표준: 진한 볼드 / 일반 / 약간 흐린(너무 흐리지 않게) */
+  --text-strong: #0f172a;
+  --text-normal: var(--ink);
+  --text-muted: #5b6675;
   --line: var(--tblr-border-color, #dce1e7);
   --accent: var(--tblr-primary, #206bc4);
   --accent-soft: rgba(32, 107, 196, 0.08);
@@ -2959,6 +2963,29 @@ a {
   display: block;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 탑픽 종목명: 모멘텀 종목풀과 동일하게 최대 2줄까지 표시한다. */
+.topPickPreviewGrid .ag-cell.topPickNameCell,
+.topPickPreviewGrid .ag-cell.topPickNameCell .ag-cell-value,
+.topPickWeightGrid .ag-cell.topPickNameCell,
+.topPickWeightGrid .ag-cell.topPickNameCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.topPickPreviewGrid .topPickNameCellText,
+.topPickWeightGrid .topPickNameCellText {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.1;
 }
 
 .tickerDetailCodeContent {

@@ -197,7 +197,7 @@ export function SettingsManager() {
         <div className="card appCard">
           <div className="card-body appCardBodyTight">
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목풀 설정</h2>
-            <p className="tableFooterMeta" style={{ marginBottom: 12, color: "#94a3b8", fontSize: "0.85rem" }}>
+            <p className="tableFooterMeta" style={{ marginBottom: 12, color: "var(--text-muted)", fontSize: "0.85rem" }}>
               종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 6개 값은 DB 에서 저장·수정합니다.
             </p>
             <div style={{ overflowX: "auto" }}>
@@ -316,16 +316,16 @@ export function SettingsManager() {
                             {savingId === id ? "저장 중…" : "저장"}
                           </button>
                         </td>
-                        <td style={{ textAlign: "left", fontSize: "0.82rem", color: "#64748b", verticalAlign: "middle" }}>
+                        <td style={{ textAlign: "left", fontSize: "0.82rem", color: "var(--text-muted)", verticalAlign: "middle" }}>
                           {entry.updated_at ? (
                             <span style={{ fontWeight: 600, color: "#475569" }}>
                               {formatKstDateTime(entry.updated_at)}
                             </span>
                           ) : (
-                            <span style={{ color: "#cbd5e1" }}>기록 없음</span>
+                            <span style={{ color: "var(--text-muted)" }}>기록 없음</span>
                           )}
                         </td>
-                        <td style={{ textAlign: "left", fontSize: "0.8rem", color: "#64748b", verticalAlign: "middle" }}>
+                        <td style={{ textAlign: "left", fontSize: "0.8rem", color: "var(--text-muted)", verticalAlign: "middle" }}>
                           {entry.save_method ? (
                             <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.35 }}>
                               {entry.save_method.split("\n").map((line, idx) => (
@@ -335,7 +335,7 @@ export function SettingsManager() {
                               ))}
                             </div>
                           ) : (
-                            <span style={{ color: "#cbd5e1" }}>미지정</span>
+                            <span style={{ color: "var(--text-muted)" }}>미지정</span>
                           )}
                         </td>
                       </tr>

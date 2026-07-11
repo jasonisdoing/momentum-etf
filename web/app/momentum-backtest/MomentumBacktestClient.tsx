@@ -138,7 +138,7 @@ export function MomentumBacktestClient() {
     return (
       <PageFrame title="모멘텀 백테스트">
         <div className="appPageStack" style={{ maxWidth: 1000 }}>
-          <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
+          <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
         </div>
       </PageFrame>
     );
@@ -158,7 +158,7 @@ export function MomentumBacktestClient() {
         <div className="card appCard">
           <div className="card-body">
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 8 }}>백테스트 실행</h2>
-            <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
               탐색공간은 모멘텀-설정에서 편집합니다. 버튼을 누르면 배치 큐에 등록되고 워커가 모든 종목풀을 전수 탐색합니다(시간이 걸립니다). 결과는 풀별 로그 파일로 저장됩니다.
             </p>
             <button type="button" className="btn btn-dark" disabled={triggering || running} onClick={() => void start()} style={{ minWidth: 200 }}>
@@ -166,8 +166,8 @@ export function MomentumBacktestClient() {
             </button>
             <div style={{ marginTop: 12, fontSize: "0.85rem", color: "#475569" }}>
               상태: <b>{statusLabel}</b>
-              {bt?.started_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>시작: {formatKstDateTime(bt.started_at)}</span> : null}
-              {bt?.ended_at ? <span style={{ color: "#94a3b8", marginLeft: 12 }}>종료: {formatKstDateTime(bt.ended_at)}</span> : null}
+              {bt?.started_at ? <span style={{ color: "var(--text-muted)", marginLeft: 12 }}>시작: {formatKstDateTime(bt.started_at)}</span> : null}
+              {bt?.ended_at ? <span style={{ color: "var(--text-muted)", marginLeft: 12 }}>종료: {formatKstDateTime(bt.ended_at)}</span> : null}
             </div>
           </div>
         </div>
@@ -177,14 +177,14 @@ export function MomentumBacktestClient() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
               <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>진행도 / 결과</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: "#64748b", fontSize: "0.85rem", fontWeight: 600 }}>종목풀</span>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600 }}>종목풀</span>
                 <select style={selectStyle} value={selectedPool} onChange={(e) => onPoolChange(e.target.value)} disabled={pools.length === 0}>
                   {pools.length === 0 ? <option value="">결과 없음</option> : null}
                   {pools.map((p) => (
                     <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
-                <span style={{ color: "#64748b", fontSize: "0.85rem", fontWeight: 600 }}>날짜</span>
+                <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600 }}>날짜</span>
                 <select style={selectStyle} value={selectedDate} onChange={(e) => setSelectedDate(e.target.value)} disabled={!selectedPool}>
                   {datesFor(selectedPool).map((d, i) => (
                     <option key={d} value={d}>{d}{i === 0 ? " (최신)" : ""}</option>
@@ -210,7 +210,7 @@ export function MomentumBacktestClient() {
                 {bt.log_text}
               </pre>
             ) : (
-              <div style={{ color: "#94a3b8", padding: 12 }}>
+              <div style={{ color: "var(--text-muted)", padding: 12 }}>
                 {pools.length === 0 ? "아직 백테스트 결과가 없습니다. \"백테스트 시작\"을 눌러 실행하세요." : "선택한 결과가 비어 있습니다."}
               </div>
             )}

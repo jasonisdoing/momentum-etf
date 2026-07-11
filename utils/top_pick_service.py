@@ -12,7 +12,11 @@ import pandas as pd
 from config import TRADING_DAYS_PER_MONTH
 from core.strategy.scoring import build_composite_rank_scores, compute_secondary_metric_points
 from core.strategy.weight_allocator import calculate_ranked_score_weights_with_cash
-from utils.cache_utils import get_all_ticker_type_lookup_keys, load_cached_close_series_bulk, load_cached_close_series_bulk_with_fallback
+from utils.cache_utils import (
+    get_all_ticker_type_lookup_keys,
+    load_cached_close_series_bulk,
+    load_cached_close_series_bulk_with_fallback,
+)
 from utils.logger import get_app_logger
 from utils.perf_metrics import curve_metrics, mdd_span
 
@@ -20,7 +24,6 @@ logger = get_app_logger()
 
 COLLECTION = "top_pick_settings"
 SETTINGS_ID = "default"
-TOP_PICK_MAX_TICKERS = 10
 
 ALLOWED_MA_TYPES = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"}
 
@@ -35,6 +38,7 @@ SETTING_KEYS = (
     "MIN_WEIGHT",
     "MAX_WEIGHT",
     "CASH_MAX_WEIGHT",
+    "MAX_TICKERS",
     "ACCOUNT_ID",
     "START_AMOUNT_MANWON",
     "START_DATE",
@@ -48,13 +52,16 @@ REQUIRED_SETTING_KEYS = (
     "MIN_WEIGHT",
     "MAX_WEIGHT",
     "CASH_MAX_WEIGHT",
+    "MAX_TICKERS",
 )
+# 계좌별 편입 티커 수 상한(MAX_TICKERS)의 허용 범위.
+MAX_TICKERS_LIMIT = 20
 DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
     "months": 12,
     "rebalance": "none",
     "initial_amount_manwon": 10000,
 }
-ALLOWED_BACKTEST_MONTHS = {6, 12, 24}
+ALLOWED_BACKTEST_MONTHS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36}
 ALLOWED_BACKTEST_REBALANCE = {"none", "weekly", "monthly", "quarterly", "yearly"}
 
 
@@ -83,6 +90,7 @@ def _load_unique_stock_meta_by_ticker(tickers: list[str]) -> dict[str, dict[str,
                 "ticker": 1,
                 "ticker_type": 1,
                 "name": 1,
+                "bucket": 1,
             },
         )
     )
@@ -115,8 +123,8 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
         name = str(item.get("name") or "").strip()
         if not ticker or not name or ticker in seen:
             continue
-        if len(clean) >= TOP_PICK_MAX_TICKERS:
-            raise ValueError(f"탑픽 편입 ETF는 최대 {TOP_PICK_MAX_TICKERS}개까지 등록할 수 있습니다.")
+        if len(clean) >= MAX_TICKERS_LIMIT:
+            raise ValueError(f"탑픽 편입 ETF는 최대 {MAX_TICKERS_LIMIT}개까지 등록할 수 있습니다.")
         seen.add(ticker)
         row: dict[str, Any] = {"ticker": ticker, "name": name}
         stock_meta = stock_meta_by_ticker.get(ticker) or {}
@@ -128,9 +136,9 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
             row["country_code"] = country_code
         if isinstance(item.get("is_etf"), bool):
             row["is_etf"] = item["is_etf"]
-        nickname = str(item.get("nickname") or "").strip()
-        if nickname:
-            row["nickname"] = nickname
+        bucket = stock_meta.get("bucket") or item.get("bucket")
+        if bucket is not None:
+            row["bucket"] = int(bucket)
         clean.append(row)
     return clean
 
@@ -176,7 +184,7 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     cleaned["SORTINO_MONTHS"] = sortino_months
 
     float_ranges = {
-        "MIN_WEIGHT": (1.0, 100.0),
+        "MIN_WEIGHT": (0.0, 100.0),
         "MAX_WEIGHT": (1.0, 100.0),
         "CASH_MAX_WEIGHT": (0.0, 100.0),
     }
@@ -191,6 +199,16 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
 
     if cleaned["MAX_WEIGHT"] < cleaned["MIN_WEIGHT"]:
         raise ValueError("MAX_WEIGHT 은 MIN_WEIGHT 보다 크거나 같아야 합니다.")
+
+    # 계좌별 편입 티커 수 상한
+    try:
+        max_tickers = int(source.get("MAX_TICKERS"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"MAX_TICKERS 은 정수여야 합니다: {source.get('MAX_TICKERS')}") from exc
+    if not (1 <= max_tickers <= MAX_TICKERS_LIMIT):
+        raise ValueError(f"MAX_TICKERS 은 1 ~ {MAX_TICKERS_LIMIT} 범위여야 합니다: {max_tickers}")
+    cleaned["MAX_TICKERS"] = max_tickers
+
     account_id = str(source.get("ACCOUNT_ID") or "").strip()
     if account_id:
         from utils.settings_loader import list_available_accounts
@@ -199,17 +217,17 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
             raise ValueError(f"존재하지 않는 탑픽 적용 계좌입니다: {account_id}")
     cleaned["ACCOUNT_ID"] = account_id
 
-    # 누적수익률 기준 시작금액(만원). 미설정(None/빈값)은 그대로 None 유지 — 임의 보정 금지.
+    # KRW는 만원, 외화 계좌는 해당 통화 금액으로 저장한다. 외화 센트 단위를 위해 소수점 2자리를 허용한다.
     raw_start_amount = source.get("START_AMOUNT_MANWON")
     if raw_start_amount in (None, ""):
         cleaned["START_AMOUNT_MANWON"] = None
     else:
         try:
-            start_amount_manwon = int(raw_start_amount)
+            start_amount_manwon = round(float(raw_start_amount), 2)
         except (TypeError, ValueError) as exc:
-            raise ValueError(f"시작금액(만원)은 정수여야 합니다: {raw_start_amount}") from exc
+            raise ValueError(f"시작금액은 숫자여야 합니다: {raw_start_amount}") from exc
         if not (1 <= start_amount_manwon <= 1_000_000_000):
-            raise ValueError(f"시작금액(만원)은 1 ~ 1000000000 범위여야 합니다: {start_amount_manwon}")
+            raise ValueError(f"시작금액은 1 ~ 1000000000 범위여야 합니다: {start_amount_manwon}")
         cleaned["START_AMOUNT_MANWON"] = start_amount_manwon
 
     # 누적수익률 기준 시작일자 (YYYY-MM-DD). 미설정은 None 유지.
@@ -232,16 +250,24 @@ def _clean_backtest_settings(values: Any, *, base: Any = None) -> dict[str, Any]
 
     benchmark_source = source.get("benchmark") if isinstance(source.get("benchmark"), dict) else {}
     ticker = str(benchmark_source.get("ticker") or "").strip().upper()
-    name = str(benchmark_source.get("name") or ticker).strip()
     if not ticker:
-        raise ValueError("백테스트 벤치마크 티커가 필요합니다.")
+        raise ValueError("시장 레짐 지수가 필요합니다. 설정 화면에서 지수를 선택해주세요.")
+    from utils.market_trend_service import INDICES
+
+    index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == ticker), None)
+    if index_meta is None:
+        allowed = ", ".join(idx["yf_ticker"] for idx in INDICES)
+        raise ValueError(f"시장 레짐은 시장추세 지수({allowed}) 중 하나여야 합니다: {ticker}")
+    name = index_meta["name"]
 
     try:
         months = int(source.get("months"))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"백테스트 기간(개월)은 정수여야 합니다: {source.get('months')}") from exc
     if months not in ALLOWED_BACKTEST_MONTHS:
-        raise ValueError(f"백테스트 기간(개월)은 {', '.join(map(str, sorted(ALLOWED_BACKTEST_MONTHS)))} 중 하나여야 합니다.")
+        raise ValueError(
+            f"백테스트 기간(개월)은 {', '.join(map(str, sorted(ALLOWED_BACKTEST_MONTHS)))} 중 하나여야 합니다."
+        )
 
     rebalance = str(source.get("rebalance") or "none").strip().lower()
     if rebalance not in ALLOWED_BACKTEST_REBALANCE:
@@ -279,35 +305,94 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
         "tickers": tickers,
         "settings": settings,
         "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings")),
-        "approved_weights": _enrich_weight_rows_with_returns(approved_weights, tickers),
-        "approved_at": (approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at).isoformat() if isinstance(approved_at, datetime) else None,
-        "updated_at": (updated_at.replace(tzinfo=timezone.utc) if updated_at.tzinfo is None else updated_at).isoformat() if isinstance(updated_at, datetime) else None,
+        "approved_weights": _enrich_weight_rows_with_returns(approved_weights, tickers, settings),
+        "approved_at": (
+            approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at
+        ).isoformat()
+        if isinstance(approved_at, datetime)
+        else None,
+        "updated_at": (updated_at.replace(tzinfo=timezone.utc) if updated_at.tzinfo is None else updated_at).isoformat()
+        if isinstance(updated_at, datetime)
+        else None,
     }
 
 
-def load_top_pick_settings() -> dict[str, Any]:
-    doc = _db()[COLLECTION].find_one({"_id": SETTINGS_ID})
+def list_top_pick_accounts() -> list[str]:
+    """탑픽 설정 문서가 존재하는 계좌 id 목록 (문서 _id = account_id)."""
+    return [str(doc["_id"]) for doc in _db()[COLLECTION].find({}, {"_id": 1})]
+
+
+def _resolve_account_id(account_id: str | None) -> str:
+    """account_id 미지정 시: 계좌가 정확히 1개면 그걸 쓰고, 0개/2개 이상이면 명시적 에러(임의 선택 금지)."""
+    if account_id and str(account_id).strip():
+        return str(account_id).strip()
+    accounts = list_top_pick_accounts()
+    if len(accounts) == 1:
+        return accounts[0]
+    if not accounts:
+        raise ValueError("등록된 탑픽 계좌가 없습니다.")
+    raise ValueError(f"탑픽 계좌를 지정해야 합니다(여러 계좌 존재): {', '.join(accounts)}")
+
+
+def load_top_pick_settings(account_id: str | None = None) -> dict[str, Any]:
+    resolved = _resolve_account_id(account_id)
+    doc = _db()[COLLECTION].find_one({"_id": resolved})
+    if doc is None:
+        raise ValueError(f"탑픽 설정이 없습니다: {resolved}")
     return _serialize_doc(doc)
+
+
+def load_top_pick_settings_for_edit(account_id: str) -> dict[str, Any]:
+    """설정 편집 화면 전용 로더.
+
+    문서가 있으면 검증된 설정을, 없으면 **초기(빈) 상태**를 반환한다.
+    저장 전까지 DB 에 아무것도 쓰지 않으며, 저장 시 save 가 필수값을 검증한다(fail loud).
+    계산 경로는 여전히 load_top_pick_settings(엄격) 를 쓴다.
+    """
+    resolved = str(account_id or "").strip()
+    if not resolved:
+        raise ValueError("계좌를 지정해야 합니다.")
+    doc = _db()[COLLECTION].find_one({"_id": resolved})
+    if doc is not None:
+        return _serialize_doc(doc)
+    # 저장된 문서 없음 → 모든 값 미설정인 초기 상태(계좌 id 만 채움).
+    return {
+        "tickers": [],
+        "settings": {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS},
+        "backtest_settings": None,
+        "approved_weights": None,
+        "approved_at": None,
+        "updated_at": None,
+    }
 
 
 def save_top_pick_settings(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
+    account_id: str | None = None,
 ) -> dict[str, Any]:
+    resolved = _resolve_account_id(account_id)
     clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 1:
         raise ValueError("저장할 종목이 1개 이상 필요합니다.")
 
-    current = load_top_pick_settings()
-    clean_settings = _clean_settings(settings, base=current.get("settings") or {})
+    # 신규 계좌면 기존 문서가 없다(base 비움). 요청에 필수 설정이 다 있어야 저장된다.
+    existing_doc = _db()[COLLECTION].find_one({"_id": resolved}) or {}
+    settings_base = {key: existing_doc[key] for key in SETTING_KEYS if existing_doc.get(key) is not None}
+    clean_settings = _clean_settings(settings, base=settings_base)
+    # 계좌별 상한(MAX_TICKERS) 초과 저장 방지
+    if len(clean_tickers) > clean_settings["MAX_TICKERS"]:
+        raise ValueError(
+            f"편입 ETF는 최대 {clean_settings['MAX_TICKERS']}개까지 등록할 수 있습니다: 현재 {len(clean_tickers)}개"
+        )
     clean_backtest_settings = _clean_backtest_settings(
         backtest_settings,
-        base=current.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
+        base=existing_doc.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
     )
     updated_at = datetime.now(timezone.utc)
     _db()[COLLECTION].update_one(
-        {"_id": SETTINGS_ID},
+        {"_id": resolved},
         {
             "$set": {
                 "tickers": clean_tickers,
@@ -322,8 +407,8 @@ def save_top_pick_settings(
         "tickers": clean_tickers,
         "settings": clean_settings,
         "backtest_settings": clean_backtest_settings,
-        "approved_weights": current.get("approved_weights"),
-        "approved_at": current.get("approved_at"),
+        "approved_weights": existing_doc.get("approved_weights"),
+        "approved_at": existing_doc.get("approved_at"),
         "updated_at": updated_at.isoformat(),
     }
 
@@ -351,7 +436,8 @@ def _load_close_frame(tickers: list[dict[str, Any]]) -> tuple[pd.DataFrame, list
     unresolved = [
         str(item.get("ticker") or "").strip().upper()
         for item in tickers
-        if str(item.get("ticker") or "").strip().upper() and str(item.get("ticker") or "").strip().upper() not in series_map
+        if str(item.get("ticker") or "").strip().upper()
+        and str(item.get("ticker") or "").strip().upper() not in series_map
     ]
     for cache_key in get_all_ticker_type_lookup_keys():
         if not unresolved:
@@ -416,8 +502,27 @@ def _build_return_map(close_frame: pd.DataFrame) -> dict[str, dict[str, float | 
         result[str(ticker)] = {
             "return_1m_pct": _calculate_period_return(series, 1, eval_date),
             "return_3m_pct": _calculate_period_return(series, 3, eval_date),
+            "return_6m_pct": _calculate_period_return(series, 6, eval_date),
             "return_12m_pct": _calculate_period_return(series, 12, eval_date),
         }
+    return result
+
+
+def _build_mdd_map(close_frame: pd.DataFrame, window_months: int) -> dict[str, float | None]:
+    """Sortino 설정과 동일한 N개월 거래일 구간의 종목별 MDD를 반환한다."""
+    if close_frame.empty:
+        return {}
+
+    window = max(2, int(window_months) * int(TRADING_DAYS_PER_MONTH))
+    result: dict[str, float | None] = {}
+    for ticker in close_frame.columns:
+        series = pd.to_numeric(close_frame[ticker], errors="coerce").dropna().iloc[-window:]
+        if len(series) < 2:
+            result[str(ticker)] = None
+            continue
+        running_max = series.cummax()
+        drawdowns = (series / running_max) - 1.0
+        result[str(ticker)] = round(float(drawdowns.min()) * 100.0, 2)
     return result
 
 
@@ -532,7 +637,8 @@ def _build_daily_change_map(tickers: list[dict[str, Any]], close_frame: pd.DataF
 
 
 def _normalize_kor_holding_ticker(value: Any) -> str:
-    return str(value or "").strip().upper().replace("KR:", "")
+    # 보유내역 티커 표시 접두사(KR:, ASX:)를 제거해 탑픽 티커와 매칭 가능한 형태로 정규화한다.
+    return str(value or "").strip().upper().replace("KR:", "").replace("ASX:", "")
 
 
 def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
@@ -542,20 +648,40 @@ def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
     from utils.holdings_detail_service import load_all_holdings_detail
 
     payload = load_all_holdings_detail(account_id)
-    summaries = [
-        row
-        for row in payload.get("account_summaries", [])
-        if str(row.get("account_id") or "") == account_id
-    ]
+    summaries = [row for row in payload.get("account_summaries", []) if str(row.get("account_id") or "") == account_id]
     if not summaries:
         raise ValueError(f"탑픽 적용 계좌 정보를 찾을 수 없습니다: {account_id}")
 
     summary = summaries[0]
+    currency = str(summary.get("currency") or "KRW").strip().upper()
+    # KRW 계좌는 KRW 금액 그대로, 그 외(AUD 등)는 계좌 환종 네이티브 금액으로 통일한다.
+    # (가격 캐시의 현재가가 네이티브라 금액·수량 계산이 같은 통화로 맞아떨어져야 한다)
+    native_mode = currency != "KRW"
+
+    account_rows = [row for row in payload.get("rows", []) if str(row.get("account_id") or "") == account_id]
     holdings: dict[str, dict[str, Any]] = {}
-    for row in payload.get("rows", []):
+    total_native_value = 0.0
+    for row in account_rows:
         ticker = _normalize_kor_holding_ticker(row.get("ticker"))
-        if not ticker or ticker == "IS":
+        if not ticker:
             continue
+        # IS는 수동으로 관리하는 고정 자산이므로 탑픽 운용 자산과 성과 계산에서 제외한다.
+        if ticker == "IS":
+            continue
+        quantity = int(float(row.get("quantity") or 0))
+        valuation_krw = float(row.get("valuation_krw") or 0)
+        if native_mode:
+            price_native = float(row.get("current_price_num") or 0)
+            value = quantity * price_native
+            # KRW 환산에 쓰인 환율을 역산해 손익/매입금액도 같은 통화로 복원한다.
+            row_rate = (valuation_krw / value) if value > 0 else 0.0
+            pnl = float(row.get("pnl_krw_num") or 0.0) / row_rate if row_rate > 0 else 0.0
+            buy_amount = float(row.get("buy_amount_krw") or 0.0) / row_rate if row_rate > 0 else 0.0
+            total_native_value += value
+        else:
+            value = valuation_krw
+            pnl = float(row.get("pnl_krw_num") or 0.0)
+            buy_amount = float(row.get("buy_amount_krw") or 0.0)
         current = holdings.setdefault(
             ticker,
             {
@@ -565,15 +691,18 @@ def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
                 "pnl_krw": 0.0,
                 "buy_amount_krw": 0.0,
                 "return_pct": 0.0,
+                "daily_change_pct": row.get("daily_change_pct"),
                 "bucket": row.get("bucket"),
             },
         )
-        current["current_quantity"] += int(float(row.get("quantity") or 0))
-        current["current_amount_krw"] += int(round(float(row.get("valuation_krw") or 0)))
-        current["pnl_krw"] += float(row.get("pnl_krw_num") or 0.0)
-        current["buy_amount_krw"] += float(row.get("buy_amount_krw") or 0.0)
+        current["current_quantity"] += quantity
+        current["current_amount_krw"] += round(value, 2) if native_mode else int(round(value))
+        current["pnl_krw"] += pnl
+        current["buy_amount_krw"] += buy_amount
         if not current.get("name"):
             current["name"] = str(row.get("name") or ticker)
+        if current.get("daily_change_pct") is None and row.get("daily_change_pct") is not None:
+            current["daily_change_pct"] = row.get("daily_change_pct")
 
     for ticker, current in holdings.items():
         buy_amt = current["buy_amount_krw"]
@@ -583,11 +712,22 @@ def _load_top_pick_account_snapshot(account_id: str) -> dict[str, Any]:
         else:
             current["return_pct"] = 0.0
 
+    if native_mode:
+        cash_native = summary.get("cash_balance_native")
+        if cash_native is None and float(summary.get("cash_balance_krw") or 0) > 0:
+            raise ValueError(f"계좌 '{account_id}' 의 현금 원화({currency}) 잔액 정보가 없습니다.")
+        cash_balance = float(cash_native or 0.0)
+        account_amount = total_native_value + cash_balance
+    else:
+        cash_balance = float(summary.get("cash_balance_krw") or 0)
+        account_amount = float(summary.get("total_assets_krw") or 0)
+
     return {
         "account_id": account_id,
         "account_name": summary.get("name") or account_id,
-        "account_amount_krw": int(round(float(summary.get("total_assets_krw") or 0))),
-        "cash_balance_krw": int(round(float(summary.get("cash_balance_krw") or 0))),
+        "currency": currency,
+        "account_amount_krw": round(account_amount, 2) if native_mode else int(round(account_amount)),
+        "cash_balance_krw": round(cash_balance, 2) if native_mode else int(round(cash_balance)),
         "holdings": holdings,
     }
 
@@ -599,6 +739,7 @@ def _normalize_bucket_label(bucket_val: Any) -> str | None:
     if not val_str:
         return None
     import re
+
     pure_name = re.sub(r"^(\d+\.\s*)+", "", val_str).strip()
 
     mapping = {
@@ -607,7 +748,7 @@ def _normalize_bucket_label(bucket_val: Any) -> str | None:
         "배당방어": "3. 배당방어",
         "비당방어": "3. 배당방어",
         "대체헷지": "4. 대체헷지",
-        "현금": "5. 현금"
+        "현금": "5. 현금",
     }
     return mapping.get(pure_name, val_str)
 
@@ -620,10 +761,33 @@ def _apply_trade_plan(
     close_frame: pd.DataFrame,
 ) -> dict[str, Any]:
     account_snapshot = _load_top_pick_account_snapshot(str(settings.get("ACCOUNT_ID") or "").strip())
-    account_amount_krw = int(account_snapshot["account_amount_krw"])
+    cash_row = next((row for row in rows if row.get("ticker") == "__CASH__"), None)
+    if cash_row is None:
+        cash_row = {
+            "ticker": "__CASH__",
+            "name": "현금",
+            "ticker_type": "cash",
+            "country_code": None,
+            "target_weight_pct": 0.0,
+        }
+    else:
+        rows.remove(cash_row)
+    rows.insert(0, cash_row)
+
+    account_amount_krw = float(account_snapshot["account_amount_krw"])
     holdings = account_snapshot["holdings"]
+    account_currency = str(account_snapshot.get("currency") or "").strip().upper()
+    native_mode = account_currency != "KRW"
+    market_by_currency = {
+        "KRW": ("kor_kr", "kor"),
+        "AUD": ("aus", "au"),
+        "USD": ("us", "us"),
+    }
+    if account_currency not in market_by_currency:
+        raise ValueError(f"탑픽에서 지원하지 않는 계좌 환종입니다: {account_currency or '-'}")
+    holding_ticker_type, holding_country_code = market_by_currency[account_currency]
     current_price_map = _build_current_price_map(tickers, close_frame)
-    target_asset_amount = 0
+    target_asset_amount = 0.0
     target_tickers: set[str] = set()
 
     for row in rows:
@@ -633,32 +797,31 @@ def _apply_trade_plan(
         target_weight = row.get("target_weight_pct")
         target_amount = None
         if account_amount_krw > 0 and target_weight is not None:
-            target_amount = int(round(account_amount_krw * (float(target_weight) / 100.0)))
+            raw_target_amount = account_amount_krw * (float(target_weight) / 100.0)
+            target_amount = round(raw_target_amount, 2) if native_mode else int(round(raw_target_amount))
 
         row["current_price"] = None
         row["target_amount_krw"] = target_amount
+        row["target_value_krw"] = None
         row["target_quantity"] = None
         row["current_quantity"] = None
         row["current_amount_krw"] = None
         row["change_quantity"] = None
+        row["change_amount_krw"] = None
         row["unallocated_amount_krw"] = target_amount
         row["return_pct"] = None
         row["pnl_krw"] = None
         row["bucket"] = None
-        if "nickname" not in row:
-            row["nickname"] = None
-
         if ticker == "__CASH__":
             row["current_amount_krw"] = account_snapshot["cash_balance_krw"]
             row["bucket"] = "5. 현금"
-            row["nickname"] = None
             continue
 
         current_price = current_price_map.get(ticker)
         row["current_price"] = None if current_price is None else round(float(current_price), 2)
         holding = holdings.get(_normalize_kor_holding_ticker(ticker), {})
         current_quantity = int(holding.get("current_quantity") or 0)
-        current_amount = int(holding.get("current_amount_krw") or 0)
+        current_amount = float(holding.get("current_amount_krw") or 0)
         row["current_quantity"] = current_quantity
         row["current_amount_krw"] = current_amount
         row["return_pct"] = holding.get("return_pct")
@@ -667,6 +830,7 @@ def _apply_trade_plan(
         if not bucket_val:
             try:
                 from utils.db_manager import get_db_connection
+
                 db = get_db_connection()
                 if db is not None:
                     meta_doc = db.stock_meta.find_one({"ticker_type": row.get("ticker_type"), "ticker": ticker})
@@ -674,6 +838,7 @@ def _apply_trade_plan(
                         b_id = meta_doc.get("bucket")
                         if b_id is not None:
                             from config import ALL_BUCKET_MAPPING
+
                             bucket_name = ALL_BUCKET_MAPPING.get(int(b_id))
                             if bucket_name:
                                 bucket_val = f"{b_id}. {bucket_name}"
@@ -684,29 +849,38 @@ def _apply_trade_plan(
             continue
 
         quantity = int(target_amount // current_price)
-        target_buy_amount = int(round(quantity * current_price))
+        raw_target_buy_amount = quantity * current_price
+        target_buy_amount = round(raw_target_buy_amount, 2) if native_mode else int(round(raw_target_buy_amount))
         row["target_quantity"] = quantity
+        row["target_value_krw"] = target_buy_amount
         row["change_quantity"] = quantity - current_quantity
-        row["unallocated_amount_krw"] = max(0, int(target_amount - target_buy_amount))
+        row["change_amount_krw"] = (
+            round(target_buy_amount - current_amount, 2)
+            if native_mode
+            else int(round(target_buy_amount - current_amount))
+        )
+        unallocated_amount = max(0.0, target_amount - target_buy_amount)
+        row["unallocated_amount_krw"] = round(unallocated_amount, 2) if native_mode else int(unallocated_amount)
         target_asset_amount += target_buy_amount
 
     for ticker, holding in sorted(holdings.items()):
         if ticker in target_tickers:
             continue
         current_quantity = int(holding.get("current_quantity") or 0)
-        current_amount = int(holding.get("current_amount_krw") or 0)
+        current_amount = float(holding.get("current_amount_krw") or 0)
         if current_quantity <= 0 and current_amount <= 0:
             continue
         rows.append(
             {
                 "ticker": ticker,
                 "name": holding.get("name") or ticker,
-                "ticker_type": "kor_kr",
-                "country_code": "kor",
+                "ticker_type": holding_ticker_type,
+                "country_code": holding_country_code,
                 "return_1m_pct": None,
                 "return_3m_pct": None,
+                "return_6m_pct": None,
                 "return_12m_pct": None,
-                "daily_change_pct": None,
+                "daily_change_pct": holding.get("daily_change_pct"),
                 "trend_pct": None,
                 "trend_score": None,
                 "sortino_score": None,
@@ -716,10 +890,12 @@ def _apply_trade_plan(
                 "rebalance_needed": None,
                 "current_price": round(current_amount / current_quantity, 2) if current_quantity > 0 else None,
                 "target_amount_krw": 0,
+                "target_value_krw": 0,
                 "target_quantity": 0,
                 "current_quantity": current_quantity,
                 "current_amount_krw": current_amount,
                 "change_quantity": -current_quantity,
+                "change_amount_krw": -current_amount,
                 "unallocated_amount_krw": 0,
                 "return_pct": holding.get("return_pct"),
                 "pnl_krw": holding.get("pnl_krw"),
@@ -727,11 +903,18 @@ def _apply_trade_plan(
             }
         )
 
-    remaining_cash = max(0, account_amount_krw - target_asset_amount) if account_amount_krw > 0 else 0
+    remaining_cash = max(0.0, account_amount_krw - target_asset_amount) if account_amount_krw > 0 else 0.0
+    remaining_cash = round(remaining_cash, 2) if native_mode else int(round(remaining_cash))
     for row in rows:
         if row.get("ticker") == "__CASH__":
             row["target_amount_krw"] = remaining_cash if account_amount_krw > 0 else row.get("target_amount_krw")
-            row["unallocated_amount_krw"] = remaining_cash if account_amount_krw > 0 else row.get("unallocated_amount_krw")
+            row["target_value_krw"] = remaining_cash if account_amount_krw > 0 else row.get("target_value_krw")
+            current_cash = float(row.get("current_amount_krw") or 0.0)
+            cash_change = remaining_cash - current_cash
+            row["change_amount_krw"] = round(cash_change, 2) if native_mode else int(round(cash_change))
+            row["unallocated_amount_krw"] = (
+                remaining_cash if account_amount_krw > 0 else row.get("unallocated_amount_krw")
+            )
 
     # 변동 비중 (%) 계산
     for row in rows:
@@ -744,13 +927,16 @@ def _apply_trade_plan(
     return {
         "account_id": account_snapshot["account_id"],
         "account_name": account_snapshot["account_name"],
+        "currency": account_snapshot.get("currency") or "KRW",
         "account_amount_krw": account_amount_krw,
         "target_asset_amount_krw": target_asset_amount,
         "remaining_cash_krw": remaining_cash,
     }
 
 
-def _enrich_weight_rows_with_returns(payload: Any, tickers: list[dict[str, Any]]) -> dict[str, Any] | None:
+def _enrich_weight_rows_with_returns(
+    payload: Any, tickers: list[dict[str, Any]], current_settings: dict[str, Any]
+) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
     rows = payload.get("rows")
@@ -760,9 +946,13 @@ def _enrich_weight_rows_with_returns(payload: Any, tickers: list[dict[str, Any]]
     close_frame, _missing = _load_close_frame(tickers)
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
-    settings = _clean_settings(payload.get("settings") if isinstance(payload.get("settings"), dict) else None)
+    # 승인 당시 박제된 settings 스냅샷 — 옛 스냅샷엔 MAX_TICKERS 같은 신규 필드가 없다.
+    # 계산(트레이드플랜·소르티노)엔 무관한 신규 필드는 현재 설정으로만 보완하고, 나머지는 스냅샷 값을 쓴다.
+    snap_settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
+    settings = _clean_settings({**current_settings, **snap_settings})
     eval_date = close_frame.index.max() if not close_frame.empty else None
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, int(settings["SORTINO_MONTHS"]))
+    mdd_map = _build_mdd_map(close_frame, int(settings["SORTINO_MONTHS"]))
     sortino_raw_row = (
         sortino_raw_frame.loc[eval_date]
         if eval_date is not None and eval_date in sortino_raw_frame.index
@@ -774,21 +964,23 @@ def _enrich_weight_rows_with_returns(payload: Any, tickers: list[dict[str, Any]]
             continue
         ticker = str(row.get("ticker") or "").strip().upper()
         sortino_raw_value = sortino_raw_row.get(ticker)
-        enriched_rows.append(
-            {
-                **row,
-                **return_map.get(
-                    ticker,
-                    {
-                        "return_1m_pct": None,
-                        "return_3m_pct": None,
-                        "return_12m_pct": None,
-                    },
-                ),
-                "daily_change_pct": daily_change_map.get(ticker),
-                "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
-            }
-        )
+        enriched_row = {
+            **row,
+            **return_map.get(
+                ticker,
+                {
+                    "return_1m_pct": None,
+                    "return_3m_pct": None,
+                    "return_6m_pct": None,
+                    "return_12m_pct": None,
+                },
+            ),
+            "daily_change_pct": daily_change_map.get(ticker),
+            "mdd_pct": mdd_map.get(ticker),
+            "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
+        }
+        enriched_row.pop("nickname", None)
+        enriched_rows.append(enriched_row)
     _normalize_target_weight_pct_rows(enriched_rows)
     trade_summary = (
         _apply_trade_plan(enriched_rows, settings=settings, tickers=tickers, close_frame=close_frame)
@@ -799,11 +991,7 @@ def _enrich_weight_rows_with_returns(payload: Any, tickers: list[dict[str, Any]]
 
 
 def _normalize_target_weight_pct_rows(rows: list[dict[str, Any]]) -> None:
-    weight_rows = [
-        row
-        for row in rows
-        if row.get("target_weight_pct") is not None
-    ]
+    weight_rows = [row for row in rows if row.get("target_weight_pct") is not None]
     if not weight_rows:
         return
 
@@ -881,7 +1069,7 @@ def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) ->
         downside = np.minimum(0.0, values)
         if len(values) <= 1:
             return np.nan
-        result = np.sqrt(np.sum(downside ** 2) / (len(values) - 1))
+        result = np.sqrt(np.sum(downside**2) / (len(values) - 1))
         return float(result) if result > 0 else np.nan
 
     downside_std = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).apply(_calc_downside_std, raw=True)
@@ -908,11 +1096,9 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
         benchmark = db_settings.get("backtest_settings", {}).get("benchmark", {})
         bench_ticker = benchmark.get("ticker")
         if bench_ticker:
-            from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
-            bench_frames = load_cached_frames_bulk_from_all_ticker_types([bench_ticker])
-            bench_df = bench_frames.get(bench_ticker)
+            bench_df = _load_regime_benchmark_ohlc(bench_ticker)
             if bench_df is not None and not bench_df.empty:
-                regimes = _calculate_benchmark_regimes(bench_df)
+                regimes = _calculate_benchmark_regimes(bench_df, bench_ticker)
                 if not regimes.empty:
                     latest_date = regimes.index.max()
                     current_regime = regimes.loc[latest_date]
@@ -942,13 +1128,16 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
     sortino_share = 1.0 - trend_share
     sortino_frame = compute_secondary_metric_points(close_frame, "SORTINO", window_months=sortino_months)
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, sortino_months)
+    mdd_map = _build_mdd_map(close_frame, sortino_months)
 
     eval_date = close_frame.index.max()
     composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
     trend_frame = trend_by_order[1]
     trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
     sortino_row = sortino_frame.loc[eval_date] if eval_date in sortino_frame.index else pd.Series(dtype=float)
-    sortino_raw_row = sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
+    sortino_raw_row = (
+        sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
+    )
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
 
@@ -975,7 +1164,6 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
             {
                 "ticker": ticker,
                 "name": meta.get("name") or ticker,
-                "nickname": meta.get("nickname"),
                 "ticker_type": meta.get("ticker_type"),
                 "country_code": meta.get("country_code"),
                 **return_map.get(
@@ -983,10 +1171,12 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
                     {
                         "return_1m_pct": None,
                         "return_3m_pct": None,
+                        "return_6m_pct": None,
                         "return_12m_pct": None,
                     },
                 ),
                 "daily_change_pct": daily_change_map.get(ticker),
+                "mdd_pct": mdd_map.get(ticker),
                 "trend_pct": None if trend_pct_value is None else round(trend_pct_value, 2),
                 "trend_score": None if point_trend is None else round(point_trend, 2),
                 "sortino_score": round(point_sortino, 2),
@@ -1036,6 +1226,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
                 "country_code": None,
                 "return_1m_pct": None,
                 "return_3m_pct": None,
+                "return_6m_pct": None,
                 "return_12m_pct": None,
                 "daily_change_pct": None,
                 "trend_pct": None,
@@ -1052,19 +1243,16 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
     # 1. top-pick-settings 에 저장된 tickers 순서 로드
     ordered_tickers = []
     try:
-        doc = _db()[COLLECTION].find_one({"_id": SETTINGS_ID})
+        doc = _db()[COLLECTION].find_one({"_id": str(settings.get("ACCOUNT_ID") or "").strip()})
         if doc:
             tickers_list = doc.get("tickers") or []
-            ordered_tickers = [
-                str(t.get("ticker") or "").strip().upper().replace("KR:", "")
-                for t in tickers_list
-            ]
+            ordered_tickers = [str(t.get("ticker") or "").strip().upper().replace("KR:", "") for t in tickers_list]
     except Exception:
         pass
 
     # 2. 정렬 매핑 테이블 구축 및 정렬 적용
     ticker_order_map = {ticker: idx for idx, ticker in enumerate(ordered_tickers)}
-    
+
     def get_sort_key(item: dict[str, Any]) -> tuple[int, str]:
         ticker = str(item.get("ticker") or "").strip().upper()
         if ticker == "__CASH__":
@@ -1086,8 +1274,8 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
     }
 
 
-def calculate_top_pick_weights() -> dict[str, Any]:
-    payload = load_top_pick_settings()
+def calculate_top_pick_weights(account_id: str | None = None) -> dict[str, Any]:
+    payload = load_top_pick_settings(account_id)
     result = calculate_top_pick_weights_for(payload["tickers"], payload["settings"])
     result["updated_at"] = payload.get("updated_at")
     return result
@@ -1101,13 +1289,16 @@ def run_top_pick_weights(tickers: list[dict[str, Any]], settings: dict[str, Any]
     return calculate_top_pick_weights_for(clean_tickers, clean_settings)
 
 
-def approve_top_pick_weights(tickers: list[dict[str, Any]], settings: dict[str, Any] | None = None) -> dict[str, Any]:
+def approve_top_pick_weights(
+    tickers: list[dict[str, Any]], settings: dict[str, Any] | None = None, account_id: str | None = None
+) -> dict[str, Any]:
     result = run_top_pick_weights(tickers, settings)
     approved_at = datetime.now(timezone.utc)
     clean_tickers = _clean_tickers(tickers)
     clean_settings = _clean_settings(settings)
+    resolved = _resolve_account_id(account_id or clean_settings.get("ACCOUNT_ID"))
     _db()[COLLECTION].update_one(
-        {"_id": SETTINGS_ID},
+        {"_id": resolved},
         {
             "$set": {
                 "tickers": clean_tickers,
@@ -1213,15 +1404,54 @@ def _calculate_top_pick_weights_on_date(
     if len(raw_scores) < 3:
         return None
 
-    weights = calculate_ranked_score_weights_with_cash(
-        raw_scores,
-        defensive_tickers=defensive_tickers,
-        min_weight=float(settings["MIN_WEIGHT"]) / 100.0,
-        max_weight=float(settings["MAX_WEIGHT"]) / 100.0,
-        cash_max_weight=float(settings["CASH_MAX_WEIGHT"]) / 100.0,
-        forced_cash_weight=forced_cash_weight,
-    )
+    max_w = float(settings["MAX_WEIGHT"]) / 100.0
+    cash_max = float(settings["CASH_MAX_WEIGHT"]) / 100.0
+    try:
+        weights = calculate_ranked_score_weights_with_cash(
+            raw_scores,
+            defensive_tickers=defensive_tickers,
+            min_weight=float(settings["MIN_WEIGHT"]) / 100.0,
+            max_weight=max_w,
+            cash_max_weight=cash_max,
+            forced_cash_weight=forced_cash_weight,
+        )
+    except ValueError as exc:
+        # 배분 불가면 어느 날짜에 왜(그 시점 데이터 있는 ETF 수) 막혔는지 정확히 알린다.
+        if "채울 수 없습니다" in str(exc):
+            date_label = f"{eval_date.year}년 {eval_date.month}월 {eval_date.day}일"
+            cash_note = " (상승장 자동 현금 0% 적용 중)" if cash_max <= 0 else ""
+            raise ValueError(
+                f"{date_label}에 데이터가 있는 ETF가 {len(raw_scores)}개뿐이라 "
+                f"최대 비중 {max_w * 100:.1f}%로는 100%를 채울 수 없습니다{cash_note}. "
+                f"최대 비중을 높이거나 백테스트 기간을 줄이세요."
+            ) from exc
+        raise
     return _normalize_weight_ratio_map(weights)
+
+
+def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
+    """종목별 (매수, 매도) 슬리피지 비율 — SLIPPAGE_CONFIG(종목풀별)를 그대로 사용한다.
+
+    ticker_type 미상이거나 SLIPPAGE_CONFIG 에 없으면 임의 기본값 없이 명시적 에러.
+    """
+    from config import SLIPPAGE_CONFIG
+
+    rates: dict[str, tuple[float, float]] = {}
+    problems: list[str] = []
+    for item in clean_tickers:
+        ticker = str(item["ticker"])
+        ticker_type = str(item.get("ticker_type") or "").strip().lower()
+        config = SLIPPAGE_CONFIG.get(ticker_type)
+        if not ticker_type or not isinstance(config, dict) or "BUY_PCT" not in config or "SELL_PCT" not in config:
+            problems.append(f"{ticker}({ticker_type or '종목풀 미상'})")
+            continue
+        rates[ticker] = (float(config["BUY_PCT"]) / 100.0, float(config["SELL_PCT"]) / 100.0)
+    if problems:
+        raise ValueError(
+            f"슬리피지 설정(SLIPPAGE_CONFIG)이 없는 종목이 있습니다: {', '.join(problems)}. "
+            "종목풀에 등록된 티커인지 확인해주세요."
+        )
+    return rates
 
 
 def run_top_pick_backtest(
@@ -1235,7 +1465,21 @@ def run_top_pick_backtest(
 
     clean_settings = _clean_settings(settings)
     clean_backtest = _clean_backtest_settings(backtest_settings)
-    benchmark = clean_backtest["benchmark"]
+    # 시장 레짐(추세/현금제어 판별)용 종목 — 탑픽 설정의 필드.
+    regime_benchmark = clean_backtest["benchmark"]
+    # 결과 비교용 벤치마크 — 계좌 설정(/account-settings)의 벤치마크를 쓴다(계좌별로 다름).
+    account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
+    if not account_id:
+        raise ValueError("탑픽 백테스트에는 적용 계좌가 필요합니다.")
+    from utils.settings_loader import get_account_settings
+
+    _account_bench = get_account_settings(account_id).get("benchmark")
+    if not isinstance(_account_bench, dict) or not str(_account_bench.get("ticker") or "").strip():
+        raise ValueError(f"계좌 '{account_id}' 설정에 벤치마크가 없습니다. 계좌 설정에서 등록해주세요.")
+    benchmark = {
+        "ticker": str(_account_bench["ticker"]).strip().upper(),
+        "name": str(_account_bench.get("name") or _account_bench["ticker"]).strip(),
+    }
     months = int(clean_backtest["months"])
     rebalance = str(clean_backtest["rebalance"])
     initial_capital_krw = float(int(clean_backtest["initial_amount_manwon"]) * 10_000)
@@ -1268,13 +1512,11 @@ def run_top_pick_backtest(
     if simulation_frame.empty or len(simulation_frame) < 2:
         raise ValueError("탑픽 백테스트 기간의 가격 데이터가 부족합니다.")
 
-    # 벤치마크 지수의 과거 레짐을 미리 일별 시계열로 구함
+    # 시장 레짐 종목의 과거 레짐을 미리 일별 시계열로 구함 (추세/현금제어 판별)
     try:
-        from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
-        bench_frames = load_cached_frames_bulk_from_all_ticker_types([benchmark["ticker"]])
-        bench_df = bench_frames.get(benchmark["ticker"])
+        bench_df = _load_regime_benchmark_ohlc(regime_benchmark["ticker"])
         if bench_df is not None and not bench_df.empty:
-            benchmark_regimes = _calculate_benchmark_regimes(bench_df)
+            benchmark_regimes = _calculate_benchmark_regimes(bench_df, regime_benchmark["ticker"])
         else:
             benchmark_regimes = pd.Series()
     except Exception:
@@ -1314,21 +1556,41 @@ def run_top_pick_backtest(
     if len(sim) < 2:
         raise ValueError("탑픽 백테스트 시뮬레이션 기간이 부족합니다.")
 
+    # 슬리피지(SLIPPAGE_CONFIG, 종목풀별) — 매수/매도 금액에 비용으로 차감한다.
+    slippage_by_ticker = _resolve_slippage_by_ticker(clean_tickers)
+    total_slippage_cost = 0.0
+
+    def allocate_with_slippage(
+        total_value: float, weights: dict[str, float], current_values: dict[str, float]
+    ) -> tuple[dict[str, float], float, float]:
+        """총자산을 목표비중으로 재배치하며 종목별 매수/매도 금액 × 슬리피지율을 비용으로 차감한다."""
+        cost = 0.0
+        for ticker in ticker_order:
+            target = total_value * float(weights.get(ticker, 0.0))
+            delta = target - float(current_values.get(ticker, 0.0))
+            buy_ratio, sell_ratio = slippage_by_ticker[ticker]
+            if delta > 0:
+                cost += delta * buy_ratio
+            elif delta < 0:
+                cost += (-delta) * sell_ratio
+        net_total = total_value - cost
+        values = {ticker: net_total * float(weights.get(ticker, 0.0)) for ticker in ticker_order}
+        cash = net_total * float(weights.get("__CASH__", 0.0))
+        return values, cash, cost
+
     current_weights = weights_by_date[start_date]
-    cash_value = initial_capital_krw * float(current_weights.get("__CASH__", 0.0))
-    asset_values = {
-        ticker: initial_capital_krw * float(current_weights.get(ticker, 0.0))
-        for ticker in ticker_order
-    }
+    # 최초 편입 — 전액 현금에서 매수하므로 매수 슬리피지가 발생한다.
+    asset_values, cash_value, initial_cost = allocate_with_slippage(
+        initial_capital_krw, current_weights, {ticker: 0.0 for ticker in ticker_order}
+    )
+    total_slippage_cost += initial_cost
     profit_by_ticker = {ticker: 0.0 for ticker in ticker_order}
     curve_values: list[float] = [initial_capital_krw]
     weight_history: list[dict[str, Any]] = []
     friday_history_dates = _select_friday_history_dates(sim.index)
 
     # 종목별/현금의 일별 실제 비중(%) 이력을 추적합니다.
-    weights_history_by_ticker: dict[str, list[float]] = {
-        ticker: [] for ticker in ticker_order
-    }
+    weights_history_by_ticker: dict[str, list[float]] = {ticker: [] for ticker in ticker_order}
     weights_history_by_ticker["__CASH__"] = []
 
     def record_current_weights():
@@ -1369,11 +1631,10 @@ def run_top_pick_backtest(
         if date in weights_by_date and date != start_date:
             current_weights = weights_by_date[date]
             total_value = sum(asset_values.values()) + cash_value
-            asset_values = {
-                ticker: total_value * float(current_weights.get(ticker, 0.0))
-                for ticker in ticker_order
-            }
-            cash_value = total_value * float(current_weights.get("__CASH__", 0.0))
+            asset_values, cash_value, rebalance_cost = allocate_with_slippage(
+                total_value, current_weights, asset_values
+            )
+            total_slippage_cost += rebalance_cost
 
         curve_values.append(sum(asset_values.values()) + cash_value)
         # 매일 최종 자산 상태 기준 비중 기록
@@ -1415,6 +1676,7 @@ def run_top_pick_backtest(
             {
                 "ticker": ticker,
                 "name": item.get("name") or ticker,
+                "bucket": item.get("bucket"),
                 "buy_date": series.index[0].date().isoformat(),
                 "late_entry": series.index[0] > start_date,
                 "shares": 0,
@@ -1440,6 +1702,10 @@ def run_top_pick_backtest(
         "has_late_entry": any(position["late_entry"] for position in positions),
         "initial_capital": round(initial_capital_krw, 0),
         "final_value": round(float(curve[-1]), 0),
+        "slippage": {
+            "total_cost": round(total_slippage_cost, 0),
+            "total_cost_pct": round(total_slippage_cost / initial_capital_krw * 100.0, 2),
+        },
         "summary": {key: round(value, 2) for key, value in summary.items()},
         "benchmark": {
             **benchmark,
@@ -1457,7 +1723,11 @@ def run_top_pick_backtest(
         },
         "weight_history": weight_history,
         "weight_items": [
-            {"key": item["ticker"], "label": item.get("name") or item["ticker"]}
+            {
+                "key": item["ticker"],
+                "label": item.get("name") or item["ticker"],
+                "bucket": item.get("bucket"),
+            }
             for item in clean_tickers
         ]
         + [{"key": "__CASH__", "label": "현금"}],
@@ -1465,44 +1735,61 @@ def run_top_pick_backtest(
     }
 
 
-def _calculate_benchmark_regimes(bench_df: pd.DataFrame) -> pd.Series:
-    """벤치마크 OHLC DataFrame을 입력받아 날짜별 레짐(accel_up, accel_down, neutral) 시리즈를 계산해 반환한다."""
+def _load_regime_benchmark_ohlc(ticker: str) -> pd.DataFrame | None:
+    """시장 레짐 지수의 OHLC 를 로드한다 (지수 전용 소스: 한국 네이버 / 미국 yfinance).
+
+    시장추세 지수 목록에 없는 티커는 설정 오류이므로 명시적으로 에러를 낸다.
+    """
+    from utils.market_trend_service import is_market_trend_index, load_index_ohlc
+
+    if not is_market_trend_index(ticker):
+        raise ValueError(f"시장 레짐은 시장추세 지수만 지원합니다: {ticker}. 설정 화면에서 지수를 선택해주세요.")
+    return load_index_ohlc(ticker)
+
+
+def _calculate_benchmark_regimes(bench_df: pd.DataFrame, ticker: str) -> pd.Series:
+    """지수 OHLC DataFrame을 입력받아 날짜별 레짐(accel_up, accel_down, neutral) 시리즈를 계산해 반환한다.
+
+    지수별 튜닝값(곱수·버퍼)을 그대로 써서 /market-trend 화면의 레짐 판정과 일치시킨다.
+    """
+    from config import (
+        MARKET_TREND_REGIME_MA_TYPE,
+        MARKET_TREND_REGIME_SHORT_MA_DAYS,
+    )
     from utils.market_trend_service import (
         _calculate_supertrend,
         _regime_step,
-    )
-    from config import (
-        MARKET_TREND_REGIME_BUFFER_PCT_DEFAULT,
-        MARKET_TREND_REGIME_MA_TYPE,
-        MARKET_TREND_REGIME_SHORT_MA_DAYS,
-        MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT,
-        MARKET_TREND_SUPERTREND_PERIOD,
+        _resolve_regime_buffer,
+        _resolve_supertrend_params,
     )
     from utils.moving_averages import calculate_moving_average
+
+    st_period, st_multiplier = _resolve_supertrend_params(ticker)
+    buffer_pct = _resolve_regime_buffer(ticker)
 
     df = bench_df.dropna(subset=["Close"]).sort_index()
     if df.empty:
         return pd.Series(dtype=object)
 
     close_series = df["Close"]
-    
+
     # 1. 20일 이동평균선(MA) 계산
     ma_days = MARKET_TREND_REGIME_SHORT_MA_DAYS
     try:
         ma_series = calculate_moving_average(close_series, ma_days, MARKET_TREND_REGIME_MA_TYPE).fillna(close_series)
     except Exception:
         ma_series = close_series
-    
+
     # 2. 휩소 방지용 부드러운 종가 (20일 MA)
     close_smooth = ma_series
-    
-    # 3. 슈퍼트렌드 계산 (벤치마크는 시장추세 지수 목록에 없으므로 공통 기본 곱수를 쓴다)
+
+    # 3. 슈퍼트렌드 계산 — 지수별 튜닝값 적용
     supertrend_dir_series = None
     try:
         st_df = _calculate_supertrend(
             df,
-            period=MARKET_TREND_SUPERTREND_PERIOD,
-            multiplier=MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT,
+            period=st_period,
+            multiplier=st_multiplier,
         )
         if st_df is not None and "direction" in st_df.columns:
             supertrend_dir_series = st_df["direction"]
@@ -1526,7 +1813,7 @@ def _calculate_benchmark_regimes(bench_df: pd.DataFrame) -> pd.Series:
             float(close_series.iloc[idx]),
             float(close_smooth.iloc[idx]),
             st_dir,
-            MARKET_TREND_REGIME_BUFFER_PCT_DEFAULT,
+            buffer_pct,
         )
 
     return pd.Series(regimes)

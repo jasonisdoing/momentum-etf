@@ -2173,6 +2173,12 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return result
 
 
+def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
+    """미국 티커를 토스 캔들 조회용 상품 코드로 변환한다."""
+    normalized_symbols = [str(symbol).strip().upper() for symbol in symbols if str(symbol or "").strip()]
+    return _resolve_toss_product_codes(normalized_symbols)
+
+
 def _us_session_state() -> str:
     """미국 정규장 세션 상태: "pre" | "regular" | "post" (ET 기준, 주말은 "post").
 
@@ -2296,6 +2302,53 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
 
     if snapshot:
         logger.info("[US] 토스증권 API에서 %d개 종목의 실시간 가격을 조회했습니다.", len(snapshot))
+
+    return snapshot
+
+
+def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """토스증권 API에서 한국 주식의 실시간 가격 정보를 조회한다."""
+    normalized_tickers = [str(ticker).strip().upper() for ticker in tickers if str(ticker or "").strip()]
+    if not normalized_tickers or not requests:
+        return {}
+
+    code_to_ticker = {
+        (ticker if ticker.startswith("A") else f"A{ticker}"): ticker.removeprefix("A")
+        for ticker in normalized_tickers
+    }
+    price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
+    snapshot: dict[str, dict[str, float]] = {}
+
+    all_codes = list(code_to_ticker)
+    for start in range(0, len(all_codes), 50):
+        codes = all_codes[start : start + 50]
+        try:
+            resp = requests.get(
+                price_url,
+                params={"productCodes": ",".join(codes)},
+                headers=TOSS_INVEST_HEADERS,
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("토스 국내주식 가격 API 실패: %s", exc)
+            continue
+
+        items = data if isinstance(data, list) else (data.get("result") or [])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ticker = code_to_ticker.get(str(item.get("code") or ""))
+            close_val = _safe_float(item.get("close"))
+            if not ticker or close_val is None or close_val <= 0:
+                continue
+            base_val = _safe_float(item.get("base"))
+            entry: dict[str, float] = {"nowVal": close_val}
+            if base_val is not None and base_val > 0:
+                entry["prevClose"] = base_val
+                entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+            snapshot[ticker] = entry
 
     return snapshot
 

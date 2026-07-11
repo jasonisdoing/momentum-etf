@@ -9,7 +9,7 @@ import { CandidateKey, inputStyle, LeverageConfig, rangeValues, TuningConfig, us
 function FieldRow({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center", padding: "7px 0", borderBottom: "1px solid rgba(148,163,184,0.15)" }}>
-      <span style={{ width: 120, flexShrink: 0, color: "#64748b", fontWeight: 600 }}>{label}</span>
+      <span style={{ width: 120, flexShrink: 0, color: "var(--text-muted)", fontWeight: 600 }}>{label}</span>
       <div style={{ flex: 1, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>{children}</div>
     </div>
   );
@@ -18,7 +18,7 @@ function FieldRow({ label, children }: { label: string; children: React.ReactNod
 function ReadRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div style={{ display: "flex", gap: 12, padding: "8px 0", borderBottom: "1px solid rgba(148,163,184,0.15)" }}>
-      <span style={{ width: 120, flexShrink: 0, color: "#64748b", fontWeight: 600 }}>{label}</span>
+      <span style={{ width: 120, flexShrink: 0, color: "var(--text-muted)", fontWeight: 600 }}>{label}</span>
       <span style={{ fontWeight: 600 }}>{value}</span>
     </div>
   );
@@ -76,7 +76,7 @@ export function LeverageSettingsClient() {
           확인
         </button>
         <input
-          style={{ ...inputStyle, flex: 1, minWidth: 140, backgroundColor: "#f8fafc", color: "#64748b", cursor: "not-allowed" }}
+          style={{ ...inputStyle, flex: 1, minWidth: 140, backgroundColor: "#f8fafc", color: "var(--text-muted)", cursor: "not-allowed" }}
           placeholder="이름 (티커 입력 후 확인 클릭)"
           value={config?.[key]?.name ?? ""}
           readOnly
@@ -150,7 +150,7 @@ export function LeverageSettingsClient() {
     return (
       <div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-          <span style={{ fontWeight: 700, color: "#334155" }}>{label} <span style={{ color: "#94a3b8", fontWeight: 500 }}>({list.length})</span></span>
+          <span style={{ fontWeight: 700, color: "var(--text-normal)" }}>{label} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({list.length})</span></span>
           <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => addCandidate(listKey)}>+ 추가</button>
         </div>
         {list.map((c, i) => {
@@ -176,7 +176,7 @@ export function LeverageSettingsClient() {
                 </button>
               )}
               <input
-                style={{ ...inputStyle, flex: 1, minWidth: 120, backgroundColor: "#f8fafc", color: "#64748b", cursor: "not-allowed" }}
+                style={{ ...inputStyle, flex: 1, minWidth: 120, backgroundColor: "#f8fafc", color: "var(--text-muted)", cursor: "not-allowed" }}
                 placeholder="이름 (티커 입력 후 확인)"
                 value={c.name ?? ""}
                 readOnly
@@ -195,7 +195,7 @@ export function LeverageSettingsClient() {
       <FieldRow label={label}>
         {(["min", "max", "step"] as const).map((f) => (
           <span key={f} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>{f}</span>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{f}</span>
             <input type="number" step="0.1" style={{ ...inputStyle, width: 70 }} value={r?.[f] ?? ""} onChange={(e) => setRange(key, f, e.target.value)} />
           </span>
         ))}
@@ -207,7 +207,7 @@ export function LeverageSettingsClient() {
     return (
       <PageFrame title="레버리지 설정">
         <div className="appPageStack" style={{ maxWidth: 1000 }}>
-          <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
+          <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
         </div>
       </PageFrame>
     );
@@ -225,7 +225,7 @@ export function LeverageSettingsClient() {
       <div className="appPageStack" style={{ maxWidth: 1000 }}>
         {error ? <div className="alert alert-danger mb-3">{error}</div> : null}
         {loading && !config ? (
-          <div style={{ color: "#868e96", padding: 20 }}>불러오는 중…</div>
+          <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
         ) : config ? (
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
             {/* 왼쪽: 전략 설정 + 튜닝 탐색 공간 */}
@@ -260,7 +260,7 @@ export function LeverageSettingsClient() {
                   </FieldRow>
                   <FieldRow label="기간(개월)">
                     <input type="number" step="1" style={{ ...inputStyle, width: 100 }} value={config.months_range ?? ""} onChange={(e) => numField("months_range", e.target.value)} />
-                    {config.start_date ? <span style={{ color: "#94a3b8", fontSize: "0.82rem" }}>start_date: {config.start_date}</span> : null}
+                    {config.start_date ? <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>start_date: {config.start_date}</span> : null}
                   </FieldRow>
                   <ReadRow label="최근 튜닝일" value={config.backtested_date ?? "-"} />
                   <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
@@ -274,7 +274,7 @@ export function LeverageSettingsClient() {
               <div className="card appCard">
                 <div className="card-body">
                   <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>튜닝 탐색 공간</h2>
-                  <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
                     레버리지-튜닝에서 전수 탐색하는 후보군·범위입니다. (벤치마크는 후보군에서 자동 파생)
                   </p>
                   {candidateList("offense_candidates", "공격 후보")}
@@ -285,7 +285,7 @@ export function LeverageSettingsClient() {
                   {rangeEditor("sell_cutoff_range", "매도컷 범위(%)")}
                   <div style={{ marginTop: 8, fontSize: "0.85rem", color: combos > 0 ? "#475569" : "#dc2626" }}>
                     유효 조합수: <b>{combos.toLocaleString()}</b>개
-                    <span style={{ color: "#94a3b8" }}> (매수컷&lt;매도컷 {pairs}쌍 × 방어 {t?.defense_candidates?.length ?? 0} — 공격 {t?.offense_candidates?.length ?? 0}종은 진입 시 동적 선택)</span>
+                    <span style={{ color: "var(--text-muted)" }}> (매수컷&lt;매도컷 {pairs}쌍 × 방어 {t?.defense_candidates?.length ?? 0} — 공격 {t?.offense_candidates?.length ?? 0}종은 진입 시 동적 선택)</span>
                   </div>
                   <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
                     <button type="button" className="btn btn-outline-dark" disabled={saving} onClick={save}>
@@ -301,7 +301,7 @@ export function LeverageSettingsClient() {
               <div className="card appCard" style={{ width: "100%" }}>
                 <div className="card-body">
                   <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>직전 추천 상태</h2>
-                  <p style={{ color: "#94a3b8", fontSize: "0.85rem", marginBottom: 12 }}>추천 배치가 자동 갱신합니다 (읽기 전용).</p>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>추천 배치가 자동 갱신합니다 (읽기 전용).</p>
                   <ReadRow label="확정일" value={state?.date ?? "-"} />
                   <ReadRow label="보유 종목" value={state?.target_name ? `${state.target_name} (${state.target ?? ""})` : "-"} />
                   <ReadRow label="보유일" value={state?.holding_days !== undefined ? `${state.holding_days}거래일째` : "-"} />

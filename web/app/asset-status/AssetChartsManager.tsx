@@ -795,9 +795,9 @@ export function AssetChartsManager({
                     >
                       <span style={{ color: "#475569", fontWeight: 700, fontSize: "0.9rem" }}>{item.label}</span>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                        <span style={{ fontWeight: 800, color: item.color ?? "#0f172a", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
+                        <span style={{ fontWeight: 800, color: item.color ?? "var(--text-strong)", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
                         {item.subValue && (
-                          <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2, fontWeight: 600 }}>
+                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2, fontWeight: 600 }}>
                             {item.subValue}
                           </span>
                         )}
@@ -877,9 +877,9 @@ export function AssetChartsManager({
                     >
                       <span style={{ color: "#475569", fontWeight: 700, fontSize: "0.9rem" }}>{item.label}</span>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                        <span style={{ fontWeight: 800, color: item.color ?? "#0f172a", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
+                        <span style={{ fontWeight: 800, color: item.color ?? "var(--text-strong)", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
                         {item.subValue && (
-                          <span style={{ fontSize: "0.72rem", color: "#64748b", marginTop: 2, fontWeight: 600 }}>
+                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2, fontWeight: 600 }}>
                             {item.subValue}
                           </span>
                         )}

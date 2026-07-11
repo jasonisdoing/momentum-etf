@@ -830,9 +830,9 @@ export function MarketTrendChart({
       {error ? (
         <div className="alert alert-danger mb-0">{error}</div>
       ) : loading && !data ? (
-        <div style={{ color: "#868e96", padding: 20 }}>불러오는 중...</div>
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중...</div>
       ) : visibleHistory.length < 2 ? (
-        <div style={{ color: "#868e96", padding: 20 }}>표시할 데이터가 없습니다.</div>
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>표시할 데이터가 없습니다.</div>
       ) : (
         <div style={{ display: "flex", height: "calc(100% - 32px)", minHeight: 300, flexDirection: "column" }}>
           <div style={{ marginBottom: 12 }}>
