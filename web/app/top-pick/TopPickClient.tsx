@@ -423,8 +423,8 @@ export function TopPickClient() {
   );
 
   return (
-    <PageFrame title="탑픽 비중" fullWidth titleRight={titleRight}>
-      <div className="appPageStack">
+    <PageFrame title="탑픽 비중" fullHeight fullWidth titleRight={titleRight}>
+      <div className="appPageStack appPageStackFill">
         <div className="card appCard">
           <div className="card-body">
             <div className="appMainHeader">
@@ -495,29 +495,23 @@ export function TopPickClient() {
           </div>
         </div>
 
-        <div className="card appCard">
-          <div className="card-body p-2">
-            <AppAgGrid<TopPickRow>
-              rowData={rows}
-              columnDefs={columns}
-              loading={loading}
-              minHeight="480px"
-              className="topPickWeightGrid assetsAgGrid"
-              theme={gridTheme}
-              getRowId={(params) => params.data.ticker}
-              gridOptions={gridOptions}
-            />
+        <div className="card appCard appTableCardFill">
+          <div className="card-body p-2 appTableCardBodyFill">
+            <div className="appGridFillWrap">
+              <AppAgGrid<TopPickRow>
+                rowData={rows}
+                columnDefs={columns}
+                loading={loading}
+                minHeight="100%"
+                className="topPickWeightGrid assetsAgGrid"
+                theme={gridTheme}
+                getRowId={(params) => params.data.ticker}
+                gridOptions={gridOptions}
+              />
+            </div>
           </div>
         </div>
       </div>
-      <style jsx global>{`
-        .topPickWeightGrid {
-          height: 480px !important;
-        }
-        .topPickWeightGrid .appAgGridTheme {
-          height: 480px !important;
-        }
-      `}</style>
     </PageFrame>
   );
 }
