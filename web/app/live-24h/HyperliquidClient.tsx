@@ -21,6 +21,8 @@ type Quote = {
   actual_change_pct: number | null;
   diff_pct: number | null;
   session_open: boolean;
+  price_data_open?: boolean;
+  price_data_session?: "premarket" | "regular" | "aftermarket" | "closed";
   candles?: Candle[];
   source_ticker?: string;
 };
@@ -37,6 +39,34 @@ type ComparisonSeries = {
 };
 
 type PriceDifference = { label: string; value: number | null };
+
+type RepresentativeValue = {
+  source: "국내시장" | "미국시장" | "Hyperliquid";
+  price: number | null;
+  changePct: number | null;
+};
+
+const TOSS_CANDLE_FRESH_MS = 30 * 60 * 1000;
+
+function hasFreshTossCandle(quote: Quote | undefined): boolean {
+  const latestCandle = quote?.candles?.at(-1);
+  return Boolean(latestCandle && latestCandle.t >= Date.now() - TOSS_CANDLE_FRESH_MS);
+}
+
+function selectRepresentativeValue(
+  tossQuote: Quote,
+  hyperliquidQuote: Quote,
+  tossSource: "국내시장" | "미국시장",
+): RepresentativeValue {
+  if (hasFreshTossCandle(tossQuote)) {
+    return { source: tossSource, price: tossQuote.hyper_price, changePct: tossQuote.diff_pct };
+  }
+  return {
+    source: "Hyperliquid",
+    price: hyperliquidQuote.hyper_price,
+    changePct: hyperliquidQuote.change_24h_pct,
+  };
+}
 
 function signColor(v: number | null | undefined): string {
   if (v === null || v === undefined || v === 0) return "#475569";
@@ -56,10 +86,10 @@ function formatPct(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
-// 30분봉 기준 최근 N시간 변동률(%). 2N봉 전 대비. 데이터 부족 시 null.
+// 15분봉 기준 최근 N시간 변동률(%). 4N봉 전 대비. 데이터 부족 시 null.
 function recentMove(candles: Candle[] | undefined, hours: number): number | null {
   if (!candles) return null;
-  const idx = 2 * hours;
+  const idx = 4 * hours;
   if (candles.length <= idx) return null;
   const prev = candles[candles.length - 1 - idx]?.c;
   const cur = candles[candles.length - 1]?.c;
@@ -317,7 +347,17 @@ function calculatePriceDifference(left: number | null, right: number | null): nu
   return (left / right - 1) * 100;
 }
 
-function ComparisonChart({ series, currency }: { series: ComparisonSeries[]; currency: "KRW" | "USD" }) {
+function ComparisonChart({
+  series,
+  candleSeriesKey,
+  priorSeriesKey,
+  currency,
+}: {
+  series: ComparisonSeries[];
+  candleSeriesKey: string;
+  priorSeriesKey?: string;
+  currency: "KRW" | "USD";
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(450);
   const [height, setHeight] = useState(300);
@@ -343,15 +383,24 @@ function ComparisonChart({ series, currency }: { series: ComparisonSeries[]; cur
 
   const endTime = Date.now();
   const startTime = endTime - 24 * 60 * 60 * 1000;
-  const chartSeries = series.map((item) => ({
-    ...item,
-    points: item.visible
-      ? (item.quote.candles ?? [])
-          .filter((candle) => candle.t >= startTime && candle.t <= endTime)
-          .map((candle) => ({ t: candle.t, value: candle.c * item.priceMultiplier }))
-      : [],
-  }));
-  const values = chartSeries.flatMap((item) => item.points.map((point) => point.value));
+  const selectedSeries = series.find((item) => item.key === candleSeriesKey);
+  const priorSeries = priorSeriesKey ? series.find((item) => item.key === priorSeriesKey) : undefined;
+  const selectedCandles = (selectedSeries?.quote.candles ?? []).filter(
+    (candle) => candle.t >= startTime && candle.t <= endTime,
+  );
+  const firstSelectedTime = selectedCandles.at(0)?.t;
+  const chartCandles = [
+    ...(firstSelectedTime
+      ? (priorSeries?.quote.candles ?? [])
+          .filter((candle) => candle.t >= startTime && candle.t < firstSelectedTime)
+          .map((candle) => ({ candle, series: priorSeries! }))
+      : []),
+    ...selectedCandles.map((candle) => ({ candle, series: selectedSeries! })),
+  ];
+  const values = chartCandles.flatMap(({ candle, series: item }) => [
+    candle.l * item.priceMultiplier,
+    candle.h * item.priceMultiplier,
+  ]);
   const chartWidth = width - 72;
   const chartHeight = height - 24;
 
@@ -372,18 +421,7 @@ function ComparisonChart({ series, currency }: { series: ComparisonSeries[]; cur
   const mapX = (timestamp: number) => ((timestamp - startTime) / (endTime - startTime)) * chartWidth;
   const mapY = (value: number) => chartHeight - ((value - min) / range) * chartHeight;
 
-  const buildSegments = (points: Array<{ t: number; value: number }>) => {
-    const segments: Array<Array<{ t: number; value: number }>> = [];
-    for (const point of points) {
-      const segment = segments.at(-1);
-      if (!segment || point.t - segment.at(-1)!.t > 30 * 60 * 1000) {
-        segments.push([point]);
-      } else {
-        segment.push(point);
-      }
-    }
-    return segments.filter((segment) => segment.length >= 2);
-  };
+  const candleWidth = Math.max(2, Math.min(7, chartWidth / 96 - 1));
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -396,19 +434,32 @@ function ComparisonChart({ series, currency }: { series: ComparisonSeries[]; cur
             </text>
           </g>
         ))}
-        {chartSeries.map((item) =>
-          buildSegments(item.points).map((segment, index) => (
-            <polyline
-              key={`${item.key}-${index}`}
-              points={segment.map((point) => `${mapX(point.t)},${mapY(point.value)}`).join(" ")}
-              fill="none"
-              stroke={item.color}
-              strokeWidth="2.2"
-              strokeLinejoin="round"
-              strokeLinecap="round"
-            />
-          )),
-        )}
+        {selectedSeries
+          ? chartCandles.map(({ candle, series: item }) => {
+            const open = candle.o * item.priceMultiplier;
+            const high = candle.h * item.priceMultiplier;
+            const low = candle.l * item.priceMultiplier;
+            const close = candle.c * item.priceMultiplier;
+            const x = mapX(candle.t);
+            const color = close >= open ? "#ef4444" : "#2563eb";
+            const bodyTop = mapY(Math.max(open, close));
+            const bodyHeight = Math.max(1, Math.abs(mapY(open) - mapY(close)));
+            return (
+              <g key={`${item.key}-${candle.t}`}>
+                <line x1={x} y1={mapY(high)} x2={x} y2={mapY(low)} stroke={color} strokeWidth="1" />
+                <rect
+                  x={x - candleWidth / 2}
+                  y={bodyTop}
+                  width={candleWidth}
+                  height={bodyHeight}
+                  fill={color}
+                  stroke={color}
+                  strokeWidth="0.5"
+                />
+              </g>
+            );
+          })
+          : null}
         <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="#cbd5e1" />
         <text x={0} y={height - 3} fill="#64748b" fontSize="10">24시간 전</text>
         <text x={chartWidth / 2 - 22} y={height - 3} fill="#64748b" fontSize="10">12시간 전</text>
@@ -421,12 +472,18 @@ function ComparisonChart({ series, currency }: { series: ComparisonSeries[]; cur
 function ComparisonCard({
   title,
   basisLabel,
+  representative,
+  candleSeriesKey,
+  priorSeriesKey,
   series,
   differences,
   currency,
 }: {
   title: string;
   basisLabel: string;
+  representative: RepresentativeValue;
+  candleSeriesKey: string;
+  priorSeriesKey?: string;
   series: ComparisonSeries[];
   differences: PriceDifference[];
   currency: "KRW" | "USD";
@@ -434,20 +491,31 @@ function ComparisonCard({
   return (
     <div className="card appCard" style={{ height: "100%" }}>
       <div className="card-body" style={{ padding: "0.7rem 1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <strong style={{ fontSize: "1.18rem" }}>{title}</strong>
-          <span
-            style={{
-              padding: "3px 9px",
-              borderRadius: 999,
-              background: "#f1f5f9",
-              color: "#475569",
-              fontSize: "0.9rem",
-              fontWeight: 700,
-            }}
-          >
-            기준: {basisLabel}
-          </span>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <strong style={{ fontSize: "1.18rem" }}>{title}</strong>
+            <span
+              style={{
+                padding: "3px 9px",
+                borderRadius: 999,
+                background: "#f1f5f9",
+                color: "#475569",
+                fontSize: "0.9rem",
+                fontWeight: 700,
+              }}
+            >
+              기준: {basisLabel}
+            </span>
+          </div>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 8, whiteSpace: "nowrap" }}>
+            <span style={{ color: "var(--text-muted)", fontSize: "0.82rem", fontWeight: 700 }}>
+              {representative.source}
+            </span>
+            <strong style={{ fontSize: "1.08rem" }}>{formatPrice(representative.price, currency)}</strong>
+            <strong style={{ fontSize: "1.18rem", color: signColor(representative.changePct) }}>
+              {formatPct(representative.changePct)}
+            </strong>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "stretch" }}>
           {series.map((item) => {
@@ -458,7 +526,11 @@ function ComparisonCard({
                 : item.quote.country === "kor"
                   ? item.quote.session_open
                     ? "장중"
-                    : "휴장"
+                    : item.quote.price_data_session === "premarket"
+                      ? "장전"
+                      : item.quote.price_data_session === "aftermarket"
+                        ? "애프터장"
+                        : "휴장"
                   : item.quote.session_open
                     ? "장중"
                     : "시간외";
@@ -477,7 +549,13 @@ function ComparisonCard({
                   color: "var(--text-strong)",
                 }}
               >
-                <span style={{ width: 18, height: 3, borderRadius: 3, background: item.color }} />
+                <span
+                  style={
+                    item.quote.type === "toss"
+                      ? { width: 18, height: 3, borderRadius: 3, background: item.color }
+                      : { width: 10, height: 14, borderRadius: 2, background: "#10b981" }
+                  }
+                />
                 {item.quote.type === "toss" ? (
                   <span aria-label={item.quote.country === "kor" ? "한국" : "미국"} style={{ lineHeight: 1 }}>
                     {item.quote.country === "kor" ? "🇰🇷" : "🇺🇸"}
@@ -528,7 +606,12 @@ function ComparisonCard({
             </span>
           ))}
         </div>
-        <ComparisonChart series={series} currency={currency} />
+        <ComparisonChart
+          series={series}
+          candleSeriesKey={candleSeriesKey}
+          priorSeriesKey={priorSeriesKey}
+          currency={currency}
+        />
       </div>
     </div>
   );
@@ -584,6 +667,9 @@ export function HyperliquidClient() {
   const micronHyperQuote = quoteBySymbol.get("MU");
   const samsungTossQuote = quoteBySymbol.get("SMSN_KR_TOSS");
   const samsungHyperQuote = quoteBySymbol.get("SMSN");
+  const hynixTossFresh = hasFreshTossCandle(hynixKorQuote);
+  const micronTossFresh = hasFreshTossCandle(micronTossQuote);
+  const samsungTossFresh = hasFreshTossCandle(samsungTossQuote);
   const macroControls = (
     <div className="appSegmentedToggle" role="tablist" aria-label="시장 지표 선택">
       {[
@@ -607,8 +693,8 @@ export function HyperliquidClient() {
   const hynixSeries: ComparisonSeries[] =
     hynixKorQuote && hynixAdrQuote && hynixHyperQuote && usdKrw
       ? [
-          { key: "000660", label: "000660", color: "#ef4444", quote: hynixKorQuote, priceMultiplier: 1, visible: hynixKorQuote.session_open },
-          { key: "SKHY", label: "SKHY", color: "#2563eb", quote: hynixAdrQuote, priceMultiplier: usdKrw * 10, visible: hynixAdrQuote.session_open },
+          { key: "000660", label: "000660", color: "#ef4444", quote: hynixKorQuote, priceMultiplier: 1, visible: hynixTossFresh },
+          { key: "SKHY", label: "SKHY", color: "#2563eb", quote: hynixAdrQuote, priceMultiplier: usdKrw * 10, visible: hasFreshTossCandle(hynixAdrQuote) },
           { key: "SKHX", label: "Hyperliquid", color: "#10b981", quote: hynixHyperQuote, priceMultiplier: 1, visible: true },
         ]
       : [];
@@ -618,14 +704,14 @@ export function HyperliquidClient() {
   const micronSeries: ComparisonSeries[] =
     micronTossQuote && micronHyperQuote
       ? [
-          { key: "MU_TOSS", label: "토스 MU", color: "#2563eb", quote: micronTossQuote, priceMultiplier: 1, visible: micronTossQuote.session_open },
+          { key: "MU_TOSS", label: "토스 MU", color: "#2563eb", quote: micronTossQuote, priceMultiplier: 1, visible: micronTossFresh },
           { key: "MU_HL", label: "Hyperliquid", color: "#10b981", quote: micronHyperQuote, priceMultiplier: 1, visible: true },
         ]
       : [];
   const samsungSeries: ComparisonSeries[] =
     samsungTossQuote && samsungHyperQuote
       ? [
-          { key: "005930", label: "005930", color: "#ef4444", quote: samsungTossQuote, priceMultiplier: 1, visible: samsungTossQuote.session_open },
+          { key: "005930", label: "005930", color: "#ef4444", quote: samsungTossQuote, priceMultiplier: 1, visible: samsungTossFresh },
           { key: "SMSN", label: "Hyperliquid", color: "#10b981", quote: samsungHyperQuote, priceMultiplier: 1, visible: true },
         ]
       : [];
@@ -642,10 +728,13 @@ export function HyperliquidClient() {
               {macroQuote ? <QuoteCard q={macroQuote} title="시장 지표" controls={macroControls} /> : null}
             </div>
             <div className="col-12 col-lg-6">
-              {hynixSeries.length ? (
+              {hynixSeries.length && hynixKorQuote && hynixHyperQuote ? (
                 <ComparisonCard
                   title="SK하이닉스 비교"
                   basisLabel="한국시장 000660"
+                  representative={selectRepresentativeValue(hynixKorQuote, hynixHyperQuote, "국내시장")}
+                  candleSeriesKey={hynixTossFresh ? "000660" : "SKHX"}
+                  priorSeriesKey={hynixTossFresh ? "SKHX" : undefined}
                   series={hynixSeries}
                   currency="KRW"
                   differences={[
@@ -660,6 +749,9 @@ export function HyperliquidClient() {
                 <ComparisonCard
                   title="마이크론 비교"
                   basisLabel="미국시장 MU"
+                  representative={selectRepresentativeValue(micronTossQuote, micronHyperQuote, "미국시장")}
+                  candleSeriesKey={micronTossFresh ? "MU_TOSS" : "MU_HL"}
+                  priorSeriesKey={micronTossFresh ? "MU_HL" : undefined}
                   series={micronSeries}
                   currency="USD"
                   differences={[
@@ -673,6 +765,9 @@ export function HyperliquidClient() {
                 <ComparisonCard
                   title="삼성전자 비교"
                   basisLabel="한국시장 005930"
+                  representative={selectRepresentativeValue(samsungTossQuote, samsungHyperQuote, "국내시장")}
+                  candleSeriesKey={samsungTossFresh ? "005930" : "SMSN"}
+                  priorSeriesKey={samsungTossFresh ? "SMSN" : undefined}
                   series={samsungSeries}
                   currency="KRW"
                   differences={[

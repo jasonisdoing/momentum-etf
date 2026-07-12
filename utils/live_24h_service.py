@@ -36,6 +36,23 @@ def _is_regular_session_open(country: str) -> bool:
     return open_t <= now_local.time() <= close_t
 
 
+def _get_kr_price_data_session() -> str:
+    """국내 토스 분봉의 장전·정규장·애프터장 상태를 반환한다."""
+    schedule = MARKET_SCHEDULES["kor"]
+    now_local = datetime.now(ZoneInfo(schedule["timezone"]))
+    if now_local.weekday() >= 5:
+        return "closed"
+    premarket_open = schedule["open"].replace(hour=8)
+    after_market_close = schedule["close"].replace(hour=20, minute=0)
+    if premarket_open <= now_local.time() < schedule["open"]:
+        return "premarket"
+    if schedule["open"] <= now_local.time() <= schedule["close"]:
+        return "regular"
+    if schedule["close"] < now_local.time() <= after_market_close:
+        return "aftermarket"
+    return "closed"
+
+
 def _fetch_dex_ctxs(*, max_attempts: int = 3) -> dict[str, dict[str, Any]]:
     """Hyperliquid `metaAndAssetCtxs` 를 호출해 {심볼: ctx} 맵을 반환한다 (심볼=dex 접두사 제거)."""
     payload = {"type": "metaAndAssetCtxs", "dex": HYPERLIQUID_DEX}
@@ -330,6 +347,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
             }
         )
 
+    kr_price_data_session = _get_kr_price_data_session()
     kr_toss_tickers = [spec["ticker"] for spec in _KR_TOSS_STOCK_SPECS]
     kr_toss_stock_snapshot = fetch_toss_kr_stock_snapshot(kr_toss_tickers)
     for spec in _KR_TOSS_STOCK_SPECS:
@@ -355,6 +373,8 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "actual_change_pct": None,
                 "diff_pct": change_pct,
                 "session_open": kor_market_open,
+                "price_data_open": kr_price_data_session != "closed",
+                "price_data_session": kr_price_data_session,
                 "candles": candles,
                 "source_ticker": ticker,
             }

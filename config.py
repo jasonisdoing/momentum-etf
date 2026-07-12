@@ -237,7 +237,7 @@ MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
 }
 
 # 위 지수 목록에 없는 종목(예: 탑픽 벤치마크 ETF)의 슈퍼트렌드 곱수 기본값.
-MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT = 2.0
+MARKET_TREND_SUPERTREND_MULTIPLIER_DEFAULT = 2.5
 
 # -----------------------------------------------------------------------
 # 백테스트 파라미터 스윕 설정
