@@ -97,7 +97,7 @@ _CACHE_LOCK = threading.Lock()
 _CACHE_UPDATING = False
 
 _TOSS_STOCK_SPECS = (
-    {"symbol": "SKHY_TOSS", "name": "SK하이닉스", "tickers": ("SKHY", "SKHYV")},
+    {"symbol": "SKHY_TOSS", "name": "SK하이닉스", "tickers": ("SKHY",)},
     {"symbol": "MU_TOSS", "name": "마이크론", "tickers": ("MU",)},
 )
 
