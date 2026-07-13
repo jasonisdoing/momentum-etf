@@ -1073,7 +1073,7 @@ export function TopPickSettingsClient() {
         width: 150,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
-          params.value == null ? "-" : <span style={{ color: "#d63939" }}>{formatReturnPct(params.value)}</span>,
+          params.value == null ? "-" : <span style={{ color: signedColor(params.value) }}>{formatReturnPct(params.value)}</span>,
       },
       {
         field: "sortino",

@@ -214,7 +214,7 @@ export function TopPickClient() {
         </div>
         <div className="appHeaderMetric">
           <span>현금:</span>
-          <span className="appHeaderMetricValue">{formatWeightPct(cashWeight)} / {formatAccountMoney(tradeSummary.remaining_cash_krw, accountCurrency)}</span>
+          <span className="appHeaderMetricValue">{formatWeightPct(cashWeight)}</span>
         </div>
         <div className="appHeaderMetric">
           <span>계좌:</span>
