@@ -143,6 +143,26 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
     return clean
 
 
+def _clean_ticker_slots(items: Any) -> list[dict[str, Any]]:
+    """빈 위치를 포함한 편입 ETF 슬롯을 검증·정규화한다."""
+    if not isinstance(items, list):
+        return []
+    if len(items) > MAX_TICKERS_LIMIT:
+        raise ValueError(f"탑픽 편입 ETF 슬롯은 최대 {MAX_TICKERS_LIMIT}개까지 저장할 수 있습니다.")
+
+    clean_by_ticker = {item["ticker"]: item for item in _clean_tickers(items)}
+    slots: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        ticker = str(item.get("ticker") or "").strip().upper() if isinstance(item, dict) else ""
+        if not ticker or ticker in seen or ticker not in clean_by_ticker:
+            slots.append({"ticker": ""})
+            continue
+        slots.append(dict(clean_by_ticker[ticker]))
+        seen.add(ticker)
+    return slots
+
+
 def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | None = None) -> dict[str, Any]:
     base_clean = {key: value for key, value in (base or {}).items() if value is not None}
     value_clean = {key: value for key, value in (values or {}).items() if value is not None}
@@ -299,13 +319,13 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
     settings = _clean_settings({}, base={key: doc[key] for key in SETTING_KEYS if doc and doc.get(key) is not None})
     updated_at = (doc or {}).get("updated_at")
     approved_at = (doc or {}).get("approved_at")
-    tickers = _clean_tickers((doc or {}).get("tickers"))
+    tickers = _clean_ticker_slots((doc or {}).get("tickers"))
     approved_weights = (doc or {}).get("approved_weights") or None
     return {
         "tickers": tickers,
         "settings": settings,
         "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings")),
-        "approved_weights": _enrich_weight_rows_with_returns(approved_weights, tickers, settings),
+        "approved_weights": _enrich_weight_rows_with_returns(approved_weights, _clean_tickers(tickers), settings),
         "approved_at": (
             approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at
         ).isoformat()
@@ -373,7 +393,8 @@ def save_top_pick_settings(
     account_id: str | None = None,
 ) -> dict[str, Any]:
     resolved = _resolve_account_id(account_id)
-    clean_tickers = _clean_tickers(tickers)
+    ticker_slots = _clean_ticker_slots(tickers)
+    clean_tickers = _clean_tickers(ticker_slots)
     if len(clean_tickers) < 1:
         raise ValueError("저장할 종목이 1개 이상 필요합니다.")
 
@@ -395,7 +416,7 @@ def save_top_pick_settings(
         {"_id": resolved},
         {
             "$set": {
-                "tickers": clean_tickers,
+                "tickers": ticker_slots,
                 **clean_settings,
                 "backtest_settings": clean_backtest_settings,
                 "updated_at": updated_at,
@@ -404,7 +425,7 @@ def save_top_pick_settings(
         upsert=True,
     )
     return {
-        "tickers": clean_tickers,
+        "tickers": ticker_slots,
         "settings": clean_settings,
         "backtest_settings": clean_backtest_settings,
         "approved_weights": existing_doc.get("approved_weights"),
@@ -1290,7 +1311,7 @@ def calculate_top_pick_weights_for(tickers: list[dict[str, Any]], settings: dict
 
 def calculate_top_pick_weights(account_id: str | None = None) -> dict[str, Any]:
     payload = load_top_pick_settings(account_id)
-    result = calculate_top_pick_weights_for(payload["tickers"], payload["settings"])
+    result = calculate_top_pick_weights_for(_clean_tickers(payload["tickers"]), payload["settings"])
     result["updated_at"] = payload.get("updated_at")
     return result
 
@@ -1308,14 +1329,15 @@ def approve_top_pick_weights(
 ) -> dict[str, Any]:
     result = run_top_pick_weights(tickers, settings)
     approved_at = datetime.now(timezone.utc)
-    clean_tickers = _clean_tickers(tickers)
+    ticker_slots = _clean_ticker_slots(tickers)
+    clean_tickers = _clean_tickers(ticker_slots)
     clean_settings = _clean_settings(settings)
     resolved = _resolve_account_id(account_id or clean_settings.get("ACCOUNT_ID"))
     _db()[COLLECTION].update_one(
         {"_id": resolved},
         {
             "$set": {
-                "tickers": clean_tickers,
+                "tickers": ticker_slots,
                 **clean_settings,
                 "approved_weights": result,
                 "approved_at": approved_at,
@@ -1327,7 +1349,7 @@ def approve_top_pick_weights(
     return {
         **result,
         "approved_at": approved_at.isoformat(),
-        "tickers": clean_tickers,
+        "tickers": ticker_slots,
     }
 
 
