@@ -53,12 +53,19 @@ function hasFreshTossCandle(quote: Quote | undefined): boolean {
   return Boolean(latestCandle && latestCandle.t >= Date.now() - TOSS_CANDLE_FRESH_MS);
 }
 
+function canUseTossAsChartSource(quote: Quote | undefined): boolean {
+  return Boolean(
+    quote?.price_data_open && quote.price_data_session !== "closed" && hasFreshTossCandle(quote),
+  );
+}
+
 function selectRepresentativeValue(
   tossQuote: Quote,
   hyperliquidQuote: Quote,
   tossSource: "국내시장" | "미국시장",
+  useToss: boolean,
 ): RepresentativeValue {
-  if (hasFreshTossCandle(tossQuote)) {
+  if (useToss) {
     return { source: tossSource, price: tossQuote.hyper_price, changePct: tossQuote.diff_pct };
   }
   return {
@@ -730,9 +737,9 @@ export function HyperliquidClient() {
   const micronHyperQuote = quoteBySymbol.get("MU");
   const samsungTossQuote = quoteBySymbol.get("SMSN_KR_TOSS");
   const samsungHyperQuote = quoteBySymbol.get("SMSN");
-  const hynixTossFresh = hasFreshTossCandle(hynixKorQuote);
-  const micronTossFresh = hasFreshTossCandle(micronTossQuote);
-  const samsungTossFresh = hasFreshTossCandle(samsungTossQuote);
+  const hynixTossActive = canUseTossAsChartSource(hynixKorQuote);
+  const micronTossActive = canUseTossAsChartSource(micronTossQuote);
+  const samsungTossActive = canUseTossAsChartSource(samsungTossQuote);
   const macroControls = (
     <div className="appSegmentedToggle" role="tablist" aria-label="시장 지표 선택">
       {[
@@ -756,9 +763,9 @@ export function HyperliquidClient() {
   const hynixSeries: ComparisonSeries[] =
     hynixKorQuote && hynixHyperQuote
       ? [
-          { key: "000660", label: "한국", color: "#ef4444", quote: hynixKorQuote, priceMultiplier: 1, visible: hynixTossFresh },
+          { key: "000660", label: "한국", color: "#ef4444", quote: hynixKorQuote, priceMultiplier: 1, visible: hynixTossActive },
           ...(hynixAdrQuote && usdKrw
-            ? [{ key: "SKHY", label: "미국", color: "#2563eb", quote: hynixAdrQuote, priceMultiplier: usdKrw * 10, visible: hasFreshTossCandle(hynixAdrQuote) }]
+            ? [{ key: "SKHY", label: "미국", color: "#2563eb", quote: hynixAdrQuote, priceMultiplier: usdKrw * 10, visible: canUseTossAsChartSource(hynixAdrQuote) }]
             : []),
           { key: "SKHX", label: "Hyperliquid", color: "#10b981", quote: hynixHyperQuote, priceMultiplier: 1, visible: true },
         ]
@@ -769,14 +776,14 @@ export function HyperliquidClient() {
   const micronSeries: ComparisonSeries[] =
     micronTossQuote && micronHyperQuote
       ? [
-          { key: "MU_TOSS", label: "미국", color: "#2563eb", quote: micronTossQuote, priceMultiplier: 1, visible: micronTossFresh },
+          { key: "MU_TOSS", label: "미국", color: "#2563eb", quote: micronTossQuote, priceMultiplier: 1, visible: micronTossActive },
           { key: "MU_HL", label: "Hyperliquid", color: "#10b981", quote: micronHyperQuote, priceMultiplier: 1, visible: true },
         ]
       : [];
   const samsungSeries: ComparisonSeries[] =
     samsungTossQuote && samsungHyperQuote
       ? [
-          { key: "005930", label: "한국", color: "#ef4444", quote: samsungTossQuote, priceMultiplier: 1, visible: samsungTossFresh },
+          { key: "005930", label: "한국", color: "#ef4444", quote: samsungTossQuote, priceMultiplier: 1, visible: samsungTossActive },
           { key: "SMSN", label: "Hyperliquid", color: "#10b981", quote: samsungHyperQuote, priceMultiplier: 1, visible: true },
         ]
       : [];
@@ -796,9 +803,9 @@ export function HyperliquidClient() {
               {hynixSeries.length && hynixKorQuote && hynixHyperQuote ? (
                 <ComparisonCard
                   title="SK하이닉스"
-                  representative={selectRepresentativeValue(hynixKorQuote, hynixHyperQuote, "국내시장")}
-                  candleSeriesKey={hynixTossFresh ? "000660" : "SKHX"}
-                  priorSeriesKey={hynixTossFresh ? "SKHX" : undefined}
+                  representative={selectRepresentativeValue(hynixKorQuote, hynixHyperQuote, "국내시장", hynixTossActive)}
+                  candleSeriesKey={hynixTossActive ? "000660" : "SKHX"}
+                  priorSeriesKey={hynixTossActive ? "SKHX" : undefined}
                   series={hynixSeries}
                   currency="KRW"
                   differences={[
@@ -814,9 +821,9 @@ export function HyperliquidClient() {
               {micronSeries.length && micronTossQuote && micronHyperQuote ? (
                 <ComparisonCard
                   title="마이크론 비교"
-                  representative={selectRepresentativeValue(micronTossQuote, micronHyperQuote, "미국시장")}
-                  candleSeriesKey={micronTossFresh ? "MU_TOSS" : "MU_HL"}
-                  priorSeriesKey={micronTossFresh ? "MU_HL" : undefined}
+                  representative={selectRepresentativeValue(micronTossQuote, micronHyperQuote, "미국시장", micronTossActive)}
+                  candleSeriesKey={micronTossActive ? "MU_TOSS" : "MU_HL"}
+                  priorSeriesKey={micronTossActive ? "MU_HL" : undefined}
                   series={micronSeries}
                   currency="USD"
                   differences={[
@@ -829,9 +836,9 @@ export function HyperliquidClient() {
               {samsungSeries.length && samsungTossQuote && samsungHyperQuote ? (
                 <ComparisonCard
                   title="삼성전자 비교"
-                  representative={selectRepresentativeValue(samsungTossQuote, samsungHyperQuote, "국내시장")}
-                  candleSeriesKey={samsungTossFresh ? "005930" : "SMSN"}
-                  priorSeriesKey={samsungTossFresh ? "SMSN" : undefined}
+                  representative={selectRepresentativeValue(samsungTossQuote, samsungHyperQuote, "국내시장", samsungTossActive)}
+                  candleSeriesKey={samsungTossActive ? "005930" : "SMSN"}
+                  priorSeriesKey={samsungTossActive ? "SMSN" : undefined}
                   series={samsungSeries}
                   currency="KRW"
                   differences={[
