@@ -3821,7 +3821,12 @@ a {
 
 .live24hPriceCardValue {
   font-size: 0.9rem;
+  font-weight: 500;
   letter-spacing: -0.03em;
+}
+
+.live24hPriceCardValue.is-active {
+  font-weight: 900;
 }
 
 .live24hPriceCardSession {

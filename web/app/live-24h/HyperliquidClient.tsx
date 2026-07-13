@@ -610,7 +610,7 @@ function ComparisonCard({
                 key={item.key}
                 className="live24hPriceCard"
                 style={{
-                  border: `1px solid ${item.color}33`,
+                  border: item.key === candleSeriesKey ? `2px solid ${item.color}` : `1px solid ${item.color}33`,
                   borderRadius: 8,
                   background: `${item.color}0A`,
                   color: "var(--text-strong)",
@@ -630,7 +630,7 @@ function ComparisonCard({
                   />
                 )}
                 <strong className="live24hPriceCardName">{item.label}</strong>
-                <strong className="live24hPriceCardValue">
+                <strong className={`live24hPriceCardValue ${item.key === candleSeriesKey ? "is-active" : ""}`}>
                   {formatPrice(currentPrice, currency)}
                   {item.quote.type === "toss" && item.quote.diff_pct !== null ? (
                     <span style={{ color: signColor(item.quote.diff_pct) }}>({formatPct(item.quote.diff_pct)})</span>
