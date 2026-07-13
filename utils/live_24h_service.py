@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
+from datetime import time as dt_time
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -50,6 +51,33 @@ def _get_kr_price_data_session() -> str:
         return "regular"
     if schedule["close"] < now_local.time() <= after_market_close:
         return "aftermarket"
+    return "closed"
+
+
+def _get_us_price_data_session() -> str:
+    """미국 토스 시세의 데이장·프리장·본장·애프터장 상태를 반환한다."""
+    schedule = MARKET_SCHEDULES["us"]
+    now_local = datetime.now(ZoneInfo(schedule["timezone"]))
+    weekday = now_local.weekday()
+    current_time = now_local.time()
+    day_market_close = dt_time(3, 50)
+    premarket_open = dt_time(4, 0)
+    aftermarket_close = dt_time(20, 0)
+
+    if weekday == 5:
+        return "closed"
+    if weekday == 6:
+        return "daymarket" if current_time >= aftermarket_close else "closed"
+    if current_time < day_market_close:
+        return "daymarket"
+    if premarket_open <= current_time < schedule["open"]:
+        return "premarket"
+    if schedule["open"] <= current_time < schedule["close"]:
+        return "regular"
+    if schedule["close"] <= current_time < aftermarket_close:
+        return "aftermarket"
+    if weekday < 4 and current_time >= aftermarket_close:
+        return "daymarket"
     return "closed"
 
 
@@ -123,14 +151,7 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
         hl_candles = []
         try:
             url = "https://api.hyperliquid.xyz/info"
-            payload = {
-                "type": "candleSnapshot",
-                "req": {
-                    "coin": hl_symbol,
-                    "interval": "15m",
-                    "startTime": start_time
-                }
-            }
+            payload = {"type": "candleSnapshot", "req": {"coin": hl_symbol, "interval": "15m", "startTime": start_time}}
             resp = requests.post(url, json=payload, timeout=5)
             data = resp.json()
             if isinstance(data, list):
@@ -271,6 +292,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
     # (정규장 종가/변동률은 한국주=네이버 일봉, 미국주/지수=yfinance 일봉으로 세션 인지 산출)
     us_market_open = _is_regular_session_open("us")
     kor_market_open = _is_regular_session_open("kor")
+    us_price_data_session = _get_us_price_data_session()
 
     quotes: list[dict[str, Any]] = []
 
@@ -342,6 +364,8 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "actual_change_pct": None,
                 "diff_pct": change_pct,
                 "session_open": us_market_open,
+                "price_data_open": us_price_data_session != "closed",
+                "price_data_session": us_price_data_session,
                 "candles": candles,
                 "source_ticker": resolved_ticker,
             }
