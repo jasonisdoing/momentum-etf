@@ -183,17 +183,22 @@ export function TopPickClient() {
   const cashWeight = rows.find((row) => row.ticker === "__CASH__")?.target_weight_pct ?? null;
   const etfCount = rows.filter((row) => row.ticker !== "__CASH__").length;
  
+  // 포트폴리오 일간수익률 = 현재 평가액 합 ÷ 전일 평가액 합 − 1.
+  // 현재비중(하락 후 비중)으로 가중하면 폭락 종목 기여가 과소평가되므로, 종목별
+  // 전일 평가액(현재액 ÷ (1+일간%))을 기준으로 계산한다. 현금은 일간 0%로 자연 반영.
   const totalDailyReturn = useMemo(() => {
     if (!rows || rows.length === 0) return 0;
-    let sumWeight = 0;
-    let weightedReturnSum = 0;
+    let currentTotal = 0;
+    let previousTotal = 0;
     for (const row of rows) {
-      const weight = row.current_weight_pct ?? 0;
-      const dailyChange = row.daily_change_pct ?? 0;
-      weightedReturnSum += dailyChange * weight;
-      sumWeight += weight;
+      const amount = row.current_amount_krw ?? 0;
+      if (amount <= 0) continue;
+      const factor = 1 + (row.daily_change_pct ?? 0) / 100;
+      if (factor <= 0) continue; // -100% 이하는 비정상값 방어
+      currentTotal += amount;
+      previousTotal += amount / factor;
     }
-    return sumWeight > 0 ? weightedReturnSum / sumWeight : 0;
+    return previousTotal > 0 ? (currentTotal / previousTotal - 1) * 100 : 0;
   }, [rows]);
  
   // 누적 수익률 = (현재 계좌 총평가액 ÷ 시작금액 − 1) × 100. 시작금액/현재액이 없으면 null.
