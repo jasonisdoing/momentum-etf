@@ -634,7 +634,7 @@ export function TopPickSettingsClient() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tickers: validTickers,
+          tickers,
           settings,
           account_id: selectedAccount,
           backtest_settings: {
@@ -732,7 +732,7 @@ export function TopPickSettingsClient() {
       const resp = await fetch("/api/top-pick-settings/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: validTickers, settings, account_id: selectedAccount }),
+        body: JSON.stringify({ tickers, settings, account_id: selectedAccount }),
       });
       const data = (await resp.json()) as TopPickWeightPreview & { approved_at?: string; tickers?: TopPickTicker[] };
       if (!resp.ok || data.error) {
