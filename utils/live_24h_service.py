@@ -416,21 +416,27 @@ def load_live_24h_quotes() -> dict[str, Any]:
             currency = "POINT"
             country = "us"
             hyper_price = mark
-            actual_price, actual_change_pct = _fetch_regular_close(str(spec.get("yahoo_symbol") or ""), us_market_open)
+            actual_price, actual_change_pct, reference_prev_close = _fetch_regular_close(
+                str(spec.get("yahoo_symbol") or ""), us_market_open
+            )
         elif spec["country"] == "kor":
             currency = "KRW"
             country = "kor"
             hyper_price = (mark * usd_krw) if (mark is not None and usd_krw) else None
             # US 와 동일: 네이버 정규장 일봉(세션 인지, 원화). 장중=전일 종가 기준(당일 변화),
             # 마감 후=당일 종가 기준. naver nowVal(실시간가) 기준의 '프리미엄만' 보이던 문제 해결.
-            actual_price, actual_change_pct = _fetch_kr_regular_close(spec["actual_ticker"], kor_market_open)
+            actual_price, actual_change_pct, reference_prev_close = _fetch_kr_regular_close(
+                spec["actual_ticker"], kor_market_open
+            )
         else:
             currency = "USD"
             country = "us"
             hyper_price = mark
             # 토스 base 는 마감 후에도 '어제 종가'라 시간외 변동만 떼어내지 못한다.
             # yfinance 정규장 일봉(세션 인지)으로 '직전 완료 정규장 종가'를 일관되게 쓴다.
-            actual_price, actual_change_pct = _fetch_regular_close(str(spec.get("actual_ticker") or ""), us_market_open)
+            actual_price, actual_change_pct, reference_prev_close = _fetch_regular_close(
+                str(spec.get("actual_ticker") or ""), us_market_open
+            )
 
         diff_pct = (
             (hyper_price / actual_price - 1.0) * 100.0
@@ -455,6 +461,7 @@ def load_live_24h_quotes() -> dict[str, Any]:
                 "change_24h_pct": change_24h,
                 "actual_price": actual_price,
                 "actual_change_pct": actual_change_pct,
+                "reference_prev_close": reference_prev_close,
                 "diff_pct": diff_pct,
                 "session_open": session_open,
                 "candles": hl_candles,
@@ -464,47 +471,53 @@ def load_live_24h_quotes() -> dict[str, Any]:
     return {"quotes": quotes, "usd_krw": usd_krw}
 
 
-_REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | None], float]] = {}
+_REGULAR_CLOSE_CACHE: dict[tuple[str, bool], tuple[tuple[float | None, float | None, float | None], float]] = {}
 _REGULAR_CLOSE_TTL = 60.0  # 정규장 종가는 하루 1회만 바뀌므로 짧은 TTL 로 yfinance 호출을 줄인다.
 
 
-def _regular_close_from_series(closes, session_open: bool, tz_name: str) -> tuple[float | None, float | None]:
-    """일봉 종가 시리즈에서 '직전 완료 정규장 종가 + 그 변동률'을 세션 인지로 뽑는다.
+def _regular_close_from_series(
+    closes, session_open: bool, tz_name: str
+) -> tuple[float | None, float | None, float | None]:
+    """완료 정규장 종가·변동률과 현재 거래일의 전일 종가를 반환한다.
 
     장중이고 마지막 봉이 '오늘'(현지 기준)이면 형성 중이므로 제외하고 직전(어제) 종가를 앵커로 한다.
     → 장중엔 전일 종가 기준(당일 변화), 마감 후엔 당일 종가 기준(시간외 변화).
     """
     if closes is None or closes.empty:
-        return None, None
+        return None, None, None
+    latest_is_today = False
+    try:
+        latest_is_today = closes.index[-1].date() == datetime.now(ZoneInfo(tz_name)).date()
+    except Exception:
+        pass
     anchor = -1
-    if session_open and len(closes) >= 2:
-        try:
-            if closes.index[-1].date() == datetime.now(ZoneInfo(tz_name)).date():
-                anchor = -2
-        except Exception:
-            pass
+    if session_open and latest_is_today and len(closes) >= 2:
+        anchor = -2
     close = float(closes.iloc[anchor])
     change = None
+    previous_close = None
     if len(closes) >= abs(anchor) + 1:
         prev = float(closes.iloc[anchor - 1])
         if prev:
             change = (close / prev - 1.0) * 100.0
-    return close, change
+            previous_close = prev
+    reference_prev_close = previous_close if latest_is_today and anchor == -1 else close
+    return close, change, reference_prev_close
 
 
-def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None]:
+def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float | None, float | None, float | None]:
     """US 종목/지수의 '직전 완료 정규장 종가'와 그 정규장 변동률 (yfinance 정규장 일봉, 세션 인지).
 
     토스 base/naver nowVal 은 실시간/시간외가라 '직전 완료 종가'를 안정적으로 못 주므로 일봉을 쓴다.
     """
     if not yahoo_symbol:
-        return None, None
+        return None, None, None
     key = (f"us:{yahoo_symbol}", session_open)
     now = time.time()
     cached = _REGULAR_CLOSE_CACHE.get(key)
     if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
         return cached[0]
-    result: tuple[float | None, float | None] = (None, None)
+    result: tuple[float | None, float | None, float | None] = (None, None, None)
     try:
         import yfinance as yf
 
@@ -518,20 +531,20 @@ def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float |
     return result
 
 
-def _fetch_kr_regular_close(ticker: str, session_open: bool) -> tuple[float | None, float | None]:
+def _fetch_kr_regular_close(ticker: str, session_open: bool) -> tuple[float | None, float | None, float | None]:
     """한국 종목의 '직전 완료 정규장 종가'와 변동률 (네이버 일봉, 세션 인지). US 와 동일 의미.
 
     naver nowVal 은 장중에 실시간 정규장가라 '전일 종가 기준 당일 변화'를 못 준다.
     그래서 일봉으로 장중엔 전일 종가, 마감 후엔 당일 종가를 앵커로 쓴다.
     """
     if not ticker:
-        return None, None
+        return None, None, None
     key = (f"kr:{ticker}", session_open)
     now = time.time()
     cached = _REGULAR_CLOSE_CACHE.get(key)
     if cached and now - cached[1] < _REGULAR_CLOSE_TTL:
         return cached[0]
-    result: tuple[float | None, float | None] = (None, None)
+    result: tuple[float | None, float | None, float | None] = (None, None, None)
     try:
         closes = _fetch_naver_kor_index_close(ticker, 10)
         result = _regular_close_from_series(closes, session_open, "Asia/Seoul")

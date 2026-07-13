@@ -1,8 +1,7 @@
 #!/usr/bin/env python
 """24H 실시간 주식 및 선물 시세를 슬랙으로 전송.
 
-한국 종목은 KRW(환율 환산), 미국 종목은 USD 로 현재가/24h 변동률/실제가 대비 차이를 보낸다.
-하이퍼리퀴드 선물 시세를 표기한다.
+종목별 거래 세션에 따라 토스 또는 Hyperliquid 대표 시세를 선택해 현재가와 변동률을 보낸다.
 """
 
 import logging
@@ -28,6 +27,8 @@ def _fmt_price(value, currency):
         return f"{round(value):,}원"
     if currency == "POINT":
         return f"{value:,.2f}p"
+    if currency == "FX":
+        return f"{value:,.2f}원"
     return f"${value:,.2f}"
 
 
@@ -64,15 +65,34 @@ def _has_fresh_toss_candle(quote):
     return timestamp is not None and timestamp >= time.time() * 1000 - 30 * 60 * 1000
 
 
+def _can_use_toss_as_representative(quote):
+    """거래 세션이 열려 있고 최근 토스 캔들이 있을 때만 대표값으로 사용한다."""
+    return bool(
+        quote
+        and quote.get("price_data_open")
+        and quote.get("price_data_session") != "closed"
+        and _has_fresh_toss_candle(quote)
+    )
+
+
+def _hyperliquid_change_from_previous_close(quote):
+    """기초 종목의 직전 거래일 종가 대비 Hyperliquid 변동률을 계산한다."""
+    price = quote.get("hyper_price")
+    previous_close = quote.get("reference_prev_close")
+    if price is None or not previous_close or previous_close <= 0:
+        return None
+    return (price / previous_close - 1.0) * 100.0
+
+
 def _select_representative(quotes_by_symbol, toss_symbol, hyperliquid_symbol):
-    """화면과 같은 신선도 기준으로 토스 또는 Hyperliquid 대표값을 선택한다."""
+    """화면과 같은 거래 세션·신선도 기준으로 대표값을 선택한다."""
     toss_quote = quotes_by_symbol.get(toss_symbol)
     hyperliquid_quote = quotes_by_symbol.get(hyperliquid_symbol)
-    if toss_quote and _has_fresh_toss_candle(toss_quote):
+    if _can_use_toss_as_representative(toss_quote):
         return toss_quote, "토스", toss_quote.get("diff_pct")
     if not hyperliquid_quote:
         raise RuntimeError(f"대표 시세가 없습니다: {hyperliquid_symbol}")
-    return hyperliquid_quote, "하이퍼리퀴드", hyperliquid_quote.get("change_24h_pct")
+    return hyperliquid_quote, "하이퍼리퀴드", _hyperliquid_change_from_previous_close(hyperliquid_quote)
 
 
 def main():
@@ -86,7 +106,7 @@ def main():
         quote = quotes_by_symbol.get(symbol)
         if not quote:
             raise RuntimeError(f"필수 시장지표 시세가 없습니다: {symbol}")
-        rows.append((":us:", name, symbol, quote, "실시간", quote.get("diff_pct")))
+        rows.append((":us:", name, symbol, quote, "실시간", quote.get("diff_pct"), symbol != "NQ_FUT"))
 
     for flag, name, toss_symbol, hyperliquid_symbol in (
         (":kr:", "SK하이닉스", "SKHX_KR_TOSS", "SKHX"),
@@ -94,18 +114,19 @@ def main():
         (":us:", "마이크론", "MU_TOSS", "MU"),
     ):
         quote, source, change_pct = _select_representative(quotes_by_symbol, toss_symbol, hyperliquid_symbol)
-        rows.append((flag, name, source, quote, None, change_pct))
+        rows.append((flag, name, source, quote, None, change_pct, True))
 
     alerts = []  # 최근 1시간 |변동| ≥ 임계 인 종목 (name, move)
     body = []
-    for flag, name, identifier, quote, status, change_pct in rows:
+    for flag, name, identifier, quote, status, change_pct, show_price in rows:
         m1 = _recent_move(quote.get("candles"), 1)
         triggered = m1 is not None and abs(m1) >= LIVE_24H_ALERT_PCT
         if triggered:
             alerts.append((name, m1))
 
+        price_text = f" *{_fmt_price(quote.get('hyper_price'), quote.get('currency'))}*" if show_price else ""
         body.append(
-            f"{flag} *{name}*({identifier}) *{_fmt_pct(change_pct)}*"
+            f"{flag} *{name}*({identifier}){price_text} *{_fmt_pct(change_pct)}*"
             f"{' (' + status + ')' if status else ''} {_trend_emoji(change_pct)}"
             f"{' 🚨' if triggered else ''}"
         )
