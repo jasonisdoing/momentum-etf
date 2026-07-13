@@ -84,12 +84,26 @@ def _hyperliquid_change_from_previous_close(quote):
     return (price / previous_close - 1.0) * 100.0
 
 
+def _toss_source_label(quote):
+    """토스 대표 시세의 국가와 거래 세션을 슬랙 표시명으로 반환한다."""
+    country = "한국" if quote.get("country") == "kor" else "미국"
+    session = {
+        "daymarket": "데이",
+        "premarket": "프리",
+        "regular": "본장",
+        "aftermarket": "애프터",
+    }.get(quote.get("price_data_session"))
+    if not session:
+        raise RuntimeError(f"토스 대표 시세의 거래 세션이 올바르지 않습니다: {quote.get('price_data_session')}")
+    return f"{country} {session}"
+
+
 def _select_representative(quotes_by_symbol, toss_symbol, hyperliquid_symbol):
     """화면과 같은 거래 세션·신선도 기준으로 대표값을 선택한다."""
     toss_quote = quotes_by_symbol.get(toss_symbol)
     hyperliquid_quote = quotes_by_symbol.get(hyperliquid_symbol)
     if _can_use_toss_as_representative(toss_quote):
-        return toss_quote, "토스", toss_quote.get("diff_pct")
+        return toss_quote, _toss_source_label(toss_quote), toss_quote.get("diff_pct")
     if not hyperliquid_quote:
         raise RuntimeError(f"대표 시세가 없습니다: {hyperliquid_symbol}")
     return hyperliquid_quote, "하이퍼리퀴드", _hyperliquid_change_from_previous_close(hyperliquid_quote)
