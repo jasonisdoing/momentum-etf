@@ -32,6 +32,8 @@ type HoldingsRow = {
   valuation_krw: number;
   target_ratio?: number | null;
   memo?: string | null;
+  target_quantity?: number | null;
+  target_weight_pct?: number | null;
   sort_order?: number | null;
   original_quantity?: number;
   original_average_buy_price?: number;
@@ -61,6 +63,7 @@ type AccountSummary = {
   holdings_count: number;
   target_ratio_total: number;
   cash_ratio: number;
+  top_pick_cash_target_weight_pct?: number | null;
   net_profit: number;
   net_profit_pct: number;
   daily_profit: number;
@@ -123,7 +126,6 @@ type AddingRowState = {
   ticker: string;
   quantity: string;
   average_buy_price: string;
-  memo: string;
   isValidatingTicker?: boolean;
   name?: string;
   bucketId?: number;
@@ -135,7 +137,6 @@ const CASH_ROW_TICKER = "__CASH__";
 type HoldingEditableSnapshot = {
   quantity: number;
   average_buy_price: number;
-  memo: string;
 };
 
 const assetsGridTheme = createAppGridTheme();
@@ -206,11 +207,10 @@ function parseEditableQuantity(value: unknown): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price" | "memo">): HoldingEditableSnapshot {
+function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "average_buy_price">): HoldingEditableSnapshot {
   return {
     quantity: parseEditableQuantity(row.quantity),
     average_buy_price: safeParseFloat(row.average_buy_price),
-    memo: String(row.memo ?? ""),
   };
 }
 
@@ -248,9 +248,6 @@ function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "currency">, 
   }
   if (before.average_buy_price !== after.average_buy_price) {
     changes.push(`매입단가 ${formatPrice(before.average_buy_price, row.currency)}→${formatPrice(after.average_buy_price, row.currency)}`);
-  }
-  if (before.memo !== after.memo) {
-    changes.push(`메모 "${before.memo}"→"${after.memo}"`);
   }
   if (changes.length === 0) {
     return null;
@@ -430,6 +427,7 @@ function buildCashGridRow(summary: AccountSummary): GridRow {
     buy_amount_krw: cashValue,
     valuation_krw: cashValue,
     target_ratio: Number(summary.cash_target_ratio ?? 0),
+    target_weight_pct: summary.top_pick_cash_target_weight_pct ?? null,
     sort_order: -1,
     original_quantity: 0,
     original_average_buy_price: 0,
@@ -645,7 +643,6 @@ function AccountHoldingsDetailPanel({
   const [isReorderDirty, setIsReorderDirty] = useState(false);
   const qtyRef = useRef<HTMLInputElement>(null);
   const priceRef = useRef<HTMLInputElement>(null);
-  const memoRef = useRef<HTMLInputElement>(null);
   const rowsRef = useRef<HoldingsRow[]>(initialRows);
   const summaryRef = useRef(summary);
   const dirtyRowIdsRef = useRef<string[]>([]);
@@ -869,7 +866,6 @@ function AccountHoldingsDetailPanel({
 
     const rawQuantity = qtyRef.current?.value ?? "";
     const rawPrice = priceRef.current?.value ?? "";
-    const rawMemo = memoRef.current?.value ?? "";
 
     const quantity = parseInt(parseRawPrice(rawQuantity), 10);
     const averageBuyPrice = safeParseFloat(rawPrice);
@@ -886,7 +882,6 @@ function AccountHoldingsDetailPanel({
         ticker: addingRow.ticker,
         quantity,
         average_buy_price: averageBuyPrice,
-        memo: rawMemo.trim(),
       }),
     });
     const payload = await response.json();
@@ -898,7 +893,6 @@ function AccountHoldingsDetailPanel({
   const processRowUpdate = useCallback(async (row: GridRow) => {
     const quantity = parseEditableQuantity(row.quantity);
     const averageBuyPrice = safeParseFloat(row.average_buy_price);
-    const memo = String(row.memo ?? "").trim();
 
     if (Number.isNaN(quantity) || quantity < 0 || Number.isNaN(averageBuyPrice) || averageBuyPrice < 0) {
       throw new Error("입력값이 올바르지 않습니다.");
@@ -912,7 +906,6 @@ function AccountHoldingsDetailPanel({
         ticker: row.ticker.replace("ASX:", ""),
         quantity,
         average_buy_price: averageBuyPrice,
-        memo,
       }),
     });
     const payload = await response.json();
@@ -1032,7 +1025,6 @@ function AccountHoldingsDetailPanel({
         id: rowId,
         quantity: typeof sourceRow.quantity === "number" ? sourceRow.quantity : parseInt(String(sourceRow.quantity), 10) || 0,
         average_buy_price: safeParseFloat(sourceRow.average_buy_price),
-        memo: sourceRow.memo ?? "",
       });
       lastSavedSnapshotsRef.current.set(rowId, nextSnapshot);
       const message = buildAutoSaveToastMessage(sourceRow, previousSnapshot, nextSnapshot);
@@ -1312,7 +1304,6 @@ function AccountHoldingsDetailPanel({
         ...currentRow,
         quantity: parseEditableQuantity(row.quantity),
         average_buy_price: safeParseFloat(row.average_buy_price),
-        memo: String(row.memo ?? ""),
       };
     });
     rowsRef.current = nextRows;
@@ -1487,39 +1478,46 @@ function AccountHoldingsDetailPanel({
       },
     },
     {
-      field: "memo",
-      headerName: "메모",
-      width: 126,
-      editable: (params) =>
-        Boolean(params.data && processingId !== params.data?.id && isEditableHoldingRow(params.data)),
-      cellClass: (params) => {
-        if (!isEditableHoldingRow(params.data)) {
-          return undefined;
-        }
-        return isDirtyEditableCell(params.data?.id, "memo")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
-      valueParser: (params) => String(params.newValue ?? "").trim(),
-      cellRenderer: (params: { data?: GridRow; value?: string | null }) => {
+      colId: "change_weight_pct",
+      headerName: "변동비중",
+      width: 92,
+      type: "rightAligned",
+      cellStyle: { fontWeight: 700 },
+      valueGetter: (params) => {
         const row = params.data;
-        if (!row) {
+        if (!row || row.id === "__adding__" || row.target_weight_pct == null) return null;
+        const currentWeight = getPreviewWeightPct(row, rowsRef.current, summaryRef.current);
+        return row.target_weight_pct - currentWeight;
+      },
+      cellRenderer: (params: { value?: number | null }) => {
+        if (params.value === null || params.value === undefined || Number.isNaN(params.value)) return "-";
+        if (Math.abs(params.value) < 0.05) return <span style={{ color: "#000000" }}>0</span>;
+        const color = params.value > 0 ? "#d63939" : "#206bc4";
+        const sign = params.value > 0 ? "+" : "";
+        return <span style={{ color }}>{sign}{params.value.toFixed(1)}%</span>;
+      },
+    },
+    {
+      colId: "change_quantity",
+      headerName: "변동수량",
+      width: 92,
+      type: "rightAligned",
+      valueGetter: (params) => {
+        const row = params.data;
+        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.target_quantity == null) {
           return null;
         }
-        if (row.id === "__adding__") {
-          return (
-            <input
-              type="text"
-              ref={memoRef}
-              className="form-control form-control-sm assetsInlineInput"
-              defaultValue={addingRow?.memo ?? ""}
-              disabled={!addingRow?.isValidated}
-            />
-          );
-        }
+        return Math.floor(row.target_quantity) - parseEditableQuantity(row.quantity);
+      },
+      cellStyle: { fontWeight: 700 },
+      cellRenderer: (params: { value?: number | null }) => {
+        if (params.value === null || params.value === undefined || Number.isNaN(params.value)) return "-";
+        if (params.value === 0) return <span style={{ color: "#000000" }}>0</span>;
+        const color = params.value > 0 ? "#d63939" : "#206bc4";
+        const sign = params.value > 0 ? "+" : "-";
         return (
-          <span style={{ color: ASSETS_WEIGHT_TEXT_COLOR, fontWeight: 500 }}>
-            {params.value || "-"}
+          <span style={{ color }}>
+            {sign}{Math.abs(params.value).toLocaleString("ko-KR")}주
           </span>
         );
       },
@@ -1746,7 +1744,6 @@ function AccountHoldingsDetailPanel({
                   ticker: "",
                   quantity: "",
                   average_buy_price: "",
-                  memo: "",
                   isValidated: false,
                 })
               }

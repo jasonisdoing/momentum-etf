@@ -4,6 +4,7 @@ import { fetchFastApiJson } from "@/lib/internal-api";
 import { jsonNoStore } from "@/lib/no-store-response";
 
 type HoldingsRow = {
+  account_id?: string;
   account_name: string;
   currency: string;
   bucket: string;
@@ -20,12 +21,27 @@ type HoldingsRow = {
   target_ratio?: number | null;
   memo?: string | null;
   target_quantity?: number | null;
+  target_weight_pct?: number | null;
   target_amount?: number | null;
   sort_order: number;
   ticker_type?: string;
   country_code?: string;
   is_etf?: boolean;
 };
+
+type TopPickWeightRow = {
+  ticker?: string;
+  target_quantity?: number | null;
+  target_weight_pct?: number | null;
+};
+
+function normalizeTicker(value: string | undefined): string {
+  return String(value ?? "").trim().toUpperCase().replace(/^ASX:/, "").replace(/^KR:/, "");
+}
+
+function normalizeAccountId(value: string | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -37,8 +53,45 @@ export async function GET(request: Request) {
       accounts?: any[];
       account_id?: string;
       rows: HoldingsRow[];
+      account_summaries?: Array<{ account_id?: string; top_pick_cash_target_weight_pct?: number | null }>;
     }>(`/internal/holdings${search}`);
-    return jsonNoStore(payload);
+    const topPickAccounts = await fetchFastApiJson<{ accounts?: string[] }>("/internal/top-pick/accounts");
+    const requestedAccountIds = new Set(
+      (payload.account_summaries ?? []).map((item) => normalizeAccountId(item.account_id)).filter(Boolean),
+    );
+    const targetAccountIds = (topPickAccounts.accounts ?? []).filter((accountId) =>
+      requestedAccountIds.has(normalizeAccountId(accountId)),
+    );
+    const weightPayloads = await Promise.all(
+      targetAccountIds.map(async (accountId) => ({
+        accountId,
+        payload: await fetchFastApiJson<{ rows?: TopPickWeightRow[] }>(
+          `/internal/top-pick/weights?account_id=${encodeURIComponent(accountId)}`,
+        ),
+      })),
+    );
+    const targetMap = new Map<string, { quantity: number | null; weightPct: number | null }>();
+    for (const { accountId, payload: weightPayload } of weightPayloads) {
+      for (const row of weightPayload.rows ?? []) {
+        targetMap.set(`${normalizeAccountId(accountId)}::${normalizeTicker(row.ticker)}`, {
+          quantity: row.target_quantity ?? null,
+          weightPct: row.target_weight_pct ?? null,
+        });
+      }
+    }
+    return jsonNoStore({
+      ...payload,
+      rows: payload.rows.map((row) => ({
+        ...row,
+        target_quantity: targetMap.get(`${normalizeAccountId(row.account_id)}::${normalizeTicker(row.ticker)}`)?.quantity ?? null,
+        target_weight_pct: targetMap.get(`${normalizeAccountId(row.account_id)}::${normalizeTicker(row.ticker)}`)?.weightPct ?? null,
+      })),
+      account_summaries: (payload.account_summaries ?? []).map((summary) => ({
+        ...summary,
+        top_pick_cash_target_weight_pct:
+          targetMap.get(`${normalizeAccountId(summary.account_id)}::__CASH__`)?.weightPct ?? null,
+      })),
+    });
   } catch (error) {
     return jsonNoStore(
       { error: error instanceof Error ? error.message : "보유 종목을 불러오지 못했습니다." },
@@ -138,7 +191,6 @@ export async function POST(request: Request) {
           quantity: body.quantity,
           average_buy_price: body.average_buy_price,
           target_ratio: body.target_ratio,
-          memo: body.memo,
         }),
       },
     );
