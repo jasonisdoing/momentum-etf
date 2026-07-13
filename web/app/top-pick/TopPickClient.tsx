@@ -287,6 +287,17 @@ export function TopPickClient() {
         },
       },
       {
+        field: "current_weight_pct",
+        headerName: "현재비중",
+        width: 88,
+        type: "rightAligned",
+        cellStyle: { fontWeight: 700 },
+        cellRenderer: (params: { value: number | null | undefined }) => {
+          if (params.value == null || Number.isNaN(params.value)) return "-";
+          return `${params.value.toFixed(1)}%`;
+        },
+      },
+      {
         field: "current_price",
         headerName: "현재가",
         width: 98,
@@ -320,17 +331,6 @@ export function TopPickClient() {
           const formatted = `${sign}${formatAccountMoney(Math.abs(val), accountCurrency)}`;
           const color = val === 0 ? "var(--text-strong)" : val > 0 ? "#d63939" : "#206bc4";
           return <span style={{ color }}>{formatted}</span>;
-        },
-      },
-      {
-        field: "current_weight_pct",
-        headerName: "현재비중",
-        width: 88,
-        type: "rightAligned",
-        cellStyle: { fontWeight: 700 },
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          if (params.value == null || Number.isNaN(params.value)) return "-";
-          return `${params.value.toFixed(1)}%`;
         },
       },
       {
