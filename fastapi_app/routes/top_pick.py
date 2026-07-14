@@ -26,6 +26,7 @@ class TopPickSettingsPayload(BaseModel):
     settings: dict[str, Any] | None = None
     backtest_settings: dict[str, Any] | None = None
     account_id: str | None = None
+    weight_mode: str = "variable"
 
 
 @router.get("/accounts")
@@ -54,7 +55,9 @@ def post_run(payload: TopPickSettingsPayload, _: None = Depends(require_internal
 
 @router.post("/backtest")
 def post_backtest(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
-    return run_top_pick_backtest(payload.tickers, payload.settings, payload.backtest_settings)
+    return run_top_pick_backtest(
+        payload.tickers, payload.settings, payload.backtest_settings, weight_mode=payload.weight_mode
+    )
 
 
 @router.post("/approve")
