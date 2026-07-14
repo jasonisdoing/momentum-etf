@@ -1162,25 +1162,28 @@ def calculate_top_pick_weights_for(
         if (max_weight * len(tickers)) + cash_max_weight < 1.0:
             raise ValueError("최대 비중과 현금 최대 비중이 맞지 않습니다. 최대 비중 또는 현금 최대 비중을 높이세요.")
 
-        # 벤치마크 실시간 레짐 판단에 따른 현금 조절
-        try:
-            db_settings = load_top_pick_settings()
-            benchmark = db_settings.get("backtest_settings", {}).get("benchmark", {})
-            bench_ticker = benchmark.get("ticker")
-            if bench_ticker:
-                bench_df = _load_regime_benchmark_ohlc(bench_ticker)
-                if bench_df is not None and not bench_df.empty:
-                    regimes = _calculate_benchmark_regimes(bench_df, bench_ticker)
-                    if not regimes.empty:
-                        latest_date = regimes.index.max()
-                        current_regime = regimes.loc[latest_date]
-                        if current_regime == "accel_up":
-                            cash_max_weight = 0.0
-                            regime_forced_cash_zero = True
-                        elif current_regime == "accel_down":
-                            forced_cash_weight = cash_max_weight
-        except Exception:
-            pass
+        # 적용 계좌의 벤치마크 실시간 레짐에 따라 현금 비중을 조절한다.
+        account_id = str(settings.get("ACCOUNT_ID") or "").strip()
+        if not account_id:
+            raise ValueError("탑픽 비중 계산에는 적용 계좌가 필요합니다.")
+        db_settings = load_top_pick_settings(account_id)
+        benchmark = db_settings.get("backtest_settings", {}).get("benchmark", {})
+        bench_ticker = str(benchmark.get("ticker") or "").strip()
+        if not bench_ticker:
+            raise ValueError(f"탑픽 계좌 '{account_id}'에 시장 레짐 벤치마크가 없습니다.")
+        bench_df = _load_regime_benchmark_ohlc(bench_ticker)
+        if bench_df is None or bench_df.empty:
+            raise ValueError(f"시장 레짐 벤치마크 가격 데이터가 없습니다: {bench_ticker}")
+        regimes = _calculate_benchmark_regimes(bench_df, bench_ticker)
+        if regimes.empty:
+            raise ValueError(f"시장 레짐을 계산할 수 없습니다: {bench_ticker}")
+        latest_date = regimes.index.max()
+        current_regime = regimes.loc[latest_date]
+        if current_regime == "accel_up":
+            cash_max_weight = 0.0
+            regime_forced_cash_zero = True
+        elif current_regime == "accel_down":
+            forced_cash_weight = cash_max_weight
 
     close_frame, missing = _load_close_frame(tickers)
     if close_frame.empty:
