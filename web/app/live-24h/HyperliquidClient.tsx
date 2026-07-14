@@ -450,15 +450,21 @@ function ComparisonChart({
   const selectedCandles = (selectedSeries?.quote.candles ?? []).filter(
     (candle) => candle.t >= startTime && candle.t <= endTime,
   );
-  const firstSelectedTime = selectedCandles.at(0)?.t;
-  const chartCandles = [
-    ...(firstSelectedTime
-      ? (priorSeries?.quote.candles ?? [])
-          .filter((candle) => candle.t >= startTime && candle.t < firstSelectedTime)
-          .map((candle) => ({ candle, series: priorSeries! }))
-      : []),
-    ...selectedCandles.map((candle) => ({ candle, series: selectedSeries! })),
-  ];
+  const candleIntervalMs = 15 * 60 * 1000;
+  const candleByTime = new Map<number, { candle: Candle; series: ComparisonSeries }>();
+  const addCandles = (candles: Candle[], item: ComparisonSeries | undefined) => {
+    if (!item) return;
+    for (const candle of candles) {
+      if (candle.t < startTime || candle.t > endTime) continue;
+      const timestamp = Math.floor(candle.t / candleIntervalMs) * candleIntervalMs;
+      candleByTime.set(timestamp, { candle: { ...candle, t: timestamp }, series: item });
+    }
+  };
+
+  // 대체 소스로 전체 구간을 채운 뒤 주 소스를 덮어써, 거래시간 외 공백만 대체 소스로 연결한다.
+  addCandles(priorSeries?.quote.candles ?? [], priorSeries);
+  addCandles(selectedCandles, selectedSeries);
+  const chartCandles = [...candleByTime.values()].sort((a, b) => a.candle.t - b.candle.t);
   const values = chartCandles.flatMap(({ candle, series: item }) => [
     candle.l * item.priceMultiplier,
     candle.h * item.priceMultiplier,

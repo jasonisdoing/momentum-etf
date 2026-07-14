@@ -1478,6 +1478,18 @@ function AccountHoldingsDetailPanel({
       },
     },
     {
+      field: "target_weight_pct",
+      headerName: "목표비중",
+      width: 92,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
+        if (!params.data || params.data.id === "__adding__" || params.value == null) {
+          return "-";
+        }
+        return <span style={{ color: "#000000", fontWeight: 700 }}>{params.value.toFixed(1)}%</span>;
+      },
+    },
+    {
       colId: "change_weight_pct",
       headerName: "변동비중",
       width: 92,

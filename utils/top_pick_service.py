@@ -63,6 +63,7 @@ DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
 }
 ALLOWED_BACKTEST_MONTHS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36}
 ALLOWED_BACKTEST_REBALANCE = {"none", "weekly", "monthly", "quarterly", "yearly"}
+ALLOWED_WEIGHT_MODES = {"variable", "fixed"}
 
 
 def _db():
@@ -72,6 +73,13 @@ def _db():
     if db is None:
         raise RuntimeError("MongoDB 연결 실패 (top_pick_settings)")
     return db
+
+
+def _clean_weight_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode not in ALLOWED_WEIGHT_MODES:
+        raise ValueError("비중 방식은 variable 또는 fixed여야 합니다.")
+    return mode
 
 
 def _load_unique_stock_meta_by_ticker(tickers: list[str]) -> dict[str, dict[str, Any]]:
@@ -337,6 +345,7 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
     approved_weights = (doc or {}).get("approved_weights") or None
     return {
         "tickers": tickers,
+        "weight_mode": _clean_weight_mode((doc or {}).get("weight_mode")),
         "settings": settings,
         "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings")),
         "approved_weights": _enrich_weight_rows_with_returns(approved_weights, _clean_tickers(tickers), settings),
@@ -392,6 +401,7 @@ def load_top_pick_settings_for_edit(account_id: str) -> dict[str, Any]:
     # 저장된 문서 없음 → 모든 값 미설정인 초기 상태(계좌 id 만 채움).
     return {
         "tickers": [],
+        "weight_mode": "variable",
         "settings": {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS},
         "backtest_settings": None,
         "approved_weights": None,
@@ -402,11 +412,13 @@ def load_top_pick_settings_for_edit(account_id: str) -> dict[str, Any]:
 
 def save_top_pick_settings(
     tickers: list[dict[str, Any]],
+    weight_mode: str,
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
     account_id: str | None = None,
 ) -> dict[str, Any]:
     resolved = _resolve_account_id(account_id)
+    clean_weight_mode = _clean_weight_mode(weight_mode)
     ticker_slots = _clean_ticker_slots(tickers)
     clean_tickers = _clean_tickers(ticker_slots)
     if len(clean_tickers) < 1:
@@ -431,6 +443,7 @@ def save_top_pick_settings(
         {
             "$set": {
                 "tickers": ticker_slots,
+                "weight_mode": clean_weight_mode,
                 **clean_settings,
                 "backtest_settings": clean_backtest_settings,
                 "updated_at": updated_at,
@@ -440,6 +453,7 @@ def save_top_pick_settings(
     )
     return {
         "tickers": ticker_slots,
+        "weight_mode": clean_weight_mode,
         "settings": clean_settings,
         "backtest_settings": clean_backtest_settings,
         "approved_weights": existing_doc.get("approved_weights"),
@@ -1342,7 +1356,9 @@ def calculate_top_pick_weights_for(
 
 def calculate_top_pick_weights(account_id: str | None = None) -> dict[str, Any]:
     payload = load_top_pick_settings(account_id)
-    result = calculate_top_pick_weights_for(_clean_tickers(payload["tickers"]), payload["settings"])
+    result = calculate_top_pick_weights_for(
+        _clean_tickers(payload["tickers"]), payload["settings"], weight_mode=payload["weight_mode"]
+    )
     result["updated_at"] = payload.get("updated_at")
     return result
 
@@ -1363,10 +1379,10 @@ def approve_top_pick_weights(
     account_id: str | None = None,
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
-    result = run_top_pick_weights(tickers, settings, weight_mode=weight_mode)
+    clean_weight_mode = _clean_weight_mode(weight_mode)
+    result = run_top_pick_weights(tickers, settings, weight_mode=clean_weight_mode)
     approved_at = datetime.now(timezone.utc)
     ticker_slots = _clean_ticker_slots(tickers)
-    clean_tickers = _clean_tickers(ticker_slots)
     clean_settings = _clean_settings(settings)
     resolved = _resolve_account_id(account_id or clean_settings.get("ACCOUNT_ID"))
     _db()[COLLECTION].update_one(
@@ -1374,6 +1390,7 @@ def approve_top_pick_weights(
         {
             "$set": {
                 "tickers": ticker_slots,
+                "weight_mode": clean_weight_mode,
                 **clean_settings,
                 "approved_weights": result,
                 "approved_at": approved_at,
@@ -1384,6 +1401,7 @@ def approve_top_pick_weights(
     )
     return {
         **result,
+        "weight_mode": clean_weight_mode,
         "approved_at": approved_at.isoformat(),
         "tickers": ticker_slots,
     }
