@@ -93,6 +93,23 @@ function formatPct(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+const THREE_HOURS_MS = 3 * 60 * 60 * 1000;
+const KST_OFFSET_MS = 9 * 60 * 60 * 1000;
+const KST_HOUR_FORMATTER = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul",
+  hour: "numeric",
+  hour12: true,
+});
+
+function buildThreeHourTicks(startTime: number, endTime: number): number[] {
+  const firstTick = Math.ceil((startTime + KST_OFFSET_MS) / THREE_HOURS_MS) * THREE_HOURS_MS - KST_OFFSET_MS;
+  const ticks: number[] = [];
+  for (let timestamp = firstTick; timestamp <= endTime; timestamp += THREE_HOURS_MS) {
+    ticks.push(timestamp);
+  }
+  return ticks;
+}
+
 // 15분봉 기준 최근 N시간 변동률(%). 4N봉 전 대비. 데이터 부족 시 null.
 function recentMove(candles: Candle[] | undefined, hours: number): number | null {
   if (!candles) return null;
@@ -205,13 +222,17 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
     };
   }, []);
 
-  if (!candles || candles.length < 2) return null;
+  const endTime = Date.now();
+  const startTime = endTime - 24 * 60 * 60 * 1000;
+  const visibleCandles = candles.filter((candle) => candle.t >= startTime && candle.t <= endTime);
 
-  const lows = candles.map((c) => c.l);
-  const highs = candles.map((c) => c.h);
+  if (visibleCandles.length < 2) return null;
+
+  const lows = visibleCandles.map((c) => c.l);
+  const highs = visibleCandles.map((c) => c.h);
   const min = Math.min(...lows);
   const max = Math.max(...highs);
-  const current = candles.at(-1)!.c;
+  const current = visibleCandles.at(-1)!.c;
   const highIndex = highs.indexOf(max);
   const lowIndex = lows.indexOf(min);
   const highDiffPct = (max / current - 1) * 100;
@@ -225,8 +246,10 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const mapY = (val: number) => {
     return chartHeight - paddingY - ((val - min) / range) * (chartHeight - paddingY * 2);
   };
+  const mapX = (timestamp: number) => ((timestamp - startTime) / (endTime - startTime)) * chartWidth;
 
-  const candleWidth = (chartWidth / candles.length) - 1.5;
+  const candleWidth = Math.max(2, Math.min(7, chartWidth / 96 - 1));
+  const timeTicks = buildThreeHourTicks(startTime, endTime);
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -249,19 +272,21 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
 
         {/* X축 시간 라벨 */}
         <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
-        <text x={0} y={height - 4} fill="#64748b" fontSize="9.5">
-          24시간 전
-        </text>
-        <text x={chartWidth / 2 - 22} y={height - 4} fill="#64748b" fontSize="9.5">
-          12시간 전
-        </text>
-        <text x={chartWidth - 22} y={height - 4} fill="#94a3b8" fontSize="9.5" fontWeight="600">
-          실시간
-        </text>
+        {timeTicks.map((timestamp) => {
+          const x = mapX(timestamp);
+          return (
+            <g key={timestamp}>
+              <line x1={x} y1={chartHeight} x2={x} y2={chartHeight + 4} stroke="#94a3b8" />
+              <text x={x} y={height - 4} textAnchor="middle" fill="#64748b" fontSize="9.5">
+                {KST_HOUR_FORMATTER.format(new Date(timestamp))}
+              </text>
+            </g>
+          );
+        })}
 
         {/* 캔들 그리기 */}
-        {candles.map((c, index) => {
-          const x = index * (chartWidth / candles.length) + 0.75;
+        {visibleCandles.map((c) => {
+          const x = mapX(c.t);
           const yOpen = mapY(c.o);
           const yClose = mapY(c.c);
           const yHigh = mapY(c.h);
@@ -274,10 +299,10 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
           const bodyHeight = Math.max(1.5, Math.abs(yOpen - yClose));
 
           return (
-            <g key={index}>
-              <line x1={x + candleWidth / 2} y1={yHigh} x2={x + candleWidth / 2} y2={yLow} stroke={color} strokeWidth="1" />
+            <g key={c.t}>
+              <line x1={x} y1={yHigh} x2={x} y2={yLow} stroke={color} strokeWidth="1" />
               <rect
-                x={x}
+                x={x - candleWidth / 2}
                 y={bodyY}
                 width={candleWidth}
                 height={bodyHeight}
@@ -289,7 +314,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
           );
         })}
         <ExtremumMarker
-          x={highIndex * (chartWidth / candles.length) + 0.75 + candleWidth / 2}
+          x={mapX(visibleCandles[highIndex].t)}
           y={mapY(max)}
           label={`고점 ${formatPct(highDiffPct)}`}
           color="#dc2626"
@@ -298,7 +323,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
           chartHeight={chartHeight}
         />
         <ExtremumMarker
-          x={lowIndex * (chartWidth / candles.length) + 0.75 + candleWidth / 2}
+          x={mapX(visibleCandles[lowIndex].t)}
           y={mapY(min)}
           label={`저점 ${formatPct(lowDiffPct)}`}
           color="#1971c2"
@@ -500,6 +525,7 @@ function ComparisonChart({
   const lowPrice = lowCandle.candle.l * lowCandle.series.priceMultiplier;
 
   const candleWidth = Math.max(2, Math.min(7, chartWidth / 96 - 1));
+  const timeTicks = buildThreeHourTicks(startTime, endTime);
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -557,9 +583,17 @@ function ComparisonChart({
           chartHeight={chartHeight}
         />
         <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="#cbd5e1" />
-        <text x={0} y={height - 3} fill="#64748b" fontSize="10">24시간 전</text>
-        <text x={chartWidth / 2 - 22} y={height - 3} fill="#64748b" fontSize="10">12시간 전</text>
-        <text x={chartWidth - 22} y={height - 3} fill="#64748b" fontSize="10">현재</text>
+        {timeTicks.map((timestamp) => {
+          const x = mapX(timestamp);
+          return (
+            <g key={timestamp}>
+              <line x1={x} y1={chartHeight} x2={x} y2={chartHeight + 4} stroke="#94a3b8" />
+              <text x={x} y={height - 3} textAnchor="middle" fill="#64748b" fontSize="10">
+                {KST_HOUR_FORMATTER.format(new Date(timestamp))}
+              </text>
+            </g>
+          );
+        })}
       </svg>
     </div>
   );
