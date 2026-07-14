@@ -170,6 +170,23 @@ function formatComparisonAxisPrice(value: number, currency: "KRW" | "USD"): stri
   return `$${Math.round(value)}`;
 }
 
+function buildRoundPriceTicks(min: number, max: number, targetCount = 7): number[] {
+  const span = max - min;
+  if (!Number.isFinite(span) || span <= 0) return [];
+
+  const rawStep = span / Math.max(2, targetCount - 1);
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceMultiplier = [1, 2, 2.5, 5, 10].find((candidate) => candidate >= normalized) ?? 10;
+  const step = niceMultiplier * magnitude;
+  const first = Math.ceil(min / step) * step;
+  const ticks: number[] = [];
+  for (let value = first; value <= max + step * 1e-9; value += step) {
+    ticks.push(Number(value.toPrecision(12)));
+  }
+  return ticks;
+}
+
 function ExtremumMarker({
   x,
   y,
@@ -246,7 +263,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const lowDiffPct = (min / current - 1) * 100;
   const range = max - min === 0 ? 1 : max - min;
 
-  const chartWidth = width - 42;
+  const chartWidth = width - 72;
   const chartHeight = height - 20;
   const paddingY = 60;
 
@@ -257,25 +274,21 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
 
   const candleWidth = Math.max(2, Math.min(7, chartWidth / 96 - 1));
   const timeTicks = buildThreeHourTicks(startTime, endTime);
+  const priceTicks = buildRoundPriceTicks(min, max).filter((value) => Math.abs(mapY(value) - mapY(current)) > 18);
+  const currentY = mapY(current);
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
       <svg width={width} height={height} style={{ overflow: "visible", marginTop: 5 }}>
-        {/* 가로 점선 가이드라인 */}
-        <line x1={0} y1={mapY(max)} x2={chartWidth} y2={mapY(max)} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
-        <line x1={0} y1={mapY(min)} x2={chartWidth} y2={mapY(min)} stroke="rgba(255,255,255,0.06)" strokeDasharray="3,3" />
-        <line x1={0} y1={mapY((max + min) / 2)} x2={chartWidth} y2={mapY((max + min) / 2)} stroke="rgba(255,255,255,0.04)" strokeDasharray="3,3" />
-
-        {/* Y축 가격 라벨 */}
-        <text x={chartWidth + 5} y={mapY(max) + 4} fill="#94a3b8" fontSize="9.5" fontWeight="600">
-          {formatPriceLabel(max, currency)}
-        </text>
-        <text x={chartWidth + 5} y={mapY((max + min) / 2) + 3} fill="#64748b" fontSize="9.5">
-          {formatPriceLabel((max + min) / 2, currency)}
-        </text>
-        <text x={chartWidth + 5} y={mapY(min) + 3} fill="#94a3b8" fontSize="9.5" fontWeight="600">
-          {formatPriceLabel(min, currency)}
-        </text>
+        {priceTicks.map((value) => (
+          <g key={value}>
+            <line x1={0} y1={mapY(value)} x2={chartWidth} y2={mapY(value)} stroke="#d8e0ea" strokeDasharray="3,3" />
+            <text x={chartWidth + 5} y={mapY(value) + 4} fill="#64748b" fontSize="9.5" fontWeight="600">
+              {formatPriceLabel(value, currency)}
+            </text>
+          </g>
+        ))}
+        <line x1={0} y1={currentY} x2={chartWidth} y2={currentY} stroke="#334155" strokeWidth="1.4" strokeDasharray="5,3" />
 
         {/* X축 시간 라벨 */}
         <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="rgba(255,255,255,0.15)" strokeWidth="1" />
@@ -338,6 +351,10 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
           chartWidth={chartWidth}
           chartHeight={chartHeight}
         />
+        <rect x={chartWidth + 3} y={currentY - 10} width={62} height={20} rx={4} fill="#334155" />
+        <text x={chartWidth + 34} y={currentY + 4} textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="800">
+          {formatPriceLabel(current, currency)}
+        </text>
       </svg>
     </div>
   );
@@ -548,6 +565,10 @@ function ComparisonChart({
 
   const candleWidth = Math.max(2, Math.min(7, chartWidth / 96 - 1));
   const timeTicks = buildThreeHourTicks(startTime, endTime);
+  const priceTicks = buildRoundPriceTicks(min, max).filter(
+    (value) => Math.abs(mapY(value) - mapY(currentPrice)) > 20,
+  );
+  const currentY = mapY(currentPrice);
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -567,7 +588,7 @@ function ComparisonChart({
             />
           );
         })}
-        {[min, (min + max) / 2, max].map((value) => (
+        {priceTicks.map((value) => (
           <g key={value}>
             <line x1={0} y1={mapY(value)} x2={chartWidth} y2={mapY(value)} stroke="#e2e8f0" strokeDasharray="3,3" />
             <text x={chartWidth + 6} y={mapY(value) + 4} fill="#475569" fontSize="11.5" fontWeight="700">
@@ -575,6 +596,7 @@ function ComparisonChart({
             </text>
           </g>
         ))}
+        <line x1={0} y1={currentY} x2={chartWidth} y2={currentY} stroke="#334155" strokeWidth="1.5" strokeDasharray="5,3" />
         {selectedSeries
           ? chartCandles.map(({ candle, series: item }) => {
             const open = candle.o * item.priceMultiplier;
@@ -619,6 +641,10 @@ function ComparisonChart({
           chartWidth={chartWidth}
           chartHeight={chartHeight}
         />
+        <rect x={chartWidth + 4} y={currentY - 11} width={66} height={22} rx={4} fill="#334155" />
+        <text x={chartWidth + 37} y={currentY + 4} textAnchor="middle" fill="#ffffff" fontSize="11.5" fontWeight="800">
+          {formatComparisonAxisPrice(currentPrice, currency)}
+        </text>
         <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="#cbd5e1" />
         {timeTicks.map((timestamp) => {
           const x = mapX(timestamp);
