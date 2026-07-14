@@ -163,6 +163,13 @@ function formatPriceLabel(value: number, currency: "KRW" | "USD" | "POINT" | "FX
   return `$${value.toFixed(2)}`;
 }
 
+function formatComparisonAxisPrice(value: number, currency: "KRW" | "USD"): string {
+  if (currency === "KRW") {
+    return `${Math.round(value / 10_000)}만원`;
+  }
+  return `$${Math.round(value)}`;
+}
+
 function ExtremumMarker({
   x,
   y,
@@ -490,6 +497,21 @@ function ComparisonChart({
   addCandles(priorSeries?.quote.candles ?? [], priorSeries);
   addCandles(selectedCandles, selectedSeries);
   const chartCandles = [...candleByTime.values()].sort((a, b) => a.candle.t - b.candle.t);
+  const sourceBands: Array<{ key: string; start: number; end: number; color: string }> = [];
+  for (const item of chartCandles) {
+    const lastBand = sourceBands.at(-1);
+    const candleEnd = Math.min(item.candle.t + candleIntervalMs, endTime);
+    if (lastBand?.key === item.series.key && item.candle.t <= lastBand.end) {
+      lastBand.end = candleEnd;
+    } else {
+      sourceBands.push({
+        key: item.series.key,
+        start: item.candle.t,
+        end: candleEnd,
+        color: item.series.color,
+      });
+    }
+  }
   const values = chartCandles.flatMap(({ candle, series: item }) => [
     candle.l * item.priceMultiplier,
     candle.h * item.priceMultiplier,
@@ -530,11 +552,26 @@ function ComparisonChart({
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
       <svg width={width} height={height} style={{ overflow: "visible", marginTop: 8 }}>
+        {sourceBands.map((band, index) => {
+          const x = mapX(Math.max(band.start, startTime));
+          const endX = mapX(Math.min(band.end, endTime));
+          return (
+            <rect
+              key={`${band.key}-${band.start}-${index}`}
+              x={x}
+              y={0}
+              width={Math.max(0, endX - x)}
+              height={chartHeight}
+              fill={band.color}
+              fillOpacity={0.08}
+            />
+          );
+        })}
         {[min, (min + max) / 2, max].map((value) => (
           <g key={value}>
             <line x1={0} y1={mapY(value)} x2={chartWidth} y2={mapY(value)} stroke="#e2e8f0" strokeDasharray="3,3" />
-            <text x={chartWidth + 6} y={mapY(value) + 4} fill="#64748b" fontSize="10">
-              {formatPriceLabel(value, currency)}
+            <text x={chartWidth + 6} y={mapY(value) + 4} fill="#475569" fontSize="11.5" fontWeight="700">
+              {formatComparisonAxisPrice(value, currency)}
             </text>
           </g>
         ))}
