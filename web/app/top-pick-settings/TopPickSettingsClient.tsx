@@ -29,6 +29,7 @@ type TopPickTicker = {
 
 type TopPickSettingsPayload = {
   tickers?: TopPickTicker[];
+  weight_mode?: "variable" | "fixed";
   settings?: TopPickSettings;
   backtest_settings?: TopPickBacktestSettings;
   approved_weights?: TopPickWeightPreview | null;
@@ -430,7 +431,7 @@ export function TopPickSettingsClient() {
   const [poolNameById, setPoolNameById] = useState<Record<string, string>>({});
   // 시장 레짐 선택지 — /market-trend 지수 목록(단일 소스).
   const [marketTrendIndices, setMarketTrendIndices] = useState<{ ticker: string; name: string }[]>([]);
-  // 비중 방식 토글(1차: UI 전용). variable=자동 계산, fixed=종목별 고정 비중(2차에서 계좌 저장·계산 연동).
+  // 계좌별 비중 방식. variable=자동 계산, fixed=종목별 고정 비중.
   const [weightMode, setWeightMode] = useState<"variable" | "fixed">("variable");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -517,6 +518,10 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정을 불러오지 못했습니다.");
       }
       setSelectedAccount(target);
+      if (data.weight_mode !== "variable" && data.weight_mode !== "fixed") {
+        throw new Error("저장된 비중 방식이 올바르지 않습니다.");
+      }
+      setWeightMode(data.weight_mode);
       setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
@@ -649,6 +654,7 @@ export function TopPickSettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tickers,
+          weight_mode: weightMode,
           settings,
           account_id: selectedAccount,
           backtest_settings: {
@@ -664,6 +670,10 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정 저장에 실패했습니다.");
       }
       setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
+      if (data.weight_mode !== "variable" && data.weight_mode !== "fixed") {
+        throw new Error("저장된 비중 방식이 올바르지 않습니다.");
+      }
+      setWeightMode(data.weight_mode);
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? approvedAt);
@@ -1817,9 +1827,13 @@ export function TopPickSettingsClient() {
 
         .topPickBacktestGrid {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(120px, 160px) minmax(180px, 1fr);
+          grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
           gap: 12px 16px;
           align-items: end;
+        }
+
+        .topPickBacktestGrid > .appLabeledField {
+          width: 100%;
         }
 
         .topPickSlotColumn {

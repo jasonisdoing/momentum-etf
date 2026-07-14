@@ -26,7 +26,7 @@ class TopPickSettingsPayload(BaseModel):
     settings: dict[str, Any] | None = None
     backtest_settings: dict[str, Any] | None = None
     account_id: str | None = None
-    weight_mode: str = "variable"
+    weight_mode: str
 
 
 @router.get("/accounts")
@@ -35,16 +35,18 @@ def get_accounts(_: None = Depends(require_internal_token)) -> dict[str, Any]:
 
 
 @router.get("/settings")
-def get_settings(
-    account_id: str = Query(...), _: None = Depends(require_internal_token)
-) -> dict[str, Any]:
+def get_settings(account_id: str = Query(...), _: None = Depends(require_internal_token)) -> dict[str, Any]:
     return load_top_pick_settings_for_edit(account_id)
 
 
 @router.put("/settings")
 def put_settings(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
     return save_top_pick_settings(
-        payload.tickers, payload.settings, payload.backtest_settings, account_id=payload.account_id
+        payload.tickers,
+        payload.weight_mode,
+        payload.settings,
+        payload.backtest_settings,
+        account_id=payload.account_id,
     )
 
 
