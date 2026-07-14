@@ -693,13 +693,17 @@ export function TopPickSettingsClient() {
       toast.error("탑픽 적용 계좌를 선택해주세요.");
       return;
     }
+    if (weightMode === "fixed" && !fixedWeightComplete) {
+      toast.error(`비중 고정은 종목별 고정 비중 합계가 100%여야 합니다. 현재 ${fixedWeightTotal.toFixed(1)}%`);
+      return;
+    }
     try {
       setRunning(true);
       setPreviewMode("weights");
       const resp = await fetch("/api/top-pick-settings/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: validTickers, settings }),
+        body: JSON.stringify({ tickers: validTickers, settings, weight_mode: weightMode }),
       });
       const data = (await resp.json()) as TopPickWeightPreview;
       if (!resp.ok || data.error) {
@@ -713,7 +717,7 @@ export function TopPickSettingsClient() {
     } finally {
       setRunning(false);
     }
-  }, [settings, toast, validTickers]);
+  }, [settings, toast, validTickers, weightMode, fixedWeightComplete, fixedWeightTotal]);
 
   useEffect(() => {
     if (
@@ -746,7 +750,7 @@ export function TopPickSettingsClient() {
       const resp = await fetch("/api/top-pick-settings/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers, settings, account_id: selectedAccount }),
+        body: JSON.stringify({ tickers, settings, account_id: selectedAccount, weight_mode: weightMode }),
       });
       const data = (await resp.json()) as TopPickWeightPreview & { approved_at?: string; tickers?: TopPickTicker[] };
       if (!resp.ok || data.error) {
