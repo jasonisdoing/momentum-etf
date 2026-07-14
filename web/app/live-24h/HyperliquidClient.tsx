@@ -462,11 +462,13 @@ function ComparisonChart({
   series,
   candleSeriesKey,
   priorSeriesKey,
+  overlayLineSeriesKey,
   currency,
 }: {
   series: ComparisonSeries[];
   candleSeriesKey: string;
   priorSeriesKey?: string;
+  overlayLineSeriesKey?: string;
   currency: "KRW" | "USD";
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -496,6 +498,9 @@ function ComparisonChart({
   const startTime = endTime - 24 * 60 * 60 * 1000;
   const selectedSeries = series.find((item) => item.key === candleSeriesKey);
   const priorSeries = priorSeriesKey ? series.find((item) => item.key === priorSeriesKey) : undefined;
+  const overlaySeries = overlayLineSeriesKey
+    ? series.find((item) => item.key === overlayLineSeriesKey)
+    : undefined;
   const selectedCandles = (selectedSeries?.quote.candles ?? []).filter(
     (candle) => candle.t >= startTime && candle.t <= endTime,
   );
@@ -514,6 +519,15 @@ function ComparisonChart({
   addCandles(priorSeries?.quote.candles ?? [], priorSeries);
   addCandles(selectedCandles, selectedSeries);
   const chartCandles = [...candleByTime.values()].sort((a, b) => a.candle.t - b.candle.t);
+  const overlayPointByTime = new Map<number, number>();
+  for (const candle of overlaySeries?.quote.candles ?? []) {
+    if (candle.t < startTime || candle.t > endTime) continue;
+    const timestamp = Math.floor(candle.t / candleIntervalMs) * candleIntervalMs;
+    overlayPointByTime.set(timestamp, candle.c * (overlaySeries?.priceMultiplier ?? 1));
+  }
+  const overlayPoints = [...overlayPointByTime.entries()]
+    .map(([timestamp, value]) => ({ timestamp, value }))
+    .sort((a, b) => a.timestamp - b.timestamp);
   const sourceBands: Array<{ key: string; start: number; end: number; color: string }> = [];
   for (const item of chartCandles) {
     const lastBand = sourceBands.at(-1);
@@ -529,11 +543,17 @@ function ComparisonChart({
       });
     }
   }
-  const values = chartCandles.flatMap(({ candle, series: item }) => [
-    candle.l * item.priceMultiplier,
-    candle.h * item.priceMultiplier,
-  ]);
-  const chartWidth = width - 72;
+  const overlayValues = overlayPoints.map((point) => point.value);
+  const values = [
+    ...chartCandles.flatMap(({ candle, series: item }) => [
+      candle.l * item.priceMultiplier,
+      candle.h * item.priceMultiplier,
+    ]),
+    ...overlayValues,
+  ];
+  const hasOverlayLine = overlayPoints.length >= 2;
+  const plotLeft = 0;
+  const chartWidth = width - (hasOverlayLine ? 94 : 72);
   const chartHeight = height - 24;
 
   if (values.length < 2) {
@@ -550,7 +570,8 @@ function ComparisonChart({
   const min = rawMin - padding;
   const max = rawMax + padding;
   const range = max - min || 1;
-  const mapX = (timestamp: number) => ((timestamp - startTime) / (endTime - startTime)) * chartWidth;
+  const mapX = (timestamp: number) =>
+    plotLeft + ((timestamp - startTime) / (endTime - startTime)) * (chartWidth - plotLeft);
   const mapY = (value: number) => chartHeight - ((value - min) / range) * chartHeight;
   const currentCandle = chartCandles.at(-1)!;
   const currentPrice = currentCandle.candle.c * currentCandle.series.priceMultiplier;
@@ -563,12 +584,24 @@ function ComparisonChart({
   const highPrice = highCandle.candle.h * highCandle.series.priceMultiplier;
   const lowPrice = lowCandle.candle.l * lowCandle.series.priceMultiplier;
 
-  const candleWidth = Math.max(2, Math.min(7, chartWidth / 96 - 1));
+  const candleWidth = Math.max(2, Math.min(7, (chartWidth - plotLeft) / 96 - 1));
   const timeTicks = buildThreeHourTicks(startTime, endTime);
   const priceTicks = buildRoundPriceTicks(min, max).filter(
     (value) => Math.abs(mapY(value) - mapY(currentPrice)) > 20,
   );
   const currentY = mapY(currentPrice);
+  const overlayCurrentPoint = hasOverlayLine ? overlayPoints.at(-1) : undefined;
+  const overlayCurrentY = overlayCurrentPoint ? mapY(overlayCurrentPoint.value) : null;
+  const overlaySegments: Array<typeof overlayPoints> = [];
+  for (const point of overlayPoints) {
+    const segment = overlaySegments.at(-1);
+    const previousPoint = segment?.at(-1);
+    if (!segment || !previousPoint || point.timestamp - previousPoint.timestamp > candleIntervalMs) {
+      overlaySegments.push([point]);
+    } else {
+      segment.push(point);
+    }
+  }
 
   return (
     <div ref={containerRef} style={{ width: "100%" }}>
@@ -589,14 +622,14 @@ function ComparisonChart({
           );
         })}
         {priceTicks.map((value) => (
-          <g key={value}>
-            <line x1={0} y1={mapY(value)} x2={chartWidth} y2={mapY(value)} stroke="#e2e8f0" strokeDasharray="3,3" />
+          <g key={`main-${value}`}>
+            <line x1={plotLeft} y1={mapY(value)} x2={chartWidth} y2={mapY(value)} stroke="#e2e8f0" strokeDasharray="3,3" />
             <text x={chartWidth + 6} y={mapY(value) + 4} fill="#475569" fontSize="11.5" fontWeight="700">
               {formatComparisonAxisPrice(value, currency)}
             </text>
           </g>
         ))}
-        <line x1={0} y1={currentY} x2={chartWidth} y2={currentY} stroke="#334155" strokeWidth="1.5" strokeDasharray="5,3" />
+        <line x1={plotLeft} y1={currentY} x2={chartWidth} y2={currentY} stroke="#334155" strokeWidth="1.5" strokeDasharray="5,3" />
         {selectedSeries
           ? chartCandles.map(({ candle, series: item }) => {
             const open = candle.o * item.priceMultiplier;
@@ -623,6 +656,21 @@ function ComparisonChart({
             );
           })
           : null}
+        {hasOverlayLine
+          ? overlaySegments
+              .filter((segment) => segment.length >= 2)
+              .map((segment, index) => (
+                <polyline
+                  key={`overlay-line-${index}`}
+                  points={segment.map((point) => `${mapX(point.timestamp)},${mapY(point.value)}`).join(" ")}
+                  fill="none"
+                  stroke={overlaySeries?.color}
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              ))
+          : null}
         <ExtremumMarker
           x={mapX(highCandle.candle.t)}
           y={mapY(highPrice)}
@@ -645,7 +693,31 @@ function ComparisonChart({
         <text x={chartWidth + 37} y={currentY + 4} textAnchor="middle" fill="#ffffff" fontSize="11.5" fontWeight="800">
           {formatComparisonAxisPrice(currentPrice, currency)}
         </text>
-        <line x1={0} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="#cbd5e1" />
+        {overlayCurrentPoint && overlayCurrentY !== null ? (
+          <>
+            <line
+              x1={mapX(overlayCurrentPoint.timestamp)}
+              y1={overlayCurrentY}
+              x2={chartWidth}
+              y2={overlayCurrentY}
+              stroke={overlaySeries?.color}
+              strokeWidth="1.5"
+              strokeDasharray="5,3"
+            />
+            <rect x={chartWidth + 4} y={overlayCurrentY - 11} width={88} height={22} rx={4} fill={overlaySeries?.color} />
+            <text
+              x={chartWidth + 48}
+              y={overlayCurrentY + 4}
+              textAnchor="middle"
+              fill="#ffffff"
+              fontSize="11.5"
+              fontWeight="800"
+            >
+              ADR {formatComparisonAxisPrice(overlayCurrentPoint.value, currency)}
+            </text>
+          </>
+        ) : null}
+        <line x1={plotLeft} y1={chartHeight} x2={chartWidth} y2={chartHeight} stroke="#cbd5e1" />
         {timeTicks.map((timestamp) => {
           const x = mapX(timestamp);
           return (
@@ -667,6 +739,7 @@ function ComparisonCard({
   representative,
   candleSeriesKey,
   priorSeriesKey,
+  overlayLineSeriesKey,
   series,
   differences,
   currency,
@@ -675,6 +748,7 @@ function ComparisonCard({
   representative: RepresentativeValue;
   candleSeriesKey: string;
   priorSeriesKey?: string;
+  overlayLineSeriesKey?: string;
   series: ComparisonSeries[];
   differences: PriceDifference[];
   currency: "KRW" | "USD";
@@ -783,6 +857,7 @@ function ComparisonCard({
           series={series}
           candleSeriesKey={candleSeriesKey}
           priorSeriesKey={priorSeriesKey}
+          overlayLineSeriesKey={overlayLineSeriesKey}
           currency={currency}
         />
       </div>
@@ -795,7 +870,6 @@ export function HyperliquidClient() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
-  const [macroSymbol, setMacroSymbol] = useState("NQ_FUT");
   const [usdKrw, setUsdKrw] = useState<number | null>(null);
 
   const load = useCallback(async (initial: boolean) => {
@@ -832,7 +906,9 @@ export function HyperliquidClient() {
     </div>
   );
   const quoteBySymbol = new Map(quotes.map((quote) => [quote.symbol, quote]));
-  const macroQuote = quoteBySymbol.get(macroSymbol);
+  const nasdaqQuote = quoteBySymbol.get("NQ_FUT");
+  const fxQuote = quoteBySymbol.get("USDKRW");
+  const vixQuote = quoteBySymbol.get("VIX");
   const hynixKorQuote = quoteBySymbol.get("SKHX_KR_TOSS");
   const hynixAdrQuote = quoteBySymbol.get("SKHY_TOSS");
   const hynixHyperQuote = quoteBySymbol.get("SKHX");
@@ -843,26 +919,6 @@ export function HyperliquidClient() {
   const hynixTossActive = canUseTossAsChartSource(hynixKorQuote);
   const micronTossActive = canUseTossAsChartSource(micronTossQuote);
   const samsungTossActive = canUseTossAsChartSource(samsungTossQuote);
-  const macroControls = (
-    <div className="appSegmentedToggle" role="tablist" aria-label="시장 지표 선택">
-      {[
-        ["NQ_FUT", "나스닥"],
-        ["USDKRW", "환율"],
-        ["VIX", "VIX"],
-      ].map(([symbol, label]) => (
-        <button
-          key={symbol}
-          type="button"
-          role="tab"
-          aria-selected={macroSymbol === symbol}
-          className={`appSegmentedToggleButton ${macroSymbol === symbol ? "is-active" : ""}`}
-          onClick={() => setMacroSymbol(symbol)}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
   const hynixSeries: ComparisonSeries[] =
     hynixKorQuote && hynixHyperQuote
       ? [
@@ -899,16 +955,23 @@ export function HyperliquidClient() {
           <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
         ) : (
           <div className="row g-2" style={{ width: "100%" }}>
-            <div className="col-12 col-lg-6">
-              {macroQuote ? <QuoteCard q={macroQuote} title="시장 지표" controls={macroControls} /> : null}
+            <div className="col-12 col-md-6 col-xxl-4">
+              {nasdaqQuote ? <QuoteCard q={nasdaqQuote} title="나스닥" /> : null}
             </div>
-            <div className="col-12 col-lg-6">
+            <div className="col-12 col-md-6 col-xxl-4">
+              {fxQuote ? <QuoteCard q={fxQuote} title="환율" /> : null}
+            </div>
+            <div className="col-12 col-md-6 col-xxl-4">
+              {vixQuote ? <QuoteCard q={vixQuote} title="VIX" /> : null}
+            </div>
+            <div className="col-12 col-md-6 col-xxl-4">
               {hynixSeries.length && hynixKorQuote && hynixHyperQuote ? (
                 <ComparisonCard
                   title="SK하이닉스"
                   representative={selectRepresentativeValue(hynixKorQuote, hynixHyperQuote, "국내시장", hynixTossActive)}
                   candleSeriesKey={hynixTossActive ? "000660" : "SKHX"}
                   priorSeriesKey={hynixTossActive ? "SKHX" : undefined}
+                  overlayLineSeriesKey="SKHY"
                   series={hynixSeries}
                   currency="KRW"
                   differences={[
@@ -920,10 +983,10 @@ export function HyperliquidClient() {
                 />
               ) : null}
             </div>
-            <div className="col-12 col-lg-6">
+            <div className="col-12 col-md-6 col-xxl-4">
               {micronSeries.length && micronTossQuote && micronHyperQuote ? (
                 <ComparisonCard
-                  title="마이크론 비교"
+                  title="마이크론"
                   representative={selectRepresentativeValue(micronTossQuote, micronHyperQuote, "미국시장", micronTossActive)}
                   candleSeriesKey={micronTossActive ? "MU_TOSS" : "MU_HL"}
                   priorSeriesKey={micronTossActive ? "MU_HL" : undefined}
@@ -935,10 +998,10 @@ export function HyperliquidClient() {
                 />
               ) : null}
             </div>
-            <div className="col-12 col-lg-6">
+            <div className="col-12 col-md-6 col-xxl-4">
               {samsungSeries.length && samsungTossQuote && samsungHyperQuote ? (
                 <ComparisonCard
-                  title="삼성전자 비교"
+                  title="삼성전자"
                   representative={selectRepresentativeValue(samsungTossQuote, samsungHyperQuote, "국내시장", samsungTossActive)}
                   candleSeriesKey={samsungTossActive ? "005930" : "SMSN"}
                   priorSeriesKey={samsungTossActive ? "SMSN" : undefined}
