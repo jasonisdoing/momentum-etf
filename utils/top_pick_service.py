@@ -139,6 +139,16 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
         bucket = stock_meta.get("bucket") or item.get("bucket")
         if bucket is not None:
             row["bucket"] = int(bucket)
+        # 비중 고정 모드의 종목별 고정 비중(%). 미설정은 저장하지 않는다(임의 0 보정 금지).
+        raw_weight = item.get("fixed_weight_pct")
+        if raw_weight is not None and str(raw_weight).strip() != "":
+            try:
+                weight_val = round(float(raw_weight), 2)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"고정 비중은 숫자여야 합니다: {raw_weight}") from exc
+            if not (0.0 <= weight_val <= 100.0):
+                raise ValueError(f"고정 비중은 0 ~ 100 범위여야 합니다: {weight_val}")
+            row["fixed_weight_pct"] = weight_val
         clean.append(row)
     return clean
 
@@ -263,7 +273,7 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     return cleaned
 
 
-def _clean_backtest_settings(values: Any, *, base: Any = None) -> dict[str, Any]:
+def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark: bool = True) -> dict[str, Any]:
     base_clean = base if isinstance(base, dict) else {}
     value_clean = values if isinstance(values, dict) else {}
     source = {**DEFAULT_BACKTEST_SETTINGS, **base_clean, **value_clean}
@@ -271,14 +281,18 @@ def _clean_backtest_settings(values: Any, *, base: Any = None) -> dict[str, Any]
     benchmark_source = source.get("benchmark") if isinstance(source.get("benchmark"), dict) else {}
     ticker = str(benchmark_source.get("ticker") or "").strip().upper()
     if not ticker:
-        raise ValueError("시장 레짐 지수가 필요합니다. 설정 화면에서 지수를 선택해주세요.")
-    from utils.market_trend_service import INDICES
+        # 비중 고정 백테스트는 시장 레짐(추세)을 쓰지 않으므로 지수 없이도 허용한다.
+        if require_benchmark:
+            raise ValueError("시장 레짐 지수가 필요합니다. 설정 화면에서 지수를 선택해주세요.")
+        name = ""
+    else:
+        from utils.market_trend_service import INDICES
 
-    index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == ticker), None)
-    if index_meta is None:
-        allowed = ", ".join(idx["yf_ticker"] for idx in INDICES)
-        raise ValueError(f"시장 레짐은 시장추세 지수({allowed}) 중 하나여야 합니다: {ticker}")
-    name = index_meta["name"]
+        index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == ticker), None)
+        if index_meta is None:
+            allowed = ", ".join(idx["yf_ticker"] for idx in INDICES)
+            raise ValueError(f"시장 레짐은 시장추세 지수({allowed}) 중 하나여야 합니다: {ticker}")
+        name = index_meta["name"]
 
     try:
         months = int(source.get("months"))
@@ -1490,18 +1504,44 @@ def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str
     return rates
 
 
+def _resolve_fixed_weights(clean_tickers: list[dict[str, Any]]) -> dict[str, float]:
+    """비중 고정용 종목별 목표 비중(합=1.0)을 반환한다.
+
+    모든 종목에 fixed_weight_pct 가 있어야 하고 합이 100%여야 한다(임의 보정 금지).
+    """
+    fixed: dict[str, float] = {}
+    total = 0.0
+    missing: list[str] = []
+    for item in clean_tickers:
+        weight = item.get("fixed_weight_pct")
+        if weight is None:
+            missing.append(str(item["ticker"]))
+            continue
+        fixed[str(item["ticker"])] = float(weight) / 100.0
+        total += float(weight)
+    if missing:
+        raise ValueError(f"비중 고정: 고정 비중이 없는 종목이 있습니다: {', '.join(missing)}")
+    if abs(total - 100.0) > 0.05:
+        raise ValueError(f"비중 고정: 고정 비중 합계가 100%여야 합니다(현재 {total:.1f}%).")
+    return fixed
+
+
 def run_top_pick_backtest(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
+    weight_mode: str = "variable",
 ) -> dict[str, Any]:
+    weight_mode = str(weight_mode or "variable").strip().lower()
+    if weight_mode not in {"variable", "fixed"}:
+        raise ValueError(f"알 수 없는 비중 방식입니다: {weight_mode}")
     clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 3:
         raise ValueError("탑픽 백테스트에는 확인된 종목이 3개 이상 필요합니다.")
 
     clean_settings = _clean_settings(settings)
-    clean_backtest = _clean_backtest_settings(backtest_settings)
-    # 시장 레짐(추세/현금제어 판별)용 종목 — 탑픽 설정의 필드.
+    clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=(weight_mode == "variable"))
+    # 시장 레짐(추세/현금제어 판별)용 종목 — 탑픽 설정의 필드. 고정 모드에서는 미사용.
     regime_benchmark = clean_backtest["benchmark"]
     # 결과 비교용 벤치마크 — 계좌 설정(/account-settings)의 벤치마크를 쓴다(계좌별로 다름).
     account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
@@ -1533,13 +1573,6 @@ def run_top_pick_backtest(
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
     start_target = (today - pd.DateOffset(months=months)).normalize()
     candidate_close = close_frame[ticker_order].sort_index()
-    composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
-    trend_frame = trend_by_order[1]
-    sortino_frame = compute_secondary_metric_points(
-        candidate_close,
-        "SORTINO",
-        window_months=int(clean_settings["SORTINO_MONTHS"]),
-    )
 
     simulation_columns = list(dict.fromkeys(ticker_order + [benchmark["ticker"]]))
     simulation_frame = close_frame[simulation_columns].sort_index()
@@ -1548,41 +1581,56 @@ def run_top_pick_backtest(
     if simulation_frame.empty or len(simulation_frame) < 2:
         raise ValueError("탑픽 백테스트 기간의 가격 데이터가 부족합니다.")
 
-    # 시장 레짐 종목의 과거 레짐을 미리 일별 시계열로 구함 (추세/현금제어 판별)
-    try:
-        bench_df = _load_regime_benchmark_ohlc(regime_benchmark["ticker"])
-        if bench_df is not None and not bench_df.empty:
-            benchmark_regimes = _calculate_benchmark_regimes(bench_df, regime_benchmark["ticker"])
-        else:
-            benchmark_regimes = pd.Series()
-    except Exception:
-        benchmark_regimes = pd.Series()
-
     requested_rebalance_dates = _select_rebalance_dates(simulation_frame.index, rebalance)
     weights_by_date: dict[pd.Timestamp, dict[str, float]] = {}
-    for date in requested_rebalance_dates:
-        # 그날의 벤치마크 시장 레짐에 따라 동적으로 현금 비중 제어
-        adjusted_settings = clean_settings.copy()
-        forced_cash_weight = None
-        regime = benchmark_regimes.get(date)
-        if regime == "accel_up":
-            # 시장 상승 시 현금 최대 비중을 0%로 강제 (100% 주식 가동)
-            adjusted_settings["CASH_MAX_WEIGHT"] = 0
-        elif regime == "accel_down":
-            # 시장 하락 시 설정된 현금 최대 비중을 우선 확보한다.
-            forced_cash_weight = float(clean_settings["CASH_MAX_WEIGHT"]) / 100.0
 
-        weights = _calculate_top_pick_weights_on_date(
-            date,
-            clean_tickers,
-            adjusted_settings,
-            composite_frame,
-            trend_frame,
-            sortino_frame,
-            forced_cash_weight=forced_cash_weight,
+    if weight_mode == "fixed":
+        # 비중 고정: 입력된 종목별 고정 비중을 리밸런싱 주기마다 그대로 적용(추세·시장 레짐 미사용).
+        fixed_weights = _resolve_fixed_backtest_weights(clean_tickers)
+        for date in requested_rebalance_dates:
+            weights_by_date[date] = dict(fixed_weights)
+    else:
+        composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
+        trend_frame = trend_by_order[1]
+        sortino_frame = compute_secondary_metric_points(
+            candidate_close,
+            "SORTINO",
+            window_months=int(clean_settings["SORTINO_MONTHS"]),
         )
-        if weights is not None:
-            weights_by_date[date] = weights
+
+        # 시장 레짐 종목의 과거 레짐을 미리 일별 시계열로 구함 (추세/현금제어 판별)
+        try:
+            bench_df = _load_regime_benchmark_ohlc(regime_benchmark["ticker"])
+            if bench_df is not None and not bench_df.empty:
+                benchmark_regimes = _calculate_benchmark_regimes(bench_df, regime_benchmark["ticker"])
+            else:
+                benchmark_regimes = pd.Series()
+        except Exception:
+            benchmark_regimes = pd.Series()
+
+        for date in requested_rebalance_dates:
+            # 그날의 벤치마크 시장 레짐에 따라 동적으로 현금 비중 제어
+            adjusted_settings = clean_settings.copy()
+            forced_cash_weight = None
+            regime = benchmark_regimes.get(date)
+            if regime == "accel_up":
+                # 시장 상승 시 현금 최대 비중을 0%로 강제 (100% 주식 가동)
+                adjusted_settings["CASH_MAX_WEIGHT"] = 0
+            elif regime == "accel_down":
+                # 시장 하락 시 설정된 현금 최대 비중을 우선 확보한다.
+                forced_cash_weight = float(clean_settings["CASH_MAX_WEIGHT"]) / 100.0
+
+            weights = _calculate_top_pick_weights_on_date(
+                date,
+                clean_tickers,
+                adjusted_settings,
+                composite_frame,
+                trend_frame,
+                sortino_frame,
+                forced_cash_weight=forced_cash_weight,
+            )
+            if weights is not None:
+                weights_by_date[date] = weights
 
     if not weights_by_date:
         raise ValueError("백테스트 기간에 계산 가능한 탑픽 비중이 없습니다.")
