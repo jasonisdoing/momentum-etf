@@ -59,7 +59,9 @@ type TopPickPayload = {
     MA_MONTHS: number;
     MIN_WEIGHT: number;
     MAX_WEIGHT: number;
-    CASH_MAX_WEIGHT: number;
+    CASH_WEIGHT_UP: number;
+    CASH_WEIGHT_NEUTRAL: number;
+    CASH_WEIGHT_DOWN: number;
     ACCOUNT_ID: string;
     START_AMOUNT_MANWON?: number | null;
     START_DATE?: string | null;
@@ -437,7 +439,7 @@ export function TopPickClient() {
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>목표 비중</h2>
                 <div style={{ color: "var(--text-muted)", fontSize: "0.86rem" }}>
                   기준일 {payload?.as_of_date ?? "-"} · {settings ? `${settings.MA_TYPE} ${settings.MA_MONTHS}개월 (추세 100%)` : "설정 없음"}
-                  {settings ? ` · 적용계좌 ${tradeSummary.account_name ?? settings.ACCOUNT_ID} · 최소 ${settings.MIN_WEIGHT}% · 최대 ${settings.MAX_WEIGHT}% · 현금 최대 ${settings.CASH_MAX_WEIGHT}%` : ""}
+                  {settings ? ` · 적용계좌 ${tradeSummary.account_name ?? settings.ACCOUNT_ID} · 최소 ${settings.MIN_WEIGHT}% · 최대 ${settings.MAX_WEIGHT}% · 현금 상승/중립/하락 ${settings.CASH_WEIGHT_UP}%/${settings.CASH_WEIGHT_NEUTRAL}%/${settings.CASH_WEIGHT_DOWN}%` : ""}
                 </div>
               </div>
               <div className="appMainHeaderRight" style={{ gap: 8, alignItems: "center" }}>
