@@ -76,7 +76,9 @@ type TopPickSettings = {
   SORTINO_MONTHS: number;
   MIN_WEIGHT: number;
   MAX_WEIGHT: number;
-  CASH_MAX_WEIGHT: number;
+  CASH_WEIGHT_UP: number;
+  CASH_WEIGHT_NEUTRAL: number;
+  CASH_WEIGHT_DOWN: number;
   MAX_TICKERS: number;
   ACCOUNT_ID: string;
   START_AMOUNT_MANWON: number | null;
@@ -818,7 +820,10 @@ export function TopPickSettingsClient() {
       toast.error("탑픽 백테스트에는 확인된 편입 ETF가 3개 이상 필요합니다.");
       return;
     }
-    if (weightMode === "variable" && (!backtestBenchmarkTicker.trim() || !backtestBenchmarkName.trim())) {
+    if (
+      !backtestBenchmarkTicker.trim() ||
+      !backtestBenchmarkName.trim()
+    ) {
       toast.error("시장 레짐 지수를 선택해주세요.");
       return;
     }
@@ -1257,7 +1262,8 @@ export function TopPickSettingsClient() {
                   disabled={
                     backtestRunning ||
                     validTickers.length < 3 ||
-                    (weightMode === "variable" ? !backtestBenchmarkName.trim() : !fixedWeightComplete)
+                    !backtestBenchmarkName.trim() ||
+                    (weightMode === "fixed" && !fixedWeightComplete)
                   }
                   onClick={() => void runBacktest()}
                 >
@@ -1298,20 +1304,20 @@ export function TopPickSettingsClient() {
                           className={`btn ${weightMode === "variable" ? "btn-primary" : "btn-outline-primary"}`}
                           onClick={() => setWeightMode("variable")}
                         >
-                          비중 변동
+                          변동
                         </button>
                         <button
                           type="button"
                           className={`btn ${weightMode === "fixed" ? "btn-primary" : "btn-outline-primary"}`}
                           onClick={() => setWeightMode("fixed")}
                         >
-                          비중 고정
+                          고정
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* 비중 변동 전용 — 추세 타입 ~ 시장 레짐(자동 계산 파라미터). 고정 모드에서도 값은 유지된다. */}
+                  {/* 변동 전용 점수·종목 배분 설정. 고정 모드에서도 저장값은 유지한다. */}
                   {weightMode === "variable" ? (
                     <>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
@@ -1398,46 +1404,55 @@ export function TopPickSettingsClient() {
                             onChange={(event) => updateSetting("MAX_WEIGHT", event.target.value)}
                           />
                         </label>
-                        <label className="appLabeledField" style={{ minWidth: 140 }}>
-                          <span className="appLabeledFieldLabel">현금 최대 비중(%)</span>
-                          <select
-                            className="form-select form-select-sm"
-                            value={settings?.CASH_MAX_WEIGHT ?? ""}
-                            onChange={(event) => updateSetting("CASH_MAX_WEIGHT", event.target.value)}
-                          >
-                            {[0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((ratio) => (
-                              <option key={ratio} value={ratio}>
-                                {ratio}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="appLabeledField" style={{ minWidth: 150 }}>
-                          <span className="appLabeledFieldLabel">시장 레짐</span>
-                          <select
-                            className="form-select form-select-sm"
-                            value={backtestBenchmarkTicker}
-                            onChange={(event) => {
-                              const picked = marketTrendIndices.find((idx) => idx.ticker === event.target.value);
-                              setBacktestBenchmarkTicker(event.target.value);
-                              setBacktestBenchmarkName(picked?.name ?? event.target.value);
-                              setBacktestResult(null);
-                            }}
-                          >
-                            {!backtestBenchmarkTicker ? <option value="">지수 선택…</option> : null}
-                            {marketTrendIndices.map((idx) => (
-                              <option key={idx.ticker} value={idx.ticker}>
-                                {idx.name}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-                      <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 4, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
-                        💡 <strong>시장 연동형 현금 제어:</strong> <strong>시장 레짐</strong> 종목이 상승 추세(accel_up)일 때는 수익 극대화를 위해 현금 한도를 자동으로 <strong>0%</strong>로 낮추어 상승 종목에 풀 투자합니다.
                       </div>
                     </>
                   ) : null}
+
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                    {([
+                      ["상승 현금 비중(%)", "CASH_WEIGHT_UP"],
+                      ["중립 현금 비중(%)", "CASH_WEIGHT_NEUTRAL"],
+                      ["하락 현금 비중(%)", "CASH_WEIGHT_DOWN"],
+                    ] as const).map(([label, key]) => (
+                      <label key={key} className="appLabeledField" style={{ minWidth: 145 }}>
+                        <span className="appLabeledFieldLabel">{label}</span>
+                        <select
+                          className="form-select form-select-sm"
+                          value={settings?.[key] ?? ""}
+                          onChange={(event) => updateSetting(key, event.target.value)}
+                        >
+                          {Array.from({ length: 21 }, (_, index) => index * 5).map((ratio) => (
+                            <option key={ratio} value={ratio}>
+                              {ratio}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ))}
+                    <label className="appLabeledField" style={{ minWidth: 150 }}>
+                      <span className="appLabeledFieldLabel">시장 레짐</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={backtestBenchmarkTicker}
+                        onChange={(event) => {
+                          const picked = marketTrendIndices.find((idx) => idx.ticker === event.target.value);
+                          setBacktestBenchmarkTicker(event.target.value);
+                          setBacktestBenchmarkName(picked?.name ?? event.target.value);
+                          setBacktestResult(null);
+                        }}
+                      >
+                        {!backtestBenchmarkTicker ? <option value="">지수 선택…</option> : null}
+                        {marketTrendIndices.map((idx) => (
+                          <option key={idx.ticker} value={idx.ticker}>
+                            {idx.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 4, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
+                    시장 레짐에 설정된 현금 비중을 적용하고, 남은 비중만 ETF에 배분합니다.
+                  </div>
 
                   {/* 시작금액 · 시작일자 — 누적수익률 기준, 항상 표시 */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
