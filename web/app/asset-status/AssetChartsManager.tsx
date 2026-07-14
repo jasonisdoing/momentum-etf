@@ -296,7 +296,7 @@ const RANGE_OPTIONS: Array<{ key: RangeKey; label: string; weeks: number | null 
   { key: "all", label: "전체", weeks: null },
 ];
 
-const BUCKET_KEYS = ["bucket_1", "bucket_2", "bucket_3", "bucket_4", "bucket_5"] as const;
+const BUCKET_STACK_KEYS = ["bucket_5", "bucket_4", "bucket_3", "bucket_2", "bucket_1"] as const;
 
 function toNumber(value: unknown): number {
   const numeric = Number(value ?? 0);
@@ -675,17 +675,20 @@ export function AssetChartsManager({
                     <XAxis dataKey="week_date" tickFormatter={formatMonthAxisLabel} minTickGap={18} tick={{ fontSize: 12 }} />
                     <YAxis hide={!showAmounts} tickFormatter={formatCompactMoney} width={showAmounts ? 56 : 0} tick={{ fontSize: 12 }} />
                     <Tooltip content={<ChartTooltip />} />
-                    <Legend />
-                    {BUCKET_KEYS.map((key, index) => (
-                      <Bar
-                        key={key}
-                        dataKey={key}
-                        name={BUCKET_NAME_MAP[index + 1]}
-                        stackId="assets"
-                        fill={BUCKET_COLORS[index]}
-                        radius={index === BUCKET_KEYS.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
-                      />
-                    ))}
+                    <Legend itemSorter="value" />
+                    {BUCKET_STACK_KEYS.map((key, index) => {
+                      const bucketId = Number(key.slice(-1));
+                      return (
+                        <Bar
+                          key={key}
+                          dataKey={key}
+                          name={BUCKET_NAME_MAP[bucketId]}
+                          stackId="assets"
+                          fill={BUCKET_COLORS[bucketId - 1]}
+                          radius={index === BUCKET_STACK_KEYS.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+                        />
+                      );
+                    })}
                   </BarChart>
                 </ResponsiveContainer>
               )}
