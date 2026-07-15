@@ -64,7 +64,7 @@ const EXCLUSION_KEYWORD_GROUPS: Record<string, string[]> = {
   선물: ["선물"],
 };
 
-const DEFAULT_EXCLUDED_GROUPS = ["채권(모든종류)", "혼합", "리츠"];
+const DEFAULT_EXCLUDED_GROUPS = ["채권(모든종류)", "혼합", "리츠", "인버스", "2X", "레버리지"];
 
 const marketGridTheme = createAppGridTheme();
 
