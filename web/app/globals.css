@@ -2191,6 +2191,43 @@ a {
   text-align: center;
 }
 
+.compareLoading {
+  display: grid;
+  gap: 0.55rem;
+  text-align: left;
+}
+
+.compareLoadingText {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.compareLoadingText strong {
+  color: #0f172a;
+  font-size: 1rem;
+}
+
+.compareLoadingBar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.compareLoadingBar div {
+  height: 100%;
+  border-radius: inherit;
+  background: #0b7bdc;
+  transition: width 0.25s ease;
+}
+
+.compareLoading small {
+  color: #64748b;
+  font-weight: 600;
+}
+
 .compareHeroGrid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);

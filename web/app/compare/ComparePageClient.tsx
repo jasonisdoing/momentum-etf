@@ -13,6 +13,10 @@ import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
 type CompareTab = "performance" | "basic" | "holdings";
 type PerformanceRange = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y";
+type CompareLoadingProgress = {
+  percent: number;
+  message: string;
+};
 
 type TickerItem = {
   ticker: string;
@@ -840,6 +844,7 @@ export function ComparePageClient() {
   const [performanceRange, setPerformanceRange] = useState<string>("ytd");
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingProgress, setLoadingProgress] = useState<CompareLoadingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groups, setGroups] = useState<CompareGroupMap>({});
   const [activeGroupName, setActiveGroupName] = useState<string | null>(null);
@@ -865,16 +870,45 @@ export function ComparePageClient() {
       return;
     }
     setLoading(true);
+    setLoadingProgress({ percent: 10, message: `${items.length}개 ETF 비교 요청 준비 중` });
     setError(null);
+    const progressTimers: number[] = [];
+    let progressInterval: number | null = null;
     try {
+      progressTimers.push(
+        window.setTimeout(() => {
+          setLoadingProgress({ percent: 35, message: "구성종목 합집합과 가격 스냅샷 조회 중" });
+        }, 400),
+      );
+      progressTimers.push(
+        window.setTimeout(() => {
+          setLoadingProgress((previous) => ({
+            percent: Math.max(previous?.percent ?? 0, 55),
+            message: "ETF별 비교 데이터 계산 중",
+          }));
+          progressInterval = window.setInterval(() => {
+            setLoadingProgress((previous) => {
+              if (!previous) return previous;
+              return {
+                ...previous,
+                percent: Math.min(90, previous.percent + 5),
+              };
+            });
+          }, 1200);
+        }, 1400),
+      );
       // 한 번의 일괄 호출 — 서버가 구성종목 합집합을 1회 조회해 공유하므로
       // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
       const details = await loadTickerDetailsBatch(items);
+      setLoadingProgress({ percent: 100, message: "비교 데이터 반영 중" });
       setProducts(items.map((item, index) => ({ item, detail: details[index] })));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
     } finally {
+      progressTimers.forEach((timer) => window.clearTimeout(timer));
+      if (progressInterval !== null) window.clearInterval(progressInterval);
       setLoading(false);
+      setLoadingProgress(null);
     }
   }, [itemByKey]);
 
@@ -1326,7 +1360,18 @@ export function ComparePageClient() {
           </div>
         </section>
 
-        {loading ? <div className="compareLoading">비교 데이터를 불러오는 중...</div> : null}
+        {loading ? (
+          <div className="compareLoading">
+            <div className="compareLoadingText">
+              <span>비교 데이터를 불러오는 중...</span>
+              <strong>{loadingProgress?.percent ?? 0}%</strong>
+            </div>
+            <div className="compareLoadingBar" aria-hidden="true">
+              <div style={{ width: `${loadingProgress?.percent ?? 0}%` }} />
+            </div>
+            <small>{loadingProgress?.message ?? "비교 데이터 요청 중"}</small>
+          </div>
+        ) : null}
 
         <section className="compareMatrix">
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
