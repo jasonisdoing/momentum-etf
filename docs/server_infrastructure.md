@@ -105,10 +105,10 @@ APScheduler 에 등록한다.
 ### 로컬 전용 잡 (워커 친화도)
 
 큐는 서버·로컬 워커가 공유하지만, **무거운 계산 + 결과가 로컬 파일에 남는** 잡은 로컬 워커만
-픽하게 한다 (`utils/batch_queue.py` 의 `LOCAL_ONLY_JOBS = {"leverage_tune", "momentum_backtest"}`).
+픽하게 한다 (`utils/batch_queue.py` 의 `LOCAL_ONLY_JOBS = {"leverage_tune"}`).
 
 - `enqueue` 가 잡 doc 에 `local_only` 플래그를 자동 기록(잡 이름 기준) → 모든 트리거 경로
-  (레버리지·모멘텀 화면 버튼 / `/batch` 클릭 / 스케줄러)에 일관 적용.
+  (레버리지 화면 버튼 / `/batch` 클릭 / 스케줄러)에 일관 적용.
 - `claim_next_pending` 은 워커가 `APP_TYPE != "Local"` 이면 `local_only: {$ne: True}` 로 필터 →
   **서버 워커는 튜닝/백테스트를 claim 하지 않는다.** 로컬 워커는 전부 claim.
 - 이유: ① 결과 파일(`leverage/zresults/`, `backtest/results/`)이 실행한 머신 FS 에만 남아

@@ -49,8 +49,7 @@ type SystemJobKey =
   | "asset_summary"
   | "us_market_stocks"
   | "leverage_switch"
-  | "leverage_tune"
-  | "momentum_backtest";
+  | "leverage_tune";
 
 type BatchQueueItem = {
   id: string;

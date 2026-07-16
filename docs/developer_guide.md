@@ -55,7 +55,6 @@ python infra/server_scheduler.py
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
-*   `backtest/`: 백테스트 전용 파라미터 스윕 실행기·결과 로그 엔진 (탐색공간은 DB `backtest_config`, `/momentum-backtest` 화면에서 실행)
 *   `core/strategy/`: 지표/추세/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 USD/KRW 만 토스 실시간(REAL_TIME, 5초 TTL) 우선 + 실패 시 야후(KRW=X) 백업이며, AUD 등 나머지 통화는 야후(1시간 TTL).
@@ -234,22 +233,10 @@ python infra/server_scheduler.py
 
 #### 선정 기준 = 추세(%)
 
-순위와 백테스트 선정 기준은 추세(%)만 사용한다. 보조지표(Sortino/Sharpe)와 보유 여부는 종목 선정에 사용하지 않는다.
+순위 선정 기준은 추세(%)만 사용한다. 보조지표(Sortino/Sharpe)와 보유 여부는 종목 선정에 사용하지 않는다.
 
 * **추세(%)**: `(종가 ÷ MA − 1) × 100`.
-* 라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일한 추세(%)를 쓴다.
-
-### 백테스트 탐색 공간 (`backtest_config`)
-
-종목풀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`MA_MONTHS` **리스트**)은
-DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
-
-* 최적 조합은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.
-* 백테스트 결과/리포트 표의 선정 기준은 추세(%) 단독이다.
-
-* `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(백테스트 탐색 차원에서 제외).
-* 라이브 단일 적용값(`pool_settings`)과 백테스트 탐색공간(`backtest_config`)은 **별개**다(같은 파라미터명, 다른 역할: 단일값 vs 리스트).
-* 편집: `/pools-settings` 하단 "백테스트 탐색 공간" 카드. 실행: `/momentum-backtest` 화면 또는 `/batch` 의 `momentum_backtest` 잡(둘 다 같은 큐, **로컬 전용**). 결과는 풀별 `backtest/results/<prefix>-backtest_<date>.log`.
+* 라이브(`utils/rankings.py`)가 추세(%)를 계산한다.
 
 ## 4. 테스트 및 검증
 

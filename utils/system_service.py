@@ -24,7 +24,6 @@ SystemAction = Literal[
     "live_24h_slack",
     "leverage_switch",
     "leverage_tune",
-    "momentum_backtest",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -123,15 +122,6 @@ SCHEDULE_ROWS = [
         "command": "python scripts/leverage_tune_switch.py",
         "schedule": None,  # 스케줄 없음(수동 전용) → 다음 실행 표시 "-"
     },
-    {
-        "key": "momentum_backtest",
-        "job": "모멘텀 백테스트",
-        "target": "모든 종목풀 (탐색공간 전수)",
-        "run_location": "LOCAL",
-        "cadence": "수동 실행",
-        "command": "python scripts/momentum_backtest.py",
-        "schedule": None,  # 스케줄 없음(수동 전용)
-    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -145,7 +135,6 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_switch": "scripts/leverage_recommend_switch.py",
     "leverage_tune": "scripts/leverage_tune_switch.py",
-    "momentum_backtest": "scripts/momentum_backtest.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
@@ -937,9 +926,9 @@ def load_system_data() -> dict[str, object]:
             "큐 워커는 서버와 로컬(`python run_local_dev.py` 실행 중) 양쪽에서 함께 동작하며 "
             "MongoDB `find_one_and_update` 로 한 곳에서만 atomic 하게 claim 합니다. "
             "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 순서로 직렬 처리됩니다. "
-            "단, 튜닝·백테스트(`leverage_tune`/`momentum_backtest`)는 무거운 계산이고 결과가 "
+            "단, 튜닝(`leverage_tune`)은 무거운 계산이고 결과가 "
             "로컬 파일시스템에 남아 로컬 UI 에서만 보이므로, 로컬 워커(APP_TYPE=Local)만 큐에서 "
-            "가져갑니다(서버 워커는 픽하지 않음). 따라서 로컬 워커가 꺼져 있으면 이 두 작업은 "
+            "가져갑니다(서버 워커는 픽하지 않음). 따라서 로컬 워커가 꺼져 있으면 이 작업은 "
             "실행되지 않고 대기(pending) 상태로 남습니다."
         ),
         "running_jobs": get_running_jobs(),
