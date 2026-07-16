@@ -194,7 +194,7 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
     # 보유일수·누적기준가 모두 확정된 보유시작일에서 1회 조회로 구해 UI(leverage_service)와 동일 소스로 맞춘다.
     display_holding_days, holding_start_close = holding_period_info(holding_target, holding_start_date)
 
-    # 공격 후보군 (진입 시점마다 ALMA 6개월 이격도 1위를 선택, normalize 가 1개 이상 보장)
+    # 공격 후보군 (진입 시점마다 SMA 20일 이격도 1위를 선택, normalize 가 1개 이상 보장)
     offense_candidates = settings["offense_candidates"]
     offense_tickers = [str(c["ticker"]) for c in offense_candidates]
     offense_set = set(offense_tickers)
@@ -302,7 +302,7 @@ def _recommend_switch(profile: str, settings: dict, market: str, status: str, ma
             else:
                 # 방어 자산 보유 중 → 매수 기준까지 남은 회복폭 (실시간). 진입 후보 1위임을 표기.
                 gap = offense_gaps.get(sym)
-                gap_text = f" (진입 후보 1위, ALMA 이격 {gap * 100:+.2f}%)" if gap is not None else " (진입 후보 1위)"
+                gap_text = f" (진입 후보 1위, SMA 20일 이격 {gap * 100:+.2f}%)" if gap is not None else " (진입 후보 1위)"
                 if needed_recovery > 0:
                     note = f"{signal_name}가 {needed_recovery:+.2f}% 더 회복 시 매수{gap_text}"
                 else:

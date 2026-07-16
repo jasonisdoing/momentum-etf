@@ -273,7 +273,7 @@ def _combine_rule_trends_array(
 
 # 워커 프로세스에서 공유하는 전역 변수.
 # _init_worker() 로 한 번만 초기화되며, 각 워커 프로세스 내에서만 유효하다.
-_W_TREND_VALUES: dict[tuple[str, int], np.ndarray] = {}
+_W_TREND_VALUES: dict[int, np.ndarray] = {}
 _W_ELIG_VALUES: np.ndarray = np.empty((0, 0), dtype=bool)
 _W_DAYS: list[pd.Timestamp] = []
 _W_CASH_LOCAL: float = 0.0
@@ -282,11 +282,11 @@ _W_SELL_SLIPPAGE: float = 0.0
 _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
-_W_BM_TREND_VALUES: dict[tuple[str, int], np.ndarray] = {}
+_W_BM_TREND_VALUES: dict[int, np.ndarray] = {}
 
 
 def _init_worker(
-    trend_specs_values: dict[tuple[str, int], np.ndarray],
+    trend_specs_values: dict[int, np.ndarray],
     eligibility_values: np.ndarray,
     open_values: np.ndarray,
     close_values: np.ndarray,
@@ -295,7 +295,7 @@ def _init_worker(
     fx_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
-    bm_trend_specs_values: dict[tuple[str, int], np.ndarray] = None,
+    bm_trend_specs_values: dict[int, np.ndarray] = None,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
     global _W_TREND_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
@@ -313,15 +313,15 @@ def _init_worker(
     _W_BM_TREND_VALUES = bm_trend_specs_values or {}
 
 
-def _run_single_combo(args: tuple[int, str, int]) -> dict[str, Any]:
+def _run_single_combo(args: tuple[int, int]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, ma_t, ma_m = args
-    raw_composite = _combine_rule_trends_array([_W_TREND_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
+    top_n, ma_m = args
+    raw_composite = _combine_rule_trends_array([_W_TREND_VALUES[ma_m]], _W_ELIG_VALUES)
     composite_values = raw_composite
 
     # 벤치마크 추세(%) 빌드
     bm_composite = None
-    bm_trend = _W_BM_TREND_VALUES.get((ma_t, ma_m))
+    bm_trend = _W_BM_TREND_VALUES.get(ma_m)
     if bm_trend is not None:
         bm_composite = bm_trend.copy()
 
@@ -340,7 +340,6 @@ def _run_single_combo(args: tuple[int, str, int]) -> dict[str, Any]:
     return {
         "TOP_N_HOLD": top_n,
         "W_TREND": 1.0,
-        "MA_TYPE": ma_t,
         "MA_MONTHS": ma_m,
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
@@ -640,7 +639,6 @@ def _write_results_file(
     months: int,
     initial_cash: float,
     top_n_values: list[int],
-    ma_types: list[str],
     ma_months_list: list[int],
     total_combos: int,
     done_count: int,
@@ -682,13 +680,13 @@ def _write_results_file(
     )
     lines.append(
         f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 "
-        f"x MA_TYPE {len(ma_types)}개 x MA_MONTHS {len(ma_months_list)}개 "
+        f"x MA_MONTHS {len(ma_months_list)}개 "
         f"= {total_combos}개 조합"
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
     lines.append('"WEIGHT": "추세 단독",')
-    lines.append(f'"MA_TYPE": {ma_types},')
+    lines.append('"TREND_BASIS": "SMA",')
     lines.append(f'"MA_MONTHS": {ma_months_list},')
     lines.append("")
 
@@ -705,7 +703,6 @@ def _write_results_file(
 
     headers = [
         "TOP_N",
-        "추세타입",
         "추세개월",
         "수익률(%)",
         "CAGR(%)",
@@ -713,11 +710,10 @@ def _write_results_file(
         "Sortino",
         "Trades",
     ]
-    aligns = ["left", "left", "left", "right", "right", "right", "right", "right"]
+    aligns = ["left", "left", "right", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
-            "-",
             "-",
             "-",
             f"{benchmark_result['TOTAL_RETURN_PCT']:.2f}",
@@ -734,7 +730,6 @@ def _write_results_file(
         formatted_rows.append(
             [
                 str(r["TOP_N_HOLD"]),
-                r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
@@ -1054,7 +1049,7 @@ def _simulate_one_combo_details(
     lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
     lines.append(f"TOP_N_HOLD: {top_n}")
     lines.append("선정기준: 추세(%)")
-    lines.append(f"MA_TYPE: {rule_frame.attrs.get('ma_type', '-')}")
+    lines.append("TREND_BASIS: SMA")
     lines.append(f"MA_MONTHS: {rule_frame.attrs.get('ma_months', '-')}")
     lines.append("")
     lines.append("1. 일별 거래 내역")
@@ -1594,7 +1589,7 @@ def _write_details_file(
         f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}",
         "=== 상위 1개 조합 설정 ===",
         f"TOP_N_HOLD: {top_result['TOP_N_HOLD']}",
-        f"추세_타입: {top_result['MA_TYPE']}",
+        "추세_기준: SMA",
         f"추세_개월: {top_result['MA_MONTHS']}",
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
@@ -1647,9 +1642,8 @@ def run_backtest(pool_id: str) -> Path:
         raise ValueError(
             f"backtest_config['{pool_id}'] 에 TOP_N_HOLD 리스트가 없습니다. "
             "백테스트 탐색 공간 화면에서 저장해주세요."
-        )
+    )
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
-    ma_types = [str(v).upper() for v in cfg["MA_TYPE"]]
     ma_months_list = [int(v) for v in cfg["MA_MONTHS"]]
 
     country_code, etfs, cache_ticker_types, display_prefix = _resolve_backtest_pool_inputs(pool_id)
@@ -1771,16 +1765,14 @@ def run_backtest(pool_id: str) -> Path:
     period_start = backtest_days[1]
     period_end = backtest_days[-1]
 
-    # MA 타입/개월 유니크 집합 → MA 이격률(%) 사전계산
-    unique_ma_specs = set(itertools.product(ma_types, ma_months_list))
+    # 추세 개월별 SMA 이격률(%) 사전계산
+    unique_ma_specs = set(ma_months_list)
 
-    trend_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
-    logger.info("[%s] MA 추세(%%) 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
-    for mtype, m_months in unique_ma_specs:
+    trend_by_spec: dict[int, pd.DataFrame] = {}
+    logger.info("[%s] SMA 추세(%%) 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
+    for m_months in unique_ma_specs:
         # rankings 와 동일하게 규칙별 MA 이격률(%) 프레임 생성.
-        trend_by_spec[(mtype, int(m_months))] = compute_trend_frame(
-            strategy_close_frame_with_bm, mtype, int(m_months)
-        )
+        trend_by_spec[int(m_months)] = compute_trend_frame(strategy_close_frame_with_bm, int(m_months))
 
     # 자격 마스크도 공통 엔진으로 생성 (MIN_TRADING_DAYS 기준) — rankings 와 동일.
     eligibility_frame = compute_eligibility_mask(strategy_close_frame_with_bm)
@@ -1861,13 +1853,12 @@ def run_backtest(pool_id: str) -> Path:
     raw_combos = list(
         itertools.product(
             top_n_values,
-            ma_types,
             ma_months_list,
         )
     )
     combos = []
-    for top_n, ma_t, ma_m in raw_combos:
-        combos.append((top_n, ma_t, ma_m))
+    for top_n, ma_m in raw_combos:
+        combos.append((top_n, ma_m))
     total_combos = len(combos)
 
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
@@ -1884,7 +1875,6 @@ def run_backtest(pool_id: str) -> Path:
         "months": months,
         "initial_cash": initial_cash,
         "top_n_values": top_n_values,
-        "ma_types": ma_types,
         "ma_months_list": ma_months_list,
         "total_combos": total_combos,
         "period_start": period_start,
@@ -1973,7 +1963,6 @@ def run_backtest(pool_id: str) -> Path:
 
             db_values = {
                 "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
-                "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
             }
             target_pool_id = pool_id
@@ -1990,8 +1979,8 @@ def run_backtest(pool_id: str) -> Path:
         except Exception as db_exc:
             logger.error("[%s] 최적 파라미터 라이브 자동 저장 중 에러 발생: %s", pool_id, db_exc)
 
-        best_rule_frame = trend_by_spec_win[(best_result["MA_TYPE"], int(best_result["MA_MONTHS"]))].copy()
-        best_rule_frame.attrs["ma_type"] = best_result["MA_TYPE"]
+        best_rule_frame = trend_by_spec_win[int(best_result["MA_MONTHS"])].copy()
+        best_rule_frame.attrs["trend_basis"] = "SMA"
         best_rule_frame.attrs["ma_months"] = int(best_result["MA_MONTHS"])
         best_composite = best_rule_frame.where(eligibility_win)
         w_trend = float(best_result.get("W_TREND", 1.0))

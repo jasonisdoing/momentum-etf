@@ -1,10 +1,10 @@
 """종목풀 편집 가능 설정의 DB 오버라이드 레이어.
 
 pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_source 등)를 정의하는
-단일 진실 소스로 유지하고, 자주 바뀌는 아래 3개 값만 MongoDB `pool_settings` 컬렉션에
+단일 진실 소스로 유지하고, 자주 바뀌는 아래 2개 값만 MongoDB `pool_settings` 컬렉션에
 저장해 화면에서 수정한다 (값 변경 때마다 커밋하던 번거로움 제거).
 
-    TOP_N_HOLD, MA_TYPE, MA_MONTHS
+    TOP_N_HOLD, MA_MONTHS
 
 읽기: settings_loader 가 pools.json 값 위에 DB 오버라이드를 덮어쓴다. DB 문서/키가 없으면
       pools.json 값을 그대로 사용한다 (silent fallback 아님 — 기본값이 명시적 소스).
@@ -12,7 +12,7 @@ pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_sour
       쓴다. 저장한 프로세스는 즉시 무효화하고, 나머지는 TTL 내 자동 반영된다.
 
 컬렉션 문서 형태:
-    {_id: <ticker_type>, TOP_N_HOLD, MA_TYPE, MA_MONTHS, updated_at}
+    {_id: <ticker_type>, TOP_N_HOLD, MA_MONTHS, updated_at}
 """
 
 from __future__ import annotations
@@ -31,7 +31,6 @@ COLLECTION = "pool_settings"
 # DB 오버라이드 대상 키
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
-    "MA_TYPE",
     "MA_MONTHS",
 )
 
@@ -175,7 +174,7 @@ def seed_from_pools_json(*, overwrite: bool = False) -> dict[str, Any]:
 
 def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
     """저장 입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError."""
-    from utils.rankings import ALLOWED_MA_TYPES, get_rank_months_max
+    from utils.rankings import get_rank_months_max
 
     cleaned: dict[str, Any] = {}
     months_max = get_rank_months_max()
@@ -184,15 +183,6 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         if key not in values:
             continue
         raw = values[key]
-
-        if key == "MA_TYPE":
-            ma_type = str(raw or "").strip().upper()
-            if ma_type not in ALLOWED_MA_TYPES:
-                raise PoolSettingsError(
-                    f"MA_TYPE 은 {', '.join(ALLOWED_MA_TYPES)} 중 하나여야 합니다: {raw}"
-                )
-            cleaned[key] = ma_type
-            continue
 
         try:
             num = int(raw)
@@ -232,9 +222,7 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         raise PoolSettingsError("DB 연결 실패로 설정을 저장할 수 없습니다.")
     db[COLLECTION].update_one(
         {"_id": norm_id},
-        {
-            "$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method},
-        },
+        {"$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method}},
         upsert=True,
     )
 

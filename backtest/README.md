@@ -25,10 +25,9 @@ python backtest/run.py
 ## 스윕 대상 파라미터
 
 - `TOP_N_HOLD` (보유 종목수, 예 `[4,5]`) — 최적 N 은 백테스트 종료 시 라이브 `pool_settings` 에 자동 저장된다.
-- `MA_TYPE`
 - `MA_MONTHS`
 
-> 선정 기준: `추세(%) = (종가 ÷ MA - 1) × 100`. 라이브(`utils/rankings.py`)와 동일하다.
+> 선정 기준: `추세(%) = (종가 ÷ SMA - 1) × 100`. 라이브(`utils/rankings.py`)와 동일하다.
 
 세부 탐색공간은 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩은 제거됨.
 

@@ -194,7 +194,7 @@ python infra/server_scheduler.py
 
 ### 핵심 일관성 체크리스트
 
-1.  **입력 단순화**: 종목풀 설정의 `MA_TYPE`, `MA_MONTHS`를 사용하고, 순위 화면에서도 같은 단일 MA 기준만 변경할 수 있다.
+1.  **입력 단순화**: 추세 타입은 SMA로 고정하고, 종목풀 설정의 `MA_MONTHS`만 사용한다.
 2.  **정렬 기준 고정**: `추세(%)`가 있는 종목을 `추세(%)` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
 3.  **데이터 기준**:
     *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
@@ -218,7 +218,6 @@ python infra/server_scheduler.py
       "name": "국내상장 국내",
       "country_code": "kor",
       "currency": "KRW",
-      "MA_TYPE": "SMA",
       "MA_MONTHS": 10
     }
   ]
@@ -229,9 +228,9 @@ python infra/server_scheduler.py
 
 검증 원칙(현재 운영):
 
-* 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
+* 개별 종목풀: `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
-* 편집값(`TOP_N_HOLD`/`MA_TYPE`/`MA_MONTHS`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
+* 편집값(`TOP_N_HOLD`/`MA_MONTHS`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
 
 #### 선정 기준 = 추세(%)
 
@@ -242,7 +241,7 @@ python infra/server_scheduler.py
 
 ### 백테스트 탐색 공간 (`backtest_config`)
 
-모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`MA_TYPE`/`MA_MONTHS` **리스트**)은
+모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`MA_MONTHS` **리스트**)은
 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
 
 * 최적 조합은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.
@@ -267,7 +266,7 @@ DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.
 
 ## 5. 순위 화면의 정의
 
-**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 `MA_TYPE`, `MA_MONTHS` 기준 추세(%)를 계산한 결과입니다.
+**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 SMA 고정 추세선과 `MA_MONTHS` 기준 추세(%)를 계산한 결과입니다.
 
 ### 핵심 원칙
 1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.

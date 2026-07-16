@@ -3,7 +3,7 @@
 기존 `config.py` 의 하드코딩 `BACKTEST_CONFIG` 를 DB 로 이관한다. 풀별로 1개 문서.
 
     {_id: <pool_id>, BACKTEST_MONTHS: <개월수>, BENCHMARK:{ticker,name},
-     TOP_N_HOLD:[...], MA_TYPE:[...],
+     TOP_N_HOLD:[...],
      MA_MONTHS:[...], updated_at}
 
 DB 가 유일한 소스다. 설정이 없으면 임의 기본값으로 보정하지 않고 **명확히 에러**를 낸다.
@@ -20,13 +20,11 @@ from datetime import datetime, timezone
 from time import monotonic
 from typing import Any
 
-from config import ALLOWED_MA_TYPES
-
 _COLLECTION = "backtest_config"
 _CACHE_TTL_SECONDS = 30.0
 
 # 풀별 문서 필수 키
-_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "MA_TYPE", "MA_MONTHS")
+_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "MA_MONTHS")
 _STORED_KEYS = frozenset(("BACKTEST_MONTHS", "BENCHMARK", "SORT_METRIC", *_REQUIRED_LIST_KEYS))
 
 _lock = threading.Lock()
@@ -78,10 +76,6 @@ def validate_backtest_config(config: Any) -> None:
     for v in config["MA_MONTHS"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or int(v) <= 0:
             raise ValueError("'MA_MONTHS' 는 0보다 큰 정수여야 합니다.")
-    for v in config["MA_TYPE"]:
-        if str(v).upper() not in ALLOWED_MA_TYPES:
-            raise ValueError(f"'MA_TYPE' 값이 허용되지 않습니다: {v} (허용: {', '.join(ALLOWED_MA_TYPES)})")
-
 
 def load_backtest_config(pool_id: str) -> dict:
     """풀의 백테스트 탐색공간 dict. 없으면 임의 기본값 없이 에러."""
@@ -120,9 +114,7 @@ def save_backtest_config(pool_id: str, config: dict) -> None:
     db = _db()
     db[_COLLECTION].update_one(
         {"_id": pool_id},
-        {
-            "$set": {**payload, "updated_at": datetime.now(timezone.utc)},
-        },
+        {"$set": {**payload, "updated_at": datetime.now(timezone.utc)}},
         upsert=True,
     )
     invalidate_cache(pool_id)

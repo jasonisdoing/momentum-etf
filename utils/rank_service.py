@@ -12,7 +12,6 @@ from config import NAVER_ETF_CATEGORY_CONFIG
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
 from utils.rankings import (
-    ALLOWED_MA_TYPES,
     MONTHLY_RETURN_LABEL_COUNT,
     build_effective_ma_rules,
     build_ticker_type_rankings,
@@ -35,7 +34,7 @@ def _build_rank_cache_key(
     ma_rules: list[dict[str, Any]],
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
-    ma_rule_key = tuple((str(rule.get("ma_type") or ""), int(rule.get("ma_months") or 0)) for rule in ma_rules)
+    ma_rule_key = tuple(int(rule.get("ma_months") or 0) for rule in ma_rules)
     return (ticker_type, as_of_date_key, ma_rule_key)
 
 
@@ -493,7 +492,6 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
-        "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
     }
 
@@ -562,7 +560,6 @@ def _compute_rank_data_payload(
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
-        "ma_type_options": ALLOWED_MA_TYPES,
         "ma_months_max": get_rank_months_max(),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(

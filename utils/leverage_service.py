@@ -36,7 +36,7 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    # 공격 자산은 설정 키가 아니다 — 진입 시점마다 공격 후보 중 ALMA 이격도 1위를 동적 선택.
+    # 공격 자산은 설정 키가 아니다 — 진입 시점마다 공격 후보 중 SMA 20일 이격도 1위를 동적 선택.
     for key in ("signal", "defense"):
         asset = config.get(key)
         if not isinstance(asset, dict) or not str(asset.get("ticker") or "").strip():

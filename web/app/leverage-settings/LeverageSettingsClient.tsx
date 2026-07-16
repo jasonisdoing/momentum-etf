@@ -245,7 +245,7 @@ export function LeverageSettingsClient() {
                     value={
                       state?.target && config.tuning?.offense_candidates?.some((c) => c.ticker === state.target)
                         ? `${state.target_name ?? state.target}(${state.target}) — 진입 시 자동 선택됨`
-                        : "진입 시 자동 선택 (공격 후보 중 ALMA 6개월 이격도 1위)"
+                        : "진입 시 자동 선택 (공격 후보 중 SMA 20일 이격도 1위)"
                     }
                   />
                   {asset("defense", "방어 자산")}

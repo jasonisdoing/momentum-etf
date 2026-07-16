@@ -40,14 +40,13 @@ npm run dev
 계좌 정의는 MongoDB `account_settings` 컬렉션에서 관리하며, 웹 사이드바 `계좌 → 설정`(`/account-settings`) 화면에서 수정합니다. 각 계좌는 `account_id`(불변), `order`, `name`, `icon`, `country_code`, `currency`, `benchmark`(티커 입력 후 조회로 종목명 확인)를 가지며, 필요하면 `URL`(증권사 접속 주소)을 함께 설정합니다. 계좌 추가/삭제는 화면에서 지원하지 않습니다.
 
 ### 종목풀 설정 (`pools.json`)
-종목풀은 등록된 전체 종목을 유니버스로 사용합니다. `MA_TYPE`, `MA_MONTHS` 기준 단일 추세(%)를 계산한 뒤, `추세(%)` 내림차순으로 순위를 보여줍니다. 버킷은 분류와 표시용 참고 정보입니다. 최상위 `all` 설정은 `/momentum-pools`의 `0. 전체` 가상 종목풀 기준과 포함 대상을 정의합니다.
+종목풀은 등록된 전체 종목을 유니버스로 사용합니다. SMA 고정 추세선과 `MA_MONTHS` 기준 단일 추세(%)를 계산한 뒤, `추세(%)` 내림차순으로 순위를 보여줍니다. 버킷은 분류와 표시용 참고 정보입니다. 최상위 `all` 설정은 `/momentum-pools`의 `0. 전체` 가상 종목풀 기준과 포함 대상을 정의합니다.
 종목풀 `country_code`는 현재 `kor`, `au`, `us`를 사용합니다. 계좌 `country_code`는 `kor` 또는 `au`만 사용합니다.
 
 ```json
 {
   "all": {
     "TOP_N_HOLD": 3,
-    "MA_TYPE": "ALMA",
     "MA_MONTHS": 5,
     "include": ["kor_kr", "kor_us", "kor"]
   },
@@ -59,7 +58,6 @@ npm run dev
       "name": "국내상장 국내",
       "country_code": "kor",
       "currency": "KRW",
-      "MA_TYPE": "ALMA",
       "MA_MONTHS": 5
     }
   ]
