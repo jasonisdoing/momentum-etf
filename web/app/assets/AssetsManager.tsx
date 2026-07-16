@@ -2654,8 +2654,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return 38;
         }
         const rowCount = (params.data.rows?.length ?? 0) + 1;
-        // 기본 테이블 높이 + 메모 섹션(약 130px) 추가
-        return 50 + 34 + rowCount * 42 + 48 + 130;
+        // 좁은 화면에서는 가로 스크롤바와 하단 여백이 필요하므로 상세 영역을 조금 더 확보한다.
+        return 50 + 34 + rowCount * 42 + 48 + 130 + 5;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {
