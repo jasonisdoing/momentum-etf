@@ -63,7 +63,6 @@ const navGroups = [
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
-      { href: "/backtest-lab", label: "백테스트 실험", icon: "🧪" },
       { href: "/live-24h", label: "24H 시세", icon: "⏰" },
     ],
   },

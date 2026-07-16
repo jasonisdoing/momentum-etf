@@ -598,16 +598,9 @@ def build_ticker_type_rankings(
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
     benchmark_ticker = ""
-    try:
-        from utils.backtest_config_store import load_backtest_config
-        bt_cfg = load_backtest_config(ticker_type)
-        benchmark_config = bt_cfg.get("BENCHMARK")
-        if isinstance(benchmark_config, dict):
-            benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
-    except Exception:
-        benchmark_config = settings.get("BENCHMARK")
-        if isinstance(benchmark_config, dict):
-            benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
+    benchmark_config = settings.get("BENCHMARK")
+    if isinstance(benchmark_config, dict):
+        benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
     country_code = str(settings.get("country_code") or "").strip().lower()
 
     etfs = get_etfs(ticker_type)

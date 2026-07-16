@@ -33,7 +33,6 @@ type PoolEntry = {
   order?: number;
   settings: SettingsMap;
   updated_at?: string;
-  save_method?: string;
 };
 
 type PoolSettingsResponse = {
@@ -174,7 +173,6 @@ export function SettingsManager() {
                     ))}
                     <th style={{ textAlign: "center", minWidth: 80 }}>저장</th>
                     <th style={{ textAlign: "left", minWidth: 160 }}>마지막 저장</th>
-                    <th style={{ textAlign: "left", minWidth: 300 }}>방식</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -233,19 +231,6 @@ export function SettingsManager() {
                             </span>
                           ) : (
                             <span style={{ color: "var(--text-muted)" }}>기록 없음</span>
-                          )}
-                        </td>
-                        <td style={{ textAlign: "left", fontSize: "0.8rem", color: "var(--text-muted)", verticalAlign: "middle" }}>
-                          {entry.save_method ? (
-                            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.35 }}>
-                              {entry.save_method.split("\n").map((line, idx) => (
-                                <span key={idx} style={idx === 0 ? { fontWeight: 600, color: "#475569" } : undefined}>
-                                  {line}
-                                </span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ color: "var(--text-muted)" }}>미지정</span>
                           )}
                         </td>
                       </tr>

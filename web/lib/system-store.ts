@@ -52,8 +52,7 @@ type SystemAction =
   | "us_market_stocks"
   | "live_24h_slack"
   | "leverage_switch"
-  | "leverage_tune"
-  | "momentum_backtest";
+  | "leverage_tune";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");

@@ -36,10 +36,9 @@ STATUS_FAILED = "failed"
 _TTL_HOURS = 24
 _HEARTBEAT_STALE_MINUTES = 5
 
-# 무거운 계산이라 서버(약한 VM)에서 돌리면 안 되고, 결과가 로컬 파일시스템에 남아
-# 로컬 UI 에서만 조회되므로 **로컬 워커(APP_TYPE=Local)만** 픽하게 하는 잡들.
+# 무거운 계산이라 서버(약한 VM)에서 돌리면 안 되고, 로컬 워커(APP_TYPE=Local)만 픽하게 하는 잡들.
 # (서버 워커는 이 잡들을 claim 하지 않는다 → 로컬이 꺼져 있으면 pending 으로 대기)
-LOCAL_ONLY_JOBS: set[str] = {"leverage_tune", "momentum_backtest"}
+LOCAL_ONLY_JOBS: set[str] = {"leverage_tune"}
 
 
 def _now_utc() -> datetime:
