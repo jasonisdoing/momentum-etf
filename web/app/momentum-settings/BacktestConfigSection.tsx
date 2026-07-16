@@ -285,7 +285,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         </div>
         <span style={{ ...labelStyle, marginLeft: 8 }}>추세 개월</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
-          {[1, 2, 3, 6, 9, 12, 18, 24].map((m) => (
+          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((m) => (
             <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
               <input
                 type="checkbox"

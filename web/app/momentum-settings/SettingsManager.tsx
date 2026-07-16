@@ -245,7 +245,7 @@ export function SettingsManager() {
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
-                                {[1, 2, 3, 6, 9, 12, 18, 24].map((m) => (
+                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((m) => (
                                   <option key={m} value={String(m)}>
                                     {m}
                                   </option>

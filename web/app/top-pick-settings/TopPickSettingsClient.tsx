@@ -76,6 +76,8 @@ type TopPickSettings = {
   CASH_WEIGHT_UP: number;
   CASH_WEIGHT_NEUTRAL: number;
   CASH_WEIGHT_DOWN: number;
+  VARIABLE_TICKERS: number;
+  FIXED_TICKERS: number;
   MAX_TICKERS: number;
   ACCOUNT_ID: string;
   START_AMOUNT_MANWON: number | null;
@@ -217,6 +219,20 @@ function buildTickerSlots(items: TopPickTicker[] | undefined, count: number): To
   const slotCount = Math.max(count, filledCount);
   const slots = Array.from({ length: slotCount }, (_, index) => list[index] ?? { ticker: "" });
   return slots.map((item) => ({ ...item, ticker: item.ticker ?? "" }));
+}
+
+function normalizeTickerCounts(settings: TopPickSettings | null | undefined): {
+  variableCount: number;
+  fixedCount: number;
+  totalCount: number;
+} {
+  const variableCount = Math.max(0, Number(settings?.VARIABLE_TICKERS ?? 0));
+  const fixedCount = Math.max(0, Number(settings?.FIXED_TICKERS ?? settings?.MAX_TICKERS ?? 0));
+  return {
+    variableCount,
+    fixedCount,
+    totalCount: variableCount + fixedCount,
+  };
 }
 
 function formatReturnPct(value: number | null | undefined): string {
@@ -452,6 +468,18 @@ export function TopPickSettingsClient() {
   const validTickers = useMemo(
     () => tickers.filter((item) => item.ticker.trim() && item.name),
     [tickers],
+  );
+  const { variableCount, fixedCount, totalCount } = useMemo(
+    () => normalizeTickerCounts(settings),
+    [settings],
+  );
+  const variableTickerSlots = useMemo(
+    () => tickers.slice(0, variableCount),
+    [tickers, variableCount],
+  );
+  const fixedTickerSlots = useMemo(
+    () => tickers.slice(variableCount, variableCount + fixedCount),
+    [tickers, variableCount, fixedCount],
   );
 
   // 비중 고정 모드: 확정 종목의 고정 비중 합계(합이 100이어야 정상).
@@ -742,7 +770,7 @@ export function TopPickSettingsClient() {
   // MAX_TICKERS(계좌별 상한) 변경 시 티커 슬롯 수를 맞춘다(채워진 티커는 유지).
   useEffect(() => {
     const count = settings?.MAX_TICKERS;
-    if (typeof count === "number" && count > 0) {
+    if (typeof count === "number" && count >= 0) {
       setTickers((prev) => buildTickerSlots(prev, count));
     }
   }, [settings?.MAX_TICKERS]);
@@ -798,6 +826,18 @@ export function TopPickSettingsClient() {
         next = Number(value);
       }
       return { ...current, [key]: next };
+    });
+  };
+
+  const updateTickerCountSetting = (key: "VARIABLE_TICKERS" | "FIXED_TICKERS", value: string) => {
+    const nextCount = value === "" ? 0 : Number(value);
+    setPreview(null);
+    setBacktestResult(null);
+    setSettings((current) => {
+      if (!current) return current;
+      const nextSettings = { ...current, [key]: nextCount };
+      const nextCounts = normalizeTickerCounts(nextSettings);
+      return { ...nextSettings, MAX_TICKERS: nextCounts.totalCount };
     });
   };
 
@@ -1198,6 +1238,118 @@ export function TopPickSettingsClient() {
     </div>
   );
 
+  const renderTickerSlotRow = (item: TopPickTicker, index: number) => {
+    const confirmed = !!item.name;
+    return (
+      <div key={index} className={`topPickSlotRow${weightMode === "fixed" ? " topPickSlotRowFixed" : ""}`}>
+        <span className="topPickSlotNumber">{index + 1}</span>
+        <input
+          style={{
+            ...inputStyle,
+            width: "100%",
+            backgroundColor: confirmed ? "#f8fafc" : undefined,
+            color: confirmed ? "var(--text-normal)" : undefined,
+          }}
+          placeholder="티커"
+          value={item.ticker}
+          readOnly={confirmed}
+          onChange={(event) => {
+            setTickers((current) =>
+              current.map((currentItem, itemIndex) =>
+                itemIndex === index ? { ticker: event.target.value } : currentItem,
+              ),
+            );
+            setPreview(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              void resolveTicker(index);
+            }
+          }}
+        />
+        <div className="topPickSlotName" title={item.name ?? ""}>
+          {item.name || "종목명 (티커 입력 후 확인)"}
+        </div>
+        {weightMode === "fixed" ? (
+          <input
+            type="number"
+            className="form-control form-control-sm topPickSlotWeight"
+            min={0}
+            max={100}
+            step={0.1}
+            placeholder="%"
+            disabled={!confirmed}
+            value={item.fixed_weight_pct ?? ""}
+            onChange={(event) => {
+              const raw = event.target.value;
+              setTickers((current) =>
+                current.map((currentItem, itemIndex) =>
+                  itemIndex === index
+                    ? { ...currentItem, fixed_weight_pct: raw === "" ? null : Number(raw) }
+                    : currentItem,
+                ),
+              );
+            }}
+          />
+        ) : null}
+        <div className="topPickBucketCell">
+          {confirmed && item.bucket && BUCKET_THEME[String(item.bucket)] ? (
+            <span
+              className="topPickBucketBadge"
+              style={{
+                color: BUCKET_THEME[String(item.bucket)].color,
+                borderColor: `${BUCKET_THEME[String(item.bucket)].color}66`,
+                backgroundColor: `${BUCKET_THEME[String(item.bucket)].color}12`,
+              }}
+            >
+              {BUCKET_THEME[String(item.bucket)].name}
+            </span>
+          ) : null}
+        </div>
+        {confirmed ? (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-danger"
+            onClick={() => {
+              setTickers((current) =>
+                current.map((currentItem, itemIndex) => (itemIndex === index ? { ticker: "" } : currentItem)),
+              );
+              setPreview(null);
+            }}
+          >
+            비우기
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-secondary"
+            disabled={!item.ticker.trim()}
+            onClick={() => void resolveTicker(index)}
+          >
+            확인
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  const renderTickerSlotSection = (title: string, items: TopPickTicker[], offset: number) => (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-normal)", fontWeight: 800 }}>
+        <span>{title}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600 }}>{items.length}개</span>
+      </div>
+      {items.length > 0 ? (
+        items.map((item, index) => renderTickerSlotRow(item, offset + index))
+      ) : (
+        <div style={{ color: "var(--text-muted)", fontSize: "0.88rem", padding: "6px 0" }}>
+          등록 슬롯이 없습니다.
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <PageFrame
       title="탑픽 설정"
@@ -1274,18 +1426,30 @@ export function TopPickSettingsClient() {
               <div className="card-body">
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {/* 편입 종목 수 + 비중 방식 토글 — 항상 표시(맨 위) */}
+                  {/* 변동/고정 슬롯 수 + 비중 방식 토글 — 계산에는 두 슬롯 수의 합계를 사용한다. */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
                     <label className="appLabeledField" style={{ minWidth: 120 }}>
-                      <span className="appLabeledFieldLabel">편입 종목 수</span>
+                      <span className="appLabeledFieldLabel">변동 종목 수</span>
                       <input
                         type="number"
                         className="form-control form-control-sm"
-                        min={1}
+                        min={0}
                         max={20}
                         step={1}
-                        value={settings?.MAX_TICKERS ?? ""}
-                        onChange={(event) => updateSetting("MAX_TICKERS", event.target.value)}
+                        value={settings?.VARIABLE_TICKERS ?? ""}
+                        onChange={(event) => updateTickerCountSetting("VARIABLE_TICKERS", event.target.value)}
+                      />
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 120 }}>
+                      <span className="appLabeledFieldLabel">고정 종목 수</span>
+                      <input
+                        type="number"
+                        className="form-control form-control-sm"
+                        min={0}
+                        max={20}
+                        step={1}
+                        value={settings?.FIXED_TICKERS ?? ""}
+                        onChange={(event) => updateTickerCountSetting("FIXED_TICKERS", event.target.value)}
                       />
                     </label>
                     <div className="appLabeledField">
@@ -1334,7 +1498,7 @@ export function TopPickSettingsClient() {
                             value={settings?.MA_MONTHS ?? ""}
                             onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
                           >
-                            {[1, 2, 3, 5, 6, 9, 12, 18, 24].map((month) => (
+                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((month) => (
                               <option key={month} value={month}>
                                 {month}
                               </option>
@@ -1529,101 +1693,11 @@ export function TopPickSettingsClient() {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 <div className="topPickSlotColumn">
-                  {tickers.map((item, index) => {
-                    const confirmed = !!item.name;
-                    return (
-                      <div key={index} className={`topPickSlotRow${weightMode === "fixed" ? " topPickSlotRowFixed" : ""}`}>
-                        <span className="topPickSlotNumber">{index + 1}</span>
-                        <input
-                          style={{
-                            ...inputStyle,
-                            width: "100%",
-                            backgroundColor: confirmed ? "#f8fafc" : undefined,
-                            color: confirmed ? "var(--text-normal)" : undefined,
-                          }}
-                          placeholder="티커"
-                          value={item.ticker}
-                          readOnly={confirmed}
-                          onChange={(event) => {
-                            setTickers((current) =>
-                              current.map((currentItem, itemIndex) =>
-                                itemIndex === index ? { ticker: event.target.value } : currentItem,
-                              ),
-                            );
-                            setPreview(null);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              void resolveTicker(index);
-                            }
-                          }}
-                        />
-                        <div className="topPickSlotName" title={item.name ?? ""}>
-                          {item.name || "종목명 (티커 입력 후 확인)"}
-                        </div>
-                        {weightMode === "fixed" ? (
-                          <input
-                            type="number"
-                            className="form-control form-control-sm topPickSlotWeight"
-                            min={0}
-                            max={100}
-                            step={0.1}
-                            placeholder="%"
-                            disabled={!confirmed}
-                            value={item.fixed_weight_pct ?? ""}
-                            onChange={(event) => {
-                              const raw = event.target.value;
-                              setTickers((current) =>
-                                current.map((currentItem, itemIndex) =>
-                                  itemIndex === index
-                                    ? { ...currentItem, fixed_weight_pct: raw === "" ? null : Number(raw) }
-                                    : currentItem,
-                                ),
-                              );
-                            }}
-                          />
-                        ) : null}
-                        <div className="topPickBucketCell">
-                          {confirmed && item.bucket && BUCKET_THEME[String(item.bucket)] ? (
-                            <span
-                              className="topPickBucketBadge"
-                              style={{
-                                color: BUCKET_THEME[String(item.bucket)].color,
-                                borderColor: `${BUCKET_THEME[String(item.bucket)].color}66`,
-                                backgroundColor: `${BUCKET_THEME[String(item.bucket)].color}12`,
-                              }}
-                            >
-                              {BUCKET_THEME[String(item.bucket)].name}
-                            </span>
-                          ) : null}
-                        </div>
-                        {confirmed ? (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-danger"
-                            onClick={() => {
-                              setTickers((current) =>
-                                current.map((currentItem, itemIndex) => (itemIndex === index ? { ticker: "" } : currentItem)),
-                              );
-                              setPreview(null);
-                            }}
-                          >
-                            비우기
-                          </button>
-                        ) : (
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-secondary"
-                            disabled={!item.ticker.trim()}
-                            onClick={() => void resolveTicker(index)}
-                          >
-                            확인
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+                  {renderTickerSlotSection("변동 종목", variableTickerSlots, 0)}
+                  {totalCount > 0 ? (
+                    <div style={{ borderTop: "1px solid rgba(148,163,184,0.24)", margin: "4px 0" }} />
+                  ) : null}
+                  {renderTickerSlotSection("고정 종목", fixedTickerSlots, variableCount)}
                 </div>
               </div>
             )}

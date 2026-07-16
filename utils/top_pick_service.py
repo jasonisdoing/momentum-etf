@@ -38,6 +38,8 @@ SETTING_KEYS = (
     "CASH_WEIGHT_UP",
     "CASH_WEIGHT_NEUTRAL",
     "CASH_WEIGHT_DOWN",
+    "VARIABLE_TICKERS",
+    "FIXED_TICKERS",
     "MAX_TICKERS",
     "ACCOUNT_ID",
     "START_AMOUNT_MANWON",
@@ -52,9 +54,10 @@ REQUIRED_SETTING_KEYS = (
     "CASH_WEIGHT_UP",
     "CASH_WEIGHT_NEUTRAL",
     "CASH_WEIGHT_DOWN",
-    "MAX_TICKERS",
+    "VARIABLE_TICKERS",
+    "FIXED_TICKERS",
 )
-# 계좌별 편입 티커 수 상한(MAX_TICKERS)의 허용 범위.
+# 계좌별 편입 티커 슬롯 수의 허용 범위.
 MAX_TICKERS_LIMIT = 20
 DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
     "months": 12,
@@ -193,6 +196,14 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
         source["CASH_WEIGHT_UP"] = 0.0
         source["CASH_WEIGHT_NEUTRAL"] = legacy_cash_max_value / 2.0
         source["CASH_WEIGHT_DOWN"] = legacy_cash_max_value
+    # 기존 문서에는 MAX_TICKERS 하나만 있다. 새 구조에서는 기존 슬롯을 모두 고정 종목으로 간주한다.
+    if (
+        source.get("VARIABLE_TICKERS") is None
+        and source.get("FIXED_TICKERS") is None
+        and source.get("MAX_TICKERS") is not None
+    ):
+        source["VARIABLE_TICKERS"] = 0
+        source["FIXED_TICKERS"] = source.get("MAX_TICKERS")
     # 전략 필수 필드가 하나라도 없으면 코드 기본값으로 대체하지 않고 명시적 에러(fail loud).
     missing_required = [key for key in REQUIRED_SETTING_KEYS if source.get(key) is None]
     if missing_required:
@@ -237,13 +248,24 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     ):
         raise ValueError("현금 비중은 상승 <= 중립 <= 하락 순서여야 합니다.")
 
-    # 계좌별 편입 티커 수 상한
+    # 계좌별 편입 티커 슬롯 수. 변동/고정은 관리용 구분이며 계산에는 합산 슬롯을 사용한다.
     try:
-        max_tickers = int(source.get("MAX_TICKERS"))
+        variable_tickers = int(source.get("VARIABLE_TICKERS"))
     except (TypeError, ValueError) as exc:
-        raise ValueError(f"MAX_TICKERS 은 정수여야 합니다: {source.get('MAX_TICKERS')}") from exc
+        raise ValueError(f"VARIABLE_TICKERS 은 정수여야 합니다: {source.get('VARIABLE_TICKERS')}") from exc
+    try:
+        fixed_tickers = int(source.get("FIXED_TICKERS"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"FIXED_TICKERS 은 정수여야 합니다: {source.get('FIXED_TICKERS')}") from exc
+    if not (0 <= variable_tickers <= MAX_TICKERS_LIMIT):
+        raise ValueError(f"VARIABLE_TICKERS 은 0 ~ {MAX_TICKERS_LIMIT} 범위여야 합니다: {variable_tickers}")
+    if not (0 <= fixed_tickers <= MAX_TICKERS_LIMIT):
+        raise ValueError(f"FIXED_TICKERS 은 0 ~ {MAX_TICKERS_LIMIT} 범위여야 합니다: {fixed_tickers}")
+    max_tickers = variable_tickers + fixed_tickers
     if not (1 <= max_tickers <= MAX_TICKERS_LIMIT):
-        raise ValueError(f"MAX_TICKERS 은 1 ~ {MAX_TICKERS_LIMIT} 범위여야 합니다: {max_tickers}")
+        raise ValueError(f"편입 종목 수 합계는 1 ~ {MAX_TICKERS_LIMIT} 범위여야 합니다: {max_tickers}")
+    cleaned["VARIABLE_TICKERS"] = variable_tickers
+    cleaned["FIXED_TICKERS"] = fixed_tickers
     cleaned["MAX_TICKERS"] = max_tickers
 
     account_id = str(source.get("ACCOUNT_ID") or "").strip()
