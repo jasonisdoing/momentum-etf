@@ -165,16 +165,11 @@ MARKET_SCHEDULES = {
     },
 }
 
-# 지원 이동평균(MA) 타입 — 시스템 전체 단일 진실 소스.
-# 백엔드(rankings/pool_settings 검증·옵션) + 프론트(MA 드롭다운)에서 모두 이 값만 본다.
-# 프론트에는 API 응답(rank: ma_type_options)으로 전달된다.
-ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
-
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
-# 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
-# ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
+# 지표 계산에 필요한 절대 최소 거래일 수 (항상 적용)
+# ENABLE_DATA_SUFFICIENCY_CHECK = True  → 엄격 기준 적용
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5

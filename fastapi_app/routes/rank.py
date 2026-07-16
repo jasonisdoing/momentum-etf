@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.rank_service import load_rank_data, load_rank_toolbar_data
@@ -18,18 +18,15 @@ def get_rank_toolbar_data(
 
 @router.get("")
 def get_rank_data(
-    request: Request,
     ticker_type: str | None = Query(default=None),
     as_of_date: str | None = Query(default=None),
+    ma_months: int | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    ma_type = request.query_params.get("ma_type")
-    ma_months_raw = request.query_params.get("ma_months")
     ma_rule_override: dict[str, object] | None = None
-    if ma_type is not None or ma_months_raw is not None:
+    if ma_months is not None:
         ma_rule_override = {
-            "ma_type": ma_type or "",
-            "ma_months": int(ma_months_raw) if ma_months_raw is not None else 0,
+            "ma_months": ma_months,
         }
     return load_rank_data(
         ticker_type=ticker_type,

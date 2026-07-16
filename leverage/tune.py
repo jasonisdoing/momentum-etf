@@ -162,7 +162,7 @@ def _tune_switch(
     config["drawdown_sell_cutoff"] = round(float(best_params["drawdown_sell_cutoff"]), 2)
 
     # 공격 자산(config.offense)은 튜닝이 정하지 않는다 — 매일 추천이 진입 시점에
-    # 공격 후보 중 ALMA 6개월 이격도 1위를 선택하고, 청산까지 같은 자산을 유지한다.
+    # 공격 후보 중 SMA 20일 이격도 1위를 선택하고, 청산까지 같은 자산을 유지한다.
 
     defense_obj = best_params.get("_defense_obj")
     if defense_obj and isinstance(defense_obj, dict):
@@ -199,7 +199,7 @@ def _tune_switch(
         f.write("탐색 공간: ")
         parts = [f"{k} {len(v)}개" for k, v in tuning_config.items() if k != "offense"]
         f.write(" × ".join(parts) + f" = {total_cases}개 조합")
-        f.write(f" (공격 후보 {len(tuning_config.get('offense', []))}종은 진입 시 ALMA 6개월 이격도 1위 동적 선택)\n\n")
+        f.write(f" (공격 후보 {len(tuning_config.get('offense', []))}종은 진입 시 SMA 20일 이격도 1위 동적 선택)\n\n")
         f.write(f"=== 결과 - 기간: {months_range} 개월 | 정렬 기준: CAGR ===\n")
         for line in table_lines[:200]:
             f.write(line + "\n")

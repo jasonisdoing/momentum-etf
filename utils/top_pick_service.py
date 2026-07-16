@@ -24,13 +24,10 @@ logger = get_app_logger()
 COLLECTION = "top_pick_settings"
 SETTINGS_ID = "default"
 
-ALLOWED_MA_TYPES = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"}
-
 # 탑픽 설정 스키마 — 코드 기본값(silent default) 없음. 값은 전적으로 DB에서 온다.
 # 전략 필수 필드는 DB에 없으면 명시적 에러(fail loud). 사용자 선택 필드(계좌·누적수익률 기준)는
 # 미설정 허용(빈값/None)이며, 그 값을 실제로 쓰는 지점에서 막는다.
 SETTING_KEYS = (
-    "MA_TYPE",
     "MA_MONTHS",
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
@@ -39,7 +36,6 @@ SETTING_KEYS = (
 )
 # DB에 반드시 있어야 하는(없으면 에러) 전략 필수 필드. 코드 기본값으로 대체하지 않는다.
 REQUIRED_SETTING_KEYS = (
-    "MA_TYPE",
     "MA_MONTHS",
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
@@ -190,11 +186,7 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
         raise ValueError(
             f"탑픽 설정값이 없습니다(DB 미설정): {', '.join(missing_required)}. 설정 화면에서 저장해주세요."
         )
-    ma_type = str(source.get("MA_TYPE") or "").strip().upper()
-    if ma_type not in ALLOWED_MA_TYPES:
-        raise ValueError(f"MA_TYPE 은 {', '.join(sorted(ALLOWED_MA_TYPES))} 중 하나여야 합니다: {ma_type}")
-
-    cleaned: dict[str, Any] = {"MA_TYPE": ma_type}
+    cleaned: dict[str, Any] = {}
     try:
         ma_months = int(source.get("MA_MONTHS"))
     except (TypeError, ValueError) as exc:
@@ -1140,7 +1132,6 @@ def calculate_top_pick_weights_for(
     ma_rules = [
         {
             "order": 1,
-            "ma_type": settings["MA_TYPE"],
             "ma_months": settings["MA_MONTHS"],
             "score_column": "추세",
         }
@@ -1372,7 +1363,6 @@ def _build_top_pick_weight_engine(
     ma_rules = [
         {
             "order": 1,
-            "ma_type": settings["MA_TYPE"],
             "ma_months": settings["MA_MONTHS"],
             "score_column": "추세",
         }

@@ -16,7 +16,7 @@ REQUIRED_KEYS_NEW: list[str] = [
     "slippage",
 ]
 # 참고: 공격 자산(offense)은 더 이상 설정 키가 아니다 — 진입 시점마다
-# tuning.offense_candidates 중 ALMA 6개월 이격도 1위를 동적으로 선택한다.
+# tuning.offense_candidates 중 SMA 20일 이격도 1위를 동적으로 선택한다.
 
 REQUIRED_KEYS_OLD: list[str] = [
     "signal_ticker",

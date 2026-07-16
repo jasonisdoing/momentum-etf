@@ -9,7 +9,6 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from config import (
-    ALLOWED_MA_TYPES,
     BUCKET_MAPPING,
     CACHE_START_DATE,
     MARKET_SCHEDULES,
@@ -27,7 +26,6 @@ from utils.logger import get_app_logger
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
-# ALLOWED_MA_TYPES 는 config.py 가 단일 소스 — 여기서는 import 후 re-export(__all__) 만 한다.
 logger = get_app_logger()
 MONTHLY_RETURN_LABEL_COUNT = 13
 RSI_PERIOD = 14
@@ -40,12 +38,6 @@ def _build_ma_rule_score_column() -> str:
 def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
     if not isinstance(ma_rule_raw, dict):
         raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 항목은 객체여야 합니다.")
-
-    ma_type = str(ma_rule_raw.get("MA_TYPE") or "").strip().upper()
-    if not ma_type:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_TYPE'이 누락되었습니다.")
-    if ma_type not in ALLOWED_MA_TYPES:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_TYPE'이 유효하지 않습니다: {ma_type}")
 
     ma_months_raw = ma_rule_raw.get("MA_MONTHS")
     if ma_months_raw is None:
@@ -61,7 +53,6 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
 
     return {
         "order": 1,
-        "ma_type": ma_type,
         "ma_months": ma_months,
         "ma_days": int(ma_months) * int(TRADING_DAYS_PER_MONTH),
         "score_column": _build_ma_rule_score_column(),
@@ -71,11 +62,9 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
 def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
     """종목풀 설정의 단일 MA 파라미터를 내부 규칙 리스트로 변환한다."""
     settings = get_ticker_type_settings(ticker_type)
-    if "MA_TYPE" not in settings:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_TYPE'이 누락되었습니다.")
     if "MA_MONTHS" not in settings:
         raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
-    return [_normalize_ma_rule(ticker_type, {"MA_TYPE": settings["MA_TYPE"], "MA_MONTHS": settings["MA_MONTHS"]})]
+    return [_normalize_ma_rule(ticker_type, {"MA_MONTHS": settings["MA_MONTHS"]})]
 
 
 def build_effective_ma_rules(
@@ -89,7 +78,6 @@ def build_effective_ma_rules(
         _normalize_ma_rule(
             ticker_type,
             {
-                "MA_TYPE": override.get("ma_type", base_rule["ma_type"]),
                 "MA_MONTHS": override.get("ma_months", base_rule["ma_months"]),
             },
         )
@@ -831,7 +819,6 @@ def build_ticker_type_rankings(
 
 
 __all__ = [
-    "ALLOWED_MA_TYPES",
     "build_recent_monthly_return_metrics",
     "build_effective_ma_rules",
     "build_ticker_type_rankings",

@@ -54,7 +54,6 @@ type TopPickPayload = {
   rows?: TopPickRow[];
   missing_tickers?: string[];
   settings?: {
-    MA_TYPE: string;
     MA_MONTHS: number;
     ACCOUNT_ID: string;
     START_AMOUNT_MANWON?: number | null;
@@ -432,7 +431,7 @@ export function TopPickClient() {
               <div className="appMainHeaderLeft">
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>목표 비중</h2>
                 <div style={{ color: "var(--text-muted)", fontSize: "0.86rem" }}>
-                  기준일 {payload?.as_of_date ?? "-"} · {settings ? `${settings.MA_TYPE} ${settings.MA_MONTHS}개월 · 추세선 위 투자` : "설정 없음"}
+                  기준일 {payload?.as_of_date ?? "-"} · {settings ? `SMA ${settings.MA_MONTHS}개월 · 추세선 위 투자` : "설정 없음"}
                   {settings ? ` · 적용계좌 ${tradeSummary.account_name ?? settings.ACCOUNT_ID}` : ""}
                 </div>
               </div>

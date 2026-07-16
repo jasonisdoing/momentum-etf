@@ -11,7 +11,6 @@ type BtConfig = {
   BACKTEST_MONTHS?: number;
   BENCHMARK?: Benchmark;
   TOP_N_HOLD?: number[];
-  MA_TYPE?: string[];
   MA_MONTHS?: number[];
 };
 
@@ -22,7 +21,7 @@ type PoolEntry = {
   live_top_n_hold?: number | null;
   updated_at?: string | null;
 };
-type ApiResponse = { pools?: PoolEntry[]; constraints?: { ma_types?: string[] }; error?: string };
+type ApiResponse = { pools?: PoolEntry[]; constraints?: Record<string, never>; error?: string };
 
 const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.4)",
@@ -37,7 +36,7 @@ function parseNums(text: string): number[] {
 }
 
 /** 풀 1개 백테스트 탐색공간 인라인 편집 행 (자체 저장). */
-function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
+function PoolRow({ pool }: { pool: PoolEntry }) {
   const toast = useToast();
   const c = pool.config;
   const [sortMetric, setSortMetric] = useState((c.SORT_METRIC ?? "CAGR").toUpperCase());
@@ -51,7 +50,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
   const [maMonthsSet, setMaMonthsSet] = useState<Set<number>>(new Set(c.MA_MONTHS ?? [6, 12]));
-  const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
   const [saving, setSaving] = useState(false);
   const [resolving, setResolving] = useState(false);
@@ -128,15 +126,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
 
   const topNs = parseNums(topNText);
   const months = [...maMonthsSet].sort((a, b) => a - b);
-  const combos = topNs.length * maSet.size * months.length;
-
-  const toggleMa = (t: string) =>
-    setMaSet((prev) => {
-      const next = new Set(prev);
-      if (next.has(t)) next.delete(t);
-      else next.add(t);
-      return next;
-    });
+  const combos = topNs.length * months.length;
 
   // 백테스트기간(Month) 셀렉트 옵션 — 저장된 비표준 값은 포함해 보존.
   const monthsBase = [6, 9, 12, 15, 18, 24];
@@ -151,7 +141,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       BACKTEST_MONTHS: Math.trunc(Number(backtestMonths)),
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
-      MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
     };
     try {
@@ -262,16 +251,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
-        <span style={{ ...labelStyle, width: 84 }}>추세 타입</span>
-        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-          {maTypes.map((t) => (
-            <label key={t} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
-              <input type="checkbox" checked={maSet.has(t)} onChange={() => toggleMa(t)} />
-              {t}
-            </label>
-          ))}
-        </div>
-        <span style={{ ...labelStyle, marginLeft: 8 }}>추세 개월</span>
+        <span style={{ ...labelStyle, width: 84 }}>추세 개월</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
           {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((m) => (
             <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
@@ -343,7 +323,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
 export function BacktestConfigSection() {
   const toast = useToast();
   const [pools, setPools] = useState<PoolEntry[]>([]);
-  const [maTypes, setMaTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -353,7 +332,6 @@ export function BacktestConfigSection() {
       const data = (await resp.json()) as ApiResponse;
       if (!resp.ok || data.error) throw new Error(data.error ?? "백테스트 설정을 불러오지 못했습니다.");
       setPools(data.pools ?? []);
-      setMaTypes(data.constraints?.ma_types ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "백테스트 설정을 불러오지 못했습니다.");
     } finally {
@@ -379,7 +357,7 @@ export function BacktestConfigSection() {
         ) : pools.length === 0 ? (
           <div style={{ color: "var(--text-muted)", padding: 12 }}>등록된 백테스트 설정이 없습니다.</div>
         ) : (
-          pools.map((p) => <PoolRow key={p.pool_id} pool={p} maTypes={maTypes} />)
+          pools.map((p) => <PoolRow key={p.pool_id} pool={p} />)
         )}
       </div>
     </div>

@@ -69,7 +69,6 @@ type TopPickWeightPreview = {
 };
 
 type TopPickSettings = {
-  MA_TYPE: string;
   MA_MONTHS: number;
   VARIABLE_TICKERS: number;
   FIXED_TICKERS: number;
@@ -252,7 +251,6 @@ type TopPickReserveGridRow = TopPickReserveCandidate & {
 // 코드 기본값 없음(silent default 금지). 설정값은 전적으로 DB(/top-pick-settings 저장)에서 온다.
 // 로드 전에는 settings=null 이며 폼은 빈 상태로 렌더되고, 로드 후 DB 값으로 채워진다.
 
-const MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"];
 const MAX_TOP_PICK_SELECTED = 10;
 const previewGridTheme = createAppGridTheme();
 const DEFAULT_BACKTEST_SETTINGS: Required<TopPickBacktestSettings> = {
@@ -648,7 +646,6 @@ export function TopPickSettingsClient() {
         setReserveError(null);
         const params = new URLSearchParams({
           ticker_type: reservePoolId,
-          ma_type: settings.MA_TYPE,
           ma_months: String(settings.MA_MONTHS),
         });
         const response = await fetch(`/api/rank?${params.toString()}`, {
@@ -939,7 +936,7 @@ export function TopPickSettingsClient() {
     setSettings((current) => {
       if (!current) return current; // 로드 전에는 편집 불가
       let next: string | number | null;
-      if (key === "MA_TYPE" || key === "ACCOUNT_ID") {
+      if (key === "ACCOUNT_ID") {
         next = value; // 문자열 그대로 (빈 값은 저장 시 백엔드가 None 처리)
       } else {
         next = Number(value);
@@ -949,9 +946,8 @@ export function TopPickSettingsClient() {
   };
 
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
-    const maType = source?.MA_TYPE ?? "-";
     const maMonths = source?.MA_MONTHS ?? "-";
-    return `${maType} ${maMonths}개월 · 추세선 위 투자`;
+    return `SMA ${maMonths}개월 · 추세선 위 투자`;
   };
 
   const runBacktest = async () => {
@@ -1649,20 +1645,6 @@ export function TopPickSettingsClient() {
               <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                  <label className="appLabeledField" style={{ minWidth: 110 }}>
-                    <span className="appLabeledFieldLabel">추세 타입</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={settings?.MA_TYPE ?? ""}
-                      onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
-                    >
-                      {MA_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {type}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <label className="appLabeledField" style={{ minWidth: 110 }}>
                     <span className="appLabeledFieldLabel">추세 개월</span>
                     <select

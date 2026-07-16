@@ -13,7 +13,6 @@ type RankTickerType = {
 };
 
 type RankMaRule = {
-  ma_type: string;
   ma_months: number;
   ma_days: number;
   score_column: string;
@@ -60,7 +59,6 @@ type RankData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_type_options: string[];
   ma_months_max: number;
   as_of_date: string | null;
   monthly_return_labels: string[];
@@ -80,7 +78,6 @@ type RankToolbarData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_type_options: string[];
   ma_months_max: number;
 };
 
@@ -109,7 +106,6 @@ export async function loadRankData(params?: {
     search.set("as_of_date", params.as_of_date);
   }
   if (params?.ma_rule_override) {
-    search.set("ma_type", params.ma_rule_override.ma_type);
     search.set("ma_months", String(params.ma_rule_override.ma_months));
   }
 

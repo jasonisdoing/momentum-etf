@@ -97,7 +97,6 @@ def _ma_days_from_months(ma_months: int) -> int:
 
 def compute_trend_frame(
     close_frame: pd.DataFrame,
-    ma_type: str,
     ma_months: int,
 ) -> pd.DataFrame:
     """[일자 × 티커] 구조의 종가 프레임으로부터 MA 대비 트렌드(%) 프레임을 계산한다.
@@ -114,7 +113,7 @@ def compute_trend_frame(
         if series.empty:
             ma_cols[ticker] = pd.Series(np.nan, index=close_frame.index, dtype=float)
             continue
-        ma_series = calculate_moving_average(series, days, ma_type)
+        ma_series = calculate_moving_average(series, days)
         ma_cols[ticker] = ma_series.reindex(close_frame.index)
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     trend = pd.DataFrame(
@@ -129,11 +128,10 @@ def compute_trend_frame(
 
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
-    ma_type: str,
     ma_months: int,
 ) -> pd.DataFrame:
     """단일 MA 규칙에 대한 signed-percentile 점수 프레임을 계산한다."""
-    trend = compute_trend_frame(close_frame, ma_type, ma_months)
+    trend = compute_trend_frame(close_frame, ma_months)
     return calculate_signed_percentile_score(trend)
 
 
@@ -178,7 +176,7 @@ def build_composite_rank_scores(
     percentile_by_order: dict[int, pd.DataFrame] = {}
     for rule in ma_rules:
         order = int(rule["order"])
-        trend = compute_trend_frame(close_frame, str(rule["ma_type"]), int(rule["ma_months"]))
+        trend = compute_trend_frame(close_frame, int(rule["ma_months"]))
         trend_by_order[order] = trend
         percentile_by_order[order] = calculate_signed_percentile_score(trend)
 

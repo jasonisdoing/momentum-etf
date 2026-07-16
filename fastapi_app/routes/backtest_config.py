@@ -1,7 +1,7 @@
 """백테스트 탐색공간(backtest_config) 조회/저장 API.
 
 풀별 BACKTEST_MONTHS(개월수) + BENCHMARK + TOP_N_HOLD/
-MA_TYPE/MA_MONTHS(리스트)을 DB 에서 조회·저장한다
+MA_MONTHS(리스트)을 DB 에서 조회·저장한다
 (단일 소스: utils.backtest_config_store).
 모멘텀-설정 화면에서 편집한다.
 """
@@ -13,7 +13,6 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from config import ALLOWED_MA_TYPES
 from fastapi_app.dependencies import require_internal_token
 from utils.backtest_config_store import (
     get_backtest_config_updated_at,
@@ -40,7 +39,7 @@ def _ordered_pools(db_pools: set[str]) -> list[str]:
 
 @router.get("")
 def get_backtest_configs(_: None = Depends(require_internal_token)) -> dict[str, object]:
-    """풀별 백테스트 탐색공간 + 입력 제약(MA 타입)을 반환한다."""
+    """풀별 백테스트 탐색공간을 반환한다."""
     db_pools = set(list_backtest_pools())
     name_by_type = {str(c["ticker_type"]): str(c["name"]) for c in load_ticker_type_configs()}
 
@@ -62,7 +61,7 @@ def get_backtest_configs(_: None = Depends(require_internal_token)) -> dict[str,
             }
         )
 
-    return {"pools": pools, "constraints": {"ma_types": ALLOWED_MA_TYPES}}
+    return {"pools": pools, "constraints": {}}
 
 
 @router.put("")

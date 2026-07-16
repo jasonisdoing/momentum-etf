@@ -10,12 +10,10 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const tickerType = searchParams.get("ticker_type") ?? undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
-    const maType = searchParams.get("ma_type");
     const maMonthsRaw = searchParams.get("ma_months");
     const maRuleOverride =
-      maType || maMonthsRaw
+      maMonthsRaw
         ? {
-            ma_type: maType ?? "",
             ma_months: maMonthsRaw ? Number(maMonthsRaw) : 0,
             ma_days: 0,
             score_column: "추세(수동)",

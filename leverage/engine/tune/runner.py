@@ -305,7 +305,7 @@ def run_tuning(
         raise RuntimeError(f"프리패치 단계에서 데이터 로드에 실패했습니다: {exc}") from exc
 
     # 공격 자산은 조합 차원이 아니다 — 백테스트가 진입 시점마다 후보 중
-    # ALMA 6개월 이격도 1위를 동적으로 선택한다 (라이브와 동일 규칙).
+    # SMA 20일 이격도 1위를 동적으로 선택한다 (라이브와 동일 규칙).
     combos: list[dict] = []
     for buy_cut in tuning_config["drawdown_buy_cutoff"]:
         for sell_cut in tuning_config["drawdown_sell_cutoff"]:
@@ -417,7 +417,7 @@ def render_top_table(
     for row in results[:top_n]:
         p = row["params"]
 
-        # 공격 자산은 고정이 아니라 진입 시점마다 후보 중 ALMA 이격도 1위를 동적 선택
+        # 공격 자산은 고정이 아니라 진입 시점마다 후보 중 SMA 20일 이격도 1위를 동적 선택
         candidate_count = len(p.get("offense_candidates") or [])
         offense_display = f"동적선택({candidate_count}종)" if candidate_count else "동적선택"
 
