@@ -476,7 +476,7 @@ def _normalize_ranking_values(
         *(monthly_labels or []),
     ]
     one_decimal_columns = ["RSI"]
-    score_columns = ["추세"]
+    score_columns = ["추세", "이격", "기울기"]
     score_columns.extend(
         str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
     )
@@ -519,6 +519,8 @@ def _apply_common_rank_scores(
 
     if not effective_close_series_map or not ma_rules:
         df["추세"] = pd.NA
+        df["이격"] = pd.NA
+        df["기울기"] = pd.NA
         for column in score_columns:
             if column not in df.columns:
                 df[column] = pd.NA
@@ -536,6 +538,8 @@ def _apply_common_rank_scores(
 
     if not series_frames:
         df["추세"] = pd.NA
+        df["이격"] = pd.NA
+        df["기울기"] = pd.NA
         for column in score_columns:
             df[column] = pd.NA
         return df
@@ -576,6 +580,7 @@ def _apply_common_rank_scores(
         df["추세"] = trend_sum / len(trend_values_by_rule)
     else:
         df["추세"] = pd.NA
+    df["이격"] = df["추세"]
 
     composite_missing = tickers_col.map(
         {
@@ -586,6 +591,7 @@ def _apply_common_rank_scores(
 
     # 자격 미달 종목(결손 행) 일관성 마스킹 처리
     df.loc[composite_missing, "추세"] = None
+    df.loc[composite_missing, "이격"] = None
 
     for column, trend_map in trend_maps.items():
         df[column] = tickers_col.map(trend_map).astype("object")
@@ -606,8 +612,15 @@ def _apply_common_rank_scores(
         main_ma_cols[ticker] = calculate_moving_average(series, main_days).reindex(close_frame.index)
 
     short_ma_row = pd.DataFrame(short_ma_cols, index=close_frame.index).loc[eval_date]
-    main_ma_row = pd.DataFrame(main_ma_cols, index=close_frame.index).loc[eval_date]
+    main_ma_frame = pd.DataFrame(main_ma_cols, index=close_frame.index)
+    main_ma_row = main_ma_frame.loc[eval_date]
+    previous_main_ma_row = (
+        main_ma_frame.iloc[-2]
+        if len(main_ma_frame.index) >= 2
+        else pd.Series(dtype="float64")
+    )
     order_map: dict[str, str | None] = {}
+    slope_map: dict[str, float | None] = {}
     for ticker in close_frame.columns:
         short_value = short_ma_row.get(ticker)
         main_value = main_ma_row.get(ticker)
@@ -615,6 +628,13 @@ def _apply_common_rank_scores(
             order_map[ticker] = None
         else:
             order_map[ticker] = "정배열" if float(short_value) >= float(main_value) else "역배열"
+        previous_main_value = previous_main_ma_row.get(ticker)
+        if pd.isna(main_value) or pd.isna(previous_main_value) or float(previous_main_value) == 0.0:
+            slope_map[ticker] = None
+        else:
+            slope_map[ticker] = ((float(main_value) / float(previous_main_value)) - 1.0) * 100.0
+    df["기울기"] = tickers_col.map(slope_map).astype("object")
+    df.loc[composite_missing, "기울기"] = None
     df["배열"] = tickers_col.map(order_map).astype("object")
     df.loc[composite_missing, "배열"] = None
 
