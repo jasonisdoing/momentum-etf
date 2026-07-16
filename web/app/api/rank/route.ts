@@ -10,7 +10,6 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const tickerType = searchParams.get("ticker_type") ?? undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
-    const heldBonusScore = searchParams.get("held_bonus_score");
     const maType = searchParams.get("ma_type");
     const maMonthsRaw = searchParams.get("ma_months");
     const maRuleOverride =
@@ -26,7 +25,6 @@ export async function GET(request: NextRequest) {
       ticker_type: tickerType,
       ma_rule_override: maRuleOverride,
       as_of_date: asOfDate,
-      held_bonus_score: heldBonusScore === null || heldBonusScore === undefined ? undefined : Number(heldBonusScore),
     }, request.signal);
     return jsonNoStore(data);
   } catch (error) {

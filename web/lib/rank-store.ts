@@ -6,9 +6,7 @@ type RankTickerType = {
   name: string;
   icon: string;
   country_code: string;
-  holding_bonus_score?: number;
   top_n_hold?: number;
-  rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
   include?: string[];
@@ -34,7 +32,6 @@ type RankRow = {
   상장일: string;
   분류: string;
   "전체 분류": string;
-  점수: number | null;
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
@@ -74,7 +71,6 @@ type RankData = {
   ranking_computed_at: string | null;
   realtime_fetched_at: string | null;
   previous_trading_day: string | null;
-  held_bonus_score: number;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];
@@ -86,7 +82,6 @@ type RankToolbarData = {
   ma_rules: RankMaRule[];
   ma_type_options: string[];
   ma_months_max: number;
-  held_bonus_score: number;
 };
 
 export async function loadRankToolbarData(params?: {
@@ -105,7 +100,6 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRule;
   as_of_date?: string;
-  held_bonus_score?: number;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -113,9 +107,6 @@ export async function loadRankData(params?: {
   }
   if (params?.as_of_date) {
     search.set("as_of_date", params.as_of_date);
-  }
-  if (typeof params?.held_bonus_score === "number") {
-    search.set("held_bonus_score", String(params.held_bonus_score));
   }
   if (params?.ma_rule_override) {
     search.set("ma_type", params.ma_rule_override.ma_type);

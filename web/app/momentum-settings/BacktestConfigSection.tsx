@@ -11,10 +11,8 @@ type BtConfig = {
   BACKTEST_MONTHS?: number;
   BENCHMARK?: Benchmark;
   TOP_N_HOLD?: number[];
-  HOLDING_BONUS_SCORE?: number[];
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
-  RSI_LIMIT?: number[];
 };
 
 type PoolEntry = {
@@ -52,9 +50,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const [topNText, setTopNText] = useState(
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
-  const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 10, 20]).join(", "));
   const [maMonthsSet, setMaMonthsSet] = useState<Set<number>>(new Set(c.MA_MONTHS ?? [6, 12]));
-  const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
   const [saving, setSaving] = useState(false);
@@ -131,10 +127,8 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   };
 
   const topNs = parseNums(topNText);
-  const bonus = parseNums(bonusText);
   const months = [...maMonthsSet].sort((a, b) => a - b);
-  const rsi = parseNums(rsiText);
-  const combos = topNs.length * bonus.length * maSet.size * months.length * rsi.length;
+  const combos = topNs.length * maSet.size * months.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -157,10 +151,8 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       BACKTEST_MONTHS: Math.trunc(Number(backtestMonths)),
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
-      HOLDING_BONUS_SCORE: bonus,
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
-      RSI_LIMIT: rsi,
     };
     try {
       setSaving(true);
@@ -267,10 +259,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       <div style={rowStyle}>
         <span style={{ ...labelStyle, width: 84 }}>보유 종목수</span>
         <input style={{ ...inputStyle, width: 190 }} placeholder="3, 4, 5, 6, 7, 8, 9, 10" value={topNText} onChange={(e) => setTopNText(e.target.value)} />
-        <span style={{ ...labelStyle, marginLeft: 8 }}>보유보너스(%)</span>
-        <input style={{ ...inputStyle, width: 110 }} placeholder="0, 10, 20" value={bonusText} onChange={(e) => setBonusText(e.target.value)} />
-        <span style={{ ...labelStyle, marginLeft: 8 }}>RSI 상한</span>
-        <input style={{ ...inputStyle, width: 170 }} placeholder="80, 85, 90, 95, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>

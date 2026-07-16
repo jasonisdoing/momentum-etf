@@ -136,7 +136,7 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
 def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
     """pools.json에 정의된 개별 종목풀 설정을 로드합니다.
 
-    편집 가능한 5개 값은 DB(pool_settings)가 단일 소스다(시드 필요).
+    편집 가능한 값은 DB(pool_settings)가 단일 소스다(시드 필요).
     """
     from utils.pool_settings_store import resolve_pool_values
 

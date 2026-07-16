@@ -24,9 +24,7 @@ type RankTickerType = {
   name: string;
   icon: string;
   country_code: string;
-  holding_bonus_score?: number;
   top_n_hold?: number;
-  rsi_limit?: number | null;
   type_source?: string;
   currency?: string;
   include?: string[];
@@ -62,7 +60,7 @@ type RankRow = {
   상장일: string;
   분류: string;
   "전체 분류": string;
-  점수: number | null;
+  추세: number | null;
   보유: string;
   현재가: number | null;
   "괴리율": number | null;
@@ -92,7 +90,6 @@ type RankRow = {
   exclude_from_ranking?: boolean;
   is_benchmark?: boolean;
   is_below_benchmark?: boolean;
-  보유가점?: number;
 };
 
 type RankResponse = {
@@ -110,7 +107,6 @@ type RankResponse = {
   ranking_computed_at?: string | null;
   realtime_fetched_at?: string | null;
   previous_trading_day?: string | null;
-  held_bonus_score?: number;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -301,19 +297,8 @@ function renderSignedPercentCell(value: number | null) {
   return <span className={getSignedClass(value ?? null)}>{formatPercent(value ?? null)}</span>;
 }
 
-function renderRsiCell(value: number | null, rsiLimit?: number | null) {
-  const formatted = formatNumber(value, 1);
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return formatted;
-  }
-  if (rsiLimit == null || Number.isNaN(rsiLimit) || value < rsiLimit) {
-    return formatted;
-  }
-  return (
-    <span style={{ color: "#d63939", fontWeight: 700 }}>
-      ⚠️ {formatted}
-    </span>
-  );
+function renderRsiCell(value: number | null) {
+  return formatNumber(value, 1);
 }
 
 function formatCurrencyValue(value: number | null, countryCode?: string): string {
@@ -354,16 +339,6 @@ function formatAudMarketCap(value: number | null): string {
   return `${formatNumber(value, 0)} AUD`;
 }
 
-function clampHeldBonusScore(value: number): number {
-  if (Number.isNaN(value) || value < 0) {
-    return 0;
-  }
-  if (value > 50) {
-    return 50;
-  }
-  return Math.round(value / 5) * 5;
-}
-
 function buildRankSessionCacheKey(query: string): string {
   return `${RANK_SESSION_CACHE_PREFIX}:${query || "default"}`;
 }
@@ -386,7 +361,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maTypeOptions, setMaTypeOptions] = useState<string[]>(rankToolbarCache?.ma_type_options ?? []);
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
-  const [heldBonusScore, setHeldBonusScore] = useState(0);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -450,18 +424,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setRows(payload.rows ?? []);
     setCacheBlocked(Boolean(payload.cache_blocked));
 
-    const currentConfig = (payload.ticker_types ?? []).find(t => t.ticker_type === nextAccountId);
-    const configuredHeldBonusScore =
-      currentConfig && typeof currentConfig.holding_bonus_score === "number"
-        ? currentConfig.holding_bonus_score
-        : payload.held_bonus_score;
-
-    if (typeof payload.held_bonus_score === "number") {
-      setHeldBonusScore(payload.held_bonus_score);
-    } else if (typeof configuredHeldBonusScore === "number") {
-      setHeldBonusScore(configuredHeldBonusScore);
-    }
-
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -482,14 +444,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMaTypeOptions(payload.ma_type_options ?? []);
     setMaMonthsMax(payload.ma_months_max ?? 12);
 
-    const currentConfig = nextTickerTypes.find(t => t.ticker_type === nextAccountId);
-    const configuredHeldBonusScore =
-      currentConfig && typeof currentConfig.holding_bonus_score === "number"
-        ? currentConfig.holding_bonus_score
-        : payload.held_bonus_score;
-    if (typeof configuredHeldBonusScore === "number") {
-      setHeldBonusScore(configuredHeldBonusScore);
-    }
     rankToolbarCache = {
       ticker_types: nextTickerTypes,
       ticker_type: nextAccountId,
@@ -539,7 +493,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ticker_type?: string;
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
-    held_bonus_score?: number;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -557,14 +510,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.as_of_date) {
         search.set("as_of_date", next.as_of_date);
       }
-      if (typeof next?.held_bonus_score === "number") {
-        search.set("held_bonus_score", String(next.held_bonus_score));
-      } else if (next?.bootstrap) {
-        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
-      } else {
-        search.set("held_bonus_score", String(heldBonusScore));
-      }
-
       if (next?.ma_rule_override) {
         search.set("ma_type", next.ma_rule_override.ma_type);
         search.set("ma_months", String(next.ma_rule_override.ma_months));
@@ -638,21 +583,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }, []);
 
-  // 초기 로딩 시 보유 보너스 점수는 선택된 종목풀 설정을 서버에서 적용한다.
-
-
-  function handleHeldBonusScoreChange(nextValue: number) {
-    const normalized = clampHeldBonusScore(nextValue);
-    setHeldBonusScore(normalized);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: selectedAsOfDate,
-      held_bonus_score: normalized,
-      skip_session_cache: true,
-    });
-  }
-
   const selectedTickerTypeItem = useMemo(
     () => ticker_types.find((account) => account.ticker_type === selectedTickerType) ?? null,
     [ticker_types, selectedTickerType],
@@ -699,7 +629,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         상장일: addingRow.listing_date || "-",
         분류: "",
         "전체 분류": "",
-        점수: null,
+        추세: null,
         보유: "",
         현재가: null,
         괴리율: null,
@@ -734,46 +664,36 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   const maRuleSummary = useMemo(() => (maRule ? [`MA: ${maRule.ma_type} ${maRule.ma_months}개월`] : []), [maRule]);
 
-  // 추천 ✅ 대상 티커 집합 — 순위 표시는 원점수 기준, 추천만 보유보너스를 반영한다.
+  // 추천 ✅ 대상 티커 집합 — 현재 추세(%) 기준으로 정렬한다.
   const recommendedTickerSet = useMemo<Set<string>>(() => {
     const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
     if (!topN) return new Set();
-    const rsiLimit = selectedTickerTypeItem?.rsi_limit;
-    const bonusScore = Number(heldBonusScore ?? 0);
     const sorted = [...gridRows]
       .filter(
         (r) =>
           r.순위 != null &&
           !r.exclude_from_ranking &&
           !r.is_benchmark &&
-          (r.점수 ?? 0) > 0
+          (r.추세 ?? 0) > 0
       )
       .sort((a, b) => {
-        const aScore = typeof a.점수 === "number" && !Number.isNaN(a.점수) ? a.점수 : null;
-        const bScore = typeof b.점수 === "number" && !Number.isNaN(b.점수) ? b.점수 : null;
-        const aAdjustedScore = aScore === null ? null : aScore + (String(a.보유 || "").trim() ? bonusScore : 0);
-        const bAdjustedScore = bScore === null ? null : bScore + (String(b.보유 || "").trim() ? bonusScore : 0);
-        if (aAdjustedScore === null && bAdjustedScore === null) {
+        const aScore = typeof a.추세 === "number" && !Number.isNaN(a.추세) ? a.추세 : null;
+        const bScore = typeof b.추세 === "number" && !Number.isNaN(b.추세) ? b.추세 : null;
+        if (aScore === null && bScore === null) {
           return Number(a.순위 ?? 0) - Number(b.순위 ?? 0);
         }
-        if (aAdjustedScore === null) return 1;
-        if (bAdjustedScore === null) return -1;
-        if (bAdjustedScore !== aAdjustedScore) return bAdjustedScore - aAdjustedScore;
+        if (aScore === null) return 1;
+        if (bScore === null) return -1;
+        if (bScore !== aScore) return bScore - aScore;
         return Number(a.순위 ?? 0) - Number(b.순위 ?? 0);
       });
     const picked = new Set<string>();
     for (const row of sorted) {
       if (picked.size >= topN) break;
-      if (rsiLimit != null) {
-        const rsi = row.RSI;
-        if (typeof rsi === "number" && !Number.isNaN(rsi) && rsi > rsiLimit) {
-          continue;
-        }
-      }
       if (row.id) picked.add(row.id);
     }
     return picked;
-  }, [gridRows, heldBonusScore, selectedTickerTypeItem?.top_n_hold, selectedTickerTypeItem?.rsi_limit]);
+  }, [gridRows, selectedTickerTypeItem?.top_n_hold]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const activeMaMonths = maRule?.ma_months ?? 12;
@@ -1010,7 +930,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                             ticker_type: selectedTickerType,
                             ma_rule_override: maRule ?? undefined,
                             as_of_date: selectedAsOfDate,
-                            held_bonus_score: heldBonusScore,
                             skip_session_cache: true,
                           });
                         } catch (error) {
@@ -1194,37 +1113,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     const cumulativeColumns: ColDef<RankGridRow>[] = [
       {
-        field: "점수",
-        headerName: "점수",
-        minWidth: 64,
-        width: 64,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? null, 1),
-      },
-      {
         field: "추세",
-        headerName: "추세",
-        minWidth: 72,
-        width: 72,
+        headerName: "추세(%)",
+        minWidth: 86,
+        width: 86,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          if (params.value === null || params.value === undefined) return "-";
-          const sign = params.value > 0 ? "+" : "";
-          return (
-            <span style={{ color: "#111", fontWeight: 600 }}>
-              {sign}{formatNumber(params.value, 1)}
-            </span>
-          );
-        },
-      },
-      {
-        field: "보유가점",
-        headerName: "보유",
-        hide: true,
-        minWidth: 76,
-        width: 76,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value ?? 0, 0),
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       ...(showDeviationColumn
         ? [
@@ -1253,7 +1147,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 68,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) =>
-          renderRsiCell(params.value ?? null, selectedTickerTypeItem?.rsi_limit),
+          renderRsiCell(params.value ?? null),
       },
       {
         headerName: "MDD3달",
@@ -1441,7 +1335,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: selectedTickerType,
       ma_rule_override: nextRule,
       as_of_date: selectedAsOfDate,
-      held_bonus_score: heldBonusScore,
     });
   }
 
@@ -1455,7 +1348,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: selectedTickerType,
       ma_rule_override: nextRule,
       as_of_date: selectedAsOfDate,
-      held_bonus_score: heldBonusScore,
     });
   }
 
@@ -1465,7 +1357,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       ticker_type: selectedTickerType,
       ma_rule_override: maRule ?? undefined,
       as_of_date: nextAsOfDate,
-      held_bonus_score: heldBonusScore,
     });
   }
 
@@ -1589,7 +1480,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
-          held_bonus_score: heldBonusScore,
           skip_session_cache: true,
         });
       } catch (saveError) {
@@ -1634,7 +1524,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           ticker_type: selectedTickerType,
           ma_rule_override: maRule ?? undefined,
           as_of_date: selectedAsOfDate,
-          held_bonus_score: heldBonusScore,
           skip_session_cache: true,
         });
       } catch (deleteError) {
@@ -1677,30 +1566,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const headerSummary = useMemo<RankHeaderSummary>(() => {
     const totalCount = gridRows.length;
     const upCount = gridRows.filter(
-      (r) => (r["점수"] ?? 0) > 0 && !r.is_benchmark && !r.exclude_from_ranking
+      (r) => (r["추세"] ?? 0) > 0 && !r.is_benchmark && !r.exclude_from_ranking
     ).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
-    const configuredRsiLimit = selectedTickerTypeItem?.rsi_limit;
     const configuredTopN = selectedTickerTypeItem?.top_n_hold;
-    const configuredBonus = selectedTickerTypeItem?.holding_bonus_score;
     const ruleSummaryParts: string[] = [];
     if (configuredTopN != null && !Number.isNaN(configuredTopN)) {
       ruleSummaryParts.push(`TOP ${formatNumber(configuredTopN, 0)}`);
     }
-    if (configuredBonus != null && !Number.isNaN(configuredBonus)) {
-      ruleSummaryParts.push(`보너스 ${formatNumber(configuredBonus, 0)}`);
-    }
     ruleSummaryParts.push(...maRuleSummary);
-    if (configuredRsiLimit != null && !Number.isNaN(configuredRsiLimit)) {
-      ruleSummaryParts.push(`RSI ${formatNumber(configuredRsiLimit, 0)}`);
-    }
     return {
       upCount,
       upPct,
       totalCount,
       ruleSummary: ruleSummaryParts.join(" / ") || "-",
     };
-  }, [gridRows, maRuleSummary, selectedTickerTypeItem?.rsi_limit]);
+  }, [gridRows, maRuleSummary, selectedTickerTypeItem?.top_n_hold]);
 
   useEffect(() => {
     onHeaderSummaryChange?.(headerSummary);
@@ -1773,23 +1654,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         관리모드
                       </button>
                     </div>
-                  </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">보유보너스(%)</span>
-                    <select
-                      className="form-select"
-                      value={String(heldBonusScore)}
-                      onChange={(event) => handleHeldBonusScoreChange(Number(event.target.value))}
-                    >
-                      {([0, 10, 20].includes(heldBonusScore)
-                        ? [0, 10, 20]
-                        : [...[0, 10, 20], heldBonusScore].sort((a, b) => a - b)
-                      ).map((score) => (
-                        <option key={score} value={score}>
-                          {score}
-                        </option>
-                      ))}
-                    </select>
                   </label>
                   {pageMode === "rank" && maRule ? (
                     <label className="appLabeledField">
@@ -1899,7 +1763,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  const scoreVal = params.data?.점수 ?? 0;
+                  const scoreVal = params.data?.추세 ?? 0;
                   if (scoreVal <= 0) {
                     classes.push("rankNegativeTrendRow");
                   }

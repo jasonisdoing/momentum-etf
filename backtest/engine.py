@@ -27,7 +27,7 @@ from config import (
 )
 from core.strategy.scoring import (
     compute_eligibility_mask,
-    compute_rule_percentile_frame,
+    compute_trend_frame,
 )
 from services.price_service import get_realtime_snapshot
 from utils.backtest_config_store import load_backtest_config
@@ -39,7 +39,6 @@ from utils.settings_loader import get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
 logger = logging.getLogger(__name__)
-RSI_PERIOD = 14
 
 # ----------------------------- 헬퍼 ----------------------------- #
 
@@ -252,13 +251,12 @@ def _augment_frames_with_intraday_open(
         frames[ticker] = merged
 
 
-def _combine_rule_percentiles_array(
+def _combine_rule_trends_array(
     per_rule_arrays: list[np.ndarray],
     eligibility_mask: np.ndarray,
 ) -> np.ndarray:
-    """규칙별 percentile 배열을 합산하고 자격 마스크를 적용한다.
+    """규칙별 추세(%) 배열을 합산하고 자격 마스크를 적용한다.
 
-    공통 엔진의 ``combine_rule_percentiles()`` 와 같은 의미를 유지하되,
     백테스트 워커 내부에서는 DataFrame 대신 ndarray 로 계산한다.
     """
     if not per_rule_arrays:
@@ -270,30 +268,12 @@ def _combine_rule_percentiles_array(
     return composite
 
 
-def _compute_rsi_frame(close_frame: pd.DataFrame, period: int) -> pd.DataFrame:
-    """종가 프레임으로 RSI 프레임을 계산한다."""
-    delta = close_frame.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-
-    rsi = pd.DataFrame(np.nan, index=close_frame.index, columns=close_frame.columns, dtype=float)
-    zero_loss_mask = avg_loss == 0
-    rsi[zero_loss_mask & ~avg_gain.isna()] = 100.0
-
-    valid_mask = (~avg_gain.isna()) & (~avg_loss.isna()) & (~zero_loss_mask)
-    rs = avg_gain[valid_mask] / avg_loss[valid_mask]
-    rsi[valid_mask] = 100.0 - (100.0 / (1.0 + rs))
-    return rsi
-
-
 # -------------------- 워커 프로세스 (병렬 실행) -------------------- #
 
 
 # 워커 프로세스에서 공유하는 전역 변수.
 # _init_worker() 로 한 번만 초기화되며, 각 워커 프로세스 내에서만 유효하다.
-_W_PCT_VALUES: dict[tuple[str, int], np.ndarray] = {}
+_W_TREND_VALUES: dict[tuple[str, int], np.ndarray] = {}
 _W_ELIG_VALUES: np.ndarray = np.empty((0, 0), dtype=bool)
 _W_DAYS: list[pd.Timestamp] = []
 _W_CASH_LOCAL: float = 0.0
@@ -302,28 +282,26 @@ _W_SELL_SLIPPAGE: float = 0.0
 _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
-_W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
-_W_BM_PCT_VALUES: dict[tuple[str, int], np.ndarray] = {}
+_W_BM_TREND_VALUES: dict[tuple[str, int], np.ndarray] = {}
 
 
 def _init_worker(
-    pct_specs_values: dict[tuple[str, int], np.ndarray],
+    trend_specs_values: dict[tuple[str, int], np.ndarray],
     eligibility_values: np.ndarray,
     open_values: np.ndarray,
     close_values: np.ndarray,
     bt_days: list[pd.Timestamp],
     init_cash_local: float,
     fx_values: np.ndarray,
-    rsi_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
-    bm_pct_specs_values: dict[tuple[str, int], np.ndarray] = None,
+    bm_trend_specs_values: dict[tuple[str, int], np.ndarray] = None,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
-    global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
-    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES  # noqa: PLW0603
-    global _W_BM_PCT_VALUES  # noqa: PLW0603
-    _W_PCT_VALUES = pct_specs_values
+    global _W_TREND_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
+    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES  # noqa: PLW0603
+    global _W_BM_TREND_VALUES  # noqa: PLW0603
+    _W_TREND_VALUES = trend_specs_values
     _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
     _W_CASH_LOCAL = init_cash_local
@@ -332,47 +310,38 @@ def _init_worker(
     _W_OPEN_VALUES = open_values
     _W_CLOSE_VALUES = close_values
     _W_FX_VALUES = fx_values
-    _W_RSI_VALUES = rsi_values
-    _W_BM_PCT_VALUES = bm_pct_specs_values or {}
+    _W_BM_TREND_VALUES = bm_trend_specs_values or {}
 
 
-def _run_single_combo(args: tuple[int, str, int, float | None, float, float]) -> dict[str, Any]:
+def _run_single_combo(args: tuple[int, str, int]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold = args
-    raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
-    # 가중치 비율 결합 (추세 단독 + 보유가점)
-    composite_values = w_trend * raw_composite
+    top_n, ma_t, ma_m = args
+    raw_composite = _combine_rule_trends_array([_W_TREND_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
+    composite_values = raw_composite
 
-    # 벤치마크 점수 빌드
+    # 벤치마크 추세(%) 빌드
     bm_composite = None
-    bm_pct = _W_BM_PCT_VALUES.get((ma_t, ma_m))
-    if bm_pct is not None:
-        bm_composite = w_trend * bm_pct.copy()
+    bm_trend = _W_BM_TREND_VALUES.get((ma_t, ma_m))
+    if bm_trend is not None:
+        bm_composite = bm_trend.copy()
 
     total_ret, cagr, mdd, trades, sortino = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
         top_n=top_n,
-        w_hold=w_hold,
         composite_values=composite_values,
         open_values=_W_OPEN_VALUES,
         close_values=_W_CLOSE_VALUES,
         backtest_days=_W_DAYS,
         fx_values=_W_FX_VALUES,
-        rsi_values=_W_RSI_VALUES,
-        rsi_limit=rsi_limit,
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
         benchmark_composite_scores=bm_composite,
     )
     return {
         "TOP_N_HOLD": top_n,
-        "HOLDING_BONUS_SCORE": w_hold * 100.0,
-        "W_TREND": w_trend,
-        "W_HOLD": w_hold,
-        "W_SEC": 0.0,
+        "W_TREND": 1.0,
         "MA_TYPE": ma_t,
         "MA_MONTHS": ma_m,
-        "RSI_LIMIT": rsi_limit,
         "TOTAL_RETURN_PCT": total_ret,
         "CAGR_PCT": cagr,
         "MDD_PCT": mdd,
@@ -395,18 +364,13 @@ def _simulate_one_combo(
     *,
     initial_cash_local: float,
     top_n: int,
-    w_hold: float,
     composite_values: np.ndarray,
     open_values: np.ndarray,
     close_values: np.ndarray,
     backtest_days: list[pd.Timestamp],
     fx_values: np.ndarray,
-    rsi_values: np.ndarray,
-    rsi_limit: float | None,
     buy_slippage: float,
     sell_slippage: float,
-    w_sec: float = 0.0,
-    secondary_points: np.ndarray | None = None,
     benchmark_composite_scores: np.ndarray | None = None,
 ) -> tuple[float, float, float, int, float]:
     """단일 파라미터 조합에 대해 1회 백테스트.
@@ -433,20 +397,6 @@ def _simulate_one_combo(
         portfolio_value_local = cash + float(np.dot(shares[priced_mask], close_today[priced_mask]))
 
         composite_today = composite_values[signal_idx].copy()
-        if w_hold > 0:
-            held_bonus_mask = (shares > 0) & ~np.isnan(composite_today)
-            composite_today[held_bonus_mask] += w_hold * 100.0
-        # 보조지표 보너스: 이미 포인트로 스케일된 값(SHARPE, -100~+100) × w_sec 를 점수에 가산.
-        if w_sec > 0 and secondary_points is not None:
-            sec_today = secondary_points[signal_idx]
-            sec_mask = ~np.isnan(composite_today) & ~np.isnan(sec_today)
-            composite_today[sec_mask] += w_sec * sec_today[sec_mask]
-
-        rsi_sell_mask = np.zeros_like(shares, dtype=bool)
-        if rsi_limit is not None:
-            rsi_today = rsi_values[signal_idx]
-            rsi_sell_mask = (~np.isnan(rsi_today)) & (rsi_today > rsi_limit)
-            composite_today[rsi_sell_mask] = np.nan
 
         open_exec = open_values[exec_idx]
         valid_mask = ~np.isnan(composite_today) & (composite_today > 0.0) & ~np.isnan(open_exec) & (open_exec > 0)
@@ -459,7 +409,7 @@ def _simulate_one_combo(
             value_curve.append(portfolio_value_local * fx_today)
             continue
 
-        # 동점 처리: 점수 desc → ticker asc(컬럼 순서가 이미 ticker asc).
+        # 동점 처리: 추세 desc → ticker asc(컬럼 순서가 이미 ticker asc).
         # 전체 정렬 대신 상위 top_n 후보만 partial sort로 추린 뒤 최종 정렬한다.
         valid_scores = composite_today[valid_idx]
         target_count = min(top_n, valid_idx.size)
@@ -482,7 +432,7 @@ def _simulate_one_combo(
         target_mask = np.zeros_like(valid_mask, dtype=bool)
         target_mask[target_idx] = True
         held_mask = shares > 0
-        to_sell_idx = np.flatnonzero(held_mask & (~target_mask | rsi_sell_mask))
+        to_sell_idx = np.flatnonzero(held_mask & ~target_mask)
         to_buy_idx = target_idx[shares[target_idx] == 0]
 
         # 신호 시점 기준 총 자산 (= 목표 비중 계산용). 매수/매도는 현지 통화로 수행.
@@ -676,11 +626,9 @@ def _result_sort_key(result: dict[str, Any], sort_metric: str = "CAGR") -> tuple
         - "CAGR": CAGR 높은 순 (동률이면 MDD)
         - "MDD": 낙폭이 얕은 순 (MDD_PCT 가 0 에 가까운 순, 동률이면 CAGR 높은 순)
     """
-    rsi_limit = result.get("RSI_LIMIT")
-    sortable_rsi = float(rsi_limit) if rsi_limit is not None else float("-inf")
     if sort_metric == "MDD":
-        return (-float(result["MDD_PCT"]), -float(result["CAGR_PCT"]), -sortable_rsi)
-    return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -sortable_rsi)
+        return (-float(result["MDD_PCT"]), -float(result["CAGR_PCT"]), -float(result["TOTAL_RETURN_PCT"]))
+    return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -float(result["TOTAL_RETURN_PCT"]))
 
 
 def _write_results_file(
@@ -694,8 +642,6 @@ def _write_results_file(
     top_n_values: list[int],
     ma_types: list[str],
     ma_months_list: list[int],
-    hold_pct_values: list[float],
-    rsi_limits: list[float] | None,
     total_combos: int,
     done_count: int,
     period_start: pd.Timestamp,
@@ -737,17 +683,13 @@ def _write_results_file(
     lines.append(
         f"탐색 공간: TOP_N_HOLD {len(top_n_values)}개 "
         f"x MA_TYPE {len(ma_types)}개 x MA_MONTHS {len(ma_months_list)}개 "
-        f"{f'x RSI_LIMIT {len(rsi_limits)}개 ' if rsi_limits is not None else ''}"
-        f"x 보유보너스(%) {len(hold_pct_values)}개 "
         f"= {total_combos}개 조합"
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
-    lines.append('"WEIGHT": "추세 단독 + 보유가점",')
+    lines.append('"WEIGHT": "추세 단독",')
     lines.append(f'"MA_TYPE": {ma_types},')
     lines.append(f'"MA_MONTHS": {ma_months_list},')
-    if rsi_limits is not None:
-        lines.append(f'"RSI_LIMIT": {[int(v) if float(v).is_integer() else v for v in rsi_limits]},')
     lines.append("")
 
     status_label = "최종 결과" if is_final else f"중간 결과 ({done_count}/{total_combos})"
@@ -761,25 +703,20 @@ def _write_results_file(
         out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    # W_TREND 절대값 대신 보유%를 표기한다.
     headers = [
         "TOP_N",
-        "W_HOLD",
         "추세타입",
         "추세개월",
-        "RSI",
         "수익률(%)",
         "CAGR(%)",
         "MDD(%)",
         "Sortino",
         "Trades",
     ]
-    aligns = ["left", "right", "left", "left", "left", "right", "right", "right", "right", "right"]
+    aligns = ["left", "left", "left", "right", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
-            "-",
-            "-",
             "-",
             "-",
             "-",
@@ -797,10 +734,8 @@ def _write_results_file(
         formatted_rows.append(
             [
                 str(r["TOP_N_HOLD"]),
-                f"{int(round(float(r.get('W_HOLD', 0.0)) * 100))}%",
                 r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
-                "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
                 f"{r['MDD_PCT']:.2f}",
@@ -850,8 +785,8 @@ def _format_weight_pct(value: float | None) -> str:
     return f"{value:.2f}%"
 
 
-def _format_score_value(value: float | None) -> str:
-    """점수/추세 값을 표 출력용 문자열로 변환한다."""
+def _format_metric_value(value: float | None) -> str:
+    """지표 값을 표 출력용 문자열로 변환한다."""
     if value is None:
         return "-"
     return f"{value:.1f}"
@@ -1041,17 +976,11 @@ def _simulate_one_combo_details(
     *,
     initial_cash_local: float,
     top_n: int,
-    w_hold: float,
-    w_sec: float = 0.0,
     w_trend: float = 1.0,
-    secondary_points_frame: pd.DataFrame | None = None,
-    secondary_metric: str = "Sortino",
     composite_frame: pd.DataFrame,
     rule_frame: pd.DataFrame,
     open_frame: pd.DataFrame,
     close_frame: pd.DataFrame,
-    rsi_frame: pd.DataFrame,
-    rsi_limit: float | None,
     backtest_days: list[pd.Timestamp],
     fx_series: pd.Series,
     benchmark_values_krw: pd.Series | None,
@@ -1094,10 +1023,7 @@ def _simulate_one_combo_details(
         "평가손익",
         "평가(%)",
         "비중",
-        "점수(D-1)",
-        "추세(D-1)",
-        f"{secondary_metric}(D-1)",
-        "RSI(D-1)",
+        "추세(%)(D-1)",
         "문구",
     ]
     aligns = [
@@ -1105,9 +1031,6 @@ def _simulate_one_combo_details(
         "left",
         "left",
         "left",
-        "right",
-        "right",
-        "right",
         "right",
         "right",
         "right",
@@ -1130,14 +1053,9 @@ def _simulate_one_combo_details(
     lines.append("=== 백테스트 상세 ===")
     lines.append(f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}")
     lines.append(f"TOP_N_HOLD: {top_n}")
-    lines.append(
-        f"가중치(추세/보유/{secondary_metric}): "
-        f"{w_trend * 100:g}% / {w_hold * 100:g}% / {w_sec * 100:g}%"
-    )
+    lines.append("선정기준: 추세(%)")
     lines.append(f"MA_TYPE: {rule_frame.attrs.get('ma_type', '-')}")
     lines.append(f"MA_MONTHS: {rule_frame.attrs.get('ma_months', '-')}")
-    if rsi_limit is not None:
-        lines.append(f"RSI_LIMIT: {rsi_limit:g}")
     lines.append("")
     lines.append("1. 일별 거래 내역")
     lines.append("")
@@ -1192,10 +1110,7 @@ def _simulate_one_combo_details(
             "-",
             "-",
             _format_weight_pct(cash_weight),
-            "-",  # 점수(D-1)
-            "-",  # 추세(D-1)
-            "-",  # 보조지표(D-1)
-            "-",  # RSI(D-1)
+            "-",  # 추세(%)(D-1)
             note,
         ]
         day_rows.append(cash_row)
@@ -1215,10 +1130,7 @@ def _simulate_one_combo_details(
                     row["pnl"],
                     row["pnl_pct"],
                     row["weight"],
-                    row["score"],
                     row["trend"],
-                    row["secondary"],
-                    row["rsi"],
                     row["message"],
                 ]
             )
@@ -1239,10 +1151,6 @@ def _simulate_one_combo_details(
     bm_composite_series = pd.Series(np.nan, index=backtest_days)
     if bm_ticker_name and bm_ticker_name in rule_frame.columns:
         bm_composite_series = w_trend * rule_frame[bm_ticker_name]
-        if w_sec > 0 and secondary_points_frame is not None and bm_ticker_name in secondary_points_frame.columns:
-            bm_sec = secondary_points_frame[bm_ticker_name]
-            non_nan = bm_composite_series.notna() & bm_sec.notna()
-            bm_composite_series.loc[non_nan] += w_sec * bm_sec.loc[non_nan]
 
     for exec_idx in range(1, len(backtest_days)):
         signal_day = backtest_days[exec_idx - 1]
@@ -1264,25 +1172,6 @@ def _simulate_one_combo_details(
 
         composite = composite_frame.loc[signal_day].reindex(target_tickers).copy()
         rule_signal = rule_frame.loc[signal_day].copy()
-        rsi_signal = rsi_frame.loc[signal_day].copy()
-        # 보조지표(SHARPE) 시그널 시리즈 — 상세 행 표시 및 점수 가산에 공용.
-        if secondary_points_frame is not None and signal_day in secondary_points_frame.index:
-            sec_signal = secondary_points_frame.loc[signal_day].reindex(composite.index)
-        else:
-            sec_signal = pd.Series(np.nan, index=composite.index, dtype=float)
-        if w_hold > 0:
-            for holding in shares:
-                if holding in composite.index and not pd.isna(composite.loc[holding]):
-                    composite.loc[holding] += w_hold * 100.0
-        if w_sec > 0:
-            sec_valid = composite.notna() & sec_signal.notna()
-            composite.loc[sec_valid] += w_sec * sec_signal.loc[sec_valid]
-
-        rsi_sell_tickers: set[str] = set()
-        if rsi_limit is not None:
-            rsi_sell_mask = rsi_signal.notna() & (rsi_signal > rsi_limit)
-            rsi_sell_tickers = set(rsi_signal.index[rsi_sell_mask].tolist())
-            composite.loc[list(rsi_sell_tickers)] = np.nan
 
         if not pd.isna(bm_score):
             composite = composite[composite >= bm_score]
@@ -1330,17 +1219,8 @@ def _simulate_one_combo_details(
                         "pnl": format_price(pnl_local * float(fx_series.loc[exec_day]), "kor"),
                         "pnl_pct": format_pct_change(pnl_pct),
                         "weight": _format_weight_pct(weight_pct),
-                        "score": _format_score_value(
-                            None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
-                        ),
-                        "trend": _format_score_value(
+                        "trend": _format_metric_value(
                             None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
-                        ),
-                        "secondary": _format_score_value(
-                            None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
-                        ),
-                        "rsi": _format_score_value(
-                            None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
                         ),
                         "message": "거래 없음",
                     }
@@ -1363,14 +1243,14 @@ def _simulate_one_combo_details(
             continue
 
         target_df = valid.reset_index()
-        target_df.columns = ["ticker", "score"]
+        target_df.columns = ["ticker", "trend"]
         target_df = target_df.sort_values(
-            by=["score", "ticker"], ascending=[False, True], kind="mergesort"
+            by=["trend", "ticker"], ascending=[False, True], kind="mergesort"
         )
         target_set = set(target_df["ticker"].head(top_n).tolist())
         current_set = set(shares.keys())
 
-        to_sell = (current_set - target_set) | (current_set & rsi_sell_tickers)
+        to_sell = current_set - target_set
         to_buy = target_set - current_set
         total_equity_signal = portfolio_value_local
 
@@ -1417,23 +1297,10 @@ def _simulate_one_combo_details(
                     "pnl": format_price(realized_pnl_local * float(fx_series.loc[exec_day]), "kor"),
                     "pnl_pct": format_pct_change(realized_pct),
                     "weight": _format_weight_pct(0.0),
-                    "score": _format_score_value(
-                        None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
-                    ),
-                    "trend": _format_score_value(
+                    "trend": _format_metric_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
                     ),
-                    "secondary": _format_score_value(
-                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
-                    ),
-                    "rsi": _format_score_value(
-                        None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
-                    ),
-                    "message": (
-                        "RSI 상한 초과로 시초가 전량매도"
-                        if ticker in rsi_sell_tickers
-                        else "상위 N 제외로 시초가 전량매도"
-                    ),
+                    "message": "상위 N 제외로 시초가 전량매도",
                 }
             )
 
@@ -1508,17 +1375,8 @@ def _simulate_one_combo_details(
                     "pnl": format_price(pnl_local * float(fx_series.loc[exec_day]), "kor"),
                     "pnl_pct": format_pct_change(pnl_pct),
                     "weight": _format_weight_pct(weight_pct),
-                    "score": _format_score_value(
-                        None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
-                    ),
-                    "trend": _format_score_value(
+                    "trend": _format_metric_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
-                    ),
-                    "secondary": _format_score_value(
-                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
-                    ),
-                    "rsi": _format_score_value(
-                        None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
                     ),
                     "message": buy_messages.get(ticker, "기존 보유 유지"),
                 }
@@ -1526,7 +1384,7 @@ def _simulate_one_combo_details(
 
         wait_rows: list[dict[str, str]] = []
         sold_rows_by_ticker = {row["ticker"]: row for row in sold_rows}
-        # 현재 보유 중인 종목을 제외하고 신호 점수순 상위 N개를 대기/매도 후보로 추출한다.
+        # 현재 보유 중인 종목을 제외하고 신호 추세순 상위 N개를 대기/매도 후보로 추출한다.
         waiting_candidates_df = target_df[~target_df["ticker"].isin(shares.keys())].head(top_n).copy()
         waiting_tickers = waiting_candidates_df["ticker"].tolist()
 
@@ -1555,17 +1413,8 @@ def _simulate_one_combo_details(
                     "pnl": "-",
                     "pnl_pct": "-",
                     "weight": _format_weight_pct(0.0),
-                    "score": _format_score_value(
-                        None if pd.isna(composite.get(ticker, np.nan)) else float(composite.get(ticker, np.nan))
-                    ),
-                    "trend": _format_score_value(
+                    "trend": _format_metric_value(
                         None if pd.isna(rule_signal.get(ticker, np.nan)) else float(rule_signal.get(ticker, np.nan)) * w_trend
-                    ),
-                    "secondary": _format_score_value(
-                        None if pd.isna(sec_signal.get(ticker, np.nan)) else float(sec_signal.get(ticker, np.nan)) * w_sec
-                    ),
-                    "rsi": _format_score_value(
-                        None if pd.isna(rsi_signal.get(ticker, np.nan)) else float(rsi_signal.get(ticker, np.nan))
                     ),
                     "message": f"대기 순위 {current_rank}위",
                     "rank": current_rank,
@@ -1740,16 +1589,13 @@ def _write_details_file(
     detail_lines: list[str],
 ) -> None:
     """상위 1개 조합의 일자별 보유 상세 로그를 기록한다."""
-    rsi_limit_text = "-" if top_result["RSI_LIMIT"] is None else f"{float(top_result['RSI_LIMIT']):g}"
     lines: list[str] = [
         f"종목풀: {pool_id}",
         f"기간: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}",
         "=== 상위 1개 조합 설정 ===",
         f"TOP_N_HOLD: {top_result['TOP_N_HOLD']}",
-        f"HOLDING_BONUS_SCORE: {top_result['HOLDING_BONUS_SCORE']:g}",
         f"추세_타입: {top_result['MA_TYPE']}",
         f"추세_개월: {top_result['MA_MONTHS']}",
-        f"RSI_LIMIT: {rsi_limit_text}",
         f"TOTAL_RETURN_PCT: {top_result['TOTAL_RETURN_PCT']:.2f}",
         f"CAGR_PCT: {top_result['CAGR_PCT']:.2f}",
         f"MDD_PCT: {top_result['MDD_PCT']:.2f}",
@@ -1805,11 +1651,6 @@ def run_backtest(pool_id: str) -> Path:
     top_n_values = [int(v) for v in cfg["TOP_N_HOLD"]]
     ma_types = [str(v).upper() for v in cfg["MA_TYPE"]]
     ma_months_list = [int(v) for v in cfg["MA_MONTHS"]]
-    # 보유보너스(%) 탐색값 — DB(backtest_config)의 HOLDING_BONUS_SCORE 를 단일 소스로 사용.
-    hold_pct_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
-    rsi_limits: list[float] | None = None
-    if "RSI_LIMIT" in cfg:
-        rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
 
     country_code, etfs, cache_ticker_types, display_prefix = _resolve_backtest_pool_inputs(pool_id)
     buy_slippage, sell_slippage = _resolve_slippage_for_backtest(pool_id, cache_ticker_types)
@@ -1930,14 +1771,14 @@ def run_backtest(pool_id: str) -> Path:
     period_start = backtest_days[1]
     period_end = backtest_days[-1]
 
-    # MA 타입/개월 유니크 집합 → signed percentile 사전계산
+    # MA 타입/개월 유니크 집합 → MA 이격률(%) 사전계산
     unique_ma_specs = set(itertools.product(ma_types, ma_months_list))
 
-    percentile_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
-    logger.info("[%s] MA 점수 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
+    trend_by_spec: dict[tuple[str, int], pd.DataFrame] = {}
+    logger.info("[%s] MA 추세(%%) 사전계산: %s specs ...", pool_id, len(unique_ma_specs))
     for mtype, m_months in unique_ma_specs:
-        # rankings 와 동일한 공통 엔진 함수를 통해 규칙별 percentile 프레임 생성.
-        percentile_by_spec[(mtype, int(m_months))] = compute_rule_percentile_frame(
+        # rankings 와 동일하게 규칙별 MA 이격률(%) 프레임 생성.
+        trend_by_spec[(mtype, int(m_months))] = compute_trend_frame(
             strategy_close_frame_with_bm, mtype, int(m_months)
         )
 
@@ -1945,9 +1786,9 @@ def run_backtest(pool_id: str) -> Path:
     eligibility_frame = compute_eligibility_mask(strategy_close_frame_with_bm)
 
     # 워커에 전달할 데이터를 백테스트 기간으로 미리 슬라이스 (메모리 절감)
-    percentile_by_spec_win = {
+    trend_by_spec_win = {
         key: pf.loc[backtest_days]
-        for key, pf in percentile_by_spec.items()
+        for key, pf in trend_by_spec.items()
     }
     eligibility_win = eligibility_frame.loc[backtest_days]
     open_win = strategy_open_frame.loc[backtest_days]
@@ -1955,24 +1796,21 @@ def run_backtest(pool_id: str) -> Path:
     benchmark_open_win = open_frame.loc[backtest_days]
     benchmark_close_win = close_frame.loc[backtest_days]
     ticker_columns = list(open_win.columns)
-    percentile_by_spec_values = {
+    trend_by_spec_values = {
         key: pf.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
-        for key, pf in percentile_by_spec_win.items()
+        for key, pf in trend_by_spec_win.items()
     }
     
-    # 벤치마크 전용 percentile 어레이 추출
-    bm_pct_specs_values = {}
+    # 벤치마크 전용 추세(%) 어레이 추출
+    bm_trend_specs_values = {}
     if benchmark_ticker:
-        for key, pf in percentile_by_spec_win.items():
+        for key, pf in trend_by_spec_win.items():
             if benchmark_ticker in pf.columns:
-                bm_pct_specs_values[key] = pf[benchmark_ticker].to_numpy(dtype=np.float64, copy=True)
+                bm_trend_specs_values[key] = pf[benchmark_ticker].to_numpy(dtype=np.float64, copy=True)
 
     eligibility_values = eligibility_win.reindex(columns=ticker_columns).to_numpy(dtype=bool, copy=True)
     open_values = open_win.to_numpy(dtype=np.float64, copy=True)
     close_values = valuation_close_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
-    rsi_frame = _compute_rsi_frame(strategy_close_frame_with_bm, RSI_PERIOD)
-    rsi_win = rsi_frame.loc[backtest_days]
-    rsi_values = rsi_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
     fx_win = fx_series.loc[backtest_days]
@@ -2019,27 +1857,17 @@ def run_backtest(pool_id: str) -> Path:
             "TRADES": benchmark_trades,
         }
 
-    # 가중치 그리드 생성: 보유보너스(%)를 제외한 나머지 점수는 전부 추세에 배분한다.
-    weight_combos = []
-    for hold in hold_pct_values:
-        remainder = 100.0 - hold
-        if remainder < 0:
-            raise ValueError(f"보유보너스(%)는 100 이하여야 합니다: {hold}")
-        weight_combos.append((remainder / 100.0, hold / 100.0))
-
     # 조합 생성
     raw_combos = list(
         itertools.product(
             top_n_values,
             ma_types,
             ma_months_list,
-            rsi_limits if rsi_limits is not None else [None],
-            weight_combos,
         )
     )
     combos = []
-    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold) in raw_combos:
-        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold))
+    for top_n, ma_t, ma_m in raw_combos:
+        combos.append((top_n, ma_t, ma_m))
     total_combos = len(combos)
 
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
@@ -2058,8 +1886,6 @@ def run_backtest(pool_id: str) -> Path:
         "top_n_values": top_n_values,
         "ma_types": ma_types,
         "ma_months_list": ma_months_list,
-        "hold_pct_values": hold_pct_values,
-        "rsi_limits": rsi_limits,
         "total_combos": total_combos,
         "period_start": period_start,
         "period_end": period_end,
@@ -2087,17 +1913,16 @@ def run_backtest(pool_id: str) -> Path:
         processes=n_workers,
         initializer=_init_worker,
         initargs=(
-            percentile_by_spec_values,
+            trend_by_spec_values,
             eligibility_values,
             open_values,
             close_values,
             backtest_days,
             initial_cash_local,
             fx_values,
-            rsi_values,
             buy_slippage,
             sell_slippage,
-            bm_pct_specs_values,
+            bm_trend_specs_values,
         ),
     ) as pool:
         for i, result in enumerate(
@@ -2146,17 +1971,10 @@ def run_backtest(pool_id: str) -> Path:
         try:
             from utils.pool_settings_store import save_pool_settings
 
-            rsi_val = best_result.get("RSI_LIMIT")
-            if rsi_val is None:
-                rsi_val = 100
-
-            # 최적 (보유%, 추세 설정) 를 라이브에 반영한다.
             db_values = {
                 "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
-                "HOLDING_BONUS_SCORE": int(best_result["HOLDING_BONUS_SCORE"]),
                 "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
-                "RSI_LIMIT": int(rsi_val),
             }
             target_pool_id = pool_id
             # 저장 방식(2줄): 기간·정렬기준 + 최적 조합의 성과 요약을 함께 남긴다.
@@ -2172,14 +1990,11 @@ def run_backtest(pool_id: str) -> Path:
         except Exception as db_exc:
             logger.error("[%s] 최적 파라미터 라이브 자동 저장 중 에러 발생: %s", pool_id, db_exc)
 
-        best_rule_frame = percentile_by_spec_win[(best_result["MA_TYPE"], int(best_result["MA_MONTHS"]))].copy()
+        best_rule_frame = trend_by_spec_win[(best_result["MA_TYPE"], int(best_result["MA_MONTHS"]))].copy()
         best_rule_frame.attrs["ma_type"] = best_result["MA_TYPE"]
         best_rule_frame.attrs["ma_months"] = int(best_result["MA_MONTHS"])
         best_composite = best_rule_frame.where(eligibility_win)
-        # 동적 비율 가중치 추출
         w_trend = float(best_result.get("W_TREND", 1.0))
-        w_hold = float(best_result.get("W_HOLD", 0.0))
-        w_sec = float(best_result.get("W_SEC", 0.0))
 
         # 동적 가중치 결합 (추세 단독)
         best_composite = w_trend * best_composite
@@ -2202,17 +2017,11 @@ def run_backtest(pool_id: str) -> Path:
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
-            w_hold=w_hold,
-            w_sec=w_sec,
             w_trend=w_trend,
-            secondary_points_frame=None,
-            secondary_metric="보조지표",
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,
             close_frame=valuation_close_win,
-            rsi_frame=rsi_win,
-            rsi_limit=None if best_result["RSI_LIMIT"] is None else float(best_result["RSI_LIMIT"]),
             backtest_days=backtest_days,
             fx_series=fx_win,
             benchmark_values_krw=benchmark_values_krw,
