@@ -25,6 +25,7 @@ type TopPickTicker = {
   is_etf?: boolean;
   bucket?: number;
   fixed_weight_pct?: number | null;
+  alignment?: string | null;
 };
 
 type TopPickSettingsPayload = {
@@ -105,6 +106,7 @@ type RankRow = {
   종목명: string;
   bucket?: number;
   추세: number | null;
+  배열?: string | null;
   exclude_from_ranking?: boolean;
   is_benchmark?: boolean;
 };
@@ -239,11 +241,13 @@ type TopPickWeightHoverDetail = {
 
 type TopPickReserveCandidate = TopPickTicker & {
   trend_pct: number | null;
+  alignment?: string | null;
 };
 
 type TopPickSelectedGridRow = TopPickTicker & {
   row_index: number;
   trend_pct: number | null;
+  alignment?: string | null;
   is_confirmed: boolean;
 };
 
@@ -381,6 +385,12 @@ function getSignedClass(value: number | null | undefined): string {
 
 function renderReturnPctCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatReturnPct(params.value)}</span>;
+}
+
+function renderAlignmentCell(params: { value: string | null | undefined }) {
+  const value = params.value ?? "-";
+  const color = value === "정배열" ? "#d63939" : value === "역배열" ? "#1d6fd1" : "var(--text-muted)";
+  return <span style={{ color, fontWeight: 700 }}>{value}</span>;
 }
 
 function LabChart({ result }: { result: LabResult }) {
@@ -539,7 +549,7 @@ export function TopPickSettingsClient() {
   const [reserveCandidates, setReserveCandidates] = useState<TopPickReserveCandidate[]>([]);
   const [reserveLoading, setReserveLoading] = useState(false);
   const [reserveError, setReserveError] = useState<string | null>(null);
-  const [rankMetaByTicker, setRankMetaByTicker] = useState<Record<string, { trend_pct: number | null }>>({});
+  const [rankMetaByTicker, setRankMetaByTicker] = useState<Record<string, { trend_pct: number | null; alignment?: string | null }>>({});
   const autoRunStartedRef = useRef(false);
 
   const validTickers = useMemo(
@@ -662,10 +672,10 @@ export function TopPickSettingsClient() {
         if (!response.ok || payload.error) {
           throw new Error(payload.error ?? "예비 종목을 불러오지 못했습니다.");
         }
-        const rankMeta: Record<string, { trend_pct: number | null }> = {};
+        const rankMeta: Record<string, { trend_pct: number | null; alignment?: string | null }> = {};
         for (const row of payload.rows ?? []) {
           if (row.티커) {
-            rankMeta[normalizeTicker(row.티커)] = { trend_pct: row.추세 };
+            rankMeta[normalizeTicker(row.티커)] = { trend_pct: row.추세, alignment: row.배열 ?? null };
           }
         }
         setRankMetaByTicker(rankMeta);
@@ -679,6 +689,7 @@ export function TopPickSettingsClient() {
             ticker_type: row.source_ticker_type ?? reservePoolId,
             bucket: row.bucket,
             trend_pct: row.추세,
+            alignment: row.배열 ?? null,
           }));
         setReserveCandidates(candidates);
       } catch (err) {
@@ -1364,6 +1375,7 @@ export function TopPickSettingsClient() {
         country_code: candidate.country_code,
         is_etf: candidate.is_etf,
         bucket: candidate.bucket,
+        alignment: candidate.alignment,
       },
     ]);
     setPreview(null);
@@ -1375,6 +1387,7 @@ export function TopPickSettingsClient() {
         ...item,
         row_index: index + 1,
         trend_pct: rankMetaByTicker[normalizeTicker(item.ticker)]?.trend_pct ?? null,
+        alignment: rankMetaByTicker[normalizeTicker(item.ticker)]?.alignment ?? item.alignment ?? null,
         is_confirmed: !!item.name,
       })),
     [rankMetaByTicker, tickers],
@@ -1394,8 +1407,6 @@ export function TopPickSettingsClient() {
         width: 108,
         pinned: "left",
         sortable: true,
-        sort: "asc",
-        sortIndex: 0,
         comparator: (_a, _b, nodeA, nodeB) => Number(nodeA.data?.bucket ?? 0) - Number(nodeB.data?.bucket ?? 0),
         valueGetter: (params) => getBucketName(params.data?.bucket),
         cellClass: (params) => getBucketCellClass(params.data?.bucket),
@@ -1454,13 +1465,20 @@ export function TopPickSettingsClient() {
       {
         field: "trend_pct",
         headerName: "추세",
-        minWidth: 128,
-        width: 128,
+        minWidth: 86,
+        width: 86,
         sortable: true,
         sort: "desc",
-        sortIndex: 1,
         type: "rightAligned",
         cellRenderer: renderReturnPctCell,
+      },
+      {
+        field: "alignment",
+        headerName: "배열",
+        minWidth: 78,
+        width: 78,
+        sortable: true,
+        cellRenderer: renderAlignmentCell,
       },
       {
         colId: "action",
@@ -1539,7 +1557,15 @@ export function TopPickSettingsClient() {
           </span>
         ),
       },
-      { field: "trend_pct", headerName: "추세", minWidth: 128, width: 128, type: "rightAligned", cellRenderer: renderReturnPctCell, sort: "desc" },
+      { field: "trend_pct", headerName: "추세", minWidth: 86, width: 86, type: "rightAligned", cellRenderer: renderReturnPctCell, sort: "desc" },
+      {
+        field: "alignment",
+        headerName: "배열",
+        minWidth: 78,
+        width: 78,
+        sortable: true,
+        cellRenderer: renderAlignmentCell,
+      },
       {
         colId: "action",
         headerName: "",
