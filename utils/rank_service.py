@@ -15,14 +15,13 @@ from utils.rankings import (
     MONTHLY_RETURN_LABEL_COUNT,
     build_effective_ma_rules,
     build_ticker_type_rankings,
-    get_rank_months_max,
     get_recent_monthly_return_labels,
 )
 from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs, pick_default_ticker_type
 
 _RANK_DATA_CACHE_TTL_SECONDS = 300.0
-_RankCacheKey = tuple[str, str, tuple[tuple[str, int], ...]]
+_RankCacheKey = tuple[str, str, tuple[tuple[int, int], ...]]
 _RANK_DATA_CACHE: dict[_RankCacheKey, tuple[float, dict[str, Any]]] = {}
 _RANK_DATA_CACHE_LOCK = Lock()
 _RANK_DATA_INFLIGHT_LOCKS: dict[_RankCacheKey, Lock] = {}
@@ -34,7 +33,13 @@ def _build_rank_cache_key(
     ma_rules: list[dict[str, Any]],
 ) -> _RankCacheKey:
     as_of_date_key = as_of_date.date().isoformat() if as_of_date is not None else ""
-    ma_rule_key = tuple(int(rule.get("ma_months") or 0) for rule in ma_rules)
+    ma_rule_key = tuple(
+        (
+            int(rule.get("short_ma_days") or 0),
+            int(rule.get("main_ma_days") or 0),
+        )
+        for rule in ma_rules
+    )
     return (ticker_type, as_of_date_key, ma_rule_key)
 
 
@@ -492,7 +497,6 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
-        "ma_months_max": get_rank_months_max(),
     }
 
 
@@ -560,7 +564,6 @@ def _compute_rank_data_payload(
         "ticker_types": configs_payload,
         "ticker_type": selected_ticker_type,
         "ma_rules": ma_rules,
-        "ma_months_max": get_rank_months_max(),
         "as_of_date": _serialize_datetime(effective_as_of_date),
         "monthly_return_labels": get_recent_monthly_return_labels(
             MONTHLY_RETURN_LABEL_COUNT,

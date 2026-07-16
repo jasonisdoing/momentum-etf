@@ -13,13 +13,13 @@ type RankTickerType = {
 };
 
 type RankMaRule = {
-  ma_months: number;
-  ma_days: number;
+  short_ma_days: number;
+  main_ma_days: number;
   score_column: string;
 };
 
 type RankRow = {
-  [key: string]: string | number | null;
+  [key: string]: string | number | null | undefined;
   순번: string;
   순위: number | null;
   이전순위: number | null;
@@ -53,13 +53,13 @@ type RankRow = {
   고점: number | null;
   RSI: number | null;
   추세: number | null;
+  배열?: string | null;
 };
 
 type RankData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_months_max: number;
   as_of_date: string | null;
   monthly_return_labels: string[];
   rows: RankRow[];
@@ -78,7 +78,6 @@ type RankToolbarData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_months_max: number;
 };
 
 export async function loadRankToolbarData(params?: {
@@ -106,7 +105,8 @@ export async function loadRankData(params?: {
     search.set("as_of_date", params.as_of_date);
   }
   if (params?.ma_rule_override) {
-    search.set("ma_months", String(params.ma_rule_override.ma_months));
+    search.set("short_ma_days", String(params.ma_rule_override.short_ma_days));
+    search.set("main_ma_days", String(params.ma_rule_override.main_ma_days));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

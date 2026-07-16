@@ -7,20 +7,25 @@ import { useToast } from "../components/ToastProvider";
 
 const EDITABLE_KEYS = [
   "TOP_N_HOLD",
-  "MA_MONTHS",
+  "SHORT_MA_DAYS",
+  "MAIN_MA_DAYS",
 ] as const;
 
 type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
-  MA_MONTHS: "추세 개월",
+  SHORT_MA_DAYS: "단기 이평선",
+  MAIN_MA_DAYS: "메인 이평선",
 };
 
 const KEY_WIDTHS: Record<EditableKey, number> = {
   TOP_N_HOLD: 90,
-  MA_MONTHS: 90,
+  SHORT_MA_DAYS: 104,
+  MAIN_MA_DAYS: 104,
 };
+
+const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
 
 type SettingField = { value: string | number | null };
 type SettingsMap = Record<EditableKey, SettingField>;
@@ -37,7 +42,7 @@ type PoolEntry = {
 
 type PoolSettingsResponse = {
   pools: PoolEntry[];
-  constraints: { ma_months_max: number; editable_keys: string[] };
+  constraints: { ma_day_options: number[]; editable_keys: string[] };
   error?: string;
 };
 
@@ -151,6 +156,7 @@ export function SettingsManager() {
     );
   }
   if (!data) return null;
+  const maDayOptions = data.constraints.ma_day_options?.length ? data.constraints.ma_day_options : DEFAULT_MA_DAY_OPTIONS;
 
   return (
     <div className="appPageStack appPageStackFill">
@@ -188,16 +194,16 @@ export function SettingsManager() {
                         </td>
                         {EDITABLE_KEYS.map((key) => (
                           <td key={key} style={{ textAlign: "right" }}>
-                            {key === "MA_MONTHS" ? (
+                            {key === "SHORT_MA_DAYS" || key === "MAIN_MA_DAYS" ? (
                               <select
                                 className="form-select form-select-sm"
                                 style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
-                                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((m) => (
-                                  <option key={m} value={String(m)}>
-                                    {m}
+                                {maDayOptions.map((day) => (
+                                  <option key={day} value={String(day)}>
+                                    {day}일
                                   </option>
                                 ))}
                               </select>

@@ -1,8 +1,4 @@
-"""종목풀 편집 가능 설정(pool_settings) 조회/저장 API.
-
-pools.json 의 구조는 유지하고, 자주 바뀌는 편집값(TOP_N_HOLD/MA_MONTHS)만
-DB 오버라이드로 수정한다 (utils.pool_settings_store).
-"""
+"""종목풀 편집 가능 설정(pool_settings) 조회/저장 API."""
 
 from __future__ import annotations
 
@@ -13,11 +9,11 @@ from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 from utils.pool_settings_store import (
+    MA_DAY_OPTIONS,
     OVERRIDABLE_KEYS,
     PoolSettingsError,
     save_pool_settings,
 )
-from utils.rankings import get_rank_months_max
 from utils.settings_loader import get_ticker_type_settings
 from utils.ticker_registry import load_ticker_type_configs
 
@@ -37,7 +33,7 @@ def _editable(settings: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("")
 def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, object]:
-    """풀별 편집 가능 설정과 입력 제약(개월 범위)을 반환한다."""
+    """풀별 편집 가능 설정과 입력 제약을 반환한다."""
     pools: list[dict[str, Any]] = []
     for config in load_ticker_type_configs():
         t_id = str(config["ticker_type"])
@@ -57,7 +53,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
     return {
         "pools": pools,
         "constraints": {
-            "ma_months_max": get_rank_months_max(),
+            "ma_day_options": list(MA_DAY_OPTIONS),
             "editable_keys": list(OVERRIDABLE_KEYS),
         },
     }

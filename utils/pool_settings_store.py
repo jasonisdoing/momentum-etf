@@ -1,10 +1,10 @@
 """종목풀 편집 가능 설정의 DB 오버라이드 레이어.
 
 pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_source 등)를 정의하는
-단일 진실 소스로 유지하고, 자주 바뀌는 아래 2개 값만 MongoDB `pool_settings` 컬렉션에
+단일 진실 소스로 유지하고, 자주 바뀌는 아래 3개 값만 MongoDB `pool_settings` 컬렉션에
 저장해 화면에서 수정한다 (값 변경 때마다 커밋하던 번거로움 제거).
 
-    TOP_N_HOLD, MA_MONTHS
+    TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS
 
 읽기: settings_loader 가 pools.json 값 위에 DB 오버라이드를 덮어쓴다. DB 문서/키가 없으면
       pools.json 값을 그대로 사용한다 (silent fallback 아님 — 기본값이 명시적 소스).
@@ -12,7 +12,7 @@ pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_sour
       쓴다. 저장한 프로세스는 즉시 무효화하고, 나머지는 TTL 내 자동 반영된다.
 
 컬렉션 문서 형태:
-    {_id: <ticker_type>, TOP_N_HOLD, MA_MONTHS, updated_at}
+    {_id: <ticker_type>, TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, updated_at}
 """
 
 from __future__ import annotations
@@ -31,10 +31,13 @@ COLLECTION = "pool_settings"
 # DB 오버라이드 대상 키
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
-    "MA_MONTHS",
+    "SHORT_MA_DAYS",
+    "MAIN_MA_DAYS",
 )
 
-_INT_KEYS = ("TOP_N_HOLD", "MA_MONTHS")
+MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 240)
+
+_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "MAIN_MA_DAYS")
 
 # 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
 _OPTIONAL_DEFAULTS: dict[str, Any] = {}
@@ -144,11 +147,17 @@ def seed_from_pools_json(*, overwrite: bool = False) -> dict[str, Any]:
     if db is None:
         raise PoolSettingsError("DB 연결 실패로 시드할 수 없습니다.")
 
+    # 신규 환경에서도 현재 운영 기준(단기 10일, 메인 20일)을 명시적으로 시드한다.
+    ma_seed_defaults = {"SHORT_MA_DAYS": 10, "MAIN_MA_DAYS": 20}
+
     # 시드 대상: (_id, {편집값}) 목록 구성
     targets: list[tuple[str, dict[str, Any]]] = []
     for config in _load_pool_configs():
         pid = str(config["ticker_type"])
-        targets.append((pid, {k: config[k] for k in OVERRIDABLE_KEYS if k in config}))
+        values = {k: config[k] for k in OVERRIDABLE_KEYS if k in config}
+        for key, value in ma_seed_defaults.items():
+            values.setdefault(key, value)
+        targets.append((pid, values))
 
     summary: dict[str, list[str]] = {"seeded": [], "skipped": [], "overwritten": []}
     now = datetime.utcnow()
@@ -174,10 +183,7 @@ def seed_from_pools_json(*, overwrite: bool = False) -> dict[str, Any]:
 
 def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
     """저장 입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError."""
-    from utils.rankings import get_rank_months_max
-
     cleaned: dict[str, Any] = {}
-    months_max = get_rank_months_max()
 
     for key in OVERRIDABLE_KEYS:
         if key not in values:
@@ -189,9 +195,10 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError) as exc:
             raise PoolSettingsError(f"{key} 은 정수여야 합니다: {raw}") from exc
 
-        if key == "MA_MONTHS":
-            if not (1 <= num <= months_max):
-                raise PoolSettingsError(f"MA_MONTHS 는 1 ~ {months_max} 범위여야 합니다: {num}")
+        if key in ("SHORT_MA_DAYS", "MAIN_MA_DAYS"):
+            if num not in MA_DAY_OPTIONS:
+                options = ", ".join(str(day) for day in MA_DAY_OPTIONS)
+                raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         elif key == "TOP_N_HOLD":
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")

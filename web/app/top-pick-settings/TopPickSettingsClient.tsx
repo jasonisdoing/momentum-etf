@@ -69,13 +69,16 @@ type TopPickWeightPreview = {
 };
 
 type TopPickSettings = {
-  MA_MONTHS: number;
   VARIABLE_TICKERS: number;
   FIXED_TICKERS: number;
   MAX_TICKERS: number;
   ACCOUNT_ID: string;
   START_AMOUNT_MANWON: number | null;
   START_DATE: string | null;
+  POOL_TICKER_TYPE?: string | null;
+  POOL_NAME?: string | null;
+  SHORT_MA_DAYS?: number | null;
+  MAIN_MA_DAYS?: number | null;
 };
 
 type AccountTopPickBasis = {
@@ -296,12 +299,16 @@ function buildSettingsForRequest(
   }
   const count = Math.max(1, tickerCount);
   return {
-    ...settings,
     VARIABLE_TICKERS: count,
     FIXED_TICKERS: 0,
     MAX_TICKERS: count,
+    ACCOUNT_ID: settings.ACCOUNT_ID,
     START_AMOUNT_MANWON: basis.startAmount,
     START_DATE: basis.startDate,
+    POOL_TICKER_TYPE: settings.POOL_TICKER_TYPE ?? null,
+    POOL_NAME: settings.POOL_NAME ?? null,
+    SHORT_MA_DAYS: settings.SHORT_MA_DAYS ?? null,
+    MAIN_MA_DAYS: settings.MAIN_MA_DAYS ?? null,
   };
 }
 
@@ -646,7 +653,6 @@ export function TopPickSettingsClient() {
         setReserveError(null);
         const params = new URLSearchParams({
           ticker_type: reservePoolId,
-          ma_months: String(settings.MA_MONTHS),
         });
         const response = await fetch(`/api/rank?${params.toString()}`, {
           cache: "no-store",
@@ -859,7 +865,16 @@ export function TopPickSettingsClient() {
       const resp = await fetch("/api/top-pick-settings/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: validTickers, settings: requestSettings, weight_mode: "variable" }),
+        body: JSON.stringify({
+          tickers: validTickers,
+          settings: requestSettings,
+          weight_mode: "variable",
+          backtest_settings: {
+            months: Number(backtestPeriodMonths),
+            rebalance: backtestRebalanceMode,
+            initial_amount_manwon: Number(backtestInitialAmountManwon),
+          },
+        }),
       });
       const data = (await resp.json()) as TopPickWeightPreview;
       if (!resp.ok || data.error) {
@@ -873,7 +888,7 @@ export function TopPickSettingsClient() {
     } finally {
       setRunning(false);
     }
-  }, [settings, toast, validTickers]);
+  }, [backtestInitialAmountManwon, backtestPeriodMonths, backtestRebalanceMode, selectedAccountTopPickBasis, settings, toast, validTickers]);
 
   useEffect(() => {
     if (
@@ -903,7 +918,17 @@ export function TopPickSettingsClient() {
       const resp = await fetch("/api/top-pick-settings/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: validTickers, settings: requestSettings, account_id: selectedAccount, weight_mode: "variable" }),
+        body: JSON.stringify({
+          tickers: validTickers,
+          settings: requestSettings,
+          account_id: selectedAccount,
+          weight_mode: "variable",
+          backtest_settings: {
+            months: Number(backtestPeriodMonths),
+            rebalance: backtestRebalanceMode,
+            initial_amount_manwon: Number(backtestInitialAmountManwon),
+          },
+        }),
       });
       const data = (await resp.json()) as TopPickWeightPreview & { approved_at?: string; tickers?: TopPickTicker[] };
       if (!resp.ok || data.error) {
@@ -931,23 +956,10 @@ export function TopPickSettingsClient() {
 
   const updatedLabel = parseUtcDate(updatedAt);
   const approvedLabel = parseUtcDate(approvedAt);
-  const updateSetting = (key: keyof TopPickSettings, value: string) => {
-    setPreview(null);
-    setSettings((current) => {
-      if (!current) return current; // 로드 전에는 편집 불가
-      let next: string | number | null;
-      if (key === "ACCOUNT_ID") {
-        next = value; // 문자열 그대로 (빈 값은 저장 시 백엔드가 None 처리)
-      } else {
-        next = Number(value);
-      }
-      return { ...current, [key]: next };
-    });
-  };
-
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
-    const maMonths = source?.MA_MONTHS ?? "-";
-    return `SMA ${maMonths}개월 · 추세선 위 투자`;
+    const mainMaDays = source?.MAIN_MA_DAYS ?? "-";
+    const poolName = source?.POOL_NAME ?? source?.POOL_TICKER_TYPE;
+    return `${poolName ? `${poolName} · ` : ""}SMA 메인 ${mainMaDays}일 · 추세선 위 투자`;
   };
 
   const runBacktest = async () => {
@@ -1053,21 +1065,21 @@ export function TopPickSettingsClient() {
       },
       {
         field: "trend_pct",
-        headerName: `추세(${settings?.MA_MONTHS ?? "-"}개월)`,
+        headerName: "추세",
         width: 112,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
       },
       {
         field: "mdd_pct",
-        headerName: `MDD(${settings?.MA_MONTHS ?? "-"}개월)`,
+        headerName: `MDD(${backtestPeriodMonths || "-"}개월)`,
         width: 112,
         type: "rightAligned",
         cellRenderer: renderReturnPctCell,
       },
       {
         field: "sortino",
-        headerName: `Sortino(${settings?.MA_MONTHS ?? "-"}개월)`,
+        headerName: `Sortino(${backtestPeriodMonths || "-"}개월)`,
         width: 126,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
@@ -1109,7 +1121,7 @@ export function TopPickSettingsClient() {
         },
       },
     ],
-    [displayTickerOf, settings?.MA_MONTHS],
+    [backtestPeriodMonths, displayTickerOf],
   );
 
   const comparisonGridOptions = useMemo<GridOptions<TopPickWeightComparisonRow>>(
@@ -1441,7 +1453,7 @@ export function TopPickSettingsClient() {
       },
       {
         field: "trend_pct",
-        headerName: "추세(%)",
+        headerName: "추세",
         minWidth: 128,
         width: 128,
         sortable: true,
@@ -1527,7 +1539,7 @@ export function TopPickSettingsClient() {
           </span>
         ),
       },
-      { field: "trend_pct", headerName: "추세(%)", minWidth: 128, width: 128, type: "rightAligned", cellRenderer: renderReturnPctCell, sort: "desc" },
+      { field: "trend_pct", headerName: "추세", minWidth: 128, width: 128, type: "rightAligned", cellRenderer: renderReturnPctCell, sort: "desc" },
       {
         colId: "action",
         headerName: "",
@@ -1642,33 +1654,10 @@ export function TopPickSettingsClient() {
         <div className="topPickSettingsTopLayout">
           <div className="card appCard">
             <div className="card-body">
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                  <label className="appLabeledField" style={{ minWidth: 110 }}>
-                    <span className="appLabeledFieldLabel">추세 개월</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={settings?.MA_MONTHS ?? ""}
-                      onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((month) => (
-                        <option key={month} value={month}>
-                          {month}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 4, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
-                  각 종목의 기본 비중은 1/N입니다. 종목이 추세선 위에 있으면 투자하고, 추세선 아래면 해당 비중을 현금으로 둡니다.
-                </div>
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>백테스트 설정</h2>
+              <div style={{ color: "#4b5563", fontSize: "0.83rem", marginBottom: 12, lineHeight: "1.4" }}>
+                비중 계산은 계좌에 연결된 종목풀의 메인 이평선을 사용합니다. {settings ? formatScoreSettingLabel(settings) : ""}
               </div>
-            </div>
-          </div>
-          <div className="card appCard">
-            <div className="card-body">
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>백테스트 (시뮬레이션 전용)</h2>
               <div className="topPickBacktestGrid">
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">최초 금액(만원)</span>
@@ -1939,7 +1928,7 @@ export function TopPickSettingsClient() {
       <style jsx global>{`
         .topPickSettingsTopLayout {
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: minmax(0, 1fr);
           gap: 12px;
           align-items: start;
         }

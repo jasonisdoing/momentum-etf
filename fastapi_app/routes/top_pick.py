@@ -52,7 +52,12 @@ def put_settings(payload: TopPickSettingsPayload, _: None = Depends(require_inte
 
 @router.post("/run")
 def post_run(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
-    return run_top_pick_weights(payload.tickers, payload.settings, weight_mode=payload.weight_mode)
+    return run_top_pick_weights(
+        payload.tickers,
+        payload.settings,
+        payload.backtest_settings,
+        weight_mode=payload.weight_mode,
+    )
 
 
 @router.post("/backtest")
@@ -65,7 +70,11 @@ def post_backtest(payload: TopPickSettingsPayload, _: None = Depends(require_int
 @router.post("/approve")
 def post_approve(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
     return approve_top_pick_weights(
-        payload.tickers, payload.settings, account_id=payload.account_id, weight_mode=payload.weight_mode
+        payload.tickers,
+        payload.settings,
+        payload.backtest_settings,
+        account_id=payload.account_id,
+        weight_mode=payload.weight_mode,
     )
 
 
