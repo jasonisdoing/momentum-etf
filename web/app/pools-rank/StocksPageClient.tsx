@@ -45,7 +45,7 @@ export function StocksPageClient() {
   );
 
   return (
-    <PageFrame title="종목풀 순위" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="순위" fullHeight fullWidth titleRight={titleRight}>
       <StocksManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );
