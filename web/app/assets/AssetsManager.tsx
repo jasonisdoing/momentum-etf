@@ -112,6 +112,7 @@ type ParentGridRow =
 type HoldingsResponse = {
   rows?: HoldingsRow[];
   account_summaries?: AccountSummary[];
+  top_pick_target_errors?: Array<{ account_id?: string; error?: string }>;
   error?: string;
 };
 
@@ -2023,6 +2024,13 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ...s,
         ...(dashAccounts[s.account_id] ?? defaultDash),
       }));
+      if (payload.top_pick_target_errors?.length) {
+        toast.error(
+          `일부 탑픽 목표비중을 불러오지 못했습니다: ${payload.top_pick_target_errors
+            .map((item) => item.account_id || "계좌 미상")
+            .join(", ")}`,
+        );
+      }
       setAllRows(payload.rows ?? []);
       setSummaries(mergedSummaries);
       setParentDirtyCellKeys([]);
