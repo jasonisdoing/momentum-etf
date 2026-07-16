@@ -71,11 +71,6 @@ type TopPickWeightPreview = {
 type TopPickSettings = {
   MA_TYPE: string;
   MA_MONTHS: number;
-  MIN_WEIGHT: number;
-  MAX_WEIGHT: number;
-  CASH_WEIGHT_UP: number;
-  CASH_WEIGHT_NEUTRAL: number;
-  CASH_WEIGHT_DOWN: number;
   VARIABLE_TICKERS: number;
   FIXED_TICKERS: number;
   MAX_TICKERS: number;
@@ -177,7 +172,6 @@ type TopPickWeightHoverDetail = {
 
 const MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"];
 const previewGridTheme = createAppGridTheme();
-// 시장 레짐 지수는 기본값 없음 — 미선택(빈 값) 상태로 두고 사용자가 지수를 골라 저장해야 한다.
 const DEFAULT_BACKTEST_SETTINGS: Required<TopPickBacktestSettings> = {
   benchmark: { ticker: "", name: "" },
   months: 12,
@@ -442,10 +436,6 @@ export function TopPickSettingsClient() {
   const [accountTickerTypes, setAccountTickerTypes] = useState<string[]>([]);
   // 종목풀 id → 이름 매핑(안내 문구 표시용).
   const [poolNameById, setPoolNameById] = useState<Record<string, string>>({});
-  // 시장 레짐 선택지 — /market-trend 지수 목록(단일 소스).
-  const [marketTrendIndices, setMarketTrendIndices] = useState<{ ticker: string; name: string }[]>([]);
-  // 계좌별 비중 방식. variable=자동 계산, fixed=종목별 고정 비중.
-  const [weightMode, setWeightMode] = useState<"variable" | "fixed">("variable");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
@@ -458,8 +448,6 @@ export function TopPickSettingsClient() {
   const [backtestResult, setBacktestResult] = useState<LabResult | null>(null);
   const [backtestRunning, setBacktestRunning] = useState(false);
   const [weightHoverDetail, setWeightHoverDetail] = useState<TopPickWeightHoverDetail | null>(null);
-  const [backtestBenchmarkTicker, setBacktestBenchmarkTicker] = useState("");
-  const [backtestBenchmarkName, setBacktestBenchmarkName] = useState("");
   const [backtestPeriodMonths, setBacktestPeriodMonths] = useState(String(DEFAULT_BACKTEST_SETTINGS.months));
   const [backtestRebalanceMode, setBacktestRebalanceMode] = useState(DEFAULT_BACKTEST_SETTINGS.rebalance);
   const [backtestInitialAmountManwon, setBacktestInitialAmountManwon] = useState(String(DEFAULT_BACKTEST_SETTINGS.initial_amount_manwon));
@@ -482,22 +470,14 @@ export function TopPickSettingsClient() {
     [tickers, variableCount, fixedCount],
   );
 
-  // 비중 고정 모드: 확정 종목의 고정 비중 합계(합이 100이어야 정상).
-  const fixedWeightTotal = useMemo(
-    () => tickers.reduce((sum, item) => sum + (item.name ? Number(item.fixed_weight_pct ?? 0) : 0), 0),
-    [tickers],
-  );
-  const fixedWeightComplete = Math.abs(fixedWeightTotal - 100) < 0.05;
-
   const loadSettings = useCallback(async (accountId?: string) => {
     try {
       setLoading(true);
       // 1) 계좌 목록 먼저 — account_id 미지정이면 탑픽 첫 계좌를 명시적으로 선택(auto-resolve 의존 X).
-      const [accountsResp, acctSettingsResp, poolsResp, indicesResp] = await Promise.all([
+      const [accountsResp, acctSettingsResp, poolsResp] = await Promise.all([
         fetch("/api/holdings-components/accounts", { cache: "no-store" }),
         fetch("/api/account-settings", { cache: "no-store" }),
         fetch("/api/pool-settings", { cache: "no-store" }),
-        fetch("/api/market-trend/indices", { cache: "no-store" }),
       ]);
       const accountsData = (await accountsResp.json()) as AccountOption[] | { error?: string };
       const acctSettingsData = (await acctSettingsResp.json()) as {
@@ -513,11 +493,6 @@ export function TopPickSettingsClient() {
         poolNameMap[pool.ticker_type] = pool.name ?? pool.ticker_type;
       }
       setPoolNameById(poolNameMap);
-      const indicesData = (await indicesResp.json()) as {
-        indices?: { ticker: string; name: string }[];
-        error?: string;
-      };
-      setMarketTrendIndices(Array.isArray(indicesData.indices) ? indicesData.indices : []);
       if (!accountsResp.ok || !Array.isArray(accountsData)) {
         throw new Error(Array.isArray(accountsData) ? "계좌 목록을 불러오지 못했습니다." : accountsData.error ?? "계좌 목록을 불러오지 못했습니다.");
       }
@@ -543,10 +518,6 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정을 불러오지 못했습니다.");
       }
       setSelectedAccount(target);
-      if (data.weight_mode !== "variable" && data.weight_mode !== "fixed") {
-        throw new Error("저장된 비중 방식이 올바르지 않습니다.");
-      }
-      setWeightMode(data.weight_mode);
       setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
@@ -554,9 +525,6 @@ export function TopPickSettingsClient() {
       setApprovedWeights(data.approved_weights ?? null);
       setPreview(null);
       const backtestSettings = data.backtest_settings ?? DEFAULT_BACKTEST_SETTINGS;
-      const benchmark = backtestSettings.benchmark ?? { ticker: "", name: "" };
-      setBacktestBenchmarkTicker(benchmark.ticker ?? "");
-      setBacktestBenchmarkName(benchmark.name ?? "");
       setBacktestPeriodMonths(String(backtestSettings.months ?? DEFAULT_BACKTEST_SETTINGS.months));
       setBacktestRebalanceMode(backtestSettings.rebalance ?? DEFAULT_BACKTEST_SETTINGS.rebalance);
       setBacktestInitialAmountManwon(String(backtestSettings.initial_amount_manwon ?? DEFAULT_BACKTEST_SETTINGS.initial_amount_manwon));
@@ -668,10 +636,6 @@ export function TopPickSettingsClient() {
       toast.error("백테스트 최초 금액(만원)은 1 이상의 정수여야 합니다.");
       return;
     }
-    if (weightMode === "fixed" && !fixedWeightComplete) {
-      toast.error(`비중 고정은 종목별 고정 비중 합계가 100%여야 합니다. 현재 ${fixedWeightTotal.toFixed(1)}%`);
-      return;
-    }
     try {
       setSaving(true);
       const resp = await fetch("/api/top-pick-settings", {
@@ -679,11 +643,10 @@ export function TopPickSettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tickers,
-          weight_mode: weightMode,
+          weight_mode: "variable",
           settings,
           account_id: selectedAccount,
           backtest_settings: {
-            benchmark: { ticker: backtestBenchmarkTicker, name: backtestBenchmarkName },
             months: Number(backtestPeriodMonths),
             rebalance: backtestRebalanceMode,
             initial_amount_manwon: Number(backtestInitialAmountManwon),
@@ -695,19 +658,12 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정 저장에 실패했습니다.");
       }
       setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
-      if (data.weight_mode !== "variable" && data.weight_mode !== "fixed") {
-        throw new Error("저장된 비중 방식이 올바르지 않습니다.");
-      }
-      setWeightMode(data.weight_mode);
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? approvedAt);
       setApprovedWeights(data.approved_weights ?? approvedWeights);
       setPreview(null);
       const backtestSettings = data.backtest_settings ?? DEFAULT_BACKTEST_SETTINGS;
-      const benchmark = backtestSettings.benchmark ?? { ticker: "", name: "" };
-      setBacktestBenchmarkTicker(benchmark.ticker ?? "");
-      setBacktestBenchmarkName(benchmark.name ?? "");
       setBacktestPeriodMonths(String(backtestSettings.months ?? DEFAULT_BACKTEST_SETTINGS.months));
       setBacktestRebalanceMode(backtestSettings.rebalance ?? DEFAULT_BACKTEST_SETTINGS.rebalance);
       setBacktestInitialAmountManwon(String(backtestSettings.initial_amount_manwon ?? DEFAULT_BACKTEST_SETTINGS.initial_amount_manwon));
@@ -728,17 +684,13 @@ export function TopPickSettingsClient() {
       toast.error("탑픽 적용 계좌를 선택해주세요.");
       return;
     }
-    if (weightMode === "fixed" && !fixedWeightComplete) {
-      toast.error(`비중 고정은 종목별 고정 비중 합계가 100%여야 합니다. 현재 ${fixedWeightTotal.toFixed(1)}%`);
-      return;
-    }
     try {
       setRunning(true);
       setPreviewMode("weights");
       const resp = await fetch("/api/top-pick-settings/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: validTickers, settings, weight_mode: weightMode }),
+        body: JSON.stringify({ tickers: validTickers, settings, weight_mode: "variable" }),
       });
       const data = (await resp.json()) as TopPickWeightPreview;
       if (!resp.ok || data.error) {
@@ -752,7 +704,7 @@ export function TopPickSettingsClient() {
     } finally {
       setRunning(false);
     }
-  }, [settings, toast, validTickers, weightMode, fixedWeightComplete, fixedWeightTotal]);
+  }, [settings, toast, validTickers]);
 
   useEffect(() => {
     if (
@@ -785,7 +737,7 @@ export function TopPickSettingsClient() {
       const resp = await fetch("/api/top-pick-settings/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers, settings, account_id: selectedAccount, weight_mode: weightMode }),
+        body: JSON.stringify({ tickers, settings, account_id: selectedAccount, weight_mode: "variable" }),
       });
       const data = (await resp.json()) as TopPickWeightPreview & { approved_at?: string; tickers?: TopPickTicker[] };
       if (!resp.ok || data.error) {
@@ -844,23 +796,12 @@ export function TopPickSettingsClient() {
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
     const maType = source?.MA_TYPE ?? "-";
     const maMonths = source?.MA_MONTHS ?? "-";
-    return `${maType} ${maMonths}개월 · 추세 100%`;
+    return `${maType} ${maMonths}개월 · 추세선 위 투자`;
   };
 
   const runBacktest = async () => {
     if (validTickers.length < 3) {
       toast.error("탑픽 백테스트에는 확인된 편입 ETF가 3개 이상 필요합니다.");
-      return;
-    }
-    if (
-      !backtestBenchmarkTicker.trim() ||
-      !backtestBenchmarkName.trim()
-    ) {
-      toast.error("시장 레짐 지수를 선택해주세요.");
-      return;
-    }
-    if (weightMode === "fixed" && !fixedWeightComplete) {
-      toast.error(`비중 고정 백테스트는 고정 비중 합계가 100%여야 합니다. 현재 ${fixedWeightTotal.toFixed(1)}%`);
       return;
     }
     if (!Number.isInteger(Number(backtestInitialAmountManwon)) || Number(backtestInitialAmountManwon) <= 0) {
@@ -877,10 +818,9 @@ export function TopPickSettingsClient() {
         body: JSON.stringify({
           tickers: validTickers,
           settings,
-          weight_mode: weightMode,
+          weight_mode: "variable",
           backtest_settings: {
             months: Number(backtestPeriodMonths),
-            benchmark: { ticker: backtestBenchmarkTicker, name: backtestBenchmarkName },
             rebalance: backtestRebalanceMode,
             initial_amount_manwon: Number(backtestInitialAmountManwon),
           },
@@ -1241,7 +1181,7 @@ export function TopPickSettingsClient() {
   const renderTickerSlotRow = (item: TopPickTicker, index: number) => {
     const confirmed = !!item.name;
     return (
-      <div key={index} className={`topPickSlotRow${weightMode === "fixed" ? " topPickSlotRowFixed" : ""}`}>
+      <div key={index} className="topPickSlotRow">
         <span className="topPickSlotNumber">{index + 1}</span>
         <input
           style={{
@@ -1271,28 +1211,6 @@ export function TopPickSettingsClient() {
         <div className="topPickSlotName" title={item.name ?? ""}>
           {item.name || "종목명 (티커 입력 후 확인)"}
         </div>
-        {weightMode === "fixed" ? (
-          <input
-            type="number"
-            className="form-control form-control-sm topPickSlotWeight"
-            min={0}
-            max={100}
-            step={0.1}
-            placeholder="%"
-            disabled={!confirmed}
-            value={item.fixed_weight_pct ?? ""}
-            onChange={(event) => {
-              const raw = event.target.value;
-              setTickers((current) =>
-                current.map((currentItem, itemIndex) =>
-                  itemIndex === index
-                    ? { ...currentItem, fixed_weight_pct: raw === "" ? null : Number(raw) }
-                    : currentItem,
-                ),
-              );
-            }}
-          />
-        ) : null}
         <div className="topPickBucketCell">
           {confirmed && item.bucket && BUCKET_THEME[String(item.bucket)] ? (
             <span
@@ -1405,9 +1323,7 @@ export function TopPickSettingsClient() {
                   className="btn btn-sm btn-outline-dark"
                   disabled={
                     backtestRunning ||
-                    validTickers.length < 3 ||
-                    !backtestBenchmarkName.trim() ||
-                    (weightMode === "fixed" && !fixedWeightComplete)
+                    validTickers.length < 3
                   }
                   onClick={() => void runBacktest()}
                 >
@@ -1426,7 +1342,7 @@ export function TopPickSettingsClient() {
               <div className="card-body">
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {/* 변동/고정 슬롯 수 + 비중 방식 토글 — 계산에는 두 슬롯 수의 합계를 사용한다. */}
+                  {/* 변동/고정 슬롯 수는 관리용 구분이며 계산에는 두 슬롯 수의 합계를 사용한다. */}
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
                     <label className="appLabeledField" style={{ minWidth: 120 }}>
                       <span className="appLabeledFieldLabel">변동 종목 수</span>
@@ -1452,134 +1368,40 @@ export function TopPickSettingsClient() {
                         onChange={(event) => updateTickerCountSetting("FIXED_TICKERS", event.target.value)}
                       />
                     </label>
-                    <div className="appLabeledField">
-                      <span className="appLabeledFieldLabel">비중 방식</span>
-                      <div className="btn-group btn-group-sm" role="group">
-                        <button
-                          type="button"
-                          className={`btn ${weightMode === "variable" ? "btn-primary" : "btn-outline-primary"}`}
-                          onClick={() => setWeightMode("variable")}
-                        >
-                          변동
-                        </button>
-                        <button
-                          type="button"
-                          className={`btn ${weightMode === "fixed" ? "btn-primary" : "btn-outline-primary"}`}
-                          onClick={() => setWeightMode("fixed")}
-                        >
-                          고정
-                        </button>
-                      </div>
-                    </div>
                   </div>
 
-                  {/* 변동 전용 점수·종목 배분 설정. 고정 모드에서도 저장값은 유지한다. */}
-                  {weightMode === "variable" ? (
-                    <>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                        <label className="appLabeledField" style={{ minWidth: 110 }}>
-                          <span className="appLabeledFieldLabel">추세 타입</span>
-                          <select
-                            className="form-select form-select-sm"
-                            value={settings?.MA_TYPE ?? ""}
-                            onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
-                          >
-                            {MA_TYPES.map((type) => (
-                              <option key={type} value={type}>
-                                {type}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="appLabeledField" style={{ minWidth: 110 }}>
-                          <span className="appLabeledFieldLabel">추세 개월</span>
-                          <select
-                            className="form-select form-select-sm"
-                            value={settings?.MA_MONTHS ?? ""}
-                            onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
-                          >
-                            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((month) => (
-                              <option key={month} value={month}>
-                                {month}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                      </div>
-
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                        <label className="appLabeledField" style={{ minWidth: 110 }}>
-                          <span className="appLabeledFieldLabel">최소 비중(%)</span>
-                          <input
-                            type="number"
-                            className="form-control form-control-sm"
-                            min={0}
-                            max={100}
-                            step={0.1}
-                            value={settings?.MIN_WEIGHT ?? ""}
-                            onChange={(event) => updateSetting("MIN_WEIGHT", event.target.value)}
-                          />
-                        </label>
-                        <label className="appLabeledField" style={{ minWidth: 110 }}>
-                          <span className="appLabeledFieldLabel">최대 비중(%)</span>
-                          <input
-                            type="number"
-                            className="form-control form-control-sm"
-                            min={1}
-                            max={100}
-                            step={0.1}
-                            value={settings?.MAX_WEIGHT ?? ""}
-                            onChange={(event) => updateSetting("MAX_WEIGHT", event.target.value)}
-                          />
-                        </label>
-                      </div>
-                    </>
-                  ) : null}
-
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                    {([
-                      ["상승 현금 비중(%)", "CASH_WEIGHT_UP"],
-                      ["중립 현금 비중(%)", "CASH_WEIGHT_NEUTRAL"],
-                      ["하락 현금 비중(%)", "CASH_WEIGHT_DOWN"],
-                    ] as const).map(([label, key]) => (
-                      <label key={key} className="appLabeledField" style={{ minWidth: 145 }}>
-                        <span className="appLabeledFieldLabel">{label}</span>
-                        <select
-                          className="form-select form-select-sm"
-                          value={settings?.[key] ?? ""}
-                          onChange={(event) => updateSetting(key, event.target.value)}
-                        >
-                          {Array.from({ length: 21 }, (_, index) => index * 5).map((ratio) => (
-                            <option key={ratio} value={ratio}>
-                              {ratio}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ))}
-                    <label className="appLabeledField" style={{ minWidth: 150 }}>
-                      <span className="appLabeledFieldLabel">시장 레짐</span>
+                    <label className="appLabeledField" style={{ minWidth: 110 }}>
+                      <span className="appLabeledFieldLabel">추세 타입</span>
                       <select
                         className="form-select form-select-sm"
-                        value={backtestBenchmarkTicker}
-                        onChange={(event) => {
-                          const picked = marketTrendIndices.find((idx) => idx.ticker === event.target.value);
-                          setBacktestBenchmarkTicker(event.target.value);
-                          setBacktestBenchmarkName(picked?.name ?? event.target.value);
-                          setBacktestResult(null);
-                        }}
+                        value={settings?.MA_TYPE ?? ""}
+                        onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
                       >
-                        {!backtestBenchmarkTicker ? <option value="">지수 선택…</option> : null}
-                        {marketTrendIndices.map((idx) => (
-                          <option key={idx.ticker} value={idx.ticker}>
-                            {idx.name}
+                        {MA_TYPES.map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="appLabeledField" style={{ minWidth: 110 }}>
+                      <span className="appLabeledFieldLabel">추세 개월</span>
+                      <select
+                        className="form-select form-select-sm"
+                        value={settings?.MA_MONTHS ?? ""}
+                        onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
+                      >
+                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((month) => (
+                          <option key={month} value={month}>
+                            {month}
                           </option>
                         ))}
                       </select>
                     </label>
                   </div>
                   <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 4, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
-                    시장 레짐에 설정된 현금 비중을 적용하고, 남은 비중만 ETF에 배분합니다.
+                    각 종목의 기본 비중은 1/N입니다. 종목이 추세선 위에 있으면 투자하고, 추세선 아래면 해당 비중을 현금으로 둡니다.
                   </div>
 
                   {/* 시작금액 · 시작일자 — 누적수익률 기준, 항상 표시 */}
@@ -1677,15 +1499,6 @@ export function TopPickSettingsClient() {
                     : "티커를 입력하고 확인한 뒤 저장합니다."}
                 </p>
               </div>
-              {weightMode === "fixed" ? (
-                <div style={{ fontSize: "0.9rem", fontWeight: 700, whiteSpace: "nowrap" }}>
-                  고정 비중 합계{" "}
-                  <span style={{ color: fixedWeightComplete ? "#2f9e44" : "#d63939" }}>
-                    {fixedWeightTotal.toFixed(1)}%
-                  </span>
-                  {!fixedWeightComplete ? <span style={{ color: "var(--text-muted)", fontWeight: 500 }}> / 100%</span> : null}
-                </div>
-              ) : null}
             </div>
 
             {loading ? (
@@ -1828,10 +1641,10 @@ export function TopPickSettingsClient() {
                   <>
                     <div className="topPickComparisonMeta">
                       <div>
-                        <strong>저장 기준</strong>: {approvedWeights?.as_of_date ?? "-"} · {formatScoreSettingLabel(approvedWeights?.settings)} · 시장 레짐 {backtestBenchmarkName || backtestBenchmarkTicker || "-"}
+                        <strong>저장 기준</strong>: {approvedWeights?.as_of_date ?? "-"} · {formatScoreSettingLabel(approvedWeights?.settings)}
                       </div>
                       <div>
-                        <strong>계산 기준</strong>: {preview?.as_of_date ?? "-"} · {formatScoreSettingLabel(preview?.settings)} · 시장 레짐 {backtestBenchmarkName || backtestBenchmarkTicker || "-"}
+                        <strong>계산 기준</strong>: {preview?.as_of_date ?? "-"} · {formatScoreSettingLabel(preview?.settings)}
                       </div>
                     </div>
                     <AppAgGrid<TopPickWeightComparisonRow>
@@ -1902,16 +1715,6 @@ export function TopPickSettingsClient() {
           gap: 8px;
           align-items: center;
           min-width: 0;
-        }
-
-        /* 비중 고정 모드: 종목명과 버킷 사이에 고정 비중(%) 입력 컬럼 추가 */
-        .topPickSlotRow.topPickSlotRowFixed {
-          grid-template-columns: 28px minmax(84px, 112px) minmax(0, 1fr) 78px minmax(96px, auto) 64px;
-        }
-
-        .topPickSlotWeight {
-          width: 100%;
-          text-align: right;
         }
 
         .topPickSlotNumber {
