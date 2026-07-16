@@ -152,10 +152,10 @@ type ChartAverageBadge = {
 // --- 상수 ---
 
 const MA_PERIODS = [
-  { period: 5, color: "#2196F3", label: "5" },
+  { period: 10, color: "#E03131", label: "10" },
   { period: 20, color: "#FF9800", label: "20" },
-  { period: 60, color: "#E91E63", label: "60" },
-  { period: 120, color: "#9C27B0", label: "120" },
+  { period: 60, color: "#F2C94C", label: "60" },
+  { period: 120, color: "#2F9E44", label: "120" },
 ];
 
 const gridTheme = createAppGridTheme();
