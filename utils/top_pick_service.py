@@ -9,9 +9,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import TRADING_DAYS_PER_MONTH
+from config import MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
 from core.strategy.scoring import build_composite_rank_scores
-from core.strategy.weight_allocator import calculate_ranked_score_weights_with_cash
 from utils.cache_utils import (
     get_all_ticker_type_lookup_keys,
     load_cached_close_series_bulk,
@@ -33,11 +32,6 @@ ALLOWED_MA_TYPES = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"}
 SETTING_KEYS = (
     "MA_TYPE",
     "MA_MONTHS",
-    "MIN_WEIGHT",
-    "MAX_WEIGHT",
-    "CASH_WEIGHT_UP",
-    "CASH_WEIGHT_NEUTRAL",
-    "CASH_WEIGHT_DOWN",
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
     "MAX_TICKERS",
@@ -49,11 +43,6 @@ SETTING_KEYS = (
 REQUIRED_SETTING_KEYS = (
     "MA_TYPE",
     "MA_MONTHS",
-    "MIN_WEIGHT",
-    "MAX_WEIGHT",
-    "CASH_WEIGHT_UP",
-    "CASH_WEIGHT_NEUTRAL",
-    "CASH_WEIGHT_DOWN",
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
 )
@@ -189,13 +178,6 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     value_clean = {key: value for key, value in (values or {}).items() if value is not None}
     # 코드 기본값 없음 — 값은 base(DB)/values(요청)에서만 온다.
     source = {**base_clean, **value_clean}
-    legacy_cash_max = source.get("CASH_MAX_WEIGHT")
-    cash_keys = ("CASH_WEIGHT_UP", "CASH_WEIGHT_NEUTRAL", "CASH_WEIGHT_DOWN")
-    if legacy_cash_max is not None and all(source.get(key) is None for key in cash_keys):
-        legacy_cash_max_value = float(legacy_cash_max)
-        source["CASH_WEIGHT_UP"] = 0.0
-        source["CASH_WEIGHT_NEUTRAL"] = legacy_cash_max_value / 2.0
-        source["CASH_WEIGHT_DOWN"] = legacy_cash_max_value
     # 기존 문서에는 MAX_TICKERS 하나만 있다. 새 구조에서는 기존 슬롯을 모두 고정 종목으로 간주한다.
     if (
         source.get("VARIABLE_TICKERS") is None
@@ -222,31 +204,6 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     if not (1 <= ma_months <= 24):
         raise ValueError(f"MA_MONTHS 은 1 ~ 24 범위여야 합니다: {ma_months}")
     cleaned["MA_MONTHS"] = ma_months
-
-    float_ranges = {
-        "MIN_WEIGHT": (0.0, 100.0),
-        "MAX_WEIGHT": (1.0, 100.0),
-        "CASH_WEIGHT_UP": (0.0, 100.0),
-        "CASH_WEIGHT_NEUTRAL": (0.0, 100.0),
-        "CASH_WEIGHT_DOWN": (0.0, 100.0),
-    }
-    for key, (low, high) in float_ranges.items():
-        try:
-            number = float(source.get(key))
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"{key} 은 숫자여야 합니다: {source.get(key)}") from exc
-        if not (low <= number <= high):
-            raise ValueError(f"{key} 은 {low} ~ {high} 범위여야 합니다: {number}")
-        cleaned[key] = round(number, 1)
-
-    if cleaned["MAX_WEIGHT"] < cleaned["MIN_WEIGHT"]:
-        raise ValueError("MAX_WEIGHT 은 MIN_WEIGHT 보다 크거나 같아야 합니다.")
-    if not (
-        cleaned["CASH_WEIGHT_UP"]
-        <= cleaned["CASH_WEIGHT_NEUTRAL"]
-        <= cleaned["CASH_WEIGHT_DOWN"]
-    ):
-        raise ValueError("현금 비중은 상승 <= 중립 <= 하락 순서여야 합니다.")
 
     # 계좌별 편입 티커 슬롯 수. 변동/고정은 관리용 구분이며 계산에는 합산 슬롯을 사용한다.
     try:
@@ -368,7 +325,7 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
         "tickers": tickers,
         "weight_mode": _clean_weight_mode((doc or {}).get("weight_mode")),
         "settings": settings,
-        "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings")),
+        "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings"), require_benchmark=False),
         "approved_weights": _enrich_weight_rows_with_returns(approved_weights, _clean_tickers(tickers), settings),
         "approved_at": (
             approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at
@@ -458,6 +415,7 @@ def save_top_pick_settings(
     clean_backtest_settings = _clean_backtest_settings(
         backtest_settings,
         base=existing_doc.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
+        require_benchmark=False,
     )
     updated_at = datetime.now(timezone.utc)
     _db()[COLLECTION].update_one(
@@ -1162,91 +1120,16 @@ def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) ->
     return (mean / downside_std.replace(0, np.nan)) * np.sqrt(252.0)
 
 
-def _cash_weight_for_regime(settings: dict[str, Any], regime: Any) -> float:
-    """시장 레짐에 직접 대응하는 목표 현금 비중을 반환한다."""
-    regime_key = str(regime or "").strip()
-    setting_key_by_regime = {
-        "accel_up": "CASH_WEIGHT_UP",
-        "neutral": "CASH_WEIGHT_NEUTRAL",
-        "accel_down": "CASH_WEIGHT_DOWN",
-    }
-    if regime_key not in setting_key_by_regime:
-        raise ValueError(f"알 수 없는 시장 레짐입니다: {regime!r}")
-    return min(1.0, max(0.0, float(settings[setting_key_by_regime[regime_key]]) / 100.0))
-
-
-def _latest_regime_on_or_before(regimes: pd.Series, date: pd.Timestamp, benchmark_ticker: str) -> str:
-    """기준일과 같거나 이전인 가장 최근 시장 레짐을 반환한다."""
-    eligible = regimes[regimes.index <= date]
-    if eligible.empty:
-        raise ValueError(
-            f"{date.strftime('%Y-%m-%d')} 이전의 시장 레짐 데이터가 없습니다: {benchmark_ticker}"
-        )
-    regime = eligible.iloc[-1]
-    regime_key = str(regime or "").strip()
-    if regime_key not in {"accel_up", "neutral", "accel_down"}:
-        raise ValueError(
-            f"{date.strftime('%Y-%m-%d')} 기준 시장 레짐 값이 올바르지 않습니다: {benchmark_ticker}={regime!r}"
-        )
-    return regime_key
-
-
-def _scale_fixed_weights_with_cash(fixed_weights: dict[str, float], cash_weight: float) -> dict[str, float]:
-    """고정 비중의 상대 비율을 유지하면서 현금을 제외한 투자 가능 비중에 맞춘다."""
-    cash_weight = min(1.0, max(0.0, float(cash_weight)))
-    investable_weight = 1.0 - cash_weight
-    scaled = {ticker: weight * investable_weight for ticker, weight in fixed_weights.items()}
-    if cash_weight > 0:
-        scaled["__CASH__"] = cash_weight
-    return _normalize_weight_ratio_map(scaled)
-
-
 def calculate_top_pick_weights_for(
     tickers: list[dict[str, Any]], settings: dict[str, Any], weight_mode: str = "variable"
 ) -> dict[str, Any]:
-    weight_mode = str(weight_mode or "variable").strip().lower()
-    if weight_mode not in {"variable", "fixed"}:
-        raise ValueError(f"알 수 없는 비중 방식입니다: {weight_mode}")
+    # weight_mode 는 저장 호환용으로만 남긴다. 실제 계산은 항상 동일 슬롯 + 개별 추세선 필터다.
     if len(tickers) < 3:
         raise ValueError("탑픽 비중 계산에는 확인된 종목이 3개 이상 필요합니다.")
 
-    # 고정 비중은 ETF 사이의 상대 비율이며, 현금 제어가 켜지면 남은 투자 가능 비중에 맞춰 축소한다.
-    fixed_weights = _resolve_fixed_weights(tickers) if weight_mode == "fixed" else {}
-
-    min_weight = float(settings["MIN_WEIGHT"]) / 100.0
-    max_weight = float(settings["MAX_WEIGHT"]) / 100.0
-    current_regime: str | None = None
-    if weight_mode == "variable":
-        for label, key in (
-            ("상승", "CASH_WEIGHT_UP"),
-            ("중립", "CASH_WEIGHT_NEUTRAL"),
-            ("하락", "CASH_WEIGHT_DOWN"),
-        ):
-            cash_weight = float(settings[key]) / 100.0
-            investable_weight = 1.0 - cash_weight
-            if min_weight * len(tickers) > investable_weight + 1e-12:
-                raise ValueError(f"{label} 현금 비중과 최소 비중·종목 수가 맞지 않습니다.")
-            if max_weight * len(tickers) + 1e-12 < investable_weight:
-                raise ValueError(f"{label} 현금 비중과 최대 비중·종목 수가 맞지 않습니다.")
-
-    # 적용 계좌의 벤치마크 실시간 레짐으로 설정된 목표 현금 비중을 선택한다.
     account_id = str(settings.get("ACCOUNT_ID") or "").strip()
     if not account_id:
         raise ValueError("탑픽 비중 계산에는 적용 계좌가 필요합니다.")
-    db_settings = load_top_pick_settings(account_id)
-    benchmark = db_settings.get("backtest_settings", {}).get("benchmark", {})
-    bench_ticker = str(benchmark.get("ticker") or "").strip()
-    if not bench_ticker:
-        raise ValueError(f"탑픽 계좌 '{account_id}'에 시장 레짐 벤치마크가 없습니다.")
-    bench_df = _load_regime_benchmark_ohlc(bench_ticker)
-    if bench_df is None or bench_df.empty:
-        raise ValueError(f"시장 레짐 벤치마크 가격 데이터가 없습니다: {bench_ticker}")
-    regimes = _calculate_benchmark_regimes(bench_df, bench_ticker)
-    if regimes.empty:
-        raise ValueError(f"시장 레짐을 계산할 수 없습니다: {bench_ticker}")
-    latest_date = regimes.index.max()
-    current_regime = regimes.loc[latest_date]
-    target_cash_weight = _cash_weight_for_regime(settings, current_regime)
 
     close_frame, missing = _load_close_frame(tickers)
     if close_frame.empty:
@@ -1256,46 +1139,52 @@ def calculate_top_pick_weights_for(
     mdd_map = _build_mdd_map(close_frame, metric_months)
     eval_date = close_frame.index.max()
 
-    # 고정 모드는 ETF 점수를 쓰지 않으므로 스코어링 계산을 생략한다.
-    if weight_mode == "variable":
-        ma_rules = [
-            {
-                "order": 1,
-                "ma_type": settings["MA_TYPE"],
-                "ma_months": settings["MA_MONTHS"],
-                "score_column": "추세",
-            }
-        ]
-        composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
-        sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
-        composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
-        trend_frame = trend_by_order[1]
-        trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
-        sortino_raw_row = (
-            sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
-        )
-    else:
-        composite_row = trend_row = sortino_raw_row = pd.Series(dtype=float)
+    ma_rules = [
+        {
+            "order": 1,
+            "ma_type": settings["MA_TYPE"],
+            "ma_months": settings["MA_MONTHS"],
+            "score_column": "추세",
+        }
+    ]
+    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
+    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
+    composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
+    trend_frame = trend_by_order[1]
+    trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
+    sortino_raw_row = sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
 
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
 
-    raw_scores: dict[str, float] = {}
-    defensive_tickers: set[str] = set()
     rows: list[dict[str, Any]] = []
     ticker_meta = {item["ticker"]: item for item in tickers}
+    excluded_reasons: list[str] = []
+    weights: dict[str, float] = {}
+    slot_weight = 1.0 / len(tickers)
+    cash_weight = 0.0
     for ticker in [item["ticker"] for item in tickers]:
         trend_value = composite_row.get(ticker)
         sortino_raw_value = sortino_raw_row.get(ticker)
         point_trend = None if pd.isna(trend_value) else float(trend_value)
         score = point_trend
-        if score is not None:
-            raw_scores[ticker] = score
+        if score is None:
+            close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
+            if close_count <= 0:
+                excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
+            elif close_count < int(MIN_TRADING_DAYS):
+                excluded_reasons.append(f"{ticker}: 가격 데이터 {close_count}개로 부족(최소 {MIN_TRADING_DAYS}개)")
+            else:
+                excluded_reasons.append(f"{ticker}: 추세 점수 계산 불가")
 
         trend_pct = trend_row.get(ticker)
         trend_pct_value = None if pd.isna(trend_pct) else float(trend_pct)
-        if trend_pct_value is not None and trend_pct_value <= 0:
-            defensive_tickers.add(ticker)
+        if score is not None and trend_pct_value is not None:
+            if trend_pct_value > 0:
+                weights[ticker] = slot_weight
+            else:
+                weights[ticker] = 0.0
+                cash_weight += slot_weight
         meta = ticker_meta[ticker]
         rows.append(
             {
@@ -1323,30 +1212,9 @@ def calculate_top_pick_weights_for(
             }
         )
 
-    if weight_mode == "fixed":
-        weights = _scale_fixed_weights_with_cash(fixed_weights, target_cash_weight)
-    else:
-        if len(raw_scores) < 3:
-            raise ValueError(f"비중 계산 가능한 종목이 3개 미만입니다. 가격 캐시 누락: {', '.join(missing) or '-'}")
-        try:
-            weights = calculate_ranked_score_weights_with_cash(
-                raw_scores,
-                defensive_tickers=defensive_tickers,
-                min_weight=min_weight,
-                max_weight=max_weight,
-                cash_max_weight=target_cash_weight,
-                forced_cash_weight=target_cash_weight,
-            )
-        except ValueError as exc:
-            if "채울 수 없습니다" in str(exc):
-                n_scored = len(raw_scores)
-                need_pct = 100.0 / n_scored if n_scored else 100.0
-                raise ValueError(
-                    f"현재 시장 레짐의 목표 현금 비중은 {target_cash_weight * 100:.1f}%입니다. "
-                    f"이 상태에서는 최대 비중 {max_weight * 100:.1f}% × {n_scored}종목 = {max_weight * n_scored * 100:.0f}%로 "
-                    f"100%를 채울 수 없습니다. 최대 비중을 {need_pct:.1f}% 이상으로 높이거나 종목 수를 늘리세요."
-                ) from exc
-            raise
+    if excluded_reasons:
+        raise ValueError("비중 계산에서 제외되는 종목이 있습니다. " + " / ".join(excluded_reasons))
+    weights["__CASH__"] = cash_weight
 
     for row in rows:
         weight = weights.get(row["ticker"])
@@ -1519,51 +1387,31 @@ def _calculate_top_pick_weights_on_date(
     settings: dict[str, Any],
     composite_frame: pd.DataFrame,
     trend_frame: pd.DataFrame,
-    target_cash_weight: float,
 ) -> dict[str, float] | None:
-    if eval_date not in composite_frame.index:
+    eligible_dates = composite_frame.index[composite_frame.index <= eval_date]
+    if eligible_dates.empty:
         return None
 
-    composite_row = composite_frame.loc[eval_date]
-    trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
-    raw_scores: dict[str, float] = {}
-    defensive_tickers: set[str] = set()
-
+    score_date = eligible_dates.max()
+    composite_row = composite_frame.loc[score_date]
+    trend_row = trend_frame.loc[score_date] if score_date in trend_frame.index else pd.Series(dtype=float)
+    slot_weight = 1.0 / len(tickers)
+    weights: dict[str, float] = {}
+    cash_weight = 0.0
     for item in tickers:
         ticker = str(item.get("ticker") or "").strip().upper()
-        trend_value = composite_row.get(ticker)
-        if pd.isna(trend_value):
-            continue
-        point_trend = float(trend_value)
-        raw_scores[ticker] = point_trend
-
+        score_value = composite_row.get(ticker)
         trend_pct = trend_row.get(ticker)
-        if not pd.isna(trend_pct) and float(trend_pct) <= 0:
-            defensive_tickers.add(ticker)
-
-    if len(raw_scores) < 3:
-        return None
-
-    max_w = float(settings["MAX_WEIGHT"]) / 100.0
-    try:
-        weights = calculate_ranked_score_weights_with_cash(
-            raw_scores,
-            defensive_tickers=defensive_tickers,
-            min_weight=float(settings["MIN_WEIGHT"]) / 100.0,
-            max_weight=max_w,
-            cash_max_weight=target_cash_weight,
-            forced_cash_weight=target_cash_weight,
-        )
-    except ValueError as exc:
-        # 배분 불가면 어느 날짜에 왜(그 시점 데이터 있는 ETF 수) 막혔는지 정확히 알린다.
-        if "채울 수 없습니다" in str(exc):
-            date_label = f"{eval_date.year}년 {eval_date.month}월 {eval_date.day}일"
-            raise ValueError(
-                f"{date_label}에 데이터가 있는 ETF가 {len(raw_scores)}개뿐이라 "
-                f"최대 비중 {max_w * 100:.1f}%와 현금 {target_cash_weight * 100:.1f}%로는 100%를 채울 수 없습니다. "
-                f"최대 비중을 높이거나 백테스트 기간을 줄이세요."
-            ) from exc
-        raise
+        if pd.isna(score_value) or pd.isna(trend_pct):
+            cash_weight += slot_weight
+            weights[ticker] = 0.0
+        elif float(trend_pct) > 0:
+            weights[ticker] = slot_weight
+        else:
+            cash_weight += slot_weight
+            weights[ticker] = 0.0
+    if cash_weight > 0:
+        weights["__CASH__"] = cash_weight
     return _normalize_weight_ratio_map(weights)
 
 
@@ -1592,45 +1440,19 @@ def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str
     return rates
 
 
-def _resolve_fixed_weights(clean_tickers: list[dict[str, Any]]) -> dict[str, float]:
-    """비중 고정용 종목별 목표 비중(합=1.0)을 반환한다.
-
-    모든 종목에 fixed_weight_pct 가 있어야 하고 합이 100%여야 한다(임의 보정 금지).
-    """
-    fixed: dict[str, float] = {}
-    total = 0.0
-    missing: list[str] = []
-    for item in clean_tickers:
-        weight = item.get("fixed_weight_pct")
-        if weight is None:
-            missing.append(str(item["ticker"]))
-            continue
-        fixed[str(item["ticker"])] = float(weight) / 100.0
-        total += float(weight)
-    if missing:
-        raise ValueError(f"비중 고정: 고정 비중이 없는 종목이 있습니다: {', '.join(missing)}")
-    if abs(total - 100.0) > 0.05:
-        raise ValueError(f"비중 고정: 고정 비중 합계가 100%여야 합니다(현재 {total:.1f}%).")
-    return fixed
-
-
 def run_top_pick_backtest(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
-    weight_mode = str(weight_mode or "variable").strip().lower()
-    if weight_mode not in {"variable", "fixed"}:
-        raise ValueError(f"알 수 없는 비중 방식입니다: {weight_mode}")
+    # weight_mode 는 저장 호환용으로만 받는다. 백테스트도 항상 동일 슬롯 + 개별 추세선 필터를 쓴다.
     clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 3:
         raise ValueError("탑픽 백테스트에는 확인된 종목이 3개 이상 필요합니다.")
 
     clean_settings = _clean_settings(settings)
-    clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=True)
-    # 시장 레짐(추세/현금제어 판별)용 종목
-    regime_benchmark = clean_backtest["benchmark"]
+    clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     # 결과 비교용 벤치마크 — 계좌 설정(/account-settings)의 벤치마크를 쓴다(계좌별로 다름).
     account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
     if not account_id:
@@ -1672,37 +1494,19 @@ def run_top_pick_backtest(
     requested_rebalance_dates = _select_rebalance_dates(simulation_frame.index, rebalance)
     weights_by_date: dict[pd.Timestamp, dict[str, float]] = {}
 
-    bench_df = _load_regime_benchmark_ohlc(regime_benchmark["ticker"])
-    if bench_df is None or bench_df.empty:
-        raise ValueError(f"시장 레짐 벤치마크 가격 데이터가 없습니다: {regime_benchmark['ticker']}")
-    benchmark_regimes = _calculate_benchmark_regimes(bench_df, regime_benchmark["ticker"])
-    if benchmark_regimes.empty:
-        raise ValueError(f"시장 레짐을 계산할 수 없습니다: {regime_benchmark['ticker']}")
+    composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
+    trend_frame = trend_by_order[1]
 
-    if weight_mode == "fixed":
-        fixed_weights = _resolve_fixed_weights(clean_tickers)
-        for date in requested_rebalance_dates:
-            regime = _latest_regime_on_or_before(benchmark_regimes, date, regime_benchmark["ticker"])
-            target_cash_weight = _cash_weight_for_regime(clean_settings, regime)
-            weights_by_date[date] = _scale_fixed_weights_with_cash(fixed_weights, target_cash_weight)
-    else:
-        composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
-        trend_frame = trend_by_order[1]
-
-        for date in requested_rebalance_dates:
-            regime = _latest_regime_on_or_before(benchmark_regimes, date, regime_benchmark["ticker"])
-            target_cash_weight = _cash_weight_for_regime(clean_settings, regime)
-
-            weights = _calculate_top_pick_weights_on_date(
-                date,
-                clean_tickers,
-                clean_settings,
-                composite_frame,
-                trend_frame,
-                target_cash_weight=target_cash_weight,
-            )
-            if weights is not None:
-                weights_by_date[date] = weights
+    for date in requested_rebalance_dates:
+        weights = _calculate_top_pick_weights_on_date(
+            date,
+            clean_tickers,
+            clean_settings,
+            composite_frame,
+            trend_frame,
+        )
+        if weights is not None:
+            weights_by_date[date] = weights
 
     if not weights_by_date:
         raise ValueError("백테스트 기간에 계산 가능한 탑픽 비중이 없습니다.")
@@ -1898,28 +1702,3 @@ def run_top_pick_backtest(
         "missing_tickers": missing,
     }
 
-
-def _load_regime_benchmark_ohlc(ticker: str) -> pd.DataFrame | None:
-    """시장 레짐 지수의 OHLC 를 로드한다 (지수 전용 소스: 한국 네이버 / 미국 yfinance).
-
-    시장추세 지수 목록에 없는 티커는 설정 오류이므로 명시적으로 에러를 낸다.
-    """
-    from utils.market_trend_service import is_market_trend_index, load_index_ohlc
-
-    if not is_market_trend_index(ticker):
-        raise ValueError(f"시장 레짐은 시장추세 지수만 지원합니다: {ticker}. 설정 화면에서 지수를 선택해주세요.")
-    return load_index_ohlc(ticker)
-
-
-def _calculate_benchmark_regimes(bench_df: pd.DataFrame, ticker: str) -> pd.Series:
-    """지수 OHLC DataFrame을 입력받아 날짜별 레짐(accel_up, accel_down, neutral) 시리즈를 계산해 반환한다.
-
-    /market-trend 화면과 동일한 MA20/60 교차 + 지수별 확인일수 레짐을 사용한다.
-    """
-    from utils.market_trend_service import _resolve_confirm_days, compute_ma_cross_regime
-
-    df = bench_df.dropna(subset=["Close"]).sort_index()
-    if df.empty:
-        return pd.Series(dtype=object)
-
-    return compute_ma_cross_regime(df, _resolve_confirm_days(ticker))
