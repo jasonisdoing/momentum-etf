@@ -62,7 +62,7 @@ export async function GET(request: Request) {
     const targetAccountIds = (topPickAccounts.accounts ?? []).filter((accountId) =>
       requestedAccountIds.has(normalizeAccountId(accountId)),
     );
-    const weightPayloads = await Promise.all(
+    const weightPayloadResults = await Promise.allSettled(
       targetAccountIds.map(async (accountId) => ({
         accountId,
         payload: await fetchFastApiJson<{ rows?: TopPickWeightRow[] }>(
@@ -70,6 +70,19 @@ export async function GET(request: Request) {
         ),
       })),
     );
+    const weightPayloads: Array<{ accountId: string; payload: { rows?: TopPickWeightRow[] } }> = [];
+    const topPickTargetErrors: Array<{ account_id: string; error: string }> = [];
+    weightPayloadResults.forEach((result, index) => {
+      const accountId = targetAccountIds[index];
+      if (result.status === "fulfilled") {
+        weightPayloads.push(result.value);
+        return;
+      }
+      topPickTargetErrors.push({
+        account_id: accountId,
+        error: result.reason instanceof Error ? result.reason.message : "탑픽 목표비중을 불러오지 못했습니다.",
+      });
+    });
     const targetMap = new Map<string, { quantity: number | null; weightPct: number | null }>();
     for (const { accountId, payload: weightPayload } of weightPayloads) {
       for (const row of weightPayload.rows ?? []) {
@@ -91,6 +104,7 @@ export async function GET(request: Request) {
         top_pick_cash_target_weight_pct:
           targetMap.get(`${normalizeAccountId(summary.account_id)}::__CASH__`)?.weightPct ?? null,
       })),
+      top_pick_target_errors: topPickTargetErrors,
     });
   } catch (error) {
     return jsonNoStore(
