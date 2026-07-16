@@ -3002,7 +3002,7 @@ a {
   white-space: nowrap;
 }
 
-/* 탑픽 종목명: 모멘텀 종목풀과 동일하게 최대 2줄까지 표시한다. */
+/* 탑픽 종목명: 종목풀 순위와 동일하게 최대 2줄까지 표시한다. */
 .topPickPreviewGrid .ag-cell.topPickNameCell,
 .topPickPreviewGrid .ag-cell.topPickNameCell .ag-cell-value,
 .topPickWeightGrid .ag-cell.topPickNameCell,

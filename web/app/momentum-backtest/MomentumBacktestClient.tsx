@@ -159,7 +159,7 @@ export function MomentumBacktestClient() {
           <div className="card-body">
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 8 }}>백테스트 실행</h2>
             <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
-              탐색공간은 모멘텀-설정에서 편집합니다. 버튼을 누르면 배치 큐에 등록되고 워커가 모든 종목풀을 전수 탐색합니다(시간이 걸립니다). 결과는 풀별 로그 파일로 저장됩니다.
+              탐색공간은 종목풀 설정에서 편집합니다. 버튼을 누르면 배치 큐에 등록되고 워커가 모든 종목풀을 전수 탐색합니다(시간이 걸립니다). 결과는 풀별 로그 파일로 저장됩니다.
             </p>
             <button type="button" className="btn btn-dark" disabled={triggering || running} onClick={() => void start()} style={{ minWidth: 200 }}>
               {running ? "백테스트 진행 중…" : triggering ? "시작 중…" : "백테스트 시작"}

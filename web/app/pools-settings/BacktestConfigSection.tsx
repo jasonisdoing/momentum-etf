@@ -349,7 +349,7 @@ export function BacktestConfigSection() {
       <div className="card-body">
         <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>백테스트 탐색 공간</h2>
         <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
-          모멘텀-백테스트(`python backtest/run.py`)가 풀별로 전수 탐색하는 값입니다. (라이브 적용값과 별개 — TOP_N_HOLD는 위 종목풀 설정에서 관리)
+          종목풀 백테스트(`python backtest/run.py`)가 풀별로 전수 탐색하는 값입니다. (라이브 적용값과 별개 — TOP_N_HOLD는 위 종목풀 설정에서 관리)
         </p>
 
         {loading ? (
