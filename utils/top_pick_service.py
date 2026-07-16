@@ -31,12 +31,14 @@ SETTING_KEYS = (
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
     "MAX_TICKERS",
+    "STOCK_MAX_WEIGHT",
     "ACCOUNT_ID",
 )
 # DB에 반드시 있어야 하는(없으면 에러) 전략 필수 필드. 코드 기본값으로 대체하지 않는다.
 REQUIRED_SETTING_KEYS = (
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
+    "STOCK_MAX_WEIGHT",
 )
 # 계좌별 편입 티커 슬롯 수의 허용 범위.
 MAX_TICKERS_LIMIT = 20
@@ -178,6 +180,12 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     ):
         source["VARIABLE_TICKERS"] = 0
         source["FIXED_TICKERS"] = source.get("MAX_TICKERS")
+    if source.get("STOCK_MAX_WEIGHT") is None and source.get("MAX_TICKERS") is not None:
+        migrated_max_tickers = int(source.get("MAX_TICKERS"))
+        if migrated_max_tickers <= 0:
+            raise ValueError(f"MAX_TICKERS 은 1 이상이어야 합니다: {migrated_max_tickers}")
+        # 기존 문서는 종목당 기본 슬롯(1/N)이 상한이었다. 신규 필드가 없을 때만 같은 의미로 명시 마이그레이션한다.
+        source["STOCK_MAX_WEIGHT"] = max(5.0, round(100.0 / migrated_max_tickers, 1))
     # 전략 필수 필드가 하나라도 없으면 코드 기본값으로 대체하지 않고 명시적 에러(fail loud).
     missing_required = [key for key in REQUIRED_SETTING_KEYS if source.get(key) is None]
     if missing_required:
@@ -205,6 +213,14 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     cleaned["VARIABLE_TICKERS"] = variable_tickers
     cleaned["FIXED_TICKERS"] = fixed_tickers
     cleaned["MAX_TICKERS"] = max_tickers
+
+    try:
+        stock_max_weight = float(source.get("STOCK_MAX_WEIGHT"))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"종목 최대 비중(%)은 숫자여야 합니다: {source.get('STOCK_MAX_WEIGHT')}") from exc
+    if not (5.0 <= stock_max_weight <= 100.0):
+        raise ValueError(f"종목 최대 비중(%)은 5 ~ 100 범위여야 합니다: {stock_max_weight}")
+    cleaned["STOCK_MAX_WEIGHT"] = round(stock_max_weight, 1)
 
     account_id = str(source.get("ACCOUNT_ID") or "").strip()
     if account_id:
@@ -1152,6 +1168,49 @@ def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) ->
     return (mean / downside_std.replace(0, np.nan)) * np.sqrt(252.0)
 
 
+def _allocate_trend_filtered_weights(ticker_trend_pct: dict[str, float | None], stock_max_weight_pct: float) -> dict[str, float]:
+    """개별 추세선 위 종목만 투자하고, 남는 비중은 최대 비중까지 재분배한다."""
+    if not ticker_trend_pct:
+        raise ValueError("비중 계산 대상 종목이 없습니다.")
+    stock_max_weight = float(stock_max_weight_pct) / 100.0
+    if not (0.05 <= stock_max_weight <= 1.0):
+        raise ValueError(f"종목 최대 비중(%)은 5 ~ 100 범위여야 합니다: {stock_max_weight_pct}")
+
+    tickers = list(ticker_trend_pct.keys())
+    slot_weight = 1.0 / len(tickers)
+    weights = {ticker: 0.0 for ticker in tickers}
+    active_tickers = [ticker for ticker, trend_pct in ticker_trend_pct.items() if trend_pct is not None and trend_pct > 0]
+    if not active_tickers:
+        return _normalize_weight_ratio_map({"__CASH__": 1.0, **weights})
+
+    for ticker in active_tickers:
+        weights[ticker] = min(slot_weight, stock_max_weight)
+
+    cash_weight = max(0.0, 1.0 - sum(weights.values()))
+    remaining_capacity = {
+        ticker: max(0.0, stock_max_weight - weights[ticker])
+        for ticker in active_tickers
+    }
+
+    while cash_weight > 1e-12:
+        candidates = [ticker for ticker, capacity in remaining_capacity.items() if capacity > 1e-12]
+        if not candidates:
+            break
+        per_ticker = cash_weight / len(candidates)
+        distributed = 0.0
+        for ticker in candidates:
+            add_weight = min(per_ticker, remaining_capacity[ticker])
+            weights[ticker] += add_weight
+            remaining_capacity[ticker] -= add_weight
+            distributed += add_weight
+        if distributed <= 1e-12:
+            break
+        cash_weight -= distributed
+
+    weights["__CASH__"] = max(0.0, 1.0 - sum(weights.values()))
+    return _normalize_weight_ratio_map(weights)
+
+
 def calculate_top_pick_weights_for(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any],
@@ -1189,9 +1248,7 @@ def calculate_top_pick_weights_for(
     rows: list[dict[str, Any]] = []
     ticker_meta = {item["ticker"]: item for item in tickers}
     excluded_reasons: list[str] = []
-    weights: dict[str, float] = {}
-    slot_weight = 1.0 / len(tickers)
-    cash_weight = 0.0
+    trend_pct_by_ticker: dict[str, float | None] = {}
     for ticker in [item["ticker"] for item in tickers]:
         trend_value = composite_row.get(ticker)
         sortino_raw_value = sortino_raw_row.get(ticker)
@@ -1208,12 +1265,9 @@ def calculate_top_pick_weights_for(
 
         trend_pct = trend_row.get(ticker)
         trend_pct_value = None if pd.isna(trend_pct) else float(trend_pct)
-        if score is not None and trend_pct_value is not None:
-            if trend_pct_value > 0:
-                weights[ticker] = slot_weight
-            else:
-                weights[ticker] = 0.0
-                cash_weight += slot_weight
+        if score is not None and trend_pct_value is None:
+            excluded_reasons.append(f"{ticker}: 추세 계산 불가")
+        trend_pct_by_ticker[ticker] = trend_pct_value
         meta = ticker_meta[ticker]
         rows.append(
             {
@@ -1243,7 +1297,7 @@ def calculate_top_pick_weights_for(
 
     if excluded_reasons:
         raise ValueError("비중 계산에서 제외되는 종목이 있습니다. " + " / ".join(excluded_reasons))
-    weights["__CASH__"] = cash_weight
+    weights = _allocate_trend_filtered_weights(trend_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
     for row in rows:
         weight = weights.get(row["ticker"])
@@ -1435,24 +1489,18 @@ def _calculate_top_pick_weights_on_date(
     score_date = eligible_dates.max()
     composite_row = composite_frame.loc[score_date]
     trend_row = trend_frame.loc[score_date] if score_date in trend_frame.index else pd.Series(dtype=float)
-    slot_weight = 1.0 / len(tickers)
-    weights: dict[str, float] = {}
-    cash_weight = 0.0
+    trend_pct_by_ticker: dict[str, float | None] = {}
     for item in tickers:
         ticker = str(item.get("ticker") or "").strip().upper()
         score_value = composite_row.get(ticker)
         trend_pct = trend_row.get(ticker)
         if pd.isna(score_value) or pd.isna(trend_pct):
-            cash_weight += slot_weight
-            weights[ticker] = 0.0
+            trend_pct_by_ticker[ticker] = None
         elif float(trend_pct) > 0:
-            weights[ticker] = slot_weight
+            trend_pct_by_ticker[ticker] = float(trend_pct)
         else:
-            cash_weight += slot_weight
-            weights[ticker] = 0.0
-    if cash_weight > 0:
-        weights["__CASH__"] = cash_weight
-    return _normalize_weight_ratio_map(weights)
+            trend_pct_by_ticker[ticker] = float(trend_pct)
+    return _allocate_trend_filtered_weights(trend_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
 
 def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:

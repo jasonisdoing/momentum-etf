@@ -73,6 +73,7 @@ type TopPickSettings = {
   VARIABLE_TICKERS: number;
   FIXED_TICKERS: number;
   MAX_TICKERS: number;
+  STOCK_MAX_WEIGHT: number;
   ACCOUNT_ID: string;
   START_AMOUNT_MANWON: number | null;
   START_DATE: string | null;
@@ -249,6 +250,7 @@ type TopPickSelectedGridRow = TopPickTicker & {
   trend_pct: number | null;
   alignment?: string | null;
   is_confirmed: boolean;
+  is_pending_new: boolean;
 };
 
 type TopPickReserveGridRow = TopPickReserveCandidate & {
@@ -306,6 +308,7 @@ function buildSettingsForRequest(
     VARIABLE_TICKERS: count,
     FIXED_TICKERS: 0,
     MAX_TICKERS: count,
+    STOCK_MAX_WEIGHT: settings.STOCK_MAX_WEIGHT,
     ACCOUNT_ID: settings.ACCOUNT_ID,
     START_AMOUNT_MANWON: basis.startAmount,
     START_DATE: basis.startDate,
@@ -550,6 +553,7 @@ export function TopPickSettingsClient() {
   const [reserveLoading, setReserveLoading] = useState(false);
   const [reserveError, setReserveError] = useState<string | null>(null);
   const [rankMetaByTicker, setRankMetaByTicker] = useState<Record<string, { trend_pct: number | null; alignment?: string | null }>>({});
+  const [pendingAddedTickerSet, setPendingAddedTickerSet] = useState<Set<string>>(() => new Set());
   const autoRunStartedRef = useRef(false);
 
   const validTickers = useMemo(
@@ -628,6 +632,7 @@ export function TopPickSettingsClient() {
       }
       setSelectedAccount(target);
       setTickers(buildTickerRows(data.tickers));
+      setPendingAddedTickerSet(new Set());
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? null);
@@ -839,6 +844,7 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정 저장에 실패했습니다.");
       }
       setTickers(buildTickerRows(data.tickers));
+      setPendingAddedTickerSet(new Set());
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? approvedAt);
@@ -1378,6 +1384,11 @@ export function TopPickSettingsClient() {
         alignment: candidate.alignment,
       },
     ]);
+    setPendingAddedTickerSet((current) => {
+      const next = new Set(current);
+      next.add(normalizeTicker(candidate.ticker));
+      return next;
+    });
     setPreview(null);
   };
 
@@ -1389,8 +1400,9 @@ export function TopPickSettingsClient() {
         trend_pct: rankMetaByTicker[normalizeTicker(item.ticker)]?.trend_pct ?? null,
         alignment: rankMetaByTicker[normalizeTicker(item.ticker)]?.alignment ?? item.alignment ?? null,
         is_confirmed: !!item.name,
+        is_pending_new: pendingAddedTickerSet.has(normalizeTicker(item.ticker)),
       })),
-    [rankMetaByTicker, tickers],
+    [pendingAddedTickerSet, rankMetaByTicker, tickers],
   );
 
   const reserveGridRows = useMemo<TopPickReserveGridRow[]>(
@@ -1584,7 +1596,7 @@ export function TopPickSettingsClient() {
     [displayTickerOf, selectedTickerSet, validTickers.length],
   );
 
-  const symbolGridOptions = useMemo<GridOptions<TopPickSelectedGridRow | TopPickReserveGridRow>>(
+  const symbolGridOptions = useMemo<GridOptions<TopPickSelectedGridRow>>(
     () => ({
       domLayout: "autoHeight",
       headerHeight: 34,
@@ -1680,11 +1692,30 @@ export function TopPickSettingsClient() {
         <div className="topPickSettingsTopLayout">
           <div className="card appCard">
             <div className="card-body">
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>백테스트 설정</h2>
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>설정</h2>
               <div style={{ color: "#4b5563", fontSize: "0.83rem", marginBottom: 12, lineHeight: "1.4" }}>
                 비중 계산은 계좌에 연결된 종목풀의 메인 이평선을 사용합니다. {settings ? formatScoreSettingLabel(settings) : ""}
               </div>
               <div className="topPickBacktestGrid">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">종목 최대 비중(%)</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={settings?.STOCK_MAX_WEIGHT ?? ""}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      setSettings((current) => (current ? { ...current, STOCK_MAX_WEIGHT: value } : current));
+                      setPreview(null);
+                      setBacktestResult(null);
+                    }}
+                  >
+                    {Array.from({ length: 20 }, (_, index) => (index + 1) * 5).map((value) => (
+                      <option key={value} value={value}>
+                        {value}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">최초 금액(만원)</span>
                   <input
@@ -1757,11 +1788,14 @@ export function TopPickSettingsClient() {
                 columnDefs={selectedGridColumnDefs}
                 loading={loading}
                 minHeight={Math.max(260, Math.min(MAX_TOP_PICK_SELECTED, Math.max(selectedGridRows.length, 4)) * 44 + 46)}
-                gridOptions={symbolGridOptions as GridOptions<TopPickSelectedGridRow>}
+                gridOptions={symbolGridOptions}
                 theme={previewGridTheme}
                 getRowClass={(params) => {
+                  const classNames: string[] = [];
                   const trend = params.data?.trend_pct;
-                  return typeof trend === "number" && trend <= 0 ? "rankNegativeTrendRow" : "";
+                  if (typeof trend === "number" && trend <= 0) classNames.push("rankNegativeTrendRow");
+                  if (params.data?.is_pending_new) classNames.push("topPickPendingAddedRow");
+                  return classNames.join(" ");
                 }}
               />
             </div>
