@@ -20,7 +20,6 @@ type TopPickRow = {
   country_code?: string;
   trend_pct?: number | null;
   trend_score?: number | null;
-  sortino_score?: number | null;
   sortino?: number | null;
   score?: number | null;
   target_weight_pct: number | null;

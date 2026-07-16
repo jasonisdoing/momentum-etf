@@ -231,23 +231,22 @@ python infra/server_scheduler.py
 
 * 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
-* 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`TREND_WEIGHT_RATIO`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
+* 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
 
-#### 점수 = 추세·샤프·보유 가중 블렌딩 (합 100%)
+#### 점수 = 추세 + 보유가점
 
-순위 점수는 세 요소를 합이 100%인 비중으로 가중 합산한다. `HOLDING_BONUS_SCORE`(보유보너스 %)를 `보유%`, `TREND_WEIGHT_RATIO`(추세 가중치 %)를 `r`이라 하면 **추세 비중 = `(100−보유%)×r/100`, 샤프 비중 = `(100−보유%)×(100−r)/100`** 이다(둘 다 풀별 `pool_settings` 단일 소스, 별도 보조지표 설정 없음).
+순위 점수는 추세 점수에 보유가점을 더해 계산한다. 보조지표(Sortino/Sharpe)는 종목 선정 점수에 사용하지 않는다.
 
 * **추세 원점수(−100~+100)**: `가격 vs MA` signed-percentile.
-* **샤프 원점수(−100~+100)**: 3개월 롤링 샤프지수를 추세와 동일한 **signed-percentile**(양/음 구간별 백분위)로 환산. 공통 엔진 `core/strategy/scoring.py`의 `compute_secondary_metric_points()`(내부 `compute_sharpe_signed_percentile()`). 보조지표는 SHARPE 로 고정.
 * **보유 원점수**: 실보유 100, 아니면 0.
-* **점수** `= w_trend×추세 + w_sec×샤프 + 보유가점` (`보유가점 = 보유 시 보유%`). **라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일 식**을 쓴다.
+* **점수** `= (100−보유보너스%) / 100 × 추세 + 보유가점` (`보유가점 = 보유 시 보유보너스%`). **라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일 식**을 쓴다.
 
 ### 백테스트 탐색 공간 (`backtest_config`)
 
-모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`TREND_WEIGHT_RATIO`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
+모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
 
-* 가중치는 `HOLDING_BONUS_SCORE`(보유보너스 %, 예 `[0,5,10]`) × `TREND_WEIGHT_RATIO`(추세 가중치 %, 예 `[50,60,70,80]`) 를 탐색한다. 최적 조합의 두 값은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.
+* 가중치는 `HOLDING_BONUS_SCORE`(보유보너스 %, 예 `[0,5,10]`) 를 탐색한다. 최적 조합은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.
 * 백테스트 결과/리포트 표에는 `W_HOLD`(보유 비중)만 표기한다(`W_TREND`·`W_SEC`는 보유값에서 유도되어 생략).
 
 * `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(백테스트 탐색 차원에서 제외).

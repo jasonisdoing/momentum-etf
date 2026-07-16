@@ -28,7 +28,6 @@ from config import (
 from core.strategy.scoring import (
     compute_eligibility_mask,
     compute_rule_percentile_frame,
-    compute_secondary_metric_points,
 )
 from services.price_service import get_realtime_snapshot
 from utils.backtest_config_store import load_backtest_config
@@ -304,12 +303,7 @@ _W_OPEN_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_CLOSE_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
 _W_FX_VALUES: np.ndarray = np.empty(0, dtype=np.float64)
 _W_RSI_VALUES: np.ndarray = np.empty((0, 0), dtype=np.float64)
-# 보조지표(SHARPE) 포인트 [일자 × 티커] — {지표: 배열}. 가중 가산용 (close 만으로 결정, MA 무관).
-_W_SECONDARY_VALUES: dict[str, np.ndarray] = {}
-
-
 _W_BM_PCT_VALUES: dict[tuple[str, int], np.ndarray] = {}
-_W_BM_SEC_VALUES: dict[tuple[str, int], np.ndarray] = {}
 
 
 def _init_worker(
@@ -323,14 +317,12 @@ def _init_worker(
     rsi_values: np.ndarray,
     buy_slippage: float,
     sell_slippage: float,
-    secondary_values_map: dict[str, np.ndarray],
     bm_pct_specs_values: dict[tuple[str, int], np.ndarray] = None,
-    bm_secondary_values_map: dict[str, np.ndarray] = None,
 ) -> None:
     """워커 프로세스 초기화: 공유 데이터를 전역 변수에 설정."""
     global _W_PCT_VALUES, _W_ELIG_VALUES, _W_DAYS, _W_CASH_LOCAL, _W_BUY_SLIPPAGE, _W_SELL_SLIPPAGE  # noqa: PLW0603
-    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES, _W_SECONDARY_VALUES  # noqa: PLW0603
-    global _W_BM_PCT_VALUES, _W_BM_SEC_VALUES  # noqa: PLW0603
+    global _W_OPEN_VALUES, _W_CLOSE_VALUES, _W_FX_VALUES, _W_RSI_VALUES  # noqa: PLW0603
+    global _W_BM_PCT_VALUES  # noqa: PLW0603
     _W_PCT_VALUES = pct_specs_values
     _W_ELIG_VALUES = eligibility_values
     _W_DAYS = bt_days
@@ -341,27 +333,21 @@ def _init_worker(
     _W_CLOSE_VALUES = close_values
     _W_FX_VALUES = fx_values
     _W_RSI_VALUES = rsi_values
-    _W_SECONDARY_VALUES = secondary_values_map
     _W_BM_PCT_VALUES = bm_pct_specs_values or {}
-    _W_BM_SEC_VALUES = bm_secondary_values_map or {}
 
 
-def _run_single_combo(args: tuple[int, str, int, float | None, float, float, float, str, int]) -> dict[str, Any]:
+def _run_single_combo(args: tuple[int, str, int, float | None, float, float]) -> dict[str, Any]:
     """워커에서 단일 파라미터 조합을 실행하고 결과 딕셔너리를 반환한다."""
-    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold, w_sec, secondary_metric, sortino_m = args
+    top_n, ma_t, ma_m, rsi_limit, w_trend, w_hold = args
     raw_composite = _combine_rule_percentiles_array([_W_PCT_VALUES[(ma_t, ma_m)]], _W_ELIG_VALUES)
-    # 가중치 비율 결합 (추세 단독 + 보유·보조지표 가산)
+    # 가중치 비율 결합 (추세 단독 + 보유가점)
     composite_values = w_trend * raw_composite
 
     # 벤치마크 점수 빌드
     bm_composite = None
     bm_pct = _W_BM_PCT_VALUES.get((ma_t, ma_m))
-    bm_sec = _W_BM_SEC_VALUES.get((secondary_metric, sortino_m))
     if bm_pct is not None:
         bm_composite = w_trend * bm_pct.copy()
-        if w_sec > 0 and bm_sec is not None:
-            bm_sec_non_nan = ~np.isnan(bm_composite) & ~np.isnan(bm_sec)
-            bm_composite[bm_sec_non_nan] += w_sec * bm_sec[bm_sec_non_nan]
 
     total_ret, cagr, mdd, trades, sortino = _simulate_one_combo(
         initial_cash_local=_W_CASH_LOCAL,
@@ -376,22 +362,14 @@ def _run_single_combo(args: tuple[int, str, int, float | None, float, float, flo
         rsi_limit=rsi_limit,
         buy_slippage=_W_BUY_SLIPPAGE,
         sell_slippage=_W_SELL_SLIPPAGE,
-        w_sec=w_sec,
-        secondary_points=_W_SECONDARY_VALUES[(secondary_metric, sortino_m)],
         benchmark_composite_scores=bm_composite,
     )
-    # 추세 가중치(%) 복원: w_trend/w_sec 는 (100-보유)에 비율을 곱한 값이므로 비율로 되돌린다.
-    side_sum = w_trend + w_sec
-    trend_weight_ratio = round(100.0 * w_trend / side_sum) if side_sum > 0 else 0
     return {
         "TOP_N_HOLD": top_n,
         "HOLDING_BONUS_SCORE": w_hold * 100.0,
-        "TREND_WEIGHT_RATIO": trend_weight_ratio,
         "W_TREND": w_trend,
         "W_HOLD": w_hold,
-        "W_SEC": w_sec,
-        "SECONDARY_METRIC": secondary_metric,
-        "SORTINO_MONTHS": sortino_m,
+        "W_SEC": 0.0,
         "MA_TYPE": ma_t,
         "MA_MONTHS": ma_m,
         "RSI_LIMIT": rsi_limit,
@@ -697,14 +675,11 @@ def _result_sort_key(result: dict[str, Any], sort_metric: str = "CAGR") -> tuple
     sort_metric:
         - "CAGR": CAGR 높은 순 (동률이면 MDD)
         - "MDD": 낙폭이 얕은 순 (MDD_PCT 가 0 에 가까운 순, 동률이면 CAGR 높은 순)
-        - "SORTINO": Sortino 높은 순 (동률이면 CAGR 높은 순)
     """
     rsi_limit = result.get("RSI_LIMIT")
     sortable_rsi = float(rsi_limit) if rsi_limit is not None else float("-inf")
     if sort_metric == "MDD":
         return (-float(result["MDD_PCT"]), -float(result["CAGR_PCT"]), -sortable_rsi)
-    if sort_metric == "SORTINO":
-        return (-float(result.get("SORTINO", 0.0)), -float(result["CAGR_PCT"]), -sortable_rsi)
     return (-float(result["CAGR_PCT"]), float(result["MDD_PCT"]), -sortable_rsi)
 
 
@@ -720,7 +695,6 @@ def _write_results_file(
     ma_types: list[str],
     ma_months_list: list[int],
     hold_pct_values: list[float],
-    trend_ratio_values: list[float],
     rsi_limits: list[float] | None,
     total_combos: int,
     done_count: int,
@@ -765,15 +739,11 @@ def _write_results_file(
         f"x MA_TYPE {len(ma_types)}개 x MA_MONTHS {len(ma_months_list)}개 "
         f"{f'x RSI_LIMIT {len(rsi_limits)}개 ' if rsi_limits is not None else ''}"
         f"x 보유보너스(%) {len(hold_pct_values)}개 "
-        f"x 추세가중치(%) {len(trend_ratio_values)}개 "
         f"= {total_combos}개 조합"
     )
     lines.append(f'"BACKTEST_INITIAL_KRW_AMOUNT": {int(initial_cash)},')
     lines.append(f'"TOP_N_HOLD": {top_n_values},')
-    lines.append(
-        f'"WEIGHT": "추세:Sortino = r:(100-r), r={[int(v) for v in trend_ratio_values]} 탐색 '
-        f'(나머지 = 100-보유)",'
-    )
+    lines.append('"WEIGHT": "추세 단독 + 보유가점",')
     lines.append(f'"MA_TYPE": {ma_types},')
     lines.append(f'"MA_MONTHS": {ma_months_list},')
     if rsi_limits is not None:
@@ -791,14 +761,12 @@ def _write_results_file(
         out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    # W_TREND·W_SEC 절대값 대신 (보유%, 추세:소르티노 비율) 축으로 표기한다.
+    # W_TREND 절대값 대신 보유%를 표기한다.
     headers = [
         "TOP_N",
         "W_HOLD",
-        "추세:Sortino",
         "추세타입",
         "추세개월",
-        "Sortino 개월",
         "RSI",
         "수익률(%)",
         "CAGR(%)",
@@ -806,12 +774,10 @@ def _write_results_file(
         "Sortino",
         "Trades",
     ]
-    aligns = ["left", "right", "right", "left", "left", "right", "left", "right", "right", "right", "right", "right"]
+    aligns = ["left", "right", "left", "left", "left", "right", "right", "right", "right", "right"]
     benchmark_metric_row: list[str] | None = None
     if benchmark_result is not None:
         benchmark_metric_row = [
-            "-",
-            "-",
             "-",
             "-",
             "-",
@@ -828,15 +794,12 @@ def _write_results_file(
     if benchmark_metric_row is not None:
         formatted_rows.append(benchmark_metric_row)
     for r in top_rows:
-        ratio = int(r.get("TREND_WEIGHT_RATIO", 0))
         formatted_rows.append(
             [
                 str(r["TOP_N_HOLD"]),
                 f"{int(round(float(r.get('W_HOLD', 0.0)) * 100))}%",
-                f"{ratio}:{100 - ratio}",
                 r["MA_TYPE"],
                 str(r["MA_MONTHS"]),
-                str(r.get("SORTINO_MONTHS", "-")),
                 "-" if r["RSI_LIMIT"] is None else f"{float(r['RSI_LIMIT']):g}",
                 f"{r['TOTAL_RETURN_PCT']:.2f}",
                 f"{r['CAGR_PCT']:.2f}",
@@ -1828,13 +1791,10 @@ def run_backtest(pool_id: str) -> Path:
         )
     months = int(cfg["BACKTEST_MONTHS"])
 
-    # 결과 정렬 기준 (CAGR | MDD | SORTINO) — 미저장 시 CAGR
+    # 결과 정렬 기준 (CAGR | MDD) — 미저장 시 CAGR
     sort_metric = str(cfg.get("SORT_METRIC") or "CAGR").upper()
-    if sort_metric not in ("CAGR", "MDD", "SORTINO"):
-        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD/SORTINO 중 하나여야 합니다: {sort_metric}")
-
-    # 보조지표는 SORTINO 로 고정한다. 옛 SECONDARY_METRIC 저장값은 무시.
-    secondary_metrics = ["SORTINO"]
+    if sort_metric not in ("CAGR", "MDD"):
+        raise ValueError(f"backtest_config['{pool_id}'] 의 SORT_METRIC 은 CAGR/MDD 중 하나여야 합니다: {sort_metric}")
 
     # TOP_N_HOLD 탐색값 — 백테스트 탐색공간(backtest_config)이 단일 소스.
     if "TOP_N_HOLD" not in cfg:
@@ -1846,25 +1806,10 @@ def run_backtest(pool_id: str) -> Path:
     ma_types = [str(v).upper() for v in cfg["MA_TYPE"]]
     ma_months_list = [int(v) for v in cfg["MA_MONTHS"]]
     # 보유보너스(%) 탐색값 — DB(backtest_config)의 HOLDING_BONUS_SCORE 를 단일 소스로 사용.
-    # 각 보유값 h(%)에 대해 추세 = 샤프 = (100 - h) / 2 % 로 묶어 가중치 그리드를 만든다.
     hold_pct_values = [float(v) for v in cfg["HOLDING_BONUS_SCORE"]]
-    # 추세 가중치(%) 탐색값 — 보유 제외 나머지 비중 중 추세 몫. 샤프 몫 = 100 - 이 값.
-    if "TREND_WEIGHT_RATIO" not in cfg:
-        raise ValueError(
-            f"backtest_config['{pool_id}'] 에 TREND_WEIGHT_RATIO 리스트가 없습니다. "
-            "백테스트 탐색 공간 화면에서 저장해주세요."
-        )
-    trend_ratio_values = [float(v) for v in cfg["TREND_WEIGHT_RATIO"]]
     rsi_limits: list[float] | None = None
     if "RSI_LIMIT" in cfg:
         rsi_limits = [float(v) for v in cfg["RSI_LIMIT"]]
-
-    if "SORTINO_MONTHS" not in cfg:
-        raise ValueError(
-            f"backtest_config['{pool_id}'] 에 SORTINO_MONTHS 리스트가 없습니다. "
-            "백테스트 탐색 공간 화면에서 저장해주세요."
-        )
-    sortino_months_list = [int(v) for v in cfg["SORTINO_MONTHS"]]
 
     country_code, etfs, cache_ticker_types, display_prefix = _resolve_backtest_pool_inputs(pool_id)
     buy_slippage, sell_slippage = _resolve_slippage_for_backtest(pool_id, cache_ticker_types)
@@ -2028,18 +1973,6 @@ def run_backtest(pool_id: str) -> Path:
     rsi_frame = _compute_rsi_frame(strategy_close_frame_with_bm, RSI_PERIOD)
     rsi_win = rsi_frame.loc[backtest_days]
     rsi_values = rsi_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
-    # 보조지표(SORTINO) 포인트 프레임 — 탐색 대상 지표와 개월수별로 계산해 {(지표, 개월수): [일자×티커] 배열} 로 보관.
-    # 전체 프레임으로 워밍업 후 백테스트 구간 슬라이스.
-    secondary_values_map: dict[tuple[str, int], np.ndarray] = {}
-    bm_secondary_values_map: dict[tuple[str, int], np.ndarray] = {}
-    for sm in secondary_metrics:
-        for sortino_m in sortino_months_list:
-            sm_frame = compute_secondary_metric_points(strategy_close_frame_with_bm, sm, window_months=sortino_m)
-            sm_win = sm_frame.loc[backtest_days]
-            secondary_values_map[(sm, sortino_m)] = sm_win.reindex(columns=ticker_columns).to_numpy(dtype=np.float64, copy=True)
-            if benchmark_ticker and benchmark_ticker in sm_win.columns:
-                bm_secondary_values_map[(sm, sortino_m)] = sm_win[benchmark_ticker].to_numpy(dtype=np.float64, copy=True)
-
     # 환율 시리즈 (KRW 기준 수익률 계산용). 국내 풀은 1.0 상수.
     fx_series = _load_fx_series(country_code, calendar_days)
     fx_win = fx_series.loc[backtest_days]
@@ -2086,22 +2019,15 @@ def run_backtest(pool_id: str) -> Path:
             "TRADES": benchmark_trades,
         }
 
-    # 가중치 그리드 생성: 보유보너스(%) × 추세 가중치(%) 를 탐색공간(DB)에서 가져와 조합한다.
-    # 각 (보유 h, 추세비율 r) → 추세 = (100-h)×(r/100), 샤프 = (100-h)×(1-r/100). 합계는 항상 100%.
+    # 가중치 그리드 생성: 보유보너스(%)를 제외한 나머지 점수는 전부 추세에 배분한다.
     weight_combos = []
     for hold in hold_pct_values:
         remainder = 100.0 - hold
         if remainder < 0:
             raise ValueError(f"보유보너스(%)는 100 이하여야 합니다: {hold}")
-        for ratio in trend_ratio_values:
-            if not (0 <= ratio <= 100):
-                raise ValueError(f"TREND_WEIGHT_RATIO 는 0 ~ 100 범위여야 합니다: {ratio}")
-            trend_share = ratio / 100.0
-            w_trend = remainder * trend_share
-            w_sec = remainder * (1.0 - trend_share)
-            weight_combos.append((w_trend / 100.0, hold / 100.0, w_sec / 100.0))
+        weight_combos.append((remainder / 100.0, hold / 100.0))
 
-    # 조합 생성 (보조지표 축 및 Sortino 개월 축 추가)
+    # 조합 생성
     raw_combos = list(
         itertools.product(
             top_n_values,
@@ -2109,13 +2035,11 @@ def run_backtest(pool_id: str) -> Path:
             ma_months_list,
             rsi_limits if rsi_limits is not None else [None],
             weight_combos,
-            secondary_metrics,
-            sortino_months_list,
         )
     )
     combos = []
-    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold, w_sec), sec, sortino_m in raw_combos:
-        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold, w_sec, sec, sortino_m))
+    for top_n, ma_t, ma_m, rsi_lim, (w_trend, w_hold) in raw_combos:
+        combos.append((top_n, ma_t, ma_m, rsi_lim, w_trend, w_hold))
     total_combos = len(combos)
 
     # 워커 수 결정 (CPU 코어 - 1, 최소 1)
@@ -2135,7 +2059,6 @@ def run_backtest(pool_id: str) -> Path:
         "ma_types": ma_types,
         "ma_months_list": ma_months_list,
         "hold_pct_values": hold_pct_values,
-        "trend_ratio_values": trend_ratio_values,
         "rsi_limits": rsi_limits,
         "total_combos": total_combos,
         "period_start": period_start,
@@ -2174,9 +2097,7 @@ def run_backtest(pool_id: str) -> Path:
             rsi_values,
             buy_slippage,
             sell_slippage,
-            secondary_values_map,
             bm_pct_specs_values,
-            bm_secondary_values_map,
         ),
     ) as pool:
         for i, result in enumerate(
@@ -2229,19 +2150,17 @@ def run_backtest(pool_id: str) -> Path:
             if rsi_val is None:
                 rsi_val = 100
 
-            # 최적 (보유%, 추세가중치%, Sortino개월) 를 라이브에 반영한다.
+            # 최적 (보유%, 추세 설정) 를 라이브에 반영한다.
             db_values = {
                 "TOP_N_HOLD": int(best_result["TOP_N_HOLD"]),
                 "HOLDING_BONUS_SCORE": int(best_result["HOLDING_BONUS_SCORE"]),
-                "TREND_WEIGHT_RATIO": int(best_result["TREND_WEIGHT_RATIO"]),
                 "MA_TYPE": str(best_result["MA_TYPE"]).upper(),
                 "MA_MONTHS": int(best_result["MA_MONTHS"]),
                 "RSI_LIMIT": int(rsi_val),
-                "SORTINO_MONTHS": int(best_result["SORTINO_MONTHS"]),
             }
             target_pool_id = pool_id
             # 저장 방식(2줄): 기간·정렬기준 + 최적 조합의 성과 요약을 함께 남긴다.
-            metric_label = {"CAGR": "CAGR", "MDD": "MDD", "SORTINO": "Sortino"}[sort_metric]
+            metric_label = {"CAGR": "CAGR", "MDD": "MDD"}[sort_metric]
             save_method = (
                 f"{months}개월 백테스트 결과, {metric_label} 기준 정렬\n"
                 f"CAGR: {float(best_result['CAGR_PCT']):.2f}%, MDD: {float(best_result['MDD_PCT']):.2f}%, "
@@ -2280,16 +2199,14 @@ def run_backtest(pool_id: str) -> Path:
                 initial_cash_local=initial_cash_local,
                 buy_slippage=buy_slippage,
             )
-        # 최적 조합의 보조지표 포인트 프레임(상세 로그용) — 보조지표는 SORTINO 고정.
-        best_secondary_frame = compute_secondary_metric_points(strategy_close_frame_with_bm, "SORTINO", window_months=int(best_result["SORTINO_MONTHS"])).loc[backtest_days]
         detail_lines = _simulate_one_combo_details(
             initial_cash_local=initial_cash_local,
             top_n=int(best_result["TOP_N_HOLD"]),
             w_hold=w_hold,
             w_sec=w_sec,
             w_trend=w_trend,
-            secondary_points_frame=best_secondary_frame,
-            secondary_metric="Sortino",
+            secondary_points_frame=None,
+            secondary_metric="보조지표",
             composite_frame=best_composite,
             rule_frame=best_rule_frame,
             open_frame=open_win,

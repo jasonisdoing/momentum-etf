@@ -8,10 +8,8 @@ import { useToast } from "../components/ToastProvider";
 const EDITABLE_KEYS = [
   "TOP_N_HOLD",
   "HOLDING_BONUS_SCORE",
-  "TREND_WEIGHT_RATIO",
   "MA_TYPE",
   "MA_MONTHS",
-  "SORTINO_MONTHS",
   "RSI_LIMIT",
 ] as const;
 
@@ -20,20 +18,16 @@ type EditableKey = (typeof EDITABLE_KEYS)[number];
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
   HOLDING_BONUS_SCORE: "보유보너스(%)",
-  TREND_WEIGHT_RATIO: "추세 가중치(%)",
   MA_TYPE: "추세 타입",
   MA_MONTHS: "추세 개월",
-  SORTINO_MONTHS: "Sortino 개월",
   RSI_LIMIT: "RSI 상한",
 };
 
 const KEY_WIDTHS: Record<EditableKey, number> = {
   TOP_N_HOLD: 90,
   HOLDING_BONUS_SCORE: 110,
-  TREND_WEIGHT_RATIO: 110,
   MA_TYPE: 110,
   MA_MONTHS: 90,
-  SORTINO_MONTHS: 100,
   RSI_LIMIT: 90,
 };
 
@@ -66,16 +60,6 @@ function bonusOptions(current: string): number[] {
   const cur = Number(current);
   if (Number.isFinite(cur) && !base.includes(cur)) {
     return [...base, cur].sort((a, b) => a - b);
-  }
-  return base;
-}
-
-/** 추세 가중치(%) 셀렉트 옵션 — 100~0 역순(10 단위). 현재값이 비표준이면 포함해 보존. */
-function ratioOptions(current: string): number[] {
-  const base = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
-  const cur = Number(current);
-  if (Number.isFinite(cur) && !base.includes(cur)) {
-    return [...base, cur].sort((a, b) => b - a);
   }
   return base;
 }
@@ -198,7 +182,7 @@ export function SettingsManager() {
           <div className="card-body appCardBodyTight">
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목풀 설정</h2>
             <p className="tableFooterMeta" style={{ marginBottom: 12, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-              종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 6개 값은 DB 에서 저장·수정합니다.
+              종목풀의 구조(이름/순서/국가 등)는 pools.json 이 유지하고, 아래 값은 DB 에서 저장·수정합니다.
             </p>
             <div style={{ overflowX: "auto" }}>
               <table className="table table-sm appSettingsTable" style={{ minWidth: 880 }}>
@@ -254,19 +238,6 @@ export function SettingsManager() {
                                   </option>
                                 ))}
                               </select>
-                            ) : key === "TREND_WEIGHT_RATIO" ? (
-                              <select
-                                className="form-select form-select-sm"
-                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
-                                value={draft[key]}
-                                onChange={(e) => updateDraft(id, key, e.target.value)}
-                              >
-                                {ratioOptions(draft[key]).map((ratio) => (
-                                  <option key={ratio} value={String(ratio)}>
-                                    {ratio}
-                                  </option>
-                                ))}
-                              </select>
                             ) : key === "MA_MONTHS" ? (
                               <select
                                 className="form-select form-select-sm"
@@ -275,19 +246,6 @@ export function SettingsManager() {
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               >
                                 {[1, 2, 3, 6, 9, 12, 18, 24].map((m) => (
-                                  <option key={m} value={String(m)}>
-                                    {m}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : key === "SORTINO_MONTHS" ? (
-                              <select
-                                className="form-select form-select-sm"
-                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
-                                value={draft[key]}
-                                onChange={(e) => updateDraft(id, key, e.target.value)}
-                              >
-                                {[1, 2, 3, 4, 5, 6].map((m) => (
                                   <option key={m} value={String(m)}>
                                     {m}
                                   </option>

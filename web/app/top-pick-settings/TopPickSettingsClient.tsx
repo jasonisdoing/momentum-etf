@@ -48,7 +48,6 @@ type TopPickWeightRow = {
   return_12m_pct?: number | null;
   trend_pct: number | null;
   mdd_pct?: number | null;
-  sortino_score: number | null;
   sortino?: number | null;
   score: number | null;
   target_weight_pct: number | null;
@@ -72,8 +71,6 @@ type TopPickWeightPreview = {
 type TopPickSettings = {
   MA_TYPE: string;
   MA_MONTHS: number;
-  TREND_WEIGHT_RATIO: number;
-  SORTINO_MONTHS: number;
   MIN_WEIGHT: number;
   MAX_WEIGHT: number;
   CASH_WEIGHT_UP: number;
@@ -177,8 +174,6 @@ type TopPickWeightHoverDetail = {
 // 로드 전에는 settings=null 이며 폼은 빈 상태로 렌더되고, 로드 후 DB 값으로 채워진다.
 
 const MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"];
-const TREND_WEIGHT_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
-const SORTINO_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6];
 const previewGridTheme = createAppGridTheme();
 // 시장 레짐 지수는 기본값 없음 — 미선택(빈 값) 상태로 두고 사용자가 지수를 골라 저장해야 한다.
 const DEFAULT_BACKTEST_SETTINGS: Required<TopPickBacktestSettings> = {
@@ -809,10 +804,7 @@ export function TopPickSettingsClient() {
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
     const maType = source?.MA_TYPE ?? "-";
     const maMonths = source?.MA_MONTHS ?? "-";
-    const trendWeight = source?.TREND_WEIGHT_RATIO;
-    const sortinoMonths = source?.SORTINO_MONTHS ?? "-";
-    const sortinoWeight = typeof trendWeight === "number" ? 100 - trendWeight : "-";
-    return `${maType} ${maMonths}개월 · 추세 ${trendWeight ?? "-"}% · Sortino ${sortinoWeight}%/${sortinoMonths}개월`;
+    return `${maType} ${maMonths}개월 · 추세 100%`;
   };
 
   const runBacktest = async () => {
@@ -932,14 +924,14 @@ export function TopPickSettingsClient() {
       },
       {
         field: "mdd_pct",
-        headerName: `MDD(${settings?.SORTINO_MONTHS ?? "-"}개월)`,
+        headerName: `MDD(${settings?.MA_MONTHS ?? "-"}개월)`,
         width: 112,
         type: "rightAligned",
         cellRenderer: renderReturnPctCell,
       },
       {
         field: "sortino",
-        headerName: `Sortino(${settings?.SORTINO_MONTHS ?? "-"}개월)`,
+        headerName: `Sortino(${settings?.MA_MONTHS ?? "-"}개월)`,
         width: 126,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
@@ -981,7 +973,7 @@ export function TopPickSettingsClient() {
         },
       },
     ],
-    [displayTickerOf, settings?.SORTINO_MONTHS],
+    [displayTickerOf, settings?.MA_MONTHS],
   );
 
   const comparisonGridOptions = useMemo<GridOptions<TopPickWeightComparisonRow>>(
@@ -1343,34 +1335,6 @@ export function TopPickSettingsClient() {
                             onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
                           >
                             {[1, 2, 3, 5, 6, 9, 12, 18, 24].map((month) => (
-                              <option key={month} value={month}>
-                                {month}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="appLabeledField" style={{ minWidth: 130 }}>
-                          <span className="appLabeledFieldLabel">추세 가중치(%)</span>
-                          <select
-                            className="form-select form-select-sm"
-                            value={settings?.TREND_WEIGHT_RATIO ?? ""}
-                            onChange={(event) => updateSetting("TREND_WEIGHT_RATIO", event.target.value)}
-                          >
-                            {TREND_WEIGHT_OPTIONS.map((ratio) => (
-                              <option key={ratio} value={ratio}>
-                                {ratio}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="appLabeledField" style={{ minWidth: 120 }}>
-                          <span className="appLabeledFieldLabel">Sortino 개월</span>
-                          <select
-                            className="form-select form-select-sm"
-                            value={settings?.SORTINO_MONTHS ?? ""}
-                            onChange={(event) => updateSetting("SORTINO_MONTHS", event.target.value)}
-                          >
-                            {SORTINO_MONTH_OPTIONS.map((month) => (
                               <option key={month} value={month}>
                                 {month}
                               </option>

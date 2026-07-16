@@ -26,12 +26,11 @@ python backtest/run.py
 
 - `TOP_N_HOLD` (보유 종목수, 예 `[4,5]`) — 최적 N 은 백테스트 종료 시 라이브 `pool_settings` 에 자동 저장된다.
 - `HOLDING_BONUS_SCORE` (보유보너스 %, 예 `[0,5,10]`) — 가중치 탐색 차원.
-- `TREND_WEIGHT_RATIO` (추세 가중치 %, 예 `[50,60,70,80]`) — 보유 제외 나머지 비중 중 추세 몫. **추세 = `(100−보유)×r/100`, 샤프 = `(100−보유)×(100−r)/100`**.
 - `MA_TYPE`
 - `MA_MONTHS`
 - `RSI_LIMIT` (`us`, `kor` 종목풀만 사용)
 
-> 점수식: `점수 = w_trend×추세(±100) + w_sec×샤프(±100) + 보유가점`, `보유가점 = 보유 시 보유%`. 라이브(`utils/rankings.py`)와 동일하다. 보조지표는 SHARPE 로 고정.
+> 점수식: `점수 = (100−보유보너스%) / 100 × 추세(±100) + 보유가점`, `보유가점 = 보유 시 보유보너스%`. 라이브(`utils/rankings.py`)와 동일하다.
 
 세부 탐색공간은 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩은 제거됨.
 

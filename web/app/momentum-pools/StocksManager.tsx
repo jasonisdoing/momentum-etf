@@ -25,8 +25,6 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   holding_bonus_score?: number;
-  trend_weight_ratio?: number;
-  sortino_months?: number;
   top_n_hold?: number;
   rsi_limit?: number | null;
   type_source?: string;
@@ -94,7 +92,6 @@ type RankRow = {
   exclude_from_ranking?: boolean;
   is_benchmark?: boolean;
   is_below_benchmark?: boolean;
-  SORTINO?: number;
   보유가점?: number;
 };
 
@@ -114,8 +111,6 @@ type RankResponse = {
   realtime_fetched_at?: string | null;
   previous_trading_day?: string | null;
   held_bonus_score?: number;
-  trend_weight_ratio?: number;
-  sortino_months?: number;
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
@@ -359,16 +354,6 @@ function formatAudMarketCap(value: number | null): string {
   return `${formatNumber(value, 0)} AUD`;
 }
 
-function clampTrendWeightRatio(value: number): number {
-  if (Number.isNaN(value) || value < 0) {
-    return 0;
-  }
-  if (value > 100) {
-    return 100;
-  }
-  return Math.round(value);
-}
-
 function clampHeldBonusScore(value: number): number {
   if (Number.isNaN(value) || value < 0) {
     return 0;
@@ -402,8 +387,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [maMonthsMax, setMaMonthsMax] = useState(rankToolbarCache?.ma_months_max ?? 12);
   const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
   const [heldBonusScore, setHeldBonusScore] = useState(0);
-  const [trendWeightRatio, setTrendWeightRatio] = useState(0);
-  const [sortinoMonths, setSortinoMonths] = useState(3);
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -479,26 +462,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       setHeldBonusScore(configuredHeldBonusScore);
     }
 
-    const configuredTrendWeightRatio =
-      currentConfig && typeof currentConfig.trend_weight_ratio === "number"
-        ? currentConfig.trend_weight_ratio
-        : payload.trend_weight_ratio;
-    if (typeof payload.trend_weight_ratio === "number") {
-      applyTrendWeightRatioState(payload.trend_weight_ratio);
-    } else if (typeof configuredTrendWeightRatio === "number") {
-      applyTrendWeightRatioState(configuredTrendWeightRatio);
-    }
-
-    const configuredSortinoMonths =
-      currentConfig && typeof currentConfig.sortino_months === "number"
-        ? currentConfig.sortino_months
-        : payload.sortino_months;
-    if (typeof payload.sortino_months === "number") {
-      setSortinoMonths(payload.sortino_months);
-    } else if (typeof configuredSortinoMonths === "number") {
-      setSortinoMonths(configuredSortinoMonths);
-    }
-
     setRankingComputedAt(payload.ranking_computed_at ?? null);
     setRealtimeFetchedAt(payload.realtime_fetched_at ?? null);
     setMissingTickers(payload.missing_tickers ?? []);
@@ -527,22 +490,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     if (typeof configuredHeldBonusScore === "number") {
       setHeldBonusScore(configuredHeldBonusScore);
     }
-    const configuredTrendWeightRatio =
-      currentConfig && typeof currentConfig.trend_weight_ratio === "number"
-        ? currentConfig.trend_weight_ratio
-        : payload.trend_weight_ratio;
-    if (typeof configuredTrendWeightRatio === "number") {
-      applyTrendWeightRatioState(configuredTrendWeightRatio);
-    }
-
-    const configuredSortinoMonths =
-      currentConfig && typeof currentConfig.sortino_months === "number"
-        ? currentConfig.sortino_months
-        : payload.sortino_months;
-    if (typeof configuredSortinoMonths === "number") {
-      setSortinoMonths(configuredSortinoMonths);
-    }
-
     rankToolbarCache = {
       ticker_types: nextTickerTypes,
       ticker_type: nextAccountId,
@@ -593,8 +540,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     ma_rule_override?: RankMaRule;
     as_of_date?: string;
     held_bonus_score?: number;
-    trend_weight_ratio?: number;
-    sortino_months?: number;
     bootstrap?: boolean;
     skip_session_cache?: boolean;
   }) {
@@ -618,22 +563,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
       } else {
         search.set("held_bonus_score", String(heldBonusScore));
-      }
-
-      if (typeof next?.trend_weight_ratio === "number") {
-        search.set("trend_weight_ratio", String(next.trend_weight_ratio));
-      } else if (next?.bootstrap) {
-        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
-      } else {
-        search.set("trend_weight_ratio", String(trendWeightRatio));
-      }
-
-      if (typeof next?.sortino_months === "number") {
-        search.set("sortino_months", String(next.sortino_months));
-      } else if (next?.bootstrap) {
-        // 초기 로드 시에는 파라미터를 전송하지 않아야 백엔드가 DB의 본래 설정값을 사용합니다.
-      } else {
-        search.set("sortino_months", String(sortinoMonths));
       }
 
       if (next?.ma_rule_override) {
@@ -711,34 +640,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
   // 초기 로딩 시 보유 보너스 점수는 선택된 종목풀 설정을 서버에서 적용한다.
 
-
-  function applyTrendWeightRatioState(value: number) {
-    setTrendWeightRatio(value);
-  }
-
-  function handleTrendWeightRatioChange(nextValue: number) {
-    const normalized = clampTrendWeightRatio(nextValue);
-    setTrendWeightRatio(normalized);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: selectedAsOfDate,
-      trend_weight_ratio: normalized,
-      skip_session_cache: true,
-    });
-  }
-
-  function handleSortinoMonthsChange(nextValue: number) {
-    const clamped = Math.max(1, Math.min(6, nextValue));
-    setSortinoMonths(clamped);
-    void load({
-      ticker_type: selectedTickerType,
-      ma_rule_override: maRule ?? undefined,
-      as_of_date: selectedAsOfDate,
-      sortino_months: clamped,
-      skip_session_cache: true,
-    });
-  }
 
   function handleHeldBonusScoreChange(nextValue: number) {
     const normalized = clampHeldBonusScore(nextValue);
@@ -1305,23 +1206,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         headerName: "추세",
         minWidth: 72,
         width: 72,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          if (params.value === null || params.value === undefined) return "-";
-          const sign = params.value > 0 ? "+" : "";
-          return (
-            <span style={{ color: "#111", fontWeight: 600 }}>
-              {sign}{formatNumber(params.value, 1)}
-            </span>
-          );
-        },
-      },
-      {
-        field: "SORTINO",
-        headerName: "Sortino",
-        headerTooltip: "3개월 소르티노의 풀 내 단면 순위 (-100~+100, 점수 계산에 사용)",
-        minWidth: 90,
-        width: 90,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => {
           if (params.value === null || params.value === undefined) return "-";
@@ -1939,37 +1823,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     </label>
                   ) : null}
                   <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">추세 가중치(%)</span>
-                    <select
-                      className="form-select"
-                      value={String(trendWeightRatio)}
-                      onChange={(event) => handleTrendWeightRatioChange(Number(event.target.value))}
-                    >
-                      {([100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0].includes(trendWeightRatio)
-                        ? [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0]
-                        : [...[100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0], trendWeightRatio].sort((a, b) => b - a)
-                      ).map((ratio) => (
-                        <option key={ratio} value={ratio}>
-                          {ratio}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">Sortino 개월</span>
-                    <select
-                      className="form-select"
-                      value={String(sortinoMonths)}
-                      onChange={(event) => handleSortinoMonthsChange(Number(event.target.value))}
-                    >
-                      {[1, 2, 3, 4, 5, 6].map((m) => (
-                        <option key={m} value={m}>
-                          {m}개월
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">컬럼</span>
                     <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
                       <button
@@ -2037,7 +1890,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="appGridFillWrap">
               <AppAgGrid
-                key={`${selectedTickerType}:${selectedAsOfDate}:${maRule?.ma_type}:${maRule?.ma_months}:${trendWeightRatio}:${sortinoMonths}`}
+                key={`${selectedTickerType}:${selectedAsOfDate}:${maRule?.ma_type}:${maRule?.ma_months}`}
                 className="rankAgGrid"
                 rowData={displayGridRows}
                 columnDefs={columns}

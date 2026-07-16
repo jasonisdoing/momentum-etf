@@ -1,7 +1,7 @@
 """종목풀 편집 가능 설정(pool_settings) 조회/저장 API.
 
 pools.json 의 구조는 유지하고, 자주 바뀌는 편집값(TOP_N_HOLD/HOLDING_BONUS_SCORE/
-TREND_WEIGHT_RATIO/MA_TYPE/MA_MONTHS/RSI_LIMIT)만 DB 오버라이드로 수정한다 (utils.pool_settings_store).
+MA_TYPE/MA_MONTHS/RSI_LIMIT)만 DB 오버라이드로 수정한다 (utils.pool_settings_store).
 """
 
 from __future__ import annotations
