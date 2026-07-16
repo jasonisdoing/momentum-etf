@@ -34,8 +34,8 @@ from utils.indicators import calculate_moving_average_signals
 from utils.perf_metrics import curve_metrics
 
 
-def _simulate_single_stock_ma_strategy(close_prices: pd.Series, ma_months: int) -> dict[str, Any]:
-    """단일 종목에 대해 지정 개월수(ma_months) 동안의 단순 보유(Buy & Hold) 성과 지표(수익률, MDD, Sortino)를 구합니다.
+def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months: int) -> dict[str, Any]:
+    """단일 종목에 대해 지정 개월수(lookback_months) 동안의 단순 보유(Buy & Hold) 성과 지표(수익률, MDD, Sortino)를 구합니다.
     상장일이 시작일보다 뒤에 있는 경우, 가용한 전체 기간으로 계산하고 is_partial=True 플래그를 반환합니다.
     """
     if close_prices.empty:
@@ -43,7 +43,7 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, ma_months: int) 
 
     try:
         last_date = close_prices.index[-1]
-        start_date = last_date - pd.DateOffset(months=ma_months)
+        start_date = last_date - pd.DateOffset(months=lookback_months)
         
         # 상장일이 시작일보다 나중인지 여부 판정
         first_price_date = close_prices.index[0]

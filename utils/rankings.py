@@ -10,10 +10,8 @@ import pandas as pd
 
 from config import (
     BUCKET_MAPPING,
-    CACHE_START_DATE,
     MARKET_SCHEDULES,
     NAVER_ETF_CATEGORY_CONFIG,
-    TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import build_composite_rank_scores
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
@@ -23,6 +21,8 @@ from utils.cache_utils import (
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
+from utils.moving_averages import calculate_moving_average
+from utils.pool_settings_store import MA_DAY_OPTIONS
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
@@ -39,22 +39,28 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
     if not isinstance(ma_rule_raw, dict):
         raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 항목은 객체여야 합니다.")
 
-    ma_months_raw = ma_rule_raw.get("MA_MONTHS")
-    if ma_months_raw is None:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_MONTHS'가 누락되었습니다.")
+    short_raw = ma_rule_raw.get("SHORT_MA_DAYS")
+    main_raw = ma_rule_raw.get("MAIN_MA_DAYS")
+    if short_raw is None:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 누락되었습니다.")
+    if main_raw is None:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MAIN_MA_DAYS'가 누락되었습니다.")
     try:
-        ma_months = int(ma_months_raw)
+        short_days = int(short_raw)
+        main_days = int(main_raw)
     except (TypeError, ValueError) as exc:
         raise AccountSettingsError(
-            f"'{ticker_type}' 설정의 'MA_MONTHS'는 정수여야 합니다: {ma_months_raw}"
+            f"'{ticker_type}' 설정의 MA 일수는 정수여야 합니다: SHORT={short_raw}, MAIN={main_raw}"
         ) from exc
-    if ma_months < 1:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MA_MONTHS'는 1 이상이어야 합니다: {ma_months}")
+    if short_days not in MA_DAY_OPTIONS:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 허용값이 아닙니다: {short_days}")
+    if main_days not in MA_DAY_OPTIONS:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MAIN_MA_DAYS'가 허용값이 아닙니다: {main_days}")
 
     return {
         "order": 1,
-        "ma_months": ma_months,
-        "ma_days": int(ma_months) * int(TRADING_DAYS_PER_MONTH),
+        "short_ma_days": short_days,
+        "main_ma_days": main_days,
         "score_column": _build_ma_rule_score_column(),
     }
 
@@ -62,9 +68,18 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
 def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
     """종목풀 설정의 단일 MA 파라미터를 내부 규칙 리스트로 변환한다."""
     settings = get_ticker_type_settings(ticker_type)
-    if "MA_MONTHS" not in settings:
-        raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 'MA_MONTHS'가 누락되었습니다.")
-    return [_normalize_ma_rule(ticker_type, {"MA_MONTHS": settings["MA_MONTHS"]})]
+    for key in ("SHORT_MA_DAYS", "MAIN_MA_DAYS"):
+        if key not in settings:
+            raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 '{key}'가 누락되었습니다.")
+    return [
+        _normalize_ma_rule(
+            ticker_type,
+            {
+                "SHORT_MA_DAYS": settings["SHORT_MA_DAYS"],
+                "MAIN_MA_DAYS": settings["MAIN_MA_DAYS"],
+            },
+        )
+    ]
 
 
 def build_effective_ma_rules(
@@ -78,7 +93,8 @@ def build_effective_ma_rules(
         _normalize_ma_rule(
             ticker_type,
             {
-                "MA_MONTHS": override.get("ma_months", base_rule["ma_months"]),
+                "SHORT_MA_DAYS": override.get("short_ma_days") or base_rule["short_ma_days"],
+                "MAIN_MA_DAYS": override.get("main_ma_days") or base_rule["main_ma_days"],
             },
         )
     ]
@@ -173,13 +189,6 @@ def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.
     if sliced.empty:
         return None
     return sliced.sort_index()
-
-
-def get_rank_months_max() -> int:
-    cache_start = pd.to_datetime(CACHE_START_DATE).normalize()
-    today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
-    month_span = ((today.year - cache_start.year) * 12) + (today.month - cache_start.month) + 1
-    return max(1, int(month_span))
 
 
 def _calc_period_return(close_series: pd.Series, days: int) -> float | None:
@@ -582,6 +591,33 @@ def _apply_common_rank_scores(
         df[column] = tickers_col.map(trend_map).astype("object")
         df.loc[composite_missing, column] = None
 
+    main_rule = ma_rules[0]
+    short_days = int(main_rule["short_ma_days"])
+    main_days = int(main_rule["main_ma_days"])
+    short_ma_cols: dict[str, pd.Series] = {}
+    main_ma_cols: dict[str, pd.Series] = {}
+    for ticker in close_frame.columns:
+        series = close_frame[ticker].dropna()
+        if series.empty:
+            short_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+            main_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+            continue
+        short_ma_cols[ticker] = calculate_moving_average(series, short_days).reindex(close_frame.index)
+        main_ma_cols[ticker] = calculate_moving_average(series, main_days).reindex(close_frame.index)
+
+    short_ma_row = pd.DataFrame(short_ma_cols, index=close_frame.index).loc[eval_date]
+    main_ma_row = pd.DataFrame(main_ma_cols, index=close_frame.index).loc[eval_date]
+    order_map: dict[str, str | None] = {}
+    for ticker in close_frame.columns:
+        short_value = short_ma_row.get(ticker)
+        main_value = main_ma_row.get(ticker)
+        if pd.isna(short_value) or pd.isna(main_value):
+            order_map[ticker] = None
+        else:
+            order_map[ticker] = "정배열" if float(short_value) >= float(main_value) else "역배열"
+    df["배열"] = tickers_col.map(order_map).astype("object")
+    df.loc[composite_missing, "배열"] = None
+
     return df
 
 
@@ -815,7 +851,6 @@ __all__ = [
     "build_recent_monthly_return_metrics",
     "build_effective_ma_rules",
     "build_ticker_type_rankings",
-    "get_rank_months_max",
     "get_recent_monthly_return_labels",
     "get_ticker_type_ma_rules",
 ]

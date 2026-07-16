@@ -28,7 +28,6 @@ SETTINGS_ID = "default"
 # 전략 필수 필드는 DB에 없으면 명시적 에러(fail loud). 사용자 선택 필드(계좌·누적수익률 기준)는
 # 미설정 허용(빈값/None)이며, 그 값을 실제로 쓰는 지점에서 막는다.
 SETTING_KEYS = (
-    "MA_MONTHS",
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
     "MAX_TICKERS",
@@ -36,7 +35,6 @@ SETTING_KEYS = (
 )
 # DB에 반드시 있어야 하는(없으면 에러) 전략 필수 필드. 코드 기본값으로 대체하지 않는다.
 REQUIRED_SETTING_KEYS = (
-    "MA_MONTHS",
     "VARIABLE_TICKERS",
     "FIXED_TICKERS",
 )
@@ -187,13 +185,6 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
             f"탑픽 설정값이 없습니다(DB 미설정): {', '.join(missing_required)}. 설정 화면에서 저장해주세요."
         )
     cleaned: dict[str, Any] = {}
-    try:
-        ma_months = int(source.get("MA_MONTHS"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"MA_MONTHS 은 정수여야 합니다: {source.get('MA_MONTHS')}") from exc
-    if not (1 <= ma_months <= 24):
-        raise ValueError(f"MA_MONTHS 은 1 ~ 24 범위여야 합니다: {ma_months}")
-    cleaned["MA_MONTHS"] = ma_months
 
     # 계좌별 편입 티커 슬롯 수. 변동/고정은 관리용 구분이며 계산에는 합산 슬롯을 사용한다.
     try:
@@ -243,7 +234,52 @@ def _load_account_top_pick_basis(account_id: str) -> dict[str, Any]:
 
 def _with_account_top_pick_basis(settings: dict[str, Any]) -> dict[str, Any]:
     """탑픽 설정 응답에 계좌별 시작 기준을 결합한다."""
-    return {**settings, **_load_account_top_pick_basis(str(settings.get("ACCOUNT_ID") or "").strip())}
+    return {
+        **settings,
+        **_load_account_top_pick_basis(str(settings.get("ACCOUNT_ID") or "").strip()),
+        **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip()),
+    }
+
+
+def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
+    """계좌에 연결된 단일 종목풀의 이평선 설정을 탑픽 계산 기준으로 반환한다."""
+    normalized_account_id = str(account_id or "").strip()
+    if not normalized_account_id:
+        return {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "MAIN_MA_DAYS": None}
+
+    from utils.settings_loader import get_account_settings, get_ticker_type_settings
+
+    account_settings = get_account_settings(normalized_account_id)
+    ticker_types = account_settings.get("ticker_types")
+    if not isinstance(ticker_types, list) or len(ticker_types) != 1 or not str(ticker_types[0] or "").strip():
+        raise ValueError(f"계좌 '{normalized_account_id}'에 연결된 종목풀이 1개여야 합니다.")
+
+    ticker_type = str(ticker_types[0]).strip().lower()
+    pool_settings = get_ticker_type_settings(ticker_type)
+    try:
+        short_ma_days = int(pool_settings["SHORT_MA_DAYS"])
+        main_ma_days = int(pool_settings["MAIN_MA_DAYS"])
+    except KeyError as exc:
+        raise ValueError(f"종목풀 '{ticker_type}'에 이평선 설정(SHORT_MA_DAYS/MAIN_MA_DAYS)이 없습니다.") from exc
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"종목풀 '{ticker_type}'의 이평선 설정은 정수여야 합니다.") from exc
+    if short_ma_days <= 0 or main_ma_days <= 0:
+        raise ValueError(f"종목풀 '{ticker_type}'의 이평선 설정은 1일 이상이어야 합니다.")
+
+    return {
+        "POOL_TICKER_TYPE": ticker_type,
+        "POOL_NAME": str(pool_settings.get("name") or ticker_type),
+        "SHORT_MA_DAYS": short_ma_days,
+        "MAIN_MA_DAYS": main_ma_days,
+    }
+
+
+def _build_top_pick_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
+    main_ma_days = settings.get("MAIN_MA_DAYS")
+    if main_ma_days is None:
+        account_id = str(settings.get("ACCOUNT_ID") or "").strip()
+        main_ma_days = _load_account_pool_ma_context(account_id)["MAIN_MA_DAYS"]
+    return {"order": 1, "main_ma_days": int(main_ma_days), "score_column": "추세"}
 
 
 def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark: bool = True) -> dict[str, Any]:
@@ -305,6 +341,7 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
     stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
     settings = _clean_settings({}, base={key: doc[key] for key in stored_keys if doc and doc.get(key) is not None})
     settings = _with_account_top_pick_basis(settings)
+    backtest_settings = _clean_backtest_settings((doc or {}).get("backtest_settings"), require_benchmark=False)
     updated_at = (doc or {}).get("updated_at")
     approved_at = (doc or {}).get("approved_at")
     tickers = _clean_ticker_slots((doc or {}).get("tickers"))
@@ -313,8 +350,13 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
         "tickers": tickers,
         "weight_mode": _clean_weight_mode((doc or {}).get("weight_mode")),
         "settings": settings,
-        "backtest_settings": _clean_backtest_settings((doc or {}).get("backtest_settings"), require_benchmark=False),
-        "approved_weights": _enrich_weight_rows_with_returns(approved_weights, _clean_tickers(tickers), settings),
+        "backtest_settings": backtest_settings,
+        "approved_weights": _enrich_weight_rows_with_returns(
+            approved_weights,
+            _clean_tickers(tickers),
+            settings,
+            metric_months=int(backtest_settings["months"]),
+        ),
         "approved_at": (
             approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at
         ).isoformat()
@@ -418,7 +460,7 @@ def save_top_pick_settings(
                 "backtest_settings": clean_backtest_settings,
                 "updated_at": updated_at,
             },
-            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": ""},
+            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": "", "MA_MONTHS": ""},
         },
         upsert=True,
     )
@@ -968,7 +1010,7 @@ def _apply_trade_plan(
 
 
 def _enrich_weight_rows_with_returns(
-    payload: Any, tickers: list[dict[str, Any]], current_settings: dict[str, Any]
+    payload: Any, tickers: list[dict[str, Any]], current_settings: dict[str, Any], *, metric_months: int
 ) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
@@ -983,8 +1025,8 @@ def _enrich_weight_rows_with_returns(
     # 계산에 필요한 신규 필드는 현재 설정으로 보완하고, 나머지는 스냅샷 값을 쓴다.
     snap_settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
     settings = _clean_settings({**current_settings, **snap_settings})
+    settings = {**settings, **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip())}
     eval_date = close_frame.index.max() if not close_frame.empty else None
-    metric_months = int(settings["MA_MONTHS"])
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
     mdd_map = _build_mdd_map(close_frame, metric_months)
     sortino_raw_row = (
@@ -1111,7 +1153,11 @@ def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) ->
 
 
 def calculate_top_pick_weights_for(
-    tickers: list[dict[str, Any]], settings: dict[str, Any], weight_mode: str = "variable"
+    tickers: list[dict[str, Any]],
+    settings: dict[str, Any],
+    weight_mode: str = "variable",
+    *,
+    metric_months: int,
 ) -> dict[str, Any]:
     # weight_mode 는 저장 호환용으로만 남긴다. 실제 계산은 항상 동일 슬롯 + 개별 추세선 필터다.
     if len(tickers) < 3:
@@ -1125,17 +1171,11 @@ def calculate_top_pick_weights_for(
     if close_frame.empty:
         raise ValueError("탑픽 종목의 가격 캐시가 없습니다.")
 
-    metric_months = int(settings["MA_MONTHS"])
+    settings = {**settings, **_load_account_pool_ma_context(account_id)}
     mdd_map = _build_mdd_map(close_frame, metric_months)
     eval_date = close_frame.index.max()
 
-    ma_rules = [
-        {
-            "order": 1,
-            "ma_months": settings["MA_MONTHS"],
-            "score_column": "추세",
-        }
-    ]
+    ma_rules = [_build_top_pick_ma_rule(settings)]
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
     composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
@@ -1269,35 +1309,50 @@ def calculate_top_pick_weights_for(
 
 def calculate_top_pick_weights(account_id: str | None = None) -> dict[str, Any]:
     payload = load_top_pick_settings(account_id)
+    backtest_settings = payload.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS
     result = calculate_top_pick_weights_for(
-        _clean_tickers(payload["tickers"]), payload["settings"], weight_mode=payload["weight_mode"]
+        _clean_tickers(payload["tickers"]),
+        payload["settings"],
+        weight_mode=payload["weight_mode"],
+        metric_months=int(backtest_settings["months"]),
     )
     result["updated_at"] = payload.get("updated_at")
     return result
 
 
 def run_top_pick_weights(
-    tickers: list[dict[str, Any]], settings: dict[str, Any] | None = None, weight_mode: str = "variable"
+    tickers: list[dict[str, Any]],
+    settings: dict[str, Any] | None = None,
+    backtest_settings: dict[str, Any] | None = None,
+    weight_mode: str = "variable",
 ) -> dict[str, Any]:
     clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 1:
         raise ValueError("계산할 종목이 1개 이상 필요합니다.")
     clean_settings = _clean_settings(settings)
     response_settings = _with_account_top_pick_basis(clean_settings)
-    return calculate_top_pick_weights_for(clean_tickers, response_settings, weight_mode=weight_mode)
+    clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
+    return calculate_top_pick_weights_for(
+        clean_tickers,
+        response_settings,
+        weight_mode=weight_mode,
+        metric_months=int(clean_backtest["months"]),
+    )
 
 
 def approve_top_pick_weights(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
+    backtest_settings: dict[str, Any] | None = None,
     account_id: str | None = None,
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
     clean_weight_mode = _clean_weight_mode(weight_mode)
-    result = run_top_pick_weights(tickers, settings, weight_mode=clean_weight_mode)
+    result = run_top_pick_weights(tickers, settings, backtest_settings, weight_mode=clean_weight_mode)
     approved_at = datetime.now(timezone.utc)
     ticker_slots = _clean_ticker_slots(tickers)
     clean_settings = _clean_settings(settings)
+    clean_backtest_settings = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     resolved = _resolve_account_id(account_id or clean_settings.get("ACCOUNT_ID"))
     _db()[COLLECTION].update_one(
         {"_id": resolved},
@@ -1306,11 +1361,12 @@ def approve_top_pick_weights(
                 "tickers": ticker_slots,
                 "weight_mode": clean_weight_mode,
                 **clean_settings,
+                "backtest_settings": clean_backtest_settings,
                 "approved_weights": result,
                 "approved_at": approved_at,
                 "updated_at": approved_at,
             },
-            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": ""},
+            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": "", "MA_MONTHS": ""},
         },
         upsert=True,
     )
@@ -1360,13 +1416,7 @@ def _build_top_pick_weight_engine(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any],
 ) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
-    ma_rules = [
-        {
-            "order": 1,
-            "ma_months": settings["MA_MONTHS"],
-            "score_column": "추세",
-        }
-    ]
+    ma_rules = [_build_top_pick_ma_rule(settings)]
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     return composite_frame, trend_by_order
 
@@ -1441,7 +1491,7 @@ def run_top_pick_backtest(
     if len(clean_tickers) < 3:
         raise ValueError("탑픽 백테스트에는 확인된 종목이 3개 이상 필요합니다.")
 
-    clean_settings = _clean_settings(settings)
+    clean_settings = _with_account_top_pick_basis(_clean_settings(settings))
     clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     # 결과 비교용 벤치마크 — 계좌 설정(/account-settings)의 벤치마크를 쓴다(계좌별로 다름).
     account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()

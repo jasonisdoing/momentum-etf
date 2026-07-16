@@ -4,7 +4,7 @@
 공통 엔진 함수를 통해서만 점수를 계산해야 한다. 점수식이 양쪽으로 갈라지면 백테스트 결과는
 의미가 없어진다.
 
-설정 상수(MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH)도 이 모듈에서 단일 진입점으로 참조한다.
+설정 상수(MIN_TRADING_DAYS)도 이 모듈에서 단일 진입점으로 참조한다.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
+from config import MIN_TRADING_DAYS
 from utils.moving_averages import calculate_moving_average
 
 
@@ -91,22 +91,17 @@ def calculate_signed_percentile_score(data: pd.Series | pd.DataFrame) -> pd.Seri
 # --------------------------- 공통 랭킹 엔진 --------------------------- #
 
 
-def _ma_days_from_months(ma_months: int) -> int:
-    return int(ma_months) * int(TRADING_DAYS_PER_MONTH)
-
-
 def compute_trend_frame(
     close_frame: pd.DataFrame,
-    ma_months: int,
+    ma_days: int,
 ) -> pd.DataFrame:
     """[일자 × 티커] 구조의 종가 프레임으로부터 MA 대비 트렌드(%) 프레임을 계산한다.
 
     각 MA 함수가 ``min_periods=1`` 로 부분 계산을 지원하므로, MA 성숙 기간
-    (``ma_months * TRADING_DAYS_PER_MONTH``) 을 만족하지 못하더라도 가용한 종가로 MA 를
-    계산해 트렌드 값을 반환한다. 랭킹 포함 여부는 ``compute_eligibility_mask`` 가
-    ``MIN_TRADING_DAYS`` 기준으로 따로 판정한다.
+    을 만족하지 못하더라도 가용한 종가로 MA 를 계산해 트렌드 값을 반환한다.
+    랭킹 포함 여부는 ``compute_eligibility_mask`` 가 ``MIN_TRADING_DAYS`` 기준으로 따로 판정한다.
     """
-    days = _ma_days_from_months(ma_months)
+    days = int(ma_days)
     ma_cols: dict[str, pd.Series] = {}
     for ticker in close_frame.columns:
         series = close_frame[ticker].dropna()
@@ -128,16 +123,23 @@ def compute_trend_frame(
 
 def compute_rule_percentile_frame(
     close_frame: pd.DataFrame,
-    ma_months: int,
+    ma_days: int,
 ) -> pd.DataFrame:
     """단일 MA 규칙에 대한 signed-percentile 점수 프레임을 계산한다."""
-    trend = compute_trend_frame(close_frame, ma_months)
+    trend = compute_trend_frame(close_frame, ma_days)
     return calculate_signed_percentile_score(trend)
 
 
 def compute_eligibility_mask(close_frame: pd.DataFrame) -> pd.DataFrame:
     """각 일자·티커가 ``MIN_TRADING_DAYS`` 이상 종가 데이터를 누적했는지 여부."""
     return close_frame.notna().cumsum() >= int(MIN_TRADING_DAYS)
+
+
+def _resolve_rule_ma_days(rule: dict[str, Any]) -> int:
+    """공통 엔진 MA 규칙에서 사용할 일수를 명시적으로 결정한다."""
+    if "main_ma_days" in rule:
+        return int(rule["main_ma_days"])
+    raise KeyError("MA 규칙에는 main_ma_days 가 필요합니다.")
 
 
 def combine_rule_percentiles(
@@ -176,7 +178,7 @@ def build_composite_rank_scores(
     percentile_by_order: dict[int, pd.DataFrame] = {}
     for rule in ma_rules:
         order = int(rule["order"])
-        trend = compute_trend_frame(close_frame, int(rule["ma_months"]))
+        trend = compute_trend_frame(close_frame, _resolve_rule_ma_days(rule))
         trend_by_order[order] = trend
         percentile_by_order[order] = calculate_signed_percentile_score(trend)
 

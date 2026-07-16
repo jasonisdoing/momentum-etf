@@ -20,13 +20,15 @@ def get_rank_toolbar_data(
 def get_rank_data(
     ticker_type: str | None = Query(default=None),
     as_of_date: str | None = Query(default=None),
-    ma_months: int | None = Query(default=None),
+    short_ma_days: int | None = Query(default=None),
+    main_ma_days: int | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     ma_rule_override: dict[str, object] | None = None
-    if ma_months is not None:
+    if short_ma_days is not None or main_ma_days is not None:
         ma_rule_override = {
-            "ma_months": ma_months,
+            "short_ma_days": short_ma_days,
+            "main_ma_days": main_ma_days,
         }
     return load_rank_data(
         ticker_type=ticker_type,
