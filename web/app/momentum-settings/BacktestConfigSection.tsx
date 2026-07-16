@@ -12,11 +12,9 @@ type BtConfig = {
   BENCHMARK?: Benchmark;
   TOP_N_HOLD?: number[];
   HOLDING_BONUS_SCORE?: number[];
-  TREND_WEIGHT_RATIO?: number[];
   MA_TYPE?: string[];
   MA_MONTHS?: number[];
   RSI_LIMIT?: number[];
-  SORTINO_MONTHS?: number[];
 };
 
 type PoolEntry = {
@@ -40,9 +38,6 @@ function parseNums(text: string): number[] {
   return text.split(/[,\s]+/).map((t) => t.trim()).filter(Boolean).map(Number).filter((n) => Number.isFinite(n));
 }
 
-// 추세 가중치(%) 체크박스 옵션 — 100~0 역순(10 단위)
-const RATIO_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
-
 /** 풀 1개 백테스트 탐색공간 인라인 편집 행 (자체 저장). */
 function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
   const toast = useToast();
@@ -58,12 +53,7 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     (c.TOP_N_HOLD ?? (pool.live_top_n_hold != null ? [pool.live_top_n_hold] : [])).join(", "),
   );
   const [bonusText, setBonusText] = useState((c.HOLDING_BONUS_SCORE ?? [0, 10, 20]).join(", "));
-  // 저장값 중 옵션 밖(10 단위가 아닌 값)은 버린다.
-  const [ratioSet, setRatioSet] = useState<Set<number>>(
-    new Set((c.TREND_WEIGHT_RATIO ?? [50, 60, 70, 80]).filter((v) => RATIO_OPTIONS.includes(v))),
-  );
   const [maMonthsSet, setMaMonthsSet] = useState<Set<number>>(new Set(c.MA_MONTHS ?? [6, 12]));
-  const [sortinoMonthsSet, setSortinoMonthsSet] = useState<Set<number>>(new Set(c.SORTINO_MONTHS ?? [3]));
   const [rsiText, setRsiText] = useState((c.RSI_LIMIT ?? []).join(", "));
   const [maSet, setMaSet] = useState<Set<string>>(new Set((c.MA_TYPE ?? []).map((m) => m.toUpperCase())));
   const [updatedAt, setUpdatedAt] = useState<string | null | undefined>(pool.updated_at);
@@ -142,11 +132,9 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
 
   const topNs = parseNums(topNText);
   const bonus = parseNums(bonusText);
-  const ratios = [...ratioSet].sort((a, b) => a - b);
   const months = [...maMonthsSet].sort((a, b) => a - b);
-  const sortinoMonths = [...sortinoMonthsSet].sort((a, b) => a - b);
   const rsi = parseNums(rsiText);
-  const combos = topNs.length * bonus.length * ratios.length * maSet.size * months.length * rsi.length * sortinoMonths.length;
+  const combos = topNs.length * bonus.length * maSet.size * months.length * rsi.length;
 
   const toggleMa = (t: string) =>
     setMaSet((prev) => {
@@ -163,14 +151,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
     ? [...monthsBase, curMonths].sort((a, b) => a - b)
     : monthsBase;
 
-  const toggleRatio = (r: number) =>
-    setRatioSet((prev) => {
-      const next = new Set(prev);
-      if (next.has(r)) next.delete(r);
-      else next.add(r);
-      return next;
-    });
-
   const save = async () => {
     const config: BtConfig = {
       SORT_METRIC: sortMetric,
@@ -178,11 +158,9 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
       BENCHMARK: { ticker: benchTicker.trim(), name: benchName.trim() },
       TOP_N_HOLD: topNs.map((n) => Math.trunc(n)),
       HOLDING_BONUS_SCORE: bonus,
-      TREND_WEIGHT_RATIO: ratios,
       MA_TYPE: [...maSet],
       MA_MONTHS: months.map((n) => Math.trunc(n)),
       RSI_LIMIT: rsi,
-      SORTINO_MONTHS: sortinoMonths.map((n) => Math.trunc(n)),
     };
     try {
       setSaving(true);
@@ -231,7 +209,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         >
           <option value="CAGR">CAGR</option>
           <option value="MDD">MDD</option>
-          <option value="SORTINO">Sortino</option>
         </select>
         <span style={{ ...labelStyle, marginLeft: 8 }}>백테스트기간(Month)</span>
         <select
@@ -296,19 +273,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
         <input style={{ ...inputStyle, width: 170 }} placeholder="80, 85, 90, 95, 100" value={rsiText} onChange={(e) => setRsiText(e.target.value)} />
       </div>
 
-      <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 84 }}>추세 가중치(%)</span>
-        <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
-          {RATIO_OPTIONS.map((r) => (
-            <label key={r} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
-              <input type="checkbox" checked={ratioSet.has(r)} onChange={() => toggleRatio(r)} />
-              {r}
-            </label>
-          ))}
-        </div>
-        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginLeft: 8 }}>보조 = (100−보유) × (100−추세비율)%</span>
-      </div>
-
       <div style={{ ...rowStyle, marginBottom: 0 }}>
         <span style={{ ...labelStyle, width: 84 }}>추세 타입</span>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap" }}>
@@ -328,26 +292,6 @@ function PoolRow({ pool, maTypes }: { pool: PoolEntry; maTypes: string[] }) {
                 checked={maMonthsSet.has(m)}
                 onChange={() => {
                   setMaMonthsSet((prev) => {
-                    const next = new Set(prev);
-                    if (next.has(m)) next.delete(m);
-                    else next.add(m);
-                    return next;
-                  });
-                }}
-              />
-              {m}
-            </label>
-          ))}
-        </div>
-        <span style={{ ...labelStyle, marginLeft: 8 }}>Sortino 개월</span>
-        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", alignItems: "center" }}>
-          {[1, 2, 3, 4, 5, 6].map((m) => (
-            <label key={m} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: "0.83rem", cursor: "pointer" }}>
-              <input
-                type="checkbox"
-                checked={sortinoMonthsSet.has(m)}
-                onChange={() => {
-                  setSortinoMonthsSet((prev) => {
                     const next = new Set(prev);
                     if (next.has(m)) next.delete(m);
                     else next.add(m);

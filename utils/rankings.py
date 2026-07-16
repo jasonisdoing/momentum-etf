@@ -16,7 +16,7 @@ from config import (
     NAVER_ETF_CATEGORY_CONFIG,
     TRADING_DAYS_PER_MONTH,
 )
-from core.strategy.scoring import build_composite_rank_scores, compute_secondary_metric_points
+from core.strategy.scoring import build_composite_rank_scores
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
@@ -509,8 +509,6 @@ def _apply_common_rank_scores(
     ma_rules: list[dict[str, Any]],
     *,
     held_bonus_score: float = 0.0,
-    trend_weight_ratio: float,
-    sortino_months: int = 3,
 ) -> pd.DataFrame:
     """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
 
@@ -556,12 +554,6 @@ def _apply_common_rank_scores(
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     eval_date = close_frame.index.max()
 
-    # 보조지표(SORTINO, -100~+100) 포인트 — 백테스트와 동일 함수/스케일. 점수식에 w_sec 로 가산.
-    sec_pct_scores = pd.Series(0.0, index=close_frame.columns)
-    secondary_points_frame = compute_secondary_metric_points(close_frame, "SORTINO", window_months=sortino_months)
-    if eval_date in secondary_points_frame.index:
-        sec_pct_scores = secondary_points_frame.loc[eval_date]
-
     # 티커별 값 매핑
     composite_row = composite_frame.loc[eval_date]
     composite_map = {
@@ -583,25 +575,16 @@ def _apply_common_rank_scores(
 
     tickers_col = df["티커"].astype(str)
     
-    # 백테스트와 동일한 가중치: 나머지(100-보유%)를 추세 : 샤프 = ratio% : (100-ratio)% 로 나눈다.
+    # Sortino 보조지표 제거 후에는 보유가점을 제외한 나머지 점수를 전부 추세에 배분한다.
     hold_pct = float(held_bonus_score)
-    trend_share = float(trend_weight_ratio) / 100.0
     remainder = (100.0 - hold_pct) / 100.0
-    w_trend = remainder * trend_share
-    w_sec = remainder * (1.0 - trend_share)
+    w_trend = remainder
 
     # 1. '추세' 원점수 (-100 ~ +100): composite_score 의 규칙 평균
     num_rules = len(ma_rules) if ma_rules else 1
     df["추세"] = tickers_col.map(composite_map).astype(float) / num_rules
 
-    # 2. '소르티노' 원점수 (-100 ~ +100): 3개월 소르티노의 단면 signed-백분위
-    sec_map = {
-        ticker: (0.0 if pd.isna(val) else float(val))
-        for ticker, val in sec_pct_scores.items()
-    }
-    df["SORTINO"] = tickers_col.map(sec_map).fillna(0.0)
-
-    # 3. '보유가점': 보유 종목이면 보유%(= 점수 기여분), 아니면 0 (고정종목 exclude 시 0)
+    # 2. '보유가점': 보유 종목이면 보유%(= 점수 기여분), 아니면 0 (고정종목 exclude 시 0)
     if "exclude_from_ranking" in df.columns:
         df["보유가점"] = df.apply(
             lambda r: 0.0 if bool(r.get("exclude_from_ranking")) else (hold_pct if r.get("보유") == "보유" else 0.0),
@@ -610,14 +593,13 @@ def _apply_common_rank_scores(
     else:
         df["보유가점"] = df["보유"].map(lambda x: hold_pct if x == "보유" else 0.0)
 
-    # 4. 최종 '점수' = 가중합 (백테스트와 동일): w_trend×추세 + w_sec×SORTINO + 보유가점
+    # 3. 최종 '점수' = 추세 + 보유가점
     composite_missing = df["추세"].isna()
-    df["점수"] = w_trend * df["추세"] + w_sec * df["SORTINO"] + df["보유가점"]
+    df["점수"] = w_trend * df["추세"] + df["보유가점"]
 
     # 자격 미달 종목(결손 행) 일관성 마스킹 처리
     df.loc[composite_missing, "점수"] = None
     df.loc[composite_missing, "추세"] = None
-    df.loc[composite_missing, "SORTINO"] = 0.0
     df.loc[composite_missing, "보유가점"] = 0.0
 
     for column, trend_map in trend_maps.items():
@@ -635,8 +617,6 @@ def build_ticker_type_rankings(
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
     held_bonus_score: float = 0.0,
-    trend_weight_ratio: float,  # 보유 제외 나머지 비중 중 추세 몫(%) — 풀별 pool_settings 가 단일 소스.
-    sortino_months: int = 3,
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -793,8 +773,6 @@ def build_ticker_type_rankings(
         effective_close_series_map,
         effective_ma_rules,
         held_bonus_score=held_bonus_score,
-        trend_weight_ratio=trend_weight_ratio,
-        sortino_months=sortino_months,
     )
     process_elapsed += perf_counter() - process_started_at
 

@@ -3,7 +3,7 @@
 기존 `config.py` 의 하드코딩 `BACKTEST_CONFIG` 를 DB 로 이관한다. 풀별로 1개 문서.
 
     {_id: <pool_id>, BACKTEST_MONTHS: <개월수>, BENCHMARK:{ticker,name},
-     TOP_N_HOLD:[...], HOLDING_BONUS_SCORE:[...], TREND_WEIGHT_RATIO:[...], MA_TYPE:[...],
+     TOP_N_HOLD:[...], HOLDING_BONUS_SCORE:[...], MA_TYPE:[...],
      MA_MONTHS:[...], RSI_LIMIT:[...], updated_at}
 
 DB 가 유일한 소스다. 설정이 없으면 임의 기본값으로 보정하지 않고 **명확히 에러**를 낸다.
@@ -26,7 +26,7 @@ _COLLECTION = "backtest_config"
 _CACHE_TTL_SECONDS = 30.0
 
 # 풀별 문서 필수 키
-_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "TREND_WEIGHT_RATIO", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT", "SORTINO_MONTHS")
+_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT")
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[dict, float]] = {}  # pool_id -> (config, cached_at)
@@ -63,8 +63,8 @@ def validate_backtest_config(config: Any) -> None:
         raise ValueError("'BACKTEST_MONTHS' 는 1~240 범위의 개월수여야 합니다.")
 
     sort_metric = config.get("SORT_METRIC")
-    if sort_metric is not None and str(sort_metric).upper() not in ("CAGR", "MDD", "SORTINO"):
-        raise ValueError("'SORT_METRIC' 은 CAGR/MDD/SORTINO 중 하나여야 합니다.")
+    if sort_metric is not None and str(sort_metric).upper() not in ("CAGR", "MDD"):
+        raise ValueError("'SORT_METRIC' 은 CAGR/MDD 중 하나여야 합니다.")
 
     for key in _REQUIRED_LIST_KEYS:
         values = config.get(key)
@@ -77,18 +77,12 @@ def validate_backtest_config(config: Any) -> None:
     for v in config["HOLDING_BONUS_SCORE"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
             raise ValueError("'HOLDING_BONUS_SCORE' 는 0 이상의 숫자여야 합니다.")
-    for v in config["TREND_WEIGHT_RATIO"]:
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 100):
-            raise ValueError("'TREND_WEIGHT_RATIO' 는 0~100 범위의 숫자여야 합니다.")
     for v in config["MA_MONTHS"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or int(v) <= 0:
             raise ValueError("'MA_MONTHS' 는 0보다 큰 정수여야 합니다.")
     for v in config["RSI_LIMIT"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 100):
             raise ValueError("'RSI_LIMIT' 는 0~100 범위의 숫자여야 합니다.")
-    for v in config["SORTINO_MONTHS"]:
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or not (1 <= int(v) <= 6):
-            raise ValueError("'SORTINO_MONTHS' 는 1~6 범위의 정수여야 합니다.")
     for v in config["MA_TYPE"]:
         if str(v).upper() not in ALLOWED_MA_TYPES:
             raise ValueError(f"'MA_TYPE' 값이 허용되지 않습니다: {v} (허용: {', '.join(ALLOWED_MA_TYPES)})")

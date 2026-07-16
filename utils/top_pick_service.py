@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from config import TRADING_DAYS_PER_MONTH
-from core.strategy.scoring import build_composite_rank_scores, compute_secondary_metric_points
+from core.strategy.scoring import build_composite_rank_scores
 from core.strategy.weight_allocator import calculate_ranked_score_weights_with_cash
 from utils.cache_utils import (
     get_all_ticker_type_lookup_keys,
@@ -33,8 +33,6 @@ ALLOWED_MA_TYPES = {"SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"}
 SETTING_KEYS = (
     "MA_TYPE",
     "MA_MONTHS",
-    "TREND_WEIGHT_RATIO",
-    "SORTINO_MONTHS",
     "MIN_WEIGHT",
     "MAX_WEIGHT",
     "CASH_WEIGHT_UP",
@@ -49,8 +47,6 @@ SETTING_KEYS = (
 REQUIRED_SETTING_KEYS = (
     "MA_TYPE",
     "MA_MONTHS",
-    "TREND_WEIGHT_RATIO",
-    "SORTINO_MONTHS",
     "MIN_WEIGHT",
     "MAX_WEIGHT",
     "CASH_WEIGHT_UP",
@@ -215,22 +211,6 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     if not (1 <= ma_months <= 24):
         raise ValueError(f"MA_MONTHS 은 1 ~ 24 범위여야 합니다: {ma_months}")
     cleaned["MA_MONTHS"] = ma_months
-
-    try:
-        trend_weight_ratio = int(source.get("TREND_WEIGHT_RATIO"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"TREND_WEIGHT_RATIO 은 정수여야 합니다: {source.get('TREND_WEIGHT_RATIO')}") from exc
-    if not (0 <= trend_weight_ratio <= 100):
-        raise ValueError(f"TREND_WEIGHT_RATIO 은 0 ~ 100 범위여야 합니다: {trend_weight_ratio}")
-    cleaned["TREND_WEIGHT_RATIO"] = trend_weight_ratio
-
-    try:
-        sortino_months = int(source.get("SORTINO_MONTHS"))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"SORTINO_MONTHS 은 정수여야 합니다: {source.get('SORTINO_MONTHS')}") from exc
-    if not (1 <= sortino_months <= 6):
-        raise ValueError(f"SORTINO_MONTHS 은 1 ~ 6 범위여야 합니다: {sortino_months}")
-    cleaned["SORTINO_MONTHS"] = sortino_months
 
     float_ranges = {
         "MIN_WEIGHT": (0.0, 100.0),
@@ -967,7 +947,6 @@ def _apply_trade_plan(
                 "daily_change_pct": holding.get("daily_change_pct"),
                 "trend_pct": None,
                 "trend_score": None,
-                "sortino_score": None,
                 "sortino": None,
                 "score": None,
                 "target_weight_pct": 0.0,
@@ -1031,12 +1010,13 @@ def _enrich_weight_rows_with_returns(
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
     # 승인 당시 박제된 settings 스냅샷 — 옛 스냅샷엔 MAX_TICKERS 같은 신규 필드가 없다.
-    # 계산(트레이드플랜·소르티노)엔 무관한 신규 필드는 현재 설정으로만 보완하고, 나머지는 스냅샷 값을 쓴다.
+    # 계산에 필요한 신규 필드는 현재 설정으로 보완하고, 나머지는 스냅샷 값을 쓴다.
     snap_settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
     settings = _clean_settings({**current_settings, **snap_settings})
     eval_date = close_frame.index.max() if not close_frame.empty else None
-    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, int(settings["SORTINO_MONTHS"]))
-    mdd_map = _build_mdd_map(close_frame, int(settings["SORTINO_MONTHS"]))
+    metric_months = int(settings["MA_MONTHS"])
+    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
+    mdd_map = _build_mdd_map(close_frame, metric_months)
     sortino_raw_row = (
         sortino_raw_frame.loc[eval_date]
         if eval_date is not None and eval_date in sortino_raw_frame.index
@@ -1250,10 +1230,8 @@ def calculate_top_pick_weights_for(
     if close_frame.empty:
         raise ValueError("탑픽 종목의 가격 캐시가 없습니다.")
 
-    sortino_months = int(settings["SORTINO_MONTHS"])
-    trend_share = float(settings["TREND_WEIGHT_RATIO"]) / 100.0
-    sortino_share = 1.0 - trend_share
-    mdd_map = _build_mdd_map(close_frame, sortino_months)
+    metric_months = int(settings["MA_MONTHS"])
+    mdd_map = _build_mdd_map(close_frame, metric_months)
     eval_date = close_frame.index.max()
 
     # 고정 모드는 ETF 점수를 쓰지 않으므로 스코어링 계산을 생략한다.
@@ -1267,17 +1245,15 @@ def calculate_top_pick_weights_for(
             }
         ]
         composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
-        sortino_frame = compute_secondary_metric_points(close_frame, "SORTINO", window_months=sortino_months)
-        sortino_raw_frame = _compute_sortino_raw_frame(close_frame, sortino_months)
+        sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
         composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
         trend_frame = trend_by_order[1]
         trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
-        sortino_row = sortino_frame.loc[eval_date] if eval_date in sortino_frame.index else pd.Series(dtype=float)
         sortino_raw_row = (
             sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
         )
     else:
-        composite_row = trend_row = sortino_row = sortino_raw_row = pd.Series(dtype=float)
+        composite_row = trend_row = sortino_raw_row = pd.Series(dtype=float)
 
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
@@ -1288,11 +1264,9 @@ def calculate_top_pick_weights_for(
     ticker_meta = {item["ticker"]: item for item in tickers}
     for ticker in [item["ticker"] for item in tickers]:
         trend_value = composite_row.get(ticker)
-        sortino_value = sortino_row.get(ticker)
         sortino_raw_value = sortino_raw_row.get(ticker)
         point_trend = None if pd.isna(trend_value) else float(trend_value)
-        point_sortino = 0.0 if pd.isna(sortino_value) else float(sortino_value)
-        score = None if point_trend is None else (trend_share * point_trend) + (sortino_share * point_sortino)
+        score = point_trend
         if score is not None:
             raw_scores[ticker] = score
 
@@ -1320,7 +1294,6 @@ def calculate_top_pick_weights_for(
                 "mdd_pct": mdd_map.get(ticker),
                 "trend_pct": None if trend_pct_value is None else round(trend_pct_value, 2),
                 "trend_score": None if point_trend is None else round(point_trend, 2),
-                "sortino_score": round(point_sortino, 2),
                 "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
                 "score": None if score is None else round(score, 2),
                 "target_weight_pct": None,
@@ -1373,7 +1346,6 @@ def calculate_top_pick_weights_for(
                 "daily_change_pct": None,
                 "trend_pct": None,
                 "trend_score": None,
-                "sortino_score": None,
                 "sortino": None,
                 "score": None,
                 "target_weight_pct": cash_weight * 100.0,
@@ -1525,7 +1497,6 @@ def _calculate_top_pick_weights_on_date(
     settings: dict[str, Any],
     composite_frame: pd.DataFrame,
     trend_frame: pd.DataFrame,
-    sortino_frame: pd.DataFrame,
     target_cash_weight: float,
 ) -> dict[str, float] | None:
     if eval_date not in composite_frame.index:
@@ -1533,9 +1504,6 @@ def _calculate_top_pick_weights_on_date(
 
     composite_row = composite_frame.loc[eval_date]
     trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
-    sortino_row = sortino_frame.loc[eval_date] if eval_date in sortino_frame.index else pd.Series(dtype=float)
-    trend_share = float(settings["TREND_WEIGHT_RATIO"]) / 100.0
-    sortino_share = 1.0 - trend_share
     raw_scores: dict[str, float] = {}
     defensive_tickers: set[str] = set()
 
@@ -1545,9 +1513,7 @@ def _calculate_top_pick_weights_on_date(
         if pd.isna(trend_value):
             continue
         point_trend = float(trend_value)
-        sortino_value = sortino_row.get(ticker)
-        point_sortino = 0.0 if pd.isna(sortino_value) else float(sortino_value)
-        raw_scores[ticker] = (trend_share * point_trend) + (sortino_share * point_sortino)
+        raw_scores[ticker] = point_trend
 
         trend_pct = trend_row.get(ticker)
         if not pd.isna(trend_pct) and float(trend_pct) <= 0:
@@ -1700,11 +1666,6 @@ def run_top_pick_backtest(
     else:
         composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
         trend_frame = trend_by_order[1]
-        sortino_frame = compute_secondary_metric_points(
-            candidate_close,
-            "SORTINO",
-            window_months=int(clean_settings["SORTINO_MONTHS"]),
-        )
 
         for date in requested_rebalance_dates:
             regime = _latest_regime_on_or_before(benchmark_regimes, date, regime_benchmark["ticker"])
@@ -1716,7 +1677,6 @@ def run_top_pick_backtest(
                 clean_settings,
                 composite_frame,
                 trend_frame,
-                sortino_frame,
                 target_cash_weight=target_cash_weight,
             )
             if weights is not None:

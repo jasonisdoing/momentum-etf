@@ -1,7 +1,7 @@
 """백테스트 탐색공간(backtest_config) 조회/저장 API.
 
 풀별 BACKTEST_MONTHS(개월수) + BENCHMARK + TOP_N_HOLD/HOLDING_BONUS_SCORE/
-TREND_WEIGHT_RATIO/MA_TYPE/MA_MONTHS/RSI_LIMIT(리스트)을 DB 에서 조회·저장한다
+MA_TYPE/MA_MONTHS/RSI_LIMIT(리스트)을 DB 에서 조회·저장한다
 (단일 소스: utils.backtest_config_store).
 모멘텀-설정 화면에서 편집한다.
 """
