@@ -3,7 +3,8 @@
 (구)accounts.json 을 대체한다. 계좌별 1개 문서:
 
     {_id: <account_id>, name, icon, order, country_code, currency,
-     benchmark: {ticker, name}, URL?, updated_at, save_method}
+     benchmark: {ticker, name}, memo?, top_pick_start_amount_manwon?,
+     top_pick_start_date?, URL?, updated_at, save_method}
 
 DB 가 유일한 소스다. 문서가 없으면 임의 기본값 없이 **명확히 에러**를 낸다.
 계좌 추가/삭제는 화면에서 지원하지 않는다 — 값 수정만 허용 (account_id 는 불변 키).
@@ -24,7 +25,19 @@ logger = get_app_logger()
 COLLECTION = "account_settings"
 
 # 화면에서 수정 가능한 키 (account_id 는 원장/포트폴리오의 FK 라 불변)
-EDITABLE_KEYS: tuple[str, ...] = ("name", "icon", "order", "country_code", "currency", "benchmark", "ticker_types", "URL")
+EDITABLE_KEYS: tuple[str, ...] = (
+    "name",
+    "icon",
+    "order",
+    "country_code",
+    "currency",
+    "benchmark",
+    "ticker_types",
+    "memo",
+    "top_pick_start_amount_manwon",
+    "top_pick_start_date",
+    "URL",
+)
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 
@@ -131,7 +144,36 @@ def _validate_values(account_id: str, values: dict[str, Any]) -> dict[str, Any]:
                     )
                 if pool_id not in selected:
                     selected.append(pool_id)
+            if len(selected) > 1:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 ticker_types 는 1개만 선택할 수 있습니다.")
             cleaned[key] = selected
+        elif key == "memo":
+            cleaned[key] = str(raw or "").replace("\r", " ").replace("\n", " ").strip()
+        elif key == "top_pick_start_amount_manwon":
+            if raw in (None, ""):
+                cleaned[key] = None
+                continue
+            try:
+                amount = round(float(raw), 2)
+            except (TypeError, ValueError) as exc:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 top_pick_start_amount_manwon 은 숫자여야 합니다: {raw}") from exc
+            if not (1 <= amount <= 1_000_000_000):
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 top_pick_start_amount_manwon 은 1 ~ 1000000000 범위여야 합니다: {amount}"
+                )
+            cleaned[key] = amount
+        elif key == "top_pick_start_date":
+            start_date = str(raw or "").strip()
+            if not start_date:
+                cleaned[key] = None
+                continue
+            try:
+                datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError as exc:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 top_pick_start_date 는 YYYY-MM-DD 형식이어야 합니다: {start_date}"
+                ) from exc
+            cleaned[key] = start_date
         elif key == "URL":
             cleaned[key] = str(raw or "").strip()
     if not cleaned:

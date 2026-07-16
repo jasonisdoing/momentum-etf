@@ -476,7 +476,7 @@ export function TopPickClient() {
                   </span>
                 </div>
                 <div style={{ color: "var(--text-muted)" }}>|</div>
-                <div title={cumulativeReturn === null ? "설정 화면에서 시작금액·시작일자를 입력해야 누적수익률이 계산됩니다" : `${settings.START_DATE} · 시작금액 ${accountCurrency === "KRW" ? `${settings.START_AMOUNT_MANWON?.toLocaleString()}만원` : formatAccountMoney(settings.START_AMOUNT_MANWON, accountCurrency)} 기준`}>
+                <div title={cumulativeReturn === null ? "계좌 설정에서 시작금액·시작일자를 입력해야 누적수익률이 계산됩니다" : `${settings.START_DATE} · 시작금액 ${accountCurrency === "KRW" ? `${settings.START_AMOUNT_MANWON?.toLocaleString()}만원` : formatAccountMoney(settings.START_AMOUNT_MANWON, accountCurrency)} 기준`}>
                   누적 수익률{cumulativeReturn !== null && settings.START_DATE ? `(${settings.START_DATE}~)` : ""}{" "}
                   {cumulativeReturn === null ? (
                     <span style={{ color: "#d63939", fontWeight: 700 }}>⚠ 시작금액 미설정</span>

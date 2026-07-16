@@ -79,6 +79,11 @@ type TopPickSettings = {
   START_DATE: string | null;
 };
 
+type AccountTopPickBasis = {
+  startAmount: number | null;
+  startDate: string | null;
+};
+
 type TopPickBacktestSettings = {
   benchmark?: TopPickTicker | null;
   months?: number;
@@ -90,6 +95,21 @@ type AccountOption = {
   account_id: string;
   name: string;
   currency?: string;
+};
+
+type RankRow = {
+  source_ticker_type?: string;
+  티커: string;
+  종목명: string;
+  bucket?: number;
+  추세: number | null;
+  exclude_from_ranking?: boolean;
+  is_benchmark?: boolean;
+};
+
+type RankResponse = {
+  rows?: RankRow[];
+  error?: string;
 };
 
 type LabSummary = {
@@ -123,6 +143,54 @@ function getBucketCellClass(bucketId: number | undefined): string {
 
 function getBucketName(bucketId: number | undefined): string {
   return bucketId ? BUCKET_THEME[String(bucketId)]?.name ?? "-" : "-";
+}
+
+const NAME_HIGHLIGHT_KEYWORDS: Record<string, { color: string; emoji: string }> = {
+  레버리지: { color: "#d63939", emoji: "💣" },
+  Geared: { color: "#d63939", emoji: "💣" },
+  "3X": { color: "#d63939", emoji: "💣" },
+  Ultra: { color: "#d63939", emoji: "💣" },
+  액티브: { color: "#206bc4", emoji: "✋" },
+};
+
+const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).join("|")})`, "i");
+
+function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
+  const lower = part.toLowerCase();
+  for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
+    if (keyword.toLowerCase() === lower) {
+      return style;
+    }
+  }
+  return undefined;
+}
+
+function renderNameWithLeverageHighlight(name: string) {
+  const parts = name.split(NAME_HIGHLIGHT_RE);
+  if (parts.length === 1) {
+    return name;
+  }
+  const emojis: string[] = [];
+  const rendered = parts.map((part, index) => {
+    const style = index % 2 === 1 ? getNameHighlight(part) : undefined;
+    if (!style) {
+      return <span key={index}>{part}</span>;
+    }
+    if (!emojis.includes(style.emoji)) {
+      emojis.push(style.emoji);
+    }
+    return (
+      <span key={index} style={{ color: style.color, fontWeight: 700 }}>
+        {part}
+      </span>
+    );
+  });
+  return (
+    <>
+      {rendered}
+      {emojis.length > 0 && <span> {emojis.join("")}</span>}
+    </>
+  );
 }
 
 type LabResult = {
@@ -167,10 +235,25 @@ type TopPickWeightHoverDetail = {
   items: Array<TopPickWeightItem & { weight: number; color: string }>;
 };
 
+type TopPickReserveCandidate = TopPickTicker & {
+  trend_pct: number | null;
+};
+
+type TopPickSelectedGridRow = TopPickTicker & {
+  row_index: number;
+  trend_pct: number | null;
+  is_confirmed: boolean;
+};
+
+type TopPickReserveGridRow = TopPickReserveCandidate & {
+  row_index: number;
+};
+
 // 코드 기본값 없음(silent default 금지). 설정값은 전적으로 DB(/top-pick-settings 저장)에서 온다.
 // 로드 전에는 settings=null 이며 폼은 빈 상태로 렌더되고, 로드 후 DB 값으로 채워진다.
 
 const MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"];
+const MAX_TOP_PICK_SELECTED = 10;
 const previewGridTheme = createAppGridTheme();
 const DEFAULT_BACKTEST_SETTINGS: Required<TopPickBacktestSettings> = {
   benchmark: { ticker: "", name: "" },
@@ -186,13 +269,6 @@ const BACKTEST_REBALANCE_OPTIONS: { value: string; label: string }[] = [
   { value: "yearly", label: "매년 (연말)" },
 ];
 
-const inputStyle: React.CSSProperties = {
-  border: "1px solid rgba(148,163,184,0.4)",
-  borderRadius: 6,
-  padding: "5px 8px",
-  fontSize: "0.9rem",
-};
-
 function normalizeTicker(value: string): string {
   return value.trim().toUpperCase();
 }
@@ -205,27 +281,29 @@ function stripKorPrefix(value: string): string {
   return value.startsWith("KOR:") ? value.slice("KOR:".length) : value;
 }
 
-// 슬롯 수 = 계좌별 MAX_TICKERS. 다만 이미 채워진 티커는 (상한을 줄여도) 숨기지 않고 유지 →
-// 저장 시 백엔드가 상한 초과를 명시적으로 막는다(임의로 티커를 버리지 않음).
-function buildTickerSlots(items: TopPickTicker[] | undefined, count: number): TopPickTicker[] {
-  const list = items ?? [];
-  const filledCount = list.filter((item) => (item?.ticker ?? "").trim()).length;
-  const slotCount = Math.max(count, filledCount);
-  const slots = Array.from({ length: slotCount }, (_, index) => list[index] ?? { ticker: "" });
-  return slots.map((item) => ({ ...item, ticker: item.ticker ?? "" }));
+function buildTickerRows(items: TopPickTicker[] | undefined): TopPickTicker[] {
+  const rows = (items ?? [])
+    .filter((item) => (item?.ticker ?? "").trim() || (item?.name ?? "").trim())
+    .map((item) => ({ ...item, ticker: item.ticker ?? "" }));
+  return rows.length > 0 ? rows : [{ ticker: "" }];
 }
 
-function normalizeTickerCounts(settings: TopPickSettings | null | undefined): {
-  variableCount: number;
-  fixedCount: number;
-  totalCount: number;
-} {
-  const variableCount = Math.max(0, Number(settings?.VARIABLE_TICKERS ?? 0));
-  const fixedCount = Math.max(0, Number(settings?.FIXED_TICKERS ?? settings?.MAX_TICKERS ?? 0));
+function buildSettingsForRequest(
+  settings: TopPickSettings | null,
+  tickerCount: number,
+  basis: AccountTopPickBasis,
+): TopPickSettings | null {
+  if (!settings) {
+    return null;
+  }
+  const count = Math.max(1, tickerCount);
   return {
-    variableCount,
-    fixedCount,
-    totalCount: variableCount + fixedCount,
+    ...settings,
+    VARIABLE_TICKERS: count,
+    FIXED_TICKERS: 0,
+    MAX_TICKERS: count,
+    START_AMOUNT_MANWON: basis.startAmount,
+    START_DATE: basis.startDate,
   };
 }
 
@@ -428,12 +506,14 @@ function TopPickWeightHistoryChart({
 
 export function TopPickSettingsClient() {
   const toast = useToast();
-  const [tickers, setTickers] = useState<TopPickTicker[]>(() => buildTickerSlots(undefined, 0));
+  const [tickers, setTickers] = useState<TopPickTicker[]>(() => buildTickerRows(undefined));
   const [settings, setSettings] = useState<TopPickSettings | null>(null);
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   // 선택 계좌에 연결된 종목풀 id — 티커 조회 범위 제한에 사용(빈 목록이면 전체 검색).
   const [accountTickerTypes, setAccountTickerTypes] = useState<string[]>([]);
+  const [accountMemoById, setAccountMemoById] = useState<Record<string, string>>({});
+  const [accountTopPickBasisById, setAccountTopPickBasisById] = useState<Record<string, AccountTopPickBasis>>({});
   // 종목풀 id → 이름 매핑(안내 문구 표시용).
   const [poolNameById, setPoolNameById] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -451,24 +531,21 @@ export function TopPickSettingsClient() {
   const [backtestPeriodMonths, setBacktestPeriodMonths] = useState(String(DEFAULT_BACKTEST_SETTINGS.months));
   const [backtestRebalanceMode, setBacktestRebalanceMode] = useState(DEFAULT_BACKTEST_SETTINGS.rebalance);
   const [backtestInitialAmountManwon, setBacktestInitialAmountManwon] = useState(String(DEFAULT_BACKTEST_SETTINGS.initial_amount_manwon));
+  const [reserveCandidates, setReserveCandidates] = useState<TopPickReserveCandidate[]>([]);
+  const [reserveLoading, setReserveLoading] = useState(false);
+  const [reserveError, setReserveError] = useState<string | null>(null);
+  const [rankMetaByTicker, setRankMetaByTicker] = useState<Record<string, { trend_pct: number | null }>>({});
   const autoRunStartedRef = useRef(false);
 
   const validTickers = useMemo(
     () => tickers.filter((item) => item.ticker.trim() && item.name),
     [tickers],
   );
-  const { variableCount, fixedCount, totalCount } = useMemo(
-    () => normalizeTickerCounts(settings),
-    [settings],
+  const selectedTickerSet = useMemo(
+    () => new Set(validTickers.map((item) => normalizeTicker(item.ticker))),
+    [validTickers],
   );
-  const variableTickerSlots = useMemo(
-    () => tickers.slice(0, variableCount),
-    [tickers, variableCount],
-  );
-  const fixedTickerSlots = useMemo(
-    () => tickers.slice(variableCount, variableCount + fixedCount),
-    [tickers, variableCount, fixedCount],
-  );
+  const reservePoolId = accountTickerTypes[0] ?? "";
 
   const loadSettings = useCallback(async (accountId?: string) => {
     try {
@@ -481,7 +558,13 @@ export function TopPickSettingsClient() {
       ]);
       const accountsData = (await accountsResp.json()) as AccountOption[] | { error?: string };
       const acctSettingsData = (await acctSettingsResp.json()) as {
-        accounts?: { account_id: string; ticker_types?: string[] }[];
+        accounts?: {
+          account_id: string;
+          ticker_types?: string[];
+          memo?: string;
+          top_pick_start_amount_manwon?: number | null;
+          top_pick_start_date?: string | null;
+        }[];
         error?: string;
       };
       const poolsData = (await poolsResp.json()) as {
@@ -506,6 +589,17 @@ export function TopPickSettingsClient() {
       }
       writeRememberedMomentumEtfAccountId(target);
       const acctList = Array.isArray(acctSettingsData.accounts) ? acctSettingsData.accounts : [];
+      const memoMap: Record<string, string> = {};
+      const basisMap: Record<string, AccountTopPickBasis> = {};
+      for (const account of acctList) {
+        memoMap[account.account_id] = String(account.memo ?? "").trim();
+        basisMap[account.account_id] = {
+          startAmount: account.top_pick_start_amount_manwon ?? null,
+          startDate: account.top_pick_start_date ?? null,
+        };
+      }
+      setAccountMemoById(memoMap);
+      setAccountTopPickBasisById(basisMap);
       const targetAcct = acctList.find((a) => a.account_id === target);
       setAccountTickerTypes(targetAcct?.ticker_types ?? []);
       // 2) 선택 계좌 설정 로드
@@ -518,7 +612,7 @@ export function TopPickSettingsClient() {
         throw new Error(data.error ?? "탑픽 설정을 불러오지 못했습니다.");
       }
       setSelectedAccount(target);
-      setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
+      setTickers(buildTickerRows(data.tickers));
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? null);
@@ -539,6 +633,67 @@ export function TopPickSettingsClient() {
     void loadSettings();
   }, [loadSettings]);
 
+  useEffect(() => {
+    if (loading || !settings || !reservePoolId) {
+      setReserveCandidates([]);
+      setReserveError(null);
+      setRankMetaByTicker({});
+      return;
+    }
+
+    const abortController = new AbortController();
+    const loadReserveCandidates = async () => {
+      try {
+        setReserveLoading(true);
+        setReserveError(null);
+        const params = new URLSearchParams({
+          ticker_type: reservePoolId,
+          ma_type: settings.MA_TYPE,
+          ma_months: String(settings.MA_MONTHS),
+        });
+        const response = await fetch(`/api/rank?${params.toString()}`, {
+          cache: "no-store",
+          signal: abortController.signal,
+        });
+        const payload = (await response.json()) as RankResponse;
+        if (!response.ok || payload.error) {
+          throw new Error(payload.error ?? "예비 종목을 불러오지 못했습니다.");
+        }
+        const rankMeta: Record<string, { trend_pct: number | null }> = {};
+        for (const row of payload.rows ?? []) {
+          if (row.티커) {
+            rankMeta[normalizeTicker(row.티커)] = { trend_pct: row.추세 };
+          }
+        }
+        setRankMetaByTicker(rankMeta);
+        const candidates = (payload.rows ?? [])
+          .filter((row) => row.티커 && !row.exclude_from_ranking && !row.is_benchmark)
+          .filter((row) => !selectedTickerSet.has(normalizeTicker(row.티커)))
+          .sort((a, b) => (b.추세 ?? Number.NEGATIVE_INFINITY) - (a.추세 ?? Number.NEGATIVE_INFINITY))
+          .map((row) => ({
+            ticker: row.티커,
+            name: row.종목명,
+            ticker_type: row.source_ticker_type ?? reservePoolId,
+            bucket: row.bucket,
+            trend_pct: row.추세,
+          }));
+        setReserveCandidates(candidates);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        setReserveCandidates([]);
+        setRankMetaByTicker({});
+        setReserveError(err instanceof Error ? err.message : "예비 종목을 불러오지 못했습니다.");
+      } finally {
+        setReserveLoading(false);
+      }
+    };
+
+    void loadReserveCandidates();
+    return () => abortController.abort();
+  }, [accountTickerTypes, loading, reservePoolId, selectedTickerSet, settings]);
+
   // 계좌 명칭 앞 숫자 오름차순(예: "3. 연금저축" < "5. 호주 연금"). 숫자 없으면 뒤로.
   const accountNumberOf = useCallback(
     (accountId: string) => {
@@ -554,12 +709,19 @@ export function TopPickSettingsClient() {
     [accounts, accountNumberOf],
   );
 
-  // 선택 계좌의 통화(환종). 시작금액 단위/라벨에 사용. KRW 는 만원 단위, 그 외는 통화 단위.
+  // 선택 계좌의 통화(환종). 호주 계좌의 ASX 표시 같은 계좌별 표시 규칙에 사용한다.
   const selectedCurrency = useMemo(
     () => accounts.find((a) => a.account_id === selectedAccount)?.currency || "KRW",
     [accounts, selectedAccount],
   );
-  const startAmountLabel = selectedCurrency === "KRW" ? "시작금액(만원)" : `시작금액(${selectedCurrency})`;
+  const selectedAccountMemo = useMemo(
+    () => (selectedAccount ? accountMemoById[selectedAccount] ?? "" : ""),
+    [accountMemoById, selectedAccount],
+  );
+  const selectedAccountTopPickBasis = useMemo(
+    () => (selectedAccount ? accountTopPickBasisById[selectedAccount] ?? { startAmount: null, startDate: null } : { startAmount: null, startDate: null }),
+    [accountTopPickBasisById, selectedAccount],
+  );
   // 호주(AUD) 계좌의 티커는 미국 동일 심볼과 구분하기 위해 ASX: 접두사로 표시한다.
   const isAusAccount = selectedCurrency === "AUD";
   const displayTickerOf = useCallback(
@@ -636,15 +798,20 @@ export function TopPickSettingsClient() {
       toast.error("백테스트 최초 금액(만원)은 1 이상의 정수여야 합니다.");
       return;
     }
+    const requestSettings = buildSettingsForRequest(settings, validTickers.length, selectedAccountTopPickBasis);
+    if (!requestSettings) {
+      toast.error("탑픽 설정을 불러오지 못했습니다.");
+      return;
+    }
     try {
       setSaving(true);
       const resp = await fetch("/api/top-pick-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          tickers,
+          tickers: validTickers,
           weight_mode: "variable",
-          settings,
+          settings: requestSettings,
           account_id: selectedAccount,
           backtest_settings: {
             months: Number(backtestPeriodMonths),
@@ -657,7 +824,7 @@ export function TopPickSettingsClient() {
       if (!resp.ok || data.error) {
         throw new Error(data.error ?? "탑픽 설정 저장에 실패했습니다.");
       }
-      setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
+      setTickers(buildTickerRows(data.tickers));
       setSettings(data.settings ?? null);
       setUpdatedAt(data.updated_at ?? null);
       setApprovedAt(data.approved_at ?? approvedAt);
@@ -684,13 +851,18 @@ export function TopPickSettingsClient() {
       toast.error("탑픽 적용 계좌를 선택해주세요.");
       return;
     }
+    const requestSettings = buildSettingsForRequest(settings, validTickers.length, selectedAccountTopPickBasis);
+    if (!requestSettings) {
+      toast.error("탑픽 설정을 불러오지 못했습니다.");
+      return;
+    }
     try {
       setRunning(true);
       setPreviewMode("weights");
       const resp = await fetch("/api/top-pick-settings/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers: validTickers, settings, weight_mode: "variable" }),
+        body: JSON.stringify({ tickers: validTickers, settings: requestSettings, weight_mode: "variable" }),
       });
       const data = (await resp.json()) as TopPickWeightPreview;
       if (!resp.ok || data.error) {
@@ -719,17 +891,14 @@ export function TopPickSettingsClient() {
     }
   }, [loading, approvedWeights, validTickers, settings?.ACCOUNT_ID, runPreview]);
 
-  // MAX_TICKERS(계좌별 상한) 변경 시 티커 슬롯 수를 맞춘다(채워진 티커는 유지).
-  useEffect(() => {
-    const count = settings?.MAX_TICKERS;
-    if (typeof count === "number" && count >= 0) {
-      setTickers((prev) => buildTickerSlots(prev, count));
-    }
-  }, [settings?.MAX_TICKERS]);
-
   const approvePreview = async () => {
     if (!preview) {
       toast.error("먼저 실행해서 계산 결과를 확인해주세요.");
+      return;
+    }
+    const requestSettings = buildSettingsForRequest(settings, validTickers.length, selectedAccountTopPickBasis);
+    if (!requestSettings) {
+      toast.error("탑픽 설정을 불러오지 못했습니다.");
       return;
     }
     try {
@@ -737,7 +906,7 @@ export function TopPickSettingsClient() {
       const resp = await fetch("/api/top-pick-settings/approve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tickers, settings, account_id: selectedAccount, weight_mode: "variable" }),
+        body: JSON.stringify({ tickers: validTickers, settings: requestSettings, account_id: selectedAccount, weight_mode: "variable" }),
       });
       const data = (await resp.json()) as TopPickWeightPreview & { approved_at?: string; tickers?: TopPickTicker[] };
       if (!resp.ok || data.error) {
@@ -747,7 +916,7 @@ export function TopPickSettingsClient() {
       setPreview(data);
       setApprovedAt(data.approved_at ?? null);
       if (data.tickers && data.tickers.length > 0) {
-        setTickers(buildTickerSlots(data.tickers, data.settings?.MAX_TICKERS ?? 0));
+        setTickers(buildTickerRows(data.tickers));
       }
       toast.success("탑픽 비중 확인 저장 완료");
     } catch (err) {
@@ -770,26 +939,12 @@ export function TopPickSettingsClient() {
     setSettings((current) => {
       if (!current) return current; // 로드 전에는 편집 불가
       let next: string | number | null;
-      if (key === "MA_TYPE" || key === "ACCOUNT_ID" || key === "START_DATE") {
+      if (key === "MA_TYPE" || key === "ACCOUNT_ID") {
         next = value; // 문자열 그대로 (빈 값은 저장 시 백엔드가 None 처리)
-      } else if (key === "START_AMOUNT_MANWON") {
-        next = value === "" ? null : Number(value); // 미설정은 null (임의 0 보정 금지)
       } else {
         next = Number(value);
       }
       return { ...current, [key]: next };
-    });
-  };
-
-  const updateTickerCountSetting = (key: "VARIABLE_TICKERS" | "FIXED_TICKERS", value: string) => {
-    const nextCount = value === "" ? 0 : Number(value);
-    setPreview(null);
-    setBacktestResult(null);
-    setSettings((current) => {
-      if (!current) return current;
-      const nextSettings = { ...current, [key]: nextCount };
-      const nextCounts = normalizeTickerCounts(nextSettings);
-      return { ...nextSettings, MAX_TICKERS: nextCounts.totalCount };
     });
   };
 
@@ -808,6 +963,11 @@ export function TopPickSettingsClient() {
       toast.error("백테스트 최초 금액(만원)은 1 이상의 정수여야 합니다.");
       return;
     }
+    const requestSettings = buildSettingsForRequest(settings, validTickers.length, selectedAccountTopPickBasis);
+    if (!requestSettings) {
+      toast.error("탑픽 설정을 불러오지 못했습니다.");
+      return;
+    }
     try {
       setBacktestRunning(true);
       setPreviewMode("backtest");
@@ -817,7 +977,7 @@ export function TopPickSettingsClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tickers: validTickers,
-          settings,
+          settings: requestSettings,
           weight_mode: "variable",
           backtest_settings: {
             months: Number(backtestPeriodMonths),
@@ -1178,94 +1338,235 @@ export function TopPickSettingsClient() {
     </div>
   );
 
-  const renderTickerSlotRow = (item: TopPickTicker, index: number) => {
-    const confirmed = !!item.name;
-    return (
-      <div key={index} className="topPickSlotRow">
-        <span className="topPickSlotNumber">{index + 1}</span>
-        <input
-          style={{
-            ...inputStyle,
-            width: "100%",
-            backgroundColor: confirmed ? "#f8fafc" : undefined,
-            color: confirmed ? "var(--text-normal)" : undefined,
-          }}
-          placeholder="티커"
-          value={item.ticker}
-          readOnly={confirmed}
-          onChange={(event) => {
-            setTickers((current) =>
-              current.map((currentItem, itemIndex) =>
-                itemIndex === index ? { ticker: event.target.value } : currentItem,
-              ),
-            );
-            setPreview(null);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void resolveTicker(index);
-            }
-          }}
-        />
-        <div className="topPickSlotName" title={item.name ?? ""}>
-          {item.name || "종목명 (티커 입력 후 확인)"}
-        </div>
-        <div className="topPickBucketCell">
-          {confirmed && item.bucket && BUCKET_THEME[String(item.bucket)] ? (
-            <span
-              className="topPickBucketBadge"
-              style={{
-                color: BUCKET_THEME[String(item.bucket)].color,
-                borderColor: `${BUCKET_THEME[String(item.bucket)].color}66`,
-                backgroundColor: `${BUCKET_THEME[String(item.bucket)].color}12`,
-              }}
-            >
-              {BUCKET_THEME[String(item.bucket)].name}
-            </span>
-          ) : null}
-        </div>
-        {confirmed ? (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-danger"
-            onClick={() => {
-              setTickers((current) =>
-                current.map((currentItem, itemIndex) => (itemIndex === index ? { ticker: "" } : currentItem)),
-              );
-              setPreview(null);
-            }}
-          >
-            비우기
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn btn-sm btn-outline-secondary"
-            disabled={!item.ticker.trim()}
-            onClick={() => void resolveTicker(index)}
-          >
-            확인
-          </button>
-        )}
-      </div>
-    );
+  const addReserveCandidate = (candidate: TopPickReserveCandidate) => {
+    if (validTickers.length >= MAX_TOP_PICK_SELECTED) {
+      toast.error(`선택 종목은 최대 ${MAX_TOP_PICK_SELECTED}개까지 등록할 수 있습니다.`);
+      return;
+    }
+    if (selectedTickerSet.has(normalizeTicker(candidate.ticker))) {
+      toast.error("이미 선택된 종목입니다.");
+      return;
+    }
+    setTickers((current) => [
+      ...buildTickerRows(current).filter((item) => item.ticker.trim() || item.name),
+      {
+        ticker: candidate.ticker,
+        name: candidate.name,
+        ticker_type: candidate.ticker_type,
+        country_code: candidate.country_code,
+        is_etf: candidate.is_etf,
+        bucket: candidate.bucket,
+      },
+    ]);
+    setPreview(null);
   };
 
-  const renderTickerSlotSection = (title: string, items: TopPickTicker[], offset: number) => (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text-normal)", fontWeight: 800 }}>
-        <span>{title}</span>
-        <span style={{ color: "var(--text-muted)", fontSize: "0.85rem", fontWeight: 600 }}>{items.length}개</span>
-      </div>
-      {items.length > 0 ? (
-        items.map((item, index) => renderTickerSlotRow(item, offset + index))
-      ) : (
-        <div style={{ color: "var(--text-muted)", fontSize: "0.88rem", padding: "6px 0" }}>
-          등록 슬롯이 없습니다.
-        </div>
-      )}
-    </div>
+  const selectedGridRows = useMemo<TopPickSelectedGridRow[]>(
+    () =>
+      tickers.map((item, index) => ({
+        ...item,
+        row_index: index + 1,
+        trend_pct: rankMetaByTicker[normalizeTicker(item.ticker)]?.trend_pct ?? null,
+        is_confirmed: !!item.name,
+      })),
+    [rankMetaByTicker, tickers],
+  );
+
+  const reserveGridRows = useMemo<TopPickReserveGridRow[]>(
+    () => reserveCandidates.map((item, index) => ({ ...item, row_index: index + 1 })),
+    [reserveCandidates],
+  );
+
+  const selectedGridColumnDefs = useMemo<ColDef<TopPickSelectedGridRow>[]>(
+    () => [
+      {
+        colId: "bucket",
+        headerName: "버킷",
+        minWidth: 108,
+        width: 108,
+        pinned: "left",
+        sortable: true,
+        sort: "asc",
+        sortIndex: 0,
+        comparator: (_a, _b, nodeA, nodeB) => Number(nodeA.data?.bucket ?? 0) - Number(nodeB.data?.bucket ?? 0),
+        valueGetter: (params) => getBucketName(params.data?.bucket),
+        cellClass: (params) => getBucketCellClass(params.data?.bucket),
+        cellRenderer: (params: { data?: TopPickSelectedGridRow }) => <span>{getBucketName(params.data?.bucket)}</span>,
+      },
+      {
+        field: "ticker",
+        headerName: "티커",
+        minWidth: 95,
+        width: 95,
+        pinned: "left",
+        sortable: false,
+        cellRenderer: (params: { data?: TopPickSelectedGridRow; value?: string }) => {
+          const row = params.data;
+          if (!row) return "-";
+          const index = row.row_index - 1;
+          if (row.is_confirmed) {
+            const display = displayTickerOf(params.value ?? "");
+            return <TickerDetailLink ticker={display} displayTicker={display} />;
+          }
+          return (
+            <input
+              className="topPickGridTickerInput"
+              placeholder="티커"
+              value={row.ticker}
+              onChange={(event) => {
+                setTickers((current) =>
+                  current.map((currentItem, itemIndex) =>
+                    itemIndex === index ? { ticker: event.target.value } : currentItem,
+                  ),
+                );
+                setPreview(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void resolveTicker(index);
+                }
+              }}
+            />
+          );
+        },
+      },
+      {
+        field: "name",
+        headerName: "종목명",
+        minWidth: 249,
+        flex: 1.05,
+        sortable: false,
+        cellRenderer: (params: { value?: string }) => (
+          <span className="rankNameCellText" title={params.value ?? ""}>
+            {params.value ? renderNameWithLeverageHighlight(params.value) : "티커 입력 후 확인"}
+          </span>
+        ),
+      },
+      {
+        field: "trend_pct",
+        headerName: "추세(%)",
+        minWidth: 128,
+        width: 128,
+        sortable: true,
+        sort: "desc",
+        sortIndex: 1,
+        type: "rightAligned",
+        cellRenderer: renderReturnPctCell,
+      },
+      {
+        colId: "action",
+        headerName: "",
+        width: 86,
+        sortable: false,
+        cellRenderer: (params: { data?: TopPickSelectedGridRow }) => {
+          const row = params.data;
+          if (!row) return null;
+          const index = row.row_index - 1;
+          return row.is_confirmed ? (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-danger topPickGridActionButton"
+              onClick={() => {
+                setTickers((current) =>
+                  buildTickerRows(
+                    current.map((currentItem, itemIndex) =>
+                      itemIndex === index ? { ticker: "" } : currentItem,
+                    ),
+                  ),
+                );
+                setPreview(null);
+              }}
+            >
+              비우기
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary topPickGridActionButton"
+              disabled={!row.ticker.trim()}
+              onClick={() => void resolveTicker(index)}
+            >
+              확인
+            </button>
+          );
+        },
+      },
+    ],
+    [displayTickerOf, resolveTicker],
+  );
+
+  const reserveGridColumnDefs = useMemo<ColDef<TopPickReserveGridRow>[]>(
+    () => [
+      {
+        colId: "bucket",
+        headerName: "버킷",
+        minWidth: 108,
+        width: 108,
+        pinned: "left",
+        sortable: true,
+        valueGetter: (params) => getBucketName(params.data?.bucket),
+        cellClass: (params) => getBucketCellClass(params.data?.bucket),
+        cellRenderer: (params: { data?: TopPickReserveGridRow }) => <span>{getBucketName(params.data?.bucket)}</span>,
+      },
+      {
+        field: "ticker",
+        headerName: "티커",
+        minWidth: 95,
+        width: 95,
+        pinned: "left",
+        cellRenderer: (params: { value?: string }) => {
+          const display = displayTickerOf(params.value ?? "");
+          return <TickerDetailLink ticker={display} displayTicker={display} />;
+        },
+      },
+      {
+        field: "name",
+        headerName: "종목명",
+        minWidth: 249,
+        flex: 1.05,
+        cellRenderer: (params: { value?: string }) => (
+          <span className="rankNameCellText" title={params.value ?? ""}>
+            {params.value ? renderNameWithLeverageHighlight(params.value) : "-"}
+          </span>
+        ),
+      },
+      { field: "trend_pct", headerName: "추세(%)", minWidth: 128, width: 128, type: "rightAligned", cellRenderer: renderReturnPctCell, sort: "desc" },
+      {
+        colId: "action",
+        headerName: "",
+        width: 76,
+        sortable: false,
+        cellRenderer: (params: { data?: TopPickReserveGridRow }) => {
+          const row = params.data;
+          return row ? (
+            <button type="button" className="btn btn-sm btn-outline-primary topPickGridActionButton" onClick={() => addReserveCandidate(row)}>
+              선택
+            </button>
+          ) : null;
+        },
+      },
+    ],
+    [displayTickerOf, selectedTickerSet, validTickers.length],
+  );
+
+  const symbolGridOptions = useMemo<GridOptions<TopPickSelectedGridRow | TopPickReserveGridRow>>(
+    () => ({
+      domLayout: "autoHeight",
+      headerHeight: 34,
+      suppressMovableColumns: true,
+      suppressHorizontalScroll: false,
+    }),
+    [],
+  );
+  const reserveGridOptions = useMemo<GridOptions<TopPickReserveGridRow>>(
+    () => ({
+      domLayout: "autoHeight",
+      headerHeight: 34,
+      suppressMovableColumns: true,
+      suppressHorizontalScroll: false,
+    }),
+    [],
   );
 
   return (
@@ -1305,6 +1606,12 @@ export function TopPickSettingsClient() {
                     )}
                   </select>
                 </label>
+                <label className="appLabeledField topPickMemoField">
+                  <span className="appLabeledFieldLabel">메모</span>
+                  <span className="topPickAccountMemoText" title={selectedAccountMemo || "-"}>
+                    {selectedAccountMemo || "-"}
+                  </span>
+                </label>
               </div>
               <div className="appMainHeaderRight" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button type="button" className="btn btn-sm btn-outline-primary" disabled={running} onClick={() => void runPreview()}>
@@ -1336,184 +1643,159 @@ export function TopPickSettingsClient() {
             </div>
           </div>
         </div>
-        <div className="topPickSettingsLayout">
-          <div className="topPickSettingsLeft">
-            <div className="card appCard">
-              <div className="card-body">
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
-                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {/* 변동/고정 슬롯 수는 관리용 구분이며 계산에는 두 슬롯 수의 합계를 사용한다. */}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-                    <label className="appLabeledField" style={{ minWidth: 120 }}>
-                      <span className="appLabeledFieldLabel">변동 종목 수</span>
-                      <input
-                        type="number"
-                        className="form-control form-control-sm"
-                        min={0}
-                        max={20}
-                        step={1}
-                        value={settings?.VARIABLE_TICKERS ?? ""}
-                        onChange={(event) => updateTickerCountSetting("VARIABLE_TICKERS", event.target.value)}
-                      />
-                    </label>
-                    <label className="appLabeledField" style={{ minWidth: 120 }}>
-                      <span className="appLabeledFieldLabel">고정 종목 수</span>
-                      <input
-                        type="number"
-                        className="form-control form-control-sm"
-                        min={0}
-                        max={20}
-                        step={1}
-                        value={settings?.FIXED_TICKERS ?? ""}
-                        onChange={(event) => updateTickerCountSetting("FIXED_TICKERS", event.target.value)}
-                      />
-                    </label>
-                  </div>
-
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                    <label className="appLabeledField" style={{ minWidth: 110 }}>
-                      <span className="appLabeledFieldLabel">추세 타입</span>
-                      <select
-                        className="form-select form-select-sm"
-                        value={settings?.MA_TYPE ?? ""}
-                        onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
-                      >
-                        {MA_TYPES.map((type) => (
-                          <option key={type} value={type}>
-                            {type}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="appLabeledField" style={{ minWidth: 110 }}>
-                      <span className="appLabeledFieldLabel">추세 개월</span>
-                      <select
-                        className="form-select form-select-sm"
-                        value={settings?.MA_MONTHS ?? ""}
-                        onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
-                      >
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((month) => (
-                          <option key={month} value={month}>
-                            {month}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 4, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
-                    각 종목의 기본 비중은 1/N입니다. 종목이 추세선 위에 있으면 투자하고, 추세선 아래면 해당 비중을 현금으로 둡니다.
-                  </div>
-
-                  {/* 시작금액 · 시작일자 — 누적수익률 기준, 항상 표시 */}
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-                    <label className="appLabeledField" style={{ minWidth: 130 }}>
-                      <span className="appLabeledFieldLabel">{startAmountLabel}</span>
-                      <input
-                        type="number"
-                        className="form-control form-control-sm"
-                        min={0}
-                        step={selectedCurrency === "KRW" ? 1 : 0.01}
-                        placeholder="미설정"
-                        value={settings?.START_AMOUNT_MANWON ?? ""}
-                        onChange={(event) => updateSetting("START_AMOUNT_MANWON", event.target.value)}
-                      />
-                    </label>
-                    <label className="appLabeledField" style={{ minWidth: 150 }}>
-                      <span className="appLabeledFieldLabel">시작일자</span>
-                      <input
-                        type="date"
-                        className="form-control form-control-sm"
-                        value={settings?.START_DATE ?? ""}
-                        onChange={(event) => updateSetting("START_DATE", event.target.value)}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div className="card appCard">
-              <div className="card-body">
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>백테스트 (시뮬레이션 전용)</h2>
-                <div className="topPickBacktestGrid">
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">최초 금액(만원)</span>
-                    <input
-                      type="number"
-                      className="form-control form-control-sm"
-                      min={1}
-                      value={backtestInitialAmountManwon}
-                      onChange={(event) => {
-                        setBacktestInitialAmountManwon(event.target.value);
-                        setBacktestResult(null);
-                      }}
-                    />
-                  </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">기간(개월)</span>
+        <div className="topPickSettingsTopLayout">
+          <div className="card appCard">
+            <div className="card-body">
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>비중 계산 설정</h2>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                  <label className="appLabeledField" style={{ minWidth: 110 }}>
+                    <span className="appLabeledFieldLabel">추세 타입</span>
                     <select
                       className="form-select form-select-sm"
-                      value={backtestPeriodMonths}
-                      onChange={(event) => {
-                        setBacktestPeriodMonths(event.target.value);
-                        setBacktestResult(null);
-                      }}
+                      value={settings?.MA_TYPE ?? ""}
+                      onChange={(event) => updateSetting("MA_TYPE", event.target.value)}
                     >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36].map((month) => (
+                      {MA_TYPES.map((type) => (
+                        <option key={type} value={type}>
+                          {type}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="appLabeledField" style={{ minWidth: 110 }}>
+                    <span className="appLabeledFieldLabel">추세 개월</span>
+                    <select
+                      className="form-select form-select-sm"
+                      value={settings?.MA_MONTHS ?? ""}
+                      onChange={(event) => updateSetting("MA_MONTHS", event.target.value)}
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24].map((month) => (
                         <option key={month} value={month}>
                           {month}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <label className="appLabeledField">
-                    <span className="appLabeledFieldLabel">리밸런싱</span>
-                    <select
-                      className="form-select form-select-sm"
-                      value={backtestRebalanceMode}
-                      onChange={(event) => {
-                        setBacktestRebalanceMode(event.target.value);
-                        setBacktestResult(null);
-                      }}
-                    >
-                      {BACKTEST_REBALANCE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                </div>
+                <div style={{ color: "#4b5563", fontSize: "0.83rem", marginTop: 4, paddingLeft: 4, width: "100%", lineHeight: "1.4" }}>
+                  각 종목의 기본 비중은 1/N입니다. 종목이 추세선 위에 있으면 투자하고, 추세선 아래면 해당 비중을 현금으로 둡니다.
                 </div>
               </div>
             </div>
           </div>
-          <div className="card appCard topPickEtfCard">
+          <div className="card appCard">
             <div className="card-body">
-            <div
-              style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 14 }}
-            >
-              <div>
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>편입 ETF</h2>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>
-                  {accountTickerTypes.length
-                    ? `${accountTickerTypes.map((id) => poolNameById[id] ?? id).join(", ")} 종목풀에 등록되어 있는 티커만 사용 가능합니다`
-                    : "티커를 입력하고 확인한 뒤 저장합니다."}
-                </p>
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>백테스트 (시뮬레이션 전용)</h2>
+              <div className="topPickBacktestGrid">
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">최초 금액(만원)</span>
+                  <input
+                    type="number"
+                    className="form-control form-control-sm"
+                    min={1}
+                    value={backtestInitialAmountManwon}
+                    onChange={(event) => {
+                      setBacktestInitialAmountManwon(event.target.value);
+                      setBacktestResult(null);
+                    }}
+                  />
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">기간(개월)</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={backtestPeriodMonths}
+                    onChange={(event) => {
+                      setBacktestPeriodMonths(event.target.value);
+                      setBacktestResult(null);
+                    }}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36].map((month) => (
+                      <option key={month} value={month}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">리밸런싱</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={backtestRebalanceMode}
+                    onChange={(event) => {
+                      setBacktestRebalanceMode(event.target.value);
+                      setBacktestResult(null);
+                    }}
+                  >
+                    {BACKTEST_REBALANCE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             </div>
+          </div>
+        </div>
 
-            {loading ? (
-              <div style={{ color: "var(--text-muted)", padding: "8px 0" }}>불러오는 중...</div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div className="topPickSlotColumn">
-                  {renderTickerSlotSection("변동 종목", variableTickerSlots, 0)}
-                  {totalCount > 0 ? (
-                    <div style={{ borderTop: "1px solid rgba(148,163,184,0.24)", margin: "4px 0" }} />
-                  ) : null}
-                  {renderTickerSlotSection("고정 종목", fixedTickerSlots, variableCount)}
+        <div className="topPickSymbolLayout">
+          <div className="card appCard">
+            <div className="card-body">
+              <div className="topPickSymbolHeader">
+                <div>
+                  <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>선택 종목</h2>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>
+                    비중 계산과 백테스트에 사용됩니다. 최대 {MAX_TOP_PICK_SELECTED}개까지 선택합니다.
+                  </p>
+                </div>
+                <div className="topPickSymbolHeaderRight">
+                  <span className="topPickSymbolCount">{validTickers.length}개</span>
                 </div>
               </div>
-            )}
+              <AppAgGrid<TopPickSelectedGridRow>
+                className="rankAgGrid"
+                rowData={selectedGridRows}
+                columnDefs={selectedGridColumnDefs}
+                loading={loading}
+                minHeight={Math.max(260, Math.min(MAX_TOP_PICK_SELECTED, Math.max(selectedGridRows.length, 4)) * 44 + 46)}
+                gridOptions={symbolGridOptions as GridOptions<TopPickSelectedGridRow>}
+                theme={previewGridTheme}
+                getRowClass={(params) => {
+                  const trend = params.data?.trend_pct;
+                  return typeof trend === "number" && trend <= 0 ? "rankNegativeTrendRow" : "";
+                }}
+              />
+            </div>
+          </div>
+
+          <div className="card appCard">
+            <div className="card-body">
+              <div className="topPickSymbolHeader">
+                <div>
+                  <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>예비 종목</h2>
+                  <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>
+                    {reservePoolId ? `${poolNameById[reservePoolId] ?? reservePoolId} · 추세 순` : "연결 종목풀 없음"}
+                  </p>
+                </div>
+              </div>
+              {reserveError ? (
+                <div style={{ color: "#dc2626", fontSize: "0.88rem", marginBottom: 8 }}>{reserveError}</div>
+              ) : null}
+              <AppAgGrid<TopPickReserveGridRow>
+                className="rankAgGrid topPickReserveGrid"
+                rowData={reserveGridRows}
+                columnDefs={reserveGridColumnDefs}
+                loading={reserveLoading}
+                minHeight={0}
+                gridOptions={reserveGridOptions}
+                theme={previewGridTheme}
+                getRowClass={(params) => {
+                  const trend = params.data?.trend_pct;
+                  return typeof trend === "number" && trend <= 0 ? "rankNegativeTrendRow" : "";
+                }}
+              />
             </div>
           </div>
         </div>
@@ -1673,22 +1955,30 @@ export function TopPickSettingsClient() {
         )}
       </div>
       <style jsx global>{`
-        .topPickSettingsLayout {
+        .topPickSettingsTopLayout {
           display: grid;
-          grid-template-columns: minmax(280px, 0.35fr) minmax(420px, 0.65fr);
+          grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 12px;
           align-items: start;
         }
 
-        .topPickSettingsLeft {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          min-width: 0;
+        .topPickMemoField {
+          min-width: 260px;
+          max-width: 560px;
         }
 
-        .topPickEtfCard {
+        .topPickAccountMemoText {
+          display: flex;
+          align-items: center;
           min-width: 0;
+          min-height: 31px;
+          overflow: hidden;
+          color: var(--text-normal);
+          font-size: 0.9rem;
+          font-weight: 700;
+          line-height: 1.2;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
 
         .topPickBacktestGrid {
@@ -1702,61 +1992,54 @@ export function TopPickSettingsClient() {
           width: 100%;
         }
 
-        .topPickSlotColumn {
-          display: flex;
-          flex-direction: column;
-          gap: 8px;
-          min-width: 0;
-        }
-
-        .topPickSlotRow {
+        .topPickSymbolLayout {
           display: grid;
-          grid-template-columns: 28px minmax(84px, 112px) minmax(0, 1fr) minmax(96px, auto) 64px;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 12px;
+          align-items: start;
+        }
+
+        .topPickSymbolHeader {
+          display: flex;
+          justify-content: space-between;
+          gap: 12px;
+          align-items: flex-start;
+          margin-bottom: 12px;
+        }
+
+        .topPickSymbolHeaderRight {
+          display: flex;
+          align-items: center;
           gap: 8px;
-          align-items: center;
-          min-width: 0;
+          flex-shrink: 0;
         }
 
-        .topPickSlotNumber {
-          color: #64748b;
-          font-size: 0.82rem;
-          font-weight: 800;
-          text-align: right;
-        }
-
-        .topPickSlotName {
-          display: -webkit-box;
-          -webkit-box-orient: vertical;
-          -webkit-line-clamp: 2;
-          min-width: 0;
-          min-height: 32px;
-          max-height: 44px;
-          padding: 5px 10px;
-          overflow: hidden;
-          border: 1px solid rgba(148, 163, 184, 0.4);
-          border-radius: 6px;
-          background: #f8fafc;
+        .topPickSymbolCount {
           color: var(--text-normal);
-          font-size: 0.875rem;
-          line-height: 1.15;
-          text-overflow: ellipsis;
-          word-break: break-word;
-        }
-
-        .topPickBucketCell {
-          min-width: 0;
-        }
-
-        .topPickBucketBadge {
-          display: inline-flex;
-          align-items: center;
-          min-height: 30px;
-          padding: 4px 9px;
-          border: 1px solid;
-          border-radius: 999px;
-          font-size: 0.82rem;
+          font-size: 0.95rem;
           font-weight: 800;
-          white-space: nowrap;
+        }
+
+        .topPickReserveGrid.appAgGridWrap {
+          max-height: 474px;
+          overflow-y: auto;
+          overflow-x: hidden;
+        }
+
+        .topPickGridTickerInput {
+          width: 100%;
+          min-height: 28px;
+          padding: 4px 7px;
+          border: 1px solid rgba(148, 163, 184, 0.45);
+          border-radius: 6px;
+          color: var(--text-normal);
+          font-size: 0.86rem;
+        }
+
+        .topPickGridActionButton {
+          min-width: 52px;
+          padding-left: 7px;
+          padding-right: 7px;
         }
 
         .topPickBacktestResultLayout {
@@ -1930,7 +2213,8 @@ export function TopPickSettingsClient() {
         }
 
         @media (max-width: 900px) {
-          .topPickSettingsLayout,
+          .topPickSettingsTopLayout,
+          .topPickSymbolLayout,
           .topPickBacktestGrid,
           .topPickBacktestTopLayout {
             grid-template-columns: minmax(0, 1fr);

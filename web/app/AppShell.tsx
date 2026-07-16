@@ -68,21 +68,21 @@ const navGroups = [
     ],
   },
   {
-    id: "momentum",
-    title: "모멘텀",
-    icon: IconTrendingUp,
-    items: [
-      { href: "/momentum-pools", label: "종목풀 순위", icon: IconMedal2 },
-      { href: "/momentum-settings", label: "설정", icon: IconSettings },
-    ],
-  },
-  {
     id: "top-pick",
     title: "탑픽",
     icon: IconMedal2,
     items: [
       { href: "/top-pick", label: "비중", icon: IconListDetails },
       { href: "/top-pick-settings", label: "설정", icon: IconSettings },
+    ],
+  },
+  {
+    id: "momentum",
+    title: "모멘텀",
+    icon: IconTrendingUp,
+    items: [
+      { href: "/momentum-pools", label: "종목풀 순위", icon: IconMedal2 },
+      { href: "/momentum-settings", label: "설정", icon: IconSettings },
     ],
   },
   {
