@@ -36,8 +36,6 @@ SETTING_KEYS = (
     "FIXED_TICKERS",
     "MAX_TICKERS",
     "ACCOUNT_ID",
-    "START_AMOUNT_MANWON",
-    "START_DATE",
 )
 # DB에 반드시 있어야 하는(없으면 에러) 전략 필수 필드. 코드 기본값으로 대체하지 않는다.
 REQUIRED_SETTING_KEYS = (
@@ -233,30 +231,27 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
             raise ValueError(f"존재하지 않는 탑픽 적용 계좌입니다: {account_id}")
     cleaned["ACCOUNT_ID"] = account_id
 
-    # KRW는 만원, 외화 계좌는 해당 통화 금액으로 저장한다. 외화 센트 단위를 위해 소수점 2자리를 허용한다.
-    raw_start_amount = source.get("START_AMOUNT_MANWON")
-    if raw_start_amount in (None, ""):
-        cleaned["START_AMOUNT_MANWON"] = None
-    else:
-        try:
-            start_amount_manwon = round(float(raw_start_amount), 2)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(f"시작금액은 숫자여야 합니다: {raw_start_amount}") from exc
-        if not (1 <= start_amount_manwon <= 1_000_000_000):
-            raise ValueError(f"시작금액은 1 ~ 1000000000 범위여야 합니다: {start_amount_manwon}")
-        cleaned["START_AMOUNT_MANWON"] = start_amount_manwon
-
-    # 누적수익률 기준 시작일자 (YYYY-MM-DD). 미설정은 None 유지.
-    start_date = str(source.get("START_DATE") or "").strip()
-    if not start_date:
-        cleaned["START_DATE"] = None
-    else:
-        try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-        except ValueError as exc:
-            raise ValueError(f"시작일자는 YYYY-MM-DD 형식이어야 합니다: {start_date}") from exc
-        cleaned["START_DATE"] = start_date
     return cleaned
+
+
+def _load_account_top_pick_basis(account_id: str) -> dict[str, Any]:
+    """계좌 설정에 저장된 탑픽 운용 시작 기준을 반환한다."""
+    normalized_account_id = str(account_id or "").strip()
+    if not normalized_account_id:
+        return {"START_AMOUNT_MANWON": None, "START_DATE": None}
+
+    from utils.settings_loader import get_account_settings
+
+    account_settings = get_account_settings(normalized_account_id)
+    return {
+        "START_AMOUNT_MANWON": account_settings.get("top_pick_start_amount_manwon"),
+        "START_DATE": account_settings.get("top_pick_start_date"),
+    }
+
+
+def _with_account_top_pick_basis(settings: dict[str, Any]) -> dict[str, Any]:
+    """탑픽 설정 응답에 계좌별 시작 기준을 결합한다."""
+    return {**settings, **_load_account_top_pick_basis(str(settings.get("ACCOUNT_ID") or "").strip())}
 
 
 def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark: bool = True) -> dict[str, Any]:
@@ -317,6 +312,7 @@ def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark
 def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
     stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
     settings = _clean_settings({}, base={key: doc[key] for key in stored_keys if doc and doc.get(key) is not None})
+    settings = _with_account_top_pick_basis(settings)
     updated_at = (doc or {}).get("updated_at")
     approved_at = (doc or {}).get("approved_at")
     tickers = _clean_ticker_slots((doc or {}).get("tickers"))
@@ -380,7 +376,9 @@ def load_top_pick_settings_for_edit(account_id: str) -> dict[str, Any]:
     return {
         "tickers": [],
         "weight_mode": "variable",
-        "settings": {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS},
+        "settings": _with_account_top_pick_basis(
+            {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS}
+        ),
         "backtest_settings": None,
         "approved_weights": None,
         "approved_at": None,
@@ -428,14 +426,14 @@ def save_top_pick_settings(
                 "backtest_settings": clean_backtest_settings,
                 "updated_at": updated_at,
             },
-            "$unset": {"CASH_MAX_WEIGHT": ""},
+            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": ""},
         },
         upsert=True,
     )
     return {
         "tickers": ticker_slots,
         "weight_mode": clean_weight_mode,
-        "settings": clean_settings,
+        "settings": _with_account_top_pick_basis(clean_settings),
         "backtest_settings": clean_backtest_settings,
         "approved_weights": existing_doc.get("approved_weights"),
         "approved_at": existing_doc.get("approved_at"),
@@ -1294,7 +1292,8 @@ def run_top_pick_weights(
     if len(clean_tickers) < 1:
         raise ValueError("계산할 종목이 1개 이상 필요합니다.")
     clean_settings = _clean_settings(settings)
-    return calculate_top_pick_weights_for(clean_tickers, clean_settings, weight_mode=weight_mode)
+    response_settings = _with_account_top_pick_basis(clean_settings)
+    return calculate_top_pick_weights_for(clean_tickers, response_settings, weight_mode=weight_mode)
 
 
 def approve_top_pick_weights(
@@ -1319,7 +1318,8 @@ def approve_top_pick_weights(
                 "approved_weights": result,
                 "approved_at": approved_at,
                 "updated_at": approved_at,
-            }
+            },
+            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": ""},
         },
         upsert=True,
     )
@@ -1701,4 +1701,3 @@ def run_top_pick_backtest(
         + [{"key": "__CASH__", "label": "현금"}],
         "missing_tickers": missing,
     }
-

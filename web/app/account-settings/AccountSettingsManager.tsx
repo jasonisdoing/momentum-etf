@@ -16,6 +16,9 @@ type AccountEntry = {
   currency?: string;
   benchmark?: Benchmark;
   ticker_types?: string[];
+  memo?: string;
+  top_pick_start_amount_manwon?: number | null;
+  top_pick_start_date?: string | null;
   URL?: string;
   updated_at?: string | null;
   save_method?: string | null;
@@ -42,7 +45,12 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
   const [countryCode, setCountryCode] = useState(account.country_code ?? "kor");
   const [currency, setCurrency] = useState(account.currency ?? "KRW");
   const [url, setUrl] = useState(account.URL ?? "");
-  const [tickerTypes, setTickerTypes] = useState<string[]>(account.ticker_types ?? []);
+  const [memo, setMemo] = useState(account.memo ?? "");
+  const [topPickStartAmount, setTopPickStartAmount] = useState(
+    account.top_pick_start_amount_manwon == null ? "" : String(account.top_pick_start_amount_manwon),
+  );
+  const [topPickStartDate, setTopPickStartDate] = useState(account.top_pick_start_date ?? "");
+  const [tickerType, setTickerType] = useState((account.ticker_types ?? [])[0] ?? "");
   const [benchTicker, setBenchTicker] = useState(account.benchmark?.ticker ?? "");
   const [benchName, setBenchName] = useState(account.benchmark?.name ?? "");
   const [benchEditing, setBenchEditing] = useState(!(account.benchmark?.ticker && account.benchmark?.name));
@@ -90,7 +98,10 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
             country_code: countryCode,
             currency: currency.trim().toUpperCase(),
             benchmark: { ticker: benchTicker.trim(), name: benchName.trim() },
-            ticker_types: tickerTypes,
+            ticker_types: tickerType ? [tickerType] : [],
+            memo: memo.trim(),
+            top_pick_start_amount_manwon: topPickStartAmount === "" ? null : Number(topPickStartAmount),
+            top_pick_start_date: topPickStartDate || null,
             URL: url.trim(),
           },
         }),
@@ -105,10 +116,6 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
     } finally {
       setSaving(false);
     }
-  };
-
-  const togglePool = (poolId: string) => {
-    setTickerTypes((prev) => (prev.includes(poolId) ? prev.filter((p) => p !== poolId) : [...prev, poolId]));
   };
 
   const rowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 };
@@ -195,29 +202,55 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
           </>
         )}
         <span style={{ ...labelStyle, marginLeft: 16 }}>종목풀</span>
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          {pools.length === 0 ? (
-            <span style={{ color: "var(--text-muted)", fontSize: "0.83rem" }}>등록된 종목풀이 없습니다</span>
-          ) : (
-            pools.map((pool) => (
-              <label
-                key={pool.ticker_type}
-                style={{ display: "flex", alignItems: "center", gap: 4, fontSize: "0.85rem", cursor: "pointer" }}
-              >
-                <input
-                  type="checkbox"
-                  checked={tickerTypes.includes(pool.ticker_type)}
-                  onChange={() => togglePool(pool.ticker_type)}
-                />
-                <span>
-                  {pool.icon ? `${pool.icon} ` : ""}
-                  {pool.name ?? pool.ticker_type}
-                  <span style={{ color: "var(--text-muted)", fontWeight: 500 }}> ({pool.ticker_type})</span>
-                </span>
-              </label>
-            ))
-          )}
-        </div>
+        <select
+          style={{ ...inputStyle, minWidth: 220 }}
+          value={tickerType}
+          onChange={(event) => setTickerType(event.target.value)}
+          disabled={pools.length === 0}
+        >
+          <option value="">선택 안 함</option>
+          {pools.map((pool) => (
+            <option key={pool.ticker_type} value={pool.ticker_type}>
+              {pool.icon ? `${pool.icon} ` : ""}
+              {pool.name ?? pool.ticker_type} ({pool.ticker_type})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 60 }}>메모</span>
+        <input
+          style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+          placeholder="탑픽 설정 상단에 표시할 1줄 메모"
+          value={memo}
+          onChange={(e) => setMemo(e.target.value.replace(/\r?\n/g, " "))}
+        />
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 60 }}>탑픽</span>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 220 }}>
+          <span style={labelStyle}>{currency === "KRW" ? "시작금액(만원)" : `시작금액(${currency})`}</span>
+          <input
+            type="number"
+            style={{ ...inputStyle, width: 130 }}
+            min={1}
+            step={currency === "KRW" ? 1 : 0.01}
+            placeholder="미설정"
+            value={topPickStartAmount}
+            onChange={(e) => setTopPickStartAmount(e.target.value)}
+          />
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 220 }}>
+          <span style={labelStyle}>시작일자</span>
+          <input
+            type="date"
+            style={{ ...inputStyle, width: 150 }}
+            value={topPickStartDate}
+            onChange={(e) => setTopPickStartDate(e.target.value)}
+          />
+        </label>
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
