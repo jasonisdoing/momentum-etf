@@ -26,7 +26,6 @@ import { useToast } from "../components/ToastProvider";
 import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown";
 import { persistRecentTickerSearch } from "@/lib/recent-ticker-searches";
 import { addStockCandidate } from "@/lib/stocks-store";
-import { readRememberedTickerType } from "../components/account-selection";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { calcPortfolioChange } from "@/lib/portfolio-change";
 import type { PortfolioChangeBreakdownItem } from "@/lib/portfolio-change";
@@ -571,28 +570,6 @@ export function TickerDetailManager({
     setHoldingsAsOfDate(null);
     setHoldingsPriceAsOfDate(null);
     setHoldingsError(null);
-    if (matches.length > 1) {
-      const rememberedType = readRememberedTickerType();
-      const bestMatch = matches.find((m) => m.ticker_type === rememberedType);
-
-      if (bestMatch) {
-        setSelectedTicker(bestMatch);
-        void loadTickerData(bestMatch);
-        return;
-      }
-
-      // 접두사 없이 호출된 경우 미국(us) 풀을 우선 선택
-      const usMatch = matches.find((m) => m.country_code === "us");
-      if (usMatch) {
-        setSelectedTicker(usMatch);
-        void loadTickerData(usMatch);
-        return;
-      }
-
-      setSelectedTicker(null);
-      setError(`동일한 티커 ${qTicker}가 여러 종목풀(${matches.map(m => m.ticker_type).join(", ")})에 등록되어 있습니다.`);
-      return;
-    }
 
     void (async () => {
       try {

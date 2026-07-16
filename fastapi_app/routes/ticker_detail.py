@@ -126,6 +126,10 @@ def _resolve_ticker_meta_item(ticker: str, allowed_ticker_types: set[str] | None
     matches: list[dict[str, object]] = []
     for config in configs:
         ticker_type = config["ticker_type"]
+        try:
+            pool_order = int(config["order"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError(f"종목풀 {ticker_type}의 우선순위(order)가 없습니다.") from exc
         if forced_ticker_type is not None and ticker_type != forced_ticker_type:
             continue
         if not _allowed(str(ticker_type)):
@@ -143,18 +147,18 @@ def _resolve_ticker_meta_item(ticker: str, allowed_ticker_types: set[str] | None
                     "country_code": country_code,
                     "is_etf": bool(item.get("is_etf", False)),
                     "bucket": int(item.get("bucket") or 1),
+                    "_pool_order": pool_order,
                 }
             )
 
+    def _public_match(match: dict[str, object]) -> dict[str, object]:
+        return {key: value for key, value in match.items() if not str(key).startswith("_")}
+
     if len(matches) == 1:
-        return matches[0]
+        return _public_match(matches[0])
     if len(matches) > 1:
-        # 접두사 없이 호출된 경우 미국(us) 풀을 우선 선택
-        if forced_ticker_type is None:
-            us_matches = [m for m in matches if m["ticker_type"] == "us"]
-            if len(us_matches) == 1:
-                return us_matches[0]
-        raise RuntimeError(f"동일한 티커 {ticker_key}가 여러 종목풀에 등록되어 있습니다.")
+        sorted_matches = sorted(matches, key=lambda match: (int(match["_pool_order"]), str(match["ticker_type"])))
+        return _public_match(sorted_matches[0])
 
     # ASX: 접두사로 호주를 명시했는데 풀에 없으면 즉시 호주로 결정 (미국 폴백 차단)
     if forced_ticker_type == "aus" and _allowed("aus"):
