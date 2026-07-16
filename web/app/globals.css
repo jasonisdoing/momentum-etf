@@ -3561,6 +3561,14 @@ a {
   background: rgba(199, 210, 254, 0.62);
 }
 
+.rankAgGrid .ag-row.topPickPendingAddedRow {
+  background: rgba(250, 204, 21, 0.28);
+}
+
+.rankAgGrid .ag-row.topPickPendingAddedRow:hover {
+  background: rgba(250, 204, 21, 0.38);
+}
+
 .rankAgGrid .ag-cell-value,
 .rankAgGrid .ag-group-value {
   width: 100%;
