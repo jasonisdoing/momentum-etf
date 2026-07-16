@@ -1,10 +1,8 @@
-"""계정/종목풀 설정을 파일에서 로드하기 위한 헬퍼 모듈."""
+"""계정/종목풀 설정 로더."""
 
 from __future__ import annotations
 
-import json
 from functools import cache, lru_cache
-from pathlib import Path
 from typing import Any
 
 from utils.logger import get_app_logger
@@ -14,14 +12,7 @@ class AccountSettingsError(RuntimeError):
     """계정 설정 로딩 중 발생하는 예외."""
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-POOL_SETTINGS_PATH = PROJECT_ROOT / "pools.json"
 logger = get_app_logger()
-
-
-def _load_pools_payload() -> dict[str, Any]:
-    return _load_json(POOL_SETTINGS_PATH)
 
 
 def _load_account_configs() -> list[dict[str, Any]]:
@@ -39,52 +30,17 @@ def _load_account_configs() -> list[dict[str, Any]]:
 
 @cache
 def _load_pool_configs() -> list[dict[str, Any]]:
-    payload = _load_pools_payload()
-    pools = payload.get("pools")
-    if not isinstance(pools, list):
-        raise AccountSettingsError(f"'pools.json'의 'pools'는 배열이어야 합니다: {POOL_SETTINGS_PATH}")
+    """DB(pool_settings)에 정의된 활성 종목풀 목록을 반환한다."""
+    from utils.pool_settings_store import PoolSettingsError, load_pool_definitions
 
-    loaded: list[dict[str, Any]] = []
-    seen_types: set[str] = set()
-
-    for raw_entry in pools:
-        if not isinstance(raw_entry, dict):
-            raise AccountSettingsError(f"'pools' 항목은 객체여야 합니다: {POOL_SETTINGS_PATH}")
-
-        ticker_type = str(raw_entry.get("ticker_type") or "").strip().lower()
-        if not ticker_type:
-            raise AccountSettingsError(f"'ticker_type'은 필수입니다: {POOL_SETTINGS_PATH}")
-        if ticker_type in seen_types:
-            raise AccountSettingsError(f"중복된 ticker_type이 있습니다: {ticker_type}")
-
-        order = raw_entry.get("order")
-        if not isinstance(order, int):
-            raise AccountSettingsError(f"종목풀 '{ticker_type}'의 'order'는 정수여야 합니다.")
-
-        country_code = str(raw_entry.get("country_code") or "").strip().lower()
-        if country_code not in {"kor", "au", "us"}:
-            raise AccountSettingsError(f"종목풀 '{ticker_type}'의 country_code는 kor, au, us만 허용합니다: {country_code}")
-
-        icon = str(raw_entry.get("icon") or "").strip()
-        if not icon:
-            raise AccountSettingsError(f"종목풀 '{ticker_type}' 설정에 icon이 필요합니다.")
-
-        loaded.append(
-            {
-                **raw_entry,
-                "ticker_type": ticker_type,
-                "order": order,
-                "country_code": country_code,
-                "icon": icon,
-            }
-        )
-        seen_types.add(ticker_type)
-
-    return sorted(loaded, key=lambda item: (int(item["order"]), str(item["ticker_type"])))
+    try:
+        return load_pool_definitions()
+    except PoolSettingsError as exc:
+        raise AccountSettingsError(str(exc)) from exc
 
 
 def list_available_ticker_types() -> list[str]:
-    """pools.json에 정의된 유효한 종목타입 목록을 반환합니다."""
+    """DB(pool_settings)에 정의된 활성 종목타입 목록을 반환합니다."""
     return [str(item["ticker_type"]) for item in _load_pool_configs()]
 
 
@@ -93,24 +49,6 @@ def list_available_accounts() -> list[str]:
     DB(account_settings)에 정의된 유효한 계정 목록을 반환합니다.
     """
     return [str(item["account_id"]) for item in _load_account_configs()]
-
-
-def _load_json(path: Path) -> dict[str, Any]:
-    try:
-        raw = path.read_text(encoding="utf-8")
-    except FileNotFoundError as exc:  # noqa: PERF203
-        raise AccountSettingsError(f"설정 파일을 찾을 수 없습니다: {path}") from exc
-    except OSError as exc:  # noqa: PERF203
-        raise AccountSettingsError(f"설정 파일을 읽을 수 없습니다: {path}") from exc
-
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:  # noqa: PERF203
-        raise AccountSettingsError(f"설정 파일이 올바른 JSON 형식이 아닙니다: {path}") from exc
-
-    if not isinstance(data, dict):
-        raise AccountSettingsError(f"설정 파일의 루트는 객체(JSON object)여야 합니다: {path}")
-    return data
 
 
 def get_account_order(account_id: str) -> int:
@@ -134,11 +72,7 @@ def get_account_settings(account_id: str) -> dict[str, Any]:
 
 
 def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
-    """pools.json에 정의된 개별 종목풀 설정을 로드합니다.
-
-    편집 가능한 값은 DB(pool_settings)가 단일 소스다(시드 필요).
-    """
-    from utils.pool_settings_store import resolve_pool_values
+    """DB(pool_settings)에 정의된 개별 종목풀 설정을 로드합니다."""
 
     t_id = (ticker_type or "").strip().lower()
     if not t_id:
@@ -146,7 +80,7 @@ def get_ticker_type_settings(ticker_type: str) -> dict[str, Any]:
 
     for settings in _load_pool_configs():
         if settings["ticker_type"] == t_id:
-            return resolve_pool_values(t_id, dict(settings))
+            return dict(settings)
     raise AccountSettingsError(f"종목타입 '{t_id}'에 해당하는 설정을 찾을 수 없습니다.")
 
 

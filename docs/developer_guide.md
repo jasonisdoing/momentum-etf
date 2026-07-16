@@ -205,24 +205,25 @@ python infra/server_scheduler.py
 
 ## 3. 전략 설정 규칙
 
-종목풀 설정 포맷(`pools.json`):
+종목풀 설정(DB `pool_settings`):
 
 ```json
 {
-  "pools": [
-    {
-      "order": 1,
-      "ticker_type": "kor_kr",
-      "icon": "🇰🇷",
-      "name": "국내상장 국내",
-      "country_code": "kor",
-      "currency": "KRW",
-      "SHORT_MA_DAYS": 10,
-      "MAIN_MA_DAYS": 20
-    }
-  ]
+  "_id": "kor_kr",
+  "name": "국내상장 국내",
+  "icon": "🇰🇷",
+  "order": 1,
+  "country_code": "kor",
+  "currency": "KRW",
+  "type_source": "Naver",
+  "TOP_N_HOLD": 10,
+  "SHORT_MA_DAYS": 10,
+  "MAIN_MA_DAYS": 20,
+  "is_active": true
 }
 ```
+
+런타임 종목풀 목록은 DB `pool_settings`가 단일 소스입니다. 종목풀 설정 화면(`/pools-settings`)에서 종목풀 추가·수정·삭제와 `TOP_N_HOLD`/`SHORT_MA_DAYS`/`MAIN_MA_DAYS` 편집을 수행합니다.
 
 종목풀 설정의 `country_code`는 현재 `kor`, `au`, `us`를 허용합니다.
 
@@ -230,7 +231,7 @@ python infra/server_scheduler.py
 
 * 개별 종목풀: `SHORT_MA_DAYS`, `MAIN_MA_DAYS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
-* 편집값(`TOP_N_HOLD`/`SHORT_MA_DAYS`/`MAIN_MA_DAYS`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/pools-rank`·`/pools-settings` 화면에서 편집.
+* 종목풀 구조와 편집값(`TOP_N_HOLD`/`SHORT_MA_DAYS`/`MAIN_MA_DAYS`)은 **DB `pool_settings`** 가 단일 소스다. `/pools-settings` 화면에서 추가·수정·삭제하며, 삭제는 연결 계좌가 없을 때만 허용한다.
 
 #### 선정 기준 = 추세(%)
 

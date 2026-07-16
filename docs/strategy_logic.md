@@ -12,7 +12,7 @@
 
 ## 2. 계좌 순위 계산 로직
 
-종목풀(`pools.json`)은 등록된 전체 종목을 유니버스로 사용하고, SMA 고정 메인 이평선(`MAIN_MA_DAYS`) 기준으로 각 종목의 추세(%)를 계산합니다.
+종목풀(DB `pool_settings`)은 등록된 전체 종목을 유니버스로 사용하고, SMA 고정 메인 이평선(`MAIN_MA_DAYS`) 기준으로 각 종목의 추세(%)를 계산합니다.
 버킷은 분류/표시용 참고 정보로만 사용합니다.
 
 ### 핵심 파라미터
@@ -20,7 +20,7 @@
 * `SHORT_MA_DAYS`: 정배열/역배열 판단용 단기 이동평균 기간(거래일)
 * `MAIN_MA_DAYS`: 추세(%) 계산용 메인 이동평균 기간(거래일)
 * `TOP_N_HOLD`: 보유 상위 종목 수
-* 위 편집값(`TOP_N_HOLD`/`SHORT_MA_DAYS`/`MAIN_MA_DAYS`)은 DB `pool_settings` 가 단일 소스이며 종목풀 순위·설정 화면에서 편집한다.
+* 종목풀 구조와 편집값(`TOP_N_HOLD`/`SHORT_MA_DAYS`/`MAIN_MA_DAYS`)은 DB `pool_settings` 가 단일 소스이며 종목풀 설정 화면에서 추가·수정·삭제한다.
 
 ### 동작 요약
 
