@@ -60,6 +60,8 @@ type RankRow = {
   분류: string;
   "전체 분류": string;
   추세: number | null;
+  이격?: number | null;
+  기울기?: number | null;
   배열?: string | null;
   보유: string;
   현재가: number | null;
@@ -611,6 +613,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         분류: "",
         "전체 분류": "",
         추세: null,
+        이격: null,
+        기울기: null,
         보유: "",
         현재가: null,
         괴리율: null,
@@ -1097,10 +1101,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     const cumulativeColumns: ColDef<RankGridRow>[] = [
       {
-        field: "추세",
-        headerName: "추세",
+        field: "이격",
+        headerName: "이격",
         minWidth: 86,
         width: 86,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
+        field: "기울기",
+        headerName: "기울기",
+        minWidth: 92,
+        width: 92,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
