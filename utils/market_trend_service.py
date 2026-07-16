@@ -13,26 +13,19 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
 from config import (
-    ALLOWED_MA_TYPES,
-    MARKET_TREND_REGIME_BUFFER_PCT,
-    MARKET_TREND_REGIME_MA_TYPE,
-    MARKET_TREND_REGIME_SHORT_MA_DAYS,
+    MARKET_TREND_REGIME_CONFIRM_DAYS,
+    MARKET_TREND_REGIME_MA_LONG,
+    MARKET_TREND_REGIME_MA_SHORT,
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
     MARKET_TREND_SUPERTREND_PERIOD,
     TRADING_DAYS_PER_MONTH,
 )
-from utils.moving_averages import calculate_moving_average
-
-# 필수 설정값 유효성 검사
-if MARKET_TREND_REGIME_MA_TYPE not in ALLOWED_MA_TYPES:
-    raise ValueError(
-        f"MARKET_TREND_REGIME_MA_TYPE 은 {ALLOWED_MA_TYPES} 중 하나여야 합니다. 현재 값: {MARKET_TREND_REGIME_MA_TYPE}"
-    )
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +162,7 @@ def _to_float(value: Any) -> float | None:
 def compute_market_trend() -> dict[str, Any]:
     """5개 시장지수의 현재가/변동률/MA 추세%(현재 + 과거 3시점) 를 계산해 반환한다.
 
-    MA는 SMA {MARKET_TREND_REGIME_SHORT_MA_DAYS}일 고정.
+    MA는 SMA MARKET_TREND_REGIME_MA_SHORT일 고정.
 
     Returns:
         ``{"ma_days", "items": [{
@@ -177,7 +170,7 @@ def compute_market_trend() -> dict[str, Any]:
             pct_from_high, current_regime, current_regime_days,
         }, ...]}``
     """
-    ma_days = MARKET_TREND_REGIME_SHORT_MA_DAYS
+    ma_days = MARKET_TREND_REGIME_MA_SHORT
 
     # 미국 인덱스만 yfinance 로 일괄 다운로드 (한국 2개는 네이버 사용).
     us_tickers = [idx["yf_ticker"] for idx in INDICES if not idx.get("kor_naver_symbol")]
@@ -196,7 +189,6 @@ def compute_market_trend() -> dict[str, Any]:
         df = None
 
     # 한국 인덱스(KOSPI/KPI200) OHLC 는 네이버 차트 API 로 조회 (2년치 ≈ 500거래일).
-    # 종가뿐 아니라 고가/저가도 받아야 SuperTrend(레짐 판정의 주 신호)를 계산할 수 있다.
     kor_ohlc_by_ticker: dict[str, pd.DataFrame] = {}
     for idx in INDICES:
         naver_symbol = idx.get("kor_naver_symbol")
@@ -283,12 +275,8 @@ def _build_item(
     base["price"] = latest_price
     base["change_pct"] = change_pct
 
-    # MA 시리즈는 전체 가격 시리즈에 대해 한 번만 계산하고, 시점별로 인덱싱한다.
-    try:
-        ma_series = calculate_moving_average(close_series, ma_days, MARKET_TREND_REGIME_MA_TYPE)
-    except Exception:
-        logger.exception("MA 계산 실패: %s (%s, days=%d)", yf_ticker, MARKET_TREND_REGIME_MA_TYPE, ma_days)
-        return base
+    # 추세 점수는 새 레짐 정본과 맞춰 SMA MA20 대비 괴리율을 쓴다.
+    ma_series = close_series.rolling(ma_days).mean()
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
 
@@ -298,40 +286,11 @@ def _build_item(
     if high_52w is not None and high_52w > 0 and latest_price is not None:
         base["pct_from_high"] = (latest_price / high_52w - 1.0) * 100.0
 
-    # SuperTrend 계산 — 한국 인덱스는 네이버 OHLC, 미국 인덱스는 yfinance df 에서 OHLC 를 취한다.
-    supertrend_dir_series = None
-    try:
-        ticker_df: pd.DataFrame | None = None
-        if kor_ohlc is not None and not kor_ohlc.empty:
-            ticker_df = kor_ohlc.reindex(close_series.index)
-        elif df is not None and not df.empty:
-            ticker_df = pd.DataFrame(index=close_series.index)
-            for col in ["Open", "High", "Low", "Close", "Volume"]:
-                if (yf_ticker, col) in df.columns:
-                    ticker_df[col] = df[(yf_ticker, col)]
-                elif col in df.columns:
-                    ticker_df[col] = df[col]
-        if ticker_df is not None:
-            ticker_df = ticker_df.dropna(subset=["High", "Low", "Close"])
-        if ticker_df is not None and not ticker_df.empty:
-            st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
-            st_df = _calculate_supertrend(
-                ticker_df,
-                period=st_period,
-                multiplier=st_multiplier,
-            )
-            if st_df is not None and "direction" in st_df.columns:
-                supertrend_dir_series = st_df["direction"]
-    except Exception:
-        logger.exception("_build_item 내 SuperTrend 계산 실패: %s", yf_ticker)
-
-    # 최근 12개월 일별 레짐을 계산해 연속 구간으로 그룹화 → 현재 레짐 + 지속일수.
-    # 레짐 판정용 MA도 같은 SMA {ma_days}일이므로 ma_series를 재활용한다.
-    short_ma_series = ma_series
-    buffer_pct = _resolve_regime_buffer(yf_ticker)
-    ranges = _build_daily_regime_ranges(
-        close_series, ma_series, short_ma_series, buffer_pct, supertrend_dir_series
-    )
+    # 최근 12개월 일별 레짐을 새 정본(MA20/60 + 지수별 N일 확인)으로 계산한다.
+    regime_df = pd.DataFrame({"Close": close_series})
+    confirm_days = _resolve_confirm_days(yf_ticker)
+    regime_series = compute_ma_cross_regime(regime_df, confirm_days)
+    ranges = _build_regime_ranges_from_series(regime_series, TRADING_DAYS_PER_MONTH * 12)
     if ranges:
         base["current_regime"] = ranges[-1]["regime"]
         base["current_regime_days"] = ranges[-1]["days"]
@@ -423,41 +382,21 @@ def _trend_pct_at(
     return (price / ma_value - 1.0) * 100.0
 
 
-def _regime_step(
-    close_raw: float | None,
-    close_smooth: float | None,
-    supertrend_dir: int | None,
-    buffer_pct: float,
-) -> str | None:
-    """레짐 판정 — **슈퍼트렌드(ST) 방향이 주(主), MA±버퍼가 보조(강도 확인)**.
-
-    ST가 방향(상승/하락)을 정하고, MA 는 방향을 뒤집지 못하며 '아직 확인 안 됨 → 중립'
-    으로만 끌어내린다(ST 는 자체 추세추종이라 별도 히스테리시스 불필요).
-    버퍼는 지수별로 다르다(``buffer_pct`` 로 주입).
-
-    판정 기준(close_smooth = MA):
-        ST ▲ 이고 종가 > MA × (1 + 버퍼) → 상승 (accel_up)
-        ST ▼ 이고 종가 < MA × (1 − 버퍼) → 하락 (accel_down)
-        그 외(ST·가격 방향 불일치, MA 근처 등) → 중립 (neutral)
-    ST 방향이 없으면(데이터 부족) 레짐도 판정하지 않는다(None).
-    """
-    if close_raw is None or close_smooth is None or close_smooth <= 0 or supertrend_dir is None:
-        return None
-
-    buffer_ratio = buffer_pct / 100.0
-    if supertrend_dir == 1 and close_raw > close_smooth * (1.0 + buffer_ratio):
-        return "accel_up"
-    if supertrend_dir == -1 and close_raw < close_smooth * (1.0 - buffer_ratio):
-        return "accel_down"
-    return "neutral"
+def _resolve_confirm_days(yf_ticker: str) -> int:
+    """지수(yf_ticker)별 MA20/60 레짐 확인 거래일 수 N을 반환한다."""
+    if yf_ticker not in MARKET_TREND_REGIME_CONFIRM_DAYS:
+        raise ValueError(
+            f"MARKET_TREND_REGIME_CONFIRM_DAYS 에 지수 '{yf_ticker}' 의 확인일 수가 등록되지 않았습니다. "
+            "config.py 에 해당 지수를 등록해주세요."
+        )
+    value = int(MARKET_TREND_REGIME_CONFIRM_DAYS[yf_ticker])
+    if value < 0:
+        raise ValueError(f"MARKET_TREND_REGIME_CONFIRM_DAYS 값은 0 이상이어야 합니다: {yf_ticker}={value}")
+    return value
 
 
 def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
-    """지수(yf_ticker)별 슈퍼트렌드 (기간, 곱수)를 반환한다.
-
-    기간은 전 지수 공통(MARKET_TREND_SUPERTREND_PERIOD), 곱수는 지수별로 등록된 값을 쓴다.
-    등록되지 않은 지수는 설정 누락이므로 명시적으로 오류를 낸다.
-    """
+    """차트 표시용 SuperTrend 기간/곱수를 반환한다."""
     if yf_ticker not in MARKET_TREND_SUPERTREND_MULTIPLIER:
         raise ValueError(
             f"MARKET_TREND_SUPERTREND_MULTIPLIER 에 지수 '{yf_ticker}' 의 곱수가 등록되지 않았습니다. "
@@ -466,60 +405,36 @@ def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
     return MARKET_TREND_SUPERTREND_PERIOD, MARKET_TREND_SUPERTREND_MULTIPLIER[yf_ticker]
 
 
-def _resolve_regime_buffer(yf_ticker: str) -> float:
-    """지수(yf_ticker)별 레짐 판정 버퍼(%)를 반환한다.
-
-    지수별로 등록된 값을 쓰며, 등록되지 않은 지수는 설정 누락이므로 명시적으로 오류를 낸다.
-    """
-    if yf_ticker not in MARKET_TREND_REGIME_BUFFER_PCT:
-        raise ValueError(
-            f"MARKET_TREND_REGIME_BUFFER_PCT 에 지수 '{yf_ticker}' 의 버퍼가 등록되지 않았습니다. "
-            "config.py 에 해당 지수를 등록해주세요."
-        )
-    return MARKET_TREND_REGIME_BUFFER_PCT[yf_ticker]
-
-
 def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
-    """SuperTrend 지표 계산 (ATR 기반 상/하단 트렌드 밴드 및 방향 판정)."""
-    high = df['High']
-    low = df['Low']
-    close = df['Close']
-    
+    """차트 표시용 SuperTrend 지표를 계산한다."""
+    high = df["High"]
+    low = df["Low"]
+    close = df["Close"]
+
     tr1 = high - low
     tr2 = (high - close.shift(1)).abs()
     tr3 = (low - close.shift(1)).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    # Wilder's Smoothing ATR
-    atr = tr.ewm(alpha=1.0/period, adjust=False).mean()
-    
+    atr = tr.ewm(alpha=1.0 / period, adjust=False).mean()
+
     hl2 = (high + low) / 2.0
     basic_upper = hl2 + multiplier * atr
     basic_lower = hl2 - multiplier * atr
-    
+
     final_upper = pd.Series(0.0, index=df.index)
     final_lower = pd.Series(0.0, index=df.index)
     supertrend = pd.Series(0.0, index=df.index)
-    direction = pd.Series(1, index=df.index)  # 1 = up, -1 = down
-    
+    direction = pd.Series(1, index=df.index)
+
     for i in range(1, len(df)):
-        prev_upper = final_upper.iloc[i-1]
-        prev_lower = final_lower.iloc[i-1]
-        prev_close = close.iloc[i-1]
-        
-        # Upper Band
-        if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper:
-            final_upper.iloc[i] = basic_upper.iloc[i]
-        else:
-            final_upper.iloc[i] = prev_upper
-            
-        # Lower Band
-        if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower:
-            final_lower.iloc[i] = basic_lower.iloc[i]
-        else:
-            final_lower.iloc[i] = prev_lower
-            
-        # Direction
-        prev_dir = direction.iloc[i-1]
+        prev_upper = final_upper.iloc[i - 1]
+        prev_lower = final_lower.iloc[i - 1]
+        prev_close = close.iloc[i - 1]
+
+        final_upper.iloc[i] = basic_upper.iloc[i] if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper else prev_upper
+        final_lower.iloc[i] = basic_lower.iloc[i] if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower else prev_lower
+
+        prev_dir = direction.iloc[i - 1]
         if prev_dir == 1:
             if close.iloc[i] < final_lower.iloc[i]:
                 direction.iloc[i] = -1
@@ -534,79 +449,106 @@ def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float 
             else:
                 direction.iloc[i] = -1
                 supertrend.iloc[i] = final_upper.iloc[i]
-                
+
     final_upper.iloc[0] = basic_upper.iloc[0]
     final_lower.iloc[0] = basic_lower.iloc[0]
     supertrend.iloc[0] = basic_lower.iloc[0]
-    
-    return pd.DataFrame({
-        'supertrend': supertrend,
-        'direction': direction
-    }, index=df.index)
+
+    return pd.DataFrame({"supertrend": supertrend, "direction": direction}, index=df.index)
 
 
-def _build_daily_regime_ranges(
-    close_series: pd.Series,
-    ma_series: pd.Series,
-    short_ma_series: pd.Series | None,
-    buffer_pct: float,
-    supertrend_dir_series: pd.Series | None = None,
-    window_days: int = TRADING_DAYS_PER_MONTH * 12,
-) -> list[dict[str, Any]]:
-    """최근 ``window_days`` 거래일의 일별 레짐(ST 주도 + MA 보조)을 연속 구간으로 그룹화한다.
+def is_market_trend_index(ticker: str) -> bool:
+    """시장추세 지수 목록(INDICES)에 등록된 yf_ticker 인지 여부."""
+    return any(idx["yf_ticker"] == ticker for idx in INDICES)
 
-    레짐은 당일 (종가·MA·ST방향) 만의 함수라 상태 워밍업이 필요 없다.
-    반환 형식: [{"regime": str, "start_date": str, "end_date": str, "days": int}, ...]
-    오래된 순서 → 최신 순서.
+
+# MA20/60 레짐 백테스트 파라미터 (읽기 전용 분석 — DB 저장/운영 미반영)
+REGIME_BACKTEST_MA_SHORT = 20  # MA 교차 방식 단기선
+REGIME_BACKTEST_MA_LONG = 60   # MA 교차 방식 장기선
+REGIME_BACKTEST_CONFIRM_MAX = 5  # MA 교차 확인 필터를 0~N일까지 나열
+# 현금제어 기본 현금 비중(%) — 상승 0%, 중립 15%, 하락 30% (화면에서 조정)
+REGIME_BACKTEST_DEFAULT_CASH = {"up": 0.0, "neutral": 15.0, "down": 30.0}
+
+
+def _regime_series_ma_cross(close: pd.Series, ma_short: pd.Series, ma_long: pd.Series) -> pd.Series:
+    """버퍼 없는 MA20/60 위치 기반 레짐(벡터화).
+
+    - MA20 < MA60 → 하락
+    - MA20 >= MA60 이면서 종가 > MA20 → 상승
+    - MA20 >= MA60 이면서 종가 < MA60 → 하락
+    - 그 외 → 중립
     """
-    if close_series is None or ma_series is None or short_ma_series is None:
-        return []
-    length = min(len(close_series), len(ma_series), len(short_ma_series))
-    if length == 0:
-        return []
+    idx = close.index
+    valid = ma_short.notna() & ma_long.notna()
+    death = ma_short < ma_long
+    up = valid & ~death & (close > ma_short)
+    down = valid & (death | (close < ma_long))
+    reg = pd.Series("neutral", index=idx, dtype=object)
+    reg[up] = "accel_up"
+    reg[down] = "accel_down"
+    reg[~valid] = None
+    return reg.dropna()
 
-    # 휩소 방지를 위해 당일 종가 대신 이동평균을 레짐 판정용 비교값으로 사용합니다.
-    try:
-        close_smooth = calculate_moving_average(
-            close_series, MARKET_TREND_REGIME_SHORT_MA_DAYS, MARKET_TREND_REGIME_MA_TYPE
-        ).fillna(close_series)
-    except Exception:
-        close_smooth = close_series
 
-    take = min(length, int(window_days))
-    start_idx = length - take
+def _apply_confirmation(regime: pd.Series, confirm_days: int) -> pd.Series:
+    """새 레짐이 confirm_days 거래일 연속으로 나올 때만 전환한다(그 전엔 직전 확정 상태 유지).
+
+    잦은 뒤집힘(휩소)을 줄이는 대신 전환이 다소 늦어진다.
+    """
+    if regime.empty or confirm_days <= 1:
+        return regime
+    values = list(regime.values)
+    committed = values[0]
+    run_state = values[0]
+    run_len = 1
+    out = [committed]
+    for value in values[1:]:
+        if value == run_state:
+            run_len += 1
+        else:
+            run_state = value
+            run_len = 1
+        if run_len >= confirm_days:
+            committed = run_state
+        out.append(committed)
+    return pd.Series(out, index=regime.index)
+
+
+def compute_ma_cross_regime(df: pd.DataFrame, confirm_days: int) -> pd.Series:
+    """MA20/60 교차 + N일 확인 레짐을 계산한다.
+
+    ``confirm_days`` 는 운영 설정의 N이다. N=0 은 원본 레짐 즉시 전환,
+    N>0 은 새 레짐이 (N+1)거래일 연속 나올 때 확정 전환한다.
+    """
+    if confirm_days < 0:
+        raise ValueError(f"confirm_days 는 0 이상이어야 합니다: {confirm_days}")
+    if df is None or df.empty or "Close" not in df.columns:
+        return pd.Series(dtype=object)
+    close = df["Close"].dropna().sort_index()
+    if close.empty:
+        return pd.Series(dtype=object)
+    ma_short = close.rolling(MARKET_TREND_REGIME_MA_SHORT).mean()
+    ma_long = close.rolling(MARKET_TREND_REGIME_MA_LONG).mean()
+    raw = _regime_series_ma_cross(close, ma_short, ma_long)
+    if confirm_days == 0:
+        return raw
+    return _apply_confirmation(raw, confirm_days + 1)
+
+
+def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> list[dict[str, Any]]:
+    """레짐 시리즈를 최근 window_days 기준 연속 구간 목록으로 변환한다."""
+    if regime is None or regime.empty:
+        return []
+    recent = regime.dropna().tail(int(window_days))
     ranges: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
-
-    # 슈퍼트렌드 방향 매핑 맵
-    st_dir_map = {}
-    if supertrend_dir_series is not None:
-        st_dir_map = supertrend_dir_series.dropna().to_dict()
-
-    for idx in range(start_idx, length):  # 레짐은 당일 (종가·MA·ST방향) 만의 함수 → 워밍업 불필요
-        date_value = close_series.index[idx]
-        st_dir = st_dir_map.get(date_value)
-        if st_dir is not None:
-            st_dir = int(st_dir)
-
-        regime = _regime_step(
-            _to_float(close_series.iloc[idx]),
-            _to_float(close_smooth.iloc[idx]),
-            st_dir,
-            buffer_pct,
-        )
-
+    for date_value, regime_value in recent.items():
         date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
-        if regime is None:
-            if current:
-                ranges.append(current)
-                current = None
-            continue
-        if current is None or current["regime"] != regime:
+        if current is None or current["regime"] != regime_value:
             if current:
                 ranges.append(current)
             current = {
-                "regime": regime,
+                "regime": regime_value,
                 "start_date": date_str,
                 "end_date": date_str,
                 "days": 1,
@@ -619,100 +561,135 @@ def _build_daily_regime_ranges(
     return ranges
 
 
-def _ma_newest_weight(close_series: pd.Series, ma_days: int) -> float | None:
-    """이동평균에서 '가장 최근 종가 1단위'가 MA 마지막 값에 기여하는 가중치 w.
+def _regime_backtest_metrics(
+    regime: pd.Series, close: pd.Series, window: int, pos_map: dict[str, float]
+) -> dict[str, Any]:
+    """레짐 시리즈의 분포·휩소·유지기간 + 현금제어 전략 성과(vs buy&hold)를 계산한다.
 
-    이동평균은 선형 시불변이라 이 가중치는 날짜·값과 무관한 상수다.
-    끝점을 미세 섭동해 수치적으로 한 번만 구한다. 이 w 로
-    가상의 다음날 종가 P 에 대한 다음날 MA 를 ``w*P + R`` 로 O(1) 평가할 수 있다.
+    pos_map: 레짐별 투자비중(=1-현금%). 예: {accel_up:1.0, neutral:0.85, accel_down:0.7}.
     """
-    if close_series is None or len(close_series) < ma_days + 1:
-        return None
-    try:
-        base_last = _to_float(calculate_moving_average(close_series, ma_days, MARKET_TREND_REGIME_MA_TYPE).iloc[-1])
-        if base_last is None:
-            return None
-        delta = abs(_to_float(close_series.iloc[-1]) or 1.0) * 0.01 + 1.0
-        bumped = close_series.copy()
-        bumped.iloc[-1] = float(bumped.iloc[-1]) + delta
-        bumped_last = _to_float(calculate_moving_average(bumped, ma_days, MARKET_TREND_REGIME_MA_TYPE).iloc[-1])
-        if bumped_last is None:
-            return None
-    except Exception:
-        return None
-    return (bumped_last - base_last) / delta
+    reg = regime.tail(window)
+    reg = reg[reg.notna()]
+    if len(reg) < 2:
+        return {}
+    counts = reg.value_counts().to_dict()
+    flips = int((reg.values[1:] != reg.values[:-1]).sum())
+    runs, cur = [], 1
+    for i in range(1, len(reg)):
+        if reg.values[i] == reg.values[i - 1]:
+            cur += 1
+        else:
+            runs.append(cur)
+            cur = 1
+    runs.append(cur)
+    dwell = float(np.mean(runs)) if runs else 0.0
 
+    # 룩어헤드 방지: 오늘 레짐으로 정한 포지션을 다음날 수익에 적용
+    ret = np.log(close / close.shift(1)).reindex(reg.index)
+    pos = reg.map(pos_map).shift(1)
+    strat = (pos * ret).dropna()
+    bh = ret.reindex(strat.index)
 
-def _forecast_thresholds(
-    current_close: float,
-    w_long: float,
-    r_long: float,
-    w_short: float,
-    r_short: float,
-    st_line: float,
-    buffer_pct: float,
-) -> dict[str, Any] | None:
-    """'다음 영업일 종가가 현재 대비 몇 %'일 때 레짐이 바뀌는 두 경계를 산출 (레벨 기반).
+    def perf(series: pd.Series) -> tuple[float, float, float]:
+        if series.empty or series.std() == 0:
+            return 0.0, 0.0, 0.0
+        cum = float(np.expm1(series.sum()) * 100)
+        eq = np.exp(series.cumsum())
+        mdd = float((eq / eq.cummax() - 1).min() * 100)
+        sharpe = float(series.mean() / series.std() * np.sqrt(252))
+        return cum, mdd, sharpe
 
-    다음날 MA 를 ``w*P + r`` (LTI 선형)로 O(1) 평가한다. 내일 ST 방향은 내일 종가 P 가
-    현재 ST 밴드선(st_line)을 넘는지로 결정된다(P > st_line → 상승, 그 외 → 하락).
-    레짐은 (종가·MA·ST방향) 만의 함수라 등락률→레짐이 단조 → 이진 탐색.
-
-    Returns:
-        ``{"up_pct","up_price","dn_pct","dn_price"}`` (상승↔중립=up, 중립↔하락=dn).
-        탐색 범위에서 경계를 못 찾으면 해당 값은 None. 둘 다 None 이면 None.
-    """
-    if current_close <= 0:
-        return None
-    rank = {"accel_up": 2, "neutral": 1, "accel_down": 0}
-
-    def regime_for(pct: float) -> str | None:
-        price = current_close * (1.0 + pct / 100.0)
-        if price <= 0:
-            return None
-        sm = w_short * price + r_short  # 내일 MA
-        st_dir_next = 1 if price > st_line else -1  # 내일 ST 방향 (밴드선 돌파 여부)
-        return _regime_step(price, sm, st_dir_next, buffer_pct)
-
-    pct_hi, pct_lo = 90.0, -90.0  # 내일 단일일 등락률 탐색 범위(상승/하락 경계 대칭)
-
-    def boundary(min_rank: int) -> float | None:
-        r_hi, r_lo = regime_for(pct_hi), regime_for(pct_lo)
-        if r_hi is None or r_lo is None:
-            return None
-        if (rank[r_hi] >= min_rank) == (rank[r_lo] >= min_rank):
-            return None
-        low, high = pct_lo, pct_hi
-        for _ in range(24):
-            mid = (low + high) / 2.0
-            r = regime_for(mid)
-            if r is not None and rank[r] >= min_rank:
-                high = mid
-            else:
-                low = mid
-        return round((low + high) / 2.0, 2)
-
-    t_up = boundary(2)
-    t_dn = boundary(1)
-
-    def price_at(pct: float | None) -> float | None:
-        return round(current_close * (1.0 + pct / 100.0), 2) if pct is not None else None
-
-    result: dict[str, Any] = {
-        "up_pct": t_up,
-        "up_price": price_at(t_up),
-        "dn_pct": t_dn,
-        "dn_price": price_at(t_dn),
+    s_cum, s_mdd, s_sharpe = perf(strat)
+    b_cum, b_mdd, b_sharpe = perf(bh)
+    return {
+        "up": int(counts.get("accel_up", 0)),
+        "neutral": int(counts.get("neutral", 0)),
+        "down": int(counts.get("accel_down", 0)),
+        "flips": flips,
+        "dwell": round(dwell, 1),
+        "strat_return": round(s_cum, 1),
+        "strat_mdd": round(s_mdd, 1),
+        "strat_sharpe": round(s_sharpe, 2),
+        "bh_return": round(b_cum, 1),
+        "bh_mdd": round(b_mdd, 1),
+        "bh_sharpe": round(b_sharpe, 2),
     }
 
-    if result["up_pct"] is None and result["dn_pct"] is None:
-        return None
-    return result
 
+def compute_regime_confirm_backtest(
+    ticker: str | None = None,
+    months: int = 12,
+    up_cash: float | None = None,
+    neutral_cash: float | None = None,
+    down_cash: float | None = None,
+) -> dict[str, Any]:
+    """선택 지수(미지정이면 전체)의 MA20/60 교차 확인일수 후보를 최근 N개월로 비교한다.
 
-def is_market_trend_index(ticker: str) -> bool:
-    """시장추세 지수 목록(INDICES)에 등록된 yf_ticker 인지 여부."""
-    return any(idx["yf_ticker"] == ticker for idx in INDICES)
+    months: 백테스트 기간(개월, 1~36). up/neutral/down_cash: 레짐별 현금 비중(%).
+    읽기 전용 분석 — config/DB 를 바꾸지 않는다.
+    """
+    if ticker is not None and not is_market_trend_index(ticker):
+        allowed = ", ".join(idx["yf_ticker"] for idx in INDICES)
+        raise ValueError(f"시장추세 지수({allowed}) 중 하나여야 합니다: {ticker}")
+    months = int(months)
+    if not (1 <= months <= 36):
+        raise ValueError(f"백테스트 기간은 1~36개월이어야 합니다: {months}")
+    window = max(10, months * TRADING_DAYS_PER_MONTH)
+
+    cash = {
+        "up": REGIME_BACKTEST_DEFAULT_CASH["up"] if up_cash is None else float(up_cash),
+        "neutral": REGIME_BACKTEST_DEFAULT_CASH["neutral"] if neutral_cash is None else float(neutral_cash),
+        "down": REGIME_BACKTEST_DEFAULT_CASH["down"] if down_cash is None else float(down_cash),
+    }
+    for label, value in cash.items():
+        if not (0.0 <= value <= 100.0):
+            raise ValueError(f"{label} 현금 비중은 0~100%여야 합니다: {value}")
+    pos_map = {
+        "accel_up": 1.0 - cash["up"] / 100.0,
+        "neutral": 1.0 - cash["neutral"] / 100.0,
+        "accel_down": 1.0 - cash["down"] / 100.0,
+    }
+
+    targets = [idx for idx in INDICES if ticker is None or idx["yf_ticker"] == ticker]
+
+    indices_out: list[dict[str, Any]] = []
+    for idx in targets:
+        idx_ticker, name = idx["yf_ticker"], idx["name"]
+        df = load_index_ohlc(idx_ticker)
+        if df is None or df.empty:
+            continue
+        df = df.dropna(subset=["Close"]).sort_index()
+        close = df["Close"]
+
+        # MA20/60 교차 방식 — 확인 필터 0~N일 나열
+        ma_short = close.rolling(REGIME_BACKTEST_MA_SHORT).mean()
+        ma_long = close.rolling(REGIME_BACKTEST_MA_LONG).mean()
+        ma_raw = _regime_series_ma_cross(close, ma_short, ma_long)
+        ma_variants: list[dict[str, Any]] = []
+        for n in range(REGIME_BACKTEST_CONFIRM_MAX + 1):
+            # n 일 확인 = 새 레짐이 (n+1)거래일 연속일 때 전환. n=0 은 즉시 전환(원본).
+            conf = ma_raw if n == 0 else _apply_confirmation(ma_raw, n + 1)
+            metrics = _regime_backtest_metrics(conf, close, window, pos_map)
+            if metrics:
+                ma_variants.append({"confirm_days": n, **metrics})
+        if not ma_variants:
+            continue
+
+        indices_out.append(
+            {
+                "ticker": idx_ticker,
+                "name": name,
+                "confirm_days": _resolve_confirm_days(idx_ticker),
+                "ma_variants": ma_variants,
+                "ma_periods": [REGIME_BACKTEST_MA_SHORT, REGIME_BACKTEST_MA_LONG],
+            }
+        )
+    return {
+        "window_days": window,
+        "months": months,
+        "cash": cash,
+        "indices": indices_out,
+    }
 
 
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
@@ -759,37 +736,83 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     return pd.DataFrame(cleaned_cols).dropna()
 
 
+def _tail_streak(values: pd.Series) -> tuple[str | None, int]:
+    """시리즈 마지막 값과 같은 값이 끝에서 몇 거래일 연속인지 반환한다."""
+    cleaned = values.dropna()
+    if cleaned.empty:
+        return None, 0
+    latest = cleaned.iloc[-1]
+    streak = 0
+    for value in reversed(cleaned.tolist()):
+        if value != latest:
+            break
+        streak += 1
+    return str(latest), streak
+
+
+def _ma_cross_forecast(
+    close: float | None,
+    ma_short: float | None,
+    ma_long: float | None,
+    raw_regime: str | None,
+    raw_streak: int,
+    confirmed_regime: str | None,
+    confirm_days: int,
+) -> dict[str, Any] | None:
+    """MA20/60 레짐 전환에 필요한 가격선과 남은 확인일수를 반환한다."""
+    if close is None or close <= 0 or ma_short is None or ma_long is None or confirmed_regime is None:
+        return None
+
+    required_days = confirm_days + 1
+
+    def change_pct(target_price: float | None) -> float | None:
+        if target_price is None:
+            return None
+        return (target_price / close - 1.0) * 100.0
+
+    def remaining(target_raw: str) -> int:
+        if raw_regime == target_raw:
+            return max(0, required_days - raw_streak)
+        return required_days
+
+    return {
+        "confirm_days": confirm_days,
+        "required_days": required_days,
+        "raw_regime": raw_regime,
+        "raw_streak": raw_streak,
+        "up_price": ma_short,
+        "up_pct": change_pct(ma_short),
+        "up_remaining_days": remaining("accel_up"),
+        "dn_price": ma_long,
+        "dn_pct": change_pct(ma_long),
+        "dn_remaining_days": remaining("accel_down"),
+    }
+
+
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
-    """단일 지수의 최근 12개월 가격/추세 히스토리 + 각 일자별 레짐을 반환한다 (행 펼침용).
+    """단일 지수의 가격/MA20/MA60/확정 레짐 히스토리를 반환한다.
 
-    MA는 SMA {MARKET_TREND_REGIME_SHORT_MA_DAYS}일 고정.
-    각 history 항목의 ``forecast`` 는 그 일자 기준 '내일 종가 전환 예측'
-    ``{up_pct, up_price, dn_pct, dn_price}`` (없으면 None) 이다.
-
-    Returns:
-        ``{"ticker", "name", "ma_days",
-            "history": [{date, close, ma, trend_pct, trend_score, regime, forecast}, ...],
-            "trend_min_12m", "trend_max_12m"}``
-        해당 ticker 가 알려진 인덱스가 아니면 name 은 ticker 그대로 사용.
+    레짐은 MA20/60 교차 원본 신호에 지수별 확인일수를 적용한 값이다.
     """
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     name = index_meta["name"] if index_meta else yf_ticker
-    naver_symbol = (index_meta or {}).get("kor_naver_symbol")
 
-    ma_days = MARKET_TREND_REGIME_SHORT_MA_DAYS
-    buffer_pct = _resolve_regime_buffer(yf_ticker)
+    ma_short_days = MARKET_TREND_REGIME_MA_SHORT
+    ma_long_days = MARKET_TREND_REGIME_MA_LONG
+    confirm_days = _resolve_confirm_days(yf_ticker)
 
     empty_payload = {
         "ticker": yf_ticker,
         "name": name,
-        "ma_days": ma_days,
-        "buffer_pct": buffer_pct,
+        "ma_days": ma_short_days,
+        "ma_short_days": ma_short_days,
+        "ma_long_days": ma_long_days,
+        "confirm_days": confirm_days,
         "history": [],
         "trend_min_12m": None,
         "trend_max_12m": None,
     }
 
-    df: pd.DataFrame | None = None
     df = load_index_ohlc(yf_ticker)
     if df is None or df.empty:
         return empty_payload
@@ -803,39 +826,30 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     df["Close"] = close_series
     df = df.ffill()
 
-    # SuperTrend 계산 (지수별 파라미터 적용)
-    try:
-        st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
-        st_df = _calculate_supertrend(
-            df,
-            period=st_period,
-            multiplier=st_multiplier,
-        )
-    except Exception:
-        logger.exception("SuperTrend 계산 실패: %s", yf_ticker)
-        st_df = None
-
     if len(close_series) < 2:
         return empty_payload
 
+    ma_short_series = close_series.rolling(ma_short_days).mean()
+    ma_long_series = close_series.rolling(ma_long_days).mean()
+    raw_regime_series = _regime_series_ma_cross(close_series, ma_short_series, ma_long_series)
+    confirmed_regime_series = compute_ma_cross_regime(pd.DataFrame({"Close": close_series}), confirm_days)
     try:
-        ma_series = calculate_moving_average(close_series, ma_days, MARKET_TREND_REGIME_MA_TYPE)
+        st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
+        st_df = _calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
     except Exception:
-        logger.exception("MA 계산 실패: %s (%s, days=%d)", yf_ticker, MARKET_TREND_REGIME_MA_TYPE, ma_days)
-        ma_series = None
-    # 레짐 판정용 MA도 같은 MA_TYPE {ma_days}일이므로 ma_series를 재활용한다.
-    short_ma_series = ma_series
+        logger.exception("차트 표시용 SuperTrend 계산 실패: %s", yf_ticker)
+        st_df = None
 
     # 최근 5년치 = 약 1200 거래일 (프론트에서 1개월~5년 범위 선택 가능)
     tail = TRADING_DAYS_PER_MONTH * 12 * 5
-    length = min(len(close_series), len(ma_series) if ma_series is not None else len(close_series))
+    length = len(close_series)
     take = min(length, tail)
 
     # 전체 시리즈에 대한 일별 trend% 사전 계산 (인덱스 = 0..length-1).
     full_trend: list[float | None] = []
     for idx in range(length):
         c = _to_float(close_series.iloc[idx])
-        m = _to_float(ma_series.iloc[idx]) if ma_series is not None else None
+        m = _to_float(ma_short_series.iloc[idx])
         if c is None or m is None or m == 0:
             full_trend.append(None)
         else:
@@ -855,76 +869,36 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         score_min = None
         score_max = None
 
-    # 일자별 '내일 종가 기준 전환 예측'을 위해 MA 최신가중치(LTI 상수)를 한 번만 구한다.
-    # 다음날 MA = weight*P + R 로 O(1) 평가 → 날짜마다 MA 재계산 없이 forecast 산출.
-    # 장기/단기 MA가 동일(SMA {ma_days}일)하므로 가중치도 하나.
-    ma_weight = _ma_newest_weight(close_series, ma_days) if ma_series is not None else None
-    short_weight = ma_weight
-    # 마지막 일자는 '내일'이 없으므로 가상 평탄일 1개를 붙여 R 을 한 번만 계산한다.
-    r_last: float | None = None
-    r_last_short: float | None = None
-    if ma_weight is not None and short_weight is not None and length >= 1:
-        last_close = _to_float(close_series.iloc[length - 1])
-        if last_close is not None:
-            try:
-                ext = pd.concat(
-                    [close_series, pd.Series([last_close], index=[close_series.index[-1] + pd.Timedelta(days=1)])]
-                )
-                ext_last = _to_float(calculate_moving_average(ext, ma_days, MARKET_TREND_REGIME_MA_TYPE).iloc[-1])
-                if ext_last is not None:
-                    r_last = ext_last - ma_weight * last_close
-                    r_last_short = r_last  # 장기/단기 MA 동일
-            except Exception:
-                r_last = None
-                r_last_short = None
-
-    # 휩소 방지를 위해 당일 종가 대신 이동평균을 레짐 판정용 비교값으로 사용합니다.
-    try:
-        close_smooth = calculate_moving_average(
-            close_series, MARKET_TREND_REGIME_SHORT_MA_DAYS, MARKET_TREND_REGIME_MA_TYPE
-        ).fillna(close_series)
-    except Exception:
-        close_smooth = close_series
-
     history: list[dict[str, Any]] = []
 
     for idx in range(start, length):
         date_value = close_series.index[idx]
         date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         close = _to_float(close_series.iloc[idx])
-        ma_v = _to_float(ma_series.iloc[idx]) if ma_series is not None else None
+        ma_short_v = _to_float(ma_short_series.iloc[idx])
+        ma_long_v = _to_float(ma_long_series.iloc[idx])
         trend = full_trend[idx]
         trend_score = (
             _normalize_score(trend, score_min, score_max) if score_min is not None and score_max is not None else None
         )
 
+        raw_slice = raw_regime_series.loc[:date_value]
+        raw_regime, raw_streak = _tail_streak(raw_slice)
+        regime_value = confirmed_regime_series.get(date_value)
+        regime = str(regime_value) if pd.notna(regime_value) else None
+        point_forecast = _ma_cross_forecast(
+            close,
+            ma_short_v,
+            ma_long_v,
+            raw_regime,
+            raw_streak,
+            regime,
+            confirm_days,
+        )
         st_val = _to_float(st_df["supertrend"].iloc[idx]) if st_df is not None else None
         st_dir = None
         if st_df is not None and "direction" in st_df.columns:
             st_dir = int(st_df["direction"].iloc[idx])
-
-        # 레짐: ST 방향(주) + MA±버퍼(보조).
-        regime = _regime_step(close, _to_float(close_smooth.iloc[idx]), st_dir, buffer_pct)
-
-        # 그 시점 기준 '다음 영업일' 전환 예측 (과거 일자엔 그날의 예측이 그대로 보존된다).
-        # 내일 ST 방향은 '내일 종가 vs 현재 ST 밴드선(st_val)' 으로 결정된다.
-        point_forecast: dict[str, Any] | None = None
-        if ma_weight is not None and short_weight is not None and close is not None and st_val is not None:
-            if idx < length - 1:
-                c_next = _to_float(close_series.iloc[idx + 1])
-                m_next = _to_float(ma_series.iloc[idx + 1]) if ma_series is not None else None
-                sm_next = _to_float(short_ma_series.iloc[idx + 1]) if short_ma_series is not None else None
-                r_next = (m_next - ma_weight * c_next) if (c_next is not None and m_next is not None) else None
-                r_next_short = (
-                    (sm_next - short_weight * c_next) if (c_next is not None and sm_next is not None) else None
-                )
-            else:
-                r_next = r_last
-                r_next_short = r_last_short
-            if r_next is not None and r_next_short is not None:
-                point_forecast = _forecast_thresholds(
-                    close, ma_weight, r_next, short_weight, r_next_short, st_val, buffer_pct
-                )
 
         history.append(
             {
@@ -934,7 +908,8 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
                 "low": _to_float(df["Low"].iloc[idx]),
                 "close": close,
                 "volume": _to_float(df["Volume"].iloc[idx]),
-                "ma": ma_v,
+                "ma": ma_short_v,
+                "ma_long": ma_long_v,
                 "trend_pct": trend,
                 "trend_score": trend_score,
                 "regime": regime,
@@ -947,12 +922,21 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     return {
         "ticker": yf_ticker,
         "name": name,
-        "ma_days": ma_days,
-        "buffer_pct": buffer_pct,
+        "ma_days": ma_short_days,
+        "ma_short_days": ma_short_days,
+        "ma_long_days": ma_long_days,
+        "confirm_days": confirm_days,
         "history": history,
         "trend_min_12m": score_min,
         "trend_max_12m": score_max,
     }
 
 
-__all__ = ["compute_market_trend", "compute_index_history", "INDICES"]
+__all__ = [
+    "compute_market_trend",
+    "compute_index_history",
+    "compute_ma_cross_regime",
+    "compute_regime_confirm_backtest",
+    "_resolve_confirm_days",
+    "INDICES",
+]

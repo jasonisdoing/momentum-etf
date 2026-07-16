@@ -1932,70 +1932,12 @@ def _load_regime_benchmark_ohlc(ticker: str) -> pd.DataFrame | None:
 def _calculate_benchmark_regimes(bench_df: pd.DataFrame, ticker: str) -> pd.Series:
     """지수 OHLC DataFrame을 입력받아 날짜별 레짐(accel_up, accel_down, neutral) 시리즈를 계산해 반환한다.
 
-    지수별 튜닝값(곱수·버퍼)을 그대로 써서 /market-trend 화면의 레짐 판정과 일치시킨다.
+    /market-trend 화면과 동일한 MA20/60 교차 + 지수별 확인일수 레짐을 사용한다.
     """
-    from config import (
-        MARKET_TREND_REGIME_MA_TYPE,
-        MARKET_TREND_REGIME_SHORT_MA_DAYS,
-    )
-    from utils.market_trend_service import (
-        _calculate_supertrend,
-        _regime_step,
-        _resolve_regime_buffer,
-        _resolve_supertrend_params,
-    )
-    from utils.moving_averages import calculate_moving_average
-
-    st_period, st_multiplier = _resolve_supertrend_params(ticker)
-    buffer_pct = _resolve_regime_buffer(ticker)
+    from utils.market_trend_service import _resolve_confirm_days, compute_ma_cross_regime
 
     df = bench_df.dropna(subset=["Close"]).sort_index()
     if df.empty:
         return pd.Series(dtype=object)
 
-    close_series = df["Close"]
-
-    # 1. 20일 이동평균선(MA) 계산
-    ma_days = MARKET_TREND_REGIME_SHORT_MA_DAYS
-    try:
-        ma_series = calculate_moving_average(close_series, ma_days, MARKET_TREND_REGIME_MA_TYPE).fillna(close_series)
-    except Exception:
-        ma_series = close_series
-
-    # 2. 휩소 방지용 부드러운 종가 (20일 MA)
-    close_smooth = ma_series
-
-    # 3. 슈퍼트렌드 계산 — 지수별 튜닝값 적용
-    supertrend_dir_series = None
-    try:
-        st_df = _calculate_supertrend(
-            df,
-            period=st_period,
-            multiplier=st_multiplier,
-        )
-        if st_df is not None and "direction" in st_df.columns:
-            supertrend_dir_series = st_df["direction"]
-    except Exception:
-        pass
-
-    # 4. 일별 레짐 계산 (ST 방향 주도 + MA±버퍼 보조)
-    regimes = {}
-
-    st_dir_map = {}
-    if supertrend_dir_series is not None:
-        st_dir_map = supertrend_dir_series.dropna().to_dict()
-
-    for idx in range(len(df)):
-        date_value = df.index[idx]
-        st_dir = st_dir_map.get(date_value)
-        if st_dir is not None:
-            st_dir = int(st_dir)
-
-        regimes[date_value] = _regime_step(
-            float(close_series.iloc[idx]),
-            float(close_smooth.iloc[idx]),
-            st_dir,
-            buffer_pct,
-        )
-
-    return pd.Series(regimes)
+    return compute_ma_cross_regime(df, _resolve_confirm_days(ticker))
