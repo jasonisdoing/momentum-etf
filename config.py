@@ -166,8 +166,8 @@ MARKET_SCHEDULES = {
 }
 
 # 지원 이동평균(MA) 타입 — 시스템 전체 단일 진실 소스.
-# 백엔드(rankings/market_trend/pool_settings 검증·옵션) + 프론트(MA 드롭다운)에서 모두 이 값만 본다.
-# 프론트에는 API 응답(rank: ma_type_options / market-trend defaults: ma_types)으로 전달된다.
+# 백엔드(rankings/pool_settings 검증·옵션) + 프론트(MA 드롭다운)에서 모두 이 값만 본다.
+# 프론트에는 API 응답(rank: ma_type_options)으로 전달된다.
 ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
 
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
@@ -188,36 +188,20 @@ MIN_TRADING_DAYS = 5
 # 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
 MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
-# 레짐 판정 + 차트 MA 공용 이동평균 설정.
-# MA 타입은 MARKET_TREND_REGIME_MA_TYPE 설정에 따르며, ALLOWED_MA_TYPES 중 하나여야 합니다.
-# 기간은 SHORT_MA_DAYS(거래일) 하나만 쓴다.
-# 레짐 판정: 종가 vs MA ± 버퍼 비율.
-#   종가 > MA × (1 + 버퍼) → 상승 (accel_up)
-#   종가 < MA × (1 − 버퍼) → 하락 (accel_down)
-#   그 외 → 중립 (neutral)
-# 값↑(SHORT_MA_DAYS)=추세 더 느긋 / 값↑(BUFFER)=라벨 덜 바뀜.
-# [SMA 20 vs ALMA 48 시차 비교 주석]
-#   - SMA 20일의 평균 시차(Lag)는 정확히 9.5일입니다.
-#   - ALMA 48일의 평균 시차(Lag)는 약 9.52일로, SMA 20일과 반응 속도(타이밍)가 거의 같습니다.
-#   - 따라서 ALMA 48로 변경하면 기존의 빠른 추세 포착 템포는 그대로 유지하면서,
-#     48일의 넓은 가우시안 가중치 필터를 통해 단기 노이즈(휩쏘)만 매우 강력하게 차단합니다.
-MARKET_TREND_REGIME_MA_TYPE = "ALMA"
-MARKET_TREND_REGIME_SHORT_MA_DAYS = 48
-
-# 레짐 판정 버퍼(%) — 지수별로 개별 등록 (ST 곱수처럼). INDICES 의 모든 지수를 등록한다.
-# ST▲ + 종가 > MA×(1+버퍼) → 상승 / ST▼ + 종가 < MA×(1−버퍼) → 하락 / 그 외 중립.
-# 값↑=중립 범위가 넓어져 작은 딥·랠리를 중립으로 흡수(지연 없음) / 값↓=작은 움직임에도 상승·하락 확정.
-# yf_ticker: ^KS11=코스피, ^KS200=코스피200, ^DJI=다우존스, ^GSPC=S&P500, ^NDX=나스닥100, ^SOX=필라델피아 반도체.
-MARKET_TREND_REGIME_BUFFER_PCT: dict[str, float] = {
-    "^KS11": 1.5,    # 코스피
-    "^KS200": 1.5,   # 코스피200
-    "^DJI": 0.5,     # 다우존스 (저변동 — 완만한 상승도 포착하도록 좁게)
-    "^GSPC": 2.5,    # S&P500
-    "^NDX": 2.5,     # 나스닥100 (중립↔하락 1일 스파이크 억제)
-    "^SOX": 1.5,     # 필라델피아 반도체
+# MA20/60 레짐 판정 설정. 지수별 N일 확인만 사람이 조정하는 운영 튜닝값이다.
+MARKET_TREND_REGIME_MA_SHORT = 20
+MARKET_TREND_REGIME_MA_LONG = 60
+MARKET_TREND_REGIME_CONFIRM_DAYS: dict[str, int] = {
+    "^KS11": 2,
+    "^KS200": 2,
+    "^DJI": 1,
+    "^GSPC": 4,
+    "^NDX": 4,
+    "^SOX": 2,
 }
 
 # 슈퍼트렌드(SuperTrend) 지표 설정.
+# 차트 보조선/화살표 표시 전용이다. 레짐 판정과 탑픽 현금비중에는 쓰지 않는다.
 # ATR 계산 기간(PERIOD)은 전 지수 공통. 곱수(MULTIPLIER)는 지수마다 개별 등록한다.
 MARKET_TREND_SUPERTREND_PERIOD = 10
 

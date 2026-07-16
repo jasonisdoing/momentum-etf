@@ -15,16 +15,18 @@ import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "
 
 type RegimeKey = "accel_up" | "neutral" | "accel_down";
 
-// 그 일자 기준 '내일 종가 전환 예측' 경계 (상승↔중립=up, 중립↔하락=dn). 범위 밖이면 null.
+// 그 일자 기준 MA20/60 전환 가격선과 확인일수.
 type ForecastThresholds = {
   up_pct: number | null;
   up_price: number | null;
+  up_remaining_days: number | null;
   dn_pct: number | null;
   dn_price: number | null;
-  // 상승 승격이 연속 확인일 요건으로 내일 하루로는 불가능할 때의 요건 안내.
-  up_confirm_pct?: number | null;
-  up_confirm_price?: number | null;
-  up_confirm_days?: number | null;
+  dn_remaining_days: number | null;
+  confirm_days: number;
+  required_days: number;
+  raw_regime: RegimeKey | null;
+  raw_streak: number;
 };
 
 type HistoryPoint = {
@@ -35,6 +37,7 @@ type HistoryPoint = {
   close: number | null;
   volume: number | null;
   ma: number | null;
+  ma_long: number | null;
   trend_pct: number | null;
   trend_score: number | null;
   regime: RegimeKey | null;
@@ -47,7 +50,9 @@ type HistoryResponse = {
   ticker: string;
   name: string;
   ma_days: number;
-  buffer_pct: number;
+  ma_short_days: number;
+  ma_long_days: number;
+  confirm_days: number;
   history: HistoryPoint[];
   trend_min_12m: number | null;
   trend_max_12m: number | null;
@@ -139,38 +144,34 @@ function formatSignedPct(value: number): string {
 }
 
 /**
- * 현재 레짐에서 ``target`` 레짐으로 넘어가는 '내일 등락률 임계 + 그 지수'를 표기.
- *   "−9.1% (8,355.38)" 형태. 이상/이하 표기는 생략(단일 임계값이면 사용자가 이해).
- *   상승 진입=up, 하락 진입=dn, 중립 진입=현재가 상승이면 up·하락이면 dn.
- * 해당 경계가 탐색 범위 밖(null)이면 "-".
+ * 현재 레짐에서 ``target`` 레짐으로 넘어가는 가격선과 확인일수를 표기한다.
  */
 function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, target: RegimeKey): string {
   let pct: number | null = null;
   let price: number | null = null;
+  let remaining: number | null = null;
   if (target === "accel_up") {
     pct = fc.up_pct;
     price = fc.up_price;
+    remaining = fc.up_remaining_days;
   } else if (target === "accel_down") {
     pct = fc.dn_pct;
     price = fc.dn_price;
+    remaining = fc.dn_remaining_days;
   } else if (current === "accel_up") {
     pct = fc.up_pct;
     price = fc.up_price;
+    remaining = fc.up_remaining_days;
   } else if (current === "accel_down") {
     pct = fc.dn_pct;
     price = fc.dn_price;
+    remaining = fc.dn_remaining_days;
   }
-  if (pct === null) {
-    if (target === "accel_up" && fc.up_confirm_price != null && fc.up_confirm_days != null) {
-      const pctText = fc.up_confirm_pct != null ? `${formatSignedPct(fc.up_confirm_pct)} ` : "";
-      return `${pctText}(${formatNumber(fc.up_confirm_price)}) 위 ${fc.up_confirm_days}일 연속`;
-    }
-    return "-";
-  }
-  // 약세 방향 전환(랭크 하락)은 '경계 미만', 강세 방향 전환은 '경계 이상'에서 발생한다.
+  if (pct === null || price === null) return "-";
   const rank: Record<RegimeKey, number> = { accel_up: 2, neutral: 1, accel_down: 0 };
   const suffix = current !== null && rank[target] < rank[current] ? " 미만" : " 이상";
-  return price !== null ? `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}` : formatSignedPct(pct);
+  const remainText = remaining !== null && remaining > 0 ? ` · ${remaining}거래일 확인` : "";
+  return `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}${remainText}`;
 }
 
 type GaugeData = {
@@ -184,8 +185,7 @@ type GaugeData = {
  * 12개월 추세% 범위를 가로 막대로 표시.
  *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
  * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
- * 오늘 핀의 색은 현재 레짐(슈퍼트렌드 방향 주도 + MA±버퍼 보조)으로 칠한다.
- * (레짐 밴드는 그리지 않음 — 슈퍼트렌드 방향 조건이 있어 1D 위치 밴드로 표현할 수 없다.)
+ * 오늘 핀의 색은 MA20/60 교차 확인 레짐으로 칠한다.
  */
 function computeGaugeData({
   trend,
@@ -281,27 +281,12 @@ function buildBandRegimeRanges(history: HistoryPoint[]): RegimeRange[] {
   });
 }
 
-function buildLineData(history: HistoryPoint[], key: "close" | "ma"): LineData<Time>[] {
+function buildLineData(history: HistoryPoint[], key: "close" | "ma" | "ma_long"): LineData<Time>[] {
   return history
     .filter((point) => point[key] !== null)
     .map((point) => ({
       time: point.date as Time,
       value: point[key] as number,
-    }));
-}
-
-function buildBufferLineData(
-  history: HistoryPoint[],
-  type: "upper" | "lower",
-  bufferPct: number
-): LineData<Time>[] {
-  const pct = bufferPct / 100.0;
-  const multiplier = type === "upper" ? (1.0 + pct) : (1.0 - pct);
-  return history
-    .filter((point) => point.ma !== null)
-    .map((point) => ({
-      time: point.date as Time,
-      value: (point.ma as number) * multiplier,
     }));
 }
 
@@ -318,11 +303,9 @@ function buildSuperTrendSegments(
         time: point.date as Time,
         value: point.supertrend,
       });
-    } else {
-      if (currentSegment.length > 0) {
-        segments.push(currentSegment);
-        currentSegment = [];
-      }
+    } else if (currentSegment.length > 0) {
+      segments.push(currentSegment);
+      currentSegment = [];
     }
   });
 
@@ -418,7 +401,7 @@ export function MarketTrendChart({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [rangeKey, setRangeKey] = useState<ChartRangeKey>("6m");
-  const showSuperTrend = true; // 슈퍼트렌드 지표는 항상 표시 (체크박스 제거)
+  const showSuperTrend = true;
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const bandOverlayRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
@@ -457,9 +440,7 @@ export function MarketTrendChart({
     [data, rangeKey],
   );
 
-  // 현재 레짐에서 다른 레짐으로 넘어가는 '전환 임계'를 문장형으로 보여주기 위해 밴드에서 도출.
-  // 현재보다 약세 밴드는 그 밴드의 상단(pct_high)이 진입 경계, 강세 밴드는 하단(pct_low).
-  // 최신일 임계로부터 '현재 레짐 → 다른 레짐' 전환 문장을 도출(근접 순). 상승이면 중립·하락 2줄.
+  // 최신 MA20/60 기준으로 다음 레짐 전환에 필요한 가격선과 확인일수를 보여준다.
   const forecastTransitions = useMemo(() => {
     const latest = data?.history.at(-1) ?? null;
     const fc = latest?.forecast;
@@ -471,8 +452,7 @@ export function MarketTrendChart({
       target_price: number | null;
       change_pct: number | null;
       confirm_days?: number | null;
-      // 문구 방향: 약세 전환인데 경계가 현재가 위면 '회복 실패 시', 아래면 '내려가면'.
-      mode: "confirm" | "recover_fail" | "drop_below" | "rise_above";
+      mode: "confirm" | "drop_below" | "rise_above";
     }[] = [];
     (["accel_up", "neutral", "accel_down"] as RegimeKey[]).forEach((rg) => {
       if (rg === current) return;
@@ -482,32 +462,27 @@ export function MarketTrendChart({
       if (rg === "accel_up") {
         pct = fc.up_pct;
         price = fc.up_price;
-        if (pct === null && fc.up_confirm_price != null && fc.up_confirm_days != null) {
-          pct = fc.up_confirm_pct ?? null;
-          price = fc.up_confirm_price;
-          confirmDays = fc.up_confirm_days;
-        }
+        confirmDays = fc.up_remaining_days;
       } else if (rg === "accel_down") {
         pct = fc.dn_pct;
         price = fc.dn_price;
+        confirmDays = fc.dn_remaining_days;
       } else if (current === "accel_up") {
         // 상승→중립: 가까운 경계는 상승 이탈선(up)
         pct = fc.up_pct;
         price = fc.up_price;
+        confirmDays = fc.up_remaining_days;
       } else if (current === "accel_down") {
         // 하락→중립: 가까운 경계는 하락 이탈선(dn)
         pct = fc.dn_pct;
         price = fc.dn_price;
+        confirmDays = fc.dn_remaining_days;
       }
       const weaker = rank[rg] < rank[current];
-      let mode: "confirm" | "recover_fail" | "drop_below" | "rise_above";
-      if (confirmDays) {
-        mode = "confirm";
-      } else if (weaker) {
-        mode = pct !== null && pct >= 0 ? "recover_fail" : "drop_below";
-      } else {
-        mode = "rise_above";
-      }
+      let mode: "confirm" | "drop_below" | "rise_above";
+      if (confirmDays !== null && confirmDays !== undefined) mode = "confirm";
+      else if (weaker) mode = "drop_below";
+      else mode = "rise_above";
       out.push({ next_regime: rg, target_price: price, change_pct: pct, confirm_days: confirmDays, mode });
     });
     // 상승 → 중립 → 하락 고정 순서로 배치.
@@ -581,11 +556,8 @@ export function MarketTrendChart({
     });
     candleSeries.setData(buildCandleData(visibleHistory));
 
-    // SuperTrend 신호 화살표 마커 생성 (showSuperTrend가 켜져있을 때만)
-    // 캔들과 마커 사이의 수직 간격을 인위적으로 띄우기 위해 투명한 라인을 만들고 그 위에 마커를 얹습니다.
-    // autoscaleInfoProvider를 null로 리턴하여 이 보조 라인의 큰 오프셋 값이 차트 캔들을 찌그러뜨리지 않도록 방지합니다.
     const markerLineSeries = chart.addSeries(LineSeries, {
-      color: "rgba(0, 0, 0, 0)", // 투명선
+      color: "rgba(0, 0, 0, 0)",
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
@@ -602,10 +574,8 @@ export function MarketTrendChart({
           const isUp = point.supertrend_dir === 1;
           const lowVal = ((point.low !== null && point.low !== undefined) ? point.low : point.close) as number;
           const highVal = ((point.high !== null && point.high !== undefined) ? point.high : point.close) as number;
-          
-          // 캔들 고가/저가로부터 수직으로 한참 먼 6.5% 간격을 벌려 공중에 띄웁니다.
           const offsetPrice = isUp ? lowVal * 0.935 : highVal * 1.065;
-          
+
           markerLineData.push({
             time: point.date as Time,
             value: offsetPrice,
@@ -613,7 +583,7 @@ export function MarketTrendChart({
 
           markers.push({
             time: point.date as Time,
-            position: "inBar", // 오프셋된 가격선 바로 그 자리에 정교하게 안착시킴
+            position: "inBar",
             color: isUp ? "#fa5252" : "#228be6",
             shape: isUp ? "arrowUp" : "arrowDown",
             size: 1.5,
@@ -650,46 +620,30 @@ export function MarketTrendChart({
       lastValueVisible: false,
     }).setData(buildLineData(visibleHistory, "ma"));
 
-    const bufferPct = data?.buffer_pct ?? 0.5;
-
-    // 상단 버퍼선
     chart.addSeries(LineSeries, {
-      color: "rgba(241, 196, 15, 0.7)", // 부드러운 노란색
+      color: "rgba(245, 158, 11, 0.85)",
       lineWidth: 1,
-      lineStyle: 0, // Solid
+      lineStyle: 0,
       priceLineVisible: false,
       lastValueVisible: false,
-    }).setData(buildBufferLineData(visibleHistory, "upper", bufferPct));
-
-    // 하단 버퍼선
-    chart.addSeries(LineSeries, {
-      color: "rgba(241, 196, 15, 0.7)", // 부드러운 노란색
-      lineWidth: 1,
-      lineStyle: 0, // Solid
-      priceLineVisible: false,
-      lastValueVisible: false,
-    }).setData(buildBufferLineData(visibleHistory, "lower", bufferPct));
+    }).setData(buildLineData(visibleHistory, "ma_long"));
 
     if (showSuperTrend) {
-      // 상승 SuperTrend (빨간색 세그먼트들)
-      const upSegments = buildSuperTrendSegments(visibleHistory, 1);
-      upSegments.forEach((segment) => {
+      buildSuperTrendSegments(visibleHistory, 1).forEach((segment) => {
         chart.addSeries(LineSeries, {
-          color: "#fa5252", // Red
+          color: "#fa5252",
           lineWidth: 2,
-          lineStyle: 0, // Solid
+          lineStyle: 0,
           priceLineVisible: false,
           lastValueVisible: false,
         }).setData(segment);
       });
 
-      // 하락 SuperTrend (파란색 세그먼트들)
-      const downSegments = buildSuperTrendSegments(visibleHistory, -1);
-      downSegments.forEach((segment) => {
+      buildSuperTrendSegments(visibleHistory, -1).forEach((segment) => {
         chart.addSeries(LineSeries, {
-          color: "#228be6", // Blue
+          color: "#228be6",
           lineWidth: 2,
-          lineStyle: 0, // Solid
+          lineStyle: 0,
           priceLineVisible: false,
           lastValueVisible: false,
         }).setData(segment);
@@ -735,7 +689,7 @@ export function MarketTrendChart({
       }
 
       const days = regimeDaysByDate.get(point.date) || 1;
-      // 각 일자는 '그날 기준 내일 종가 전환 예측'을 자체적으로 갖는다(point.forecast).
+      // 각 일자는 그날 기준 MA20/60 전환 가격선과 확인일수를 자체적으로 갖는다(point.forecast).
       const fc = point.forecast;
 
       const getRegimeStatusText = (key: RegimeKey) => {
@@ -751,7 +705,7 @@ export function MarketTrendChart({
       const statusRows = fc
         ? `
         <div style="margin-top: 6px; border-top: 1px dashed rgba(255,255,255,0.25); padding-top: 6px; display: flex; flex-direction: column; gap: 3px;">
-          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">내일 종가 기준 전환 예측</div>
+          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">MA20/60 전환 조건</div>
           <div style="display: flex; justify-content: space-between; gap: 15px;">
             <span>상승:</span> <strong>${getRegimeStatusText("accel_up")}</strong>
           </div>
@@ -773,7 +727,6 @@ export function MarketTrendChart({
         <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #e2e8f0;">
           <div>상태: <strong style="color: ${regimeTextColor}">${regimeLabelText} (${days}일차)</strong></div>
           <div>추세 점수: <strong style="color: #ffffff">${formatScore(point.trend_score)}</strong></div>
-          ${showSuperTrend && point.supertrend !== null && point.supertrend !== undefined ? `<div>슈퍼트렌드: <strong style="color: ${point.supertrend_dir === 1 ? "#fa5252" : "#228be6"}">${formatNumber(point.supertrend)}</strong></div>` : ""}
           ${statusRows}
         </div>
       `;
@@ -963,7 +916,7 @@ export function MarketTrendChart({
               <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
                 <span style={{ fontSize: "1.1rem", lineHeight: 1 }}>⚠️</span>
                 <strong style={{ fontSize: "0.85rem" }}>
-                  추세 전환 예측 <span style={{ fontWeight: 400, opacity: 0.85 }}>(내일 종가 기준)</span>
+                  추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(MA20/60 · 확인일수 기준)</span>
                 </strong>
               </div>
               <ul style={{ margin: 0, paddingLeft: 20 }}>
@@ -980,7 +933,7 @@ export function MarketTrendChart({
                       {formatNumber(item.target_price)}
                     </span>
                     pt
-                    {item.mode === "confirm" ? " 위에서" : item.mode === "recover_fail" ? "" : item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
+                    {item.mode === "confirm" ? " 부근에서" : item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
                     {" "}(현재 대비{" "}
                     <span style={{ fontWeight: 800 }}>
                       {item.change_pct! > 0 ? "+" : ""}
@@ -989,12 +942,7 @@ export function MarketTrendChart({
                     ){item.mode === "confirm" ? (
                       <>
                         {" "}
-                        <span style={{ fontWeight: 800 }}>{item.confirm_days}거래일 연속 마감하면</span>, 시장 상태가{" "}
-                      </>
-                    ) : item.mode === "recover_fail" ? (
-                      <>
-                        {" "}
-                        <span style={{ fontWeight: 800 }}>위로 회복하지 못하면</span>, 시장 상태가{" "}
+                        <span style={{ fontWeight: 800 }}>{item.confirm_days}거래일 확인되면</span>, 시장 상태가{" "}
                       </>
                     ) : (
                       <>, 시장 상태가{" "}</>
