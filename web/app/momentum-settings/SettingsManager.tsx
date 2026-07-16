@@ -7,28 +7,22 @@ import { useToast } from "../components/ToastProvider";
 
 const EDITABLE_KEYS = [
   "TOP_N_HOLD",
-  "HOLDING_BONUS_SCORE",
   "MA_TYPE",
   "MA_MONTHS",
-  "RSI_LIMIT",
 ] as const;
 
 type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
-  HOLDING_BONUS_SCORE: "보유보너스(%)",
   MA_TYPE: "추세 타입",
   MA_MONTHS: "추세 개월",
-  RSI_LIMIT: "RSI 상한",
 };
 
 const KEY_WIDTHS: Record<EditableKey, number> = {
   TOP_N_HOLD: 90,
-  HOLDING_BONUS_SCORE: 110,
   MA_TYPE: 110,
   MA_MONTHS: 90,
-  RSI_LIMIT: 90,
 };
 
 type SettingField = { value: string | number | null };
@@ -53,16 +47,6 @@ type PoolSettingsResponse = {
 
 /** 한 행의 편집 중인 값 (모두 문자열로 보관, 저장 시 파싱). */
 type RowDraft = Record<EditableKey, string>;
-
-/** 보유보너스(%) 셀렉트 옵션 — 백테스트 탐색값과 동일한 0/10/20. 현재값이 비표준이면 포함해 보존. */
-function bonusOptions(current: string): number[] {
-  const base = [0, 10, 20];
-  const cur = Number(current);
-  if (Number.isFinite(cur) && !base.includes(cur)) {
-    return [...base, cur].sort((a, b) => a - b);
-  }
-  return base;
-}
 
 function toDraft(settings: SettingsMap): RowDraft {
   return EDITABLE_KEYS.reduce((acc, key) => {
@@ -225,19 +209,6 @@ export function SettingsManager() {
                                   </option>
                                 ))}
                               </select>
-                            ) : key === "HOLDING_BONUS_SCORE" ? (
-                              <select
-                                className="form-select form-select-sm"
-                                style={{ width: KEY_WIDTHS[key], marginLeft: "auto" }}
-                                value={draft[key]}
-                                onChange={(e) => updateDraft(id, key, e.target.value)}
-                              >
-                                {bonusOptions(draft[key]).map((score) => (
-                                  <option key={score} value={String(score)}>
-                                    {score}
-                                  </option>
-                                ))}
-                              </select>
                             ) : key === "MA_MONTHS" ? (
                               <select
                                 className="form-select form-select-sm"
@@ -258,7 +229,7 @@ export function SettingsManager() {
                                 style={{ textAlign: "right", width: KEY_WIDTHS[key], marginLeft: "auto" }}
                                 value={draft[key]}
                                 min={1}
-                                max={key === "RSI_LIMIT" || key === "TOP_N_HOLD" ? 100 : undefined}
+                                max={key === "TOP_N_HOLD" ? 100 : undefined}
                                 onChange={(e) => updateDraft(id, key, e.target.value)}
                               />
                             )}

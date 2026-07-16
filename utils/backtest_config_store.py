@@ -3,8 +3,8 @@
 기존 `config.py` 의 하드코딩 `BACKTEST_CONFIG` 를 DB 로 이관한다. 풀별로 1개 문서.
 
     {_id: <pool_id>, BACKTEST_MONTHS: <개월수>, BENCHMARK:{ticker,name},
-     TOP_N_HOLD:[...], HOLDING_BONUS_SCORE:[...], MA_TYPE:[...],
-     MA_MONTHS:[...], RSI_LIMIT:[...], updated_at}
+     TOP_N_HOLD:[...], MA_TYPE:[...],
+     MA_MONTHS:[...], updated_at}
 
 DB 가 유일한 소스다. 설정이 없으면 임의 기본값으로 보정하지 않고 **명확히 에러**를 낸다.
 멀티프로세스(fastapi/scheduler/worker) 반영을 위해 짧은 TTL 캐시 + 저장 시 무효화를 쓴다.
@@ -26,7 +26,8 @@ _COLLECTION = "backtest_config"
 _CACHE_TTL_SECONDS = 30.0
 
 # 풀별 문서 필수 키
-_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_TYPE", "MA_MONTHS", "RSI_LIMIT")
+_REQUIRED_LIST_KEYS = ("TOP_N_HOLD", "MA_TYPE", "MA_MONTHS")
+_STORED_KEYS = frozenset(("BACKTEST_MONTHS", "BENCHMARK", "SORT_METRIC", *_REQUIRED_LIST_KEYS))
 
 _lock = threading.Lock()
 _cache: dict[str, tuple[dict, float]] = {}  # pool_id -> (config, cached_at)
@@ -74,15 +75,9 @@ def validate_backtest_config(config: Any) -> None:
     for v in config["TOP_N_HOLD"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or not (1 <= int(v) <= 100):
             raise ValueError("'TOP_N_HOLD' 는 1~100 범위의 정수여야 합니다.")
-    for v in config["HOLDING_BONUS_SCORE"]:
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0:
-            raise ValueError("'HOLDING_BONUS_SCORE' 는 0 이상의 숫자여야 합니다.")
     for v in config["MA_MONTHS"]:
         if not isinstance(v, (int, float)) or isinstance(v, bool) or int(v) <= 0:
             raise ValueError("'MA_MONTHS' 는 0보다 큰 정수여야 합니다.")
-    for v in config["RSI_LIMIT"]:
-        if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 100):
-            raise ValueError("'RSI_LIMIT' 는 0~100 범위의 숫자여야 합니다.")
     for v in config["MA_TYPE"]:
         if str(v).upper() not in ALLOWED_MA_TYPES:
             raise ValueError(f"'MA_TYPE' 값이 허용되지 않습니다: {v} (허용: {', '.join(ALLOWED_MA_TYPES)})")
@@ -103,7 +98,11 @@ def load_backtest_config(pool_id: str) -> dict:
             f"DB(backtest_config)에 '{pool_id}' 백테스트 설정이 없습니다. "
             "모멘텀-설정 화면에서 저장하거나 시드해야 합니다."
         )
-    config = {k: v for k, v in doc.items() if k not in ("_id", "updated_at")}
+    config = {
+        k: v
+        for k, v in doc.items()
+        if k in _STORED_KEYS
+    }
 
     with _lock:
         _cache[pool_id] = (config, monotonic())
@@ -113,11 +112,17 @@ def load_backtest_config(pool_id: str) -> dict:
 def save_backtest_config(pool_id: str, config: dict) -> None:
     """검증 후 풀의 백테스트 탐색공간을 DB 에 저장하고 캐시를 무효화한다."""
     validate_backtest_config(config)
-    payload = {k: v for k, v in config.items() if k not in ("_id", "updated_at")}
+    payload = {
+        k: v
+        for k, v in config.items()
+        if k in _STORED_KEYS
+    }
     db = _db()
     db[_COLLECTION].update_one(
         {"_id": pool_id},
-        {"$set": {**payload, "updated_at": datetime.now(timezone.utc)}},
+        {
+            "$set": {**payload, "updated_at": datetime.now(timezone.utc)},
+        },
         upsert=True,
     )
     invalidate_cache(pool_id)

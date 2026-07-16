@@ -1,10 +1,10 @@
 """종목풀 편집 가능 설정의 DB 오버라이드 레이어.
 
 pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_source 등)를 정의하는
-단일 진실 소스로 유지하고, 자주 바뀌는 아래 6개 값만 MongoDB `pool_settings` 컬렉션에
+단일 진실 소스로 유지하고, 자주 바뀌는 아래 3개 값만 MongoDB `pool_settings` 컬렉션에
 저장해 화면에서 수정한다 (값 변경 때마다 커밋하던 번거로움 제거).
 
-    TOP_N_HOLD, HOLDING_BONUS_SCORE, MA_TYPE, MA_MONTHS, RSI_LIMIT
+    TOP_N_HOLD, MA_TYPE, MA_MONTHS
 
 읽기: settings_loader 가 pools.json 값 위에 DB 오버라이드를 덮어쓴다. DB 문서/키가 없으면
       pools.json 값을 그대로 사용한다 (silent fallback 아님 — 기본값이 명시적 소스).
@@ -12,7 +12,7 @@ pools.json 은 종목풀의 구조(존재/order/icon/name/country_code/type_sour
       쓴다. 저장한 프로세스는 즉시 무효화하고, 나머지는 TTL 내 자동 반영된다.
 
 컬렉션 문서 형태:
-    {_id: <ticker_type>, TOP_N_HOLD, HOLDING_BONUS_SCORE, MA_TYPE, MA_MONTHS, RSI_LIMIT, updated_at}
+    {_id: <ticker_type>, TOP_N_HOLD, MA_TYPE, MA_MONTHS, updated_at}
 """
 
 from __future__ import annotations
@@ -31,13 +31,11 @@ COLLECTION = "pool_settings"
 # DB 오버라이드 대상 키
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
-    "HOLDING_BONUS_SCORE",
     "MA_TYPE",
     "MA_MONTHS",
-    "RSI_LIMIT",
 )
 
-_INT_KEYS = ("TOP_N_HOLD", "HOLDING_BONUS_SCORE", "MA_MONTHS", "RSI_LIMIT")
+_INT_KEYS = ("TOP_N_HOLD", "MA_MONTHS")
 
 # 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
 _OPTIONAL_DEFAULTS: dict[str, Any] = {}
@@ -102,10 +100,10 @@ def get_overrides() -> dict[str, dict[str, Any]]:
 
 
 def resolve_pool_values(pool_id: str, base: dict[str, Any]) -> dict[str, Any]:
-    """편집 가능한 5개 값을 DB(pool_settings)에서 가져와 base 에 덮어써 반환한다.
+    """편집 가능한 값을 DB(pool_settings)에서 가져와 base 에 덮어써 반환한다.
 
     DB 가 이 값들의 단일 소스다. pools.json 값으로의 silent fallback 은 하지 않는다 —
-    DB 에 값이 없으면 명시적으로 에러를 낸다(시드 필요). pools.json 의 5개 값은
+    DB 에 값이 없으면 명시적으로 에러를 낸다(시드 필요). pools.json 의 편집값은
     최초 시드 소스로만 쓰이고, 읽기 시점에는 DB 값이 항상 우선한다.
     """
     pid = str(pool_id or "").strip()
@@ -133,7 +131,7 @@ def resolve_pool_values(pool_id: str, base: dict[str, Any]) -> dict[str, Any]:
 
 
 def seed_from_pools_json(*, overwrite: bool = False) -> dict[str, Any]:
-    """pools.json 의 현재 5개 값을 pool_settings 컬렉션에 시드한다.
+    """pools.json 의 현재 편집값을 pool_settings 컬렉션에 시드한다.
 
     overwrite=False: 이미 존재하는 문서/값은 건드리지 않고 빠진 것만 채운다($setOnInsert).
     overwrite=True : pools.json 값으로 전부 덮어쓴다.
@@ -156,7 +154,7 @@ def seed_from_pools_json(*, overwrite: bool = False) -> dict[str, Any]:
     summary: dict[str, list[str]] = {"seeded": [], "skipped": [], "overwritten": []}
     now = datetime.utcnow()
     for pid, values in targets:
-        # pools.json 에 5개 값이 없으면(= 이미 DB 전용으로 옮긴 경우) 시드할 게 없다.
+        # pools.json 에 편집값이 없으면(= 이미 DB 전용으로 옮긴 경우) 시드할 게 없다.
         if not values:
             summary["skipped"].append(pid)
             continue
@@ -204,15 +202,9 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         if key == "MA_MONTHS":
             if not (1 <= num <= months_max):
                 raise PoolSettingsError(f"MA_MONTHS 는 1 ~ {months_max} 범위여야 합니다: {num}")
-        elif key == "RSI_LIMIT":
-            if not (1 <= num <= 100):
-                raise PoolSettingsError(f"RSI_LIMIT 은 1 ~ 100 범위여야 합니다: {num}")
         elif key == "TOP_N_HOLD":
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
-        elif key == "HOLDING_BONUS_SCORE":
-            if not (0 <= num <= 100):
-                raise PoolSettingsError(f"HOLDING_BONUS_SCORE 는 0 ~ 100 범위여야 합니다: {num}")
         cleaned[key] = num
 
     if not cleaned:
@@ -221,7 +213,7 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
 
 
 def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = "수동") -> dict[str, Any]:
-    """편집한 5개 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
+    """편집한 값을 pool_settings 에 upsert 하고 캐시를 무효화한다.
 
     pool_id 는 유효한 ticker_type.
     반환: 저장된(정규화된) 값.
@@ -240,7 +232,9 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         raise PoolSettingsError("DB 연결 실패로 설정을 저장할 수 없습니다.")
     db[COLLECTION].update_one(
         {"_id": norm_id},
-        {"$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method}},
+        {
+            "$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method},
+        },
         upsert=True,
     )
 

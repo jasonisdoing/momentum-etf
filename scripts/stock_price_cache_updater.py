@@ -266,34 +266,34 @@ def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
 
 
 def _update_pool_rank_summary(target_id: str) -> None:
-    """종목풀 순위(점수)를 계산해 점수 양수 개수를 pool_rank_summary 컬렉션에 저장한다.
+    """종목풀 순위를 계산해 추세(%) 양수 개수를 pool_rank_summary 컬렉션에 저장한다.
 
-    /system 종목풀 표의 상승수(점수)/상승비율(점수) 가 이 문서를 읽는다.
-    점수 계산은 방금 갱신된 가격 캐시를 사용하므로 외부 호출이 없다.
+    /system 종목풀 표의 매수 후보 수/비율이 이 문서를 읽는다.
+    추세 계산은 방금 갱신된 가격 캐시를 사용하므로 외부 호출이 없다.
     """
     logger = get_app_logger()
     try:
         from utils.db_manager import get_db_connection
         from utils.rank_service import load_rank_data
 
-        payload = load_rank_data(ticker_type=target_id, held_bonus_score=None)
+        payload = load_rank_data(ticker_type=target_id)
         rows = payload.get("rows") or []
         total_count = len(rows)
         up_count = 0
         for row in rows:
             try:
-                score = row.get("점수")
+                trend = row.get("추세")
                 is_below = bool(row.get("is_below_benchmark"))
                 is_bm = bool(row.get("is_benchmark"))
                 is_excl = bool(row.get("exclude_from_ranking"))
-                if score is not None and float(score) > 0 and not is_below and not is_bm and not is_excl:
+                if trend is not None and float(trend) > 0 and not is_below and not is_bm and not is_excl:
                     up_count += 1
             except (TypeError, ValueError):
                 continue
 
         db = get_db_connection()
         if db is None:
-            logger.warning("[%s] DB 연결 실패로 점수 요약 저장 생략", target_id.upper())
+            logger.warning("[%s] 종목풀 요약 저장 생략: DB 연결 실패", target_id.upper())
             return
         db.pool_rank_summary.update_one(
             {"_id": target_id},
@@ -314,7 +314,7 @@ def _update_pool_rank_summary(target_id: str) -> None:
             total_count,
         )
     except Exception as exc:
-        logger.warning("[%s] 점수 요약 저장 실패: %s", target_id.upper(), exc)
+        logger.warning("[%s] 종목풀 요약 저장 실패: %s", target_id.upper(), exc)
 
 
 def _refresh_portfolio_change_cache_for_target(
@@ -736,7 +736,7 @@ def refresh_cache_for_target(
         # /system 종목풀 표용 일간 등락률을 stock_meta 에 저장
         _update_daily_change_pct(target_norm, success_tickers)
 
-        # /system 종목풀 표용 점수 양수 요약을 pool_rank_summary 에 저장
+        # /system 종목풀 표용 추세(%) 양수 요약을 pool_rank_summary 에 저장
         _update_pool_rank_summary(target_norm)
 
         # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.

@@ -1,6 +1,6 @@
-"""pools.json 의 편집 가능한 5개 값을 pool_settings 컬렉션에 시드한다.
+"""pools.json 의 편집 가능한 값을 pool_settings 컬렉션에 시드한다.
 
-DB 가 5개 값(TOP_N_HOLD/HOLDING_BONUS_SCORE/MA_TYPE/MA_MONTHS/RSI_LIMIT)의 단일 소스이므로,
+DB 가 TOP_N_HOLD/MA_TYPE/MA_MONTHS의 단일 소스이므로,
 신규 환경/신규 풀 추가 후 한 번 실행해 DB 를 채운다. 기본은 빠진 것만 채우고(기존값 보존),
 --overwrite 시 pools.json 값으로 전부 덮어쓴다.
 

@@ -56,7 +56,7 @@ python infra/server_scheduler.py
 
 ### 모듈 구조
 *   `backtest/`: 백테스트 전용 파라미터 스윕 실행기·결과 로그 엔진 (탐색공간은 DB `backtest_config`, `/momentum-backtest` 화면에서 실행)
-*   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
+*   `core/strategy/`: 지표/추세/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
     *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 USD/KRW 만 토스 실시간(REAL_TIME, 5초 TTL) 우선 + 실패 시 야후(KRW=X) 백업이며, AUD 등 나머지 통화는 야후(1시간 TTL).
     *   `toss_market_service.py`: 토스 시장지표(mini-chart)·차트(c-chart) 연동 — /live-24h 카드(나스닥 100 선물·달러 환율·VIX), 헤더 나스닥선물, USD 환율, market-trend 나스닥 선물 최신 봉 보강에 사용
@@ -85,8 +85,8 @@ python infra/server_scheduler.py
     *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
     *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
     *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 수집하고, 응답 시점에는 메타 캐시에 저장된 구성종목에 해외 가격만 Yahoo TTL 캐시로 보조합니다.
-4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
-5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
+4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 추세(%)를 계산.
+5.  **순위 생성**: `utils/rankings.py`가 종목별 추세(%), RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
 ### 일별 원장 원칙
 
@@ -187,7 +187,7 @@ python infra/server_scheduler.py
 |-----------------|------|
 | `web/app/*` | Next.js 기반 사용자 화면과 API 라우트 |
 | `utils/rankings.py` | 순위 계산과 정렬 |
-| `core/strategy/metrics.py` | 이동평균 점수 계산 |
+| `core/strategy/metrics.py` | 이동평균 추세 계산 |
 | `services/price_service.py` | 실시간 가격/환율 조회의 공식 진입점 |
 | `services/reference_data_service.py` | ETF 마스터/메타데이터/상장일 조회의 공식 진입점 |
 | `utils/account_notes.py` | 계좌 메모 저장/조회 |
@@ -195,7 +195,7 @@ python infra/server_scheduler.py
 ### 핵심 일관성 체크리스트
 
 1.  **입력 단순화**: 종목풀 설정의 `MA_TYPE`, `MA_MONTHS`를 사용하고, 순위 화면에서도 같은 단일 MA 기준만 변경할 수 있다.
-2.  **정렬 기준 고정**: `점수`가 있는 종목을 `점수` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
+2.  **정렬 기준 고정**: `추세(%)`가 있는 종목을 `추세(%)` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
 3.  **데이터 기준**:
     *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
     *   "오늘"의 순위는 "어제까지의 마감 데이터"를 보고 계산된 것임
@@ -231,23 +231,22 @@ python infra/server_scheduler.py
 
 * 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
-* 편집값(`TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
+* 편집값(`TOP_N_HOLD`/`MA_TYPE`/`MA_MONTHS`)은 **DB `pool_settings`** 가 단일 소스다(`pools.json` 은 최초 시드용). `/momentum-pools`·`/momentum-settings` 화면에서 편집.
 
-#### 점수 = 추세 + 보유가점
+#### 선정 기준 = 추세(%)
 
-순위 점수는 추세 점수에 보유가점을 더해 계산한다. 보조지표(Sortino/Sharpe)는 종목 선정 점수에 사용하지 않는다.
+순위와 백테스트 선정 기준은 추세(%)만 사용한다. 보조지표(Sortino/Sharpe)와 보유 여부는 종목 선정에 사용하지 않는다.
 
-* **추세 원점수(−100~+100)**: `가격 vs MA` signed-percentile.
-* **보유 원점수**: 실보유 100, 아니면 0.
-* **점수** `= (100−보유보너스%) / 100 × 추세 + 보유가점` (`보유가점 = 보유 시 보유보너스%`). **라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일 식**을 쓴다.
+* **추세(%)**: `(종가 ÷ MA − 1) × 100`.
+* 라이브(`utils/rankings.py`)와 백테스트(`backtest/engine.py`)가 동일한 추세(%)를 쓴다.
 
 ### 백테스트 탐색 공간 (`backtest_config`)
 
-모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`HOLDING_BONUS_SCORE`/`MA_TYPE`/`MA_MONTHS`/`RSI_LIMIT` **리스트**)은
+모멘텀 백테스트의 **풀별 탐색공간**(BENCHMARK + `TOP_N_HOLD`/`MA_TYPE`/`MA_MONTHS` **리스트**)은
 DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.py`). `config.py` 하드코딩(`BACKTEST_CONFIG`)은 제거됨.
 
-* 가중치는 `HOLDING_BONUS_SCORE`(보유보너스 %, 예 `[0,5,10]`) 를 탐색한다. 최적 조합은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.
-* 백테스트 결과/리포트 표에는 `W_HOLD`(보유 비중)만 표기한다(`W_TREND`·`W_SEC`는 보유값에서 유도되어 생략).
+* 최적 조합은 백테스트 종료 시 풀별 `pool_settings` 에 자동 저장된다.
+* 백테스트 결과/리포트 표의 선정 기준은 추세(%) 단독이다.
 
 * `TOP_N_HOLD` 는 라이브와 동일하게 `pool_settings` DB 에서 풀별 조회(백테스트 탐색 차원에서 제외).
 * 라이브 단일 적용값(`pool_settings`)과 백테스트 탐색공간(`backtest_config`)은 **별개**다(같은 파라미터명, 다른 역할: 단일값 vs 리스트).
@@ -261,19 +260,19 @@ DB `backtest_config` 컬렉션이 단일 소스다(`utils/backtest_config_store.
     *   가격/환율 문제면 `services/price_service.py`를 함께 확인
     *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
 2.  **검증**:
-    *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 점수가 즉시 갱신되는지 확인
+    *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 추세(%)가 즉시 갱신되는지 확인
     *   실제 보유 종목이 녹색 행으로 표시되는지 확인
 3.  **확인**:
-    *   `점수`, `추세`, `샤프` 컬럼이 `현재가` 뒤에 순서대로 표시되는지 확인(`보유` 컬럼은 숨김)
+    *   `추세(%)` 컬럼이 `현재가` 뒤에 표시되는지 확인(`보유` 컬럼은 숨김)
 
 ## 5. 순위 화면의 정의
 
-**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 `MA_TYPE`, `MA_MONTHS` 기준 점수를 계산한 결과입니다.
+**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 `MA_TYPE`, `MA_MONTHS` 기준 추세(%)를 계산한 결과입니다.
 
 ### 핵심 원칙
 1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.
 2.  **실보유 구분**: 실제 보유 종목만 행 색상으로 표시합니다.
-3.  **정렬 규칙**: `점수` 내림차순, `점수` 계산 불가 종목은 맨 아래입니다.
+3.  **정렬 규칙**: `추세(%)` 내림차순, `추세(%)` 계산 불가 종목은 맨 아래입니다.
 4.  **계좌 종목 직접 관리**: 계좌가 자신의 종목 유니버스를 직접 보유하며, 별도 종목풀 fallback은 사용하지 않습니다.
 5.  **고정 종목 표시**: `exclude_from_ranking=true`인 고정 종목은 순위 번호 없이 현재 위치만 보여줍니다.
 

@@ -479,7 +479,7 @@ def _normalize_ranking_values(
         *(monthly_labels or []),
     ]
     one_decimal_columns = ["RSI"]
-    score_columns = ["점수"]
+    score_columns = ["추세"]
     score_columns.extend(
         str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
     )
@@ -507,13 +507,11 @@ def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
     ma_rules: list[dict[str, Any]],
-    *,
-    held_bonus_score: float = 0.0,
 ) -> pd.DataFrame:
-    """공통 랭킹 엔진으로 추세(원값)/점수(composite) 컬럼을 일괄 주입한다.
+    """공통 랭킹 엔진으로 추세(%) 컬럼을 일괄 주입한다.
 
-    - 같은 점수식/자격기준을 백테스트와 공유하기 위해 ``build_composite_rank_scores`` 를
-      반드시 경유한다.
+    - 자격기준은 공통 엔진의 composite 결손 여부를 사용한다.
+    - 화면/정렬/백테스트 기준값은 signed-percentile 이 아니라 원천 MA 이격률(%)이다.
     - 평가 시점은 각 티커의 ``effective_close_series`` 최신 일자들의 최댓값.
     - ETF 풀에 있으나 종가 시리즈가 없는 티커는 NaN 유지.
     """
@@ -523,7 +521,7 @@ def _apply_common_rank_scores(
         return df
 
     if not effective_close_series_map or not ma_rules:
-        df["점수"] = pd.NA
+        df["추세"] = pd.NA
         for column in score_columns:
             if column not in df.columns:
                 df[column] = pd.NA
@@ -540,7 +538,7 @@ def _apply_common_rank_scores(
         series_frames[ticker] = normalized
 
     if not series_frames:
-        df["점수"] = pd.NA
+        df["추세"] = pd.NA
         for column in score_columns:
             df[column] = pd.NA
         return df
@@ -554,12 +552,8 @@ def _apply_common_rank_scores(
     composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     eval_date = close_frame.index.max()
 
-    # 티커별 값 매핑
+    # 티커별 값 매핑. composite 는 signed-percentile 이지만 여기서는 자격 마스크 용도로만 쓴다.
     composite_row = composite_frame.loc[eval_date]
-    composite_map = {
-        ticker: (None if pd.isna(composite_row.get(ticker)) else float(composite_row.get(ticker)))
-        for ticker in composite_row.index
-    }
     trend_maps: dict[str, dict[str, float | None]] = {}
     for rule in ma_rules:
         column = str(rule["score_column"])
@@ -574,33 +568,27 @@ def _apply_common_rank_scores(
             trend_maps[column] = {}
 
     tickers_col = df["티커"].astype(str)
-    
-    # Sortino 보조지표 제거 후에는 보유가점을 제외한 나머지 점수를 전부 추세에 배분한다.
-    hold_pct = float(held_bonus_score)
-    remainder = (100.0 - hold_pct) / 100.0
-    w_trend = remainder
-
-    # 1. '추세' 원점수 (-100 ~ +100): composite_score 의 규칙 평균
-    num_rules = len(ma_rules) if ma_rules else 1
-    df["추세"] = tickers_col.map(composite_map).astype(float) / num_rules
-
-    # 2. '보유가점': 보유 종목이면 보유%(= 점수 기여분), 아니면 0 (고정종목 exclude 시 0)
-    if "exclude_from_ranking" in df.columns:
-        df["보유가점"] = df.apply(
-            lambda r: 0.0 if bool(r.get("exclude_from_ranking")) else (hold_pct if r.get("보유") == "보유" else 0.0),
-            axis=1,
-        )
+    trend_values_by_rule = [
+        tickers_col.map(trend_map).astype(float)
+        for trend_map in trend_maps.values()
+    ]
+    if trend_values_by_rule:
+        trend_sum = trend_values_by_rule[0].copy()
+        for values in trend_values_by_rule[1:]:
+            trend_sum = trend_sum + values
+        df["추세"] = trend_sum / len(trend_values_by_rule)
     else:
-        df["보유가점"] = df["보유"].map(lambda x: hold_pct if x == "보유" else 0.0)
+        df["추세"] = pd.NA
 
-    # 3. 최종 '점수' = 추세 + 보유가점
-    composite_missing = df["추세"].isna()
-    df["점수"] = w_trend * df["추세"] + df["보유가점"]
+    composite_missing = tickers_col.map(
+        {
+            ticker: (None if pd.isna(composite_row.get(ticker)) else float(composite_row.get(ticker)))
+            for ticker in composite_row.index
+        }
+    ).isna()
 
     # 자격 미달 종목(결손 행) 일관성 마스킹 처리
-    df.loc[composite_missing, "점수"] = None
     df.loc[composite_missing, "추세"] = None
-    df.loc[composite_missing, "보유가점"] = 0.0
 
     for column, trend_map in trend_maps.items():
         df[column] = tickers_col.map(trend_map).astype("object")
@@ -616,7 +604,6 @@ def build_ticker_type_rankings(
     as_of_date: pd.Timestamp | None = None,
     realtime_snapshot_override: dict[str, dict[str, float]] | None = None,
     status_callback: Any | None = None,
-    held_bonus_score: float = 0.0,
 ) -> pd.DataFrame:
     if callable(status_callback):
         status_callback("최신 거래일 기준 캐시 상태 확인")
@@ -731,7 +718,7 @@ def build_ticker_type_rankings(
         price_metrics = _apply_realtime_overlay(price_metrics, realtime_entry)
         metric_elapsed += perf_counter() - metric_started_at
 
-        # 추세/점수는 아래 공통 엔진에서 한 번에 주입된다.
+        # 추세(%)는 아래 공통 엔진에서 한 번에 주입된다.
         ma_rule_scores = {str(rule["score_column"]): None for rule in effective_ma_rules}
 
         row = {
@@ -746,7 +733,6 @@ def build_ticker_type_rankings(
             "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
             "분류": etf.get("etf_category", "") or "",
-            "점수": None,
             "보유": "보유" if (f"ASX:{ticker}" if country_code == "au" and not ticker.startswith("ASX:") else ticker) in held_tickers else "",
             "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,
@@ -766,13 +752,12 @@ def build_ticker_type_rankings(
     if df.empty:
         return df
 
-    # 공통 엔진 호출: rankings 와 backtest 가 동일한 점수식(추세 + 샤프 보조지표)을 쓰도록 강제.
+    # 공통 엔진 호출: rankings 와 backtest 가 동일하게 MA 이격률(%) 기준 추세를 쓰도록 강제.
     process_started_at = perf_counter()
     df = _apply_common_rank_scores(
         df,
         effective_close_series_map,
         effective_ma_rules,
-        held_bonus_score=held_bonus_score,
     )
     process_elapsed += perf_counter() - process_started_at
 
@@ -785,7 +770,7 @@ def build_ticker_type_rankings(
         return float(value)
 
     def _sort_key(row: pd.Series) -> tuple[int, float, str]:
-        trend = row.get("점수")
+        trend = row.get("추세")
         return (
             1 if trend is None or pd.isna(trend) else 0,
             _to_sortable_score(trend),
