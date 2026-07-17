@@ -53,9 +53,10 @@ type BacktestResult = {
 };
 
 type PoolOption = { ticker_type: string; name: string };
+type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
-const MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 60, 120];
+const DEFAULT_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
 
 function signedClass(value: number): string {
   if (value === 0) return "";
@@ -72,6 +73,7 @@ export function PoolBacktestManager() {
   const [poolId, setPoolId] = useState("");
   const [forwardDays, setForwardDays] = useState(20);
   const [months, setMonths] = useState(36);
+  const [monthOptions, setMonthOptions] = useState(DEFAULT_MONTH_OPTIONS);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,12 +82,26 @@ export function PoolBacktestManager() {
     let alive = true;
     (async () => {
       try {
-        const resp = await fetch("/api/pool-settings", { cache: "no-store" });
-        const payload = (await resp.json()) as { pools?: PoolOption[]; error?: string };
-        if (!resp.ok || payload.error) throw new Error(payload.error ?? "종목풀 목록을 불러오지 못했습니다.");
+        const [poolResp, optionsResp] = await Promise.all([
+          fetch("/api/pool-settings", { cache: "no-store" }),
+          fetch("/api/pool-backtest/options", { cache: "no-store" }),
+        ]);
+        const payload = (await poolResp.json()) as { pools?: PoolOption[]; error?: string };
+        const options = (await optionsResp.json()) as BacktestOptions;
+        if (!poolResp.ok || payload.error) throw new Error(payload.error ?? "종목풀 목록을 불러오지 못했습니다.");
+        if (!optionsResp.ok || options.error) throw new Error(options.error ?? "백테스트 옵션을 불러오지 못했습니다.");
         if (alive) {
           const list = payload.pools ?? [];
+          const loadedMonthOptions = (options.month_options ?? []).filter((month) => Number.isFinite(month) && month > 0);
           setPools(list);
+          if (loadedMonthOptions.length > 0) {
+            setMonthOptions(loadedMonthOptions);
+            setMonths((current) =>
+              loadedMonthOptions.includes(current)
+                ? current
+                : (loadedMonthOptions.includes(36) ? 36 : loadedMonthOptions[loadedMonthOptions.length - 1]),
+            );
+          }
           if (list.length > 0) setPoolId(list[0].ticker_type);
         }
       } catch (e) {
@@ -266,7 +282,7 @@ export function PoolBacktestManager() {
             <label className="appLabeledField" style={{ minWidth: 130 }}>
               <span className="appLabeledFieldLabel">기간(개월)</span>
               <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
-                {MONTH_OPTIONS.map((m) => (
+                {monthOptions.map((m) => (
                   <option key={m} value={m}>
                     최근 {m}개월
                   </option>

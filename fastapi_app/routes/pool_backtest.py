@@ -8,6 +8,8 @@ from fastapi_app.dependencies import require_internal_token
 from utils.pool_signal_backtest_service import (
     FORWARD_DAY_OPTIONS,
     compute_pool_signal_backtest,
+    get_max_backtest_months,
+    get_month_options,
 )
 
 router = APIRouter(prefix="/internal/pool-backtest", tags=["pool-backtest"])
@@ -18,7 +20,11 @@ def get_pool_backtest_options(
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     """화면 셀렉트용 선택지."""
-    return {"forward_day_options": list(FORWARD_DAY_OPTIONS)}
+    return {
+        "forward_day_options": list(FORWARD_DAY_OPTIONS),
+        "month_options": get_month_options(),
+        "max_months": get_max_backtest_months(),
+    }
 
 
 @router.get("")

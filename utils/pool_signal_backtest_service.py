@@ -12,11 +12,13 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from config import CACHE_START_DATE
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
 from utils.rankings import get_ticker_type_ma_rules
@@ -30,6 +32,25 @@ _TRADING_DAYS_PER_MONTH = 21
 # t 검정을 낼 수 있는 최소 독립구간 수. 이 미만이면 t 가 우연히 커져 '유의'로 오도할 수 있어
 # 판정 자체를 내지 않는다(기간을 늘리거나 전망일수를 줄이면 확보된다).
 MIN_INDEPENDENT_SAMPLES = 10
+
+
+def get_max_backtest_months(today: date | None = None) -> int:
+    """가격 캐시 시작일 기준으로 선택 가능한 최대 개월 수를 계산한다."""
+    start = datetime.strptime(CACHE_START_DATE, "%Y-%m-%d").date()
+    end = today or date.today()
+    months = (end.year - start.year) * 12 + (end.month - start.month)
+    if end.day < start.day:
+        months -= 1
+    return max(months, 1)
+
+
+def get_month_options() -> list[int]:
+    """기간 셀렉트 옵션. 60개월보다 긴 구간은 현재 캐시 기준 최대값만 노출한다."""
+    max_months = get_max_backtest_months()
+    options = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60]
+    if max_months > 60:
+        options.append(max_months)
+    return [month for month in options if month <= max_months]
 
 
 def _quantile_label(order: int) -> str:
@@ -94,14 +115,22 @@ def _spread_stats(spread: pd.Series, forward_days: int, digits: int = 2) -> dict
     ``insufficient`` 로 표시한다(표본 3개짜리 t가 우연히 2를 넘어 '유의' 초록불이 켜지는 것 방지).
     """
     spread = spread.dropna()
-    independent = len(spread.iloc[::forward_days])
+    # 승패는 **겹치지 않는 독립 구간**으로만 센다. 전체 날짜로 세면 같은 사건을
+    # forward_days 번씩 중복 계수해 승률이 부풀려진다(예: 5승 8패인데 '이긴 날 58%').
+    independent_series = spread.iloc[::forward_days]
+    independent = len(independent_series)
+    wins = int((independent_series > 0).sum())
+    losses = int(independent - wins)
     if independent < MIN_INDEPENDENT_SAMPLES:
         if spread.empty:
             return None
+        win_rate = float((independent_series > 0).mean() * 100) if independent > 0 else 0.0
         return {
             "insufficient": True,
             "mean": round(float(spread.mean()), digits),
-            "win_rate": round(float((spread > 0).mean() * 100), 1),
+            "wins": wins,
+            "losses": losses,
+            "win_rate": round(win_rate, 1),
             "independent_samples": independent,
             "required_samples": MIN_INDEPENDENT_SAMPLES,
             "t_value": None,
@@ -193,8 +222,9 @@ def compute_pool_signal_backtest(pool_id: str, forward_days: int = 20, months: i
     if forward_days not in FORWARD_DAY_OPTIONS:
         options = ", ".join(str(day) for day in FORWARD_DAY_OPTIONS)
         raise ValueError(f"전망일수는 {options} 중 하나여야 합니다: {forward_days}")
-    if not (1 <= int(months) <= 120):
-        raise ValueError(f"기간은 1~120개월이어야 합니다: {months}")
+    max_months = get_max_backtest_months()
+    if not (1 <= int(months) <= max_months):
+        raise ValueError(f"기간은 1~{max_months}개월이어야 합니다: {months}")
 
     rule = get_ticker_type_ma_rules(pool_id)[0]
     short_days = int(rule["short_ma_days"])

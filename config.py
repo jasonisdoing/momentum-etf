@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-CACHE_START_DATE = "2024-01-01"
+CACHE_START_DATE = "2020-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
 
