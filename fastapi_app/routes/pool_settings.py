@@ -11,6 +11,7 @@ from fastapi_app.dependencies import require_internal_token
 from utils.pool_settings_store import (
     MA_DAY_OPTIONS,
     OVERRIDABLE_KEYS,
+    SLOPE_DAY_OPTIONS,
     PoolSettingsError,
     create_pool,
     delete_pool,
@@ -66,6 +67,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "pools": pools,
         "constraints": {
             "ma_day_options": list(MA_DAY_OPTIONS),
+            "slope_day_options": list(SLOPE_DAY_OPTIONS),
             "editable_keys": list(OVERRIDABLE_KEYS),
         },
     }

@@ -9,6 +9,7 @@ const EDITABLE_KEYS = [
   "TOP_N_HOLD",
   "SHORT_MA_DAYS",
   "MAIN_MA_DAYS",
+  "SLOPE_DAYS",
 ] as const;
 
 type EditableKey = (typeof EDITABLE_KEYS)[number];
@@ -17,9 +18,11 @@ const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
   SHORT_MA_DAYS: "단기 이평선",
   MAIN_MA_DAYS: "메인 이평선",
+  SLOPE_DAYS: "기울기 일수",
 };
 
 const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
+const DEFAULT_SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
 const COUNTRY_OPTIONS = ["kor", "us", "au"] as const;
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
@@ -40,7 +43,7 @@ type PoolEntry = {
 
 type PoolSettingsResponse = {
   pools: PoolEntry[];
-  constraints: { ma_day_options: number[]; editable_keys: string[] };
+  constraints: { ma_day_options: number[]; slope_day_options?: number[]; editable_keys: string[] };
   error?: string;
 };
 
@@ -65,6 +68,7 @@ const EMPTY_DRAFT: PoolDraft = {
   TOP_N_HOLD: "10",
   SHORT_MA_DAYS: "10",
   MAIN_MA_DAYS: "20",
+  SLOPE_DAYS: "5",
 };
 
 const inputStyle: React.CSSProperties = {
@@ -87,6 +91,7 @@ function toDraft(pool: PoolEntry): PoolDraft {
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     MAIN_MA_DAYS: String(pool.settings.MAIN_MA_DAYS?.value ?? ""),
+    SLOPE_DAYS: String(pool.settings.SLOPE_DAYS?.value ?? ""),
   };
 }
 
@@ -102,6 +107,7 @@ function draftToValues(draft: PoolDraft) {
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     MAIN_MA_DAYS: Number(draft.MAIN_MA_DAYS),
+    SLOPE_DAYS: Number(draft.SLOPE_DAYS),
   };
 }
 
@@ -275,6 +281,9 @@ export function SettingsManager() {
   }
   if (!data) return null;
   const maDayOptions = data.constraints.ma_day_options?.length ? data.constraints.ma_day_options : DEFAULT_MA_DAY_OPTIONS;
+  const slopeDayOptions = data.constraints.slope_day_options?.length
+    ? data.constraints.slope_day_options
+    : DEFAULT_SLOPE_DAY_OPTIONS;
 
   const renderDraftCells = (draft: PoolDraft, onChange: (key: keyof PoolDraft, value: string) => void, options?: { idReadonly?: boolean }) => (
     <>
@@ -324,6 +333,9 @@ export function SettingsManager() {
       </td>
       <td>
         <SelectField value={draft.MAIN_MA_DAYS} options={maDayOptions} width={90} onChange={(value) => onChange("MAIN_MA_DAYS", value)} />
+      </td>
+      <td>
+        <SelectField value={draft.SLOPE_DAYS} options={slopeDayOptions} width={90} onChange={(value) => onChange("SLOPE_DAYS", value)} />
       </td>
     </>
   );

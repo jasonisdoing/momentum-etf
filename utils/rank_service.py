@@ -37,6 +37,7 @@ def _build_rank_cache_key(
         (
             int(rule.get("short_ma_days") or 0),
             int(rule.get("main_ma_days") or 0),
+            int(rule.get("slope_days") or 0),
         )
         for rule in ma_rules
     )

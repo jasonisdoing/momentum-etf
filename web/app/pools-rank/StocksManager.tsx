@@ -33,6 +33,7 @@ type RankTickerType = {
 type RankMaRule = {
   short_ma_days: number;
   main_ma_days: number;
+  slope_days: number;
   score_column: string;
 };
 
@@ -131,6 +132,7 @@ type RankAddingRowState = {
 
 const rankGridTheme = createAppGridTheme();
 const MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
+const SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
 const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
 const DEFAULT_TICKER_TYPE = "";
@@ -496,6 +498,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
         search.set("main_ma_days", String(next.ma_rule_override.main_ma_days));
+        search.set("slope_days", String(next.ma_rule_override.slope_days));
       }
 
       const query = search.size > 0 ? `?${search.toString()}` : "";
@@ -649,7 +652,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [addingRow, gridRows, pageMode]);
 
   const maRuleSummary = useMemo(
-    () => (maRule ? [`SMA 단기 ${maRule.short_ma_days}일 · 메인 ${maRule.main_ma_days}일`] : []),
+    () => (maRule ? [`SMA 단기 ${maRule.short_ma_days}일 · 메인 ${maRule.main_ma_days}일 · 기울기 ${maRule.slope_days}일`] : []),
     [maRule],
   );
 
@@ -1332,7 +1335,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
-  function handleMaRuleDaysChange(key: "short_ma_days" | "main_ma_days", nextDays: number) {
+  function handleMaRuleDaysChange(key: "short_ma_days" | "main_ma_days" | "slope_days", nextDays: number) {
     if (!maRule) {
       return;
     }
@@ -1676,6 +1679,22 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           ))}
                         </select>
                       </div>
+                    </label>
+                  ) : null}
+                  {pageMode === "rank" && maRule ? (
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">기울기 일수</span>
+                      <select
+                        className="form-select"
+                        value={String(maRule.slope_days)}
+                        onChange={(event) => handleMaRuleDaysChange("slope_days", Number(event.target.value))}
+                      >
+                        {SLOPE_DAY_OPTIONS.map((day) => (
+                          <option key={day} value={day}>
+                            {day}일
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   ) : null}
                   <label className="appLabeledField">

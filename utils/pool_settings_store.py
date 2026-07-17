@@ -3,7 +3,7 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, type_source, is_active
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, SLOPE_DAYS
 
 런타임 로딩은 DB 문서가 없거나 필수 키가 누락되면 명확히 에러를 낸다.
 캐시: 멀티프로세스(fastapi/scheduler/worker)에서 변경이 반영되도록 짧은 TTL(30초) 캐시를
@@ -12,7 +12,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency, type_source?,
-      is_active, TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, updated_at
+      is_active, TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, SLOPE_DAYS, updated_at
     }
 """
 
@@ -35,6 +35,7 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "SHORT_MA_DAYS",
     "MAIN_MA_DAYS",
+    "SLOPE_DAYS",
 )
 
 STRUCTURAL_KEYS: tuple[str, ...] = (
@@ -48,13 +49,15 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 )
 
 MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 240)
+# 기울기 측정 일수(k): 단기 이평선의 k일 전 대비 변화율. 1일은 노이즈가 커 권장하지 않는다.
+SLOPE_DAY_OPTIONS: tuple[int, ...] = (1, 2, 3, 5, 10, 20, 40, 60)
 
-_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "MAIN_MA_DAYS")
+_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "MAIN_MA_DAYS", "SLOPE_DAYS")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
 
 # 나중에 추가된 선택 키 → 기본값. DB 문서에 없어도 에러 없이 이 값으로 채운다(하위 호환).
-_OPTIONAL_DEFAULTS: dict[str, Any] = {}
+_OPTIONAL_DEFAULTS: dict[str, Any] = {"SLOPE_DAYS": 5}
 
 _CACHE_TTL_SECONDS = 30.0
 _overlay_cache: dict[str, dict[str, Any]] | None = None
@@ -168,6 +171,11 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
 
 def _normalize_pool_doc(doc: dict[str, Any]) -> dict[str, Any]:
     pool_id = _normalize_ticker_type(doc.get("_id") or doc.get("ticker_type"))
+    # 나중에 추가된 선택 키는 기존 문서에 없을 수 있으므로 기본값으로 채운다(하위 호환).
+    doc = dict(doc)
+    for optional_key, default_value in _OPTIONAL_DEFAULTS.items():
+        if doc.get(optional_key) in (None, ""):
+            doc[optional_key] = default_value
     required_keys = ("name", "icon", "order", "country_code", "currency", *OVERRIDABLE_KEYS)
     missing = [key for key in required_keys if key not in doc or doc[key] in (None, "")]
     if missing:
@@ -272,6 +280,10 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
             if num not in MA_DAY_OPTIONS:
                 options = ", ".join(str(day) for day in MA_DAY_OPTIONS)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
+        elif key == "SLOPE_DAYS":
+            if num not in SLOPE_DAY_OPTIONS:
+                options = ", ".join(str(day) for day in SLOPE_DAY_OPTIONS)
+                raise PoolSettingsError(f"SLOPE_DAYS 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         elif key == "TOP_N_HOLD":
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
