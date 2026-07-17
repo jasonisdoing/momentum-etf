@@ -10,12 +10,6 @@ import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
 import numpy as np
-from config import (
-    NAVER_ETF_CATEGORY_CONFIG,
-    NAVER_ETF_CATEGORY_HEADERS,
-    NAVER_ETF_DOMESTIC_URL,
-    NAVER_ETF_THEMES_URL,
-)
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
@@ -70,23 +64,13 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months:
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
 # `update_stock_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
 # -------------------------------------------------------------------------
-_BATCH_NAVER_CATEGORY_MAP: dict[str, dict[str, Any]] | None = None
 _BATCH_NAVER_ETF_NAMES_MAP: dict[str, str] | None = None
 
 
 def _reset_batch_caches() -> None:
     """메타 업데이트 배치 진입 시 풀 간 공유 캐시를 초기화한다."""
-    global _BATCH_NAVER_CATEGORY_MAP, _BATCH_NAVER_ETF_NAMES_MAP
-    _BATCH_NAVER_CATEGORY_MAP = None
+    global _BATCH_NAVER_ETF_NAMES_MAP
     _BATCH_NAVER_ETF_NAMES_MAP = None
-
-
-def _get_cached_naver_category_map() -> dict[str, dict[str, Any]]:
-    """배치 동안 1회만 카테고리 맵을 빌드해 풀들에 공유."""
-    global _BATCH_NAVER_CATEGORY_MAP
-    if _BATCH_NAVER_CATEGORY_MAP is None:
-        _BATCH_NAVER_CATEGORY_MAP = _build_naver_category_map()
-    return _BATCH_NAVER_CATEGORY_MAP
 
 
 def _get_cached_naver_etf_names_map() -> dict[str, str]:
@@ -95,153 +79,6 @@ def _get_cached_naver_etf_names_map() -> dict[str, str]:
     if _BATCH_NAVER_ETF_NAMES_MAP is None:
         _BATCH_NAVER_ETF_NAMES_MAP = fetch_naver_etf_names_map()
     return _BATCH_NAVER_ETF_NAMES_MAP
-
-
-def _build_naver_category_map() -> dict[str, dict[str, str]]:
-    """
-    네이버 ETF 카테고리(투자국가/섹터/지수) 테마별 티커 목록을 조회해
-    {ticker: {"category_country": str, "category_sector": str, "category_index": str}} 형태의
-    역인덱스 맵을 구성한다.
-
-    - 대분류 0201 (투자국가), 0401 (섹터), 0501 (지수)만 대상으로 한다.
-    - 동일 대분류 내 여러 중분류에 해당될 경우 첫 번째 값만 보존한다.
-    """
-
-    logger = get_app_logger()
-    ticker_categories: dict[str, dict[str, str]] = {}
-
-    try:
-        themes_response = shared_session.get(
-            NAVER_ETF_THEMES_URL,
-            headers=NAVER_ETF_CATEGORY_HEADERS,
-            timeout=10,
-        )
-        themes_response.raise_for_status()
-        themes_payload = themes_response.json()
-    except Exception as exc:
-        logger.warning(f"[Naver 카테고리] 테마 목록 조회 실패: {exc}")
-        return ticker_categories
-
-    # API 응답은 리스트 형태임
-    large_categories: list[dict[str, Any]] = []
-    if isinstance(themes_payload, list):
-        large_categories = themes_payload
-    elif isinstance(themes_payload, dict):
-        # 만약 dict 구조일 경우를 대비한 fallback (upperCategories 등)
-        large_categories = list(themes_payload.get("upperCategories") or themes_payload.get("largeCategories") or [])
-
-    # 모든 대분류 코드 목록 (0101~0803 전체)
-    all_codes = {c["code"] for c in NAVER_ETF_CATEGORY_CONFIG}
-    # 대표 분류(best) 결정 시 사용할 대분류 코드 세트 (use가 True인 것만)
-    use_codes = {c["code"] for c in NAVER_ETF_CATEGORY_CONFIG if c.get("use")}
-
-    # 티커별로 (최대 활성 코드, 중분류 이름, 대분류별 맵) 저장
-    ticker_cat_info: dict[str, dict[str, Any]] = {}
-
-    for large in large_categories:
-        large_code = str(large.get("largeCategoryCode") or large.get("upperCategoryCode") or "").strip()
-        if large_code not in all_codes:
-            continue
-
-        middle_categories = large.get("middleCategories") or []
-        for middle in middle_categories:
-            middle_code = str(middle.get("code") or middle.get("middleCategoryCode") or "").strip()
-            middle_name = str(middle.get("name") or middle.get("middleCategoryName") or "").strip()
-            if not middle_code or not middle_name:
-                continue
-
-            # 중분류별 ETF 목록 조회 (페이지네이션)
-            idx = 0
-            page_size = 100
-            while True:
-                try:
-                    resp = shared_session.get(
-                        NAVER_ETF_DOMESTIC_URL,
-                        params={
-                            "listingType": "aumDesc",
-                            "size": page_size,
-                            "index": idx,
-                            "middleCategoryCode": middle_code,
-                        },
-                        headers=NAVER_ETF_CATEGORY_HEADERS,
-                        timeout=10,
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                except Exception as exc:
-                    logger.warning(
-                        f"[Naver 카테고리] 중분류 조회 실패(large={large_code}, mid={middle_code}): {exc}"
-                    )
-                    break
-
-                items = []
-                if isinstance(data, dict):
-                    items = list(data.get("etfs") or data.get("items") or [])
-
-                if not items:
-                    break
-
-                for item in items:
-                    ticker_raw = (
-                        item.get("itemCode")
-                        or item.get("symbolCode")
-                        or item.get("ticker")
-                    )
-                    ticker_norm = str(ticker_raw or "").strip().upper()
-                    if not ticker_norm:
-                        continue
-
-                    info = ticker_cat_info.setdefault(ticker_norm, {
-                        "best_code": "",
-                        "best_name": "",
-                        "name": "",
-                        "details": {cat["code"]: "" for cat in NAVER_ETF_CATEGORY_CONFIG}
-                    })
-
-                    # 0. 응답에 이름 필드가 있으면 곁다리로 수집 (이름 맵 보완용)
-                    if not info["name"]:
-                        item_name = str(
-                            item.get("itemName")
-                            or item.get("stockName")
-                            or item.get("name")
-                            or ""
-                        ).strip()
-                        if item_name:
-                            info["name"] = item_name
-
-                    # 1. 상세 맵 업데이트 (대분류별 중분류명 보존)
-                    # 값이 여러 개인 경우 가장 처음 발견된 값만 사용
-                    if not info["details"].get(large_code):
-                        info["details"][large_code] = middle_name
-
-                    # 2. 대표 분류(best) 업데이트 (use가 True인 코드 중 코드가 클수록 우선순위 높음)
-                    if large_code in use_codes:
-                        if large_code > info["best_code"]:
-                            info["best_code"] = large_code
-                            info["best_name"] = middle_name
-
-                if len(items) < page_size:
-                    break
-                idx += page_size
-                time.sleep(0.05)  # 과도한 호출 방지
-
-    # 최종 결과 구성
-    final_map: dict[str, dict[str, Any]] = {}
-    names_collected = 0
-    for ticker, info in ticker_cat_info.items():
-        final_map[ticker] = {
-            "best": info["best_name"],
-            "name": info["name"],
-            "details": info["details"],
-        }
-        if info["name"]:
-            names_collected += 1
-
-    logger.info(
-        f"[Naver 카테고리] 역인덱스 구성 완료: 티커 {len(final_map)}개, "
-        f"이름 보완용 수집 {names_collected}건"
-    )
-    return final_map
 
 
 def fetch_naver_etf_names_map() -> dict[str, str]:
@@ -355,7 +192,6 @@ def _refresh_korean_etf_meta_cache(
     ticker_type: str,
     ticker: str,
     name: str,
-    category_data: dict[str, Any] | None = None,
     *,
     existing_cache_doc: dict[str, Any] | None = None,
     backtest_stats: dict[str, Any] | None = None,
@@ -396,11 +232,6 @@ def _refresh_korean_etf_meta_cache(
             "issue_name": etf_info.get("issue_name"),
             "base_index": etf_info.get("base_index"),
         }
-        # 추가 카테고리 정보가 있으면 업데이트
-        if category_data:
-            for k, v in category_data.items():
-                if k.startswith("cat_"):
-                    meta_cache[k] = v
 
     if meta_cache is not None:
         meta_cache["backtest_stats"] = backtest_stats
@@ -704,7 +535,6 @@ def update_ticker_type_metadata(
     try:
         settings = get_ticker_type_settings(type_norm)
         country_code = str(settings.get("country_code") or "").strip().lower()
-        type_source = str(settings.get("type_source") or "").strip()
     except Exception as e:
         logger.error(f"종목타입 설정을 로드할 수 없습니다 ({type_norm}): {e}")
         return
@@ -730,35 +560,15 @@ def update_ticker_type_metadata(
 
     # [KOR] 전체 종목(일반주/ETF) 맵 구성하여 루프 내 호출 최소화
     naver_etf_map: dict[str, str] = {}
-    is_naver_source = type_source.lower() == "naver"
     if country_code == "kor":
-        # 풀 간 공유 캐시 사용 (kor_kr/kor_us/kor 모두 같은 API 결과를 공유)
-        logger.info("네이버 API에서 전체 종목 정보들을 수집합니다 (배치 캐시)...")
+        # 풀 간 공유 캐시 사용 (한국 종목풀은 같은 API 결과를 공유)
+        logger.info("네이버 API에서 한국 ETF/종목 정보를 수집합니다 (배치 캐시)...")
         naver_etf_map = dict(_get_cached_naver_etf_names_map())
-        # type_source=Naver 풀은 모두 ETF이므로 일반주 맵 프리로드 생략
-        if not is_naver_source:
-            fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
+        fetch_naver_kor_stock_map()  # 캐시 워밍 (일반주/ETN 이름·시장 조회 대비)
 
-    # type_source == "Naver" 인 종목풀만 카테고리(투자국가/섹터/지수) 역인덱스 맵 구성
-    naver_category_map: dict[str, dict[str, Any]] = {}
-    if is_naver_source:
-        # 풀 간 공유 캐시 사용 (Naver 풀끼리 동일 카테고리 트리)
-        logger.info(f"[{type_norm.upper()}] 네이버 ETF 카테고리 맵을 가져옵니다 (배치 캐시)...")
-        naver_category_map = _get_cached_naver_category_map()
-        # 카테고리 API 응답으로 수집한 이름을 ETF 이름 맵에 보완
-        supplemented = 0
-        for t_code, entry in naver_category_map.items():
-            cat_name = str(entry.get("name") or "").strip()
-            if cat_name and not naver_etf_map.get(t_code):
-                naver_etf_map[t_code] = cat_name
-                supplemented += 1
-        if supplemented:
-            logger.info(f"[{type_norm.upper()}] 카테고리 맵으로 ETF 이름 {supplemented}건 보완")
-
-    # type_source=Naver 풀(한국 ETF): 기존 메타 캐시 문서를 1회 일괄 로드 →
-    # 종목별 TTL 판정에 사용. 1일 이내면 fetch_korean_etf_info_from_naver 스킵.
+    # 한국 종목풀: 기존 메타 캐시 문서를 1회 일괄 로드해 ETF 상세 TTL 판정에 사용한다.
     existing_meta_cache_map: dict[str, dict[str, Any]] = {}
-    if is_naver_source:
+    if country_code == "kor":
         all_tickers_for_pool = [
             str(stock.get("ticker") or "").strip().upper()
             for stock in ticker_entries
@@ -800,7 +610,6 @@ def update_ticker_type_metadata(
                 country_code,
                 naver_etf_map,
                 type_norm,
-                naver_category_map=naver_category_map,
                 naver_us_stock_map=naver_us_stock_map,
             )
 
@@ -840,9 +649,6 @@ def update_ticker_type_metadata(
                 "market_cap",
                 "backtest_stats",
             ]
-            # 개별 분류 컬럼들을 업데이트 필드에 추가
-            for cat in NAVER_ETF_CATEGORY_CONFIG:
-                fields_to_update.append(f"cat_{cat['code']}")
 
             for f in fields_to_update:
                 if f == "backtest_stats":
@@ -850,18 +656,14 @@ def update_ticker_type_metadata(
                 if f in stock:
                     update_doc[f] = stock[f]
 
-            # 한국 ETF(type_source=Naver)인 경우에만 상세 캐시(배당률 등) 갱신 시도
-            # 한국 개별주는 ETFBase API 대상이 아니므로 건너뜀
-            if country_code == "kor" and is_naver_source:
+            # 한국 종목풀은 ETF 상세 캐시 갱신을 시도한다. 개별주/비ETF는 서비스 오류를 경고로 건너뛴다.
+            if country_code == "kor":
                 try:
-                    # 카테고리 정보만 추출하여 전달
-                    cat_info = {f"cat_{c['code']}": stock.get(f"cat_{c['code']}") for c in NAVER_ETF_CATEGORY_CONFIG if f"cat_{c['code']}" in stock}
                     existing_doc = existing_meta_cache_map.get(str(ticker).strip().upper())
                     _refresh_korean_etf_meta_cache(
                         type_norm,
                         str(ticker),
                         str(name),
-                        category_data=cat_info,
                         existing_cache_doc=existing_doc,
                         backtest_stats=backtest_stats,
                     )
@@ -916,7 +718,7 @@ def update_stock_metadata(ticker_type: str | None = None):
     """
     logger = get_app_logger()
 
-    # 풀 간 공유 캐시 초기화 — 이번 배치에서 1회만 카테고리 맵/ETF 이름 맵을 빌드한다.
+    # 풀 간 공유 캐시 초기화 — 이번 배치에서 ETF 이름 맵을 1회만 빌드한다.
     _reset_batch_caches()
 
     ticker_types_to_update: list[str] = []
@@ -1036,21 +838,13 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
     try:
         settings = get_ticker_type_settings(type_norm)
         country_code = str(settings.get("country_code") or "").strip().lower()
-        type_source = str(settings.get("type_source") or "").strip()
     except Exception as exc:
         raise RuntimeError(f"[{type_norm.upper()}/{ticker_norm}] 종목타입 설정 로드 실패: {exc}") from exc
 
-    # 단일 종목 경로는 전체 ETF 이름 맵/카테고리 맵을 스캔하지 않는다.
-    # 이름은 fetch_pykrx_name(네이버 marketValue → pykrx 폴백)으로 충분히 조회되며,
-    # 카테고리(투자국가/섹터/지수)는 배치 업데이트에서 일괄 갱신되는 것이 정상.
     naver_etf_map: dict[str, str] = {}
-    naver_category_map: dict[str, dict[str, Any]] = {}
     naver_us_stock_map: dict[str, dict[str, Any]] = {}
-    if type_source.lower() == "naver":
-        logger.info(
-            f"[{type_norm.upper()}/{ticker_norm}] 단일 업데이트: 카테고리 맵 스캔 생략 "
-            "(전체 업데이트 시 재구성됨)"
-        )
+    if country_code == "kor":
+        naver_etf_map = dict(_get_cached_naver_etf_names_map())
     if country_code == "us":
         from utils.us_stock_market_service import fetch_naver_us_stock_info_map
 
@@ -1076,17 +870,15 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         country_code,
         naver_etf_map,
         type_norm,
-        naver_category_map=naver_category_map,
         naver_us_stock_map=naver_us_stock_map,
     )
 
-    # 한국 ETF(type_source=Naver)만 ETF 상세 캐시(배당률 등) 갱신 대상
-    # 한국 개별주(type_source 미설정)는 ETFBase API 대상이 아니므로 건너뜀
-    if country_code == "kor" and type_source.lower() == "naver":
+    # 한국 종목풀은 ETF 상세 캐시 갱신을 시도한다. 개별주/비ETF는 서비스 오류를 경고로 건너뛴다.
+    if country_code == "kor":
         try:
             _refresh_korean_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm))
         except Exception as meta_cache_error:
-            logger.error(f"[{type_norm.upper()}/{ticker_norm}] ETF 메타 캐시 갱신 실패: {meta_cache_error}")
+            logger.warning(f"[{type_norm.upper()}/{ticker_norm}] ETF 메타 캐시 갱신 건너뜀: {meta_cache_error}")
     elif country_code == "au":
         try:
             _refresh_overseas_etf_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), country_code)
@@ -1118,9 +910,6 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "dividend_yield_ttm",
         "market_cap",
     ]
-    # 개별 분류 컬럼들을 업데이트 필드에 추가
-    for cat in NAVER_ETF_CATEGORY_CONFIG:
-        fields_to_update.append(f"cat_{cat['code']}")
 
     for f in fields_to_update:
         if f in stock:
@@ -1139,7 +928,6 @@ def update_single_stock_metadata(
     naver_etf_map: dict[str, str],
     account_norm: str = "",
     *,
-    naver_category_map: dict[str, Any] | None = None,
     naver_us_stock_map: dict[str, Any] | None = None,
 ):
     """단일 종목의 메타데이터를 업데이트합니다."""
@@ -1147,16 +935,6 @@ def update_single_stock_metadata(
     ticker = stock.get("ticker")
     if not ticker:
         return
-
-    # Naver 카테고리 맵이 제공된 경우 (type_source == "Naver" 종목풀)
-    if naver_category_map:
-        ticker_norm = str(ticker).strip().upper()
-        entry = naver_category_map.get(ticker_norm, {})
-        stock["etf_category"] = entry.get("best", "")
-        # 개별 대분류 필드들 채우기
-        details = entry.get("details", {})
-        for code, name in details.items():
-            stock[f"cat_{code}"] = name
 
     if country_code == "kor":
         yfinance_ticker = f"{ticker}.KS"

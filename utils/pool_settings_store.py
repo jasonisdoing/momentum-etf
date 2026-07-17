@@ -2,7 +2,7 @@
 
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
-    구조: ticker_type, name, icon, order, country_code, currency, type_source, is_active
+    구조: ticker_type, name, icon, order, country_code, currency, is_active
     편집: TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, SLOPE_DAYS
 
 런타임 로딩은 DB 문서가 없거나 필수 키가 누락되면 명확히 에러를 낸다.
@@ -11,7 +11,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 
 컬렉션 문서 형태:
     {
-      _id: <ticker_type>, name, icon, order, country_code, currency, type_source?,
+      _id: <ticker_type>, name, icon, order, country_code, currency,
       is_active, TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, SLOPE_DAYS, updated_at
     }
 """
@@ -44,7 +44,6 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
     "order",
     "country_code",
     "currency",
-    "type_source",
     "is_active",
 )
 
@@ -154,12 +153,6 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
             allowed = ", ".join(sorted(_ALLOWED_CURRENCIES))
             raise PoolSettingsError(f"currency 는 {allowed} 중 하나여야 합니다: {currency}")
         cleaned["currency"] = currency
-    if "type_source" in values:
-        type_source = str(values.get("type_source") or "").strip()
-        if type_source:
-            cleaned["type_source"] = type_source
-        else:
-            cleaned["type_source"] = None
     if "is_active" in values:
         cleaned["is_active"] = bool(values.get("is_active"))
 
@@ -311,7 +304,10 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
     db = _db()
     db[COLLECTION].update_one(
         {"_id": norm_id},
-        {"$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method}},
+        {
+            "$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method},
+            "$unset": {"type_source": ""},
+        },
         upsert=True,
     )
 
@@ -360,7 +356,10 @@ def update_pool(pool_id: str, values: dict[str, Any], save_method: str = "사용
         raise PoolSettingsError(f"알 수 없는 종목풀입니다: {pool_id}")
     db[COLLECTION].update_one(
         {"_id": norm_id},
-        {"$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method}},
+        {
+            "$set": {**cleaned, "updated_at": datetime.utcnow(), "save_method": save_method},
+            "$unset": {"type_source": ""},
+        },
     )
     invalidate_overlay_cache()
     return cleaned

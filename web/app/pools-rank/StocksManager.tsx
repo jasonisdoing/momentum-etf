@@ -25,7 +25,6 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   top_n_hold?: number;
-  type_source?: string;
   currency?: string;
   include?: string[];
 };
@@ -58,8 +57,6 @@ type RankRow = {
   마켓?: string;
   종목명: string;
   상장일: string;
-  분류: string;
-  "전체 분류": string;
   추세: number | null;
   이격?: number | null;
   기울기?: number | null;
@@ -111,7 +108,6 @@ type RankResponse = {
   missing_tickers?: string[];
   missing_ticker_labels?: string[];
   stale_tickers?: string[];
-  naver_category_config?: { code: string; name: string; show: boolean; use: boolean }[];
   error?: string;
 };
 
@@ -382,7 +378,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [naverCategoryConfig, setNaverCategoryConfig] = useState<{ code: string; name: string }[]>([]);
   const todayDateInputValue = useMemo(() => getTodayDateInputValue(), []);
   function clearCacheWarningState() {
     setCacheBlocked(false);
@@ -418,7 +413,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     setMissingTickers(payload.missing_tickers ?? []);
     setMissingTickerLabels(payload.missing_ticker_labels ?? []);
     setStaleTickers(payload.stale_tickers ?? []);
-    setNaverCategoryConfig(payload.naver_category_config ?? []);
   }
 
   function applyRankToolbarPayload(payload: RankResponse) {
@@ -613,8 +607,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         티커: addingRow.ticker,
         종목명: addingRow.name,
         상장일: addingRow.listing_date || "-",
-        분류: "",
-        "전체 분류": "",
         추세: null,
         이격: null,
         기울기: null,
@@ -1059,24 +1051,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           );
         },
       },
-      ...(isAllTickerType ||
-        String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver" ||
-        String(selectedTickerTypeItem?.country_code || "").toLowerCase() === "us"
-        ? [
-          {
-            field: "분류",
-            headerName: "분류",
-            hide: metricMode === "info",
-            minWidth: 120,
-            flex: 1,
-            cellClass: "appTextEllipsisCell",
-            cellRenderer: (params: { value: string | null | undefined }) => {
-              const value = String(params.value ?? "").trim();
-              return <span title={value}>{value || "-"}</span>;
-            },
-          } as ColDef<RankGridRow>,
-        ]
-        : []),
       {
         field: "현재가",
         headerName: "현재가",
@@ -1280,21 +1254,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 110,
         cellRenderer: (params: { value: string | null | undefined }) => String(params.value ?? "-"),
       },
-      ...(String(selectedTickerTypeItem?.type_source || "").toLowerCase() === "naver"
-        ? naverCategoryConfig.map(
-          (cat) =>
-            ({
-              field: cat.name,
-              headerName: cat.name,
-              minWidth: 80,
-              width: 120,
-              cellRenderer: (params: { value: string | null | undefined }) => {
-                const value = String(params.value ?? "").trim();
-                return <span title={value}>{value || "-"}</span>;
-              },
-            }) as ColDef<RankGridRow>,
-        )
-        : []),
     ];
 
     return [
@@ -1315,7 +1274,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerType,
     isAllTickerType,
     selectedTickerTypeItem?.country_code,
-    selectedTickerTypeItem?.type_source,
     selectedTickerTypeItem?.top_n_hold,
     selectedTickerTypeItem?.currency,
     recommendedTickerSet,

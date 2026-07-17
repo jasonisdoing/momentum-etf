@@ -11,7 +11,6 @@ import pandas as pd
 from config import (
     BUCKET_MAPPING,
     MARKET_SCHEDULES,
-    NAVER_ETF_CATEGORY_CONFIG,
 )
 from core.strategy.scoring import build_composite_rank_scores
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
@@ -783,18 +782,12 @@ def build_ticker_type_rankings(
             "source_ticker_type": ticker_type,
             "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
-            "분류": etf.get("etf_category", "") or "",
             "보유": "보유" if (f"ASX:{ticker}" if country_code == "au" and not ticker.startswith("ASX:") else ticker) in held_tickers else "",
             "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,
             **price_metrics,
             "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,
         }
-
-        # 네이버 개별 분류 컬럼 명칭 매핑 (cat_xxxx -> 한글분류명)
-        for cat in NAVER_ETF_CATEGORY_CONFIG:
-            val = etf.get(f"cat_{cat['code']}", "")
-            row[cat["name"]] = val or ""
 
         rows.append(row)
 

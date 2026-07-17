@@ -36,7 +36,6 @@ type PoolEntry = {
   order?: number;
   country_code?: string;
   currency?: string;
-  type_source?: string | null;
   settings: SettingsMap;
   updated_at?: string;
 };
@@ -54,7 +53,6 @@ type PoolDraft = {
   order: string;
   country_code: string;
   currency: string;
-  type_source: string;
 } & Record<EditableKey, string>;
 
 const EMPTY_DRAFT: PoolDraft = {
@@ -64,7 +62,6 @@ const EMPTY_DRAFT: PoolDraft = {
   order: "",
   country_code: "kor",
   currency: "KRW",
-  type_source: "",
   TOP_N_HOLD: "10",
   SHORT_MA_DAYS: "10",
   MAIN_MA_DAYS: "20",
@@ -87,7 +84,6 @@ function toDraft(pool: PoolEntry): PoolDraft {
     order: pool.order === null || pool.order === undefined ? "" : String(pool.order),
     country_code: pool.country_code ?? "kor",
     currency: pool.currency ?? "KRW",
-    type_source: pool.type_source ?? "",
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     MAIN_MA_DAYS: String(pool.settings.MAIN_MA_DAYS?.value ?? ""),
@@ -103,7 +99,6 @@ function draftToValues(draft: PoolDraft) {
     order: Number(draft.order),
     country_code: draft.country_code,
     currency: draft.currency,
-    type_source: draft.type_source.trim(),
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     MAIN_MA_DAYS: Number(draft.MAIN_MA_DAYS),
@@ -316,9 +311,6 @@ export function SettingsManager() {
         <SelectField value={draft.currency} options={CURRENCY_OPTIONS} width={82} onChange={(value) => onChange("currency", value)} />
       </td>
       <td>
-        <input style={{ ...inputStyle, width: 96 }} value={draft.type_source} onChange={(event) => onChange("type_source", event.target.value)} />
-      </td>
-      <td>
         <input
           type="number"
           min={1}
@@ -358,7 +350,7 @@ export function SettingsManager() {
             </div>
 
             <div style={{ overflowX: "auto" }}>
-              <table className="table table-sm appSettingsTable" style={{ minWidth: 1220 }}>
+              <table className="table table-sm appSettingsTable" style={{ minWidth: 1120 }}>
                 <thead>
                   <tr>
                     <th style={{ width: 104 }}>ID</th>
@@ -367,7 +359,6 @@ export function SettingsManager() {
                     <th style={{ width: 72, textAlign: "right" }}>순서</th>
                     <th style={{ width: 84 }}>국가</th>
                     <th style={{ width: 90 }}>통화</th>
-                    <th style={{ width: 104 }}>소스</th>
                     {EDITABLE_KEYS.map((key) => (
                       <th key={key} style={{ whiteSpace: "nowrap", width: 98 }}>
                         {KEY_LABELS[key]}
