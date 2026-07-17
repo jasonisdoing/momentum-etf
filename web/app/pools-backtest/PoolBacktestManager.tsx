@@ -17,6 +17,16 @@ type SignalRow = {
   samples: number;
 };
 
+type LongShort = {
+  insufficient: boolean;
+  mean: number;
+  win_rate: number;
+  t_value: number | null;
+  independent_samples: number;
+  required_samples: number;
+  significant: boolean;
+};
+
 type BacktestResult = {
   pool_id: string;
   forward_days: number;
@@ -30,16 +40,22 @@ type BacktestResult = {
   base_rate: number;
   effective_samples: number;
   rate_error: number;
+  date_from: string;
+  date_to: string;
+  quantile_count: number;
   disparity: SignalRow[];
   slope: SignalRow[];
-  arrangement: SignalRow[];
+  disparity_long_short: LongShort | null;
+  slope_long_short: LongShort | null;
+  disparity_ic: LongShort | null;
+  slope_ic: LongShort | null;
   error?: string;
 };
 
 type PoolOption = { ticker_type: string; name: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
-const MONTH_OPTIONS = [6, 12, 24, 36, 60, 120];
+const MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 60, 120];
 
 function signedClass(value: number): string {
   if (value === 0) return "";
@@ -104,11 +120,79 @@ export function PoolBacktestManager() {
     }
   }, [forwardDays, months, poolId, toast]);
 
-  const renderTable = (title: string, note: string, rows: SignalRow[]) => (
+  /** 롱숏·IC 공통 렌더. digits/suffix 로 표기만 달라진다. */
+  const renderStat = (
+    stat: LongShort | null,
+    title: string,
+    opts: { digits: number; suffix: string; winLabel: string; hint: string },
+  ) => {
+    if (!stat) {
+      return (
+        <div className="poolBtLongShort" style={{ color: "var(--text-muted)" }}>
+          {title} — 계산에 데이터가 부족합니다.
+        </div>
+      );
+    }
+    const value = (
+      <span
+        className={stat.insufficient ? undefined : signedClass(stat.mean)}
+        style={{ fontWeight: 800, fontSize: "1.05rem", color: stat.insufficient ? "var(--text-muted)" : undefined }}
+      >
+        {formatSigned(stat.mean, opts.digits)}
+        {opts.suffix}
+      </span>
+    );
+    const borderColor = stat.insufficient ? "#b45309" : stat.significant ? "#2f9e44" : "rgba(148,163,184,0.4)";
+    return (
+      <div
+        className="poolBtLongShort"
+        style={{ borderColor, background: stat.insufficient ? "rgba(180,83,9,0.06)" : undefined }}
+      >
+        <strong>{title}</strong> {value}
+        <span style={{ color: "var(--text-muted)" }}>
+          {" · "}
+          {opts.winLabel} {stat.win_rate.toFixed(0)}%
+          {!stat.insufficient && <>{" · "}t {stat.t_value === null ? "-" : formatSigned(stat.t_value, 2)}</>}
+          {" · "}독립표본 {stat.independent_samples}개
+        </span>
+        <strong style={{ marginLeft: 8, color: stat.insufficient || !stat.significant ? "#b45309" : "#2f9e44" }}>
+          {stat.insufficient
+            ? `→ 표본 부족 (최소 ${stat.required_samples}개 필요) — 판단 불가`
+            : stat.significant
+              ? "→ 유의 (신호 있음)"
+              : "→ 유의하지 않음 (우연과 구분 불가)"}
+        </strong>
+        <div style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginTop: 2 }}>
+          {stat.insufficient ? "이 표본으로는 t 검정이 무의미해 유의 판정을 내지 않습니다. 기간을 늘리거나 전망일수를 줄이세요." : opts.hint}
+        </div>
+      </div>
+    );
+  };
+
+  const renderTable = (
+    title: string,
+    note: string,
+    rows: SignalRow[],
+    ls: LongShort | null,
+    ic: LongShort | null,
+    spreadLabel: string,
+  ) => (
     <div className="card appCard">
       <div className="card-body">
         <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 2 }}>{title}</h3>
         <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", margin: "0 0 8px" }}>{note}</p>
+        {renderStat(ls, `롱숏(${spreadLabel})`, {
+          digits: 2,
+          suffix: "%p",
+          winLabel: "이긴 날",
+          hint: "같은 날 최상·최하 등급을 빼서 시장 요인을 상쇄한 값입니다.",
+        })}
+        {renderStat(ic, "IC(날짜별 상관)", {
+          digits: 3,
+          suffix: "",
+          winLabel: "양수인 날",
+          hint: "그날 신호 순위와 향후 수익 순위의 상관. 아래 등급 평균의 매끄러운 단조성은 10개의 증거가 아니라 같은 날을 10칸으로 나눈 것이라, 미약한 경향도 단조로 보입니다. IC 는 날짜마다 관계가 실제로 성립했는지를 봅니다.",
+        })}
         <div style={{ overflowX: "auto" }}>
           <table className="poolBtTable">
             <thead>
@@ -194,10 +278,13 @@ export function PoolBacktestManager() {
             </button>
           </div>
           <p style={{ fontSize: "0.88rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "12px 0 0" }}>
-            분위는 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). 고정 보유 종목 제외.
+            등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 고정 보유 종목 제외.
             <br />
             주 지표는 <strong>평균수익</strong>입니다 — 모멘텀은 승률이 아니라 손익비로 벌기 때문에 상승확률로는 안 잡힙니다.{" "}
             <strong>기저 대비 차이가 오차(±)를 넘어야만 의미</strong>가 있습니다.
+            <br />
+            표보다 위의 <strong>롱숏·IC</strong>를 믿으세요 — 등급 평균의 매끄러운 단조성은 같은 날을 10칸으로 나눈 것이라 <strong>미약한 경향도 단조로 보입니다</strong>.
+            롱숏·IC는 시장 요인을 상쇄하고 <strong>날짜마다 관계가 성립했는지</strong>를 봅니다. <strong>t &gt; 2</strong>여야 우연이 아닙니다.
           </p>
         </div>
       </div>
@@ -231,6 +318,12 @@ export function PoolBacktestManager() {
                   <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>유효 독립구간</div>
                   <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#b45309" }}>{result.effective_samples}개</div>
                 </div>
+                <div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>실제 분석 기간</div>
+                  <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>
+                    {result.date_from} ~ {result.date_to}
+                  </div>
+                </div>
               </div>
               <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
                 종목 {result.ticker_count}개(고정 {result.excluded_fixed_count}개 제외) · 거래일 {result.trading_days}일 · 행{" "}
@@ -239,17 +332,31 @@ export function PoolBacktestManager() {
                 <br />
                 <strong>행 {result.row_count.toLocaleString()}개가 곧 표본이 아닙니다</strong> — {result.forward_days}일 수익률이 매일 겹쳐
                 실제 독립구간은 <strong>{result.effective_samples}개</strong>뿐입니다. 종목 간 동조까지 감안하면 더 적습니다.
+                <br />
+                {result.forward_days}일 뒤 수익을 알아야 하므로 <strong>최근 {result.forward_days}거래일은 분석에서 빠집니다</strong> — 끝일자가 오늘이
+                아닌 이유입니다. 최근 구간을 보려면 전망일수를 짧게 잡으세요.
               </p>
             </div>
           </div>
 
-          {renderTable("이격 5분위", `종가가 메인 이평선(${result.ma_rule.main_ma_days}일) 대비 얼마나 벌어졌나`, result.disparity)}
-          {renderTable(
-            "기울기 5분위",
-            `단기 이평선(${result.ma_rule.short_ma_days}일)의 ${result.ma_rule.slope_days}일 전 대비 변화율`,
-            result.slope,
-          )}
-          {renderTable("배열", "단기 이평선이 메인 이평선 위(정배열)인지", result.arrangement)}
+          <div className="poolBtSplit">
+            {renderTable(
+              `이격 ${result.quantile_count}등급`,
+              `종가가 메인 이평선(${result.ma_rule.main_ma_days}일) 대비 얼마나 벌어졌나 · 1등급 = 이격 상위`,
+              result.disparity,
+              result.disparity_long_short,
+              result.disparity_ic,
+              `1등급 − ${result.quantile_count}등급`,
+            )}
+            {renderTable(
+              `기울기 ${result.quantile_count}등급`,
+              `단기 이평선(${result.ma_rule.short_ma_days}일)의 ${result.ma_rule.slope_days}일 전 대비 변화율 · 1등급 = 기울기 상위`,
+              result.slope,
+              result.slope_long_short,
+              result.slope_ic,
+              `1등급 − ${result.quantile_count}등급`,
+            )}
+          </div>
         </>
       ) : null}
 
@@ -269,6 +376,27 @@ export function PoolBacktestManager() {
         .poolBtTable th {
           color: var(--text-muted);
           font-weight: 600;
+        }
+        .poolBtLongShort {
+          border: 1px solid rgba(148, 163, 184, 0.4);
+          border-radius: 6px;
+          padding: 6px 10px;
+          margin-bottom: 10px;
+          font-size: 0.88rem;
+          background: rgba(148, 163, 184, 0.06);
+          line-height: 1.5;
+        }
+        /* 이격(좌) · 기울기(우) 나란히. 좁아지면 1열로 접힌다. */
+        .poolBtSplit {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          gap: 12px;
+          align-items: start;
+        }
+        @media (max-width: 1100px) {
+          .poolBtSplit {
+            grid-template-columns: minmax(0, 1fr);
+          }
         }
       `}</style>
     </div>
