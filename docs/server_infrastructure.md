@@ -123,6 +123,12 @@ APScheduler 에 등록한다.
 - **무인자 스크립트만 실행**: `python <script.py>` 형태만 파싱하며 `-m`/추가 인자는 인식하지 못한다. 인자가 필요한 진입점은 무인자 **래퍼 스크립트**로 감싼다(예: `scripts/leverage_recommend_switch.py`, `scripts/leverage_tune_switch.py`).
 - **주석 cron 라인도 활성으로 파싱**: 주석(`#`) 처리된 잡 라인도 등록될 수 있으므로, 잡 비활성화는 주석이 아니라 **라인 삭제**로 한다.
 - 배치 코드/스크립트는 Docker 이미지에 포함되므로 변경 시 **재배포** 필요. `crontab`/`run_batch` 는 `./infra/cron` 마운트로 즉시 반영.
+
+### 개별주 인덱스 캐시
+
+- 미국 개별주 캐시는 `us_market_stocks` 배치가 평일 08:00 KST에 `scripts/update_us_market_stocks.py`를 실행해 갱신합니다.
+- 호주 개별주 캐시는 `aus_market_stocks` 배치가 평일 08:10 KST에 `scripts/update_aus_market_stocks.py`를 실행해 `data/asx200_tickers.json`을 갱신합니다.
+- 호주 캐시는 Wikipedia `S&P/ASX 200` 구성종목을 기준으로 하고, yfinance의 `.AX` 심볼로 시가총액·거래량·3개월 수익률을 보강합니다. 화면과 종목풀 저장 티커는 시스템 원칙대로 `ASX:` 접두사를 사용합니다.
 - leverage 전략 데이터는 `ticker_type="etf"`(MongoDB 캐시 키)로 조회하며 대상은 모두 한국 ETF.
 
 ### VM 의 역할 (현재)

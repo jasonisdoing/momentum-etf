@@ -7,6 +7,7 @@ from utils.env import load_env_if_present
 
 from .routes.account_settings import router as account_settings_router
 from .routes.assets import router as assets_router
+from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
@@ -65,6 +66,7 @@ async def generic_exception_handler(_request: Request, exc: Exception) -> JSONRe
 
 
 app.include_router(assets_router)
+app.include_router(aus_market_stocks_router)
 app.include_router(holdings_router)
 app.include_router(leverage_router)
 app.include_router(live_24h_router)
