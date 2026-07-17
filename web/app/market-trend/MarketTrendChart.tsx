@@ -13,7 +13,7 @@ import {
 import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "lightweight-charts";
 
 
-type RegimeKey = "accel_up" | "neutral" | "accel_down";
+type RegimeKey = "accel_up" | "accel_down";
 
 // 그 일자 기준 MA20/60 전환 가격선과 확인일수.
 type ForecastThresholds = {
@@ -84,16 +84,14 @@ const CHART_RANGES: Array<{ key: ChartRangeKey; label: string; days?: number; yt
   { key: "5y", label: "5년", days: 365 * 5 },
 ];
 
-// 3단계: 상승(빨강) / 중립(녹색) / 하락(파랑).
+// 2단계: 상승(빨강) / 하락(파랑).
 const REGIME_COLOR: Record<RegimeKey, string> = {
   accel_up: "#d62828",   // 빨강 — 상승
-  neutral: "#2f9e44",    // 녹색 — 중립
   accel_down: "#1971c2", // 파랑 — 하락
 };
 
 const REGIME_LABEL: Record<RegimeKey, string> = {
   accel_up: "⬆️ 상승",
-  neutral: "➡️ 중립",
   accel_down: "⬇️ 하락",
 };
 
@@ -168,7 +166,7 @@ function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, targ
     remaining = fc.dn_remaining_days;
   }
   if (pct === null || price === null) return "-";
-  const rank: Record<RegimeKey, number> = { accel_up: 2, neutral: 1, accel_down: 0 };
+  const rank: Record<RegimeKey, number> = { accel_up: 1, accel_down: 0 };
   const suffix = current !== null && rank[target] < rank[current] ? " 미만" : " 이상";
   const remainText = remaining !== null && remaining > 0 ? ` · ${remaining}거래일 확인` : "";
   return `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}${remainText}`;
@@ -446,7 +444,7 @@ export function MarketTrendChart({
     const fc = latest?.forecast;
     const current = latest?.regime;
     if (!fc || !current) return [];
-    const rank: Record<RegimeKey, number> = { accel_up: 2, neutral: 1, accel_down: 0 };
+    const rank: Record<RegimeKey, number> = { accel_up: 1, accel_down: 0 };
     const out: {
       next_regime: RegimeKey;
       target_price: number | null;
@@ -454,7 +452,7 @@ export function MarketTrendChart({
       confirm_days?: number | null;
       mode: "confirm" | "drop_below" | "rise_above";
     }[] = [];
-    (["accel_up", "neutral", "accel_down"] as RegimeKey[]).forEach((rg) => {
+    (["accel_up", "accel_down"] as RegimeKey[]).forEach((rg) => {
       if (rg === current) return;
       let pct: number | null = null;
       let price: number | null = null;
@@ -467,16 +465,6 @@ export function MarketTrendChart({
         pct = fc.dn_pct;
         price = fc.dn_price;
         confirmDays = fc.dn_remaining_days;
-      } else if (current === "accel_up") {
-        // 상승→중립: 가까운 경계는 상승 이탈선(up)
-        pct = fc.up_pct;
-        price = fc.up_price;
-        confirmDays = fc.up_remaining_days;
-      } else if (current === "accel_down") {
-        // 하락→중립: 가까운 경계는 하락 이탈선(dn)
-        pct = fc.dn_pct;
-        price = fc.dn_price;
-        confirmDays = fc.dn_remaining_days;
       }
       const weaker = rank[rg] < rank[current];
       let mode: "confirm" | "drop_below" | "rise_above";
@@ -485,8 +473,8 @@ export function MarketTrendChart({
       else mode = "rise_above";
       out.push({ next_regime: rg, target_price: price, change_pct: pct, confirm_days: confirmDays, mode });
     });
-    // 상승 → 중립 → 하락 고정 순서로 배치.
-    const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, neutral: 1, accel_down: 2 };
+    // 상승 → 하락 고정 순서로 배치.
+    const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, accel_down: 1 };
     out.sort((a, c) => regimeOrder[a.next_regime] - regimeOrder[c.next_regime]);
     return out.filter((t) => t.target_price !== null && t.change_pct !== null);
   }, [data]);
@@ -705,12 +693,9 @@ export function MarketTrendChart({
       const statusRows = fc
         ? `
         <div style="margin-top: 6px; border-top: 1px dashed rgba(255,255,255,0.25); padding-top: 6px; display: flex; flex-direction: column; gap: 3px;">
-          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">MA20/60 전환 조건</div>
+          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">ST(SuperTrend) 전환 조건</div>
           <div style="display: flex; justify-content: space-between; gap: 15px;">
             <span>상승:</span> <strong>${getRegimeStatusText("accel_up")}</strong>
-          </div>
-          <div style="display: flex; justify-content: space-between; gap: 15px;">
-            <span>중립:</span> <strong>${getRegimeStatusText("neutral")}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; gap: 15px;">
             <span>하락:</span> <strong>${getRegimeStatusText("accel_down")}</strong>

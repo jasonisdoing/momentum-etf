@@ -76,24 +76,21 @@ function renderSignedScoreCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatScore(params.value)}</span>;
 }
 
-type RegimeKey = "accel_up" | "neutral" | "accel_down";
+type RegimeKey = "accel_up" | "accel_down";
 
 const REGIME_LABEL: Record<RegimeKey, string> = {
   accel_up: "⬆️ 상승",
-  neutral: "➡️ 중립",
   accel_down: "⬇️ 하락",
 };
 
 const REGIME_COLORS: Record<RegimeKey, string> = {
   accel_up: "#d62828",   // 빨강
-  neutral: "#2f9e44",    // 녹색 (중립)
   accel_down: "#1971c2", // 파랑
 };
 
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
-  { key: "accel_up", text: "⬆️ 상승: MA20이 MA60 위에 있고 종가가 MA20 위에서 확인된 강세 국면입니다." },
-  { key: "neutral", text: "➡️ 중립: MA20이 MA60 위지만 종가가 MA20~MA60 사이에 있어 방향 확인을 기다리는 구간입니다." },
-  { key: "accel_down", text: "⬇️ 하락: MA20이 MA60 아래이거나 종가가 MA60 아래로 밀린 위험 국면입니다." },
+  { key: "accel_up", text: "⬆️ 상승: 가격이 SuperTrend 위에 위치한 강세 국면입니다." },
+  { key: "accel_down", text: "⬇️ 하락: 가격이 SuperTrend 아래로 내려간 위험 국면입니다." },
 ];
 
 function renderRegimeCell(params: { data?: GridRow }) {
@@ -109,236 +106,7 @@ function renderRegimeCell(params: { data?: GridRow }) {
   );
 }
 
-type RegimeCombo = {
-  multiplier?: number;
-  k?: number;
-  buffer?: number;
-  confirm_days?: number;
-  up: number;
-  neutral: number;
-  down: number;
-  flips: number;
-  dwell: number;
-  strat_return: number;
-  strat_mdd: number;
-  strat_sharpe: number;
-  bh_return: number;
-  bh_mdd: number;
-  bh_sharpe: number;
-};
-type RegimeBacktestIndex = {
-  ticker: string;
-  name: string;
-  confirm_days: number;
-  ma_variants: RegimeCombo[];
-  ma_periods: number[];
-};
-type RegimeBacktestResponse = {
-  window_days?: number;
-  months?: number;
-  top_n?: number;
-  indices?: RegimeBacktestIndex[];
-  error?: string;
-};
 
-const BACKTEST_MONTH_OPTIONS = Array.from({ length: 36 }, (_, i) => i + 1);
-const CASH_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100];
-
-/** 백테스트 탭 — 선택 지수·N개월로 MA20/60 확인일수 후보를 비교한다(읽기 전용). */
-function RegimeBacktestPanel() {
-  const [indexOptions, setIndexOptions] = useState<{ ticker: string; name: string }[]>([]);
-  const [selectedTicker, setSelectedTicker] = useState<string>("");
-  const [months, setMonths] = useState<number>(12);
-  const [upCash, setUpCash] = useState<number>(0);
-  const [neutralCash, setNeutralCash] = useState<number>(15);
-  const [downCash, setDownCash] = useState<number>(30);
-  const [data, setData] = useState<RegimeBacktestResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // 지수 셀렉트 목록 로드 (/market-trend 지수 단일 소스)
-  useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        const resp = await fetch("/api/market-trend/indices", { cache: "no-store" });
-        const payload = (await resp.json()) as { indices?: { ticker: string; name: string }[]; error?: string };
-        if (!resp.ok || payload.error) throw new Error(payload.error ?? "지수 목록을 불러오지 못했습니다.");
-        if (alive) {
-          const list = payload.indices ?? [];
-          setIndexOptions(list);
-          if (list.length > 0) setSelectedTicker(list[0].ticker);
-        }
-      } catch (e) {
-        if (alive) setError(e instanceof Error ? e.message : "지수 목록을 불러오지 못했습니다.");
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
-
-  const runBacktest = async () => {
-    if (!selectedTicker) {
-      setError("지수를 선택해주세요.");
-      return;
-    }
-    try {
-      setLoading(true);
-      setError(null);
-      const resp = await fetch(
-        `/api/market-trend/regime-backtest?ticker=${encodeURIComponent(selectedTicker)}&months=${months}` +
-          `&up_cash=${upCash}&neutral_cash=${neutralCash}&down_cash=${downCash}`,
-        { cache: "no-store" },
-      );
-      const payload = (await resp.json()) as RegimeBacktestResponse;
-      if (!resp.ok || payload.error) throw new Error(payload.error ?? "레짐 백테스트를 불러오지 못했습니다.");
-      setData(payload);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "레짐 백테스트를 불러오지 못했습니다.");
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const indices = data?.indices ?? [];
-
-  return (
-    <div className="appPageStack">
-      <div className="card appCard">
-        <div className="card-body">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-            <label className="appLabeledField" style={{ minWidth: 180 }}>
-              <span className="appLabeledFieldLabel">지수</span>
-              <select
-                className="form-select form-select-sm"
-                value={selectedTicker}
-                onChange={(e) => setSelectedTicker(e.target.value)}
-              >
-                {indexOptions.length === 0 ? <option value="">불러오는 중…</option> : null}
-                {indexOptions.map((opt) => (
-                  <option key={opt.ticker} value={opt.ticker}>
-                    {opt.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 130 }}>
-              <span className="appLabeledFieldLabel">기간(개월)</span>
-              <select
-                className="form-select form-select-sm"
-                value={months}
-                onChange={(e) => setMonths(Number(e.target.value))}
-              >
-                {BACKTEST_MONTH_OPTIONS.map((m) => (
-                  <option key={m} value={m}>
-                    최근 {m}개월
-                  </option>
-                ))}
-              </select>
-            </label>
-            {([
-              ["상승 현금 비중(%)", upCash, setUpCash],
-              ["중립 현금 비중(%)", neutralCash, setNeutralCash],
-              ["하락 현금 비중(%)", downCash, setDownCash],
-            ] as const).map(([label, value, setter]) => (
-              <label key={label} className="appLabeledField" style={{ minWidth: 130 }}>
-                <span className="appLabeledFieldLabel">{label}</span>
-                <select
-                  className="form-select form-select-sm"
-                  value={value}
-                  onChange={(e) => setter(Number(e.target.value))}
-                >
-                  {CASH_OPTIONS.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ))}
-            <button type="button" className="btn btn-sm btn-primary" disabled={loading || !selectedTicker} onClick={() => void runBacktest()}>
-              {loading ? "백테스트 중…" : "백테스트"}
-            </button>
-          </div>
-          <p style={{ fontSize: "0.88rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "12px 0 0" }}>
-            <strong>MA20/60 교차</strong> 레짐에 <strong>확인 필터(0~5거래일)</strong>를 걸어 어느 N이 좋은지 비교합니다. 전략 = 레짐별 현금 비중(위 선택)을 적용해 전일 레짐을 다음날 수익에 반영.{" "}
-            <strong>좋은 N을 골라 config에 직접 반영하세요.</strong>
-          </p>
-        </div>
-      </div>
-      {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
-      {!loading && !data ? (
-        <div style={{ color: "var(--text-muted)", padding: 16 }}>지수와 기간을 고르고 백테스트를 눌러주세요.</div>
-      ) : null}
-      {indices.map((idx) => (
-        <div className="card appCard" key={idx.ticker}>
-          <div className="card-body">
-            <h3 style={{ fontSize: "1rem", fontWeight: 800, marginBottom: 8 }}>
-              {idx.name}{" "}
-              <span style={{ color: "var(--text-muted)", fontWeight: 500, fontSize: "0.85rem" }}>
-                ({idx.ticker}) · 현재 확인일수 {idx.confirm_days}거래일
-              </span>
-            </h3>
-            <div style={{ overflowX: "auto" }}>
-              <table className="regimeBtTable">
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left" }}>방식</th>
-                    <th style={{ textAlign: "left" }}>기준</th>
-                    <th>상승</th>
-                    <th>중립</th>
-                    <th>하락</th>
-                    <th>휩소</th>
-                    <th>유지일</th>
-                    <th>전략수익</th>
-                    <th>전략MDD</th>
-                    <th>Sharpe</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {idx.ma_variants[0] ? (
-                    <tr className="regimeBtBh">
-                      <td style={{ textAlign: "left" }}>buy&amp;hold</td>
-                      <td colSpan={6} />
-                      <td className={getSignedClass(idx.ma_variants[0].bh_return)}>{formatPct(idx.ma_variants[0].bh_return)}</td>
-                      <td className="metricNegative">{formatPct(idx.ma_variants[0].bh_mdd)}</td>
-                      <td>{idx.ma_variants[0].bh_sharpe.toFixed(2)}</td>
-                    </tr>
-                  ) : null}
-                  {idx.ma_variants.map((v) => {
-                    const bestSharpe = Math.max(...idx.ma_variants.map((x) => x.strat_sharpe));
-                    const isBest = v.strat_sharpe === bestSharpe;
-                    return (
-                      <tr key={`ma-${v.confirm_days}`} className={isBest ? "regimeBtBest" : ""}>
-                        <td style={{ textAlign: "left" }}>
-                          MA{idx.ma_periods?.[0] ?? 20}/{idx.ma_periods?.[1] ?? 60} 교차 + {v.confirm_days}일
-                          {isBest ? " ⭐" : ""}
-                        </td>
-                        <td style={{ textAlign: "left", color: "var(--text-muted)", fontSize: "0.82rem" }}>
-                          {v.confirm_days === 0 ? "즉시 전환" : `${v.confirm_days}거래일 연속 확인`}
-                        </td>
-                        <td>{v.up}</td>
-                        <td>{v.neutral}</td>
-                        <td>{v.down}</td>
-                        <td>{v.flips}</td>
-                        <td>{v.dwell.toFixed(1)}</td>
-                        <td className={getSignedClass(v.strat_return)}>{formatPct(v.strat_return)}</td>
-                        <td className="metricNegative">{formatPct(v.strat_mdd)}</td>
-                        <td>{v.strat_sharpe.toFixed(2)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 type MarketTrendClientProps = {
   // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
@@ -354,7 +122,6 @@ export function MarketTrendClient({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
-  const [tab, setTab] = useState<"trend" | "backtest">("trend");
 
   useEffect(() => {
     let alive = true;
@@ -484,12 +251,6 @@ export function MarketTrendClient({
           }
           const sinceUp = params.data?.days_since_last_up;
           const upText = sinceUp !== null && sinceUp !== undefined ? `마지막 상승 후 ${sinceUp}일째` : "1년 내 상승 없음";
-          if (regime === "accel_down") {
-            const sinceNeutral = params.data?.days_since_last_neutral;
-            const neutralText =
-              sinceNeutral !== null && sinceNeutral !== undefined ? `, 마지막 중립 후 ${sinceNeutral}일째` : "";
-            return <span style={{ color: "var(--text-strong)" }}>{upText}{neutralText}</span>;
-          }
           return <span style={{ color: "var(--text-strong)" }}>{upText}</span>;
         },
       },
@@ -562,27 +323,6 @@ export function MarketTrendClient({
   return (
     <PageFrame title="시장지수 추세" fullWidth titleRight={titleRight}>
       <div className="appPageStack">
-        <div className="appSegmentedToggle" role="tablist" aria-label="시장지수 추세 화면 선택">
-          {([
-            ["trend", "시장지수 추세"],
-            ["backtest", "백테스트"],
-          ] as const).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              role="tab"
-              aria-selected={tab === key}
-              className={`appSegmentedToggleButton ${tab === key ? "is-active" : ""}`}
-              onClick={() => setTab(key)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {tab === "backtest" ? (
-          <RegimeBacktestPanel />
-        ) : (
-          <>
         <section className="appSection">
           <div className="card appCard">
             <div className="card-body appCardBodyTight">
@@ -626,17 +366,13 @@ export function MarketTrendClient({
                   MA 위면 양수, 아래면 음수 — <strong>수익률이 아니라 MA 대비 위치입니다.</strong>
                 </li>
                 <li>
-                  레짐: <strong>MA20/60 교차 + 지수별 확인일수</strong>입니다.
-                  MA20 &lt; MA60이면 하락, MA20 ≥ MA60 이면서 종가가 MA20 위면 상승, 종가가 MA60 아래면 하락,
-                  그 사이는 중립입니다. 새 레짐은 지수별 확인일수만큼 연속 확인된 뒤 확정됩니다.
+                  레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.
                 </li>
               </ul>
             </div>
           </div>
         </section>
         <SystemPoolGrid />
-          </>
-        )}
       </div>
 
       <style jsx global>{`

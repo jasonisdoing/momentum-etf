@@ -62,7 +62,6 @@ type RankRow = {
   이격?: number | null;
   단기이격?: number | null;
   기울기?: number | null;
-  배열?: string | null;
   보유대상?: boolean;
   보유: string;
   현재가: number | null;
@@ -641,7 +640,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보수: null,
         순자산총액: null,
         "전일 거래량(주)": null,
-        배열: null,
         exclude_from_ranking: false,
       },
       ...rows,
@@ -765,7 +763,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       {
         colId: "추천",
         headerName: "✓",
-        headerTooltip: "추천 — 고정 종목·벤치마크가 아니고, 이격이 양수이며, 단기이격이 음수가 아닌 종목 중 이격 상위 N개(보유 종목수)",
+        headerTooltip: "추천 — 고정 종목·벤치마크가 아니고, 장기가 양수이며, 단기가 음수가 아닌 종목 중 장기 상위 N개(보유 종목수)",
         minWidth: 44,
         width: 44,
         sortable: true,
@@ -1048,20 +1046,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
 
     const cumulativeColumns: ColDef<RankGridRow>[] = [
       {
-        field: "이격",
-        headerName: "이격",
+        field: "단기이격",
+        headerName: "단기",
         minWidth: 86,
         width: 86,
         type: "rightAligned",
+        headerTooltip: "종가와 단기 이평선의 이격률. 음수면 단기 추세가 꺾인 것으로 보고 보유하지 않는다.",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       {
-        field: "단기이격",
-        headerName: "단기이격",
-        minWidth: 92,
-        width: 92,
+        field: "이격",
+        headerName: "장기",
+        minWidth: 86,
+        width: 86,
         type: "rightAligned",
-        headerTooltip: "종가와 단기 이평선의 이격률. 음수면 단기 추세가 꺾인 것으로 보고 보유하지 않는다.",
+        headerTooltip: "종가와 메인 이평선의 이격률. 순위 정렬과 보유 후보 판단에 사용한다.",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       {
@@ -1071,17 +1070,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 92,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
-      {
-        field: "배열",
-        headerName: "배열",
-        minWidth: 78,
-        width: 78,
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = params.value ?? "-";
-          const color = value === "정배열" ? "#d63939" : value === "역배열" ? "#1d6fd1" : "var(--text-muted)";
-          return <span style={{ color, fontWeight: 700 }}>{value}</span>;
-        },
       },
       ...(showDeviationColumn
         ? [
@@ -1710,7 +1698,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 이격(장기)·단기이격 중 하나라도 음수이거나 역배열이면 보유 대상이 될 수
+                  // 장기·단기 중 하나라도 음수이면 보유 대상이 될 수
                   // 없으므로 흐리게. 값이 없으면 판단 자체가 불가하므로 같이 흐리게 둔다.
                   const disparity = params.data?.이격 ?? null;
                   const shortDisparity = params.data?.단기이격 ?? null;
@@ -1718,8 +1706,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                     disparity === null ||
                     shortDisparity === null ||
                     disparity < 0 ||
-                    shortDisparity < 0 ||
-                    params.data?.배열 === "역배열"
+                    shortDisparity < 0
                   ) {
                     classes.push("rankNegativeTrendRow");
                   }
