@@ -1,0 +1,35 @@
+"""종목풀 신호(이격/기울기/배열) 실증 백테스트 API — 읽기 전용."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from fastapi_app.dependencies import require_internal_token
+from utils.pool_signal_backtest_service import (
+    FORWARD_DAY_OPTIONS,
+    compute_pool_signal_backtest,
+)
+
+router = APIRouter(prefix="/internal/pool-backtest", tags=["pool-backtest"])
+
+
+@router.get("/options")
+def get_pool_backtest_options(
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """화면 셀렉트용 선택지."""
+    return {"forward_day_options": list(FORWARD_DAY_OPTIONS)}
+
+
+@router.get("")
+def get_pool_backtest(
+    pool_id: str = Query(...),
+    forward_days: int = Query(default=20),
+    months: int = Query(default=36, ge=1, le=120),
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """선택 종목풀의 이격/기울기/배열 → 향후 N일 상승확률 실증 결과."""
+    try:
+        return compute_pool_signal_backtest(pool_id, forward_days=forward_days, months=months)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

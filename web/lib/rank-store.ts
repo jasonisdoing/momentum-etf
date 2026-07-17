@@ -7,7 +7,6 @@ type RankTickerType = {
   icon: string;
   country_code: string;
   top_n_hold?: number;
-  type_source?: string;
   currency?: string;
   include?: string[];
 };
@@ -29,8 +28,6 @@ type RankRow = {
   티커: string;
   종목명: string;
   상장일: string;
-  분류: string;
-  "전체 분류": string;
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;

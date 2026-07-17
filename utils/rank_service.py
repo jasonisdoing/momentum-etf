@@ -8,7 +8,6 @@ from typing import Any
 
 import pandas as pd
 
-from config import NAVER_ETF_CATEGORY_CONFIG
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.data_loader import get_trading_days
 from utils.rankings import (
@@ -206,12 +205,6 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
         row["backtest_stats"] = meta_stats_map.get(ticker)
 
-        # Naver 상세 분류 정보(cat_*) 추가
-        for cat in NAVER_ETF_CATEGORY_CONFIG:
-            cat_code = cat["code"]
-            cat_name = cat["name"]
-            row[cat_name] = meta_cache.get(f"cat_{cat_code}")
-
         rows.append(row)
 
     enriched = pd.DataFrame(rows)
@@ -233,7 +226,6 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "icon": str(cfg.get("icon") or ""),
             "country_code": str(cfg.get("country_code") or ""),
             "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
-            "type_source": str(cfg["settings"].get("type_source") or ""),
             "currency": str(cfg["settings"].get("currency") or ""),
         }
         for cfg in configs
@@ -313,8 +305,6 @@ def _build_missing_ticker_rows(
                 "버킷": "",
                 "bucket": None,
                 "상장일": "-",
-                "분류": "",
-                "전체 분류": "",
                 "추세": None,
                 "보유": "",
                 "현재가": None,
@@ -584,7 +574,6 @@ def _compute_rank_data_payload(
             [str(item) for item in (dataframe.attrs.get("missing_tickers") or [])],
         ),
         "stale_tickers": [str(item) for item in (dataframe.attrs.get("stale_tickers") or [])],
-        "naver_category_config": [c for c in NAVER_ETF_CATEGORY_CONFIG if c.get("show")],
     }
 
 

@@ -51,7 +51,6 @@ npm run dev
   "order": 1,
   "country_code": "kor",
   "currency": "KRW",
-  "type_source": "Naver",
   "TOP_N_HOLD": 10,
   "SHORT_MA_DAYS": 10,
   "MAIN_MA_DAYS": 20,
