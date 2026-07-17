@@ -11,12 +11,12 @@ export async function GET(request: NextRequest) {
     const tickerType = searchParams.get("ticker_type") ?? undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
     const shortMaDaysRaw = searchParams.get("short_ma_days");
-    const mainMaDaysRaw = searchParams.get("main_ma_days");
+    const longMaDaysRaw = searchParams.get("long_ma_days");
     const maRuleOverride =
-      shortMaDaysRaw || mainMaDaysRaw
+      shortMaDaysRaw || longMaDaysRaw
         ? {
             short_ma_days: shortMaDaysRaw ? Number(shortMaDaysRaw) : 0,
-            main_ma_days: mainMaDaysRaw ? Number(mainMaDaysRaw) : 0,
+            long_ma_days: longMaDaysRaw ? Number(longMaDaysRaw) : 0,
             score_column: "추세(수동)",
           }
         : undefined;

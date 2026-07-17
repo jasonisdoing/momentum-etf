@@ -5,6 +5,7 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
 import {
@@ -31,7 +32,7 @@ type RankTickerType = {
 
 type RankMaRule = {
   short_ma_days: number;
-  main_ma_days: number;
+  long_ma_days: number;
   slope_days: number;
   score_column: string;
 };
@@ -59,8 +60,10 @@ type RankRow = {
   상장일: string;
   추세: number | null;
   이격?: number | null;
+  단기이격?: number | null;
   기울기?: number | null;
   배열?: string | null;
+  보유대상?: boolean;
   보유: string;
   현재가: number | null;
   "괴리율": number | null;
@@ -491,7 +494,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       }
       if (next?.ma_rule_override) {
         search.set("short_ma_days", String(next.ma_rule_override.short_ma_days));
-        search.set("main_ma_days", String(next.ma_rule_override.main_ma_days));
+        search.set("long_ma_days", String(next.ma_rule_override.long_ma_days));
         search.set("slope_days", String(next.ma_rule_override.slope_days));
       }
 
@@ -609,8 +612,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         상장일: addingRow.listing_date || "-",
         추세: null,
         이격: null,
+        단기이격: null,
         기울기: null,
         보유: "",
+        보유대상: false,
         현재가: null,
         괴리율: null,
         "일간(%)": null,
@@ -644,40 +649,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [addingRow, gridRows, pageMode]);
 
   const maRuleSummary = useMemo(
-    () => (maRule ? [`SMA 단기 ${maRule.short_ma_days}일 · 메인 ${maRule.main_ma_days}일 · 기울기 ${maRule.slope_days}일`] : []),
+    () => (maRule ? [`SMA 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일 · 기울기 ${maRule.slope_days}일`] : []),
     [maRule],
   );
 
-  // 추천 ✅ 대상 티커 집합 — 현재 추세(%) 기준으로 정렬한다.
-  const recommendedTickerSet = useMemo<Set<string>>(() => {
-    const topN = Number(selectedTickerTypeItem?.top_n_hold ?? 0);
-    if (!topN) return new Set();
-    const sorted = [...gridRows]
-      .filter(
-        (r) =>
-          r.순위 != null &&
-          !r.exclude_from_ranking &&
-          !r.is_benchmark &&
-          (r.추세 ?? 0) > 0
-      )
-      .sort((a, b) => {
-        const aScore = typeof a.추세 === "number" && !Number.isNaN(a.추세) ? a.추세 : null;
-        const bScore = typeof b.추세 === "number" && !Number.isNaN(b.추세) ? b.추세 : null;
-        if (aScore === null && bScore === null) {
-          return Number(a.순위 ?? 0) - Number(b.순위 ?? 0);
-        }
-        if (aScore === null) return 1;
-        if (bScore === null) return -1;
-        if (bScore !== aScore) return bScore - aScore;
-        return Number(a.순위 ?? 0) - Number(b.순위 ?? 0);
-      });
-    const picked = new Set<string>();
-    for (const row of sorted) {
-      if (picked.size >= topN) break;
-      if (row.id) picked.add(row.id);
-    }
-    return picked;
-  }, [gridRows, selectedTickerTypeItem?.top_n_hold]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
@@ -751,25 +726,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        colId: "순위변동",
-        headerName: "변동",
-        minWidth: 66,
-        width: 66,
-        cellStyle: { textAlign: "center" },
-        sortable: true,
-        valueGetter: (params) => {
-          const currentRank = params.data?.순위 ?? null;
-          const previousRank = params.data?.이전순위 ?? null;
-          if (currentRank === null || currentRank === undefined || previousRank === null || previousRank === undefined) {
-            return null;
-          }
-          return previousRank - currentRank;
-        },
-        cellRenderer: (params: { value: number | null | undefined }) => {
-          return renderRankDelta(params.value);
-        },
-      },
-      {
         colId: "1주순위변동",
         headerName: "1주",
         minWidth: 66,
@@ -789,19 +745,33 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
+        field: "보유",
+        headerName: "보유",
+        headerTooltip: "이 종목을 실제로 보유 중인 계좌",
+        minWidth: 120,
+        width: 120,
+        sortable: true,
+        cellClass: "rankHoldCell",
+        cellRenderer: (params: { value: string | null | undefined }) => {
+          const value = String(params.value ?? "").trim();
+          if (!value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          return (
+            <span className="rankHoldAccountsCell" title={value}>
+              {value}
+            </span>
+          );
+        },
+      },
+      {
         colId: "추천",
         headerName: "✓",
-        headerTooltip: "추천",
+        headerTooltip: "추천 — 고정 종목·벤치마크가 아니고, 이격이 양수이며, 단기이격이 음수가 아닌 종목 중 이격 상위 N개(보유 종목수)",
         minWidth: 44,
         width: 44,
         sortable: true,
         filter: false,
         cellStyle: { textAlign: "center" },
-        valueGetter: (params) => {
-          const rowId = String(params.data?.id ?? "").trim();
-          if (!rowId) return 0;
-          return recommendedTickerSet.has(rowId) ? 1 : 0;
-        },
+        valueGetter: (params) => (params.data?.보유대상 ? 1 : 0),
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (!params.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
           return <span style={{ fontSize: "1rem" }}>✅</span>;
@@ -1086,6 +1056,15 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       {
+        field: "단기이격",
+        headerName: "단기이격",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        headerTooltip: "종가와 단기 이평선의 이격률. 음수면 단기 추세가 꺾인 것으로 보고 보유하지 않는다.",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
         field: "기울기",
         headerName: "기울기",
         minWidth: 92,
@@ -1276,7 +1255,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     selectedTickerTypeItem?.country_code,
     selectedTickerTypeItem?.top_n_hold,
     selectedTickerTypeItem?.currency,
-    recommendedTickerSet,
     ticker_types,
   ]);
 
@@ -1293,7 +1271,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     });
   }
 
-  function handleMaRuleDaysChange(key: "short_ma_days" | "main_ma_days" | "slope_days", nextDays: number) {
+  function handleMaRuleDaysChange(key: "short_ma_days" | "long_ma_days" | "slope_days", nextDays: number) {
     if (!maRule) {
       return;
     }
@@ -1579,7 +1557,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       ) : (
                         ticker_types.map((account) => (
                           <option key={account.ticker_type} value={account.ticker_type}>
-                            {account.name}
+                            {formatPoolLabel(account)}
                           </option>
                         ))
                       )}
@@ -1627,12 +1605,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                         </select>
                         <select
                           className="form-select"
-                          value={String(maRule.main_ma_days)}
-                          onChange={(event) => handleMaRuleDaysChange("main_ma_days", Number(event.target.value))}
+                          value={String(maRule.long_ma_days)}
+                          onChange={(event) => handleMaRuleDaysChange("long_ma_days", Number(event.target.value))}
                         >
                           {MA_DAY_OPTIONS.map((day) => (
                             <option key={day} value={day}>
-                              메인 {day}일
+                              장기 {day}일
                             </option>
                           ))}
                         </select>
@@ -1723,7 +1701,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             <div className="appGridFillWrap">
               <AppAgGrid
-                key={`${selectedTickerType}:${selectedAsOfDate}:${maRule?.short_ma_days}:${maRule?.main_ma_days}`}
+                key={`${selectedTickerType}:${selectedAsOfDate}:${maRule?.short_ma_days}:${maRule?.long_ma_days}`}
                 className="rankAgGrid"
                 rowData={displayGridRows}
                 columnDefs={columns}
@@ -1732,15 +1710,21 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  const scoreVal = params.data?.추세 ?? 0;
-                  if (scoreVal <= 0) {
+                  // 이격(장기)·단기이격 중 하나라도 음수이거나 역배열이면 보유 대상이 될 수
+                  // 없으므로 흐리게. 값이 없으면 판단 자체가 불가하므로 같이 흐리게 둔다.
+                  const disparity = params.data?.이격 ?? null;
+                  const shortDisparity = params.data?.단기이격 ?? null;
+                  if (
+                    disparity === null ||
+                    shortDisparity === null ||
+                    disparity < 0 ||
+                    shortDisparity < 0 ||
+                    params.data?.배열 === "역배열"
+                  ) {
                     classes.push("rankNegativeTrendRow");
                   }
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
-                  }
-                  if (String(params.data?.보유 || "").trim() !== "") {
-                    classes.push("rankHeldRow");
                   }
                   return classes.join(" ");
                 }}

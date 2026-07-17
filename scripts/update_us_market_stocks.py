@@ -1,4 +1,4 @@
-"""미국 개별주 인덱스 구성종목을 갱신하고 시가총액·3개월 수익률을 저장한다.
+"""미국 개별주 인덱스 구성종목을 갱신하고 시가총액·기간 수익률을 저장한다.
 
 사용법:
     python scripts/update_us_market_stocks.py
@@ -105,38 +105,64 @@ def _extract_close_frame(downloaded: pd.DataFrame, yf_symbols: list[str]) -> pd.
     return close.sort_index()
 
 
-def _calculate_three_month_return(series: pd.Series) -> dict[str, Any]:
+def _calculate_period_return(clean: pd.Series, latest_price: float, months: int) -> dict[str, Any]:
+    target_date = pd.Timestamp(date.today()).normalize() - pd.DateOffset(months=months)
+    base_candidates = clean[clean.index >= target_date]
+    base_date = clean.index.min() if base_candidates.empty else base_candidates.index.min()
+    base_price = float(clean.loc[base_date])
+    return_pct = ((latest_price / base_price) - 1.0) * 100.0 if base_price > 0 else None
+    prefix = f"return_{months}m"
+    return {
+        f"{prefix}_base_date": pd.Timestamp(base_date).date().isoformat(),
+        f"{prefix}_base_price": round(base_price, 6),
+        f"{prefix}_latest_price": round(latest_price, 6),
+        f"{prefix}_pct": round(return_pct, 4) if return_pct is not None else None,
+    }
+
+
+def _calculate_mdd(clean: pd.Series, months: int) -> dict[str, Any]:
+    target_date = pd.Timestamp(date.today()).normalize() - pd.DateOffset(months=months)
+    period = clean[clean.index >= target_date]
+    if period.empty:
+        period = clean
+    running_peak = period.cummax()
+    drawdown = (period / running_peak - 1.0) * 100.0
+    mdd = float(drawdown.min()) if not drawdown.empty else None
+    return {f"mdd_{months}m_pct": round(mdd, 4) if mdd is not None else None}
+
+
+def _calculate_return_metrics(series: pd.Series) -> dict[str, Any]:
     clean = pd.to_numeric(series, errors="coerce").dropna()
     clean = clean[clean > 0]
     if clean.empty:
         return {
+            "return_1m_base_date": None,
+            "return_1m_base_price": None,
+            "return_1m_latest_price": None,
+            "return_1m_pct": None,
             "return_3m_base_date": None,
             "return_3m_base_price": None,
             "return_3m_latest_price": None,
             "return_3m_pct": None,
+            "return_12m_base_date": None,
+            "return_12m_base_price": None,
+            "return_12m_latest_price": None,
+            "return_12m_pct": None,
+            "mdd_12m_pct": None,
         }
 
     latest_date = clean.index.max()
     latest_price = float(clean.loc[latest_date])
-    target_date = pd.Timestamp(date.today()).normalize() - pd.DateOffset(months=3)
-    base_candidates = clean[clean.index >= target_date]
-    if base_candidates.empty:
-        base_date = clean.index.min()
-    else:
-        base_date = base_candidates.index.min()
-
-    base_price = float(clean.loc[base_date])
-    return_pct = ((latest_price / base_price) - 1.0) * 100.0 if base_price > 0 else None
     return {
-        "return_3m_base_date": pd.Timestamp(base_date).date().isoformat(),
-        "return_3m_base_price": round(base_price, 6),
-        "return_3m_latest_price": round(latest_price, 6),
-        "return_3m_pct": round(return_pct, 4) if return_pct is not None else None,
+        **_calculate_period_return(clean, latest_price, 1),
+        **_calculate_period_return(clean, latest_price, 3),
+        **_calculate_period_return(clean, latest_price, 12),
+        **_calculate_mdd(clean, 12),
     }
 
 
 def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
-    """yfinance fast_info 와 시계열로 시가총액·거래량·3개월 수익률을 배치 조회한다."""
+    """yfinance fast_info 와 시계열로 시가총액·거래량·기간 수익률을 배치 조회한다."""
     result: dict[str, dict[str, Any]] = {}
     batches = [tickers[i:i + _YFINANCE_BATCH_SIZE] for i in range(0, len(tickers), _YFINANCE_BATCH_SIZE)]
 
@@ -166,7 +192,7 @@ def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
         try:
             history = yf.download(
                 yf_symbols,
-                period="4mo",
+                period="13mo",
                 interval="1d",
                 auto_adjust=True,
                 progress=False,
@@ -175,14 +201,14 @@ def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
             close_frame = _extract_close_frame(history, yf_symbols)
             for yf_sym, ticker in symbol_to_ticker.items():
                 if close_frame.empty or yf_sym not in close_frame.columns:
-                    return_data = _calculate_three_month_return(pd.Series(dtype=float))
+                    return_data = _calculate_return_metrics(pd.Series(dtype=float))
                 else:
-                    return_data = _calculate_three_month_return(close_frame[yf_sym])
+                    return_data = _calculate_return_metrics(close_frame[yf_sym])
                 result.setdefault(ticker, {}).update(return_data)
         except Exception as exc:
-            print(f"\n  3개월 수익률 배치 조회 실패: {exc}")
+            print(f"\n  기간 수익률 배치 조회 실패: {exc}")
             for ticker in batch:
-                result.setdefault(ticker, {}).update(_calculate_three_month_return(pd.Series(dtype=float)))
+                result.setdefault(ticker, {}).update(_calculate_return_metrics(pd.Series(dtype=float)))
 
         if batch_idx < len(batches) - 1:
             time.sleep(_YFINANCE_BATCH_DELAY)
@@ -211,10 +237,12 @@ def _enrich_constituents(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         meta = meta_map.get(str(item["ticker"]), {})
         item["market_cap"] = meta.get("market_cap")
         item["volume"] = meta.get("volume")
-        item["return_3m_base_date"] = meta.get("return_3m_base_date")
-        item["return_3m_base_price"] = meta.get("return_3m_base_price")
-        item["return_3m_latest_price"] = meta.get("return_3m_latest_price")
-        item["return_3m_pct"] = meta.get("return_3m_pct")
+        for months in (1, 3, 12):
+            item[f"return_{months}m_base_date"] = meta.get(f"return_{months}m_base_date")
+            item[f"return_{months}m_base_price"] = meta.get(f"return_{months}m_base_price")
+            item[f"return_{months}m_latest_price"] = meta.get(f"return_{months}m_latest_price")
+            item[f"return_{months}m_pct"] = meta.get(f"return_{months}m_pct")
+        item["mdd_12m_pct"] = meta.get("mdd_12m_pct")
     return items
 
 
@@ -222,7 +250,7 @@ def main() -> None:
     print("S&P500 구성종목 조회 중...")
     try:
         sp500 = _fetch_sp500()
-        print(f"  Wikipedia에서 {len(sp500)}개 종목 확인. 시가총액/3개월 수익률 조회 시작...")
+        print(f"  Wikipedia에서 {len(sp500)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
         sp500 = _enrich_constituents(sp500)
         _save("sp500_tickers.json", sp500, "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
     except Exception as exc:
@@ -231,7 +259,7 @@ def main() -> None:
     print("NASDAQ100 구성종목 조회 중...")
     try:
         ndx100 = _fetch_ndx100()
-        print(f"  Wikipedia에서 {len(ndx100)}개 종목 확인. 시가총액/3개월 수익률 조회 시작...")
+        print(f"  Wikipedia에서 {len(ndx100)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
         ndx100 = _enrich_constituents(ndx100)
         _save("ndx100_tickers.json", ndx100, "https://en.wikipedia.org/wiki/Nasdaq-100")
     except Exception as exc:

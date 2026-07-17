@@ -5,20 +5,21 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatKstDateTime } from "@/lib/datetime";
 import { useToast } from "../components/ToastProvider";
 
-const EDITABLE_KEYS = [
-  "TOP_N_HOLD",
-  "SHORT_MA_DAYS",
-  "MAIN_MA_DAYS",
-  "SLOPE_DAYS",
-] as const;
+/** 숫자 셀렉트/입력으로 편집하는 키. */
+const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS"] as const;
 
+/** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
+const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK"] as const;
+
+type NumericKey = (typeof NUMERIC_KEYS)[number];
 type EditableKey = (typeof EDITABLE_KEYS)[number];
 
 const KEY_LABELS: Record<EditableKey, string> = {
   TOP_N_HOLD: "보유 종목수",
   SHORT_MA_DAYS: "단기 이평선",
-  MAIN_MA_DAYS: "메인 이평선",
+  LONG_MA_DAYS: "장기 이평선",
   SLOPE_DAYS: "기울기 일수",
+  BENCHMARK: "벤치마크",
 };
 
 const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
@@ -26,7 +27,10 @@ const DEFAULT_SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
 const COUNTRY_OPTIONS = ["kor", "us", "au"] as const;
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
-type SettingField = { value: string | number | null };
+/** 계좌 설정(account_settings.benchmark)과 같은 형태. 미설정이면 null. */
+type Benchmark = { ticker?: string; name?: string };
+
+type SettingField = { value: string | number | Benchmark | null };
 type SettingsMap = Record<EditableKey, SettingField>;
 
 type PoolEntry = {
@@ -53,7 +57,10 @@ type PoolDraft = {
   order: string;
   country_code: string;
   currency: string;
-} & Record<EditableKey, string>;
+  // 벤치마크는 {ticker, name} 이라 초안에서는 두 값으로 나눠 든다. 이름은 조회로만 채운다.
+  benchmarkTicker: string;
+  benchmarkName: string;
+} & Record<NumericKey, string>;
 
 const EMPTY_DRAFT: PoolDraft = {
   ticker_type: "",
@@ -64,9 +71,16 @@ const EMPTY_DRAFT: PoolDraft = {
   currency: "KRW",
   TOP_N_HOLD: "10",
   SHORT_MA_DAYS: "10",
-  MAIN_MA_DAYS: "20",
+  LONG_MA_DAYS: "20",
   SLOPE_DAYS: "5",
+  benchmarkTicker: "",
+  benchmarkName: "",
 };
+
+function toBenchmark(field: SettingField | undefined): Benchmark {
+  const value = field?.value;
+  return value && typeof value === "object" ? (value as Benchmark) : {};
+}
 
 const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.45)",
@@ -86,8 +100,10 @@ function toDraft(pool: PoolEntry): PoolDraft {
     currency: pool.currency ?? "KRW",
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
-    MAIN_MA_DAYS: String(pool.settings.MAIN_MA_DAYS?.value ?? ""),
+    LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
     SLOPE_DAYS: String(pool.settings.SLOPE_DAYS?.value ?? ""),
+    benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
+    benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
   };
 }
 
@@ -101,8 +117,12 @@ function draftToValues(draft: PoolDraft) {
     currency: draft.currency,
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
-    MAIN_MA_DAYS: Number(draft.MAIN_MA_DAYS),
+    LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
     SLOPE_DAYS: Number(draft.SLOPE_DAYS),
+    // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
+    BENCHMARK: draft.benchmarkTicker.trim()
+      ? { ticker: draft.benchmarkTicker.trim().toUpperCase(), name: draft.benchmarkName.trim() }
+      : null,
   };
 }
 
@@ -130,6 +150,86 @@ function SelectField({
         </option>
       ))}
     </select>
+  );
+}
+
+/** 벤치마크 등록/변경 — 계좌 설정(`/account-settings`)과 같은 방식.
+ *
+ * 티커를 입력해 조회하면 종목명이 채워지고 확정된다. 이름은 조회로만 채우므로
+ * 존재하지 않는 종목이 저장될 수 없다. 티커를 비우면 미설정.
+ */
+function BenchmarkField({
+  ticker,
+  name,
+  onChange,
+}: {
+  ticker: string;
+  name: string;
+  onChange: (key: keyof PoolDraft, value: string) => void;
+}) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(!(ticker && name));
+  const [resolving, setResolving] = useState(false);
+
+  const resolve = async () => {
+    const target = ticker.trim();
+    if (!target) {
+      toast.error("티커를 입력해주세요.");
+      return;
+    }
+    try {
+      setResolving(true);
+      const resp = await fetch(`/api/leverage-config/resolve?ticker=${encodeURIComponent(target)}`);
+      const payload = (await resp.json()) as { name?: string; error?: string };
+      if (!resp.ok || payload.error || !payload.name) {
+        toast.error(payload.error ?? "종목명을 찾을 수 없습니다.");
+        return;
+      }
+      onChange("benchmarkName", payload.name);
+      setEditing(false);
+      toast.success(`${payload.name}(${target}) 확인 완료`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "티커 조회 중 오류가 발생했습니다.");
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span style={{ fontSize: "0.86rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+          {name} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({ticker})</span>
+        </span>
+        <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setEditing(true)}>
+          변경
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input
+        style={{ ...inputStyle, width: 96 }}
+        placeholder="티커"
+        title="비우면 미설정"
+        value={ticker}
+        onChange={(event) => {
+          onChange("benchmarkTicker", event.target.value);
+          onChange("benchmarkName", "");
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            void resolve();
+          }
+        }}
+      />
+      <button type="button" className="btn btn-sm btn-outline-secondary" disabled={resolving} onClick={() => void resolve()}>
+        {resolving ? "조회 중…" : "조회"}
+      </button>
+    </div>
   );
 }
 
@@ -324,10 +424,13 @@ export function SettingsManager() {
         <SelectField value={draft.SHORT_MA_DAYS} options={maDayOptions} width={90} onChange={(value) => onChange("SHORT_MA_DAYS", value)} />
       </td>
       <td>
-        <SelectField value={draft.MAIN_MA_DAYS} options={maDayOptions} width={90} onChange={(value) => onChange("MAIN_MA_DAYS", value)} />
+        <SelectField value={draft.LONG_MA_DAYS} options={maDayOptions} width={90} onChange={(value) => onChange("LONG_MA_DAYS", value)} />
       </td>
       <td>
         <SelectField value={draft.SLOPE_DAYS} options={slopeDayOptions} width={90} onChange={(value) => onChange("SLOPE_DAYS", value)} />
+      </td>
+      <td>
+        <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
       </td>
     </>
   );

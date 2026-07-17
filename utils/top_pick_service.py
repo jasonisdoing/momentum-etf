@@ -262,7 +262,7 @@ def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
     """계좌에 연결된 단일 종목풀의 이평선 설정을 탑픽 계산 기준으로 반환한다."""
     normalized_account_id = str(account_id or "").strip()
     if not normalized_account_id:
-        return {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "MAIN_MA_DAYS": None}
+        return {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
 
     from utils.settings_loader import get_account_settings, get_ticker_type_settings
 
@@ -275,28 +275,28 @@ def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
     pool_settings = get_ticker_type_settings(ticker_type)
     try:
         short_ma_days = int(pool_settings["SHORT_MA_DAYS"])
-        main_ma_days = int(pool_settings["MAIN_MA_DAYS"])
+        long_ma_days = int(pool_settings["LONG_MA_DAYS"])
     except KeyError as exc:
-        raise ValueError(f"종목풀 '{ticker_type}'에 이평선 설정(SHORT_MA_DAYS/MAIN_MA_DAYS)이 없습니다.") from exc
+        raise ValueError(f"종목풀 '{ticker_type}'에 이평선 설정(SHORT_MA_DAYS/LONG_MA_DAYS)이 없습니다.") from exc
     except (TypeError, ValueError) as exc:
         raise ValueError(f"종목풀 '{ticker_type}'의 이평선 설정은 정수여야 합니다.") from exc
-    if short_ma_days <= 0 or main_ma_days <= 0:
+    if short_ma_days <= 0 or long_ma_days <= 0:
         raise ValueError(f"종목풀 '{ticker_type}'의 이평선 설정은 1일 이상이어야 합니다.")
 
     return {
         "POOL_TICKER_TYPE": ticker_type,
         "POOL_NAME": str(pool_settings.get("name") or ticker_type),
         "SHORT_MA_DAYS": short_ma_days,
-        "MAIN_MA_DAYS": main_ma_days,
+        "LONG_MA_DAYS": long_ma_days,
     }
 
 
 def _build_top_pick_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
-    main_ma_days = settings.get("MAIN_MA_DAYS")
-    if main_ma_days is None:
+    long_ma_days = settings.get("LONG_MA_DAYS")
+    if long_ma_days is None:
         account_id = str(settings.get("ACCOUNT_ID") or "").strip()
-        main_ma_days = _load_account_pool_ma_context(account_id)["MAIN_MA_DAYS"]
-    return {"order": 1, "main_ma_days": int(main_ma_days), "score_column": "이격"}
+        long_ma_days = _load_account_pool_ma_context(account_id)["LONG_MA_DAYS"]
+    return {"order": 1, "long_ma_days": int(long_ma_days), "score_column": "이격"}
 
 
 def _build_current_ma_state_maps(
@@ -304,30 +304,30 @@ def _build_current_ma_state_maps(
     eval_date: pd.Timestamp,
     *,
     short_ma_days: int,
-    main_ma_days: int,
+    long_ma_days: int,
 ) -> tuple[dict[str, float | None], dict[str, str | None]]:
     short_ma_cols: dict[str, pd.Series] = {}
-    main_ma_cols: dict[str, pd.Series] = {}
+    long_ma_cols: dict[str, pd.Series] = {}
     for ticker in close_frame.columns:
         series = close_frame[ticker].dropna()
         if series.empty:
             short_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
-            main_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+            long_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
             continue
         short_ma_cols[ticker] = calculate_moving_average(series, short_ma_days).reindex(close_frame.index)
-        main_ma_cols[ticker] = calculate_moving_average(series, main_ma_days).reindex(close_frame.index)
+        long_ma_cols[ticker] = calculate_moving_average(series, long_ma_days).reindex(close_frame.index)
 
     short_ma_frame = pd.DataFrame(short_ma_cols, index=close_frame.index)
-    main_ma_frame = pd.DataFrame(main_ma_cols, index=close_frame.index)
-    if eval_date not in main_ma_frame.index:
+    long_ma_frame = pd.DataFrame(long_ma_cols, index=close_frame.index)
+    if eval_date not in long_ma_frame.index:
         return ({ticker: None for ticker in close_frame.columns}, {ticker: None for ticker in close_frame.columns})
 
     short_ma_row = short_ma_frame.loc[eval_date]
-    main_ma_row = main_ma_frame.loc[eval_date]
-    eligible_main_ma_frame = main_ma_frame.loc[main_ma_frame.index <= eval_date]
-    previous_main_ma_row = (
-        eligible_main_ma_frame.iloc[-2]
-        if len(eligible_main_ma_frame.index) >= 2
+    long_ma_row = long_ma_frame.loc[eval_date]
+    eligible_long_ma_frame = long_ma_frame.loc[long_ma_frame.index <= eval_date]
+    previous_long_ma_row = (
+        eligible_long_ma_frame.iloc[-2]
+        if len(eligible_long_ma_frame.index) >= 2
         else pd.Series(dtype="float64")
     )
 
@@ -335,17 +335,17 @@ def _build_current_ma_state_maps(
     alignment_map: dict[str, str | None] = {}
     for ticker in close_frame.columns:
         short_value = short_ma_row.get(ticker)
-        main_value = main_ma_row.get(ticker)
-        if pd.isna(short_value) or pd.isna(main_value):
+        long_value = long_ma_row.get(ticker)
+        if pd.isna(short_value) or pd.isna(long_value):
             alignment_map[ticker] = None
         else:
-            alignment_map[ticker] = "정배열" if float(short_value) >= float(main_value) else "역배열"
+            alignment_map[ticker] = "정배열" if float(short_value) >= float(long_value) else "역배열"
 
-        previous_main_value = previous_main_ma_row.get(ticker)
-        if pd.isna(main_value) or pd.isna(previous_main_value) or float(previous_main_value) == 0.0:
+        previous_long_value = previous_long_ma_row.get(ticker)
+        if pd.isna(long_value) or pd.isna(previous_long_value) or float(previous_long_value) == 0.0:
             slope_map[ticker] = None
         else:
-            slope_map[ticker] = ((float(main_value) / float(previous_main_value)) - 1.0) * 100.0
+            slope_map[ticker] = ((float(long_value) / float(previous_long_value)) - 1.0) * 100.0
     return slope_map, alignment_map
 
 
@@ -1099,7 +1099,7 @@ def _enrich_weight_rows_with_returns(
             close_frame,
             eval_date,
             short_ma_days=int(settings["SHORT_MA_DAYS"]),
-            main_ma_days=int(settings["MAIN_MA_DAYS"]),
+            long_ma_days=int(settings["LONG_MA_DAYS"]),
         )
         if eval_date is not None
         else ({}, {})
@@ -1317,7 +1317,7 @@ def calculate_top_pick_weights_for(
         close_frame,
         eval_date,
         short_ma_days=int(settings["SHORT_MA_DAYS"]),
-        main_ma_days=int(settings["MAIN_MA_DAYS"]),
+        long_ma_days=int(settings["LONG_MA_DAYS"]),
     )
 
     rows: list[dict[str, Any]] = []

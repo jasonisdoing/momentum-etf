@@ -13,7 +13,7 @@ type RankTickerType = {
 
 type RankMaRule = {
   short_ma_days: number;
-  main_ma_days: number;
+  long_ma_days: number;
   score_column: string;
 };
 
@@ -103,7 +103,7 @@ export async function loadRankData(params?: {
   }
   if (params?.ma_rule_override) {
     search.set("short_ma_days", String(params.ma_rule_override.short_ma_days));
-    search.set("main_ma_days", String(params.ma_rule_override.main_ma_days));
+    search.set("long_ma_days", String(params.ma_rule_override.long_ma_days));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

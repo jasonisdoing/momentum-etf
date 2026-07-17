@@ -3,7 +3,8 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, is_active
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, SLOPE_DAYS
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS (필수)
+          BENCHMARK (선택 — 비우면 미설정)
 
 런타임 로딩은 DB 문서가 없거나 필수 키가 누락되면 명확히 에러를 낸다.
 캐시: 멀티프로세스(fastapi/scheduler/worker)에서 변경이 반영되도록 짧은 TTL(30초) 캐시를
@@ -12,7 +13,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      is_active, TOP_N_HOLD, SHORT_MA_DAYS, MAIN_MA_DAYS, SLOPE_DAYS, updated_at
+      is_active, TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS, BENCHMARK, updated_at
     }
 """
 
@@ -30,13 +31,20 @@ logger = get_app_logger()
 COLLECTION = "pool_settings"
 INTERNAL_POOL_ID_PREFIX = "__"
 
-# DB 오버라이드 대상 키
+# DB 오버라이드 대상 키 — 전부 필수이며 비어 있으면 로딩 자체가 실패한다.
 OVERRIDABLE_KEYS: tuple[str, ...] = (
     "TOP_N_HOLD",
     "SHORT_MA_DAYS",
-    "MAIN_MA_DAYS",
+    "LONG_MA_DAYS",
     "SLOPE_DAYS",
 )
+
+# 편집 가능하지만 비워둘 수 있는 키. 필수 검사에서 제외한다.
+# 빈 문자열은 '미설정'을 뜻하며, 읽는 쪽이 그 상태를 명시적으로 처리해야 한다(임의 대체 금지).
+OPTIONAL_EDITABLE_KEYS: tuple[str, ...] = ("BENCHMARK",)
+
+# 종목풀 설정 화면에서 편집하는 전체 키(순서 = 화면 표시 순서).
+POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *OPTIONAL_EDITABLE_KEYS)
 
 STRUCTURAL_KEYS: tuple[str, ...] = (
     "name",
@@ -51,7 +59,7 @@ MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 240)
 # 기울기 측정 일수(k): 단기 이평선의 k일 전 대비 변화율. 1일은 노이즈가 커 권장하지 않는다.
 SLOPE_DAY_OPTIONS: tuple[int, ...] = (1, 2, 3, 5, 10, 20, 40, 60)
 
-_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "MAIN_MA_DAYS", "SLOPE_DAYS")
+_INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
 
@@ -68,6 +76,18 @@ _pool_docs_lock = threading.Lock()
 
 class PoolSettingsError(ValueError):
     """종목풀 설정 검증/저장 오류."""
+
+
+def get_pool_benchmark_ticker(settings: dict[str, Any]) -> str:
+    """종목풀 설정에서 벤치마크 티커를 꺼낸다. 미설정이면 빈 문자열.
+
+    ``BENCHMARK`` 는 ``{ticker, name}`` 이며 선택 항목이라 없을 수 있다.
+    읽는 쪽이 제각각 파싱하면 형태가 어긋나므로 여기서만 해석한다.
+    """
+    benchmark = settings.get("BENCHMARK")
+    if not isinstance(benchmark, dict):
+        return ""
+    return str(benchmark.get("ticker") or "").strip().upper()
 
 
 def invalidate_overlay_cache() -> None:
@@ -156,8 +176,8 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
     if "is_active" in values:
         cleaned["is_active"] = bool(values.get("is_active"))
 
-    editable = _validate_values({k: values[k] for k in OVERRIDABLE_KEYS if k in values}) if any(k in values for k in OVERRIDABLE_KEYS) else {}
-    cleaned.update(editable)
+    editable_input = {k: values[k] for k in POOL_EDITABLE_KEYS if k in values}
+    cleaned.update(_validate_values(editable_input) if editable_input else {})
 
     return cleaned
 
@@ -227,7 +247,7 @@ def _load_overrides_from_db() -> dict[str, dict[str, Any]]:
             pool_id = str(doc.get("_id") or "").strip()
             if not pool_id:
                 continue
-            overrides = {k: doc[k] for k in OVERRIDABLE_KEYS if k in doc and doc[k] is not None}
+            overrides = {k: doc[k] for k in POOL_EDITABLE_KEYS if k in doc and doc[k] is not None}
             if "updated_at" in doc and doc["updated_at"] is not None:
                 overrides["updated_at"] = doc["updated_at"]
             if "save_method" in doc and doc["save_method"] is not None:
@@ -269,7 +289,7 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError) as exc:
             raise PoolSettingsError(f"{key} 은 정수여야 합니다: {raw}") from exc
 
-        if key in ("SHORT_MA_DAYS", "MAIN_MA_DAYS"):
+        if key in ("SHORT_MA_DAYS", "LONG_MA_DAYS"):
             if num not in MA_DAY_OPTIONS:
                 options = ", ".join(str(day) for day in MA_DAY_OPTIONS)
                 raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
@@ -281,6 +301,24 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
         cleaned[key] = num
+
+    if "BENCHMARK" in values:
+        # 계좌 설정(account_settings.benchmark)과 같은 {ticker, name} 형태를 쓴다.
+        # 계좌 쪽과 달리 종목풀 벤치마크는 선택이라 None/빈 값이면 '미설정'으로 저장한다.
+        raw = values["BENCHMARK"]
+        if raw in (None, ""):
+            cleaned["BENCHMARK"] = None
+        elif not isinstance(raw, dict):
+            raise PoolSettingsError("BENCHMARK 는 {ticker, name} 객체여야 합니다.")
+        else:
+            ticker = str(raw.get("ticker") or "").strip().upper()
+            bench_name = str(raw.get("name") or "").strip()
+            if not ticker and not bench_name:
+                cleaned["BENCHMARK"] = None
+            elif not ticker or not bench_name:
+                raise PoolSettingsError("BENCHMARK 에는 ticker/name 이 모두 필요합니다. 티커를 조회해 이름을 채우세요.")
+            else:
+                cleaned["BENCHMARK"] = {"ticker": ticker, "name": bench_name}
 
     if not cleaned:
         raise PoolSettingsError("저장할 값이 없습니다.")

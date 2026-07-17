@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from utils.pool_settings_store import (
     MA_DAY_OPTIONS,
-    OVERRIDABLE_KEYS,
+    POOL_EDITABLE_KEYS,
     SLOPE_DAY_OPTIONS,
     PoolSettingsError,
     create_pool,
@@ -37,7 +37,7 @@ class PoolDefinitionPayload(BaseModel):
 
 def _editable(settings: dict[str, Any]) -> dict[str, Any]:
     """편집 가능한 키의 현재(DB) 값을 반환한다."""
-    return {key: {"value": settings.get(key)} for key in OVERRIDABLE_KEYS}
+    return {key: {"value": settings.get(key)} for key in POOL_EDITABLE_KEYS}
 
 
 def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
@@ -68,7 +68,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
         "constraints": {
             "ma_day_options": list(MA_DAY_OPTIONS),
             "slope_day_options": list(SLOPE_DAY_OPTIONS),
-            "editable_keys": list(OVERRIDABLE_KEYS),
+            "editable_keys": list(POOL_EDITABLE_KEYS),
         },
     }
 

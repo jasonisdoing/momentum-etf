@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { ColDef, RowClassParams } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
@@ -749,7 +750,7 @@ export function MarketManager({
               <option value="">종목풀 선택</option>
               {tickerPools.map((pool) => (
                 <option key={pool.ticker_type} value={pool.ticker_type}>
-                  {pool.name}
+                  {formatPoolLabel(pool)}
                 </option>
               ))}
             </select>

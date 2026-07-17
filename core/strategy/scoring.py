@@ -137,9 +137,9 @@ def compute_eligibility_mask(close_frame: pd.DataFrame) -> pd.DataFrame:
 
 def _resolve_rule_ma_days(rule: dict[str, Any]) -> int:
     """공통 엔진 MA 규칙에서 사용할 일수를 명시적으로 결정한다."""
-    if "main_ma_days" in rule:
-        return int(rule["main_ma_days"])
-    raise KeyError("MA 규칙에는 main_ma_days 가 필요합니다.")
+    if "long_ma_days" in rule:
+        return int(rule["long_ma_days"])
+    raise KeyError("MA 규칙에는 long_ma_days 가 필요합니다.")
 
 
 def combine_rule_percentiles(

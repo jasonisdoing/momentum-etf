@@ -128,7 +128,8 @@ APScheduler 에 등록한다.
 
 - 미국 개별주 캐시는 `us_market_stocks` 배치가 평일 08:00 KST에 `scripts/update_us_market_stocks.py`를 실행해 갱신합니다.
 - 호주 개별주 캐시는 `aus_market_stocks` 배치가 평일 08:10 KST에 `scripts/update_aus_market_stocks.py`를 실행해 `data/asx200_tickers.json`을 갱신합니다.
-- 호주 캐시는 Wikipedia `S&P/ASX 200` 구성종목을 기준으로 하고, yfinance의 `.AX` 심볼로 시가총액·거래량·3개월 수익률을 보강합니다. 화면과 종목풀 저장 티커는 시스템 원칙대로 `ASX:` 접두사를 사용합니다.
+- 미국·호주 개별주 캐시는 yfinance 일봉으로 1개월·3개월·12개월 수익률과 12개월 MDD를 보강합니다.
+- 호주 캐시는 Wikipedia `S&P/ASX 200` 구성종목을 기준으로 하고, yfinance의 `.AX` 심볼로 시가총액·거래량·기간 지표를 보강합니다. 화면과 종목풀 저장 티커는 시스템 원칙대로 `ASX:` 접두사를 사용합니다.
 - leverage 전략 데이터는 `ticker_type="etf"`(MongoDB 캐시 키)로 조회하며 대상은 모두 한국 ETF.
 
 ### VM 의 역할 (현재)

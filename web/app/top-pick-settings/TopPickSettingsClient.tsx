@@ -82,7 +82,7 @@ type TopPickSettings = {
   POOL_TICKER_TYPE?: string | null;
   POOL_NAME?: string | null;
   SHORT_MA_DAYS?: number | null;
-  MAIN_MA_DAYS?: number | null;
+  LONG_MA_DAYS?: number | null;
 };
 
 type AccountTopPickBasis = {
@@ -321,7 +321,7 @@ function buildSettingsForRequest(
     POOL_TICKER_TYPE: settings.POOL_TICKER_TYPE ?? null,
     POOL_NAME: settings.POOL_NAME ?? null,
     SHORT_MA_DAYS: settings.SHORT_MA_DAYS ?? null,
-    MAIN_MA_DAYS: settings.MAIN_MA_DAYS ?? null,
+    LONG_MA_DAYS: settings.LONG_MA_DAYS ?? null,
   };
 }
 
@@ -987,9 +987,9 @@ export function TopPickSettingsClient() {
   const updatedLabel = parseUtcDate(updatedAt);
   const approvedLabel = parseUtcDate(approvedAt);
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
-    const mainMaDays = source?.MAIN_MA_DAYS ?? "-";
+    const longMaDays = source?.LONG_MA_DAYS ?? "-";
     const poolName = source?.POOL_NAME ?? source?.POOL_TICKER_TYPE;
-    return `${poolName ? `${poolName} · ` : ""}SMA 메인 ${mainMaDays}일 · 이평선 위 투자`;
+    return `${poolName ? `${poolName} · ` : ""}SMA 장기 ${longMaDays}일 · 이평선 위 투자`;
   };
 
   const runBacktest = async () => {
@@ -1746,7 +1746,7 @@ export function TopPickSettingsClient() {
             <div className="card-body">
               <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>설정</h2>
               <div style={{ color: "#4b5563", fontSize: "0.83rem", marginBottom: 12, lineHeight: "1.4" }}>
-                비중 계산은 계좌에 연결된 종목풀의 메인 이평선을 사용합니다. {settings ? formatScoreSettingLabel(settings) : ""}
+                비중 계산은 계좌에 연결된 종목풀의 장기 이평선을 사용합니다. {settings ? formatScoreSettingLabel(settings) : ""}
               </div>
               <div className="topPickBacktestGrid">
                 <label className="appLabeledField">
