@@ -1,4 +1,4 @@
-"""S&P500, NASDAQ100 구성종목 JSON 파일 로더."""
+"""주요 인덱스 구성종목 JSON 파일 로더."""
 
 from __future__ import annotations
 
@@ -8,10 +8,11 @@ from typing import Any
 
 _DATA_DIR = Path(__file__).parent.parent / "data"
 
-SUPPORTED_INDICES = {"SP500", "NDX100"}
+SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200"}
 _INDEX_FILE_MAP = {
     "SP500": _DATA_DIR / "sp500_tickers.json",
     "NDX100": _DATA_DIR / "ndx100_tickers.json",
+    "ASX200": _DATA_DIR / "asx200_tickers.json",
 }
 
 
@@ -25,7 +26,7 @@ def load_index_constituents(index: str) -> list[dict[str, Any]]:
     if not path.exists():
         raise FileNotFoundError(
             f"{key} 구성종목 파일이 없습니다: {path}\n"
-            "scripts/update_us_market_stocks.py 를 실행해 파일을 생성하세요."
+            "미국은 scripts/update_us_market_stocks.py, 호주는 scripts/update_aus_market_stocks.py 를 실행해 파일을 생성하세요."
         )
 
     payload = json.loads(path.read_text(encoding="utf-8"))

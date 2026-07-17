@@ -48,6 +48,7 @@ type SystemJobKey =
   | "metadata_updater"
   | "asset_summary"
   | "us_market_stocks"
+  | "aus_market_stocks"
   | "leverage_switch"
   | "leverage_tune";
 

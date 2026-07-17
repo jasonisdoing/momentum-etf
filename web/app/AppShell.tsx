@@ -63,6 +63,7 @@ const navGroups = [
       { href: "/compare", label: "ETF 비교", icon: IconListDetails },
       { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
       { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
+      { href: "/aus-market-stock", label: "호주 개별주", icon: "🇦🇺" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
       { href: "/live-24h", label: "24H 시세", icon: "⏰" },
     ],
