@@ -42,6 +42,8 @@ tmp/
 
 # 캐시 — data/ 내부는 서버에 직접 배치하고 컨테이너로 bind-mount 함 (git 추적 제외)
 data/*
+!data/country/
+!data/country/**
 
 # DB 백업 (Atlas → VM 마이그레이션, 로컬 자동 백업)
 .backups/
