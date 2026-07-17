@@ -32,13 +32,13 @@ KST = ZoneInfo("Asia/Seoul")
 
 # 배치 실행 절대 상한 (초). 외부 API hang / 무한 루프로 인한 무한 대기 방지.
 # 정상 배치(가격 캐시 / 메타 등)는 가장 큰 것도 최대 10분 안에 끝남.
-# 30분(1800s) = 정상의 ~3배 — 진짜 hang 만 잡고 정상 작업은 영향 없는 마진.
+# 20분(1200s) = 정상의 ~2배 — 진짜 hang 만 잡고 정상 작업은 영향 없는 마진.
 # 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
-BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1800)
+BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1200)
 
 
 def _format_duration(seconds: float) -> str:
-    """초 → 사람이 읽기 쉬운 표시. 예: 1800 → '30분', 75 → '1분 15초', 45 → '45초'."""
+    """초 → 사람이 읽기 쉬운 표시. 예: 1200 → '20분', 75 → '1분 15초', 45 → '45초'."""
     total = max(0, int(round(seconds)))
     if total < 60:
         return f"{total}초"
@@ -77,7 +77,7 @@ def _append_log_line(job_name: str, text: str) -> None:
             handle.write("\n")
 
 
-def _acquire_db_lock(job_name: str, ttl_seconds: int = 1800) -> tuple[object, str] | None:
+def _acquire_db_lock(job_name: str, ttl_seconds: int | None = None) -> tuple[object, str] | None:
     """MongoDB 에 분산 락을 잡는다. 다른 호스트(로컬/서버)에서 동일 작업 중복 실행 방지.
 
     반환: (db, job_name) 성공 시 / None: 이미 다른 곳에서 실행 중
@@ -93,6 +93,9 @@ def _acquire_db_lock(job_name: str, ttl_seconds: int = 1800) -> tuple[object, st
         db.batch_locks.create_index("expires_at", expireAfterSeconds=0)
     except Exception:
         pass  # 이미 있을 수 있음
+
+    if ttl_seconds is None:
+        ttl_seconds = BATCH_TIMEOUT_SECONDS
 
     now = datetime.now(KST)
     expires_at = now + timedelta(seconds=ttl_seconds)
@@ -139,6 +142,27 @@ def _notify(text: str) -> None:
         send_slack_message_v2(text)
     except Exception as exc:  # pragma: no cover - 알림 실패는 로그만
         print(f"[run_batch] 슬랙 전송 실패: {exc}", file=sys.stderr)
+
+
+def _get_job_display(job_name: str) -> tuple[int | None, str]:
+    """시스템 화면의 배치 순서와 작업명을 반환한다."""
+    try:
+        from utils.system_service import SCHEDULE_ROWS  # 지연 임포트
+
+        for idx, row in enumerate(SCHEDULE_ROWS, start=1):
+            if row.get("key") == job_name:
+                return idx, str(row.get("job") or job_name)
+    except Exception:
+        pass
+    return None, job_name
+
+
+def _format_job_display(job_name: str) -> str:
+    """Slack 알림에 표시할 배치 번호/작업명."""
+    job_no, job_label = _get_job_display(job_name)
+    if job_no is None:
+        return f"{job_label} (`{job_name}`)"
+    return f"{job_no}번 {job_label} (`{job_name}`)"
 
 
 def _format_tail(stdout: str, stderr: str) -> str:
@@ -200,6 +224,7 @@ def main(argv: list[str]) -> int:
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started_monotonic
+        job_display = _format_job_display(job_name)
         timeout_line = (
             f"[run_batch] TIMEOUT job={job_name} elapsed={elapsed:.1f}s "
             f"limit={BATCH_TIMEOUT_SECONDS}s — 자식 프로세스 SIGKILL 처리됨"
@@ -214,7 +239,8 @@ def main(argv: list[str]) -> int:
             pass
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"⏰ *[{app_label}] 배치 타임아웃*: `{job_name}`\n"
+            f"<!channel>\n"
+            f"⏰ *[{app_label}] 배치 타임아웃*: {job_display}\n"
             f"• 시작: {started_at}\n"
             f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(BATCH_TIMEOUT_SECONDS)})\n"
             f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
@@ -224,11 +250,13 @@ def main(argv: list[str]) -> int:
         return 124  # 표준 timeout exit code (Linux timeout(1) 호환)
     except FileNotFoundError as exc:
         elapsed = time.monotonic() - started_monotonic
+        job_display = _format_job_display(job_name)
         fail_line = f"[run_batch] FAIL {exc}"
         _append_log_line(job_name, fail_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"❌ *[{app_label}] 배치 실행 불가*: `{job_name}`\n"
+            f"<!channel>\n"
+            f"❌ *[{app_label}] 배치 실행 불가*: {job_display}\n"
             f"• 시작: {started_at}\n"
             f"• 소요: {elapsed:.1f}s\n"
             f"• 에러: `{exc}`"
@@ -238,11 +266,16 @@ def main(argv: list[str]) -> int:
         return 127
     except Exception as exc:
         elapsed = time.monotonic() - started_monotonic
+        job_display = _format_job_display(job_name)
         exception_line = f"[run_batch] EXCEPTION {exc}"
         _append_log_line(job_name, exception_line)
         app_label = os.environ.get("APP_TYPE", "VM").strip() or "VM"
         _notify(
-            f"❌ *[{app_label}] 배치 예외*: `{job_name}`\n• 시작: {started_at}\n• 소요: {elapsed:.1f}s\n• 에러: `{exc}`"
+            f"<!channel>\n"
+            f"❌ *[{app_label}] 배치 예외*: {job_display}\n"
+            f"• 시작: {started_at}\n"
+            f"• 소요: {elapsed:.1f}s\n"
+            f"• 에러: `{exc}`"
         )
         print(exception_line, file=sys.stderr)
         _release_db_lock(db_lock)
@@ -270,8 +303,10 @@ def main(argv: list[str]) -> int:
     already_notified_failure = exit_code == EXIT_ALREADY_NOTIFIED
     should_notify = (not success) and (not already_notified_failure)
     if should_notify:
+        job_display = _format_job_display(job_name)
         _notify(
-            f"{emoji} *[{app_label}] 배치 {status}*: `{job_name}`\n"
+            f"<!channel>\n"
+            f"{emoji} *[{app_label}] 배치 {status}*: {job_display}\n"
             f"• 시작: {started_at}\n"
             f"• 소요: {elapsed:.1f}s\n"
             f"• exit: {exit_code}\n"
