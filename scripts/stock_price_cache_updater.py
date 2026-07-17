@@ -35,6 +35,7 @@ from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
 PER_TICKER_TIMEOUT_SECONDS = 90
+KOR_FETCH_TARGET_SECONDS = 0.5
 
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
@@ -613,7 +614,7 @@ def refresh_cache_for_target(
 
             KOR 풀(pykrx 사용)은 KRX 가 단위 시간당 호출 빈도로 IP 차단을 거는 듯하다.
             서버처럼 응답이 너무 빠른 환경(종목당 ~0.1s)에서는 30종목 즈음 차단되어 hang
-            상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_MS, 기본 300ms) 미만으로
+            상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_SECONDS) 미만으로
             끝났을 때 부족분만큼 동적으로 sleep 한다. 로컬처럼 자연 소요가 충분히 느린
             환경(0.3s 이상)은 영향이 없다.
             """
@@ -632,8 +633,7 @@ def refresh_cache_for_target(
                 # KOR 풀에만 동적 sleep — 부족분만큼 채워 호출 빈도를 늦춘다.
                 sleep_secs = 0.0
                 if country_code == "kor":
-                    target = max(0.0, float(os.environ.get("KOR_FETCH_TARGET_MS") or 300) / 1000.0)
-                    sleep_secs = max(0.0, target - elapsed)
+                    sleep_secs = max(0.0, KOR_FETCH_TARGET_SECONDS - elapsed)
                     if sleep_secs > 0:
                         time.sleep(sleep_secs)
                 sleep_suffix = f" + {sleep_secs:.1f}s 대기(속도조절)" if sleep_secs > 0 else ""
