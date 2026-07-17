@@ -22,13 +22,15 @@ def get_rank_data(
     as_of_date: str | None = Query(default=None),
     short_ma_days: int | None = Query(default=None),
     main_ma_days: int | None = Query(default=None),
+    slope_days: int | None = Query(default=None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     ma_rule_override: dict[str, object] | None = None
-    if short_ma_days is not None or main_ma_days is not None:
+    if short_ma_days is not None or main_ma_days is not None or slope_days is not None:
         ma_rule_override = {
             "short_ma_days": short_ma_days,
             "main_ma_days": main_ma_days,
+            "slope_days": slope_days,
         }
     return load_rank_data(
         ticker_type=ticker_type,
