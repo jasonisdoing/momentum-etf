@@ -240,18 +240,22 @@ def _build_item(
         "days_since_last_neutral": None,
     }
     # 한국 인덱스는 네이버에서 받은 OHLC 의 종가를 우선 사용한다.
+    full_df = None
     kor_close = kor_ohlc["Close"] if (kor_ohlc is not None and "Close" in kor_ohlc.columns) else None
     if kor_close is not None and not kor_close.empty:
-        close_series = kor_close.dropna()
+        full_df = kor_ohlc.copy()
+        close_series = full_df["Close"].dropna()
     elif df is None or df.empty:
         return base
     else:
         # multi-ticker 결과는 컬럼 멀티인덱스(ticker, ohlc). 단일 ticker 결과는 평탄.
         try:
             if (yf_ticker, "Close") in df.columns:
-                close_series = df[(yf_ticker, "Close")].dropna()
+                full_df = df.xs(yf_ticker, axis=1, level=0).copy()
+                close_series = full_df["Close"].dropna()
             elif "Close" in df.columns:
-                close_series = df["Close"].dropna()
+                full_df = df.copy()
+                close_series = full_df["Close"].dropna()
             else:
                 return base
         except Exception:
@@ -259,6 +263,11 @@ def _build_item(
 
         # 미국 인덱스 daily 마지막 종가가 지연 누락되면 intraday 마감가로 보강 (한국=네이버 제외).
         close_series = _apply_intraday_boost(close_series, yf_ticker)
+
+        # 보정된 close_series 를 df 에 다시 반영 (인덱스가 확장되었을 경우 대비 reindex 적용)
+        full_df = full_df.reindex(close_series.index)
+        full_df["Close"] = close_series
+        full_df = full_df.ffill()
 
     if close_series is None or close_series.empty or len(close_series) < 2:
         return base
@@ -286,10 +295,17 @@ def _build_item(
     if high_52w is not None and high_52w > 0 and latest_price is not None:
         base["pct_from_high"] = (latest_price / high_52w - 1.0) * 100.0
 
-    # 최근 12개월 일별 레짐을 새 정본(MA20/60 + 지수별 N일 확인)으로 계산한다.
-    regime_df = pd.DataFrame({"Close": close_series})
-    confirm_days = _resolve_confirm_days(yf_ticker)
-    regime_series = compute_ma_cross_regime(regime_df, confirm_days)
+    # 최근 12개월 일별 레짐을 ST(SuperTrend)로 계산한다.
+    try:
+        st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
+        st_df = _calculate_supertrend(full_df, period=st_period, multiplier=st_multiplier)
+        st_dir = st_df["direction"]
+    except Exception:
+        st_dir = pd.Series(1, index=full_df.index)
+
+    regime_series = pd.Series("accel_up", index=full_df.index, dtype=object)
+    regime_series[st_dir == -1] = "accel_down"
+
     ranges = _build_regime_ranges_from_series(regime_series, TRADING_DAYS_PER_MONTH * 12)
     if ranges:
         base["current_regime"] = ranges[-1]["regime"]
@@ -303,10 +319,10 @@ def _build_item(
                 elapsed += int(seg["days"])
             return None
 
-        if ranges[-1]["regime"] != "accel_up":
-            base["days_since_last_up"] = _days_since_last("accel_up")
         if ranges[-1]["regime"] == "accel_down":
-            base["days_since_last_neutral"] = _days_since_last("neutral")
+            base["days_since_last_up"] = _days_since_last("accel_up")
+        else:
+            base["days_since_last_neutral"] = _days_since_last("accel_down")
 
     # MA 괴리율 0%를 0점으로 두고, 12개월 상위 5%(95퍼센타일)/하위 5%(5퍼센타일) 괴리율로
     # 점수 정규화한다. 단발 극단치(최대/최소)는 천장을 한 순간만 만들어 +100 이 거의 안 찍히므로,
@@ -882,23 +898,26 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
             _normalize_score(trend, score_min, score_max) if score_min is not None and score_max is not None else None
         )
 
-        raw_slice = raw_regime_series.loc[:date_value]
-        raw_regime, raw_streak = _tail_streak(raw_slice)
-        regime_value = confirmed_regime_series.get(date_value)
-        regime = str(regime_value) if pd.notna(regime_value) else None
-        point_forecast = _ma_cross_forecast(
-            close,
-            ma_short_v,
-            ma_long_v,
-            raw_regime,
-            raw_streak,
-            regime,
-            confirm_days,
-        )
+        # ST(SuperTrend) 기반 2단계 레짐
         st_val = _to_float(st_df["supertrend"].iloc[idx]) if st_df is not None else None
         st_dir = None
         if st_df is not None and "direction" in st_df.columns:
             st_dir = int(st_df["direction"].iloc[idx])
+
+        regime = "accel_up" if st_dir == 1 else "accel_down"
+        
+        point_forecast = {
+            "confirm_days": 0,
+            "required_days": 0,
+            "raw_regime": regime,
+            "raw_streak": 0,
+            "up_price": st_val if regime == "accel_down" else None,
+            "up_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_down" and st_val and close else None,
+            "up_remaining_days": 0,
+            "dn_price": st_val if regime == "accel_up" else None,
+            "dn_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_up" and st_val and close else None,
+            "dn_remaining_days": 0,
+        }
 
         history.append(
             {

@@ -649,21 +649,16 @@ def _apply_common_rank_scores(
 
     main_rule = ma_rules[0]
     short_days = int(main_rule["short_ma_days"])
-    long_days = int(main_rule["long_ma_days"])
     short_ma_cols: dict[str, pd.Series] = {}
-    long_ma_cols: dict[str, pd.Series] = {}
     for ticker in close_frame.columns:
         series = close_frame[ticker].dropna()
         if series.empty:
             short_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
-            long_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
             continue
         short_ma_cols[ticker] = calculate_moving_average(series, short_days).reindex(close_frame.index)
-        long_ma_cols[ticker] = calculate_moving_average(series, long_days).reindex(close_frame.index)
 
     short_ma_frame = pd.DataFrame(short_ma_cols, index=close_frame.index)
     short_ma_row = short_ma_frame.loc[eval_date]
-    long_ma_row = pd.DataFrame(long_ma_cols, index=close_frame.index).loc[eval_date]
 
     # 기울기 = 단기 이평선의 k(설정: SLOPE_DAYS)일 전 대비 변화율(%).
     # 1일 변화는 SMA 특성상 (P_t − P_{t−n})/n 이라 창에서 빠지는 옛 한 봉이 부호를 좌우해 노이즈가 크다.
@@ -674,15 +669,9 @@ def _apply_common_rank_scores(
         short_ma_frame.iloc[past_pos] if past_pos >= 0 else pd.Series(dtype="float64")
     )
 
-    order_map: dict[str, str | None] = {}
     slope_map: dict[str, float | None] = {}
     for ticker in close_frame.columns:
         short_value = short_ma_row.get(ticker)
-        long_value = long_ma_row.get(ticker)
-        if pd.isna(short_value) or pd.isna(long_value):
-            order_map[ticker] = None
-        else:
-            order_map[ticker] = "정배열" if float(short_value) >= float(long_value) else "역배열"
         past_short_value = past_short_ma_row.get(ticker)
         if pd.isna(short_value) or pd.isna(past_short_value) or float(past_short_value) == 0.0:
             slope_map[ticker] = None
@@ -690,8 +679,6 @@ def _apply_common_rank_scores(
             slope_map[ticker] = ((float(short_value) / float(past_short_value)) - 1.0) * 100.0
     df["기울기"] = tickers_col.map(slope_map).astype("object")
     df.loc[composite_missing, "기울기"] = None
-    df["배열"] = tickers_col.map(order_map).astype("object")
-    df.loc[composite_missing, "배열"] = None
 
     # 단기이격 = 종가와 단기 이평선의 이격률(%). 이격(장기 기준)과 같은 함수를 써서
     # 두 값이 항상 동일한 지표의 기간만 다른 버전이 되도록 한다.

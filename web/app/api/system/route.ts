@@ -24,6 +24,7 @@ export async function POST(request: NextRequest) {
       "metadata_updater",
       "asset_summary",
       "us_market_stocks",
+      "aus_market_stocks",
       "live_24h_slack",
       "leverage_switch",
       "leverage_tune",
