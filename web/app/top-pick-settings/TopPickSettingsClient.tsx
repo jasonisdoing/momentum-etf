@@ -47,7 +47,9 @@ type TopPickWeightRow = {
   return_3m_pct?: number | null;
   return_6m_pct?: number | null;
   return_12m_pct?: number | null;
-  trend_pct: number | null;
+  deviation_pct?: number | null;
+  slope_pct?: number | null;
+  alignment?: string | null;
   mdd_pct?: number | null;
   sortino?: number | null;
   score: number | null;
@@ -106,7 +108,9 @@ type RankRow = {
   티커: string;
   종목명: string;
   bucket?: number;
-  추세: number | null;
+  이격?: number | null;
+  추세?: number | null;
+  기울기?: number | null;
   배열?: string | null;
   exclude_from_ranking?: boolean;
   is_benchmark?: boolean;
@@ -241,13 +245,15 @@ type TopPickWeightHoverDetail = {
 };
 
 type TopPickReserveCandidate = TopPickTicker & {
-  trend_pct: number | null;
+  deviation_pct: number | null;
+  slope_pct?: number | null;
   alignment?: string | null;
 };
 
 type TopPickSelectedGridRow = TopPickTicker & {
   row_index: number;
-  trend_pct: number | null;
+  deviation_pct: number | null;
+  slope_pct?: number | null;
   alignment?: string | null;
   is_confirmed: boolean;
   is_pending_new: boolean;
@@ -552,7 +558,9 @@ export function TopPickSettingsClient() {
   const [reserveCandidates, setReserveCandidates] = useState<TopPickReserveCandidate[]>([]);
   const [reserveLoading, setReserveLoading] = useState(false);
   const [reserveError, setReserveError] = useState<string | null>(null);
-  const [rankMetaByTicker, setRankMetaByTicker] = useState<Record<string, { trend_pct: number | null; alignment?: string | null }>>({});
+  const [rankMetaByTicker, setRankMetaByTicker] = useState<
+    Record<string, { deviation_pct: number | null; slope_pct?: number | null; alignment?: string | null }>
+  >({});
   const [pendingAddedTickerSet, setPendingAddedTickerSet] = useState<Set<string>>(() => new Set());
   const autoRunStartedRef = useRef(false);
 
@@ -677,23 +685,28 @@ export function TopPickSettingsClient() {
         if (!response.ok || payload.error) {
           throw new Error(payload.error ?? "예비 종목을 불러오지 못했습니다.");
         }
-        const rankMeta: Record<string, { trend_pct: number | null; alignment?: string | null }> = {};
+        const rankMeta: Record<string, { deviation_pct: number | null; slope_pct?: number | null; alignment?: string | null }> = {};
         for (const row of payload.rows ?? []) {
           if (row.티커) {
-            rankMeta[normalizeTicker(row.티커)] = { trend_pct: row.추세, alignment: row.배열 ?? null };
+            rankMeta[normalizeTicker(row.티커)] = {
+              deviation_pct: row.이격 ?? row.추세 ?? null,
+              slope_pct: row.기울기 ?? null,
+              alignment: row.배열 ?? null,
+            };
           }
         }
         setRankMetaByTicker(rankMeta);
         const candidates = (payload.rows ?? [])
           .filter((row) => row.티커 && !row.exclude_from_ranking && !row.is_benchmark)
           .filter((row) => !selectedTickerSet.has(normalizeTicker(row.티커)))
-          .sort((a, b) => (b.추세 ?? Number.NEGATIVE_INFINITY) - (a.추세 ?? Number.NEGATIVE_INFINITY))
+          .sort((a, b) => ((b.이격 ?? b.추세) ?? Number.NEGATIVE_INFINITY) - ((a.이격 ?? a.추세) ?? Number.NEGATIVE_INFINITY))
           .map((row) => ({
             ticker: row.티커,
             name: row.종목명,
             ticker_type: row.source_ticker_type ?? reservePoolId,
             bucket: row.bucket,
-            trend_pct: row.추세,
+            deviation_pct: row.이격 ?? row.추세 ?? null,
+            slope_pct: row.기울기 ?? null,
             alignment: row.배열 ?? null,
           }));
         setReserveCandidates(candidates);
@@ -976,7 +989,7 @@ export function TopPickSettingsClient() {
   const formatScoreSettingLabel = (source?: Partial<TopPickSettings>) => {
     const mainMaDays = source?.MAIN_MA_DAYS ?? "-";
     const poolName = source?.POOL_NAME ?? source?.POOL_TICKER_TYPE;
-    return `${poolName ? `${poolName} · ` : ""}SMA 메인 ${mainMaDays}일 · 추세선 위 투자`;
+    return `${poolName ? `${poolName} · ` : ""}SMA 메인 ${mainMaDays}일 · 이평선 위 투자`;
   };
 
   const runBacktest = async () => {
@@ -1081,11 +1094,24 @@ export function TopPickSettingsClient() {
         cellRenderer: renderReturnPctCell,
       },
       {
-        field: "trend_pct",
-        headerName: "추세",
-        width: 112,
+        field: "deviation_pct",
+        headerName: "이격",
+        width: 86,
         type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => formatNumber(params.value),
+        cellRenderer: renderReturnPctCell,
+      },
+      {
+        field: "slope_pct",
+        headerName: "기울기",
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: renderReturnPctCell,
+      },
+      {
+        field: "alignment",
+        headerName: "배열",
+        width: 78,
+        cellRenderer: renderAlignmentCell,
       },
       {
         field: "mdd_pct",
@@ -1397,7 +1423,8 @@ export function TopPickSettingsClient() {
       tickers.map((item, index) => ({
         ...item,
         row_index: index + 1,
-        trend_pct: rankMetaByTicker[normalizeTicker(item.ticker)]?.trend_pct ?? null,
+        deviation_pct: rankMetaByTicker[normalizeTicker(item.ticker)]?.deviation_pct ?? null,
+        slope_pct: rankMetaByTicker[normalizeTicker(item.ticker)]?.slope_pct ?? null,
         alignment: rankMetaByTicker[normalizeTicker(item.ticker)]?.alignment ?? item.alignment ?? null,
         is_confirmed: !!item.name,
         is_pending_new: pendingAddedTickerSet.has(normalizeTicker(item.ticker)),
@@ -1475,12 +1502,21 @@ export function TopPickSettingsClient() {
         ),
       },
       {
-        field: "trend_pct",
-        headerName: "추세",
+        field: "deviation_pct",
+        headerName: "이격",
         minWidth: 86,
         width: 86,
         sortable: true,
         sort: "desc",
+        type: "rightAligned",
+        cellRenderer: renderReturnPctCell,
+      },
+      {
+        field: "slope_pct",
+        headerName: "기울기",
+        minWidth: 92,
+        width: 92,
+        sortable: true,
         type: "rightAligned",
         cellRenderer: renderReturnPctCell,
       },
@@ -1569,7 +1605,23 @@ export function TopPickSettingsClient() {
           </span>
         ),
       },
-      { field: "trend_pct", headerName: "추세", minWidth: 86, width: 86, type: "rightAligned", cellRenderer: renderReturnPctCell, sort: "desc" },
+      {
+        field: "deviation_pct",
+        headerName: "이격",
+        minWidth: 86,
+        width: 86,
+        type: "rightAligned",
+        cellRenderer: renderReturnPctCell,
+        sort: "desc",
+      },
+      {
+        field: "slope_pct",
+        headerName: "기울기",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        cellRenderer: renderReturnPctCell,
+      },
       {
         field: "alignment",
         headerName: "배열",
@@ -1792,8 +1844,8 @@ export function TopPickSettingsClient() {
                 theme={previewGridTheme}
                 getRowClass={(params) => {
                   const classNames: string[] = [];
-                  const trend = params.data?.trend_pct;
-                  if (typeof trend === "number" && trend <= 0) classNames.push("rankNegativeTrendRow");
+                  const deviation = params.data?.deviation_pct;
+                  if (typeof deviation === "number" && deviation <= 0) classNames.push("rankNegativeTrendRow");
                   if (params.data?.is_pending_new) classNames.push("topPickPendingAddedRow");
                   return classNames.join(" ");
                 }}
@@ -1807,7 +1859,7 @@ export function TopPickSettingsClient() {
                 <div>
                   <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>예비 종목</h2>
                   <p style={{ color: "var(--text-muted)", fontSize: "0.9rem", margin: 0 }}>
-                    {reservePoolId ? `${poolNameById[reservePoolId] ?? reservePoolId} · 추세 순` : "연결 종목풀 없음"}
+                    {reservePoolId ? `${poolNameById[reservePoolId] ?? reservePoolId} · 이격 순` : "연결 종목풀 없음"}
                   </p>
                 </div>
               </div>
@@ -1823,8 +1875,8 @@ export function TopPickSettingsClient() {
                 gridOptions={reserveGridOptions}
                 theme={previewGridTheme}
                 getRowClass={(params) => {
-                  const trend = params.data?.trend_pct;
-                  return typeof trend === "number" && trend <= 0 ? "rankNegativeTrendRow" : "";
+                  const deviation = params.data?.deviation_pct;
+                  return typeof deviation === "number" && deviation <= 0 ? "rankNegativeTrendRow" : "";
                 }}
               />
             </div>

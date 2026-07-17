@@ -17,6 +17,7 @@ from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
 )
 from utils.logger import get_app_logger
+from utils.moving_averages import calculate_moving_average
 from utils.perf_metrics import curve_metrics, mdd_span
 
 logger = get_app_logger()
@@ -295,7 +296,57 @@ def _build_top_pick_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
     if main_ma_days is None:
         account_id = str(settings.get("ACCOUNT_ID") or "").strip()
         main_ma_days = _load_account_pool_ma_context(account_id)["MAIN_MA_DAYS"]
-    return {"order": 1, "main_ma_days": int(main_ma_days), "score_column": "추세"}
+    return {"order": 1, "main_ma_days": int(main_ma_days), "score_column": "이격"}
+
+
+def _build_current_ma_state_maps(
+    close_frame: pd.DataFrame,
+    eval_date: pd.Timestamp,
+    *,
+    short_ma_days: int,
+    main_ma_days: int,
+) -> tuple[dict[str, float | None], dict[str, str | None]]:
+    short_ma_cols: dict[str, pd.Series] = {}
+    main_ma_cols: dict[str, pd.Series] = {}
+    for ticker in close_frame.columns:
+        series = close_frame[ticker].dropna()
+        if series.empty:
+            short_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+            main_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+            continue
+        short_ma_cols[ticker] = calculate_moving_average(series, short_ma_days).reindex(close_frame.index)
+        main_ma_cols[ticker] = calculate_moving_average(series, main_ma_days).reindex(close_frame.index)
+
+    short_ma_frame = pd.DataFrame(short_ma_cols, index=close_frame.index)
+    main_ma_frame = pd.DataFrame(main_ma_cols, index=close_frame.index)
+    if eval_date not in main_ma_frame.index:
+        return ({ticker: None for ticker in close_frame.columns}, {ticker: None for ticker in close_frame.columns})
+
+    short_ma_row = short_ma_frame.loc[eval_date]
+    main_ma_row = main_ma_frame.loc[eval_date]
+    eligible_main_ma_frame = main_ma_frame.loc[main_ma_frame.index <= eval_date]
+    previous_main_ma_row = (
+        eligible_main_ma_frame.iloc[-2]
+        if len(eligible_main_ma_frame.index) >= 2
+        else pd.Series(dtype="float64")
+    )
+
+    slope_map: dict[str, float | None] = {}
+    alignment_map: dict[str, str | None] = {}
+    for ticker in close_frame.columns:
+        short_value = short_ma_row.get(ticker)
+        main_value = main_ma_row.get(ticker)
+        if pd.isna(short_value) or pd.isna(main_value):
+            alignment_map[ticker] = None
+        else:
+            alignment_map[ticker] = "정배열" if float(short_value) >= float(main_value) else "역배열"
+
+        previous_main_value = previous_main_ma_row.get(ticker)
+        if pd.isna(main_value) or pd.isna(previous_main_value) or float(previous_main_value) == 0.0:
+            slope_map[ticker] = None
+        else:
+            slope_map[ticker] = ((float(main_value) / float(previous_main_value)) - 1.0) * 100.0
+    return slope_map, alignment_map
 
 
 def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark: bool = True) -> dict[str, Any]:
@@ -1043,6 +1094,16 @@ def _enrich_weight_rows_with_returns(
     settings = _clean_settings({**current_settings, **snap_settings})
     settings = {**settings, **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip())}
     eval_date = close_frame.index.max() if not close_frame.empty else None
+    slope_map, alignment_map = (
+        _build_current_ma_state_maps(
+            close_frame,
+            eval_date,
+            short_ma_days=int(settings["SHORT_MA_DAYS"]),
+            main_ma_days=int(settings["MAIN_MA_DAYS"]),
+        )
+        if eval_date is not None
+        else ({}, {})
+    )
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
     mdd_map = _build_mdd_map(close_frame, metric_months)
     sortino_raw_row = (
@@ -1069,6 +1130,9 @@ def _enrich_weight_rows_with_returns(
             ),
             "daily_change_pct": daily_change_map.get(ticker),
             "mdd_pct": mdd_map.get(ticker),
+            "deviation_pct": row.get("deviation_pct", row.get("trend_pct")),
+            "slope_pct": None if slope_map.get(ticker) is None else round(float(slope_map[ticker]), 2),
+            "alignment": alignment_map.get(ticker),
             "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
         }
         enriched_row.pop("nickname", None)
@@ -1168,18 +1232,23 @@ def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) ->
     return (mean / downside_std.replace(0, np.nan)) * np.sqrt(252.0)
 
 
-def _allocate_trend_filtered_weights(ticker_trend_pct: dict[str, float | None], stock_max_weight_pct: float) -> dict[str, float]:
-    """개별 추세선 위 종목만 투자하고, 남는 비중은 최대 비중까지 재분배한다."""
-    if not ticker_trend_pct:
+def _allocate_deviation_filtered_weights(
+    ticker_deviation_pct: dict[str, float | None],
+    stock_max_weight_pct: float,
+) -> dict[str, float]:
+    """개별 이평선 위 종목만 투자하고, 남는 비중은 최대 비중까지 재분배한다."""
+    if not ticker_deviation_pct:
         raise ValueError("비중 계산 대상 종목이 없습니다.")
     stock_max_weight = float(stock_max_weight_pct) / 100.0
     if not (0.05 <= stock_max_weight <= 1.0):
         raise ValueError(f"종목 최대 비중(%)은 5 ~ 100 범위여야 합니다: {stock_max_weight_pct}")
 
-    tickers = list(ticker_trend_pct.keys())
+    tickers = list(ticker_deviation_pct.keys())
     slot_weight = 1.0 / len(tickers)
     weights = {ticker: 0.0 for ticker in tickers}
-    active_tickers = [ticker for ticker, trend_pct in ticker_trend_pct.items() if trend_pct is not None and trend_pct > 0]
+    active_tickers = [
+        ticker for ticker, deviation_pct in ticker_deviation_pct.items() if deviation_pct is not None and deviation_pct > 0
+    ]
     if not active_tickers:
         return _normalize_weight_ratio_map({"__CASH__": 1.0, **weights})
 
@@ -1218,7 +1287,7 @@ def calculate_top_pick_weights_for(
     *,
     metric_months: int,
 ) -> dict[str, Any]:
-    # weight_mode 는 저장 호환용으로만 남긴다. 실제 계산은 항상 동일 슬롯 + 개별 추세선 필터다.
+    # weight_mode 는 저장 호환용으로만 남긴다. 실제 계산은 항상 동일 슬롯 + 개별 이평선 필터다.
     if len(tickers) < 3:
         raise ValueError("탑픽 비중 계산에는 확인된 종목이 3개 이상 필요합니다.")
 
@@ -1244,16 +1313,22 @@ def calculate_top_pick_weights_for(
 
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
+    slope_map, alignment_map = _build_current_ma_state_maps(
+        close_frame,
+        eval_date,
+        short_ma_days=int(settings["SHORT_MA_DAYS"]),
+        main_ma_days=int(settings["MAIN_MA_DAYS"]),
+    )
 
     rows: list[dict[str, Any]] = []
     ticker_meta = {item["ticker"]: item for item in tickers}
     excluded_reasons: list[str] = []
-    trend_pct_by_ticker: dict[str, float | None] = {}
+    deviation_pct_by_ticker: dict[str, float | None] = {}
     for ticker in [item["ticker"] for item in tickers]:
-        trend_value = composite_row.get(ticker)
+        deviation_score_value = composite_row.get(ticker)
         sortino_raw_value = sortino_raw_row.get(ticker)
-        point_trend = None if pd.isna(trend_value) else float(trend_value)
-        score = point_trend
+        point_deviation = None if pd.isna(deviation_score_value) else float(deviation_score_value)
+        score = point_deviation
         if score is None:
             close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
             if close_count <= 0:
@@ -1261,13 +1336,14 @@ def calculate_top_pick_weights_for(
             elif close_count < int(MIN_TRADING_DAYS):
                 excluded_reasons.append(f"{ticker}: 가격 데이터 {close_count}개로 부족(최소 {MIN_TRADING_DAYS}개)")
             else:
-                excluded_reasons.append(f"{ticker}: 추세 점수 계산 불가")
+                excluded_reasons.append(f"{ticker}: 이격 계산 불가")
 
-        trend_pct = trend_row.get(ticker)
-        trend_pct_value = None if pd.isna(trend_pct) else float(trend_pct)
-        if score is not None and trend_pct_value is None:
-            excluded_reasons.append(f"{ticker}: 추세 계산 불가")
-        trend_pct_by_ticker[ticker] = trend_pct_value
+        deviation_pct = trend_row.get(ticker)
+        deviation_pct_value = None if pd.isna(deviation_pct) else float(deviation_pct)
+        if score is not None and deviation_pct_value is None:
+            excluded_reasons.append(f"{ticker}: 이격 계산 불가")
+        deviation_pct_by_ticker[ticker] = deviation_pct_value
+        slope_value = slope_map.get(ticker)
         meta = ticker_meta[ticker]
         rows.append(
             {
@@ -1286,8 +1362,11 @@ def calculate_top_pick_weights_for(
                 ),
                 "daily_change_pct": daily_change_map.get(ticker),
                 "mdd_pct": mdd_map.get(ticker),
-                "trend_pct": None if trend_pct_value is None else round(trend_pct_value, 2),
-                "trend_score": None if point_trend is None else round(point_trend, 2),
+                "deviation_pct": None if deviation_pct_value is None else round(deviation_pct_value, 2),
+                "trend_pct": None if deviation_pct_value is None else round(deviation_pct_value, 2),
+                "slope_pct": None if slope_value is None else round(float(slope_value), 2),
+                "alignment": alignment_map.get(ticker),
+                "trend_score": None if point_deviation is None else round(point_deviation, 2),
                 "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
                 "score": None if score is None else round(score, 2),
                 "target_weight_pct": None,
@@ -1297,7 +1376,7 @@ def calculate_top_pick_weights_for(
 
     if excluded_reasons:
         raise ValueError("비중 계산에서 제외되는 종목이 있습니다. " + " / ".join(excluded_reasons))
-    weights = _allocate_trend_filtered_weights(trend_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
+    weights = _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
     for row in rows:
         weight = weights.get(row["ticker"])
@@ -1317,7 +1396,10 @@ def calculate_top_pick_weights_for(
                 "return_6m_pct": None,
                 "return_12m_pct": None,
                 "daily_change_pct": None,
+                "deviation_pct": None,
                 "trend_pct": None,
+                "slope_pct": None,
+                "alignment": None,
                 "trend_score": None,
                 "sortino": None,
                 "score": None,
@@ -1489,18 +1571,18 @@ def _calculate_top_pick_weights_on_date(
     score_date = eligible_dates.max()
     composite_row = composite_frame.loc[score_date]
     trend_row = trend_frame.loc[score_date] if score_date in trend_frame.index else pd.Series(dtype=float)
-    trend_pct_by_ticker: dict[str, float | None] = {}
+    deviation_pct_by_ticker: dict[str, float | None] = {}
     for item in tickers:
         ticker = str(item.get("ticker") or "").strip().upper()
         score_value = composite_row.get(ticker)
-        trend_pct = trend_row.get(ticker)
-        if pd.isna(score_value) or pd.isna(trend_pct):
-            trend_pct_by_ticker[ticker] = None
-        elif float(trend_pct) > 0:
-            trend_pct_by_ticker[ticker] = float(trend_pct)
+        deviation_pct = trend_row.get(ticker)
+        if pd.isna(score_value) or pd.isna(deviation_pct):
+            deviation_pct_by_ticker[ticker] = None
+        elif float(deviation_pct) > 0:
+            deviation_pct_by_ticker[ticker] = float(deviation_pct)
         else:
-            trend_pct_by_ticker[ticker] = float(trend_pct)
-    return _allocate_trend_filtered_weights(trend_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
+            deviation_pct_by_ticker[ticker] = float(deviation_pct)
+    return _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
 
 def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
@@ -1534,7 +1616,7 @@ def run_top_pick_backtest(
     backtest_settings: dict[str, Any] | None = None,
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
-    # weight_mode 는 저장 호환용으로만 받는다. 백테스트도 항상 동일 슬롯 + 개별 추세선 필터를 쓴다.
+    # weight_mode 는 저장 호환용으로만 받는다. 백테스트도 항상 동일 슬롯 + 개별 이평선 필터를 쓴다.
     clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 3:
         raise ValueError("탑픽 백테스트에는 확인된 종목이 3개 이상 필요합니다.")
