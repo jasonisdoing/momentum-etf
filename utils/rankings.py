@@ -12,7 +12,7 @@ from config import (
     BUCKET_MAPPING,
     MARKET_SCHEDULES,
 )
-from core.strategy.scoring import build_composite_rank_scores
+from core.strategy.scoring import build_composite_rank_scores, compute_trend_frame
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
@@ -21,7 +21,7 @@ from utils.cache_utils import (
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.moving_averages import calculate_moving_average
-from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS
+from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS, get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
@@ -39,33 +39,33 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 MA 규칙 항목은 객체여야 합니다.")
 
     short_raw = ma_rule_raw.get("SHORT_MA_DAYS")
-    main_raw = ma_rule_raw.get("MAIN_MA_DAYS")
+    long_raw = ma_rule_raw.get("LONG_MA_DAYS")
     slope_raw = ma_rule_raw.get("SLOPE_DAYS")
     if short_raw is None:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 누락되었습니다.")
-    if main_raw is None:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MAIN_MA_DAYS'가 누락되었습니다.")
+    if long_raw is None:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'LONG_MA_DAYS'가 누락되었습니다.")
     if slope_raw is None:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'SLOPE_DAYS'가 누락되었습니다.")
     try:
         short_days = int(short_raw)
-        main_days = int(main_raw)
+        long_days = int(long_raw)
         slope_days = int(slope_raw)
     except (TypeError, ValueError) as exc:
         raise AccountSettingsError(
-            f"'{ticker_type}' 설정의 MA 일수는 정수여야 합니다: SHORT={short_raw}, MAIN={main_raw}, SLOPE={slope_raw}"
+            f"'{ticker_type}' 설정의 MA 일수는 정수여야 합니다: SHORT={short_raw}, LONG={long_raw}, SLOPE={slope_raw}"
         ) from exc
     if short_days not in MA_DAY_OPTIONS:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'SHORT_MA_DAYS'가 허용값이 아닙니다: {short_days}")
-    if main_days not in MA_DAY_OPTIONS:
-        raise AccountSettingsError(f"'{ticker_type}' 설정의 'MAIN_MA_DAYS'가 허용값이 아닙니다: {main_days}")
+    if long_days not in MA_DAY_OPTIONS:
+        raise AccountSettingsError(f"'{ticker_type}' 설정의 'LONG_MA_DAYS'가 허용값이 아닙니다: {long_days}")
     if slope_days not in SLOPE_DAY_OPTIONS:
         raise AccountSettingsError(f"'{ticker_type}' 설정의 'SLOPE_DAYS'가 허용값이 아닙니다: {slope_days}")
 
     return {
         "order": 1,
         "short_ma_days": short_days,
-        "main_ma_days": main_days,
+        "long_ma_days": long_days,
         "slope_days": slope_days,
         "score_column": _build_ma_rule_score_column(),
     }
@@ -74,7 +74,7 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
 def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
     """종목풀 설정의 단일 MA 파라미터를 내부 규칙 리스트로 변환한다."""
     settings = get_ticker_type_settings(ticker_type)
-    for key in ("SHORT_MA_DAYS", "MAIN_MA_DAYS", "SLOPE_DAYS"):
+    for key in ("SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS"):
         if key not in settings:
             raise AccountSettingsError(f"'{ticker_type}' 설정에 필수 항목 '{key}'가 누락되었습니다.")
     return [
@@ -82,7 +82,7 @@ def get_ticker_type_ma_rules(ticker_type: str) -> list[dict[str, Any]]:
             ticker_type,
             {
                 "SHORT_MA_DAYS": settings["SHORT_MA_DAYS"],
-                "MAIN_MA_DAYS": settings["MAIN_MA_DAYS"],
+                "LONG_MA_DAYS": settings["LONG_MA_DAYS"],
                 "SLOPE_DAYS": settings["SLOPE_DAYS"],
             },
         )
@@ -101,7 +101,7 @@ def build_effective_ma_rules(
             ticker_type,
             {
                 "SHORT_MA_DAYS": override.get("short_ma_days") or base_rule["short_ma_days"],
-                "MAIN_MA_DAYS": override.get("main_ma_days") or base_rule["main_ma_days"],
+                "LONG_MA_DAYS": override.get("long_ma_days") or base_rule["long_ma_days"],
                 "SLOPE_DAYS": override.get("slope_days") or base_rule["slope_days"],
             },
         )
@@ -484,7 +484,7 @@ def _normalize_ranking_values(
         *(monthly_labels or []),
     ]
     one_decimal_columns = ["RSI"]
-    score_columns = ["추세", "이격", "기울기"]
+    score_columns = ["추세", "이격", "단기이격", "기울기"]
     score_columns.extend(
         str(column) for column in normalized.columns if str(column).startswith("추세(") and str(column).endswith(")")
     )
@@ -508,6 +508,46 @@ def _normalize_ranking_values(
     return normalized
 
 
+def hold_eligible_mask(disparity: pd.Series, short_disparity: pd.Series) -> pd.Series:
+    """보유 가능 조건 — ``이격`` 이 양수이고 ``단기이격`` 이 음수가 아님.
+
+    장기 이평선은 종목 선택, 단기 이평선은 손절/익절을 담당한다. 장기 추세가 죽었거나
+    (이격 <= 0) 단기 추세가 꺾이면(단기이격 < 0) 보유하지 않는다.
+
+    순위 화면의 추천(✅)과 백테스트 실적이 같은 규칙을 쓰도록 여기서만 정의한다.
+    종목풀/계좌 조건(고정 보유·벤치마크)은 호출부에서 따로 건다.
+    """
+    return disparity.notna() & (disparity > 0) & short_disparity.notna() & (short_disparity >= 0)
+
+
+def _mark_hold_targets(df: pd.DataFrame, top_n: int) -> pd.DataFrame:
+    """규칙상 보유 대상인 종목에 ``보유대상`` 을 표시한다. 화면의 추천(✅) 기준.
+
+    조건을 모두 만족하는 종목 중 ``이격``(장기 이평선 기준) 상위 ``top_n`` 개:
+
+    * 고정 보유(``exclude_from_ranking``)가 아님 — 투자 후보가 아니다
+    * 벤치마크가 아님 — 비교 기준일 뿐 매수 대상이 아니다
+    * ``이격`` 이 양수 — 장기 이평선 아래면 추세가 죽은 것으로 본다
+    * ``단기이격`` 이 음수가 아님 — 단기 이평선은 손절/익절을 담당하므로,
+      장기 추세가 살아있어도(이격 상위) 단기이격이 음수면 보유 대상에서 뺀다
+
+    조건을 만족하는 종목이 ``top_n`` 보다 적으면 그만큼만 표시한다(억지로 채우지 않는다).
+    """
+    df["보유대상"] = False
+    if "이격" not in df.columns or "단기이격" not in df.columns:
+        return df
+
+    disparity = pd.to_numeric(df["이격"], errors="coerce")
+    short_disparity = pd.to_numeric(df["단기이격"], errors="coerce")
+    eligible = (
+        ~df["exclude_from_ranking"].astype(bool)
+        & ~df["is_benchmark"].astype(bool)
+        & hold_eligible_mask(disparity, short_disparity)
+    )
+    df.loc[disparity[eligible].nlargest(int(top_n)).index, "보유대상"] = True
+    return df
+
+
 def _apply_common_rank_scores(
     df: pd.DataFrame,
     effective_close_series_map: dict[str, pd.Series],
@@ -528,6 +568,7 @@ def _apply_common_rank_scores(
     if not effective_close_series_map or not ma_rules:
         df["추세"] = pd.NA
         df["이격"] = pd.NA
+        df["단기이격"] = pd.NA
         df["기울기"] = pd.NA
         for column in score_columns:
             if column not in df.columns:
@@ -547,6 +588,7 @@ def _apply_common_rank_scores(
     if not series_frames:
         df["추세"] = pd.NA
         df["이격"] = pd.NA
+        df["단기이격"] = pd.NA
         df["기울기"] = pd.NA
         for column in score_columns:
             df[column] = pd.NA
@@ -607,21 +649,21 @@ def _apply_common_rank_scores(
 
     main_rule = ma_rules[0]
     short_days = int(main_rule["short_ma_days"])
-    main_days = int(main_rule["main_ma_days"])
+    long_days = int(main_rule["long_ma_days"])
     short_ma_cols: dict[str, pd.Series] = {}
-    main_ma_cols: dict[str, pd.Series] = {}
+    long_ma_cols: dict[str, pd.Series] = {}
     for ticker in close_frame.columns:
         series = close_frame[ticker].dropna()
         if series.empty:
             short_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
-            main_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+            long_ma_cols[ticker] = pd.Series(float("nan"), index=close_frame.index, dtype="float64")
             continue
         short_ma_cols[ticker] = calculate_moving_average(series, short_days).reindex(close_frame.index)
-        main_ma_cols[ticker] = calculate_moving_average(series, main_days).reindex(close_frame.index)
+        long_ma_cols[ticker] = calculate_moving_average(series, long_days).reindex(close_frame.index)
 
     short_ma_frame = pd.DataFrame(short_ma_cols, index=close_frame.index)
     short_ma_row = short_ma_frame.loc[eval_date]
-    main_ma_row = pd.DataFrame(main_ma_cols, index=close_frame.index).loc[eval_date]
+    long_ma_row = pd.DataFrame(long_ma_cols, index=close_frame.index).loc[eval_date]
 
     # 기울기 = 단기 이평선의 k(설정: SLOPE_DAYS)일 전 대비 변화율(%).
     # 1일 변화는 SMA 특성상 (P_t − P_{t−n})/n 이라 창에서 빠지는 옛 한 봉이 부호를 좌우해 노이즈가 크다.
@@ -636,11 +678,11 @@ def _apply_common_rank_scores(
     slope_map: dict[str, float | None] = {}
     for ticker in close_frame.columns:
         short_value = short_ma_row.get(ticker)
-        main_value = main_ma_row.get(ticker)
-        if pd.isna(short_value) or pd.isna(main_value):
+        long_value = long_ma_row.get(ticker)
+        if pd.isna(short_value) or pd.isna(long_value):
             order_map[ticker] = None
         else:
-            order_map[ticker] = "정배열" if float(short_value) >= float(main_value) else "역배열"
+            order_map[ticker] = "정배열" if float(short_value) >= float(long_value) else "역배열"
         past_short_value = past_short_ma_row.get(ticker)
         if pd.isna(short_value) or pd.isna(past_short_value) or float(past_short_value) == 0.0:
             slope_map[ticker] = None
@@ -650,6 +692,19 @@ def _apply_common_rank_scores(
     df.loc[composite_missing, "기울기"] = None
     df["배열"] = tickers_col.map(order_map).astype("object")
     df.loc[composite_missing, "배열"] = None
+
+    # 단기이격 = 종가와 단기 이평선의 이격률(%). 이격(장기 기준)과 같은 함수를 써서
+    # 두 값이 항상 동일한 지표의 기간만 다른 버전이 되도록 한다.
+    # 종목 선택은 이격(장기), 손절/익절 판단은 단기이격이 담당한다.
+    short_trend_frame = compute_trend_frame(close_frame, short_days)
+    short_trend_row = short_trend_frame.loc[eval_date]
+    df["단기이격"] = tickers_col.map(
+        {
+            ticker: (None if pd.isna(short_trend_row.get(ticker)) else float(short_trend_row.get(ticker)))
+            for ticker in short_trend_row.index
+        }
+    ).astype("object")
+    df.loc[composite_missing, "단기이격"] = None
 
     return df
 
@@ -666,10 +721,7 @@ def build_ticker_type_rankings(
         status_callback("최신 거래일 기준 캐시 상태 확인")
     started_at = perf_counter()
     settings = get_ticker_type_settings(ticker_type)
-    benchmark_ticker = ""
-    benchmark_config = settings.get("BENCHMARK")
-    if isinstance(benchmark_config, dict):
-        benchmark_ticker = str(benchmark_config.get("ticker") or "").strip().upper()
+    benchmark_ticker = get_pool_benchmark_ticker(settings)
     country_code = str(settings.get("country_code") or "").strip().lower()
 
     etfs = get_etfs(ticker_type)
@@ -738,9 +790,9 @@ def build_ticker_type_rankings(
     metric_elapsed = 0.0
     process_elapsed = 0.0
 
-    from utils.portfolio_io import load_all_holding_tickers
+    from utils.portfolio_io import load_holding_accounts_by_ticker
 
-    held_tickers = load_all_holding_tickers()
+    holding_accounts = load_holding_accounts_by_ticker()
 
     if callable(status_callback):
         status_callback("순위 계산")
@@ -782,7 +834,13 @@ def build_ticker_type_rankings(
             "source_ticker_type": ticker_type,
             "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
-            "보유": "보유" if (f"ASX:{ticker}" if country_code == "au" and not ticker.startswith("ASX:") else ticker) in held_tickers else "",
+            # 보유: 이 종목을 실제로 들고 있는 계좌명 목록(쉼표 구분). 없으면 빈 문자열.
+            "보유": ", ".join(
+                holding_accounts.get(
+                    f"ASX:{ticker}" if country_code == "au" and not ticker.startswith("ASX:") else ticker,
+                    [],
+                )
+            ),
             "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,
             **price_metrics,
@@ -845,6 +903,7 @@ def build_ticker_type_rankings(
             "_ticker_sort",
         ]
     )
+    df = _mark_hold_targets(df, int(settings["TOP_N_HOLD"]))
     df = _normalize_ranking_values(df, country_code, monthly_labels=monthly_labels)
     df.attrs["realtime_active"] = realtime_active
     df.attrs["ranking_computed_at"] = ranking_computed_at

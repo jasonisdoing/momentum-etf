@@ -18,10 +18,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from config import CACHE_START_DATE
+from config import CACHE_START_DATE, SLIPPAGE_CONFIG
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
-from utils.rankings import get_ticker_type_ma_rules
+from utils.pool_settings_store import get_pool_benchmark_ticker
+from utils.rankings import get_ticker_type_ma_rules, hold_eligible_mask
+from utils.settings_loader import get_ticker_type_settings
 from utils.stock_list_io import get_etfs
 
 logger = get_app_logger()
@@ -124,13 +126,11 @@ def _spread_stats(spread: pd.Series, forward_days: int, digits: int = 2) -> dict
     if independent < MIN_INDEPENDENT_SAMPLES:
         if spread.empty:
             return None
-        win_rate = float((independent_series > 0).mean() * 100) if independent > 0 else 0.0
         return {
             "insufficient": True,
             "mean": round(float(spread.mean()), digits),
             "wins": wins,
             "losses": losses,
-            "win_rate": round(win_rate, 1),
             "independent_samples": independent,
             "required_samples": MIN_INDEPENDENT_SAMPLES,
             "t_value": None,
@@ -149,7 +149,8 @@ def _spread_stats(spread: pd.Series, forward_days: int, digits: int = 2) -> dict
     return {
         "insufficient": False,
         "mean": round(float(spread.mean()), digits),
-        "win_rate": round(float((spread > 0).mean() * 100), 1),
+        "wins": wins,
+        "losses": losses,
         "t_value": round(t_median, 2),
         "independent_samples": independent,
         "required_samples": MIN_INDEPENDENT_SAMPLES,
@@ -213,10 +214,80 @@ def _cross_sectional_table(
     return rows
 
 
-def compute_pool_signal_backtest(pool_id: str, forward_days: int = 20, months: int = 36) -> dict[str, Any]:
-    """종목풀의 이격/기울기 → 향후 N일 수익 실증 결과를 반환한다.
+def _rule_performance(
+    df: pd.DataFrame,
+    pool_id: str,
+    top_n: int,
+    forward_days: int,
+) -> dict[str, Any] | None:
+    """현재 설정 그대로 규칙을 돌렸을 때의 기간 실적.
 
-    MA 파라미터(단기/메인/기울기 일수)는 해당 종목풀 설정을 그대로 쓴다.
+    순위 화면의 추천(✅)과 동일한 규칙으로 ``forward_days`` 마다 리밸런싱한다.
+    조건을 만족하는 종목이 없는 회차는 현금 보유(0%)로 본다.
+
+    **기대수익이 아니라 지나간 기간의 실적**이다. 표본은 기간/forward_days 회차뿐이라
+    강세장 한 구간이 통째로 들어오면 숫자가 커진다. 그래서 기저(아무 종목이나 보유)를
+    함께 반환해 '규칙이 기여한 몫'을 구분할 수 있게 한다.
+    """
+    calendar = sorted(df["date"].unique())
+    rebalance_dates = calendar[::forward_days]
+    if len(rebalance_dates) < 2:
+        return None
+
+    eligible = df[hold_eligible_mask(df["이격"], df["단기이격"])]
+    segment_returns: list[float] = []
+    baskets: list[set[str]] = []
+    cash_rounds = 0
+    for as_of in rebalance_dates:
+        picked = eligible[eligible["date"] == as_of].nlargest(top_n, "이격")
+        if picked.empty:
+            segment_returns.append(0.0)
+            baskets.append(set())
+            cash_rounds += 1
+            continue
+        segment_returns.append(float(picked["fwd"].mean()))
+        baskets.append(set(picked["ticker"]))
+
+    segments = pd.Series(segment_returns, dtype="float64")
+
+    # 회전율: 직전 회차 대비 바스켓이 바뀐 비율. 슬리피지는 여기에 비례한다.
+    turnovers = [
+        (1.0 - len(prev & cur) / len(cur)) if cur else (1.0 if prev else 0.0)
+        for prev, cur in zip(baskets, baskets[1:])
+    ]
+    turnover = float(np.mean(turnovers)) if turnovers else 0.0
+    slippage = SLIPPAGE_CONFIG.get(pool_id, {})
+    round_trip_pct = float(slippage.get("BUY_PCT", 0.0)) + float(slippage.get("SELL_PCT", 0.0))
+    cost_per_round = turnover * round_trip_pct
+
+    baseline = df[df["date"].isin(rebalance_dates)].groupby("date")["fwd"].mean().reindex(rebalance_dates).fillna(0.0)
+
+    def _compound(values: pd.Series) -> float:
+        return float((1.0 + values / 100.0).prod() - 1.0) * 100.0
+
+    return {
+        "top_n_hold": int(top_n),
+        "rounds": len(rebalance_dates),
+        "cash_rounds": cash_rounds,
+        "mean_return": round(float(segments.mean()), 2),
+        "wins": int((segments > 0).sum()),
+        "losses": int((segments < 0).sum()),
+        "turnover_pct": round(turnover * 100.0, 1),
+        "round_trip_pct": round(round_trip_pct, 2),
+        "cost_per_round_pct": round(cost_per_round, 2),
+        "cumulative_pct": round(_compound(segments), 1),
+        "cumulative_net_pct": round(_compound(segments - cost_per_round), 1),
+        "baseline_cumulative_pct": round(_compound(baseline), 1),
+    }
+
+
+def compute_pool_signal_backtest(pool_id: str, forward_days: int = 20, months: int = 36) -> dict[str, Any]:
+    """종목풀의 이격/단기이격/기울기 → 향후 N일 수익 실증 결과를 반환한다.
+
+    신호 정의는 순위 화면(`utils.rankings`)과 같다. 이격은 장기 이평선, 단기이격은
+    단기 이평선 기준이며, 두 이평선의 역할(선택/손절)이 실제로 성립하는지 확인한다.
+
+    MA 파라미터(단기/장기/기울기 일수)는 해당 종목풀 설정을 그대로 쓴다.
     고정 보유 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다.
     """
     if forward_days not in FORWARD_DAY_OPTIONS:
@@ -228,28 +299,40 @@ def compute_pool_signal_backtest(pool_id: str, forward_days: int = 20, months: i
 
     rule = get_ticker_type_ma_rules(pool_id)[0]
     short_days = int(rule["short_ma_days"])
-    main_days = int(rule["main_ma_days"])
+    long_days = int(rule["long_ma_days"])
     slope_days = int(rule["slope_days"])
     window = int(months) * _TRADING_DAYS_PER_MONTH
 
+    pool_settings = get_ticker_type_settings(pool_id)
+    top_n_hold = int(pool_settings["TOP_N_HOLD"])
+    # 벤치마크는 비교 기준일 뿐 매수 대상이 아니다 — 순위 화면의 추천 규칙과 동일하게 뺀다.
+    benchmark_ticker = get_pool_benchmark_ticker(pool_settings)
+
     all_etfs = get_etfs(pool_id)
-    etfs = [item for item in all_etfs if not bool(item.get("exclude_from_ranking"))]
+    etfs = [
+        item
+        for item in all_etfs
+        if not bool(item.get("exclude_from_ranking"))
+        and str(item.get("ticker") or "").strip().upper() != benchmark_ticker
+    ]
     excluded_count = len(all_etfs) - len(etfs)
     if not etfs:
-        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(고정 보유 제외 후 0개).")
+        raise ValueError(f"'{pool_id}' 종목풀에 분석 가능한 종목이 없습니다(고정 보유·벤치마크 제외 후 0개).")
 
     series_map = load_cached_close_series_bulk(pool_id, [item["ticker"] for item in etfs])
     frames: list[pd.DataFrame] = []
-    min_length = main_days + slope_days + forward_days + 20
+    min_length = long_days + slope_days + forward_days + 20
     for ticker, series in series_map.items():
         close = pd.to_numeric(series, errors="coerce").dropna()
         if len(close) < min_length:
             continue
         short_ma = close.rolling(short_days).mean()
-        main_ma = close.rolling(main_days).mean()
+        long_ma = close.rolling(long_days).mean()
         frame = pd.DataFrame(
             {
-                "이격": (close / main_ma - 1.0) * 100.0,
+                "이격": (close / long_ma - 1.0) * 100.0,
+                # 단기이격: 순위 화면과 동일하게 이격과 같은 식에 단기 이평선을 넣은 값.
+                "단기이격": (close / short_ma - 1.0) * 100.0,
                 "기울기": (short_ma / short_ma.shift(slope_days) - 1.0) * 100.0,
                 # 향후 N거래일 수익률(라벨). 마지막 N일은 미래가 없어 자동 제외된다.
                 "fwd": (close.shift(-forward_days) / close - 1.0) * 100.0,
@@ -278,7 +361,7 @@ def compute_pool_signal_backtest(pool_id: str, forward_days: int = 20, months: i
         "pool_id": pool_id,
         "forward_days": forward_days,
         "months": int(months),
-        "ma_rule": {"short_ma_days": short_days, "main_ma_days": main_days, "slope_days": slope_days},
+        "ma_rule": {"short_ma_days": short_days, "long_ma_days": long_days, "slope_days": slope_days},
         "ticker_count": int(df["ticker"].nunique()),
         "excluded_fixed_count": excluded_count,
         "row_count": int(len(df)),
@@ -289,13 +372,19 @@ def compute_pool_signal_backtest(pool_id: str, forward_days: int = 20, months: i
         "date_to": pd.Timestamp(df["date"].max()).strftime("%Y-%m-%d"),
         "base_return": round(base_return, 2),
         "base_rate": round(base_rate, 2),
+        "performance": _rule_performance(df, pool_id, top_n_hold, forward_days),
         "effective_samples": effective_samples,
         "rate_error": round(rate_error, 2),
         "disparity": _cross_sectional_table(df, "이격", base_return, base_rate, effective_samples, rate_error),
+        "short_disparity": _cross_sectional_table(
+            df, "단기이격", base_return, base_rate, effective_samples, rate_error
+        ),
         "slope": _cross_sectional_table(df, "기울기", base_return, base_rate, effective_samples, rate_error),
         "quantile_count": QUANTILE_COUNT,
         "disparity_long_short": _quantile_long_short(df, "이격", forward_days),
+        "short_disparity_long_short": _quantile_long_short(df, "단기이격", forward_days),
         "slope_long_short": _quantile_long_short(df, "기울기", forward_days),
         "disparity_ic": _information_coefficient(df, "이격", forward_days),
+        "short_disparity_ic": _information_coefficient(df, "단기이격", forward_days),
         "slope_ic": _information_coefficient(df, "기울기", forward_days),
     }

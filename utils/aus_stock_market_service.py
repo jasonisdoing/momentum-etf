@@ -56,9 +56,16 @@ def load_aus_index_stock_market(index: str = "ASX200", min_market_cap_ukm: int =
                 "change_pct": item.get("change_pct"),
                 "volume": item.get("volume"),
                 "market_cap": market_cap,
+                "return_1m_base_date": item.get("return_1m_base_date"),
+                "return_1m_base_price": item.get("return_1m_base_price"),
+                "return_1m_pct": item.get("return_1m_pct"),
                 "return_3m_base_date": item.get("return_3m_base_date"),
                 "return_3m_base_price": item.get("return_3m_base_price"),
                 "return_3m_pct": item.get("return_3m_pct"),
+                "return_12m_base_date": item.get("return_12m_base_date"),
+                "return_12m_base_price": item.get("return_12m_base_price"),
+                "return_12m_pct": item.get("return_12m_pct"),
+                "mdd_12m_pct": item.get("mdd_12m_pct"),
             }
         )
 

@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -32,9 +33,16 @@ type UsMarketStockRow = {
   change_pct: number | null;
   volume: number | null;
   market_cap: number | null;
+  return_1m_base_date: string | null;
+  return_1m_base_price: number | null;
+  return_1m_pct: number | null;
   return_3m_base_date: string | null;
   return_3m_base_price: number | null;
   return_3m_pct: number | null;
+  return_12m_base_date: string | null;
+  return_12m_base_price: number | null;
+  return_12m_pct: number | null;
+  mdd_12m_pct: number | null;
 };
 
 type UsMarketStockGridRow = UsMarketStockRow & {
@@ -315,14 +323,6 @@ export function UsMarketStockManager({
         cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
       },
       {
-        headerName: "현재가",
-        field: "current_price",
-        width: 130,
-        minWidth: 108,
-        type: "rightAligned",
-        valueFormatter: (p) => formatUsd(p.value),
-      },
-      {
         headerName: "등락률",
         field: "change_pct",
         width: 110,
@@ -335,6 +335,70 @@ export function UsMarketStockManager({
         },
       },
       {
+        headerName: "현재가",
+        field: "current_price",
+        width: 130,
+        minWidth: 108,
+        type: "rightAligned",
+        valueFormatter: (p) => formatUsd(p.value),
+      },
+      {
+        headerName: "1개월",
+        field: "return_1m_pct",
+        width: 104,
+        minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "3개월",
+        field: "return_3m_pct",
+        width: 104,
+        minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "12개월",
+        field: "return_12m_pct",
+        width: 108,
+        minWidth: 100,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "MDD(12개월)",
+        field: "mdd_12m_pct",
+        width: 132,
+        minWidth: 122,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "거래량",
+        field: "volume",
+        width: 120,
+        minWidth: 110,
+        type: "rightAligned",
+        valueFormatter: (p) => formatVolume(p.value),
+      },
+      {
         headerName: "시가총액",
         field: "market_cap",
         width: 160,
@@ -342,18 +406,6 @@ export function UsMarketStockManager({
         type: "rightAligned",
         sort: "desc",
         valueFormatter: (p) => formatUsdMarketCap(p.value),
-      },
-      {
-        headerName: "3개월(%)",
-        field: "return_3m_pct",
-        width: 116,
-        minWidth: 104,
-        type: "rightAligned",
-        valueFormatter: (p) => formatPercent(p.value),
-        cellClassRules: {
-          metricPositive: (p) => p.value != null && p.value > 0,
-          metricNegative: (p) => p.value != null && p.value < 0,
-        },
       },
       {
         field: "__selected__",
@@ -506,7 +558,7 @@ export function UsMarketStockManager({
                 .filter(isUsTickerPool)
                 .map((pool) => (
                   <option key={pool.ticker_type} value={pool.ticker_type}>
-                    {pool.name}
+                    {formatPoolLabel(pool)}
                   </option>
                 ))}
             </select>

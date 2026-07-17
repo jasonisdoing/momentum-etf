@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -28,6 +29,10 @@ type KorMarketStockRow = {
   change_pct: number | null;
   volume: number | null;
   market_cap: number | null;
+  return_1m_pct: number | null;
+  return_3m_pct: number | null;
+  return_12m_pct: number | null;
+  mdd_12m_pct: number | null;
 };
 
 type KorMarketStockGridRow = KorMarketStockRow & {
@@ -293,6 +298,18 @@ export function KorMarketStockManager({
         minWidth: 180,
       },
       {
+        headerName: "등락률",
+        field: "change_pct",
+        width: 110,
+        minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
         headerName: "현재가",
         field: "current_price",
         width: 130,
@@ -301,10 +318,46 @@ export function KorMarketStockManager({
         valueFormatter: (p) => formatKrw(p.value),
       },
       {
-        headerName: "등락률",
-        field: "change_pct",
-        width: 110,
+        headerName: "1개월",
+        field: "return_1m_pct",
+        width: 104,
         minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "3개월",
+        field: "return_3m_pct",
+        width: 104,
+        minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "12개월",
+        field: "return_12m_pct",
+        width: 108,
+        minWidth: 100,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "MDD(12개월)",
+        field: "mdd_12m_pct",
+        width: 132,
+        minWidth: 122,
         type: "rightAligned",
         valueFormatter: (p) => formatPercent(p.value),
         cellClassRules: {
@@ -498,7 +551,7 @@ export function KorMarketStockManager({
                 .filter((p) => p.name.includes("한국 개별주"))
                 .map((pool) => (
                   <option key={pool.ticker_type} value={pool.ticker_type}>
-                    {pool.name}
+                    {formatPoolLabel(pool)}
                   </option>
                 ))}
             </select>

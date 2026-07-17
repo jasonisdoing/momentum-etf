@@ -24,9 +24,16 @@ type AusMarketStocksResponse = {
     change_pct: number | null;
     volume: number | null;
     market_cap: number | null;
+    return_1m_base_date: string | null;
+    return_1m_base_price: number | null;
+    return_1m_pct: number | null;
     return_3m_base_date: string | null;
     return_3m_base_price: number | null;
     return_3m_pct: number | null;
+    return_12m_base_date: string | null;
+    return_12m_base_price: number | null;
+    return_12m_pct: number | null;
+    mdd_12m_pct: number | null;
   }>;
 };
 

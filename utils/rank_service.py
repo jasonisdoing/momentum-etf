@@ -35,7 +35,7 @@ def _build_rank_cache_key(
     ma_rule_key = tuple(
         (
             int(rule.get("short_ma_days") or 0),
-            int(rule.get("main_ma_days") or 0),
+            int(rule.get("long_ma_days") or 0),
             int(rule.get("slope_days") or 0),
         )
         for rule in ma_rules
@@ -307,6 +307,7 @@ def _build_missing_ticker_rows(
                 "상장일": "-",
                 "추세": None,
                 "보유": "",
+                "보유대상": False,
                 "현재가": None,
                 "exclude_from_ranking": False,
                 "cache_missing": True,

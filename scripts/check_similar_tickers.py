@@ -41,7 +41,7 @@ def load_market_data(
         raise ValueError(f"종목풀 '{ticker_type}'의 country_code가 비어 있습니다.")
 
     ma_rules = get_ticker_type_ma_rules(ticker_type)
-    lookback_days = max(int(rule["main_ma_days"]) for rule in ma_rules)
+    lookback_days = max(int(rule["long_ma_days"]) for rule in ma_rules)
 
     etfs = get_etfs(ticker_type)
     tickers = sorted({str(etf["ticker"]).strip().upper() for etf in etfs if etf.get("ticker")})

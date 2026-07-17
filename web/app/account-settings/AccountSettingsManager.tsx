@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { useToast } from "../components/ToastProvider";
 
 type Benchmark = { ticker?: string; name?: string };
@@ -24,7 +25,7 @@ type AccountEntry = {
   save_method?: string | null;
 };
 
-type PoolOption = { ticker_type: string; name?: string; icon?: string };
+type PoolOption = { ticker_type: string; name?: string; icon?: string; order?: number };
 
 type ApiResponse = { accounts?: AccountEntry[]; error?: string };
 
@@ -211,8 +212,7 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
           <option value="">선택 안 함</option>
           {pools.map((pool) => (
             <option key={pool.ticker_type} value={pool.ticker_type}>
-              {pool.icon ? `${pool.icon} ` : ""}
-              {pool.name ?? pool.ticker_type} ({pool.ticker_type})
+              {formatPoolLabel(pool)}
             </option>
           ))}
         </select>

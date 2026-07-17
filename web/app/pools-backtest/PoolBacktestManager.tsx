@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { formatPoolLabel } from "@/lib/pool-label";
 import { useToast } from "../components/ToastProvider";
 
 type SignalRow = {
@@ -20,39 +21,59 @@ type SignalRow = {
 type LongShort = {
   insufficient: boolean;
   mean: number;
-  win_rate: number;
+  wins: number;
+  losses: number;
   t_value: number | null;
   independent_samples: number;
   required_samples: number;
   significant: boolean;
 };
 
+type Performance = {
+  top_n_hold: number;
+  rounds: number;
+  cash_rounds: number;
+  mean_return: number;
+  wins: number;
+  losses: number;
+  turnover_pct: number;
+  round_trip_pct: number;
+  cost_per_round_pct: number;
+  cumulative_pct: number;
+  cumulative_net_pct: number;
+  baseline_cumulative_pct: number;
+};
+
 type BacktestResult = {
   pool_id: string;
   forward_days: number;
   months: number;
-  ma_rule: { short_ma_days: number; main_ma_days: number; slope_days: number };
+  ma_rule: { short_ma_days: number; long_ma_days: number; slope_days: number };
   ticker_count: number;
   excluded_fixed_count: number;
   row_count: number;
   trading_days: number;
   base_return: number;
   base_rate: number;
+  performance: Performance | null;
   effective_samples: number;
   rate_error: number;
   date_from: string;
   date_to: string;
   quantile_count: number;
   disparity: SignalRow[];
+  short_disparity: SignalRow[];
   slope: SignalRow[];
   disparity_long_short: LongShort | null;
+  short_disparity_long_short: LongShort | null;
   slope_long_short: LongShort | null;
   disparity_ic: LongShort | null;
+  short_disparity_ic: LongShort | null;
   slope_ic: LongShort | null;
   error?: string;
 };
 
-type PoolOption = { ticker_type: string; name: string };
+type PoolOption = { ticker_type: string; name: string; order: number; icon: string };
 type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
@@ -167,9 +188,8 @@ export function PoolBacktestManager() {
         <strong>{title}</strong> {value}
         <span style={{ color: "var(--text-muted)" }}>
           {" · "}
-          {opts.winLabel} {stat.win_rate.toFixed(0)}%
+          {opts.winLabel} {stat.wins}승 {stat.losses}패
           {!stat.insufficient && <>{" · "}t {stat.t_value === null ? "-" : formatSigned(stat.t_value, 2)}</>}
-          {" · "}독립표본 {stat.independent_samples}개
         </span>
         <strong style={{ marginLeft: 8, color: stat.insufficient || !stat.significant ? "#b45309" : "#2f9e44" }}>
           {stat.insufficient
@@ -200,13 +220,13 @@ export function PoolBacktestManager() {
         {renderStat(ls, `롱숏(${spreadLabel})`, {
           digits: 2,
           suffix: "%p",
-          winLabel: "이긴 날",
+          winLabel: "독립구간",
           hint: "같은 날 최상·최하 등급을 빼서 시장 요인을 상쇄한 값입니다.",
         })}
         {renderStat(ic, "IC(날짜별 상관)", {
           digits: 3,
           suffix: "",
-          winLabel: "양수인 날",
+          winLabel: "독립구간",
           hint: "그날 신호 순위와 향후 수익 순위의 상관. 아래 등급 평균의 매끄러운 단조성은 10개의 증거가 아니라 같은 날을 10칸으로 나눈 것이라, 미약한 경향도 단조로 보입니다. IC 는 날짜마다 관계가 실제로 성립했는지를 봅니다.",
         })}
         <div style={{ overflowX: "auto" }}>
@@ -260,7 +280,7 @@ export function PoolBacktestManager() {
                 {pools.length === 0 ? <option value="">불러오는 중…</option> : null}
                 {pools.map((p) => (
                   <option key={p.ticker_type} value={p.ticker_type}>
-                    {p.name}
+                    {formatPoolLabel(p)}
                   </option>
                 ))}
               </select>
@@ -312,6 +332,73 @@ export function PoolBacktestManager() {
 
       {result ? (
         <>
+          {/* 현재 설정 그대로 돌렸을 때의 기간 실적 — 순위 화면의 추천(✅) 규칙과 동일 */}
+          {result.performance ? (
+            <div className="card appCard">
+              <div className="card-body">
+                <h3 style={{ fontSize: "0.98rem", fontWeight: 800, margin: "0 0 2px" }}>
+                  최근 {result.months}개월 실적 — 현재 설정 그대로
+                </h3>
+                <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", margin: "0 0 10px" }}>
+                  순위 화면의 추천(✅)과 같은 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
+                  {result.forward_days}일마다 리밸런싱({result.performance.rounds}회
+                  {result.performance.cash_rounds > 0 ? `, 후보 없어 현금 ${result.performance.cash_rounds}회` : ""}).
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "baseline" }}>
+                  <div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>규칙 누적(슬리피지 차감)</div>
+                    <div
+                      style={{ fontSize: "1.6rem", fontWeight: 800 }}
+                      className={signedClass(result.performance.cumulative_net_pct)}
+                    >
+                      {formatSigned(result.performance.cumulative_net_pct, 1)}%
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>기저 누적 (아무 종목이나)</div>
+                    <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-muted)" }}>
+                      {formatSigned(result.performance.baseline_cumulative_pct, 1)}%
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>규칙이 기여한 몫</div>
+                    <div
+                      style={{ fontSize: "1.6rem", fontWeight: 800 }}
+                      className={signedClass(
+                        result.performance.cumulative_net_pct - result.performance.baseline_cumulative_pct,
+                      )}
+                    >
+                      {formatSigned(
+                        result.performance.cumulative_net_pct - result.performance.baseline_cumulative_pct,
+                        1,
+                      )}
+                      %p
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>회차당 · 승패</div>
+                    <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>
+                      {formatSigned(result.performance.mean_return, 2)}% · {result.performance.wins}승{" "}
+                      {result.performance.losses}패
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>회전율 · 거래비용</div>
+                    <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>
+                      {result.performance.turnover_pct.toFixed(0)}% · 회차당 −{result.performance.cost_per_round_pct.toFixed(2)}%
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
+                  <strong>기대수익이 아니라 지나간 {result.months}개월의 실적입니다</strong> — 리밸런싱{" "}
+                  {result.performance.rounds}회가 표본의 전부라, 큰 상승장이 통째로 들어오면 숫자가 커집니다. 다음 기간에
+                  이만큼을 기대하면 안 됩니다. <strong>기저와의 차이(규칙이 기여한 몫)</strong>를 보세요 — 이 값이 작으면
+                  수익의 대부분은 규칙이 아니라 시장이 만든 것입니다.
+                </p>
+              </div>
+            </div>
+          ) : null}
+
           {/* 요약: 기저율/오차범위를 가장 먼저 크게 */}
           <div className="card appCard">
             <div className="card-body">
@@ -343,7 +430,7 @@ export function PoolBacktestManager() {
               </div>
               <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
                 종목 {result.ticker_count}개(고정 {result.excluded_fixed_count}개 제외) · 거래일 {result.trading_days}일 · 행{" "}
-                {result.row_count.toLocaleString()}개 · 단기 {result.ma_rule.short_ma_days}일 / 메인 {result.ma_rule.main_ma_days}일 / 기울기{" "}
+                {result.row_count.toLocaleString()}개 · 단기 {result.ma_rule.short_ma_days}일 / 장기 {result.ma_rule.long_ma_days}일 / 기울기{" "}
                 {result.ma_rule.slope_days}일
                 <br />
                 <strong>행 {result.row_count.toLocaleString()}개가 곧 표본이 아닙니다</strong> — {result.forward_days}일 수익률이 매일 겹쳐
@@ -358,10 +445,18 @@ export function PoolBacktestManager() {
           <div className="poolBtSplit">
             {renderTable(
               `이격 ${result.quantile_count}등급`,
-              `종가가 메인 이평선(${result.ma_rule.main_ma_days}일) 대비 얼마나 벌어졌나 · 1등급 = 이격 상위`,
+              `종가가 장기 이평선(${result.ma_rule.long_ma_days}일) 대비 얼마나 벌어졌나 · 1등급 = 이격 상위`,
               result.disparity,
               result.disparity_long_short,
               result.disparity_ic,
+              `1등급 − ${result.quantile_count}등급`,
+            )}
+            {renderTable(
+              `단기이격 ${result.quantile_count}등급`,
+              `종가가 단기 이평선(${result.ma_rule.short_ma_days}일) 대비 얼마나 벌어졌나 · 1등급 = 단기이격 상위`,
+              result.short_disparity,
+              result.short_disparity_long_short,
+              result.short_disparity_ic,
               `1등급 − ${result.quantile_count}등급`,
             )}
             {renderTable(
@@ -402,12 +497,17 @@ export function PoolBacktestManager() {
           background: rgba(148, 163, 184, 0.06);
           line-height: 1.5;
         }
-        /* 이격(좌) · 기울기(우) 나란히. 좁아지면 1열로 접힌다. */
+        /* 이격 · 단기이격 · 기울기 나란히. 좁아지면 2열 → 1열로 접힌다. */
         .poolBtSplit {
           display: grid;
-          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          grid-template-columns: repeat(3, minmax(0, 1fr));
           gap: 12px;
           align-items: start;
+        }
+        @media (max-width: 1500px) {
+          .poolBtSplit {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
         }
         @media (max-width: 1100px) {
           .poolBtSplit {

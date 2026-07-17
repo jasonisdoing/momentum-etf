@@ -1658,10 +1658,6 @@ a {
   color: #2e7d32;
 }
 
-.rankHeldRow {
-  background: rgba(46, 125, 50, 0.1);
-}
-
 .rankGridWrap,
 .appGridFillWrap {
   overflow: hidden;
@@ -3523,12 +3519,19 @@ a {
   color: #fff;
 }
 
-.rankAgGrid .ag-row.rankHeldRow {
-  background: rgba(102, 204, 102, 0.35);
+/* 보유 계좌 목록 — 계좌가 여러 개면 길어지므로 한 줄 말줄임.
+   .ag-cell 이 flex 라서 자식의 min-width 가 auto 면 줄어들지 않아 말줄임이 안 걸린다. */
+.rankAgGrid .ag-cell.rankHoldCell,
+.rankAgGrid .ag-cell.rankHoldCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
 }
 
-.rankAgGrid .ag-row.rankHeldRow:hover {
-  background: rgba(102, 204, 102, 0.42);
+.rankAgGrid .rankHoldAccountsCell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .rankAgGrid .ag-row.rankNegativeTrendRow {
@@ -3539,25 +3542,13 @@ a {
   background: rgba(100, 116, 139, 0.38);
 }
 
-.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow {
-  background: rgba(102, 180, 102, 0.38);
-}
-
-.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow:hover {
-  background: rgba(102, 180, 102, 0.45);
-}
-
 .rankAgGrid .ag-row.rankFixedRow,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow,
-.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow {
+.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow {
   background: rgba(199, 210, 254, 0.5);
 }
 
 .rankAgGrid .ag-row.rankFixedRow:hover,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow:hover,
-.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow:hover,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow:hover {
+.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow:hover {
   background: rgba(199, 210, 254, 0.62);
 }
 
