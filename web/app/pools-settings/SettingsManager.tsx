@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
 import { useToast } from "../components/ToastProvider";
+import { AppModal } from "../components/AppModal";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
 const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS", "BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT"] as const;
@@ -409,38 +410,12 @@ export function SettingsManager() {
     </label>
   );
 
-  const renderDraftCard = ({
-    title,
-    subtitle,
-    draft,
-    onChange,
-    idReadonly,
-    updatedAt,
-    primaryButton,
-    secondaryButton,
-  }: {
-    title: string;
-    subtitle: string;
-    draft: PoolDraft;
-    onChange: (key: keyof PoolDraft, value: string) => void;
-    idReadonly?: boolean;
-    updatedAt?: string;
-    primaryButton: React.ReactNode;
-    secondaryButton: React.ReactNode;
-  }) => (
-    <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
-        <div>
-          <div style={{ fontWeight: 850, fontSize: "0.98rem" }}>{title}</div>
-          <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{subtitle}</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {updatedAt ? <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{formatKstDateTime(updatedAt)}</span> : null}
-          {primaryButton}
-          {secondaryButton}
-        </div>
-      </div>
-
+  const renderDraftFormFields = (
+    draft: PoolDraft,
+    onChange: (key: keyof PoolDraft, value: string) => void,
+    idReadonly?: boolean,
+  ) => (
+    <>
       <div style={rowStyle}>
         {renderField(
           "ID",
@@ -532,6 +507,41 @@ export function SettingsManager() {
         <span style={{ ...labelStyle, width: 72 }}>벤치마크</span>
         <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
       </div>
+    </>
+  );
+
+  const renderDraftCard = ({
+    title,
+    subtitle,
+    draft,
+    onChange,
+    idReadonly,
+    updatedAt,
+    primaryButton,
+    secondaryButton,
+  }: {
+    title: string;
+    subtitle: string;
+    draft: PoolDraft;
+    onChange: (key: keyof PoolDraft, value: string) => void;
+    idReadonly?: boolean;
+    updatedAt?: string;
+    primaryButton: React.ReactNode;
+    secondaryButton: React.ReactNode;
+  }) => (
+    <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 850, fontSize: "0.98rem" }}>{title}</div>
+          <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{subtitle}</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {updatedAt ? <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{formatKstDateTime(updatedAt)}</span> : null}
+          {primaryButton}
+          {secondaryButton}
+        </div>
+      </div>
+      {renderDraftFormFields(draft, onChange, idReadonly)}
     </div>
   );
 
@@ -558,27 +568,6 @@ export function SettingsManager() {
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(max(520px, calc(50% - 5px)), 1fr))", gap: 10 }}>
-              {isCreatingNew && renderDraftCard({
-                title: "신규 종목풀",
-                subtitle: "ticker_type 은 생성 후 변경할 수 없습니다.",
-                draft: newDraft,
-                onChange: updateNewDraft,
-                primaryButton: (
-                  <button
-                    type="button"
-                    className="btn btn-sm btn-primary"
-                    disabled={creating || !newDraft.ticker_type.trim() || !newDraft.name.trim()}
-                    onClick={() => void handleCreate()}
-                  >
-                    {creating ? "추가 중…" : "추가"}
-                  </button>
-                ),
-                secondaryButton: (
-                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => { setNewDraft(EMPTY_DRAFT); setIsCreatingNew(false); }}>
-                    취소
-                  </button>
-                ),
-              })}
               {rows.map((pool) => {
                 const draft = drafts[pool.ticker_type] ?? toDraft(pool);
                 const dirty = isDirty(draft, pool);
@@ -615,6 +604,43 @@ export function SettingsManager() {
           </div>
         </div>
       </section>
+
+      <AppModal
+        open={isCreatingNew}
+        title="신규 종목풀"
+        subtitle="ticker_type 은 생성 후 변경할 수 없습니다."
+        onClose={() => {
+          setNewDraft(EMPTY_DRAFT);
+          setIsCreatingNew(false);
+        }}
+        size="xl"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, width: "100%" }}>
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={() => {
+                setNewDraft(EMPTY_DRAFT);
+                setIsCreatingNew(false);
+              }}
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={creating || !newDraft.ticker_type.trim() || !newDraft.name.trim()}
+              onClick={() => void handleCreate()}
+            >
+              {creating ? "추가 중…" : "추가"}
+            </button>
+          </div>
+        }
+      >
+        <div style={{ display: "grid", gap: 8 }}>
+          {renderDraftFormFields(newDraft, updateNewDraft)}
+        </div>
+      </AppModal>
     </div>
   );
 }
