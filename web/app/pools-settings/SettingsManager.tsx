@@ -6,7 +6,7 @@ import { formatKstDateTime } from "@/lib/datetime";
 import { useToast } from "../components/ToastProvider";
 
 /** 숫자 셀렉트/입력으로 편집하는 키. */
-const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS"] as const;
+const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS", "BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT"] as const;
 
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
 const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK"] as const;
@@ -19,11 +19,14 @@ const KEY_LABELS: Record<EditableKey, string> = {
   SHORT_MA_DAYS: "단기 이평선",
   LONG_MA_DAYS: "장기 이평선",
   SLOPE_DAYS: "기울기 일수",
+  BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
+  SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   BENCHMARK: "벤치마크",
 };
 
 const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
 const DEFAULT_SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
+const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
 const COUNTRY_OPTIONS = ["kor", "us", "au"] as const;
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
@@ -46,7 +49,7 @@ type PoolEntry = {
 
 type PoolSettingsResponse = {
   pools: PoolEntry[];
-  constraints: { ma_day_options: number[]; slope_day_options?: number[]; editable_keys: string[] };
+  constraints: { ma_day_options: number[]; slope_day_options?: number[]; slippage_pct_options?: number[]; editable_keys: string[] };
   error?: string;
 };
 
@@ -73,6 +76,8 @@ const EMPTY_DRAFT: PoolDraft = {
   SHORT_MA_DAYS: "10",
   LONG_MA_DAYS: "20",
   SLOPE_DAYS: "5",
+  BUY_SLIPPAGE_PCT: "0.25",
+  SELL_SLIPPAGE_PCT: "0.25",
   benchmarkTicker: "",
   benchmarkName: "",
 };
@@ -89,6 +94,7 @@ const inputStyle: React.CSSProperties = {
   fontSize: "0.86rem",
   minHeight: 30,
 };
+const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 700, fontSize: "0.82rem", flexShrink: 0 };
 
 function toDraft(pool: PoolEntry): PoolDraft {
   return {
@@ -102,6 +108,8 @@ function toDraft(pool: PoolEntry): PoolDraft {
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
     SLOPE_DAYS: String(pool.settings.SLOPE_DAYS?.value ?? ""),
+    BUY_SLIPPAGE_PCT: String(pool.settings.BUY_SLIPPAGE_PCT?.value ?? ""),
+    SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
     benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
   };
@@ -119,6 +127,8 @@ function draftToValues(draft: PoolDraft) {
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
     SLOPE_DAYS: Number(draft.SLOPE_DAYS),
+    BUY_SLIPPAGE_PCT: Number(draft.BUY_SLIPPAGE_PCT),
+    SELL_SLIPPAGE_PCT: Number(draft.SELL_SLIPPAGE_PCT),
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
     BENCHMARK: draft.benchmarkTicker.trim()
       ? { ticker: draft.benchmarkTicker.trim().toUpperCase(), name: draft.benchmarkName.trim() }
@@ -243,6 +253,7 @@ export function SettingsManager() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
 
   const rows = useMemo(() => {
     if (!data) return [] as PoolEntry[];
@@ -297,6 +308,7 @@ export function SettingsManager() {
       }
       toast.success("종목풀을 추가했습니다.");
       setNewDraft(EMPTY_DRAFT);
+      setIsCreatingNew(false);
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "종목풀 생성에 실패했습니다.");
@@ -379,60 +391,148 @@ export function SettingsManager() {
   const slopeDayOptions = data.constraints.slope_day_options?.length
     ? data.constraints.slope_day_options
     : DEFAULT_SLOPE_DAY_OPTIONS;
+  const slippageOptions = data.constraints.slippage_pct_options?.length
+    ? data.constraints.slippage_pct_options
+    : DEFAULT_SLIPPAGE_PCT_OPTIONS;
 
-  const renderDraftCells = (draft: PoolDraft, onChange: (key: keyof PoolDraft, value: string) => void, options?: { idReadonly?: boolean }) => (
-    <>
-      <td>
-        <input
-          style={{ ...inputStyle, width: 96, background: options?.idReadonly ? "#f8fafc" : undefined }}
-          value={draft.ticker_type}
-          readOnly={options?.idReadonly}
-          onChange={(event) => onChange("ticker_type", event.target.value)}
-        />
-      </td>
-      <td>
-        <input style={{ ...inputStyle, width: 160 }} value={draft.name} onChange={(event) => onChange("name", event.target.value)} />
-      </td>
-      <td>
-        <input style={{ ...inputStyle, width: 56 }} value={draft.icon} onChange={(event) => onChange("icon", event.target.value)} />
-      </td>
-      <td>
-        <input
-          type="number"
-          style={{ ...inputStyle, width: 64, textAlign: "right" }}
-          value={draft.order}
-          onChange={(event) => onChange("order", event.target.value)}
-        />
-      </td>
-      <td>
-        <SelectField value={draft.country_code} options={COUNTRY_OPTIONS} width={76} onChange={(value) => onChange("country_code", value)} />
-      </td>
-      <td>
-        <SelectField value={draft.currency} options={CURRENCY_OPTIONS} width={82} onChange={(value) => onChange("currency", value)} />
-      </td>
-      <td>
-        <input
-          type="number"
-          min={1}
-          max={100}
-          style={{ ...inputStyle, width: 84, textAlign: "right" }}
-          value={draft.TOP_N_HOLD}
-          onChange={(event) => onChange("TOP_N_HOLD", event.target.value)}
-        />
-      </td>
-      <td>
-        <SelectField value={draft.SHORT_MA_DAYS} options={maDayOptions} width={90} onChange={(value) => onChange("SHORT_MA_DAYS", value)} />
-      </td>
-      <td>
-        <SelectField value={draft.LONG_MA_DAYS} options={maDayOptions} width={90} onChange={(value) => onChange("LONG_MA_DAYS", value)} />
-      </td>
-      <td>
-        <SelectField value={draft.SLOPE_DAYS} options={slopeDayOptions} width={90} onChange={(value) => onChange("SLOPE_DAYS", value)} />
-      </td>
-      <td>
+  const rowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 };
+  const inputLabelStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, minWidth: 160 };
+
+  const renderField = (
+    label: string,
+    node: React.ReactNode,
+    options: { minWidth?: number; labelWidth?: number } = {},
+  ) => (
+    <label style={{ ...inputLabelStyle, minWidth: options.minWidth ?? 160 }}>
+      <span style={{ ...labelStyle, width: options.labelWidth ?? 72 }}>{label}</span>
+      {node}
+    </label>
+  );
+
+  const renderDraftCard = ({
+    title,
+    subtitle,
+    draft,
+    onChange,
+    idReadonly,
+    updatedAt,
+    primaryButton,
+    secondaryButton,
+  }: {
+    title: string;
+    subtitle: string;
+    draft: PoolDraft;
+    onChange: (key: keyof PoolDraft, value: string) => void;
+    idReadonly?: boolean;
+    updatedAt?: string;
+    primaryButton: React.ReactNode;
+    secondaryButton: React.ReactNode;
+  }) => (
+    <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontWeight: 850, fontSize: "0.98rem" }}>{title}</div>
+          <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{subtitle}</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          {updatedAt ? <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{formatKstDateTime(updatedAt)}</span> : null}
+          {primaryButton}
+          {secondaryButton}
+        </div>
+      </div>
+
+      <div style={rowStyle}>
+        {renderField(
+          "ID",
+          <input
+            style={{ ...inputStyle, width: 110, background: idReadonly ? "#f8fafc" : undefined }}
+            value={draft.ticker_type}
+            readOnly={idReadonly}
+            onChange={(event) => onChange("ticker_type", event.target.value)}
+          />,
+          { minWidth: 178, labelWidth: 44 },
+        )}
+        {renderField(
+          "이름",
+          <input style={{ ...inputStyle, width: 220 }} value={draft.name} onChange={(event) => onChange("name", event.target.value)} />,
+          { minWidth: 292, labelWidth: 44 },
+        )}
+        {renderField(
+          "아이콘",
+          <input style={{ ...inputStyle, width: 56 }} value={draft.icon} onChange={(event) => onChange("icon", event.target.value)} />,
+          { minWidth: 126, labelWidth: 56 },
+        )}
+        {renderField(
+          "순서",
+          <input
+            type="number"
+            style={{ ...inputStyle, width: 62, textAlign: "right" }}
+            value={draft.order}
+            onChange={(event) => onChange("order", event.target.value)}
+          />,
+          { minWidth: 126, labelWidth: 44 },
+        )}
+      </div>
+
+      <div style={rowStyle}>
+        {renderField(
+          "국가",
+          <SelectField value={draft.country_code} options={COUNTRY_OPTIONS} width={82} onChange={(value) => onChange("country_code", value)} />,
+          { minWidth: 144, labelWidth: 44 },
+        )}
+        {renderField(
+          "통화",
+          <SelectField value={draft.currency} options={CURRENCY_OPTIONS} width={88} onChange={(value) => onChange("currency", value)} />,
+          { minWidth: 150, labelWidth: 44 },
+        )}
+        {renderField(
+          "보유 종목수",
+          <input
+            type="number"
+            min={1}
+            max={100}
+            style={{ ...inputStyle, width: 76, textAlign: "right" }}
+            value={draft.TOP_N_HOLD}
+            onChange={(event) => onChange("TOP_N_HOLD", event.target.value)}
+          />,
+          { minWidth: 164, labelWidth: 82 },
+        )}
+        {renderField(
+          "단기",
+          <SelectField value={draft.SHORT_MA_DAYS} options={maDayOptions} width={82} onChange={(value) => onChange("SHORT_MA_DAYS", value)} />,
+          { minWidth: 144, labelWidth: 44 },
+        )}
+        {renderField(
+          "장기",
+          <SelectField value={draft.LONG_MA_DAYS} options={maDayOptions} width={82} onChange={(value) => onChange("LONG_MA_DAYS", value)} />,
+          { minWidth: 144, labelWidth: 44 },
+        )}
+      </div>
+
+      <div style={rowStyle}>
+        {renderField(
+          "기울기",
+          <SelectField value={draft.SLOPE_DAYS} options={slopeDayOptions} width={82} onChange={(value) => onChange("SLOPE_DAYS", value)} />,
+          { minWidth: 154, labelWidth: 56 },
+        )}
+        {renderField(
+          "매수 슬리피지",
+          <SelectField value={draft.BUY_SLIPPAGE_PCT} options={slippageOptions} width={90} onChange={(value) => onChange("BUY_SLIPPAGE_PCT", value)} />,
+          { minWidth: 196, labelWidth: 94 },
+        )}
+        {renderField(
+          "매도 슬리피지",
+          <SelectField value={draft.SELL_SLIPPAGE_PCT} options={slippageOptions} width={90} onChange={(value) => onChange("SELL_SLIPPAGE_PCT", value)} />,
+          { minWidth: 196, labelWidth: 94 },
+        )}
+        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>% 단위</span>
+      </div>
+
+      <div style={{ ...rowStyle, marginBottom: 0 }}>
+        <span style={{ ...labelStyle, width: 72 }}>벤치마크</span>
         <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
-      </td>
-    </>
+      </div>
+    </div>
   );
 
   return (
@@ -447,89 +547,70 @@ export function SettingsManager() {
                   종목풀 구조와 이평선 설정은 DB(pool_settings)가 단일 소스입니다. ticker_type 은 생성 후 변경할 수 없습니다.
                 </p>
               </div>
-              <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loading} onClick={() => void load()}>
-                새로고침
-              </button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
+                  등록
+                </button>
+                <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loading} onClick={() => void load()}>
+                  새로고침
+                </button>
+              </div>
             </div>
 
-            <div style={{ overflowX: "auto" }}>
-              <table className="table table-sm appSettingsTable" style={{ minWidth: 1120 }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: 104 }}>ID</th>
-                    <th style={{ width: 168 }}>종목풀명</th>
-                    <th style={{ width: 64 }}>아이콘</th>
-                    <th style={{ width: 72, textAlign: "right" }}>순서</th>
-                    <th style={{ width: 84 }}>국가</th>
-                    <th style={{ width: 90 }}>통화</th>
-                    {EDITABLE_KEYS.map((key) => (
-                      <th key={key} style={{ whiteSpace: "nowrap", width: 98 }}>
-                        {KEY_LABELS[key]}
-                      </th>
-                    ))}
-                    <th style={{ textAlign: "center", width: 86 }}>저장</th>
-                    <th style={{ textAlign: "center", width: 86 }}>삭제</th>
-                    <th style={{ textAlign: "left", minWidth: 150 }}>마지막 저장</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr style={{ background: "#f8fafc" }}>
-                    {renderDraftCells(newDraft, updateNewDraft)}
-                    <td style={{ textAlign: "center" }}>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-primary"
-                        disabled={creating || !newDraft.ticker_type.trim() || !newDraft.name.trim()}
-                        onClick={() => void handleCreate()}
-                      >
-                        {creating ? "추가 중…" : "추가"}
-                      </button>
-                    </td>
-                    <td style={{ textAlign: "center" }}>
-                      <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setNewDraft(EMPTY_DRAFT)}>
-                        초기화
-                      </button>
-                    </td>
-                    <td style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>신규 종목풀</td>
-                  </tr>
-                  {rows.map((pool) => {
-                    const draft = drafts[pool.ticker_type] ?? toDraft(pool);
-                    const dirty = isDirty(draft, pool);
-                    return (
-                      <tr key={pool.ticker_type}>
-                        {renderDraftCells(draft, (key, value) => updateDraft(pool.ticker_type, key, value), { idReadonly: true })}
-                        <td style={{ textAlign: "center" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-primary"
-                            disabled={!dirty || savingId === pool.ticker_type}
-                            onClick={() => void handleSave(pool)}
-                          >
-                            {savingId === pool.ticker_type ? "저장 중…" : "저장"}
-                          </button>
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          <button
-                            type="button"
-                            className="btn btn-sm btn-outline-danger"
-                            disabled={deletingId === pool.ticker_type}
-                            onClick={() => void handleDelete(pool)}
-                          >
-                            {deletingId === pool.ticker_type ? "삭제 중…" : "삭제"}
-                          </button>
-                        </td>
-                        <td style={{ textAlign: "left", fontSize: "0.82rem", color: "var(--text-muted)", verticalAlign: "middle" }}>
-                          {pool.updated_at ? (
-                            <span style={{ fontWeight: 600, color: "#475569" }}>{formatKstDateTime(pool.updated_at)}</span>
-                          ) : (
-                            <span style={{ color: "var(--text-muted)" }}>기록 없음</span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(max(520px, calc(50% - 5px)), 1fr))", gap: 10 }}>
+              {isCreatingNew && renderDraftCard({
+                title: "신규 종목풀",
+                subtitle: "ticker_type 은 생성 후 변경할 수 없습니다.",
+                draft: newDraft,
+                onChange: updateNewDraft,
+                primaryButton: (
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={creating || !newDraft.ticker_type.trim() || !newDraft.name.trim()}
+                    onClick={() => void handleCreate()}
+                  >
+                    {creating ? "추가 중…" : "추가"}
+                  </button>
+                ),
+                secondaryButton: (
+                  <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => { setNewDraft(EMPTY_DRAFT); setIsCreatingNew(false); }}>
+                    취소
+                  </button>
+                ),
+              })}
+              {rows.map((pool) => {
+                const draft = drafts[pool.ticker_type] ?? toDraft(pool);
+                const dirty = isDirty(draft, pool);
+                return renderDraftCard({
+                  title: `${pool.icon ?? ""} ${pool.name}`.trim(),
+                  subtitle: pool.ticker_type,
+                  draft,
+                  onChange: (key, value) => updateDraft(pool.ticker_type, key, value),
+                  idReadonly: true,
+                  updatedAt: pool.updated_at,
+                  primaryButton: (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-primary"
+                      disabled={!dirty || savingId === pool.ticker_type}
+                      onClick={() => void handleSave(pool)}
+                    >
+                      {savingId === pool.ticker_type ? "저장 중…" : "저장"}
+                    </button>
+                  ),
+                  secondaryButton: (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-danger"
+                      disabled={deletingId === pool.ticker_type}
+                      onClick={() => void handleDelete(pool)}
+                    >
+                      {deletingId === pool.ticker_type ? "삭제 중…" : "삭제"}
+                    </button>
+                  ),
+                });
+              })}
             </div>
           </div>
         </div>

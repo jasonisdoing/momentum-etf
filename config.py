@@ -151,17 +151,8 @@ MIN_TRADING_DAYS = 5
 # 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
 MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
-# MA20/60 레짐 판정 설정. 지수별 N일 확인만 사람이 조정하는 운영 튜닝값이다.
-MARKET_TREND_REGIME_MA_SHORT = 20
-MARKET_TREND_REGIME_MA_LONG = 60
-MARKET_TREND_REGIME_CONFIRM_DAYS: dict[str, int] = {
-    "^KS11": 2,
-    "^KS200": 2,
-    "^DJI": 1,
-    "^GSPC": 4,
-    "^NDX": 4,
-    "^SOX": 2,
-}
+# 추세 점수용 SMA 일수
+MARKET_TREND_SCORE_MA_DAYS = 20
 
 # 슈퍼트렌드(SuperTrend) 지표 설정.
 # 차트 보조선/화살표 표시 전용이다. 레짐 판정과 탑픽 현금비중에는 쓰지 않는다.
@@ -178,33 +169,4 @@ MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
     "^GSPC": 3.0,    # S&P500
     "^NDX": 3.0,     # 나스닥100
     "^SOX": 1.5,     # 필라델피아 반도체 (빠른 대응이 필요)
-}
-
-# -----------------------------------------------------------------------
-# 백테스트 파라미터 스윕 설정
-# -----------------------------------------------------------------------
-BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
-
-# 슬리피지는 % 단위로 입력한다.
-SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
-    "kor_kr": {
-        "BUY_PCT": 0.25,
-        "SELL_PCT": 0.25,
-    },
-    "kor_us": {
-        "BUY_PCT": 0.25,
-        "SELL_PCT": 0.25,
-    },
-    "aus": {
-        "BUY_PCT": 0.5,
-        "SELL_PCT": 0.5,
-    },
-    "us": {
-        "BUY_PCT": 0.15,
-        "SELL_PCT": 0.15,
-    },
-    "kor": {
-        "BUY_PCT": 0.25,
-        "SELL_PCT": 0.25,
-    },
 }

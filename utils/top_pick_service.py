@@ -1111,14 +1111,19 @@ def _enrich_weight_rows_with_returns(
         if eval_date is not None and eval_date in sortino_raw_frame.index
         else pd.Series(dtype=float)
     )
+    ticker_to_bucket = {str(t.get("ticker")).upper(): t.get("bucket") for t in tickers}
+
     enriched_rows: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
         ticker = str(row.get("ticker") or "").strip().upper()
         sortino_raw_value = sortino_raw_row.get(ticker)
+        bucket = ticker_to_bucket.get(ticker)
+        
         enriched_row = {
             **row,
+            "bucket": int(bucket) if bucket is not None else None,
             **return_map.get(
                 ticker,
                 {
@@ -1586,26 +1591,30 @@ def _calculate_top_pick_weights_on_date(
 
 
 def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
-    """종목별 (매수, 매도) 슬리피지 비율 — SLIPPAGE_CONFIG(종목풀별)를 그대로 사용한다.
+    """종목별 (매수, 매도) 슬리피지 비율 — 종목풀 DB 설정을 그대로 사용한다.
 
-    ticker_type 미상이거나 SLIPPAGE_CONFIG 에 없으면 임의 기본값 없이 명시적 에러.
+    ticker_type 미상이거나 종목풀 슬리피지 설정이 없으면 임의 기본값 없이 명시적 에러.
     """
-    from config import SLIPPAGE_CONFIG
+    from utils.settings_loader import get_ticker_type_settings
 
     rates: dict[str, tuple[float, float]] = {}
     problems: list[str] = []
+    settings_cache: dict[str, dict[str, Any]] = {}
     for item in clean_tickers:
         ticker = str(item["ticker"])
         ticker_type = str(item.get("ticker_type") or "").strip().lower()
-        config = SLIPPAGE_CONFIG.get(ticker_type)
-        if not ticker_type or not isinstance(config, dict) or "BUY_PCT" not in config or "SELL_PCT" not in config:
+        if ticker_type:
+            if ticker_type not in settings_cache:
+                settings_cache[ticker_type] = get_ticker_type_settings(ticker_type)
+        config = settings_cache.get(ticker_type, {})
+        if not ticker_type or config.get("BUY_SLIPPAGE_PCT") in (None, "") or config.get("SELL_SLIPPAGE_PCT") in (None, ""):
             problems.append(f"{ticker}({ticker_type or '종목풀 미상'})")
             continue
-        rates[ticker] = (float(config["BUY_PCT"]) / 100.0, float(config["SELL_PCT"]) / 100.0)
+        rates[ticker] = (float(config["BUY_SLIPPAGE_PCT"]) / 100.0, float(config["SELL_SLIPPAGE_PCT"]) / 100.0)
     if problems:
         raise ValueError(
-            f"슬리피지 설정(SLIPPAGE_CONFIG)이 없는 종목이 있습니다: {', '.join(problems)}. "
-            "종목풀에 등록된 티커인지 확인해주세요."
+            f"종목풀 슬리피지 설정이 없는 종목이 있습니다: {', '.join(problems)}. "
+            "/pools-settings 에서 해당 종목풀의 매수/매도 슬리피지를 저장하세요."
         )
     return rates
 
@@ -1686,7 +1695,7 @@ def run_top_pick_backtest(
     if len(sim) < 2:
         raise ValueError("탑픽 백테스트 시뮬레이션 기간이 부족합니다.")
 
-    # 슬리피지(SLIPPAGE_CONFIG, 종목풀별) — 매수/매도 금액에 비용으로 차감한다.
+    # 슬리피지(종목풀별 DB 설정) — 매수/매도 금액에 비용으로 차감한다.
     slippage_by_ticker = _resolve_slippage_by_ticker(clean_tickers)
     total_slippage_cost = 0.0
 

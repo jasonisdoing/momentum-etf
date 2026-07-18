@@ -3,7 +3,8 @@
 MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 보관한다.
 
     구조: ticker_type, name, icon, order, country_code, currency, is_active
-    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS (필수)
+    편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
+          BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT (필수)
           BENCHMARK (선택 — 비우면 미설정)
 
 런타임 로딩은 DB 문서가 없거나 필수 키가 누락되면 명확히 에러를 낸다.
@@ -13,7 +14,8 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 컬렉션 문서 형태:
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
-      is_active, TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS, BENCHMARK, updated_at
+      is_active, TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
+      BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, updated_at
     }
 """
 
@@ -39,12 +41,19 @@ OVERRIDABLE_KEYS: tuple[str, ...] = (
     "SLOPE_DAYS",
 )
 
+# 종목풀별 거래비용 설정. 기존 문서에 없어도 설정 화면은 열려야 하므로 로딩 필수값은 아니다.
+# 단, 슬리피지를 실제로 사용하는 백테스트/계산 로직은 누락 시 명시적으로 실패한다.
+SLIPPAGE_KEYS: tuple[str, ...] = (
+    "BUY_SLIPPAGE_PCT",
+    "SELL_SLIPPAGE_PCT",
+)
+
 # 편집 가능하지만 비워둘 수 있는 키. 필수 검사에서 제외한다.
 # 빈 문자열은 '미설정'을 뜻하며, 읽는 쪽이 그 상태를 명시적으로 처리해야 한다(임의 대체 금지).
 OPTIONAL_EDITABLE_KEYS: tuple[str, ...] = ("BENCHMARK",)
 
 # 종목풀 설정 화면에서 편집하는 전체 키(순서 = 화면 표시 순서).
-POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *OPTIONAL_EDITABLE_KEYS)
+POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *SLIPPAGE_KEYS, *OPTIONAL_EDITABLE_KEYS)
 
 STRUCTURAL_KEYS: tuple[str, ...] = (
     "name",
@@ -58,8 +67,11 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
 MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 240)
 # 기울기 측정 일수(k): 단기 이평선의 k일 전 대비 변화율. 1일은 노이즈가 커 권장하지 않는다.
 SLOPE_DAY_OPTIONS: tuple[int, ...] = (1, 2, 3, 5, 10, 20, 40, 60)
+# 편도 슬리피지(%) 선택지: 0.05 ~ 0.50, 0.05 단위. 필수라 빈 값 불가.
+SLIPPAGE_PCT_OPTIONS: tuple[float, ...] = (0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5)
 
 _INT_KEYS = ("TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS")
+_FLOAT_KEYS = ("BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT")
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
 _ALLOWED_CURRENCIES = {"KRW", "AUD", "USD"}
 
@@ -279,7 +291,7 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
     """저장 입력값을 검증/정규화한다. 잘못된 값은 PoolSettingsError."""
     cleaned: dict[str, Any] = {}
 
-    for key in OVERRIDABLE_KEYS:
+    for key in _INT_KEYS:
         if key not in values:
             continue
         raw = values[key]
@@ -300,6 +312,19 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
         elif key == "TOP_N_HOLD":
             if not (1 <= num <= 100):
                 raise PoolSettingsError(f"TOP_N_HOLD 는 1 ~ 100 범위여야 합니다: {num}")
+        cleaned[key] = num
+
+    for key in _FLOAT_KEYS:
+        if key not in values:
+            continue
+        raw = values[key]
+        try:
+            num = round(float(raw), 2)
+        except (TypeError, ValueError) as exc:
+            raise PoolSettingsError(f"{key} 은 숫자여야 합니다: {raw}") from exc
+        if num not in {round(option, 2) for option in SLIPPAGE_PCT_OPTIONS}:
+            options = ", ".join(f"{option:g}" for option in SLIPPAGE_PCT_OPTIONS)
+            raise PoolSettingsError(f"{key} 는 다음 값 중 하나여야 합니다: {options}. 입력값: {num}")
         cleaned[key] = num
 
     if "BENCHMARK" in values:
