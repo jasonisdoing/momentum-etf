@@ -36,7 +36,6 @@ def get_pool_backtest(
     top_n: int | None = Query(default=None),
     short_ma_days: int | None = Query(default=None),
     long_ma_days: int | None = Query(default=None),
-    slope_days: int | None = Query(default=None),
     hold_threshold_k: float | None = Query(default=None),
     down_market_invest_pct: float = Query(default=100.0, ge=0.0, le=100.0),
     _: None = Depends(require_internal_token),
@@ -50,7 +49,6 @@ def get_pool_backtest(
             top_n=top_n,
             short_ma_days=short_ma_days,
             long_ma_days=long_ma_days,
-            slope_days=slope_days,
             hold_threshold_k=hold_threshold_k,
             down_market_invest_pct=down_market_invest_pct,
         )

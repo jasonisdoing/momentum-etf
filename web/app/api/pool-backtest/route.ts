@@ -17,7 +17,6 @@ export async function GET(request: NextRequest) {
       "top_n",
       "short_ma_days",
       "long_ma_days",
-      "slope_days",
       "hold_threshold_k",
       "down_market_invest_pct",
     ]) {
