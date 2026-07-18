@@ -244,10 +244,11 @@ function BenchmarkField({
   );
 }
 
-export function SettingsManager() {
+export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalCount: number) => void }) {
   const toast = useToast();
   const [data, setData] = useState<PoolSettingsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
   const [error, setError] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, PoolDraft>>({});
   const [newDraft, setNewDraft] = useState<PoolDraft>(EMPTY_DRAFT);
@@ -257,9 +258,13 @@ export function SettingsManager() {
   const [isCreatingNew, setIsCreatingNew] = useState(false);
 
   const rows = useMemo(() => {
-    if (!data) return [] as PoolEntry[];
+    if (!data?.pools) return [] as PoolEntry[];
     return [...data.pools].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
   }, [data]);
+
+  useEffect(() => {
+    onSummaryChange?.(rows.length);
+  }, [rows.length, onSummaryChange]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -547,26 +552,35 @@ export function SettingsManager() {
 
   return (
     <div className="appPageStack appPageStackFill">
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-body appCardBodyTight">
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
-              <div>
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목풀 설정</h2>
-                <p className="tableFooterMeta" style={{ marginBottom: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                  종목풀 구조와 이평선 설정은 DB(pool_settings)가 단일 소스입니다. ticker_type 은 생성 후 변경할 수 없습니다.
-                </p>
+      <section className="appSection appSectionFill">
+        <div className="card appCard appTableCardFill">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft">
+                <div>
+                  <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>종목풀 설정</h2>
+                  <div className="tableFooterMeta" style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                    종목풀 구조와 이평선 설정은 DB(pool_settings)가 단일 소스입니다.
+                  </div>
+                </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
-                <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
-                  등록
-                </button>
                 <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loading} onClick={() => void load()}>
                   새로고침
                 </button>
               </div>
             </div>
+          </div>
+          
+          <div className="card-header appActionHeader bg-light-subtle border-top">
+            <div className="appActionHeaderInner">
+              <button type="button" className="btn btn-sm btn-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
+                등록
+              </button>
+            </div>
+          </div>
 
+          <div className="card-body appCardBodyTight appTableCardBodyFill" style={{ overflowY: "auto", padding: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(max(520px, calc(50% - 5px)), 1fr))", gap: 10 }}>
               {rows.map((pool) => {
                 const draft = drafts[pool.ticker_type] ?? toDraft(pool);
