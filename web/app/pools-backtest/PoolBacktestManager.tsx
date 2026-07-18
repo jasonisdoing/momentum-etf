@@ -314,119 +314,124 @@ export function PoolBacktestManager() {
   );
 
   return (
-    <div className="appPageStack">
-      {/* 상단 옵션 + 실행 */}
-      <div className="card appCard">
-        <div className="card-body">
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-            <label className="appLabeledField" style={{ minWidth: 180 }}>
-              <span className="appLabeledFieldLabel">종목풀</span>
-              <select className="form-select form-select-sm" value={poolId} onChange={(e) => setPoolId(e.target.value)}>
-                {pools.length === 0 ? <option value="">불러오는 중…</option> : null}
-                {pools.map((p) => (
-                  <option key={p.ticker_type} value={p.ticker_type}>
-                    {formatPoolLabel(p)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 130 }}>
-              <span className="appLabeledFieldLabel">전망일수</span>
-              <select
-                className="form-select form-select-sm"
-                value={forwardDays}
-                onChange={(e) => setForwardDays(Number(e.target.value))}
-              >
-                {FORWARD_DAY_OPTIONS.map((d) => (
-                  <option key={d} value={d}>
-                    {d}일 후
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 130 }}>
-              <span className="appLabeledFieldLabel">기간(개월)</span>
-              <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
-                {monthOptions.map((m) => (
-                  <option key={m} value={m}>
-                    최근 {m}개월
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 96 }}>
-              <span className="appLabeledFieldLabel">보유 종목수</span>
-              <input
-                type="number"
-                min={1}
-                max={100}
-                className="form-control form-control-sm"
-                value={topN ?? ""}
-                onChange={(e) => setTopN(e.target.value === "" ? null : Number(e.target.value))}
-              />
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 104 }}>
-              <span className="appLabeledFieldLabel">단기 이평선</span>
-              <select
-                className="form-select form-select-sm"
-                value={shortMa ?? ""}
-                onChange={(e) => setShortMa(e.target.value === "" ? null : Number(e.target.value))}
-              >
-                {maDayOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}일
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 104 }}>
-              <span className="appLabeledFieldLabel">장기 이평선</span>
-              <select
-                className="form-select form-select-sm"
-                value={longMa ?? ""}
-                onChange={(e) => setLongMa(e.target.value === "" ? null : Number(e.target.value))}
-              >
-                {maDayOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}일
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="appLabeledField" style={{ minWidth: 104 }}>
-              <span className="appLabeledFieldLabel">기울기 일수</span>
-              <select
-                className="form-select form-select-sm"
-                value={slopeDays ?? ""}
-                onChange={(e) => setSlopeDays(e.target.value === "" ? null : Number(e.target.value))}
-              >
-                {slopeDayOptions.map((d) => (
-                  <option key={d} value={d}>
-                    {d}일
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
-              {loading ? "백테스트 중…" : "백테스트"}
-            </button>
+    <div className="appPageStack appPageStackFill">
+      <section className="appSection appSectionFill">
+        <div className="card appCard appTableCardFill">
+          <div className="card-header">
+            <div className="appMainHeader">
+              <div className="appMainHeaderLeft" style={{ flexWrap: "wrap", gap: "12px 16px" }}>
+                <label className="appLabeledField" style={{ minWidth: 280, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">종목풀</span>
+                  <select className="form-select form-select-sm" value={poolId} onChange={(e) => setPoolId(e.target.value)}>
+                    {pools.length === 0 ? <option value="">불러오는 중…</option> : null}
+                    {pools.map((p) => (
+                      <option key={p.ticker_type} value={p.ticker_type}>
+                        {formatPoolLabel(p)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField" style={{ minWidth: 84, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">리밸런싱 주기</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={forwardDays}
+                    onChange={(e) => setForwardDays(Number(e.target.value))}
+                  >
+                    {FORWARD_DAY_OPTIONS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}일
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">기간(개월)</span>
+                  <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+                    {monthOptions.map((m) => (
+                      <option key={m} value={m}>
+                        최근 {m}개월
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField" style={{ minWidth: 96, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">보유 종목수</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    className="form-control form-control-sm"
+                    value={topN ?? ""}
+                    onChange={(e) => setTopN(e.target.value === "" ? null : Number(e.target.value))}
+                  />
+                </label>
+                <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">단기 이평선</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={shortMa ?? ""}
+                    onChange={(e) => setShortMa(e.target.value === "" ? null : Number(e.target.value))}
+                  >
+                    {maDayOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}일
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">장기 이평선</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={longMa ?? ""}
+                    onChange={(e) => setLongMa(e.target.value === "" ? null : Number(e.target.value))}
+                  >
+                    {maDayOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}일
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField" style={{ minWidth: 104, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">기울기 일수</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={slopeDays ?? ""}
+                    onChange={(e) => setSlopeDays(e.target.value === "" ? null : Number(e.target.value))}
+                  >
+                    {slopeDayOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}일
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
+                <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
+                  {loading ? "백테스트 중…" : "백테스트"}
+                </button>
+              </div>
+            </div>
           </div>
-          <p style={{ fontSize: "0.88rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "12px 0 0" }}>
-            등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 고정 보유 종목 제외.
-            <br />
-            주 지표는 <strong>평균수익</strong>입니다 — 모멘텀은 승률이 아니라 손익비로 벌기 때문에 상승확률로는 안 잡힙니다.{" "}
-            <strong>기저 대비 차이가 오차(±)를 넘어야만 의미</strong>가 있습니다.
-            <br />
-            표보다 위의 <strong>롱숏·IC</strong>를 믿으세요 — 등급 평균의 매끄러운 단조성은 같은 날을 10칸으로 나눈 것이라 <strong>미약한 경향도 단조로 보입니다</strong>.
-            롱숏·IC는 시장 요인을 상쇄하고 <strong>날짜마다 관계가 성립했는지</strong>를 봅니다. <strong>t &gt; 2</strong>여야 우연이 아닙니다.
-          </p>
-        </div>
-      </div>
 
-      {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
-      {!loading && !result && !error ? (
-        <div style={{ color: "var(--text-muted)", padding: 16 }}>종목풀·전망일수·기간을 고르고 백테스트를 눌러주세요.</div>
-      ) : null}
+          <div className="card-body appCardBodyTight appTableCardBodyFill" style={{ overflowY: "auto", padding: "16px 20px" }}>
+            <p style={{ fontSize: "0.88rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "0 0 16px" }}>
+              등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 고정 보유 종목 제외.
+              <br />
+              주 지표는 <strong>평균수익</strong>입니다 — 모멘텀은 승률이 아니라 손익비로 벌기 때문에 상승확률로는 안 잡힙니다.{" "}
+              <strong>기저 대비 차이가 오차(±)를 넘어야만 의미</strong>가 있습니다.
+              <br />
+              표보다 위의 <strong>롱숏·IC</strong>를 믿으세요 — 등급 평균의 매끄러운 단조성은 같은 날을 10칸으로 나눈 것이라 <strong>미약한 경향도 단조로 보입니다</strong>.
+              롱숏·IC는 시장 요인을 상쇄하고 <strong>날짜마다 관계가 성립했는지</strong>를 봅니다. <strong>t &gt; 2</strong>여야 우연이 아닙니다.
+            </p>
+
+            {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
+            {!loading && !result && !error ? (
+              <div style={{ color: "var(--text-muted)", padding: "16px 0" }}>종목풀·리밸런싱 주기·기간을 고르고 백테스트를 눌러주세요.</div>
+            ) : null}
 
       {result ? (
         <>
@@ -552,6 +557,9 @@ export function PoolBacktestManager() {
           </div>
         </>
       ) : null}
+          </div>
+        </div>
+      </section>
 
       <style jsx global>{`
         .poolBtTable {
