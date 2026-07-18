@@ -30,7 +30,13 @@ type LongShort = {
   significant: boolean;
 };
 
-type StrategyStats = { cumulative_pct: number; mdd_pct: number | null; sortino: number | null };
+type StrategyStats = {
+  cumulative_pct: number;
+  mdd_pct: number | null;
+  mdd_start_date?: string | null;
+  mdd_end_date?: string | null;
+  sortino: number | null;
+};
 type Performance = {
   top_n_hold: number;
   hold_threshold_k: number | null;
@@ -43,6 +49,9 @@ type Performance = {
   turnover_pct: number;
   round_trip_pct: number;
   cost_per_round_pct: number;
+  down_market_invest_pct?: number;
+  market_regime_index?: { ticker: string; name: string } | null;
+  down_market_rounds?: number;
   rule: StrategyStats;
   pool_hold: StrategyStats;
   benchmark: (StrategyStats & { ticker: string; name: string }) | null;
@@ -96,6 +105,7 @@ const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
 const DEFAULT_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
 const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
 const DEFAULT_SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
+const DOWN_MARKET_INVEST_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 
 /** 종목풀 설정 필드에서 정수를 꺼낸다. 값이 없으면 null. */
 function fieldToInt(field: PoolSettingField | undefined): number | null {
@@ -127,6 +137,7 @@ export function PoolBacktestManager() {
   const [longMa, setLongMa] = useState<number | null>(null);
   const [slopeDays, setSlopeDays] = useState<number | null>(null);
   const [holdK, setHoldK] = useState<number | null>(null); // 상대 임계(보유 유지). null=끔(매 회차 재선택)
+  const [downMarketInvestPct, setDownMarketInvestPct] = useState(100);
   const [maDayOptions, setMaDayOptions] = useState(DEFAULT_MA_DAY_OPTIONS);
   const [slopeDayOptions, setSlopeDayOptions] = useState(DEFAULT_SLOPE_DAY_OPTIONS);
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -198,6 +209,7 @@ export function PoolBacktestManager() {
       if (longMa != null) params.set("long_ma_days", String(longMa));
       if (slopeDays != null) params.set("slope_days", String(slopeDays));
       if (holdK != null) params.set("hold_threshold_k", String(holdK));
+      params.set("down_market_invest_pct", String(downMarketInvestPct));
       const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
@@ -208,7 +220,7 @@ export function PoolBacktestManager() {
     } finally {
       setLoading(false);
     }
-  }, [forwardDays, months, poolId, topN, shortMa, longMa, slopeDays, holdK, toast]);
+  }, [forwardDays, months, poolId, topN, shortMa, longMa, slopeDays, holdK, downMarketInvestPct, toast]);
 
   /** 롱숏·IC 공통 렌더. digits/suffix 로 표기만 달라진다. */
   const renderStat = (
@@ -440,6 +452,20 @@ export function PoolBacktestManager() {
                     ))}
                   </select>
                 </label>
+                <label className="appLabeledField" style={{ minWidth: 140, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">하락시 투자비중</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={downMarketInvestPct}
+                    onChange={(e) => setDownMarketInvestPct(Number(e.target.value))}
+                  >
+                    {DOWN_MARKET_INVEST_OPTIONS.map((pct) => (
+                      <option key={pct} value={pct}>
+                        {pct}%
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
                 <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
@@ -485,6 +511,9 @@ export function PoolBacktestManager() {
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
                   {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).
                   조건 맞는 종목이 {result.performance.top_n_hold}개 미만이면 부족분은 현금으로 둡니다.
+                  {result.performance.down_market_invest_pct !== undefined && result.performance.down_market_invest_pct < 100
+                    ? ` 시장 레짐(${result.performance.market_regime_index?.name ?? "-"}) 하락 회차는 투자비중 ${result.performance.down_market_invest_pct}%로 제한합니다.`
+                    : ""}
                   {result.performance.hold_threshold_k != null
                     ? ` 보유 유지 k=${result.performance.hold_threshold_k.toFixed(1)}: 이미 보유한 종목은 이격이 'N등 이격×k' 이상이면 유지(회전율↓).`
                     : ""}
@@ -497,8 +526,19 @@ export function PoolBacktestManager() {
                       {formatSigned(v, 1)}%
                     </span>
                   );
-                  const mdd = (v: number | null) =>
-                    v === null ? <span style={{ color: "var(--text-muted)" }}>-</span> : <span>{v.toFixed(1)}%</span>;
+                  const mdd = (stat: StrategyStats | null | undefined) => {
+                    if (!stat || stat.mdd_pct === null) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+                    const period =
+                      stat.mdd_start_date && stat.mdd_end_date ? ` (${stat.mdd_start_date}~${stat.mdd_end_date})` : "";
+                    return (
+                      <span>
+                        <span className={signedClass(stat.mdd_pct)} style={{ fontWeight: 800 }}>
+                          {stat.mdd_pct.toFixed(1)}%
+                        </span>
+                        {period}
+                      </span>
+                    );
+                  };
                   const sortino = (v: number | null) =>
                     v === null ? <span style={{ color: "var(--text-muted)" }}>-</span> : <span style={{ fontWeight: 700 }}>{v.toFixed(2)}</span>;
                   const th: React.CSSProperties = { textAlign: "right", padding: "6px 10px", fontWeight: 700 };
@@ -526,9 +566,9 @@ export function PoolBacktestManager() {
                           </tr>
                           <tr>
                             <td style={labelCell}>최대낙폭 (MDD)</td>
-                            <td style={td}>{mdd(p.rule.mdd_pct)}</td>
-                            <td style={td}>{mdd(p.pool_hold.mdd_pct)}</td>
-                            <td style={td}>{bench ? mdd(bench.mdd_pct) : <span style={{ color: "var(--text-muted)" }}>-</span>}</td>
+                            <td style={td}>{mdd(p.rule)}</td>
+                            <td style={td}>{mdd(p.pool_hold)}</td>
+                            <td style={td}>{bench ? mdd(bench) : <span style={{ color: "var(--text-muted)" }}>-</span>}</td>
                           </tr>
                           <tr>
                             <td style={labelCell}>소르티노 (연율)</td>

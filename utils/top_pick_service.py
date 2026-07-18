@@ -86,6 +86,7 @@ def _load_unique_stock_meta_by_ticker(tickers: list[str]) -> dict[str, dict[str,
                 "ticker_type": 1,
                 "name": 1,
                 "bucket": 1,
+                "exclude_from_ranking": 1,
             },
         )
     )
@@ -134,6 +135,8 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
         bucket = stock_meta.get("bucket") or item.get("bucket")
         if bucket is not None:
             row["bucket"] = int(bucket)
+        if bool(stock_meta.get("exclude_from_ranking") or item.get("exclude_from_ranking")):
+            row["exclude_from_ranking"] = True
         # 비중 고정 모드의 종목별 고정 비중(%). 미설정은 저장하지 않는다(임의 0 보정 금지).
         raw_weight = item.get("fixed_weight_pct")
         if raw_weight is not None and str(raw_weight).strip() != "":
@@ -297,6 +300,43 @@ def _build_top_pick_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
         account_id = str(settings.get("ACCOUNT_ID") or "").strip()
         long_ma_days = _load_account_pool_ma_context(account_id)["LONG_MA_DAYS"]
     return {"order": 1, "long_ma_days": int(long_ma_days), "score_column": "이격"}
+
+
+def _filter_rank_excluded_tickers(tickers: list[dict[str, Any]], settings: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+    """순위 고정 종목(exclude_from_ranking=true)을 계산/백테스트 유니버스에서 제외한다."""
+    if not tickers:
+        return [], []
+
+    default_ticker_type = str(settings.get("POOL_TICKER_TYPE") or "").strip().lower()
+    query_pairs: list[dict[str, str]] = []
+    pair_by_ticker: dict[str, str] = {}
+    for item in tickers:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        ticker_type = str(item.get("ticker_type") or default_ticker_type).strip().lower()
+        if ticker and ticker_type:
+            query_pairs.append({"ticker_type": ticker_type, "ticker": ticker})
+            pair_by_ticker[ticker] = ticker_type
+
+    excluded_from_db: set[str] = set()
+    if query_pairs:
+        for doc in _db().stock_meta.find(
+            {"$or": query_pairs, "is_deleted": {"$ne": True}},
+            {"_id": 0, "ticker": 1, "ticker_type": 1, "exclude_from_ranking": 1},
+        ):
+            ticker = str(doc.get("ticker") or "").strip().upper()
+            ticker_type = str(doc.get("ticker_type") or "").strip().lower()
+            if ticker and ticker_type == pair_by_ticker.get(ticker) and bool(doc.get("exclude_from_ranking")):
+                excluded_from_db.add(ticker)
+
+    filtered: list[dict[str, Any]] = []
+    excluded: list[str] = []
+    for item in tickers:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if bool(item.get("exclude_from_ranking")) or ticker in excluded_from_db:
+            excluded.append(ticker)
+            continue
+        filtered.append(item)
+    return filtered, excluded
 
 
 def _build_current_ma_state_maps(
@@ -1293,18 +1333,19 @@ def calculate_top_pick_weights_for(
     metric_months: int,
 ) -> dict[str, Any]:
     # weight_mode 는 저장 호환용으로만 남긴다. 실제 계산은 항상 동일 슬롯 + 개별 이평선 필터다.
-    if len(tickers) < 3:
-        raise ValueError("탑픽 비중 계산에는 확인된 종목이 3개 이상 필요합니다.")
-
     account_id = str(settings.get("ACCOUNT_ID") or "").strip()
     if not account_id:
         raise ValueError("탑픽 비중 계산에는 적용 계좌가 필요합니다.")
+    settings = {**settings, **_load_account_pool_ma_context(account_id)}
+    tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(tickers, settings)
+    if len(tickers) < 3:
+        suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
+        raise ValueError(f"탑픽 비중 계산에는 고정 종목 제외 후 확인된 종목이 3개 이상 필요합니다.{suffix}")
 
     close_frame, missing = _load_close_frame(tickers)
     if close_frame.empty:
         raise ValueError("탑픽 종목의 가격 캐시가 없습니다.")
 
-    settings = {**settings, **_load_account_pool_ma_context(account_id)}
     mdd_map = _build_mdd_map(close_frame, metric_months)
     eval_date = close_frame.index.max()
 
@@ -1444,6 +1485,7 @@ def calculate_top_pick_weights_for(
         "settings": settings,
         "rows": rows,
         "missing_tickers": missing,
+        "excluded_fixed_tickers": excluded_fixed_tickers,
         "trade_summary": trade_summary,
     }
 
@@ -1627,10 +1669,11 @@ def run_top_pick_backtest(
 ) -> dict[str, Any]:
     # weight_mode 는 저장 호환용으로만 받는다. 백테스트도 항상 동일 슬롯 + 개별 이평선 필터를 쓴다.
     clean_tickers = _clean_tickers(tickers)
-    if len(clean_tickers) < 3:
-        raise ValueError("탑픽 백테스트에는 확인된 종목이 3개 이상 필요합니다.")
-
     clean_settings = _with_account_top_pick_basis(_clean_settings(settings))
+    clean_tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(clean_tickers, clean_settings)
+    if len(clean_tickers) < 3:
+        suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
+        raise ValueError(f"탑픽 백테스트에는 고정 종목 제외 후 확인된 종목이 3개 이상 필요합니다.{suffix}")
     clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     # 결과 비교용 벤치마크 — 계좌 설정(/account-settings)의 벤치마크를 쓴다(계좌별로 다름).
     account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
@@ -1879,4 +1922,5 @@ def run_top_pick_backtest(
         ]
         + [{"key": "__CASH__", "label": "현금"}],
         "missing_tickers": missing,
+        "excluded_fixed_tickers": excluded_fixed_tickers,
     }

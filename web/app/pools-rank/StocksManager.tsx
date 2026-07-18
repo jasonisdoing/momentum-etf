@@ -1485,10 +1485,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [blockedMessage, toast]);
 
   const headerSummary = useMemo<RankHeaderSummary>(() => {
-    const totalCount = gridRows.length;
-    const upCount = gridRows.filter(
-      (r) => (r["추세"] ?? 0) > 0 && !r.is_benchmark && !r.exclude_from_ranking
-    ).length;
+    const candidateRows = gridRows.filter((r) => !r.is_benchmark && !r.exclude_from_ranking);
+    const totalCount = candidateRows.length;
+    const upCount = candidateRows.filter((r) => (r["추세"] ?? 0) > 0).length;
     const upPct = totalCount > 0 ? Math.round((upCount / totalCount) * 100) : 0;
     const configuredTopN = selectedTickerTypeItem?.top_n_hold;
     const ruleSummaryParts: string[] = [];
