@@ -33,6 +33,7 @@ type LongShort = {
 type StrategyStats = { cumulative_pct: number; mdd_pct: number | null; sortino: number | null };
 type Performance = {
   top_n_hold: number;
+  hold_threshold_k: number | null;
   rounds: number;
   cash_rounds: number;
   partial_rounds: number;
@@ -125,6 +126,7 @@ export function PoolBacktestManager() {
   const [shortMa, setShortMa] = useState<number | null>(null);
   const [longMa, setLongMa] = useState<number | null>(null);
   const [slopeDays, setSlopeDays] = useState<number | null>(null);
+  const [holdK, setHoldK] = useState<number | null>(null); // 상대 임계(보유 유지). null=끔(매 회차 재선택)
   const [maDayOptions, setMaDayOptions] = useState(DEFAULT_MA_DAY_OPTIONS);
   const [slopeDayOptions, setSlopeDayOptions] = useState(DEFAULT_SLOPE_DAY_OPTIONS);
   const [result, setResult] = useState<BacktestResult | null>(null);
@@ -195,6 +197,7 @@ export function PoolBacktestManager() {
       if (shortMa != null) params.set("short_ma_days", String(shortMa));
       if (longMa != null) params.set("long_ma_days", String(longMa));
       if (slopeDays != null) params.set("slope_days", String(slopeDays));
+      if (holdK != null) params.set("hold_threshold_k", String(holdK));
       const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
@@ -205,7 +208,7 @@ export function PoolBacktestManager() {
     } finally {
       setLoading(false);
     }
-  }, [forwardDays, months, poolId, topN, shortMa, longMa, slopeDays, toast]);
+  }, [forwardDays, months, poolId, topN, shortMa, longMa, slopeDays, holdK, toast]);
 
   /** 롱숏·IC 공통 렌더. digits/suffix 로 표기만 달라진다. */
   const renderStat = (
@@ -417,6 +420,26 @@ export function PoolBacktestManager() {
                     ))}
                   </select>
                 </label>
+                <label className="appLabeledField" style={{ minWidth: 120, flex: "0 0 auto" }}>
+                  <span
+                    className="appLabeledFieldLabel"
+                    title="보유 유지 기준(상대 임계). 이미 보유한 종목은 이격이 'N등 이격 × k' 이상이면 유지. 끔이면 매 회차 상위 N 재선택. k가 작을수록 오래 보유(회전율↓)."
+                  >
+                    보유 유지(k)
+                  </span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={holdK ?? ""}
+                    onChange={(e) => setHoldK(e.target.value === "" ? null : Number(e.target.value))}
+                  >
+                    <option value="">끔</option>
+                    {[0.9, 0.8, 0.7, 0.6, 0.5].map((k) => (
+                      <option key={k} value={k}>
+                        {k.toFixed(1)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexShrink: 0 }}>
                 <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
@@ -462,6 +485,9 @@ export function PoolBacktestManager() {
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
                   {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).
                   조건 맞는 종목이 {result.performance.top_n_hold}개 미만이면 부족분은 현금으로 둡니다.
+                  {result.performance.hold_threshold_k != null
+                    ? ` 보유 유지 k=${result.performance.hold_threshold_k.toFixed(1)}: 이미 보유한 종목은 이격이 'N등 이격×k' 이상이면 유지(회전율↓).`
+                    : ""}
                 </p>
                 {(() => {
                   const p = result.performance!;
@@ -537,6 +563,37 @@ export function PoolBacktestManager() {
             </div>
           ) : null}
 
+          {result.performance ? (
+            <div className="card appCard">
+              <div className="card-body">
+                <h3 style={{ fontSize: "0.98rem", fontWeight: 800, margin: "0 0 6px" }}>백테스트 방식</h3>
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.7 }}>
+                  <li>
+                    <strong>선택</strong>: {result.forward_days}일마다 리밸런싱. 그날 이격&gt;0 그리고 단기이격&ge;0 인
+                    종목 중 <strong>이격 상위 {result.performance.top_n_hold}종목</strong>을 보유(순위 화면 추천 ✅ 과 동일).
+                  </li>
+                  <li>
+                    <strong>비중</strong>: 목표 1/{result.performance.top_n_hold}. <strong>유지 종목은 팔지 않고
+                    그대로 둔다</strong> — 계속 오르면 비중이 커진 채 유지된다(승자 키우기). 신규는 목표 1/
+                    {result.performance.top_n_hold}까지만 매수하고, 현금이 부족하면 남은 현금을 신규끼리 균등 분배,
+                    남으면 다음 회차로 이월한다.
+                  </li>
+                  <li>
+                    <strong>매도</strong>: 단기이격이 음수(20일선 하회)가 되거나 더 강한 종목에 밀려 상위{" "}
+                    {result.performance.top_n_hold} 밖으로 나갈 때만. 그 외에는 비중을 줄이지 않는다.
+                  </li>
+                  <li>
+                    <strong>비용</strong>: 슬리피지는 실제 거래금액(매수·매도)에만 물린다 — 유지 종목은 0. 단주(정수 주)
+                    제약은 무시하고 비중(%)으로 계산한다.
+                  </li>
+                  <li>
+                    <strong>보유 유지(k)</strong>: 켜면 값 기반 히스테리시스. 이미 보유한 종목은 이격이{" "}
+                    &lsquo;N등 이격 × k&rsquo; 이상이면 순위가 밀려도 유지해 회전율을 낮춘다.
+                  </li>
+                </ul>
+              </div>
+            </div>
+          ) : null}
 
           <div className="poolBtSplit">
             {renderTable(

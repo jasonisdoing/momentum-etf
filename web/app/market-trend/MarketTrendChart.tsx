@@ -15,18 +15,13 @@ import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "
 
 type RegimeKey = "accel_up" | "accel_down";
 
-// 그 일자 기준 MA20/60 전환 가격선과 확인일수.
+// 그 일자 기준 SuperTrend 전환 가격선(상승/하락). 즉시 전환 기준이다.
 type ForecastThresholds = {
   up_pct: number | null;
   up_price: number | null;
-  up_remaining_days: number | null;
   dn_pct: number | null;
   dn_price: number | null;
-  dn_remaining_days: number | null;
-  confirm_days: number;
-  required_days: number;
   raw_regime: RegimeKey | null;
-  raw_streak: number;
 };
 
 type HistoryPoint = {
@@ -37,7 +32,6 @@ type HistoryPoint = {
   close: number | null;
   volume: number | null;
   ma: number | null;
-  ma_long: number | null;
   trend_pct: number | null;
   trend_score: number | null;
   regime: RegimeKey | null;
@@ -51,8 +45,6 @@ type HistoryResponse = {
   name: string;
   ma_days: number;
   ma_short_days: number;
-  ma_long_days: number;
-  confirm_days: number;
   history: HistoryPoint[];
   trend_min_12m: number | null;
   trend_max_12m: number | null;
@@ -142,34 +134,28 @@ function formatSignedPct(value: number): string {
 }
 
 /**
- * 현재 레짐에서 ``target`` 레짐으로 넘어가는 가격선과 확인일수를 표기한다.
+ * 현재 레짐에서 ``target`` 레짐으로 넘어가는 SuperTrend 전환 가격선을 표기한다.
  */
 function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, target: RegimeKey): string {
   let pct: number | null = null;
   let price: number | null = null;
-  let remaining: number | null = null;
   if (target === "accel_up") {
     pct = fc.up_pct;
     price = fc.up_price;
-    remaining = fc.up_remaining_days;
   } else if (target === "accel_down") {
     pct = fc.dn_pct;
     price = fc.dn_price;
-    remaining = fc.dn_remaining_days;
   } else if (current === "accel_up") {
     pct = fc.up_pct;
     price = fc.up_price;
-    remaining = fc.up_remaining_days;
   } else if (current === "accel_down") {
     pct = fc.dn_pct;
     price = fc.dn_price;
-    remaining = fc.dn_remaining_days;
   }
   if (pct === null || price === null) return "-";
   const rank: Record<RegimeKey, number> = { accel_up: 1, accel_down: 0 };
   const suffix = current !== null && rank[target] < rank[current] ? " 미만" : " 이상";
-  const remainText = remaining !== null && remaining > 0 ? ` · ${remaining}거래일 확인` : "";
-  return `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}${remainText}`;
+  return `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}`;
 }
 
 type GaugeData = {
@@ -183,7 +169,7 @@ type GaugeData = {
  * 12개월 추세% 범위를 가로 막대로 표시.
  *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
  * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
- * 오늘 핀의 색은 MA20/60 교차 확인 레짐으로 칠한다.
+ * 오늘 핀의 색은 SuperTrend 방향 레짐으로 칠한다.
  */
 function computeGaugeData({
   trend,
@@ -279,7 +265,7 @@ function buildBandRegimeRanges(history: HistoryPoint[]): RegimeRange[] {
   });
 }
 
-function buildLineData(history: HistoryPoint[], key: "close" | "ma" | "ma_long"): LineData<Time>[] {
+function buildLineData(history: HistoryPoint[], key: "close" | "ma"): LineData<Time>[] {
   return history
     .filter((point) => point[key] !== null)
     .map((point) => ({
@@ -438,7 +424,7 @@ export function MarketTrendChart({
     [data, rangeKey],
   );
 
-  // 최신 MA20/60 기준으로 다음 레짐 전환에 필요한 가격선과 확인일수를 보여준다.
+  // 최신 SuperTrend 기준으로 다음 레짐 전환에 필요한 가격선을 보여준다.
   const forecastTransitions = useMemo(() => {
     const latest = data?.history.at(-1) ?? null;
     const fc = latest?.forecast;
@@ -449,29 +435,21 @@ export function MarketTrendChart({
       next_regime: RegimeKey;
       target_price: number | null;
       change_pct: number | null;
-      confirm_days?: number | null;
-      mode: "confirm" | "drop_below" | "rise_above";
+      mode: "drop_below" | "rise_above";
     }[] = [];
     (["accel_up", "accel_down"] as RegimeKey[]).forEach((rg) => {
       if (rg === current) return;
       let pct: number | null = null;
       let price: number | null = null;
-      let confirmDays: number | null = null;
       if (rg === "accel_up") {
         pct = fc.up_pct;
         price = fc.up_price;
-        confirmDays = fc.up_remaining_days;
       } else if (rg === "accel_down") {
         pct = fc.dn_pct;
         price = fc.dn_price;
-        confirmDays = fc.dn_remaining_days;
       }
-      const weaker = rank[rg] < rank[current];
-      let mode: "confirm" | "drop_below" | "rise_above";
-      if (confirmDays !== null && confirmDays !== undefined) mode = "confirm";
-      else if (weaker) mode = "drop_below";
-      else mode = "rise_above";
-      out.push({ next_regime: rg, target_price: price, change_pct: pct, confirm_days: confirmDays, mode });
+      const mode: "drop_below" | "rise_above" = rank[rg] < rank[current] ? "drop_below" : "rise_above";
+      out.push({ next_regime: rg, target_price: price, change_pct: pct, mode });
     });
     // 상승 → 하락 고정 순서로 배치.
     const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, accel_down: 1 };
@@ -608,14 +586,6 @@ export function MarketTrendChart({
       lastValueVisible: false,
     }).setData(buildLineData(visibleHistory, "ma"));
 
-    chart.addSeries(LineSeries, {
-      color: "rgba(245, 158, 11, 0.85)",
-      lineWidth: 1,
-      lineStyle: 0,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    }).setData(buildLineData(visibleHistory, "ma_long"));
-
     if (showSuperTrend) {
       buildSuperTrendSegments(visibleHistory, 1).forEach((segment) => {
         chart.addSeries(LineSeries, {
@@ -677,7 +647,7 @@ export function MarketTrendChart({
       }
 
       const days = regimeDaysByDate.get(point.date) || 1;
-      // 각 일자는 그날 기준 MA20/60 전환 가격선과 확인일수를 자체적으로 갖는다(point.forecast).
+      // 각 일자는 그날 기준 SuperTrend 전환 가격선을 자체적으로 갖는다(point.forecast).
       const fc = point.forecast;
 
       const getRegimeStatusText = (key: RegimeKey) => {
@@ -901,7 +871,7 @@ export function MarketTrendChart({
               <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
                 <span style={{ fontSize: "1.1rem", lineHeight: 1 }}>⚠️</span>
                 <strong style={{ fontSize: "0.85rem" }}>
-                  추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(MA20/60 · 확인일수 기준)</span>
+                  추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(SuperTrend 기준)</span>
                 </strong>
               </div>
               <ul style={{ margin: 0, paddingLeft: 20 }}>
@@ -918,7 +888,7 @@ export function MarketTrendChart({
                       {formatNumber(item.target_price)}
                     </span>
                     pt
-                    {item.mode === "confirm" ? " 도달하면" : item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
+                    {item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
                     {" "}(현재 대비{" "}
                     <span style={{ fontWeight: 800 }}>
                       {item.change_pct! > 0 ? "+" : ""}

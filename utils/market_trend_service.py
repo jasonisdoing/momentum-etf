@@ -13,7 +13,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -160,7 +159,7 @@ def _to_float(value: Any) -> float | None:
 def compute_market_trend() -> dict[str, Any]:
     """5개 시장지수의 현재가/변동률/MA 추세%(현재 + 과거 3시점) 를 계산해 반환한다.
 
-    MA는 SMA MARKET_TREND_REGIME_MA_SHORT일 고정.
+    MA는 SMA MARKET_TREND_SCORE_MA_DAYS(20)일 고정. 레짐은 SuperTrend 방향(상승/하락)이다.
 
     Returns:
         ``{"ma_days", "items": [{
@@ -282,7 +281,7 @@ def _build_item(
     base["price"] = latest_price
     base["change_pct"] = change_pct
 
-    # 추세 점수는 새 레짐 정본과 맞춰 SMA MA20 대비 괴리율을 쓴다.
+    # 추세 점수는 설정된 SMA 기준 괴리율을 쓴다.
     ma_series = close_series.rolling(ma_days).mean()
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
@@ -540,9 +539,10 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
 
 
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
-    """단일 지수의 가격/MA20/MA60/확정 레짐 히스토리를 반환한다.
+    """단일 지수의 가격/이동평균/레짐 히스토리를 반환한다.
 
-    레짐은 MA20/60 교차 원본 신호에 지수별 확인일수를 적용한 값이다.
+    레짐은 SuperTrend 방향(2단계: 상승 accel_up / 하락 accel_down)이다. SuperTrend 는 즉시
+    전환이라 지연 없이 전환 가격선(up_price/dn_price)만 함께 준다.
     """
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     name = index_meta["name"] if index_meta else yf_ticker
@@ -631,18 +631,14 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
             st_dir = int(st_df["direction"].iloc[idx])
 
         regime = "accel_up" if st_dir == 1 else "accel_down"
-        
+
+        # SuperTrend 는 즉시 전환이라 전환 '가격선'만 제공한다.
         point_forecast = {
-            "confirm_days": 0,
-            "required_days": 0,
             "raw_regime": regime,
-            "raw_streak": 0,
             "up_price": st_val if regime == "accel_down" else None,
             "up_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_down" and st_val and close else None,
-            "up_remaining_days": 0,
             "dn_price": st_val if regime == "accel_up" else None,
             "dn_pct": ((st_val / close - 1.0) * 100.0) if regime == "accel_up" and st_val and close else None,
-            "dn_remaining_days": 0,
         }
 
         history.append(
