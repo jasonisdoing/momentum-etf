@@ -22,7 +22,7 @@ type MarketTrendItem = {
   score_range_low: number | null;
   // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
   pct_from_high: number | null;
-  // 현재 레짐(MA20/60 교차 + 확인일수) + 지속일수
+  // 현재 레짐(SuperTrend 방향) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
   days_since_last_up: number | null;
