@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatPoolLabel } from "@/lib/pool-label";
+import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { useToast } from "../components/ToastProvider";
 
 type SignalRow = {
@@ -156,7 +157,11 @@ export function PoolBacktestManager() {
                 : (loadedMonthOptions.includes(12) ? 12 : loadedMonthOptions[0]),
             );
           }
-          if (list.length > 0) setPoolId(list[0].ticker_type);
+          if (list.length > 0) {
+            const rem = readRememberedTickerType();
+            const defaultPool = rem && list.some((p) => p.ticker_type === rem) ? rem : list[0].ticker_type;
+            setPoolId(defaultPool);
+          }
         }
       } catch (e) {
         if (alive) setError(e instanceof Error ? e.message : "종목풀 목록을 불러오지 못했습니다.");
@@ -318,7 +323,15 @@ export function PoolBacktestManager() {
               <div className="appMainHeaderLeft" style={{ flexWrap: "wrap", gap: "12px 16px" }}>
                 <label className="appLabeledField" style={{ minWidth: 280, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">종목풀</span>
-                  <select className="form-select form-select-sm" value={poolId} onChange={(e) => setPoolId(e.target.value)}>
+                  <select
+                    className="form-select form-select-sm"
+                    value={poolId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setPoolId(val);
+                      writeRememberedTickerType(val);
+                    }}
+                  >
                     {pools.length === 0 ? <option value="">불러오는 중…</option> : null}
                     {pools.map((p) => (
                       <option key={p.ticker_type} value={p.ticker_type}>
