@@ -278,10 +278,9 @@ export function PoolBacktestManager() {
           <table className="poolBtTable">
             <thead>
               <tr>
-                <th style={{ textAlign: "left" }}>구간</th>
+                <th style={{ textAlign: "left", width: "1%", whiteSpace: "nowrap" }}>구간</th>
                 <th>평균수익</th>
                 <th>기저 대비</th>
-                <th>유의?</th>
                 <th>상승확률</th>
                 <th>기저 대비</th>
                 <th>표본</th>
@@ -290,16 +289,13 @@ export function PoolBacktestManager() {
             <tbody>
               {rows.map((row) => (
                 <tr key={row.label}>
-                  <td style={{ textAlign: "left" }}>{row.label}</td>
+                  <td style={{ textAlign: "left", width: "1%", whiteSpace: "nowrap" }}>{row.label}</td>
                   <td style={{ fontWeight: 800 }} className={signedClass(row.avg_return)}>
                     {formatSigned(row.avg_return, 2)}%
                   </td>
                   <td className={signedClass(row.avg_return_diff)}>
                     {formatSigned(row.avg_return_diff, 2)}%p
                     <span style={{ color: "var(--text-muted)", fontWeight: 400 }}> (±{row.avg_return_error.toFixed(2)})</span>
-                  </td>
-                  <td style={{ fontWeight: 700, color: row.avg_return_significant ? "#2f9e44" : "var(--text-muted)" }}>
-                    {row.avg_return_significant ? "O" : "–"}
                   </td>
                   <td style={{ color: "var(--text-muted)" }}>{row.up_rate.toFixed(1)}%</td>
                   <td style={{ color: "var(--text-muted)" }}>{formatSigned(row.up_rate_diff)}%p</td>
