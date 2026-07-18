@@ -57,11 +57,6 @@ def get_month_options() -> list[int]:
 
 def _quantile_label(order: int) -> str:
     """1등급 = 신호 상위, 마지막 등급 = 신호 하위 (순위 화면과 같은 '1등이 최고' 관례)."""
-    share = round(100 / QUANTILE_COUNT)
-    if order == 1:
-        return f"1등급 (상위 {share}%)"
-    if order == QUANTILE_COUNT:
-        return f"{QUANTILE_COUNT}등급 (하위 {share}%)"
     return f"{order}등급"
 
 
@@ -214,14 +209,25 @@ def _cross_sectional_table(
     return rows
 
 
-def _max_drawdown_pct(segment_returns: pd.Series) -> float | None:
-    """회차별 수익률(%) 시리즈의 최대낙폭(MDD, 음수 %). 자산 곡선의 고점 대비 최대 하락."""
-    values = segment_returns.dropna()
-    if len(values) < 2:
+def _curve_mdd(curve: pd.Series) -> float | None:
+    """자산 곡선(일별 등)에서 최대낙폭(MDD, 음수 %). 고점 대비 최대 하락.
+
+    MDD 는 반드시 **일별** 곡선으로 계산한다. 리밸런싱 간격(예 20일)으로만 찍은 점으로
+    구하면 그 사이의 급락을 건너뛰어 실제보다 훨씬 작게 나온다(예: 실제 −20% → −6%).
+    """
+    curve = curve.dropna()
+    if len(curve) < 2:
         return None
-    curve = (1.0 + values / 100.0).cumprod()
     drawdown = curve / curve.cummax() - 1.0
     return round(float(drawdown.min()) * 100.0, 1)
+
+
+def _daily_returns_mdd(daily_returns: pd.Series) -> float | None:
+    """일별 수익률(소수) 시리즈 → 누적 곡선 → MDD(%)."""
+    returns = daily_returns.dropna()
+    if len(returns) < 2:
+        return None
+    return _curve_mdd((1.0 + returns).cumprod())
 
 
 def _sortino(segment_returns: pd.Series, forward_days: int) -> float | None:
@@ -317,22 +323,42 @@ def _rule_performance(
     def _compound(values: pd.Series) -> float:
         return float((1.0 + values / 100.0).prod() - 1.0) * 100.0
 
-    # ① 종목풀 규칙(슬리피지 차감) ② 종목풀 보유(전체 동일가중=기저) — 둘 다 회차별 수익 시리즈.
+    # MDD 는 일별 자산곡선으로 구한다(회차 격자로는 구간 내 급락을 놓쳐 실제보다 작게 나온다).
+    # 소르티노는 리밸런싱 주기 수익 기준(회차별)으로 둔다.
+    close_wide = df.pivot_table(index="date", columns="ticker", values="close").sort_index()
+    daily_all = close_wide.pct_change()
+    pool_daily = daily_all.mean(axis=1)  # 종목풀 전체 동일가중 보유
+    rule_daily_parts: list[pd.Series] = []
+    for i, as_of in enumerate(rebalance_dates):
+        tickers = list(baskets[i])
+        start_pos = close_wide.index.get_loc(as_of)
+        end_pos = (
+            close_wide.index.get_loc(rebalance_dates[i + 1]) if i + 1 < len(rebalance_dates) else len(close_wide) - 1
+        )
+        # 리밸런싱 당일 다음날부터 다음 리밸런싱일까지 보유. 부족분(top_n 미달)은 현금이라 n/top_n 만 투자.
+        window = daily_all.iloc[start_pos + 1 : end_pos + 1]
+        if tickers:
+            rule_daily_parts.append(window[tickers].mean(axis=1) * (len(tickers) / top_n))
+        else:
+            rule_daily_parts.append(pd.Series(0.0, index=window.index))
+    rule_daily = pd.concat(rule_daily_parts) if rule_daily_parts else pd.Series(dtype="float64")
+
+    # ① 종목풀 규칙(슬리피지 차감) ② 종목풀 보유(전체 동일가중=기저).
     rule_net = segments - cost_per_round
     rule_stats = {
         "cumulative_pct": round(_compound(rule_net), 1),
-        "mdd_pct": _max_drawdown_pct(rule_net),
+        "mdd_pct": _daily_returns_mdd(rule_daily),
         "sortino": _sortino(rule_net, forward_days),
     }
     pool_hold_stats = {
         "cumulative_pct": round(_compound(baseline), 1),
-        "mdd_pct": _max_drawdown_pct(baseline),
+        "mdd_pct": _daily_returns_mdd(pool_daily),
         "sortino": _sortino(baseline, forward_days),
     }
 
     # ③ 벤치마크: 운용 기간(첫 리밸런싱 ~ 마지막 청산일) 동안 그냥 계속 보유.
-    # 누적은 시작·끝 종가비로만 계산해 텔레스코핑 오차를 없앤다. MDD·소르티노는 규칙·보유와
-    # 같은 잣대로 회차별 수익 시리즈에서 구한다. 미설정/데이터 없음이면 None(기저로 대체 금지).
+    # 누적은 시작·끝 종가비로(텔레스코핑 오차 없음). MDD 는 그 구간 일별 종가곡선으로,
+    # 소르티노는 회차별 수익으로. 미설정/데이터 없음이면 None(기저로 대체 금지).
     benchmark_payload: dict[str, Any] | None = None
     if benchmark is not None:
         bclose = benchmark["close"]
@@ -343,7 +369,7 @@ def _rule_performance(
             # 마지막 리밸런싱에서 forward_days 뒤 = 규칙이 마지막에 청산한 날(범위 밖이면 최신 종가).
             i_end = min(bclose.index.get_loc(last_d) + forward_days, len(bclose) - 1)
             cumulative = (float(bclose.iloc[i_end]) / float(bclose.iloc[i0]) - 1.0) * 100.0
-            # 회차별 벤치 수익(MDD·소르티노용): 각 리밸런싱 시점의 forward_days 수익.
+            # 회차별 벤치 수익(소르티노용): 각 리밸런싱 시점의 forward_days 수익.
             bench_seg = []
             for as_of in rebalance_dates:
                 d = pd.Timestamp(as_of).normalize()
@@ -357,7 +383,7 @@ def _rule_performance(
                 "ticker": benchmark["ticker"],
                 "name": benchmark["name"],
                 "cumulative_pct": round(cumulative, 1),
-                "mdd_pct": _max_drawdown_pct(bench_series),
+                "mdd_pct": _curve_mdd(bclose.iloc[i0 : i_end + 1]),
                 "sortino": _sortino(bench_series, forward_days),
             }
 

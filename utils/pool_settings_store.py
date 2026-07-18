@@ -364,6 +364,22 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
 
     cleaned = _validate_values(values)
 
+    # 벤치마크는 이 종목풀에 실제로 등록된 종목이어야 한다(순위/백테스트에서 매수 후보에서
+    # 제외하고 종가를 이 풀 캐시에서 읽기 때문). 없는 종목이면 저장을 거부한다.
+    benchmark = cleaned.get("BENCHMARK")
+    if isinstance(benchmark, dict) and benchmark.get("ticker"):
+        from utils.stock_list_io import get_etfs
+
+        def _norm_ticker(value: Any) -> str:
+            return str(value or "").strip().upper().removeprefix("ASX:")
+
+        pool_tickers = {_norm_ticker(item.get("ticker")) for item in get_etfs(norm_id)}
+        if _norm_ticker(benchmark["ticker"]) not in pool_tickers:
+            raise PoolSettingsError(
+                f"벤치마크 '{benchmark['ticker']}' 는 이 종목풀에 등록된 종목이 아닙니다. "
+                "종목풀에 있는 종목만 벤치마크로 지정할 수 있습니다."
+            )
+
     db = _db()
     db[COLLECTION].update_one(
         {"_id": norm_id},
