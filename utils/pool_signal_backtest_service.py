@@ -382,42 +382,42 @@ def _rule_performance(
             if ticker not in selected:
                 sell_amount += holdings[ticker]
                 cash += holdings.pop(ticker)
-        # 하락 레짐 투자비중이 100% 미만이면 전체 보유금액을 목표 투자금액 이하로 줄인다.
-        target_invested = total_before * invest_ratio
-        current_invested = sum(holdings.values())
-        if current_invested > target_invested and current_invested > 0:
-            scale = target_invested / current_invested
-            for ticker in list(holdings):
-                reduced = holdings[ticker] * (1.0 - scale)
-                holdings[ticker] *= scale
-                sell_amount += reduced
-                cash += reduced
-                if holdings[ticker] <= 1e-12:
-                    holdings.pop(ticker)
+
+        # 매수는 레짐 켬/끔과 무관하게 항상 '승자 키우기': 신규만 목표 1/N(100% 기준)까지 사고,
+        # 유지 종목은 비중 드리프트를 둔다(팔지 않음). 종목 간 상대 비중(승자 구조)은 여기서 결정된다.
         buy_amount = 0.0
-        target_amount = target_w * total_before * invest_ratio
-        if market_regime is None:
-            # 기존 규칙 유지: 신규만 목표 1/N까지 매수하고, 유지 종목은 비중 드리프트를 둔다.
-            newcomers = [ticker for ticker in selected if ticker not in holdings]
-            if newcomers:
-                each = target_amount if cash >= target_amount * len(newcomers) else cash / len(newcomers)
-                for ticker in newcomers:
-                    holdings[ticker] = each
-                    cash -= each
-                    buy_amount += each
-        else:
-            # 시장 레짐 필터 사용 시에는 상승장 복귀 때도 목표 투자비중까지 다시 채운다.
-            for ticker in selected:
-                if cash <= 0:
-                    break
-                current_amount = holdings.get(ticker, 0.0)
-                need = max(0.0, target_amount - current_amount)
-                if need <= 0:
-                    continue
-                add = min(need, cash)
-                holdings[ticker] = current_amount + add
-                cash -= add
-                buy_amount += add
+        target_amount = target_w * total_before
+        newcomers = [ticker for ticker in selected if ticker not in holdings]
+        if newcomers:
+            each = target_amount if cash >= target_amount * len(newcomers) else cash / len(newcomers)
+            for ticker in newcomers:
+                holdings[ticker] = each
+                cash -= each
+                buy_amount += each
+
+        # 레짐 볼륨 다이얼: 총 투자금액만 목표 투자비중으로 맞춘다. 상대 비중은 안 건드린다(리셋 없음).
+        #  - 하락(현재>목표): 모든 종목을 같은 배율로 축소, 차액은 현금.
+        #  - 상승 복귀(현재<목표, 현금 있음): 남은 현금을 현재 비중에 비례해 재투입(같은 배율로 증가).
+        if market_regime is not None:
+            target_invested = total_before * invest_ratio
+            current_invested = sum(holdings.values())
+            if current_invested > target_invested and current_invested > 0:
+                scale = target_invested / current_invested
+                for ticker in list(holdings):
+                    reduced = holdings[ticker] * (1.0 - scale)
+                    holdings[ticker] *= scale
+                    sell_amount += reduced
+                    cash += reduced
+                    if holdings[ticker] <= 1e-12:
+                        holdings.pop(ticker)
+            elif current_invested < target_invested and current_invested > 0 and cash > 0:
+                add_total = min(target_invested - current_invested, cash)
+                for ticker in list(holdings):
+                    add = add_total * (holdings[ticker] / current_invested)
+                    holdings[ticker] += add
+                    buy_amount += add
+                cash -= add_total
+
         # 정기 리밸런싱 비용. 긴급 매도 비용은 보유 기간 일별 루프에서 추가한다.
         cost = sell_amount * sell_pct + buy_amount * buy_pct
         cash -= cost
@@ -437,7 +437,6 @@ def _rule_performance(
             close_wide.index.get_loc(rebalance_dates[i + 1]) if i + 1 < len(rebalance_dates) else len(close_wide) - 1
         )
         window = close_wide.iloc[start_pos : end_pos + 1]
-        held_tickers = list(holdings)
         asset_values: list[float] = []
         for pos, current_date in enumerate(window.index):
             if pos > 0 and holdings:
