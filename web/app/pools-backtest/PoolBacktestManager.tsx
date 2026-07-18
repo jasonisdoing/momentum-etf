@@ -29,19 +29,21 @@ type LongShort = {
   significant: boolean;
 };
 
+type StrategyStats = { cumulative_pct: number; mdd_pct: number | null; sortino: number | null };
 type Performance = {
   top_n_hold: number;
   rounds: number;
   cash_rounds: number;
+  partial_rounds: number;
   mean_return: number;
   wins: number;
   losses: number;
   turnover_pct: number;
   round_trip_pct: number;
   cost_per_round_pct: number;
-  cumulative_pct: number;
-  cumulative_net_pct: number;
-  baseline_cumulative_pct: number;
+  rule: StrategyStats;
+  pool_hold: StrategyStats;
+  benchmark: (StrategyStats & { ticker: string; name: string }) | null;
 };
 
 type BacktestResult = {
@@ -73,11 +75,33 @@ type BacktestResult = {
   error?: string;
 };
 
-type PoolOption = { ticker_type: string; name: string; order: number; icon: string };
+type PoolSettingField = { value: string | number | null };
+type PoolOption = {
+  ticker_type: string;
+  name: string;
+  order: number;
+  icon: string;
+  settings?: Partial<Record<"TOP_N_HOLD" | "SHORT_MA_DAYS" | "LONG_MA_DAYS" | "SLOPE_DAYS", PoolSettingField>>;
+};
+type PoolSettingsResponse = {
+  pools?: PoolOption[];
+  constraints?: { ma_day_options?: number[]; slope_day_options?: number[] };
+  error?: string;
+};
 type BacktestOptions = { forward_day_options?: number[]; month_options?: number[]; max_months?: number; error?: string };
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
 const DEFAULT_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
+const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
+const DEFAULT_SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
+
+/** 종목풀 설정 필드에서 정수를 꺼낸다. 값이 없으면 null. */
+function fieldToInt(field: PoolSettingField | undefined): number | null {
+  const raw = field?.value;
+  if (raw === null || raw === undefined || raw === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
 
 function signedClass(value: number): string {
   if (value === 0) return "";
@@ -93,8 +117,15 @@ export function PoolBacktestManager() {
   const [pools, setPools] = useState<PoolOption[]>([]);
   const [poolId, setPoolId] = useState("");
   const [forwardDays, setForwardDays] = useState(20);
-  const [months, setMonths] = useState(36);
+  const [months, setMonths] = useState(12);
   const [monthOptions, setMonthOptions] = useState(DEFAULT_MONTH_OPTIONS);
+  // 파라미터 오버라이드(실험용). 종목풀 선택 시 그 설정값으로 채워지고, 사용자가 바꿀 수 있다.
+  const [topN, setTopN] = useState<number | null>(null);
+  const [shortMa, setShortMa] = useState<number | null>(null);
+  const [longMa, setLongMa] = useState<number | null>(null);
+  const [slopeDays, setSlopeDays] = useState<number | null>(null);
+  const [maDayOptions, setMaDayOptions] = useState(DEFAULT_MA_DAY_OPTIONS);
+  const [slopeDayOptions, setSlopeDayOptions] = useState(DEFAULT_SLOPE_DAY_OPTIONS);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -107,7 +138,7 @@ export function PoolBacktestManager() {
           fetch("/api/pool-settings", { cache: "no-store" }),
           fetch("/api/pool-backtest/options", { cache: "no-store" }),
         ]);
-        const payload = (await poolResp.json()) as { pools?: PoolOption[]; error?: string };
+        const payload = (await poolResp.json()) as PoolSettingsResponse;
         const options = (await optionsResp.json()) as BacktestOptions;
         if (!poolResp.ok || payload.error) throw new Error(payload.error ?? "종목풀 목록을 불러오지 못했습니다.");
         if (!optionsResp.ok || options.error) throw new Error(options.error ?? "백테스트 옵션을 불러오지 못했습니다.");
@@ -115,12 +146,14 @@ export function PoolBacktestManager() {
           const list = payload.pools ?? [];
           const loadedMonthOptions = (options.month_options ?? []).filter((month) => Number.isFinite(month) && month > 0);
           setPools(list);
+          if (payload.constraints?.ma_day_options?.length) setMaDayOptions(payload.constraints.ma_day_options);
+          if (payload.constraints?.slope_day_options?.length) setSlopeDayOptions(payload.constraints.slope_day_options);
           if (loadedMonthOptions.length > 0) {
             setMonthOptions(loadedMonthOptions);
             setMonths((current) =>
               loadedMonthOptions.includes(current)
                 ? current
-                : (loadedMonthOptions.includes(36) ? 36 : loadedMonthOptions[loadedMonthOptions.length - 1]),
+                : (loadedMonthOptions.includes(12) ? 12 : loadedMonthOptions[0]),
             );
           }
           if (list.length > 0) setPoolId(list[0].ticker_type);
@@ -134,6 +167,16 @@ export function PoolBacktestManager() {
     };
   }, []);
 
+  // 종목풀을 바꾸면 그 종목풀의 저장된 설정값으로 파라미터를 채운다(사용자가 이후 수정 가능).
+  useEffect(() => {
+    const pool = pools.find((p) => p.ticker_type === poolId);
+    if (!pool?.settings) return;
+    setTopN(fieldToInt(pool.settings.TOP_N_HOLD));
+    setShortMa(fieldToInt(pool.settings.SHORT_MA_DAYS));
+    setLongMa(fieldToInt(pool.settings.LONG_MA_DAYS));
+    setSlopeDays(fieldToInt(pool.settings.SLOPE_DAYS));
+  }, [poolId, pools]);
+
   const runBacktest = useCallback(async () => {
     if (!poolId) {
       toast.error("종목풀을 선택해주세요.");
@@ -142,10 +185,12 @@ export function PoolBacktestManager() {
     setLoading(true);
     setError(null);
     try {
-      const resp = await fetch(
-        `/api/pool-backtest?pool_id=${encodeURIComponent(poolId)}&forward_days=${forwardDays}&months=${months}`,
-        { cache: "no-store" },
-      );
+      const params = new URLSearchParams({ pool_id: poolId, forward_days: String(forwardDays), months: String(months) });
+      if (topN != null) params.set("top_n", String(topN));
+      if (shortMa != null) params.set("short_ma_days", String(shortMa));
+      if (longMa != null) params.set("long_ma_days", String(longMa));
+      if (slopeDays != null) params.set("slope_days", String(slopeDays));
+      const resp = await fetch(`/api/pool-backtest?${params.toString()}`, { cache: "no-store" });
       const payload = (await resp.json()) as BacktestResult & { detail?: string };
       if (!resp.ok || payload.error) throw new Error(payload.error ?? payload.detail ?? "백테스트에 실패했습니다.");
       setResult(payload);
@@ -155,7 +200,7 @@ export function PoolBacktestManager() {
     } finally {
       setLoading(false);
     }
-  }, [forwardDays, months, poolId, toast]);
+  }, [forwardDays, months, poolId, topN, shortMa, longMa, slopeDays, toast]);
 
   /** 롱숏·IC 공통 렌더. digits/suffix 로 표기만 달라진다. */
   const renderStat = (
@@ -309,6 +354,59 @@ export function PoolBacktestManager() {
                 ))}
               </select>
             </label>
+            <label className="appLabeledField" style={{ minWidth: 96 }}>
+              <span className="appLabeledFieldLabel">보유 종목수</span>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                className="form-control form-control-sm"
+                value={topN ?? ""}
+                onChange={(e) => setTopN(e.target.value === "" ? null : Number(e.target.value))}
+              />
+            </label>
+            <label className="appLabeledField" style={{ minWidth: 104 }}>
+              <span className="appLabeledFieldLabel">단기 이평선</span>
+              <select
+                className="form-select form-select-sm"
+                value={shortMa ?? ""}
+                onChange={(e) => setShortMa(e.target.value === "" ? null : Number(e.target.value))}
+              >
+                {maDayOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}일
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="appLabeledField" style={{ minWidth: 104 }}>
+              <span className="appLabeledFieldLabel">장기 이평선</span>
+              <select
+                className="form-select form-select-sm"
+                value={longMa ?? ""}
+                onChange={(e) => setLongMa(e.target.value === "" ? null : Number(e.target.value))}
+              >
+                {maDayOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}일
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="appLabeledField" style={{ minWidth: 104 }}>
+              <span className="appLabeledFieldLabel">기울기 일수</span>
+              <select
+                className="form-select form-select-sm"
+                value={slopeDays ?? ""}
+                onChange={(e) => setSlopeDays(e.target.value === "" ? null : Number(e.target.value))}
+              >
+                {slopeDayOptions.map((d) => (
+                  <option key={d} value={d}>
+                    {d}일
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" className="btn btn-sm btn-primary" disabled={loading || !poolId} onClick={() => void runBacktest()}>
               {loading ? "백테스트 중…" : "백테스트"}
             </button>
@@ -336,111 +434,95 @@ export function PoolBacktestManager() {
           {result.performance ? (
             <div className="card appCard">
               <div className="card-body">
-                <h3 style={{ fontSize: "0.98rem", fontWeight: 800, margin: "0 0 2px" }}>
-                  최근 {result.months}개월 실적 — 현재 설정 그대로
-                </h3>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+                  <h3 style={{ fontSize: "0.98rem", fontWeight: 800, margin: "0 0 2px" }}>
+                    최근 {result.months}개월 실적 — 현재 설정 그대로
+                  </h3>
+                  <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                    분석 기간 {result.date_from} ~ {result.date_to}
+                  </span>
+                </div>
                 <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", margin: "0 0 10px" }}>
                   순위 화면의 추천(✅)과 같은 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
                   {result.forward_days}일마다 리밸런싱({result.performance.rounds}회
-                  {result.performance.cash_rounds > 0 ? `, 후보 없어 현금 ${result.performance.cash_rounds}회` : ""}).
+                  {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
+                  {result.performance.partial_rounds > 0 ? `, 일부 현금 ${result.performance.partial_rounds}회` : ""}).
+                  조건 맞는 종목이 {result.performance.top_n_hold}개 미만이면 부족분은 현금으로 둡니다.
                 </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "baseline" }}>
-                  <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>규칙 누적(슬리피지 차감)</div>
-                    <div
-                      style={{ fontSize: "1.6rem", fontWeight: 800 }}
-                      className={signedClass(result.performance.cumulative_net_pct)}
-                    >
-                      {formatSigned(result.performance.cumulative_net_pct, 1)}%
+                {(() => {
+                  const p = result.performance!;
+                  const bench = p.benchmark;
+                  const cell = (v: number) => (
+                    <span className={signedClass(v)} style={{ fontWeight: 800 }}>
+                      {formatSigned(v, 1)}%
+                    </span>
+                  );
+                  const mdd = (v: number | null) =>
+                    v === null ? <span style={{ color: "var(--text-muted)" }}>-</span> : <span>{v.toFixed(1)}%</span>;
+                  const sortino = (v: number | null) =>
+                    v === null ? <span style={{ color: "var(--text-muted)" }}>-</span> : <span style={{ fontWeight: 700 }}>{v.toFixed(2)}</span>;
+                  const th: React.CSSProperties = { textAlign: "right", padding: "6px 10px", fontWeight: 700 };
+                  const td: React.CSSProperties = { textAlign: "right", padding: "6px 10px" };
+                  const labelCell: React.CSSProperties = { textAlign: "left", padding: "6px 10px", color: "var(--text-muted)" };
+                  return (
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="poolBtTable" style={{ minWidth: 460 }}>
+                        <thead>
+                          <tr>
+                            <th style={labelCell}>지표</th>
+                            <th style={th}>종목풀 규칙</th>
+                            <th style={th}>종목풀 보유</th>
+                            <th style={th}>{bench ? `벤치마크 (${bench.name})` : "벤치마크"}</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td style={labelCell}>누적수익 (슬리피지 차감)</td>
+                            <td style={td}>{cell(p.rule.cumulative_pct)}</td>
+                            <td style={td}>{cell(p.pool_hold.cumulative_pct)}</td>
+                            <td style={td}>
+                              {bench ? cell(bench.cumulative_pct) : <span style={{ color: "var(--text-muted)" }}>미설정</span>}
+                            </td>
+                          </tr>
+                          <tr>
+                            <td style={labelCell}>최대낙폭 (MDD)</td>
+                            <td style={td}>{mdd(p.rule.mdd_pct)}</td>
+                            <td style={td}>{mdd(p.pool_hold.mdd_pct)}</td>
+                            <td style={td}>{bench ? mdd(bench.mdd_pct) : <span style={{ color: "var(--text-muted)" }}>-</span>}</td>
+                          </tr>
+                          <tr>
+                            <td style={labelCell}>소르티노 (연율)</td>
+                            <td style={td}>{sortino(p.rule.sortino)}</td>
+                            <td style={td}>{sortino(p.pool_hold.sortino)}</td>
+                            <td style={td}>{bench ? sortino(bench.sortino) : <span style={{ color: "var(--text-muted)" }}>-</span>}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                      <p style={{ fontSize: "0.85rem", margin: "8px 2px 0", color: "var(--text-muted)" }}>
+                        <strong>규칙 − 벤치마크(기여한 몫):</strong>{" "}
+                        {bench ? (
+                          <span className={signedClass(p.rule.cumulative_pct - bench.cumulative_pct)} style={{ fontWeight: 800 }}>
+                            {formatSigned(p.rule.cumulative_pct - bench.cumulative_pct, 1)}%p
+                          </span>
+                        ) : (
+                          "벤치마크 미설정"
+                        )}
+                        {" · "}회차당 {formatSigned(p.mean_return, 2)}% · {p.wins}승 {p.losses}패 · 회전율{" "}
+                        {p.turnover_pct.toFixed(0)}% · 회차비용 −{p.cost_per_round_pct.toFixed(2)}%
+                      </p>
                     </div>
-                  </div>
-                  <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>기저 누적 (아무 종목이나)</div>
-                    <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-muted)" }}>
-                      {formatSigned(result.performance.baseline_cumulative_pct, 1)}%
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>규칙이 기여한 몫</div>
-                    <div
-                      style={{ fontSize: "1.6rem", fontWeight: 800 }}
-                      className={signedClass(
-                        result.performance.cumulative_net_pct - result.performance.baseline_cumulative_pct,
-                      )}
-                    >
-                      {formatSigned(
-                        result.performance.cumulative_net_pct - result.performance.baseline_cumulative_pct,
-                        1,
-                      )}
-                      %p
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>회차당 · 승패</div>
-                    <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>
-                      {formatSigned(result.performance.mean_return, 2)}% · {result.performance.wins}승{" "}
-                      {result.performance.losses}패
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>회전율 · 거래비용</div>
-                    <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>
-                      {result.performance.turnover_pct.toFixed(0)}% · 회차당 −{result.performance.cost_per_round_pct.toFixed(2)}%
-                    </div>
-                  </div>
-                </div>
+                  );
+                })()}
                 <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
                   <strong>기대수익이 아니라 지나간 {result.months}개월의 실적입니다</strong> — 리밸런싱{" "}
                   {result.performance.rounds}회가 표본의 전부라, 큰 상승장이 통째로 들어오면 숫자가 커집니다. 다음 기간에
-                  이만큼을 기대하면 안 됩니다. <strong>기저와의 차이(규칙이 기여한 몫)</strong>를 보세요 — 이 값이 작으면
+                  이만큼을 기대하면 안 됩니다. <strong>벤치마크와의 차이(규칙이 기여한 몫)</strong>를 보세요 — 이 값이 작으면
                   수익의 대부분은 규칙이 아니라 시장이 만든 것입니다.
                 </p>
               </div>
             </div>
           ) : null}
 
-          {/* 요약: 기저율/오차범위를 가장 먼저 크게 */}
-          <div className="card appCard">
-            <div className="card-body">
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 24, alignItems: "baseline" }}>
-                <div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-                    기저 평균수익 (아무 종목이나 {result.forward_days}일 보유)
-                  </div>
-                  <div style={{ fontSize: "1.6rem", fontWeight: 800 }} className={signedClass(result.base_return)}>
-                    {formatSigned(result.base_return, 2)}%
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>기저 상승확률</div>
-                  <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "var(--text-muted)" }}>
-                    {result.base_rate.toFixed(1)}%
-                  </div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>유효 독립구간</div>
-                  <div style={{ fontSize: "1.6rem", fontWeight: 800, color: "#b45309" }}>{result.effective_samples}개</div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>실제 분석 기간</div>
-                  <div style={{ fontSize: "1.05rem", fontWeight: 800 }}>
-                    {result.date_from} ~ {result.date_to}
-                  </div>
-                </div>
-              </div>
-              <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
-                종목 {result.ticker_count}개(고정 {result.excluded_fixed_count}개 제외) · 거래일 {result.trading_days}일 · 행{" "}
-                {result.row_count.toLocaleString()}개 · 단기 {result.ma_rule.short_ma_days}일 / 장기 {result.ma_rule.long_ma_days}일 / 기울기{" "}
-                {result.ma_rule.slope_days}일
-                <br />
-                <strong>행 {result.row_count.toLocaleString()}개가 곧 표본이 아닙니다</strong> — {result.forward_days}일 수익률이 매일 겹쳐
-                실제 독립구간은 <strong>{result.effective_samples}개</strong>뿐입니다. 종목 간 동조까지 감안하면 더 적습니다.
-                <br />
-                {result.forward_days}일 뒤 수익을 알아야 하므로 <strong>최근 {result.forward_days}거래일은 분석에서 빠집니다</strong> — 끝일자가 오늘이
-                아닌 이유입니다. 최근 구간을 보려면 전망일수를 짧게 잡으세요.
-              </p>
-            </div>
-          </div>
 
           <div className="poolBtSplit">
             {renderTable(

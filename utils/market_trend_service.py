@@ -18,10 +18,8 @@ import pandas as pd
 import yfinance as yf
 
 from config import (
-    MARKET_TREND_REGIME_CONFIRM_DAYS,
-    MARKET_TREND_REGIME_MA_LONG,
-    MARKET_TREND_REGIME_MA_SHORT,
     MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
+    MARKET_TREND_SCORE_MA_DAYS,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
     MARKET_TREND_SUPERTREND_PERIOD,
     TRADING_DAYS_PER_MONTH,
@@ -170,7 +168,7 @@ def compute_market_trend() -> dict[str, Any]:
             pct_from_high, current_regime, current_regime_days,
         }, ...]}``
     """
-    ma_days = MARKET_TREND_REGIME_MA_SHORT
+    ma_days = MARKET_TREND_SCORE_MA_DAYS
 
     # 미국 인덱스만 yfinance 로 일괄 다운로드 (한국 2개는 네이버 사용).
     us_tickers = [idx["yf_ticker"] for idx in INDICES if not idx.get("kor_naver_symbol")]
@@ -398,18 +396,6 @@ def _trend_pct_at(
     return (price / ma_value - 1.0) * 100.0
 
 
-def _resolve_confirm_days(yf_ticker: str) -> int:
-    """지수(yf_ticker)별 MA20/60 레짐 확인 거래일 수 N을 반환한다."""
-    if yf_ticker not in MARKET_TREND_REGIME_CONFIRM_DAYS:
-        raise ValueError(
-            f"MARKET_TREND_REGIME_CONFIRM_DAYS 에 지수 '{yf_ticker}' 의 확인일 수가 등록되지 않았습니다. "
-            "config.py 에 해당 지수를 등록해주세요."
-        )
-    value = int(MARKET_TREND_REGIME_CONFIRM_DAYS[yf_ticker])
-    if value < 0:
-        raise ValueError(f"MARKET_TREND_REGIME_CONFIRM_DAYS 값은 0 이상이어야 합니다: {yf_ticker}={value}")
-    return value
-
 
 def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
     """차트 표시용 SuperTrend 기간/곱수를 반환한다."""
@@ -478,77 +464,6 @@ def is_market_trend_index(ticker: str) -> bool:
     return any(idx["yf_ticker"] == ticker for idx in INDICES)
 
 
-# MA20/60 레짐 백테스트 파라미터 (읽기 전용 분석 — DB 저장/운영 미반영)
-REGIME_BACKTEST_MA_SHORT = 20  # MA 교차 방식 단기선
-REGIME_BACKTEST_MA_LONG = 60   # MA 교차 방식 장기선
-REGIME_BACKTEST_CONFIRM_MAX = 5  # MA 교차 확인 필터를 0~N일까지 나열
-# 현금제어 기본 현금 비중(%) — 상승 0%, 중립 15%, 하락 30% (화면에서 조정)
-REGIME_BACKTEST_DEFAULT_CASH = {"up": 0.0, "neutral": 15.0, "down": 30.0}
-
-
-def _regime_series_ma_cross(close: pd.Series, ma_short: pd.Series, ma_long: pd.Series) -> pd.Series:
-    """버퍼 없는 MA20/60 위치 기반 레짐(벡터화).
-
-    - MA20 < MA60 → 하락
-    - MA20 >= MA60 이면서 종가 > MA20 → 상승
-    - MA20 >= MA60 이면서 종가 < MA60 → 하락
-    - 그 외 → 중립
-    """
-    idx = close.index
-    valid = ma_short.notna() & ma_long.notna()
-    death = ma_short < ma_long
-    up = valid & ~death & (close > ma_short)
-    down = valid & (death | (close < ma_long))
-    reg = pd.Series("neutral", index=idx, dtype=object)
-    reg[up] = "accel_up"
-    reg[down] = "accel_down"
-    reg[~valid] = None
-    return reg.dropna()
-
-
-def _apply_confirmation(regime: pd.Series, confirm_days: int) -> pd.Series:
-    """새 레짐이 confirm_days 거래일 연속으로 나올 때만 전환한다(그 전엔 직전 확정 상태 유지).
-
-    잦은 뒤집힘(휩소)을 줄이는 대신 전환이 다소 늦어진다.
-    """
-    if regime.empty or confirm_days <= 1:
-        return regime
-    values = list(regime.values)
-    committed = values[0]
-    run_state = values[0]
-    run_len = 1
-    out = [committed]
-    for value in values[1:]:
-        if value == run_state:
-            run_len += 1
-        else:
-            run_state = value
-            run_len = 1
-        if run_len >= confirm_days:
-            committed = run_state
-        out.append(committed)
-    return pd.Series(out, index=regime.index)
-
-
-def compute_ma_cross_regime(df: pd.DataFrame, confirm_days: int) -> pd.Series:
-    """MA20/60 교차 + N일 확인 레짐을 계산한다.
-
-    ``confirm_days`` 는 운영 설정의 N이다. N=0 은 원본 레짐 즉시 전환,
-    N>0 은 새 레짐이 (N+1)거래일 연속 나올 때 확정 전환한다.
-    """
-    if confirm_days < 0:
-        raise ValueError(f"confirm_days 는 0 이상이어야 합니다: {confirm_days}")
-    if df is None or df.empty or "Close" not in df.columns:
-        return pd.Series(dtype=object)
-    close = df["Close"].dropna().sort_index()
-    if close.empty:
-        return pd.Series(dtype=object)
-    ma_short = close.rolling(MARKET_TREND_REGIME_MA_SHORT).mean()
-    ma_long = close.rolling(MARKET_TREND_REGIME_MA_LONG).mean()
-    raw = _regime_series_ma_cross(close, ma_short, ma_long)
-    if confirm_days == 0:
-        return raw
-    return _apply_confirmation(raw, confirm_days + 1)
 
 
 def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> list[dict[str, Any]]:
@@ -576,136 +491,6 @@ def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> lis
         ranges.append(current)
     return ranges
 
-
-def _regime_backtest_metrics(
-    regime: pd.Series, close: pd.Series, window: int, pos_map: dict[str, float]
-) -> dict[str, Any]:
-    """레짐 시리즈의 분포·휩소·유지기간 + 현금제어 전략 성과(vs buy&hold)를 계산한다.
-
-    pos_map: 레짐별 투자비중(=1-현금%). 예: {accel_up:1.0, neutral:0.85, accel_down:0.7}.
-    """
-    reg = regime.tail(window)
-    reg = reg[reg.notna()]
-    if len(reg) < 2:
-        return {}
-    counts = reg.value_counts().to_dict()
-    flips = int((reg.values[1:] != reg.values[:-1]).sum())
-    runs, cur = [], 1
-    for i in range(1, len(reg)):
-        if reg.values[i] == reg.values[i - 1]:
-            cur += 1
-        else:
-            runs.append(cur)
-            cur = 1
-    runs.append(cur)
-    dwell = float(np.mean(runs)) if runs else 0.0
-
-    # 룩어헤드 방지: 오늘 레짐으로 정한 포지션을 다음날 수익에 적용
-    ret = np.log(close / close.shift(1)).reindex(reg.index)
-    pos = reg.map(pos_map).shift(1)
-    strat = (pos * ret).dropna()
-    bh = ret.reindex(strat.index)
-
-    def perf(series: pd.Series) -> tuple[float, float, float]:
-        if series.empty or series.std() == 0:
-            return 0.0, 0.0, 0.0
-        cum = float(np.expm1(series.sum()) * 100)
-        eq = np.exp(series.cumsum())
-        mdd = float((eq / eq.cummax() - 1).min() * 100)
-        sharpe = float(series.mean() / series.std() * np.sqrt(252))
-        return cum, mdd, sharpe
-
-    s_cum, s_mdd, s_sharpe = perf(strat)
-    b_cum, b_mdd, b_sharpe = perf(bh)
-    return {
-        "up": int(counts.get("accel_up", 0)),
-        "neutral": int(counts.get("neutral", 0)),
-        "down": int(counts.get("accel_down", 0)),
-        "flips": flips,
-        "dwell": round(dwell, 1),
-        "strat_return": round(s_cum, 1),
-        "strat_mdd": round(s_mdd, 1),
-        "strat_sharpe": round(s_sharpe, 2),
-        "bh_return": round(b_cum, 1),
-        "bh_mdd": round(b_mdd, 1),
-        "bh_sharpe": round(b_sharpe, 2),
-    }
-
-
-def compute_regime_confirm_backtest(
-    ticker: str | None = None,
-    months: int = 12,
-    up_cash: float | None = None,
-    neutral_cash: float | None = None,
-    down_cash: float | None = None,
-) -> dict[str, Any]:
-    """선택 지수(미지정이면 전체)의 MA20/60 교차 확인일수 후보를 최근 N개월로 비교한다.
-
-    months: 백테스트 기간(개월, 1~36). up/neutral/down_cash: 레짐별 현금 비중(%).
-    읽기 전용 분석 — config/DB 를 바꾸지 않는다.
-    """
-    if ticker is not None and not is_market_trend_index(ticker):
-        allowed = ", ".join(idx["yf_ticker"] for idx in INDICES)
-        raise ValueError(f"시장추세 지수({allowed}) 중 하나여야 합니다: {ticker}")
-    months = int(months)
-    if not (1 <= months <= 36):
-        raise ValueError(f"백테스트 기간은 1~36개월이어야 합니다: {months}")
-    window = max(10, months * TRADING_DAYS_PER_MONTH)
-
-    cash = {
-        "up": REGIME_BACKTEST_DEFAULT_CASH["up"] if up_cash is None else float(up_cash),
-        "neutral": REGIME_BACKTEST_DEFAULT_CASH["neutral"] if neutral_cash is None else float(neutral_cash),
-        "down": REGIME_BACKTEST_DEFAULT_CASH["down"] if down_cash is None else float(down_cash),
-    }
-    for label, value in cash.items():
-        if not (0.0 <= value <= 100.0):
-            raise ValueError(f"{label} 현금 비중은 0~100%여야 합니다: {value}")
-    pos_map = {
-        "accel_up": 1.0 - cash["up"] / 100.0,
-        "neutral": 1.0 - cash["neutral"] / 100.0,
-        "accel_down": 1.0 - cash["down"] / 100.0,
-    }
-
-    targets = [idx for idx in INDICES if ticker is None or idx["yf_ticker"] == ticker]
-
-    indices_out: list[dict[str, Any]] = []
-    for idx in targets:
-        idx_ticker, name = idx["yf_ticker"], idx["name"]
-        df = load_index_ohlc(idx_ticker)
-        if df is None or df.empty:
-            continue
-        df = df.dropna(subset=["Close"]).sort_index()
-        close = df["Close"]
-
-        # MA20/60 교차 방식 — 확인 필터 0~N일 나열
-        ma_short = close.rolling(REGIME_BACKTEST_MA_SHORT).mean()
-        ma_long = close.rolling(REGIME_BACKTEST_MA_LONG).mean()
-        ma_raw = _regime_series_ma_cross(close, ma_short, ma_long)
-        ma_variants: list[dict[str, Any]] = []
-        for n in range(REGIME_BACKTEST_CONFIRM_MAX + 1):
-            # n 일 확인 = 새 레짐이 (n+1)거래일 연속일 때 전환. n=0 은 즉시 전환(원본).
-            conf = ma_raw if n == 0 else _apply_confirmation(ma_raw, n + 1)
-            metrics = _regime_backtest_metrics(conf, close, window, pos_map)
-            if metrics:
-                ma_variants.append({"confirm_days": n, **metrics})
-        if not ma_variants:
-            continue
-
-        indices_out.append(
-            {
-                "ticker": idx_ticker,
-                "name": name,
-                "confirm_days": _resolve_confirm_days(idx_ticker),
-                "ma_variants": ma_variants,
-                "ma_periods": [REGIME_BACKTEST_MA_SHORT, REGIME_BACKTEST_MA_LONG],
-            }
-        )
-    return {
-        "window_days": window,
-        "months": months,
-        "cash": cash,
-        "indices": indices_out,
-    }
 
 
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
@@ -752,57 +537,6 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     return pd.DataFrame(cleaned_cols).dropna()
 
 
-def _tail_streak(values: pd.Series) -> tuple[str | None, int]:
-    """시리즈 마지막 값과 같은 값이 끝에서 몇 거래일 연속인지 반환한다."""
-    cleaned = values.dropna()
-    if cleaned.empty:
-        return None, 0
-    latest = cleaned.iloc[-1]
-    streak = 0
-    for value in reversed(cleaned.tolist()):
-        if value != latest:
-            break
-        streak += 1
-    return str(latest), streak
-
-
-def _ma_cross_forecast(
-    close: float | None,
-    ma_short: float | None,
-    ma_long: float | None,
-    raw_regime: str | None,
-    raw_streak: int,
-    confirmed_regime: str | None,
-    confirm_days: int,
-) -> dict[str, Any] | None:
-    """MA20/60 레짐 전환에 필요한 가격선과 남은 확인일수를 반환한다."""
-    if close is None or close <= 0 or ma_short is None or ma_long is None or confirmed_regime is None:
-        return None
-
-    required_days = confirm_days + 1
-
-    def change_pct(target_price: float | None) -> float | None:
-        if target_price is None:
-            return None
-        return (target_price / close - 1.0) * 100.0
-
-    def remaining(target_raw: str) -> int:
-        if raw_regime == target_raw:
-            return max(0, required_days - raw_streak)
-        return required_days
-
-    return {
-        "confirm_days": confirm_days,
-        "required_days": required_days,
-        "raw_regime": raw_regime,
-        "raw_streak": raw_streak,
-        "up_price": ma_short,
-        "up_pct": change_pct(ma_short),
-        "up_remaining_days": remaining("accel_up"),
-        "dn_price": ma_long,
-        "dn_pct": change_pct(ma_long),
-        "dn_remaining_days": remaining("accel_down"),
-    }
 
 
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:
@@ -813,17 +547,12 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     name = index_meta["name"] if index_meta else yf_ticker
 
-    ma_short_days = MARKET_TREND_REGIME_MA_SHORT
-    ma_long_days = MARKET_TREND_REGIME_MA_LONG
-    confirm_days = _resolve_confirm_days(yf_ticker)
+    ma_short_days = MARKET_TREND_SCORE_MA_DAYS
 
     empty_payload = {
         "ticker": yf_ticker,
         "name": name,
         "ma_days": ma_short_days,
-        "ma_short_days": ma_short_days,
-        "ma_long_days": ma_long_days,
-        "confirm_days": confirm_days,
         "history": [],
         "trend_min_12m": None,
         "trend_max_12m": None,
@@ -846,9 +575,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         return empty_payload
 
     ma_short_series = close_series.rolling(ma_short_days).mean()
-    ma_long_series = close_series.rolling(ma_long_days).mean()
-    raw_regime_series = _regime_series_ma_cross(close_series, ma_short_series, ma_long_series)
-    confirmed_regime_series = compute_ma_cross_regime(pd.DataFrame({"Close": close_series}), confirm_days)
+
     try:
         st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
         st_df = _calculate_supertrend(df, period=st_period, multiplier=st_multiplier)
@@ -892,7 +619,6 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         date_str = date_value.strftime("%Y-%m-%d") if hasattr(date_value, "strftime") else str(date_value)
         close = _to_float(close_series.iloc[idx])
         ma_short_v = _to_float(ma_short_series.iloc[idx])
-        ma_long_v = _to_float(ma_long_series.iloc[idx])
         trend = full_trend[idx]
         trend_score = (
             _normalize_score(trend, score_min, score_max) if score_min is not None and score_max is not None else None
@@ -928,7 +654,6 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
                 "close": close,
                 "volume": _to_float(df["Volume"].iloc[idx]),
                 "ma": ma_short_v,
-                "ma_long": ma_long_v,
                 "trend_pct": trend,
                 "trend_score": trend_score,
                 "regime": regime,
@@ -942,9 +667,6 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "ticker": yf_ticker,
         "name": name,
         "ma_days": ma_short_days,
-        "ma_short_days": ma_short_days,
-        "ma_long_days": ma_long_days,
-        "confirm_days": confirm_days,
         "history": history,
         "trend_min_12m": score_min,
         "trend_max_12m": score_max,
@@ -954,8 +676,5 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
 __all__ = [
     "compute_market_trend",
     "compute_index_history",
-    "compute_ma_cross_regime",
-    "compute_regime_confirm_backtest",
-    "_resolve_confirm_days",
     "INDICES",
 ]

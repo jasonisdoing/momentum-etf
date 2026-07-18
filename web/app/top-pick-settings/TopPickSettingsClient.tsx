@@ -1040,9 +1040,21 @@ export function TopPickSettingsClient() {
   const comparisonColumns = useMemo<ColDef<TopPickWeightComparisonRow>[]>(
     () => [
       {
+        colId: "bucket",
+        headerName: "버킷",
+        width: 108,
+        pinned: "left",
+        sortable: true,
+        comparator: (_a, _b, nodeA, nodeB) => Number(nodeA.data?.bucket ?? 0) - Number(nodeB.data?.bucket ?? 0),
+        valueGetter: (params) => getBucketName(params.data?.bucket),
+        cellClass: (params) => getBucketCellClass(params.data?.bucket),
+        cellRenderer: (params: { data?: TopPickWeightComparisonRow }) => <span>{getBucketName(params.data?.bucket)}</span>,
+      },
+      {
         field: "ticker",
         headerName: "티커",
         width: 110,
+        pinned: "left",
         cellStyle: { fontWeight: 700 },
         cellRenderer: (params: { value: string | null | undefined }) =>
           params.value === "__CASH__" ? "CASH" : params.value ? displayTickerOf(params.value) : "-",
@@ -1974,7 +1986,6 @@ export function TopPickSettingsClient() {
                     <AppAgGrid<LabPosition>
                       rowData={backtestPositionRows}
                       columnDefs={backtestPositionColumns}
-                      minHeight="auto"
                       className="topPickPreviewGrid rankAgGrid"
                       theme={previewGridTheme}
                       getRowId={(params) => params.data.ticker}
@@ -2015,7 +2026,6 @@ export function TopPickSettingsClient() {
                     <AppAgGrid<TopPickWeightComparisonRow>
                       rowData={comparisonRows}
                       columnDefs={comparisonColumns}
-                      minHeight="auto"
                       className="topPickPreviewGrid"
                       theme={previewGridTheme}
                       getRowId={(params) => params.data.ticker}

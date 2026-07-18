@@ -918,20 +918,13 @@ export function MarketTrendChart({
                       {formatNumber(item.target_price)}
                     </span>
                     pt
-                    {item.mode === "confirm" ? " 부근에서" : item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
+                    {item.mode === "confirm" ? " 도달하면" : item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
                     {" "}(현재 대비{" "}
                     <span style={{ fontWeight: 800 }}>
                       {item.change_pct! > 0 ? "+" : ""}
                       {item.change_pct!.toFixed(1)}%
                     </span>
-                    ){item.mode === "confirm" ? (
-                      <>
-                        {" "}
-                        <span style={{ fontWeight: 800 }}>{item.confirm_days}거래일 확인되면</span>, 시장 상태가{" "}
-                      </>
-                    ) : (
-                      <>, 시장 상태가{" "}</>
-                    )}
+                    ), 시장 상태가{" "}
                     <span style={{ fontWeight: 800 }}>{REGIME_LABEL[item.next_regime]}</span>
                     으로 변경될 것으로 예상됩니다.
                   </li>
