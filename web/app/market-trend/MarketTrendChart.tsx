@@ -829,7 +829,7 @@ export function MarketTrendChart({
                         fontWeight: 800,
                         boxShadow: "0 4px 12px rgba(15, 23, 42, 0.2)",
                       }}
-                      title={`추세 점수 ${formatScore(latestPoint?.trend_score)} (MA 괴리율 ${formatPct(
+                      title={`추세 점수(SMA20 기반) ${formatScore(latestPoint?.trend_score)} (SMA20 괴리율 ${formatPct(
                         latestPoint?.trend_pct,
                       )}, ${latestRegime ? REGIME_LABEL[latestRegime] : "-"})`}
                     >

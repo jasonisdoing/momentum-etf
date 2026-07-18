@@ -281,7 +281,7 @@ def _build_item(
     base["price"] = latest_price
     base["change_pct"] = change_pct
 
-    # 추세 점수는 설정된 SMA 기준 괴리율을 쓴다.
+    # 추세 점수는 추세점수용 SMA20(MARKET_TREND_SCORE_MA_DAYS) 기준 괴리율을 쓴다.
     ma_series = close_series.rolling(ma_days).mean()
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)

@@ -10,7 +10,17 @@ export async function GET(request: NextRequest) {
   try {
     const src = request.nextUrl.searchParams;
     const params = new URLSearchParams();
-    for (const key of ["pool_id", "forward_days", "months", "top_n", "short_ma_days", "long_ma_days", "slope_days", "hold_threshold_k"]) {
+    for (const key of [
+      "pool_id",
+      "forward_days",
+      "months",
+      "top_n",
+      "short_ma_days",
+      "long_ma_days",
+      "slope_days",
+      "hold_threshold_k",
+      "down_market_invest_pct",
+    ]) {
       const value = src.get(key);
       if (value !== null && value !== "") params.set(key, value);
     }

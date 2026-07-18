@@ -21,6 +21,7 @@ from utils.pool_settings_store import (
     save_pool_settings,
     update_pool,
 )
+from utils.market_trend_service import INDICES
 
 router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 
@@ -71,6 +72,7 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
             "slope_day_options": list(SLOPE_DAY_OPTIONS),
             "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
             "editable_keys": list(POOL_EDITABLE_KEYS),
+            "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
         },
     }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
 import { useToast } from "../components/ToastProvider";
@@ -10,7 +10,7 @@ import { AppModal } from "../components/AppModal";
 const NUMERIC_KEYS = ["TOP_N_HOLD", "SHORT_MA_DAYS", "LONG_MA_DAYS", "SLOPE_DAYS", "BUY_SLIPPAGE_PCT", "SELL_SLIPPAGE_PCT"] as const;
 
 /** 화면 표시 순서 = 헤더 순서. 셀도 반드시 이 순서로 그려야 한다. */
-const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK"] as const;
+const EDITABLE_KEYS = [...NUMERIC_KEYS, "BENCHMARK", "MARKET_REGIME_INDEX"] as const;
 
 type NumericKey = (typeof NUMERIC_KEYS)[number];
 type EditableKey = (typeof EDITABLE_KEYS)[number];
@@ -23,6 +23,7 @@ const KEY_LABELS: Record<EditableKey, string> = {
   BUY_SLIPPAGE_PCT: "매수 슬리피지(%)",
   SELL_SLIPPAGE_PCT: "매도 슬리피지(%)",
   BENCHMARK: "벤치마크",
+  MARKET_REGIME_INDEX: "시장 레짐",
 };
 
 const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
@@ -33,8 +34,9 @@ const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
 /** 계좌 설정(account_settings.benchmark)과 같은 형태. 미설정이면 null. */
 type Benchmark = { ticker?: string; name?: string };
+type MarketIndexOption = { ticker: string; name: string };
 
-type SettingField = { value: string | number | Benchmark | null };
+type SettingField = { value: string | number | Benchmark | MarketIndexOption | null };
 type SettingsMap = Record<EditableKey, SettingField>;
 
 type PoolEntry = {
@@ -50,7 +52,13 @@ type PoolEntry = {
 
 type PoolSettingsResponse = {
   pools: PoolEntry[];
-  constraints: { ma_day_options: number[]; slope_day_options?: number[]; slippage_pct_options?: number[]; editable_keys: string[] };
+  constraints: {
+    ma_day_options: number[];
+    slope_day_options?: number[];
+    slippage_pct_options?: number[];
+    market_indices?: MarketIndexOption[];
+    editable_keys: string[];
+  };
   error?: string;
 };
 
@@ -64,6 +72,8 @@ type PoolDraft = {
   // 벤치마크는 {ticker, name} 이라 초안에서는 두 값으로 나눠 든다. 이름은 조회로만 채운다.
   benchmarkTicker: string;
   benchmarkName: string;
+  marketRegimeTicker: string;
+  marketRegimeName: string;
 } & Record<NumericKey, string>;
 
 const EMPTY_DRAFT: PoolDraft = {
@@ -81,11 +91,21 @@ const EMPTY_DRAFT: PoolDraft = {
   SELL_SLIPPAGE_PCT: "0.25",
   benchmarkTicker: "",
   benchmarkName: "",
+  marketRegimeTicker: "",
+  marketRegimeName: "",
 };
 
 function toBenchmark(field: SettingField | undefined): Benchmark {
   const value = field?.value;
   return value && typeof value === "object" ? (value as Benchmark) : {};
+}
+
+function toMarketRegimeIndex(field: SettingField | undefined): MarketIndexOption | null {
+  const value = field?.value;
+  if (!value || typeof value !== "object") return null;
+  const ticker = String((value as MarketIndexOption).ticker ?? "").trim();
+  const name = String((value as MarketIndexOption).name ?? "").trim();
+  return ticker ? { ticker, name } : null;
 }
 
 const inputStyle: React.CSSProperties = {
@@ -113,6 +133,8 @@ function toDraft(pool: PoolEntry): PoolDraft {
     SELL_SLIPPAGE_PCT: String(pool.settings.SELL_SLIPPAGE_PCT?.value ?? ""),
     benchmarkTicker: toBenchmark(pool.settings.BENCHMARK).ticker ?? "",
     benchmarkName: toBenchmark(pool.settings.BENCHMARK).name ?? "",
+    marketRegimeTicker: toMarketRegimeIndex(pool.settings.MARKET_REGIME_INDEX)?.ticker ?? "",
+    marketRegimeName: toMarketRegimeIndex(pool.settings.MARKET_REGIME_INDEX)?.name ?? "",
   };
 }
 
@@ -133,6 +155,9 @@ function draftToValues(draft: PoolDraft) {
     // 티커/이름이 모두 비면 미설정(null). 하나만 있으면 백엔드가 거부한다.
     BENCHMARK: draft.benchmarkTicker.trim()
       ? { ticker: draft.benchmarkTicker.trim().toUpperCase(), name: draft.benchmarkName.trim() }
+      : null,
+    MARKET_REGIME_INDEX: draft.marketRegimeTicker.trim()
+      ? { ticker: draft.marketRegimeTicker.trim(), name: draft.marketRegimeName.trim() }
       : null,
   };
 }
@@ -400,6 +425,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
   const slippageOptions = data.constraints.slippage_pct_options?.length
     ? data.constraints.slippage_pct_options
     : DEFAULT_SLIPPAGE_PCT_OPTIONS;
+  const marketIndices = data.constraints.market_indices ?? [];
 
   const rowStyle: React.CSSProperties = { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 };
   const inputLabelStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, minWidth: 160 };
@@ -511,6 +537,28 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
       <div style={{ ...rowStyle, marginBottom: 0 }}>
         <span style={{ ...labelStyle, width: 72 }}>벤치마크</span>
         <BenchmarkField ticker={draft.benchmarkTicker} name={draft.benchmarkName} onChange={onChange} />
+        {renderField(
+          "시장 레짐",
+          <select
+            className="form-select form-select-sm"
+            style={{ width: 170 }}
+            value={draft.marketRegimeTicker}
+            onChange={(event) => {
+              const ticker = event.target.value;
+              const selected = marketIndices.find((item) => item.ticker === ticker);
+              onChange("marketRegimeTicker", ticker);
+              onChange("marketRegimeName", selected?.name ?? "");
+            }}
+          >
+            <option value="">미설정</option>
+            {marketIndices.map((item) => (
+              <option key={item.ticker} value={item.ticker}>
+                {item.name}
+              </option>
+            ))}
+          </select>,
+          { minWidth: 260, labelWidth: 72 },
+        )}
       </div>
     </>
   );
@@ -565,18 +613,13 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                 </div>
               </div>
               <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" className="btn btn-sm btn-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
+                  등록
+                </button>
                 <button type="button" className="btn btn-sm btn-outline-secondary" disabled={loading} onClick={() => void load()}>
                   새로고침
                 </button>
               </div>
-            </div>
-          </div>
-          
-          <div className="card-header appActionHeader bg-light-subtle border-top">
-            <div className="appActionHeaderInner">
-              <button type="button" className="btn btn-sm btn-primary" onClick={() => setIsCreatingNew(!isCreatingNew)}>
-                등록
-              </button>
             </div>
           </div>
 
@@ -585,7 +628,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
               {rows.map((pool) => {
                 const draft = drafts[pool.ticker_type] ?? toDraft(pool);
                 const dirty = isDirty(draft, pool);
-                return renderDraftCard({
+                return (
+                  <React.Fragment key={pool.ticker_type}>
+                    {renderDraftCard({
                   title: `${pool.icon ?? ""} ${pool.name}`.trim(),
                   subtitle: pool.ticker_type,
                   draft,
@@ -612,7 +657,9 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
                       {deletingId === pool.ticker_type ? "삭제 중…" : "삭제"}
                     </button>
                   ),
-                });
+                    })}
+                  </React.Fragment>
+                );
               })}
             </div>
           </div>

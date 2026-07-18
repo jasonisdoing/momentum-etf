@@ -4,8 +4,8 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
 
     구조: ticker_type, name, icon, order, country_code, currency, is_active
     편집: TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
-          BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT (필수)
-          BENCHMARK (선택 — 비우면 미설정)
+          BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT,
+          BENCHMARK, MARKET_REGIME_INDEX (선택 — 비우면 미설정)
 
 런타임 로딩은 DB 문서가 없거나 필수 키가 누락되면 명확히 에러를 낸다.
 캐시: 멀티프로세스(fastapi/scheduler/worker)에서 변경이 반영되도록 짧은 TTL(30초) 캐시를
@@ -15,7 +15,7 @@ MongoDB `pool_settings` 컬렉션이 종목풀의 구조와 편집값을 모두 
     {
       _id: <ticker_type>, name, icon, order, country_code, currency,
       is_active, TOP_N_HOLD, SHORT_MA_DAYS, LONG_MA_DAYS, SLOPE_DAYS,
-      BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, updated_at
+      BUY_SLIPPAGE_PCT, SELL_SLIPPAGE_PCT, BENCHMARK, MARKET_REGIME_INDEX, updated_at
     }
 """
 
@@ -50,7 +50,7 @@ SLIPPAGE_KEYS: tuple[str, ...] = (
 
 # 편집 가능하지만 비워둘 수 있는 키. 필수 검사에서 제외한다.
 # 빈 문자열은 '미설정'을 뜻하며, 읽는 쪽이 그 상태를 명시적으로 처리해야 한다(임의 대체 금지).
-OPTIONAL_EDITABLE_KEYS: tuple[str, ...] = ("BENCHMARK",)
+OPTIONAL_EDITABLE_KEYS: tuple[str, ...] = ("BENCHMARK", "MARKET_REGIME_INDEX")
 
 # 종목풀 설정 화면에서 편집하는 전체 키(순서 = 화면 표시 순서).
 POOL_EDITABLE_KEYS: tuple[str, ...] = (*OVERRIDABLE_KEYS, *SLIPPAGE_KEYS, *OPTIONAL_EDITABLE_KEYS)
@@ -100,6 +100,18 @@ def get_pool_benchmark_ticker(settings: dict[str, Any]) -> str:
     if not isinstance(benchmark, dict):
         return ""
     return str(benchmark.get("ticker") or "").strip().upper()
+
+
+def get_pool_market_regime_index(settings: dict[str, Any]) -> dict[str, str] | None:
+    """종목풀 설정의 시장 레짐 지수를 반환한다. 미설정이면 None."""
+    index = settings.get("MARKET_REGIME_INDEX")
+    if not isinstance(index, dict):
+        return None
+    ticker = str(index.get("ticker") or "").strip()
+    name = str(index.get("name") or "").strip()
+    if not ticker:
+        return None
+    return {"ticker": ticker, "name": name or ticker}
 
 
 def invalidate_overlay_cache() -> None:
@@ -344,6 +356,28 @@ def _validate_values(values: dict[str, Any]) -> dict[str, Any]:
                 raise PoolSettingsError("BENCHMARK 에는 ticker/name 이 모두 필요합니다. 티커를 조회해 이름을 채우세요.")
             else:
                 cleaned["BENCHMARK"] = {"ticker": ticker, "name": bench_name}
+
+    if "MARKET_REGIME_INDEX" in values:
+        raw = values["MARKET_REGIME_INDEX"]
+        if raw in (None, ""):
+            cleaned["MARKET_REGIME_INDEX"] = None
+        elif not isinstance(raw, dict):
+            raise PoolSettingsError("MARKET_REGIME_INDEX 는 {ticker, name} 객체여야 합니다.")
+        else:
+            ticker = str(raw.get("ticker") or "").strip()
+            name = str(raw.get("name") or "").strip()
+            if not ticker and not name:
+                cleaned["MARKET_REGIME_INDEX"] = None
+            elif not ticker or not name:
+                raise PoolSettingsError("MARKET_REGIME_INDEX 에는 ticker/name 이 모두 필요합니다.")
+            else:
+                from utils.market_trend_service import INDICES
+
+                allowed = {str(item["yf_ticker"]): str(item["name"]) for item in INDICES}
+                if ticker not in allowed:
+                    options = ", ".join(f"{label}({code})" for code, label in allowed.items())
+                    raise PoolSettingsError(f"MARKET_REGIME_INDEX 는 시장추세 지수 중 하나여야 합니다: {options}. 입력값: {ticker}")
+                cleaned["MARKET_REGIME_INDEX"] = {"ticker": ticker, "name": allowed[ticker]}
 
     if not cleaned:
         raise PoolSettingsError("저장할 값이 없습니다.")

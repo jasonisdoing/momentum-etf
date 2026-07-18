@@ -21,7 +21,12 @@ import pandas as pd
 from config import CACHE_START_DATE
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
-from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS, get_pool_benchmark_ticker
+from utils.pool_settings_store import (
+    MA_DAY_OPTIONS,
+    SLOPE_DAY_OPTIONS,
+    get_pool_benchmark_ticker,
+    get_pool_market_regime_index,
+)
 from utils.rankings import get_ticker_type_ma_rules, hold_eligible_mask
 from utils.settings_loader import get_ticker_type_settings
 from utils.stock_list_io import get_etfs
@@ -209,25 +214,46 @@ def _cross_sectional_table(
     return rows
 
 
-def _curve_mdd(curve: pd.Series) -> float | None:
-    """자산 곡선(일별 등)에서 최대낙폭(MDD, 음수 %). 고점 대비 최대 하락.
+def _format_date(value: Any) -> str:
+    """응답에 넣을 날짜를 YYYY-MM-DD 문자열로 맞춘다."""
+    return pd.Timestamp(value).strftime("%Y-%m-%d")
+
+
+def _curve_mdd_info(curve: pd.Series) -> dict[str, Any]:
+    """자산 곡선(일별 등)에서 최대낙폭(MDD)과 고점~저점 구간을 계산한다.
 
     MDD 는 반드시 **일별** 곡선으로 계산한다. 리밸런싱 간격(예 20일)으로만 찍은 점으로
     구하면 그 사이의 급락을 건너뛰어 실제보다 훨씬 작게 나온다(예: 실제 −20% → −6%).
     """
     curve = curve.dropna()
     if len(curve) < 2:
-        return None
+        return {"mdd_pct": None, "mdd_start_date": None, "mdd_end_date": None}
     drawdown = curve / curve.cummax() - 1.0
-    return round(float(drawdown.min()) * 100.0, 1)
+    end_date = drawdown.idxmin()
+    start_date = curve.loc[:end_date].idxmax()
+    return {
+        "mdd_pct": round(float(drawdown.loc[end_date]) * 100.0, 1),
+        "mdd_start_date": _format_date(start_date),
+        "mdd_end_date": _format_date(end_date),
+    }
+
+
+def _curve_mdd(curve: pd.Series) -> float | None:
+    """자산 곡선(일별 등)에서 최대낙폭(MDD, 음수 %)."""
+    return _curve_mdd_info(curve)["mdd_pct"]
+
+
+def _daily_returns_mdd_info(daily_returns: pd.Series) -> dict[str, Any]:
+    """일별 수익률(소수) 시리즈 → 누적 곡선 → MDD 정보."""
+    returns = daily_returns.dropna()
+    if len(returns) < 2:
+        return {"mdd_pct": None, "mdd_start_date": None, "mdd_end_date": None}
+    return _curve_mdd_info((1.0 + returns).cumprod())
 
 
 def _daily_returns_mdd(daily_returns: pd.Series) -> float | None:
     """일별 수익률(소수) 시리즈 → 누적 곡선 → MDD(%)."""
-    returns = daily_returns.dropna()
-    if len(returns) < 2:
-        return None
-    return _curve_mdd((1.0 + returns).cumprod())
+    return _daily_returns_mdd_info(daily_returns)["mdd_pct"]
 
 
 def _sortino(segment_returns: pd.Series, forward_days: int) -> float | None:
@@ -255,6 +281,7 @@ def _rule_performance(
     forward_days: int,
     benchmark: dict[str, Any] | None,
     hold_threshold_k: float | None = None,
+    down_market_invest_pct: float = 100.0,
 ) -> dict[str, Any] | None:
     """현재 설정 그대로 규칙을 돌렸을 때의 기간 실적.
 
@@ -297,11 +324,15 @@ def _rule_performance(
     buy_pct = float(pool_settings["BUY_SLIPPAGE_PCT"]) / 100.0
     sell_pct = float(pool_settings["SELL_SLIPPAGE_PCT"]) / 100.0
     round_trip_pct = float(pool_settings["BUY_SLIPPAGE_PCT"]) + float(pool_settings["SELL_SLIPPAGE_PCT"])
+    market_regime = (
+        _load_market_regime_map(pool_settings, require=True) if float(down_market_invest_pct) < 100.0 else None
+    )
 
     # 종목마다 상장일·거래정지가 달라 pivot 에 구멍이 생긴다. 포트폴리오는 금액을 이어 추적하므로
     # NaN 이 전파되면 곡선이 망가진다 → ffill(거래정지는 직전 종가 유지 = 그날 수익 0)로 메운다.
     # 상장 전(앞쪽) 결측은 그 종목이 아직 신호도 없어 선택되지 않으므로 그대로 둔다.
     close_wide = df.pivot_table(index="date", columns="ticker", values="close").sort_index().ffill()
+    short_disparity_wide = df.pivot_table(index="date", columns="ticker", values="단기이격").sort_index().ffill()
 
     # 포트폴리오 시뮬레이션(비중 방식):
     #  - 목표 비중 1/N. **유지 종목은 팔지 않고 비중을 그대로 둔다**(승자 비중이 커진 채 유지).
@@ -318,17 +349,22 @@ def _rule_performance(
     baskets: list[set[str]] = []
     cash_rounds = 0
     partial_rounds = 0
+    down_market_rounds = 0
 
     for i, as_of in enumerate(rebalance_dates):
         total_before = cash + sum(holdings.values())
+        invest_ratio = 1.0
+        if market_regime is not None:
+            regime = _resolve_market_regime_for_date(market_regime["series"], as_of)
+            if regime == "down":
+                invest_ratio = float(down_market_invest_pct) / 100.0
+                down_market_rounds += 1
         day = eligible[eligible["date"] == as_of]
         if day.empty:
             selected: list[str] = []
-            fwd_by_ticker: dict[str, float] = {}
         else:
             ranked = day.sort_values("이격", ascending=False)
             ranked_tickers = list(ranked["ticker"])
-            fwd_by_ticker = dict(zip(day["ticker"], day["fwd"], strict=False))
             if hold_threshold_k is None:
                 selected = ranked_tickers[:top_n]
             else:
@@ -346,21 +382,48 @@ def _rule_performance(
             if ticker not in selected:
                 sell_amount += holdings[ticker]
                 cash += holdings.pop(ticker)
-        # 신규 매수: 목표 1/N 까지, 현금 부족하면 균등 분배, 남으면 이월
-        newcomers = [ticker for ticker in selected if ticker not in holdings]
+        # 하락 레짐 투자비중이 100% 미만이면 전체 보유금액을 목표 투자금액 이하로 줄인다.
+        target_invested = total_before * invest_ratio
+        current_invested = sum(holdings.values())
+        if current_invested > target_invested and current_invested > 0:
+            scale = target_invested / current_invested
+            for ticker in list(holdings):
+                reduced = holdings[ticker] * (1.0 - scale)
+                holdings[ticker] *= scale
+                sell_amount += reduced
+                cash += reduced
+                if holdings[ticker] <= 1e-12:
+                    holdings.pop(ticker)
         buy_amount = 0.0
-        if newcomers:
-            target_amount = target_w * total_before
-            each = target_amount if cash >= target_amount * len(newcomers) else cash / len(newcomers)
-            for ticker in newcomers:
-                holdings[ticker] = each
-                cash -= each
-                buy_amount += each
-        # 슬리피지는 실제 거래금액에만. 유지 종목은 거래가 없어 비용 0.
+        target_amount = target_w * total_before * invest_ratio
+        if market_regime is None:
+            # 기존 규칙 유지: 신규만 목표 1/N까지 매수하고, 유지 종목은 비중 드리프트를 둔다.
+            newcomers = [ticker for ticker in selected if ticker not in holdings]
+            if newcomers:
+                each = target_amount if cash >= target_amount * len(newcomers) else cash / len(newcomers)
+                for ticker in newcomers:
+                    holdings[ticker] = each
+                    cash -= each
+                    buy_amount += each
+        else:
+            # 시장 레짐 필터 사용 시에는 상승장 복귀 때도 목표 투자비중까지 다시 채운다.
+            for ticker in selected:
+                if cash <= 0:
+                    break
+                current_amount = holdings.get(ticker, 0.0)
+                need = max(0.0, target_amount - current_amount)
+                if need <= 0:
+                    continue
+                add = min(need, cash)
+                holdings[ticker] = current_amount + add
+                cash -= add
+                buy_amount += add
+        # 정기 리밸런싱 비용. 긴급 매도 비용은 보유 기간 일별 루프에서 추가한다.
         cost = sell_amount * sell_pct + buy_amount * buy_pct
         cash -= cost
-        round_costs_pct.append(cost / total_before * 100.0 if total_before > 0 else 0.0)
-        round_turnovers.append((sell_amount + buy_amount) / total_before if total_before > 0 else 0.0)
+        round_sell_amount = sell_amount
+        round_buy_amount = buy_amount
+        round_cost = cost
 
         baskets.append(set(holdings))
         if not holdings:
@@ -375,16 +438,36 @@ def _rule_performance(
         )
         window = close_wide.iloc[start_pos : end_pos + 1]
         held_tickers = list(holdings)
-        if held_tickers:
-            # 일별 곡선(MDD용): 회차 시작 금액 기준 종가비. close_wide 는 union 거래일이라 근사.
-            start_prices = window.iloc[0][held_tickers]
-            ratio = window[held_tickers].div(start_prices, axis=1)
-            asset_series = ratio.mul([holdings[t] for t in held_tickers], axis=1).sum(axis=1) + cash
-            # 회차 끝 금액은 개별 종목 fwd(자기 거래일 기준, 결측 영향 없음)로 정확히 갱신한다.
-            for ticker in held_tickers:
-                holdings[ticker] *= 1.0 + fwd_by_ticker.get(ticker, 0.0) / 100.0
-        else:
-            asset_series = pd.Series(cash, index=window.index, dtype="float64")
+        asset_values: list[float] = []
+        for pos, current_date in enumerate(window.index):
+            if pos > 0 and holdings:
+                previous_date = window.index[pos - 1]
+                for ticker in list(holdings):
+                    prev_price = close_wide.at[previous_date, ticker] if ticker in close_wide.columns else np.nan
+                    current_price = close_wide.at[current_date, ticker] if ticker in close_wide.columns else np.nan
+                    if pd.notna(prev_price) and pd.notna(current_price) and float(prev_price) > 0:
+                        holdings[ticker] *= float(current_price) / float(prev_price)
+
+                is_next_rebalance_boundary = i + 1 < len(rebalance_dates) and current_date == rebalance_dates[i + 1]
+                if not is_next_rebalance_boundary:
+                    # 긴급 매도: 정기 리밸런싱일이 아니어도 단기이격이 음수로 내려가면 현금화한다.
+                    # 매도 후 생긴 현금은 다음 리밸런싱일까지 대기한다.
+                    for ticker in list(holdings):
+                        short_disparity = (
+                            short_disparity_wide.at[current_date, ticker] if ticker in short_disparity_wide.columns else np.nan
+                        )
+                        if pd.notna(short_disparity) and float(short_disparity) < 0:
+                            emergency_sell_amount = holdings.pop(ticker)
+                            emergency_cost = emergency_sell_amount * sell_pct
+                            cash += emergency_sell_amount - emergency_cost
+                            round_sell_amount += emergency_sell_amount
+                            round_cost += emergency_cost
+
+            asset_values.append(cash + sum(holdings.values()))
+
+        asset_series = pd.Series(asset_values, index=window.index, dtype="float64")
+        round_costs_pct.append(round_cost / total_before * 100.0 if total_before > 0 else 0.0)
+        round_turnovers.append((round_sell_amount + round_buy_amount) / total_before if total_before > 0 else 0.0)
         # 첫 회차는 시작점 포함, 이후는 경계(직전 회차 끝과 중복) 제외.
         daily_curve_parts.append(asset_series if i == 0 else asset_series.iloc[1:])
 
@@ -405,14 +488,16 @@ def _rule_performance(
     pool_daily = close_wide.pct_change().mean(axis=1)
 
     # ① 종목풀 규칙: 누적·소르티노는 개별 fwd 기반 회차수익(정확), MDD 는 일별 곡선(근사).
+    rule_mdd = _curve_mdd_info(rule_curve)
+    pool_hold_mdd = _daily_returns_mdd_info(pool_daily)
     rule_stats = {
         "cumulative_pct": round(_compound(round_returns_s), 1),
-        "mdd_pct": _curve_mdd(rule_curve),
+        **rule_mdd,
         "sortino": _sortino(round_returns_s, forward_days),
     }
     pool_hold_stats = {
         "cumulative_pct": round(_compound(baseline), 1),
-        "mdd_pct": _daily_returns_mdd(pool_daily),
+        **pool_hold_mdd,
         "sortino": _sortino(baseline, forward_days),
     }
 
@@ -439,11 +524,12 @@ def _rule_performance(
                 if pos + forward_days < len(bclose):
                     bench_seg.append((float(bclose.iloc[pos + forward_days]) / float(bclose.iloc[pos]) - 1.0) * 100.0)
             bench_series = pd.Series(bench_seg, dtype="float64")
+            benchmark_mdd = _curve_mdd_info(bclose.iloc[i0 : i_end + 1])
             benchmark_payload = {
                 "ticker": benchmark["ticker"],
                 "name": benchmark["name"],
                 "cumulative_pct": round(cumulative, 1),
-                "mdd_pct": _curve_mdd(bclose.iloc[i0 : i_end + 1]),
+                **benchmark_mdd,
                 "sortino": _sortino(bench_series, forward_days),
             }
 
@@ -459,10 +545,49 @@ def _rule_performance(
         "turnover_pct": round(turnover * 100.0, 1),
         "round_trip_pct": round(round_trip_pct, 2),
         "cost_per_round_pct": round(cost_per_round, 2),
+        "down_market_invest_pct": round(float(down_market_invest_pct), 1),
+        "market_regime_index": market_regime["index"] if market_regime is not None else None,
+        "down_market_rounds": down_market_rounds,
         "rule": rule_stats,
         "pool_hold": pool_hold_stats,
         "benchmark": benchmark_payload,
     }
+
+
+def _load_market_regime_map(pool_settings: dict[str, Any], *, require: bool) -> dict[str, Any] | None:
+    """종목풀의 시장 레짐 지수로 일별 상승/하락 맵을 만든다."""
+    index = get_pool_market_regime_index(pool_settings)
+    if index is None:
+        if require:
+            raise ValueError("하락시 투자비중을 100% 미만으로 쓰려면 /pools-settings 에서 시장 레짐 지수를 설정하세요.")
+        return None
+
+    from utils.market_trend_service import _calculate_supertrend, _resolve_supertrend_params, load_index_ohlc
+
+    ticker = index["ticker"]
+    ohlc = load_index_ohlc(ticker)
+    if ohlc is None or ohlc.empty:
+        raise ValueError(f"시장 레짐 지수 '{index['name']}'({ticker}) 의 가격 데이터를 불러오지 못했습니다.")
+
+    period, multiplier = _resolve_supertrend_params(ticker)
+    st = _calculate_supertrend(ohlc, period=period, multiplier=multiplier)
+    if st.empty or "direction" not in st:
+        raise ValueError(f"시장 레짐 지수 '{index['name']}'({ticker}) 의 레짐 계산 결과가 없습니다.")
+
+    series = pd.Series(np.where(st["direction"] == 1, "up", "down"), index=pd.to_datetime(st.index).normalize()).sort_index()
+    return {"index": index, "series": series}
+
+
+def _resolve_market_regime_for_date(regime: pd.Series, as_of: Any) -> str:
+    """리밸런싱일 기준 가장 최근 시장 레짐을 반환한다. 이전 레짐이 없으면 실패한다."""
+    target = pd.Timestamp(as_of).normalize()
+    pos = regime.index.searchsorted(target, side="right") - 1
+    if pos < 0:
+        raise ValueError(f"{target.strftime('%Y-%m-%d')} 이전의 시장 레짐 데이터가 없습니다.")
+    value = str(regime.iloc[pos])
+    if value not in {"up", "down"}:
+        raise ValueError(f"{target.strftime('%Y-%m-%d')} 시장 레짐 값이 올바르지 않습니다: {value}")
+    return value
 
 
 def _load_benchmark_close(pool_id: str, pool_settings: dict[str, Any]) -> dict[str, Any] | None:
@@ -509,6 +634,7 @@ def compute_pool_signal_backtest(
     long_ma_days: int | None = None,
     slope_days: int | None = None,
     hold_threshold_k: float | None = None,
+    down_market_invest_pct: float,
 ) -> dict[str, Any]:
     """종목풀의 이격/단기이격/기울기 → 향후 N일 수익 실증 결과를 반환한다.
 
@@ -526,6 +652,8 @@ def compute_pool_signal_backtest(
         raise ValueError(f"기간은 1~{max_months}개월이어야 합니다: {months}")
     if hold_threshold_k is not None and not (0.0 < float(hold_threshold_k) <= 1.0):
         raise ValueError(f"보유 유지 기준(k)은 0 초과 1 이하여야 합니다: {hold_threshold_k}")
+    if not (0.0 <= float(down_market_invest_pct) <= 100.0):
+        raise ValueError(f"하락시 투자비중은 0~100 범위여야 합니다: {down_market_invest_pct}")
 
     # MA/보유수 파라미터는 종목풀 설정이 기본. 화면에서 넘긴 오버라이드가 있으면 그 값으로
     # 실험한다(저장은 하지 않음). 오버라이드도 허용값인지 반드시 검증한다.
@@ -624,6 +752,7 @@ def compute_pool_signal_backtest(
             forward_days,
             _load_benchmark_close(pool_id, pool_settings),
             hold_threshold_k=hold_threshold_k,
+            down_market_invest_pct=float(down_market_invest_pct),
         ),
         "effective_samples": effective_samples,
         "rate_error": round(rate_error, 2),

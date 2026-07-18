@@ -38,6 +38,7 @@ def get_pool_backtest(
     long_ma_days: int | None = Query(default=None),
     slope_days: int | None = Query(default=None),
     hold_threshold_k: float | None = Query(default=None),
+    down_market_invest_pct: float = Query(default=100.0, ge=0.0, le=100.0),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     """선택 종목풀의 이격/기울기/배열 → 향후 N일 상승확률 실증 결과."""
@@ -51,6 +52,7 @@ def get_pool_backtest(
             long_ma_days=long_ma_days,
             slope_days=slope_days,
             hold_threshold_k=hold_threshold_k,
+            down_market_invest_pct=down_market_invest_pct,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

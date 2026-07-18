@@ -57,6 +57,7 @@ type TopPickWeightRow = {
 };
 
 type TopPickWeightComparisonRow = TopPickWeightRow & {
+  bucket?: number;
   approved_weight_pct: number | null;
   calculated_weight_pct: number | null;
   weight_diff_pct: number | null;
