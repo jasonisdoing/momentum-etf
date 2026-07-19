@@ -766,7 +766,10 @@ function ComparisonCard({
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <strong style={{ fontSize: "1.18rem" }}>{title}</strong>
           </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 8, whiteSpace: "nowrap" }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500 }}>
+              {representative.source === "Hyperliquid" ? "최근 24시간" : "전일 대비"}
+            </span>
             <strong style={{ fontSize: "1.18rem", color: signColor(representative.changePct) }}>
               {formatPct(representative.changePct)}
             </strong>

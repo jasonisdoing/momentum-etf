@@ -85,7 +85,7 @@ export function PoolBacktestManager() {
   const toast = useToast();
   const [pools, setPools] = useState<PoolOption[]>([]);
   const [poolId, setPoolId] = useState("");
-  const [forwardDays, setForwardDays] = useState(20);
+  const [forwardDays, setForwardDays] = useState(5);
   const [months, setMonths] = useState(12);
   const [monthOptions, setMonthOptions] = useState(DEFAULT_MONTH_OPTIONS);
   // 파라미터 오버라이드(실험용). 종목풀 선택 시 그 설정값으로 채워지고, 사용자가 바꿀 수 있다.
