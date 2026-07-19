@@ -250,7 +250,13 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   const startTime = endTime - 24 * 60 * 60 * 1000;
   const visibleCandles = candles.filter((candle) => candle.t >= startTime && candle.t <= endTime);
 
-  if (visibleCandles.length < 2) return null;
+  if (visibleCandles.length < 2) {
+    return (
+      <div ref={containerRef} style={{ height, display: "grid", placeItems: "center", color: "var(--text-muted)", marginTop: 12 }}>
+        표시할 차트 데이터가 없습니다.
+      </div>
+    );
+  }
 
   const lows = visibleCandles.map((c) => c.l);
   const highs = visibleCandles.map((c) => c.h);

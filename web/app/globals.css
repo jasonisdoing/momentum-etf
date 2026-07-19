@@ -3317,6 +3317,12 @@ a {
   background: rgba(102, 204, 102, 0.42);
 }
 
+/* 튜닝 표 상단 고정행: 지수/레버리지 단순보유 벤치마크 */
+.ag-row.appBenchmarkRow {
+  background: rgba(148, 163, 184, 0.16);
+  font-weight: 700;
+}
+
 .assetsAgGrid {
   border: 0;
   background: transparent;

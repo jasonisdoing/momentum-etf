@@ -36,7 +36,7 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    # 공격 자산은 설정 키가 아니다 — 진입 시점마다 공격 후보 중 SMA 20일 이격도 1위를 동적 선택.
+    # 레버리지 자산은 단일 설정 키가 아니다. 진입 시점마다 후보 중 SMA 20일 이격도 1위를 동적 선택.
     for key in ("signal", "defense"):
         asset = config.get(key)
         if not isinstance(asset, dict) or not str(asset.get("ticker") or "").strip():
@@ -66,117 +66,20 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
 def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, Any]:
     """검증 후 설정을 DB 에 저장하고, 갱신된 설정+상태를 반환한다.
 
-    벤치마크는 후보군(tuning)에서 파생해 DB 에 함께 저장한다(단일 소스 유지).
+    - sma_cross: normalize_settings 로 전량 검증 후 그대로 저장(파생 키 없음).
+    - switch(기존): 벤치마크를 후보군(tuning)에서 파생해 함께 저장(단일 소스 유지).
     """
+    if isinstance(config, dict) and config.get("strategy") == "sma_cross":
+        normalize_settings(dict(config))  # 사본으로 검증 — 파생 키가 저장값에 섞이지 않게
+        save_leverage_config_raw(profile, dict(config))
+        return load_leverage_settings(profile)
+
     _validate_leverage_config(config)
     config = dict(config)
     config.pop("offense", None)  # 폐기된 필드 — 저장 시 DB 에서도 제거된다
     config["benchmarks"] = derive_benchmarks(config)
     save_leverage_config_raw(profile, config)
     return load_leverage_settings(profile)
-
-
-_TUNE_JOB_NAME = "leverage_tune"
-_TUNE_SCRIPT = "scripts/leverage_tune_switch.py"
-
-
-def trigger_leverage_tune(profile: str = "switch") -> dict[str, Any]:
-    """튜닝 작업을 배치 큐에 추가한다(워커가 순서대로 실행). 이미 대기/실행 중이면 무시."""
-    from utils.batch_queue import enqueue
-
-    result = enqueue(_TUNE_JOB_NAME, _TUNE_SCRIPT, triggered_by="manual")
-    return {
-        "enqueued": bool(result.get("enqueued")),
-        "reason": result.get("reason"),
-    }
-
-
-def _parse_tune_log(text: str) -> dict[str, Any]:
-    """튜닝 로그에서 진행률/완료 여부를 파싱한다."""
-    import re
-
-    done = "종료 시각" in text
-    progress_pct: float | None = None
-    completed = total = None
-    m = re.search(r"진행률:\s*(\d+)/(\d+)\s*\(([\d.]+)%\)", text)
-    if m:
-        completed, total = int(m.group(1)), int(m.group(2))
-        progress_pct = float(m.group(3))
-    if done:
-        progress_pct = 100.0
-    return {"done": done, "progress_pct": progress_pct, "completed": completed, "total": total}
-
-
-def list_tune_log_dates(profile: str = "switch") -> list[str]:
-    """저장된 튜닝 로그 날짜(YYYY-MM-DD) 목록을 최신순으로 반환한다."""
-    from leverage.constants import ZRESULTS_DIR
-
-    out_dir = ZRESULTS_DIR / profile
-    if not out_dir.exists():
-        return []
-    dates = {p.stem[len("tune_"):] for p in out_dir.glob("tune_*.log")}
-    # YYYY-MM-DD 형식만(파일명 안전), 최신순 정렬(문자열 정렬 = 날짜순)
-    import re
-
-    return sorted((d for d in dates if re.fullmatch(r"\d{4}-\d{2}-\d{2}", d)), reverse=True)
-
-
-def _read_tune_log(profile: str, date: str | None = None) -> dict[str, Any]:
-    """튜닝 로그(zresults/<profile>/tune_<date>.log)의 내용·진행률을 반환한다.
-
-    date 가 없으면 가장 최근 로그를 읽는다. 잘못된 date 형식은 무시(경로 조작 방지).
-    """
-    import re
-
-    from leverage.constants import ZRESULTS_DIR
-
-    out_dir = ZRESULTS_DIR / profile
-    empty = {"log_text": "", "log_file": None, "selected_date": None, "done": False, "progress_pct": None, "completed": None, "total": None}
-
-    if date and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
-        date = None  # 형식이 아니면 무시 (디렉터리 탈출 방지)
-
-    if date:
-        path = out_dir / f"tune_{date}.log"
-        if not path.exists():
-            return {**empty, "selected_date": date}
-    else:
-        logs = sorted(out_dir.glob("tune_*.log"), key=lambda p: p.stat().st_mtime, reverse=True) if out_dir.exists() else []
-        if not logs:
-            return empty
-        path = logs[0]
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
-        text = ""
-    parsed = _parse_tune_log(text)
-    return {"log_text": text, "log_file": path.name, "selected_date": date or path.stem[len("tune_"):], **parsed}
-
-
-def leverage_tune_status(profile: str = "switch", date: str | None = None) -> dict[str, Any]:
-    """튜닝 실행 상태 + 선택 날짜(없으면 최신) 로그(진행도/결과) + 날짜 목록을 반환한다."""
-    from utils.batch_queue import get_latest_item
-
-    item = get_latest_item(_TUNE_JOB_NAME)
-    queue_status = item.get("status") if item else None  # pending/running/done/failed/None
-
-    log = _read_tune_log(profile, date)
-
-    def _iso(value: Any) -> str | None:
-        return value.isoformat() if hasattr(value, "isoformat") else value
-
-    return {
-        "queue_status": queue_status,  # None=이력 없음
-        "running": queue_status in ("pending", "running"),
-        "exit_code": item.get("exit_code") if item else None,
-        "error": item.get("error") if item else None,
-        "triggered_at": _iso(item.get("triggered_at")) if item else None,
-        "started_at": _iso(item.get("started_at")) if item else None,
-        "ended_at": _iso(item.get("ended_at")) if item else None,
-        "dates": list_tune_log_dates(profile),
-        **log,
-    }
 
 
 def resolve_pool_ticker(ticker: str) -> dict[str, Any]:

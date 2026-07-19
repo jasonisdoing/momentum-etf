@@ -62,3 +62,30 @@ def holding_period_info(target: str, start_date_str: str) -> tuple[int, float | 
 def count_holding_trading_days(target: str, start_date_str: str) -> int:
     """start_date_str 부터 오늘(장중 포함)까지의 거래 영업일수."""
     return holding_period_info(target, start_date_str)[0]
+
+
+def count_trading_days_market(country: str, calendar_ticker: str, start_date_str: str) -> int:
+    """시장(country)의 거래일 달력 기준 보유 거래일수.
+
+    현금/종목 무관하게 항상 거래되는 기준 티커(calendar_ticker, 보통 지수 ETF)의 종가
+    일수로 센다 — CASH 대체 티커에 시장을 하드코딩하지 않으려는 목적. 실패 시 영업일수로 폴백.
+    """
+    import pandas as pd
+
+    from utils.data_loader import fetch_ohlcv, is_trading_day
+
+    try:
+        df = fetch_ohlcv(calendar_ticker, country, months_back=None, date_range=[start_date_str, None], ticker_type="etf")
+        if df is not None and not df.empty:
+            count = len(df)
+            today_ts = pd.Timestamp.today().normalize()
+            if is_trading_day(country, today_ts) and today_ts > pd.Timestamp(df.index[-1]).normalize():
+                count += 1
+            return int(count)
+    except Exception as e:
+        print(f"[count_trading_days_market] fetch_ohlcv 실패 ({calendar_ticker}, {country}, {start_date_str}): {e}")
+
+    try:
+        return int(len(pd.bdate_range(pd.Timestamp(start_date_str).normalize(), pd.Timestamp.today().normalize())))
+    except Exception:
+        return 0
