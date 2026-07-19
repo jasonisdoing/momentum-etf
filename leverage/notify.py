@@ -16,6 +16,22 @@ def _format_display_name(ticker: str, name: str | None) -> str:
     return ticker
 
 
+def _required_number(source: dict[str, Any], key: str) -> float:
+    """슬랙 문구에 필요한 계산값이 없으면 명확히 실패시킨다."""
+    value = source.get(key)
+    if not isinstance(value, (int, float)):
+        raise ValueError(f"레버리지 슬랙 메시지 필수 계산값이 없습니다: {key}")
+    return float(value)
+
+
+def _index_point_label(market: str) -> str:
+    return "나스닥 100" if market == "us" else "코스피"
+
+
+def _format_index_point(value: float) -> str:
+    return f"{value:,.2f}pt"
+
+
 def _post(text: str, blocks: list[dict], label: str) -> bool:
     """momentum-etf 공용 전송기로 blocks 메시지를 보낸다."""
     ts = send_slack_message_v2(text=text, blocks=blocks)
@@ -24,6 +40,142 @@ def _post(text: str, blocks: list[dict], label: str) -> bool:
         return True
     print(f" [SLACK] {label} 전송 실패")
     return False
+
+
+def send_slack_sma_cross(
+    view: dict[str, Any],
+    *,
+    market_phase: str = "장 마감 직후",
+    test: bool = False,
+) -> bool:
+    """SMA 크로스(+고점대비) 전략 추천을 Slack 으로 전송한다.
+
+    ``view`` 는 ``utils.leverage_sma_service.compute_sma_cross_view`` 의 반환값.
+    기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이동선/고점대비로 바뀐 내용을 반영한다.
+    """
+    market = str(view.get("market") or "kor")
+    market_name = "🇺🇸 미국" if market == "us" else "🇰🇷 한국"
+    phase_tag = f"[{market_phase}]"
+
+    rec = view.get("recommendation") or {}
+    judgment = view.get("judgment") or {}
+    state = view.get("state") or {}
+    assets = view.get("assets") or {}
+    sma_days = int(view.get("sma_days") or 0)
+    peak_limit = float(view.get("peak_drawdown_pct") or 0.0)
+
+    is_changed = bool(rec.get("is_changed"))
+    want_leverage = bool(judgment.get("want_leverage"))
+
+    index_display = _format_display_name(assets.get("index", {}).get("ticker", ""), assets.get("index", {}).get("name"))
+    leverage_display = _format_display_name(assets.get("leverage", {}).get("ticker", ""), assets.get("leverage", {}).get("name"))
+    defense_display = _format_display_name(assets.get("defense", {}).get("ticker", ""), assets.get("defense", {}).get("name"))
+    target_display = _format_display_name(rec.get("target_ticker", ""), rec.get("target_name")) if rec else "-"
+
+    if is_changed:
+        header_emoji = "🚨"
+        header_text = f"{market_name} {phase_tag} 포지션 변경 확정! (다음 거래일 시초가 매매)"
+    else:
+        header_emoji = "✅"
+        header_text = f"{market_name} {phase_tag} 정기 보고"
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"{header_emoji} {header_text}", "emoji": True}},
+    ]
+
+    # 전략 설정(파라미터)
+    param_text = (
+        "*🏆 전략 설정 (SMA 크로스 + 고점대비)*\n"
+        f"• 지수(신호): {index_display}\n"
+        f"• 레버리지 자산: {leverage_display}\n"
+        f"• 방어 자산: {defense_display}\n"
+        f"• 이동선: SMA {sma_days}일\n"
+        f"• 고점대비 한도: {peak_limit:.0f}%"
+    )
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": param_text}})
+    blocks.append({"type": "divider"})
+
+    # 판정 근거 (이격 / 고점대비)
+    if judgment:
+        gap_pct = float(judgment.get("gap_pct") or 0.0)
+        peak_dd = float(judgment.get("peak_drawdown_pct") or 0.0)
+        limit = float(judgment.get("peak_drawdown_limit_pct") or 0.0)
+        gap_ok = gap_pct >= 0.0
+        peak_ok = peak_dd >= -limit
+        judge_text = (
+            "*=== 판정 근거 ===*\n"
+            f"• 이격(SMA {sma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
+            f"• 고점대비: {peak_dd:+.2f}% / 한도 ≥ -{limit:.0f}% {'✅' if peak_ok else '❌'}\n"
+            f"• 결과: {'🟢 레버리지 보유' if want_leverage else '🔵 방어 보유'} → *{target_display}*"
+        )
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": judge_text}})
+        blocks.append({"type": "divider"})
+
+    # 요약
+    as_of = rec.get("as_of") or state.get("date") or "-"
+    holding_days = state.get("holding_days")
+    summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target_display}*"
+    if holding_days is not None:
+        summary_text += f"\n⏳ *보유일*: *{holding_days}거래일째*"
+    if is_changed:
+        summary_text += (
+            "\n\n*🔔 실행 안내*: 오늘 종가 기준으로 시그널이 확정되었습니다. "
+            "내일(다음 거래일) 아침 시초가에 해당 종목을 매매하세요."
+        )
+
+    # 보유 상태에 맞춰 레버리지 진입/방어 전환 기준을 안내합니다.
+    if judgment:
+        gap_pct = float(judgment.get("gap_pct") or 0.0)
+        peak_dd = float(judgment.get("peak_drawdown_pct") or 0.0)
+        limit = float(judgment.get("peak_drawdown_limit_pct") or 0.0)
+        current_index_close = _required_number(judgment, "index_close")
+        sma_threshold_close = _required_number(judgment, "sma_threshold_close")
+        peak_threshold_close = _required_number(judgment, "peak_threshold_close")
+        required_index_close = _required_number(judgment, "required_index_close")
+        required_move_pct = (required_index_close / current_index_close - 1.0) * 100.0
+        sma_recovery_pct = (sma_threshold_close / current_index_close - 1.0) * 100.0
+        peak_recovery_pct = (peak_threshold_close / current_index_close - 1.0) * 100.0
+        gap_ok = gap_pct >= 0
+        peak_ok = peak_dd >= -limit
+
+        if want_leverage:
+            threshold_line = (
+                f"  • 방어 전환 기준 지수: {_index_point_label(market)} "
+                f"*{_format_index_point(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
+            )
+            needs = [
+                f"① {sma_days}일 이동평균선 아래로 *{sma_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
+                f"② 전고점 대비 -{limit:.0f}% 아래로 *{peak_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
+            ]
+            summary_text += (
+                f"\n\n💡 *설명*: {leverage_display}를 유지하려면 다음을 **모두** 유지해야 합니다.\n"
+                + threshold_line
+                + "\n"
+                + "\n".join(f"  {n}" for n in needs)
+            )
+        else:
+            threshold_line = (
+                f"  • 전환 필요 지수: {_index_point_label(market)} "
+                f"*{_format_index_point(required_index_close)} 이상 ({required_move_pct:+.2f}%)*"
+            )
+            needs = []
+            if not gap_ok:
+                needs.append(f"① {sma_days}일 이동평균선 위로 *{sma_recovery_pct:+.2f}%* 회복 필요")
+            if not peak_ok:
+                needs.append(f"② 전고점 대비 -{limit:.0f}% 이내로 *{peak_recovery_pct:+.2f}%* 회복 필요")
+            if needs:
+                summary_text += (
+                    f"\n\n💡 *설명*: {leverage_display}로 전환하려면 다음을 **모두** 충족해야 합니다.\n"
+                    + threshold_line
+                    + "\n"
+                    + "\n".join(f"  {n}" for n in needs)
+                )
+
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
+
+    if is_changed:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "<!channel> 포지션이 변경되었습니다! 확인해주세요."}})
+
+    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "SMA 크로스 추천")
 
 
 def send_slack_recommendation(

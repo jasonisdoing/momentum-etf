@@ -4,10 +4,8 @@ from fastapi import APIRouter, Body, Depends, Query
 
 from fastapi_app.dependencies import require_internal_token
 from utils.leverage_service import (
-    leverage_tune_status,
     load_leverage_settings,
     save_leverage_settings,
-    trigger_leverage_tune,
 )
 
 router = APIRouter(prefix="/internal/leverage", tags=["leverage"])
@@ -35,23 +33,62 @@ def post_leverage_config(
     return save_leverage_settings(profile, config)
 
 
-@router.post("/tune")
-def post_leverage_tune(
-    profile: str = Query(default="switch"),
+@router.get("/sma-cross")
+def get_sma_cross_view(
+    market: str = Query(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """튜닝 작업을 배치 큐에 추가한다(워커가 실행). 이미 대기/실행 중이면 무시."""
-    return trigger_leverage_tune(profile)
+    """SMA 크로스 전략의 현재 판정 + 추천 + 직전 상태(시장별).
+
+    market(kor/us) → 프로필 sma_cross_<market>.
+    """
+    from leverage.config_store import sma_cross_profile
+    from utils.leverage_sma_service import compute_sma_cross_view
+
+    return compute_sma_cross_view(sma_cross_profile(market))
 
 
-@router.get("/tune/status")
-def get_leverage_tune_status(
-    profile: str = Query(default="switch"),
-    date: str | None = Query(default=None),
+@router.get("/sma-cross/tune")
+def get_sma_cross_tune(
+    market: str = Query(...),
+    months: int = Query(..., ge=1, le=120),
+    sma_min: int = Query(..., ge=2),
+    sma_max: int = Query(..., ge=2),
+    sma_step: int = Query(..., ge=1),
+    peak_min: float = Query(..., ge=0),
+    peak_max: float = Query(..., ge=0),
+    peak_step: float = Query(..., gt=0),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """튜닝 실행 상태 + 선택 날짜(없으면 최신) 로그 + 날짜 목록을 반환한다."""
-    return leverage_tune_status(profile, date)
+    """지정한 기간·이동선·고점대비 범위로 튜닝 sweep 을 즉시 계산해 반환한다."""
+    from leverage.config_store import sma_cross_profile
+    from utils.leverage_sma_service import compute_sma_cross_tune
+
+    return compute_sma_cross_tune(
+        sma_cross_profile(market),
+        months=months,
+        sma_min=sma_min,
+        sma_max=sma_max,
+        sma_step=sma_step,
+        peak_min=peak_min,
+        peak_max=peak_max,
+        peak_step=peak_step,
+    )
+
+
+@router.post("/sma-cross/slack-test")
+def post_sma_cross_slack_test(
+    market: str = Query(...),
+    _: None = Depends(require_internal_token),
+) -> dict:
+    """현재 판정으로 슬랙 메시지를 즉시(수동) 발송한다. 토글/장 마감 여부와 무관, 테스트 표식."""
+    from leverage.config_store import sma_cross_profile
+    from leverage.notify import send_slack_sma_cross
+    from utils.leverage_sma_service import compute_sma_cross_view
+
+    view = compute_sma_cross_view(sma_cross_profile(market))
+    sent = send_slack_sma_cross(view, market_phase="수동 발송", test=True)
+    return {"sent": bool(sent)}
 
 
 @router.get("/resolve-ticker")

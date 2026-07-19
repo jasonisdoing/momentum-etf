@@ -49,8 +49,7 @@ type SystemJobKey =
   | "asset_summary"
   | "us_market_stocks"
   | "aus_market_stocks"
-  | "leverage_switch"
-  | "leverage_tune";
+  | "leverage_sma_cross";
 
 type BatchQueueItem = {
   id: string;

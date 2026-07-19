@@ -25,7 +25,8 @@ npm run dev
 ### 레버리지 전략 (`leverage/`) 실행
 
 폐기된 `leverage-switching` 앱에서 이전된 레버리지 스위칭 전략입니다.
-* CLI: `python -m leverage.backtest switch` (백테스트) / `python -m leverage.recommend switch --slack` (추천+Slack) / `python -m leverage.tune switch` (튜닝)
+* CLI: `python -m leverage.backtest switch` (백테스트) / `python -m leverage.recommend switch --slack` (추천+Slack)
+* SMA 크로스 전략: 레버리지-설정 화면에서 시장(한국/미국)별로 지수·레버리지·방어 티커, 이동선, 고점대비 허용폭을 설정하면, 후보 이동선·고점대비 조건별 성과를 즉시 튜닝 표로 보여줍니다(별도 배치 없음)
 * 자동: `leverage_switch` 배치가 평일 09:05~16:05 매시 :05 에 추천을 Slack 으로 발송
 * 수동: `/batch` 화면에서 **"레버리지 스위칭 추천"** 클릭 → 큐 등록 → worker 실행
 

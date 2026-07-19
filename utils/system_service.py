@@ -23,8 +23,7 @@ SystemAction = Literal[
     "us_market_stocks",
     "aus_market_stocks",
     "live_24h_slack",
-    "leverage_switch",
-    "leverage_tune",
+    "leverage_sma_cross",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -115,22 +114,13 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "key": "leverage_switch",
-        "job": "레버리지 스위칭 추천",
-        "target": "한국 레버리지 ETF (switch)",
+        "key": "leverage_sma_cross",
+        "job": "레버리지 스위칭",
+        "target": "한국/미국 지수(코스피·나스닥100)",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:05 ~ 16:05 매시 5분 KST",
-        "command": "python scripts/leverage_recommend_switch.py",
-        "schedule": {"minutes": [5], "hours": list(range(9, 17)), "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
-        "key": "leverage_tune",
-        "job": "레버리지 튜닝",
-        "target": "한국 레버리지 ETF (switch)",
-        "run_location": "LOCAL",
-        "cadence": "수동 실행",
-        "command": "python scripts/leverage_tune_switch.py",
-        "schedule": None,  # 스케줄 없음(수동 전용) → 다음 실행 표시 "-"
+        "cadence": "평일 09:10 · 15:00 · 16:00 KST (하루 3회)",
+        "command": "python scripts/leverage_recommend_sma_cross.py",
+        "schedule": {"minutes": [0], "hours": [16], "weekdays": _WEEKDAYS_MON_FRI},
     },
 ]
 
@@ -144,8 +134,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "us_market_stocks": "scripts/update_us_market_stocks.py",
     "aus_market_stocks": "scripts/update_aus_market_stocks.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
-    "leverage_switch": "scripts/leverage_recommend_switch.py",
-    "leverage_tune": "scripts/leverage_tune_switch.py",
+    "leverage_sma_cross": "scripts/leverage_recommend_sma_cross.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
@@ -936,11 +925,7 @@ def load_system_data() -> dict[str, object]:
             "`infra/cron/crontab` 파일이 단일 진실 소스입니다. "
             "큐 워커는 서버와 로컬(`python run_local_dev.py` 실행 중) 양쪽에서 함께 동작하며 "
             "MongoDB `find_one_and_update` 로 한 곳에서만 atomic 하게 claim 합니다. "
-            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 순서로 직렬 처리됩니다. "
-            "단, 튜닝(`leverage_tune`)은 무거운 계산이고 결과가 "
-            "로컬 파일시스템에 남아 로컬 UI 에서만 보이므로, 로컬 워커(APP_TYPE=Local)만 큐에서 "
-            "가져갑니다(서버 워커는 픽하지 않음). 따라서 로컬 워커가 꺼져 있으면 이 작업은 "
-            "실행되지 않고 대기(pending) 상태로 남습니다."
+            "트리거(수동 클릭 / 스케줄)는 큐에 추가되어 FIFO 순서로 직렬 처리됩니다."
         ),
         "running_jobs": get_running_jobs(),
         "running_job_details": get_running_job_details(),

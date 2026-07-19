@@ -93,7 +93,6 @@ const navGroups = [
     icon: IconChartLine,
     items: [
       { href: "/leverage-settings", label: "설정", icon: IconSettings },
-      { href: "/leverage-tune", label: "튜닝", icon: IconMedal2 },
     ],
   },
   {

@@ -200,6 +200,16 @@ export function PoolBacktestManager() {
                     ))}
                   </select>
                 </label>
+                <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
+                  <span className="appLabeledFieldLabel">기간(개월)</span>
+                  <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
+                    {monthOptions.map((m) => (
+                      <option key={m} value={m}>
+                        최근 {m}개월
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label className="appLabeledField" style={{ minWidth: 84, flex: "0 0 auto" }}>
                   <span className="appLabeledFieldLabel">리밸런싱 주기</span>
                   <select
@@ -210,16 +220,6 @@ export function PoolBacktestManager() {
                     {FORWARD_DAY_OPTIONS.map((d) => (
                       <option key={d} value={d}>
                         {d}일
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField" style={{ minWidth: 130, flex: "0 0 auto" }}>
-                  <span className="appLabeledFieldLabel">기간(개월)</span>
-                  <select className="form-select form-select-sm" value={months} onChange={(e) => setMonths(Number(e.target.value))}>
-                    {monthOptions.map((m) => (
-                      <option key={m} value={m}>
-                        최근 {m}개월
                       </option>
                     ))}
                   </select>

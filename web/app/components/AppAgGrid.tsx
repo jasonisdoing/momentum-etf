@@ -17,6 +17,7 @@ type AppAgGridProps<TData> = {
   columnDefs: ColDef<TData>[];
   loading?: boolean;
   minHeight?: string | number;
+  height?: string | number;
   className?: string;
   getRowClass?: (params: RowClassParams<TData>) => string;
   getCellClass?: (params: CellClassParams<TData>) => string | string[] | undefined;
@@ -30,6 +31,7 @@ export function AppAgGrid<TData>({
   columnDefs,
   loading = false,
   minHeight = "24rem",
+  height = "100%",
   className,
   getRowClass,
   getRowId,
@@ -38,7 +40,7 @@ export function AppAgGrid<TData>({
 }: AppAgGridProps<TData>) {
   const themeClassName = theme === "legacy" ? "ag-theme-quartz appAgGridThemeLegacy" : "appAgGridTheme";
   return (
-    <div className={className ? `appAgGridWrap ${className}` : "appAgGridWrap"} style={{ minHeight, height: "100%" }}>
+    <div className={className ? `appAgGridWrap ${className}` : "appAgGridWrap"} style={{ minHeight, height }}>
       <div className={themeClassName}>
         <AgGridReact<TData>
           rowData={rowData}

@@ -35,8 +35,11 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 10 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py aus_market_stocks python scripts/update_aus_market_stocks.py >> logs/cron/aus_market_stocks.log 2>&1
 0 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py live_24h_slack python scripts/live_24h_slack.py >> logs/cron/live_24h_slack.log 2>&1
 
-# ── leverage 스위칭 전략 (한국, 월-금) ─────────────────────────────
-# 09:05~16:05 KST 매시간 5분. DB(leverage_config) 저장 설정 기준 추천만 실행.
-# 장중에는 현재가만 실시간, 신호/포지션은 어제 종가 확정.
-# (스케줄러는 무인자 스크립트만 실행하므로 scripts/ 래퍼를 통해 호출한다.)
-5 9-16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_switch python scripts/leverage_recommend_switch.py >> logs/cron/leverage_switch.log 2>&1
+# ── leverage 추천 (SMA 크로스, 한국+미국, 월-금) ─────────────────────
+# 지수(코스피/나스닥100) SMA 크로스 + 고점대비. DB(leverage_config) 저장 설정 기준.
+# 각 시장은 자기 거래 달력 기준 '장 마감 직후'일 때만 슬랙을 1회 보낸다(당일 중복 방지).
+# 한국 마감(15:30 KST)만 커버: 09:10·15:00·16:00 중 16:00 이 마감 직후라 한국 알림이 나간다.
+# (미국 알림이 필요하면 미국 마감 05:05/06:05 KST 라인을 추가해야 한다 — 현재는 미제공.)
+# 스케줄러는 무인자 스크립트만 실행하므로 scripts/ 래퍼를 통해 호출한다.
+10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_sma_cross python scripts/leverage_recommend_sma_cross.py >> logs/cron/leverage_sma_cross.log 2>&1
+0 15,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_sma_cross python scripts/leverage_recommend_sma_cross.py >> logs/cron/leverage_sma_cross.log 2>&1

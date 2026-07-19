@@ -68,6 +68,14 @@ def load_config(profile: str = "switch") -> dict:
     return normalize_settings(load_leverage_config_raw(profile))
 
 
+def sma_cross_profile(market: str) -> str:
+    """SMA 크로스 전략의 시장별 프로필 id. 한국/미국이 독립 설정·상태를 갖도록 분리한다."""
+    normalized = str(market or "").strip().lower()
+    if normalized not in {"kor", "us"}:
+        raise ValueError(f"market 은 kor/us 중 하나여야 합니다: {market}")
+    return f"sma_cross_{normalized}"
+
+
 def save_leverage_config_raw(profile: str, config: dict) -> None:
     """원본 설정 dict 를 DB 에 저장하고 캐시를 무효화한다."""
     db = _db()
