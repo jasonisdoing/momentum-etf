@@ -83,6 +83,8 @@ type RankRow = {
   "10달(%)": number | null;
   "11달(%)": number | null;
   "12달(%)": number | null;
+  "24달(%)": number | null;
+  "36달(%)": number | null;
   고점: number | null;
   RSI: number | null;
   배당률: number | null;
@@ -634,6 +636,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         "10달(%)": null,
         "11달(%)": null,
         "12달(%)": null,
+        "24달(%)": null,
+        "36달(%)": null,
         고점: null,
         RSI: null,
         배당률: null,
@@ -1140,18 +1144,20 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       ...[
-        "1달(%)",
-        "3달(%)",
-        "6달(%)",
-        "9달(%)",
-        "12달(%)",
+        { field: "1달(%)", headerName: "1달(%)" },
+        { field: "3달(%)", headerName: "3달(%)" },
+        { field: "6달(%)", headerName: "6달(%)" },
+        { field: "9달(%)", headerName: "9달(%)" },
+        { field: "12달(%)", headerName: "1년" },
+        { field: "24달(%)", headerName: "2년" },
+        { field: "36달(%)", headerName: "3년" },
       ].map(
-        (field) =>
+        ({ field, headerName }) =>
           ({
             field,
-            headerName: field,
-            minWidth: field.length > 6 ? 94 : 88,
-            width: field.length > 6 ? 94 : 88,
+            headerName,
+            minWidth: headerName.length > 4 ? 94 : 78,
+            width: headerName.length > 4 ? 94 : 78,
             type: "rightAligned",
             cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
           }) as ColDef<RankGridRow>,
