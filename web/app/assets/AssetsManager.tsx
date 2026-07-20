@@ -1479,63 +1479,6 @@ function AccountHoldingsDetailPanel({
       },
     },
     {
-      field: "target_weight_pct",
-      headerName: "목표비중",
-      width: 92,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
-        if (!params.data || params.data.id === "__adding__" || params.value == null) {
-          return "-";
-        }
-        return <span style={{ color: "#000000", fontWeight: 700 }}>{params.value.toFixed(1)}%</span>;
-      },
-    },
-    {
-      colId: "change_weight_pct",
-      headerName: "변동비중",
-      width: 92,
-      type: "rightAligned",
-      cellStyle: { fontWeight: 700 },
-      valueGetter: (params) => {
-        const row = params.data;
-        if (!row || row.id === "__adding__" || row.target_weight_pct == null) return null;
-        const currentWeight = getPreviewWeightPct(row, rowsRef.current, summaryRef.current);
-        return row.target_weight_pct - currentWeight;
-      },
-      cellRenderer: (params: { value?: number | null }) => {
-        if (params.value === null || params.value === undefined || Number.isNaN(params.value)) return "-";
-        if (Math.abs(params.value) < 0.05) return <span style={{ color: "#000000" }}>0</span>;
-        const color = params.value > 0 ? "#d63939" : "#206bc4";
-        const sign = params.value > 0 ? "+" : "";
-        return <span style={{ color }}>{sign}{params.value.toFixed(1)}%</span>;
-      },
-    },
-    {
-      colId: "change_quantity",
-      headerName: "변동수량",
-      width: 92,
-      type: "rightAligned",
-      valueGetter: (params) => {
-        const row = params.data;
-        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.target_quantity == null) {
-          return null;
-        }
-        return Math.floor(row.target_quantity) - parseEditableQuantity(row.quantity);
-      },
-      cellStyle: { fontWeight: 700 },
-      cellRenderer: (params: { value?: number | null }) => {
-        if (params.value === null || params.value === undefined || Number.isNaN(params.value)) return "-";
-        if (params.value === 0) return <span style={{ color: "#000000" }}>0</span>;
-        const color = params.value > 0 ? "#d63939" : "#206bc4";
-        const sign = params.value > 0 ? "+" : "-";
-        return (
-          <span style={{ color }}>
-            {sign}{Math.abs(params.value).toLocaleString("ko-KR")}주
-          </span>
-        );
-      },
-    },
-    {
       field: "quantity",
       headerName: "수량",
       width: 64,
