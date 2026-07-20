@@ -27,6 +27,7 @@ export async function POST(request: NextRequest) {
       "aus_market_stocks",
       "live_24h_slack",
       "leverage_sma_cross",
+      "holdings_alarm",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {

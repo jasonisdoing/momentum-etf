@@ -51,7 +51,8 @@ type SystemAction =
   | "asset_summary"
   | "us_market_stocks"
   | "live_24h_slack"
-  | "leverage_sma_cross";
+  | "leverage_sma_cross"
+  | "holdings_alarm";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");

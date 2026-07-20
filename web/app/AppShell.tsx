@@ -19,6 +19,7 @@ import {
   IconSettings,
   IconTrendingUp,
   IconActivity,
+  IconBell,
   IconX,
   IconLayoutSidebarLeftCollapse,
   IconLayoutSidebarLeftExpand,
@@ -100,6 +101,7 @@ const navGroups = [
     title: "시스템",
     icon: IconSettings,
     items: [
+      { href: "/alarms", label: "알람", icon: IconBell },
       { href: "/batch", label: "배치", icon: IconListDetails },
     ],
   },
