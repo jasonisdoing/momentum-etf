@@ -2604,9 +2604,10 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (!isDetailRow(params.data)) {
           return 38;
         }
-        const rowCount = (params.data.rows?.length ?? 0) + 1;
-        // 좁은 화면에서는 가로 스크롤바와 하단 여백이 필요하므로 상세 영역을 조금 더 확보한다.
-        return 50 + 34 + rowCount * 42 + 48 + 130 + 5;
+        // 기본적으로 현금(1) + 추가 가능 공간(1)을 고려하여 최소 +2행 공간을 확보합니다.
+        const rowCount = (params.data.rows?.length ?? 0) + 2;
+        // 가로 스크롤바(약 16px) 및 상하 테두리/여백(약 14px) 안전 마진을 추가하여 입력창이 잘리는 현상을 방지합니다.
+        return 50 + 34 + rowCount * 42 + 48 + 130 + 5 + 30;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {

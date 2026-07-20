@@ -11,6 +11,7 @@ from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
+from .routes.alarms import router as alarms_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.leverage import router as leverage_router
@@ -65,6 +66,7 @@ async def generic_exception_handler(_request: Request, exc: Exception) -> JSONRe
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
+app.include_router(alarms_router)
 app.include_router(assets_router)
 app.include_router(aus_market_stocks_router)
 app.include_router(holdings_router)

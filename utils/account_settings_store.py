@@ -37,6 +37,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "top_pick_start_amount_manwon",
     "top_pick_start_date",
     "URL",
+    "ma20_alarm_enabled",
+    "ma20_ma_days",
+    "stoploss_alarm_enabled",
+    "stoploss_threshold_pct",
 )
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
@@ -176,6 +180,26 @@ def _validate_values(account_id: str, values: dict[str, Any]) -> dict[str, Any]:
             cleaned[key] = start_date
         elif key == "URL":
             cleaned[key] = str(raw or "").strip()
+        elif key == "ma20_alarm_enabled":
+            cleaned[key] = bool(raw)
+        elif key == "ma20_ma_days":
+            try:
+                days = int(raw)
+            except (TypeError, ValueError) as exc:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 ma20_ma_days 는 정수여야 합니다: {raw}") from exc
+            if days < 2:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 ma20_ma_days 는 2 이상이어야 합니다: {days}")
+            cleaned[key] = days
+        elif key == "stoploss_alarm_enabled":
+            cleaned[key] = bool(raw)
+        elif key == "stoploss_threshold_pct":
+            try:
+                pct = round(float(raw), 2)
+            except (TypeError, ValueError) as exc:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 stoploss_threshold_pct 는 숫자여야 합니다: {raw}") from exc
+            if pct >= 0:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}")
+            cleaned[key] = pct
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned

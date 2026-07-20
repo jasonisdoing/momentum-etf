@@ -24,6 +24,7 @@ SystemAction = Literal[
     "aus_market_stocks",
     "live_24h_slack",
     "leverage_sma_cross",
+    "holdings_alarm",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -122,6 +123,15 @@ SCHEDULE_ROWS = [
         "command": "python scripts/leverage_recommend_sma_cross.py",
         "schedule": {"minutes": [0], "hours": [16], "weekdays": _WEEKDAYS_MON_FRI},
     },
+    {
+        "key": "holdings_alarm",
+        "job": "보유종목 알람",
+        "target": "알람 On 계좌의 보유 종목",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10 KST (한국 개시 직후)",
+        "command": "python scripts/holdings_alarm.py",
+        "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
+    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -135,6 +145,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "aus_market_stocks": "scripts/update_aus_market_stocks.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_sma_cross": "scripts/leverage_recommend_sma_cross.py",
+    "holdings_alarm": "scripts/holdings_alarm.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}

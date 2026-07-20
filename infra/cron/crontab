@@ -43,3 +43,8 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 스케줄러는 무인자 스크립트만 실행하므로 scripts/ 래퍼를 통해 호출한다.
 10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_sma_cross python scripts/leverage_recommend_sma_cross.py >> logs/cron/leverage_sma_cross.log 2>&1
 0 15,16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py leverage_sma_cross python scripts/leverage_recommend_sma_cross.py >> logs/cron/leverage_sma_cross.log 2>&1
+
+# ── 보유종목 알람 (20일선 이탈·손절, 평일 한국 개시 직후) ────────────────
+# 계좌 마스터 On + 종류별 전역 On 계좌의 보유 종목 트리거를 모아 슬랙 1건 발송(없으면 미발송).
+# 개시 직후라 판정은 직전(어제) 확정 종가/수익률 기준 — 오늘 매매 전 아침 알림.
+10 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py holdings_alarm python scripts/holdings_alarm.py >> logs/cron/holdings_alarm.log 2>&1

@@ -422,7 +422,7 @@ def _apply_realtime_overlay(
     return updated
 
 
-def _build_effective_close_series(
+def build_effective_close_series(
     cached_close_series: pd.Series | None,
     realtime_entry: dict[str, float] | None,
 ) -> pd.Series | None:
@@ -799,7 +799,7 @@ def build_ticker_type_rankings(
         realtime_entry = realtime_snapshot.get(ticker)
         preprocess_started_at = perf_counter()
         base_close_series = _slice_close_series_to_date(cached_close_series, latest_trading_day)
-        effective_close_series = _build_effective_close_series(base_close_series, realtime_entry)
+        effective_close_series = build_effective_close_series(base_close_series, realtime_entry)
         if effective_close_series is not None and not effective_close_series.empty:
             effective_close_series_map[ticker] = effective_close_series
         preprocess_elapsed += perf_counter() - preprocess_started_at
