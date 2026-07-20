@@ -167,9 +167,8 @@ export function KorMarketStockManager({
   );
 
   const allVisibleSelected = useMemo(() => {
-    const selectableRows = gridRows.filter((row) => !registeredTickers.has(row.ticker.toUpperCase()));
-    return selectableRows.length > 0 && selectableRows.every((row) => selectedTickers.includes(row.ticker));
-  }, [gridRows, selectedTickers, registeredTickers]);
+    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [gridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -179,7 +178,6 @@ export function KorMarketStockManager({
 
   const toggleSelectAllVisible = useCallback(() => {
     const selectableTickers = gridRows
-      .filter((row) => !registeredTickers.has(row.ticker.toUpperCase()))
       .map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
@@ -194,7 +192,7 @@ export function KorMarketStockManager({
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
 
-    const stockPools = tickerPools.filter((p) => p.name.includes("한국 개별주"));
+    const stockPools = tickerPools.filter((p) => p.country_code === "kor");
     const remembered = readRememberedTickerType();
 
     if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
@@ -402,10 +400,6 @@ export function KorMarketStockManager({
         cellRenderer: (params: { data?: KorMarketStockGridRow }) => {
           const ticker = String(params.data?.ticker ?? "").trim();
           if (!ticker) return null;
-          const isAlreadyRegistered = registeredTickers.has(ticker.toUpperCase());
-          if (isAlreadyRegistered) {
-            return null;
-          }
           return (
             <input
               type="checkbox"
@@ -548,7 +542,7 @@ export function KorMarketStockManager({
             >
               <option value="">종목풀 선택</option>
               {tickerPools
-                .filter((p) => p.name.includes("한국 개별주"))
+                .filter((p) => p.country_code === "kor")
                 .map((pool) => (
                   <option key={pool.ticker_type} value={pool.ticker_type}>
                     {formatPoolLabel(pool)}

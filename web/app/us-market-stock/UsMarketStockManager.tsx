@@ -171,9 +171,8 @@ export function UsMarketStockManager({
   const gridRows = useMemo(() => [...rows], [rows]);
 
   const allVisibleSelected = useMemo(() => {
-    const selectableRows = gridRows.filter((row) => !registeredTickers.has(row.ticker.toUpperCase()));
-    return selectableRows.length > 0 && selectableRows.every((row) => selectedTickers.includes(row.ticker));
-  }, [gridRows, selectedTickers, registeredTickers]);
+    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [gridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -183,7 +182,6 @@ export function UsMarketStockManager({
 
   const toggleSelectAllVisible = useCallback(() => {
     const selectableTickers = gridRows
-      .filter((row) => !registeredTickers.has(row.ticker.toUpperCase()))
       .map((row) => row.ticker);
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
@@ -427,10 +425,6 @@ export function UsMarketStockManager({
         cellRenderer: (params: { data?: UsMarketStockGridRow }) => {
           const ticker = String(params.data?.ticker ?? "").trim();
           if (!ticker) return null;
-          const isAlreadyRegistered = registeredTickers.has(ticker.toUpperCase());
-          if (isAlreadyRegistered) {
-            return null;
-          }
           return (
             <input
               type="checkbox"
