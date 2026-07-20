@@ -170,9 +170,8 @@ export function AusMarketStockManager({
   const gridRows = useMemo(() => [...rows], [rows]);
 
   const allVisibleSelected = useMemo(() => {
-    const selectableRows = gridRows.filter((row) => !registeredTickers.has(normalizeAsxTicker(row.ticker)));
-    return selectableRows.length > 0 && selectableRows.every((row) => selectedTickers.includes(normalizeAsxTicker(row.ticker)));
-  }, [gridRows, selectedTickers, registeredTickers]);
+    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(normalizeAsxTicker(row.ticker)));
+  }, [gridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     const normalized = normalizeAsxTicker(ticker);
@@ -183,8 +182,7 @@ export function AusMarketStockManager({
 
   const toggleSelectAllVisible = useCallback(() => {
     const selectableTickers = gridRows
-      .map((row) => normalizeAsxTicker(row.ticker))
-      .filter((ticker) => !registeredTickers.has(ticker));
+      .map((row) => normalizeAsxTicker(row.ticker));
     setSelectedTickers((current) => {
       if (selectableTickers.length === 0) return current;
       const allSelected = selectableTickers.every((ticker) => current.includes(ticker));
@@ -411,8 +409,9 @@ export function AusMarketStockManager({
           />
         ),
         cellRenderer: (params: { data?: AusMarketStockGridRow }) => {
-          const ticker = normalizeAsxTicker(String(params.data?.ticker ?? ""));
-          if (!ticker || registeredTickers.has(ticker)) return null;
+          const rawTicker = String(params.data?.ticker ?? "").trim();
+          if (!rawTicker) return null;
+          const ticker = normalizeAsxTicker(rawTicker);
           return (
             <input
               type="checkbox"
