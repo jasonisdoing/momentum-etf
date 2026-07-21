@@ -124,25 +124,41 @@ type HoldingRow = {
   country_code?: string;
 };
 
+// 보유 티커의 시장 접두어(ASX:/KR: 등)를 제거한다. 가격 캐시·비중 계산은 접두어 없는 티커를 쓴다.
+function stripMarketPrefix(ticker: string): string {
+  return String(ticker ?? "").replace(/^[A-Za-z]+:/, "").trim().toUpperCase();
+}
+
+// 표시용 티커 — 호주(au)는 rankings/자산 관리와 동일하게 ASX: 접두어를 붙여 보여준다(내부 티커는 접두어 없음).
+function displayTickerFor(ticker: string, countryCode?: string): string {
+  return String(countryCode ?? "").toLowerCase() === "au" && !ticker.startsWith("ASX:") ? `ASX:${ticker}` : ticker;
+}
+
 // 보유 종목(순서 유지) + 저장된 비중 맵을 합쳐 자산 헬퍼용 종목 목록을 만든다.
 function mergeHoldingsWithWeights(holdings: HoldingRow[], weightTickers: HelperTicker[] | undefined): HelperTicker[] {
   const weightMap: Record<string, number | null> = {};
   for (const t of weightTickers ?? []) {
-    const tk = String(t.ticker ?? "").trim().toUpperCase();
+    const tk = stripMarketPrefix(String(t.ticker ?? ""));
     if (tk) weightMap[tk] = t.fixed_weight_pct ?? null;
   }
   return holdings
-    .filter((r) => String(r.ticker ?? "").trim() && r.ticker !== "IS")
+    .filter((r) => {
+      const tk = stripMarketPrefix(r.ticker);
+      return tk && tk !== "IS"; // IS(International Shares)는 수동 고정자산이라 제외
+    })
     .slice()
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
-    .map((r) => ({
-      ticker: r.ticker,
-      name: r.name,
-      ticker_type: r.ticker_type,
-      country_code: r.country_code,
-      bucket: r.bucket_id,
-      fixed_weight_pct: weightMap[r.ticker.trim().toUpperCase()] ?? null,
-    }));
+    .map((r) => {
+      const tk = stripMarketPrefix(r.ticker);
+      return {
+        ticker: tk,
+        name: r.name,
+        ticker_type: r.ticker_type,
+        country_code: r.country_code,
+        bucket: r.bucket_id,
+        fixed_weight_pct: weightMap[tk] ?? null,
+      };
+    });
 }
 
 type WeightRow = {
@@ -200,10 +216,13 @@ function fmtNum(value: number | null | undefined, digits = 2): string {
   return value.toFixed(digits);
 }
 
-// 현재가 — 통화 단위가 섞여 있어(원/달러/호주달러) 숫자만 천단위 구분해 표기한다.
-function fmtPrice(value: number | null | undefined): string {
+// 현재가 — 종목 국가(country_code)별 통화로 표기(자산 관리 formatPrice 와 동일 규칙).
+function fmtPrice(value: number | null | undefined, countryCode?: string): string {
   if (value == null || Number.isNaN(value)) return "-";
-  return new Intl.NumberFormat("ko-KR", { maximumFractionDigits: 2 }).format(value);
+  const cc = String(countryCode ?? "").toLowerCase();
+  if (cc === "au") return `A$${new Intl.NumberFormat("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
+  if (cc === "us") return `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
+  return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
 }
 
 // /assets 메모와 동일한 저장시간 표기.
@@ -226,6 +245,7 @@ export function AssetHelperClient() {
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
   const [tickers, setTickers] = useState<HelperTicker[]>(() => buildRows(undefined));
   const [cashWeight, setCashWeight] = useState(100); // 현금 비중(%) — 편집 가능. 로드 시 100-종목합으로 초기화.
+  const [selectedTickers, setSelectedTickers] = useState<string[]>([]); // 삭제 선택(내부 티커=접두어 없음)
   const [settings, setSettings] = useState<HelperSettings | null>(null);
   const [metricByTicker, setMetricByTicker] = useState<Record<string, WeightRow>>({});
   const [loading, setLoading] = useState(true);
@@ -441,6 +461,29 @@ export function AssetHelperClient() {
     resetOnValidated: true,
   });
 
+  // 선택 종목을 보유 목록에서 삭제한다(공통 목록이라 자산 관리 보유에서도 사라짐 — 수량·비중 함께 삭제).
+  const handleDelete = async () => {
+    if (!selectedTickers.length || !selectedAccount) return;
+    if (!window.confirm(`${selectedTickers.length}개 종목을 보유 목록에서 삭제할까요? (수량·비중 함께 삭제)`)) return;
+    try {
+      for (const bare of selectedTickers) {
+        const item = tickers.find((t) => t.ticker === bare);
+        const delTicker = displayTickerFor(bare, item?.country_code); // 보유 저장 형식(au는 ASX: 접두어)
+        const resp = await fetch(
+          `/api/assets?account=${encodeURIComponent(selectedAccount)}&ticker=${encodeURIComponent(delTicker)}`,
+          { method: "DELETE" },
+        );
+        const data = (await resp.json()) as { error?: string };
+        if (!resp.ok || data.error) throw new Error(data.error ?? "삭제에 실패했습니다.");
+      }
+      setSelectedTickers([]);
+      await load(selectedAccount ?? undefined);
+      toast.success("삭제 완료");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "삭제에 실패했습니다.");
+    }
+  };
+
   // 비중계산 — 지표(금일/수익률/MDD/소르티노)를 채운다. fixed 모드 엔진 재활용.
   const runMetrics = useCallback(async () => {
     if (!settings || !settings.ACCOUNT_ID) return;
@@ -643,7 +686,10 @@ export function AssetHelperClient() {
               />
             );
           }
-          return <TickerDetailLink ticker={row.ticker} displayTicker={row.ticker} />;
+          {
+            const dt = displayTickerFor(row.ticker, row.country_code);
+            return <TickerDetailLink ticker={dt} displayTicker={dt} />;
+          }
         },
       },
       {
@@ -685,7 +731,7 @@ export function AssetHelperClient() {
         minWidth: 96,
         width: 96,
         type: "rightAligned",
-        valueFormatter: (p) => fmtPrice(p.value as number | null),
+        valueFormatter: (p) => fmtPrice(p.value as number | null, p.data?.country_code),
       },
       { field: "return_1m_pct", headerName: "1달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "return_3m_pct", headerName: "3달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
@@ -716,7 +762,23 @@ export function AssetHelperClient() {
       suppressMovableColumns: true,
       stopEditingWhenCellsLoseFocus: true,
       animateRows: true,
-      // 종목 목록·순서·삭제는 자산 관리에서만. 자산 헬퍼는 추가 + 비중 편집만 한다(드래그·선택 없음).
+      // 순서는 자산 관리 기준(드래그 없음). 삭제는 여기서도 가능(보유 목록에서 삭제).
+      rowSelection: {
+        mode: "multiRow",
+        checkboxes: (params) => Boolean(params.data && !params.data.is_adding && params.data.ticker !== CASH_TICKER),
+        headerCheckbox: true,
+        hideDisabledCheckboxes: true,
+        enableClickSelection: false,
+      },
+      selectionColumnDef: { width: 52, minWidth: 52, maxWidth: 52, pinned: "left", sortable: false, resizable: false, headerName: "", cellClass: "assetsSelectCell" },
+      onSelectionChanged: (params) => {
+        setSelectedTickers(
+          params.api
+            .getSelectedRows()
+            .filter((row) => row.ticker && row.ticker !== CASH_TICKER && !row.is_adding)
+            .map((row) => row.ticker),
+        );
+      },
       onCellValueChanged: (params) => {
         if (params.colDef.field !== "fixed_weight_pct") return;
         if (params.data.ticker === CASH_TICKER) {
@@ -867,6 +929,7 @@ export function AssetHelperClient() {
                 <GridToolbarButton variant="save" disabled={saving} onClick={() => void saveSettings()}>
                   {saving ? "저장 중..." : "저장"}
                 </GridToolbarButton>
+                <GridToolbarButton variant="delete" onClick={() => void handleDelete()} disabled={!selectedTickers.length} />
               </div>
             </div>
             <AppAgGrid<GridRow>
