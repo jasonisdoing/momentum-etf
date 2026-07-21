@@ -23,7 +23,7 @@ SystemAction = Literal[
     "us_market_stocks",
     "aus_market_stocks",
     "live_24h_slack",
-    "leverage_sma_cross",
+    "leverage_ma_cross",
     "holdings_alarm",
 ]
 
@@ -115,12 +115,12 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
-        "key": "leverage_sma_cross",
+        "key": "leverage_ma_cross",
         "job": "레버리지 스위칭",
         "target": "한국/미국 지수(코스피·나스닥100)",
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10 · 15:00 · 16:00 KST (하루 3회)",
-        "command": "python scripts/leverage_recommend_sma_cross.py",
+        "command": "python scripts/leverage_recommend_ma_cross.py",
         "schedule": {"minutes": [0], "hours": [16], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
@@ -144,7 +144,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "us_market_stocks": "scripts/update_us_market_stocks.py",
     "aus_market_stocks": "scripts/update_aus_market_stocks.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
-    "leverage_sma_cross": "scripts/leverage_recommend_sma_cross.py",
+    "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
 }
 

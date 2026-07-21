@@ -113,7 +113,7 @@ def process_ticker_data(
         else:
             open_prices = close_prices.copy()
 
-    # 데이터 충분성 검증: SMA 기준으로 필요한 데이터 수를 확인합니다.
+    # 데이터 충분성 검증: 이동평균 기준으로 필요한 데이터 수를 확인합니다.
     if enable_data_sufficiency_check:
         ideal_multiplier = 1.0
         ideal_data_required = int(current_ma_days * ideal_multiplier)

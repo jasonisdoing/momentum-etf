@@ -7,6 +7,7 @@
 from datetime import datetime
 from typing import Any
 
+from utils.moving_averages import get_moving_average_type
 from utils.notification import send_slack_message_v2
 
 
@@ -42,15 +43,15 @@ def _post(text: str, blocks: list[dict], label: str) -> bool:
     return False
 
 
-def send_slack_sma_cross(
+def send_slack_ma_cross(
     view: dict[str, Any],
     *,
     market_phase: str = "장 마감 직후",
     test: bool = False,
 ) -> bool:
-    """SMA 크로스(+고점대비) 전략 추천을 Slack 으로 전송한다.
+    """이동평균선 크로스(+고점대비) 전략 추천을 Slack 으로 전송한다.
 
-    ``view`` 는 ``utils.leverage_sma_service.compute_sma_cross_view`` 의 반환값.
+    ``view`` 는 ``utils.leverage_ma_service.compute_ma_cross_view`` 의 반환값.
     기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이동선/고점대비로 바뀐 내용을 반영한다.
     """
     market = str(view.get("market") or "kor")
@@ -61,7 +62,7 @@ def send_slack_sma_cross(
     judgment = view.get("judgment") or {}
     state = view.get("state") or {}
     assets = view.get("assets") or {}
-    sma_days = int(view.get("sma_days") or 0)
+    ma_days = int(view.get("ma_days") or 0)
     peak_limit = float(view.get("peak_drawdown_pct") or 0.0)
 
     is_changed = bool(rec.get("is_changed"))
@@ -83,12 +84,13 @@ def send_slack_sma_cross(
     ]
 
     # 전략 설정(파라미터)
+    ma_type = get_moving_average_type()
     param_text = (
-        "*🏆 전략 설정 (SMA 크로스 + 고점대비)*\n"
+        "*🏆 전략 설정 (이동평균선 크로스 + 고점대비)*\n"
         f"• 지수(신호): {index_display}\n"
         f"• 레버리지 자산: {leverage_display}\n"
         f"• 방어 자산: {defense_display}\n"
-        f"• 이동선: SMA {sma_days}일\n"
+        f"• 이동선: {ma_type} {ma_days}일\n"
         f"• 고점대비 한도: {peak_limit:.0f}%"
     )
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": param_text}})
@@ -103,7 +105,7 @@ def send_slack_sma_cross(
         peak_ok = peak_dd >= -limit
         judge_text = (
             "*=== 판정 근거 ===*\n"
-            f"• 이격(SMA {sma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
+            f"• 이격({ma_type} {ma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
             f"• 고점대비: {peak_dd:+.2f}% / 한도 ≥ -{limit:.0f}% {'✅' if peak_ok else '❌'}\n"
             f"• 결과: {'🟢 레버리지 보유' if want_leverage else '🔵 방어 보유'} → *{target_display}*"
         )
@@ -128,11 +130,11 @@ def send_slack_sma_cross(
         peak_dd = float(judgment.get("peak_drawdown_pct") or 0.0)
         limit = float(judgment.get("peak_drawdown_limit_pct") or 0.0)
         current_index_close = _required_number(judgment, "index_close")
-        sma_threshold_close = _required_number(judgment, "sma_threshold_close")
+        ma_threshold_close = _required_number(judgment, "ma_threshold_close")
         peak_threshold_close = _required_number(judgment, "peak_threshold_close")
         required_index_close = _required_number(judgment, "required_index_close")
         required_move_pct = (required_index_close / current_index_close - 1.0) * 100.0
-        sma_recovery_pct = (sma_threshold_close / current_index_close - 1.0) * 100.0
+        ma_recovery_pct = (ma_threshold_close / current_index_close - 1.0) * 100.0
         peak_recovery_pct = (peak_threshold_close / current_index_close - 1.0) * 100.0
         gap_ok = gap_pct >= 0
         peak_ok = peak_dd >= -limit
@@ -143,7 +145,7 @@ def send_slack_sma_cross(
                 f"*{_format_index_point(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
             )
             needs = [
-                f"① {sma_days}일 이동평균선 아래로 *{sma_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
+                f"① {ma_days}일 이동평균선 아래로 *{ma_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
                 f"② 전고점 대비 -{limit:.0f}% 아래로 *{peak_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
             ]
             summary_text += (
@@ -159,7 +161,7 @@ def send_slack_sma_cross(
             )
             needs = []
             if not gap_ok:
-                needs.append(f"① {sma_days}일 이동평균선 위로 *{sma_recovery_pct:+.2f}%* 회복 필요")
+                needs.append(f"① {ma_days}일 이동평균선 위로 *{ma_recovery_pct:+.2f}%* 회복 필요")
             if not peak_ok:
                 needs.append(f"② 전고점 대비 -{limit:.0f}% 이내로 *{peak_recovery_pct:+.2f}%* 회복 필요")
             if needs:
@@ -175,7 +177,7 @@ def send_slack_sma_cross(
     if is_changed:
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "<!channel> 포지션이 변경되었습니다! 확인해주세요."}})
 
-    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "SMA 크로스 추천")
+    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "이동평균선 크로스 추천")
 
 
 def send_slack_recommendation(
@@ -378,12 +380,12 @@ def send_slack_tuning_result(
 
     market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
     params = best_result.get("params", {})
-    # 공격 자산은 튜닝 조합 차원이 아님 — 진입 시점마다 후보 중 SMA 20일 이격도 1위를 동적 선택
+    # 공격 자산은 튜닝 조합 차원이 아님 — 진입 시점마다 후보 중 이동평균 20일 이격도 1위를 동적 선택
     if params.get("offense_ticker"):
         offense_display = _format_display_name(str(params["offense_ticker"]), params.get("offense_name"))
     else:
         candidates = params.get("offense_candidates") or []
-        offense_display = f"동적 선택 (후보 {len(candidates)}종, 진입 시 SMA 20일 이격도 1위)"
+        offense_display = f"동적 선택 (후보 {len(candidates)}종, 진입 시 {get_moving_average_type()} 20일 이격도 1위)"
     defense_display = _format_display_name(
         str(params.get("defense_ticker", "N/A")),
         params.get("defense_name"),

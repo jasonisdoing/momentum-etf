@@ -39,7 +39,7 @@ const UP_COLOR = "#d63939";
 const DOWN_COLOR = "#206bc4";
 const EMA_COLOR = "rgba(230,145,56,0.9)"; // EMA선(주황)
 const ST_COLOR = "rgba(120,130,150,0.75)"; // 슈퍼트렌드선(회색)
-// 선물 참고용 이동평균선(SMA) 20·60·120·240.
+// 선물 참고용 이동평균선(종류는 config.MOVING_AVERAGE_TYPE: SMA/EMA) 20·60·120·240.
 const FUT_MAS = [
   { period: 20, color: "rgba(230,145,56,0.95)" },
   { period: 60, color: "rgba(46,164,79,0.95)" },
@@ -440,7 +440,9 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
   );
 }
 
-export function LeverageScalpClient() {
+export function LeverageScalpClient({ maType }: { maType: string }) {
+  // 선물 참고 이동평균선 종류(SMA/EMA)는 config.py 전역 설정을 따른다(page.tsx 가 전달).
+  const computeFutMa = maType === "EMA" ? computeEma : computeSma;
   const [mode, setMode] = useState<StratMode>("both");
   const [emaPeriod, setEmaPeriod] = useState("10");
   const [stPeriod, setStPeriod] = useState("10");
@@ -453,16 +455,16 @@ export function LeverageScalpClient() {
   const handleFutData = useCallback((c: Candle[]) => setFutCandles(c), []);
   const [btOpen, setBtOpen] = useState(false);
 
-  // 선물 이동평균선(SMA 20/60/120/240) 오버레이 + 범례.
+  // 선물 이동평균선(20/60/120/240) 오버레이 + 범례. 종류(SMA/EMA)는 config 연동.
   const futOverlays = useMemo<Overlay[]>(() => {
     if (futCandles.length === 0) return [];
     const closes = futCandles.map((c) => c.c);
     return FUT_MAS.map((m) => ({
       color: m.color,
       width: 1,
-      data: computeSma(closes, m.period).map<LineData>((v, i) => ({ time: toTime(futCandles[i].t), value: v })),
+      data: computeFutMa(closes, m.period).map<LineData>((v, i) => ({ time: toTime(futCandles[i].t), value: v })),
     }));
-  }, [futCandles]);
+  }, [futCandles, computeFutMa]);
   const futLegend = FUT_MAS.map((m) => ({ label: String(m.period), color: m.color }));
 
   // 두 차트 시간축 동기화(한쪽 스크롤/줌 → 다른 쪽도 같은 시간범위).

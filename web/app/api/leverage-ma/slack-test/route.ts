@@ -5,11 +5,11 @@ import { jsonNoStore } from "../../../../lib/no-store-response";
 
 export const dynamic = "force-dynamic";
 
-/** SMA 크로스 슬랙 수동 발송 — FastAPI `/internal/leverage/sma-cross/slack-test` 프록시. */
+/** 이동평균선 크로스 슬랙 수동 발송 — FastAPI `/internal/leverage/ma-cross/slack-test` 프록시. */
 export async function POST(request: NextRequest) {
   try {
     const market = request.nextUrl.searchParams.get("market") ?? "kor";
-    const data = await fetchFastApiJson(`/internal/leverage/sma-cross/slack-test?market=${encodeURIComponent(market)}`, {
+    const data = await fetchFastApiJson(`/internal/leverage/ma-cross/slack-test?market=${encodeURIComponent(market)}`, {
       method: "POST",
     });
     return jsonNoStore(data);

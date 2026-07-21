@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       "us_market_stocks",
       "aus_market_stocks",
       "live_24h_slack",
-      "leverage_sma_cross",
+      "leverage_ma_cross",
       "holdings_alarm",
     ] as const);
     const actionStr = String(payload.action || "").trim();

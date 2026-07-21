@@ -36,7 +36,7 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    # 레버리지 자산은 단일 설정 키가 아니다. 진입 시점마다 후보 중 SMA 20일 이격도 1위를 동적 선택.
+    # 레버리지 자산은 단일 설정 키가 아니다. 진입 시점마다 후보 중 이동평균 20일 이격도 1위를 동적 선택.
     for key in ("signal", "defense"):
         asset = config.get(key)
         if not isinstance(asset, dict) or not str(asset.get("ticker") or "").strip():
@@ -66,10 +66,10 @@ def _validate_leverage_config(config: dict[str, Any]) -> None:
 def save_leverage_settings(profile: str, config: dict[str, Any]) -> dict[str, Any]:
     """검증 후 설정을 DB 에 저장하고, 갱신된 설정+상태를 반환한다.
 
-    - sma_cross: normalize_settings 로 전량 검증 후 그대로 저장(파생 키 없음).
+    - ma_cross: normalize_settings 로 전량 검증 후 그대로 저장(파생 키 없음).
     - switch(기존): 벤치마크를 후보군(tuning)에서 파생해 함께 저장(단일 소스 유지).
     """
-    if isinstance(config, dict) and config.get("strategy") == "sma_cross":
+    if isinstance(config, dict) and config.get("strategy") == "ma_cross":
         normalize_settings(dict(config))  # 사본으로 검증 — 파생 키가 저장값에 섞이지 않게
         save_leverage_config_raw(profile, dict(config))
         return load_leverage_settings(profile)

@@ -5,6 +5,8 @@
 
 import pandas as pd
 
+from utils.moving_averages import calculate_moving_average
+
 
 def calculate_moving_average_signals(
     close_prices: pd.Series, moving_average_period: int
@@ -32,8 +34,8 @@ def calculate_moving_average_signals(
     if isinstance(close_prices, pd.DataFrame):
         close_prices = close_prices.iloc[:, 0]
 
-    # 이동평균 계산
-    moving_average = close_prices.rolling(window=moving_average_period).mean()
+    # 이동평균 계산(종류는 config.MOVING_AVERAGE_TYPE)
+    moving_average = calculate_moving_average(close_prices, moving_average_period, min_periods=moving_average_period)
 
     # 이동평균 상회 여부 (종가 > 이동평균)
     buy_signal_active = close_prices > moving_average

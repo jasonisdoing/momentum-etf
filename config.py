@@ -6,6 +6,11 @@ from pathlib import Path
 CACHE_START_DATE = "2020-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
+# 전략 이동평균 종류 — 추세선·이격도·순위 계산에 쓰는 이동평균. "SMA"(단순) 또는 "EMA"(지수).
+# 이 값 하나로 시스템 전체의 이동평균 계산·표시 문구가 바뀐다
+# MOVING_AVERAGE_TYPE = "SMA"
+MOVING_AVERAGE_TYPE = "EMA"
+
 
 # -----------------------------------------------------------------------
 # 버킷(Bucket) 설정 및 스타일링
@@ -151,7 +156,7 @@ MIN_TRADING_DAYS = 5
 # 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
 MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
-# 추세 점수용 SMA 일수
+# 추세 점수용 이동평균 일수
 MARKET_TREND_SCORE_MA_DAYS = 20
 
 # 슈퍼트렌드(SuperTrend) 지표 설정.

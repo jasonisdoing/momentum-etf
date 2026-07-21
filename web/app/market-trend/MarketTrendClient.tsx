@@ -112,11 +112,13 @@ type MarketTrendClientProps = {
   // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
   maDays: number;
   scoreAnchorPercentile: number;
+  maType: string;
 };
 
 export function MarketTrendClient({
   maDays,
   scoreAnchorPercentile,
+  maType,
 }: MarketTrendClientProps) {
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -256,7 +258,7 @@ export function MarketTrendClient({
       },
       {
         field: "trend_score",
-        headerName: "추세 점수(SMA20 기반)",
+        headerName: `추세 점수(${maType}${maDays} 기반)`,
         flex: 0.7,
         minWidth: 100,
         sortable: true,
@@ -287,6 +289,8 @@ export function MarketTrendClient({
           <MarketTrendChart
             ticker={data.parentTicker}
             name={data.parentName}
+            maType={maType}
+            maDays={maDays}
           />
         );
       },
@@ -303,7 +307,7 @@ export function MarketTrendClient({
       },
       domLayout: "autoHeight",
     }),
-    [maDays],
+    [maDays, maType],
   );
 
   const titleRight = useMemo(
@@ -312,12 +316,12 @@ export function MarketTrendClient({
         <div className="appHeaderMetric">
           <span>기준:</span>
           <span className="appHeaderMetricValue">
-            SMA {maDays}일
+            {maType} {maDays}일
           </span>
         </div>
       </div>
     ),
-    [maDays],
+    [maDays, maType],
   );
 
   return (
@@ -361,7 +365,7 @@ export function MarketTrendClient({
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
                 <li>일간(%): 전일 종가 대비 등락률.</li>
                 <li>
-                  추세 점수: 종가의 SMA{maDays} 대비 괴리율을 −100~+100 으로 정규화한 값(0 = MA선).
+                  추세 점수: 종가의 {maType}{maDays} 대비 괴리율을 −100~+100 으로 정규화한 값(0 = MA선).
                   최근 12개월 괴리율의 상위/하위 {100 - scoreAnchorPercentile}% 를 각각 천장(+100)·바닥(−100)으로 봅니다.
                   MA 위면 양수, 아래면 음수 — <strong>수익률이 아니라 MA 대비 위치입니다.</strong>
                 </li>

@@ -21,7 +21,7 @@ REQUIRED_KEYS_NEW: list[str] = [
     "slippage",
 ]
 # 참고: 레버리지 자산(offense legacy)은 더 이상 단일 설정 키가 아니다.
-# 진입 시점마다 tuning.offense_candidates 중 SMA 20일 이격도 1위를 동적으로 선택한다.
+# 진입 시점마다 tuning.offense_candidates 중 이동평균 20일 이격도 1위를 동적으로 선택한다.
 
 REQUIRED_KEYS_OLD: list[str] = [
     "signal_ticker",
@@ -41,8 +41,8 @@ def normalize_settings(settings: dict) -> dict:
     # 전략 구분 (기본값: switch - 하위 호환)
     settings["strategy"] = settings.get("strategy", "switch")
 
-    if settings["strategy"] == "sma_cross":
-        return _normalize_sma_cross_settings(settings)
+    if settings["strategy"] == "ma_cross":
+        return _normalize_ma_cross_settings(settings)
 
     # start_date 또는 months_range 중 하나는 있어야 함
     if "start_date" not in settings and "months_range" not in settings:
@@ -51,10 +51,10 @@ def normalize_settings(settings: dict) -> dict:
     return _normalize_switch_settings(settings)
 
 
-def _normalize_sma_cross_settings(settings: dict) -> dict:
-    """SMA 크로스 전략 설정 검증·정규화.
+def _normalize_ma_cross_settings(settings: dict) -> dict:
+    """이동평균선 크로스 전략 설정 검증·정규화.
 
-    필수: index/leverage/defense({ticker,name}), sma_days, peak_drawdown_pct, slippage, market.
+    필수: index/leverage/defense({ticker,name}), ma_days, peak_drawdown_pct, slippage, market.
     방어는 현금 가능(ticker='CASH'). 매수/매도 컷·후보군은 이 전략에 없다.
     """
     for key in ("index", "leverage", "defense"):
@@ -68,9 +68,9 @@ def _normalize_sma_cross_settings(settings: dict) -> dict:
     if str(settings["leverage_ticker"]).upper() == "CASH":
         raise ValueError("레버리지 티커는 현금(CASH)일 수 없습니다.")
 
-    sma_days = settings.get("sma_days")
-    if not isinstance(sma_days, int) or sma_days < 2:
-        raise ValueError(f"sma_days 는 2 이상 정수여야 합니다: {sma_days}")
+    ma_days = settings.get("ma_days")
+    if not isinstance(ma_days, int) or ma_days < 2:
+        raise ValueError(f"ma_days 는 2 이상 정수여야 합니다: {ma_days}")
 
     peak_drawdown_pct = settings.get("peak_drawdown_pct")
     if not isinstance(peak_drawdown_pct, (int, float)) or isinstance(peak_drawdown_pct, bool) or peak_drawdown_pct < 0:
@@ -86,7 +86,7 @@ def _normalize_sma_cross_settings(settings: dict) -> dict:
         raise ValueError(f"market 은 kor/us 중 하나여야 합니다: {settings.get('market')}")
     settings["market"] = market
 
-    # SMA 크로스 전략의 지수는 시장별 고정값이다. DB에 과거 값이 남아도 계산 기준은 여기서 통일한다.
+    # 이동평균선 크로스 전략의 지수는 시장별 고정값이다. DB에 과거 값이 남아도 계산 기준은 여기서 통일한다.
     fixed_index = FIXED_INDEX_BY_MARKET[market]
     settings["index"] = dict(fixed_index)
     settings["index_ticker"] = fixed_index["ticker"]

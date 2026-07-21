@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 type MarketTrendDefaults = {
   ma_days: number;
   score_anchor_percentile: number;
+  ma_type: string;
 };
 
 export default async function MarketTrendPage() {
@@ -15,6 +16,7 @@ export default async function MarketTrendPage() {
     <MarketTrendClient
       maDays={defaults.ma_days}
       scoreAnchorPercentile={defaults.score_anchor_percentile}
+      maType={defaults.ma_type}
     />
   );
 }

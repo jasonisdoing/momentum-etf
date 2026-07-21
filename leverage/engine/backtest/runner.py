@@ -33,7 +33,7 @@ def run_backtest(
     opens_full = pre_opens.copy() if pre_opens is not None else download_opens(settings, warmup_start)
 
     defense = settings["defense_ticker"]
-    # 공격 후보군 — 진입 시점마다 SMA 20일 이격도 1위를 선택한다 (후보 1개면 기존 단일 동작).
+    # 공격 후보군 — 진입 시점마다 이동평균 20일 이격도 1위를 선택한다 (후보 1개면 기존 단일 동작).
     # normalize_settings 가 후보 1개 이상을 보장한다.
     offense_entries = settings["offense_candidates"]
     offense_tickers = [str(c["ticker"]) for c in offense_entries]
@@ -43,26 +43,26 @@ def run_backtest(
     signal_df_full = compute_signals(prices_full[settings["signal_ticker"]], settings)
     returns_full = opens_full[assets].pct_change(fill_method=None)
 
-    # 공격 후보별 SMA 20일 이격도 (종가 / SMA - 1). 부분 계산(min_periods=1) 지원.
+    # 공격 후보별 이동평균 20일 이격도 (종가 / 이동평균 - 1). 부분 계산(min_periods=1) 지원.
     from config import TRADING_DAYS_PER_MONTH
     from utils.moving_averages import calculate_moving_average
 
-    _sma_days = int(TRADING_DAYS_PER_MONTH)
+    _ma_days = int(TRADING_DAYS_PER_MONTH)
     _gap_cols: dict[str, pd.Series] = {}
     for _t in offense_tickers:
         _series = prices_full[_t].dropna()
         if _series.empty:
             raise ValueError(f"공격 후보 {_t} 의 가격 데이터가 비어 있습니다.")
-        _ma = calculate_moving_average(_series, _sma_days)
+        _ma = calculate_moving_average(_series, _ma_days)
         _gap_cols[_t] = (_series / _ma - 1.0).reindex(prices_full.index)
     offense_gap_frame = pd.DataFrame(_gap_cols, index=prices_full.index)
 
     def select_offense(date) -> str:
-        """해당 일자 기준 SMA 20일 이격도가 가장 큰 공격 후보를 반환한다."""
+        """해당 일자 기준 이동평균 20일 이격도가 가장 큰 공격 후보를 반환한다."""
         gaps = offense_gap_frame.loc[offense_gap_frame.index.asof(date)] if date not in offense_gap_frame.index else offense_gap_frame.loc[date]
         gaps = gaps.dropna()
         if gaps.empty:
-            raise ValueError(f"{pd.Timestamp(date).date()} 기준 공격 후보의 SMA 20일 이격도를 계산할 수 없습니다.")
+            raise ValueError(f"{pd.Timestamp(date).date()} 기준 공격 후보의 이동평균 20일 이격도를 계산할 수 없습니다.")
         return str(gaps.idxmax())
 
     common_index = (
@@ -763,7 +763,7 @@ def run_backtest(
             f"| buy_cutoff: {settings['drawdown_buy_cutoff']}%",
             f"| sell_cutoff: {settings['drawdown_sell_cutoff']}%",
             f"| signal_ticker: {settings['signal_ticker']}",
-            f"| offense_candidates: {', '.join(offense_tickers)} (진입 시 SMA 20일 이격도 1위 선택)",
+            f"| offense_candidates: {', '.join(offense_tickers)} (진입 시 이동평균 20일 이격도 1위 선택)",
             f"| defense_ticker: {settings['defense_ticker']}",
             f"| slippage: {settings['slippage']}%",
         ]
@@ -809,7 +809,7 @@ def run_backtest(
     # 장중 정보용: 오늘(미완성 봉 포함) 실시간 시그널 드로다운
     live_drawdown = float(signal_df_full["drawdown"].iloc[-1])
 
-    # 공격 후보별 최근(확정 신호일) SMA 20일 이격도 + 다음 진입 시 선택될 후보
+    # 공격 후보별 최근(확정 신호일) 이동평균 20일 이격도 + 다음 진입 시 선택될 후보
     last_gaps = offense_gap_frame.loc[last_date].dropna() if last_date in offense_gap_frame.index else pd.Series(dtype=float)
     offense_gaps = {str(t): float(v) for t, v in last_gaps.items()}
     next_offense = select_offense(last_date)

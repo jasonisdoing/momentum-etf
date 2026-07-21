@@ -26,7 +26,7 @@ npm run dev
 
 폐기된 `leverage-switching` 앱에서 이전된 레버리지 스위칭 전략입니다.
 * CLI: `python -m leverage.backtest switch` (백테스트) / `python -m leverage.recommend switch --slack` (추천+Slack)
-* SMA 크로스 전략: 레버리지-설정 화면에서 시장(한국/미국)별로 지수·레버리지·방어 티커, 이동선, 고점대비 허용폭을 설정하면, 후보 이동선·고점대비 조건별 성과를 즉시 튜닝 표로 보여줍니다(별도 배치 없음)
+* 이동평균선 크로스 전략: 레버리지-설정 화면에서 시장(한국/미국)별로 지수·레버리지·방어 티커, 이동선, 고점대비 허용폭을 설정하면, 후보 이동선·고점대비 조건별 성과를 즉시 튜닝 표로 보여줍니다(별도 배치 없음)
 * 자동: `leverage_switch` 배치가 평일 09:05~16:05 매시 :05 에 추천을 Slack 으로 발송
 * 수동: `/batch` 화면에서 **"레버리지 스위칭 추천"** 클릭 → 큐 등록 → worker 실행
 
@@ -41,7 +41,7 @@ npm run dev
 계좌 정의는 MongoDB `account_settings` 컬렉션에서 관리하며, 웹 사이드바 `계좌 → 설정`(`/account-settings`) 화면에서 수정합니다. 각 계좌는 `account_id`(불변), `order`, `name`, `icon`, `country_code`, `currency`, `benchmark`(티커 입력 후 조회로 종목명 확인)를 가지며, 필요하면 `URL`(증권사 접속 주소)을 함께 설정합니다. 계좌 추가/삭제는 화면에서 지원하지 않습니다.
 
 ### 종목풀 설정 (DB `pool_settings` / 웹 `종목풀 → 설정`)
-종목풀은 등록된 전체 종목을 유니버스로 사용합니다. SMA 고정 추세선과 `LONG_MA_DAYS` 기준 단일 추세(%)를 계산한 뒤, `추세(%)` 내림차순으로 순위를 보여줍니다. 순위 화면의 `단기`는 `SHORT_MA_DAYS`, `장기`는 `LONG_MA_DAYS` 기준 이격률이며, `SHORT_MA_DAYS`는 `단기`와 `기울기` 산출용입니다. 버킷은 분류와 표시용 참고 정보입니다.
+종목풀은 등록된 전체 종목을 유니버스로 사용합니다. 이동평균 고정 추세선과 `LONG_MA_DAYS` 기준 단일 추세(%)를 계산한 뒤, `추세(%)` 내림차순으로 순위를 보여줍니다. 순위 화면의 `단기`는 `SHORT_MA_DAYS`, `장기`는 `LONG_MA_DAYS` 기준 이격률이며, `SHORT_MA_DAYS`는 `단기`와 `기울기` 산출용입니다. 버킷은 분류와 표시용 참고 정보입니다.
 종목풀 구조와 `TOP_N_HOLD`/`SHORT_MA_DAYS`/`LONG_MA_DAYS`는 MongoDB `pool_settings` 컬렉션에서 관리하며, `/pools-settings` 화면에서 추가·수정·삭제합니다. 삭제는 다른 계좌에 연결되지 않은 종목풀만 가능합니다. 종목풀 `country_code`는 현재 `kor`, `au`, `us`를 사용합니다. 계좌 `country_code`는 `kor` 또는 `au`만 사용합니다. 종목풀별 `시장 레짐`은 기존 시장지수 6개 중 하나를 선택하며, `/pools-backtest`의 하락시 투자비중 필터에 사용합니다.
 
 ```json

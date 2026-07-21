@@ -36,6 +36,7 @@ type RankMaRule = {
   long_ma_days: number;
   slope_days: number;
   score_column: string;
+  ma_type: string;
 };
 
 type RankRow = {
@@ -604,7 +605,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [addingRow, gridRows, pageMode]);
 
   const maRuleSummary = useMemo(
-    () => (maRule ? [`SMA 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일 · 기울기 ${maRule.slope_days}일`] : []),
+    () => (maRule ? [`${maRule.ma_type} 단기 ${maRule.short_ma_days}일 · 장기 ${maRule.long_ma_days}일 · 기울기 ${maRule.slope_days}일`] : []),
     [maRule],
   );
 

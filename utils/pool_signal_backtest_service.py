@@ -22,6 +22,7 @@ import pandas as pd
 from config import CACHE_START_DATE
 from utils.cache_utils import load_cached_close_series_bulk
 from utils.logger import get_app_logger
+from utils.moving_averages import calculate_moving_average
 from utils.pool_settings_store import (
     MA_DAY_OPTIONS,
     get_pool_benchmark_ticker,
@@ -527,8 +528,8 @@ def compute_pool_signal_backtest(
         close = pd.to_numeric(series, errors="coerce").dropna()
         if len(close) < min_length:
             continue
-        short_ma = close.rolling(short_days).mean()
-        long_ma = close.rolling(long_days).mean()
+        short_ma = calculate_moving_average(close, short_days, min_periods=short_days)
+        long_ma = calculate_moving_average(close, long_days, min_periods=long_days)
         frame = pd.DataFrame(
             {
                 "close": close,
