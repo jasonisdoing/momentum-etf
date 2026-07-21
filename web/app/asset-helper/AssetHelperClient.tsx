@@ -206,6 +206,41 @@ function buildRows(items: HelperTicker[] | undefined): HelperTicker[] {
     .map((item) => ({ ...item, ticker: item.ticker ?? "" }));
 }
 
+// 지표(금일/수익률/MDD/소르티노/현재가)를 계산해 티커→지표 맵으로 반환한다. 실패해도 빈 맵(그리드는 표시).
+async function fetchMetrics(validList: HelperTicker[], settingsArg: HelperSettings): Promise<Record<string, WeightRow>> {
+  try {
+    const resp = await fetch("/api/asset-helper-settings/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tickers: validList,
+        settings: settingsArg,
+        weight_mode: "fixed",
+        backtest_settings: { months: 12, rebalance: "none", initial_amount_manwon: 10000 },
+      }),
+    });
+    const data = (await resp.json()) as { rows?: (WeightRow & { bucket?: unknown })[]; error?: string };
+    if (!resp.ok || data.error) return {};
+    const map: Record<string, WeightRow> = {};
+    for (const row of data.rows ?? []) {
+      map[row.ticker] = {
+        ticker: row.ticker,
+        current_price: row.current_price,
+        daily_change_pct: row.daily_change_pct,
+        return_1m_pct: row.return_1m_pct,
+        return_3m_pct: row.return_3m_pct,
+        return_6m_pct: row.return_6m_pct,
+        return_12m_pct: row.return_12m_pct,
+        mdd_pct: row.mdd_pct,
+        sortino: row.sortino,
+      };
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 function fmtPct(value: number | null | undefined): string {
   if (value == null || Number.isNaN(value)) return "-";
   return `${value.toFixed(2)}%`;
@@ -250,7 +285,6 @@ export function AssetHelperClient() {
   const [metricByTicker, setMetricByTicker] = useState<Record<string, WeightRow>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
   const [btAmount, setBtAmount] = useState("10000");
   const [btMonths, setBtMonths] = useState("12");
   const [btRebalance, setBtRebalance] = useState("monthly");
@@ -317,7 +351,13 @@ export function AssetHelperClient() {
         setTickers(loadedTickers);
         setCashWeight(cashFromTickers(loadedTickers)); // 저장된 종목합의 나머지를 현금으로 초기화
         setSettings(data.settings ?? null);
-        setMetricByTicker({});
+        // 지표까지 로드가 끝난 뒤 그리드를 한 번에 표시한다(종목 먼저 뜨고 값이 나중에 채워지는 깜빡임 방지).
+        const validLoaded = loadedTickers.filter((t) => t.ticker.trim() && t.name);
+        if (validLoaded.length >= 3 && data.settings?.ACCOUNT_ID) {
+          setMetricByTicker(await fetchMetrics(validLoaded, data.settings));
+        } else {
+          setMetricByTicker({});
+        }
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "불러오지 못했습니다.");
       } finally {
@@ -392,22 +432,6 @@ export function AssetHelperClient() {
     if (totalThen <= 0) return null;
     return ((series[0][0] - profitThen) / totalThen) * 100;
   }, [marketRegime, selectedReturns]);
-
-  // 지표(금일/수익률/MDD/소르티노)는 계좌 로드 시 자동으로 계산한다(버튼 없이).
-  const autoRunAccountRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (
-      !loading &&
-      selectedAccount &&
-      settings?.ACCOUNT_ID &&
-      validTickers.length >= 3 &&
-      autoRunAccountRef.current !== selectedAccount
-    ) {
-      autoRunAccountRef.current = selectedAccount;
-      void runMetrics();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, selectedAccount, settings?.ACCOUNT_ID, validTickers.length]);
 
   // 종목 추가 — /assets 와 동일한 addingRow 흐름을 공용 훅(useAddingTickerRow)으로 재사용한다.
   // 추가 → 상단 신규 행에 티커 입력 → 확인(조회) → 목록에 추가. 저장은 그리드 저장 버튼으로.
@@ -484,49 +508,6 @@ export function AssetHelperClient() {
     }
   };
 
-  // 비중계산 — 지표(금일/수익률/MDD/소르티노)를 채운다. fixed 모드 엔진 재활용.
-  const runMetrics = useCallback(async () => {
-    if (!settings || !settings.ACCOUNT_ID) return;
-    if (validTickers.length < 3) {
-      toast.error("지표 계산에는 확인된 종목이 3개 이상 필요합니다.");
-      return;
-    }
-    try {
-      setRunning(true);
-      const resp = await fetch("/api/asset-helper-settings/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tickers: validTickers,
-          settings,
-          weight_mode: "fixed",
-          backtest_settings: { months: 12, rebalance: "none", initial_amount_manwon: 10000 },
-        }),
-      });
-      const data = (await resp.json()) as { rows?: (WeightRow & { bucket?: unknown })[]; error?: string };
-      if (!resp.ok || data.error) throw new Error(data.error ?? "지표 계산에 실패했습니다.");
-      // 지표 필드만 병합한다(run 응답의 bucket 은 문자열이라 티커의 숫자 bucket 을 덮어쓰지 않도록 제외).
-      const map: Record<string, WeightRow> = {};
-      for (const row of data.rows ?? []) {
-        map[row.ticker] = {
-          ticker: row.ticker,
-          current_price: row.current_price,
-          daily_change_pct: row.daily_change_pct,
-          return_1m_pct: row.return_1m_pct,
-          return_3m_pct: row.return_3m_pct,
-          return_6m_pct: row.return_6m_pct,
-          return_12m_pct: row.return_12m_pct,
-          mdd_pct: row.mdd_pct,
-          sortino: row.sortino,
-        };
-      }
-      setMetricByTicker(map);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "지표 계산에 실패했습니다.");
-    } finally {
-      setRunning(false);
-    }
-  }, [settings, toast, validTickers]);
 
   // 메모는 /assets 와 같은 계좌 메모(/api/note) — 양쪽에서 편집·저장하면 서로 공유된다.
   const handleSaveNote = async () => {
