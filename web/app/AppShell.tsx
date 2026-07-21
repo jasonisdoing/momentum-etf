@@ -85,6 +85,7 @@ const navGroups = [
     title: "레버리지",
     icon: IconChartLine,
     items: [
+      { href: "/leverage-scalp", label: "단타", icon: IconChartLine },
       { href: "/leverage-settings", label: "설정", icon: IconSettings },
     ],
   },
