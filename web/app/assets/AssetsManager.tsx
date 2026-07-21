@@ -537,7 +537,8 @@ function AccountHoldingsDetailPanel({
         if (!resp.ok || !alive) return;
         const map: Record<string, number> = {};
         for (const t of data.tickers ?? []) {
-          const tk = String(t.ticker ?? "").trim().toUpperCase();
+          // 시장 접두어(ASX:/KR:) 제거해 보유행 티커와 맞춘다(자산 헬퍼는 접두어 없는 티커 저장).
+          const tk = String(t.ticker ?? "").replace(/^[A-Za-z]+:/, "").trim().toUpperCase();
           const w = t.fixed_weight_pct;
           if (tk && w != null && Number.isFinite(Number(w))) map[tk] = Number(w);
         }
@@ -1381,7 +1382,7 @@ function AccountHoldingsDetailPanel({
           const cashPct = Math.max(0, 100 - Object.values(map).reduce((a, b) => a + b, 0));
           return <span style={{ color: "#000000", fontWeight: 700 }}>{cashPct.toFixed(1)}%</span>;
         }
-        const w = map[String(row.ticker || "").trim().toUpperCase()];
+        const w = map[String(row.ticker || "").replace(/^[A-Za-z]+:/, "").trim().toUpperCase()];
         return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${w.toFixed(1)}%`}</span>;
       },
     },
