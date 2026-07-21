@@ -932,14 +932,15 @@ export function HyperliquidClient() {
   const hynixTossActive = canUseTossAsChartSource(hynixKorQuote);
   const micronTossActive = canUseTossAsChartSource(micronTossQuote);
   const samsungTossActive = canUseTossAsChartSource(samsungTossQuote);
+  // 카드 배치(is-three): 1줄=한국(전체), 2줄=[Hyperliquid | 미국] 반반 → 배열 순서를 그 순서로 둔다.
   const hynixSeries: ComparisonSeries[] =
     hynixKorQuote && hynixHyperQuote
       ? [
           { key: "000660", label: "한국", color: "#ef4444", quote: hynixKorQuote, priceMultiplier: 1, visible: hynixTossActive },
+          { key: "SKHX", label: "Hyperliquid", color: "#10b981", quote: hynixHyperQuote, priceMultiplier: 1, visible: true },
           ...(hynixAdrQuote && usdKrw
             ? [{ key: "SKHY", label: "미국", color: "#2563eb", quote: hynixAdrQuote, priceMultiplier: usdKrw * 10, visible: canUseTossAsChartSource(hynixAdrQuote) }]
             : []),
-          { key: "SKHX", label: "Hyperliquid", color: "#10b981", quote: hynixHyperQuote, priceMultiplier: 1, visible: true },
         ]
       : [];
   const hynixKorPrice = hynixKorQuote?.hyper_price ?? null;
@@ -984,7 +985,6 @@ export function HyperliquidClient() {
                   representative={selectRepresentativeValue(hynixKorQuote, hynixHyperQuote, "국내시장", hynixTossActive)}
                   candleSeriesKey={hynixTossActive ? "000660" : "SKHX"}
                   priorSeriesKey={hynixTossActive ? "SKHX" : undefined}
-                  overlayLineSeriesKey="SKHY"
                   series={hynixSeries}
                   currency="KRW"
                   differences={[

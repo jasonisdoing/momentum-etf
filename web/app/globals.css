@@ -3825,14 +3825,14 @@ a {
 }
 
 .live24hPriceCardList.is-two {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .live24hPriceCardList.is-three {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.live24hPriceCardList.is-three .live24hPriceCard:last-child {
+.live24hPriceCardList.is-three .live24hPriceCard:first-child {
   grid-column: 1 / -1;
 }
 
