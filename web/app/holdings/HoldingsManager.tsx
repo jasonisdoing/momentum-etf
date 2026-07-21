@@ -106,7 +106,7 @@ export function HoldingsManager({
   const constituentColDefs = useMemo<ColDef<ConstituentRow>[]>(() => [
     {
       field: "ticker",
-      headerName: "종목코드",
+      headerName: "티커",
       minWidth: 120,
       width: 120,
       cellClass: "tickerDetailCodeCell",

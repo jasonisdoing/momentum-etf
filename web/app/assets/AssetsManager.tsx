@@ -1,11 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
 import type { ColDef, ColumnState, GridApi, GridOptions, RowClassParams } from "ag-grid-community";
-import { IconCheck, IconLoader2, IconPlus, IconTrash } from "@tabler/icons-react";
+import { IconLoader2 } from "@tabler/icons-react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
+import { GridToolbarButton } from "../components/GridToolbarButton";
+import { StableInlineInput } from "../components/StableInlineInput";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
@@ -32,8 +34,6 @@ type HoldingsRow = {
   valuation_krw: number;
   target_ratio?: number | null;
   memo?: string | null;
-  target_quantity?: number | null;
-  target_weight_pct?: number | null;
   sort_order?: number | null;
   original_quantity?: number;
   original_average_buy_price?: number;
@@ -63,7 +63,6 @@ type AccountSummary = {
   holdings_count: number;
   target_ratio_total: number;
   cash_ratio: number;
-  top_pick_cash_target_weight_pct?: number | null;
   net_profit: number;
   net_profit_pct: number;
   daily_profit: number;
@@ -112,7 +111,6 @@ type ParentGridRow =
 type HoldingsResponse = {
   rows?: HoldingsRow[];
   account_summaries?: AccountSummary[];
-  top_pick_target_errors?: Array<{ account_id?: string; error?: string }>;
   error?: string;
 };
 
@@ -225,22 +223,6 @@ function formatHiddenAmount(showAmounts: boolean, value: string): string {
 
 // (제거됨) 기간 수익률은 백엔드 dashboard_service 의 입출금 제거 daily_return_pct/weekly_return_pct 사용.
 // 상세는 docs/developer_guide.md (자산 수익률 계산 정책) 참고.
-
-function formatNoteUpdatedAt(value: string | null): string {
-  if (!value) {
-    return "아직 저장된 메모가 없습니다.";
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date);
-}
 
 function buildAutoSaveToastMessage(row: Pick<HoldingsRow, "name" | "currency">, before: HoldingEditableSnapshot, after: HoldingEditableSnapshot): string | null {
   const changes: string[] = [];
@@ -428,7 +410,6 @@ function buildCashGridRow(summary: AccountSummary): GridRow {
     buy_amount_krw: cashValue,
     valuation_krw: cashValue,
     target_ratio: Number(summary.cash_target_ratio ?? 0),
-    target_weight_pct: summary.top_pick_cash_target_weight_pct ?? null,
     sort_order: -1,
     original_quantity: 0,
     original_average_buy_price: 0,
@@ -478,75 +459,6 @@ function stopActionButtonClick(event: ReactMouseEvent<HTMLButtonElement>) {
   event.stopPropagation();
 }
 
-function StableInlineInput({
-  initialValue,
-  onSave,
-  onCancel,
-  onChange,
-  className,
-  style,
-  placeholder,
-  autoFocus = false,
-  disabled = false,
-}: {
-  initialValue: string;
-  onSave?: (val: string) => void;
-  onCancel?: () => void;
-  onChange?: (val: string) => void;
-  className?: string;
-  style?: CSSProperties;
-  placeholder?: string;
-  autoFocus?: boolean;
-  disabled?: boolean;
-}) {
-  const [localValue, setLocalValue] = useState(initialValue);
-
-  useEffect(() => {
-    setLocalValue(initialValue);
-  }, [initialValue]);
-
-  return (
-    <input
-      type="text"
-      className={className}
-      style={style}
-      placeholder={placeholder}
-      value={localValue}
-      autoFocus={autoFocus}
-      disabled={disabled}
-      onMouseDown={(event) => {
-        event.stopPropagation();
-      }}
-      onClick={(event) => {
-        event.stopPropagation();
-      }}
-      onDoubleClick={(event) => {
-        event.stopPropagation();
-      }}
-      onChange={(event) => {
-        event.stopPropagation();
-        setLocalValue(event.target.value);
-        onChange?.(event.target.value);
-      }}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.nativeEvent.isComposing) return;
-        if (event.key === "Enter") {
-          onSave?.(localValue);
-        } else if (event.key === "Escape") {
-          setLocalValue(initialValue);
-          onCancel?.();
-        }
-      }}
-      onBlur={() => {
-        if (localValue !== initialValue) {
-          onSave?.(localValue);
-        }
-      }}
-    />
-  );
-}
-
 function AccountHoldingsDetailPanel({
   summary,
   initialRows,
@@ -565,61 +477,6 @@ function AccountHoldingsDetailPanel({
   showAmounts: boolean;
 }) {
   const toast = useToast();
-  const [noteContent, setNoteContent] = useState("");
-  const [savedNoteContent, setSavedNoteContent] = useState("");
-  const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
-  const [noteLoading, setNoteLoading] = useState(false);
-  const [noteSaving, setNoteSaving] = useState(false);
-  const [noteError, setNoteError] = useState<string | null>(null);
-
-  const loadNote = useCallback(async () => {
-    try {
-      setNoteLoading(true);
-      setNoteError(null);
-      const response = await fetch(`/api/note?account=${encodeURIComponent(summary.account_id)}`, {
-        cache: "no-store",
-      });
-      const payload = (await response.json()) as { content?: string; updated_at?: string; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "메모를 불러오지 못했습니다.");
-      }
-      const nextContent = String(payload.content ?? "");
-      setNoteContent(nextContent);
-      setSavedNoteContent(nextContent);
-      setNoteUpdatedAt(payload.updated_at ?? null);
-    } catch (error) {
-      setNoteError(error instanceof Error ? error.message : "메모 로딩 실패");
-    } finally {
-      setNoteLoading(false);
-    }
-  }, [summary.account_id]);
-
-  useEffect(() => {
-    void loadNote();
-  }, [loadNote]);
-
-  const handleSaveNote = useCallback(async () => {
-    try {
-      setNoteSaving(true);
-      setNoteError(null);
-      const response = await fetch("/api/note", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: summary.account_id, content: noteContent }),
-      });
-      const payload = (await response.json()) as { updated_at?: string; error?: string };
-      if (!response.ok) {
-        throw new Error(payload.error ?? "메모 저장에 실패했습니다.");
-      }
-      setSavedNoteContent(noteContent);
-      setNoteUpdatedAt(payload.updated_at ?? null);
-      toast.success(`[${summary.name}] 메모 저장 완료`);
-    } catch (error) {
-      setNoteError(error instanceof Error ? error.message : "메모 저장 실패");
-    } finally {
-      setNoteSaving(false);
-    }
-  }, [summary.account_id, summary.name, noteContent, toast]);
 
   const hydrateRows = useCallback(
     (sourceRows: HoldingsRow[]) =>
@@ -1345,7 +1202,7 @@ function AccountHoldingsDetailPanel({
     },
     {
       field: "ticker",
-      headerName: "종목코드",
+      headerName: "티커",
       width: 98,
       cellRenderer: (params: { data?: GridRow; value?: string }) => {
         const row = params.data;
@@ -1691,9 +1548,8 @@ function AccountHoldingsDetailPanel({
             </div>
           )}
           <div className="d-flex align-items-center gap-2 ms-auto">
-            <button
-              type="button"
-              className="btn btn-primary btn-sm px-3 fw-bold"
+            <GridToolbarButton
+              variant="add"
               onMouseDown={stopActionButtonMouseDown}
               onClick={() =>
                 setAddingRow({
@@ -1704,30 +1560,22 @@ function AccountHoldingsDetailPanel({
                 })
               }
               disabled={hasPendingAdd}
-            >
-              <IconPlus size={16} /> 추가
-            </button>
-            <button
-              type="button"
-              className="btn btn-success btn-sm px-3 fw-bold"
+            />
+            <GridToolbarButton
+              variant="save"
               onMouseDown={stopActionButtonMouseDown}
               onClick={() => void handleSaveChanges()}
               disabled={!hasPendingSave || processingId === "__adding__" || processingId === "__deleting__"}
-            >
-              <IconCheck size={16} /> 저장
-            </button>
-            <button
-              type="button"
-              className="btn btn-outline-danger btn-sm px-3 fw-bold"
+            />
+            <GridToolbarButton
+              variant="delete"
               onMouseDown={stopActionButtonMouseDown}
               onClick={(event) => {
                 stopActionButtonClick(event);
                 handleDeleteSelected();
               }}
               disabled={!hasSelectedRows || processingId === "__adding__" || processingId === "__deleting__"}
-            >
-              <IconTrash size={16} /> 삭제
-            </button>
+            />
           </div>
         </div>
       </div>
@@ -1868,44 +1716,6 @@ function AccountHoldingsDetailPanel({
         />
       </div>
 
-      <div className="assetsNoteSection mt-1 pt-2 border-top">
-        <div className="assetsNoteSectionHeader">
-          <div className="noteMetaRow">
-            {noteLoading ? (
-              <span className="text-muted small">계좌 메모를 불러오는 중...</span>
-            ) : (
-              <span className="text-muted small">메모 저장: {formatNoteUpdatedAt(noteUpdatedAt)}</span>
-            )}
-          </div>
-          <button
-            type="button"
-            className="btn btn-primary btn-sm px-3 fw-bold d-inline-flex align-items-center gap-1"
-            onMouseDown={stopActionButtonMouseDown}
-            onClick={() => void handleSaveNote()}
-            disabled={noteLoading || noteSaving}
-            style={{ minHeight: "36px", fontSize: "0.95rem" }}
-          >
-            {noteSaving ? (
-              <>
-                <IconLoader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> 저장 중...
-              </>
-            ) : (
-              <>
-                <IconCheck size={16} /> 메모 저장
-              </>
-            )}
-          </button>
-        </div>
-        {noteError ? <div className="bannerError mb-2">{noteError}</div> : null}
-        <textarea
-          className="form-control assetsNoteTextarea"
-          style={{ fontSize: "0.9rem", minHeight: "120px" }}
-          value={noteContent}
-          onChange={(event) => setNoteContent(event.target.value)}
-          placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
-          disabled={noteLoading}
-        />
-      </div>
     </div>
   );
 }
@@ -1967,13 +1777,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         ...s,
         ...(dashAccounts[s.account_id] ?? defaultDash),
       }));
-      if (payload.top_pick_target_errors?.length) {
-        toast.error(
-          `일부 탑픽 목표비중을 불러오지 못했습니다: ${payload.top_pick_target_errors
-            .map((item) => item.account_id || "계좌 미상")
-            .join(", ")}`,
-        );
-      }
       setAllRows(payload.rows ?? []);
       setSummaries(mergedSummaries);
       setParentDirtyCellKeys([]);
@@ -2606,8 +2409,9 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }
         // 기본적으로 현금(1) + 추가 가능 공간(1)을 고려하여 최소 +2행 공간을 확보합니다.
         const rowCount = (params.data.rows?.length ?? 0) + 2;
-        // 가로 스크롤바(약 16px) 및 상하 테두리/여백(약 14px) 안전 마진을 추가하여 입력창이 잘리는 현상을 방지합니다.
-        return 50 + 34 + rowCount * 42 + 48 + 130 + 5 + 30;
+        // 툴바(50) + 그리드 헤더(34) + 행 + 가로 스크롤바/테두리 안전 마진(5 + 30).
+        // (메모 영역 제거로 예약 높이 48 + 130 은 뺐다.)
+        return 50 + 34 + rowCount * 42 + 5 + 30;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {

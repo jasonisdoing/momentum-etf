@@ -6,12 +6,13 @@ from fastapi.responses import JSONResponse
 from utils.env import load_env_if_present
 
 from .routes.account_settings import router as account_settings_router
+from .routes.alarms import router as alarms_router
+from .routes.asset_helper import router as asset_helper_router
 from .routes.assets import router as assets_router
 from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
 from .routes.holdings import router as holdings_router
-from .routes.alarms import router as alarms_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.leverage import router as leverage_router
@@ -27,7 +28,6 @@ from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
-from .routes.top_pick import router as top_pick_router
 from .routes.us_market_stocks import router as us_market_stocks_router
 from .routes.weekly import router as weekly_router
 from .routes.yearly import router as yearly_router
@@ -85,7 +85,7 @@ app.include_router(account_settings_router)
 app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
-app.include_router(top_pick_router)
+app.include_router(asset_helper_router)
 from fastapi import Request
 from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { formatPoolLabel } from "@/lib/pool-label";
+import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
 import {
@@ -207,54 +208,6 @@ function renderRankDelta(value: number | null | undefined) {
 /** 종목명 강조 키워드 → 색상/이모지 (대소문자 무관, 볼드 공통).
  *  키워드를 추가하려면 여기에 한 줄만 더하면 된다. 겹치는 키워드는 긴 것을 앞에 둘 것 (예: UltraPro > Ultra).
  *  emoji 는 종목명 맨 뒤에 붙는다 (여러 키워드 매칭 시 중복 없이 순서대로). */
-const NAME_HIGHLIGHT_KEYWORDS: Record<string, { color: string; emoji: string }> = {
-  레버리지: { color: "#d63939", emoji: "💣" },
-  Geared: { color: "#d63939", emoji: "💣" },
-  "3X": { color: "#d63939", emoji: "💣" },
-  Ultra: { color: "#d63939", emoji: "💣" },
-  액티브: { color: "#206bc4", emoji: "✋" },
-};
-
-const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).join("|")})`, "i");
-
-function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
-  const lower = part.toLowerCase();
-  for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
-    if (keyword.toLowerCase() === lower) {
-      return style;
-    }
-  }
-  return undefined;
-}
-
-function renderNameWithLeverageHighlight(name: string) {
-  const parts = name.split(NAME_HIGHLIGHT_RE);
-  if (parts.length === 1) {
-    return name;
-  }
-  const emojis: string[] = [];
-  const rendered = parts.map((part, index) => {
-    const style = index % 2 === 1 ? getNameHighlight(part) : undefined;
-    if (!style) {
-      return <span key={index}>{part}</span>;
-    }
-    if (!emojis.includes(style.emoji)) {
-      emojis.push(style.emoji);
-    }
-    return (
-      <span key={index} style={{ color: style.color, fontWeight: 700 }}>
-        {part}
-      </span>
-    );
-  });
-  return (
-    <>
-      {rendered}
-      {emojis.length > 0 && <span> {emojis.join("")}</span>}
-    </>
-  );
-}
-
 function getBucketCellClass(bucketLabel: string): string {
   const match = /^(\d+)/.exec(String(bucketLabel || "").trim());
   if (!match) {
@@ -1129,7 +1082,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       {
         field: "1주(%)",
-        headerName: "1주(%)",
+        headerName: "1주",
         minWidth: 88,
         width: 88,
         type: "rightAligned",
@@ -1137,17 +1090,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
       {
         field: "2주(%)",
-        headerName: "2주(%)",
+        headerName: "2주",
         minWidth: 88,
         width: 88,
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
       ...[
-        { field: "1달(%)", headerName: "1달(%)" },
-        { field: "3달(%)", headerName: "3달(%)" },
-        { field: "6달(%)", headerName: "6달(%)" },
-        { field: "9달(%)", headerName: "9달(%)" },
+        { field: "1달(%)", headerName: "1달" },
+        { field: "3달(%)", headerName: "3달" },
+        { field: "6달(%)", headerName: "6달" },
         { field: "12달(%)", headerName: "1년" },
         { field: "24달(%)", headerName: "2년" },
         { field: "36달(%)", headerName: "3년" },

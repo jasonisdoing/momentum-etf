@@ -18,6 +18,7 @@ from utils.account_settings_store import (
     load_account_docs,
     save_account_settings,
 )
+from utils.market_trend_service import INDICES
 
 router = APIRouter(prefix="/internal/account-settings", tags=["account-settings"])
 
@@ -33,7 +34,11 @@ def get_account_settings_list(_: None = Depends(require_internal_token)) -> dict
         accounts = load_account_docs()
     except AccountSettingsStoreError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return {"accounts": accounts, "editable_keys": list(EDITABLE_KEYS)}
+    return {
+        "accounts": accounts,
+        "editable_keys": list(EDITABLE_KEYS),
+        "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
+    }
 
 
 @router.put("")

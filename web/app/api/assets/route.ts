@@ -20,28 +20,11 @@ type HoldingsRow = {
   valuation_krw: number;
   target_ratio?: number | null;
   memo?: string | null;
-  target_quantity?: number | null;
-  target_weight_pct?: number | null;
-  target_amount?: number | null;
   sort_order: number;
   ticker_type?: string;
   country_code?: string;
   is_etf?: boolean;
 };
-
-type TopPickWeightRow = {
-  ticker?: string;
-  target_quantity?: number | null;
-  target_weight_pct?: number | null;
-};
-
-function normalizeTicker(value: string | undefined): string {
-  return String(value ?? "").trim().toUpperCase().replace(/^ASX:/, "").replace(/^KR:/, "");
-}
-
-function normalizeAccountId(value: string | undefined): string {
-  return String(value ?? "").trim().toLowerCase();
-}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -49,63 +32,8 @@ export async function GET(request: Request) {
 
   try {
     const search = account ? `?account=${encodeURIComponent(account)}` : "";
-    const payload = await fetchFastApiJson<{
-      accounts?: any[];
-      account_id?: string;
-      rows: HoldingsRow[];
-      account_summaries?: Array<{ account_id?: string; top_pick_cash_target_weight_pct?: number | null }>;
-    }>(`/internal/holdings${search}`);
-    const topPickAccounts = await fetchFastApiJson<{ accounts?: string[] }>("/internal/top-pick/accounts");
-    const requestedAccountIds = new Set(
-      (payload.account_summaries ?? []).map((item) => normalizeAccountId(item.account_id)).filter(Boolean),
-    );
-    const targetAccountIds = (topPickAccounts.accounts ?? []).filter((accountId) =>
-      requestedAccountIds.has(normalizeAccountId(accountId)),
-    );
-    const weightPayloadResults = await Promise.allSettled(
-      targetAccountIds.map(async (accountId) => ({
-        accountId,
-        payload: await fetchFastApiJson<{ rows?: TopPickWeightRow[] }>(
-          `/internal/top-pick/weights?account_id=${encodeURIComponent(accountId)}`,
-        ),
-      })),
-    );
-    const weightPayloads: Array<{ accountId: string; payload: { rows?: TopPickWeightRow[] } }> = [];
-    const topPickTargetErrors: Array<{ account_id: string; error: string }> = [];
-    weightPayloadResults.forEach((result, index) => {
-      const accountId = targetAccountIds[index];
-      if (result.status === "fulfilled") {
-        weightPayloads.push(result.value);
-        return;
-      }
-      topPickTargetErrors.push({
-        account_id: accountId,
-        error: result.reason instanceof Error ? result.reason.message : "탑픽 목표비중을 불러오지 못했습니다.",
-      });
-    });
-    const targetMap = new Map<string, { quantity: number | null; weightPct: number | null }>();
-    for (const { accountId, payload: weightPayload } of weightPayloads) {
-      for (const row of weightPayload.rows ?? []) {
-        targetMap.set(`${normalizeAccountId(accountId)}::${normalizeTicker(row.ticker)}`, {
-          quantity: row.target_quantity ?? null,
-          weightPct: row.target_weight_pct ?? null,
-        });
-      }
-    }
-    return jsonNoStore({
-      ...payload,
-      rows: payload.rows.map((row) => ({
-        ...row,
-        target_quantity: targetMap.get(`${normalizeAccountId(row.account_id)}::${normalizeTicker(row.ticker)}`)?.quantity ?? null,
-        target_weight_pct: targetMap.get(`${normalizeAccountId(row.account_id)}::${normalizeTicker(row.ticker)}`)?.weightPct ?? null,
-      })),
-      account_summaries: (payload.account_summaries ?? []).map((summary) => ({
-        ...summary,
-        top_pick_cash_target_weight_pct:
-          targetMap.get(`${normalizeAccountId(summary.account_id)}::__CASH__`)?.weightPct ?? null,
-      })),
-      top_pick_target_errors: topPickTargetErrors,
-    });
+    const payload = await fetchFastApiJson<{ rows: HoldingsRow[] }>(`/internal/holdings${search}`);
+    return jsonNoStore(payload);
   } catch (error) {
     return jsonNoStore(
       { error: error instanceof Error ? error.message : "보유 종목을 불러오지 못했습니다." },

@@ -18,7 +18,8 @@ export type PoolLabelSource = {
  * 이름이 비어 있으면 ticker_type 으로 대체한다.
  */
 export function formatPoolLabel(pool: PoolLabelSource): string {
-  const name = String(pool.name ?? "").trim() || pool.ticker_type;
+  // order 접두사로 번호를 붙이므로, 이름에 이미 박혀 있는 선행 번호("1. ")는 제거해 중복을 막는다.
+  const name = String(pool.name ?? "").trim().replace(/^\d+\.\s*/, "") || pool.ticker_type;
   const prefix = [
     pool.order === null || pool.order === undefined ? null : `${pool.order}.`,
     String(pool.icon ?? "").trim() || null,

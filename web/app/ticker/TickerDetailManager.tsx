@@ -1107,7 +1107,7 @@ export function TickerDetailManager({
       const columns: ColDef[] = [
         {
           field: "ticker",
-          headerName: "종목코드",
+          headerName: "티커",
           minWidth: 120,
           width: 120,
           cellClass: "tickerDetailCodeCell",
