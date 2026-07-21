@@ -4,11 +4,22 @@
 
     {_id: <account_id>, name, icon, order, country_code, currency,
      benchmark: {ticker, name}, memo?, top_pick_start_amount_manwon?,
-     top_pick_start_date?, URL?, updated_at, save_method}
+     top_pick_start_date?, URL?, updated_at, save_method,
+     account_type?: "fixed"|"trend"|"regime", strategy?: {...}}
 
 DB 가 유일한 소스다. 문서가 없으면 임의 기본값 없이 **명확히 에러**를 낸다.
 계좌 추가/삭제는 화면에서 지원하지 않는다 — 값 수정만 허용 (account_id 는 불변 키).
 멀티프로세스 반영을 위해 짧은 TTL 캐시 + 저장 시 무효화를 쓴다.
+
+계좌 전략(account_type/strategy)은 docs/account_types_plan.md 참고. 계좌가 종목풀을
+참조(ticker_types)하는 대신 **자기 종목 리스트를 직접 소유**한다:
+
+    fixed  : strategy.holdings        [{ticker, name, ticker_type?, country_code?, weight_pct}]
+    trend  : strategy.universe        [{ticker, name, ticker_type?, country_code?}]
+             strategy.long_ma_days / short_ma_days / hold_count
+    regime : strategy.regime_index    {ticker, name}
+             strategy.up_universe / down_universe  (fixed 없이 trend 와 동일한 종목 항목 형태)
+             strategy.long_ma_days / short_ma_days / hold_count
 """
 
 from __future__ import annotations
@@ -32,10 +43,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "country_code",
     "currency",
     "benchmark",
+    "account_type",
     "ticker_types",
-    "memo",
-    "top_pick_start_amount_manwon",
-    "top_pick_start_date",
+    "strategy",
+    "market_regime_index",
     "URL",
     "ma20_alarm_enabled",
     "ma20_ma_days",
@@ -44,6 +55,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
 )
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
+_ALLOWED_ACCOUNT_TYPES = {"fixed", "trend", "regime"}
 
 _CACHE_TTL_SECONDS = 30.0
 _cache: tuple[float, list[dict[str, Any]]] | None = None
@@ -93,7 +105,113 @@ def load_account_docs() -> list[dict[str, Any]]:
     return docs
 
 
-def _validate_values(account_id: str, values: dict[str, Any]) -> dict[str, Any]:
+def _clean_strategy_ticker_item(account_id: str, label: str, item: Any) -> dict[str, Any]:
+    """전략 종목 리스트(universe/holdings 등)의 항목 1개를 정규화한다.
+
+    종목풀 자동 선택(ticker_types)과 달리 계좌가 이 항목을 **직접 소유**한다 — stock_meta
+    재조회로 덮어쓰지 않고, 화면에서 확인(resolve)해 채운 ticker/name/ticker_type/country_code
+    를 그대로 신뢰해 저장한다.
+    """
+    if not isinstance(item, dict):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 항목은 객체여야 합니다: {item}")
+    ticker = str(item.get("ticker") or "").strip().upper()
+    name = str(item.get("name") or "").strip()
+    if not ticker or not name:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 항목에는 ticker/name 이 모두 필요합니다: {item}")
+    row: dict[str, Any] = {"ticker": ticker, "name": name}
+    ticker_type = str(item.get("ticker_type") or "").strip().lower()
+    if ticker_type:
+        row["ticker_type"] = ticker_type
+    country_code = str(item.get("country_code") or "").strip().lower()
+    if country_code:
+        row["country_code"] = country_code
+    return row
+
+
+def _clean_strategy_ticker_list(account_id: str, label: str, raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 는 목록이어야 합니다.")
+    seen: set[str] = set()
+    cleaned: list[dict[str, Any]] = []
+    for item in raw:
+        row = _clean_strategy_ticker_item(account_id, label, item)
+        if row["ticker"] in seen:
+            continue
+        seen.add(row["ticker"])
+        cleaned.append(row)
+    if not cleaned:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 는 1개 이상 필요합니다.")
+    return cleaned
+
+
+def _clean_fixed_holdings(account_id: str, raw: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 holdings 는 목록이어야 합니다.")
+    seen: set[str] = set()
+    cleaned: list[dict[str, Any]] = []
+    for item in raw:
+        row = _clean_strategy_ticker_item(account_id, "holdings", item)
+        if row["ticker"] in seen:
+            continue
+        raw_weight = item.get("weight_pct")
+        try:
+            weight = round(float(raw_weight), 2)
+        except (TypeError, ValueError) as exc:
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 holdings 항목({row['ticker']})에는 숫자 weight_pct 가 필요합니다: {raw_weight}"
+            ) from exc
+        if not (0.0 <= weight <= 100.0):
+            raise AccountSettingsStoreError(
+                f"'{account_id}' 의 holdings 항목({row['ticker']}) weight_pct 는 0 ~ 100 범위여야 합니다: {weight}"
+            )
+        row["weight_pct"] = weight
+        seen.add(row["ticker"])
+        cleaned.append(row)
+    if not cleaned:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 holdings 는 1개 이상 필요합니다.")
+    return cleaned
+
+
+def _clean_positive_int(account_id: str, label: str, raw: Any) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 는 정수여야 합니다: {raw}") from exc
+    if value < 1:
+        raise AccountSettingsStoreError(f"'{account_id}' 의 {label} 는 1 이상이어야 합니다: {value}")
+    return value
+
+
+def _clean_strategy(account_id: str, account_type: str, raw: Any) -> dict[str, Any]:
+    """account_type 에 맞는 strategy 형태만 검증·정규화한다(타입별 필드만 저장)."""
+    if not isinstance(raw, dict):
+        raise AccountSettingsStoreError(f"'{account_id}' 의 strategy 는 객체여야 합니다.")
+
+    if account_type == "fixed":
+        return {"holdings": _clean_fixed_holdings(account_id, raw.get("holdings"))}
+
+    if account_type == "trend":
+        # 후보 출처 풀은 계좌-풀 연결(ticker_types)로, 선정 기준(이평선·게이팅·순위)은 그 풀 설정을
+        # 그대로 쓴다. 계좌 strategy 는 보유개수(hold_count) 하나만 소유한다.
+        return {
+            "hold_count": _clean_positive_int(account_id, "hold_count", raw.get("hold_count")),
+        }
+
+    if account_type == "regime":
+        regime_index = _clean_strategy_ticker_item(account_id, "regime_index", raw.get("regime_index"))
+        return {
+            "regime_index": regime_index,
+            "up_universe": _clean_strategy_ticker_list(account_id, "up_universe", raw.get("up_universe")),
+            "down_universe": _clean_strategy_ticker_list(account_id, "down_universe", raw.get("down_universe")),
+            "long_ma_days": _clean_positive_int(account_id, "long_ma_days", raw.get("long_ma_days")),
+            "short_ma_days": _clean_positive_int(account_id, "short_ma_days", raw.get("short_ma_days")),
+            "hold_count": _clean_positive_int(account_id, "hold_count", raw.get("hold_count")),
+        }
+
+    raise AccountSettingsStoreError(f"'{account_id}' 의 account_type 을 알 수 없습니다: {account_type}")
+
+
+def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict[str, Any]) -> dict[str, Any]:
     cleaned: dict[str, Any] = {}
     for key in EDITABLE_KEYS:
         if key not in values:
@@ -131,53 +249,52 @@ def _validate_values(account_id: str, values: dict[str, Any]) -> dict[str, Any]:
             if not ticker or not bench_name:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 benchmark 에는 ticker/name 이 모두 필요합니다.")
             cleaned[key] = {"ticker": ticker, "name": bench_name}
+        elif key == "account_type":
+            account_type = str(raw or "").strip().lower()
+            if account_type not in _ALLOWED_ACCOUNT_TYPES:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 account_type 은 {', '.join(sorted(_ALLOWED_ACCOUNT_TYPES))} 중 하나여야 합니다: {raw}"
+                )
+            cleaned[key] = account_type
         elif key == "ticker_types":
-            if not isinstance(raw, (list, tuple)):
-                raise AccountSettingsStoreError(f"'{account_id}' 의 ticker_types 는 목록이어야 합니다.")
+            # 후보 출처 종목풀 연결(trend). 유효한 종목풀 id 목록이어야 한다.
+            if not isinstance(raw, list) or not all(isinstance(item, str) and item.strip() for item in raw):
+                raise AccountSettingsStoreError(f"'{account_id}' 의 ticker_types 는 종목풀 id 목록이어야 합니다.")
             from utils.settings_loader import list_available_ticker_types
 
             available = set(list_available_ticker_types())
-            selected: list[str] = []
-            for item in raw:
-                pool_id = str(item or "").strip()
-                if not pool_id:
-                    continue
-                if pool_id not in available:
-                    raise AccountSettingsStoreError(
-                        f"'{account_id}' 의 ticker_types 에 알 수 없는 종목풀이 있습니다: {item}"
-                    )
-                if pool_id not in selected:
-                    selected.append(pool_id)
-            if len(selected) > 1:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 ticker_types 는 1개만 선택할 수 있습니다.")
-            cleaned[key] = selected
-        elif key == "memo":
-            cleaned[key] = str(raw or "").replace("\r", " ").replace("\n", " ").strip()
-        elif key == "top_pick_start_amount_manwon":
-            if raw in (None, ""):
-                cleaned[key] = None
-                continue
-            try:
-                amount = round(float(raw), 2)
-            except (TypeError, ValueError) as exc:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 top_pick_start_amount_manwon 은 숫자여야 합니다: {raw}") from exc
-            if not (1 <= amount <= 1_000_000_000):
+            normalized = [item.strip().lower() for item in raw]
+            unknown = [item for item in normalized if item not in available]
+            if unknown:
                 raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 top_pick_start_amount_manwon 은 1 ~ 1000000000 범위여야 합니다: {amount}"
+                    f"'{account_id}' 의 ticker_types 에 알 수 없는 종목풀이 있습니다: {', '.join(unknown)}"
                 )
-            cleaned[key] = amount
-        elif key == "top_pick_start_date":
-            start_date = str(raw or "").strip()
-            if not start_date:
-                cleaned[key] = None
-                continue
-            try:
-                datetime.strptime(start_date, "%Y-%m-%d")
-            except ValueError as exc:
+            cleaned[key] = normalized
+        elif key == "strategy":
+            # strategy 는 account_type 형태를 따른다. 같은 저장 호출에 account_type 이 없으면
+            # 기존 저장값을 기준으로 삼는다(타입 변경 없이 전략 내용만 수정하는 경우).
+            account_type = str(cleaned.get("account_type") or existing_doc.get("account_type") or "").strip().lower()
+            if account_type not in _ALLOWED_ACCOUNT_TYPES:
                 raise AccountSettingsStoreError(
-                    f"'{account_id}' 의 top_pick_start_date 는 YYYY-MM-DD 형식이어야 합니다: {start_date}"
-                ) from exc
-            cleaned[key] = start_date
+                    f"'{account_id}' 의 strategy 를 저장하려면 account_type 이 먼저 정해져야 합니다."
+                )
+            cleaned[key] = _clean_strategy(account_id, account_type, raw)
+        elif key == "market_regime_index":
+            # 계좌별 시장 레짐 판정 지수 — 시장추세 지수(INDICES) 중 하나(필수, {ticker, name}).
+            if not isinstance(raw, dict):
+                raise AccountSettingsStoreError(f"'{account_id}' 의 market_regime_index 는 {{ticker, name}} 객체여야 합니다.")
+            ticker = str(raw.get("ticker") or "").strip()
+            if not ticker:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 market_regime_index 는 필수입니다(시장 레짐 지수를 선택하세요).")
+            from utils.market_trend_service import INDICES
+
+            allowed = {str(item["yf_ticker"]): str(item["name"]) for item in INDICES}
+            if ticker not in allowed:
+                options = ", ".join(f"{label}({code})" for code, label in allowed.items())
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 market_regime_index 는 시장추세 지수 중 하나여야 합니다: {options}. 입력값: {ticker}"
+                )
+            cleaned[key] = {"ticker": ticker, "name": allowed[ticker]}
         elif key == "URL":
             cleaned[key] = str(raw or "").strip()
         elif key == "ma20_alarm_enabled":
@@ -209,10 +326,11 @@ def save_account_settings(account_id: str, values: dict[str, Any], save_method: 
     """기존 계좌의 편집값을 검증 후 저장한다 (신규 계좌 생성은 지원하지 않음)."""
     norm_id = str(account_id or "").strip().lower()
     db = _db()
-    if db[COLLECTION].find_one({"_id": norm_id}, {"_id": 1}) is None:
+    existing_doc = db[COLLECTION].find_one({"_id": norm_id})
+    if existing_doc is None:
         raise AccountSettingsStoreError(f"알 수 없는 계좌입니다: {account_id}")
 
-    cleaned = _validate_values(norm_id, values)
+    cleaned = _validate_values(norm_id, values, existing_doc)
     db[COLLECTION].update_one(
         {"_id": norm_id},
         {"$set": {**cleaned, "updated_at": datetime.now(timezone.utc), "save_method": save_method}},

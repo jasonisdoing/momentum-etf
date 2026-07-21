@@ -42,7 +42,7 @@ REQUIRED_SETTING_KEYS = (
     "STOCK_MAX_WEIGHT",
 )
 # 계좌별 편입 티커 슬롯 수의 허용 범위.
-MAX_TICKERS_LIMIT = 20
+MAX_TICKERS_LIMIT = 10
 DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
     "months": 12,
     "rebalance": "none",
@@ -237,28 +237,18 @@ def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | Non
     return cleaned
 
 
-def _load_account_top_pick_basis(account_id: str) -> dict[str, Any]:
-    """계좌 설정에 저장된 탑픽 운용 시작 기준을 반환한다."""
-    normalized_account_id = str(account_id or "").strip()
-    if not normalized_account_id:
-        return {"START_AMOUNT_MANWON": None, "START_DATE": None}
+def _with_account_top_pick_basis(settings: dict[str, Any], *, weight_mode: str | None = None) -> dict[str, Any]:
+    """설정 응답에 계좌별 이평선 기준을 결합한다.
 
-    from utils.settings_loader import get_account_settings
-
-    account_settings = get_account_settings(normalized_account_id)
-    return {
-        "START_AMOUNT_MANWON": account_settings.get("top_pick_start_amount_manwon"),
-        "START_DATE": account_settings.get("top_pick_start_date"),
-    }
-
-
-def _with_account_top_pick_basis(settings: dict[str, Any]) -> dict[str, Any]:
-    """탑픽 설정 응답에 계좌별 시작 기준을 결합한다."""
-    return {
-        **settings,
-        **_load_account_top_pick_basis(str(settings.get("ACCOUNT_ID") or "").strip()),
-        **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip()),
-    }
+    weight_mode="fixed"(고정 보유)는 이평선·종목풀 연결이 필요 없으므로 그 필드는 비운 채 반환한다
+    (계좌-풀 연결을 요구하지 않는다). trend 계좌는 연결 풀 이평선 + 보유개수를 붙인다.
+    """
+    account_id = str(settings.get("ACCOUNT_ID") or "").strip()
+    if weight_mode == "fixed":
+        ma_context = {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
+    else:
+        ma_context = _load_account_trend_context(account_id) or _load_account_pool_ma_context(account_id)
+    return {**settings, **ma_context}
 
 
 def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
@@ -294,6 +284,62 @@ def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
     }
 
 
+def _load_account_trend_context(account_id: str) -> dict[str, Any] | None:
+    """trend 계좌면 연결 종목풀의 선정 기준(이평선/풀명) + 계좌 보유개수(hold_count)를 반환한다.
+
+    후보 출처·선정 기준(이평선·게이팅·순위)은 계좌에 연결된 종목풀(ticker_types)을 그대로 쓰고,
+    계좌 strategy 는 보유개수(hold_count) 하나만 소유한다. account_type 이 trend 가 아니거나
+    hold_count 가 없으면 None을 반환해 호출부가 기존 풀 기반 방식으로 동작하게 한다.
+    """
+    normalized_account_id = str(account_id or "").strip()
+    if not normalized_account_id:
+        return None
+
+    from utils.settings_loader import get_account_settings
+
+    account_settings = get_account_settings(normalized_account_id)
+    if account_settings.get("account_type") != "trend":
+        return None
+    strategy = account_settings.get("strategy")
+    if not isinstance(strategy, dict):
+        return None
+    try:
+        hold_count = int(strategy["hold_count"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    # 이평선·풀명은 연결된 종목풀에서 그대로 가져온다(계좌가 따로 소유하지 않는다).
+    pool_context = _load_account_pool_ma_context(normalized_account_id)
+    return {**pool_context, "HOLD_COUNT": hold_count}
+
+
+def _load_pool_universe_tickers(pool_ticker_type: str) -> list[dict[str, Any]]:
+    """trend 후보군 = 연결 종목풀의 종목 전체. get_etfs 로 풀 종목을 읽어 계산 유니버스로 만든다."""
+    pool = str(pool_ticker_type or "").strip().lower()
+    if not pool:
+        raise ValueError("추세 계좌의 후보 종목풀(ticker_types)이 지정되지 않았습니다.")
+
+    from utils.settings_loader import get_ticker_type_settings
+    from utils.stock_list_io import get_etfs
+
+    country_code = str(get_ticker_type_settings(pool).get("country_code") or "").strip().lower()
+    universe: list[dict[str, Any]] = []
+    for item in get_etfs(pool):
+        ticker = str(item.get("ticker") or "").strip().upper()
+        if not ticker:
+            continue
+        universe.append(
+            {
+                "ticker": ticker,
+                "name": str(item.get("name") or ticker),
+                "ticker_type": pool,
+                "country_code": country_code or None,
+            }
+        )
+    if not universe:
+        raise ValueError(f"종목풀 '{pool}'에 종목이 없습니다.")
+    return universe
+
+
 def _build_top_pick_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
     long_ma_days = settings.get("LONG_MA_DAYS")
     if long_ma_days is None:
@@ -302,7 +348,9 @@ def _build_top_pick_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
     return {"order": 1, "long_ma_days": int(long_ma_days), "score_column": "이격"}
 
 
-def _filter_rank_excluded_tickers(tickers: list[dict[str, Any]], settings: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
+def _filter_rank_excluded_tickers(
+    tickers: list[dict[str, Any]], settings: dict[str, Any]
+) -> tuple[list[dict[str, Any]], list[str]]:
     """순위 고정 종목(exclude_from_ranking=true)을 계산/백테스트 유니버스에서 제외한다."""
     if not tickers:
         return [], []
@@ -366,9 +414,7 @@ def _build_current_ma_state_maps(
     long_ma_row = long_ma_frame.loc[eval_date]
     eligible_long_ma_frame = long_ma_frame.loc[long_ma_frame.index <= eval_date]
     previous_long_ma_row = (
-        eligible_long_ma_frame.iloc[-2]
-        if len(eligible_long_ma_frame.index) >= 2
-        else pd.Series(dtype="float64")
+        eligible_long_ma_frame.iloc[-2] if len(eligible_long_ma_frame.index) >= 2 else pd.Series(dtype="float64")
     )
 
     slope_map: dict[str, float | None] = {}
@@ -387,6 +433,58 @@ def _build_current_ma_state_maps(
         else:
             slope_map[ticker] = ((float(long_value) / float(previous_long_value)) - 1.0) * 100.0
     return slope_map, alignment_map
+
+
+def _compute_ma_deviation_frame(close_frame: pd.DataFrame, ma_days: int) -> pd.DataFrame:
+    """종목별 (종가/이평선-1)*100 이격률을 전체 구간에 대해 벡터화로 계산한다.
+
+    trend 계좌(Phase 2)의 장기/단기 이격 게이트에 쓴다 — 백테스트는 리밸런싱 날짜마다
+    이 프레임에서 그날의 값만 조회해 재사용한다(매번 새로 계산하지 않는다).
+    """
+    ma_cols: dict[str, pd.Series] = {}
+    for ticker in close_frame.columns:
+        series = close_frame[ticker].dropna()
+        ma_cols[ticker] = (
+            calculate_moving_average(series, ma_days).reindex(close_frame.index)
+            if not series.empty
+            else pd.Series(float("nan"), index=close_frame.index, dtype="float64")
+        )
+    ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
+    return (close_frame / ma_frame - 1.0) * 100.0
+
+
+def _allocate_trend_hold_weights(
+    long_deviation_pct: dict[str, float | None],
+    short_deviation_pct: dict[str, float | None],
+    hold_count: int,
+) -> dict[str, float]:
+    """이격(장기) 상위 hold_count개를 균등 슬롯(1/hold_count)으로 보유한다 (trend 계좌, Phase 2).
+
+    보유 조건: 장기이격>0 이고 단기이격>=0 인 종목만 후보. 장기 이평선은 종목 선택, 단기
+    이평선은 손절/익절 담당(docs/account_types_plan.md 선정 규칙과 동일). 후보가 hold_count
+    보다 적으면 남는 슬롯은 현금으로 남긴다(억지로 채우지 않는다) — 종목풀 백테스트의
+    top_n 방식과 동일한 관례.
+    """
+    if hold_count < 1:
+        raise ValueError(f"보유종목수(hold_count)는 1 이상이어야 합니다: {hold_count}")
+
+    eligible = [
+        ticker
+        for ticker, long_dev in long_deviation_pct.items()
+        if long_dev is not None
+        and long_dev > 0
+        and short_deviation_pct.get(ticker) is not None
+        and float(short_deviation_pct[ticker]) >= 0
+    ]
+    eligible.sort(key=lambda t: long_deviation_pct[t], reverse=True)
+    selected = eligible[:hold_count]
+
+    slot_weight = 1.0 / hold_count
+    weights = {ticker: 0.0 for ticker in long_deviation_pct}
+    for ticker in selected:
+        weights[ticker] = slot_weight
+    weights["__CASH__"] = max(0.0, 1.0 - slot_weight * len(selected))
+    return weights
 
 
 def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark: bool = True) -> dict[str, Any]:
@@ -447,7 +545,8 @@ def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark
 def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
     stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
     settings = _clean_settings({}, base={key: doc[key] for key in stored_keys if doc and doc.get(key) is not None})
-    settings = _with_account_top_pick_basis(settings)
+    doc_weight_mode = _clean_weight_mode((doc or {}).get("weight_mode"))
+    settings = _with_account_top_pick_basis(settings, weight_mode=doc_weight_mode)
     backtest_settings = _clean_backtest_settings((doc or {}).get("backtest_settings"), require_benchmark=False)
     updated_at = (doc or {}).get("updated_at")
     approved_at = (doc or {}).get("approved_at")
@@ -455,7 +554,7 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
     approved_weights = (doc or {}).get("approved_weights") or None
     return {
         "tickers": tickers,
-        "weight_mode": _clean_weight_mode((doc or {}).get("weight_mode")),
+        "weight_mode": doc_weight_mode,
         "settings": settings,
         "backtest_settings": backtest_settings,
         "approved_weights": _enrich_weight_rows_with_returns(
@@ -463,6 +562,7 @@ def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
             _clean_tickers(tickers),
             settings,
             metric_months=int(backtest_settings["months"]),
+            weight_mode=doc_weight_mode,
         ),
         "approved_at": (
             approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at
@@ -492,20 +592,11 @@ def _resolve_account_id(account_id: str | None) -> str:
     raise ValueError(f"탑픽 계좌를 지정해야 합니다(여러 계좌 존재): {', '.join(accounts)}")
 
 
-def load_top_pick_settings(account_id: str | None = None) -> dict[str, Any]:
-    resolved = _resolve_account_id(account_id)
-    doc = _db()[COLLECTION].find_one({"_id": resolved})
-    if doc is None:
-        raise ValueError(f"탑픽 설정이 없습니다: {resolved}")
-    return _serialize_doc(doc)
-
-
 def load_top_pick_settings_for_edit(account_id: str) -> dict[str, Any]:
     """설정 편집 화면 전용 로더.
 
     문서가 있으면 검증된 설정을, 없으면 **초기(빈) 상태**를 반환한다.
     저장 전까지 DB 에 아무것도 쓰지 않으며, 저장 시 save 가 필수값을 검증한다(fail loud).
-    계산 경로는 여전히 load_top_pick_settings(엄격) 를 쓴다.
     """
     resolved = str(account_id or "").strip()
     if not resolved:
@@ -514,11 +605,17 @@ def load_top_pick_settings_for_edit(account_id: str) -> dict[str, Any]:
     if doc is not None:
         return _serialize_doc(doc)
     # 저장된 문서 없음 → 모든 값 미설정인 초기 상태(계좌 id 만 채움).
+    # 초기 weight_mode 는 계좌 타입(account_settings.account_type)을 따른다 — fixed 계좌는
+    # 종목풀 연결이 없어도(이번 개편으로 더 이상 요구하지 않음) 화면이 열려야 한다.
+    from utils.settings_loader import get_account_settings
+
+    initial_weight_mode = "fixed" if get_account_settings(resolved).get("account_type") == "fixed" else "variable"
     return {
         "tickers": [],
-        "weight_mode": "variable",
+        "weight_mode": initial_weight_mode,
         "settings": _with_account_top_pick_basis(
-            {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS}
+            {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS},
+            weight_mode=initial_weight_mode,
         ),
         "backtest_settings": None,
         "approved_weights": None,
@@ -546,11 +643,11 @@ def save_top_pick_settings(
     stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
     settings_base = {key: existing_doc[key] for key in stored_keys if existing_doc.get(key) is not None}
     clean_settings = _clean_settings(settings, base=settings_base)
-    # 계좌별 상한(MAX_TICKERS) 초과 저장 방지
-    if len(clean_tickers) > clean_settings["MAX_TICKERS"]:
-        raise ValueError(
-            f"편입 ETF는 최대 {clean_settings['MAX_TICKERS']}개까지 등록할 수 있습니다: 현재 {len(clean_tickers)}개"
-        )
+    # 자산 헬퍼는 자유 테스트 포트폴리오라 계좌별 종목수 상한을 두지 않는다 —
+    # 슬롯 수를 실제 종목 수에 맞춰 저장한다(전역 하드 상한 MAX_TICKERS_LIMIT 만 유지).
+    clean_settings["VARIABLE_TICKERS"] = 0
+    clean_settings["FIXED_TICKERS"] = len(clean_tickers)
+    clean_settings["MAX_TICKERS"] = len(clean_tickers)
     clean_backtest_settings = _clean_backtest_settings(
         backtest_settings,
         base=existing_doc.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
@@ -574,7 +671,7 @@ def save_top_pick_settings(
     return {
         "tickers": ticker_slots,
         "weight_mode": clean_weight_mode,
-        "settings": _with_account_top_pick_basis(clean_settings),
+        "settings": _with_account_top_pick_basis(clean_settings, weight_mode=clean_weight_mode),
         "backtest_settings": clean_backtest_settings,
         "approved_weights": existing_doc.get("approved_weights"),
         "approved_at": existing_doc.get("approved_at"),
@@ -1117,7 +1214,12 @@ def _apply_trade_plan(
 
 
 def _enrich_weight_rows_with_returns(
-    payload: Any, tickers: list[dict[str, Any]], current_settings: dict[str, Any], *, metric_months: int
+    payload: Any,
+    tickers: list[dict[str, Any]],
+    current_settings: dict[str, Any],
+    *,
+    metric_months: int,
+    weight_mode: str | None = None,
 ) -> dict[str, Any] | None:
     if not isinstance(payload, dict):
         return None
@@ -1132,7 +1234,11 @@ def _enrich_weight_rows_with_returns(
     # 계산에 필요한 신규 필드는 현재 설정으로 보완하고, 나머지는 스냅샷 값을 쓴다.
     snap_settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
     settings = _clean_settings({**current_settings, **snap_settings})
-    settings = {**settings, **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip())}
+    is_fixed = weight_mode == "fixed"
+    if is_fixed:
+        settings = {**settings, "POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
+    else:
+        settings = {**settings, **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip())}
     eval_date = close_frame.index.max() if not close_frame.empty else None
     slope_map, alignment_map = (
         _build_current_ma_state_maps(
@@ -1141,7 +1247,7 @@ def _enrich_weight_rows_with_returns(
             short_ma_days=int(settings["SHORT_MA_DAYS"]),
             long_ma_days=int(settings["LONG_MA_DAYS"]),
         )
-        if eval_date is not None
+        if eval_date is not None and not is_fixed
         else ({}, {})
     )
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
@@ -1160,7 +1266,7 @@ def _enrich_weight_rows_with_returns(
         ticker = str(row.get("ticker") or "").strip().upper()
         sortino_raw_value = sortino_raw_row.get(ticker)
         bucket = ticker_to_bucket.get(ticker)
-        
+
         enriched_row = {
             **row,
             "bucket": int(bucket) if bucket is not None else None,
@@ -1263,17 +1369,22 @@ def _compute_sortino_raw_frame(close_frame: pd.DataFrame, window_months: int) ->
         return pd.DataFrame(index=close_frame.index, columns=close_frame.columns, dtype=float)
 
     window = max(2, int(window_months) * int(TRADING_DAYS_PER_MONTH))
+    # 상장 이력이 window(=지표 기간)보다 짧아도 "보유 기간만큼"(가용 데이터)으로 계산한다.
+    # 최소 표본은 종목 데이터 충분 여부의 표준 기준(MIN_TRADING_DAYS)을 재사용한다.
+    min_obs = min(window, max(2, int(MIN_TRADING_DAYS)))
     daily_ret = close_frame.pct_change(fill_method=None)
-    mean = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).mean()
+    mean = daily_ret.rolling(window=window, min_periods=min_obs).mean()
 
     def _calc_downside_std(values: np.ndarray) -> float:
-        downside = np.minimum(0.0, values)
-        if len(values) <= 1:
+        # 윈도우가 종목 첫 행까지 닿으면 pct_change 첫 NaN이 섞여 들어온다 — 제거 후 계산한다.
+        valid = values[~np.isnan(values)]
+        if valid.size <= 1:
             return np.nan
-        result = np.sqrt(np.sum(downside**2) / (len(values) - 1))
+        downside = np.minimum(0.0, valid)
+        result = np.sqrt(np.sum(downside**2) / (valid.size - 1))
         return float(result) if result > 0 else np.nan
 
-    downside_std = daily_ret.rolling(window=window, min_periods=max(2, window // 2)).apply(_calc_downside_std, raw=True)
+    downside_std = daily_ret.rolling(window=window, min_periods=min_obs).apply(_calc_downside_std, raw=True)
     return (mean / downside_std.replace(0, np.nan)) * np.sqrt(252.0)
 
 
@@ -1292,7 +1403,9 @@ def _allocate_deviation_filtered_weights(
     slot_weight = 1.0 / len(tickers)
     weights = {ticker: 0.0 for ticker in tickers}
     active_tickers = [
-        ticker for ticker, deviation_pct in ticker_deviation_pct.items() if deviation_pct is not None and deviation_pct > 0
+        ticker
+        for ticker, deviation_pct in ticker_deviation_pct.items()
+        if deviation_pct is not None and deviation_pct > 0
     ]
     if not active_tickers:
         return _normalize_weight_ratio_map({"__CASH__": 1.0, **weights})
@@ -1301,10 +1414,7 @@ def _allocate_deviation_filtered_weights(
         weights[ticker] = min(slot_weight, stock_max_weight)
 
     cash_weight = max(0.0, 1.0 - sum(weights.values()))
-    remaining_capacity = {
-        ticker: max(0.0, stock_max_weight - weights[ticker])
-        for ticker in active_tickers
-    }
+    remaining_capacity = {ticker: max(0.0, stock_max_weight - weights[ticker]) for ticker in active_tickers}
 
     while cash_weight > 1e-12:
         candidates = [ticker for ticker, capacity in remaining_capacity.items() if capacity > 1e-12]
@@ -1332,12 +1442,22 @@ def calculate_top_pick_weights_for(
     *,
     metric_months: int,
 ) -> dict[str, Any]:
-    # weight_mode 는 저장 호환용으로만 남긴다. 실제 계산은 항상 동일 슬롯 + 개별 이평선 필터다.
+    # weight_mode="fixed"(고정 보유)는 추세/이평선이 필요 없다 — 계좌-풀 연결도 요구하지 않는다.
+    # 그 외(variable/trend)는 계좌에 연결된 풀의 이평선 설정을 쓴다.
+    # trend 계좌는 후보군 = 연결 풀의 종목 전체(get_etfs)로 대체한다.
     account_id = str(settings.get("ACCOUNT_ID") or "").strip()
     if not account_id:
         raise ValueError("탑픽 비중 계산에는 적용 계좌가 필요합니다.")
-    settings = {**settings, **_load_account_pool_ma_context(account_id)}
-    tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(tickers, settings)
+
+    is_fixed = weight_mode == "fixed"
+    if is_fixed:
+        excluded_fixed_tickers: list[str] = []
+    else:
+        ma_context = _load_account_trend_context(account_id) or _load_account_pool_ma_context(account_id)
+        settings = {**settings, **ma_context}
+        if settings.get("HOLD_COUNT") is not None:
+            tickers = _load_pool_universe_tickers(settings["POOL_TICKER_TYPE"])
+        tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(tickers, settings)
     if len(tickers) < 3:
         suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
         raise ValueError(f"탑픽 비중 계산에는 고정 종목 제외 후 확인된 종목이 3개 이상 필요합니다.{suffix}")
@@ -1348,49 +1468,81 @@ def calculate_top_pick_weights_for(
 
     mdd_map = _build_mdd_map(close_frame, metric_months)
     eval_date = close_frame.index.max()
-
-    ma_rules = [_build_top_pick_ma_rule(settings)]
-    composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
     sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
-    composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
-    trend_frame = trend_by_order[1]
-    trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
-    sortino_raw_row = sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
-
+    sortino_raw_row = (
+        sortino_raw_frame.loc[eval_date] if eval_date in sortino_raw_frame.index else pd.Series(dtype=float)
+    )
     return_map = _build_return_map(close_frame)
     daily_change_map = _build_daily_change_map(tickers, close_frame)
-    slope_map, alignment_map = _build_current_ma_state_maps(
-        close_frame,
-        eval_date,
-        short_ma_days=int(settings["SHORT_MA_DAYS"]),
-        long_ma_days=int(settings["LONG_MA_DAYS"]),
-    )
+
+    if is_fixed:
+        # 고정 보유는 추세 점수·이평선 배열이 필요 없다(관련 표시 컬럼은 전부 None으로 남긴다).
+        composite_row: pd.Series = pd.Series(dtype=float)
+        trend_row: pd.Series = pd.Series(dtype=float)
+        slope_map: dict[str, float] = {}
+        alignment_map: dict[str, str | None] = {}
+    else:
+        ma_rules = [_build_top_pick_ma_rule(settings)]
+        composite_frame, trend_by_order, _ = build_composite_rank_scores(close_frame, ma_rules)
+        composite_row = composite_frame.loc[eval_date] if eval_date in composite_frame.index else pd.Series(dtype=float)
+        trend_frame = trend_by_order[1]
+        trend_row = trend_frame.loc[eval_date] if eval_date in trend_frame.index else pd.Series(dtype=float)
+        slope_map, alignment_map = _build_current_ma_state_maps(
+            close_frame,
+            eval_date,
+            short_ma_days=int(settings["SHORT_MA_DAYS"]),
+            long_ma_days=int(settings["LONG_MA_DAYS"]),
+        )
+
+    # trend 계좌(Phase 2, HOLD_COUNT 있음)만 단기이격 게이트를 계산한다 — 그 외는 불필요한 연산.
+    hold_count = settings.get("HOLD_COUNT")
+    if hold_count is not None:
+        short_dev_frame = _compute_ma_deviation_frame(close_frame, int(settings["SHORT_MA_DAYS"]))
+        short_dev_row = short_dev_frame.loc[eval_date] if eval_date in short_dev_frame.index else pd.Series(dtype=float)
+    else:
+        short_dev_row = pd.Series(dtype=float)
 
     rows: list[dict[str, Any]] = []
     ticker_meta = {item["ticker"]: item for item in tickers}
     excluded_reasons: list[str] = []
     deviation_pct_by_ticker: dict[str, float | None] = {}
+    short_deviation_pct_by_ticker: dict[str, float | None] = {}
     for ticker in [item["ticker"] for item in tickers]:
-        deviation_score_value = composite_row.get(ticker)
         sortino_raw_value = sortino_raw_row.get(ticker)
-        point_deviation = None if pd.isna(deviation_score_value) else float(deviation_score_value)
-        score = point_deviation
-        if score is None:
+        meta = ticker_meta[ticker]
+
+        if is_fixed:
+            # 고정 보유는 가격 캐시 존재만 확인한다(이격/추세 요구 없음).
             close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
             if close_count <= 0:
                 excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
-            elif close_count < int(MIN_TRADING_DAYS):
-                excluded_reasons.append(f"{ticker}: 가격 데이터 {close_count}개로 부족(최소 {MIN_TRADING_DAYS}개)")
-            else:
-                excluded_reasons.append(f"{ticker}: 이격 계산 불가")
+            point_deviation = None
+            score = None
+            deviation_pct_value = None
+            slope_value = None
+        else:
+            deviation_score_value = composite_row.get(ticker)
+            point_deviation = None if pd.isna(deviation_score_value) else float(deviation_score_value)
+            score = point_deviation
+            if score is None:
+                close_count = int(close_frame[ticker].dropna().shape[0]) if ticker in close_frame.columns else 0
+                if close_count <= 0:
+                    excluded_reasons.append(f"{ticker}: 가격 캐시 없음")
+                elif close_count < int(MIN_TRADING_DAYS):
+                    excluded_reasons.append(f"{ticker}: 가격 데이터 {close_count}개로 부족(최소 {MIN_TRADING_DAYS}개)")
+                else:
+                    excluded_reasons.append(f"{ticker}: 이격 계산 불가")
 
-        deviation_pct = trend_row.get(ticker)
-        deviation_pct_value = None if pd.isna(deviation_pct) else float(deviation_pct)
-        if score is not None and deviation_pct_value is None:
-            excluded_reasons.append(f"{ticker}: 이격 계산 불가")
-        deviation_pct_by_ticker[ticker] = deviation_pct_value
-        slope_value = slope_map.get(ticker)
-        meta = ticker_meta[ticker]
+            deviation_pct = trend_row.get(ticker)
+            deviation_pct_value = None if pd.isna(deviation_pct) else float(deviation_pct)
+            if score is not None and deviation_pct_value is None:
+                excluded_reasons.append(f"{ticker}: 이격 계산 불가")
+            deviation_pct_by_ticker[ticker] = deviation_pct_value
+            if hold_count is not None:
+                short_dev_value = short_dev_row.get(ticker)
+                short_deviation_pct_by_ticker[ticker] = None if pd.isna(short_dev_value) else float(short_dev_value)
+            slope_value = slope_map.get(ticker)
+
         rows.append(
             {
                 "ticker": ticker,
@@ -1409,6 +1561,11 @@ def calculate_top_pick_weights_for(
                 "daily_change_pct": daily_change_map.get(ticker),
                 "mdd_pct": mdd_map.get(ticker),
                 "deviation_pct": None if deviation_pct_value is None else round(deviation_pct_value, 2),
+                "short_deviation_pct": (
+                    None
+                    if short_deviation_pct_by_ticker.get(ticker) is None
+                    else round(short_deviation_pct_by_ticker[ticker], 2)
+                ),
                 "trend_pct": None if deviation_pct_value is None else round(deviation_pct_value, 2),
                 "slope_pct": None if slope_value is None else round(float(slope_value), 2),
                 "alignment": alignment_map.get(ticker),
@@ -1422,7 +1579,25 @@ def calculate_top_pick_weights_for(
 
     if excluded_reasons:
         raise ValueError("비중 계산에서 제외되는 종목이 있습니다. " + " / ".join(excluded_reasons))
-    weights = _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
+
+    if weight_mode == "fixed":
+        fixed_weights = {}
+        for item in tickers:
+            tk = item["ticker"]
+            fixed_weights[tk] = float(item.get("fixed_weight_pct") or 0.0) / 100.0
+
+        sum_fixed = sum(fixed_weights.values())
+        if sum_fixed > 1.0:
+            for tk in fixed_weights:
+                fixed_weights[tk] /= sum_fixed
+            cash_weight = 0.0
+        else:
+            cash_weight = 1.0 - sum_fixed
+        weights = {**fixed_weights, "__CASH__": cash_weight}
+    elif hold_count is not None:
+        weights = _allocate_trend_hold_weights(deviation_pct_by_ticker, short_deviation_pct_by_ticker, int(hold_count))
+    else:
+        weights = _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
     for row in rows:
         weight = weights.get(row["ticker"])
@@ -1490,30 +1665,24 @@ def calculate_top_pick_weights_for(
     }
 
 
-def calculate_top_pick_weights(account_id: str | None = None) -> dict[str, Any]:
-    payload = load_top_pick_settings(account_id)
-    backtest_settings = payload.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS
-    result = calculate_top_pick_weights_for(
-        _clean_tickers(payload["tickers"]),
-        payload["settings"],
-        weight_mode=payload["weight_mode"],
-        metric_months=int(backtest_settings["months"]),
-    )
-    result["updated_at"] = payload.get("updated_at")
-    return result
-
-
 def run_top_pick_weights(
     tickers: list[dict[str, Any]],
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
-    clean_tickers = _clean_tickers(tickers)
+    clean_settings = _clean_settings(settings)
+    account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
+    # trend 계좌는 후보군 = 연결 풀 종목 전체(전달받은 tickers 는 무시).
+    trend_context = None if weight_mode == "fixed" else _load_account_trend_context(account_id)
+    if trend_context is not None:
+        # 풀 유니버스는 이미 정제된 형태이며 20개 상한(선택 종목용)을 적용하지 않는다.
+        clean_tickers = _load_pool_universe_tickers(trend_context["POOL_TICKER_TYPE"])
+    else:
+        clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 1:
         raise ValueError("계산할 종목이 1개 이상 필요합니다.")
-    clean_settings = _clean_settings(settings)
-    response_settings = _with_account_top_pick_basis(clean_settings)
+    response_settings = _with_account_top_pick_basis(clean_settings, weight_mode=weight_mode)
     clean_backtest = _clean_backtest_settings(backtest_settings, require_benchmark=False)
     return calculate_top_pick_weights_for(
         clean_tickers,
@@ -1521,44 +1690,6 @@ def run_top_pick_weights(
         weight_mode=weight_mode,
         metric_months=int(clean_backtest["months"]),
     )
-
-
-def approve_top_pick_weights(
-    tickers: list[dict[str, Any]],
-    settings: dict[str, Any] | None = None,
-    backtest_settings: dict[str, Any] | None = None,
-    account_id: str | None = None,
-    weight_mode: str = "variable",
-) -> dict[str, Any]:
-    clean_weight_mode = _clean_weight_mode(weight_mode)
-    result = run_top_pick_weights(tickers, settings, backtest_settings, weight_mode=clean_weight_mode)
-    approved_at = datetime.now(timezone.utc)
-    ticker_slots = _clean_ticker_slots(tickers)
-    clean_settings = _clean_settings(settings)
-    clean_backtest_settings = _clean_backtest_settings(backtest_settings, require_benchmark=False)
-    resolved = _resolve_account_id(account_id or clean_settings.get("ACCOUNT_ID"))
-    _db()[COLLECTION].update_one(
-        {"_id": resolved},
-        {
-            "$set": {
-                "tickers": ticker_slots,
-                "weight_mode": clean_weight_mode,
-                **clean_settings,
-                "backtest_settings": clean_backtest_settings,
-                "approved_weights": result,
-                "approved_at": approved_at,
-                "updated_at": approved_at,
-            },
-            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": "", "MA_MONTHS": ""},
-        },
-        upsert=True,
-    )
-    return {
-        **result,
-        "weight_mode": clean_weight_mode,
-        "approved_at": approved_at.isoformat(),
-        "tickers": ticker_slots,
-    }
 
 
 def _select_rebalance_dates(index: pd.DatetimeIndex, rebalance: str) -> list[pd.Timestamp]:
@@ -1632,6 +1763,32 @@ def _calculate_top_pick_weights_on_date(
     return _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
 
+def _calculate_trend_weights_on_date(
+    eval_date: pd.Timestamp,
+    tickers: list[dict[str, Any]],
+    long_dev_frame: pd.DataFrame,
+    short_dev_frame: pd.DataFrame,
+    hold_count: int,
+) -> dict[str, float] | None:
+    """trend 계좌(Phase 2)의 특정 리밸런싱 날짜 비중 — 이격 상위 hold_count개, 균등 슬롯."""
+    eligible_dates = long_dev_frame.index[long_dev_frame.index <= eval_date]
+    if eligible_dates.empty:
+        return None
+    score_date = eligible_dates.max()
+    long_row = long_dev_frame.loc[score_date]
+    short_row = short_dev_frame.loc[score_date] if score_date in short_dev_frame.index else pd.Series(dtype=float)
+
+    long_dev: dict[str, float | None] = {}
+    short_dev: dict[str, float | None] = {}
+    for item in tickers:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        long_value = long_row.get(ticker)
+        short_value = short_row.get(ticker)
+        long_dev[ticker] = None if pd.isna(long_value) else float(long_value)
+        short_dev[ticker] = None if pd.isna(short_value) else float(short_value)
+    return _allocate_trend_hold_weights(long_dev, short_dev, hold_count)
+
+
 def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
     """종목별 (매수, 매도) 슬리피지 비율 — 종목풀 DB 설정을 그대로 사용한다.
 
@@ -1649,7 +1806,11 @@ def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str
             if ticker_type not in settings_cache:
                 settings_cache[ticker_type] = get_ticker_type_settings(ticker_type)
         config = settings_cache.get(ticker_type, {})
-        if not ticker_type or config.get("BUY_SLIPPAGE_PCT") in (None, "") or config.get("SELL_SLIPPAGE_PCT") in (None, ""):
+        if (
+            not ticker_type
+            or config.get("BUY_SLIPPAGE_PCT") in (None, "")
+            or config.get("SELL_SLIPPAGE_PCT") in (None, "")
+        ):
             problems.append(f"{ticker}({ticker_type or '종목풀 미상'})")
             continue
         rates[ticker] = (float(config["BUY_SLIPPAGE_PCT"]) / 100.0, float(config["SELL_SLIPPAGE_PCT"]) / 100.0)
@@ -1667,9 +1828,11 @@ def run_top_pick_backtest(
     backtest_settings: dict[str, Any] | None = None,
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
-    # weight_mode 는 저장 호환용으로만 받는다. 백테스트도 항상 동일 슬롯 + 개별 이평선 필터를 쓴다.
+    # weight_mode="fixed"(고정 보유)는 이평선·종목풀 연결이 필요 없다. 그 외는 동일 슬롯 + 개별 이평선 필터.
+    # 백테스트는 전달받은 "현재 종목"만 검증한다 — trend 라도 풀 전체를 재선정하지 않는다
+    # (풀 백테스트는 종목풀 화면에 별도로 있음).
     clean_tickers = _clean_tickers(tickers)
-    clean_settings = _with_account_top_pick_basis(_clean_settings(settings))
+    clean_settings = _with_account_top_pick_basis(_clean_settings(settings), weight_mode=weight_mode)
     clean_tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(clean_tickers, clean_settings)
     if len(clean_tickers) < 3:
         suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
@@ -1715,20 +1878,43 @@ def run_top_pick_backtest(
 
     requested_rebalance_dates = _select_rebalance_dates(simulation_frame.index, rebalance)
     weights_by_date: dict[pd.Timestamp, dict[str, float]] = {}
+    hold_count = clean_settings.get("HOLD_COUNT")
 
-    composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
-    trend_frame = trend_by_order[1]
+    if weight_mode == "fixed":
+        fixed_weights = {item["ticker"]: float(item.get("fixed_weight_pct") or 0.0) / 100.0 for item in clean_tickers}
+        sum_fixed = sum(fixed_weights.values())
+        if sum_fixed > 1.0:
+            for tk in fixed_weights:
+                fixed_weights[tk] /= sum_fixed
+            cash_weight = 0.0
+        else:
+            cash_weight = 1.0 - sum_fixed
+        fixed_weights["__CASH__"] = cash_weight
 
-    for date in requested_rebalance_dates:
-        weights = _calculate_top_pick_weights_on_date(
-            date,
-            clean_tickers,
-            clean_settings,
-            composite_frame,
-            trend_frame,
-        )
-        if weights is not None:
-            weights_by_date[date] = weights
+        weights_by_date = {date: fixed_weights for date in requested_rebalance_dates}
+    elif hold_count is not None:
+        # trend 계좌(Phase 2): 계좌 소유 장기/단기 이평선으로 이격 프레임을 미리 계산해두고
+        # 리밸런싱 날짜마다 그 값만 조회한다(기존 종목풀 기반 엔진과 별개 경로).
+        long_dev_frame = _compute_ma_deviation_frame(candidate_close, int(clean_settings["LONG_MA_DAYS"]))
+        short_dev_frame = _compute_ma_deviation_frame(candidate_close, int(clean_settings["SHORT_MA_DAYS"]))
+        for date in requested_rebalance_dates:
+            weights = _calculate_trend_weights_on_date(date, clean_tickers, long_dev_frame, short_dev_frame, int(hold_count))
+            if weights is not None:
+                weights_by_date[date] = weights
+    else:
+        composite_frame, trend_by_order = _build_top_pick_weight_engine(candidate_close, clean_tickers, clean_settings)
+        trend_frame = trend_by_order[1]
+
+        for date in requested_rebalance_dates:
+            weights = _calculate_top_pick_weights_on_date(
+                date,
+                clean_tickers,
+                clean_settings,
+                composite_frame,
+                trend_frame,
+            )
+            if weights is not None:
+                weights_by_date[date] = weights
 
     if not weights_by_date:
         raise ValueError("백테스트 기간에 계산 가능한 탑픽 비중이 없습니다.")

@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
-import { formatPoolLabel } from "@/lib/pool-label";
 import { useToast } from "../components/ToastProvider";
 
 type Benchmark = { ticker?: string; name?: string };
+type MarketIndexOption = { ticker: string; name: string };
 
 type AccountEntry = {
   account_id: string;
@@ -16,18 +16,16 @@ type AccountEntry = {
   country_code?: string;
   currency?: string;
   benchmark?: Benchmark;
-  ticker_types?: string[];
-  memo?: string;
-  top_pick_start_amount_manwon?: number | null;
-  top_pick_start_date?: string | null;
+  market_regime_index?: MarketIndexOption | null;
   URL?: string;
   updated_at?: string | null;
   save_method?: string | null;
 };
 
-type PoolOption = { ticker_type: string; name?: string; icon?: string; order?: number };
+type ApiResponse = { accounts?: AccountEntry[]; market_indices?: MarketIndexOption[]; error?: string };
 
-type ApiResponse = { accounts?: AccountEntry[]; error?: string };
+// 시장 레짐 지수 기본값 — S&P 500 (yf_ticker ^GSPC). 필수값이라 미설정 계좌는 이 값으로 시작한다.
+const DEFAULT_REGIME_TICKER = "^GSPC";
 
 const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.4)",
@@ -38,7 +36,15 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
 
 /** 계좌 1개 편집 행 (자체 저장). account_id 는 원장 FK 라 수정 불가. */
-function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools: PoolOption[]; onSaved: () => void }) {
+function AccountRow({
+  account,
+  marketIndices,
+  onSaved,
+}: {
+  account: AccountEntry;
+  marketIndices: MarketIndexOption[];
+  onSaved: () => void;
+}) {
   const toast = useToast();
   const [name, setName] = useState(account.name ?? "");
   const [icon, setIcon] = useState(account.icon ?? "");
@@ -46,12 +52,8 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
   const [countryCode, setCountryCode] = useState(account.country_code ?? "kor");
   const [currency, setCurrency] = useState(account.currency ?? "KRW");
   const [url, setUrl] = useState(account.URL ?? "");
-  const [memo, setMemo] = useState(account.memo ?? "");
-  const [topPickStartAmount, setTopPickStartAmount] = useState(
-    account.top_pick_start_amount_manwon == null ? "" : String(account.top_pick_start_amount_manwon),
-  );
-  const [topPickStartDate, setTopPickStartDate] = useState(account.top_pick_start_date ?? "");
-  const [tickerType, setTickerType] = useState((account.ticker_types ?? [])[0] ?? "");
+  // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
+  const [regimeTicker, setRegimeTicker] = useState(account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER);
   const [benchTicker, setBenchTicker] = useState(account.benchmark?.ticker ?? "");
   const [benchName, setBenchName] = useState(account.benchmark?.name ?? "");
   const [benchEditing, setBenchEditing] = useState(!(account.benchmark?.ticker && account.benchmark?.name));
@@ -99,10 +101,10 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
             country_code: countryCode,
             currency: currency.trim().toUpperCase(),
             benchmark: { ticker: benchTicker.trim(), name: benchName.trim() },
-            ticker_types: tickerType ? [tickerType] : [],
-            memo: memo.trim(),
-            top_pick_start_amount_manwon: topPickStartAmount === "" ? null : Number(topPickStartAmount),
-            top_pick_start_date: topPickStartDate || null,
+            market_regime_index: {
+              ticker: regimeTicker,
+              name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
+            },
             URL: url.trim(),
           },
         }),
@@ -202,55 +204,23 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
             </button>
           </>
         )}
-        <span style={{ ...labelStyle, marginLeft: 16 }}>종목풀</span>
+      </div>
+
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 60 }}>시장 레짐</span>
         <select
-          style={{ ...inputStyle, minWidth: 220 }}
-          value={tickerType}
-          onChange={(event) => setTickerType(event.target.value)}
-          disabled={pools.length === 0}
+          className="form-select form-select-sm"
+          style={{ width: 200 }}
+          value={regimeTicker}
+          onChange={(e) => setRegimeTicker(e.target.value)}
         >
-          <option value="">선택 안 함</option>
-          {pools.map((pool) => (
-            <option key={pool.ticker_type} value={pool.ticker_type}>
-              {formatPoolLabel(pool)}
+          {marketIndices.map((item) => (
+            <option key={item.ticker} value={item.ticker}>
+              {item.name}
             </option>
           ))}
         </select>
-      </div>
-
-      <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 60 }}>메모</span>
-        <input
-          style={{ ...inputStyle, flex: 1, minWidth: 220 }}
-          placeholder="탑픽 설정 상단에 표시할 1줄 메모"
-          value={memo}
-          onChange={(e) => setMemo(e.target.value.replace(/\r?\n/g, " "))}
-        />
-      </div>
-
-      <div style={rowStyle}>
-        <span style={{ ...labelStyle, width: 60 }}>탑픽</span>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 220 }}>
-          <span style={labelStyle}>{currency === "KRW" ? "시작금액(만원)" : `시작금액(${currency})`}</span>
-          <input
-            type="number"
-            style={{ ...inputStyle, width: 130 }}
-            min={1}
-            step={currency === "KRW" ? 1 : 0.01}
-            placeholder="미설정"
-            value={topPickStartAmount}
-            onChange={(e) => setTopPickStartAmount(e.target.value)}
-          />
-        </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 220 }}>
-          <span style={labelStyle}>시작일자</span>
-          <input
-            type="date"
-            style={{ ...inputStyle, width: 150 }}
-            value={topPickStartDate}
-            onChange={(e) => setTopPickStartDate(e.target.value)}
-          />
-        </label>
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
@@ -264,22 +234,17 @@ function AccountRow({ account, pools, onSaved }: { account: AccountEntry; pools:
 export function AccountSettingsManager() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
-  const [pools, setPools] = useState<PoolOption[]>([]);
+  const [marketIndices, setMarketIndices] = useState<MarketIndexOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [accResp, poolResp] = await Promise.all([
-        fetch("/api/account-settings", { cache: "no-store" }),
-        fetch("/api/pool-settings", { cache: "no-store" }),
-      ]);
+      const accResp = await fetch("/api/account-settings", { cache: "no-store" });
       const accData = (await accResp.json()) as ApiResponse;
       if (!accResp.ok || accData.error) throw new Error(accData.error ?? "계좌 설정을 불러오지 못했습니다.");
-      const poolData = (await poolResp.json()) as { pools?: PoolOption[]; error?: string };
-      if (!poolResp.ok || poolData.error) throw new Error(poolData.error ?? "종목풀을 불러오지 못했습니다.");
       setAccounts(accData.accounts ?? []);
-      setPools(poolData.pools ?? []);
+      setMarketIndices(accData.market_indices ?? []);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "계좌 설정을 불러오지 못했습니다.");
     } finally {
@@ -304,7 +269,9 @@ export function AccountSettingsManager() {
         ) : accounts.length === 0 ? (
           <div style={{ color: "var(--text-muted)", padding: 12 }}>등록된 계좌가 없습니다.</div>
         ) : (
-          accounts.map((a) => <AccountRow key={a.account_id} account={a} pools={pools} onSaved={() => {}} />)
+          accounts.map((a) => (
+            <AccountRow key={a.account_id} account={a} marketIndices={marketIndices} onSaved={() => {}} />
+          ))
         )}
       </div>
     </div>

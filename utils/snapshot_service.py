@@ -172,3 +172,53 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
         "total_assets": total_assets,
         "account_count": len(account_summaries)
     }
+
+
+# 계좌별 최근 거래일 기간 수익률 창.
+# 1주/2주/3주/1달/3달/6달/1년 = 5/10/15/21/63/126/252 거래일.
+ACCOUNT_RETURN_TRADING_DAYS = [5, 10, 15, 21, 63, 126, 252]
+
+
+def compute_account_period_returns() -> dict[str, dict[str, Any]]:
+    """계좌별 최근 거래일 기간 수익률(입출금 제거)을 반환한다.
+
+    손익 = 총자산(total_assets, 보유평가 + 현금) − 원금(total_principal)로 입출금 영향을 제거하고,
+    기간 수익률 = (손익_현재 − 손익_N거래일전) / N거래일전 총자산 × 100 으로 계산한다
+    (일별 펀드 화면과 동일한 calculate_period_return_pct 공식 재사용).
+    ※ valuation_krw(보유 평가금액)는 현금을 빼먹어 총자산과 불일치하므로 쓰지 않는다.
+    스냅샷 이력이 부족한 기간은 None.
+    반환: {account_id: {"d5": float|None, "d10": ..., "d15": ..., "d21": ...}}
+    """
+    from utils.daily_fund_service import calculate_period_return_pct
+
+    snapshots = load_snapshot_list()  # 최신 날짜순(desc)
+    # account_id -> [(profit, total_assets), ...] 최신순. 값 누락일은 제외(임의 보정 금지).
+    series: dict[str, list[tuple[float, float]]] = {}
+    for snap in snapshots:
+        for account in snap.get("accounts", []):
+            account_id = str(account.get("account_id") or "")
+            if not account_id:
+                continue
+            principal = account.get("total_principal")
+            total_assets = account.get("total_assets")
+            if principal is None or total_assets is None:
+                continue
+            series.setdefault(account_id, []).append((float(total_assets) - float(principal), float(total_assets)))
+
+    result: dict[str, dict[str, Any]] = {}
+    for account_id, points in series.items():
+        latest_profit = points[0][0]
+        returns: dict[str, Any] = {}
+        for days in ACCOUNT_RETURN_TRADING_DAYS:
+            if len(points) > days:
+                prev_profit, prev_total_assets = points[days]
+                returns[f"d{days}"] = round(
+                    calculate_period_return_pct(latest_profit - prev_profit, prev_total_assets), 2
+                )
+            else:
+                returns[f"d{days}"] = None
+        # 임의 N거래일 수익률(예: 시장 레짐 지속일수)을 프론트가 계산할 수 있게 손익 시계열도 준다.
+        # [profit, total_assets] 최신순.
+        returns["series"] = [[profit, total_assets] for profit, total_assets in points]
+        result[account_id] = returns
+    return result

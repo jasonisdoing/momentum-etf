@@ -3586,7 +3586,8 @@ a {
   line-height: 1.1;
 }
 
-.rankAgGrid .ag-cell[col-id="종목명"] {
+.rankAgGrid .ag-cell[col-id="종목명"],
+.assetsAgGrid .ag-cell[col-id="name"] {
   overflow: hidden;
 }
 

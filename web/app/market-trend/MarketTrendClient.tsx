@@ -250,7 +250,7 @@ export function MarketTrendClient({
             return <span style={{ color: "var(--text-strong)" }}>상승 {d}일째</span>;
           }
           const sinceUp = params.data?.days_since_last_up;
-          const upText = sinceUp !== null && sinceUp !== undefined ? `마지막 상승 후 ${sinceUp}일째` : "1년 내 상승 없음";
+          const upText = sinceUp !== null && sinceUp !== undefined ? `하락 ${sinceUp}일째` : "1년 내 상승 없음";
           return <span style={{ color: "var(--text-strong)" }}>{upText}</span>;
         },
       },

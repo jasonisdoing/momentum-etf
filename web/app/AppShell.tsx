@@ -49,6 +49,7 @@ const navGroups = [
     icon: IconCash,
     items: [
       { href: "/assets", label: "자산 관리", icon: IconList },
+      { href: "/asset-helper", label: "자산 헬퍼", icon: IconListDetails },
       { href: "/asset-status", label: "자산 현황", icon: IconTrendingUp },
       { href: "/daily", label: "기간별", icon: IconReceipt2 },
       { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
@@ -67,15 +68,6 @@ const navGroups = [
       { href: "/aus-market-stock", label: "호주 개별주", icon: "🇦🇺" },
       { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
       { href: "/live-24h", label: "24H 시세", icon: "⏰" },
-    ],
-  },
-  {
-    id: "top-pick",
-    title: "탑픽",
-    icon: IconMedal2,
-    items: [
-      { href: "/top-pick", label: "비중", icon: IconListDetails },
-      { href: "/top-pick-settings", label: "설정", icon: IconSettings },
     ],
   },
   {
