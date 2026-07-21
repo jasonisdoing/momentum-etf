@@ -17,7 +17,7 @@ router = APIRouter(prefix="/internal/market-trend", tags=["market-trend"])
 def get_market_trend_indices(
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    """시장추세 지수 목록 (탑픽 시장 레짐 셀렉터 등에서 사용)."""
+    """시장추세 지수 목록 (시장 레짐 셀렉터 등에서 사용)."""
     return {"indices": [{"ticker": idx["yf_ticker"], "name": idx["name"]} for idx in INDICES]}
 
 

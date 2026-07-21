@@ -3,8 +3,7 @@
 (구)accounts.json 을 대체한다. 계좌별 1개 문서:
 
     {_id: <account_id>, name, icon, order, country_code, currency,
-     benchmark: {ticker, name}, memo?, top_pick_start_amount_manwon?,
-     top_pick_start_date?, URL?, updated_at, save_method,
+     benchmark: {ticker, name}, URL?, updated_at, save_method,
      account_type?: "fixed"|"trend"|"regime", strategy?: {...}}
 
 DB 가 유일한 소스다. 문서가 없으면 임의 기본값 없이 **명확히 에러**를 낸다.

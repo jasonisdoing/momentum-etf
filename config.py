@@ -155,7 +155,7 @@ MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 MARKET_TREND_SCORE_MA_DAYS = 20
 
 # 슈퍼트렌드(SuperTrend) 지표 설정.
-# 차트 보조선/화살표 표시 전용이다. 레짐 판정과 탑픽 현금비중에는 쓰지 않는다.
+# 차트 보조선/화살표 표시 전용이다. 레짐 판정과 현금비중에는 쓰지 않는다.
 # ATR 계산 기간(PERIOD)은 전 지수 공통. 곱수(MULTIPLIER)는 지수마다 개별 등록한다.
 MARKET_TREND_SUPERTREND_PERIOD = 10
 

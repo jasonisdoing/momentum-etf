@@ -2998,17 +2998,14 @@ a {
   white-space: nowrap;
 }
 
-/* 탑픽 종목명: 종목풀 순위와 동일하게 최대 2줄까지 표시한다. */
-.topPickPreviewGrid .ag-cell.topPickNameCell,
-.topPickPreviewGrid .ag-cell.topPickNameCell .ag-cell-value,
-.topPickWeightGrid .ag-cell.topPickNameCell,
-.topPickWeightGrid .ag-cell.topPickNameCell .ag-cell-value {
+/* 자산 헬퍼 종목명: 종목풀 순위와 동일하게 최대 2줄까지 표시한다. */
+.assetHelperPreviewGrid .ag-cell.assetHelperNameCell,
+.assetHelperPreviewGrid .ag-cell.assetHelperNameCell .ag-cell-value {
   min-width: 0;
   overflow: hidden;
 }
 
-.topPickPreviewGrid .topPickNameCellText,
-.topPickWeightGrid .topPickNameCellText {
+.assetHelperPreviewGrid .assetHelperNameCellText {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -3556,14 +3553,6 @@ a {
 .rankAgGrid .ag-row.rankFixedRow:hover,
 .rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow:hover {
   background: rgba(199, 210, 254, 0.62);
-}
-
-.rankAgGrid .ag-row.topPickPendingAddedRow {
-  background: rgba(250, 204, 21, 0.28);
-}
-
-.rankAgGrid .ag-row.topPickPendingAddedRow:hover {
-  background: rgba(250, 204, 21, 0.38);
 }
 
 .rankAgGrid .ag-cell-value,
