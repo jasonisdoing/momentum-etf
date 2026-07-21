@@ -495,7 +495,7 @@ def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> lis
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     """단일 지수의 일별 OHLC 히스토리를 반환한다 (한국: 네이버 5년, 미국: yfinance 10년).
 
-    compute_index_history 와 탑픽 시장 레짐 계산이 공유하는 단일 소스.
+    compute_index_history 와 시장 레짐 계산이 공유하는 단일 소스.
     """
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     naver_symbol = (index_meta or {}).get("kor_naver_symbol")

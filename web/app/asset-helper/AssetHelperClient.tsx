@@ -9,7 +9,7 @@ import { PageFrame } from "../components/PageFrame";
 import { StableInlineInput } from "../components/StableInlineInput";
 import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
-import { TopPickBacktestResult, type LabResult } from "../components/TopPickBacktestResult";
+import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
 
@@ -27,7 +27,17 @@ import {
 } from "../components/account-selection";
 
 // 자산 헬퍼: 실제 계좌와 별개로, 계좌별 테스트 포트폴리오(수동 종목+비중)를 관리·백테스트한다.
-// 저장/계산/백테스트는 기존 top_pick_settings(fixed 모드) 엔진을 그대로 재활용한다.
+// 저장/계산/백테스트는 기존 fixed 모드 엔진을 그대로 재활용한다.
+
+// 종목 비중 합의 나머지는 현금으로 보유한다(백엔드 fixed 엔진이 __CASH__ = 1 - 합 으로 처리).
+// 현금 행은 편집 가능하며, 종목합 + 현금 = 100% 여야 유효하다(백엔드는 종목만 저장, 현금=100-종목합 파생).
+const CASH_TICKER = "__CASH__";
+
+// 저장된 종목들의 고정비중 합의 나머지를 현금(%)으로 계산한다(로드 시 현금 초기화용).
+function cashFromTickers(rows: Array<{ ticker: string; name?: string; fixed_weight_pct?: number | null }>): number {
+  const sum = rows.reduce((acc, item) => acc + (item.ticker.trim() && item.name ? Number(item.fixed_weight_pct) || 0 : 0), 0);
+  return Math.max(0, 100 - sum);
+}
 
 type MarketRegimeIndex = { ticker: string; name: string };
 type AccountOption = { account_id: string; name: string; icon?: string; order?: number; market_regime_index?: MarketRegimeIndex | null };
@@ -104,6 +114,37 @@ type HelperTicker = {
   fixed_weight_pct?: number | null;
 };
 
+// 종목 목록의 소스는 자산 관리(보유 종목)다. 자산 헬퍼는 이 목록을 같은 순서로 보여주고 비중만 붙인다.
+type HoldingRow = {
+  ticker: string;
+  name: string;
+  bucket_id?: number;
+  sort_order?: number;
+  ticker_type?: string;
+  country_code?: string;
+};
+
+// 보유 종목(순서 유지) + 저장된 비중 맵을 합쳐 자산 헬퍼용 종목 목록을 만든다.
+function mergeHoldingsWithWeights(holdings: HoldingRow[], weightTickers: HelperTicker[] | undefined): HelperTicker[] {
+  const weightMap: Record<string, number | null> = {};
+  for (const t of weightTickers ?? []) {
+    const tk = String(t.ticker ?? "").trim().toUpperCase();
+    if (tk) weightMap[tk] = t.fixed_weight_pct ?? null;
+  }
+  return holdings
+    .filter((r) => String(r.ticker ?? "").trim() && r.ticker !== "IS")
+    .slice()
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((r) => ({
+      ticker: r.ticker,
+      name: r.name,
+      ticker_type: r.ticker_type,
+      country_code: r.country_code,
+      bucket: r.bucket_id,
+      fixed_weight_pct: weightMap[r.ticker.trim().toUpperCase()] ?? null,
+    }));
+}
+
 type WeightRow = {
   ticker: string;
   current_price?: number | null;
@@ -135,7 +176,7 @@ function signColor(value: number | null | undefined): string {
   return "#475569";
 }
 
-// 원본 top-pick 과 동일한 색상 셀(양수 빨강/음수 파랑).
+// 순위 화면과 동일한 색상 셀(양수 빨강/음수 파랑).
 function renderPctCell(params: { value?: number | null }) {
   return <span style={{ color: signColor(params.value) }}>{fmtPct(params.value)}</span>;
 }
@@ -184,9 +225,9 @@ export function AssetHelperClient() {
   const [noteSaving, setNoteSaving] = useState(false);
   const [noteUpdatedAt, setNoteUpdatedAt] = useState<string | null>(null);
   const [tickers, setTickers] = useState<HelperTicker[]>(() => buildRows(undefined));
+  const [cashWeight, setCashWeight] = useState(100); // 현금 비중(%) — 편집 가능. 로드 시 100-종목합으로 초기화.
   const [settings, setSettings] = useState<HelperSettings | null>(null);
   const [metricByTicker, setMetricByTicker] = useState<Record<string, WeightRow>>({});
-  const [selectedRowIndexes, setSelectedRowIndexes] = useState<number[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
@@ -232,10 +273,11 @@ export function AssetHelperClient() {
         if (!target) throw new Error("등록된 계좌가 없습니다.");
         writeRememberedMomentumEtfAccountId(target);
 
-        // 상단 메모는 /assets 와 동일한 계좌 메모(/api/note).
-        const [settingsResp, noteResp] = await Promise.all([
-          fetch(`/api/top-pick-settings?account_id=${encodeURIComponent(target)}`, { cache: "no-store" }),
+        // 종목 목록은 자산 관리(보유 종목)가 소스. 비중은 자산 헬퍼 설정, 메모는 /api/note.
+        const [settingsResp, noteResp, holdingsResp] = await Promise.all([
+          fetch(`/api/asset-helper-settings?account_id=${encodeURIComponent(target)}`, { cache: "no-store" }),
           fetch(`/api/note?account=${encodeURIComponent(target)}`, { cache: "no-store" }),
+          fetch(`/api/assets?account=${encodeURIComponent(target)}`, { cache: "no-store" }),
         ]);
         const data = (await settingsResp.json()) as {
           tickers?: HelperTicker[];
@@ -243,16 +285,19 @@ export function AssetHelperClient() {
           error?: string;
         };
         if (!settingsResp.ok || data.error) throw new Error(data.error ?? "포트폴리오를 불러오지 못했습니다.");
+        const holdingsData = (await holdingsResp.json()) as { rows?: HoldingRow[]; error?: string };
+        if (!holdingsResp.ok || holdingsData.error) throw new Error(holdingsData.error ?? "보유 종목을 불러오지 못했습니다.");
         const noteData = (await noteResp.json()) as { content?: string; updated_at?: string };
         const noteContent = noteResp.ok ? String(noteData.content ?? "") : "";
         setSelectedAccount(target);
         setMemo(noteContent);
         setSavedMemo(noteContent);
         setNoteUpdatedAt(noteResp.ok ? noteData.updated_at ?? null : null);
-        setTickers(buildRows(data.tickers));
+        const loadedTickers = mergeHoldingsWithWeights(holdingsData.rows ?? [], data.tickers);
+        setTickers(loadedTickers);
+        setCashWeight(cashFromTickers(loadedTickers)); // 저장된 종목합의 나머지를 현금으로 초기화
         setSettings(data.settings ?? null);
         setMetricByTicker({});
-        setSelectedRowIndexes([]);
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "불러오지 못했습니다.");
       } finally {
@@ -366,9 +411,27 @@ export function AssetHelperClient() {
     },
     [tickers],
   );
-  const addOnValidated = useCallback((resolved: HelperTicker) => {
-    setTickers((prev) => [resolved, ...prev]);
-  }, []);
+  // 추가하면 자산 관리 보유 목록에 수량 0으로 등록한 뒤 재로드한다(진짜 공통 1개 목록).
+  const addOnValidated = useCallback(
+    (resolved: HelperTicker) => {
+      void (async () => {
+        try {
+          const resp = await fetch("/api/assets", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account_id: selectedAccount, ticker: resolved.ticker, quantity: 0, average_buy_price: 0, target_ratio: 0 }),
+          });
+          const data = (await resp.json()) as { added?: string; error?: string };
+          if (!resp.ok || data.error) throw new Error(data.error ?? "종목 추가에 실패했습니다.");
+          await load(selectedAccount ?? undefined);
+          toast.success("보유 목록에 추가(수량 0)");
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : "종목 추가에 실패했습니다.");
+        }
+      })();
+    },
+    [selectedAccount, load, toast],
+  );
   const addOnError = useCallback((message: string) => toast.error(message), [toast]);
   const add = useAddingTickerRow({
     resolve: addResolve,
@@ -378,14 +441,7 @@ export function AssetHelperClient() {
     resetOnValidated: true,
   });
 
-  const handleDelete = useCallback(() => {
-    if (!selectedRowIndexes.length) return;
-    const toRemove = new Set(selectedRowIndexes);
-    setTickers((current) => current.filter((_, idx) => !toRemove.has(idx + 1)));
-    setSelectedRowIndexes([]);
-  }, [selectedRowIndexes]);
-
-  // 비중계산 — 지표(금일/수익률/MDD/소르티노)를 채운다. fixed 모드로 top_pick 엔진 재활용.
+  // 비중계산 — 지표(금일/수익률/MDD/소르티노)를 채운다. fixed 모드 엔진 재활용.
   const runMetrics = useCallback(async () => {
     if (!settings || !settings.ACCOUNT_ID) return;
     if (validTickers.length < 3) {
@@ -394,7 +450,7 @@ export function AssetHelperClient() {
     }
     try {
       setRunning(true);
-      const resp = await fetch("/api/top-pick-settings/run", {
+      const resp = await fetch("/api/asset-helper-settings/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -470,7 +526,7 @@ export function AssetHelperClient() {
     }
     try {
       setSaving(true);
-      const resp = await fetch("/api/top-pick-settings", {
+      const resp = await fetch("/api/asset-helper-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -482,7 +538,7 @@ export function AssetHelperClient() {
       });
       const data = (await resp.json()) as { tickers?: HelperTicker[]; error?: string; detail?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
-      if (data.tickers) setTickers(buildRows(data.tickers));
+      await load(selectedAccount ?? undefined); // 보유 목록 순서 기준으로 다시 병합(비중만 저장됨)
       toast.success("저장 완료");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -500,10 +556,10 @@ export function AssetHelperClient() {
       toast.error("백테스트에는 확인된 종목이 3개 이상 필요합니다.");
       return;
     }
-    // 비중 합계가 100%가 아니면 백테스트를 막는다.
+    // 종목 + 현금 = 100% 여야 한다(백엔드는 종목만 저장, 현금=100-종목합 파생).
     const sum = validTickers.reduce((acc, item) => acc + (Number(item.fixed_weight_pct) || 0), 0);
-    if (Math.abs(sum - 100) >= 0.05) {
-      toast.error(`비중 합계가 ${sum.toFixed(1)}%입니다. 100%로 맞춰야 백테스트할 수 있습니다.`);
+    if (Math.abs(sum + cashWeight - 100) >= 0.05) {
+      toast.error(`종목 ${sum.toFixed(1)}% + 현금 ${cashWeight.toFixed(1)}% = ${(sum + cashWeight).toFixed(1)}%. 합계를 100%로 맞춰주세요.`);
       return;
     }
     if (!Number.isInteger(Number(btAmount)) || Number(btAmount) <= 0) {
@@ -513,7 +569,7 @@ export function AssetHelperClient() {
     try {
       setBtRunning(true);
       setBtResult(null);
-      const resp = await fetch("/api/top-pick-settings/backtest", {
+      const resp = await fetch("/api/asset-helper-settings/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -534,41 +590,27 @@ export function AssetHelperClient() {
     }
   };
 
+  const weightSum = validTickers.reduce((acc, item) => acc + (Number(item.fixed_weight_pct) || 0), 0);
+  const totalWeight = weightSum + cashWeight; // 종목합 + 현금
+  const weightOk = Math.abs(totalWeight - 100) < 0.05; // 종목 + 현금 = 100% 여야 유효
+
   const gridRows = useMemo<GridRow[]>(() => {
+    // 맨 위 고정 현금 행(읽기전용, row_index=-1 로 종목·추가행과 구분).
+    const cashRow: GridRow = { ticker: CASH_TICKER, name: "현금", row_index: -1, is_adding: false, fixed_weight_pct: cashWeight };
     const committed = tickers.map((item, idx) => ({
       ...item,
       ...(metricByTicker[item.ticker.trim().toUpperCase()] ?? {}),
       row_index: idx + 1,
       is_adding: false,
     }));
-    if (!add.addingRow) return committed;
-    const addingRow: GridRow = {
-      ticker: add.addingRow.ticker,
-      name: add.addingRow.name,
-      row_index: 0,
-      is_adding: true,
-    };
-    return [addingRow, ...committed];
-  }, [tickers, metricByTicker, add.addingRow]);
-
-  const weightSum = validTickers.reduce((acc, item) => acc + (Number(item.fixed_weight_pct) || 0), 0);
-  const weightOk = Math.abs(weightSum - 100) < 0.05;
+    const addingRows: GridRow[] = add.addingRow
+      ? [{ ticker: add.addingRow.ticker, name: add.addingRow.name, row_index: 0, is_adding: true }]
+      : [];
+    return [cashRow, ...addingRows, ...committed];
+  }, [tickers, metricByTicker, add.addingRow, cashWeight]);
 
   const columnDefs = useMemo<ColDef<GridRow>[]>(
     () => [
-      {
-        colId: "drag",
-        headerName: "",
-        width: 42,
-        maxWidth: 42,
-        pinned: "left",
-        sortable: false,
-        resizable: false,
-        suppressMovable: true,
-        rowDrag: (params) => Boolean(params.data && !params.data.is_adding),
-        cellClass: "assetsDragCell",
-        valueGetter: () => "",
-      },
       {
         colId: "bucket",
         headerName: "버킷",
@@ -588,6 +630,7 @@ export function AssetHelperClient() {
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const row = params.data;
           if (!row) return "-";
+          if (row.ticker === CASH_TICKER) return <span>-</span>;
           if (row.is_adding) {
             return (
               <StableInlineInput
@@ -672,45 +715,20 @@ export function AssetHelperClient() {
       domLayout: "autoHeight",
       suppressMovableColumns: true,
       stopEditingWhenCellsLoseFocus: true,
-      rowDragManaged: true,
       animateRows: true,
-      rowSelection: {
-        mode: "multiRow",
-        checkboxes: (params) => Boolean(params.data && !params.data.is_adding),
-        headerCheckbox: true,
-        hideDisabledCheckboxes: true,
-        enableClickSelection: false,
-      },
-      selectionColumnDef: {
-        width: 52,
-        minWidth: 52,
-        maxWidth: 52,
-        pinned: "left",
-        sortable: false,
-        resizable: false,
-        headerName: "",
-        cellClass: "assetsSelectCell",
-      },
-      onSelectionChanged: (params) => {
-        setSelectedRowIndexes(
-          params.api.getSelectedRows().map((row) => row.row_index).filter((idx): idx is number => Number.isFinite(idx)),
-        );
-      },
-      onRowDragEnd: (params) => {
-        const orderedIndexes: number[] = [];
-        params.api.forEachNode((node) => {
-          if (node.data) orderedIndexes.push(node.data.row_index);
-        });
-        setTickers((current) => orderedIndexes.map((idx) => current[idx - 1]).filter(Boolean));
-      },
+      // 종목 목록·순서·삭제는 자산 관리에서만. 자산 헬퍼는 추가 + 비중 편집만 한다(드래그·선택 없음).
       onCellValueChanged: (params) => {
-        if (params.colDef.field === "fixed_weight_pct") {
-          const newWeight = params.newValue === "" || params.newValue == null ? null : Number(params.newValue);
-          const index = params.data.row_index - 1;
-          setTickers((current) =>
-            current.map((item, i) => (i === index ? { ...item, fixed_weight_pct: newWeight } : item)),
-          );
+        if (params.colDef.field !== "fixed_weight_pct") return;
+        if (params.data.ticker === CASH_TICKER) {
+          const raw = params.newValue === "" || params.newValue == null ? 0 : Number(params.newValue);
+          setCashWeight(Number.isFinite(raw) ? Math.max(0, raw) : 0);
+          return;
         }
+        const newWeight = params.newValue === "" || params.newValue == null ? null : Number(params.newValue);
+        const index = params.data.row_index - 1;
+        setTickers((current) =>
+          current.map((item, i) => (i === index ? { ...item, fixed_weight_pct: newWeight } : item)),
+        );
       },
     }),
     [],
@@ -841,7 +859,7 @@ export function AssetHelperClient() {
               <div>
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목</h2>
                 <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: weightOk ? "#16a34a" : "#dc2626" }}>
-                  합계 {weightSum.toFixed(1)}%{weightOk ? " ✓" : " (100% 필요)"}
+                  종목 {weightSum.toFixed(1)}% + 현금 {cashWeight.toFixed(1)}% = {totalWeight.toFixed(1)}%{weightOk ? " ✓" : " (100% 필요)"}
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -849,7 +867,6 @@ export function AssetHelperClient() {
                 <GridToolbarButton variant="save" disabled={saving} onClick={() => void saveSettings()}>
                   {saving ? "저장 중..." : "저장"}
                 </GridToolbarButton>
-                <GridToolbarButton variant="delete" onClick={handleDelete} disabled={!selectedRowIndexes.length} />
               </div>
             </div>
             <AppAgGrid<GridRow>
@@ -892,7 +909,7 @@ export function AssetHelperClient() {
             </div>
 
             {btResult ? (
-              <TopPickBacktestResult result={btResult} />
+              <AssetHelperBacktestResult result={btResult} />
             ) : (
               <div style={{ color: "var(--text-muted)", fontSize: "0.9rem", padding: "6px 0" }}>백테스트 버튼을 눌러 결과를 확인하세요.</div>
             )}

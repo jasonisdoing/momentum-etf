@@ -11,7 +11,7 @@ import { AppAgGrid } from "./AppAgGrid";
 import { TickerDetailLink } from "./TickerDetailLink";
 import { createAppGridTheme } from "./app-grid-theme";
 
-// top-pick 백테스트 결과 렌더링(차트+비중변화+요약+종목별 성과)을 공용화한 것.
+// 자산 헬퍼 백테스트 결과 렌더링(차트+비중변화+요약+종목별 성과)을 공용화한 것.
 // 자산 헬퍼 등 여러 화면이 동일한 백테스트 결과 UI 를 재사용한다(AGENTS.md 3-1).
 
 type LabSummary = { total_return_pct: number; cagr_pct: number; mdd_pct: number; sortino: number };
@@ -36,9 +36,9 @@ export type LabPosition = LabTicker & {
   max_weight?: number;
 };
 
-type TopPickWeightHistoryRow = { date: string; [key: string]: string | number };
-type TopPickWeightItem = { key: string; label: string; bucket?: number };
-type TopPickWeightHoverDetail = { date: string; items: Array<TopPickWeightItem & { weight: number; color: string }> };
+type AssetHelperWeightHistoryRow = { date: string; [key: string]: string | number };
+type AssetHelperWeightItem = { key: string; label: string; bucket?: number };
+type AssetHelperWeightHoverDetail = { date: string; items: Array<AssetHelperWeightItem & { weight: number; color: string }> };
 
 export type LabResult = {
   months: number;
@@ -61,8 +61,8 @@ export type LabResult = {
     portfolio_pct: number[];
     benchmark_pct: number[];
   };
-  weight_history?: TopPickWeightHistoryRow[];
-  weight_items?: TopPickWeightItem[];
+  weight_history?: AssetHelperWeightHistoryRow[];
+  weight_items?: AssetHelperWeightItem[];
   error?: string;
   detail?: string;
 };
@@ -120,7 +120,7 @@ function getBucketName(bucketId: number | undefined): string {
   return bucketId ? BUCKET_THEME[String(bucketId)]?.name ?? "-" : "-";
 }
 
-function getTopPickWeightColor(items: TopPickWeightItem[] | undefined, key: string): string {
+function getAssetHelperWeightColor(items: AssetHelperWeightItem[] | undefined, key: string): string {
   if (key === "__CASH__") return BUCKET_COLORS[4];
   const bucket = items?.find((item) => item.key === key)?.bucket;
   return bucket && BUCKET_COLORS[bucket - 1] ? BUCKET_COLORS[bucket - 1] : "#64748b";
@@ -186,14 +186,14 @@ function LabChart({ result }: { result: LabResult }) {
   return <div ref={containerRef} style={{ width: "100%", height: 320 }} />;
 }
 
-function TopPickWeightHistoryChart({
+function AssetHelperWeightHistoryChart({
   rows,
   items,
   onHoverChange,
 }: {
-  rows: TopPickWeightHistoryRow[];
-  items: TopPickWeightItem[];
-  onHoverChange: (detail: TopPickWeightHoverDetail | null) => void;
+  rows: AssetHelperWeightHistoryRow[];
+  items: AssetHelperWeightItem[];
+  onHoverChange: (detail: AssetHelperWeightHoverDetail | null) => void;
 }) {
   if (!rows.length || !items.length) {
     return <div style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>비중 이력이 없습니다.</div>;
@@ -212,15 +212,15 @@ function TopPickWeightHistoryChart({
       .map((item) => ({
         ...item,
         weight: total > 0 ? (Number(activeRow[item.key] ?? 0) / total) * 100 : 0,
-        color: getTopPickWeightColor(items, item.key),
+        color: getAssetHelperWeightColor(items, item.key),
       }))
       .filter((item) => item.weight > 0);
     onHoverChange({ date, items: hoverItems });
   };
 
   return (
-    <div className="topPickWeightChartWrap">
-      <div className="topPickWeightChartCanvas">
+    <div className="assetHelperWeightChartWrap">
+      <div className="assetHelperWeightChartCanvas">
         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
           <BarChart
             data={rows}
@@ -240,7 +240,7 @@ function TopPickWeightHistoryChart({
                 dataKey={item.key}
                 name={item.label}
                 stackId="weight"
-                fill={getTopPickWeightColor(items, item.key)}
+                fill={getAssetHelperWeightColor(items, item.key)}
                 radius={index === sortedItems.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
               />
             ))}
@@ -251,8 +251,8 @@ function TopPickWeightHistoryChart({
   );
 }
 
-export function TopPickBacktestResult({ result }: { result: LabResult }) {
-  const [weightHoverDetail, setWeightHoverDetail] = useState<TopPickWeightHoverDetail | null>(null);
+export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
+  const [weightHoverDetail, setWeightHoverDetail] = useState<AssetHelperWeightHoverDetail | null>(null);
 
   const columns = useMemo<ColDef<LabPosition>[]>(
     () => [
@@ -281,7 +281,7 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
         headerName: "종목명",
         minWidth: 180,
         flex: 1,
-        cellClass: "topPickNameCell",
+        cellClass: "assetHelperNameCell",
         valueGetter: (params) => {
           const row = params.data;
           if (!row) return "-";
@@ -291,13 +291,13 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
         cellRenderer: (params: { value: string | null | undefined }) => {
           const name = params.value || "-";
           return (
-            <span className="topPickNameCellText" title={name}>
+            <span className="assetHelperNameCellText" title={name}>
               {name}
             </span>
           );
         },
         cellStyle: (params) => ({
-          color: getTopPickWeightColor(result.weight_items, params.data?.ticker ?? ""),
+          color: getAssetHelperWeightColor(result.weight_items, params.data?.ticker ?? ""),
           fontWeight: 800,
         }),
       },
@@ -427,16 +427,16 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
   );
 
   return (
-    <div className="topPickBacktestResultLayout">
-      <div className="topPickBacktestTopLayout">
-        <div className="topPickBacktestResultPanel">
+    <div className="assetHelperBacktestResultLayout">
+      <div className="assetHelperBacktestTopLayout">
+        <div className="assetHelperBacktestResultPanel">
           {weightHoverDetail ? (
-            <div className="topPickWeightHoverOverlay">
-              <div className="topPickWeightHoverDate">{weightHoverDetail.date}</div>
-              <div className="topPickWeightHoverTitle">종목별 비중</div>
-              <div className="topPickWeightHoverRows">
+            <div className="assetHelperWeightHoverOverlay">
+              <div className="assetHelperWeightHoverDate">{weightHoverDetail.date}</div>
+              <div className="assetHelperWeightHoverTitle">종목별 비중</div>
+              <div className="assetHelperWeightHoverRows">
                 {weightHoverDetail.items.map((item) => (
-                  <div key={item.key} className="topPickWeightHoverRow">
+                  <div key={item.key} className="assetHelperWeightHoverRow">
                     <span style={{ color: item.color }}>{item.label}</span>
                     <strong>{item.weight.toFixed(1)}%</strong>
                   </div>
@@ -456,23 +456,23 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
               </>
             ) : null}
           </p>
-          <div className="topPickSummaryCompare">
-            <div className="topPickSummaryGroup topPickSummaryPortfolio">
-              <div className="topPickSummaryTitle">
-                <span className="topPickSummaryLine" /> 포트폴리오
+          <div className="assetHelperSummaryCompare">
+            <div className="assetHelperSummaryGroup assetHelperSummaryPortfolio">
+              <div className="assetHelperSummaryTitle">
+                <span className="assetHelperSummaryLine" /> 포트폴리오
               </div>
-              <div className="topPickSummaryMetrics">
+              <div className="assetHelperSummaryMetrics">
                 {summaryChip("총수익률", `${result.summary.total_return_pct.toFixed(2)}%`, signedColor(result.summary.total_return_pct))}
                 {summaryChip("CAGR", `${result.summary.cagr_pct.toFixed(2)}%`, signedColor(result.summary.cagr_pct))}
                 {summaryChip("MDD", `${result.summary.mdd_pct.toFixed(2)}%`, "#d63939")}
                 {summaryChip("Sortino", result.summary.sortino.toFixed(2))}
               </div>
             </div>
-            <div className="topPickSummaryGroup topPickSummaryBenchmark">
-              <div className="topPickSummaryTitle">
-                <span className="topPickSummaryLine" /> {result.benchmark.name}
+            <div className="assetHelperSummaryGroup assetHelperSummaryBenchmark">
+              <div className="assetHelperSummaryTitle">
+                <span className="assetHelperSummaryLine" /> {result.benchmark.name}
               </div>
-              <div className="topPickSummaryMetrics">
+              <div className="assetHelperSummaryMetrics">
                 {summaryChip("총수익률", `${result.benchmark.summary.total_return_pct.toFixed(2)}%`, signedColor(result.benchmark.summary.total_return_pct))}
                 {summaryChip("CAGR", `${result.benchmark.summary.cagr_pct.toFixed(2)}%`, signedColor(result.benchmark.summary.cagr_pct))}
                 {summaryChip("MDD", `${result.benchmark.summary.mdd_pct.toFixed(2)}%`, "#d63939")}
@@ -482,19 +482,19 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
           </div>
           <LabChart result={result} />
         </div>
-        <div className="topPickBacktestResultPanel">
+        <div className="assetHelperBacktestResultPanel">
           <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 4 }}>비중 변화</h3>
           <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 10 }}>
             매주 금요일 기준 가격 변동이 반영된 종목별 평가금액
           </p>
-          <TopPickWeightHistoryChart
+          <AssetHelperWeightHistoryChart
             rows={result.weight_history ?? []}
             items={result.weight_items ?? []}
             onHoverChange={setWeightHoverDetail}
           />
         </div>
       </div>
-      <div className="topPickBacktestPerformancePanel">
+      <div className="assetHelperBacktestPerformancePanel">
         <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 8 }}>백테스트 종목별 성과</h3>
         {result.has_late_entry ? (
           <p style={{ color: "#b45309", background: "rgba(245,158,11,0.08)", fontSize: "0.8rem", padding: "6px 10px", borderRadius: 6, marginBottom: 10 }}>
@@ -504,31 +504,31 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
         <AppAgGrid<LabPosition>
           rowData={positionRows}
           columnDefs={columns}
-          className="topPickPreviewGrid rankAgGrid"
+          className="assetHelperPreviewGrid rankAgGrid"
           theme={previewGridTheme}
           getRowId={(params) => params.data.ticker}
           gridOptions={gridOptions}
         />
       </div>
       <style jsx global>{`
-        .topPickBacktestResultLayout {
+        .assetHelperBacktestResultLayout {
           display: flex;
           flex-direction: column;
           gap: 12px;
         }
-        .topPickBacktestTopLayout {
+        .assetHelperBacktestTopLayout {
           display: grid;
           grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
           gap: 12px;
           align-items: stretch;
         }
-        .topPickBacktestResultPanel {
+        .assetHelperBacktestResultPanel {
           position: relative;
           display: flex;
           flex-direction: column;
           min-width: 0;
         }
-        .topPickWeightHoverOverlay {
+        .assetHelperWeightHoverOverlay {
           position: absolute;
           inset: 0;
           z-index: 5;
@@ -542,59 +542,59 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
           color: #f8fafc;
           pointer-events: none;
         }
-        .topPickWeightHoverDate {
+        .assetHelperWeightHoverDate {
           font-size: 1.05rem;
           font-weight: 900;
         }
-        .topPickWeightHoverTitle {
+        .assetHelperWeightHoverTitle {
           margin-top: 3px;
           color: #94a3b8;
           font-size: 0.8rem;
           font-weight: 700;
         }
-        .topPickWeightHoverRows {
+        .assetHelperWeightHoverRows {
           display: grid;
           grid-template-columns: minmax(0, 1fr);
           gap: 6px;
           margin-top: 12px;
         }
-        .topPickWeightHoverRow {
+        .assetHelperWeightHoverRow {
           display: flex;
           justify-content: space-between;
           gap: 12px;
           min-width: 0;
           font-size: 0.86rem;
         }
-        .topPickWeightHoverRow span {
+        .assetHelperWeightHoverRow span {
           overflow: hidden;
           font-weight: 800;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .topPickWeightHoverRow strong {
+        .assetHelperWeightHoverRow strong {
           flex: 0 0 auto;
           color: #f8fafc;
         }
-        .topPickSummaryCompare {
+        .assetHelperSummaryCompare {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
           margin-bottom: 10px;
         }
-        .topPickSummaryGroup {
+        .assetHelperSummaryGroup {
           min-width: 0;
           padding: 7px 10px;
           border: 1px solid rgba(148, 163, 184, 0.22);
           border-radius: 9px;
           background: rgba(248, 250, 252, 0.62);
         }
-        .topPickSummaryPortfolio {
+        .assetHelperSummaryPortfolio {
           border-top: 3px solid #2563eb;
         }
-        .topPickSummaryBenchmark {
+        .assetHelperSummaryBenchmark {
           border-top: 3px solid #94a3b8;
         }
-        .topPickSummaryTitle {
+        .assetHelperSummaryTitle {
           display: flex;
           align-items: center;
           gap: 7px;
@@ -606,26 +606,26 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .topPickSummaryLine {
+        .assetHelperSummaryLine {
           width: 18px;
           height: 3px;
           flex: 0 0 auto;
           border-radius: 2px;
           background: #2563eb;
         }
-        .topPickSummaryBenchmark .topPickSummaryLine {
+        .assetHelperSummaryBenchmark .assetHelperSummaryLine {
           background: #94a3b8;
         }
-        .topPickSummaryMetrics {
+        .assetHelperSummaryMetrics {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 4px 12px;
         }
-        .topPickBacktestPerformancePanel {
+        .assetHelperBacktestPerformancePanel {
           min-width: 0;
           width: 100%;
         }
-        .topPickWeightChartWrap {
+        .assetHelperWeightChartWrap {
           display: flex;
           flex-direction: column;
           flex: 1;
@@ -633,22 +633,22 @@ export function TopPickBacktestResult({ result }: { result: LabResult }) {
           min-height: 380px;
           width: 100%;
         }
-        .topPickWeightChartCanvas {
+        .assetHelperWeightChartCanvas {
           flex: 1;
           min-height: 320px;
           min-width: 0;
         }
-        .topPickPreviewGrid {
+        .assetHelperPreviewGrid {
           height: auto !important;
         }
-        .topPickPreviewGrid .appAgGridTheme {
+        .assetHelperPreviewGrid .appAgGridTheme {
           height: auto;
         }
         @media (max-width: 900px) {
-          .topPickBacktestTopLayout {
+          .assetHelperBacktestTopLayout {
             grid-template-columns: minmax(0, 1fr);
           }
-          .topPickSummaryCompare {
+          .assetHelperSummaryCompare {
             grid-template-columns: minmax(0, 1fr);
           }
         }

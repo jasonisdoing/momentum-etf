@@ -9,16 +9,16 @@ from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 from utils.asset_helper_service import (
-    load_top_pick_settings_for_edit,
-    run_top_pick_backtest,
-    run_top_pick_weights,
-    save_top_pick_settings,
+    load_asset_helper_settings_for_edit,
+    run_asset_helper_backtest,
+    run_asset_helper_weights,
+    save_asset_helper_settings,
 )
 
-router = APIRouter(prefix="/internal/top-pick", tags=["top-pick"])
+router = APIRouter(prefix="/internal/asset-helper", tags=["asset-helper"])
 
 
-class TopPickSettingsPayload(BaseModel):
+class AssetHelperSettingsPayload(BaseModel):
     tickers: list[dict[str, Any]]
     settings: dict[str, Any] | None = None
     backtest_settings: dict[str, Any] | None = None
@@ -28,12 +28,12 @@ class TopPickSettingsPayload(BaseModel):
 
 @router.get("/settings")
 def get_settings(account_id: str = Query(...), _: None = Depends(require_internal_token)) -> dict[str, Any]:
-    return load_top_pick_settings_for_edit(account_id)
+    return load_asset_helper_settings_for_edit(account_id)
 
 
 @router.put("/settings")
-def put_settings(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
-    return save_top_pick_settings(
+def put_settings(payload: AssetHelperSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
+    return save_asset_helper_settings(
         payload.tickers,
         payload.weight_mode,
         payload.settings,
@@ -43,8 +43,8 @@ def put_settings(payload: TopPickSettingsPayload, _: None = Depends(require_inte
 
 
 @router.post("/run")
-def post_run(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
-    return run_top_pick_weights(
+def post_run(payload: AssetHelperSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
+    return run_asset_helper_weights(
         payload.tickers,
         payload.settings,
         payload.backtest_settings,
@@ -53,8 +53,8 @@ def post_run(payload: TopPickSettingsPayload, _: None = Depends(require_internal
 
 
 @router.post("/backtest")
-def post_backtest(payload: TopPickSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
-    return run_top_pick_backtest(
+def post_backtest(payload: AssetHelperSettingsPayload, _: None = Depends(require_internal_token)) -> dict[str, Any]:
+    return run_asset_helper_backtest(
         payload.tickers,
         payload.settings,
         payload.backtest_settings,
