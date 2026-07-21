@@ -18,6 +18,7 @@ type AlarmAccount = {
 type AlarmView = {
   ma_days_options: number[];
   stoploss_pct_options: number[];
+  ma_type: string;
   accounts: AlarmAccount[];
   error?: string;
 };
@@ -119,7 +120,7 @@ export function AlarmsClient() {
           onChange={(e) => void saveAccount(a.account_id, alarm_type, enabled, Number(e.target.value))}
         >
           {options.map((o) => (
-            <option key={o} value={o}>{alarm_type === "ma20" ? `SMA ${o}일` : `${o}%`}</option>
+            <option key={o} value={o}>{alarm_type === "ma20" ? `${view?.ma_type ?? ""} ${o}일` : `${o}%`}</option>
           ))}
         </select>
       </div>

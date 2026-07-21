@@ -41,21 +41,21 @@ const leverageTuneGridTheme = createAppGridTheme();
 type Market = "kor" | "us";
 type AssetRef = { ticker: string; name?: string };
 
-type SmaConfig = {
-  strategy: "sma_cross";
+type MaConfig = {
+  strategy: "ma_cross";
   market: Market;
   index: AssetRef;
   leverage: AssetRef;
   defense: AssetRef;
-  sma_days: number;
+  ma_days: number;
   peak_drawdown_pct: number;
   slippage: number;
   slack_enabled?: boolean;
   tuning?: {
     months: number;
-    sma_min: number;
-    sma_max: number;
-    sma_step: number;
+    ma_min: number;
+    ma_max: number;
+    ma_step: number;
     peak_min: number;
     peak_max: number;
     peak_step: number;
@@ -63,7 +63,7 @@ type SmaConfig = {
 };
 
 type TuneRow = {
-  sma_days: number;
+  ma_days: number;
   peak_drawdown_pct: number;
   cumulative_pct: number;
   cagr_pct: number | null;
@@ -91,7 +91,7 @@ type TuneBenchmarkRow = {
 type LeverageTuneGridRow = {
   label?: string;
   isBenchmark?: boolean;
-  sma_days?: number;
+  ma_days?: number;
   peak_drawdown_pct?: number;
   cumulative_pct: number;
   cagr_pct: number | null;
@@ -102,19 +102,20 @@ type LeverageTuneGridRow = {
   leverage_days?: number;
 };
 
-type SmaView = {
+type MaView = {
   market: Market;
-  sma_days: number;
+  ma_days: number;
+  ma_type: string;
   peak_drawdown_pct: number;
   slippage: number;
   judgment: {
     as_of: string;
     index_close: number;
-    sma: number;
+    ma: number;
     gap_pct: number;
     peak_drawdown_pct: number;
     peak_drawdown_limit_pct: number;
-    sma_threshold_close: number;
+    ma_threshold_close: number;
     peak_threshold_close: number;
     required_index_close: number;
     want_leverage: boolean;
@@ -133,7 +134,7 @@ type SmaView = {
 
 type TuneResult = {
   months: number;
-  sma_range: { min: number; max: number; step: number };
+  ma_range: { min: number; max: number; step: number };
   peak_drawdown_range: { min: number; max: number; step: number };
   benchmarks?: TuneBenchmarkRow[];
   rows: TuneRow[];
@@ -148,14 +149,14 @@ const FIXED_INDEX: Record<Market, AssetRef> = {
   us: { ticker: "^NDX", name: "나스닥 100" },
 };
 
-function blankConfig(market: Market): SmaConfig {
+function blankConfig(market: Market): MaConfig {
   return {
-    strategy: "sma_cross",
+    strategy: "ma_cross",
     market,
     index: FIXED_INDEX[market],
     leverage: { ticker: "", name: "" },
     defense: { ticker: "CASH", name: "현금" },
-    sma_days: 120,
+    ma_days: 120,
     peak_drawdown_pct: 7,
     slippage: 0.1,
   };
@@ -201,9 +202,9 @@ function buildNumberRange(min: number, max: number, step: number, decimals = 0):
 export function LeverageSettingsClient() {
   const toast = useToast();
   const [market, setMarket] = useState<Market>("kor");
-  const [config, setConfig] = useState<SmaConfig | null>(null);
+  const [config, setConfig] = useState<MaConfig | null>(null);
   const [configMissing, setConfigMissing] = useState(false);
-  const [view, setView] = useState<SmaView | null>(null);
+  const [view, setView] = useState<MaView | null>(null);
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [loadingView, setLoadingView] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -224,16 +225,16 @@ export function LeverageSettingsClient() {
   // 슬랙 알람: 우선 UI 토글만(백엔드 연결 없음).
   const [slackEnabled, setSlackEnabled] = useState(false);
 
-  const profile = `sma_cross_${market}`;
-  const smaOptions = useMemo(() => buildNumberRange(tuneMin, tuneMax, tuneStep), [tuneMin, tuneMax, tuneStep]);
+  const profile = `ma_cross_${market}`;
+  const maOptions = useMemo(() => buildNumberRange(tuneMin, tuneMax, tuneStep), [tuneMin, tuneMax, tuneStep]);
   const peakDrawdownOptions = useMemo(() => buildNumberRange(peakMin, peakMax, peakStep, 1), [peakMin, peakMax, peakStep]);
 
   const loadConfig = useCallback(async (m: Market) => {
     setLoadingConfig(true);
     setConfigMissing(false);
     try {
-      const resp = await fetch(`/api/leverage-config?profile=sma_cross_${m}`, { cache: "no-store" });
-      const payload = (await resp.json()) as { config?: Partial<SmaConfig>; error?: string };
+      const resp = await fetch(`/api/leverage-config?profile=ma_cross_${m}`, { cache: "no-store" });
+      const payload = (await resp.json()) as { config?: Partial<MaConfig>; error?: string };
       if (!resp.ok || payload.error || !payload.config?.index) {
         // 아직 설정이 없는 시장 — 빈 폼으로 새로 작성 (임의 계산 기본값 아님, 사용자 입력 대기)
         setConfig(blankConfig(m));
@@ -243,29 +244,29 @@ export function LeverageSettingsClient() {
       const c = payload.config;
       const tuning = c.tuning;
       setConfig({
-        strategy: "sma_cross",
+        strategy: "ma_cross",
         market: m,
         index: FIXED_INDEX[m],
         leverage: c.leverage ?? { ticker: "", name: "" },
         defense: c.defense ?? { ticker: "CASH", name: "현금" },
-        sma_days: c.sma_days ?? 120,
+        ma_days: c.ma_days ?? 120,
         peak_drawdown_pct: Number(c.peak_drawdown_pct ?? tuning?.peak_min ?? 7),
         slippage: c.slippage ?? 0.1,
         slack_enabled: Boolean(c.slack_enabled),
         tuning: tuning && typeof tuning === "object" ? {
           months: Number(tuning.months),
-          sma_min: Number(tuning.sma_min),
-          sma_max: Number(tuning.sma_max),
-          sma_step: Number(tuning.sma_step),
+          ma_min: Number(tuning.ma_min),
+          ma_max: Number(tuning.ma_max),
+          ma_step: Number(tuning.ma_step),
           peak_min: Number(tuning.peak_min ?? 1),
           peak_max: Number(tuning.peak_max ?? 10),
           peak_step: Number(tuning.peak_step ?? 1),
         } : undefined,
       });
       setTuneMonths(Number(tuning?.months ?? 36));
-      setTuneMin(Number(tuning?.sma_min ?? 20));
-      setTuneMax(Number(tuning?.sma_max ?? 120));
-      setTuneStep(Number(tuning?.sma_step ?? 10));
+      setTuneMin(Number(tuning?.ma_min ?? 20));
+      setTuneMax(Number(tuning?.ma_max ?? 120));
+      setTuneStep(Number(tuning?.ma_step ?? 10));
       setPeakMin(Number(tuning?.peak_min ?? 1));
       setPeakMax(Number(tuning?.peak_max ?? 10));
       setPeakStep(Number(tuning?.peak_step ?? 1));
@@ -281,8 +282,8 @@ export function LeverageSettingsClient() {
   const loadView = useCallback(async (m: Market) => {
     setLoadingView(true);
     try {
-      const resp = await fetch(`/api/leverage-sma?market=${m}`, { cache: "no-store" });
-      const payload = (await resp.json()) as SmaView;
+      const resp = await fetch(`/api/leverage-ma?market=${m}`, { cache: "no-store" });
+      const payload = (await resp.json()) as MaView;
       if (!resp.ok || payload.error) {
         setView(null);
         return;
@@ -316,8 +317,8 @@ export function LeverageSettingsClient() {
       setTuneProgress((prev) => (prev ? { ...prev, percent: Math.min(90, prev.percent + 7), message: "이동선별 백테스트 계산 중" } : prev));
     }, 400);
     try {
-      const qs = `market=${market}&months=${tuneMonths}&sma_min=${tuneMin}&sma_max=${tuneMax}&sma_step=${tuneStep}&peak_min=${peakMin}&peak_max=${peakMax}&peak_step=${peakStep}`;
-      const resp = await fetch(`/api/leverage-sma/tune?${qs}`, { cache: "no-store" });
+      const qs = `market=${market}&months=${tuneMonths}&ma_min=${tuneMin}&ma_max=${tuneMax}&ma_step=${tuneStep}&peak_min=${peakMin}&peak_max=${peakMax}&peak_step=${peakStep}`;
+      const resp = await fetch(`/api/leverage-ma/tune?${qs}`, { cache: "no-store" });
       const payload = (await resp.json()) as TuneResult;
       if (!resp.ok || payload.error) throw new Error(payload.error ?? "이동선 튜닝에 실패했습니다.");
       setTuneProgress({ percent: 100, message: "결과 반영 중" });
@@ -387,7 +388,7 @@ export function LeverageSettingsClient() {
       toast.error("방어 티커(또는 현금)를 확인하세요.");
       return;
     }
-    if (!smaOptions.includes(config.sma_days)) {
+    if (!maOptions.includes(config.ma_days)) {
       toast.error("이동선은 튜닝 설정의 이동선 범위 안에서 선택하세요.");
       return;
     }
@@ -401,14 +402,14 @@ export function LeverageSettingsClient() {
     }
     setSaving(true);
     try {
-      const configToSave: SmaConfig = {
+      const configToSave: MaConfig = {
         ...config,
         slack_enabled: slackEnabled,
         tuning: {
           months: tuneMonths,
-          sma_min: tuneMin,
-          sma_max: tuneMax,
-          sma_step: tuneStep,
+          ma_min: tuneMin,
+          ma_max: tuneMax,
+          ma_step: tuneStep,
           peak_min: peakMin,
           peak_max: peakMax,
           peak_step: peakStep,
@@ -441,7 +442,7 @@ export function LeverageSettingsClient() {
       return;
     }
     try {
-      const configToSave: SmaConfig = { ...config, slack_enabled: enabled };
+      const configToSave: MaConfig = { ...config, slack_enabled: enabled };
       const resp = await fetch(`/api/leverage-config?profile=${profile}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -462,7 +463,7 @@ export function LeverageSettingsClient() {
   const sendSlackManual = async () => {
     setSlackSending(true);
     try {
-      const resp = await fetch(`/api/leverage-sma/slack-test?market=${market}`, { method: "POST" });
+      const resp = await fetch(`/api/leverage-ma/slack-test?market=${market}`, { method: "POST" });
       const payload = (await resp.json()) as { sent?: boolean; error?: string };
       if (!resp.ok || payload.error) throw new Error(payload.error ?? "슬랙 발송에 실패했습니다.");
       if (payload.sent) toast.success(`${MARKET_LABEL[market]} 슬랙 수동 발송 완료`);
@@ -475,7 +476,7 @@ export function LeverageSettingsClient() {
   };
 
   const columnDefs = useMemo<ColDef<LeverageTuneGridRow>[]>(() => [
-    { headerName: "이동선", field: "sma_days", width: 120, valueGetter: (p) => p.data?.label ?? p.data?.sma_days },
+    { headerName: "이동선", field: "ma_days", width: 120, valueGetter: (p) => p.data?.label ?? p.data?.ma_days },
     { headerName: "고점대비", field: "peak_drawdown_pct", width: 100, valueFormatter: (p) => fmtWholePct(p.value) },
     { headerName: "누적수익", field: "cumulative_pct", width: 104, valueFormatter: (p) => fmtPct(p.value) },
     { headerName: "CAGR", field: "cagr_pct", width: 150, sort: "desc", sortIndex: 1, valueFormatter: (p) => fmtPct(p.value) },
@@ -619,9 +620,9 @@ export function LeverageSettingsClient() {
                     {assetRow("defense", "방어", true)}
                     <div style={compactRowStyle}>
                       <span style={compactLabelStyle}>이동선</span>
-                      <select style={{ ...inputStyle, width: 96 }} value={config.sma_days} onChange={(e) => setConfig((c) => c && { ...c, sma_days: Number(e.target.value) })}>
-                        {!smaOptions.includes(config.sma_days) && <option value={config.sma_days}>SMA {config.sma_days}일</option>}
-                        {smaOptions.map((n) => <option key={n} value={n}>SMA {n}일</option>)}
+                      <select style={{ ...inputStyle, width: 96 }} value={config.ma_days} onChange={(e) => setConfig((c) => c && { ...c, ma_days: Number(e.target.value) })}>
+                        {!maOptions.includes(config.ma_days) && <option value={config.ma_days}>{view?.ma_type ?? ""} {config.ma_days}일</option>}
+                        {maOptions.map((n) => <option key={n} value={n}>{view?.ma_type ?? ""} {n}일</option>)}
                       </select>
                       <span style={{ ...compactLabelStyle, width: "auto", marginLeft: 14 }}>고점대비</span>
                       <select
@@ -731,7 +732,7 @@ export function LeverageSettingsClient() {
                       <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>· {rec.target_name}({rec.target_ticker})</span>
                     </div>
                     <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginBottom: 10 }}>
-                      기준일 {view.judgment.as_of} · SMA {view.sma_days}일 / 고점대비 한도 {view.judgment.peak_drawdown_limit_pct.toFixed(0)}%
+                      기준일 {view.judgment.as_of} · {view.ma_type} {view.ma_days}일 / 고점대비 한도 {view.judgment.peak_drawdown_limit_pct.toFixed(0)}%
                     </div>
                     {(() => {
                       const j = view.judgment;
@@ -759,17 +760,17 @@ export function LeverageSettingsClient() {
                       const j = view.judgment;
                       const gapOk = j.gap_pct >= 0;
                       const pctToTarget = (target: number) => ((target / j.index_close) - 1) * 100;
-                      const smaRecoveryPct = pctToTarget(j.sma_threshold_close);
+                      const maRecoveryPct = pctToTarget(j.ma_threshold_close);
                       const peakRecoveryPct = pctToTarget(j.peak_threshold_close);
                       const gapMargin = gapOk
-                        ? `${view.sma_days}일 이동평균선 아래로 ${fmtPct(smaRecoveryPct)} 하락하기 전까지 레버리지 보유`
-                        : `${view.sma_days}일 이동평균선 위로 ${fmtPct(smaRecoveryPct)} 회복 필요`;
+                        ? `${view.ma_days}일 이동평균선 아래로 ${fmtPct(maRecoveryPct)} 하락하기 전까지 레버리지 보유`
+                        : `${view.ma_days}일 이동평균선 위로 ${fmtPct(maRecoveryPct)} 회복 필요`;
                       const peakOk = j.peak_drawdown_pct >= -j.peak_drawdown_limit_pct;
                       const peakMargin = peakOk
                         ? `전고점 대비 -${j.peak_drawdown_limit_pct.toFixed(0)}% 아래로 ${fmtPct(peakRecoveryPct)} 하락하기 전까지 레버리지 보유`
                         : `전고점 대비 -${j.peak_drawdown_limit_pct.toFixed(0)}% 이내로 ${fmtPct(peakRecoveryPct)} 회복 필요`;
                       const rows = [
-                        { name: `이격 (${view.sma_days}일 이동평균선)`, needValue: smaRecoveryPct, need: fmtPct(smaRecoveryPct), base: `${view.sma_days}일 이평선`, ok: gapOk, margin: gapMargin },
+                        { name: `이격 (${view.ma_days}일 이동평균선)`, needValue: maRecoveryPct, need: fmtPct(maRecoveryPct), base: `${view.ma_days}일 이평선`, ok: gapOk, margin: gapMargin },
                         { name: "고점대비", needValue: peakRecoveryPct, need: fmtPct(peakRecoveryPct), base: `≥ -${j.peak_drawdown_limit_pct.toFixed(0)}%`, ok: peakOk, margin: peakMargin },
                       ];
                       const signedColor = (value: number) => (value > 0 ? "#dc2626" : value < 0 ? "#2563eb" : "var(--text-primary)");
@@ -851,7 +852,7 @@ export function LeverageSettingsClient() {
               {tuneError ? <div className="alert alert-warning py-2" style={{ fontSize: "0.85rem" }}>{tuneError}</div> : null}
               {tuneResult && !tuneError ? (
                 <div style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 6 }}>
-                  최근 {tuneResult.months}개월 · 이동선 {tuneResult.sma_range.min}~{tuneResult.sma_range.max} (step {tuneResult.sma_range.step})
+                  최근 {tuneResult.months}개월 · 이동선 {tuneResult.ma_range.min}~{tuneResult.ma_range.max} (step {tuneResult.ma_range.step})
                   {" · "}고점대비 {tuneResult.peak_drawdown_range.min}~{tuneResult.peak_drawdown_range.max}% (step {tuneResult.peak_drawdown_range.step}) · 후보 {tuneResult.rows.length}개
                 </div>
               ) : null}
@@ -864,17 +865,17 @@ export function LeverageSettingsClient() {
                 height="100%"
                 getRowClass={(p) => {
                   if (p.data?.isBenchmark) return "appBenchmarkRow";
-                  const currentSmaDays = config?.sma_days ?? view?.sma_days;
+                  const currentSmaDays = config?.ma_days ?? view?.ma_days;
                   const currentPeakDrawdownPct = config?.peak_drawdown_pct ?? view?.peak_drawdown_pct;
                   return p.data &&
-                    p.data.sma_days === currentSmaDays &&
+                    p.data.ma_days === currentSmaDays &&
                     currentPeakDrawdownPct != null &&
                     p.data.peak_drawdown_pct != null &&
                     Math.abs(p.data.peak_drawdown_pct - currentPeakDrawdownPct) < 0.0001
                     ? "appHeldRow"
                     : "";
                 }}
-                getRowId={(p) => (p.data.isBenchmark ? `bm:${p.data.label}` : `${p.data.sma_days}:${p.data.peak_drawdown_pct}`)}
+                getRowId={(p) => (p.data.isBenchmark ? `bm:${p.data.label}` : `${p.data.ma_days}:${p.data.peak_drawdown_pct}`)}
                 gridOptions={{ overlayNoRowsTemplate: "기간·범위를 정하고 '튜닝' 버튼을 누르세요." }}
               />
             </div>

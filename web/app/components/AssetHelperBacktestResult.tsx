@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 import { ColorType, LineSeries, createChart, createSeriesMarkers } from "lightweight-charts";
 import type { Time } from "lightweight-charts";
@@ -38,7 +38,6 @@ export type LabPosition = LabTicker & {
 
 type AssetHelperWeightHistoryRow = { date: string; [key: string]: string | number };
 type AssetHelperWeightItem = { key: string; label: string; bucket?: number };
-type AssetHelperWeightHoverDetail = { date: string; items: Array<AssetHelperWeightItem & { weight: number; color: string }> };
 
 export type LabResult = {
   months: number;
@@ -186,14 +185,47 @@ function LabChart({ result }: { result: LabResult }) {
   return <div ref={containerRef} style={{ width: "100%", height: 320 }} />;
 }
 
+// 막대 위에 커서를 따라다니는 작은 툴팁 — 날짜 + 종목별 비중(%). 왼쪽 패널을 덮지 않는다.
+function AssetHelperWeightTooltip({
+  active,
+  label,
+  payload,
+}: {
+  active?: boolean;
+  label?: string | number;
+  payload?: Array<{ dataKey?: string | number; name?: string; value?: number | string; color?: string; fill?: string }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((sum, entry) => sum + Number(entry.value ?? 0), 0);
+  const rows = payload
+    .map((entry) => ({
+      key: String(entry.dataKey ?? entry.name ?? ""),
+      label: String(entry.name ?? ""),
+      color: entry.color ?? entry.fill ?? "#94a3b8",
+      weight: total > 0 ? (Number(entry.value ?? 0) / total) * 100 : 0,
+    }))
+    .filter((entry) => entry.weight > 0)
+    .reverse(); // 시각적 스택(위→아래) 순서로 표시
+  if (!rows.length) return null;
+  return (
+    <div className="assetHelperWeightTip">
+      <div className="assetHelperWeightTipDate">{String(label ?? "")}</div>
+      {rows.map((row) => (
+        <div key={row.key} className="assetHelperWeightTipRow">
+          <span style={{ color: row.color }}>{row.label}</span>
+          <strong>{row.weight.toFixed(1)}%</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AssetHelperWeightHistoryChart({
   rows,
   items,
-  onHoverChange,
 }: {
   rows: AssetHelperWeightHistoryRow[];
   items: AssetHelperWeightItem[];
-  onHoverChange: (detail: AssetHelperWeightHoverDetail | null) => void;
 }) {
   if (!rows.length || !items.length) {
     return <div style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>비중 이력이 없습니다.</div>;
@@ -204,36 +236,21 @@ function AssetHelperWeightHistoryChart({
     const bBucket = b.key === "__CASH__" ? 5 : b.bucket ?? 0;
     return bBucket - aBucket;
   });
-  const showWeightsForDate = (date: string) => {
-    const activeRow = rows.find((row) => String(row.date) === date);
-    if (!activeRow) return;
-    const total = items.reduce((sum, item) => sum + Number(activeRow[item.key] ?? 0), 0);
-    const hoverItems = items
-      .map((item) => ({
-        ...item,
-        weight: total > 0 ? (Number(activeRow[item.key] ?? 0) / total) * 100 : 0,
-        color: getAssetHelperWeightColor(items, item.key),
-      }))
-      .filter((item) => item.weight > 0);
-    onHoverChange({ date, items: hoverItems });
-  };
 
   return (
     <div className="assetHelperWeightChartWrap">
       <div className="assetHelperWeightChartCanvas">
         <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={320}>
-          <BarChart
-            data={rows}
-            margin={{ top: 10, right: 12, bottom: 6, left: 0 }}
-            onMouseMove={(state) => {
-              if (state?.activeLabel != null) showWeightsForDate(String(state.activeLabel));
-            }}
-            onMouseLeave={() => onHoverChange(null)}
-          >
+          <BarChart data={rows} margin={{ top: 10, right: 12, bottom: 6, left: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="date" tickFormatter={formatMonthAxisLabel} minTickGap={18} tick={{ fontSize: 12 }} />
             <YAxis tickFormatter={(value) => formatCompactKrw(Number(value))} width={52} tick={{ fontSize: 12 }} />
-            <Tooltip content={() => null} />
+            <Tooltip
+              content={<AssetHelperWeightTooltip />}
+              cursor={{ fill: "rgba(148, 163, 184, 0.18)" }}
+              allowEscapeViewBox={{ x: false, y: false }}
+              wrapperStyle={{ zIndex: 10, outline: "none" }}
+            />
             {sortedItems.map((item, index) => (
               <Bar
                 key={item.key}
@@ -252,8 +269,6 @@ function AssetHelperWeightHistoryChart({
 }
 
 export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
-  const [weightHoverDetail, setWeightHoverDetail] = useState<AssetHelperWeightHoverDetail | null>(null);
-
   const columns = useMemo<ColDef<LabPosition>[]>(
     () => [
       {
@@ -430,20 +445,6 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
     <div className="assetHelperBacktestResultLayout">
       <div className="assetHelperBacktestTopLayout">
         <div className="assetHelperBacktestResultPanel">
-          {weightHoverDetail ? (
-            <div className="assetHelperWeightHoverOverlay">
-              <div className="assetHelperWeightHoverDate">{weightHoverDetail.date}</div>
-              <div className="assetHelperWeightHoverTitle">종목별 비중</div>
-              <div className="assetHelperWeightHoverRows">
-                {weightHoverDetail.items.map((item) => (
-                  <div key={item.key} className="assetHelperWeightHoverRow">
-                    <span style={{ color: item.color }}>{item.label}</span>
-                    <strong>{item.weight.toFixed(1)}%</strong>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
           <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 4 }}>백테스트 결과</h3>
           <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 4 }}>
             {result.buy_date} ~ {result.end_date} ({result.months}개월)
@@ -490,7 +491,6 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
           <AssetHelperWeightHistoryChart
             rows={result.weight_history ?? []}
             items={result.weight_items ?? []}
-            onHoverChange={setWeightHoverDetail}
           />
         </div>
       </div>
@@ -528,50 +528,37 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
           flex-direction: column;
           min-width: 0;
         }
-        .assetHelperWeightHoverOverlay {
-          position: absolute;
-          inset: 0;
-          z-index: 5;
-          display: flex;
-          flex-direction: column;
-          padding: 18px 20px;
+        .assetHelperWeightTip {
+          min-width: 150px;
+          max-width: 220px;
+          padding: 7px 9px;
           border: 1px solid rgba(148, 163, 184, 0.42);
-          border-radius: 10px;
-          background: rgba(15, 23, 42, 0.96);
-          box-shadow: 0 18px 40px rgba(15, 23, 42, 0.22);
+          border-radius: 8px;
+          background: rgba(15, 23, 42, 0.94);
+          box-shadow: 0 8px 20px rgba(15, 23, 42, 0.28);
           color: #f8fafc;
           pointer-events: none;
         }
-        .assetHelperWeightHoverDate {
-          font-size: 1.05rem;
+        .assetHelperWeightTipDate {
+          margin-bottom: 5px;
+          font-size: 0.8rem;
           font-weight: 900;
         }
-        .assetHelperWeightHoverTitle {
-          margin-top: 3px;
-          color: #94a3b8;
-          font-size: 0.8rem;
-          font-weight: 700;
-        }
-        .assetHelperWeightHoverRows {
-          display: grid;
-          grid-template-columns: minmax(0, 1fr);
-          gap: 6px;
-          margin-top: 12px;
-        }
-        .assetHelperWeightHoverRow {
+        .assetHelperWeightTipRow {
           display: flex;
           justify-content: space-between;
-          gap: 12px;
+          gap: 10px;
           min-width: 0;
-          font-size: 0.86rem;
+          font-size: 0.78rem;
+          line-height: 1.5;
         }
-        .assetHelperWeightHoverRow span {
+        .assetHelperWeightTipRow span {
           overflow: hidden;
-          font-weight: 800;
+          font-weight: 700;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
-        .assetHelperWeightHoverRow strong {
+        .assetHelperWeightTipRow strong {
           flex: 0 0 auto;
           color: #f8fafc;
         }

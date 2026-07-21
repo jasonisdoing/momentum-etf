@@ -29,6 +29,7 @@ def get_market_trend_defaults(
     return {
         "ma_days": config.MARKET_TREND_SCORE_MA_DAYS,
         "score_anchor_percentile": config.MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
+        "ma_type": config.MOVING_AVERAGE_TYPE,
     }
 
 
@@ -36,7 +37,7 @@ def get_market_trend_defaults(
 def get_market_trend(
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    """5개 시장지수의 현재가/추세/레짐 — MA 는 SMA {SHORT_MA_DAYS}일 고정."""
+    """5개 시장지수의 현재가/추세/레짐 — MA 는 이동평균 {SHORT_MA_DAYS}일 고정."""
     return compute_market_trend()
 
 
@@ -47,5 +48,5 @@ def get_market_trend_history(
     ticker: str = Query(..., description="Yahoo Finance 지수 심볼 (예: ^GSPC)"),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    """단일 지수의 가격/추세/레짐 히스토리 — MA 는 SMA {SHORT_MA_DAYS}일 고정."""
+    """단일 지수의 가격/추세/레짐 히스토리 — MA 는 이동평균 {SHORT_MA_DAYS}일 고정."""
     return compute_index_history(ticker)

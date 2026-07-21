@@ -1,7 +1,7 @@
 """보유종목 알람 서비스 (화면·배치 공용).
 
 여러 알람 종류를 한 번에 처리해 **한 건의 슬랙 메시지**로 보낸다.
-- 이동선 이탈: 보유 종가 < SMA(계좌별 이평선 일수)
+- 이동선 이탈: 보유 종가 < 이동평균(계좌별 이평선 일수)
 - 손절: 보유 수익률 <= 계좌별 손절 기준(예: -7%)
 
 설정은 **계좌별**이다(각 계좌 문서):
@@ -20,6 +20,7 @@ from utils.account_settings_store import load_account_docs, save_account_setting
 from utils.data_loader import fetch_ohlcv
 from utils.holdings_detail_service import load_all_holdings_detail
 from utils.logger import get_app_logger
+from utils.moving_averages import calculate_moving_average, get_moving_average_type
 from utils.notification import send_slack_message_v2
 from utils.rankings import build_effective_close_series
 
@@ -79,7 +80,8 @@ def _ma_status(
         close = effective
     if len(close) < ma_days:
         return None
-    sma = float(close.iloc[-ma_days:].mean())
+    # 이동평균 종류는 config(SMA/EMA). 최신 봉의 이동평균 값으로 이탈을 판정한다.
+    sma = float(calculate_moving_average(close, ma_days, min_periods=ma_days).iloc[-1])
     if sma == 0.0:
         return None
     last = float(close.iloc[-1])
@@ -117,7 +119,7 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
                     "return_pct": round(float(ret), 2),
                 })
 
-    # 이동선 이탈: 종가 vs SMA. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
+    # 이동선 이탈: 종가 vs 이동평균. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
     if ma20_on:
         candidates: list[tuple[dict[str, Any], str, str, str]] = []  # (row, fetch_ticker, ticker_type, country)
         by_country: dict[str, list[str]] = {}
@@ -152,6 +154,7 @@ def get_alarm_view() -> dict[str, Any]:
     return {
         "ma_days_options": list(MA_DAYS_OPTIONS),
         "stoploss_pct_options": list(STOPLOSS_PCT_OPTIONS),
+        "ma_type": get_moving_average_type(),
         "accounts": [
             {
                 "account_id": doc["account_id"],
@@ -188,7 +191,7 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
     for s in sections:
         parts: list[str] = [f"*{s['account']}*"]
         if s["ma20"]:
-            parts.append(f"📉 *이동선 이탈* (SMA {s['ma_days']}일)")
+            parts.append(f"📉 *이동선 이탈* ({get_moving_average_type()} {s['ma_days']}일)")
             parts += [f"  • {b['name']}({b['ticker']}): 이격 {b['deviation_pct']:+.2f}%" for b in s["ma20"]]
         if s["stoploss"]:
             parts.append(f"🛑 *손절* ({s['threshold']:.1f}% 이하)")

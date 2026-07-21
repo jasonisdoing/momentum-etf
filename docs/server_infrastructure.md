@@ -86,8 +86,8 @@ momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.s
 
 > **leverage-switching 앱 통합(2026-06)**: 같은 VM 에서 별도 호스트 cron 으로 돌던
 > `leverage-switching`(레버리지 스위칭) 앱은 폐기되었고, 전략이 momentum-etf 의
-> `leverage/` 패키지로 이전되었다. 추천 배치는 momentum-etf 배치 체계의 `leverage_sma_cross`
-> 잡(`scripts/leverage_recommend_sma_cross.py`, 한국+미국 SMA 크로스+고점대비)으로 편입되어 동일한
+> `leverage/` 패키지로 이전되었다. 추천 배치는 momentum-etf 배치 체계의 `leverage_ma_cross`
+> 잡(`scripts/leverage_recommend_ma_cross.py`, 한국+미국 이동평균선 크로스+고점대비)으로 편입되어 동일한
 > crontab·스케줄러·큐로 실행된다. (드로다운 컷 기반 구 스위칭 배치는 폐기됨)
 > leverage-switching VM cron 제거는
 > `bash ~/apps/leverage-switching/infra/cron/install.sh --uninstall`.
@@ -117,7 +117,7 @@ APScheduler 에 등록한다.
 
 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱할 때의 비자명한 동작:
 
-- **무인자 스크립트만 실행**: `python <script.py>` 형태만 파싱하며 `-m`/추가 인자는 인식하지 못한다. 인자가 필요한 진입점은 무인자 **래퍼 스크립트**로 감싼다(예: `scripts/leverage_recommend_sma_cross.py`).
+- **무인자 스크립트만 실행**: `python <script.py>` 형태만 파싱하며 `-m`/추가 인자는 인식하지 못한다. 인자가 필요한 진입점은 무인자 **래퍼 스크립트**로 감싼다(예: `scripts/leverage_recommend_ma_cross.py`).
 - **주석 cron 라인도 활성으로 파싱**: 주석(`#`) 처리된 잡 라인도 등록될 수 있으므로, 잡 비활성화는 주석이 아니라 **라인 삭제**로 한다.
 - 배치 코드/스크립트는 Docker 이미지에 포함되므로 변경 시 **재배포** 필요. `crontab`/`run_batch` 는 `./infra/cron` 마운트로 즉시 반영.
 

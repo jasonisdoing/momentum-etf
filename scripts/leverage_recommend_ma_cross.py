@@ -1,4 +1,4 @@
-"""leverage SMA 크로스 추천 배치 (무인자 래퍼).
+"""leverage 이동평균선 크로스 추천 배치 (무인자 래퍼).
 
 server_scheduler/run_batch 는 `python <script.py>` 형태(무인자)로만 실행하므로,
 한국·미국 두 시장의 추천 상태를 확정 저장하고(장 마감 직후 슬랙 알림 켜져 있으면 발송) 얇게 감싼다.
@@ -12,15 +12,15 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from leverage.config_store import sma_cross_profile  # noqa: E402
-from utils.leverage_sma_service import persist_sma_cross_state  # noqa: E402
+from leverage.config_store import ma_cross_profile  # noqa: E402
+from utils.leverage_ma_service import persist_ma_cross_state  # noqa: E402
 
 
 def main() -> None:
     for market in ("kor", "us"):
-        profile = sma_cross_profile(market)
+        profile = ma_cross_profile(market)
         try:
-            result = persist_sma_cross_state(profile)
+            result = persist_ma_cross_state(profile)
             print(
                 f"[{profile}] status={result.get('market_status')} "
                 f"saved={result.get('state_saved')} slack_sent={result.get('slack_sent')}"

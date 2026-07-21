@@ -27,6 +27,14 @@ def get_system_data(_: None = Depends(require_internal_token)) -> dict[str, obje
     return load_system_data()
 
 
+@router.get("/config")
+def get_system_config(_: None = Depends(require_internal_token)) -> dict[str, object]:
+    """화면 표시용 전역 설정(config.py 단일 소스). 현재는 이동평균 종류(SMA/EMA)."""
+    import config
+
+    return {"ma_type": config.MOVING_AVERAGE_TYPE}
+
+
 @router.post("")
 def post_system_action(payload: SystemActionRequest, _: None = Depends(require_internal_token)) -> dict[str, str]:
     try:

@@ -20,7 +20,7 @@ from utils.cache_utils import (
 )
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
-from utils.moving_averages import calculate_moving_average
+from utils.moving_averages import calculate_moving_average, get_moving_average_type
 from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS, get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
@@ -68,6 +68,7 @@ def _normalize_ma_rule(ticker_type: str, ma_rule_raw: Any) -> dict[str, Any]:
         "long_ma_days": long_days,
         "slope_days": slope_days,
         "score_column": _build_ma_rule_score_column(),
+        "ma_type": get_moving_average_type(),
     }
 
 

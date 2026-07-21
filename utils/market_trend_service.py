@@ -23,6 +23,7 @@ from config import (
     MARKET_TREND_SUPERTREND_PERIOD,
     TRADING_DAYS_PER_MONTH,
 )
+from utils.moving_averages import calculate_moving_average
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ def _to_float(value: Any) -> float | None:
 def compute_market_trend() -> dict[str, Any]:
     """5개 시장지수의 현재가/변동률/MA 추세%(현재 + 과거 3시점) 를 계산해 반환한다.
 
-    MA는 SMA MARKET_TREND_SCORE_MA_DAYS(20)일 고정. 레짐은 SuperTrend 방향(상승/하락)이다.
+    MA는 이동평균 MARKET_TREND_SCORE_MA_DAYS(20)일 고정. 레짐은 SuperTrend 방향(상승/하락)이다.
 
     Returns:
         ``{"ma_days", "items": [{
@@ -281,8 +282,8 @@ def _build_item(
     base["price"] = latest_price
     base["change_pct"] = change_pct
 
-    # 추세 점수는 추세점수용 SMA20(MARKET_TREND_SCORE_MA_DAYS) 기준 괴리율을 쓴다.
-    ma_series = close_series.rolling(ma_days).mean()
+    # 추세 점수는 추세점수용 MA20(MARKET_TREND_SCORE_MA_DAYS) 기준 괴리율을 쓴다(종류는 config).
+    ma_series = calculate_moving_average(close_series, ma_days, min_periods=ma_days)
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
 
@@ -574,7 +575,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
     if len(close_series) < 2:
         return empty_payload
 
-    ma_short_series = close_series.rolling(ma_short_days).mean()
+    ma_short_series = calculate_moving_average(close_series, ma_short_days, min_periods=ma_short_days)
 
     try:
         st_period, st_multiplier = _resolve_supertrend_params(yf_ticker)
