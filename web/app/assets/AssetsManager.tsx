@@ -13,6 +13,7 @@ import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { reorderHoldings } from "@/lib/holdings-store";
 
 type HoldingsRow = {
   account_id: string;
@@ -871,24 +872,7 @@ function AccountHoldingsDetailPanel({
     const orderedTickers = orderedRows
       .map((row) => String(row.ticker || "").trim().toUpperCase())
       .filter((ticker) => ticker && ticker !== "IS" && ticker !== CASH_ROW_TICKER);
-
-    if (!orderedTickers.length) {
-      return;
-    }
-
-    const response = await fetch("/api/assets", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        action: "reorder",
-        account_id: summary.account_id,
-        ordered_tickers: orderedTickers,
-      }),
-    });
-    const payload = await response.json();
-    if (!response.ok) {
-      throw new Error(payload.error || "순서 저장에 실패했습니다.");
-    }
+    await reorderHoldings(summary.account_id, orderedTickers);
   }, [summary.account_id]);
 
   const silentlySaveRow = useCallback(async (rowId: string) => {

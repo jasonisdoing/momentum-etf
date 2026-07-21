@@ -12,6 +12,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
+import { reorderHoldings } from "@/lib/holdings-store";
 
 function getBucketName(bucketId: number | undefined): string {
   return bucketId ? BUCKET_THEME[String(bucketId)]?.name ?? "-" : "-";
@@ -272,6 +273,11 @@ export function AssetHelperClient() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
+  // 드래그 순서 저장(onRowDragEnd)은 gridOptions(deps [])의 클로저에서 실행돼 최신 계좌가 필요하다.
+  const selectedAccountRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedAccountRef.current = selectedAccount;
+  }, [selectedAccount]);
   const [marketTrendItems, setMarketTrendItems] = useState<MarketTrendItem[]>([]);
   const [accountReturns, setAccountReturns] = useState<Record<string, AccountReturns>>({});
   const [memo, setMemo] = useState("");
@@ -636,6 +642,20 @@ export function AssetHelperClient() {
   const columnDefs = useMemo<ColDef<GridRow>[]>(
     () => [
       {
+        colId: "drag",
+        headerName: "",
+        width: 36,
+        maxWidth: 36,
+        pinned: "left",
+        sortable: false,
+        resizable: false,
+        suppressMovable: true,
+        // 현금 고정행·추가행은 드래그 불가. 확정된 종목만 순서 변경.
+        rowDrag: (params) => Boolean(params.data && !params.data.is_adding && params.data.ticker !== CASH_TICKER),
+        cellClass: "assetsDragCell",
+        valueGetter: () => "",
+      },
+      {
         colId: "bucket",
         headerName: "버킷",
         minWidth: 108,
@@ -743,7 +763,40 @@ export function AssetHelperClient() {
       suppressMovableColumns: true,
       stopEditingWhenCellsLoseFocus: true,
       animateRows: true,
-      // 순서는 자산 관리 기준(드래그 없음). 삭제는 여기서도 가능(보유 목록에서 삭제).
+      // 드래그로 종목 순서 변경(/assets 와 동일). 순서의 단일 소스는 holdings 라
+      // 드래그 즉시 holdings sort_order 를 저장한다(안 하면 재조회 시 holdings 순서로 되돌아감).
+      rowDragManaged: true,
+      onRowDragEnd: (params) => {
+        const orderedTickers: string[] = [];
+        params.api.forEachNode((node) => {
+          const row = node.data;
+          if (row && !row.is_adding && row.ticker && row.ticker !== CASH_TICKER) {
+            orderedTickers.push(row.ticker.trim().toUpperCase());
+          }
+        });
+        if (!orderedTickers.length) return;
+        setTickers((current) => {
+          const byTicker = new Map(current.map((item) => [item.ticker.trim().toUpperCase(), item]));
+          const seen = new Set<string>();
+          const reordered: HelperTicker[] = [];
+          for (const key of orderedTickers) {
+            const item = byTicker.get(key);
+            if (item && !seen.has(key)) {
+              seen.add(key);
+              reordered.push(item);
+            }
+          }
+          // 순서 목록에 없는 항목(방어)은 기존 순서로 뒤에 붙인다.
+          const rest = current.filter((item) => !seen.has(item.ticker.trim().toUpperCase()));
+          return [...reordered, ...rest];
+        });
+        const accountId = selectedAccountRef.current;
+        if (accountId) {
+          void reorderHoldings(accountId, orderedTickers).catch((err) =>
+            toast.error(err instanceof Error ? err.message : "순서 저장에 실패했습니다."),
+          );
+        }
+      },
       rowSelection: {
         mode: "multiRow",
         checkboxes: (params) => Boolean(params.data && !params.data.is_adding && params.data.ticker !== CASH_TICKER),
@@ -774,7 +827,7 @@ export function AssetHelperClient() {
         );
       },
     }),
-    [],
+    [toast],
   );
 
   return (
@@ -921,7 +974,9 @@ export function AssetHelperClient() {
               minHeight={Math.max(260, Math.min(gridRows.length, 12) * 44 + 46)}
               gridOptions={gridOptions}
               theme={gridTheme}
-              getRowId={(params) => String(params.data.row_index)}
+              getRowId={(params) =>
+                params.data.is_adding ? "__adding__" : String(params.data.ticker || `row_${params.data.row_index}`)
+              }
             />
           </div>
         </div>
