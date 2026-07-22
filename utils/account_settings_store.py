@@ -23,6 +23,7 @@ DB 가 유일한 소스다. 문서가 없으면 임의 기본값 없이 **명확
 
 from __future__ import annotations
 
+import re
 import threading
 from datetime import datetime, timezone
 from time import monotonic
@@ -338,6 +339,97 @@ def save_account_settings(account_id: str, values: dict[str, Any], save_method: 
 
     # 계좌 메타를 쓰는 파생 캐시 무효화 (registry 는 settings_loader 캐시를 쓰지 않음 — TTL 로 자동 반영)
     return cleaned
+
+
+_ACCOUNT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+# account_type 별 최소 전략 기본값(생성 직후 화면에서 상세 설정).
+_DEFAULT_STRATEGY_BY_TYPE: dict[str, dict[str, Any]] = {
+    "fixed": {"holdings": []},
+    "trend": {"hold_count": 1},
+    "regime": {},
+}
+
+
+def create_account(
+    account_id: str,
+    name: str,
+    account_type: str,
+    *,
+    icon: str = "",
+    order: int = 0,
+    country_code: str = "kor",
+    currency: str = "KRW",
+) -> dict[str, Any]:
+    """새 계좌 문서를 생성한다. account_id(원장 FK)는 사용자 입력이며 중복 불가.
+
+    상세 전략/벤치마크/레짐지수는 생성 후 계좌 설정 화면에서 편집한다(여기선 최소 문서만 만든다).
+    """
+    norm_id = str(account_id or "").strip().lower()
+    if not norm_id or not _ACCOUNT_ID_RE.match(norm_id):
+        raise AccountSettingsStoreError("계좌 ID는 영문 소문자·숫자로 시작하고 소문자·숫자·-·_ 만 쓸 수 있습니다.")
+    name_norm = str(name or "").strip()
+    if not name_norm:
+        raise AccountSettingsStoreError("계좌 이름을 입력하세요.")
+    atype = str(account_type or "").strip().lower()
+    if atype not in _ALLOWED_ACCOUNT_TYPES:
+        raise AccountSettingsStoreError(f"account_type 은 {', '.join(sorted(_ALLOWED_ACCOUNT_TYPES))} 중 하나여야 합니다: {account_type}")
+    ccode = str(country_code or "").strip().lower()
+    if ccode not in _ALLOWED_COUNTRY_CODES:
+        raise AccountSettingsStoreError(f"country_code 는 {', '.join(sorted(_ALLOWED_COUNTRY_CODES))} 중 하나여야 합니다: {country_code}")
+    curr = str(currency or "").strip().upper()
+    if len(curr) != 3:
+        raise AccountSettingsStoreError(f"currency 는 3자리 코드여야 합니다: {currency}")
+    try:
+        order_int = int(order)
+    except (TypeError, ValueError) as exc:
+        raise AccountSettingsStoreError(f"order 는 정수여야 합니다: {order}") from exc
+
+    db = _db()
+    if db[COLLECTION].find_one({"_id": norm_id}) is not None:
+        raise AccountSettingsStoreError(f"이미 존재하는 계좌 ID 입니다: {norm_id}")
+
+    doc = {
+        "_id": norm_id,
+        "name": name_norm,
+        "icon": str(icon or "").strip(),
+        "order": order_int,
+        "account_type": atype,
+        "country_code": ccode,
+        "currency": curr,
+        "strategy": dict(_DEFAULT_STRATEGY_BY_TYPE[atype]),
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": datetime.now(timezone.utc),
+        "save_method": "계좌 추가",
+    }
+    db[COLLECTION].insert_one(doc)
+    invalidate_account_settings_cache()
+    return {"account_id": norm_id, "name": name_norm, "account_type": atype}
+
+
+def _account_holding_count(account_id: str) -> int:
+    """portfolio_master(GLOBAL) 에서 해당 계좌의 보유종목 수(티커가 있는 항목)를 센다."""
+    doc = _db()["portfolio_master"].find_one({"master_id": "GLOBAL"}, {"accounts": 1}) or {}
+    for acc in doc.get("accounts") or []:
+        if str(acc.get("account_id") or "").strip().lower() == account_id:
+            holdings = acc.get("holdings") or []
+            return len([h for h in holdings if str((h or {}).get("ticker") or "").strip()])
+    return 0
+
+
+def delete_account(account_id: str) -> dict[str, Any]:
+    """계좌를 삭제한다. 보유종목이 남아 있으면 차단(원장 데이터 보호)."""
+    norm_id = str(account_id or "").strip().lower()
+    db = _db()
+    if db[COLLECTION].find_one({"_id": norm_id}) is None:
+        raise AccountSettingsStoreError(f"알 수 없는 계좌입니다: {account_id}")
+    holding_count = _account_holding_count(norm_id)
+    if holding_count > 0:
+        raise AccountSettingsStoreError(
+            f"보유종목이 {holding_count}건 있어 삭제할 수 없습니다. 먼저 보유를 비운 뒤 삭제하세요."
+        )
+    db[COLLECTION].delete_one({"_id": norm_id})
+    invalidate_account_settings_cache()
+    return {"account_id": norm_id, "deleted": True}
 
 
 def get_account_settings_updated_at(account_id: str) -> str | None:

@@ -14,6 +14,8 @@ from fastapi_app.dependencies import require_internal_token
 from utils.account_settings_store import (
     EDITABLE_KEYS,
     AccountSettingsStoreError,
+    create_account,
+    delete_account,
     get_account_settings_updated_at,
     load_account_docs,
     save_account_settings,
@@ -26,6 +28,20 @@ router = APIRouter(prefix="/internal/account-settings", tags=["account-settings"
 class AccountSettingsUpdatePayload(BaseModel):
     account_id: str
     values: dict[str, Any]
+
+
+class AccountCreatePayload(BaseModel):
+    account_id: str
+    name: str
+    account_type: str
+    icon: str = ""
+    order: int = 0
+    country_code: str = "kor"
+    currency: str = "KRW"
+
+
+class AccountDeletePayload(BaseModel):
+    account_id: str
 
 
 @router.get("")
@@ -55,3 +71,33 @@ def put_account_settings(
         "saved": saved,
         "updated_at": get_account_settings_updated_at(payload.account_id),
     }
+
+
+@router.post("")
+def post_account(
+    payload: AccountCreatePayload, _: None = Depends(require_internal_token)
+) -> dict[str, object]:
+    try:
+        created = create_account(
+            payload.account_id,
+            payload.name,
+            payload.account_type,
+            icon=payload.icon,
+            order=payload.order,
+            country_code=payload.country_code,
+            currency=payload.currency,
+        )
+    except AccountSettingsStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **created}
+
+
+@router.delete("")
+def delete_account_route(
+    payload: AccountDeletePayload, _: None = Depends(require_internal_token)
+) -> dict[str, object]:
+    try:
+        result = delete_account(payload.account_id)
+    except AccountSettingsStoreError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
