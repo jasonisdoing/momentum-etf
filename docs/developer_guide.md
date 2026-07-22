@@ -108,7 +108,7 @@ python infra/server_scheduler.py
     *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
-    *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
+    *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_reference_meta_updater.py`(배치 B)가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다. 거래량·기간수익률·backtest 등 가격 파생 지표는 `scripts/stock_price_metrics_updater.py`(배치 A)가 담당합니다.
     *   미국 개별주는 네이버 `foreign/market/stock/global`에서 업종, 배당률, 시가총액을 조회해 `stock_meta.etf_category`와 `stock_cache_meta.meta_cache`에 저장합니다. 미국 개별주에는 보수 개념을 적용하지 않습니다.
     *   종목풀에 등록되지 않았더라도 포트폴리오 마스터에서 현재 보유 중인 티커는 계좌 `ticker_types` 기준으로 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
 

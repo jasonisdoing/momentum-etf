@@ -123,7 +123,7 @@ def compute_price_metrics(frame: "pd.DataFrame | None") -> dict[str, Any]:
 
 # -------------------------------------------------------------------------
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
-# `update_stock_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
+# `update_stock_reference_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
 # -------------------------------------------------------------------------
 _BATCH_NAVER_ETF_NAMES_MAP: dict[str, str] | None = None
 
@@ -767,15 +767,6 @@ def _update_price_metrics_for_type(
         logger.error(f"'{type_norm}' 가격 지표 최종 저장 실패: {e}")
 
 
-def update_ticker_type_metadata(
-    ticker_type: str, progress_callback: Callable[[int, int, str], None] | None = None
-):
-    """지정 종목타입의 메타를 갱신한다(식별·상세 + 가격지표 순차). 기존 진입점 호환용 래퍼."""
-    type_norm = (ticker_type or "").strip().lower()
-    _update_reference_meta_for_type(type_norm, progress_callback)
-    _update_price_metrics_for_type(type_norm, progress_callback)
-
-
 def _resolve_ticker_types_to_update(ticker_type: str | None) -> list[str] | None:
     """대상 종목타입 목록을 확정한다. 잘못된 타입이면 None(호출부에서 중단)."""
     logger = get_app_logger()
@@ -822,15 +813,6 @@ def update_stock_price_metrics(ticker_type: str | None = None):
     for type_norm in targets:
         _update_price_metrics_for_type(type_norm)
     logger.info("[배치 A] 가격 지표 업데이트 완료.")
-
-
-def update_stock_metadata(ticker_type: str | None = None):
-    """식별·상세(B) + 가격지표(A)를 순차 실행하는 통합 진입점(기존 호환용).
-
-    분리 배치는 `update_stock_reference_metadata` / `update_stock_price_metrics` 를 각각 쓴다.
-    """
-    update_stock_reference_metadata(ticker_type)
-    update_stock_price_metrics(ticker_type)
 
 
 def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
