@@ -168,6 +168,7 @@ MARKET_TREND_SUPERTREND_PERIOD = 10
 # 값↑=방향 전환이 뜸해져 휩쏘↓(지연 없음) / 값↓=추세 전환에 민감. 지수마다 변동성이 달라 개별 설정.
 # yf_ticker: ^KS11=코스피, ^KS200=코스피200, ^DJI=다우존스, ^GSPC=S&P500, ^NDX=나스닥100, ^SOX=필라델피아 반도체.
 MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
+    "CORE": 1.5,     # 코스피+나스닥100+반도체 등가중 합성 (3개 평균이라 변동성↓ → 곱수 낮게 시작)
     "^KS11": 1.5,    # 코스피 (빠른 대응이 필요)
     "^KS200": 1.5,   # 코스피200 (빠른 대응이 필요)
     "^DJI": 3.0,     # 다우존스

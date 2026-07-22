@@ -11,6 +11,7 @@ MA 계산은 utils.moving_averages 사용.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Any
 
 import pandas as pd
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 # 표시 순서대로 정의. yf_ticker 는 Yahoo Finance 인덱스 심볼.
 # kor_naver_symbol 이 있으면 한국 인덱스로 간주하고 가격은 네이버에서 받는다.
 INDICES: list[dict[str, str]] = [
+    {"name": "코스피+나스닥+반도체", "yf_ticker": "CORE"},  # 합성 지수(등가중). 실제 소스는 아래 CORE_* 참조.
     {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
     {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "다우존스", "yf_ticker": "^DJI"},
@@ -37,6 +39,16 @@ INDICES: list[dict[str, str]] = [
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
     {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
 ]
+
+# 합성 지수 CORE: 아래 3개를 '공통 기준일=100' 으로 리베이스해 등가중 평균한 종가로 만든다.
+# 지수 레벨(코스피 ~2,500 / 나스닥100 ~20,000 / 반도체 ~5,000)이 제각각이라 리베이스 없이는
+# 나스닥100 이 지배하므로, 리베이스 후 평균해 세 시장의 %움직임을 1:1:1 로 반영한다.
+CORE_TICKER = "CORE"
+CORE_COMPONENT_TICKERS: tuple[str, ...] = ("^KS11", "^NDX", "^SOX")
+# 코스피는 미국 지수에 '하루 뒤' 동조하는 경향이 있다. 미국 마감(당일 밤)은 코스피 당일 마감보다
+# 늦으므로, 미국 구성 지수는 **전 거래일 종가**를 코스피 당일에 맞춰 1거래일 시프트한다
+# (예: 코스피 7/22 ↔ 미국 7/21). 룩어헤드(코스피 마감 뒤에 나오는 미국 당일가 사용)도 방지된다.
+CORE_US_LAG_TRADING_DAYS = 1
 
 # 네이버 차트 (legacy XML) — 일봉 OHLCV 조회는 공통 헬퍼(utils/naver_chart.py)를 쓴다.
 
@@ -170,8 +182,12 @@ def compute_market_trend() -> dict[str, Any]:
     """
     ma_days = MARKET_TREND_SCORE_MA_DAYS
 
-    # 미국 인덱스만 yfinance 로 일괄 다운로드 (한국 2개는 네이버 사용).
-    us_tickers = [idx["yf_ticker"] for idx in INDICES if not idx.get("kor_naver_symbol")]
+    # 미국 인덱스만 yfinance 로 일괄 다운로드 (한국 2개는 네이버, 합성 CORE 는 구성 지수로 조립).
+    us_tickers = [
+        idx["yf_ticker"]
+        for idx in INDICES
+        if not idx.get("kor_naver_symbol") and idx["yf_ticker"] != CORE_TICKER
+    ]
     try:
         df = yf.download(
             tickers=us_tickers,
@@ -196,9 +212,21 @@ def compute_market_trend() -> dict[str, Any]:
         if ohlc is not None and not ohlc.empty:
             kor_ohlc_by_ticker[idx["yf_ticker"]] = ohlc
 
+    # 합성 CORE OHLC 는 이미 받아온 구성 지수(코스피=네이버, 나스닥100·반도체=yf 일괄)에서 조립한다.
+    # 미국 구성 지수는 코스피 당일이 미국 전일과 합쳐지도록 하루 시프트한다.
+    core_components = [
+        _lag_core_component(
+            kor_ohlc_by_ticker.get(t) if _index_uses_naver(t) else _extract_bulk_us_ohlc(df, t),
+            t,
+        )
+        for t in CORE_COMPONENT_TICKERS
+    ]
+    core_ohlc = _composite_ohlc(core_components)
+
     items: list[dict[str, Any]] = []
     for idx in INDICES:
-        kor_ohlc = kor_ohlc_by_ticker.get(idx["yf_ticker"])
+        # CORE 는 합성 OHLC 를 '이미 계산된 OHLC' 로 넘겨 일반 지수와 동일 경로로 처리한다.
+        kor_ohlc = core_ohlc if idx["yf_ticker"] == CORE_TICKER else kor_ohlc_by_ticker.get(idx["yf_ticker"])
         item = _build_item(df, idx["yf_ticker"], idx["name"], ma_days, kor_ohlc)
         items.append(item)
 
@@ -224,6 +252,9 @@ def _build_item(
         "trend_pct": None,
         # 12개월 정규화 점수 (-100 ~ +100, 화면 표시용)
         "trend_score": None,
+        # 공격/방어 비중 (각 0~100, 20% 단위) — MA 위=공격100, 아래는 12개월 최저까지 거리로 방어↑
+        "offense_pct": None,
+        "defense_pct": None,
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
@@ -337,6 +368,12 @@ def _build_item(
         base["score_range_low"] = score_min
         base["trend_score"] = _normalize_score(base["trend_pct"], score_min, score_max)
 
+    # 공격/방어 비중 — 화면 게이지와 동일 앵커(12개월 '최저'=score_range_low)를 쓴다.
+    offense_defense = _offense_defense(base["trend_pct"], base["score_range_low"])
+    if offense_defense is not None:
+        base["offense_pct"] = offense_defense["offense_pct"]
+        base["defense_pct"] = offense_defense["defense_pct"]
+
     return base
 
 
@@ -359,6 +396,27 @@ def _trend_pct_series(
         else:
             out.append((price / ma_v - 1.0) * 100.0)
     return out
+
+
+def _offense_defense(trend_pct: float | None, trend_min: float | None) -> dict[str, int] | None:
+    """기준 이동평균선 대비 위치로 공격/방어 비율(각 0~100, 20% 단위)을 산출한다.
+
+    - 종가가 MA 위(괴리 ≥ 0): 공격 100 / 방어 0.
+    - MA 아래: 12개월 최저 괴리(``trend_min``, 화면의 '최저')까지의 진행률 f 를 20% 단위로
+      **올림**해 방어 비율을 매긴다 — MA 아래로 조금이라도 내려가면 방어 20(공격 80)부터
+      시작하고, 최저 근처(f≥80%)면 방어 100(공격 0).
+    데이터가 없으면 None.
+    """
+    if trend_pct is None:
+        return None
+    if trend_pct >= 0:
+        return {"offense_pct": 100, "defense_pct": 0}  # MA 위 — 최저 앵커 불필요
+    if trend_min is None or trend_min >= 0:
+        return None  # MA 아래인데 방어 척도(12개월 최저)가 없음 → 판정 불가(미표시)
+    f = min(trend_pct / trend_min, 1.0)  # 0(=MA선) ~ 1(=최저), 둘 다 음수라 0~1
+    steps = max(1, min(5, math.ceil(f * 5)))  # 1~5 단계
+    defense = steps * 20
+    return {"offense_pct": 100 - defense, "defense_pct": defense}
 
 
 def _normalize_score(value: float | None, lo: float, hi: float) -> float | None:
@@ -493,11 +551,88 @@ def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> lis
 
 
 
+def _index_uses_naver(yf_ticker: str) -> bool:
+    """해당 지수가 한국(네이버) 소스인지 여부."""
+    meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
+    return bool(meta and meta.get("kor_naver_symbol"))
+
+
+def _lag_core_component(ohlc: pd.DataFrame | None, yf_ticker: str) -> pd.DataFrame | None:
+    """CORE 구성 지수의 날짜 정렬: 한국은 그대로, 미국은 전 거래일 종가를 당일에 맞춰 시프트.
+
+    미국 지수를 ``shift(1)`` 하면 각 날짜 행에 **직전 미국 거래일** 값이 들어가므로, 코스피 당일
+    (예 7/22)이 미국 전일(7/21)과 합성된다. 시프트로 생기는 앞부분 NaN 은 합성 시 공통 시작
+    구간에서 자연히 제외된다.
+    """
+    if ohlc is None or _index_uses_naver(yf_ticker):
+        return ohlc
+    return ohlc.shift(CORE_US_LAG_TRADING_DAYS)
+
+
+def _composite_ohlc(components: list[pd.DataFrame | None]) -> pd.DataFrame | None:
+    """구성 지수 OHLC 들을 '공통 기준일=100' 으로 리베이스해 등가중 평균한 합성 OHLC 를 만든다.
+
+    - 공통 날짜(합집합)로 정렬 후 ffill 하고, 모든 구성 지수에 종가가 생긴 최초 시점을 기준일로 잡는다.
+    - Open/High/Low/Close 는 각 구성 지수를 '기준일 종가' 로 나눠 100 스케일로 맞춘 뒤 등가중 평균한다
+      (종가 기준 공통 배수라 각 구성 지수의 장중 캔들 비율은 유지된다). Volume 은 합.
+    - 합성 High/Low 는 실제 장중 고저가 아니라 근사치다(차트는 라인 표시 권장).
+    구성 지수가 2개 미만이거나 공통 구간이 없으면 None.
+    """
+    frames = [c for c in components if c is not None and not c.empty and "Close" in c.columns]
+    if len(frames) < 2:
+        return None
+
+    index: pd.Index | None = None
+    for frame in frames:
+        index = frame.index if index is None else index.union(frame.index)
+    aligned = [frame.reindex(index).ffill() for frame in frames]
+
+    closes = pd.concat([frame["Close"] for frame in aligned], axis=1)
+    common = closes.dropna()
+    if len(common) < 2:
+        return None
+    base_date = common.index[0]
+
+    out = pd.DataFrame(index=index)
+    for col in ("Open", "High", "Low", "Close"):
+        rebased_cols: list[pd.Series] = []
+        for frame in aligned:
+            if col not in frame.columns:
+                continue
+            base = _to_float(frame["Close"].loc[base_date])
+            if base is None or base == 0:
+                continue
+            rebased_cols.append(frame[col].astype(float) / base * 100.0)
+        if rebased_cols:
+            out[col] = pd.concat(rebased_cols, axis=1).mean(axis=1)
+    vol_cols = [frame["Volume"] for frame in aligned if "Volume" in frame.columns]
+    out["Volume"] = pd.concat(vol_cols, axis=1).sum(axis=1) if vol_cols else 0.0
+
+    out = out.loc[out.index >= base_date].dropna(subset=["Close"])
+    return out if len(out) >= 2 else None
+
+
+def _extract_bulk_us_ohlc(df: pd.DataFrame | None, yf_ticker: str) -> pd.DataFrame | None:
+    """compute_market_trend 의 yfinance 일괄 다운로드 결과에서 단일 티커 OHLC 를 추출한다."""
+    if df is None:
+        return None
+    try:
+        if (yf_ticker, "Close") in df.columns:
+            return df.xs(yf_ticker, axis=1, level=0).copy()
+    except Exception:
+        return None
+    return None
+
+
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     """단일 지수의 일별 OHLC 히스토리를 반환한다 (한국: 네이버 5년, 미국: yfinance 10년).
 
     compute_index_history 와 시장 레짐 계산이 공유하는 단일 소스.
     """
+    # 합성 지수 CORE: 구성 지수 3개를 각각 로드하고(미국은 하루 시프트) 리베이스 등가중 평균한다.
+    if yf_ticker == CORE_TICKER:
+        return _composite_ohlc([_lag_core_component(load_index_ohlc(t), t) for t in CORE_COMPONENT_TICKERS])
+
     index_meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     naver_symbol = (index_meta or {}).get("kor_naver_symbol")
 
@@ -660,6 +795,10 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
             }
         )
 
+    # 공격/방어 비율 — 최신 괴리율과 12개월 '최저'(score_min) 기준. 화면 바와 같은 앵커를 쓴다.
+    latest_trend = full_trend[length - 1] if full_trend else None
+    offense_defense = _offense_defense(latest_trend, score_min)
+
     return {
         "ticker": yf_ticker,
         "name": name,
@@ -667,6 +806,8 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "history": history,
         "trend_min_12m": score_min,
         "trend_max_12m": score_max,
+        "offense_pct": offense_defense["offense_pct"] if offense_defense else None,
+        "defense_pct": offense_defense["defense_pct"] if offense_defense else None,
     }
 
 
