@@ -8,6 +8,7 @@ from typing import Any
 
 from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
+from utils.cash_model import cash_total_krw
 from utils.account_stocks_io import get_account_targets, save_account_targets
 from utils.account_registry import load_account_configs
 from utils.assets_service import load_cash_accounts
@@ -268,15 +269,26 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         all_rows.extend(account_rows)
 
         valuation_krw = sum(float(row.get("valuation_krw") or 0.0) for row in account_rows)
-        cash_balance_krw = float((cash_info or {}).get("cash_balance_krw") or 0.0)
-        # 호주 계좌: cash_balance_krw가 0이고 cash_balance_native가 있으면 환율 적용하여 KRW 환산
-        if cash_balance_krw == 0.0 and currency == "AUD":
-            cash_native = float((cash_info or {}).get("cash_balance_native") or 0.0)
-            if cash_native > 0:
-                aud_rate = float(((rates or {}).get("AUD") or {}).get("rate") or 0.0)
-                if aud_rate > 0:
-                    cash_balance_krw = round(cash_native * aud_rate, 2)
+        # 현금: 통화별 native 맵을 원화로 환산·합산한다(다통화 계좌). 맵이 없으면 레거시 단일 현금.
+        cash_native_map = (cash_info or {}).get("cash") or {}
+        if cash_native_map:
+            cash_balance_krw = round(cash_total_krw(cash_native_map, rates or {}), 2)
+        else:
+            cash_balance_krw = float((cash_info or {}).get("cash_balance_krw") or 0.0)
+            # 호주 계좌: cash_balance_krw가 0이고 cash_balance_native가 있으면 환율 적용하여 KRW 환산
+            if cash_balance_krw == 0.0 and currency == "AUD":
+                cash_native = float((cash_info or {}).get("cash_balance_native") or 0.0)
+                if cash_native > 0:
+                    aud_rate = float(((rates or {}).get("AUD") or {}).get("rate") or 0.0)
+                    if aud_rate > 0:
+                        cash_balance_krw = round(cash_native * aud_rate, 2)
         cash_target_ratio = float((cash_info or {}).get("cash_target_ratio") or 0.0)
+        # 현금 컬럼 표시용: 원화 합계를 계좌의 주 통화로 환산한 값(호주=AUD, 국내=KRW).
+        if currency == "KRW":
+            base_rate = 1.0
+        else:
+            base_rate = float(((rates or {}).get(currency) or {}).get("rate") or 0.0)
+        cash_display_native = round(cash_balance_krw / base_rate, 2) if base_rate > 0 else cash_balance_krw
         target_ratio_total = sum(float(row.get("target_ratio") or 0.0) for row in account_rows) + cash_target_ratio
         account_summaries.append(
             {
@@ -290,6 +302,10 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "cash_balance_krw": cash_balance_krw,
                 "cash_balance_native": (cash_info or {}).get("cash_balance_native"),
                 "cash_currency": str((cash_info or {}).get("cash_currency") or currency).strip().upper(),
+                "cash": cash_native_map,
+                "cash_currencies": (cash_info or {}).get("cash_currencies") or [],
+                "cash_display_native": cash_display_native,
+                "cash_display_currency": currency,
                 "cash_target_ratio": cash_target_ratio,
                 "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
                 "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
@@ -426,13 +442,11 @@ def add_holding(
     res = validate_ticker_for_account(account_id, ticker)
     raw_ticker = res["ticker"]
 
-    # 2. 계좌 설정에서 통화 정보 가져오기
-    from utils.settings_loader import get_account_settings
-    try:
-        settings = get_account_settings(account_id)
-        currency = settings.get("currency", "KRW")
-    except Exception:
-        currency = "KRW"
+    # 2. 통화는 계좌가 아니라 "종목 실제 통화" 로 각인한다(다통화 계좌 지원).
+    #    미국 티커는 USD, 호주는 AUD, 국내는 KRW. 계좌 통화에 종속되지 않는다.
+    from utils.cash_model import currency_for_country
+
+    currency = currency_for_country(res.get("country_code"))
 
     # 원장(portfolio_master) 항목이 아직 없으면(신규 계좌·자산 미설정) 빈 목록에서 시작한다.
     # save_portfolio_master 가 저장 시 계좌 항목을 새로 만들어준다.
@@ -581,5 +595,6 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
         "ticker": validated_res["ticker"],
         "name": validated_res["name"],
         "bucket_id": validated_res.get("bucket_id") or 1,
+        "country_code": str(validated_res.get("country_code") or "").strip().lower(),
         "status": "success"
     }

@@ -34,22 +34,29 @@ export function useAddingTickerRow<T extends ResolvedTicker>(options: {
   // validate 가 최신 ticker 를 읽도록 ref 로 미러링(낡은 클로저 방지).
   const rowRef = useRef<AddingTickerRow | null>(null);
   rowRef.current = addingRow;
+  // 입력 중인 티커 초안. 타이핑마다 setState 하면 그리드 rowData 가 바뀌어 셀이 리마운트되고
+  // 입력창 포커스가 튄다(1글자만 입력됨). 그래서 draft 는 ref 에만 쌓고 setState 하지 않는다.
+  const draftRef = useRef("");
 
   const start = useCallback(() => {
+    draftRef.current = "";
     setAddingRow({ ticker: "", name: "", isValidated: false, isValidating: false });
   }, []);
 
-  const cancel = useCallback(() => setAddingRow(null), []);
+  const cancel = useCallback(() => {
+    draftRef.current = "";
+    setAddingRow(null);
+  }, []);
 
   const setTicker = useCallback((value: string) => {
-    setAddingRow((prev) => (prev ? { ...prev, ticker: value, name: "", isValidated: false } : null));
+    draftRef.current = value; // ref 만 갱신(리렌더 없음) — 포커스 유지
   }, []);
 
   const validate = useCallback(
     async (tickerToUse?: string) => {
       const current = rowRef.current;
       if (!current || current.isValidating) return;
-      const source = tickerToUse ?? current.ticker;
+      const source = tickerToUse ?? (draftRef.current || current.ticker);
       const raw = (normalize ? normalize(source) : source).trim();
       if (!raw) {
         onError?.("티커를 입력해주세요.");
@@ -58,6 +65,7 @@ export function useAddingTickerRow<T extends ResolvedTicker>(options: {
       setAddingRow((prev) => (prev ? { ...prev, ticker: raw, name: "", isValidated: false, isValidating: true } : null));
       try {
         const resolved = await resolve(raw);
+        draftRef.current = resetOnValidated ? "" : resolved.ticker;
         setAddingRow((prev) =>
           resetOnValidated
             ? null

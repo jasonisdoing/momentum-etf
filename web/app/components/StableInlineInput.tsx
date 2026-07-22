@@ -18,6 +18,7 @@ export function StableInlineInput({
   placeholder,
   autoFocus = false,
   disabled = false,
+  submitOnBlur = true,
 }: {
   initialValue: string;
   onSave?: (val: string) => void;
@@ -28,6 +29,8 @@ export function StableInlineInput({
   placeholder?: string;
   autoFocus?: boolean;
   disabled?: boolean;
+  /** blur 시 onSave 자동 호출 여부. 신규 티커 입력처럼 명시적 확인만 원하면 false. 기본 true. */
+  submitOnBlur?: boolean;
 }) {
   const [localValue, setLocalValue] = useState(initialValue);
 
@@ -69,7 +72,7 @@ export function StableInlineInput({
         }
       }}
       onBlur={() => {
-        if (localValue !== initialValue) {
+        if (submitOnBlur && localValue !== initialValue) {
           onSave?.(localValue);
         }
       }}

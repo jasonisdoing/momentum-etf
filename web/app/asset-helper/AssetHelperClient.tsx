@@ -477,10 +477,19 @@ export function AssetHelperClient() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ account_id: selectedAccount, ticker: resolved.ticker, quantity: 0, average_buy_price: 0, target_ratio: 0 }),
           });
-          const data = (await resp.json()) as { added?: string; error?: string };
+          const data = (await resp.json()) as { added?: string; name?: string; error?: string };
           if (!resp.ok || data.error) throw new Error(data.error ?? "종목 추가에 실패했습니다.");
+          // 서버가 확정한 실제 종목명으로 낙관적 행 이름을 보정(새로고침 없이 즉시 반영).
+          // ticker-resolve 는 미국 티커에 name=티커 를 돌려주므로, 여기서 실제 이름으로 바꾼다.
+          const realName = String(data.name ?? "").trim();
+          if (realName && realName !== resolved.name) {
+            setTickers((cur) => cur.map((t) => (t.ticker.trim().toUpperCase() === key ? { ...t, name: realName } : t)));
+          }
           // 목록 교체 없이 지표만 갱신(그리드 개수 깜빡임 방지).
-          const newValid = newList.filter((t) => t.ticker.trim() && t.name);
+          const effectiveName = realName || resolved.name || "";
+          const newValid = newList
+            .map((t) => (t.ticker.trim().toUpperCase() === key ? { ...t, name: effectiveName } : t))
+            .filter((t) => t.ticker.trim() && t.name);
           if (newValid.length >= 3 && settings && settings.ACCOUNT_ID) {
             setMetricByTicker(await fetchMetrics(newValid, settings));
           }
@@ -702,6 +711,7 @@ export function AssetHelperClient() {
                 placeholder="티커"
                 initialValue={row.ticker}
                 disabled={add.addingRow?.isValidating}
+                submitOnBlur={false}
                 onChange={(value) => add.setTicker(value)}
                 onSave={(value) => void add.validate(value)}
               />
@@ -730,7 +740,7 @@ export function AssetHelperClient() {
                 <button
                   type="button"
                   className="btn btn-outline-primary btn-sm assetsInlineButton d-inline-flex align-items-center gap-1"
-                  disabled={!row.ticker.trim() || add.addingRow?.isValidating}
+                  disabled={add.addingRow?.isValidating}
                   onClick={() => void add.validate()}
                 >
                   확인
