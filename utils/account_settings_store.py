@@ -32,6 +32,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "order",
     "country_code",
     "currency",
+    "cash_currencies",
     "benchmark",
     "ticker_types",
     "market_regime_index",
@@ -43,6 +44,7 @@ EDITABLE_KEYS: tuple[str, ...] = (
 )
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
+_ALLOWED_CASH_CURRENCIES = {"KRW", "USD", "AUD"}
 
 _CACHE_TTL_SECONDS = 30.0
 _cache: tuple[float, list[dict[str, Any]]] | None = None
@@ -122,6 +124,31 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             if len(currency) != 3:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 currency 는 3자리 코드여야 합니다: {raw}")
             cleaned[key] = currency
+        elif key == "cash_currencies":
+            # 보유 현금 통화 목록. 허용 통화·최소 1개·주 통화 포함을 강제한다.
+            if not isinstance(raw, list):
+                raise AccountSettingsStoreError(f"'{account_id}' 의 cash_currencies 는 통화 코드 목록이어야 합니다.")
+            normalized: list[str] = []
+            for item in raw:
+                code = str(item or "").strip().upper()
+                if not code:
+                    continue
+                if code not in _ALLOWED_CASH_CURRENCIES:
+                    raise AccountSettingsStoreError(
+                        f"'{account_id}' 의 cash_currencies 는 {', '.join(sorted(_ALLOWED_CASH_CURRENCIES))} 중에서만 선택할 수 있습니다: {code}"
+                    )
+                if code not in normalized:
+                    normalized.append(code)
+            if not normalized:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 cash_currencies 는 최소 1개 이상이어야 합니다.")
+            base_currency = str(
+                values.get("currency") or existing_doc.get("currency") or ""
+            ).strip().upper()
+            if base_currency and base_currency not in normalized:
+                raise AccountSettingsStoreError(
+                    f"'{account_id}' 의 주 통화({base_currency})는 외화 잔액에 반드시 포함되어야 합니다."
+                )
+            cleaned[key] = normalized
         elif key == "benchmark":
             if not isinstance(raw, dict):
                 raise AccountSettingsStoreError(f"'{account_id}' 의 benchmark 는 객체여야 합니다.")

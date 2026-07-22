@@ -375,7 +375,7 @@ def load_real_holdings_table(
         account_country = str(account_settings.get("country_code") or "").strip().lower()
     except Exception:
         account_country = ""
-    if account_country in ("kor", "au"):
+    if account_country in ("kor", "au", "us"):
         df_holdings = _apply_realtime_overlay_to_holdings(
             df_holdings,
             country_code=account_country,

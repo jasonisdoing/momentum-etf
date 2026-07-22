@@ -15,6 +15,7 @@ type AccountEntry = {
   order?: number;
   country_code?: string;
   currency?: string;
+  cash_currencies?: string[];
   benchmark?: Benchmark;
   market_regime_index?: MarketIndexOption | null;
   URL?: string;
@@ -26,6 +27,9 @@ type ApiResponse = { accounts?: AccountEntry[]; market_indices?: MarketIndexOpti
 
 // 시장 레짐 지수 기본값 — S&P 500 (yf_ticker ^GSPC). 필수값이라 미설정 계좌는 이 값으로 시작한다.
 const DEFAULT_REGIME_TICKER = "^GSPC";
+
+// 현금 잔액(보유 현금 통화) 선택 옵션. 주 통화는 항상 포함되며 해제 불가.
+const CASH_CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
 
 const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.4)",
@@ -74,6 +78,11 @@ function AccountRow({
   const [order, setOrder] = useState(String(account.order ?? 0));
   const [countryCode, setCountryCode] = useState(account.country_code ?? "kor");
   const [currency, setCurrency] = useState(account.currency ?? "KRW");
+  const [cashCurrencies, setCashCurrencies] = useState<string[]>(
+    account.cash_currencies && account.cash_currencies.length > 0
+      ? account.cash_currencies.map((c) => c.toUpperCase())
+      : [(account.currency ?? "KRW").toUpperCase()],
+  );
   const [url, setUrl] = useState(account.URL ?? "");
   // 시장 레짐 지수(필수) — 미설정 계좌는 S&P 500 기본값으로 시작.
   const [regimeTicker, setRegimeTicker] = useState(account.market_regime_index?.ticker || DEFAULT_REGIME_TICKER);
@@ -109,15 +118,33 @@ function AccountRow({
     }
   };
 
+  const baseCurrency = currency.trim().toUpperCase();
+
+  // 현금 잔액 토글. 주 통화는 항상 포함(해제 불가).
+  const toggleCashCurrency = (code: string) => {
+    setCashCurrencies((cur) => {
+      if (cur.includes(code)) {
+        if (code === baseCurrency) return cur; // 주 통화는 해제 불가
+        return cur.filter((c) => c !== code);
+      }
+      return [...cur, code];
+    });
+  };
+
   const save = async () => {
     try {
       setSaving(true);
+      // 주 통화는 반드시 현금 잔액에 포함(백엔드 검증과 동일). 순서 보존 + 중복 제거.
+      const finalCashCurrencies = cashCurrencies.includes(baseCurrency)
+        ? cashCurrencies
+        : [baseCurrency, ...cashCurrencies];
       const values: Record<string, unknown> = {
         name: name.trim(),
         icon: icon.trim(),
         order: Math.trunc(Number(order)),
         country_code: countryCode,
-        currency: currency.trim().toUpperCase(),
+        currency: baseCurrency,
+        cash_currencies: finalCashCurrencies,
         market_regime_index: {
           ticker: regimeTicker,
           name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
@@ -190,11 +217,52 @@ function AccountRow({
           <option value="us">us</option>
         </select>
         <span style={{ ...labelStyle, marginLeft: 8 }}>통화</span>
-        <select className="form-select form-select-sm" style={{ width: 96 }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+        <select
+          className="form-select form-select-sm"
+          style={{ width: 96 }}
+          value={currency}
+          onChange={(e) => {
+            const next = e.target.value.toUpperCase();
+            setCurrency(next);
+            // 새 주 통화는 현금 잔액에 자동 포함(주 통화 현금은 항상 가능).
+            setCashCurrencies((cur) => (cur.includes(next) ? cur : [...cur, next]));
+          }}
+        >
           <option value="KRW">KRW</option>
           <option value="AUD">AUD</option>
           <option value="USD">USD</option>
         </select>
+      </div>
+
+      <div style={rowStyle}>
+        <span style={{ ...labelStyle, width: 60 }}>현금 잔액</span>
+        {CASH_CURRENCY_OPTIONS.map((code) => {
+          const checked = cashCurrencies.includes(code);
+          const isBase = code === baseCurrency;
+          return (
+            <label
+              key={code}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+                fontSize: "0.85rem",
+                color: isBase ? "var(--text-muted)" : undefined,
+                cursor: isBase ? "not-allowed" : "pointer",
+              }}
+              title={isBase ? "주 통화는 항상 포함됩니다" : undefined}
+            >
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={isBase}
+                onChange={() => toggleCashCurrency(code)}
+              />
+              {code}
+              {isBase ? " (주)" : ""}
+            </label>
+          );
+        })}
       </div>
 
       <div style={rowStyle}>
