@@ -68,6 +68,15 @@ function renderSignedPercentCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatPct(params.value)}</span>;
 }
 
+function renderRatioCell(color: string) {
+  return function RatioCell(params: { value: number | null | undefined }) {
+    if (params.value === null || params.value === undefined) {
+      return <span style={{ color: "var(--text-muted)" }}>-</span>;
+    }
+    return <span style={{ color, fontWeight: 700 }}>{params.value}%</span>;
+  };
+}
+
 
 type RegimeKey = "accel_up" | "accel_down";
 
@@ -256,9 +265,7 @@ export function MarketTrendClient({
         minWidth: 88,
         sortable: true,
         type: "rightAligned",
-        cellStyle: { color: "#d62828", fontWeight: 700 },
-        valueFormatter: (params: ValueFormatterParams<GridRow>) =>
-          params.value == null ? "-" : `${params.value}%`,
+        cellRenderer: renderRatioCell("#d62828"),
       },
       {
         field: "defense_pct",
@@ -267,9 +274,7 @@ export function MarketTrendClient({
         minWidth: 88,
         sortable: true,
         type: "rightAligned",
-        cellStyle: { color: "#1971c2", fontWeight: 700 },
-        valueFormatter: (params: ValueFormatterParams<GridRow>) =>
-          params.value == null ? "-" : `${params.value}%`,
+        cellRenderer: renderRatioCell("#1971c2"),
       },
       {
         field: "pct_from_high",
