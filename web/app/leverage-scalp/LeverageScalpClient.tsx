@@ -35,6 +35,7 @@ const SESSION_END_MIN = 15 * 60 + 30; // KST 15:30(이하)
 const KST_OFFSET_SEC = 9 * 3600;
 const POLL_MS = 2000;
 const CANDLE_COUNT = 450;
+const VISIBLE_BARS = 60; // 최초 표시·리사이즈 시 화면에 채우는 최근 봉 개수(약 1시간).
 const UP_COLOR = "#d63939";
 const DOWN_COLOR = "#206bc4";
 const ST_COLOR = "rgba(120,130,150,0.75)"; // 슈퍼트렌드선(회색)
@@ -293,40 +294,31 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
   }, []);
 
   // 리사이즈 대응: lightweight-charts 는 폭이 바뀌면 barSpacing(줌)을 유지해 보이는 봉 수가
-  // 바뀐다(창이 좁아지면 몇 개만 보임). 사용자가 보던 '봉 개수'를 기록해 두었다가 리사이즈 후
-  // 폭에 맞게 다시 적용해, 항상 같은 구간이 화면에 꽉 차게 보이도록 한다.
-  const visibleBarSpanRef = useRef(60); // 현재 보이는 봉 개수(사용자 줌 유지용)
-  const resizeAtRef = useRef(0);
+  // 바뀐다(창이 좁아지면 몇 개만 보임). **폭이 변할 때만** 최근 VISIBLE_BARS 개를 폭에 맞게
+  // 다시 채운다. 높이 변화(안내 문구 갱신 등)에는 반응하지 않아 시간이 지나도 흔들리지 않는다.
+  const prevWidthRef = useRef(0);
   useEffect(() => {
     const container = containerRef.current;
     const chart = chartRef.current;
     if (!container || !chart) return;
-    const ts = chart.timeScale();
-    // 사용자 줌/팬으로 보이는 봉 개수 기록(리사이즈 직후 이벤트는 무시).
-    const onRange = (range: { from: number; to: number } | null) => {
-      if (!range || Date.now() - resizeAtRef.current < 300) return;
-      const span = range.to - range.from;
-      if (span > 1) visibleBarSpanRef.current = span;
-    };
-    ts.subscribeVisibleLogicalRangeChange(onRange);
-
+    prevWidthRef.current = container.clientWidth;
     let raf = 0;
-    const ro = new ResizeObserver(() => {
-      resizeAtRef.current = Date.now();
+    const ro = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? container.clientWidth;
+      if (Math.abs(width - prevWidthRef.current) < 1) return; // 폭 변화만 반응(높이 무시)
+      prevWidthRef.current = width;
       cancelAnimationFrame(raf);
-      // autoSize 가 폭을 반영한 다음 프레임에 '보던 봉 개수'를 오른쪽 끝 기준으로 재적용.
+      // autoSize 가 폭을 반영한 다음 프레임에 최근 봉을 오른쪽 끝 기준으로 재적용.
       raf = requestAnimationFrame(() => {
         const len = barCountRef.current;
         if (len <= 0) return;
-        const span = Math.max(10, Math.round(visibleBarSpanRef.current));
-        ts.setVisibleLogicalRange({ from: Math.max(0, len - span), to: len + 4 });
+        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, len - VISIBLE_BARS), to: len + 4 });
       });
     });
     ro.observe(container);
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      ts.unsubscribeVisibleLogicalRangeChange(onRange);
     };
   }, []);
 
@@ -358,8 +350,8 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
         setCandles(next);
         barCountRef.current = next.length;
         if (firstLoadRef.current && next.length > 0) {
-          // 최초 표시폭은 최근 약 1시간(60개 1분봉). 이후 사용자가 자유롭게 확대/축소.
-          ts?.setVisibleLogicalRange({ from: Math.max(0, next.length - 60), to: next.length + 4 });
+          // 최초 표시폭은 최근 약 1시간(VISIBLE_BARS 개 1분봉). 이후 사용자가 자유롭게 확대/축소.
+          ts?.setVisibleLogicalRange({ from: Math.max(0, next.length - VISIBLE_BARS), to: next.length + 4 });
           firstLoadRef.current = false;
         } else if (following) {
           // 오른쪽 끝을 보고 있었으면 새 봉을 따라 실시간으로 이동(줌 유지).
