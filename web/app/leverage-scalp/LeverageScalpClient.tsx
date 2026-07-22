@@ -191,20 +191,26 @@ function computeStrategyTrades(candles: Candle[], buy: boolean[], bull: boolean[
   return trades;
 }
 
+// 백테스트 슬리피지(편도, %). 완결 매매 1회당 매수+매도 왕복으로 2배가 차감된다.
+const SLIPPAGE_ONE_WAY_PCT = 0.2;
+
 type Metrics = { trades: number; winRate: number; cum: number; avg: number; mdd: number };
 function backtestMetrics(trades: Trade[]): Metrics {
+  const roundTripCost = SLIPPAGE_ONE_WAY_PCT * 2; // 왕복(매수+매도) 슬리피지
   const sells = trades.filter((t) => t.type === "sell" && t.pnlPct != null);
   const n = sells.length;
-  const wins = sells.filter((t) => (t.pnlPct ?? 0) > 0).length;
+  // 각 완결 매매의 수익률에서 왕복 슬리피지를 차감한 순수익률로 성과를 계산한다.
+  const netPnls = sells.map((s) => (s.pnlPct ?? 0) - roundTripCost);
+  const wins = netPnls.filter((p) => p > 0).length;
   let equity = 1;
   let peak = 1;
   let mdd = 0;
-  for (const s of sells) {
-    equity *= 1 + (s.pnlPct ?? 0) / 100;
+  for (const p of netPnls) {
+    equity *= 1 + p / 100;
     peak = Math.max(peak, equity);
     mdd = Math.max(mdd, (peak - equity) / peak);
   }
-  const avg = n > 0 ? sells.reduce((acc, t) => acc + (t.pnlPct ?? 0), 0) / n : 0;
+  const avg = n > 0 ? netPnls.reduce((acc, p) => acc + p, 0) / n : 0;
   return { trades: n, winRate: n > 0 ? (wins / n) * 100 : 0, cum: (equity - 1) * 100, avg, mdd: mdd * 100 };
 }
 
@@ -758,7 +764,7 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
               backtest ? (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginBottom: 6 }}>
-                    구간 {backtest.rangeLabel} · {backtest.levBars}봉 · 비용 미반영(총수익). 스윕: 슈퍼트렌드 기간 × 배수, 누적 상위 {SWEEP_TOP}개.
+                    구간 {backtest.rangeLabel} · {backtest.levBars}봉 · 슬리피지 {SLIPPAGE_ONE_WAY_PCT}%(편도, 왕복 {SLIPPAGE_ONE_WAY_PCT * 2}%) 반영. 스윕: 슈퍼트렌드 기간 × 배수, 누적 상위 {SWEEP_TOP}개.
                   </div>
                   <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 8 }}>
                     현재 · {backtest.current.trades}건 · 승률 {backtest.current.winRate.toFixed(0)}% · 누적{" "}
