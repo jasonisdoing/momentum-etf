@@ -18,7 +18,7 @@ import { PageFrame } from "../components/PageFrame";
 
 // 레버리지 단타 — 위: 나스닥100 선물(캔들만, 눈으로 참고), 아래: KODEX 레버리지(신호·화살표 표시).
 // 둘 다 1분봉을 KST 09:00~15:00 세션으로 잘라 시간축을 동기화해 겹쳐 본다.
-// 전략: EMA 돌파 + 슈퍼트렌드 조합(가격>EMA & 슈퍼트렌드 상승 → 매수, 하나라도 깨지면 매도).
+// 전략: 슈퍼트렌드 단독(상승 전환 → 매수, 하락 전환 → 매도).
 // 기록·백테스트는 이 세션 데이터로 계산한다. 선물 차트는 눈으로 참고만(매매 로직 미사용).
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 type Trade = { type: "buy" | "sell"; time: number; price: number; pnlPct?: number };
@@ -37,7 +37,6 @@ const POLL_MS = 2000;
 const CANDLE_COUNT = 450;
 const UP_COLOR = "#d63939";
 const DOWN_COLOR = "#206bc4";
-const EMA_COLOR = "rgba(230,145,56,0.9)"; // EMA선(주황)
 const ST_COLOR = "rgba(120,130,150,0.75)"; // 슈퍼트렌드선(회색)
 // 선물 참고용 이동평균선(종류는 config.MOVING_AVERAGE_TYPE: SMA/EMA) 20·60·120·240.
 const FUT_MAS = [
@@ -159,26 +158,12 @@ function computeSupertrend(candles: Candle[], period: number, mult: number): { s
   return { supertrend, direction };
 }
 
-type StratMode = "both" | "ema" | "st"; // EMA+ST 조합 / EMA 단독 / 슈퍼트렌드 단독
-const MODE_LABELS: Record<StratMode, string> = { both: "EMA + 슈퍼트렌드", ema: "EMA 단독", st: "슈퍼트렌드 단독" };
-
-// 강세(bull) 판정: both=가격>EMA & ST상승, ema=가격>EMA, st=ST상승. 강세 진입=매수 이벤트.
+// 강세(bull) = 슈퍼트렌드 상승. 강세 진입(직전 비강세 → 강세)=매수 이벤트.
 // 매도는 강세가 아닌 봉에서 실행하므로(computeStrategyTrades) 강세 상태 배열을 함께 반환한다.
-function buildSignals(mode: StratMode, candles: Candle[], emaPeriod: number, stPeriod: number, stMult: number): { buy: boolean[]; bull: boolean[] } {
+function buildSignals(candles: Candle[], stPeriod: number, stMult: number): { buy: boolean[]; bull: boolean[] } {
   const n = candles.length;
-  const closes = candles.map((c) => c.c);
-  let bull: boolean[];
-  if (mode === "ema") {
-    const ema = computeEma(closes, emaPeriod);
-    bull = closes.map((c, i) => c > ema[i]);
-  } else if (mode === "st") {
-    const { direction } = computeSupertrend(candles, stPeriod, stMult);
-    bull = direction.map((d) => d === 1);
-  } else {
-    const ema = computeEma(closes, emaPeriod);
-    const { direction } = computeSupertrend(candles, stPeriod, stMult);
-    bull = closes.map((c, i) => c > ema[i] && direction[i] === 1);
-  }
+  const { direction } = computeSupertrend(candles, stPeriod, stMult);
+  const bull = direction.map((d) => d === 1);
   const buy = new Array<boolean>(n).fill(false);
   for (let i = 1; i < n; i += 1) {
     buy[i] = bull[i] && !bull[i - 1];
@@ -222,19 +207,18 @@ function backtestMetrics(trades: Trade[]): Metrics {
   return { trades: n, winRate: n > 0 ? (wins / n) * 100 : 0, cum: (equity - 1) * 100, avg, mdd: mdd * 100 };
 }
 
-function runCombo(levC: Candle[], mode: StratMode, emaPeriod: number, stPeriod: number, stMult: number): Trade[] {
-  const { buy, bull } = buildSignals(mode, levC, emaPeriod, stPeriod, stMult);
+function runStrategy(levC: Candle[], stPeriod: number, stMult: number): Trade[] {
+  const { buy, bull } = buildSignals(levC, stPeriod, stMult);
   return computeStrategyTrades(levC, buy, bull);
 }
 
-// 스윕: EMA 기간 × 슈퍼트렌드 기간 × 배수. 모드별로 관련 파라미터만 조합한다.
-const SWEEP_EMA = [5, 10, 20, 30];
+// 스윕: 슈퍼트렌드 기간 × 배수.
 const SWEEP_ST = [7, 10, 14];
 const SWEEP_MULT = [1, 1.5, 2, 2.5, 3];
 const SWEEP_TOP = 40; // 표에는 누적수익 상위 N개만 표시.
 
-type SweepRow = { label: string; mode: StratMode; ema: number; st: number; mult: number; m: Metrics };
-type ScalpSettings = { mode: StratMode; ema_period: number; st_period: number; st_mult: number };
+type SweepRow = { label: string; st: number; mult: number; m: Metrics };
+type ScalpSettings = { st_period: number; st_mult: number };
 type BacktestResult = { rangeLabel: string; levBars: number; current: Metrics; sweep: SweepRow[] };
 
 // 단일 차트(캔들 + 오버레이 선 + 화살표). 선물은 overlays·markers 를 비워 캔들만 표시한다.
@@ -443,8 +427,6 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
 export function LeverageScalpClient({ maType }: { maType: string }) {
   // 선물 참고 이동평균선 종류(SMA/EMA)는 config.py 전역 설정을 따른다(page.tsx 가 전달).
   const computeFutMa = maType === "EMA" ? computeEma : computeSma;
-  const [mode, setMode] = useState<StratMode>("both");
-  const [emaPeriod, setEmaPeriod] = useState("10");
   const [stPeriod, setStPeriod] = useState("10");
   const [stMult, setStMult] = useState("2");
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -518,8 +500,6 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
         const data = (await resp.json()) as { settings?: ScalpSettings | null; error?: string };
         if (!resp.ok || data.error) throw new Error(data.error ?? "설정을 불러오지 못했습니다.");
         if (!alive || !data.settings) return;
-        setMode(data.settings.mode);
-        setEmaPeriod(String(data.settings.ema_period));
         setStPeriod(String(data.settings.st_period));
         setStMult(String(data.settings.st_mult));
       } catch {
@@ -531,33 +511,28 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
     };
   }, []);
 
-  const emaP = Math.max(1, Math.trunc(Number(emaPeriod) || 1));
   const stP = Math.max(1, Math.trunc(Number(stPeriod) || 1));
   const stM = Math.max(0.1, Number(stMult) || 0.1);
 
-  // 결합 신호. 형성 중 마지막 봉 제외.
+  // 슈퍼트렌드 신호. 형성 중 마지막 봉 제외.
   const trades = useMemo(() => {
     const lev = levCandles.slice(0, Math.max(0, levCandles.length - 1));
     if (lev.length === 0) return [];
-    return runCombo(lev, mode, emaP, stP, stM);
-  }, [levCandles, mode, emaP, stP, stM]);
+    return runStrategy(lev, stP, stM);
+  }, [levCandles, stP, stM]);
 
-  // 레버리지 지표(EMA·슈퍼트렌드) — 오버레이선·트리거 안내에 공용.
+  // 레버리지 지표(슈퍼트렌드) — 오버레이선·트리거 안내에 공용.
   const levInd = useMemo(() => {
     if (levCandles.length === 0) return null;
-    const ema = computeEma(levCandles.map((c) => c.c), emaP);
     const { supertrend, direction } = computeSupertrend(levCandles, stP, stM);
-    return { ema, supertrend, direction };
-  }, [levCandles, emaP, stP, stM]);
+    return { supertrend, direction };
+  }, [levCandles, stP, stM]);
 
   const levOverlays = useMemo<Overlay[]>(() => {
     if (!levInd) return [];
-    const emaLine: Overlay = { color: EMA_COLOR, data: levCandles.map<LineData>((c, i) => ({ time: toTime(c.t), value: levInd.ema[i] })) };
     const stLine: Overlay = { color: ST_COLOR, data: levCandles.map<LineData>((c, i) => ({ time: toTime(c.t), value: levInd.supertrend[i] })) };
-    if (mode === "ema") return [emaLine];
-    if (mode === "st") return [stLine];
-    return [emaLine, stLine];
-  }, [levCandles, levInd, mode]);
+    return [stLine];
+  }, [levCandles, levInd]);
 
   const realizedPct = trades.reduce((acc, t) => acc + (t.type === "sell" ? t.pnlPct ?? 0 : 0), 0);
   const holding = trades.length > 0 && trades[trades.length - 1].type === "buy";
@@ -574,26 +549,19 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
   const avgPct = effPnls.length > 0 ? effPnls.reduce((a, p) => a + p, 0) / effPnls.length : 0;
 
   // 레버리지 가격 옆 안내: 미보유면 매수까지 상승%, 보유 중이면 매도까지 하락%.
-  // 트리거 레벨 — 매수: 가격이 EMA 위 & 슈퍼트렌드 상승이어야 하므로 넘어야 할 레벨 = 하락추세면 max(EMA, ST밴드), 상승추세면 EMA.
-  //           매도: 가격이 EMA 아래 또는 슈퍼트렌드 하락 전환 시 → 먼저 닿는 레벨 = max(EMA, ST밴드).
+  // 트리거 레벨 = 슈퍼트렌드 밴드(상승 전환 시 매수, 하락 전환 시 매도).
   const priceHint = useMemo<{ text: string; color: string; pct: number; kind: "buy" | "sell" } | undefined>(() => {
     if (!levInd || levCandles.length < 2) return undefined;
     const i = levCandles.length - 2; // 마지막 확정봉 지표
-    const E = levInd.ema[i];
     const S = levInd.supertrend[i];
-    const D = levInd.direction[i];
     const P = levCandles[levCandles.length - 1].c; // 현재가(형성 봉 종가)
     if (!(P > 0)) return undefined;
-    // 트리거 레벨 — ema: EMA / st: ST밴드 / both: 매수는 하락추세면 max(EMA,ST) 상승추세면 EMA, 매도는 max(EMA,ST).
+    const pct = (S / P - 1) * 100;
     if (holding) {
-      const level = mode === "ema" ? E : mode === "st" ? S : Math.max(E, S);
-      const pct = (level / P - 1) * 100;
       return { text: `${pct.toFixed(2)}% 하락하면 매도`, color: DOWN_COLOR, pct, kind: "sell" };
     }
-    const level = mode === "ema" ? E : mode === "st" ? S : D === 1 ? E : Math.max(E, S);
-    const pct = (level / P - 1) * 100;
     return { text: `${pct > 0 ? "+" : ""}${pct.toFixed(2)}% 상승하면 매수`, color: UP_COLOR, pct, kind: "buy" };
-  }, [levInd, levCandles, holding, mode]);
+  }, [levInd, levCandles, holding]);
 
   // 레버리지 수평 가격선: 현재가(검은 점선) + 대기 시 매수선(빨강) / 보유 시 매도선(파랑).
   const levPriceLines = useMemo<{ price: number; color: string; title?: string }[]>(() => {
@@ -602,17 +570,11 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
     if (P != null) lines.push({ price: P, color: "#111111", title: "현재가" });
     if (levInd && levCandles.length >= 2) {
       const i = levCandles.length - 2;
-      const E = levInd.ema[i];
       const S = levInd.supertrend[i];
-      const D = levInd.direction[i];
-      if (holding) {
-        lines.push({ price: mode === "ema" ? E : mode === "st" ? S : Math.max(E, S), color: DOWN_COLOR, title: "매도" });
-      } else {
-        lines.push({ price: mode === "ema" ? E : mode === "st" ? S : D === 1 ? E : Math.max(E, S), color: UP_COLOR, title: "매수" });
-      }
+      lines.push({ price: S, color: holding ? DOWN_COLOR : UP_COLOR, title: holding ? "매도" : "매수" });
     }
     return lines;
-  }, [levCandles, levInd, holding, mode]);
+  }, [levCandles, levInd, holding]);
 
   // 트리거까지 거리(|pct|)가 줄면 "가까워짐", 늘면 "멀어짐". 직전 갱신과 비교(종류 바뀌면 리셋).
   const prevHintRef = useRef<{ pct: number; kind: "buy" | "sell" } | null>(null);
@@ -640,39 +602,22 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
   const backtest: BacktestResult | null = useMemo(() => {
     const lev = levCandles.slice(0, Math.max(0, levCandles.length - 1));
     if (lev.length === 0) return null;
-    const current = backtestMetrics(runCombo(lev, mode, emaP, stP, stM));
+    const current = backtestMetrics(runStrategy(lev, stP, stM));
     const sweep: SweepRow[] = [];
-    const push = (m: StratMode, label: string, e: number, s: number, mlt: number, buy: boolean[], bull: boolean[]) => {
-      sweep.push({ label, mode: m, ema: e, st: s, mult: mlt, m: backtestMetrics(computeStrategyTrades(lev, buy, bull)) });
-    };
-    // both: EMA × ST × 배수
-    for (const e of SWEEP_EMA) {
-      for (const s of SWEEP_ST) {
-        for (const mlt of SWEEP_MULT) {
-          const { buy, bull } = buildSignals("both", lev, e, s, mlt);
-          push("both", `EMA${e}+ST${s}/${mlt}`, e, s, mlt, buy, bull);
-        }
-      }
-    }
-    // ema 단독: EMA만
-    for (const e of SWEEP_EMA) {
-      const { buy, bull } = buildSignals("ema", lev, e, 0, 0);
-      push("ema", `EMA${e}만`, e, stP, stM, buy, bull);
-    }
-    // st 단독: ST × 배수
+    // 슈퍼트렌드 기간 × 배수
     for (const s of SWEEP_ST) {
       for (const mlt of SWEEP_MULT) {
-        const { buy, bull } = buildSignals("st", lev, 0, s, mlt);
-        push("st", `ST${s}/${mlt}만`, emaP, s, mlt, buy, bull);
+        const { buy, bull } = buildSignals(lev, s, mlt);
+        sweep.push({ label: `ST${s}/${mlt}`, st: s, mult: mlt, m: backtestMetrics(computeStrategyTrades(lev, buy, bull)) });
       }
     }
     sweep.sort((x, y) => y.m.cum - x.m.cum);
     const rangeLabel = `${fmtDateTime(lev[0].t)} ~ ${fmtDateTime(lev[lev.length - 1].t)}`;
     return { rangeLabel, levBars: lev.length, current, sweep: sweep.slice(0, SWEEP_TOP) };
-  }, [levCandles, mode, emaP, stP, stM]);
+  }, [levCandles, stP, stM]);
 
   // 명시적 값으로 DB 저장(setState 는 비동기라 현재 state 를 읽지 않고 인자로 받은 값을 저장).
-  const saveSettings = async (settings: { mode: StratMode; ema_period: number; st_period: number; st_mult: number }) => {
+  const saveSettings = async (settings: { st_period: number; st_mult: number }) => {
     setSaveState("saving");
     setSaveError(null);
     try {
@@ -691,20 +636,16 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
     }
   };
 
-  const handleSaveSettings = () => saveSettings({ mode, ema_period: emaP, st_period: stP, st_mult: stM });
+  const handleSaveSettings = () => saveSettings({ st_period: stP, st_mult: stM });
 
   // 스윕 행을 입력값에 반영(라이브 미리보기). applyAndSave 는 반영 + DB 저장까지.
   const applyRow = (row: SweepRow) => {
-    setMode(row.mode);
-    if (row.mode !== "st") setEmaPeriod(String(row.ema));
-    if (row.mode !== "ema") {
-      setStPeriod(String(row.st));
-      setStMult(String(row.mult));
-    }
+    setStPeriod(String(row.st));
+    setStMult(String(row.mult));
   };
   const applyAndSaveRow = (row: SweepRow) => {
     applyRow(row);
-    void saveSettings({ mode: row.mode, ema_period: row.ema, st_period: row.st, st_mult: row.mult });
+    void saveSettings({ st_period: row.st, st_mult: row.mult });
   };
 
   return (
@@ -742,7 +683,7 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
         <div className="card appCard">
           <div className="card-body">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12 }}>
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>EMA 돌파 + 슈퍼트렌드</h2>
+              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>슈퍼트렌드</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {saveState === "saved" ? <span style={{ color: UP_COLOR, fontSize: "0.82rem", fontWeight: 700 }}>저장됨</span> : null}
                 {saveState === "error" ? <span style={{ color: DOWN_COLOR, fontSize: "0.82rem", fontWeight: 700 }}>{saveError}</span> : null}
@@ -753,41 +694,17 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>지표</span>
-                <select className="form-select form-select-sm" style={{ width: 160 }} value={mode} onChange={(e) => setMode(e.target.value as StratMode)}>
-                  {(Object.keys(MODE_LABELS) as StratMode[]).map((m) => (
-                    <option key={m} value={m}>
-                      {MODE_LABELS[m]}
-                    </option>
-                  ))}
-                </select>
+                <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>슈퍼트렌드 기간</span>
+                <input type="number" min={1} step={1} className="form-control form-control-sm" style={{ width: 120 }} value={stPeriod} onChange={(e) => setStPeriod(e.target.value)} />
               </label>
-              {mode !== "st" ? (
-                <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>EMA 기간</span>
-                  <input type="number" min={1} step={1} className="form-control form-control-sm" style={{ width: 120 }} value={emaPeriod} onChange={(e) => setEmaPeriod(e.target.value)} />
-                </label>
-              ) : null}
-              {mode !== "ema" ? (
-                <>
-                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>슈퍼트렌드 기간</span>
-                    <input type="number" min={1} step={1} className="form-control form-control-sm" style={{ width: 120 }} value={stPeriod} onChange={(e) => setStPeriod(e.target.value)} />
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>슈퍼트렌드 배수</span>
-                    <input type="number" min={0.1} step={0.1} className="form-control form-control-sm" style={{ width: 120 }} value={stMult} onChange={(e) => setStMult(e.target.value)} />
-                  </label>
-                </>
-              ) : null}
+              <label style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>슈퍼트렌드 배수</span>
+                <input type="number" min={0.1} step={0.1} className="form-control form-control-sm" style={{ width: 120 }} value={stMult} onChange={(e) => setStMult(e.target.value)} />
+              </label>
               <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.82rem", lineHeight: 1.6 }}>
-                <span style={{ color: EMA_COLOR, fontWeight: 800 }}>━</span> EMA · <span style={{ color: ST_COLOR, fontWeight: 800 }}>━</span> 슈퍼트렌드
+                <span style={{ color: ST_COLOR, fontWeight: 800 }}>━</span> 슈퍼트렌드
                 <br />
-                {mode === "both"
-                  ? "매수: 가격 > EMA 그리고 슈퍼트렌드 상승. 매도: 둘 중 하나라도 깨질 때."
-                  : mode === "ema"
-                    ? "매수: 가격이 EMA 상향 돌파. 매도: EMA 하향 이탈."
-                    : "매수: 슈퍼트렌드 상승 전환. 매도: 슈퍼트렌드 하락 전환."}
+                매수: 슈퍼트렌드 상승 전환. 매도: 슈퍼트렌드 하락 전환.
               </p>
             </div>
 
@@ -811,7 +728,7 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
               backtest ? (
                 <div style={{ marginBottom: 8 }}>
                   <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", marginBottom: 6 }}>
-                    구간 {backtest.rangeLabel} · {backtest.levBars}봉 · 비용 미반영(총수익). 스윕: EMA+ST / EMA단독 / ST단독 × 파라미터, 누적 상위 {SWEEP_TOP}개.
+                    구간 {backtest.rangeLabel} · {backtest.levBars}봉 · 비용 미반영(총수익). 스윕: 슈퍼트렌드 기간 × 배수, 누적 상위 {SWEEP_TOP}개.
                   </div>
                   <div style={{ fontSize: "0.85rem", fontWeight: 700, marginBottom: 8 }}>
                     현재 · {backtest.current.trades}건 · 승률 {backtest.current.winRate.toFixed(0)}% · 누적{" "}
@@ -835,13 +752,7 @@ export function LeverageScalpClient({ maType }: { maType: string }) {
                       </thead>
                       <tbody>
                         {backtest.sweep.map((row) => {
-                          const paramsMatch =
-                            row.mode === "ema"
-                              ? row.ema === emaP
-                              : row.mode === "st"
-                                ? row.st === stP && row.mult === stM
-                                : row.ema === emaP && row.st === stP && row.mult === stM;
-                          const isCurrent = row.mode === mode && paramsMatch;
+                          const isCurrent = row.st === stP && row.mult === stM;
                           return (
                             <tr
                               key={row.label}
