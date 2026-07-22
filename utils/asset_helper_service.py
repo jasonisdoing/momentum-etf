@@ -1697,7 +1697,12 @@ def run_asset_helper_backtest(
     # (풀 백테스트는 종목풀 화면에 별도로 있음).
     clean_tickers = _clean_tickers(tickers)
     clean_settings = _with_account_asset_helper_basis(_clean_settings(settings), weight_mode=weight_mode)
-    clean_tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(clean_tickers, clean_settings)
+    # 고정 비중(사용자가 직접 고른 종목)은 순위 고정(exclude_from_ranking) 제외를 적용하지 않는다.
+    # 변동 모드에서만 순위 유니버스에서 고정 종목을 뺀다(비중 계산부와 동일 규칙).
+    if weight_mode == "fixed":
+        excluded_fixed_tickers = []
+    else:
+        clean_tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(clean_tickers, clean_settings)
     if len(clean_tickers) < 3:
         suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
         raise ValueError(f"백테스트에는 고정 종목 제외 후 확인된 종목이 3개 이상 필요합니다.{suffix}")
