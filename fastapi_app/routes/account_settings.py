@@ -33,7 +33,6 @@ class AccountSettingsUpdatePayload(BaseModel):
 class AccountCreatePayload(BaseModel):
     account_id: str
     name: str
-    account_type: str
     icon: str = ""
     order: int = 0
     country_code: str = "kor"
@@ -81,7 +80,6 @@ def post_account(
         created = create_account(
             payload.account_id,
             payload.name,
-            payload.account_type,
             icon=payload.icon,
             order=payload.order,
             country_code=payload.country_code,

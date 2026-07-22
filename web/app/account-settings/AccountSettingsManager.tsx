@@ -112,25 +112,26 @@ function AccountRow({
   const save = async () => {
     try {
       setSaving(true);
+      const values: Record<string, unknown> = {
+        name: name.trim(),
+        icon: icon.trim(),
+        order: Math.trunc(Number(order)),
+        country_code: countryCode,
+        currency: currency.trim().toUpperCase(),
+        market_regime_index: {
+          ticker: regimeTicker,
+          name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
+        },
+        URL: url.trim(),
+      };
+      // 벤치마크는 선택 — 둘 다 채워졌을 때만 저장(빈 값이면 백엔드 검증에 걸리므로 생략).
+      if (benchTicker.trim() && benchName.trim()) {
+        values.benchmark = { ticker: benchTicker.trim(), name: benchName.trim() };
+      }
       const resp = await fetch("/api/account-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          account_id: account.account_id,
-          values: {
-            name: name.trim(),
-            icon: icon.trim(),
-            order: Math.trunc(Number(order)),
-            country_code: countryCode,
-            currency: currency.trim().toUpperCase(),
-            benchmark: { ticker: benchTicker.trim(), name: benchName.trim() },
-            market_regime_index: {
-              ticker: regimeTicker,
-              name: marketIndices.find((item) => item.ticker === regimeTicker)?.name ?? "",
-            },
-            URL: url.trim(),
-          },
-        }),
+        body: JSON.stringify({ account_id: account.account_id, values }),
       });
       const data = (await resp.json()) as { updated_at?: string | null; error?: string; detail?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
@@ -159,7 +160,7 @@ function AccountRow({
           <button
             type="button"
             className="btn btn-sm btn-dark"
-            disabled={saving || !name.trim() || !benchTicker.trim() || !benchName.trim()}
+            disabled={saving || !name.trim()}
             onClick={() => void save()}
           >
             {saving ? "저장 중…" : "저장"}
@@ -268,7 +269,6 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
   const [name, setName] = useState("");
   const [icon, setIcon] = useState("");
   const [order, setOrder] = useState("0");
-  const [accountType, setAccountType] = useState<"fixed" | "trend" | "regime">("fixed");
   const [countryCode, setCountryCode] = useState("kor");
   const [currency, setCurrency] = useState("KRW");
   const [saving, setSaving] = useState(false);
@@ -282,7 +282,6 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
         body: JSON.stringify({
           account_id: accountId.trim().toLowerCase(),
           name: name.trim(),
-          account_type: accountType,
           icon: icon.trim(),
           order: Math.trunc(Number(order) || 0),
           country_code: countryCode,
@@ -327,14 +326,6 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
               {row.el}
             </label>
           ))}
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ ...labelStyle, width: 64 }}>타입</span>
-            <select className="form-select form-select-sm" style={{ flex: 1 }} value={accountType} onChange={(e) => setAccountType(e.target.value as "fixed" | "trend" | "regime")}>
-              <option value="fixed">fixed (고정 보유)</option>
-              <option value="trend">trend (추세 순위)</option>
-              <option value="regime">regime (레짐)</option>
-            </select>
-          </label>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={{ ...labelStyle, width: 64 }}>국가</span>
             <select className="form-select form-select-sm" style={{ flex: 1 }} value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>

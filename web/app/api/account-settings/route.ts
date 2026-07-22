@@ -31,7 +31,7 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-/** 계좌 추가 — `{ account_id, name, account_type, icon?, order?, country_code?, currency? }`. */
+/** 계좌 추가 — `{ account_id, name, icon?, order?, country_code?, currency? }`. */
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
