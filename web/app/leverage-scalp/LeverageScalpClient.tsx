@@ -292,6 +292,44 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 리사이즈 대응: lightweight-charts 는 폭이 바뀌면 barSpacing(줌)을 유지해 보이는 봉 수가
+  // 바뀐다(창이 좁아지면 몇 개만 보임). 사용자가 보던 '봉 개수'를 기록해 두었다가 리사이즈 후
+  // 폭에 맞게 다시 적용해, 항상 같은 구간이 화면에 꽉 차게 보이도록 한다.
+  const visibleBarSpanRef = useRef(60); // 현재 보이는 봉 개수(사용자 줌 유지용)
+  const resizeAtRef = useRef(0);
+  useEffect(() => {
+    const container = containerRef.current;
+    const chart = chartRef.current;
+    if (!container || !chart) return;
+    const ts = chart.timeScale();
+    // 사용자 줌/팬으로 보이는 봉 개수 기록(리사이즈 직후 이벤트는 무시).
+    const onRange = (range: { from: number; to: number } | null) => {
+      if (!range || Date.now() - resizeAtRef.current < 300) return;
+      const span = range.to - range.from;
+      if (span > 1) visibleBarSpanRef.current = span;
+    };
+    ts.subscribeVisibleLogicalRangeChange(onRange);
+
+    let raf = 0;
+    const ro = new ResizeObserver(() => {
+      resizeAtRef.current = Date.now();
+      cancelAnimationFrame(raf);
+      // autoSize 가 폭을 반영한 다음 프레임에 '보던 봉 개수'를 오른쪽 끝 기준으로 재적용.
+      raf = requestAnimationFrame(() => {
+        const len = barCountRef.current;
+        if (len <= 0) return;
+        const span = Math.max(10, Math.round(visibleBarSpanRef.current));
+        ts.setVisibleLogicalRange({ from: Math.max(0, len - span), to: len + 4 });
+      });
+    });
+    ro.observe(container);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      ts.unsubscribeVisibleLogicalRangeChange(onRange);
+    };
+  }, []);
+
   useEffect(() => {
     let alive = true;
     const fetchCandles = async () => {
