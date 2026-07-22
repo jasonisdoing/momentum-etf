@@ -31,13 +31,13 @@ logger = logging.getLogger(__name__)
 # 표시 순서대로 정의. yf_ticker 는 Yahoo Finance 인덱스 심볼.
 # kor_naver_symbol 이 있으면 한국 인덱스로 간주하고 가격은 네이버에서 받는다.
 INDICES: list[dict[str, str]] = [
-    {"name": "코스피+나스닥+반도체", "yf_ticker": "CORE"},  # 합성 지수(등가중). 실제 소스는 아래 CORE_* 참조.
     {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
     {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "다우존스", "yf_ticker": "^DJI"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
     {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
+    {"name": "코스피+나스닥+반도체", "yf_ticker": "CORE"},  # 합성 지수(등가중). 실제 소스는 위 CORE_* 참조.
 ]
 
 # 합성 지수 CORE: 아래 3개를 '공통 기준일=100' 으로 리베이스해 등가중 평균한 종가로 만든다.
