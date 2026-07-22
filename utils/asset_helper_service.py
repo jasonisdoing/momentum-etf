@@ -647,6 +647,68 @@ def _load_close_frame(tickers: list[dict[str, Any]]) -> tuple[pd.DataFrame, list
     return close_frame, missing
 
 
+# 국가코드 → 통화, 통화 → KRW 환율 심볼(Yahoo). 국내(kor)는 원화라 변환 없음.
+_CURRENCY_BY_COUNTRY = {"kor": "KRW", "us": "USD", "au": "AUD"}
+_FX_SYMBOL_BY_CURRENCY = {"USD": "KRW=X", "AUD": "AUDKRW=X"}
+
+
+def _resolve_backtest_currency(ticker: str, country_code: str | None, ticker_type: str | None) -> str:
+    """백테스트 통화 판정: country_code → ticker_type → 티커 형식 순으로 추정한다.
+
+    /market-trend·resolve 와 동일한 형식 규칙(6자리 숫자=국내, .AX=호주, 그 외 알파벳=미국).
+    """
+    cc = str(country_code or "").strip().lower()
+    if not cc and ticker_type:
+        from utils.settings_loader import get_ticker_type_settings
+
+        try:
+            cc = str(get_ticker_type_settings(ticker_type).get("country_code") or "").strip().lower()
+        except Exception:
+            cc = ""
+    if not cc:
+        t = str(ticker or "").strip().upper()
+        if t.isdigit() and len(t) == 6:
+            cc = "kor"
+        elif t.endswith(".AX"):
+            cc = "au"
+        else:
+            cc = "us"
+    return _CURRENCY_BY_COUNTRY.get(cc, "KRW")
+
+
+def _convert_close_frame_to_krw(close_frame: pd.DataFrame, currency_by_ticker: dict[str, str]) -> pd.DataFrame:
+    """비원화(USD/AUD) 종목의 종가를 해당 일자 환율로 곱해 원화(KRW) 시계열로 환산한다.
+
+    이렇게 하면 백테스트가 시점별 환율(환차손익)까지 반영한다. 원화 종목은 그대로 둔다.
+    """
+    if close_frame.empty:
+        return close_frame
+    from utils.data_loader import get_exchange_rate_series
+
+    start = close_frame.index.min()
+    end = close_frame.index.max()
+    fx_cache: dict[str, pd.Series] = {}
+    converted = close_frame.copy()
+    for ticker in list(converted.columns):
+        currency = str(currency_by_ticker.get(str(ticker).strip().upper(), "KRW")).upper()
+        if currency == "KRW":
+            continue
+        symbol = _FX_SYMBOL_BY_CURRENCY.get(currency)
+        if not symbol:
+            raise ValueError(f"백테스트 환율 변환을 지원하지 않는 통화입니다: {currency} ({ticker})")
+        if symbol not in fx_cache:
+            fx = get_exchange_rate_series(start, end, symbol=symbol, allow_partial=True)
+            if fx is None or fx.empty:
+                raise ValueError(f"{symbol} 환율 시계열을 불러오지 못해 백테스트 환율 변환이 불가합니다.")
+            fx = fx.copy()
+            fx.index = pd.to_datetime(fx.index).normalize()
+            fx = fx[~fx.index.duplicated(keep="last")].sort_index()
+            fx_cache[symbol] = fx
+        aligned = fx_cache[symbol].reindex(converted.index).ffill().bfill()
+        converted[ticker] = pd.to_numeric(converted[ticker], errors="coerce") * aligned
+    return converted
+
+
 def _calculate_period_return(series: pd.Series, months: int, eval_date: pd.Timestamp) -> float | None:
     normalized = pd.to_numeric(series, errors="coerce").dropna()
     if normalized.empty:
@@ -1733,6 +1795,17 @@ def run_asset_helper_backtest(
     missing_required = [ticker for ticker in ticker_order + [benchmark["ticker"]] if ticker not in close_frame.columns]
     if missing_required:
         raise ValueError(f"백테스트 가격 캐시 누락: {', '.join(missing_required)}")
+
+    # 시점별 환율 반영: 비원화(미국 USD·호주 AUD) 종목 종가를 원화로 환산한 뒤 시뮬레이션한다.
+    # 벤치마크는 country_code 가 없으므로 티커 형식/메타로 통화를 추정한다.
+    currency_by_ticker = {
+        str(item["ticker"]).strip().upper(): _resolve_backtest_currency(
+            item["ticker"], item.get("country_code"), item.get("ticker_type")
+        )
+        for item in clean_tickers
+    }
+    currency_by_ticker[benchmark["ticker"]] = _resolve_backtest_currency(benchmark["ticker"], None, None)
+    close_frame = _convert_close_frame_to_krw(close_frame, currency_by_ticker)
 
     today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
     start_target = (today - pd.DateOffset(months=months)).normalize()

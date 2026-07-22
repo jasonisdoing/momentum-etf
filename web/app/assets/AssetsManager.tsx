@@ -2504,9 +2504,8 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         }
         // 기본적으로 현금(1) + 추가 가능 공간(1)을 고려하여 최소 +2행 공간을 확보합니다.
         const rowCount = (params.data.rows?.length ?? 0) + 2;
-        // 툴바(50) + 그리드 헤더(34) + 행 + 가로 스크롤바/테두리 안전 마진(5 + 30).
-        // (메모 영역 제거로 예약 높이 48 + 130 은 뺐다.)
-        return 50 + 34 + rowCount * 42 + 5 + 30;
+        // 툴바(50) + 그리드 헤더(36) + 행(실제 rowHeight 34) + 가로 스크롤바/테두리 안전 마진(5 + 30).
+        return 50 + 36 + rowCount * 34 + 5 + 30;
       },
       onCellClicked: (params) => {
         if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) {

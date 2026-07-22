@@ -895,7 +895,7 @@ export function AssetHelperClient() {
           <div className="card appCard">
             <div className="card-body">
               <h2 style={{ fontSize: "1.0rem", fontWeight: 800, marginBottom: 6 }}>시장 상황</h2>
-              <div style={{ minHeight: "13rem" }}>
+              <div style={{ minHeight: "16rem" }}>
                 <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.9rem", lineHeight: 1.6 }}>
                   {marketRegime ? (
                     <li>
@@ -956,8 +956,8 @@ export function AssetHelperClient() {
               </div>
               <textarea
                 className="form-control"
-                style={{ fontSize: "0.9rem", minHeight: "13rem" }}
-                rows={10}
+                style={{ fontSize: "0.9rem", minHeight: "16rem" }}
+                rows={12}
                 placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
                 value={memo}
                 onChange={(e) => setMemo(e.target.value)}
@@ -1001,7 +1001,7 @@ export function AssetHelperClient() {
               rowData={gridRows}
               columnDefs={columnDefs}
               loading={loading}
-              minHeight={Math.max(260, Math.min(gridRows.length, 12) * 44 + 46)}
+              minHeight={Math.max(180, Math.min(gridRows.length, 12) * 34 + 36)}
               gridOptions={gridOptions}
               theme={gridTheme}
               getRowId={(params) =>
