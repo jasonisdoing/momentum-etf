@@ -113,6 +113,7 @@ type HelperTicker = {
   country_code?: string;
   bucket?: number;
   fixed_weight_pct?: number | null;
+  current_weight_pct?: number | null;
 };
 
 // 종목 목록의 소스는 자산 관리(보유 종목)다. 자산 헬퍼는 이 목록을 같은 순서로 보여주고 비중만 붙인다.
@@ -123,6 +124,7 @@ type HoldingRow = {
   sort_order?: number;
   ticker_type?: string;
   country_code?: string;
+  weight_pct?: number | null;
 };
 
 // 보유 티커의 시장 접두어(ASX:/KR: 등)를 제거한다. 가격 캐시·비중 계산은 접두어 없는 티커를 쓴다.
@@ -158,6 +160,7 @@ function mergeHoldingsWithWeights(holdings: HoldingRow[], weightTickers: HelperT
         country_code: r.country_code,
         bucket: r.bucket_id,
         fixed_weight_pct: weightMap[tk] ?? null,
+        current_weight_pct: r.weight_pct ?? null,
       };
     });
 }
@@ -783,6 +786,14 @@ export function AssetHelperClient() {
       { field: "return_12m_pct", headerName: "1년", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "mdd_pct", headerName: "MDD", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "sortino", headerName: "Sortino", minWidth: 90, width: 90, type: "rightAligned", valueFormatter: (p) => fmtNum(p.value as number | null) },
+      {
+        field: "current_weight_pct",
+        headerName: "현재 비중",
+        minWidth: 92,
+        width: 92,
+        type: "rightAligned",
+        valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(1)}`),
+      },
       {
         field: "fixed_weight_pct",
         headerName: "비중",
