@@ -16,8 +16,11 @@ type MarketTrendItem = {
   change_pct: number | null;
   // 원본 추세 % (MA 괴리율 — 화면 미표시)
   trend_pct: number | null;
-  // MA를 0점으로 두고 12개월 위/아래 괴리율로 정규화한 점수 (-100 ~ +100, 화면 표시용)
+  // MA를 0점으로 두고 12개월 위/아래 괴리율로 정규화한 점수 (-100 ~ +100, 참조용)
   trend_score: number | null;
+  // 공격/방어 비중 (각 0~100, 20% 단위)
+  offense_pct: number | null;
+  defense_pct: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
   // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
@@ -56,13 +59,6 @@ function formatPct(value: number | null | undefined): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  const rounded = Math.round(value);
-  const sign = rounded > 0 ? "+" : "";
-  return `${sign}${rounded}`;
-}
-
 function getSignedClass(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) return "";
   return value < 0 ? "metricNegative" : "metricPositive";
@@ -72,9 +68,6 @@ function renderSignedPercentCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatPct(params.value)}</span>;
 }
 
-function renderSignedScoreCell(params: { value: number | null | undefined }) {
-  return <span className={getSignedClass(params.value)}>{formatScore(params.value)}</span>;
-}
 
 type RegimeKey = "accel_up" | "accel_down";
 
@@ -257,13 +250,26 @@ export function MarketTrendClient({
         },
       },
       {
-        field: "trend_score",
-        headerName: `추세 점수(${maType}${maDays} 기반)`,
-        flex: 0.7,
-        minWidth: 100,
+        field: "offense_pct",
+        headerName: "공격비중",
+        flex: 0.6,
+        minWidth: 88,
         sortable: true,
         type: "rightAligned",
-        cellRenderer: renderSignedScoreCell,
+        cellStyle: { color: "#d62828", fontWeight: 700 },
+        valueFormatter: (params: ValueFormatterParams<GridRow>) =>
+          params.value == null ? "-" : `${params.value}%`,
+      },
+      {
+        field: "defense_pct",
+        headerName: "수비비중",
+        flex: 0.6,
+        minWidth: 88,
+        sortable: true,
+        type: "rightAligned",
+        cellStyle: { color: "#1971c2", fontWeight: 700 },
+        valueFormatter: (params: ValueFormatterParams<GridRow>) =>
+          params.value == null ? "-" : `${params.value}%`,
       },
       {
         field: "pct_from_high",
@@ -365,9 +371,9 @@ export function MarketTrendClient({
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
                 <li>일간(%): 전일 종가 대비 등락률.</li>
                 <li>
-                  추세 점수: 종가의 {maType}{maDays} 대비 괴리율을 −100~+100 으로 정규화한 값(0 = MA선).
-                  최근 12개월 괴리율의 상위/하위 {100 - scoreAnchorPercentile}% 를 각각 천장(+100)·바닥(−100)으로 봅니다.
-                  MA 위면 양수, 아래면 음수 — <strong>수익률이 아니라 MA 대비 위치입니다.</strong>
+                  공격/수비 비중: 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
+                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다
+                  (조금만 내려가도 수비 20%부터, 연최저 근처면 수비 100%). 상세 차트의 바와 같은 기준입니다.
                 </li>
                 <li>
                   레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.

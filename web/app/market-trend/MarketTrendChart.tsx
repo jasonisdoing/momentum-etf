@@ -48,6 +48,8 @@ type HistoryResponse = {
   history: HistoryPoint[];
   trend_min_12m: number | null;
   trend_max_12m: number | null;
+  offense_pct: number | null;
+  defense_pct: number | null;
   error?: string;
 };
 
@@ -158,49 +160,6 @@ function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, targ
   const rank: Record<RegimeKey, number> = { accel_up: 1, accel_down: 0 };
   const suffix = current !== null && rank[target] < rank[current] ? " 미만" : " 이상";
   return `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}`;
-}
-
-type GaugeData = {
-  todayPct: number; // 오늘 추세%의 막대 내 위치 (0~100)
-  zeroPct: number | null; // MA선(0%)의 위치 (범위가 0을 교차할 때만)
-  trendMin: number;
-  trendMax: number;
-};
-
-/**
- * 12개월 추세% 범위를 가로 막대로 표시.
- *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
- * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
- * 오늘 핀의 색은 SuperTrend 방향 레짐으로 칠한다.
- */
-function computeGaugeData({
-  trend,
-  trendMin,
-  trendMax,
-}: {
-  trend: number | null | undefined;
-  trendMin: number | null | undefined;
-  trendMax: number | null | undefined;
-}): GaugeData | null {
-  if (
-    trend === null || trend === undefined || Number.isNaN(trend) ||
-    trendMin === null || trendMin === undefined || Number.isNaN(trendMin) ||
-    trendMax === null || trendMax === undefined || Number.isNaN(trendMax) ||
-    trendMax <= trendMin
-  ) {
-    return null;
-  }
-  const project = (v: number) =>
-    Math.max(0, Math.min(100, ((v - trendMin) / (trendMax - trendMin)) * 100));
-
-  const zeroPct = trendMin < 0 && trendMax > 0 ? project(0) : null;
-
-  return {
-    todayPct: project(trend),
-    zeroPct,
-    trendMin,
-    trendMax,
-  };
 }
 
 function filterHistoryByRange(history: HistoryPoint[], rangeKey: ChartRangeKey): HistoryPoint[] {
@@ -466,13 +425,6 @@ export function MarketTrendChart({
   }, [visibleHistory]);
 
   const latestPoint = data?.history.at(-1) ?? null;
-  const gaugeData = computeGaugeData({
-    trend: latestPoint?.trend_pct,
-    trendMin: data?.trend_min_12m,
-    trendMax: data?.trend_max_12m,
-  });
-  const gaugeLeft = gaugeData?.todayPct ?? null;
-  const latestRegime = latestPoint?.regime ?? null;
 
   useEffect(() => {
     const container = chartContainerRef.current;
@@ -748,112 +700,38 @@ export function MarketTrendChart({
       ) : (
         <div style={{ display: "flex", height: "calc(100% - 32px)", minHeight: 300, flexDirection: "column" }}>
           <div style={{ marginBottom: 12 }}>
-            {gaugeData ? (
+            {data?.offense_pct != null && data?.defense_pct != null ? (
               <>
-                {/* 게이지 본체 — MA(0) 기준 아래(파랑)/위(빨강) 배경, 오늘 핀은 레짐색 */}
+                {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4, marginBottom: 6 }}>
+                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82" }}>
+                    공격 / 방어 <span style={{ fontWeight: 400 }}>({maType}{maDays} 기준)</span>
+                  </span>
+                  <span style={{ fontSize: "0.82rem", fontWeight: 800 }}>
+                    <span style={{ color: "#d62828" }}>공격 {data.offense_pct}%</span>
+                    <span style={{ color: "#94a3b8" }}> · </span>
+                    <span style={{ color: "#1971c2" }}>방어 {data.defense_pct}%</span>
+                  </span>
+                </div>
                 <div
-                  style={{
-                    position: "relative",
-                    height: 34,
-                    marginTop: 18,
-                    overflow: "visible",
-                    borderRadius: 8,
-                    border: "1px solid #e2e8f0",
-                    background: "#fff",
-                  }}
+                  style={{ display: "flex", height: 34, borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0", background: "#fff" }}
+                  title={`${maType}${maDays} 괴리율 ${formatPct(latestPoint?.trend_pct)} · 공격 ${data.offense_pct}% / 방어 ${data.defense_pct}%`}
                 >
-                  {/* 방향 배경: MA 아래(파랑) / 위(빨강) */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "flex",
-                      borderRadius: 8,
-                      overflow: "hidden",
-                    }}
-                  >
-                    {gaugeData.zeroPct === null ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          background: gaugeData.trendMin >= 0 ? "#d62828" : "#1971c2",
-                          opacity: 0.14,
-                        }}
-                      />
-                    ) : (
-                      <>
-                        <div style={{ width: `${gaugeData.zeroPct}%`, background: "#1971c2", opacity: 0.14 }} />
-                        <div style={{ width: `${100 - gaugeData.zeroPct}%`, background: "#d62828", opacity: 0.14 }} />
-                      </>
-                    )}
-                  </div>
-                  {/* MA(0) marker */}
-                  {gaugeData.zeroPct !== null ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: `${gaugeData.zeroPct}%`,
-                        top: 0,
-                        bottom: 0,
-                        width: 0,
-                        borderLeft: "1px dashed #475569",
-                        transform: "translateX(-0.5px)",
-                      }}
-                      title="MA(0)"
-                    >
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: -16,
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: "#475569",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        MA
-                      </div>
+                  {data.offense_pct > 0 ? (
+                    <div style={{ width: `${data.offense_pct}%`, background: "#d62828", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.78rem", fontWeight: 800 }}>
+                      {data.offense_pct >= 20 ? `공격 ${data.offense_pct}%` : ""}
                     </div>
                   ) : null}
-                  {/* 오늘 핀 — 색은 현재 레짐(레벨 기반), 라벨은 추세% */}
-                  {gaugeLeft !== null ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: `${gaugeLeft}%`,
-                        top: "50%",
-                        transform: "translate(-50%, -50%)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        background: latestRegime ? REGIME_COLOR[latestRegime] : "#1f2937",
-                        color: "#fff",
-                        fontSize: "0.78rem",
-                        fontWeight: 800,
-                        boxShadow: "0 4px 12px rgba(15, 23, 42, 0.2)",
-                      }}
-                      title={`추세 점수(${maType}${maDays} 기반) ${formatScore(latestPoint?.trend_score)} (${maType}${maDays} 괴리율 ${formatPct(
-                        latestPoint?.trend_pct,
-                      )}, ${latestRegime ? REGIME_LABEL[latestRegime] : "-"})`}
-                    >
-                      {formatScore(latestPoint?.trend_score)}
+                  {data.defense_pct > 0 ? (
+                    <div style={{ width: `${data.defense_pct}%`, background: "#1971c2", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.78rem", fontWeight: 800 }}>
+                      {data.defense_pct >= 20 ? `방어 ${data.defense_pct}%` : ""}
                     </div>
                   ) : null}
                 </div>
-                {/* 범례: 최저 / MA / 최고 */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: "0.7rem",
-                    color: "#5f6b82",
-                    marginTop: 6,
-                  }}
-                >
-                  <span>최저: {formatPct(gaugeData.trendMin)}</span>
-                  <span>MA: 0%</span>
-                  <span>최고: {formatPct(gaugeData.trendMax)}</span>
+                {/* 범례: 왼쪽=MA 위(공격 100) / 오른쪽=연최저(방어 100) */}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.7rem", color: "#5f6b82", marginTop: 6 }}>
+                  <span>MA 위 = 공격 100</span>
+                  <span>연최저 = 방어 100</span>
                 </div>
               </>
             ) : null}
