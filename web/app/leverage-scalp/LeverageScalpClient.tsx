@@ -36,6 +36,7 @@ const KST_OFFSET_SEC = 9 * 3600;
 const POLL_MS = 2000;
 const CANDLE_COUNT = 450;
 const VISIBLE_BARS = 60; // 최초 표시·리사이즈 시 화면에 채우는 최근 봉 개수(약 1시간).
+const RIGHT_OFFSET = 4; // 마지막 봉 오른쪽 여백(봉 수).
 const UP_COLOR = "#d63939";
 const DOWN_COLOR = "#206bc4";
 const ST_COLOR = "rgba(120,130,150,0.75)"; // 슈퍼트렌드선(회색)
@@ -257,6 +258,7 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
   const firstLoadRef = useRef(true);
   const barCountRef = useRef(0); // 직전 봉 개수(실시간 추적 여부 판단용)
   const lastSigRef = useRef(""); // 직전 데이터 시그니처(변화 없으면 재그리기 생략 → 마감 후 깜빡임 방지)
+  const prevCandlesRef = useRef<Candle[]>([]); // 직전 봉 배열(증분 update 판단용)
 
   const [candles, setCandles] = useState<Candle[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -299,8 +301,10 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 보이는 봉 개수(줌). 폴링·리사이즈가 공유해 사용자가 보던 개수를 유지한다.
+  const spanRef = useRef(VISIBLE_BARS + RIGHT_OFFSET);
   // 리사이즈 대응: lightweight-charts 는 폭이 바뀌면 barSpacing(줌)을 유지해 보이는 봉 수가
-  // 바뀐다(창이 좁아지면 몇 개만 보임). **폭이 변할 때만** 최근 VISIBLE_BARS 개를 폭에 맞게
+  // 바뀐다(창이 좁아지면 몇 개만 보임). **폭이 변할 때만** 보던 봉 개수(spanRef)를 폭에 맞게
   // 다시 채운다. 높이 변화(안내 문구 갱신 등)에는 반응하지 않아 시간이 지나도 흔들리지 않는다.
   const prevWidthRef = useRef(0);
   useEffect(() => {
@@ -314,11 +318,12 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
       if (Math.abs(width - prevWidthRef.current) < 1) return; // 폭 변화만 반응(높이 무시)
       prevWidthRef.current = width;
       cancelAnimationFrame(raf);
-      // autoSize 가 폭을 반영한 다음 프레임에 최근 봉을 오른쪽 끝 기준으로 재적용.
+      // autoSize 가 폭을 반영한 다음 프레임에 보던 봉 개수를 오른쪽 끝 기준으로 재적용.
       raf = requestAnimationFrame(() => {
         const len = barCountRef.current;
         if (len <= 0) return;
-        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, len - VISIBLE_BARS), to: len + 4 });
+        const to = len + RIGHT_OFFSET;
+        chart.timeScale().setVisibleLogicalRange({ from: Math.max(0, to - spanRef.current), to });
       });
     });
     ro.observe(container);
@@ -350,17 +355,42 @@ function ScalpChart({ name, code, feed, interval, note, formatPrice, overlays, l
         // 데이터 교체 전에 "지금 오른쪽 끝(실시간)을 보고 있었는지" 판단(과거로 스크롤했으면 추적 안 함).
         const vr = ts?.getVisibleLogicalRange();
         const following = !vr || vr.to >= barCountRef.current - 1;
-        candleSeriesRef.current.setData(
-          next.map<CandlestickData>((c) => ({ time: toTime(c.t), open: c.o, high: c.h, low: c.l, close: c.c })),
-        );
+        // 리사이즈가 유지할 '보던 봉 개수'를 기록만 한다(범위를 바꾸지 않아 깜빡임 없음).
+        if (vr && following) {
+          const s = Math.round(vr.to - vr.from);
+          if (s >= 14) spanRef.current = s;
+        }
+
+        const toBar = (c: Candle): CandlestickData => ({ time: toTime(c.t), open: c.o, high: c.h, low: c.l, close: c.c });
+        const prev = prevCandlesRef.current;
+        const delta = next.length - prev.length;
+        // 꼬리만 바뀐 경우(폴링 대부분)는 전체 setData(드리프트·깜빡임 유발) 대신 바뀐 봉만 update().
+        // 정렬 판단: 직전 마지막 봉이 next 의 같은 자리에 그대로 있으면 증분으로 본다.
+        const aligned =
+          !firstLoadRef.current &&
+          prev.length > 0 &&
+          delta >= 0 &&
+          delta <= 2 &&
+          next.length - 1 - delta >= 0 &&
+          prev[prev.length - 1]?.t === next[next.length - 1 - delta]?.t;
+        if (aligned) {
+          for (let i = next.length - 1 - delta; i < next.length; i += 1) {
+            candleSeriesRef.current.update(toBar(next[i]));
+          }
+        } else {
+          candleSeriesRef.current.setData(next.map(toBar));
+        }
+        prevCandlesRef.current = next;
         setCandles(next);
         barCountRef.current = next.length;
         if (firstLoadRef.current && next.length > 0) {
           // 최초 표시폭은 최근 약 1시간(VISIBLE_BARS 개 1분봉). 이후 사용자가 자유롭게 확대/축소.
-          ts?.setVisibleLogicalRange({ from: Math.max(0, next.length - VISIBLE_BARS), to: next.length + 4 });
+          spanRef.current = VISIBLE_BARS + RIGHT_OFFSET;
+          ts?.setVisibleLogicalRange({ from: Math.max(0, next.length - VISIBLE_BARS), to: next.length + RIGHT_OFFSET });
           firstLoadRef.current = false;
-        } else if (following) {
-          // 오른쪽 끝을 보고 있었으면 새 봉을 따라 실시간으로 이동(줌 유지).
+        } else if (following && (delta > 0 || !aligned)) {
+          // 새 봉이 생겼거나 대량 재로드(비정렬 setData) 시에만 오른쪽 끝으로 이동(줌·barSpacing 유지).
+          // 형성 중 봉만 바뀐 경우(delta 0 · 정렬됨)는 이동하지 않아 깜빡임이 없다.
           ts?.scrollToRealTime();
         }
         if (next.length > 0) {
