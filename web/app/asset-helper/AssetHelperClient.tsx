@@ -304,9 +304,10 @@ export function AssetHelperClient() {
   );
 
   const load = useCallback(
-    async (accountId?: string) => {
+    async (accountId?: string, opts?: { silent?: boolean }) => {
+      // silent: 재로드 중 로딩 오버레이를 띄우지 않아 그리드가 깜빡이지 않는다(종목 추가/삭제 후 사용).
       try {
-        setLoading(true);
+        if (!opts?.silent) setLoading(true);
         // 전체 계좌·이름은 account-settings 가 단일 소스다.
         const acctSettingsResp = await fetch("/api/account-settings", { cache: "no-store" });
         const acctSettingsData = (await acctSettingsResp.json()) as {
@@ -367,7 +368,7 @@ export function AssetHelperClient() {
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "불러오지 못했습니다.");
       } finally {
-        setLoading(false);
+        if (!opts?.silent) setLoading(false);
       }
     },
     [toast],
@@ -464,6 +465,9 @@ export function AssetHelperClient() {
   // 추가하면 자산 관리 보유 목록에 수량 0으로 등록한 뒤 재로드한다(진짜 공통 1개 목록).
   const addOnValidated = useCallback(
     (resolved: HelperTicker) => {
+      // 낙관적 표시: 즉시 목록에 추가해 바로 보이게 한다(깜빡임/사라짐 방지). 이후 조용히 재로드해 지표를 채운다.
+      const key = resolved.ticker.trim().toUpperCase();
+      setTickers((cur) => (cur.some((t) => t.ticker.trim().toUpperCase() === key) ? cur : [...cur, resolved]));
       void (async () => {
         try {
           const resp = await fetch("/api/assets", {
@@ -473,10 +477,11 @@ export function AssetHelperClient() {
           });
           const data = (await resp.json()) as { added?: string; error?: string };
           if (!resp.ok || data.error) throw new Error(data.error ?? "종목 추가에 실패했습니다.");
-          await load(selectedAccount ?? undefined);
+          await load(selectedAccount ?? undefined, { silent: true });
           toast.success("보유 목록에 추가(수량 0)");
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "종목 추가에 실패했습니다.");
+          await load(selectedAccount ?? undefined, { silent: true }); // 실패 시 낙관적 항목 정리
         }
       })();
     },
@@ -506,8 +511,10 @@ export function AssetHelperClient() {
         const data = (await resp.json()) as { error?: string };
         if (!resp.ok || data.error) throw new Error(data.error ?? "삭제에 실패했습니다.");
       }
+      // 낙관적 제거 후 조용히 재로드(그리드 깜빡임 방지).
+      setTickers((cur) => cur.filter((t) => !selectedTickers.includes(t.ticker)));
       setSelectedTickers([]);
-      await load(selectedAccount ?? undefined);
+      await load(selectedAccount ?? undefined, { silent: true });
       toast.success("삭제 완료");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "삭제에 실패했습니다.");

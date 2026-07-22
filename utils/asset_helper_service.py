@@ -22,7 +22,7 @@ from utils.perf_metrics import curve_metrics, mdd_span
 
 logger = get_app_logger()
 
-COLLECTION = "top_pick_settings"  # DB 컬렉션명(데이터 마이그레이션 전까지 유지)
+COLLECTION = "asset_helper_settings"
 SETTINGS_ID = "default"
 
 # 설정 스키마 — 코드 기본값(silent default) 없음. 값은 전적으로 DB에서 온다.
@@ -247,7 +247,7 @@ def _with_account_asset_helper_basis(settings: dict[str, Any], *, weight_mode: s
     if weight_mode == "fixed":
         ma_context = {"POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
     else:
-        ma_context = _load_account_trend_context(account_id) or _load_account_pool_ma_context(account_id)
+        ma_context = _load_account_pool_ma_context(account_id)
     return {**settings, **ma_context}
 
 
@@ -282,62 +282,6 @@ def _load_account_pool_ma_context(account_id: str) -> dict[str, Any]:
         "SHORT_MA_DAYS": short_ma_days,
         "LONG_MA_DAYS": long_ma_days,
     }
-
-
-def _load_account_trend_context(account_id: str) -> dict[str, Any] | None:
-    """trend 계좌면 연결 종목풀의 선정 기준(이평선/풀명) + 계좌 보유개수(hold_count)를 반환한다.
-
-    후보 출처·선정 기준(이평선·게이팅·순위)은 계좌에 연결된 종목풀(ticker_types)을 그대로 쓰고,
-    계좌 strategy 는 보유개수(hold_count) 하나만 소유한다. account_type 이 trend 가 아니거나
-    hold_count 가 없으면 None을 반환해 호출부가 기존 풀 기반 방식으로 동작하게 한다.
-    """
-    normalized_account_id = str(account_id or "").strip()
-    if not normalized_account_id:
-        return None
-
-    from utils.settings_loader import get_account_settings
-
-    account_settings = get_account_settings(normalized_account_id)
-    if account_settings.get("account_type") != "trend":
-        return None
-    strategy = account_settings.get("strategy")
-    if not isinstance(strategy, dict):
-        return None
-    try:
-        hold_count = int(strategy["hold_count"])
-    except (KeyError, TypeError, ValueError):
-        return None
-    # 이평선·풀명은 연결된 종목풀에서 그대로 가져온다(계좌가 따로 소유하지 않는다).
-    pool_context = _load_account_pool_ma_context(normalized_account_id)
-    return {**pool_context, "HOLD_COUNT": hold_count}
-
-
-def _load_pool_universe_tickers(pool_ticker_type: str) -> list[dict[str, Any]]:
-    """trend 후보군 = 연결 종목풀의 종목 전체. get_etfs 로 풀 종목을 읽어 계산 유니버스로 만든다."""
-    pool = str(pool_ticker_type or "").strip().lower()
-    if not pool:
-        raise ValueError("추세 계좌의 후보 종목풀(ticker_types)이 지정되지 않았습니다.")
-
-    from utils.settings_loader import get_ticker_type_settings
-    from utils.stock_list_io import get_etfs
-
-    country_code = str(get_ticker_type_settings(pool).get("country_code") or "").strip().lower()
-    universe: list[dict[str, Any]] = []
-    for item in get_etfs(pool):
-        ticker = str(item.get("ticker") or "").strip().upper()
-        if not ticker:
-            continue
-        universe.append(
-            {
-                "ticker": ticker,
-                "name": str(item.get("name") or ticker),
-                "ticker_type": pool,
-                "country_code": country_code or None,
-            }
-        )
-    if not universe:
-        raise ValueError(f"종목풀 '{pool}'에 종목이 없습니다.")
-    return universe
 
 
 def _build_asset_helper_ma_rule(settings: dict[str, Any]) -> dict[str, Any]:
@@ -451,40 +395,6 @@ def _compute_ma_deviation_frame(close_frame: pd.DataFrame, ma_days: int) -> pd.D
         )
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     return (close_frame / ma_frame - 1.0) * 100.0
-
-
-def _allocate_trend_hold_weights(
-    long_deviation_pct: dict[str, float | None],
-    short_deviation_pct: dict[str, float | None],
-    hold_count: int,
-) -> dict[str, float]:
-    """이격(장기) 상위 hold_count개를 균등 슬롯(1/hold_count)으로 보유한다 (trend 계좌, Phase 2).
-
-    보유 조건: 장기이격>0 이고 단기이격>=0 인 종목만 후보. 장기 이평선은 종목 선택, 단기
-    이평선은 손절/익절 담당(docs/account_types_plan.md 선정 규칙과 동일). 후보가 hold_count
-    보다 적으면 남는 슬롯은 현금으로 남긴다(억지로 채우지 않는다) — 종목풀 백테스트의
-    top_n 방식과 동일한 관례.
-    """
-    if hold_count < 1:
-        raise ValueError(f"보유종목수(hold_count)는 1 이상이어야 합니다: {hold_count}")
-
-    eligible = [
-        ticker
-        for ticker, long_dev in long_deviation_pct.items()
-        if long_dev is not None
-        and long_dev > 0
-        and short_deviation_pct.get(ticker) is not None
-        and float(short_deviation_pct[ticker]) >= 0
-    ]
-    eligible.sort(key=lambda t: long_deviation_pct[t], reverse=True)
-    selected = eligible[:hold_count]
-
-    slot_weight = 1.0 / hold_count
-    weights = {ticker: 0.0 for ticker in long_deviation_pct}
-    for ticker in selected:
-        weights[ticker] = slot_weight
-    weights["__CASH__"] = max(0.0, 1.0 - slot_weight * len(selected))
-    return weights
 
 
 def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark: bool = True) -> dict[str, Any]:
@@ -604,12 +514,8 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
     doc = _db()[COLLECTION].find_one({"_id": resolved})
     if doc is not None:
         return _serialize_doc(doc)
-    # 저장된 문서 없음 → 모든 값 미설정인 초기 상태(계좌 id 만 채움).
-    # 초기 weight_mode 는 계좌 타입(account_settings.account_type)을 따른다 — fixed 계좌는
-    # 종목풀 연결이 없어도(이번 개편으로 더 이상 요구하지 않음) 화면이 열려야 한다.
-    from utils.settings_loader import get_account_settings
-
-    initial_weight_mode = "fixed" if get_account_settings(resolved).get("account_type") == "fixed" else "variable"
+    # 저장된 문서 없음 → 모든 값 미설정인 초기 상태(계좌 id 만 채움). 초기 weight_mode 는 fixed.
+    initial_weight_mode = "fixed"
     return {
         "tickers": [],
         "weight_mode": initial_weight_mode,
@@ -638,10 +544,16 @@ def save_asset_helper_settings(
     if len(clean_tickers) < 1:
         raise ValueError("저장할 종목이 1개 이상 필요합니다.")
 
-    # 신규 계좌면 기존 문서가 없다(base 비움). 요청에 필수 설정이 다 있어야 저장된다.
+    # 신규 계좌면 기존 문서가 없다(base 비움).
     existing_doc = _db()[COLLECTION].find_one({"_id": resolved}) or {}
     stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
     settings_base = {key: existing_doc[key] for key in stored_keys if existing_doc.get(key) is not None}
+    # 아래에서 VARIABLE/FIXED/MAX_TICKERS 를 실제 종목수로 덮어쓰므로, 신규 계좌라도 검증을 통과하게 미리 채운다.
+    settings_base.setdefault("VARIABLE_TICKERS", 0)
+    settings_base.setdefault("FIXED_TICKERS", len(clean_tickers))
+    # STOCK_MAX_WEIGHT 는 변동(variable) 모드에서만 쓰이는 종목 상한(%). 고정 모드는 종목별 비중을 직접 정하므로
+    # 안 쓴다 — 신규 계좌에서 미설정이면 100(=상한 없음)으로 둔다(있으면 기존 값 유지).
+    settings_base.setdefault("STOCK_MAX_WEIGHT", 100.0)
     clean_settings = _clean_settings(settings, base=settings_base)
     # 자산 헬퍼는 자유 테스트 포트폴리오라 계좌별 종목수 상한을 두지 않는다 —
     # 슬롯 수를 실제 종목 수에 맞춰 저장한다(전역 하드 상한 MAX_TICKERS_LIMIT 만 유지).
@@ -1453,10 +1365,8 @@ def calculate_asset_helper_weights_for(
     if is_fixed:
         excluded_fixed_tickers: list[str] = []
     else:
-        ma_context = _load_account_trend_context(account_id) or _load_account_pool_ma_context(account_id)
+        ma_context = _load_account_pool_ma_context(account_id)
         settings = {**settings, **ma_context}
-        if settings.get("HOLD_COUNT") is not None:
-            tickers = _load_pool_universe_tickers(settings["POOL_TICKER_TYPE"])
         tickers, excluded_fixed_tickers = _filter_rank_excluded_tickers(tickers, settings)
     if len(tickers) < 3:
         suffix = f" 고정 종목 제외: {', '.join(excluded_fixed_tickers)}" if excluded_fixed_tickers else ""
@@ -1494,14 +1404,6 @@ def calculate_asset_helper_weights_for(
             long_ma_days=int(settings["LONG_MA_DAYS"]),
         )
 
-    # trend 계좌(Phase 2, HOLD_COUNT 있음)만 단기이격 게이트를 계산한다 — 그 외는 불필요한 연산.
-    hold_count = settings.get("HOLD_COUNT")
-    if hold_count is not None:
-        short_dev_frame = _compute_ma_deviation_frame(close_frame, int(settings["SHORT_MA_DAYS"]))
-        short_dev_row = short_dev_frame.loc[eval_date] if eval_date in short_dev_frame.index else pd.Series(dtype=float)
-    else:
-        short_dev_row = pd.Series(dtype=float)
-
     rows: list[dict[str, Any]] = []
     ticker_meta = {item["ticker"]: item for item in tickers}
     excluded_reasons: list[str] = []
@@ -1538,9 +1440,6 @@ def calculate_asset_helper_weights_for(
             if score is not None and deviation_pct_value is None:
                 excluded_reasons.append(f"{ticker}: 이격 계산 불가")
             deviation_pct_by_ticker[ticker] = deviation_pct_value
-            if hold_count is not None:
-                short_dev_value = short_dev_row.get(ticker)
-                short_deviation_pct_by_ticker[ticker] = None if pd.isna(short_dev_value) else float(short_dev_value)
             slope_value = slope_map.get(ticker)
 
         rows.append(
@@ -1594,8 +1493,6 @@ def calculate_asset_helper_weights_for(
         else:
             cash_weight = 1.0 - sum_fixed
         weights = {**fixed_weights, "__CASH__": cash_weight}
-    elif hold_count is not None:
-        weights = _allocate_trend_hold_weights(deviation_pct_by_ticker, short_deviation_pct_by_ticker, int(hold_count))
     else:
         weights = _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
 
@@ -1672,14 +1569,7 @@ def run_asset_helper_weights(
     weight_mode: str = "variable",
 ) -> dict[str, Any]:
     clean_settings = _clean_settings(settings)
-    account_id = str(clean_settings.get("ACCOUNT_ID") or "").strip()
-    # trend 계좌는 후보군 = 연결 풀 종목 전체(전달받은 tickers 는 무시).
-    trend_context = None if weight_mode == "fixed" else _load_account_trend_context(account_id)
-    if trend_context is not None:
-        # 풀 유니버스는 이미 정제된 형태이며 20개 상한(선택 종목용)을 적용하지 않는다.
-        clean_tickers = _load_pool_universe_tickers(trend_context["POOL_TICKER_TYPE"])
-    else:
-        clean_tickers = _clean_tickers(tickers)
+    clean_tickers = _clean_tickers(tickers)
     if len(clean_tickers) < 1:
         raise ValueError("계산할 종목이 1개 이상 필요합니다.")
     response_settings = _with_account_asset_helper_basis(clean_settings, weight_mode=weight_mode)
@@ -1761,32 +1651,6 @@ def _calculate_asset_helper_weights_on_date(
         else:
             deviation_pct_by_ticker[ticker] = float(deviation_pct)
     return _allocate_deviation_filtered_weights(deviation_pct_by_ticker, float(settings["STOCK_MAX_WEIGHT"]))
-
-
-def _calculate_trend_weights_on_date(
-    eval_date: pd.Timestamp,
-    tickers: list[dict[str, Any]],
-    long_dev_frame: pd.DataFrame,
-    short_dev_frame: pd.DataFrame,
-    hold_count: int,
-) -> dict[str, float] | None:
-    """trend 계좌(Phase 2)의 특정 리밸런싱 날짜 비중 — 이격 상위 hold_count개, 균등 슬롯."""
-    eligible_dates = long_dev_frame.index[long_dev_frame.index <= eval_date]
-    if eligible_dates.empty:
-        return None
-    score_date = eligible_dates.max()
-    long_row = long_dev_frame.loc[score_date]
-    short_row = short_dev_frame.loc[score_date] if score_date in short_dev_frame.index else pd.Series(dtype=float)
-
-    long_dev: dict[str, float | None] = {}
-    short_dev: dict[str, float | None] = {}
-    for item in tickers:
-        ticker = str(item.get("ticker") or "").strip().upper()
-        long_value = long_row.get(ticker)
-        short_value = short_row.get(ticker)
-        long_dev[ticker] = None if pd.isna(long_value) else float(long_value)
-        short_dev[ticker] = None if pd.isna(short_value) else float(short_value)
-    return _allocate_trend_hold_weights(long_dev, short_dev, hold_count)
 
 
 def _resolve_slippage_by_ticker(clean_tickers: list[dict[str, Any]]) -> dict[str, tuple[float, float]]:
@@ -1878,7 +1742,6 @@ def run_asset_helper_backtest(
 
     requested_rebalance_dates = _select_rebalance_dates(simulation_frame.index, rebalance)
     weights_by_date: dict[pd.Timestamp, dict[str, float]] = {}
-    hold_count = clean_settings.get("HOLD_COUNT")
 
     if weight_mode == "fixed":
         fixed_weights = {item["ticker"]: float(item.get("fixed_weight_pct") or 0.0) / 100.0 for item in clean_tickers}
@@ -1892,15 +1755,6 @@ def run_asset_helper_backtest(
         fixed_weights["__CASH__"] = cash_weight
 
         weights_by_date = {date: fixed_weights for date in requested_rebalance_dates}
-    elif hold_count is not None:
-        # trend 계좌(Phase 2): 계좌 소유 장기/단기 이평선으로 이격 프레임을 미리 계산해두고
-        # 리밸런싱 날짜마다 그 값만 조회한다(기존 종목풀 기반 엔진과 별개 경로).
-        long_dev_frame = _compute_ma_deviation_frame(candidate_close, int(clean_settings["LONG_MA_DAYS"]))
-        short_dev_frame = _compute_ma_deviation_frame(candidate_close, int(clean_settings["SHORT_MA_DAYS"]))
-        for date in requested_rebalance_dates:
-            weights = _calculate_trend_weights_on_date(date, clean_tickers, long_dev_frame, short_dev_frame, int(hold_count))
-            if weights is not None:
-                weights_by_date[date] = weights
     else:
         composite_frame, trend_by_order = _build_asset_helper_weight_engine(candidate_close, clean_tickers, clean_settings)
         trend_frame = trend_by_order[1]

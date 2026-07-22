@@ -434,11 +434,10 @@ def add_holding(
     except Exception:
         currency = "KRW"
 
+    # 원장(portfolio_master) 항목이 아직 없으면(신규 계좌·자산 미설정) 빈 목록에서 시작한다.
+    # save_portfolio_master 가 저장 시 계좌 항목을 새로 만들어준다.
     master = load_portfolio_master(account_id)
-    if not master:
-        raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
-
-    holdings = master.get("holdings", [])
+    holdings = master.get("holdings", []) if master else []
 
     # 중복 확인
     for h in holdings:
