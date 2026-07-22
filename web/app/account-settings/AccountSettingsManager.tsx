@@ -40,12 +40,35 @@ function AccountRow({
   account,
   marketIndices,
   onSaved,
+  onDeleted,
 }: {
   account: AccountEntry;
   marketIndices: MarketIndexOption[];
   onSaved: () => void;
+  onDeleted: () => void;
 }) {
   const toast = useToast();
+  const [deleting, setDeleting] = useState(false);
+
+  const remove = async () => {
+    if (!window.confirm(`'${account.name ?? account.account_id}' 계좌를 삭제할까요?\n(보유종목이 있으면 삭제되지 않습니다)`)) return;
+    setDeleting(true);
+    try {
+      const resp = await fetch("/api/account-settings", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ account_id: account.account_id }),
+      });
+      const data = (await resp.json()) as { error?: string };
+      if (!resp.ok || data.error) throw new Error(data.error ?? "계좌 삭제에 실패했습니다.");
+      toast.success(`[계좌] ${account.account_id} 삭제 완료`);
+      onDeleted();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "계좌 삭제에 실패했습니다.");
+    } finally {
+      setDeleting(false);
+    }
+  };
   const [name, setName] = useState(account.name ?? "");
   const [icon, setIcon] = useState(account.icon ?? "");
   const [order, setOrder] = useState(String(account.order ?? 0));
@@ -141,6 +164,14 @@ function AccountRow({
           >
             {saving ? "저장 중…" : "저장"}
           </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-danger"
+            disabled={deleting}
+            onClick={() => void remove()}
+          >
+            {deleting ? "삭제 중…" : "삭제"}
+          </button>
         </span>
       </div>
 
@@ -231,11 +262,116 @@ function AccountRow({
   );
 }
 
+function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const toast = useToast();
+  const [accountId, setAccountId] = useState("");
+  const [name, setName] = useState("");
+  const [icon, setIcon] = useState("");
+  const [order, setOrder] = useState("0");
+  const [accountType, setAccountType] = useState<"fixed" | "trend" | "regime">("fixed");
+  const [countryCode, setCountryCode] = useState("kor");
+  const [currency, setCurrency] = useState("KRW");
+  const [saving, setSaving] = useState(false);
+
+  const create = async () => {
+    setSaving(true);
+    try {
+      const resp = await fetch("/api/account-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account_id: accountId.trim().toLowerCase(),
+          name: name.trim(),
+          account_type: accountType,
+          icon: icon.trim(),
+          order: Math.trunc(Number(order) || 0),
+          country_code: countryCode,
+          currency: currency.trim().toUpperCase(),
+        }),
+      });
+      const data = (await resp.json()) as { error?: string };
+      if (!resp.ok || data.error) throw new Error(data.error ?? "계좌 추가에 실패했습니다.");
+      toast.success(`[계좌] ${accountId.trim().toLowerCase()} 추가 완료`);
+      onCreated();
+      onClose();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "계좌 추가에 실패했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "grid", placeItems: "center", zIndex: 1000 }}
+      onClick={onClose}
+    >
+      <div
+        className="card appCard"
+        style={{ width: 420, maxWidth: "92vw" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <h3 style={{ fontSize: "1rem", fontWeight: 800, margin: 0 }}>계좌 추가</h3>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", margin: 0 }}>
+            계좌 ID는 원장 FK라 생성 후 변경할 수 없습니다(영문 소문자·숫자·-·_). 벤치마크·전략 상세는 추가 후 편집하세요.
+          </p>
+          {[
+            { label: "계좌 ID", el: <input style={{ ...inputStyle, flex: 1 }} value={accountId} placeholder="예: kiwoom-main" onChange={(e) => setAccountId(e.target.value)} /> },
+            { label: "이름", el: <input style={{ ...inputStyle, flex: 1 }} value={name} onChange={(e) => setName(e.target.value)} /> },
+            { label: "아이콘", el: <input style={{ ...inputStyle, flex: 1 }} value={icon} placeholder="선택(이모지)" onChange={(e) => setIcon(e.target.value)} /> },
+            { label: "순서", el: <input style={{ ...inputStyle, flex: 1 }} type="number" value={order} onChange={(e) => setOrder(e.target.value)} /> },
+          ].map((row) => (
+            <label key={row.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ ...labelStyle, width: 64 }}>{row.label}</span>
+              {row.el}
+            </label>
+          ))}
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ ...labelStyle, width: 64 }}>타입</span>
+            <select className="form-select form-select-sm" style={{ flex: 1 }} value={accountType} onChange={(e) => setAccountType(e.target.value as "fixed" | "trend" | "regime")}>
+              <option value="fixed">fixed (고정 보유)</option>
+              <option value="trend">trend (추세 순위)</option>
+              <option value="regime">regime (레짐)</option>
+            </select>
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ ...labelStyle, width: 64 }}>국가</span>
+            <select className="form-select form-select-sm" style={{ flex: 1 }} value={countryCode} onChange={(e) => setCountryCode(e.target.value)}>
+              <option value="kor">kor</option>
+              <option value="au">au</option>
+              <option value="us">us</option>
+            </select>
+            <span style={{ ...labelStyle, width: 40 }}>통화</span>
+            <select className="form-select form-select-sm" style={{ width: 90 }} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+              <option value="KRW">KRW</option>
+              <option value="USD">USD</option>
+              <option value="AUD">AUD</option>
+            </select>
+          </label>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 4 }}>
+            <button type="button" className="btn btn-sm btn-light" onClick={onClose} disabled={saving}>취소</button>
+            <button
+              type="button"
+              className="btn btn-sm btn-dark"
+              disabled={saving || !accountId.trim() || !name.trim()}
+              onClick={() => void create()}
+            >
+              {saving ? "추가 중…" : "추가"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function AccountSettingsManager() {
   const toast = useToast();
   const [accounts, setAccounts] = useState<AccountEntry[]>([]);
   const [marketIndices, setMarketIndices] = useState<MarketIndexOption[]>([]);
   const [loading, setLoading] = useState(true);
+  const [addOpen, setAddOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -260,9 +396,12 @@ export function AccountSettingsManager() {
   return (
     <div className="card appCard">
       <div className="card-body">
-        <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>계좌 설정</h2>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+          <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>계좌 설정</h2>
+          <button type="button" className="btn btn-sm btn-primary" onClick={() => setAddOpen(true)}>+ 계좌 추가</button>
+        </div>
         <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
-          계좌 메타(이름/순서/벤치마크 등)는 DB(account_settings)가 단일 소스입니다. 계좌 추가/삭제는 화면에서 지원하지 않습니다.
+          계좌 메타(이름/순서/벤치마크 등)는 DB(account_settings)가 단일 소스입니다. 삭제는 보유종목이 없는 계좌만 가능합니다.
         </p>
         {loading ? (
           <div style={{ color: "var(--text-muted)", padding: 12 }}>불러오는 중…</div>
@@ -270,10 +409,11 @@ export function AccountSettingsManager() {
           <div style={{ color: "var(--text-muted)", padding: 12 }}>등록된 계좌가 없습니다.</div>
         ) : (
           accounts.map((a) => (
-            <AccountRow key={a.account_id} account={a} marketIndices={marketIndices} onSaved={() => {}} />
+            <AccountRow key={a.account_id} account={a} marketIndices={marketIndices} onSaved={() => {}} onDeleted={() => void load()} />
           ))
         )}
       </div>
+      {addOpen ? <AddAccountModal onClose={() => setAddOpen(false)} onCreated={() => void load()} /> : null}
     </div>
   );
 }
