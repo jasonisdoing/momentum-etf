@@ -5,6 +5,7 @@ import {
   ColorType,
   CrosshairMode,
   LineSeries,
+  LineStyle,
   CandlestickSeries,
   HistogramSeries,
   createChart,
@@ -525,9 +526,44 @@ export function MarketTrendChart({
       wickUpColor: "#dc2626",
       wickDownColor: "#2563eb",
       priceLineVisible: false,
-      lastValueVisible: true,
+      // 마지막 종가 라벨은 아래 "현재가" 가로선 라벨과 중복이라 끈다.
+      lastValueVisible: false,
     });
     candleSeries.setData(buildCandleData(visibleHistory));
+
+    // 가로 점선: 현재가(검정) / 상승 전환 조건(빨강) / 하락 전환 조건(파랑).
+    const latestForPriceLines = visibleHistory.at(-1) ?? null;
+    const currentClose = latestForPriceLines?.close ?? null;
+    const upTurnPrice = latestForPriceLines?.forecast?.up_price ?? null;
+    const dnTurnPrice = latestForPriceLines?.forecast?.dn_price ?? null;
+    // 제목은 라벨을 넓혀 최근 캔들을 가리므로 생략하고, 우측 축에는 값 라벨만 색으로 구분해 표시한다.
+    if (currentClose != null) {
+      candleSeries.createPriceLine({
+        price: currentClose,
+        color: "#111827",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      });
+    }
+    if (upTurnPrice != null) {
+      candleSeries.createPriceLine({
+        price: upTurnPrice,
+        color: "#dc2626",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      });
+    }
+    if (dnTurnPrice != null) {
+      candleSeries.createPriceLine({
+        price: dnTurnPrice,
+        color: "#2563eb",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      });
+    }
 
     const markerLineSeries = chart.addSeries(LineSeries, {
       color: "rgba(0, 0, 0, 0)",
@@ -568,27 +604,31 @@ export function MarketTrendChart({
     markerLineSeries.setData(markerLineData);
     createSeriesMarkers(markerLineSeries, markers);
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: {
-        type: "volume",
-      },
-      priceScaleId: "volume",
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-    volumeSeries.setData(buildVolumeData(visibleHistory));
+    // 거래량 데이터가 없는 지수(예: 필라델피아 반도체)는 히스토그램의 빈 바닥선만 남으므로 아예 그리지 않는다.
+    const hasVolume = visibleHistory.some((point) => point.volume != null && point.volume > 0);
+    if (hasVolume) {
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        priceFormat: {
+          type: "volume",
+        },
+        priceScaleId: "volume",
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      volumeSeries.setData(buildVolumeData(visibleHistory));
 
-    chart.priceScale("volume").applyOptions({
-      scaleMargins: {
-        top: 0.75,
-        bottom: 0,
-      },
-    });
+      chart.priceScale("volume").applyOptions({
+        scaleMargins: {
+          top: 0.75,
+          bottom: 0,
+        },
+      });
+    }
 
     chart.addSeries(LineSeries, {
-      color: "#fa5252",
-      lineWidth: 1,
-      lineStyle: 2,
+      color: "#16a34a",
+      lineWidth: 2,
+      lineStyle: 0,
       priceLineVisible: false,
       lastValueVisible: false,
     }).setData(buildLineData(visibleHistory, "ma"));
@@ -729,6 +769,7 @@ export function MarketTrendChart({
       chart.remove();
       chartRef.current = null;
       overlay.innerHTML = "";
+      labelOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
   }, [visibleHistory, showSuperTrend]);
@@ -950,6 +991,10 @@ export function MarketTrendChart({
             <div
               ref={chartContainerRef}
               style={{ position: "absolute", inset: 0, zIndex: 1 }}
+            />
+            <div
+              ref={labelOverlayRef}
+              style={{ position: "absolute", inset: 0, zIndex: 2, overflow: "hidden", pointerEvents: "none" }}
             />
             <div
               ref={tooltipRef}
