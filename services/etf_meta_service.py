@@ -12,6 +12,11 @@ DEFAULT_USER_AGENT = (
 )
 NAVER_ETF_BASE_URL = "https://stock.naver.com/api/domestic/detail/{ticker}/ETFBase"
 NAVER_ETF_DIVIDEND_URL = "https://stock.naver.com/api/domestic/detail/{ticker}/ETFDividend"
+# 회차별 배당 내역(배당락일/주당배당금/수익률) — 페이지네이션. 상세화면 배당금 탭용.
+NAVER_ETF_DIVIDEND_HIST_URL = (
+    "https://stock.naver.com/api/domestic/detail/{ticker}/ETFDividendHist?startIdx=0&pageSize={size}"
+)
+_DIVIDEND_HISTORY_PAGE_SIZE = 20
 _NAVER_ETF_INFO_CACHE: dict[str, dict[str, Any]] = {}
 _NAVER_ETF_INFO_TTL_SECONDS = 300
 
@@ -81,6 +86,31 @@ def _fetch_naver_json(session: requests.Session, url: str) -> dict[str, Any]:
     return payload
 
 
+def _fetch_naver_dividend_history(session: requests.Session, ticker: str, size: int) -> list[dict[str, Any]]:
+    """회차별 배당 내역을 최신순 리스트로 반환한다. 응답은 dict 가 아닌 배열이라 별도 파싱한다."""
+    url = NAVER_ETF_DIVIDEND_HIST_URL.format(ticker=ticker, size=int(size))
+    response = session.get(url, timeout=15)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, list):
+        return []
+    history: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        ex_date = str((item.get("id") or {}).get("exDividendAt") or "").strip() or None
+        if ex_date is None:
+            continue
+        history.append(
+            {
+                "ex_dividend_at": ex_date,
+                "amount": _to_float(item.get("dividendAmount")),
+                "yield_pct": _to_float(item.get("dividendYield")),
+            }
+        )
+    return history
+
+
 def fetch_korean_etf_info_from_naver(ticker: str) -> dict[str, Any]:
     normalized_ticker = _normalize_ticker(ticker)
     if not normalized_ticker:
@@ -103,6 +133,7 @@ def fetch_korean_etf_info_from_naver(ticker: str) -> dict[str, Any]:
         "dividend_yield_ttm": _to_float(dividend_payload.get("dividendYieldTtm")),
         "dividend_per_share_ttm": _to_float(dividend_payload.get("dividendPerShareTtm")),
         "recent_ex_dividend_at": str(dividend_payload.get("recentExDividendAt") or "").strip() or None,
+        "dividend_history": _fetch_naver_dividend_history(session, normalized_ticker, _DIVIDEND_HISTORY_PAGE_SIZE),
         "expense_ratio": _to_float(base_payload.get("fundPay")),
         "total_net_assets": _to_float(base_payload.get("totalNetAssets")),
         "listed_date": _normalize_listed_date(base_payload.get("listedDate")),

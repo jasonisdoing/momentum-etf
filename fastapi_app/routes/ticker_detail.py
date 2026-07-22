@@ -456,6 +456,7 @@ def _build_korean_etf_info_payload(
         "dividend_yield_ttm": float(meta_cache["dividend_yield_ttm"])
         if meta_cache.get("dividend_yield_ttm") is not None
         else None,
+        "dividend_history": list(meta_cache.get("dividend_history") or []),
         "total_net_assets_eok": float(total_net_assets) if total_net_assets is not None else None,
         "market_cap_krw": market_cap_krw,
         "volume": int(latest_row["volume"]) if latest_row and latest_row.get("volume") is not None else None,
