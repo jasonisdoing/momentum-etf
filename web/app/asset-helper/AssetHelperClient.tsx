@@ -291,6 +291,7 @@ export function AssetHelperClient() {
   const [metricByTicker, setMetricByTicker] = useState<Record<string, WeightRow>>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [btAmount, setBtAmount] = useState("10000");
   const [btMonths, setBtMonths] = useState("12");
   const [btRebalance, setBtRebalance] = useState("monthly");
@@ -468,7 +469,11 @@ export function AssetHelperClient() {
       // 낙관적 표시: 즉시 목록에 추가한다. 목록은 이미 정확하므로 재로드로 통째 교체하지 않고(깜빡임 방지)
       // 지표만 백그라운드로 채운다.
       const key = resolved.ticker.trim().toUpperCase();
-      const newList = tickers.some((t) => t.ticker.trim().toUpperCase() === key) ? tickers : [...tickers, resolved];
+      // 종목풀에 없는 티커는 resolve 가 이름 대신 티커를 돌려준다(예: 미보유 ASX 종목).
+      // 잘못된 티커명을 잠깐 보였다가 바뀌는 걸 막기 위해, 실제 이름 확정(POST) 전까지 "조회 중…" 으로 표시.
+      const looksPlaceholder = !resolved.name || resolved.name.trim().toUpperCase() === key;
+      const optimistic = looksPlaceholder ? { ...resolved, name: "조회 중…" } : resolved;
+      const newList = tickers.some((t) => t.ticker.trim().toUpperCase() === key) ? tickers : [...tickers, optimistic];
       setTickers(newList);
       void (async () => {
         try {
@@ -491,7 +496,12 @@ export function AssetHelperClient() {
             .map((t) => (t.ticker.trim().toUpperCase() === key ? { ...t, name: effectiveName } : t))
             .filter((t) => t.ticker.trim() && t.name);
           if (newValid.length >= 3 && settings && settings.ACCOUNT_ID) {
-            setMetricByTicker(await fetchMetrics(newValid, settings));
+            // 신규 종목(가격캐시 없음)이 배치를 실패시켜 빈 결과가 오면 기존 지표를 지우지 않는다.
+            // 결과가 있으면 병합해 갱신(기존 행 지표 보존).
+            const nextMetrics = await fetchMetrics(newValid, settings);
+            if (Object.keys(nextMetrics).length > 0) {
+              setMetricByTicker((prev) => ({ ...prev, ...nextMetrics }));
+            }
           }
           toast.success("보유 목록에 추가(수량 0)");
         } catch (e) {
@@ -516,6 +526,7 @@ export function AssetHelperClient() {
     if (!selectedTickers.length || !selectedAccount) return;
     if (!window.confirm(`${selectedTickers.length}개 종목을 보유 목록에서 삭제할까요? (수량·비중 함께 삭제)`)) return;
     try {
+      setDeleting(true);
       for (const bare of selectedTickers) {
         const item = tickers.find((t) => t.ticker === bare);
         const delTicker = displayTickerFor(bare, item?.country_code); // 보유 저장 형식(au는 ASX: 접두어)
@@ -533,6 +544,8 @@ export function AssetHelperClient() {
       toast.success("삭제 완료");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "삭제에 실패했습니다.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -993,14 +1006,16 @@ export function AssetHelperClient() {
                 <GridToolbarButton variant="save" disabled={saving} onClick={() => void saveSettings()}>
                   {saving ? "저장 중..." : "저장"}
                 </GridToolbarButton>
-                <GridToolbarButton variant="delete" onClick={() => void handleDelete()} disabled={!selectedTickers.length} />
+                <GridToolbarButton variant="delete" onClick={() => void handleDelete()} disabled={!selectedTickers.length || deleting}>
+                  {deleting ? "삭제 중..." : undefined}
+                </GridToolbarButton>
               </div>
             </div>
             <AppAgGrid<GridRow>
               className="rankAgGrid assetsAgGrid"
               rowData={gridRows}
               columnDefs={columnDefs}
-              loading={loading}
+              loading={loading || deleting}
               minHeight={Math.max(180, Math.min(gridRows.length, 12) * 34 + 36)}
               gridOptions={gridOptions}
               theme={gridTheme}
