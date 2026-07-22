@@ -60,6 +60,11 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months:
     except Exception:
         return {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
 
+
+# 랭킹 표시용 백테스트 기준 기간(개월). MDD·소르티노 모두 이 기간으로 계산한다.
+# 상장 기간이 이보다 짧으면 is_partial=True 로 표시(프론트에서 다른 색으로 강조).
+RANK_BACKTEST_MONTHS = 12
+
 # -------------------------------------------------------------------------
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
 # `update_stock_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
@@ -622,8 +627,8 @@ def update_ticker_type_metadata(
                 df = fetch_ohlcv(ticker, country=country_code, months_back=60, ticker_type=type_norm)
                 if df is not None and not df.empty and "Close" in df.columns:
                     close_prices = df["Close"].dropna()
-                    # 최근 3개월의 성과 지표(단순 보유 CAGR, MDD, Sortino)만 구합니다.
-                    backtest_stats = _simulate_single_stock_ma_strategy(close_prices, 3)
+                    # 최근 RANK_BACKTEST_MONTHS(12)개월 성과(수익/MDD/소르티노).
+                    backtest_stats = _simulate_single_stock_ma_strategy(close_prices, RANK_BACKTEST_MONTHS)
             except Exception as exc:
                 logger.warning(f"  -> [{ticker}] 백테스트 지표 연산 중 오류 발생: {exc}")
 
@@ -909,6 +914,7 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         "etf_category",
         "dividend_yield_ttm",
         "market_cap",
+        "backtest_stats",
     ]
 
     for f in fields_to_update:
@@ -1116,6 +1122,16 @@ def update_single_stock_metadata(
         stock["3_month_earn_rate"] = calc_rate_safe(data, 63)
         stock["6_month_earn_rate"] = calc_rate_safe(data, 126)
         stock["12_month_earn_rate"] = calc_rate_safe(data, 252)
+
+        # 랭킹 표시용 백테스트 지표(MDD·소르티노, RANK_BACKTEST_MONTHS 기준). 종목 추가 시에도 바로 채워지도록
+        # 배치와 동일하게 여기서 계산한다. 상장 기간이 기준보다 짧으면 is_partial=True.
+        try:
+            if "Close" in data.columns:
+                bt_close = data["Close"].dropna()
+                if not bt_close.empty:
+                    stock["backtest_stats"] = _simulate_single_stock_ma_strategy(bt_close, RANK_BACKTEST_MONTHS)
+        except Exception:
+            pass
 
         ordered_stock = {}
         for k in ["ticker", "name", "note", "listing_date"]:
