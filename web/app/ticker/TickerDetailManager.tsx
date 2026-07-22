@@ -61,7 +61,14 @@ type MonthlyPriceRow = {
 };
 
 type ChartInterval = "day" | "week" | "month";
-type HistoryTab = "daily" | "monthly";
+type HistoryTab = "daily" | "monthly" | "dividend";
+
+// 회차별 배당 내역(최신순) — 국내 ETF 메타 캐시(etf_info.dividend_history)에서 옴.
+type TickerDividendRow = {
+  ex_dividend_at: string;
+  amount: number | null;
+  yield_pct: number | null;
+};
 
 type TickerDetailResponse = {
   ticker: string;
@@ -82,6 +89,7 @@ type TickerEtfInfo = {
   deviation?: number | null;
   expense_ratio?: number | null;
   dividend_yield_ttm?: number | null;
+  dividend_history?: TickerDividendRow[] | null;
   total_net_assets_eok?: number | null;
   market_cap_krw?: number | null;
   volume?: number | null;
@@ -1075,6 +1083,31 @@ export function TickerDetailManager({
     [selectedCountryCode],
   );
 
+  // 메타 갱신 전(캐시에 dividend_history 없음)에도 탭·빈 그리드는 보이게 한다.
+  const dividendRows = useMemo<TickerDividendRow[]>(() => etfInfo?.dividend_history ?? [], [etfInfo]);
+
+  const dividendColumns = useMemo<ColDef[]>(
+    () => [
+      {
+        field: "ex_dividend_at",
+        headerName: "배당락일",
+        minWidth: 120,
+        flex: 1.3,
+        cellStyle: { fontWeight: 600 },
+        cellRenderer: (params: { value: string }) => formatDateWithWeekday(params.value),
+      },
+      {
+        field: "amount", headerName: "주당 배당금", minWidth: 100, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode),
+      },
+      {
+        field: "yield_pct", headerName: "배당수익률", minWidth: 96, flex: 1, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatPercent(params.value),
+      },
+    ],
+    [selectedCountryCode],
+  );
+
   const monthlyColumns = useMemo<ColDef[]>(
     () => [
       {
@@ -1439,17 +1472,28 @@ export function TickerDetailManager({
                             >
                               월별
                             </button>
+                            <button
+                              type="button"
+                              role="tab"
+                              aria-selected={historyTab === "dividend"}
+                              className={historyTab === "dividend" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                              onClick={() => setHistoryTab("dividend")}
+                            >
+                              배당금
+                            </button>
                           </div>
                           <span className="text-muted tickerDetailTableMeta">
                             {historyTab === "daily"
                               ? `총 ${new Intl.NumberFormat("ko-KR").format(rows.length)}일`
-                              : `총 ${new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월`}
+                              : historyTab === "monthly"
+                                ? `총 ${new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월`
+                                : `총 ${new Intl.NumberFormat("ko-KR").format(dividendRows.length)}회`}
                           </span>
                         </div>
                         <div className="appGridFillWrap">
                           <AppAgGrid
-                            rowData={historyTab === "daily" ? reversedRows : monthlyRows}
-                            columnDefs={historyTab === "daily" ? dailyColumns : monthlyColumns}
+                            rowData={historyTab === "daily" ? reversedRows : historyTab === "monthly" ? monthlyRows : dividendRows}
+                            columnDefs={historyTab === "daily" ? dailyColumns : historyTab === "monthly" ? monthlyColumns : dividendColumns}
                             loading={loading}
                             theme={gridTheme}
                             gridOptions={{ suppressMovableColumns: true }}

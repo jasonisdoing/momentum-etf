@@ -232,6 +232,7 @@ def _refresh_korean_etf_meta_cache(
             "dividend_yield_ttm": etf_info.get("dividend_yield_ttm"),
             "dividend_per_share_ttm": etf_info.get("dividend_per_share_ttm"),
             "recent_ex_dividend_at": etf_info.get("recent_ex_dividend_at"),
+            "dividend_history": etf_info.get("dividend_history") or [],
             "expense_ratio": etf_info.get("expense_ratio"),
             "total_net_assets": etf_info.get("total_net_assets"),
             "issue_name": etf_info.get("issue_name"),
