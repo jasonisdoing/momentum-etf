@@ -112,7 +112,7 @@ npm run dev
 ### 캐시 알림 (Alerts)
 순위 화면에서 가격 캐시가 누락된 종목이 있으면 토스트 경고가 표시됩니다.
 *   누락된 종목명과 티커가 구체적으로 안내됩니다.
-*   필요하면 로컬에서 `python scripts/stock_meta_cache_updater.py` 또는 전체 가격 캐시 갱신 명령 `python scripts/stock_price_cache_updater.py`를 실행해 정리합니다.
+*   필요하면 로컬에서 `python scripts/stock_reference_meta_updater.py`(식별·상세 메타) 또는 전체 가격 캐시 갱신 명령 `python scripts/stock_price_cache_updater.py`를 실행해 정리합니다.
 *   종목풀에 등록되지 않은 티커라도 현재 계좌에 보유 중이면 계좌별 종목풀 매핑을 기준으로 메타데이터/가격 캐시 갱신 대상에 포함됩니다.
 *   순위 화면의 가격 캐시는 선택한 종목풀 기준으로만 판정하며, 다른 종목풀의 오래된 캐시를 대신 사용하지 않습니다.
 *   주별/월별 집계는 독립 원장을 별도로 유지하지 않고, 일별 원장(`daily_fund_data`)에서 다시 계산해 `weekly_fund_data`, `monthly_fund_data`를 갱신합니다.
@@ -128,11 +128,16 @@ npm run dev
 원칙은 **실시간 가격데이터를 제외한 모든 값은 종목 캐시에 넣는다**는 것입니다. 화면은 메타/구성종목을 종목 캐시에서 한꺼번에 읽어 속도를 유지하고, 실시간성이 필요한 현재가/등락률만 별도로 조회합니다.
 
 ### 종목 메타 캐시 갱신
-저빈도 ETF 메타 정보는 별도 메타 캐시로 저장합니다.
+종목 메타 배치는 2개로 분리돼 있습니다. 식별·상세(이름·상장일·마켓·업종 + ETF holdings·배당)와 가격지표(거래량·기간수익률·backtest)를 각각 실행합니다.
 
 ```bash
-./.venv/bin/python scripts/stock_meta_cache_updater.py
-./.venv/bin/python scripts/stock_meta_cache_updater.py kor_us
+# 식별·상세 메타 (배치 B) — 전체 / 특정 종목풀
+./.venv/bin/python scripts/stock_reference_meta_updater.py
+./.venv/bin/python scripts/stock_reference_meta_updater.py kor_us
+
+# 가격지표 (배치 A) — 전체 / 특정 종목풀
+./.venv/bin/python scripts/stock_price_metrics_updater.py
+./.venv/bin/python scripts/stock_price_metrics_updater.py kor_us
 ```
 
 이 스크립트는 종목타입별 활성 종목을 순회하면서 한국 ETF의 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`와 미국 개별주의 네이버 `foreign/market/stock/global`을 조회해 다음 값을 `stock_cache_meta`에 저장합니다.
@@ -173,6 +178,6 @@ VM cron 배치는 실패 시에만 래퍼 알림을 보냅니다.
 ### 한국 ETF 구성종목 조회
 한국 ETF 구성종목 비중은 `stock_cache_meta.holdings_cache`를 우선 사용합니다.
 
-* `scripts/stock_meta_cache_updater.py`가 네이버 `ETFComponent`를 조회해 구성종목 캐시에 저장합니다.
+* `scripts/stock_reference_meta_updater.py`가 네이버 `ETFComponent`를 조회해 구성종목 캐시에 저장합니다.
 * `/ticker`는 저장된 구성종목 캐시를 읽고, 현재가와 일간(%) 같은 실시간 가격만 별도로 조회합니다.
 * 해외 구성종목 가격은 미국 무접미 심볼과 호주 `.AX`는 기존 실시간 경로를 사용하고, 일본 `.T`와 홍콩 `.HK`는 네이버 `worldstock` 지연 시세, 대만 `.TW`는 Yahoo 지연 시세를 사용합니다.

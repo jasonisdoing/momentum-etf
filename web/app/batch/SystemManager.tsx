@@ -172,17 +172,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     type: "rightAligned",
     valueGetter: (params) => (params.node ? (params.node.rowIndex ?? -1) + 1 : ""),
   },
-  { field: "job", headerName: "작업", minWidth: 140, width: 150 },
-  {
-    field: "run_location",
-    headerName: "실행 위치",
-    minWidth: 110,
-    width: 120,
-    cellRenderer: (params: { value?: string }) => {
-      const text = params.value ?? "";
-      return text || "-";
-    },
-  },
+  { field: "job", headerName: "작업", minWidth: 220, flex: 1 },
   {
     field: "cadence",
     headerName: "자동 주기",
