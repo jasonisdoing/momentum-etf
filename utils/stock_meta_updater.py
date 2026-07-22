@@ -330,6 +330,22 @@ def _format_iso_date(value: Any) -> str | None:
         return text[:10] if len(text) >= 10 else text
 
 
+def _yf_dividend_yield_pct(info: dict[str, Any]) -> float | None:
+    """yfinance .info 의 배당수익률을 '퍼센트' 단위로 정규화한다(화면 formatPercent 가 값을 그대로 %로 표기).
+
+    trailingAnnualDividendYield 는 소수(0.025=2.5%). dividendYield 는 yfinance 버전에 따라
+    소수/퍼센트가 섞여 있어 1 미만이면 소수로 보고 ×100 한다.
+    """
+    v = info.get("trailingAnnualDividendYield")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return round(float(v) * 100.0, 2)
+    v = info.get("dividendYield")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        v = float(v)
+        return round(v * 100.0 if v < 1.0 else v, 2)
+    return None
+
+
 def _refresh_us_stock_meta_cache(
     ticker_type: str,
     ticker: str,
@@ -337,7 +353,8 @@ def _refresh_us_stock_meta_cache(
     naver_entry: dict[str, Any],
     backtest_stats: dict[str, Any] | None = None,
 ) -> None:
-    """미국 개별주 메타 캐시를 네이버 미국 종목 API 기준으로 갱신한다."""
+    """미국 종목 메타 캐시를 갱신한다. 네이버 미국 개별주 API 를 기본으로 하되, 네이버에 없는 종목
+    (예: 미국 ETF ENFR 등)은 yfinance .info 로 배당수익률·순자산(시가총액)을 보완한다."""
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
     name_norm = str(name or "").strip() or ticker_norm
@@ -357,6 +374,20 @@ def _refresh_us_stock_meta_cache(
         "industry": naver_entry.get("industry"),
         "backtest_stats": backtest_stats,
     }
+
+    # 네이버에 배당/순자산이 없으면(미국 ETF 등) yfinance .info 로 보완.
+    if meta_cache["dividend_yield_ttm"] is None or meta_cache["total_net_assets"] is None:
+        try:
+            info = getattr(yf.Ticker(ticker_norm), "info", {}) or {}
+            if meta_cache["dividend_yield_ttm"] is None:
+                meta_cache["dividend_yield_ttm"] = _yf_dividend_yield_pct(info)
+            if meta_cache["total_net_assets"] is None:
+                assets = info.get("totalAssets") or info.get("marketCap")  # ETF=순자산 / 개별주=시총
+                if isinstance(assets, (int, float)) and not isinstance(assets, bool) and assets > 0:
+                    meta_cache["total_net_assets"] = float(assets)
+            meta_cache["source"] = "naver_us_market_stock+yfinance"
+        except Exception as exc:
+            get_app_logger().debug(f"[{ticker_type_norm.upper()}/{ticker_norm}] yfinance 배당/순자산 보완 건너뜀: {exc}")
 
     refresh_stock_cache(
         ticker_type_norm,
@@ -690,12 +721,12 @@ def _update_reference_meta_for_type(
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
             elif country_code == "us":
+                # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
                 naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
-                if naver_entry:
-                    try:
-                        _refresh_us_stock_meta_cache(type_norm, str(ticker), str(name), naver_entry)
-                    except Exception as e:
-                        logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 개별주 메타 캐시 갱신 건너뜀: {e}")
+                try:
+                    _refresh_us_stock_meta_cache(type_norm, str(ticker), str(name), naver_entry)
+                except Exception as e:
+                    logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 메타 캐시 갱신 건너뜀: {e}")
 
             updates_for_db.append(update_doc)
             if len(updates_for_db) >= 100:
@@ -952,12 +983,12 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         except Exception as meta_cache_error:
             logger.error(f"[{type_norm.upper()}/{ticker_norm}] 호주 ETF 상세 캐시 갱신 실패: {meta_cache_error}")
     elif country_code == "us":
+        # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
         naver_entry = naver_us_stock_map.get(ticker_norm, {})
-        if naver_entry:
-            try:
-                _refresh_us_stock_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), naver_entry)
-            except Exception as meta_cache_error:
-                logger.error(f"[{type_norm.upper()}/{ticker_norm}] 미국 개별주 메타 캐시 갱신 실패: {meta_cache_error}")
+        try:
+            _refresh_us_stock_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), naver_entry)
+        except Exception as meta_cache_error:
+            logger.error(f"[{type_norm.upper()}/{ticker_norm}] 미국 메타 캐시 갱신 실패: {meta_cache_error}")
 
     # 가격 파생 지표 — 종목 추가 즉시 랭킹 지표가 채워지도록 배치와 동일하게 계산한다.
     price_metrics: dict[str, Any] = {}
