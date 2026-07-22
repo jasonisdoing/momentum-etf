@@ -219,6 +219,55 @@ function ExtremumMarker({
   );
 }
 
+// Hyperliquid 피드의 단일 봉 오류 틱을 보정한다. 오류는 고가/저가뿐 아니라 시가/종가에도 박힐 수 있어
+// 각 봉의 o/h/l/c 를 **이웃 봉 종가의 중앙값(기준가)** 과 비교한다.
+// 척도는 원시 봉 범위가 아니라 "각 봉이 기준가에서 벗어난 폭(extent)의 중앙값" 을 쓴다 — 이렇게 하면
+// 종목 변동성/노이즈와 무관하게 '전형적 벗어남'을 잡아, 그 DETECT 배를 넘는 값만 오류로 본다.
+// (전역 평균이 아니라 '이웃'과 비교해 추세 구간을 오탐하지 않는다.)
+const _SANITIZE_DETECT = 4; // 전형 벗어남의 이 배수 초과 = 오류 틱
+const _SANITIZE_PULL = 1.5; // 오류면 기준가 ± (전형 벗어남×이 배수) 로 눌러 정상 봉에 묻히게 한다
+const _SANITIZE_WINDOW = 3; // 기준가 계산에 쓰는 좌우 이웃 개수
+
+function sanitizeCandles(candles: Candle[]): Candle[] {
+  const n = candles.length;
+  if (n < 5) return candles;
+  const refAt = (i: number): number => {
+    const neigh: number[] = [];
+    for (let j = Math.max(0, i - _SANITIZE_WINDOW); j <= Math.min(n - 1, i + _SANITIZE_WINDOW); j += 1) {
+      if (j !== i) neigh.push(candles[j].c);
+    }
+    neigh.sort((a, b) => a - b);
+    return neigh.length ? neigh[Math.floor(neigh.length / 2)] : candles[i].c;
+  };
+  const refs = candles.map((_, i) => refAt(i));
+  // 각 봉이 기준가에서 벗어난 최대 폭. 대부분의 봉은 추세를 따라 작게 벗어나므로 그 중앙값이 '전형'.
+  const extents = candles
+    .map((c, i) => Math.max(Math.abs(c.h - refs[i]), Math.abs(c.l - refs[i]), Math.abs(c.o - refs[i]), Math.abs(c.c - refs[i])))
+    .filter((e) => e > 0)
+    .sort((a, b) => a - b);
+  if (extents.length === 0) return candles;
+  const medianExtent = extents[Math.floor(extents.length / 2)];
+  if (!(medianExtent > 0)) return candles;
+  const detect = medianExtent * _SANITIZE_DETECT;
+  const pull = medianExtent * _SANITIZE_PULL;
+
+  let changed = false;
+  const out = candles.map((c, i) => {
+    const ref = refs[i];
+    const fix = (v: number) => (v > ref + detect ? ref + pull : v < ref - detect ? ref - pull : v);
+    const o = fix(c.o);
+    const cc = fix(c.c);
+    const h = Math.max(o, cc, fix(c.h));
+    const l = Math.min(o, cc, fix(c.l));
+    if (o !== c.o || cc !== c.c || h !== c.h || l !== c.l) {
+      changed = true;
+      return { ...c, o, h, l, c: cc };
+    }
+    return c;
+  });
+  return changed ? out : candles;
+}
+
 function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: "KRW" | "USD" | "POINT" | "FX" }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(450);
@@ -248,7 +297,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
 
   const endTime = Date.now();
   const startTime = endTime - 24 * 60 * 60 * 1000;
-  const visibleCandles = candles.filter((candle) => candle.t >= startTime && candle.t <= endTime);
+  const visibleCandles = sanitizeCandles(candles.filter((candle) => candle.t >= startTime && candle.t <= endTime));
 
   if (visibleCandles.length < 2) {
     return (
@@ -522,8 +571,12 @@ function ComparisonChart({
   };
 
   // 대체 소스로 전체 구간을 채운 뒤 주 소스를 덮어써, 거래시간 외 공백만 대체 소스로 연결한다.
-  addCandles(priorSeries?.quote.candles ?? [], priorSeries);
-  addCandles(selectedCandles, selectedSeries);
+  // 병합 전에 각 소스 캔들에서 피드 오류 틱(스파이크)을 제거한다(시리즈별로 동질적이라 개별 처리).
+  const priorCandles = (priorSeries?.quote.candles ?? [])
+    .filter((candle) => candle.t >= startTime && candle.t <= endTime)
+    .sort((a, b) => a.t - b.t);
+  addCandles(sanitizeCandles(priorCandles), priorSeries);
+  addCandles(sanitizeCandles([...selectedCandles].sort((a, b) => a.t - b.t)), selectedSeries);
   const chartCandles = [...candleByTime.values()].sort((a, b) => a.candle.t - b.candle.t);
   const overlayPointByTime = new Map<number, number>();
   for (const candle of overlaySeries?.quote.candles ?? []) {
