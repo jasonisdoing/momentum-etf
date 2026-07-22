@@ -540,6 +540,16 @@ export function AssetHelperClient() {
     }
   };
 
+  // 종목 + 현금 = 100% 여야 저장·백테스트 가능. 아니면 명시적 에러(현금으로 자동 보정하지 않음).
+  const ensureWeightSum100 = useCallback((): boolean => {
+    const sum = validTickers.reduce((acc, item) => acc + (Number(item.fixed_weight_pct) || 0), 0);
+    if (Math.abs(sum + cashWeight - 100) >= 0.05) {
+      toast.error(`종목 ${sum.toFixed(1)}% + 현금 ${cashWeight.toFixed(1)}% = ${(sum + cashWeight).toFixed(1)}%. 합계를 100%로 맞춰주세요.`);
+      return false;
+    }
+    return true;
+  }, [validTickers, cashWeight, toast]);
+
   const saveSettings = async () => {
     if (!selectedAccount || !settings) {
       toast.error("계좌를 선택해주세요.");
@@ -554,6 +564,7 @@ export function AssetHelperClient() {
       toast.error("확인된 종목이 1개 이상 필요합니다.");
       return;
     }
+    if (!ensureWeightSum100()) return;
     try {
       setSaving(true);
       const resp = await fetch("/api/asset-helper-settings", {
@@ -587,11 +598,7 @@ export function AssetHelperClient() {
       return;
     }
     // 종목 + 현금 = 100% 여야 한다(백엔드는 종목만 저장, 현금=100-종목합 파생).
-    const sum = validTickers.reduce((acc, item) => acc + (Number(item.fixed_weight_pct) || 0), 0);
-    if (Math.abs(sum + cashWeight - 100) >= 0.05) {
-      toast.error(`종목 ${sum.toFixed(1)}% + 현금 ${cashWeight.toFixed(1)}% = ${(sum + cashWeight).toFixed(1)}%. 합계를 100%로 맞춰주세요.`);
-      return;
-    }
+    if (!ensureWeightSum100()) return;
     if (!Number.isInteger(Number(btAmount)) || Number(btAmount) <= 0) {
       toast.error("최초 금액(만원)은 1 이상의 정수여야 합니다.");
       return;
