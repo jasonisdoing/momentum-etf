@@ -40,6 +40,15 @@ type HistoryPoint = {
   supertrend_dir: number | null;
 };
 
+type ComponentContribution = {
+  name: string;
+  ticker: string;
+  trend_pct: number | null;
+  offense_pct: number | null;
+  defense_pct: number | null;
+  regime: RegimeKey | null;
+};
+
 type HistoryResponse = {
   ticker: string;
   name: string;
@@ -50,6 +59,7 @@ type HistoryResponse = {
   trend_max_12m: number | null;
   offense_pct: number | null;
   defense_pct: number | null;
+  components?: ComponentContribution[];
   error?: string;
 };
 
@@ -450,6 +460,23 @@ export function MarketTrendChart({
     return { targetPrice, changePct, kind: "offense" as const, ratioValue: offense + 20, rising: true };
   }, [data, latestPoint]);
 
+  // 개별 지수(합성이 아닌) 왼쪽 패널용 기간 수익률 — 최신 종가 대비 N거래일 전 종가.
+  // (합성지수는 대신 '구성 지수 기여도'를 왼쪽에 둔다.)
+  const periodReturns = useMemo(() => {
+    const hist = data?.history ?? [];
+    const lastClose = hist.at(-1)?.close;
+    if (lastClose == null || !(lastClose > 0)) return [];
+    return [
+      { label: "1개월", days: 20 },
+      { label: "3개월", days: 60 },
+      { label: "1년", days: 240 },
+    ].map((p) => {
+      const past = hist[hist.length - 1 - p.days]?.close;
+      const pct = past != null && past > 0 ? (lastClose / past - 1) * 100 : null;
+      return { label: p.label, pct };
+    });
+  }, [data]);
+
   useEffect(() => {
     const container = chartContainerRef.current;
     const overlay = bandOverlayRef.current;
@@ -725,63 +752,97 @@ export function MarketTrendChart({
         <div style={{ display: "flex", height: "calc(100% - 32px)", minHeight: 300, flexDirection: "column" }}>
           <div style={{ marginBottom: 12 }}>
             {data?.offense_pct != null && data?.defense_pct != null ? (
-              <>
-                {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: 4, marginBottom: 6 }}>
-                  <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82" }}>
-                    공격 / 방어 <span style={{ fontWeight: 400 }}>({maType}{maDays} 기준)</span>
-                  </span>
-                  <span style={{ fontSize: "0.82rem", fontWeight: 800 }}>
-                    <span style={{ color: "#d62828" }}>공격 {data.offense_pct}%</span>
-                    <span style={{ color: "#94a3b8" }}> · </span>
-                    <span style={{ color: "#2f9e44" }}>방어 {data.defense_pct}%</span>
-                  </span>
-                </div>
-                {/* 5개 균등 덩어리(각 20%). 왼쪽부터 공격 비중만큼 빨강, 나머지는 방어 녹색. */}
-                <div
-                  style={{ display: "flex", gap: 3, height: 34 }}
-                  title={`${maType}${maDays} 괴리율 ${formatPct(latestPoint?.trend_pct)} · 공격 ${data.offense_pct}% / 방어 ${data.defense_pct}%`}
-                >
-                  {[0, 1, 2, 3, 4].map((i) => {
-                    const isOffense = i < Math.round((data.offense_pct ?? 0) / 20);
-                    return (
-                      <div
-                        key={i}
-                        style={{
-                          flex: 1,
-                          background: isOffense ? "#d62828" : "#2f9e44",
-                          borderRadius: 4,
-                          color: "#fff",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "0.72rem",
-                          fontWeight: 800,
-                        }}
-                      >
-                        {isOffense ? "공격" : "방어"}
-                      </div>
-                    );
-                  })}
-                </div>
-                {/* 다음 단계 예측: 공격/방어 비중이 한 단계 바뀌는 지수 종가(추세 전환 조건과 같은 형식). */}
-                {ratioForecast ? (
-                  <div style={{ fontSize: "0.78rem", color: "#5f6b82", marginTop: 6, lineHeight: 1.5 }}>
-                    {data?.name} 지수가{" "}
-                    <span style={{ fontWeight: 800, textDecoration: "underline" }}>{formatNumber(ratioForecast.targetPrice)}</span>
-                    pt {ratioForecast.rising ? "이상으로 마감하면" : "아래로 내려가면"} (현재 대비{" "}
-                    <span style={{ fontWeight: 800 }}>
-                      {ratioForecast.changePct > 0 ? "+" : ""}
-                      {ratioForecast.changePct.toFixed(1)}%
-                    </span>
-                    ),{" "}
-                    <span style={{ fontWeight: 800, color: ratioForecast.kind === "offense" ? "#d62828" : "#2f9e44" }}>
-                      {ratioForecast.kind === "offense" ? "공격" : "방어"} 비중이 {ratioForecast.ratioValue}%
-                    </span>
-                    로 상승할 것으로 예상됩니다.
+              <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+                {/* 왼쪽 반: 합성지수는 '구성 지수 기여도', 개별 지수는 '기간 수익률'. */}
+                {data.components && data.components.length > 0 ? (
+                  <div style={{ flex: "1 1 0", minWidth: 0 }}>
+                    <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>구성 지수 기여도</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {data.components.map((c) => (
+                        <div key={c.ticker} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.76rem" }}>
+                          <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+                          <span style={{ flex: "0 0 auto", color: (c.trend_pct ?? 0) >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(c.trend_pct)}</span>
+                          <span style={{ flex: "0 0 auto", fontWeight: 800, color: (c.offense_pct ?? 0) >= (c.defense_pct ?? 0) ? "#d62828" : "#2f9e44" }}>
+                            {c.offense_pct == null || c.defense_pct == null ? "-" : `공${c.offense_pct}·방${c.defense_pct}`}
+                          </span>
+                          <span style={{ flex: "0 0 auto", fontWeight: 700, color: c.regime ? REGIME_COLOR[c.regime] : "#94a3b8" }}>
+                            {c.regime ? REGIME_LABEL[c.regime] : "-"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : periodReturns.length > 0 ? (
+                  <div style={{ flex: "1 1 0", minWidth: 0 }}>
+                    <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {periodReturns.map((r) => (
+                        <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "0.76rem" }}>
+                          <span style={{ fontWeight: 700 }}>{r.label}</span>
+                          <span style={{ fontWeight: 800, color: r.pct == null ? "#94a3b8" : r.pct >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(r.pct)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
-              </>
+                {/* 공격/방어 게이지 — 구성 기여도가 있으면 오른쪽 반, 없으면(일반 지수) 전체 폭. */}
+                <div style={{ flex: "1 1 0", minWidth: 0 }}>
+                  {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82" }}>
+                      공격 / 방어 <span style={{ fontWeight: 400 }}>({maType}{maDays} 기준)</span>
+                    </span>
+                    <span style={{ fontSize: "0.82rem", fontWeight: 800 }}>
+                      <span style={{ color: "#d62828" }}>공격 {data.offense_pct}%</span>
+                      <span style={{ color: "#94a3b8" }}> · </span>
+                      <span style={{ color: "#2f9e44" }}>방어 {data.defense_pct}%</span>
+                    </span>
+                  </div>
+                  {/* 5개 균등 덩어리(각 20%). 왼쪽부터 공격 비중만큼 빨강, 나머지는 방어 녹색. */}
+                  <div
+                    style={{ display: "flex", gap: 3, height: 34 }}
+                    title={`${maType}${maDays} 괴리율 ${formatPct(latestPoint?.trend_pct)} · 공격 ${data.offense_pct}% / 방어 ${data.defense_pct}%`}
+                  >
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const isOffense = i < Math.round((data.offense_pct ?? 0) / 20);
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            flex: 1,
+                            background: isOffense ? "#d62828" : "#2f9e44",
+                            borderRadius: 4,
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "0.72rem",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {isOffense ? "공격" : "방어"}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* 다음 단계 예측: 공격/방어 비중이 한 단계 바뀌는 지수 종가(추세 전환 조건과 같은 형식). */}
+                  {ratioForecast ? (
+                    <div style={{ fontSize: "0.78rem", color: "#5f6b82", marginTop: 6, lineHeight: 1.5 }}>
+                      <span style={{ fontWeight: 800, textDecoration: "underline" }}>{formatNumber(ratioForecast.targetPrice)}</span>
+                      pt {ratioForecast.rising ? "이상으로 마감하면" : "아래로 내려가면"} (현재 대비{" "}
+                      <span style={{ fontWeight: 800 }}>
+                        {ratioForecast.changePct > 0 ? "+" : ""}
+                        {ratioForecast.changePct.toFixed(1)}%
+                      </span>
+                      ),{" "}
+                      <span style={{ fontWeight: 800, color: ratioForecast.kind === "offense" ? "#d62828" : "#2f9e44" }}>
+                        {ratioForecast.kind === "offense" ? "공격" : "방어"} 비중이 {ratioForecast.ratioValue}%
+                      </span>
+                      로 상승할 것으로 예상됩니다.
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             ) : null}
           </div>
           {forecastTransitions.length > 0 && (

@@ -37,7 +37,7 @@ INDICES: list[dict[str, str]] = [
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
     {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
-    {"name": "코스피+나스닥+반도체", "yf_ticker": "CORE"},  # 합성 지수(등가중). 실제 소스는 위 CORE_* 참조.
+    {"name": "합성지수", "yf_ticker": "CORE"},  # 코스피+나스닥100+반도체 등가중 합성. 실제 소스는 위 CORE_* 참조.
 ]
 
 # 합성 지수 CORE: 아래 3개를 '공통 기준일=100' 으로 리베이스해 등가중 평균한 종가로 만든다.
@@ -692,9 +692,28 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "history": [],
         "trend_min_12m": None,
         "trend_max_12m": None,
+        "components": [],
     }
 
-    df = load_index_ohlc(yf_ticker)
+    # 합성 CORE 는 구성 지수를 한 번만 로드해 (a) 합성 OHLC 와 (b) 각 지수 기여도(공격/방어·괴리·레짐)를
+    # 함께 만든다. 일반 지수는 기여도 없음.
+    component_items: list[dict[str, Any]] = []
+    if yf_ticker == CORE_TICKER:
+        comp_frames = {t: _lag_core_component(load_index_ohlc(t), t) for t in CORE_COMPONENT_TICKERS}
+        df = _composite_ohlc(list(comp_frames.values()))
+        for t in CORE_COMPONENT_TICKERS:
+            meta = next((idx for idx in INDICES if idx["yf_ticker"] == t), None)
+            item = _build_item(None, t, (meta or {}).get("name", t), ma_short_days, kor_ohlc=comp_frames[t])
+            component_items.append({
+                "name": item["name"],
+                "ticker": t,
+                "trend_pct": item["trend_pct"],
+                "offense_pct": item["offense_pct"],
+                "defense_pct": item["defense_pct"],
+                "regime": item["current_regime"],
+            })
+    else:
+        df = load_index_ohlc(yf_ticker)
     if df is None or df.empty:
         return empty_payload
 
@@ -808,6 +827,7 @@ def compute_index_history(yf_ticker: str) -> dict[str, Any]:
         "trend_max_12m": score_max,
         "offense_pct": offense_defense["offense_pct"] if offense_defense else None,
         "defense_pct": offense_defense["defense_pct"] if offense_defense else None,
+        "components": component_items,
     }
 
 
