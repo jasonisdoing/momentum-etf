@@ -465,9 +465,11 @@ export function AssetHelperClient() {
   // 추가하면 자산 관리 보유 목록에 수량 0으로 등록한 뒤 재로드한다(진짜 공통 1개 목록).
   const addOnValidated = useCallback(
     (resolved: HelperTicker) => {
-      // 낙관적 표시: 즉시 목록에 추가해 바로 보이게 한다(깜빡임/사라짐 방지). 이후 조용히 재로드해 지표를 채운다.
+      // 낙관적 표시: 즉시 목록에 추가한다. 목록은 이미 정확하므로 재로드로 통째 교체하지 않고(깜빡임 방지)
+      // 지표만 백그라운드로 채운다.
       const key = resolved.ticker.trim().toUpperCase();
-      setTickers((cur) => (cur.some((t) => t.ticker.trim().toUpperCase() === key) ? cur : [...cur, resolved]));
+      const newList = tickers.some((t) => t.ticker.trim().toUpperCase() === key) ? tickers : [...tickers, resolved];
+      setTickers(newList);
       void (async () => {
         try {
           const resp = await fetch("/api/assets", {
@@ -477,15 +479,19 @@ export function AssetHelperClient() {
           });
           const data = (await resp.json()) as { added?: string; error?: string };
           if (!resp.ok || data.error) throw new Error(data.error ?? "종목 추가에 실패했습니다.");
-          await load(selectedAccount ?? undefined, { silent: true });
+          // 목록 교체 없이 지표만 갱신(그리드 개수 깜빡임 방지).
+          const newValid = newList.filter((t) => t.ticker.trim() && t.name);
+          if (newValid.length >= 3 && settings && settings.ACCOUNT_ID) {
+            setMetricByTicker(await fetchMetrics(newValid, settings));
+          }
           toast.success("보유 목록에 추가(수량 0)");
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "종목 추가에 실패했습니다.");
-          await load(selectedAccount ?? undefined, { silent: true }); // 실패 시 낙관적 항목 정리
+          setTickers((cur) => cur.filter((t) => t.ticker.trim().toUpperCase() !== key)); // 실패 시 롤백
         }
       })();
     },
-    [selectedAccount, load, toast],
+    [selectedAccount, toast, tickers, settings],
   );
   const addOnError = useCallback((message: string) => toast.error(message), [toast]);
   const add = useAddingTickerRow({
@@ -511,10 +517,10 @@ export function AssetHelperClient() {
         const data = (await resp.json()) as { error?: string };
         if (!resp.ok || data.error) throw new Error(data.error ?? "삭제에 실패했습니다.");
       }
-      // 낙관적 제거 후 조용히 재로드(그리드 깜빡임 방지).
+      // 티커만 제거한다 — 남은 종목의 비중과 현금 비중은 건드리지 않는다.
+      // (재로드하면 현금을 100−종목합으로 다시 계산해 제거분이 현금으로 채워지므로 재로드도 하지 않는다.)
       setTickers((cur) => cur.filter((t) => !selectedTickers.includes(t.ticker)));
       setSelectedTickers([]);
-      await load(selectedAccount ?? undefined, { silent: true });
       toast.success("삭제 완료");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "삭제에 실패했습니다.");
