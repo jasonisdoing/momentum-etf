@@ -913,7 +913,7 @@ def build_ticker_detail_payload(
             }
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
         if not holdings:
-            holdings_error = "구성종목 캐시가 없습니다. python scripts/stock_meta_cache_updater.py 실행이 필요합니다."
+            holdings_error = "구성종목 캐시가 없습니다. python scripts/stock_reference_meta_updater.py 실행이 필요합니다."
         elif not holdings_as_of_date:
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
         else:
