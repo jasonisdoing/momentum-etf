@@ -575,20 +575,32 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     if not ticker_types:
         raise RuntimeError("사용 가능한 종목풀이 없습니다.")
 
-    # 3. 기존 "종목 추가" 모달과 동일한 검증 엔진 사용
+    # 3. 종목풀(stock_meta)에 이미 등록된 종목만 계좌에 담을 수 있다.
+    #    미등록 종목(status="new": fetch 는 되지만 stock_meta 부재)은 여기서 막고,
+    #    최초 등록 창구인 '종목 순위(pools-rank)' 로 안내한다. (pools-rank 는 이 함수를 거치지 않는다.)
     last_error = None
     validated_res = None
-    
+    saw_unregistered = False
+
     for tt in ticker_types:
         try:
             # StocksManager가 사용하는 동일한 함수 호출
-            validated_res = validate_stock_candidate(tt, ticker)
-            break # 성공하면 루프 중단
+            candidate = validate_stock_candidate(tt, ticker)
         except Exception as e:
             last_error = str(e)
             continue
+        # 종목풀 순서에 관계없이 "등록된(active)" 매칭을 우선한다(먼저 걸린 new 로 확정하지 않음).
+        if candidate.get("status") == "active":
+            validated_res = candidate
+            break
+        saw_unregistered = True
 
     if not validated_res:
+        if saw_unregistered:
+            raise RuntimeError(
+                f"종목풀에 등록되지 않은 종목입니다: {ticker}. "
+                "'종목 순위' 화면에서 먼저 종목을 추가한 뒤 계좌에 담아주세요."
+            )
         raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {ticker}")
 
     return {
