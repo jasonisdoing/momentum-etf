@@ -47,7 +47,7 @@ type RankRow = {
   backtest_stats?: {
     cagr: number;
     mdd: number;
-    sharpe: number;
+    sortino: number;
     is_partial?: boolean;
   } | null;
   순번: string;
@@ -1059,7 +1059,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           renderRsiCell(params.value ?? null),
       },
       {
-        headerName: "MDD3달",
+        headerName: "MDD",
         minWidth: 80,
         width: 80,
         type: "rightAligned",
@@ -1074,8 +1074,29 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
         cellStyle: (params: { data?: RankGridRow }) => {
           const stats = params.data?.backtest_stats;
-          const isPartial = stats?.is_partial;
-          if (isPartial) {
+          if (stats?.is_partial) {
+            return { color: "#ca8a04", fontWeight: 700 };
+          }
+          return null;
+        },
+      },
+      {
+        headerName: "소르티노",
+        minWidth: 80,
+        width: 80,
+        type: "rightAligned",
+        valueGetter: (params) => {
+          const stats = params.data?.backtest_stats;
+          const val = stats?.sortino;
+          return val != null ? val : null;
+        },
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
+          if (params.value == null) return "-";
+          return params.value.toFixed(2);
+        },
+        cellStyle: (params: { data?: RankGridRow }) => {
+          const stats = params.data?.backtest_stats;
+          if (stats?.is_partial) {
             return { color: "#ca8a04", fontWeight: 700 };
           }
           return null;

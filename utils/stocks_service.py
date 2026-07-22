@@ -240,15 +240,8 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
     config = _require_ticker_type_config(type_norm)
     country_code = str(config.get("country_code") or "kor").strip().lower()
 
-    # 1) 메타데이터 업데이트
-    from utils.stock_meta_updater import update_single_ticker_metadata
-
-    try:
-        update_single_ticker_metadata(type_norm, ticker_norm)
-    except Exception as e:
-        logger.error(f"[{type_norm.upper()}/{ticker_norm}] 메타데이터 갱신 실패: {e}")
-
-    # 2) 가격 캐시 업데이트
+    # 1) 가격 캐시 업데이트 — 먼저 채워야 2)의 메타(3달 백테스트 MDD 등)가 캐시에서 데이터를 읽어 계산된다.
+    #    (순서가 바뀌면 신규 종목은 캐시가 빈 상태로 메타가 계산돼 MDD 등이 비어버린다.)
     from utils.data_loader import fetch_ohlcv
 
     try:
@@ -268,6 +261,14 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
         )
     except Exception as e:
         logger.error(f"[{type_norm.upper()}/{ticker_norm}] 가격 캐시 갱신 실패: {e}")
+
+    # 2) 메타데이터 업데이트 — 위에서 채운 가격 캐시로 backtest_stats(3달 MDD/수익/소르티노)를 계산·저장.
+    from utils.stock_meta_updater import update_single_ticker_metadata
+
+    try:
+        update_single_ticker_metadata(type_norm, ticker_norm)
+    except Exception as e:
+        logger.error(f"[{type_norm.upper()}/{ticker_norm}] 메타데이터 갱신 실패: {e}")
 
     invalidate_rank_data_cache(type_norm)
     return {"ticker": ticker_norm, "ticker_type": type_norm}
