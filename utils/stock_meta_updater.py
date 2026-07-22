@@ -65,6 +65,62 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months:
 # 상장 기간이 이보다 짧으면 is_partial=True 로 표시(프론트에서 다른 색으로 강조).
 RANK_BACKTEST_MONTHS = 12
 
+# 가격 파생 지표(거래량·기간수익률·backtest_stats) 필드 목록 — 가격지표 배치가 담당하는 필드.
+PRICE_METRIC_FIELDS = (
+    "1_week_avg_volume",
+    "volume",
+    "1_week_earn_rate",
+    "2_week_earn_rate",
+    "1_month_earn_rate",
+    "3_month_earn_rate",
+    "6_month_earn_rate",
+    "12_month_earn_rate",
+    "backtest_stats",
+)
+
+
+def compute_price_metrics(frame: "pd.DataFrame | None") -> dict[str, Any]:
+    """OHLCV 프레임에서 거래량·기간수익률(1주~12개월)·backtest_stats 를 계산한다.
+
+    가격지표 배치와 단일 종목 추가가 **같은 로직**을 쓰도록 공용화한 함수다.
+    프레임이 없거나 Close 가 없으면 빈 dict 를 반환한다(호출부가 부분 갱신).
+    """
+    result: dict[str, Any] = {}
+    if frame is None or frame.empty or "Close" not in frame.columns:
+        return result
+
+    if "Volume" in frame.columns:
+        avg_volume = frame.tail(5)["Volume"].mean()
+        if pd.notna(avg_volume):
+            result["1_week_avg_volume"] = int(avg_volume)
+        non_empty_vols = frame["Volume"].dropna()
+        if not non_empty_vols.empty:
+            result["volume"] = int(non_empty_vols.iloc[-1])
+
+    def calc_rate_safe(df: pd.DataFrame, days_lookback: int) -> float | None:
+        if len(df) < days_lookback + 1 or "Close" not in df.columns:
+            return None
+        subset = df.tail(days_lookback + 1)
+        if len(subset) < 2:
+            return None
+        start_price = subset.iloc[0]["Close"]
+        end_price = subset.iloc[-1]["Close"]
+        if pd.notna(start_price) and pd.notna(end_price) and start_price > 0:
+            return round(((end_price - start_price) / start_price) * 100, 4)
+        return None
+
+    result["1_week_earn_rate"] = calc_rate_safe(frame, 5)
+    result["2_week_earn_rate"] = calc_rate_safe(frame, 10)
+    result["1_month_earn_rate"] = calc_rate_safe(frame, 21)
+    result["3_month_earn_rate"] = calc_rate_safe(frame, 63)
+    result["6_month_earn_rate"] = calc_rate_safe(frame, 126)
+    result["12_month_earn_rate"] = calc_rate_safe(frame, 252)
+
+    bt_close = frame["Close"].dropna()
+    if not bt_close.empty:
+        result["backtest_stats"] = _simulate_single_stock_ma_strategy(bt_close, RANK_BACKTEST_MONTHS)
+    return result
+
 # -------------------------------------------------------------------------
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
 # `update_stock_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
@@ -622,43 +678,27 @@ def update_ticker_type_metadata(
             name = stock.get("name") or "-"
             logger.info(f"  -> 메타데이터 획득 중: {idx}/{total_count} - {name}({ticker})")
 
-            # 5년치(60개월) 일봉 데이터 로드하여 MA 통계 지표 계산 (CAGR, MDD, Sortino)
-            backtest_stats = {}
+            # 가격 파생 지표(거래량·기간수익률·backtest_stats) — OHLCV(60개월) 1회 로드로 계산.
+            price_metrics: dict[str, Any] = {}
             try:
                 df = fetch_ohlcv(ticker, country=country_code, months_back=60, ticker_type=type_norm)
-                if df is not None and not df.empty and "Close" in df.columns:
-                    close_prices = df["Close"].dropna()
-                    # 최근 RANK_BACKTEST_MONTHS(12)개월 성과(수익/MDD/소르티노).
-                    backtest_stats = _simulate_single_stock_ma_strategy(close_prices, RANK_BACKTEST_MONTHS)
+                price_metrics = compute_price_metrics(df)
             except Exception as exc:
-                logger.warning(f"  -> [{ticker}] 백테스트 지표 연산 중 오류 발생: {exc}")
+                logger.warning(f"  -> [{ticker}] 가격 지표 연산 중 오류 발생: {exc}")
+            backtest_stats = price_metrics.get("backtest_stats") or {}
 
-            # 저장할 필드들을 딕셔너리로 구성
-            update_doc = {"ticker": ticker, "backtest_stats": backtest_stats}
-
-            # 메타데이터 업데이트 시 갱신되는 주요 필드 지정
-            fields_to_update = [
+            # 저장할 필드 = 식별(stock) + 가격지표(price_metrics)
+            update_doc: dict[str, Any] = {"ticker": ticker, **price_metrics}
+            identity_fields = [
                 "name",
                 "listing_date",
                 "market",
                 "is_etf",
-                "1_week_avg_volume",
-                "volume",
-                "1_week_earn_rate",
-                "2_week_earn_rate",
-                "1_month_earn_rate",
-                "3_month_earn_rate",
-                "6_month_earn_rate",
-                "12_month_earn_rate",
                 "etf_category",
                 "dividend_yield_ttm",
                 "market_cap",
-                "backtest_stats",
             ]
-
-            for f in fields_to_update:
-                if f == "backtest_stats":
-                    continue
+            for f in identity_fields:
                 if f in stock:
                     update_doc[f] = stock[f]
 
@@ -898,27 +938,25 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
             except Exception as meta_cache_error:
                 logger.error(f"[{type_norm.upper()}/{ticker_norm}] 미국 개별주 메타 캐시 갱신 실패: {meta_cache_error}")
 
-    update_doc = {"ticker": ticker_norm}
-    fields_to_update = [
+    # 가격 파생 지표 — 종목 추가 즉시 랭킹 지표가 채워지도록 배치와 동일하게 계산한다.
+    price_metrics: dict[str, Any] = {}
+    try:
+        df = fetch_ohlcv(ticker_norm, country=country_code, months_back=60, ticker_type=type_norm)
+        price_metrics = compute_price_metrics(df)
+    except Exception as exc:
+        logger.warning(f"[{type_norm.upper()}/{ticker_norm}] 가격 지표 연산 실패: {exc}")
+
+    update_doc: dict[str, Any] = {"ticker": ticker_norm, **price_metrics}
+    identity_fields = [
         "name",
         "listing_date",
         "market",
         "is_etf",
-        "1_week_avg_volume",
-        "volume",
-        "1_week_earn_rate",
-        "2_week_earn_rate",
-        "1_month_earn_rate",
-        "3_month_earn_rate",
-        "6_month_earn_rate",
-        "12_month_earn_rate",
         "etf_category",
         "dividend_yield_ttm",
         "market_cap",
-        "backtest_stats",
     ]
-
-    for f in fields_to_update:
+    for f in identity_fields:
         if f in stock:
             update_doc[f] = stock[f]
 
@@ -1061,104 +1099,8 @@ def update_single_stock_metadata(
     if listing_date_str:
         stock["listing_date"] = listing_date_str
 
-    # 먼저 캐시된 데이터(MongoDB)가 있는지 확인
-    from utils.cache_utils import load_cached_frame
-
-    # [Improvement] yfinance를 매번 호출하기보다는, 이미 수집된(fetch_ohlcv로) 캐시 데이터를 우선 사용
-    # 캐시가 있으면 그것으로 수익률 계산 -> 훨씬 빠르고 정합성 높음 (특히 KOR 종목)
-    try:
-        cached_df = load_cached_frame(account_norm, ticker)
-        if cached_df is not None and not cached_df.empty:
-            data = cached_df
-            # 캐시 데이터는 이미 'Close', 'Volume' 등이 포함되어 있음 (한글 컬럼일 수도 있음 - data_loader 참고)
-            # data_loader.fetch_ohlcv 결과는 영문 컬럼 (Open, High, Low, Close, Volume, 등락률)
-            # load_cached_frame 결과도 동일.
-    except Exception:
-        pass
-
-    if data is None:
-        # 캐시에 없으면 yfinance 시도 (기존 로직)
-        data = yf.download(yfinance_ticker, period="2y", progress=False, auto_adjust=True)
-        if isinstance(data, pd.DataFrame) and not data.empty:
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = data.columns.get_level_values(0)
-                data = data.loc[:, ~data.columns.duplicated()]
-            if not data.index.is_unique:
-                data = data[~data.index.duplicated(keep="last")]
-        else:
-            data = None
-
+    # 가격 파생 지표(거래량·기간수익률·backtest_stats)는 이 함수에서 계산하지 않는다.
+    # 호출부가 OHLCV 를 1회 로드해 compute_price_metrics() 로 계산·병합한다(가격지표 배치와 공유).
     stock.pop("1_month_avg_volume", None)
     stock.pop("1_week_avg_turnover", None)
     stock.pop("1_month_avg_turnover", None)
-
-    if data is not None and not data.empty and len(data) >= 1:
-        if "Volume" in data.columns:
-            last_week = data.tail(5)
-            avg_volume = last_week["Volume"].mean()
-            if pd.notna(avg_volume):
-                stock["1_week_avg_volume"] = int(avg_volume)
-
-            non_empty_vols = data["Volume"].dropna()
-            if not non_empty_vols.empty:
-                stock["volume"] = int(non_empty_vols.iloc[-1])
-
-        def calc_rate_safe(df, days_lookback):
-            if len(df) < days_lookback + 1:
-                return None
-            if "Close" not in df.columns:
-                return None
-            subset = df.tail(days_lookback + 1)
-            if len(subset) < 2:
-                return None
-            start_price = subset.iloc[0]["Close"]
-            end_price = subset.iloc[-1]["Close"]
-            if pd.notna(start_price) and pd.notna(end_price) and start_price > 0:
-                return round(((end_price - start_price) / start_price) * 100, 4)
-            return None
-
-        stock["1_week_earn_rate"] = calc_rate_safe(data, 5)
-        stock["2_week_earn_rate"] = calc_rate_safe(data, 10)
-        stock["1_month_earn_rate"] = calc_rate_safe(data, 21)
-        stock["3_month_earn_rate"] = calc_rate_safe(data, 63)
-        stock["6_month_earn_rate"] = calc_rate_safe(data, 126)
-        stock["12_month_earn_rate"] = calc_rate_safe(data, 252)
-
-        # 랭킹 표시용 백테스트 지표(MDD·소르티노, RANK_BACKTEST_MONTHS 기준). 종목 추가 시에도 바로 채워지도록
-        # 배치와 동일하게 여기서 계산한다. 상장 기간이 기준보다 짧으면 is_partial=True.
-        try:
-            if "Close" in data.columns:
-                bt_close = data["Close"].dropna()
-                if not bt_close.empty:
-                    stock["backtest_stats"] = _simulate_single_stock_ma_strategy(bt_close, RANK_BACKTEST_MONTHS)
-        except Exception:
-            pass
-
-        ordered_stock = {}
-        for k in ["ticker", "name", "note", "listing_date"]:
-            if k in stock:
-                ordered_stock[k] = stock[k]
-
-        if "1_week_avg_volume" in stock:
-            ordered_stock["1_week_avg_volume"] = stock["1_week_avg_volume"]
-
-        rate_keys = [
-            "volume",
-        "1_week_earn_rate",
-            "2_week_earn_rate",
-            "1_month_earn_rate",
-            "3_month_earn_rate",
-            "6_month_earn_rate",
-            "12_month_earn_rate",
-        ]
-        for k in rate_keys:
-            if k in stock:
-                ordered_stock[k] = stock[k]
-
-        known_keys = set(["ticker", "name", "note", "listing_date", "1_week_avg_volume"] + rate_keys)
-        for k, v in stock.items():
-            if k not in known_keys:
-                ordered_stock[k] = v
-
-        stock.clear()
-        stock.update(ordered_stock)
