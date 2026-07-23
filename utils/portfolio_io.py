@@ -492,9 +492,19 @@ def load_real_holdings_table(
         if col in df_holdings.columns:
             df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").round(2)
 
+    # 가격 반올림 자리수는 계좌가 아니라 "종목 통화"별로 정한다(다통화 계좌 지원).
+    # USD/AUD 4자리, KRW 0자리. 통화 컬럼(환종)이 없으면 계좌 기준(price_digits)으로 폴백.
+    if "환종" in df_holdings.columns:
+        row_digits = df_holdings["환종"].astype(str).str.upper().map(lambda cur: 4 if cur in ("USD", "AUD") else 0)
+    else:
+        row_digits = pd.Series(price_digits, index=df_holdings.index)
     for col in price_cols:
         if col in df_holdings.columns:
-            df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").round(price_digits)
+            numeric = pd.to_numeric(df_holdings[col], errors="coerce")
+            df_holdings[col] = [
+                round(float(value), int(digits)) if pd.notna(value) else value
+                for value, digits in zip(numeric, row_digits)
+            ]
 
     for col in int_cols:
         if col in df_holdings.columns:
