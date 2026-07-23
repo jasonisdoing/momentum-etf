@@ -34,9 +34,24 @@ MA_DAYS_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 200)
 STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-3.0, -5.0, -7.0, -10.0, -15.0, -20.0)
 
 
+# 화면 배지용 기본 아이콘 — 계좌별로 저장해 덮어쓸 수 있다(빈값 저장 = 배지 미표시).
+_DEFAULT_MA_ICON = "🚫"
+_DEFAULT_STOPLOSS_ICON = "✂️"
+
+
 def _account_ma_days(doc: dict[str, Any]) -> int:
     value = doc.get("ma20_ma_days")
     return int(value) if isinstance(value, (int, float)) and int(value) >= 2 else _DEFAULT_MA_DAYS
+
+
+def _account_ma_icon(doc: dict[str, Any]) -> str:
+    value = doc.get("ma20_alarm_icon")
+    return str(value).strip() if isinstance(value, str) else _DEFAULT_MA_ICON
+
+
+def _account_stoploss_icon(doc: dict[str, Any]) -> str:
+    value = doc.get("stoploss_alarm_icon")
+    return str(value).strip() if isinstance(value, str) else _DEFAULT_STOPLOSS_ICON
 
 
 def _account_stoploss_pct(doc: dict[str, Any]) -> float:
@@ -149,6 +164,64 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
     return {"ma20": ma20_hits, "stoploss": stoploss_hits, "ma_days": ma_days, "threshold": threshold}, errors
 
 
+# 배지 계산은 보유 종목별 가격 시계열 조회라 수 초 걸린다 — 계좌별 TTL 캐시로 재계산을 줄인다.
+# (알람 설정 저장 시 무효화. 판정 기반인 종가·실시간 스냅샷은 이 TTL 내 변화가 미미하다.)
+_BADGES_CACHE_TTL_SECONDS = 120.0
+_badges_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _invalidate_badges_cache() -> None:
+    _badges_cache.clear()
+
+
+def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
+    """자산 화면(종목명 배지)용: 계좌의 알람 트리거를 티커→아이콘 문자열 맵으로 반환한다.
+
+    슬랙 알람(compute_account_alerts)과 **같은 설정·같은 판정**을 쓴다. 꺼진 알람 종류나
+    아이콘이 빈값(미설정)이면 해당 배지는 붙지 않는다. 티커는 접두사 없는 형태로 정규화한다.
+    """
+    norm_id = str(account_id or "").strip().lower()
+    import time as _time
+
+    cached = _badges_cache.get(norm_id)
+    if cached is not None and _time.monotonic() - cached[0] < _BADGES_CACHE_TTL_SECONDS:
+        return dict(cached[1])
+    account_doc = next((doc for doc in load_account_docs() if doc["account_id"] == norm_id), None)
+    if account_doc is None:
+        raise ValueError(f"알 수 없는 계좌입니다: {account_id}")
+
+    ma_icon = _account_ma_icon(account_doc)
+    stoploss_icon = _account_stoploss_icon(account_doc)
+    alerts, _errors = compute_account_alerts(account_doc)
+
+    badge_by_ticker: dict[str, str] = {}
+
+    def _norm_ticker(value: str) -> str:
+        return str(value or "").strip().upper().split(":")[-1]
+
+    if ma_icon:
+        for hit in alerts["ma20"]:
+            key = _norm_ticker(hit["ticker"])
+            if key:
+                badge_by_ticker[key] = badge_by_ticker.get(key, "") + ma_icon
+    if stoploss_icon:
+        for hit in alerts["stoploss"]:
+            key = _norm_ticker(hit["ticker"])
+            if key:
+                badge_by_ticker[key] = badge_by_ticker.get(key, "") + stoploss_icon
+
+    result = {
+        "account_id": norm_id,
+        "badge_by_ticker": badge_by_ticker,
+        "ma20_icon": ma_icon,
+        "stoploss_icon": stoploss_icon,
+        "ma_days": alerts["ma_days"],
+        "threshold": alerts["threshold"],
+    }
+    _badges_cache[norm_id] = (_time.monotonic(), dict(result))
+    return result
+
+
 def get_alarm_view() -> dict[str, Any]:
     """알람 화면용: 계좌별 알람 On/Off + 기준(이평선 일수·손절 %) 목록(시세 계산 없음)."""
     return {
@@ -163,23 +236,32 @@ def get_alarm_view() -> dict[str, Any]:
                 "order": int(doc.get("order") or 0),
                 "ma20_enabled": bool(doc.get("ma20_alarm_enabled", False)),
                 "ma20_ma_days": _account_ma_days(doc),
+                "ma20_icon": _account_ma_icon(doc),
                 "stoploss_enabled": bool(doc.get("stoploss_alarm_enabled", False)),
                 "stoploss_threshold_pct": _account_stoploss_pct(doc),
+                "stoploss_icon": _account_stoploss_icon(doc),
             }
             for doc in load_account_docs()
         ],
     }
 
 
-def set_account_alarm(account_id: str, alarm_type: str, *, enabled: bool, value: float) -> dict[str, Any]:
-    """계좌별 알람 On/Off + 기준값 저장. alarm_type: 'ma20'|'stoploss'."""
+def set_account_alarm(
+    account_id: str, alarm_type: str, *, enabled: bool, value: float, icon: str | None = None
+) -> dict[str, Any]:
+    """계좌별 알람 On/Off + 기준값(+화면 배지 아이콘) 저장. alarm_type: 'ma20'|'stoploss'."""
     if alarm_type == "ma20":
-        payload = {"ma20_alarm_enabled": bool(enabled), "ma20_ma_days": int(value)}
+        payload: dict[str, Any] = {"ma20_alarm_enabled": bool(enabled), "ma20_ma_days": int(value)}
+        if icon is not None:
+            payload["ma20_alarm_icon"] = str(icon).strip()
     elif alarm_type == "stoploss":
         payload = {"stoploss_alarm_enabled": bool(enabled), "stoploss_threshold_pct": float(value)}
+        if icon is not None:
+            payload["stoploss_alarm_icon"] = str(icon).strip()
     else:
         raise ValueError(f"알 수 없는 알람 종류입니다: {alarm_type}")
     save_account_settings(account_id, payload, save_method="알람 센터")
+    _invalidate_badges_cache()  # 설정(기준·아이콘·On/Off) 변경 즉시 배지에 반영
     return get_alarm_view()
 
 

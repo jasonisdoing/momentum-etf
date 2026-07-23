@@ -39,8 +39,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "URL",
     "ma20_alarm_enabled",
     "ma20_ma_days",
+    "ma20_alarm_icon",
     "stoploss_alarm_enabled",
     "stoploss_threshold_pct",
+    "stoploss_alarm_icon",
 )
 
 _ALLOWED_COUNTRY_CODES = {"kor", "au", "us"}
@@ -209,6 +211,12 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             if pct >= 0:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}")
             cleaned[key] = pct
+        elif key in ("ma20_alarm_icon", "stoploss_alarm_icon"):
+            # 화면 배지용 아이콘(이모지). 빈 문자열 = 배지 미표시(명시적 미설정).
+            icon = str(raw or "").strip()
+            if len(icon) > 8:
+                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 8자 이하여야 합니다: {icon}")
+            cleaned[key] = icon
     if not cleaned:
         raise AccountSettingsStoreError("저장할 값이 없습니다.")
     return cleaned

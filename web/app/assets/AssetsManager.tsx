@@ -14,6 +14,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
+import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 
 type HoldingsRow = {
   account_id: string;
@@ -501,6 +502,17 @@ function AccountHoldingsDetailPanel({
   // 입력 중인 티커 초안 — 타이핑마다 setState 하면 그리드 셀이 리마운트돼 포커스가 튄다(1글자만 입력됨).
   // draft 는 ref 에만 쌓고, 검증 시점에만 읽는다.
   const addingTickerDraftRef = useRef("");
+  // 종목명 알람 배지(이동선 이탈·손절 아이콘) — /alarms 설정·판정 그대로. 보조 정보라 실패 시 빈 맵.
+  const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
+  useEffect(() => {
+    let alive = true;
+    void fetchAlertBadges(summary.account_id).then((badges) => {
+      if (alive) setAlertBadges(badges);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [summary.account_id]);
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [dirtyRowIds, setDirtyRowIds] = useState<string[]>([]);
   const [dirtyCellKeys, setDirtyCellKeys] = useState<string[]>([]);
@@ -1339,7 +1351,13 @@ function AccountHoldingsDetailPanel({
         }
 
         const value = String(params.value ?? "-");
-        return <span className="assetsNameCellText" title={value}>{value}</span>;
+        const badge = alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "";
+        return (
+          <span className="assetsNameCellText" title={value}>
+            {value}
+            {badge ? ` ${badge}` : ""}
+          </span>
+        );
       },
     },
     {
@@ -1534,7 +1552,7 @@ function AccountHoldingsDetailPanel({
         <span className="appGridNumericValue">{params.data ? formatHiddenAmount(showAmounts, formatKrw(getPreviewValuationKrw(params.data))) : "-"}</span>
       ),
     },
-  ], [addingRow, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId, showAmounts]);
+  ], [addingRow, alertBadges, handleValidateTicker, isAusAccount, isCashGridRow, isDirtyEditableCell, isEditableHoldingRow, processingId, showAmounts]);
 
   return (
     <div className="assetsDetailPanel">

@@ -12,8 +12,10 @@ type AlarmAccount = {
   order: number;
   ma20_enabled: boolean;
   ma20_ma_days: number;
+  ma20_icon: string;
   stoploss_enabled: boolean;
   stoploss_threshold_pct: number;
+  stoploss_icon: string;
 };
 type AlarmView = {
   ma_days_options: number[];
@@ -58,13 +60,19 @@ export function AlarmsClient() {
     void load();
   }, [load]);
 
-  const saveAccount = async (account_id: string, alarm_type: "ma20" | "stoploss", enabled: boolean, value: number) => {
+  const saveAccount = async (
+    account_id: string,
+    alarm_type: "ma20" | "stoploss",
+    enabled: boolean,
+    value: number,
+    icon?: string,
+  ) => {
     setBusy(`${account_id}-${alarm_type}`);
     try {
       const resp = await fetch("/api/alarms/account", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id, alarm_type, enabled, value }),
+        body: JSON.stringify({ account_id, alarm_type, enabled, value, ...(icon !== undefined ? { icon } : {}) }),
       });
       const payload = (await resp.json()) as AlarmView;
       if (!resp.ok || payload.error) throw new Error(payload.error ?? "저장에 실패했습니다.");
@@ -95,6 +103,7 @@ export function AlarmsClient() {
   const accountRow = (a: AlarmAccount, alarm_type: "ma20" | "stoploss") => {
     const enabled = alarm_type === "ma20" ? a.ma20_enabled : a.stoploss_enabled;
     const value = alarm_type === "ma20" ? a.ma20_ma_days : a.stoploss_threshold_pct;
+    const icon = alarm_type === "ma20" ? a.ma20_icon : a.stoploss_icon;
     const options = alarm_type === "ma20" ? view?.ma_days_options ?? [] : view?.stoploss_pct_options ?? [];
     const isBusy = busy === `${a.account_id}-${alarm_type}`;
     return (
@@ -123,6 +132,22 @@ export function AlarmsClient() {
             <option key={o} value={o}>{alarm_type === "ma20" ? `${view?.ma_type ?? ""} ${o}일` : `${o}%`}</option>
           ))}
         </select>
+        <input
+          type="text"
+          key={`${a.account_id}-${alarm_type}-icon-${icon}`}
+          style={{ ...selectStyle, width: 52, textAlign: "center" }}
+          defaultValue={icon}
+          maxLength={8}
+          disabled={isBusy}
+          title="자산 화면 종목명에 붙는 배지 아이콘(비우면 표시 안 함)"
+          onBlur={(e) => {
+            const next = e.target.value.trim();
+            if (next !== icon) void saveAccount(a.account_id, alarm_type, enabled, value, next);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") e.currentTarget.blur();
+          }}
+        />
       </div>
     );
   };
@@ -146,6 +171,7 @@ export function AlarmsClient() {
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>📉 이동선 이탈 알림</h2>
             <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
               계좌별로 켜고, 계좌마다 다른 기준 이평선을 선택할 수 있습니다. 보유 종목의 종가가 그 이평선 아래면 알립니다.
+              맨 오른쪽 아이콘은 자산 관리·자산 헬퍼 종목명에 붙는 배지입니다(비우면 표시 안 함).
             </p>
             {loading || !view ? <div style={{ color: "var(--text-muted)" }}>불러오는 중…</div> : (
               <div style={{ display: "flex", flexDirection: "column" }}>{accounts.map((a) => accountRow(a, "ma20"))}</div>
@@ -159,6 +185,7 @@ export function AlarmsClient() {
             <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>🛑 손절 알림</h2>
             <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
               계좌별로 켜고, 계좌마다 다른 손절 기준을 선택할 수 있습니다. 보유 종목의 수익률이 그 기준 이하면 알립니다.
+              맨 오른쪽 아이콘은 자산 관리·자산 헬퍼 종목명에 붙는 배지입니다(비우면 표시 안 함).
             </p>
             {loading || !view ? <div style={{ color: "var(--text-muted)" }}>불러오는 중…</div> : (
               <div style={{ display: "flex", flexDirection: "column" }}>{accounts.map((a) => accountRow(a, "stoploss"))}</div>
