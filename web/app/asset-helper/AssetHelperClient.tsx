@@ -13,6 +13,7 @@ import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHe
 import { BUCKET_THEME } from "@/lib/bucket-theme";
 import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
+import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 
 function getBucketName(bucketId: number | undefined): string {
   return bucketId ? BUCKET_THEME[String(bucketId)]?.name ?? "-" : "-";
@@ -282,6 +283,8 @@ export function AssetHelperClient() {
     selectedAccountRef.current = selectedAccount;
   }, [selectedAccount]);
   const [marketTrendItems, setMarketTrendItems] = useState<MarketTrendItem[]>([]);
+  // 알람 배지(이동선 이탈·손절 아이콘) — /alarms 설정·판정 그대로. 보조 정보라 실패 시 빈 맵.
+  const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
   const [accountReturns, setAccountReturns] = useState<Record<string, AccountReturns>>({});
   const [memo, setMemo] = useState("");
   const [savedMemo, setSavedMemo] = useState("");
@@ -399,6 +402,21 @@ export function AssetHelperClient() {
       alive = false;
     };
   }, []);
+
+  // 종목명 알람 배지 — 선택 계좌의 이동선 이탈·손절 트리거를 티커→아이콘 맵으로 로드.
+  useEffect(() => {
+    if (!selectedAccount) {
+      setAlertBadges({});
+      return;
+    }
+    let alive = true;
+    void fetchAlertBadges(selectedAccount).then((badges) => {
+      if (alive) setAlertBadges(badges);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [selectedAccount]);
 
   // 계좌별 기간 수익률(스냅샷 기반, 보조 정보라 실패해도 화면 유지).
   useEffect(() => {
@@ -764,9 +782,11 @@ export function AssetHelperClient() {
               </div>
             );
           }
+          const badge = alertBadges[normalizeBadgeTicker(row.ticker)] ?? "";
           return (
             <span className="rankNameCellText" title={params.value ?? ""}>
               {renderNameWithLeverageHighlight(String(params.value ?? ""))}
+              {badge ? <span> {badge}</span> : null}
             </span>
           );
         },
@@ -808,7 +828,7 @@ export function AssetHelperClient() {
     // add(useAddingTickerRow) 는 매 렌더 새로 생성되므로 의존성에 포함해
     // 낡은 클로저가 빈 상태를 읽어 "티커를 입력해주세요"가 뜨는 것을 막는다.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [add],
+    [add, alertBadges],
   );
 
   const gridOptions = useMemo<GridOptions<GridRow>>(

@@ -17,9 +17,10 @@ def get_alarms(_: None = Depends(require_internal_token)) -> dict:
 
 @router.post("/account")
 def post_account(payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
-    """계좌별 알람 저장. body: ``{account_id, alarm_type: 'ma20'|'stoploss', enabled: bool, value: number}``.
+    """계좌별 알람 저장. body: ``{account_id, alarm_type: 'ma20'|'stoploss', enabled: bool, value: number, icon?: str}``.
 
     value 는 ma20 이면 이평선 일수(정수), stoploss 면 손절 기준(%, 음수).
+    icon 은 자산 화면 종목명 배지용 이모지(생략 시 미변경, 빈 문자열 = 배지 끔).
     """
     from utils.holdings_alarm_service import set_account_alarm
 
@@ -32,7 +33,17 @@ def post_account(payload: dict = Body(...), _: None = Depends(require_internal_t
     value = payload.get("value")
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         raise ValueError("기준 value 는 숫자여야 합니다.")
-    return set_account_alarm(account_id, alarm_type, enabled=bool(payload.get("enabled")), value=float(value))
+    raw_icon = payload.get("icon")
+    icon = str(raw_icon) if isinstance(raw_icon, str) else None
+    return set_account_alarm(account_id, alarm_type, enabled=bool(payload.get("enabled")), value=float(value), icon=icon)
+
+
+@router.get("/badges")
+def get_badges(account_id: str, _: None = Depends(require_internal_token)) -> dict:
+    """자산 화면 종목명 배지 — 계좌 알람 설정·판정 그대로 티커→아이콘 맵 반환."""
+    from utils.holdings_alarm_service import compute_account_alert_badges
+
+    return compute_account_alert_badges(account_id)
 
 
 @router.post("/send")
