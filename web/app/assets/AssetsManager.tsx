@@ -1521,16 +1521,8 @@ function AccountHoldingsDetailPanel({
       type: "rightAligned",
       // 수량/평균매입가 변경 시 평가금액 셀이 즉시 재렌더되도록 valueGetter 로 라이브 계산.
       valueGetter: (params) => (params.data ? getPreviewValuationKrw(params.data) : null),
-      // 현금 입력은 상단 통화별 박스로 이전됨 — 그리드 현금 셀 편집은 막는다.
+      // 현금 입력은 상단 통화별 박스로 이전됨 — 그리드 현금 셀 편집은 막고 편집 스타일도 제거한다.
       editable: false,
-      cellClass: (params) => {
-        if (params.data?.ticker !== CASH_ROW_TICKER || isAusAccount) {
-          return undefined;
-        }
-        return isDirtyEditableCell(params.data?.id, "valuation_krw")
-          ? "assetsEditableCell assetsDirtyCell"
-          : "assetsEditableCell";
-      },
       valueParser: (params) => {
         const parsed = parseFloat(parseRawPrice(params.newValue));
         if (Number.isNaN(parsed) || parsed < 0) {

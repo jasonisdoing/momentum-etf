@@ -769,7 +769,6 @@ export function MarketTrendChart({
       chart.remove();
       chartRef.current = null;
       overlay.innerHTML = "";
-      labelOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
   }, [visibleHistory, showSuperTrend]);
@@ -991,10 +990,6 @@ export function MarketTrendChart({
             <div
               ref={chartContainerRef}
               style={{ position: "absolute", inset: 0, zIndex: 1 }}
-            />
-            <div
-              ref={labelOverlayRef}
-              style={{ position: "absolute", inset: 0, zIndex: 2, overflow: "hidden", pointerEvents: "none" }}
             />
             <div
               ref={tooltipRef}
