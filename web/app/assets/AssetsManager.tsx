@@ -2234,6 +2234,15 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
     },
     {
+      field: "cash_ratio",
+      headerName: "현금 비중",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
+    },
+    {
       colId: "asset_weight",
       headerName: "비중",
       minWidth: 80,
@@ -2327,15 +2336,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         if (r === "lose") return <span style={{ color: "#1971c2", fontWeight: 700 }}>{`😢 패${diffText}`}</span>;
         return <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>🤝 무</span>;
       },
-    },
-    {
-      field: "cash_ratio",
-      headerName: "현금 비중",
-      minWidth: 90,
-      flex: 0.7,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
     },
     {
       field: "total_assets_krw",

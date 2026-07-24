@@ -117,11 +117,19 @@ type MarketTrendClientProps = {
   maType: string;
 };
 
-export function MarketTrendClient({
+// 시장지수 추세 패널 — 페이지(/market-trend)와 홈 허브가 공유하는 본문(그리드 카드).
+// compact(홈 허브): 핵심 컬럼(지수/일간/추세/기간)만 남긴 요약 그리드.
+const COMPACT_TREND_HEADERS = ["지수", "현재가", "일간(%)", "추세", "기간(거래일)"];
+
+export function MarketTrendPanel({
   maDays,
-  scoreAnchorPercentile,
   maType,
-}: MarketTrendClientProps) {
+  compact = false,
+}: {
+  maDays: number;
+  maType: string;
+  compact?: boolean;
+}) {
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -321,75 +329,20 @@ export function MarketTrendClient({
     [maDays, maType],
   );
 
-  const titleRight = useMemo(
-    () => (
-      <div className="appHeaderMetrics rankToolbarMeta">
-        <div className="appHeaderMetric">
-          <span>기준:</span>
-          <span className="appHeaderMetricValue">
-            {maType} {maDays}일
-          </span>
-        </div>
-      </div>
-    ),
-    [maDays, maType],
-  );
-
   return (
-    <PageFrame title="시장지수 추세" fullWidth titleRight={titleRight}>
-      <div className="appPageStack">
-        <section className="appSection">
-          <div className="card appCard">
-            <div className="card-body appCardBodyTight">
-              {error ? <div className="alert alert-danger mb-2">{error}</div> : null}
-              <AppAgGrid<GridRow>
-                rowData={rowData}
-                columnDefs={columnDefs}
-                loading={loading}
-                minHeight="auto"
-                theme={gridTheme}
-                getRowId={(params) => params.data.id}
-                gridOptions={gridOptions}
-              />
-            </div>
-          </div>
-        </section>
-        <section className="appSection">
-          <div className="card appCard">
-            <div className="card-body" style={{ fontSize: "1rem", lineHeight: 1.7 }}>
-              <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
-                {REGIME_DESCRIPTIONS.map(({ key, text }) => (
-                  <li key={key} style={{ marginBottom: "2px", color: REGIME_COLORS[key] }}>
-                    {text}
-                  </li>
-                ))}
-              </ul>
-              <hr style={{ margin: "12px 0", borderColor: "#e9ecef" }} />
-              <ul
-                style={{
-                  margin: 0,
-                  paddingLeft: "1.2rem",
-                  fontSize: "0.9rem",
-                  color: "#5f6b82",
-                }}
-              >
-                <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
-                <li>일간(%): 전일 종가 대비 등락률.</li>
-                <li>
-                  공격/수비 비중: 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
-                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다
-                  (조금만 내려가도 수비 20%부터, 연최저 근처면 수비 100%). 상세 차트의 바와 같은 기준입니다.
-                </li>
-                <li>
-                  레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.
-                </li>
-              </ul>
-            </div>
-          </div>
-        </section>
-        <SystemPoolGrid />
+    <div className="card appCard">
+      <div className="card-body appCardBodyTight">
+        {error ? <div className="alert alert-danger mb-2">{error}</div> : null}
+        <AppAgGrid<GridRow>
+          rowData={rowData}
+          columnDefs={compact ? columnDefs.filter((col) => COMPACT_TREND_HEADERS.includes(String(col.headerName ?? ""))) : columnDefs}
+          loading={loading}
+          minHeight="auto"
+          theme={gridTheme}
+          getRowId={(params) => params.data.id}
+          gridOptions={gridOptions}
+        />
       </div>
-
       <style jsx global>{`
         .marketTrendRegimeHeader .ag-header-cell-label {
           justify-content: center;
@@ -431,6 +384,67 @@ export function MarketTrendClient({
           border-bottom: none;
         }
       `}</style>
+    </div>
+  );
+}
+
+export function MarketTrendClient({
+  maDays,
+  scoreAnchorPercentile: _scoreAnchorPercentile,
+  maType,
+}: MarketTrendClientProps) {
+  const titleRight = (
+    <div className="appHeaderMetrics rankToolbarMeta">
+      <div className="appHeaderMetric">
+        <span>기준:</span>
+        <span className="appHeaderMetricValue">
+          {maType} {maDays}일
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <PageFrame title="시장지수 추세" fullWidth titleRight={titleRight}>
+      <div className="appPageStack">
+        <section className="appSection">
+          <MarketTrendPanel maDays={maDays} maType={maType} />
+        </section>
+        <section className="appSection">
+          <div className="card appCard">
+            <div className="card-body" style={{ fontSize: "1rem", lineHeight: 1.7 }}>
+              <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
+                {REGIME_DESCRIPTIONS.map(({ key, text }) => (
+                  <li key={key} style={{ marginBottom: "2px", color: REGIME_COLORS[key] }}>
+                    {text}
+                  </li>
+                ))}
+              </ul>
+              <hr style={{ margin: "12px 0", borderColor: "#e9ecef" }} />
+              <ul
+                style={{
+                  margin: 0,
+                  paddingLeft: "1.2rem",
+                  fontSize: "0.9rem",
+                  color: "#5f6b82",
+                }}
+              >
+                <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
+                <li>일간(%): 전일 종가 대비 등락률.</li>
+                <li>
+                  공격/수비 비중: 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
+                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다
+                  (조금만 내려가도 수비 20%부터, 연최저 근처면 수비 100%). 상세 차트의 바와 같은 기준입니다.
+                </li>
+                <li>
+                  레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.
+                </li>
+              </ul>
+            </div>
+          </div>
+        </section>
+        <SystemPoolGrid />
+      </div>
     </PageFrame>
   );
 }

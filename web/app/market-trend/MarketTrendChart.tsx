@@ -69,6 +69,8 @@ type MarketTrendChartProps = {
   name: string;
   maType: string;
   maDays: number;
+  /** compact: 좌패널·게이지·추세전환·레짐·기간버튼을 숨기고 타이틀 + 차트만 표시(홈 대시보드용). */
+  compact?: boolean;
 };
 
 type RegimeRange = {
@@ -354,6 +356,7 @@ export function MarketTrendChart({
   name,
   maType,
   maDays,
+  compact = false,
 }: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -776,8 +779,8 @@ export function MarketTrendChart({
   return (
     <div
       style={{
-        padding: "16px 20px",
-        background: "#f8f9fa",
+        padding: compact ? "12px 14px" : "16px 20px",
+        background: compact ? "#ffffff" : "#f8f9fa",
         height: "100%",
         boxSizing: "border-box",
       }}
@@ -789,7 +792,62 @@ export function MarketTrendChart({
       ) : visibleHistory.length < 2 ? (
         <div style={{ color: "var(--text-muted)", padding: 20 }}>표시할 데이터가 없습니다.</div>
       ) : (
-        <div style={{ display: "flex", height: "calc(100% - 32px)", minHeight: 300, flexDirection: "column" }}>
+        <div style={{ display: "flex", height: compact ? "100%" : "calc(100% - 32px)", minHeight: compact ? 0 : 300, flexDirection: "column" }}>
+          {compact ? (() => {
+            const cClose = latestPoint?.close ?? null;
+            const cPrev = data?.history.at(-2)?.close ?? null;
+            const cPct = cClose != null && cPrev != null && cPrev !== 0 ? (cClose / cPrev - 1) * 100 : null;
+            // 추세 전환 조건 — 반대 레짐으로 바뀌는 목표가/변화율(SuperTrend 기준). 레짐은 2상태라 1건.
+            const trans = forecastTransitions[0];
+            const transColor = trans ? REGIME_COLOR[trans.next_regime] : "#64748b";
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                <strong style={{ fontSize: "1.7rem", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>{name}</strong>
+                {cClose != null ? (
+                  <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "#1e293b" }}>{formatNumber(cClose)}</span>
+                ) : null}
+                {cPct != null ? (
+                  <span style={{ fontSize: "1.18rem", fontWeight: 800, color: cPct >= 0 ? "#d62828" : "#1971c2" }}>
+                    {cPct >= 0 ? "+" : ""}
+                    {cPct.toFixed(2)}%
+                  </span>
+                ) : null}
+                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {trans && trans.change_pct != null ? (
+                    <span
+                      title={`${formatNumber(trans.target_price)}pt ${trans.mode === "drop_below" ? "아래로 내려가면" : "이상으로 마감하면"} ${REGIME_LABEL[trans.next_regime]} 추세로 전환`}
+                      style={{
+                        fontSize: "0.98rem",
+                        fontWeight: 800,
+                        color: transColor,
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {trans.mode === "drop_below" ? "↓" : "↑"} {trans.change_pct >= 0 ? "+" : ""}
+                      {trans.change_pct.toFixed(1)}%면 {REGIME_LABEL[trans.next_regime]}
+                    </span>
+                  ) : null}
+                  {latestPoint?.regime ? (
+                    <span
+                      style={{
+                        fontSize: "1rem",
+                        fontWeight: 800,
+                        padding: "5px 15px",
+                        borderRadius: 999,
+                        color: "#fff",
+                        background: REGIME_COLOR[latestPoint.regime],
+                        boxShadow: `0 2px 8px ${REGIME_COLOR[latestPoint.regime]}45`,
+                      }}
+                    >
+                      {REGIME_LABEL[latestPoint.regime]} 추세
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })() : null}
+          {!compact ? (
+          <>
           <div style={{ marginBottom: 12 }}>
             {data?.offense_pct != null && data?.defense_pct != null ? (
               <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
@@ -976,6 +1034,8 @@ export function MarketTrendChart({
               ))}
             </div>
           </div>
+          </>
+          ) : null}
           <div style={{ position: "relative", width: "100%", minHeight: 220, flex: "1 1 auto" }}>
             <div
               ref={bandOverlayRef}
