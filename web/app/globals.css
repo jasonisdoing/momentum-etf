@@ -425,6 +425,75 @@ a {
   padding-bottom: 0.5rem;
 }
 
+/* 홈 허브 — 좌측 사이드바 제거 대체. 메인 컨텐츠(좌) + 메뉴 레일(우). */
+.appContentHome {
+  flex-direction: row;
+  gap: 12px;
+  padding: 0 12px 1rem;
+  align-items: flex-start;
+}
+.appHomeMainCol {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.appHomeRail {
+  flex: 0 0 200px;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 8px;
+  align-self: flex-start;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+.appHomeRail .hubMenuCard {
+  position: static;
+}
+.appHomeRailFooter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px;
+}
+/* 레일 기간 수익률(금일/금주/금월/금년) — CNN 아래 4줄 */
+.appRailPeriod {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, rgba(148, 163, 184, 0.25));
+  border-radius: 8px;
+  background: #fff;
+}
+.appRailPeriodRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.86rem;
+}
+.appRailPeriodLabel {
+  color: var(--text-muted, #64748b);
+  font-weight: 600;
+}
+.appRailPeriodRow strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+@media (max-width: 900px) {
+  .appContentHome {
+    flex-direction: column;
+  }
+  .appHomeRail {
+    flex: none;
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+}
+
 .page-header {
   margin-bottom: 0.25rem;
 }

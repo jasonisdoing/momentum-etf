@@ -5,100 +5,21 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 import {
-  IconCash,
-  IconChartHistogram,
-  IconChartLine,
   IconChevronDown,
-  IconMoodSmile,
   IconHome,
-  IconMedal2,
-  IconList,
-  IconListDetails,
+  IconMoodSmile,
   IconMenu2,
-  IconReceipt2,
-  IconSettings,
-  IconTrendingUp,
-  IconActivity,
-  IconBell,
   IconX,
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarLeftExpand,
 } from "@tabler/icons-react";
 
 import { useHideMoney } from "@/lib/hide-money-context";
+import { HOME_ITEM, NAV_GROUPS, ROOT_ITEMS, isNavItemActive } from "@/lib/nav-menu";
+import { HubMenu } from "./components/HubMenu";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
 
-const homeItem = { href: "/", label: "홈", icon: IconHome };
-const holdingsItem = { href: "/holdings", label: "보유종목", icon: IconActivity };
-const holdingsDetailsItem = { href: "/holdings_details", label: "보유종목 상세", icon: IconListDetails };
-
-function isNavItemActive(itemHref: string, currentPathname: string | null): boolean {
-  if (!currentPathname) return false;
-  if (itemHref === currentPathname) return true;
-  // 기간별 통합 메뉴(/daily)는 주별/월별/년별에서도 활성 표시
-  if (itemHref === "/daily" && ["/weekly", "/monthly", "/yearly"].includes(currentPathname)) return true;
-  // /ticker → /ticker/XXX 같은 동적 라우트 매칭
-  if (itemHref !== "/" && currentPathname.startsWith(itemHref + "/")) return true;
-  return false;
-}
-
-const navGroups = [
-  {
-    id: "assets",
-    title: "계좌",
-    icon: IconCash,
-    items: [
-      { href: "/assets", label: "자산 관리", icon: IconList },
-      { href: "/asset-helper", label: "자산 헬퍼", icon: IconListDetails },
-      { href: "/asset-status", label: "자산 현황", icon: IconTrendingUp },
-      { href: "/daily", label: "기간별", icon: IconReceipt2 },
-      { href: "/snapshots", label: "스냅샷", icon: IconReceipt2 },
-      { href: "/account-settings", label: "설정", icon: IconSettings },
-    ],
-  },
-  {
-    id: "info",
-    title: "정보",
-    icon: IconTrendingUp,
-    items: [
-      { href: "/market-trend", label: "시장지수 추세", icon: IconChartLine },
-      { href: "/compare", label: "ETF 비교", icon: IconListDetails },
-      { href: "/kor-market-stock", label: "한국 개별주", icon: "🇰🇷" },
-      { href: "/us-market-stock", label: "미국 개별주", icon: "🇺🇸" },
-      { href: "/aus-market-stock", label: "호주 개별주", icon: "🇦🇺" },
-      { href: "/kor-market-etf", label: "한국 ETF", icon: "🇰🇷" },
-      { href: "/live-24h", label: "24H 시세", icon: "⏰" },
-    ],
-  },
-  {
-    id: "pools",
-    title: "종목풀",
-    icon: IconTrendingUp,
-    items: [
-      { href: "/pools-rank", label: "순위", icon: IconMedal2 },
-      { href: "/pools-settings", label: "설정", icon: IconSettings },
-      { href: "/pools-backtest", label: "백테스트", icon: IconChartHistogram },
-    ],
-  },
-  {
-    id: "leverage",
-    title: "레버리지",
-    icon: IconChartLine,
-    items: [
-      { href: "/leverage-scalp", label: "단타", icon: IconChartLine },
-      { href: "/leverage-settings", label: "설정", icon: IconSettings },
-    ],
-  },
-  {
-    id: "system",
-    title: "시스템",
-    icon: IconSettings,
-    items: [
-      { href: "/alarms", label: "알람", icon: IconBell },
-      { href: "/batch", label: "배치", icon: IconListDetails },
-    ],
-  },
-] as const;
+// 메뉴 정의는 nav-menu.ts 가 단일 소스 — 홈 허브 타일(HubMenu)과 공유한다.
+const homeItem = HOME_ITEM;
+const navGroups = NAV_GROUPS;
 
 type AppShellProps = {
   children: ReactNode;
@@ -114,12 +35,6 @@ type FearGreedSummary = {
   score: number | null;
   label: string | null;
   previous_close_score: number | null;
-  updated_at?: string | null;
-};
-
-type VkospiSummary = {
-  price: number;
-  change_pct: number;
   updated_at?: string | null;
 };
 
@@ -250,14 +165,16 @@ export function AppShell({ children }: AppShellProps) {
   const [isFxLoading, setIsFxLoading] = useState(true);
   const [fearGreed, setFearGreed] = useState<FearGreedSummary | null>(null);
   const [isFearGreedLoading, setIsFearGreedLoading] = useState(true);
-  const [vkospi, setVkospi] = useState<VkospiSummary | null>(null);
-  const [isVkospiLoading, setIsVkospiLoading] = useState(true);
   const [dashboardSummary, setDashboardSummary] = useState<DashboardSummary | null>(null);
   const [isDashboardSummaryLoading, setIsDashboardSummaryLoading] = useState(true);
   const [nqFuture, setNqFuture] = useState<NqFutureSummary | null>(null);
   const [isNqLoading, setIsNqLoading] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  // 데스크톱 좌측 사이드바는 제거됨. 메뉴는 홈의 우측 레일(HubMenu)로 통일하고,
+  // 다른 화면은 사이드바 없이 전체폭 + 상단 홈 버튼으로 복귀한다. (모바일은 햄버거 메뉴 유지)
+  const isHome = pathname === "/";
+  // 레일 기간손익은 기본 숨김 — "수익률 보기" 클릭 시 펼친다.
+  const [showRailPeriod, setShowRailPeriod] = useState(false);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() => getDefaultOpenGroups(pathname));
   const [isDbError, setIsDbError] = useState(false);
   const isLoginPage = pathname === "/login";
@@ -271,21 +188,18 @@ export function AppShell({ children }: AppShellProps) {
       if (initial) {
         setIsFxLoading(true);
         setIsFearGreedLoading(true);
-        setIsVkospiLoading(true);
         setIsDashboardSummaryLoading(true);
         setIsNqLoading(true);
       }
 
-      const [fxResponse, fearGreedSummary, vkospiResponse, dashboardResponse, nqResponse] = await Promise.all([
+      const [fxResponse, fearGreedSummary, dashboardResponse, nqResponse] = await Promise.all([
         fetch("/api/fx", { cache: "no-store" }),
         loadFearGreedSummary().catch(() => null),
-        fetch("/api/vkospi", { cache: "no-store" }).catch(() => null),
         fetch("/api/dashboard", { cache: "no-store" }).catch(() => null),
         fetch("/api/nq-future", { cache: "no-store" }).catch(() => null),
       ]);
 
       const payload = fxResponse.ok ? ((await fxResponse.json()) as FxSummary) : null;
-      const vkospiPayload = vkospiResponse?.ok ? ((await vkospiResponse.json()) as VkospiSummary) : null;
       const dashboardPayload = dashboardResponse?.ok
         ? ((await dashboardResponse.json()) as DashboardSummary)
         : null;
@@ -293,27 +207,23 @@ export function AppShell({ children }: AppShellProps) {
 
       setFx(payload);
       setFearGreed(fearGreedSummary);
-      setVkospi(vkospiPayload);
       setDashboardSummary(dashboardPayload);
       setNqFuture(nqPayload);
 
       if (initial) {
         setIsFxLoading(false);
         setIsFearGreedLoading(false);
-        setIsVkospiLoading(false);
         setIsDashboardSummaryLoading(false);
         setIsNqLoading(false);
       }
     } catch {
       setFx(null);
       setFearGreed(null);
-      setVkospi(null);
       setDashboardSummary(null);
       setNqFuture(null);
       if (initial) {
         setIsFxLoading(false);
         setIsFearGreedLoading(false);
-        setIsVkospiLoading(false);
         setIsDashboardSummaryLoading(false);
         setIsNqLoading(false);
       }
@@ -403,8 +313,6 @@ export function AppShell({ children }: AppShellProps) {
     return <div className="appContent loginAppContent">{children}</div>;
   }
 
-  const HomeIcon = homeItem.icon;
-  const HoldingsIcon = holdingsItem.icon;
   const fearGreedDelta =
     fearGreed?.score !== null &&
       fearGreed?.score !== undefined &&
@@ -414,22 +322,6 @@ export function AppShell({ children }: AppShellProps) {
       : null;
 
   const periodProfits = dashboardSummary?.period_profits;
-  const renderPeriodItem = (label: string, pct: number | undefined) => (
-    <span className="topbarFxItem">
-      {label}:{" "}
-      {isDashboardSummaryLoading ? (
-        <span className="topbarFxLoading" aria-label={`${label} 로딩 중`}>
-          <span className="topbarSpinner" />
-        </span>
-      ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
-        <strong className={getFxChangeClass(pct)} style={{ fontSize: "14.5px" }}>
-          {`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}
-        </strong>
-      ) : (
-        <strong>-</strong>
-      )}
-    </span>
-  );
 
   const sentimentWidget = (
     <div className="appSidebarSentiment">
@@ -459,59 +351,25 @@ export function AppShell({ children }: AppShellProps) {
           <strong>-</strong>
         )}
       </a>
-      <a
-        href="https://kr.investing.com/indices/kospi-volatility"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="appSidebarSentimentItem"
-      >
-        <span className="appSidebarSentimentLabel">
-          <IconActivity size={14} stroke={1.9} />
-          <span>VKOSPI</span>
-        </span>
-        {isVkospiLoading ? (
-          <span className="topbarSpinner" aria-label="VKOSPI 로딩 중" />
-        ) : vkospi?.price != null ? (
-          <span className="appSidebarSentimentValue">
-            <strong>{vkospi.price.toFixed(2)}</strong>
-            <span className={getFxChangeClass(vkospi.change_pct)}>
-              {formatChangePct(vkospi.change_pct)}
-            </span>
-          </span>
-        ) : (
-          <strong>-</strong>
-        )}
-      </a>
     </div>
   );
 
   const navList = (
     <div className="appSidebarNavGroups">
       <div className="navbar-nav appSidebarNav appSidebarNavRoot">
-        <div className="nav-item appSidebarItem">
-          <Link href={homeItem.href} className={pathname === homeItem.href ? "nav-link active" : "nav-link"}>
-            <span className="appSidebarIcon" aria-hidden="true">
-              <HomeIcon size={18} stroke={1.9} />
-            </span>
-            <span className="nav-link-title">{homeItem.label}</span>
-          </Link>
-        </div>
-        <div className="nav-item appSidebarItem">
-          <Link href={holdingsItem.href} className={pathname === holdingsItem.href ? "nav-link active" : "nav-link"}>
-            <span className="appSidebarIcon" aria-hidden="true">
-              <HoldingsIcon size={18} stroke={1.9} />
-            </span>
-            <span className="nav-link-title">{holdingsItem.label}</span>
-          </Link>
-        </div>
-        <div className="nav-item appSidebarItem">
-          <Link href={holdingsDetailsItem.href} className={pathname === holdingsDetailsItem.href ? "nav-link active" : "nav-link"}>
-            <span className="appSidebarIcon" aria-hidden="true">
-              <IconListDetails size={18} stroke={1.9} />
-            </span>
-            <span className="nav-link-title">{holdingsDetailsItem.label}</span>
-          </Link>
-        </div>
+        {[homeItem, ...ROOT_ITEMS].map((item) => {
+          const ItemIcon = item.icon;
+          return (
+            <div key={item.href} className="nav-item appSidebarItem">
+              <Link href={item.href} className={pathname === item.href ? "nav-link active" : "nav-link"}>
+                <span className="appSidebarIcon" aria-hidden="true">
+                  <ItemIcon size={18} stroke={1.9} />
+                </span>
+                <span className="nav-link-title">{item.label}</span>
+              </Link>
+            </div>
+          );
+        })}
       </div>
       {navGroups.map((group) => {
         const isExpanded = openGroups[group.id] ?? false;
@@ -561,40 +419,64 @@ export function AppShell({ children }: AppShellProps) {
     </div>
   );
 
-  return (
-    <div className={`appLayout ${isSidebarCollapsed ? "appLayoutSidebarCollapsed" : ""}`.trim()}>
-      <aside className="navbar navbar-vertical navbar-expand-lg appSidebar appSidebarDesktop">
-        <div className="container-fluid appSidebarInner">
-          {navList}
-          <div className="appSidebarFooter">
-            {sentimentWidget}
-            <button className="btn btn-outline-secondary btn-sm w-100" type="button" onClick={handleLogout}>
-              로그아웃
-            </button>
+  // 레일용 기간 수익률 행(금일/금주/금월/금년) — 이전엔 헤더에 있던 것을 CNN 아래로 옮김.
+  const renderRailPeriodRow = (label: string, pct: number | undefined) => (
+    <div className="appRailPeriodRow" key={label}>
+      <span className="appRailPeriodLabel">{label}</span>
+      {isDashboardSummaryLoading ? (
+        <span className="topbarSpinner" aria-label={`${label} 로딩 중`} />
+      ) : pct !== undefined && pct !== null && !Number.isNaN(pct) ? (
+        <strong className={getFxChangeClass(pct)}>{`${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`}</strong>
+      ) : (
+        <strong>-</strong>
+      )}
+    </div>
+  );
+
+  // 홈 우측 메뉴 레일 — 좌측 사이드바를 대체(메뉴 + CNN + 기간손익 + 로그아웃). 홈에서만 표시.
+  const homeRail = (
+    <aside className="appHomeRail">
+      <HubMenu />
+      <div className="appHomeRailFooter">
+        {sentimentWidget}
+        {showRailPeriod ? (
+          <div className="appRailPeriod">
+            {renderRailPeriodRow("금일", periodProfits?.daily?.return_pct)}
+            {renderRailPeriodRow("금주", periodProfits?.weekly?.return_pct)}
+            {renderRailPeriodRow("금월", periodProfits?.monthly?.return_pct)}
+            {renderRailPeriodRow("금년", periodProfits?.yearly?.return_pct)}
           </div>
-        </div>
-      </aside>
+        ) : (
+          <button
+            className="btn btn-outline-secondary btn-sm w-100"
+            type="button"
+            onClick={() => setShowRailPeriod(true)}
+          >
+            수익률 보기
+          </button>
+        )}
+        <button className="btn btn-outline-secondary btn-sm w-100" type="button" onClick={handleLogout}>
+          로그아웃
+        </button>
+      </div>
+    </aside>
+  );
+
+  return (
+    <div className="appLayout appLayoutNoSidebar">
       <div className="appMain">
         <header className="navbar d-print-none appTopHeader">
           <div className="container-fluid appTopHeaderInner">
             <div className="appHeaderLeft">
-              <button
+              {/* 사이드바 없는 화면에서 홈(허브)으로 복귀 */}
+              <Link
+                href="/"
                 className="btn btn-icon btn-sm appSidebarDesktopToggle"
-                type="button"
-                aria-label={isSidebarCollapsed ? "사이드바 펼치기" : "사이드바 접기"}
-                onClick={() => setIsSidebarCollapsed((current) => !current)}
+                aria-label="홈(허브)으로 이동"
+                title="홈(허브)"
               >
-                {isSidebarCollapsed ? (
-                  <IconLayoutSidebarLeftExpand size={18} stroke={1.9} />
-                ) : (
-                  <IconLayoutSidebarLeftCollapse size={18} stroke={1.9} />
-                )}
-              </button>
-              <div className="topbarFx" style={{ marginLeft: "0.75rem" }}>
-                {renderPeriodItem("금일", periodProfits?.daily?.return_pct)}
-                {renderPeriodItem("금주", periodProfits?.weekly?.return_pct)}
-                {renderPeriodItem("금월", periodProfits?.monthly?.return_pct)}
-              </div>
+                <IconHome size={18} stroke={1.9} />
+              </Link>
               {dashboardSummary?.is_deploying ? (
                 <span
                   title="서버 배포 진행 중 — DB가 일시적으로 느려질 수 있습니다"
@@ -697,7 +579,14 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </div>
         <div className="appBody">
-          <div className="container-fluid appContent">{children}</div>
+          {isHome ? (
+            <div className="appContent appContentHome">
+              <div className="appHomeMainCol">{children}</div>
+              {homeRail}
+            </div>
+          ) : (
+            <div className="container-fluid appContent">{children}</div>
+          )}
         </div>
       </div>
     </div>

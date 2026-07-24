@@ -415,7 +415,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   );
 }
 
-function QuoteCard({ q, title, controls }: { q: Quote; title: string; controls?: ReactNode }) {
+function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: string; controls?: ReactNode; compact?: boolean }) {
   const m1 = recentMove(q.candles, 1);
   const m3 = recentMove(q.candles, 3);
   return (
@@ -502,7 +502,7 @@ function QuoteCard({ q, title, controls }: { q: Quote; title: string; controls?:
             ) : null}
           </span>
         </div>
-        <CandlestickChart candles={q.candles || []} currency={q.currency} />
+        {compact ? null : <CandlestickChart candles={q.candles || []} currency={q.currency} />}
       </div>
     </div>
   );
@@ -519,20 +519,27 @@ function ComparisonChart({
   priorSeriesKey,
   overlayLineSeriesKey,
   currency,
+  fixedHeight,
 }: {
   series: ComparisonSeries[];
   candleSeriesKey: string;
   priorSeriesKey?: string;
   overlayLineSeriesKey?: string;
   currency: "KRW" | "USD";
+  /** 홈 허브(한 화면 배치)용 고정 차트 높이 — 지정 시 뷰포트 기반 자동 높이를 끈다. */
+  fixedHeight?: number;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(450);
-  const [height, setHeight] = useState(300);
+  const [height, setHeight] = useState(fixedHeight ?? 300);
 
   useEffect(() => {
     if (!containerRef.current) return;
     const updateHeight = () => {
+      if (fixedHeight !== undefined) {
+        setHeight(fixedHeight);
+        return;
+      }
       setHeight(Math.max(260, Math.min(620, Math.floor((window.innerHeight - 420) / 2))));
     };
     const observer = new ResizeObserver((entries) => {
@@ -547,7 +554,7 @@ function ComparisonChart({
       observer.disconnect();
       window.removeEventListener("resize", updateHeight);
     };
-  }, []);
+  }, [fixedHeight]);
 
   const endTime = Date.now();
   const startTime = endTime - 24 * 60 * 60 * 1000;
@@ -802,6 +809,7 @@ function ComparisonCard({
   series,
   differences,
   currency,
+  compact = false,
 }: {
   title: string;
   representative: RepresentativeValue;
@@ -811,6 +819,8 @@ function ComparisonCard({
   series: ComparisonSeries[];
   differences: PriceDifference[];
   currency: "KRW" | "USD";
+  /** 홈 허브용 — 차트를 고정 높이(작게)로 그린다. */
+  compact?: boolean;
 }) {
   return (
     <div className="card appCard" style={{ height: "100%" }}>
@@ -925,13 +935,15 @@ function ComparisonCard({
           priorSeriesKey={priorSeriesKey}
           overlayLineSeriesKey={overlayLineSeriesKey}
           currency={currency}
+          fixedHeight={compact ? 185 : undefined}
         />
       </div>
     </div>
   );
 }
 
-export function HyperliquidClient() {
+// 24H 시세 보드 — 페이지(/live-24h)와 홈 허브가 공유하는 본문. compact=홈용(시세 카드 작게 3열).
+export function Live24hBoard({ compact = false }: { compact?: boolean }) {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -963,12 +975,13 @@ export function HyperliquidClient() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  const titleRight = (
-    <div className="appHeaderMetrics rankToolbarMeta">
-      <div className="appHeaderMetric">
-        <span>마지막 갱신:</span>
-        <span className="appHeaderMetricValue">{updatedAt ?? "-"} (10초 마다) · 차트: 15분봉</span>
-      </div>
+  // compact(홈 허브): 시세 3장은 좌측 세로 스택(작게, 차트 없음), 비교 3장은 크게 — CSS 그리드로 배치.
+  const rowClass = compact ? "hubLive24hRow" : "row g-2";
+  const quoteColClass = compact ? "hubLive24hQuote" : "col-12 col-md-6 col-xxl-4";
+  const comparisonColClass = compact ? "hubLive24hComparison" : "col-12 col-md-6 col-xxl-4";
+  const metaLine = (
+    <div className="d-flex justify-content-end text-secondary" style={{ fontSize: "0.8rem" }}>
+      마지막 갱신: {updatedAt ?? "-"} (10초 마다) · 차트: 15분봉
     </div>
   );
   const quoteBySymbol = new Map(quotes.map((quote) => [quote.symbol, quote]));
@@ -1015,23 +1028,23 @@ export function HyperliquidClient() {
       : [];
 
   return (
-    <PageFrame title="24H 시세" titleRight={titleRight}>
-      <div className="appPageStack">
-        {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
-        {loading && quotes.length === 0 ? (
-          <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
-        ) : (
-          <div className="row g-2" style={{ width: "100%" }}>
-            <div className="col-12 col-md-6 col-xxl-4">
-              {nasdaqQuote ? <QuoteCard q={nasdaqQuote} title="나스닥" /> : null}
-            </div>
-            <div className="col-12 col-md-6 col-xxl-4">
-              {fxQuote ? <QuoteCard q={fxQuote} title="환율" /> : null}
-            </div>
-            <div className="col-12 col-md-6 col-xxl-4">
-              {vixQuote ? <QuoteCard q={vixQuote} title="VIX" /> : null}
-            </div>
-            <div className="col-12 col-md-6 col-xxl-4">
+    <div className="appPageStack">
+      {metaLine}
+      {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
+      {loading && quotes.length === 0 ? (
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중…</div>
+      ) : (
+        <div className={rowClass} style={{ width: "100%" }}>
+          <div className={quoteColClass}>
+            {nasdaqQuote ? <QuoteCard q={nasdaqQuote} title="나스닥" compact={compact} /> : null}
+          </div>
+          <div className={quoteColClass}>
+            {fxQuote ? <QuoteCard q={fxQuote} title="환율" compact={compact} /> : null}
+          </div>
+          <div className={quoteColClass}>
+            {vixQuote ? <QuoteCard q={vixQuote} title="VIX" compact={compact} /> : null}
+          </div>
+          <div className={comparisonColClass}>
               {hynixSeries.length && hynixKorQuote && hynixHyperQuote ? (
                 <ComparisonCard
                   title="SK하이닉스"
@@ -1040,6 +1053,7 @@ export function HyperliquidClient() {
                   priorSeriesKey={hynixTossActive ? "SKHX" : undefined}
                   series={hynixSeries}
                   currency="KRW"
+                  compact={compact}
                   differences={[
                     ...(hynixAdrPrice !== null
                       ? [{ label: "미국시장", value: calculatePriceDifference(hynixAdrPrice, hynixKorPrice) }]
@@ -1049,7 +1063,7 @@ export function HyperliquidClient() {
                 />
               ) : null}
             </div>
-            <div className="col-12 col-md-6 col-xxl-4">
+            <div className={comparisonColClass}>
               {micronSeries.length && micronTossQuote && micronHyperQuote ? (
                 <ComparisonCard
                   title="마이크론"
@@ -1058,13 +1072,14 @@ export function HyperliquidClient() {
                   priorSeriesKey={micronTossActive ? "MU_HL" : undefined}
                   series={micronSeries}
                   currency="USD"
+                  compact={compact}
                   differences={[
                     { label: "Hyperliquid", value: calculatePriceDifference(micronHyperQuote.hyper_price, micronTossQuote.hyper_price) },
                   ]}
                 />
               ) : null}
             </div>
-            <div className="col-12 col-md-6 col-xxl-4">
+            <div className={comparisonColClass}>
               {samsungSeries.length && samsungTossQuote && samsungHyperQuote ? (
                 <ComparisonCard
                   title="삼성전자"
@@ -1073,6 +1088,7 @@ export function HyperliquidClient() {
                   priorSeriesKey={samsungTossActive ? "SMSN" : undefined}
                   series={samsungSeries}
                   currency="KRW"
+                  compact={compact}
                   differences={[
                     { label: "Hyperliquid", value: calculatePriceDifference(samsungHyperQuote.hyper_price, samsungTossQuote.hyper_price) },
                   ]}
@@ -1081,7 +1097,16 @@ export function HyperliquidClient() {
             </div>
           </div>
         )}
-      </div>
+    </div>
+  );
+}
+
+
+// /live-24h 페이지 — 공용 보드를 PageFrame 으로 감싼다.
+export function HyperliquidClient() {
+  return (
+    <PageFrame title="24H 시세">
+      <Live24hBoard />
     </PageFrame>
   );
 }
