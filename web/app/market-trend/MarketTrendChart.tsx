@@ -800,6 +800,18 @@ export function MarketTrendChart({
             // 추세 전환 조건 — 반대 레짐으로 바뀌는 목표가/변화율(SuperTrend 기준). 레짐은 2상태라 1건.
             const trans = forecastTransitions[0];
             const transColor = trans ? REGIME_COLOR[trans.next_regime] : "#64748b";
+            // 현재 레짐 지속일수 — /market-trend 의 "상승/하락 N일째"와 동일 개념(현재 레짐 연속일).
+            const regimeDays = (() => {
+              const hist = data?.history ?? [];
+              const cur = latestPoint?.regime;
+              if (!cur) return null;
+              let count = 0;
+              for (let i = hist.length - 1; i >= 0; i -= 1) {
+                if (hist[i].regime === cur) count += 1;
+                else break;
+              }
+              return count;
+            })();
             return (
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
                 <strong style={{ fontSize: "1.7rem", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>{name}</strong>
@@ -839,7 +851,8 @@ export function MarketTrendChart({
                         boxShadow: `0 2px 8px ${REGIME_COLOR[latestPoint.regime]}45`,
                       }}
                     >
-                      {REGIME_LABEL[latestPoint.regime]} 추세
+                      {latestPoint.regime === "accel_up" ? "상승" : "하락"}
+                      {regimeDays != null ? ` ${regimeDays}일째` : ""}
                     </span>
                   ) : null}
                 </div>

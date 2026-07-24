@@ -229,6 +229,14 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             elif row_currency == "USD":
                 price_prefix = "$"
 
+            # 종목 통화 → 원화 환율 배수(프론트 라이브 비중 계산용). KRW=1.0.
+            if row_currency == "USD":
+                fx_rate_krw = float(((rates or {}).get("USD") or {}).get("rate") or 0.0)
+            elif row_currency == "AUD":
+                fx_rate_krw = float(((rates or {}).get("AUD") or {}).get("rate") or 0.0)
+            else:
+                fx_rate_krw = 1.0
+
             account_rows.append(
                 {
                     "account_id": curr_account_id,
@@ -244,6 +252,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                     if price_prefix
                     else f"{current_price:,.0f}원",
                     "current_price_num": current_price,
+                    "fx_rate_krw": fx_rate_krw,
                     "pnl_krw": pnl,
                     "pnl_krw_num": pnl,
                     "return_pct": round(ret_pct, 2),
