@@ -28,6 +28,7 @@ type HoldingsRow = {
   average_buy_price: string | number;
   current_price: string;
   current_price_num?: number;
+  fx_rate_krw?: number;
   pnl_krw: number;
   return_pct: number;
   weight_pct: number;
@@ -288,6 +289,12 @@ function getPreviewValuationKrw(row: GridRow): number {
     return getCurrentPriceNumber(row) * quantity;
   }
   const currentPrice = getCurrentPriceNumber(row);
+  // 외화는 종목 통화의 원화 환율 배수를 직접 사용한다(수량 0 신규 종목도 즉시 계산됨).
+  const fxRate = Number(row.fx_rate_krw ?? NaN);
+  if (currentPrice > 0 && !Number.isNaN(fxRate) && fxRate > 0) {
+    return currentPrice * quantity * fxRate;
+  }
+  // 폴백: 환율이 없으면 원래 값에서 역산(구버전 응답 호환).
   const originalQuantity = getOriginalQuantity(row);
   const originalValuationKrw = getOriginalValuationKrw(row);
   if (currentPrice > 0 && originalQuantity > 0 && originalValuationKrw > 0) {
@@ -309,6 +316,12 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
   if (row.currency === "KRW") {
     return averageBuyPrice * quantity;
   }
+  // 외화는 종목 통화의 원화 환율 배수를 직접 사용한다(수량 0 신규 종목도 즉시 계산됨).
+  const fxRate = Number(row.fx_rate_krw ?? NaN);
+  if (!Number.isNaN(fxRate) && fxRate > 0) {
+    return averageBuyPrice * quantity * fxRate;
+  }
+  // 폴백: 환율이 없으면 원래 값에서 역산(구버전 응답 호환).
   const originalQuantity = getOriginalQuantity(row);
   const originalAverageBuyPrice = getOriginalAverageBuyPrice(row);
   const originalBuyAmountKrw = getOriginalBuyAmountKrw(row);
