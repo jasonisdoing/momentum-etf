@@ -21,10 +21,14 @@ export async function GET(request: NextRequest) {
       return jsonNoStore({ error: "ticker 파라미터가 필요합니다." }, { status: 400 });
     }
     const tickerTypes = request.nextUrl.searchParams.get("ticker_types");
+    const accountId = request.nextUrl.searchParams.get("account_id");
 
     let path = `/internal/ticker-detail/resolve?ticker=${encodeURIComponent(ticker)}`;
     if (tickerTypes !== null) {
       path += `&ticker_types=${encodeURIComponent(tickerTypes)}`;
+    }
+    if (accountId !== null && accountId !== "") {
+      path += `&account_id=${encodeURIComponent(accountId)}`;
     }
     const data = await fetchFastApiJson<TickerResolveItem>(path);
     return jsonNoStore(data);

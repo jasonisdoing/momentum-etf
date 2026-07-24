@@ -112,9 +112,12 @@ type HelperTicker = {
   name?: string;
   ticker_type?: string;
   country_code?: string;
+  currency?: string;
   bucket?: number;
   fixed_weight_pct?: number | null;
   current_weight_pct?: number | null;
+  // 미저장(임시) 행 — 확인만 된 상태. 저장 버튼에서 보유목록에 커밋한다(/assets 와 동일).
+  pending?: boolean;
 };
 
 // 종목 목록의 소스는 자산 관리(보유 종목)다. 자산 헬퍼는 이 목록을 같은 순서로 보여주고 비중만 붙인다.
@@ -125,6 +128,7 @@ type HoldingRow = {
   sort_order?: number;
   ticker_type?: string;
   country_code?: string;
+  currency?: string;
   weight_pct?: number | null;
 };
 
@@ -159,6 +163,7 @@ function mergeHoldingsWithWeights(holdings: HoldingRow[], weightTickers: HelperT
         name: r.name,
         ticker_type: r.ticker_type,
         country_code: r.country_code,
+        currency: r.currency,
         bucket: r.bucket_id,
         fixed_weight_pct: weightMap[tk] ?? null,
         current_weight_pct: r.weight_pct ?? null,
@@ -256,12 +261,17 @@ function fmtNum(value: number | null | undefined, digits = 2): string {
   return value.toFixed(digits);
 }
 
-// 현재가 — 종목 국가(country_code)별 통화로 표기(자산 관리 formatPrice 와 동일 규칙).
-function fmtPrice(value: number | null | undefined, countryCode?: string): string {
+// 현재가 — 행별 통화(currency)로 표기(자산 관리 formatPrice 와 동일 규칙).
+// 혼합 환종 계좌에서 country_code 는 비어 올 수 있어 currency 를 우선 쓰고, 없으면 country_code 로 추정한다.
+function fmtPrice(value: number | null | undefined, currency?: string, countryCode?: string): string {
   if (value == null || Number.isNaN(value)) return "-";
-  const cc = String(countryCode ?? "").toLowerCase();
-  if (cc === "au") return `A$${new Intl.NumberFormat("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
-  if (cc === "us") return `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
+  let cur = String(currency ?? "").toUpperCase();
+  if (!cur) {
+    const cc = String(countryCode ?? "").toLowerCase();
+    cur = cc === "us" ? "USD" : cc === "au" ? "AUD" : "KRW";
+  }
+  if (cur === "AUD") return `A$${new Intl.NumberFormat("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
+  if (cur === "USD") return `$${new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(value)}`;
   return `${new Intl.NumberFormat("ko-KR").format(Math.round(value))}원`;
 }
 
@@ -469,7 +479,8 @@ export function AssetHelperClient() {
       if (tickers.some((item) => item.ticker.trim().toUpperCase() === raw && item.name)) {
         throw new Error("이미 등록된 종목입니다.");
       }
-      const resp = await fetch(`/api/ticker-resolve?ticker=${encodeURIComponent(raw)}`);
+      const accountParam = selectedAccount ? `&account_id=${encodeURIComponent(selectedAccount)}` : "";
+      const resp = await fetch(`/api/ticker-resolve?ticker=${encodeURIComponent(raw)}${accountParam}`);
       const data = (await resp.json()) as HelperTicker & { name?: string; error?: string; detail?: string };
       if (!resp.ok || data.error || !data.name) {
         throw new Error(data.error ?? data.detail ?? "존재하지 않는 티커입니다.");
@@ -482,56 +493,23 @@ export function AssetHelperClient() {
         bucket: data.bucket,
       };
     },
-    [tickers],
+    [tickers, selectedAccount],
   );
-  // 추가하면 자산 관리 보유 목록에 수량 0으로 등록한 뒤 재로드한다(진짜 공통 1개 목록).
+  // /assets 와 동일: 확인 시 즉시 저장하지 않고 상단에 '미저장(pending)' 행으로 둔다.
+  // 실제 보유목록 등록·비중 저장은 '저장' 버튼에서 한 번에 처리하고, 저장 전 새로고침하면 사라진다.
   const addOnValidated = useCallback(
     (resolved: HelperTicker) => {
-      // 낙관적 표시: 즉시 목록에 추가한다. 목록은 이미 정확하므로 재로드로 통째 교체하지 않고(깜빡임 방지)
-      // 지표만 백그라운드로 채운다.
       const key = resolved.ticker.trim().toUpperCase();
-      // 종목풀에 없는 티커는 resolve 가 이름 대신 티커를 돌려준다(예: 미보유 ASX 종목).
-      // 잘못된 티커명을 잠깐 보였다가 바뀌는 걸 막기 위해, 실제 이름 확정(POST) 전까지 "조회 중…" 으로 표시.
-      const looksPlaceholder = !resolved.name || resolved.name.trim().toUpperCase() === key;
-      const optimistic = looksPlaceholder ? { ...resolved, name: "조회 중…" } : resolved;
-      const newList = tickers.some((t) => t.ticker.trim().toUpperCase() === key) ? tickers : [...tickers, optimistic];
-      setTickers(newList);
-      void (async () => {
-        try {
-          const resp = await fetch("/api/assets", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ account_id: selectedAccount, ticker: resolved.ticker, quantity: 0, average_buy_price: 0, target_ratio: 0 }),
-          });
-          const data = (await resp.json()) as { added?: string; name?: string; error?: string };
-          if (!resp.ok || data.error) throw new Error(data.error ?? "종목 추가에 실패했습니다.");
-          // 서버가 확정한 실제 종목명으로 낙관적 행 이름을 보정(새로고침 없이 즉시 반영).
-          // ticker-resolve 는 미국 티커에 name=티커 를 돌려주므로, 여기서 실제 이름으로 바꾼다.
-          const realName = String(data.name ?? "").trim();
-          if (realName && realName !== resolved.name) {
-            setTickers((cur) => cur.map((t) => (t.ticker.trim().toUpperCase() === key ? { ...t, name: realName } : t)));
-          }
-          // 목록 교체 없이 지표만 갱신(그리드 개수 깜빡임 방지).
-          const effectiveName = realName || resolved.name || "";
-          const newValid = newList
-            .map((t) => (t.ticker.trim().toUpperCase() === key ? { ...t, name: effectiveName } : t))
-            .filter((t) => t.ticker.trim() && t.name);
-          if (newValid.length >= 3 && settings && settings.ACCOUNT_ID) {
-            // 신규 종목(가격캐시 없음)이 배치를 실패시켜 빈 결과가 오면 기존 지표를 지우지 않는다.
-            // 결과가 있으면 병합해 갱신(기존 행 지표 보존).
-            const nextMetrics = await fetchMetrics(newValid, settings);
-            if (Object.keys(nextMetrics).length > 0) {
-              setMetricByTicker((prev) => ({ ...prev, ...nextMetrics }));
-            }
-          }
-          toast.success("보유 목록에 추가(수량 0)");
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "종목 추가에 실패했습니다.");
-          setTickers((cur) => cur.filter((t) => t.ticker.trim().toUpperCase() !== key)); // 실패 시 롤백
-        }
-      })();
+      // 종목풀에 없는 티커는 resolve 가 이름 대신 티커를 돌려준다 — 그 경우 티커를 이름으로 쓴다(저장 후 실제 이름 확정).
+      const nm = resolved.name && resolved.name.trim() ? resolved.name.trim() : resolved.ticker;
+      setTickers((cur) =>
+        cur.some((t) => t.ticker.trim().toUpperCase() === key)
+          ? cur
+          : [{ ...resolved, name: nm, pending: true, fixed_weight_pct: null }, ...cur],
+      );
+      toast.success(`조회 성공: ${nm}`); // /assets 와 동일한 확인 성공 안내
     },
-    [selectedAccount, toast, tickers, settings],
+    [toast],
   );
   const addOnError = useCallback((message: string) => toast.error(message), [toast]);
   const add = useAddingTickerRow({
@@ -550,6 +528,7 @@ export function AssetHelperClient() {
       setDeleting(true);
       for (const bare of selectedTickers) {
         const item = tickers.find((t) => t.ticker === bare);
+        if (item?.pending) continue; // 미저장 행은 보유목록에 없으니 로컬 제거만(아래).
         const delTicker = displayTickerFor(bare, item?.country_code); // 보유 저장 형식(au는 ASX: 접두어)
         const resp = await fetch(
           `/api/assets?account=${encodeURIComponent(selectedAccount)}&ticker=${encodeURIComponent(delTicker)}`,
@@ -623,6 +602,18 @@ export function AssetHelperClient() {
     if (!ensureWeightSum100()) return;
     try {
       setSaving(true);
+      // 1) 미저장(pending) 종목을 보유목록에 커밋(수량 0) — /assets 처럼 '저장' 시점에 등록한다.
+      const pendings = tickers.filter((t) => t.pending && t.ticker.trim());
+      for (const p of pendings) {
+        const addResp = await fetch("/api/assets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ account_id: selectedAccount, ticker: p.ticker, quantity: 0, average_buy_price: 0, target_ratio: 0 }),
+        });
+        const addData = (await addResp.json()) as { error?: string };
+        if (!addResp.ok || addData.error) throw new Error(addData.error ?? `${p.ticker} 추가에 실패했습니다.`);
+      }
+      // 2) 비중 저장(종목은 보유목록이 소스, 여기선 비중만).
       const resp = await fetch("/api/asset-helper-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -635,7 +626,7 @@ export function AssetHelperClient() {
       });
       const data = (await resp.json()) as { tickers?: HelperTicker[]; error?: string; detail?: string };
       if (!resp.ok || data.error) throw new Error(data.error ?? data.detail ?? "저장에 실패했습니다.");
-      await load(selectedAccount ?? undefined); // 보유 목록 순서 기준으로 다시 병합(비중만 저장됨)
+      await load(selectedAccount ?? undefined); // 보유 목록 순서 기준으로 다시 병합(pending 반영 + 정렬)
       toast.success("저장 완료");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "저장에 실패했습니다.");
@@ -798,7 +789,7 @@ export function AssetHelperClient() {
         minWidth: 96,
         width: 96,
         type: "rightAligned",
-        valueFormatter: (p) => fmtPrice(p.value as number | null, p.data?.country_code),
+        valueFormatter: (p) => fmtPrice(p.value as number | null, p.data?.currency, p.data?.country_code),
       },
       { field: "return_1m_pct", headerName: "1달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
       { field: "return_3m_pct", headerName: "3달", minWidth: 84, width: 84, type: "rightAligned", cellRenderer: renderPctCell },
@@ -837,6 +828,10 @@ export function AssetHelperClient() {
       suppressMovableColumns: true,
       stopEditingWhenCellsLoseFocus: true,
       animateRows: true,
+      // /assets 와 동일한 임시(미저장) 행 강조 — 같은 CSS 클래스(assetsAddingRow)를 재사용한다.
+      rowClassRules: {
+        assetsAddingRow: (params: { data?: GridRow }) => Boolean(params.data?.is_adding || params.data?.pending),
+      },
       // 드래그로 종목 순서 변경(/assets 와 동일). 순서의 단일 소스는 holdings 라
       // 드래그 즉시 holdings sort_order 를 저장한다(안 하면 재조회 시 holdings 순서로 되돌아감).
       rowDragManaged: true,

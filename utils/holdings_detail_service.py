@@ -552,8 +552,16 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     if not account_id or not ticker:
         raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
-    # ASX: 접두어 제거
-    raw_ticker = ticker.replace("ASX:", "").strip().upper()
+    # 시장 접두어(ASX:/US:/KOR:)로 시장을 명시할 수 있다(같은 티커가 여러 시장에 있을 때 구분용).
+    forced_country: str | None = None
+    if ticker.startswith("ASX:"):
+        forced_country, raw_ticker = "au", ticker[len("ASX:") :].strip().upper()
+    elif ticker.startswith("US:"):
+        forced_country, raw_ticker = "us", ticker[len("US:") :].strip().upper()
+    elif ticker.startswith("KOR:"):
+        forced_country, raw_ticker = "kor", ticker[len("KOR:") :].strip().upper()
+    else:
+        raw_ticker = ticker.strip().upper()
     if not raw_ticker:
         raise RuntimeError("유효한 티커를 입력하세요.")
 
@@ -579,29 +587,56 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
     #    미등록 종목(status="new": fetch 는 되지만 stock_meta 부재)은 여기서 막고,
     #    최초 등록 창구인 '종목 순위(pools-rank)' 로 안내한다. (pools-rank 는 이 함수를 거치지 않는다.)
     last_error = None
-    validated_res = None
     saw_unregistered = False
+    # 시장(country_code)별 최초 active 후보. 같은 시장의 여러 종목풀 중복은 하나로 취급.
+    candidates_by_country: dict[str, dict[str, Any]] = {}
 
     for tt in ticker_types:
         try:
             # StocksManager가 사용하는 동일한 함수 호출
-            candidate = validate_stock_candidate(tt, ticker)
+            candidate = validate_stock_candidate(tt, raw_ticker)
         except Exception as e:
             last_error = str(e)
             continue
-        # 종목풀 순서에 관계없이 "등록된(active)" 매칭을 우선한다(먼저 걸린 new 로 확정하지 않음).
         if candidate.get("status") == "active":
-            validated_res = candidate
-            break
-        saw_unregistered = True
+            cc = str(candidate.get("country_code") or "").strip().lower()
+            candidates_by_country.setdefault(cc, candidate)
+        else:
+            saw_unregistered = True
 
-    if not validated_res:
+    if not candidates_by_country:
         if saw_unregistered:
             raise RuntimeError(
-                f"종목풀에 등록되지 않은 종목입니다: {ticker}. "
+                f"종목풀에 등록되지 않은 종목입니다: {raw_ticker}. "
                 "'종목 순위' 화면에서 먼저 종목을 추가한 뒤 계좌에 담아주세요."
             )
-        raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {ticker}")
+        raise RuntimeError(last_error or f"등록되지 않은 종목입니다: {raw_ticker}")
+
+    # 시장 결정: 접두어 지정 > 단일 시장 > 계좌 현금 통화로 후보 필터(A).
+    if forced_country is not None:
+        if forced_country not in candidates_by_country:
+            raise RuntimeError(f"'{raw_ticker}' 는 지정한 시장({forced_country})에 등록돼 있지 않습니다.")
+        validated_res = candidates_by_country[forced_country]
+    elif len(candidates_by_country) == 1:
+        validated_res = next(iter(candidates_by_country.values()))
+    else:
+        # 같은 티커가 여러 시장에 존재 — 계좌가 보유하는 현금 통화로 후보를 좁힌다.
+        from utils.cash_model import currency_for_country, resolve_cash_currencies
+
+        account_currencies = set(resolve_cash_currencies(inner_settings))
+        matched = {
+            cc: cand
+            for cc, cand in candidates_by_country.items()
+            if currency_for_country(cc) in account_currencies
+        }
+        if len(matched) == 1:
+            validated_res = next(iter(matched.values()))
+        else:
+            markets = " / ".join(sorted(f"{currency_for_country(cc)}({cc})" for cc in candidates_by_country))
+            raise RuntimeError(
+                f"'{raw_ticker}' 는 여러 시장에 등록돼 있습니다: {markets}. "
+                f"'US:{raw_ticker}' 또는 'ASX:{raw_ticker}' 처럼 시장을 지정해 주세요."
+            )
 
     return {
         "ticker": validated_res["ticker"],

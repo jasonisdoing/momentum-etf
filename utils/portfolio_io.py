@@ -160,33 +160,59 @@ def load_real_holdings_table(
     if db is not None and not df_holdings.empty:
         all_tickers = df_holdings["ticker"].unique().tolist()
 
-        bucket_map = {}
-        name_map = {}
-        type_map = {}
-        is_etf_map = {}
+        # 같은 티커가 여러 시장(stock_meta 문서 여러 개, 예: 미국·호주 IOO)일 수 있으므로 티커별로 문서를 모은다.
+        docs_by_ticker: dict[str, list[dict[str, Any]]] = {}
         cursor = db.stock_meta.find(
             {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
             {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1}
         )
         for doc in cursor:
-            t = doc["ticker"]
-            if t not in bucket_map:
-                bucket_map[t] = doc.get("bucket", 1)
-            if t not in name_map:
-                name_map[t] = doc.get("name")
-            if t not in type_map:
-                type_map[t] = doc.get("ticker_type")
-            if t not in is_etf_map:
-                is_etf_map[t] = doc.get("is_etf", False)
+            docs_by_ticker.setdefault(doc["ticker"], []).append(doc)
 
-        # 데이터 업데이트 (종목풀 정보 우선 적용)
-        df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
-        df_holdings["name"] = df_holdings.apply(
-            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])),
-            axis=1
-        )
-        df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
-        df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
+        # 종목풀(ticker_type) → 통화 매핑 캐시. 보유의 통화로 올바른 시장 문서를 고르기 위해 사용.
+        from utils.cash_model import currency_for_country
+        from utils.settings_loader import get_ticker_type_settings
+
+        _tt_currency: dict[str, str] = {}
+
+        def _ticker_type_currency(ticker_type: object) -> str:
+            key = str(ticker_type or "").strip().lower()
+            if key not in _tt_currency:
+                try:
+                    country = str(get_ticker_type_settings(key).get("country_code") or "").strip().lower()
+                except Exception:
+                    country = ""
+                _tt_currency[key] = currency_for_country(country)
+            return _tt_currency[key]
+
+        def _pick_meta_doc(ticker: str, currency: object) -> dict[str, Any] | None:
+            docs = docs_by_ticker.get(ticker) or []
+            if not docs:
+                return None
+            if len(docs) == 1:
+                return docs[0]
+            # 여러 시장 — 보유 통화와 일치하는 시장 문서를 우선(없으면 첫 문서).
+            cur = str(currency or "").strip().upper()
+            for doc in docs:
+                if _ticker_type_currency(doc.get("ticker_type")) == cur:
+                    return doc
+            return docs[0]
+
+        picked_docs = [
+            _pick_meta_doc(str(row.get("ticker") or ""), row.get("currency"))
+            for _, row in df_holdings.iterrows()
+        ]
+
+        # 데이터 업데이트 (종목풀 정보 우선 적용, 다시장은 보유 통화 기준 문서 사용)
+        df_holdings["bucket"] = [(doc or {}).get("bucket", 1) for doc in picked_docs]
+        df_holdings["name"] = [
+            ((doc.get("name") if doc else None) or orig_name or ticker)
+            for doc, orig_name, ticker in zip(
+                picked_docs, list(df_holdings.get("name", [])), list(df_holdings["ticker"])
+            )
+        ]
+        df_holdings["ticker_type"] = [(doc.get("ticker_type") if doc else "") or "" for doc in picked_docs]
+        df_holdings["is_etf"] = [bool(doc.get("is_etf", False)) if doc else False for doc in picked_docs]
 
         # 계좌의 country_code 찾아와서 부여
         try:
@@ -233,10 +259,34 @@ def load_real_holdings_table(
     # DB 의 first_buy_date / last_buy_date 필드는 그대로 유지.
 
     # Fetch prices from price cache and exchange rates
-    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    # 다시장 티커(예: 미국·호주 IOO)가 올바른 시장 가격을 쓰도록, 보유별 ticker_type 의 캐시를 우선 사용한다.
+    # (전체 종목풀에서 먼저 걸리는 캐시를 쓰면 호주/미국이 뒤바뀔 수 있다.)
+    from utils.cache_utils import (
+        load_cached_frames_bulk_from_all_ticker_types,
+        load_cached_frames_bulk_from_ticker_types,
+    )
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
+    tickers_by_type: dict[str, list[str]] = {}
+    for _, row in df_holdings.iterrows():
+        ticker_type = str(row.get("ticker_type") or "").strip().lower()
+        ticker_upper = str(row.get("ticker") or "").strip().upper()
+        if ticker_type and ticker_upper:
+            tickers_by_type.setdefault(ticker_type, []).append(ticker_upper)
+
+    cached_frames: dict[str, pd.DataFrame] = {}
+    for ticker_type, type_tickers in tickers_by_type.items():
+        fetched = load_cached_frames_bulk_from_ticker_types([ticker_type], type_tickers)
+        for ticker_key, frame in fetched.items():
+            cached_frames.setdefault(str(ticker_key).strip().upper(), frame)
+
+    # ticker_type 이 없거나 그 종목풀 캐시에 없던 티커는 전체 종목풀에서 폴백 조회.
+    missing_for_cache = [tk for tk in tickers if str(tk).strip().upper() not in cached_frames]
+    if missing_for_cache:
+        fallback = load_cached_frames_bulk_from_all_ticker_types(missing_for_cache)
+        for ticker_key, frame in fallback.items():
+            cached_frames.setdefault(str(ticker_key).strip().upper(), frame)
+
     missing_price_tickers: set[str] = set()
 
     def _get_current_price(row):

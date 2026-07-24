@@ -90,7 +90,11 @@ def _lookup_domestic_etf_name(ticker: str) -> str | None:
     return name or None
 
 
-def _resolve_ticker_meta_item(ticker: str, allowed_ticker_types: set[str] | None = None) -> dict[str, object]:
+def _resolve_ticker_meta_item(
+    ticker: str,
+    allowed_ticker_types: set[str] | None = None,
+    account_id: str | None = None,
+) -> dict[str, object]:
     ticker_key = str(ticker or "").strip().upper()
     if not ticker_key:
         raise ValueError("ticker 파라미터가 필요합니다.")
@@ -153,6 +157,25 @@ def _resolve_ticker_meta_item(ticker: str, allowed_ticker_types: set[str] | None
 
     def _public_match(match: dict[str, object]) -> dict[str, object]:
         return {key: value for key, value in match.items() if not str(key).startswith("_")}
+
+    # 같은 티커가 여러 시장에 있으면(예: 미국·호주 IOO) 계좌가 보유하는 현금 통화로 후보를 좁힌다.
+    # (계좌 담기 검증 validate_ticker_for_account 와 동일한 규칙 — 낙관적 표시와 실제 저장의 시장 일치)
+    if len(matches) > 1 and account_id:
+        try:
+            from utils.cash_model import currency_for_country, resolve_cash_currencies
+            from utils.settings_loader import get_account_settings
+
+            acct = get_account_settings(account_id)
+            acct_currencies = set(resolve_cash_currencies(acct.get("settings") or acct))
+            filtered = [
+                match
+                for match in matches
+                if currency_for_country(str(match.get("country_code") or "")) in acct_currencies
+            ]
+            if filtered:
+                matches = filtered
+        except Exception:
+            pass
 
     if len(matches) == 1:
         return _public_match(matches[0])
@@ -670,17 +693,19 @@ def get_all_tickers(
 def resolve_ticker(
     ticker: str = Query(...),
     ticker_types: str | None = Query(None),
+    account_id: str | None = Query(None),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
     """직접 진입용 티커 메타데이터를 반환합니다.
 
     ``ticker_types`` (쉼표 구분)를 주면 해당 종목풀로 검색 범위를 제한한다.
+    ``account_id`` 를 주면 같은 티커가 여러 시장에 있을 때 계좌 현금 통화로 시장을 판별한다.
     """
 
     allowed: set[str] | None = None
     if ticker_types is not None:
         allowed = {part.strip() for part in ticker_types.split(",") if part.strip()}
-    return _resolve_ticker_meta_item(ticker, allowed_ticker_types=allowed)
+    return _resolve_ticker_meta_item(ticker, allowed_ticker_types=allowed, account_id=account_id)
 
 
 @router.get("/search-data")
