@@ -543,10 +543,9 @@ function getMonthlyReturnMap(rows: PriceRow[]): Record<string, number> {
   return result;
 }
 
-/** "2026-07" → "2026년 07월" */
+/** "2026-07" → "202607" (라벨 열 폭을 아끼기 위한 압축 표기) */
 function formatMonthLabel(month: string): string {
-  const [year, mm] = month.split("-");
-  return year && mm ? `${year}년 ${mm}월` : month;
+  return month.replace("-", "");
 }
 
 /**
@@ -1458,8 +1457,8 @@ export function ComparePageClient() {
           </div>
         ) : null}
 
-        {/* 월간 분석은 행이 많아 종목 헤더를 고정(sticky)하고 아래 행만 스크롤한다. */}
-        <section className={`compareMatrix${activeTab === "monthly" ? " compareMatrixStickyHeader" : ""}`}>
+        {/* 월간 분석은 년월 라벨에 동일가중 평균까지 넣어 라벨 열을 넓게 쓴다(헤더·본문 동일 적용). */}
+        <section className={`compareMatrix${activeTab === "monthly" ? " compareMatrixMonthly" : ""}`}>
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
             <div
@@ -1528,14 +1527,16 @@ export function ComparePageClient() {
               </div>
               <CompareChart products={sortedProducts} dateRange={chartDateRange} />
             </div>
-            <div className="compareMatrixLabel compareMetricsGroupLabel" style={{ gridRow: `span ${performanceMetricRows.length}` }}>
-              수익률(%)
-            </div>
+            {/* '수익률(%)' 그룹 라벨 열은 제거하고, 기간 라벨이 라벨 영역 전체(2열)를 쓴다. */}
             {performanceMetricRows.map((period) => {
               const isActiveMetricRow = period.key === selectedPerformanceRange.key;
               return (
                 <Fragment key={period.key}>
-                  <div className={`compareMetricPeriodLabel ${isActiveMetricRow ? "is-active-range" : ""}`}>{period.label}</div>
+                  <div
+                    className={`compareMetricPeriodLabel compareMatrixLabelWide ${isActiveMetricRow ? "is-active-range" : ""}`}
+                  >
+                    {period.label}
+                  </div>
                   {sortedProducts.map((product) => {
                     const value = getMetricReturnPct(product.detail.rows, period);
                     return (
@@ -1610,7 +1611,7 @@ export function ComparePageClient() {
             </div>
           </section>
         ) : activeTab === "monthly" ? (
-          <section className="compareMatrix compareMatrixBody compareMatrixMonthlyScroll">
+          <section className="compareMatrix compareMatrixBody compareMatrixMonthly compareMatrixMonthlyScroll">
             {monthlyRows.length === 0 ? (
               <div className="compareMatrixWide" style={{ color: "var(--text-muted)" }}>
                 월간 변동률을 계산할 데이터가 없습니다.
@@ -1621,10 +1622,26 @@ export function ComparePageClient() {
                 const prevMonth = monthIndex > 0 ? monthlyRows[monthIndex - 1] : null;
                 const isYearBoundary = Boolean(prevMonth && prevMonth.slice(0, 4) !== month.slice(0, 4));
                 const boundaryClass = isYearBoundary ? " compareMonthlyYearBoundary" : "";
+                // 동일가중 보유 시 해당 월 수익률 = 값이 있는 종목들의 단순 평균.
+                const monthValues = sortedProducts
+                  .map((product) => monthlyReturnMaps.get(tickerKey(product.item))?.[month])
+                  .filter((value): value is number => typeof value === "number" && !Number.isNaN(value));
+                const equalWeighted =
+                  monthValues.length > 0
+                    ? monthValues.reduce((sum, value) => sum + value, 0) / monthValues.length
+                    : null;
                 return (
                   <Fragment key={month}>
                     <div className={`compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel${boundaryClass}`}>
-                      <div className="compareMatrixLabelText">{formatMonthLabel(month)}</div>
+                      <div className="compareMonthlyLabelRow">
+                        <span className="compareMatrixLabelText">{formatMonthLabel(month)}</span>
+                        <span
+                          className={getSignedClass(equalWeighted)}
+                          title={`선택 종목 ${monthValues.length}개 동일가중 평균`}
+                        >
+                          {formatPercent(equalWeighted)}
+                        </span>
+                      </div>
                     </div>
                     {sortedProducts.map((product) => {
                       const value = monthlyReturnMaps.get(tickerKey(product.item))?.[month] ?? null;

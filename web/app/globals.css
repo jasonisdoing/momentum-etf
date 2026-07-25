@@ -2575,9 +2575,9 @@ a {
      overflow:hidden 에 잘렸다. 섹션은 축소하지 않고 내용 높이를 유지한다. */
   flex: 0 0 auto;
   /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다.
-     앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 8.4rem 은 가장 긴 라벨
-     ('포트폴리오 변동', '소르티노 지수')이 한 줄로 들어가는 최소 폭이다. */
-  grid-template-columns: 3.2rem 5.2rem repeat(8, minmax(8.5rem, 1fr));
+     앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 7.2rem 은 라벨 폰트(0.86rem)에서
+     가장 긴 문구('포트폴리오 변동')가 한 줄로 들어가는 최소 폭이다. */
+  grid-template-columns: 2.9rem 4.3rem repeat(8, minmax(8.5rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2585,7 +2585,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 3.2rem 5.2rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 2.9rem 4.3rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2604,6 +2604,8 @@ a {
   background: #f3f6fc;
   color: #1f2937;
   font-weight: 800;
+  /* 라벨 열을 좁게 쓰기 위해 본문보다 약간 작은 크기로 고정한다. */
+  font-size: 0.86rem;
   text-align: center;
   white-space: nowrap;
 }
@@ -2687,6 +2689,10 @@ a {
   justify-content: center;
   background: #f8fafc;
   color: #64748b;
+  /* 좁아진 라벨 열에 맞춰 좌우 패딩·글자 크기를 줄인다(값 셀은 그대로). */
+  padding-inline: 0.35rem;
+  font-size: 0.86rem;
+  white-space: nowrap;
 }
 
 .compareMetricCell {
@@ -2715,8 +2721,9 @@ a {
    부모(.comparePage)가 flex:1 1 auto + min-height:0 으로 뷰포트 높이에 갇혀 있어
    position:sticky 는 한 화면 분량만 유지된다. 그래서 본문 섹션이 남은 높이를 차지하고
    그 안에서 스크롤하게 한다. 헤더/본문 컬럼 폭이 어긋나지 않게 스크롤바 자리를 미리 확보한다. */
-.compareMatrixStickyHeader,
-.compareMatrixMonthlyScroll {
+/* 월간 분석 전용 — 라벨 열 폭은 기본값(좁게)을 그대로 쓰고, 년월을 "202607" 로 압축 표기해
+   동일가중 평균까지 한 줄에 담는다. 헤더/본문 모두 스크롤바 자리를 확보해 컬럼 정렬을 맞춘다. */
+.compareMatrixMonthly {
   scrollbar-gutter: stable;
 }
 
@@ -2724,6 +2731,16 @@ a {
   flex: 1 1 auto;
   min-height: 12rem;
   overflow-y: auto;
+}
+
+/* 월간 분석 라벨 — "202607"(왼쪽) + 동일가중 평균(오른쪽)을 한 줄에 양쪽 정렬로 둔다. */
+.compareMonthlyLabelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  width: 100%;
+  white-space: nowrap;
 }
 
 /* 월간 분석 — 해가 바뀌는 행 위에 굵은 구분선. */
