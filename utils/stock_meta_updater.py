@@ -65,6 +65,11 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months:
 # 상장 기간이 이보다 짧으면 is_partial=True 로 표시(프론트에서 다른 색으로 강조).
 RANK_BACKTEST_MONTHS = 12
 
+# 미국 ETF 전용 종목풀 — 이 풀 소속 미국 종목은 is_etf=True 로 판정한다.
+# (미국은 한국(네이버 ETF 목록)과 달리 종목 단위 ETF 판별 소스가 없어 풀 성격으로 명시한다.
+#  새 미국 ETF 풀을 추가하면 여기에도 추가할 것.)
+US_ETF_POOL_TYPES = {"us_sector", "us_dividend", "us_snp"}
+
 # 가격 파생 지표(거래량·기간수익률·backtest_stats) 필드 목록 — 가격지표 배치가 담당하는 필드.
 PRICE_METRIC_FIELDS = (
     "1_week_avg_volume",
@@ -1094,11 +1099,12 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
     elif country_code in ("us", "au"):
-        # 해외 주식 플래그 설정
+        # 해외 주식 플래그 설정 — 미국은 네이버 같은 ETF 판별 소스가 없어 종목풀 성격으로 판정한다.
+        # (us=나스닥100 개별주 풀 → False, us_sector/us_dividend 등 ETF 전용 풀 → True)
         if country_code == "au":
             stock["is_etf"] = True
         else:
-            stock["is_etf"] = False
+            stock["is_etf"] = account_norm in US_ETF_POOL_TYPES
 
         if country_code == "us" and naver_us_stock_map:
             naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
