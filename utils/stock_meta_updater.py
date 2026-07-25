@@ -183,6 +183,13 @@ def _fetch_naver_listing_date(ticker: str) -> str | None:
     from config import NAVER_FINANCE_CHART_API_URL
 
     logger = get_app_logger()
+
+    # 한국 종목코드는 6자리(숫자 포함)다. 미국·호주 알파벳 티커(예: IOO, SCHD)는 국내 조회 대상이 아니므로
+    # 네이버 API 를 호출하지 않는다(호출하면 비 XML 응답으로 파싱 실패 로그만 남는다).
+    ticker_norm = str(ticker or "").strip().upper()
+    if len(ticker_norm) != 6 or not any(ch.isdigit() for ch in ticker_norm):
+        return None
+
     url = f"{NAVER_FINANCE_CHART_API_URL}?symbol={ticker}&timeframe=day&count=1&requestType=0"
 
     try:
