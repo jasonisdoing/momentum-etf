@@ -2571,8 +2571,10 @@ a {
 
 .compareMatrix {
   display: grid;
-  /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다. */
-  grid-template-columns: 4.75rem 6.8rem repeat(8, minmax(8.5rem, 1fr));
+  /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다.
+     앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 8.4rem 은 가장 긴 라벨
+     ('포트폴리오 변동', '소르티노 지수')이 한 줄로 들어가는 최소 폭이다. */
+  grid-template-columns: 3.2rem 5.2rem repeat(8, minmax(8.5rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2580,7 +2582,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 4.75rem 6.8rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 3.2rem 5.2rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2592,13 +2594,15 @@ a {
   align-items: center;
   justify-content: center;
   min-height: 6rem;
-  padding: 0.9rem;
+  /* 좌우 패딩을 줄여 좁은 라벨 열에서도 문구가 한 줄로 들어가게 한다. */
+  padding: 0.9rem 0.35rem;
   border-right: 1px solid #d6deea;
   border-bottom: 1px solid #d6deea;
   background: #f3f6fc;
   color: #1f2937;
   font-weight: 800;
   text-align: center;
+  white-space: nowrap;
 }
 
 .compareMatrixLabelWide {
@@ -2659,6 +2663,8 @@ a {
   font-size: 11px;
   color: #64748b;
   font-weight: 400;
+  /* 라벨은 한 줄 고정이지만 보조 설명(기간 등)은 좁은 열에서 접히게 둔다. */
+  white-space: normal;
 }
 
 .compareMetricPeriodLabel,
