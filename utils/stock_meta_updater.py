@@ -65,11 +65,6 @@ def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months:
 # 상장 기간이 이보다 짧으면 is_partial=True 로 표시(프론트에서 다른 색으로 강조).
 RANK_BACKTEST_MONTHS = 12
 
-# 미국 ETF 전용 종목풀 — 이 풀 소속 미국 종목은 is_etf=True 로 판정한다.
-# (미국은 한국(네이버 ETF 목록)과 달리 종목 단위 ETF 판별 소스가 없어 풀 성격으로 명시한다.
-#  새 미국 ETF 풀을 추가하면 여기에도 추가할 것.)
-US_ETF_POOL_TYPES = {"us_sector", "us_dividend", "us_snp"}
-
 # 가격 파생 지표(거래량·기간수익률·backtest_stats) 필드 목록 — 가격지표 배치가 담당하는 필드.
 PRICE_METRIC_FIELDS = (
     "1_week_avg_volume",
@@ -364,9 +359,14 @@ def _refresh_us_stock_meta_cache(
     name: str,
     naver_entry: dict[str, Any],
     backtest_stats: dict[str, Any] | None = None,
+    *,
+    is_etf: bool = False,
 ) -> None:
     """미국 종목 메타 캐시를 갱신한다. 네이버 미국 개별주 API 를 기본으로 하되, 네이버에 없는 종목
-    (예: 미국 ETF ENFR 등)은 yfinance .info 로 배당수익률·순자산(시가총액)을 보완한다."""
+    (예: 미국 ETF ENFR 등)은 yfinance .info 로 배당수익률·순자산(시가총액)을 보완한다.
+
+    ``is_etf`` 이면 구성종목(holdings)도 yfinance 로 수집해 저장한다(개별주는 구성종목이 없다).
+    """
     ticker_type_norm = str(ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
     name_norm = str(name or "").strip() or ticker_norm
@@ -401,12 +401,30 @@ def _refresh_us_stock_meta_cache(
         except Exception as exc:
             get_app_logger().debug(f"[{ticker_type_norm.upper()}/{ticker_norm}] yfinance 배당/순자산 보완 건너뜀: {exc}")
 
+    # 미국 ETF 는 구성종목도 함께 저장한다(개별주는 holdings 개념이 없어 건너뜀).
+    holdings_cache: dict[str, Any] | None = None
+    if is_etf:
+        holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
+        if holdings_info:
+            holdings_cache = {
+                "source": holdings_info["source"],
+                "updated_at": holdings_info["fetched_at"],
+                "reference_date": holdings_info["as_of_date"],
+                "holdings_count": holdings_info["holdings_count"],
+                "items": holdings_info["holdings"],
+            }
+        else:
+            get_app_logger().warning(
+                f"[{ticker_type_norm.upper()}/{ticker_norm}] 미국 ETF holdings 수집 실패 (메타만 저장)"
+            )
+
     refresh_stock_cache(
         ticker_type_norm,
         ticker_norm,
         country_code="us",
         name=name_norm,
         meta_cache=meta_cache,
+        holdings_cache=holdings_cache,
     )
 
 
@@ -740,7 +758,9 @@ def _update_reference_meta_for_type(
                 # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
                 naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
                 try:
-                    _refresh_us_stock_meta_cache(type_norm, str(ticker), str(name), naver_entry)
+                    _refresh_us_stock_meta_cache(
+                        type_norm, str(ticker), str(name), naver_entry, is_etf=bool(stock.get("is_etf"))
+                    )
                 except Exception as e:
                     logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 메타 캐시 갱신 건너뜀: {e}")
 
@@ -1002,7 +1022,13 @@ def update_single_ticker_metadata(ticker_type: str, ticker: str) -> None:
         # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
         naver_entry = naver_us_stock_map.get(ticker_norm, {})
         try:
-            _refresh_us_stock_meta_cache(type_norm, ticker_norm, str(stock.get("name") or ticker_norm), naver_entry)
+            _refresh_us_stock_meta_cache(
+                type_norm,
+                ticker_norm,
+                str(stock.get("name") or ticker_norm),
+                naver_entry,
+                is_etf=bool(stock.get("is_etf")),
+            )
         except Exception as meta_cache_error:
             logger.error(f"[{type_norm.upper()}/{ticker_norm}] 미국 메타 캐시 갱신 실패: {meta_cache_error}")
 
@@ -1099,12 +1125,10 @@ def update_single_stock_metadata(
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
     elif country_code in ("us", "au"):
-        # 해외 주식 플래그 설정 — 미국은 네이버 같은 ETF 판별 소스가 없어 종목풀 성격으로 판정한다.
-        # (us=나스닥100 개별주 풀 → False, us_sector/us_dividend 등 ETF 전용 풀 → True)
+        # 호주 풀은 ETF 전용. 미국은 종목 자체 속성(yfinance quoteType)으로 판정한다 — 아래 .info 블록에서 설정.
+        # (어느 풀에 넣었는지로 추정하면 같은 종목이 풀마다 다른 값을 갖게 되므로 쓰지 않는다.)
         if country_code == "au":
             stock["is_etf"] = True
-        else:
-            stock["is_etf"] = account_norm in US_ETF_POOL_TYPES
 
         if country_code == "us" and naver_us_stock_map:
             naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
@@ -1131,16 +1155,21 @@ def update_single_stock_metadata(
                 else yf.Ticker(yfinance_ticker)
             )
 
-            if not stock.get("name") or stock.get("name") == ticker:
+            # 미국: 종목 자체 속성으로 ETF 판정(quoteType == "ETF"). 이름 보완도 같은 .info 로 처리.
+            need_name = not stock.get("name") or stock.get("name") == ticker
+            if country_code == "us" or need_name:
                 try:
                     info = t.info
-                    fetched_name = info.get("longName") or info.get("shortName")
-                    if fetched_name:
-                        stock["name"] = fetched_name
-                        if account_norm:
-                            logger.debug(f"[{account_norm.upper()}/{ticker}] 종목명 업데이트: {fetched_name}")
+                    if country_code == "us":
+                        stock["is_etf"] = str(info.get("quoteType") or "").strip().upper() == "ETF"
+                    if need_name:
+                        fetched_name = info.get("longName") or info.get("shortName")
+                        if fetched_name:
+                            stock["name"] = fetched_name
+                            if account_norm:
+                                logger.debug(f"[{account_norm.upper()}/{ticker}] 종목명 업데이트: {fetched_name}")
                 except Exception as e:
-                    logger.warning(f"[{account_norm.upper()}/{ticker}] 종목명 조회 실패: {e}")
+                    logger.warning(f"[{account_norm.upper()}/{ticker}] yfinance 정보 조회 실패: {e}")
 
             # 상장일이 이미 있으면 history 호출 자체를 생략
             if not stock.get("listing_date"):
