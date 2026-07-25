@@ -340,9 +340,13 @@ def _format_iso_date(value: Any) -> str | None:
 def _yf_dividend_yield_pct(info: dict[str, Any]) -> float | None:
     """yfinance .info 의 배당수익률을 '퍼센트' 단위로 정규화한다(화면 formatPercent 가 값을 그대로 %로 표기).
 
-    trailingAnnualDividendYield 는 소수(0.025=2.5%). dividendYield 는 yfinance 버전에 따라
-    소수/퍼센트가 섞여 있어 1 미만이면 소수로 보고 ×100 한다.
+    ETF 는 ``yield`` 가 정확하다(소수. 예: SPMO 0.0065=0.65%). ``trailingAnnualDividendYield`` 는
+    ETF 에서 0/누락이 잦아 뒤로 미룬다. ``dividendYield`` 는 버전에 따라 소수/퍼센트가 섞여 있어
+    1 미만이면 소수로 보고 ×100 한다.
     """
+    v = info.get("yield")  # ETF 배당수익률(소수)
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return round(float(v) * 100.0, 2)
     v = info.get("trailingAnnualDividendYield")
     if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
         return round(float(v) * 100.0, 2)
@@ -350,6 +354,23 @@ def _yf_dividend_yield_pct(info: dict[str, Any]) -> float | None:
     if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
         v = float(v)
         return round(v * 100.0 if v < 1.0 else v, 2)
+    return None
+
+
+def _yf_expense_ratio_pct(info: dict[str, Any]) -> float | None:
+    """yfinance .info 의 운용보수를 '퍼센트' 단위로 정규화한다.
+
+    ETF 는 ``netExpenseRatio`` 가 이미 퍼센트(0.13=0.13%). 구버전 필드(annualReportExpenseRatio,
+    feesExpensesTotal)는 소수라 1 미만이면 ×100 한다.
+    """
+    v = info.get("netExpenseRatio")
+    if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+        return round(float(v), 4)
+    for key in ("annualReportExpenseRatio", "feesExpensesTotal", "expenseRatio"):
+        v = info.get(key)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0:
+            v = float(v)
+            return round(v * 100.0 if v < 1.0 else v, 4)
     return None
 
 
@@ -387,19 +408,38 @@ def _refresh_us_stock_meta_cache(
         "backtest_stats": backtest_stats,
     }
 
-    # 네이버에 배당/순자산이 없으면(미국 ETF 등) yfinance .info 로 보완.
-    if meta_cache["dividend_yield_ttm"] is None or meta_cache["total_net_assets"] is None:
+    # yfinance .info 보완 — ETF 는 네이버 배당값이 부정확해(개별주 기준) yfinance 를 우선한다.
+    # 개별주는 네이버 값이 있으면 유지하고 빈 값만 채운다. 보수·상장일은 네이버에 없어 항상 보완.
+    needs_yf = (
+        is_etf
+        or meta_cache["dividend_yield_ttm"] is None
+        or meta_cache["total_net_assets"] is None
+        or meta_cache["listed_date"] is None
+    )
+    if needs_yf:
         try:
             info = getattr(yf.Ticker(ticker_norm), "info", {}) or {}
-            if meta_cache["dividend_yield_ttm"] is None:
-                meta_cache["dividend_yield_ttm"] = _yf_dividend_yield_pct(info)
+            if is_etf or meta_cache["dividend_yield_ttm"] is None:
+                yf_yield = _yf_dividend_yield_pct(info)
+                if yf_yield is not None:
+                    meta_cache["dividend_yield_ttm"] = yf_yield
+            if meta_cache["expense_ratio"] is None:
+                meta_cache["expense_ratio"] = _yf_expense_ratio_pct(info)
             if meta_cache["total_net_assets"] is None:
                 assets = info.get("totalAssets") or info.get("marketCap")  # ETF=순자산 / 개별주=시총
                 if isinstance(assets, (int, float)) and not isinstance(assets, bool) and assets > 0:
                     meta_cache["total_net_assets"] = float(assets)
+            if meta_cache["listed_date"] is None:
+                epoch = info.get("firstTradeDateEpochUtc") or info.get("fundInceptionDate")
+                if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) and epoch > 0:
+                    meta_cache["listed_date"] = datetime.fromtimestamp(float(epoch), tz=timezone.utc).strftime("%Y-%m-%d")
+            if not meta_cache.get("market"):
+                meta_cache["market"] = str(info.get("exchange") or "").strip().upper() or None
+            if not meta_cache.get("industry"):
+                meta_cache["industry"] = str(info.get("category") or info.get("industry") or "").strip() or None
             meta_cache["source"] = "naver_us_market_stock+yfinance"
         except Exception as exc:
-            get_app_logger().debug(f"[{ticker_type_norm.upper()}/{ticker_norm}] yfinance 배당/순자산 보완 건너뜀: {exc}")
+            get_app_logger().debug(f"[{ticker_type_norm.upper()}/{ticker_norm}] yfinance 메타 보완 건너뜀: {exc}")
 
     # 미국 ETF 는 구성종목도 함께 저장한다(개별주는 holdings 개념이 없어 건너뜀).
     holdings_cache: dict[str, Any] | None = None
@@ -631,12 +671,19 @@ def _refresh_overseas_etf_meta_cache(
         t_data = yf.Ticker(symbol)
         t_info = getattr(t_data, "info", {})
         if t_info:
-            meta_cache["dividend_yield_ttm"] = t_info.get("trailingAnnualDividendYield") or t_info.get("dividendYield")
-            meta_cache["expense_ratio"] = t_info.get("feesExpensesTotal") or t_info.get("expenseRatio")
+            # 배당/보수는 미국 경로와 같은 정규화 함수를 쓴다(둘 다 '퍼센트' 단위로 저장 — 화면 표기 규칙 동일).
+            meta_cache["dividend_yield_ttm"] = _yf_dividend_yield_pct(t_info)
+            meta_cache["expense_ratio"] = _yf_expense_ratio_pct(t_info)
             meta_cache["total_net_assets"] = t_info.get("totalAssets") or t_info.get("marketCap")
-            if t_info.get("firstTradeDateEpochUtc") or t_info.get("startDate"):
-                raw_start = t_info.get("firstTradeDateEpochUtc") or t_info.get("startDate")
-                meta_cache["listed_date"] = _format_iso_date(raw_start)
+            epoch = t_info.get("firstTradeDateEpochUtc") or t_info.get("fundInceptionDate")
+            if isinstance(epoch, (int, float)) and not isinstance(epoch, bool) and epoch > 0:
+                meta_cache["listed_date"] = datetime.fromtimestamp(float(epoch), tz=timezone.utc).strftime("%Y-%m-%d")
+            elif t_info.get("startDate"):
+                meta_cache["listed_date"] = _format_iso_date(t_info.get("startDate"))
+            if not meta_cache.get("market"):
+                meta_cache["market"] = str(t_info.get("exchange") or "").strip().upper() or None
+            if not meta_cache.get("industry"):
+                meta_cache["industry"] = str(t_info.get("category") or "").strip() or None
     except Exception as e:
         logger.debug(f"yfinance 추가 메타데이터 수집 건너뜀: {e}")
 
