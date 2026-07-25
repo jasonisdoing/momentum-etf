@@ -71,6 +71,7 @@ export async function loadTickerDetailData(params: {
 // 같은 구성종목이 여러 ETF에 나와도 동일 시세/변동률로 보이고 중복 조회가 사라진다.
 export async function loadTickerDetailCompare(
   items: { ticker: string; ticker_type: string; country_code: string }[],
+  includeHoldings: boolean = true,
 ): Promise<{ results: TickerDetailData[] }> {
   // 여러 ETF를 한 요청에서 계산하므로(특히 미국 구성종목 ETF) 첫 콜드 호출은 오래 걸릴 수 있다.
   // 기본 30초로는 잘리므로 90초로 늘린다(이후 결과 캐시로 즉시 응답).
@@ -79,7 +80,8 @@ export async function loadTickerDetailCompare(
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ items }),
+      // include_holdings=false 면 구성종목 계산을 건너뛴다(성과분석·월간분석 탭).
+      body: JSON.stringify({ items, include_holdings: includeHoldings }),
     },
     90_000,
   );
