@@ -407,6 +407,47 @@ def _calculate_consolidated_average_buy_price(ticker: str, currency: str | None 
     return total_buy_amount / total_quantity
 
 
+def _build_overseas_etf_info_payload(
+    *,
+    cache_document: dict[str, object] | None,
+    holdings_cache: dict[str, object],
+    latest_row: dict[str, object] | None,
+    country_code: str,
+) -> dict[str, object]:
+    """해외(미국·호주) ETF 기본 정보 페이로드.
+
+    한국은 iNAV/괴리율을 계산하는 별도 페이로드를 쓰고, 해외는 메타 캐시에 저장된 값
+    (운용보수·순자산·배당수익률 등)을 그대로 노출한다. 값이 없으면 None(화면은 '-').
+    시가총액은 화면이 국가별로 포맷하므로 현지 통화 원시값을 그대로 넘긴다.
+    """
+    meta_cache = dict((cache_document or {}).get("meta_cache") or {}) if isinstance(cache_document, dict) else {}
+
+    def _as_float(value: object) -> float | None:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+        return None
+
+    payload: dict[str, object] = {
+        "source": holdings_cache.get("source"),
+        "reference_date": holdings_cache.get("reference_date"),
+        "expense_ratio": _as_float(meta_cache.get("expense_ratio")),
+        "dividend_yield_ttm": _as_float(meta_cache.get("dividend_yield_ttm")),
+        "market_cap_krw": _as_float(meta_cache.get("total_net_assets")),
+        "listed_date": meta_cache.get("listed_date"),
+        "volume": int(latest_row["volume"]) if latest_row and latest_row.get("volume") is not None else None,
+    }
+
+    # 환율(해외 종목 표기용) — 한국 페이로드와 같은 소스.
+    rates = get_exchange_rates()
+    currency = "USD" if country_code == "us" else "AUD" if country_code == "au" else None
+    if currency:
+        rate_info = rates.get(currency)
+        if isinstance(rate_info, dict):
+            payload["fx_rate"] = rate_info.get("rate")
+            payload["fx_change_pct"] = rate_info.get("change_pct")
+    return payload
+
+
 def _build_korean_etf_info_payload(
     *,
     ticker: str,
@@ -943,10 +984,14 @@ def build_ticker_detail_payload(
                 holdings=holdings,
             )
         else:
-            etf_info = {
-                "source": holdings_cache.get("source"),
-                "reference_date": holdings_cache.get("reference_date"),
-            }
+            # 해외(미국·호주) ETF — 메타 캐시의 기본 정보(보수·순자산·배당 등)를 함께 노출한다.
+            # (한국은 iNAV/괴리율까지 계산하는 별도 페이로드를 쓴다.)
+            etf_info = _build_overseas_etf_info_payload(
+                cache_document=cache_document if isinstance(cache_document, dict) else None,
+                holdings_cache=holdings_cache,
+                latest_row=rows[-1] if rows else None,
+                country_code=country_clean,
+            )
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
         if not holdings:
             holdings_error = "구성종목 캐시가 없습니다. python scripts/stock_reference_meta_updater.py 실행이 필요합니다."
