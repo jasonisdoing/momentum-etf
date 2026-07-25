@@ -620,7 +620,10 @@ function buildHoldingExposureRows(products: SelectedProduct[]): CompareHoldingEx
 
 // 여러 ETF를 한 번에 — 서버에서 구성종목 합집합을 1회 조회해 공유한다.
 // 같은 종목(예: SK스퀘어)이 여러 ETF에 나와도 동일 시세/변동률로 나오고, 중복 조회가 사라진다.
-async function loadTickerDetailsBatch(items: TickerItem[]): Promise<TickerDetailResponse[]> {
+async function loadTickerDetailsBatch(
+  items: TickerItem[],
+  includeHoldings: boolean = true,
+): Promise<TickerDetailResponse[]> {
   const response = await fetch(`/api/ticker-detail-compare`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -631,6 +634,8 @@ async function loadTickerDetailsBatch(items: TickerItem[]): Promise<TickerDetail
         ticker_type: item.ticker_type,
         country_code: item.country_code,
       })),
+      // 성과분석 탭은 가격 시계열만 필요 — 구성종목 평가를 건너뛰어 초기 로딩을 줄인다.
+      include_holdings: includeHoldings,
     }),
   });
   const payload = (await response.json()) as { results?: TickerDetailResponse[]; error?: string };
@@ -863,7 +868,10 @@ export function ComparePageClient() {
     [tickerItems],
   );
 
-  const loadSelectedProducts = useCallback(async (keys: string[]) => {
+  // 마지막으로 로드한 조합 + 범위("종목키::full|price"). 탭 전환 시 중복 요청을 막는다.
+  const loadedSignatureRef = useRef<string | null>(null);
+
+  const loadSelectedProducts = useCallback(async (keys: string[], includeHoldings: boolean = true) => {
     const items = keys.map((key) => itemByKey.get(key)).filter((item): item is TickerItem => Boolean(item));
     if (items.length === 0) {
       setProducts([]);
@@ -899,11 +907,12 @@ export function ComparePageClient() {
       );
       // 한 번의 일괄 호출 — 서버가 구성종목 합집합을 1회 조회해 공유하므로
       // 같은 종목은 ETF 간 동일 값이 되고, 중복 조회/전역 lock 직렬화 문제도 사라진다.
-      const details = await loadTickerDetailsBatch(items);
+      const details = await loadTickerDetailsBatch(items, includeHoldings);
       setLoadingProgress({ percent: 100, message: "비교 데이터 반영 중" });
       setProducts(items.map((item, index) => ({ item, detail: details[index] })));
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "비교 데이터를 불러오지 못했습니다.");
+      loadedSignatureRef.current = null; // 실패한 요청은 '로드됨'으로 두지 않는다(재시도 가능하게).
     } finally {
       progressTimers.forEach((timer) => window.clearTimeout(timer));
       if (progressInterval !== null) window.clearInterval(progressInterval);
@@ -955,9 +964,19 @@ export function ComparePageClient() {
     };
   }, []);
 
+  // 성과분석 탭은 가격 시계열만 있으면 되므로 구성종목 계산을 생략해 초기 로딩을 줄인다.
+  // 기본정보/구성종목 탭을 열면(또는 종목이 바뀌면) 구성종목까지 포함해 다시 요청한다.
+  // 이미 전체 데이터를 받아둔 조합이면 재요청하지 않는다(성과분석으로 되돌아와도 유지).
   useEffect(() => {
-    void loadSelectedProducts(selectedKeys);
-  }, [loadSelectedProducts, selectedKeys]);
+    const needsHoldings = activeTab !== "performance";
+    const key = selectedKeys.join("|");
+    const signature = `${key}::${needsHoldings ? "full" : "price"}`;
+    // 전체(full)를 이미 받았으면 가격만 필요한 요청은 건너뛴다(같은 종목 조합인 동안).
+    if (loadedSignatureRef.current === signature) return;
+    if (!needsHoldings && loadedSignatureRef.current === `${key}::full`) return;
+    loadedSignatureRef.current = signature;
+    void loadSelectedProducts(selectedKeys, needsHoldings);
+  }, [loadSelectedProducts, selectedKeys, activeTab]);
 
   // selectedKeys 가 변경될 때 활성 그룹이면 해당 그룹에 자동 저장, 아니면 임시 저장
   useEffect(() => {

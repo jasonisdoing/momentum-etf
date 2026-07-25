@@ -874,12 +874,16 @@ def build_ticker_detail_payload(
     *,
     component_price_snapshot: dict[str, dict[str, Any]] | None = None,
     use_bundle_cache: bool = True,
+    include_holdings: bool = True,
 ) -> dict[str, object]:
     """단일 ETF/종목의 상세(가격 행 + 구성종목) 페이로드를 만든다.
 
     ``component_price_snapshot`` 을 주면 구성종목 가격을 그 공유 스냅샷에서 가져온다
     (비교 화면에서 여러 ETF가 같은 종목을 동일 값으로 보도록 합집합 1회 조회 결과 주입).
     그 경우 ETF별 캐시를 우회하려면 ``use_bundle_cache=False`` 로 강제 재계산한다.
+
+    ``include_holdings=False`` 면 구성종목 시세 평가·포트폴리오 변동 계산을 건너뛴다
+    (비교 화면 성과분석 탭처럼 가격 시계열만 필요한 경우 — 초기 로딩을 크게 줄인다).
     """
     settings = load_common_settings()
     cache_start_date = str(settings.get("CACHE_START_DATE") or "").strip()
@@ -993,7 +997,10 @@ def build_ticker_detail_payload(
                 country_code=country_clean,
             )
         holdings_as_of_date = str(holdings_cache.get("reference_date") or "").strip() or None
-        if not holdings:
+        if not include_holdings:
+            # 가격 시계열만 필요한 호출(성과분석 탭) — 구성종목 시세 평가·포트폴리오 변동 계산을 건너뛴다.
+            holdings = []
+        elif not holdings:
             holdings_error = "구성종목 캐시가 없습니다. python scripts/stock_reference_meta_updater.py 실행이 필요합니다."
         elif not holdings_as_of_date:
             holdings_error = "구성종목 캐시 기준일(reference_date)이 없습니다."
@@ -1083,21 +1090,30 @@ def get_ticker_detail_compare(
     """여러 ETF 상세를 한 번에 계산한다 — 구성종목 합집합을 1회만 조회해 공유한다.
 
     같은 구성종목(예: SK스퀘어)이 여러 ETF에 등장해도 **동일한 시세/변동률**로 보이고,
-    중복 조회가 사라진다. body: ``{"items": [{"ticker","ticker_type","country_code"}, ...]}``.
+    중복 조회가 사라진다. body: ``{"items": [{"ticker","ticker_type","country_code"}, ...],
+    "include_holdings": bool}``.
+
+    ``include_holdings=False`` (성과분석 탭 초기 로딩)면 구성종목 시세 평가·포트폴리오 변동
+    계산을 생략해 응답이 크게 빨라진다. 구성종목/기본정보 탭을 열 때 true 로 다시 요청한다.
     """
     raw_items = payload.get("items") if isinstance(payload, dict) else None
     items = [it for it in raw_items if isinstance(it, dict)] if isinstance(raw_items, list) else []
+    include_holdings = bool(payload.get("include_holdings", True)) if isinstance(payload, dict) else True
 
     # 0) 결과 캐시 — 같은 ETF 세트면 TTL 내 재계산 없이 즉시 반환.
+    #    (구성종목 포함 여부가 다르면 페이로드가 달라 캐시 키를 분리한다.)
     cache_key = json.dumps(
-        sorted(
-            (
-                str(it.get("ticker") or ""),
-                str(it.get("ticker_type") or ""),
-                str(it.get("country_code") or "kor"),
-            )
-            for it in items
-        )
+        {
+            "include_holdings": include_holdings,
+            "items": sorted(
+                (
+                    str(it.get("ticker") or ""),
+                    str(it.get("ticker_type") or ""),
+                    str(it.get("country_code") or "kor"),
+                )
+                for it in items
+            ),
+        }
     )
     now_ts = _time.time()
     with _COMPARE_CACHE_LOCK:
@@ -1106,17 +1122,20 @@ def get_ticker_detail_compare(
             return cached[0]
 
     # 1) 한국 ETF 구성종목 합집합 → 공유 가격 스냅샷 1회 구성 (build_component_price_snapshot 가 중복 제거)
-    union_holdings: list[dict[str, object]] = []
-    for item in items:
-        if str(item.get("country_code") or "kor").strip().lower() != "kor":
-            continue
-        cache_doc = get_stock_cache_meta(str(item.get("ticker_type") or ""), str(item.get("ticker") or ""))
-        if not isinstance(cache_doc, dict):
-            continue
-        holdings_cache = dict(cache_doc.get("holdings_cache") or {})
-        union_holdings.extend(list(holdings_cache.get("items") or []))
+    #    구성종목이 필요 없는 호출이면 이 조회 자체를 건너뛴다(성과분석 탭 초기 로딩 단축).
+    shared_snapshot: dict[str, dict[str, Any]] = {}
+    if include_holdings:
+        union_holdings: list[dict[str, object]] = []
+        for item in items:
+            if str(item.get("country_code") or "kor").strip().lower() != "kor":
+                continue
+            cache_doc = get_stock_cache_meta(str(item.get("ticker_type") or ""), str(item.get("ticker") or ""))
+            if not isinstance(cache_doc, dict):
+                continue
+            holdings_cache = dict(cache_doc.get("holdings_cache") or {})
+            union_holdings.extend(list(holdings_cache.get("items") or []))
 
-    shared_snapshot = build_component_price_snapshot(union_holdings) if union_holdings else {}
+        shared_snapshot = build_component_price_snapshot(union_holdings) if union_holdings else {}
 
     # 2) ETF 별 detail 을 공유 스냅샷으로 계산 (캐시 우회 → 종목당 동일 값 보장)
     results: list[dict[str, object]] = []
@@ -1128,6 +1147,7 @@ def get_ticker_detail_compare(
                 str(item.get("country_code") or "kor"),
                 component_price_snapshot=shared_snapshot,
                 use_bundle_cache=False,
+                include_holdings=include_holdings,
             )
         )
     result = {"results": results}
