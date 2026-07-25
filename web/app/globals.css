@@ -2571,6 +2571,9 @@ a {
 
 .compareMatrix {
   display: grid;
+  /* .comparePage 가 flex column 이라, 본문 행이 많은 탭(월간 분석)에서 헤더 섹션이 눌려
+     overflow:hidden 에 잘렸다. 섹션은 축소하지 않고 내용 높이를 유지한다. */
+  flex: 0 0 auto;
   /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다.
      앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 8.4rem 은 가장 긴 라벨
      ('포트폴리오 변동', '소르티노 지수')이 한 줄로 들어가는 최소 폭이다. */
