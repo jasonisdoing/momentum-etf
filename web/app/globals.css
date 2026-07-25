@@ -2822,7 +2822,8 @@ a {
 }
 
 .compareMatrixWide {
-  grid-column: span 6;
+  /* 상품 컬럼 전체를 차지하는 셀(차트 등) — MAX_PRODUCTS(8) 와 같아야 이후 행이 밀리지 않는다. */
+  grid-column: span 8;
   min-width: 0;
   padding: 1rem;
   border-bottom: 1px solid #d6deea;
