@@ -953,7 +953,10 @@ def _load_asset_helper_account_snapshot(account_id: str) -> dict[str, Any]:
             current["return_pct"] = 0.0
 
     if native_mode:
-        cash_native = summary.get("cash_balance_native")
+        # 다통화 현금 개편: 주 통화 환산 현금(cash_display_native)을 우선 사용. 없으면 레거시 native 필드.
+        cash_native = summary.get("cash_display_native")
+        if cash_native is None:
+            cash_native = summary.get("cash_balance_native")
         if cash_native is None and float(summary.get("cash_balance_krw") or 0) > 0:
             raise ValueError(f"계좌 '{account_id}' 의 현금 원화({currency}) 잔액 정보가 없습니다.")
         cash_balance = float(cash_native or 0.0)
