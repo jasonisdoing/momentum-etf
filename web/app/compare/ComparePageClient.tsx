@@ -11,7 +11,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { calcPortfolioChange } from "@/lib/portfolio-change";
 import type { PortfolioChangeResult } from "@/lib/portfolio-change";
 
-type CompareTab = "performance" | "monthly" | "basic" | "holdings";
+type CompareTab = "performance" | "yearly" | "monthly" | "basic" | "holdings";
 type PerformanceRange = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y";
 type CompareLoadingProgress = {
   percent: number;
@@ -521,31 +521,40 @@ function getMaxDrawdown(rows: PriceRow[], dateRange: ChartDateRange | null): Max
 }
 
 /**
- * 월별 변동률(%) — 각 월의 마지막 종가를 직전 월 마지막 종가와 비교한다.
- * 첫 월은 비교 기준(직전 월 종가)이 없어 제외한다. 반환: { "2026-07": 1.23, ... }
+ * 기간별 변동률(%) — 각 기간의 마지막 종가를 직전 기간 마지막 종가와 비교한다.
+ * 첫 기간만 예외로 **그 기간 안의 첫 종가 → 마지막 종가**로 계산하고 `partial` 로 표시한다
+ * (직전 기간 종가가 없어서다. 데이터가 기간 중간에 시작하면 부분 기간 수익률이 된다).
+ * `periodKeyLength`: 7 이면 월간("YYYY-MM"), 4 이면 연간("YYYY").
  */
-function getMonthlyReturnMap(rows: PriceRow[]): Record<string, number> {
-  const lastCloseByMonth = new Map<string, number>();
+type PeriodReturn = { pct: number; partial: boolean };
+
+function getPeriodReturnMap(rows: PriceRow[], periodKeyLength: 4 | 7): Record<string, PeriodReturn> {
+  const firstCloseByPeriod = new Map<string, number>();
+  const lastCloseByPeriod = new Map<string, number>();
   for (const row of getPricedRows(rows)) {
-    const month = String(row.date).slice(0, 7); // YYYY-MM
-    if (month.length !== 7) continue;
-    lastCloseByMonth.set(month, row.close as number); // rows 는 날짜 오름차순 → 마지막 값이 월말 종가
+    const key = String(row.date).slice(0, periodKeyLength);
+    if (key.length !== periodKeyLength) continue;
+    if (!firstCloseByPeriod.has(key)) firstCloseByPeriod.set(key, row.close as number);
+    lastCloseByPeriod.set(key, row.close as number); // rows 는 날짜 오름차순 → 마지막 값이 기간말 종가
   }
-  const months = [...lastCloseByMonth.keys()].sort();
-  const result: Record<string, number> = {};
-  for (let index = 1; index < months.length; index += 1) {
-    const prevClose = lastCloseByMonth.get(months[index - 1]);
-    const close = lastCloseByMonth.get(months[index]);
-    if (prevClose && close && prevClose > 0) {
-      result[months[index]] = (close / prevClose - 1) * 100;
-    }
-  }
+  const periods = [...lastCloseByPeriod.keys()].sort();
+  const result: Record<string, PeriodReturn> = {};
+  periods.forEach((period, index) => {
+    const close = lastCloseByPeriod.get(period);
+    if (!close) return;
+    // 첫 기간은 기준이 될 직전 기간 종가가 없어 기간 내 첫 종가를 기준으로 쓴다(부분 기간).
+    const isFirst = index === 0;
+    const base = isFirst ? firstCloseByPeriod.get(period) : lastCloseByPeriod.get(periods[index - 1]);
+    if (!base || base <= 0) return;
+    if (isFirst && base === close) return; // 거래일이 하나뿐이면 의미 있는 변동률이 아니다.
+    result[period] = { pct: (close / base - 1) * 100, partial: isFirst };
+  });
   return result;
 }
 
-/** "2026-07" → "202607" (라벨 열 폭을 아끼기 위한 압축 표기) */
-function formatMonthLabel(month: string): string {
-  return month.replace("-", "");
+/** "2026-07" → "202607" (라벨 열 폭을 아끼기 위한 압축 표기). 연간은 "2026" 그대로. */
+function formatPeriodLabel(period: string): string {
+  return period.replace("-", "");
 }
 
 /**
@@ -1010,7 +1019,7 @@ export function ComparePageClient() {
   // 이미 전체 데이터를 받아둔 조합이면 재요청하지 않는다(성과분석으로 되돌아와도 유지).
   useEffect(() => {
     // 성과분석·월간분석은 가격 시계열만 쓴다 → 구성종목 계산 없이 가볍게 로드.
-    const needsHoldings = activeTab !== "performance" && activeTab !== "monthly";
+    const needsHoldings = activeTab !== "performance" && activeTab !== "monthly" && activeTab !== "yearly";
     const key = selectedKeys.join("|");
     const signature = `${key}::${needsHoldings ? "full" : "price"}`;
     // 전체(full)를 이미 받았으면 가격만 필요한 요청은 건너뛴다(같은 종목 조합인 동안).
@@ -1169,21 +1178,95 @@ export function ComparePageClient() {
       .map(({ product }) => product);
   }, [products, selectedPerformanceRange.days, selectedPerformanceRange.ytd]);
 
-  // 월간 분석 탭 — 종목별 월간 변동률 맵 + 표시할 월 목록(최신 월이 위)
+  // 월간/연간 분석 탭 — 종목별 기간 변동률 맵 + 표시할 기간 목록(최신이 위)
   const monthlyReturnMaps = useMemo(() => {
-    const map = new Map<string, Record<string, number>>();
+    const map = new Map<string, Record<string, PeriodReturn>>();
     for (const product of sortedProducts) {
-      map.set(tickerKey(product.item), getMonthlyReturnMap(product.detail.rows));
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 7));
     }
     return map;
   }, [sortedProducts]);
-  const monthlyRows = useMemo(() => {
-    const months = new Set<string>();
-    for (const returns of monthlyReturnMaps.values()) {
-      for (const month of Object.keys(returns)) months.add(month);
+  const yearlyReturnMaps = useMemo(() => {
+    const map = new Map<string, Record<string, PeriodReturn>>();
+    for (const product of sortedProducts) {
+      map.set(tickerKey(product.item), getPeriodReturnMap(product.detail.rows, 4));
     }
-    return [...months].sort().reverse(); // 최신 월 → 과거 월
-  }, [monthlyReturnMaps]);
+    return map;
+  }, [sortedProducts]);
+  const collectPeriods = useCallback((maps: Map<string, Record<string, PeriodReturn>>) => {
+    const periods = new Set<string>();
+    for (const returns of maps.values()) {
+      for (const period of Object.keys(returns)) periods.add(period);
+    }
+    return [...periods].sort().reverse(); // 최신 → 과거
+  }, []);
+  const monthlyRows = useMemo(() => collectPeriods(monthlyReturnMaps), [collectPeriods, monthlyReturnMaps]);
+  const yearlyRows = useMemo(() => collectPeriods(yearlyReturnMaps), [collectPeriods, yearlyReturnMaps]);
+
+  // 월간·연간 분석 본문 공용 렌더 — 라벨(기간 + 동일가중 평균) + 종목별 값 행.
+  // 월간은 해가 바뀌는 행에 굵은 구분선을 넣는다(연간은 매 행이 새 해라 불필요).
+  const renderPeriodRows = (
+    periods: string[],
+    maps: Map<string, Record<string, PeriodReturn>>,
+    options: { kind: "monthly" | "yearly" },
+  ) => {
+    if (periods.length === 0) {
+      return (
+        <div className="compareMatrixWide" style={{ color: "var(--text-muted)" }}>
+          {options.kind === "monthly" ? "월간" : "연간"} 변동률을 계산할 데이터가 없습니다.
+        </div>
+      );
+    }
+    return periods.map((period, index) => {
+      const prevPeriod = index > 0 ? periods[index - 1] : null;
+      const isYearBoundary =
+        options.kind === "monthly" && Boolean(prevPeriod && prevPeriod.slice(0, 4) !== period.slice(0, 4));
+      const boundaryClass = isYearBoundary ? " compareMonthlyYearBoundary" : "";
+      // 동일가중 보유 시 해당 기간 수익률 = 값이 있는 종목들의 단순 평균.
+      const entries = sortedProducts
+        .map((product) => maps.get(tickerKey(product.item))?.[period])
+        .filter((entry): entry is PeriodReturn => Boolean(entry) && !Number.isNaN(entry!.pct));
+      const equalWeighted =
+        entries.length > 0 ? entries.reduce((sum, entry) => sum + entry.pct, 0) / entries.length : null;
+      // 하나라도 부분 기간(직전 기간 종가 없이 계산)이면 평균에도 * 를 붙여 알린다.
+      const hasPartialAvg = entries.some((entry) => entry.partial);
+      return (
+        <Fragment key={period}>
+          <div className={`compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel${boundaryClass}`}>
+            <div className="compareMonthlyLabelRow">
+              {/* 기간은 등폭 폰트(appCodeText)로 렌더해 201911/201910 처럼 폭이 달라지지 않게 한다. */}
+              <span className="compareMatrixLabelText appCodeText">{formatPeriodLabel(period)}</span>
+              <span
+                className={getSignedClass(equalWeighted)}
+                title={`선택 종목 ${entries.length}개 동일가중 평균${hasPartialAvg ? " (*: 부분 기간 포함)" : ""}`}
+              >
+                {formatPercent(equalWeighted)}
+                {hasPartialAvg ? "*" : ""}
+              </span>
+            </div>
+          </div>
+          {sortedProducts.map((product) => {
+            const entry = maps.get(tickerKey(product.item))?.[period] ?? null;
+            return (
+              <div
+                key={`${options.kind}-${period}-${tickerKey(product.item)}`}
+                className={`compareMetricCell ${getSignedClass(entry?.pct ?? null)}${boundaryClass}`}
+                title={entry?.partial ? "데이터 시작 기간이라 직전 기간 종가 대신 기간 내 첫 종가 기준(부분 기간)" : undefined}
+              >
+                {formatPercent(entry?.pct ?? null)}
+                {entry?.partial ? "*" : ""}
+              </div>
+            );
+          })}
+          {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, emptyIndex) => (
+            <div key={`empty-${options.kind}-${period}-${emptyIndex}`} className={`compareMetricCell${boundaryClass}`}>
+              -
+            </div>
+          ))}
+        </Fragment>
+      );
+    });
+  };
   const chartDateRange = useMemo(
     () => getChartDateRange(sortedProducts, {
       calendarDays: selectedPerformanceRange.days,
@@ -1387,6 +1470,13 @@ export function ComparePageClient() {
                         </button>
                         <button
                           type="button"
+                          className={activeTab === "yearly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setActiveTab("yearly")}
+                        >
+                          연간 분석
+                        </button>
+                        <button
+                          type="button"
                           className={activeTab === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                           onClick={() => setActiveTab("monthly")}
                         >
@@ -1458,7 +1548,9 @@ export function ComparePageClient() {
         ) : null}
 
         {/* 월간 분석은 년월 라벨에 동일가중 평균까지 넣어 라벨 열을 넓게 쓴다(헤더·본문 동일 적용). */}
-        <section className={`compareMatrix${activeTab === "monthly" ? " compareMatrixMonthly" : ""}`}>
+        <section
+          className={`compareMatrix${activeTab === "monthly" || activeTab === "yearly" ? " compareMatrixMonthly" : ""}`}
+        >
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
             <div
@@ -1610,59 +1702,21 @@ export function ComparePageClient() {
               소르티노 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (하방 변동성(Downside Deviation)만을 기준으로 손실 위험 대비 초과수익을 측정, 연율화)
             </div>
           </section>
+        ) : activeTab === "yearly" ? (
+          <section className="compareMatrix compareMatrixBody compareMatrixMonthly compareMatrixMonthlyScroll">
+            {renderPeriodRows(yearlyRows, yearlyReturnMaps, { kind: "yearly" })}
+            <div className="compareSharpeLegend">
+              <strong>*</strong> 표시는 데이터가 시작된 기간이라 직전 기간 종가 대신 <strong>기간 내 첫 종가</strong>를 기준으로
+              계산한 값입니다(부분 기간).
+            </div>
+          </section>
         ) : activeTab === "monthly" ? (
           <section className="compareMatrix compareMatrixBody compareMatrixMonthly compareMatrixMonthlyScroll">
-            {monthlyRows.length === 0 ? (
-              <div className="compareMatrixWide" style={{ color: "var(--text-muted)" }}>
-                월간 변동률을 계산할 데이터가 없습니다.
-              </div>
-            ) : (
-              monthlyRows.map((month, monthIndex) => {
-                // 해가 바뀌는 지점(위에서 아래로 내려가며 연도가 달라지는 첫 행)에 굵은 구분선을 넣는다.
-                const prevMonth = monthIndex > 0 ? monthlyRows[monthIndex - 1] : null;
-                const isYearBoundary = Boolean(prevMonth && prevMonth.slice(0, 4) !== month.slice(0, 4));
-                const boundaryClass = isYearBoundary ? " compareMonthlyYearBoundary" : "";
-                // 동일가중 보유 시 해당 월 수익률 = 값이 있는 종목들의 단순 평균.
-                const monthValues = sortedProducts
-                  .map((product) => monthlyReturnMaps.get(tickerKey(product.item))?.[month])
-                  .filter((value): value is number => typeof value === "number" && !Number.isNaN(value));
-                const equalWeighted =
-                  monthValues.length > 0
-                    ? monthValues.reduce((sum, value) => sum + value, 0) / monthValues.length
-                    : null;
-                return (
-                  <Fragment key={month}>
-                    <div className={`compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel${boundaryClass}`}>
-                      <div className="compareMonthlyLabelRow">
-                        <span className="compareMatrixLabelText">{formatMonthLabel(month)}</span>
-                        <span
-                          className={getSignedClass(equalWeighted)}
-                          title={`선택 종목 ${monthValues.length}개 동일가중 평균`}
-                        >
-                          {formatPercent(equalWeighted)}
-                        </span>
-                      </div>
-                    </div>
-                    {sortedProducts.map((product) => {
-                      const value = monthlyReturnMaps.get(tickerKey(product.item))?.[month] ?? null;
-                      return (
-                        <div
-                          key={`monthly-${month}-${tickerKey(product.item)}`}
-                          className={`compareMetricCell ${getSignedClass(value)}${boundaryClass}`}
-                        >
-                          {formatPercent(value)}
-                        </div>
-                      );
-                    })}
-                    {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-                      <div key={`empty-monthly-${month}-${index}`} className={`compareMetricCell${boundaryClass}`}>
-                        -
-                      </div>
-                    ))}
-                  </Fragment>
-                );
-              })
-            )}
+            {renderPeriodRows(monthlyRows, monthlyReturnMaps, { kind: "monthly" })}
+            <div className="compareSharpeLegend">
+              <strong>*</strong> 표시는 데이터가 시작된 기간이라 직전 기간 종가 대신 <strong>기간 내 첫 종가</strong>를 기준으로
+              계산한 값입니다(부분 기간).
+            </div>
           </section>
         ) : activeTab === "basic" ? (
           <section className="compareMatrix compareMatrixBody">
