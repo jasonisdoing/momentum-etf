@@ -2571,7 +2571,8 @@ a {
 
 .compareMatrix {
   display: grid;
-  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(11rem, 1fr));
+  /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다. */
+  grid-template-columns: 4.75rem 6.8rem repeat(8, minmax(8.5rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2579,7 +2580,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(10rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 4.75rem 6.8rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
