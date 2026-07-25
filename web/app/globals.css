@@ -2734,6 +2734,11 @@ a {
   padding-inline: 0.85rem;
 }
 
+/* 일간 분석은 라벨이 8자리(20260724)라 라벨 열을 조금 더 넓게 쓴다. */
+.compareMatrixDaily {
+  grid-template-columns: 4.2rem 6.3rem repeat(8, minmax(8.5rem, 1fr));
+}
+
 .compareMatrixMonthlyScroll {
   flex: 1 1 auto;
   min-height: 12rem;
@@ -2759,10 +2764,11 @@ a {
   white-space: nowrap;
 }
 
-/* 년월(6자리)은 폭을 고정한다 — '1' 이 '0' 보다 좁은 폰트에서도 201911/201910 폭이 같아진다. */
+/* 기간 라벨(2026 / 202607 / 20260724)은 폭을 고정한다 — 등폭 폰트라 자릿수만큼 늘어난다.
+   '1' 이 '0' 보다 좁은 비례폭 폰트로 폴백돼도 201911/201910 폭이 같아진다. */
 .compareMonthlyLabelRow > span:first-child {
   flex: 0 0 auto;
-  min-width: 6ch;
+  min-width: 4ch;
   text-align: left;
 }
 
