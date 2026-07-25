@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-CACHE_START_DATE = "2020-01-01"
+CACHE_START_DATE = "2019-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
 # 전략 이동평균 종류 — 추세선·이격도·순위 계산에 쓰는 이동평균. "SMA"(단순) 또는 "EMA"(지수).
