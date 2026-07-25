@@ -730,11 +730,12 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
   }
 
   if (metric === "iNAV") {
+    // NAV 도 현재가와 같은 종목 통화로 표기한다(미국 $, 호주 A$, 국내 원).
     return (
       <div className="compareBasicValue">
-        <strong>{formatPrice(etfInfo?.nav ?? null, "kor")}</strong>
+        <strong>{formatPrice(etfInfo?.nav ?? null, product.item.country_code)}</strong>
         <span className={getSignedClass(etfInfo?.nav_change ?? null)}>
-          {formatSignedPriceDelta(etfInfo?.nav_change ?? null, "kor")}
+          {formatSignedPriceDelta(etfInfo?.nav_change ?? null, product.item.country_code)}
         </span>
         <span className={getSignedClass(etfInfo?.nav_change_pct ?? null)}>
           {formatSignedPercent(etfInfo?.nav_change_pct ?? null)}
@@ -744,7 +745,9 @@ function BasicInfoValue({ product, metric }: { product: SelectedProduct; metric:
   }
 
   if (metric === "괴리율") {
-    return <strong>{formatSignedPercent(etfInfo?.deviation ?? null)}</strong>;
+    // 괴리율도 다른 증감 값과 같은 규칙(+빨강 / -파랑)으로 색을 준다.
+    const deviation = etfInfo?.deviation ?? null;
+    return <strong className={getSignedClass(deviation)}>{formatSignedPercent(deviation)}</strong>;
   }
 
   if (metric === "거래량") {
