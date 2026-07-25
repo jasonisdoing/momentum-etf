@@ -187,6 +187,9 @@ type HelperSettings = Record<string, unknown> & { ACCOUNT_ID?: string; STOCK_MAX
 
 type GridRow = HelperTicker & { row_index: number; is_adding: boolean } & Partial<WeightRow>;
 
+// 백테스트 기간(개월) 선택 옵션 — 백엔드 ALLOWED_BACKTEST_MONTHS 와 동일해야 한다(자유 입력 시 허용값 밖 에러 방지).
+const BACKTEST_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36];
+
 const REBALANCE_OPTIONS = [
   { value: "none", label: "리밸런싱 없음 (보유)" },
   { value: "weekly", label: "매주 (금요일)" },
@@ -311,9 +314,29 @@ export function AssetHelperClient() {
   const [btAmount, setBtAmount] = useState("10000");
   const [btMonths, setBtMonths] = useState("12");
   const [btRebalance, setBtRebalance] = useState("monthly");
+  // 기간(개월) 옵션 — pools-backtest 와 동일하게 가격 캐시 데이터 길이 기준으로 서버에서 받는다.
+  const [monthOptions, setMonthOptions] = useState<number[]>(BACKTEST_MONTH_OPTIONS);
   const [btResult, setBtResult] = useState<LabResult | null>(null);
   const [btRunning, setBtRunning] = useState(false);
 
+  // 기간(개월) 옵션 로드 — pools-backtest 와 같은 엔드포인트/데이터 기준 재사용.
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const resp = await fetch("/api/pool-backtest/options", { cache: "no-store" });
+        const data = (await resp.json()) as { month_options?: number[] };
+        if (!resp.ok || !alive) return;
+        const loaded = (data.month_options ?? []).filter((m) => Number.isFinite(m) && m > 0);
+        if (loaded.length > 0) setMonthOptions(loaded);
+      } catch {
+        /* 실패 시 기본 옵션 유지 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const validTickers = useMemo(
     () => tickers.filter((item) => item.ticker.trim() && item.name),
@@ -1061,7 +1084,13 @@ export function AssetHelperClient() {
               </label>
               <label className="appLabeledField">
                 <span className="appLabeledFieldLabel">기간(개월)</span>
-                <input type="number" min={1} className="form-control form-control-sm" value={btMonths} onChange={(e) => setBtMonths(e.target.value)} />
+                <select className="form-select form-select-sm" value={btMonths} onChange={(e) => setBtMonths(e.target.value)}>
+                  {monthOptions.map((m) => (
+                    <option key={m} value={m}>
+                      최근 {m}개월
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="appLabeledField">
                 <span className="appLabeledFieldLabel">리밸런싱</span>

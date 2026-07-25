@@ -48,7 +48,6 @@ DEFAULT_BACKTEST_SETTINGS: dict[str, Any] = {
     "rebalance": "none",
     "initial_amount_manwon": 10000,
 }
-ALLOWED_BACKTEST_MONTHS = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 24, 36}
 ALLOWED_BACKTEST_REBALANCE = {"none", "weekly", "monthly", "quarterly", "yearly"}
 ALLOWED_WEIGHT_MODES = {"variable", "fixed"}
 
@@ -421,9 +420,13 @@ def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark
         months = int(source.get("months"))
     except (TypeError, ValueError) as exc:
         raise ValueError(f"백테스트 기간(개월)은 정수여야 합니다: {source.get('months')}") from exc
-    if months not in ALLOWED_BACKTEST_MONTHS:
+    # 기간 옵션은 pools-backtest 와 동일하게 가격 캐시 데이터 길이 기준으로 산정한다(재사용, 하드코딩 제거).
+    from utils.pool_signal_backtest_service import get_month_options
+
+    allowed_months = get_month_options()
+    if months not in allowed_months:
         raise ValueError(
-            f"백테스트 기간(개월)은 {', '.join(map(str, sorted(ALLOWED_BACKTEST_MONTHS)))} 중 하나여야 합니다."
+            f"백테스트 기간(개월)은 {', '.join(map(str, allowed_months))} 중 하나여야 합니다."
         )
 
     rebalance = str(source.get("rebalance") or "none").strip().lower()
