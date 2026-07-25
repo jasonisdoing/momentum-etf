@@ -841,7 +841,7 @@ export function ComparePageClient() {
   const [activeTab, setActiveTab] = useState<CompareTab>("performance");
   // 구성 종목 탭에서 종목 정렬 기준: weight(비중, 기본) / change(상승률 내림차순)
   const [holdingsSortBy, setHoldingsSortBy] = useState<"weight" | "change">("weight");
-  const [performanceRange, setPerformanceRange] = useState<string>("ytd");
+  const [performanceRange, setPerformanceRange] = useState<string>("1y"); // 성과분석 기본 기간
   const [searchText, setSearchText] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState<CompareLoadingProgress | null>(null);
