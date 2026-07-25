@@ -2752,9 +2752,18 @@ a {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 0.96rem; /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
-  /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다. */
+  /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다.
+     폰트가 font-variant-numeric 을 무시하는 경우까지 대비해 feature-settings 도 함께 준다. */
   font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
   white-space: nowrap;
+}
+
+/* 년월(6자리)은 폭을 고정한다 — '1' 이 '0' 보다 좁은 폰트에서도 201911/201910 폭이 같아진다. */
+.compareMonthlyLabelRow > span:first-child {
+  flex: 0 0 auto;
+  min-width: 6ch;
+  text-align: left;
 }
 
 /* 평균값은 항상 오른쪽 끝에 붙인다(년월 길이와 무관하게). */
