@@ -1615,29 +1615,35 @@ export function ComparePageClient() {
                 월간 변동률을 계산할 데이터가 없습니다.
               </div>
             ) : (
-              monthlyRows.map((month) => (
-                <Fragment key={month}>
-                  <div className="compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel">
-                    <div className="compareMatrixLabelText">{formatMonthLabel(month)}</div>
-                  </div>
-                  {sortedProducts.map((product) => {
-                    const value = monthlyReturnMaps.get(tickerKey(product.item))?.[month] ?? null;
-                    return (
-                      <div
-                        key={`monthly-${month}-${tickerKey(product.item)}`}
-                        className={`compareMetricCell ${getSignedClass(value)}`}
-                      >
-                        {formatPercent(value)}
-                      </div>
-                    );
-                  })}
-                  {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
-                    <div key={`empty-monthly-${month}-${index}`} className="compareMetricCell">
-                      -
+              monthlyRows.map((month, monthIndex) => {
+                // 해가 바뀌는 지점(위에서 아래로 내려가며 연도가 달라지는 첫 행)에 굵은 구분선을 넣는다.
+                const prevMonth = monthIndex > 0 ? monthlyRows[monthIndex - 1] : null;
+                const isYearBoundary = Boolean(prevMonth && prevMonth.slice(0, 4) !== month.slice(0, 4));
+                const boundaryClass = isYearBoundary ? " compareMonthlyYearBoundary" : "";
+                return (
+                  <Fragment key={month}>
+                    <div className={`compareMatrixLabel compareMatrixLabelWide compareBasicCompactLabel${boundaryClass}`}>
+                      <div className="compareMatrixLabelText">{formatMonthLabel(month)}</div>
                     </div>
-                  ))}
-                </Fragment>
-              ))
+                    {sortedProducts.map((product) => {
+                      const value = monthlyReturnMaps.get(tickerKey(product.item))?.[month] ?? null;
+                      return (
+                        <div
+                          key={`monthly-${month}-${tickerKey(product.item)}`}
+                          className={`compareMetricCell ${getSignedClass(value)}${boundaryClass}`}
+                        >
+                          {formatPercent(value)}
+                        </div>
+                      );
+                    })}
+                    {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+                      <div key={`empty-monthly-${month}-${index}`} className={`compareMetricCell${boundaryClass}`}>
+                        -
+                      </div>
+                    ))}
+                  </Fragment>
+                );
+              })
             )}
           </section>
         ) : activeTab === "basic" ? (

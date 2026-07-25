@@ -2611,7 +2611,7 @@ a {
 
 .compareProductHeaderLabel,
 .compareProductHeaderEmpty {
-  height: 8rem;
+  /* 카드와 같은 최소 높이만 두고, 내용이 길어지면 행 전체가 함께 늘어나게 한다. */
   min-height: 8rem;
 }
 
@@ -2708,6 +2708,11 @@ a {
   color: #1d4ed8;
 }
 
+/* 월간 분석 — 해가 바뀌는 행 위에 굵은 구분선. */
+.compareMonthlyYearBoundary {
+  border-top: 2px solid #94a3b8;
+}
+
 /* 지표 셀 보조 설명(예: MDD 낙폭 구간) — 값 아래 작게. */
 .compareMetricCell:has(.compareMetricCellHint) {
   flex-direction: column;
@@ -2740,7 +2745,7 @@ a {
   grid-template-rows: auto auto auto;
   align-content: start;
   row-gap: 0.45rem;
-  height: 8rem;
+  /* height 고정이면 내용(티커·종목명·가격)이 카드 밖으로 잘린다 — 최소 높이만 보장한다. */
   min-height: 8rem;
   border-top: 3px solid transparent;
 }
