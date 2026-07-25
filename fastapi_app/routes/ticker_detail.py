@@ -35,6 +35,7 @@ from utils.cache_utils import (
 )
 from utils.data_loader import fetch_naver_etf_inav_snapshot, fetch_ohlcv, get_latest_trading_day, get_trading_days
 from utils.kis_market import load_cached_kis_domestic_etf_master
+from utils.cash_model import currency_for_country
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
@@ -162,7 +163,7 @@ def _resolve_ticker_meta_item(
     # (계좌 담기 검증 validate_ticker_for_account 와 동일한 규칙 — 낙관적 표시와 실제 저장의 시장 일치)
     if len(matches) > 1 and account_id:
         try:
-            from utils.cash_model import currency_for_country, resolve_cash_currencies
+            from utils.cash_model import resolve_cash_currencies
             from utils.settings_loader import get_account_settings
 
             acct = get_account_settings(account_id)
@@ -359,11 +360,16 @@ def _build_fx_rates_for_holdings(
     return result
 
 
-def _calculate_consolidated_average_buy_price(ticker: str) -> float | None:
-    """모든 계좌의 동일 티커 보유분을 합산해 통합 평균매입가를 계산한다."""
+def _calculate_consolidated_average_buy_price(ticker: str, currency: str | None = None) -> float | None:
+    """모든 계좌의 동일 티커 보유분을 합산해 통합 평균매입가를 계산한다.
+
+    같은 티커가 여러 시장에 상장된 경우(예: IOO — 미국 USD / 호주 AUD)가 있어,
+    ``currency`` 가 주어지면 그 통화 보유분만 합산한다(통화가 섞여 계산 불가한 상황 자체를 없앤다).
+    """
     ticker_key = str(ticker or "").strip().upper()
     if not ticker_key:
         raise ValueError("ticker 값이 필요합니다.")
+    target_currency = str(currency or "").strip().upper()
 
     total_quantity = 0.0
     total_buy_amount = 0.0
@@ -383,9 +389,12 @@ def _calculate_consolidated_average_buy_price(ticker: str) -> float | None:
             if quantity <= 0 or average_buy_price <= 0:
                 continue
 
-            currency = str(holding.get("currency") or "").strip().upper()
-            if currency:
-                currencies.add(currency)
+            holding_currency = str(holding.get("currency") or "").strip().upper()
+            # 조회 대상 통화가 정해져 있으면 다른 시장 상장분(동일 티커)은 제외한다.
+            if target_currency and holding_currency and holding_currency != target_currency:
+                continue
+            if holding_currency:
+                currencies.add(holding_currency)
             total_quantity += quantity
             total_buy_amount += quantity * average_buy_price
 
@@ -860,7 +869,9 @@ def build_ticker_detail_payload(
             "holdings_as_of_date": None,
             "holdings_price_as_of_date": None,
             "holdings_error": None,
-            "my_average_buy_price": _calculate_consolidated_average_buy_price(db_ticker),
+            "my_average_buy_price": _calculate_consolidated_average_buy_price(
+                db_ticker, currency_for_country(country_code)
+            ),
             "error": fetch_error or "가격 데이터를 가져오지 못했습니다.",
         }
 
@@ -1003,7 +1014,9 @@ def build_ticker_detail_payload(
         "holdings_as_of_date": holdings_as_of_date,
         "holdings_price_as_of_date": holdings_price_as_of_date,
         "holdings_error": holdings_error,
-        "my_average_buy_price": _calculate_consolidated_average_buy_price(db_ticker),
+        "my_average_buy_price": _calculate_consolidated_average_buy_price(
+            db_ticker, currency_for_country(country_code)
+        ),
     }
 
 
