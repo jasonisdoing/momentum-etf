@@ -1610,7 +1610,7 @@ export function ComparePageClient() {
             </div>
           </section>
         ) : activeTab === "monthly" ? (
-          <section className="compareMatrix compareMatrixBody">
+          <section className="compareMatrix compareMatrixBody compareMatrixMonthlyScroll">
             {monthlyRows.length === 0 ? (
               <div className="compareMatrixWide" style={{ color: "var(--text-muted)" }}>
                 월간 변동률을 계산할 데이터가 없습니다.
