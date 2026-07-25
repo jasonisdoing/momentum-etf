@@ -1738,6 +1738,58 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
     return {code: all_data[code] for code in normalized_codes if code in all_data}
 
 
+# 해외 ETF NAV 캐시 — 종목별로 조회하므로 티커 단위로 담는다(한국은 전체 목록 1회 조회).
+# (모듈 상단에서 datetime.time 을 import 하고 있어 시간 비교는 datetime 으로 한다.)
+_OVERSEAS_NAV_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
+_OVERSEAS_NAV_TTL_SECONDS = 300
+
+
+def fetch_overseas_etf_nav_snapshot(ticker: str, country_code: str) -> dict[str, float]:
+    """해외(미국·호주) ETF 의 NAV·괴리율을 yfinance ``navPrice`` 로 조회한다.
+
+    괴리율 계산식은 한국과 동일하다: ``(현재가 / NAV - 1) × 100``.
+    한국 네이버 iNAV 와 달리 실시간 추정치(iNAV)가 아니라 **직전 공시 NAV** 라 장중에는 지연이 있다.
+    값이 없으면 빈 dict(화면은 '-').
+    """
+    code = str(ticker or "").strip().upper()
+    cc = str(country_code or "").strip().lower()
+    if not code or cc not in ("us", "au"):
+        return {}
+
+    cache_key = f"{cc}:{code}"
+    now = datetime.now()
+    cached = _OVERSEAS_NAV_CACHE.get(cache_key)
+    if cached is not None and (now - cached[0]).total_seconds() < _OVERSEAS_NAV_TTL_SECONDS:
+        return dict(cached[1])
+
+    symbol = f"{code}.AX" if cc == "au" else code
+    try:
+        import yfinance as yf
+
+        info = getattr(yf.Ticker(symbol), "info", {}) or {}
+    except Exception as exc:
+        logger.debug("해외 ETF NAV 조회 실패 (%s): %s", symbol, exc)
+        return {}
+
+    def _positive_float(value: Any) -> float | None:
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return float(value)
+        return None
+
+    nav_value = _positive_float(info.get("navPrice"))
+    price_value = _positive_float(info.get("regularMarketPrice")) or _positive_float(info.get("previousClose"))
+    if nav_value is None:
+        return {}
+
+    entry: dict[str, float] = {"nav": nav_value}
+    if price_value is not None:
+        entry["price"] = price_value
+        entry["deviation"] = ((price_value / nav_value) - 1.0) * 100.0
+
+    _OVERSEAS_NAV_CACHE[cache_key] = (now, dict(entry))
+    return entry
+
+
 def _parse_comma_number(value: str | None) -> float | None:
     """쉼표가 포함된 숫자 문자열을 float로 변환한다."""
     if value is None:

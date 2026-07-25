@@ -33,7 +33,13 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
-from utils.data_loader import fetch_naver_etf_inav_snapshot, fetch_ohlcv, get_latest_trading_day, get_trading_days
+from utils.data_loader import (
+    fetch_naver_etf_inav_snapshot,
+    fetch_ohlcv,
+    fetch_overseas_etf_nav_snapshot,
+    get_latest_trading_day,
+    get_trading_days,
+)
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.cash_model import currency_for_country
 from utils.portfolio_io import load_portfolio_master
@@ -409,6 +415,7 @@ def _calculate_consolidated_average_buy_price(ticker: str, currency: str | None 
 
 def _build_overseas_etf_info_payload(
     *,
+    ticker: str,
     cache_document: dict[str, object] | None,
     holdings_cache: dict[str, object],
     latest_row: dict[str, object] | None,
@@ -436,6 +443,11 @@ def _build_overseas_etf_info_payload(
         "listed_date": meta_cache.get("listed_date"),
         "volume": int(latest_row["volume"]) if latest_row and latest_row.get("volume") is not None else None,
     }
+
+    # NAV·괴리율 — yfinance navPrice 기준(한국 네이버 iNAV 와 계산식 동일, 다만 실시간 추정이 아닌 공시 NAV).
+    nav_snapshot = fetch_overseas_etf_nav_snapshot(ticker, country_code)
+    payload["nav"] = _as_float(nav_snapshot.get("nav"))
+    payload["deviation"] = _as_float(nav_snapshot.get("deviation"))
 
     # 환율(해외 종목 표기용) — 한국 페이로드와 같은 소스.
     rates = get_exchange_rates()
@@ -991,6 +1003,7 @@ def build_ticker_detail_payload(
             # 해외(미국·호주) ETF — 메타 캐시의 기본 정보(보수·순자산·배당 등)를 함께 노출한다.
             # (한국은 iNAV/괴리율까지 계산하는 별도 페이로드를 쓴다.)
             etf_info = _build_overseas_etf_info_payload(
+                ticker=db_ticker,
                 cache_document=cache_document if isinstance(cache_document, dict) else None,
                 holdings_cache=holdings_cache,
                 latest_row=rows[-1] if rows else None,
