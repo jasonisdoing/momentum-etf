@@ -2702,6 +2702,21 @@ a {
   color: #1d4ed8;
 }
 
+/* 지표 셀 보조 설명(예: MDD 낙폭 구간) — 값 아래 작게. */
+.compareMetricCell:has(.compareMetricCellHint) {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+}
+
+.compareMetricCellHint {
+  color: var(--text-muted, #64748b);
+  font-size: 0.7rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .compareProductCard,
 .compareProductEmpty,
 .compareHoldingCount,
