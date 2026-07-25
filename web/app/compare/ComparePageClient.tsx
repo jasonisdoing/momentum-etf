@@ -485,30 +485,41 @@ function getChartDateRange(
 }
 
 /**
- * 주어진 기간의 일간 종가에서 MDD(%) 계산.
+ * 주어진 기간의 일간 종가에서 MDD(%) 와 그 구간(고점일~저점일)을 계산.
  * MDD = min((price - running_max) / running_max) × 100
  */
-function getMaxDrawdownPct(rows: PriceRow[], dateRange: ChartDateRange | null): number | null {
+type MaxDrawdownResult = { pct: number; peakDate: string | null; troughDate: string | null };
+
+function getMaxDrawdown(rows: PriceRow[], dateRange: ChartDateRange | null): MaxDrawdownResult | null {
   if (!dateRange) return null;
   const seriesRows = getPricedRows(rows).filter(
     (row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate,
   );
   if (seriesRows.length < 2) return null;
   let runningMax = seriesRows[0].close ?? 0;
+  let runningMaxDate = seriesRows[0].date;
   let maxDrawdown = 0; // 0 이하의 값(음수)으로 갱신됨
+  let peakDate: string | null = null;
+  let troughDate: string | null = null;
   for (const row of seriesRows) {
     const price = row.close ?? 0;
     if (price <= 0) continue;
     if (price > runningMax) {
       runningMax = price;
+      runningMaxDate = row.date;
       continue;
     }
     if (runningMax <= 0) continue;
     const drawdown = (price - runningMax) / runningMax;
-    if (drawdown < maxDrawdown) maxDrawdown = drawdown;
+    if (drawdown < maxDrawdown) {
+      maxDrawdown = drawdown;
+      peakDate = runningMaxDate; // 낙폭이 시작된 고점일
+      troughDate = row.date; // 최대 낙폭이 찍힌 저점일
+    }
   }
-  return maxDrawdown * 100;
+  return { pct: maxDrawdown * 100, peakDate, troughDate };
 }
+
 
 /**
  * 샤프지수 = (일간 수익률 평균 / 표준편차) × √252.
@@ -1504,10 +1515,17 @@ export function ComparePageClient() {
               </div>
             </div>
             {sortedProducts.map((product) => {
-              const value = getMaxDrawdownPct(product.detail.rows, chartDateRange);
+              const mdd = getMaxDrawdown(product.detail.rows, chartDateRange);
+              const value = mdd?.pct ?? null;
+              // MDD 값 아래에 낙폭 구간(고점일~저점일)을 작게 표기한다.
+              const period =
+                mdd?.peakDate && mdd?.troughDate
+                  ? `${formatDateKey(mdd.peakDate)}~${formatDateKey(mdd.troughDate)}`
+                  : null;
               return (
                 <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
                   {formatPercent(value)}
+                  {period ? <div className="compareMetricCellHint">({period})</div> : null}
                 </div>
               );
             })}
