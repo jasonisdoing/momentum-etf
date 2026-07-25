@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+# python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2019-01-01"
 SLACK_CHANNEL = "C0A0X2LTS3X"
 
