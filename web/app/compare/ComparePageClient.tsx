@@ -110,7 +110,7 @@ type PerformanceMetricRange =
   | { key: string; label: string; kind: "period"; days: number }
   | { key: string; label: string; kind: "ytd" };
 
-const MAX_PRODUCTS = 6;
+const MAX_PRODUCTS = 8;
 const COMPARE_GROUPS_KEY = "momentum-etf:compare:groups";
 const COMPARE_ACTIVE_GROUP_KEY = "momentum-etf:compare:active-group";
 const COMPARE_TEMP_SELECTION_KEY = "momentum-etf:compare:temp-selection";
