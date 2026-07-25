@@ -709,7 +709,8 @@ def _update_reference_meta_for_type(
                     update_doc[f] = stock[f]
 
             # ETF 상세 캐시 갱신(holdings/배당 등). backtest_stats 는 배치 A(문서 필드)가 소유하므로 넘기지 않는다.
-            if country_code == "kor":
+            # ETF 가 아닌 국내 개별주(예: KOSDAQ 다우데이타)는 ETF 상세 API 가 404 이므로 호출 자체를 건너뛴다.
+            if country_code == "kor" and stock.get("is_etf"):
                 try:
                     existing_doc = existing_meta_cache_map.get(str(ticker).strip().upper())
                     _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name), existing_cache_doc=existing_doc)
