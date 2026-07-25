@@ -1458,7 +1458,8 @@ export function ComparePageClient() {
           </div>
         ) : null}
 
-        <section className="compareMatrix">
+        {/* 월간 분석은 행이 많아 종목 헤더를 고정(sticky)하고 아래 행만 스크롤한다. */}
+        <section className={`compareMatrix${activeTab === "monthly" ? " compareMatrixStickyHeader" : ""}`}>
           <div className="compareMatrixLabel compareMatrixLabelWide compareProductHeaderLabel">종목</div>
           {sortedProducts.map((product, index) => (
             <div
