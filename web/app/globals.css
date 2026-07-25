@@ -2721,10 +2721,17 @@ a {
    부모(.comparePage)가 flex:1 1 auto + min-height:0 으로 뷰포트 높이에 갇혀 있어
    position:sticky 는 한 화면 분량만 유지된다. 그래서 본문 섹션이 남은 높이를 차지하고
    그 안에서 스크롤하게 한다. 헤더/본문 컬럼 폭이 어긋나지 않게 스크롤바 자리를 미리 확보한다. */
-/* 월간 분석 전용 — 라벨 열 폭은 기본값(좁게)을 그대로 쓰고, 년월을 "202607" 로 압축 표기해
-   동일가중 평균까지 한 줄에 담는다. 헤더/본문 모두 스크롤바 자리를 확보해 컬럼 정렬을 맞춘다. */
+/* 월간 분석 전용 — 년월("202607")과 동일가중 평균을 한 줄에 담는다.
+   라벨 셀은 값 셀과 같은 좌우 패딩(0.85rem)을 써서 라벨 안 평균값 끝이 옆 종목 값 끝과
+   같은 선에 놓이게 하고, 그만큼 라벨 열 폭(합 9rem)을 준다.
+   헤더/본문 모두 스크롤바 자리를 확보해 두 섹션의 컬럼이 어긋나지 않게 한다. */
 .compareMatrixMonthly {
+  grid-template-columns: 3.6rem 5.4rem repeat(8, minmax(8.5rem, 1fr));
   scrollbar-gutter: stable;
+}
+
+.compareMatrixMonthly .compareMatrixLabel {
+  padding-inline: 0.85rem;
 }
 
 .compareMatrixMonthlyScroll {
@@ -2733,14 +2740,27 @@ a {
   overflow-y: auto;
 }
 
-/* 월간 분석 라벨 — "202607"(왼쪽) + 동일가중 평균(오른쪽)을 한 줄에 양쪽 정렬로 둔다. */
+/* 월간 분석 라벨 — "202607"(왼쪽) + 동일가중 평균(오른쪽)을 한 줄에 양쪽 정렬로 둔다.
+   글자 크기는 값 셀(.compareMetricCell)과 같게 두어 행 간 크기가 튀지 않게 한다. */
 .compareMonthlyLabelRow {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.4rem;
-  width: 100%;
+  /* 부모(.compareMatrixLabel)가 flex 라서 width:100% 만으로는 셀 폭을 채우지 못한다.
+     flex 아이템으로 늘려야 년월(왼쪽)·평균(오른쪽) 끝이 셀 양끝에 정확히 맞는다. */
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.96rem; /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
+  /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다. */
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* 평균값은 항상 오른쪽 끝에 붙인다(년월 길이와 무관하게). */
+.compareMonthlyLabelRow > span:last-child {
+  margin-left: auto;
+  text-align: right;
 }
 
 /* 월간 분석 — 해가 바뀌는 행 위에 굵은 구분선. */
