@@ -2711,6 +2711,17 @@ a {
   color: #1d4ed8;
 }
 
+/* 월간 분석 — 종목 헤더 섹션을 상단에 고정하고 아래 행만 스크롤되게 한다.
+   앱 상단 헤더(.appTopHeader, sticky)가 이미 top:0 을 차지하므로 그 높이만큼 내려 붙인다.
+   헤더/본문이 각각 같은 grid-template-columns 를 쓰는 별개 섹션이라 컬럼 정렬은 유지된다. */
+.compareMatrixStickyHeader {
+  position: sticky;
+  top: var(--app-header-height, 3rem);
+  z-index: 6;
+  background: #fff;
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
+}
+
 /* 월간 분석 — 해가 바뀌는 행 위에 굵은 구분선. */
 .compareMonthlyYearBoundary {
   border-top: 2px solid #94a3b8;
