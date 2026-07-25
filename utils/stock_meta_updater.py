@@ -444,7 +444,8 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
                 break
 
         if header_idx == -1:
-            logger.warning(f"[BetaShares] {ticker_clean} CSV 헤더 시작부(Ticker,)를 찾지 못했습니다.")
+            # 비 BetaShares ETF(예: Fidelity FEMX)는 CSV 형식이 없거나 달라 실패 — yfinance 폴백이 있으니 debug.
+            logger.debug(f"[BetaShares] {ticker_clean} CSV 헤더 시작부(Ticker,)를 찾지 못했습니다.")
             return None
 
         # 데이터 파싱
@@ -456,7 +457,7 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
             name_col = headers.index("Name")
             weight_col = headers.index("Weight (%)")
         except ValueError as e:
-            logger.warning(f"[BetaShares] {ticker_clean} CSV 필수 열 매핑 실패: {e}")
+            logger.debug(f"[BetaShares] {ticker_clean} CSV 필수 열 매핑 실패: {e}")
             return None
 
         items = []
@@ -496,7 +497,8 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
             "holdings": items,
         }
     except Exception as exc:
-        logger.warning(f"[BetaShares] {ticker_clean} CSV 수집 실패: {exc}")
+        # 모든 호주 ETF에 BetaShares 를 먼저 시도하므로 비 BetaShares(404 등)는 흔하다 — yfinance 폴백이 있어 debug.
+        logger.debug(f"[BetaShares] {ticker_clean} CSV 수집 실패: {exc}")
         return None
 
 
@@ -546,7 +548,8 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
             "holdings": items,
         }
     except Exception as exc:
-        logger.warning(f"[yfinance] {symbol} 수집 실패: {exc}")
+        # 개별 소스 실패는 debug. 모든 소스 실패 시 호출부에서 "holdings 수집 실패(건너뜀)" 로 한 번 경고한다.
+        logger.debug(f"[yfinance] {symbol} 수집 실패: {exc}")
         return None
 
 
