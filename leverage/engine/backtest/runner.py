@@ -13,7 +13,8 @@ from leverage.data_adapter import (
     download_prices,
 )
 from leverage.engine.backtest.signals import compute_signals, pick_target
-from leverage.report import format_kr_money, render_table_eaw
+from leverage.report import format_kr_money
+from utils.report import render_table_eaw
 
 
 def run_backtest(
