@@ -67,7 +67,7 @@ _HOLDING_COUNTRY_ORDER: list[str] = [
 ]
 
 
-def _classify_holding_country(ticker: str) -> str:
+def _classify_ticker_country(ticker: str) -> str:
     """티커 패턴만으로 종목 국가를 미국/한국/호주/기타국가 4개로 분류한다.
 
     호주 종목은 시스템 전 구간에서 `ASX:` 접두사가 강제 부착되어 유통된다
@@ -88,6 +88,33 @@ def _classify_holding_country(ticker: str) -> str:
     return _HOLDING_COUNTRY_OTHER
 
 
+# 상장 통화 → 종목 국가. 표에 없는 통화는 기타국가로 본다(임의 추정하지 않는다).
+_HOLDING_COUNTRY_BY_LISTING_CURRENCY: dict[str, str] = {
+    "AUD": _HOLDING_COUNTRY_AU,
+    "KRW": _HOLDING_COUNTRY_KOR,
+    "USD": _HOLDING_COUNTRY_US,
+}
+
+
+def _classify_holding_country(component: dict[str, Any]) -> str:
+    """구성종목의 상장 국가를 미국/한국/호주/기타국가 4개로 분류한다.
+
+    구성종목 수집 소스가 알려준 원본 심볼(`yahoo_symbol`, 예: `NAB.AX`)과 상장 통화
+    (`listing_currency`)가 티커 패턴보다 정확하므로 먼저 본다. 둘 다 없을 때만
+    티커 패턴으로 판정한다. (`NAB` 처럼 점 없는 영문 티커는 패턴만으로는 미국과
+    구분되지 않는다.)
+    """
+    yahoo_symbol = _normalize_ticker(component.get("yahoo_symbol"))
+    if yahoo_symbol.endswith(".AX"):
+        return _HOLDING_COUNTRY_AU
+
+    listing_currency = _normalize_ticker(component.get("listing_currency"))
+    if listing_currency:
+        return _HOLDING_COUNTRY_BY_LISTING_CURRENCY.get(listing_currency, _HOLDING_COUNTRY_OTHER)
+
+    return _classify_ticker_country(component.get("ticker"))
+
+
 def _ensure_asx_prefix(ticker: str) -> str:
     """호주 시장 종목 ticker 에 `ASX:` 접두사를 강제 부착한다.
 
@@ -104,6 +131,15 @@ def _ensure_asx_prefix(ticker: str) -> str:
     if upper.endswith(".AX"):
         return f"ASX:{upper[:-3]}"
     return f"ASX:{upper}"
+
+
+def _strip_asx_prefix(ticker: str) -> str:
+    """`ASX:` 접두사를 벗긴 티커. 접두사가 없으면 그대로 돌려준다.
+
+    stock_meta / stock_cache_meta 는 호주 종목도 접두사 없이(`SYI`) 저장하므로,
+    캐시를 조회할 때는 화면 표준 표기(`ASX:SYI`)에서 접두사를 벗겨야 한다.
+    """
+    return _normalize_ticker(ticker).removeprefix("ASX:")
 
 
 def _resolve_row_ticker(row: Any) -> tuple[str, str, str]:
@@ -248,7 +284,8 @@ def _append_account_components(
 
     # 구성종목 캐시를 ETF×종목풀 조합마다 개별 조회하면 수백 회 DB 왕복이 된다.
     # 종목풀당 1회 배치 조회로 모아 두고 아래 루프에서는 맵 조회만 한다.
-    target_tickers = [_resolve_row_ticker(r)[0] for _, r in df.iterrows() if _is_target_row(r)]
+    # 캐시 키는 ASX: 접두사가 없는 형태이므로 조회 시에만 접두사를 벗긴다.
+    target_tickers = [_strip_asx_prefix(_resolve_row_ticker(r)[0]) for _, r in df.iterrows() if _is_target_row(r)]
     cache_maps = {t_type: get_stock_cache_meta_map(t_type, target_tickers) for t_type in ticker_types}
 
     for _, row in df.iterrows():
@@ -266,9 +303,10 @@ def _append_account_components(
         ticker, etf_currency, etf_price_country_code = _resolve_row_ticker(row)
         portfolio_weight = valuation / total_valuation
 
+        cache_lookup_ticker = _strip_asx_prefix(ticker)
         cache_doc = None
         for t_type in ticker_types:
-            cache_doc = cache_maps[t_type].get(ticker)
+            cache_doc = cache_maps[t_type].get(cache_lookup_ticker)
             if cache_doc and cache_doc.get("holdings_cache", {}).get("items"):
                 break
 
@@ -367,12 +405,18 @@ def _append_account_components(
             source_current_value = valuation * component_ratio
             source_cumulative_profit = etf_profit * component_ratio
             source_return_pct = (source_cumulative_profit / source_buy_amount * 100.0) if source_buy_amount > 0 else None
-            component_price_country_code = _infer_price_country_code(comp_ticker)
-            component_currency = "KRW" if component_price_country_code == "kor" else "AUD" if component_price_country_code == "au" else "USD"
+            # 거래소 접미사가 붙은 원본 심볼(NAB.AX)이 티커(NAB)보다 상장 시장을 정확히 알려준다.
+            component_yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+            component_listing_currency = str(item.get("listing_currency") or "").strip().upper()
+            component_price_country_code = _infer_price_country_code(component_yahoo_symbol or comp_ticker)
+            component_currency = component_listing_currency or (
+                "KRW" if component_price_country_code == "kor" else "AUD" if component_price_country_code == "au" else "USD"
+            )
             component_price_fields = {
                 "raw_code": item.get("raw_code"),
                 "reuters_code": item.get("reuters_code"),
                 "yahoo_symbol": item.get("yahoo_symbol"),
+                "listing_currency": item.get("listing_currency"),
             }
 
             if comp_ticker in merged:
@@ -642,11 +686,7 @@ def load_holding_country_components(country_code: str) -> dict[str, Any]:
     if code == _HOLDING_COUNTRY_ALL:
         filtered_components = all_components
     else:
-        filtered_components = [
-            comp
-            for comp in all_components
-            if _classify_holding_country(str(comp.get("ticker") or "")) == code
-        ]
+        filtered_components = [comp for comp in all_components if _classify_holding_country(comp) == code]
 
     return {
         "account_id": f"HOLDING_COUNTRY:{code}",
