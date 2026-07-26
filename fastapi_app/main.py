@@ -12,6 +12,7 @@ from .routes.assets import router as assets_router
 from .routes.aus_market_stocks import router as aus_market_stocks_router
 from .routes.daily import router as daily_router
 from .routes.dashboard import router as dashboard_router
+from .routes.data_sources import router as data_sources_router
 from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
@@ -75,6 +76,7 @@ app.include_router(live_24h_router)
 app.include_router(holdings_components_router)
 app.include_router(dashboard_router)
 app.include_router(daily_router)
+app.include_router(data_sources_router)
 app.include_router(kor_market_stocks_router)
 app.include_router(market_router)
 app.include_router(market_trend_router)
