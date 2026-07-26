@@ -170,6 +170,29 @@ def _clean_ticker_slots(items: Any) -> list[dict[str, Any]]:
     return slots
 
 
+def _apply_asx_prefix_for_account(slots: list[dict[str, Any]], account_id: str) -> list[dict[str, Any]]:
+    """호주 계좌면 티커에 `ASX:` 접두사를 붙여 저장한다.
+
+    DB 저장 값도 시스템 표준 표기를 따른다
+    (docs/developer_guide.md "호주 티커(ASX) 식별 규칙").
+    """
+    from utils.asx_ticker import ensure_asx_prefix
+    from utils.settings_loader import get_account_settings
+
+    country_code = str(get_account_settings(account_id).get("country_code") or "").strip().lower()
+    if country_code != "au":
+        return slots
+
+    normalized: list[dict[str, Any]] = []
+    for slot in slots:
+        ticker = str(slot.get("ticker") or "").strip()
+        if not ticker:
+            normalized.append(slot)
+            continue
+        normalized.append({**slot, "ticker": ensure_asx_prefix(ticker)})
+    return normalized
+
+
 def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | None = None) -> dict[str, Any]:
     base_clean = {key: value for key, value in (base or {}).items() if value is not None}
     value_clean = {key: value for key, value in (values or {}).items() if value is not None}
@@ -542,7 +565,7 @@ def save_asset_helper_settings(
 ) -> dict[str, Any]:
     resolved = _resolve_account_id(account_id)
     clean_weight_mode = _clean_weight_mode(weight_mode)
-    ticker_slots = _clean_ticker_slots(tickers)
+    ticker_slots = _apply_asx_prefix_for_account(_clean_ticker_slots(tickers), resolved)
     clean_tickers = _clean_tickers(ticker_slots)
     if len(clean_tickers) < 1:
         raise ValueError("저장할 종목이 1개 이상 필요합니다.")

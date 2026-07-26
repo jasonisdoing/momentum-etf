@@ -3722,6 +3722,28 @@ a {
   background: rgba(199, 210, 254, 0.62);
 }
 
+/* 실제 보유 중인 종목 — 배경 녹색(보유 컬럼 대체). 회색/고정 행보다 우선. */
+.rankAgGrid .ag-row.rankHeldRow,
+.rankAgGrid .ag-row.rankHeldRow.rankFixedRow {
+  background: rgba(34, 197, 94, 0.28);
+}
+
+.rankAgGrid .ag-row.rankHeldRow:hover,
+.rankAgGrid .ag-row.rankHeldRow.rankFixedRow:hover {
+  background: rgba(34, 197, 94, 0.38);
+}
+
+/* 회색(음수추세)이면서 보유인 행만 회녹색. (비보유 회색은 원래 회색 유지) */
+.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow,
+.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow.rankFixedRow {
+  background: rgba(120, 150, 120, 0.42);
+}
+
+.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow:hover,
+.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow.rankFixedRow:hover {
+  background: rgba(120, 150, 120, 0.52);
+}
+
 .rankAgGrid .ag-cell-value,
 .rankAgGrid .ag-group-value {
   width: 100%;

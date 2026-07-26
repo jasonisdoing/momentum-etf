@@ -5,7 +5,7 @@ import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink, stripAsxPrefix } from "../components/TickerDetailLink";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
@@ -237,7 +237,7 @@ function HoldingsBoxView({
                 lineHeight: 1.25,
               }}
             >
-              {formatDisplayName(row.name) || stripAsxPrefix(row.ticker)}
+              {formatDisplayName(row.name) || row.ticker}
             </div>
             {/* 아랫줄: 티커 + 비중 + 변동률 */}
             <div
@@ -250,7 +250,7 @@ function HoldingsBoxView({
               }}
             >
               <div style={{ flex: "0 0 auto", color: "var(--text-muted)", fontSize: "0.85rem" }}>
-                {stripAsxPrefix(row.ticker)}
+                {row.ticker}
               </div>
               <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
                 {weight.toFixed(2)}%

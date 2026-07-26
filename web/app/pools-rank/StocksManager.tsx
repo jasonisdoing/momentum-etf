@@ -701,24 +701,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        field: "보유",
-        headerName: "보유",
-        headerTooltip: "이 종목을 실제로 보유 중인 계좌",
-        minWidth: 120,
-        width: 120,
-        sortable: true,
-        cellClass: "rankHoldCell",
-        cellRenderer: (params: { value: string | null | undefined }) => {
-          const value = String(params.value ?? "").trim();
-          if (!value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          return (
-            <span className="rankHoldAccountsCell" title={value}>
-              {value}
-            </span>
-          );
-        },
-      },
-      {
         colId: "추천",
         headerName: "✓",
         headerTooltip: "추천 — 고정 종목·벤치마크가 아니고, 장기가 양수이며, 단기가 음수가 아닌 종목 중 장기 상위 N개(보유 종목수)",
@@ -1691,6 +1673,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   }
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
+                  }
+                  // 실제 보유 중인 종목은 배경을 녹색으로(보유 컬럼 대체). 보유가 다른 색보다 우선한다.
+                  if (String(params.data?.보유 ?? "").trim()) {
+                    classes.push("rankHeldRow");
                   }
                   return classes.join(" ");
                 }}

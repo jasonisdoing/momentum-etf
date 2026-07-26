@@ -4,20 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
 from utils.market_service import load_ticker_pool_map
 from utils.portfolio_io import load_all_holding_tickers
 
 
 def _normalize_asx_ticker(value: object) -> str:
-    ticker = str(value or "").strip().upper()
-    if not ticker:
-        return ""
-    if ticker.startswith("ASX:"):
-        return ticker
-    if ticker.endswith(".AX"):
-        return f"ASX:{ticker[:-3]}"
-    return f"ASX:{ticker}"
+    """호주 종목 표준 표기(`ASX:NAB`). 공용 규칙을 따른다."""
+    return ensure_asx_prefix(value)
 
 
 def load_aus_index_stock_market(index: str = "ASX200", min_market_cap_ukm: int = 0) -> dict[str, Any]:
@@ -50,7 +45,9 @@ def load_aus_index_stock_market(index: str = "ASX200", min_market_cap_ukm: int =
                 "industry": item.get("industry") or item.get("sector") or "",
                 "sector": item.get("sector") or "",
                 "market": "ASX",
-                "ticker_pools": ", ".join(ticker_pool_map.get(ticker.replace("ASX:", ""), []) or ticker_pool_map.get(ticker, [])),
+                "ticker_pools": ", ".join(
+                    ticker_pool_map.get(strip_asx_prefix(ticker), []) or ticker_pool_map.get(ticker, [])
+                ),
                 "is_held": ticker in held_keys,
                 "current_price": item.get("current_price") or item.get("return_3m_latest_price"),
                 "change_pct": item.get("change_pct"),

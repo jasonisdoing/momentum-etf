@@ -6,7 +6,7 @@ import pandas as pd
 from bson import ObjectId
 
 from services.price_service import get_exchange_rates, get_realtime_snapshot
-from utils.data_loader import get_latest_trading_day
+from utils.asx_ticker import ensure_asx_prefix
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings
@@ -64,8 +64,8 @@ def load_holding_accounts_by_ticker(country_code: str | None = None) -> dict[str
         account_name = str(account_settings.get("name") or t_id)
         for holding in snapshot.get("holdings", []):
             ticker = str(holding.get("ticker") or "").strip().upper()
-            if account_country == "au" and ticker and not ticker.startswith("ASX:"):
-                ticker = f"ASX:{ticker}"
+            if account_country == "au" and ticker:
+                ticker = ensure_asx_prefix(ticker)
             qty = float(holding.get("quantity") or 0)
             if ticker and qty > 0:
                 names = accounts_by_ticker.setdefault(ticker, [])
