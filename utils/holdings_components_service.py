@@ -7,6 +7,7 @@ from typing import Any
 from services.component_price_service import enrich_component_prices
 from services.stock_cache_service import get_stock_cache_meta_map
 from utils.account_registry import load_account_configs
+from utils.asx_ticker import ensure_asx_prefix
 from utils.logger import get_app_logger
 from utils.ticker_registry import load_ticker_type_configs
 
@@ -115,33 +116,6 @@ def _classify_holding_country(component: dict[str, Any]) -> str:
     return _classify_ticker_country(component.get("ticker"))
 
 
-def _ensure_asx_prefix(ticker: str) -> str:
-    """호주 시장 종목 ticker 에 `ASX:` 접두사를 강제 부착한다.
-
-    이미 접두사가 있으면 그대로, 없으면 부착. `.AX` 접미사 형태(`2454.AX`) 도
-    `ASX:2454` 형태로 표준화한다. 6자리 숫자/현금 등 명백히 호주가 아닌 패턴은
-    그대로 둔다 (호출자가 호주임을 이미 알고 부르는 함수이므로 ticker 형식만 본다).
-    """
-    raw = (ticker or "").strip()
-    if not raw:
-        return raw
-    upper = raw.upper()
-    if upper.startswith("ASX:"):
-        return upper
-    if upper.endswith(".AX"):
-        return f"ASX:{upper[:-3]}"
-    return f"ASX:{upper}"
-
-
-def _strip_asx_prefix(ticker: str) -> str:
-    """`ASX:` 접두사를 벗긴 티커. 접두사가 없으면 그대로 돌려준다.
-
-    stock_meta / stock_cache_meta 는 호주 종목도 접두사 없이(`SYI`) 저장하므로,
-    캐시를 조회할 때는 화면 표준 표기(`ASX:SYI`)에서 접두사를 벗겨야 한다.
-    """
-    return _normalize_ticker(ticker).removeprefix("ASX:")
-
-
 def _resolve_row_ticker(row: Any) -> tuple[str, str, str]:
     """보유 행에서 (표준 티커, 환종, 가격 조회 국가코드) 를 뽑는다.
 
@@ -151,7 +125,7 @@ def _resolve_row_ticker(row: Any) -> tuple[str, str, str]:
     raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
     currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
     country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
-    ticker = _ensure_asx_prefix(raw_ticker) if (country_code == "au" or currency == "AUD") else raw_ticker
+    ticker = ensure_asx_prefix(raw_ticker) if (country_code == "au" or currency == "AUD") else raw_ticker
     return ticker, currency, country_code
 
 
@@ -284,8 +258,8 @@ def _append_account_components(
 
     # 구성종목 캐시를 ETF×종목풀 조합마다 개별 조회하면 수백 회 DB 왕복이 된다.
     # 종목풀당 1회 배치 조회로 모아 두고 아래 루프에서는 맵 조회만 한다.
-    # 캐시 키는 ASX: 접두사가 없는 형태이므로 조회 시에만 접두사를 벗긴다.
-    target_tickers = [_strip_asx_prefix(_resolve_row_ticker(r)[0]) for _, r in df.iterrows() if _is_target_row(r)]
+    # 캐시도 시스템 표준 표기(ASX:SYI)로 저장되므로 접두사를 그대로 두고 조회한다.
+    target_tickers = [_resolve_row_ticker(r)[0] for _, r in df.iterrows() if _is_target_row(r)]
     cache_maps = {t_type: get_stock_cache_meta_map(t_type, target_tickers) for t_type in ticker_types}
 
     for _, row in df.iterrows():
@@ -303,10 +277,9 @@ def _append_account_components(
         ticker, etf_currency, etf_price_country_code = _resolve_row_ticker(row)
         portfolio_weight = valuation / total_valuation
 
-        cache_lookup_ticker = _strip_asx_prefix(ticker)
         cache_doc = None
         for t_type in ticker_types:
-            cache_doc = cache_maps[t_type].get(cache_lookup_ticker)
+            cache_doc = cache_maps[t_type].get(ticker)
             if cache_doc and cache_doc.get("holdings_cache", {}).get("items"):
                 break
 
