@@ -46,7 +46,6 @@ data/*
 !data/country/**
 
 # DB 백업 (Atlas → VM 마이그레이션, 로컬 자동 백업, 마이그레이션 스크립트 백업)
-.backups/
 backups/
 
 # MongoDB 컨테이너 데이터 (VM 전용, 로컬에는 없어야 함)

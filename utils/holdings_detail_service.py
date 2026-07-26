@@ -9,7 +9,6 @@ from typing import Any
 from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
 from utils.account_registry import load_account_configs
-from utils.account_stocks_io import get_account_targets, save_account_targets
 from utils.assets_service import load_cash_accounts
 from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
 from utils.cash_model import cash_total_krw
@@ -82,13 +81,15 @@ def _apply_target_metrics(
     if not account_id:
         return rows
 
-    target_items = get_account_targets(account_id)
     if not rows:
         return rows
 
+    # 목표비중은 보유 항목(portfolio_master.holdings)의 target_ratio 필드가 단일 소스다.
+    master = load_portfolio_master(account_id) or {}
     target_map = {
-        _normalize_target_ticker(str(item.get("ticker") or "")): float(item.get("ratio") or 0.0)
-        for item in target_items
+        _normalize_target_ticker(str(h.get("ticker") or "")): float(h["target_ratio"])
+        for h in master.get("holdings") or []
+        if h.get("target_ratio") is not None
     }
     account_total_assets = _compute_account_total_assets_native(rows, cash_info, account_currency, rates)
 
@@ -112,32 +113,12 @@ def _apply_target_metrics(
     return enriched_rows
 
 
-def _save_target_ratio(account_id: str, ticker: str, target_ratio: float | None) -> None:
-    normalized_account_id = str(account_id or "").strip().lower()
-    normalized_ticker = _normalize_target_ticker(ticker)
-    if not normalized_account_id or not normalized_ticker:
-        raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
-
-    targets = get_account_targets(normalized_account_id)
-    remaining_items: list[dict[str, Any]] = []
-    found = False
-
-    for item in targets:
-        item_ticker = _normalize_target_ticker(str(item.get("ticker") or ""))
-        if item_ticker == normalized_ticker:
-            found = True
-            if target_ratio is not None and target_ratio > 0:
-                next_item = dict(item)
-                next_item["ticker"] = normalized_ticker
-                next_item["ratio"] = target_ratio
-                remaining_items.append(next_item)
-            continue
-        remaining_items.append(dict(item))
-
-    if not found and target_ratio is not None and target_ratio > 0:
-        remaining_items.append({"ticker": normalized_ticker, "ratio": target_ratio})
-
-    save_account_targets(normalized_account_id, remaining_items)
+def _set_holding_target_ratio(holding: dict[str, Any], target_ratio: float | None) -> None:
+    """보유 항목의 목표비중 필드를 갱신한다 — 0 이하/None 은 미설정(필드 제거)으로 처리."""
+    if target_ratio is not None and float(target_ratio) > 0:
+        holding["target_ratio"] = float(target_ratio)
+    else:
+        holding.pop("target_ratio", None)
 
 
 def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
@@ -374,7 +355,6 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, _assign_sort_order(new_holdings))
-    _save_target_ratio(account_id, target_ticker, None)
     
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
@@ -418,6 +398,8 @@ def update_holding(
                 h["average_buy_price"] = float(average_buy_price)
             if memo is not None:
                 h["memo"] = str(memo).strip()
+            if target_ratio is not None:
+                _set_holding_target_ratio(h, float(target_ratio))
             found = True
             break
 
@@ -425,8 +407,6 @@ def update_holding(
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, _assign_sort_order(holdings))
-    if target_ratio is not None:
-        _save_target_ratio(account_id, target_ticker, float(target_ratio))
 
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
@@ -488,10 +468,10 @@ def add_holding(
         "sort_order": next_sort_order,
     }
 
+    if target_ratio is not None:
+        _set_holding_target_ratio(new_holding, float(target_ratio))
     holdings.append(new_holding)
     save_portfolio_master(account_id, _assign_sort_order(holdings))
-    if target_ratio is not None:
-        _save_target_ratio(account_id, raw_ticker, float(target_ratio))
 
     # 변경 사항을 스냅샷에 즉시 동기화
     try:

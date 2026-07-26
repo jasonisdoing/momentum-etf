@@ -619,6 +619,7 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "intl_shares_value": intl_val,
                 "intl_shares_change": intl_change,
                 "holdings": acc.get("holdings", []),
+                "asset_helper": acc.get("asset_helper"),
                 "updated_at": acc.get("updated_at"),
             }
     return None
@@ -702,6 +703,55 @@ def save_portfolio_master(
     except Exception as e:
         logger.error(f"Error saving portfolio master: {e}")
         return False
+
+
+def update_account_asset_helper(
+    account_id: str,
+    *,
+    target_ratio_by_ticker: dict[str, float],
+    helper_settings: dict[str, Any],
+) -> None:
+    """자산 헬퍼 데이터를 portfolio_master 에 저장한다 (단일 컬렉션 원칙).
+
+    - 종목별 목표비중: 해당 계좌 보유 항목의 ``target_ratio`` 필드로 저장.
+      맵에 없는 보유 항목은 필드를 제거한다(미설정 명시 — 임의 0 보정 금지).
+    - 계좌 단위 설정(weight_mode·백테스트 등): 계좌 객체의 ``asset_helper`` 필드로 저장.
+
+    맵의 티커가 보유 목록에 없으면 에러를 낸다(fail loud — 종목 목록의 소스는 보유 목록이다).
+    """
+    from utils.asx_ticker import strip_asx_prefix
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결 실패 — portfolio_master 를 저장할 수 없습니다.")
+
+    doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
+    if not doc:
+        raise RuntimeError("portfolio_master 문서가 없습니다.")
+
+    accounts = doc.get("accounts", [])
+    account = next((a for a in accounts if str(a.get("account_id")) == str(account_id)), None)
+    if account is None:
+        raise RuntimeError(f"portfolio_master 에 계좌가 없습니다: {account_id}")
+
+    # 비교 키는 ASX: 접두사를 벗겨 통일한다(저장 표기는 보유 항목 원본을 유지).
+    normalized_ratios = {strip_asx_prefix(t): float(r) for t, r in target_ratio_by_ticker.items()}
+    holdings = account.get("holdings", [])
+    holding_keys = {strip_asx_prefix(str(h.get("ticker") or "")) for h in holdings}
+    unmatched = sorted(set(normalized_ratios) - holding_keys)
+    if unmatched:
+        raise RuntimeError(f"보유 목록에 없는 종목의 비중은 저장할 수 없습니다: {', '.join(unmatched)}")
+
+    for holding in holdings:
+        key = strip_asx_prefix(str(holding.get("ticker") or ""))
+        if key in normalized_ratios:
+            holding["target_ratio"] = normalized_ratios[key]
+        else:
+            holding.pop("target_ratio", None)
+
+    account["asset_helper"] = dict(helper_settings)
+    account["updated_at"] = _now_kst()
+    db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
 
 
 def save_daily_snapshot(
