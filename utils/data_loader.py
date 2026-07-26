@@ -2180,7 +2180,8 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     search_url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/search/stocks"
 
-    for sym in uncached:
+    def _search_one(sym: str) -> tuple[str, str | None]:
+        """심볼 1개를 검색해 (심볼, productCode) 를 반환한다. 실패 시 코드는 None."""
         try:
             # 토스는 BRK-A 등 하이픈(-)이 들어간 경우 BRK.A로 검색해야 결과가 나옵니다.
             search_query = sym.replace("-", ".")
@@ -2198,29 +2199,30 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
             us_stocks = [s for s in stocks if not str(s.get("stockCode") or "").startswith("A")]
 
             # matchType이 EXACT인 첫 번째 미국 종목 사용
-            product_code: str | None = None
             for stock in us_stocks:
                 if stock.get("matchType") == "EXACT":
-                    product_code = stock.get("stockCode")
-                    break
+                    return sym, stock.get("stockCode")
 
             # EXACT 없으면 stockName이 심볼(원래 심볼 또는 검색 심볼)과 동일한 첫 번째 미국 종목
-            if not product_code:
-                for stock in us_stocks:
-                    name = str(stock.get("stockName") or "").strip().upper()
-                    if name == sym or name == search_query:
-                        product_code = stock.get("stockCode")
-                        break
+            for stock in us_stocks:
+                name = str(stock.get("stockName") or "").strip().upper()
+                if name == sym or name == search_query:
+                    return sym, stock.get("stockCode")
 
+            logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
+            mark_failed(sym, source="토스", reason="미국 주식 검색 결과 없음")
+            return sym, None
+        except Exception as exc:
+            logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
+            return sym, None
+
+    # 심볼당 1회 요청이라 순차로 돌면 수백 개일 때 수십 초가 걸린다(응답 자체는 ~80ms).
+    # 실시간 시세 병렬 조회와 동일하게 10 스레드로 제한해 동시에 요청한다.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for sym, product_code in executor.map(_search_one, uncached):
             if product_code:
                 _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
                 result[sym] = product_code
-            else:
-                logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
-                mark_failed(sym, source="토스", reason="미국 주식 검색 결과 없음")
-
-        except Exception as exc:
-            logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
 
     return result
 

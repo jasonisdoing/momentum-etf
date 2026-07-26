@@ -45,18 +45,21 @@ def _infer_price_country_code(ticker: str) -> str:
 
 
 # 종목 국가 분류 (보유종목 상세 화면의 필터 셀렉터용).
-# 미국 / 한국 / 호주 / 기타국가 4개 그룹.
+# 전체 / 미국 / 한국 / 호주 / 기타국가 5개 그룹 (전체는 분류 결과가 아니라 "필터 없음").
+_HOLDING_COUNTRY_ALL = "all"
 _HOLDING_COUNTRY_US = "us"
 _HOLDING_COUNTRY_KOR = "kor"
 _HOLDING_COUNTRY_AU = "au"
 _HOLDING_COUNTRY_OTHER = "other"
 _HOLDING_COUNTRY_LABELS: dict[str, str] = {
+    _HOLDING_COUNTRY_ALL: "전체",
     _HOLDING_COUNTRY_US: "미국",
     _HOLDING_COUNTRY_KOR: "한국",
     _HOLDING_COUNTRY_AU: "호주",
     _HOLDING_COUNTRY_OTHER: "기타국가",
 }
 _HOLDING_COUNTRY_ORDER: list[str] = [
+    _HOLDING_COUNTRY_ALL,
     _HOLDING_COUNTRY_US,
     _HOLDING_COUNTRY_KOR,
     _HOLDING_COUNTRY_AU,
@@ -104,7 +107,10 @@ def _ensure_asx_prefix(ticker: str) -> str:
 
 
 def list_holding_country_options() -> list[dict[str, str]]:
-    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (미국, 한국, 호주, 기타국가 순)."""
+    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (전체, 미국, 한국, 호주, 기타국가 순).
+
+    첫 항목이 화면의 기본 선택값이 된다.
+    """
     return [
         {"code": code, "label": _HOLDING_COUNTRY_LABELS[code]}
         for code in _HOLDING_COUNTRY_ORDER
@@ -598,11 +604,12 @@ def load_account_holdings_components(
 
 
 def load_holding_country_components(country_code: str) -> dict[str, Any]:
-    """종목 국가(us/kor/au/other) 기준 보유 ETF 구성종목 통합.
+    """종목 국가(all/us/kor/au/other) 기준 보유 ETF 구성종목 통합.
 
     모든 계좌의 보유 ETF 의 구성종목을 통합한 뒤, 각 종목의 티커 패턴으로 분류된
-    국가가 인자와 일치하는 종목만 남긴다. 현금은 항상 제외하며 비중은 원본
-    (전체 자산 대비) 그대로 유지한다.
+    국가가 인자와 일치하는 종목만 남긴다. `all` 은 이 필터를 건너뛴다(추가 계산 없음
+    — 어차피 아래 통합 단계에서 전 국가를 모두 계산하고 있다). 현금은 항상 제외하며
+    비중은 원본(전체 자산 대비) 그대로 유지한다.
     """
     code = str(country_code or "").strip().lower()
     if code not in _HOLDING_COUNTRY_LABELS:
@@ -611,10 +618,15 @@ def load_holding_country_components(country_code: str) -> dict[str, Any]:
     # 국가 필터 후 박스 뷰에서 작은 비중 종목까지 보여야 하므로, 통합 시 cap 을 적용하지 않는다.
     # (TOTAL cap=100 을 그대로 두면 한국·호주의 작은 종목들이 미국 큰 종목 100개에 밀려 응답에서 통째 사라짐.)
     base = load_account_holdings_components("TOTAL", include_cash=False, max_components=0)
-    filtered_components: list[dict[str, Any]] = []
-    for comp in base.get("components") or []:
-        if _classify_holding_country(str(comp.get("ticker") or "")) == code:
-            filtered_components.append(comp)
+    all_components: list[dict[str, Any]] = base.get("components") or []
+    if code == _HOLDING_COUNTRY_ALL:
+        filtered_components = all_components
+    else:
+        filtered_components = [
+            comp
+            for comp in all_components
+            if _classify_holding_country(str(comp.get("ticker") or "")) == code
+        ]
 
     return {
         "account_id": f"HOLDING_COUNTRY:{code}",

@@ -308,7 +308,7 @@ export function HoldingsDetailsPageClient() {
   const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
 
-  // 종목 국가 목록 로드 (미국/한국/호주/기타국가 고정 4개)
+  // 종목 국가 목록 로드 (전체/미국/한국/호주/기타국가 고정 5개, 첫 항목이 기본 선택값)
   useEffect(() => {
     async function fetchHoldingCountries() {
       try {
@@ -459,7 +459,7 @@ export function HoldingsDetailsPageClient() {
     {
       headerName: "현재가",
       field: "current_price",
-      width: 110,
+      width: 128,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -535,7 +535,7 @@ export function HoldingsDetailsPageClient() {
               {formatWeight(src.weight)}
             </div>
             
-            {/* 4. 현재가 (110px) - 우측 패딩 12px */}
+            {/* 4. 현재가 (128px) - 우측 패딩 12px */}
             <div className="hdColPrice">
               {formatPrice(src.current_price, src.currency)}
             </div>
@@ -784,7 +784,7 @@ export function HoldingsDetailsPageClient() {
         .hdColTicker { width: 100px; padding-left: 12px; }
         .hdColName   { flex: 1; min-width: 0; padding-left: 12px; overflow: hidden; }
         .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
-        .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
+        .hdColPrice  { width: 128px; padding-right: 12px; justify-content: flex-end; }
         .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
