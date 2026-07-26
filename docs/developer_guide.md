@@ -209,6 +209,14 @@ python infra/server_scheduler.py
 - 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 정책 변경 자체에는 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
 - 과거 일별 입출금 값을 수정한 경우에는 주/월/년 raw 집계(`deposit_withdrawal`, `total_assets` 등)를 다시 만들기 위해 관련 집계 버튼을 눌러야 합니다.
 
+자산 헬퍼 데이터 (단일 컬렉션 원칙):
+
+- `/assets` 와 `/asset-helper` 는 **portfolio_master 하나만** 저장소로 쓴다. 별도 컬렉션을 만들지 않는다.
+- 종목별 목표비중: `accounts[].holdings[].target_ratio` (%). 미설정이면 필드 자체가 없다(임의 0 보정 금지).
+  `/asset-helper` 의 "비중" 컬럼에서 편집하고, `/assets` 의 "목표비중" 컬럼은 같은 값을 읽기 전용으로 보여준다.
+- 계좌 단위 헬퍼 설정(weight_mode·STOCK_MAX_WEIGHT·백테스트 설정): `accounts[].asset_helper` 하위 객체.
+- 과거의 `asset_helper_settings` / `account_targets` 컬렉션은 2026-07 통합 마이그레이션으로 삭제됐다.
+
 ## 2. 순위 화면 정합성 원칙
 
 > **Critical**: 이 시스템은 **순위 화면이 단일 진실 원천(single source of truth)** 입니다. 화면에서 보이는 값은 계좌 종목 목록, 가격 캐시, 실제 보유 데이터로 직접 계산되어야 합니다.

@@ -144,6 +144,26 @@ def _is_hidden_component_ticker(ticker: Any) -> bool:
     return _normalize_ticker(str(ticker or "")) == "IS"
 
 
+def _is_cash_component_item(item: dict[str, Any]) -> bool:
+    """ETF 구성종목 항목이 현금(통화) 포지션인지 — 수집 소스가 준 정보로만 판별한다.
+
+    티커가 통화코드와 같다는 이유만으로 걸러내면 NOK(노키아)·SGD(Snowline Gold)처럼
+    통화코드와 겹치는 실제 종목이 함께 사라지므로, 다음 순서로만 판단한다.
+    1. `asset_class` 가 있으면 그 값이 Cash 인지 (BetaShares CSV)
+    2. 없으면 티커가 자기 자신의 상장 통화와 같은지 (예: ticker=USD, listing_currency=USD)
+    """
+    asset_class = str(item.get("asset_class") or "").strip().lower()
+    if asset_class:
+        return asset_class == "cash"
+
+    listing_currency = str(item.get("listing_currency") or "").strip().upper()
+    if listing_currency:
+        base_ticker = _normalize_ticker(item.get("ticker")).removeprefix("ASX:")
+        return base_ticker == listing_currency
+
+    return False
+
+
 def _load_account_holdings_frame(account_id: str) -> Any:
     """계좌 보유 테이블을 1회 로드한다 (시세 조회를 포함하므로 계좌당 한 번만 부른다).
 
@@ -364,6 +384,8 @@ def _append_account_components(
         for item in items:
             comp_ticker = _normalize_ticker(item.get("ticker", ""))
             if not comp_ticker:
+                continue
+            if _is_cash_component_item(item):
                 continue
             comp_name = str(item.get("name") or item.get("raw_name") or "").strip()
 

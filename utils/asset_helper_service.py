@@ -22,7 +22,6 @@ from utils.perf_metrics import curve_metrics, mdd_span
 
 logger = get_app_logger()
 
-COLLECTION = "asset_helper_settings"
 SETTINGS_ID = "default"
 
 # 설정 스키마 — 코드 기본값(silent default) 없음. 값은 전적으로 DB에서 온다.
@@ -168,29 +167,6 @@ def _clean_ticker_slots(items: Any) -> list[dict[str, Any]]:
         slots.append(dict(clean_by_ticker[ticker]))
         seen.add(ticker)
     return slots
-
-
-def _apply_asx_prefix_for_account(slots: list[dict[str, Any]], account_id: str) -> list[dict[str, Any]]:
-    """호주 계좌면 티커에 `ASX:` 접두사를 붙여 저장한다.
-
-    DB 저장 값도 시스템 표준 표기를 따른다
-    (docs/developer_guide.md "호주 티커(ASX) 식별 규칙").
-    """
-    from utils.asx_ticker import ensure_asx_prefix
-    from utils.settings_loader import get_account_settings
-
-    country_code = str(get_account_settings(account_id).get("country_code") or "").strip().lower()
-    if country_code != "au":
-        return slots
-
-    normalized: list[dict[str, Any]] = []
-    for slot in slots:
-        ticker = str(slot.get("ticker") or "").strip()
-        if not ticker:
-            normalized.append(slot)
-            continue
-        normalized.append({**slot, "ticker": ensure_asx_prefix(ticker)})
-    return normalized
 
 
 def _clean_settings(values: dict[str, Any] | None, *, base: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -478,42 +454,11 @@ def _clean_backtest_settings(values: Any, *, base: Any = None, require_benchmark
     }
 
 
-def _serialize_doc(doc: dict[str, Any] | None) -> dict[str, Any]:
-    stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
-    settings = _clean_settings({}, base={key: doc[key] for key in stored_keys if doc and doc.get(key) is not None})
-    doc_weight_mode = _clean_weight_mode((doc or {}).get("weight_mode"))
-    settings = _with_account_asset_helper_basis(settings, weight_mode=doc_weight_mode)
-    backtest_settings = _clean_backtest_settings((doc or {}).get("backtest_settings"), require_benchmark=False)
-    updated_at = (doc or {}).get("updated_at")
-    approved_at = (doc or {}).get("approved_at")
-    tickers = _clean_ticker_slots((doc or {}).get("tickers"))
-    approved_weights = (doc or {}).get("approved_weights") or None
-    return {
-        "tickers": tickers,
-        "weight_mode": doc_weight_mode,
-        "settings": settings,
-        "backtest_settings": backtest_settings,
-        "approved_weights": _enrich_weight_rows_with_returns(
-            approved_weights,
-            _clean_tickers(tickers),
-            settings,
-            metric_months=int(backtest_settings["months"]),
-            weight_mode=doc_weight_mode,
-        ),
-        "approved_at": (
-            approved_at.replace(tzinfo=timezone.utc) if approved_at.tzinfo is None else approved_at
-        ).isoformat()
-        if isinstance(approved_at, datetime)
-        else None,
-        "updated_at": (updated_at.replace(tzinfo=timezone.utc) if updated_at.tzinfo is None else updated_at).isoformat()
-        if isinstance(updated_at, datetime)
-        else None,
-    }
-
-
 def list_asset_helper_accounts() -> list[str]:
-    """설정 문서가 존재하는 계좌 id 목록 (문서 _id = account_id)."""
-    return [str(doc["_id"]) for doc in _db()[COLLECTION].find({}, {"_id": 1})]
+    """자산 헬퍼를 쓸 수 있는 계좌 id 목록 (계좌 설정이 단일 소스)."""
+    from utils.account_registry import load_account_configs
+
+    return [str(config["account_id"]) for config in load_account_configs()]
 
 
 def _resolve_account_id(account_id: str | None) -> str:
@@ -534,25 +479,51 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
     문서가 있으면 검증된 설정을, 없으면 **초기(빈) 상태**를 반환한다.
     저장 전까지 DB 에 아무것도 쓰지 않으며, 저장 시 save 가 필수값을 검증한다(fail loud).
     """
+    from utils.portfolio_io import load_portfolio_master
+
     resolved = str(account_id or "").strip()
     if not resolved:
         raise ValueError("계좌를 지정해야 합니다.")
-    doc = _db()[COLLECTION].find_one({"_id": resolved})
-    if doc is not None:
-        return _serialize_doc(doc)
-    # 저장된 문서 없음 → 모든 값 미설정인 초기 상태(계좌 id 만 채움). 초기 weight_mode 는 fixed.
-    initial_weight_mode = "fixed"
+
+    # 단일 컬렉션 원칙 — 종목·비중은 보유 목록(portfolio_master.holdings)의
+    # target_ratio 필드, 계좌 단위 설정은 계좌 객체의 asset_helper 필드에서 읽는다.
+    master = load_portfolio_master(resolved) or {}
+    holdings = master.get("holdings") or []
+    helper_doc = master.get("asset_helper") or {}
+
+    weight_tickers = [
+        {"ticker": str(h.get("ticker") or "").strip().upper(), "fixed_weight_pct": float(h["target_ratio"])}
+        for h in holdings
+        if h.get("target_ratio") is not None
+    ]
+
+    stored_weight_mode = _clean_weight_mode(helper_doc.get("weight_mode")) if helper_doc else "fixed"
+    settings_base = {
+        key: helper_doc[key] for key in (*SETTING_KEYS, "CASH_MAX_WEIGHT") if helper_doc.get(key) is not None
+    }
+    # 종목수 관련 값은 저장하지 않고 실제 보유 종목 수에서 파생한다.
+    settings_base.setdefault("VARIABLE_TICKERS", 0)
+    settings_base.setdefault("FIXED_TICKERS", len(weight_tickers))
+    settings_base.setdefault("MAX_TICKERS", len(weight_tickers) or None)
+    settings_base["ACCOUNT_ID"] = resolved
+    settings = _clean_settings({}, base={k: v for k, v in settings_base.items() if v is not None}) if helper_doc else {
+        key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS
+    }
+    backtest_settings = (
+        _clean_backtest_settings(helper_doc.get("backtest_settings"), require_benchmark=False) if helper_doc else None
+    )
+    updated_at = helper_doc.get("updated_at")
+
     return {
-        "tickers": [],
-        "weight_mode": initial_weight_mode,
-        "settings": _with_account_asset_helper_basis(
-            {key: (resolved if key == "ACCOUNT_ID" else None) for key in SETTING_KEYS},
-            weight_mode=initial_weight_mode,
+        "tickers": weight_tickers,
+        "weight_mode": stored_weight_mode,
+        "settings": _with_account_asset_helper_basis(settings, weight_mode=stored_weight_mode),
+        "backtest_settings": backtest_settings,
+        "updated_at": (
+            (updated_at.replace(tzinfo=timezone.utc) if updated_at.tzinfo is None else updated_at).isoformat()
+            if isinstance(updated_at, datetime)
+            else None
         ),
-        "backtest_settings": None,
-        "approved_weights": None,
-        "approved_at": None,
-        "updated_at": None,
     }
 
 
@@ -563,23 +534,25 @@ def save_asset_helper_settings(
     backtest_settings: dict[str, Any] | None = None,
     account_id: str | None = None,
 ) -> dict[str, Any]:
+    from utils.portfolio_io import load_portfolio_master, update_account_asset_helper
+
     resolved = _resolve_account_id(account_id)
     clean_weight_mode = _clean_weight_mode(weight_mode)
-    ticker_slots = _apply_asx_prefix_for_account(_clean_ticker_slots(tickers), resolved)
-    clean_tickers = _clean_tickers(ticker_slots)
+    clean_tickers = _clean_tickers(_clean_ticker_slots(tickers))
     if len(clean_tickers) < 1:
         raise ValueError("저장할 종목이 1개 이상 필요합니다.")
 
-    # 신규 계좌면 기존 문서가 없다(base 비움).
-    existing_doc = _db()[COLLECTION].find_one({"_id": resolved}) or {}
+    # 단일 컬렉션 원칙 — 기존 설정은 portfolio_master 계좌 객체의 asset_helper 에서 읽는다.
+    existing_helper = (load_portfolio_master(resolved) or {}).get("asset_helper") or {}
     stored_keys = (*SETTING_KEYS, "CASH_MAX_WEIGHT")
-    settings_base = {key: existing_doc[key] for key in stored_keys if existing_doc.get(key) is not None}
+    settings_base = {key: existing_helper[key] for key in stored_keys if existing_helper.get(key) is not None}
     # 아래에서 VARIABLE/FIXED/MAX_TICKERS 를 실제 종목수로 덮어쓰므로, 신규 계좌라도 검증을 통과하게 미리 채운다.
     settings_base.setdefault("VARIABLE_TICKERS", 0)
     settings_base.setdefault("FIXED_TICKERS", len(clean_tickers))
     # STOCK_MAX_WEIGHT 는 변동(variable) 모드에서만 쓰이는 종목 상한(%). 고정 모드는 종목별 비중을 직접 정하므로
     # 안 쓴다 — 신규 계좌에서 미설정이면 100(=상한 없음)으로 둔다(있으면 기존 값 유지).
     settings_base.setdefault("STOCK_MAX_WEIGHT", 100.0)
+    settings_base["ACCOUNT_ID"] = resolved
     clean_settings = _clean_settings(settings, base=settings_base)
     # 자산 헬퍼는 자유 테스트 포트폴리오라 계좌별 종목수 상한을 두지 않는다 —
     # 슬롯 수를 실제 종목 수에 맞춰 저장한다(전역 하드 상한 MAX_TICKERS_LIMIT 만 유지).
@@ -588,31 +561,32 @@ def save_asset_helper_settings(
     clean_settings["MAX_TICKERS"] = len(clean_tickers)
     clean_backtest_settings = _clean_backtest_settings(
         backtest_settings,
-        base=existing_doc.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
+        base=existing_helper.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
         require_benchmark=False,
     )
     updated_at = datetime.now(timezone.utc)
-    _db()[COLLECTION].update_one(
-        {"_id": resolved},
-        {
-            "$set": {
-                "tickers": ticker_slots,
-                "weight_mode": clean_weight_mode,
-                **clean_settings,
-                "backtest_settings": clean_backtest_settings,
-                "updated_at": updated_at,
-            },
-            "$unset": {"CASH_MAX_WEIGHT": "", "START_AMOUNT_MANWON": "", "START_DATE": "", "MA_MONTHS": ""},
+
+    # 종목별 목표비중 — 보유 항목의 target_ratio 필드로 저장 (비중 미입력 종목은 미설정 유지).
+    target_ratio_by_ticker = {
+        str(item["ticker"]): float(item["fixed_weight_pct"])
+        for item in clean_tickers
+        if item.get("fixed_weight_pct") is not None
+    }
+    update_account_asset_helper(
+        resolved,
+        target_ratio_by_ticker=target_ratio_by_ticker,
+        helper_settings={
+            "weight_mode": clean_weight_mode,
+            **clean_settings,
+            "backtest_settings": clean_backtest_settings,
+            "updated_at": updated_at,
         },
-        upsert=True,
     )
     return {
-        "tickers": ticker_slots,
+        "tickers": clean_tickers,
         "weight_mode": clean_weight_mode,
         "settings": _with_account_asset_helper_basis(clean_settings, weight_mode=clean_weight_mode),
         "backtest_settings": clean_backtest_settings,
-        "approved_weights": existing_doc.get("approved_weights"),
-        "approved_at": existing_doc.get("approved_at"),
         "updated_at": updated_at.isoformat(),
     }
 
@@ -1216,90 +1190,6 @@ def _apply_trade_plan(
     }
 
 
-def _enrich_weight_rows_with_returns(
-    payload: Any,
-    tickers: list[dict[str, Any]],
-    current_settings: dict[str, Any],
-    *,
-    metric_months: int,
-    weight_mode: str | None = None,
-) -> dict[str, Any] | None:
-    if not isinstance(payload, dict):
-        return None
-    rows = payload.get("rows")
-    if not isinstance(rows, list) or not rows:
-        return payload
-
-    close_frame, _missing = _load_close_frame(tickers)
-    return_map = _build_return_map(close_frame)
-    daily_change_map = _build_daily_change_map(tickers, close_frame)
-    # 승인 당시 박제된 settings 스냅샷 — 옛 스냅샷엔 MAX_TICKERS 같은 신규 필드가 없다.
-    # 계산에 필요한 신규 필드는 현재 설정으로 보완하고, 나머지는 스냅샷 값을 쓴다.
-    snap_settings = payload.get("settings") if isinstance(payload.get("settings"), dict) else {}
-    settings = _clean_settings({**current_settings, **snap_settings})
-    is_fixed = weight_mode == "fixed"
-    if is_fixed:
-        settings = {**settings, "POOL_TICKER_TYPE": None, "POOL_NAME": None, "SHORT_MA_DAYS": None, "LONG_MA_DAYS": None}
-    else:
-        settings = {**settings, **_load_account_pool_ma_context(str(settings.get("ACCOUNT_ID") or "").strip())}
-    eval_date = close_frame.index.max() if not close_frame.empty else None
-    slope_map, alignment_map = (
-        _build_current_ma_state_maps(
-            close_frame,
-            eval_date,
-            short_ma_days=int(settings["SHORT_MA_DAYS"]),
-            long_ma_days=int(settings["LONG_MA_DAYS"]),
-        )
-        if eval_date is not None and not is_fixed
-        else ({}, {})
-    )
-    sortino_raw_frame = _compute_sortino_raw_frame(close_frame, metric_months)
-    mdd_map = _build_mdd_map(close_frame, metric_months)
-    sortino_raw_row = (
-        sortino_raw_frame.loc[eval_date]
-        if eval_date is not None and eval_date in sortino_raw_frame.index
-        else pd.Series(dtype=float)
-    )
-    ticker_to_bucket = {str(t.get("ticker")).upper(): t.get("bucket") for t in tickers}
-
-    enriched_rows: list[dict[str, Any]] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        ticker = str(row.get("ticker") or "").strip().upper()
-        sortino_raw_value = sortino_raw_row.get(ticker)
-        bucket = ticker_to_bucket.get(ticker)
-
-        enriched_row = {
-            **row,
-            "bucket": int(bucket) if bucket is not None else None,
-            **return_map.get(
-                ticker,
-                {
-                    "return_1m_pct": None,
-                    "return_3m_pct": None,
-                    "return_6m_pct": None,
-                    "return_12m_pct": None,
-                },
-            ),
-            "daily_change_pct": daily_change_map.get(ticker),
-            "mdd_pct": mdd_map.get(ticker),
-            "deviation_pct": row.get("deviation_pct", row.get("trend_pct")),
-            "slope_pct": None if slope_map.get(ticker) is None else round(float(slope_map[ticker]), 2),
-            "alignment": alignment_map.get(ticker),
-            "sortino": None if pd.isna(sortino_raw_value) else round(float(sortino_raw_value), 2),
-        }
-        enriched_row.pop("nickname", None)
-        enriched_rows.append(enriched_row)
-    _normalize_target_weight_pct_rows(enriched_rows)
-    trade_summary = (
-        _apply_trade_plan(enriched_rows, settings=settings, tickers=tickers, close_frame=close_frame)
-        if settings.get("ACCOUNT_ID")
-        else {}
-    )
-    return {**payload, "rows": enriched_rows, "trade_summary": trade_summary}
-
-
 def _normalize_target_weight_pct_rows(rows: list[dict[str, Any]]) -> None:
     weight_rows = [row for row in rows if row.get("target_weight_pct") is not None]
     if not weight_rows:
@@ -1618,13 +1508,17 @@ def calculate_asset_helper_weights_for(
         )
     _normalize_target_weight_pct_rows(rows)
 
-    # 1. 자산 헬퍼 설정에 저장된 tickers 순서 로드
+    # 1. 종목 순서는 보유 목록(portfolio_master)의 sort_order 를 그대로 따른다 (단일 소스).
     ordered_tickers = []
     try:
-        doc = _db()[COLLECTION].find_one({"_id": str(settings.get("ACCOUNT_ID") or "").strip()})
-        if doc:
-            tickers_list = doc.get("tickers") or []
-            ordered_tickers = [str(t.get("ticker") or "").strip().upper().replace("KR:", "") for t in tickers_list]
+        from utils.portfolio_io import load_portfolio_master
+
+        master = load_portfolio_master(str(settings.get("ACCOUNT_ID") or "").strip()) or {}
+        holdings_sorted = sorted(master.get("holdings") or [], key=lambda h: int(h.get("sort_order") or 0))
+        ordered_tickers = [
+            str(h.get("ticker") or "").strip().upper().replace("KR:", "").replace("ASX:", "")
+            for h in holdings_sorted
+        ]
     except Exception:
         pass
 

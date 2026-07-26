@@ -566,35 +566,13 @@ function AccountHoldingsDetailPanel({
     summary.cash_currencies && summary.cash_currencies.length > 0
       ? summary.cash_currencies.map((c) => c.toUpperCase())
       : [String(summary.currency || "KRW").toUpperCase()];
-  // 자산 헬퍼에서 이 계좌에 입력한 목표비중(티커→%). ref 로 읽어 컬럼 재생성 없이
-  // 데이터 도착 시 목표비중 컬럼만 refreshCells 로 갱신한다(늦게 깜빡이며 전체가 다시 그려지는 것 방지).
-  const targetWeightsRef = useRef<Record<string, number>>({});
-  const targetHasDataRef = useRef(false);
+  // 목표비중은 보유 행 자체의 target_ratio(portfolio_master 단일 소스)를 그대로 쓴다.
+  // 현금 행 계산(100 - 종목합)을 위해 최신 rows 를 ref 로 참조한다(컬럼 재생성 방지).
+  const rowsForTargetRef = useRef<HoldingsRow[]>([]);
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const resp = await fetch(`/api/asset-helper-settings?account_id=${encodeURIComponent(summary.account_id)}`, { cache: "no-store" });
-        const data = (await resp.json()) as { tickers?: { ticker?: string; fixed_weight_pct?: number | null }[] };
-        if (!resp.ok || !alive) return;
-        const map: Record<string, number> = {};
-        for (const t of data.tickers ?? []) {
-          // 시장 접두어(ASX:/KR:) 제거해 보유행 티커와 맞춘다(자산 헬퍼는 접두어 없는 티커 저장).
-          const tk = String(t.ticker ?? "").replace(/^[A-Za-z]+:/, "").trim().toUpperCase();
-          const w = t.fixed_weight_pct;
-          if (tk && w != null && Number.isFinite(Number(w))) map[tk] = Number(w);
-        }
-        targetWeightsRef.current = map;
-        targetHasDataRef.current = true;
-        gridApiRef.current?.refreshCells({ force: true, columns: ["target_weight_pct"] });
-      } catch {
-        // 목표비중 미설정/오류는 무시(해당 컬럼만 '-'로 표시).
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [summary.account_id]);
+    rowsForTargetRef.current = rows;
+    gridApiRef.current?.refreshCells({ force: true, columns: ["target_weight_pct"] });
+  }, [rows]);
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -1423,16 +1401,18 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow }) => {
         const row = params.data;
         if (!row || row.id === "__adding__") return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        const map = targetWeightsRef.current;
-        const hasData = targetHasDataRef.current && Object.keys(map).length > 0;
+        // 목표비중은 보유 행의 target_ratio(portfolio_master 단일 소스) 그대로.
+        const weights = rowsForTargetRef.current
+          .map((r) => (r.ticker === CASH_ROW_TICKER ? null : r.target_ratio))
+          .filter((w): w is number => w != null && Number.isFinite(Number(w)));
         // 현금 행: 목표 현금비중 = 100 - 종목 목표비중 합.
         if (row.ticker === CASH_ROW_TICKER) {
-          if (!hasData) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          const cashPct = Math.max(0, 100 - Object.values(map).reduce((a, b) => a + b, 0));
+          if (weights.length === 0) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          const cashPct = Math.max(0, 100 - weights.reduce((a, b) => a + b, 0));
           return <span style={{ color: "#000000", fontWeight: 700 }}>{cashPct.toFixed(1)}%</span>;
         }
-        const w = map[String(row.ticker || "").replace(/^[A-Za-z]+:/, "").trim().toUpperCase()];
-        return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${w.toFixed(1)}%`}</span>;
+        const w = row.target_ratio;
+        return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(1)}%`}</span>;
       },
     },
     {
