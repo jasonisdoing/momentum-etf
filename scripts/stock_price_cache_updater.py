@@ -35,7 +35,8 @@ from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
 PER_TICKER_TIMEOUT_SECONDS = 90
-KOR_FETCH_TARGET_SECONDS = 0.5
+# KOR_FETCH_TARGET_SECONDS = 0.5 서버에서 freeze 1초로 늘려서 테스트중
+KOR_FETCH_TARGET_SECONDS = 1
 
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
