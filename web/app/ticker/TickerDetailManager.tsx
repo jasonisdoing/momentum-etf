@@ -60,8 +60,18 @@ type MonthlyPriceRow = {
   change_pct: number | null;
 };
 
+type YearlyPriceRow = {
+  year: string;
+  open: number | null;
+  high: number | null;
+  low: number | null;
+  close: number | null;
+  volume: number | null;
+  change_pct: number | null;
+};
+
 type ChartInterval = "day" | "week" | "month";
-type HistoryTab = "daily" | "monthly" | "dividend";
+type HistoryTab = "daily" | "monthly" | "yearly" | "dividend";
 
 // 회차별 배당 내역(최신순) — 국내 ETF 메타 캐시(etf_info.dividend_history)에서 옴.
 type TickerDividendRow = {
@@ -293,14 +303,15 @@ function getWeekBucketStart(value: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function aggregatePriceRows(data: PriceRow[], bucket: "week" | "month"): PriceRow[] {
+function aggregatePriceRows(data: PriceRow[], bucket: "week" | "month" | "year"): PriceRow[] {
   const aggregatedRows: PriceRow[] = [];
   let currentKey = "";
   let currentRow: PriceRow | null = null;
   let previousClose: number | null = null;
 
   for (const row of data) {
-    const nextKey = bucket === "week" ? getWeekBucketStart(row.date) : row.date.slice(0, 7);
+    const nextKey =
+      bucket === "week" ? getWeekBucketStart(row.date) : bucket === "year" ? row.date.slice(0, 4) : row.date.slice(0, 7);
     if (!nextKey) {
       continue;
     }
@@ -356,6 +367,18 @@ function aggregatePriceRows(data: PriceRow[], bucket: "week" | "month"): PriceRo
 function aggregateMonthlyRows(data: PriceRow[]): MonthlyPriceRow[] {
   return aggregatePriceRows(data, "month").map((row) => ({
     month: row.date.slice(0, 7),
+    open: row.open,
+    high: row.high,
+    low: row.low,
+    close: row.close,
+    volume: row.volume,
+    change_pct: row.change_pct,
+  }));
+}
+
+function aggregateYearlyRows(data: PriceRow[]): YearlyPriceRow[] {
+  return aggregatePriceRows(data, "year").map((row) => ({
+    year: row.date.slice(0, 4),
     open: row.open,
     high: row.high,
     low: row.low,
@@ -970,6 +993,11 @@ export function TickerDetailManager({
     [rows],
   );
 
+  const yearlyRows = useMemo(
+    () => aggregateYearlyRows(rows).reverse().map((row, i) => ({ ...row, id: `${row.year}-${i}` })),
+    [rows],
+  );
+
   const holdingsRows = useMemo(
     () => holdings.map((row, index) => ({ ...row, id: `${row.ticker}-${index}` })),
     [holdings],
@@ -1129,6 +1157,33 @@ export function TickerDetailManager({
       },
       {
         field: "volume", headerName: "월간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0)
+      },
+    ],
+    [selectedCountryCode],
+  );
+
+  const yearlyColumns = useMemo<ColDef[]>(
+    () => [
+      {
+        field: "year",
+        headerName: "연도",
+        minWidth: 92,
+        flex: 1.1,
+        cellStyle: { fontWeight: 600 },
+      },
+      {
+        field: "close", headerName: "연말 종가", minWidth: 88, flex: 0.95, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
+      },
+      {
+        field: "change_pct", headerName: "연간 등락률", minWidth: 96, flex: 0.95, type: "rightAligned",
+        cellRenderer: (params: { value: number | null }) => (
+          <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
+        )
+      },
+      {
+        field: "volume", headerName: "연간 거래량", minWidth: 120, flex: 1.25, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => formatNumber(params.value, 0)
       },
     ],
@@ -1475,6 +1530,15 @@ export function TickerDetailManager({
                             <button
                               type="button"
                               role="tab"
+                              aria-selected={historyTab === "yearly"}
+                              className={historyTab === "yearly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                              onClick={() => setHistoryTab("yearly")}
+                            >
+                              연별
+                            </button>
+                            <button
+                              type="button"
+                              role="tab"
                               aria-selected={historyTab === "dividend"}
                               className={historyTab === "dividend" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
                               onClick={() => setHistoryTab("dividend")}
@@ -1487,13 +1551,31 @@ export function TickerDetailManager({
                               ? `총 ${new Intl.NumberFormat("ko-KR").format(rows.length)}일`
                               : historyTab === "monthly"
                                 ? `총 ${new Intl.NumberFormat("ko-KR").format(monthlyRows.length)}개월`
-                                : `총 ${new Intl.NumberFormat("ko-KR").format(dividendRows.length)}회`}
+                                : historyTab === "yearly"
+                                  ? `총 ${new Intl.NumberFormat("ko-KR").format(yearlyRows.length)}년`
+                                  : `총 ${new Intl.NumberFormat("ko-KR").format(dividendRows.length)}회`}
                           </span>
                         </div>
                         <div className="appGridFillWrap">
                           <AppAgGrid
-                            rowData={historyTab === "daily" ? reversedRows : historyTab === "monthly" ? monthlyRows : dividendRows}
-                            columnDefs={historyTab === "daily" ? dailyColumns : historyTab === "monthly" ? monthlyColumns : dividendColumns}
+                            rowData={
+                              historyTab === "daily"
+                                ? reversedRows
+                                : historyTab === "monthly"
+                                  ? monthlyRows
+                                  : historyTab === "yearly"
+                                    ? yearlyRows
+                                    : dividendRows
+                            }
+                            columnDefs={
+                              historyTab === "daily"
+                                ? dailyColumns
+                                : historyTab === "monthly"
+                                  ? monthlyColumns
+                                  : historyTab === "yearly"
+                                    ? yearlyColumns
+                                    : dividendColumns
+                            }
                             loading={loading}
                             theme={gridTheme}
                             gridOptions={{ suppressMovableColumns: true }}
