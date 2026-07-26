@@ -11,6 +11,7 @@ import {
   IconCash,
   IconChartHistogram,
   IconChartLine,
+  IconDatabase,
   IconHome,
   IconLayoutDashboard,
   IconList,
@@ -105,6 +106,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconSettings,
     items: [
       { href: "/alarms", label: "알람", icon: IconBell },
+      { href: "/data_source", label: "데이터 소스", icon: IconDatabase },
       { href: "/batch", label: "배치", icon: IconListDetails },
     ],
   },
