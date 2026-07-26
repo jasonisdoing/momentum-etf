@@ -11,26 +11,58 @@
 1. **저장·전달 시점부터 호주 종목 ticker 는 `ASX:` 접두사를 강제** 부착한다.
    - 예: `TECH` (X) / `ASX:TECH` (O)
    - 예: `HACK` (X) / `ASX:HACK` (O)
-2. **모든 내부 데이터(메모리/캐시/DB/API 응답)** 에서 호주 종목은 `ASX:` 가 붙은 형태로 유통된다.
-3. **화면에 표시할 때만** display helper 로 `ASX:` 접두사를 제거하고 사용자에게 보여준다.
-   - 예: 그리드/박스 셀 — `ASX:TECH` → 사용자에게 "TECH" 만 보임
-4. **국가 분류 / 가격 조회 분기 / 라우팅** 은 ticker 의 `ASX:` 패턴을 직접 보고 호주로 식별한다.
-5. **위반 시 미국 종목과 혼동되어 잘못된 가격이 표시**된다 (실제로 과거에 `TECH`, `HACK`, `ACDC` 등이 미국 토스 API 로 조회되어 호주 시장 미개장임에도 미국 변동률이 표시되는 버그 발생).
+2. **모든 내부 데이터에서** 호주 종목은 `ASX:` 가 붙은 형태로 유통된다. 메모리·캐시뿐 아니라
+   **DB 저장 값과 API 응답까지 포함**한다. ETF 자체는 물론 **ETF 구성종목(holdings)** 도 같다
+   (예: SYI 의 구성종목은 `NAB` 이 아니라 `ASX:NAB` 으로 저장한다).
+3. **화면에도 `ASX:` 를 그대로 노출**한다. 표시 단계에서 접두사를 벗기지 않는다 —
+   사용자가 미국 동명 티커와 구분할 수 있어야 한다.
+4. **접두사를 벗기는 것은 외부로 나갈 때뿐**이다. 외부 소스마다 요구 형식이 다르므로
+   `utils/asx_ticker.py` 의 변환 함수를 쓴다.
+   - yfinance: `to_yahoo_symbol("ASX:NAB")` → `NAB.AX`
+   - BetaShares CSV / Vanguard API / QuoteAPI: `strip_asx_prefix("ASX:NAB")` → `NAB`
+5. **국가 분류 / 가격 조회 분기 / 라우팅** 은 ticker 의 `ASX:` 패턴을 직접 보고 호주로 식별한다.
+6. **위반 시 미국 종목과 혼동되어 잘못된 가격이 표시**된다 (실제로 과거에 `TECH`, `HACK`, `ACDC` 등이 미국 토스 API 로 조회되어 호주 시장 미개장임에도 미국 변동률이 표시되는 버그 발생).
+
+### 공용 유틸 — `utils/asx_ticker.py`
+
+접두사 부착·제거를 각 파일에서 `.replace("ASX:", "")` 로 인라인 처리하지 말고 이 모듈을 쓴다.
+
+| 함수 | 용도 |
+| --- | --- |
+| `ensure_asx_prefix(t)` | `NAB` / `NAB.AX` / `ASX:NAB` → `ASX:NAB` (호주임을 아는 경우에만 사용) |
+| `strip_asx_prefix(t)` | `ASX:NAB` → `NAB` (외부 API 호출 직전) |
+| `to_yahoo_symbol(t)` | `ASX:NAB` → `NAB.AX` (yfinance 조회) |
+| `from_yahoo_symbol(s)` | `NAB.AX` → `ASX:NAB`, 호주가 아니면 `None` |
+| `is_asx_ticker(t)` | 호주 종목 여부 |
+
+### 구성종목의 상장 국가 판별
+
+구성종목 티커만으로는 상장 시장을 알 수 없다(`NAB` 은 점 없는 영문이라 미국과 구분 불가).
+**수집 소스가 알려주는 국가 정보를 반드시 보존**하고, 그걸 근거로 `ASX:` 를 붙인다. 추정하지 않는다.
+
+| 소스 | 국가 신호 | 보존 필드 |
+| --- | --- | --- |
+| yfinance | 원본 심볼 접미사 (`NAB.AX`) | `yahoo_symbol` |
+| BetaShares CSV | `Currency` / `Country` / `Asset Class` 열 | `listing_currency`, `listing_country`, `asset_class` |
+| Vanguard API | `countryCode` 필드 | `listing_country_code` |
+
+`Asset Class` 가 `Cash` 인 항목(`AUD - AUSTRALIA DOLLAR`)은 상장 종목이 아니므로 접두사를 붙이지 않는다.
 
 ### 적용 위치
 
 - `_normalize_ticker` 류의 정규화 함수: ASX 종목 진입 시 접두사 부착
 - `_append_account_components` 등 ETF·구성종목 통합 진입점: row 의 country_code 또는 currency 가 호주이면 ticker 에 `ASX:` 자동 부착
+- `utils/stock_meta_updater.fetch_*_holdings`: 구성종목 수집 시 호주 상장이면 `ASX:` 부착
 - `services/component_price_service.enrich_component_prices`: 가격 조회 분기에서 `ASX:` 접두사 인식 → 호주 QuoteAPI 로 라우팅 (`.AX` 와 동등 처리)
 - `_classify_holding_country`: ticker 가 `ASX:` 로 시작하면 즉시 `au` 로 분류
-- 프론트엔드 표시: `displayTicker(t)` 같은 helper 로 `"ASX:TECH"` → `"TECH"` 변환 후 노출
 
 ### 새 진입점 추가 시 체크리스트
 
 - [ ] 외부에서 들어오는 호주 종목 ticker 에 `ASX:` 가 붙어 있는가?
 - [ ] 정규화 함수가 `ASX:` 를 보존하는가? (대문자/소문자 변환은 prefix 도 정규화)
 - [ ] 가격 조회 시 `ASX:` 접두사로 호주 시장 라우팅이 되는가?
-- [ ] 화면 표시 직전에만 `ASX:` 를 제거하는가?
+- [ ] 외부 API 호출 직전에만 `utils/asx_ticker` 변환 함수로 벗기는가?
+- [ ] DB 에 저장하는 값에도 접두사가 붙어 있는가? (화면 표시용으로 벗겨 저장하지 않는다)
 
 ## 0. 로컬 실행
 

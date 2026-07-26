@@ -100,6 +100,7 @@ from utils.cache_utils import (
     load_cached_frames_bulk_with_fallback,
     save_cached_frame,
 )
+from utils.asx_ticker import strip_asx_prefix, to_yahoo_symbol
 from utils.logger import get_app_logger
 from utils.stock_list_io import get_etfs_by_country, set_listing_date
 
@@ -958,9 +959,8 @@ def prefetch_yfinance_bulk(
         t_norm = str(t or "").strip().upper()
         if not t_norm or t_norm.startswith("^"):
             continue
-        dl = t_norm
-        if country_norm == "au" and not dl.endswith(".AX"):
-            dl = f"{t_norm}.AX"
+        # 시스템 표준 티커(ASX:ACDC)를 yfinance 심볼(ACDC.AX)로 바꾼다.
+        dl = to_yahoo_symbol(t_norm) if country_norm == "au" else t_norm
         download_tickers.append(dl)
         ticker_to_download[t_norm] = dl
 
@@ -1050,10 +1050,10 @@ def _fetch_ohlcv_core(
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
-        # [AU] 호주 주식은 .AX 접미사가 필요함 (이미 있는 경우 제외)
+        # [AU] 호주 주식은 ASX: 접두사를 벗기고 .AX 접미사를 붙인다 (지수(^)는 그대로).
         download_ticker = ticker
-        if country_code == "au" and not download_ticker.endswith(".AX") and not download_ticker.startswith("^"):
-            download_ticker = f"{ticker}.AX"
+        if country_code == "au" and not download_ticker.startswith("^"):
+            download_ticker = to_yahoo_symbol(ticker)
 
         try:
             with _silence_yfinance_output():
@@ -1762,7 +1762,7 @@ def fetch_overseas_etf_nav_snapshot(ticker: str, country_code: str) -> dict[str,
     if cached is not None and (now - cached[0]).total_seconds() < _OVERSEAS_NAV_TTL_SECONDS:
         return dict(cached[1])
 
-    symbol = f"{code}.AX" if cc == "au" else code
+    symbol = to_yahoo_symbol(code) if cc == "au" else code
     try:
         import yfinance as yf
 
@@ -2027,8 +2027,8 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
     # 병렬 처리를 위한 내부 함수
     def _fetch_single_quote(ticker: str) -> tuple[str, dict[str, float] | None]:
         try:
-            # 호주 ETF 티커 형식: ticker.asx (소문자)
-            url = f"{AU_QUOTEAPI_URL}/{ticker.lower()}.asx"
+            # 호주 ETF 티커 형식: ticker.asx (소문자). 시스템 표준 ASX: 접두사는 벗겨서 보낸다.
+            url = f"{AU_QUOTEAPI_URL}/{strip_asx_prefix(ticker).lower()}.asx"
             # params = {"appID": AU_QUOTEAPI_APP_ID} # URL에 포함되지 않는 경우도 있음
 
             # API 호출 (타임아웃 단축)
