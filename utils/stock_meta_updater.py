@@ -523,6 +523,10 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
             logger.debug(f"[BetaShares] {ticker_clean} CSV 필수 열 매핑 실패: {e}")
             return None
 
+        # 상장 통화/국가 열은 CSV 에 있을 때만 읽는다(없으면 해당 항목을 비워 둔다).
+        currency_col = headers.index("Currency") if "Currency" in headers else None
+        country_col = headers.index("Country") if "Country" in headers else None
+
         items = []
         for row in reader:
             if not row or len(row) <= max(ticker_col, name_col, weight_col):
@@ -540,11 +544,22 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
             except ValueError:
                 continue
 
-            items.append({
+            item: dict[str, Any] = {
                 "ticker": t_clean,
                 "name": name_val,
                 "weight": weight_val,
-            })
+            }
+            # 티커만 남기면 상장 국가를 알 수 없어 호주 종목이 미국으로 분류된다.
+            # CSV 가 알려주는 상장 통화/국가를 그대로 보존한다(추정하지 않는다).
+            if currency_col is not None and len(row) > currency_col:
+                currency_val = str(row[currency_col]).strip().upper()
+                if currency_val:
+                    item["listing_currency"] = currency_val
+            if country_col is not None and len(row) > country_col:
+                country_val = str(row[country_col]).strip()
+                if country_val:
+                    item["listing_country"] = country_val
+            items.append(item)
 
         if not items:
             return None
@@ -596,6 +611,9 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
                 "ticker": t_clean,
                 "name": name_val,
                 "weight": weight_val,
+                # 거래소 접미사가 붙은 원본 심볼(NAB.AX)을 보존한다. 티커만 남기면
+                # 상장 국가를 알 수 없어 호주 종목이 미국으로 분류된다.
+                "yahoo_symbol": t_code,
             })
 
         if not items:
