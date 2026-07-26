@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 import math
+from datetime import datetime
 from typing import Any
 
 from config import BUCKET_MAPPING
 from services.price_service import get_exchange_rates
-from utils.cash_model import cash_total_krw
-from utils.account_stocks_io import get_account_targets, save_account_targets
 from utils.account_registry import load_account_configs
+from utils.account_stocks_io import get_account_targets, save_account_targets
 from utils.assets_service import load_cash_accounts
+from utils.asx_ticker import ensure_asx_prefix, strip_asx_prefix
+from utils.cash_model import cash_total_krw
 from utils.logger import get_app_logger
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table, save_portfolio_master
 
@@ -19,7 +20,11 @@ logger = get_app_logger()
 
 
 def _normalize_target_ticker(ticker: str) -> str:
-    return str(ticker or "").replace("ASX:", "").strip().upper()
+    """비교 전용 키 — 접두사 유무와 무관하게 같은 종목이 같은 값이 되도록 벗긴다.
+
+    저장·표시용이 아니다. 저장/표시에는 `ensure_asx_prefix` 로 접두사를 붙인 값을 쓴다.
+    """
+    return strip_asx_prefix(ticker)
 
 
 def _assign_sort_order(holdings: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -195,9 +200,9 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             ticker_raw = str(row.get("티커") or "").strip()
             row_currency = str(row.get("환종") or currency).strip().upper()
 
-            # 종목코드 포맷: 호주는 ASX:TICKER
+            # 종목코드 포맷: 호주는 ASX:TICKER (이미 붙어 있으면 그대로 — 중복 방지)
             if country_code == "au" and ticker_raw != "IS":
-                display_ticker = f"ASX:{ticker_raw}"
+                display_ticker = ensure_asx_prefix(ticker_raw)
             else:
                 display_ticker = ticker_raw
 
@@ -354,21 +359,22 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
     if not account_id or not ticker:
         raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
-    # ASX: 접두어 제거
-    raw_ticker = ticker.replace("ASX:", "")
+    # 저장된 티커와 요청 티커 양쪽을 같은 규칙으로 정규화해 비교한다
+    # (ASX: 접두사 유무가 달라도 같은 종목으로 매칭되도록).
+    target_ticker = _normalize_target_ticker(ticker)
 
     master = load_portfolio_master(account_id)
     if not master:
         raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
 
     holdings = master.get("holdings", [])
-    new_holdings = [h for h in holdings if str(h.get("ticker", "")).strip() != raw_ticker]
+    new_holdings = [h for h in holdings if _normalize_target_ticker(str(h.get("ticker", ""))) != target_ticker]
 
     if len(new_holdings) == len(holdings):
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, _assign_sort_order(new_holdings))
-    _save_target_ratio(account_id, raw_ticker, None)
+    _save_target_ratio(account_id, target_ticker, None)
     
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
@@ -395,7 +401,8 @@ def update_holding(
     if not account_id or not ticker:
         raise RuntimeError("계좌 ID와 종목코드가 필요합니다.")
 
-    raw_ticker = ticker.replace("ASX:", "")
+    # 저장된 티커와 요청 티커를 같은 규칙으로 정규화해 비교한다(ASX: 접두사 유무 무관).
+    target_ticker = _normalize_target_ticker(ticker)
 
     master = load_portfolio_master(account_id)
     if not master:
@@ -404,7 +411,7 @@ def update_holding(
     holdings = master.get("holdings", [])
     found = False
     for h in holdings:
-        if str(h.get("ticker", "")).strip() == raw_ticker:
+        if _normalize_target_ticker(str(h.get("ticker", ""))) == target_ticker:
             if quantity is not None:
                 h["quantity"] = int(quantity)
             if average_buy_price is not None:
@@ -419,8 +426,8 @@ def update_holding(
 
     save_portfolio_master(account_id, _assign_sort_order(holdings))
     if target_ratio is not None:
-        _save_target_ratio(account_id, raw_ticker, float(target_ratio))
-    
+        _save_target_ratio(account_id, target_ticker, float(target_ratio))
+
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
         from utils.snapshot_service import update_today_snapshot_all_accounts
@@ -468,7 +475,6 @@ def add_holding(
             raise RuntimeError(f"종목 {ticker}은 이미 등록되어 있습니다.")
 
     # 3. 정석적인 구조로 새로운 종목 구성
-    from datetime import datetime
     next_sort_order = max((int(h.get("sort_order") or 0) for h in holdings), default=-1) + 1
     new_holding = {
         "ticker": raw_ticker,

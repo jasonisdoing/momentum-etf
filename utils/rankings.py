@@ -14,6 +14,7 @@ from config import (
 )
 from core.strategy.scoring import build_composite_rank_scores, compute_trend_frame
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
+from utils.asx_ticker import ensure_asx_prefix
 from utils.cache_utils import (
     load_cached_close_series_bulk_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
@@ -830,10 +831,7 @@ def build_ticker_type_rankings(
             "상장일": etf.get("listing_date", "-"),
             # 보유: 이 종목을 실제로 들고 있는 계좌명 목록(쉼표 구분). 없으면 빈 문자열.
             "보유": ", ".join(
-                holding_accounts.get(
-                    f"ASX:{ticker}" if country_code == "au" and not ticker.startswith("ASX:") else ticker,
-                    [],
-                )
+                holding_accounts.get(ensure_asx_prefix(ticker) if country_code == "au" else ticker, [])
             ),
             "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,

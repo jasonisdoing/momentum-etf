@@ -835,7 +835,7 @@ function AccountHoldingsDetailPanel({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: summary.account_id,
-        ticker: row.ticker.replace("ASX:", ""),
+        ticker: row.ticker,
         quantity,
         average_buy_price: averageBuyPrice,
       }),
@@ -1169,7 +1169,7 @@ function AccountHoldingsDetailPanel({
       for (const row of selectedDeletableRows) {
         const params = new URLSearchParams({
           account: summary.account_id,
-          ticker: row.ticker.replace("ASX:", ""),
+          ticker: row.ticker,
         });
         const response = await fetch(`/api/assets?${params.toString()}`, { method: "DELETE" });
         const payload = await response.json();
