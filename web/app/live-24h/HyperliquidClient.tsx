@@ -276,7 +276,7 @@ function CandlestickChart({ candles, currency }: { candles: Candle[]; currency: 
   useEffect(() => {
     if (!containerRef.current) return;
     const updateHeight = () => {
-      setHeight(Math.max(260, Math.min(620, Math.floor((window.innerHeight - 420) / 2))));
+      setHeight(Math.max(260, Math.min(620, Math.floor((window.innerHeight - 460) / 2))));
     };
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -540,7 +540,7 @@ function ComparisonChart({
         setHeight(fixedHeight);
         return;
       }
-      setHeight(Math.max(260, Math.min(620, Math.floor((window.innerHeight - 420) / 2))));
+      setHeight(Math.max(260, Math.min(620, Math.floor((window.innerHeight - 460) / 2))));
     };
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
