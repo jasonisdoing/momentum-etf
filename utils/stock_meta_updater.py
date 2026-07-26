@@ -13,12 +13,20 @@ import numpy as np
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
+from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
 from utils.data_loader import (
     _YF_SESSION,
     fetch_naver_kor_market,
     fetch_naver_kor_stock_map,
     fetch_pykrx_name,
     fetch_ohlcv,
+)
+from utils.asx_ticker import (
+    ensure_asx_prefix,
+    from_yahoo_symbol,
+    normalize_ticker,
+    strip_asx_prefix,
+    to_yahoo_symbol,
 )
 from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
@@ -475,7 +483,8 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
     from datetime import datetime
 
     logger = get_app_logger()
-    ticker_clean = str(ticker).strip().upper()
+    # BetaShares CSV 는 접두사 없는 티커를 쓴다(ASX:ACDC → ACDC).
+    ticker_clean = strip_asx_prefix(ticker)
     url = f"https://www.betashares.com.au/files/csv/{ticker_clean}_Portfolio_Holdings.csv"
 
     try:
@@ -523,9 +532,10 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
             logger.debug(f"[BetaShares] {ticker_clean} CSV 필수 열 매핑 실패: {e}")
             return None
 
-        # 상장 통화/국가 열은 CSV 에 있을 때만 읽는다(없으면 해당 항목을 비워 둔다).
+        # 상장 통화/국가/자산군 열은 CSV 에 있을 때만 읽는다(없으면 해당 항목을 비워 둔다).
         currency_col = headers.index("Currency") if "Currency" in headers else None
         country_col = headers.index("Country") if "Country" in headers else None
+        asset_class_col = headers.index("Asset Class") if "Asset Class" in headers else None
 
         items = []
         for row in reader:
@@ -544,21 +554,32 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
             except ValueError:
                 continue
 
+            # 티커만 남기면 상장 국가를 알 수 없어 호주 종목이 미국으로 분류된다.
+            # CSV 가 알려주는 상장 통화/국가를 그대로 보존한다(추정하지 않는다).
+            currency_val = ""
+            if currency_col is not None and len(row) > currency_col:
+                currency_val = str(row[currency_col]).strip().upper()
+            country_val = ""
+            if country_col is not None and len(row) > country_col:
+                country_val = str(row[country_col]).strip()
+            asset_class_val = ""
+            if asset_class_col is not None and len(row) > asset_class_col:
+                asset_class_val = str(row[asset_class_col]).strip()
+
+            # 현금 포지션(`AUD - AUSTRALIA DOLLAR`)은 상장 종목이 아니므로 ASX: 를 붙이지 않는다.
+            is_cash = asset_class_val.lower() == "cash"
+            # 호주 상장 종목은 시스템 표준 표기(ASX:NAB)로 저장한다.
             item: dict[str, Any] = {
-                "ticker": t_clean,
+                "ticker": ensure_asx_prefix(t_clean) if (currency_val == "AUD" and not is_cash) else t_clean,
                 "name": name_val,
                 "weight": weight_val,
             }
-            # 티커만 남기면 상장 국가를 알 수 없어 호주 종목이 미국으로 분류된다.
-            # CSV 가 알려주는 상장 통화/국가를 그대로 보존한다(추정하지 않는다).
-            if currency_col is not None and len(row) > currency_col:
-                currency_val = str(row[currency_col]).strip().upper()
-                if currency_val:
-                    item["listing_currency"] = currency_val
-            if country_col is not None and len(row) > country_col:
-                country_val = str(row[country_col]).strip()
-                if country_val:
-                    item["listing_country"] = country_val
+            if asset_class_val:
+                item["asset_class"] = asset_class_val
+            if currency_val:
+                item["listing_currency"] = currency_val
+            if country_val:
+                item["listing_country"] = country_val
             items.append(item)
 
         if not items:
@@ -586,7 +607,8 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
     from datetime import datetime
 
     logger = get_app_logger()
-    symbol = f"{ticker.upper()}.AX" if is_australian else ticker.upper()
+    # 시스템 표준 티커는 ASX: 접두사를 달고 다니므로 외부 조회 직전에 벗긴다.
+    symbol = to_yahoo_symbol(ticker) if is_australian else normalize_ticker(ticker)
     try:
         t_data = yf.Ticker(symbol)
         funds_data = getattr(t_data, "funds_data", None)
@@ -607,12 +629,13 @@ def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[st
             except ValueError:
                 weight_val = 0.0
 
+            # 거래소 접미사가 붙은 원본 심볼(NAB.AX)이 상장 시장을 알려준다.
+            # 호주 상장이면 시스템 표준 표기(ASX:NAB)로 저장한다.
+            asx_ticker = from_yahoo_symbol(t_code)
             items.append({
-                "ticker": t_clean,
+                "ticker": asx_ticker or t_clean,
                 "name": name_val,
                 "weight": weight_val,
-                # 거래소 접미사가 붙은 원본 심볼(NAB.AX)을 보존한다. 티커만 남기면
-                # 상장 국가를 알 수 없어 호주 종목이 미국으로 분류된다.
                 "yahoo_symbol": t_code,
             })
 
@@ -651,25 +674,30 @@ def _refresh_overseas_etf_meta_cache(
 
     holdings_info = None
 
-    # 호주 ETF인 경우 BetaShares CSV 우선 시도 후 yfinance로 fallback
+    # 호주 ETF는 발행사 공식 소스(BetaShares CSV → Vanguard API)를 먼저 쓰고
+    # 둘 다 없을 때만 yfinance 로 폴백한다. 공식 소스가 구성종목 국가까지 알려준다.
     if country_norm == "au":
         holdings_info = fetch_betashares_holdings(ticker_norm)
+        if not holdings_info:
+            holdings_info = fetch_vanguard_au_holdings(ticker_norm)
         if not holdings_info:
             holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=True)
     else:
         holdings_info = fetch_yfinance_holdings(ticker_norm, is_australian=False)
 
-    if not holdings_info:
-        logger.warning(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF holdings 수집 실패 (건너뜀)")
-        return
-
-    holdings_cache = {
-        "source": holdings_info["source"],
-        "updated_at": holdings_info["fetched_at"],
-        "reference_date": holdings_info["as_of_date"],
-        "holdings_count": holdings_info["holdings_count"],
-        "items": holdings_info["holdings"],
-    }
+    # 구성종목 수집이 실패해도 배당·상장일·순자산 등 나머지 메타는 저장한다.
+    # (여기서 return 하면 캐시 문서 자체가 만들어지지 않아 화면이 통째로 빈다.)
+    holdings_cache = None
+    if holdings_info:
+        holdings_cache = {
+            "source": holdings_info["source"],
+            "updated_at": holdings_info["fetched_at"],
+            "reference_date": holdings_info["as_of_date"],
+            "holdings_count": holdings_info["holdings_count"],
+            "items": holdings_info["holdings"],
+        }
+    else:
+        logger.warning(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF holdings 수집 실패 (메타만 저장)")
 
     meta_cache = {
         "source": "overseas_etf_meta",
@@ -685,7 +713,7 @@ def _refresh_overseas_etf_meta_cache(
     # yfinance를 통해 추가적인 ETF 메타 정보 보완
     try:
         import yfinance as yf
-        symbol = f"{ticker_norm}.AX" if country_norm == "au" else ticker_norm
+        symbol = to_yahoo_symbol(ticker_norm) if country_norm == "au" else ticker_norm
         t_data = yf.Ticker(symbol)
         t_info = getattr(t_data, "info", {})
         if t_info:
@@ -705,6 +733,12 @@ def _refresh_overseas_etf_meta_cache(
     except Exception as e:
         logger.debug(f"yfinance 추가 메타데이터 수집 건너뜀: {e}")
 
+    # yfinance 는 호주 ETF 의 운용보수를 제공하지 않는다. Vanguard 상품이면 공식 API 로 채운다.
+    if country_norm == "au" and meta_cache.get("expense_ratio") is None:
+        vanguard_expense_ratio = fetch_vanguard_au_expense_ratio_pct(ticker_norm)
+        if vanguard_expense_ratio is not None:
+            meta_cache["expense_ratio"] = vanguard_expense_ratio
+
     refresh_stock_cache(
         ticker_type_norm,
         ticker_norm,
@@ -713,7 +747,12 @@ def _refresh_overseas_etf_meta_cache(
         meta_cache=meta_cache,
         holdings_cache=holdings_cache,
     )
-    logger.info(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF 구성종목 캐시 갱신 완료 ({holdings_info['holdings_count']}개 종목)")
+    if holdings_info:
+        logger.info(
+            f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF 구성종목 캐시 갱신 완료 ({holdings_info['holdings_count']}개 종목)"
+        )
+    else:
+        logger.info(f"[{ticker_type_norm.upper()}/{ticker_norm}] 해외 ETF 메타 캐시 갱신 완료 (구성종목 없음)")
 
 
 def _load_ticker_entries(type_norm: str) -> tuple[str, list[dict[str, Any]]] | None:
@@ -1142,8 +1181,8 @@ def update_single_stock_metadata(
 
     if country_code == "kor":
         yfinance_ticker = f"{ticker}.KS"
-    elif country_code == "au" and not ticker.endswith(".AX"):
-        yfinance_ticker = f"{ticker}.AX"
+    elif country_code == "au":
+        yfinance_ticker = to_yahoo_symbol(ticker)
     else:
         yfinance_ticker = ticker
 
