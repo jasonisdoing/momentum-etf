@@ -2154,6 +2154,8 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     Returns:
         {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
     """
+    import concurrent.futures
+
     from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
 
     result: dict[str, str] = {}

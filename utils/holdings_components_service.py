@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from services.component_price_service import enrich_component_prices
-from services.stock_cache_service import get_stock_cache_meta
+from services.stock_cache_service import get_stock_cache_meta_map
 from utils.account_registry import load_account_configs
 from utils.logger import get_app_logger
 from utils.ticker_registry import load_ticker_type_configs
@@ -106,6 +106,19 @@ def _ensure_asx_prefix(ticker: str) -> str:
     return f"ASX:{upper}"
 
 
+def _resolve_row_ticker(row: Any) -> tuple[str, str, str]:
+    """보유 행에서 (표준 티커, 환종, 가격 조회 국가코드) 를 뽑는다.
+
+    호주 ETF/종목은 시스템 전 구간에서 ASX: 접두사를 강제 부착한다.
+    (docs/developer_guide.md "호주 티커 식별 규칙" 참조)
+    """
+    raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
+    currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
+    country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
+    ticker = _ensure_asx_prefix(raw_ticker) if (country_code == "au" or currency == "AUD") else raw_ticker
+    return ticker, currency, country_code
+
+
 def list_holding_country_options() -> list[dict[str, str]]:
     """종목 국가 셀렉터에 사용할 코드/라벨 목록 (전체, 미국, 한국, 호주, 기타국가 순).
 
@@ -121,15 +134,21 @@ def _is_hidden_component_ticker(ticker: Any) -> bool:
     return _normalize_ticker(str(ticker or "")) == "IS"
 
 
-def _load_account_valuation_krw(account_id: str) -> float:
+def _load_account_holdings_frame(account_id: str) -> Any:
+    """계좌 보유 테이블을 1회 로드한다 (시세 조회를 포함하므로 계좌당 한 번만 부른다).
+
+    평가금액 합산과 구성종목 통합이 같은 테이블을 쓰므로 호출자가 결과를 공유한다.
+    """
     from utils.portfolio_io import load_real_holdings_table
 
     try:
-        df = load_real_holdings_table(account_id)
+        return load_real_holdings_table(account_id)
     except Exception as exc:
         logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", account_id, exc)
-        return 0.0
+        return None
 
+
+def _account_valuation_krw(df: Any) -> float:
     if df is None or df.empty:
         return 0.0
     return float(df["평가금액(KRW)"].sum())
@@ -196,6 +215,7 @@ def _append_account_components(
     *,
     account_id: str,
     account_name: str,
+    df: Any,
     merged: dict[str, dict[str, Any]],
     etf_details: list[dict[str, Any]],
     total_valuation_krw: float | None = None,
@@ -203,17 +223,10 @@ def _append_account_components(
 ) -> None:
     """단일 계좌의 보유 ETF 구성종목을 누적 병합한다.
 
+    df 는 호출자가 `_load_account_holdings_frame` 으로 미리 로드한 보유 테이블이다.
     ticker_type_filter 가 주어지면 해당 ticker_type 의 ETF 만 통합 대상으로 한다
     (노출국가 필터에 사용).
     """
-    from utils.portfolio_io import load_real_holdings_table
-
-    try:
-        df = load_real_holdings_table(account_id)
-    except Exception as exc:
-        logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", account_id, exc)
-        return
-
     if df is None or df.empty:
         return
 
@@ -225,16 +238,24 @@ def _append_account_components(
     if total_valuation <= 0:
         total_valuation = 1.0
 
+    def _is_target_row(target_row: Any) -> bool:
+        """통합 대상 보유 행인지 — 수량이 있고 ticker_type 필터를 통과하는 행."""
+        if int(target_row.get("수량", target_row.get("quantity", 0))) <= 0:
+            return False
+        if ticker_type_filter is None:
+            return True
+        return str(target_row.get("ticker_type") or "").strip().lower() in ticker_type_filter
+
+    # 구성종목 캐시를 ETF×종목풀 조합마다 개별 조회하면 수백 회 DB 왕복이 된다.
+    # 종목풀당 1회 배치 조회로 모아 두고 아래 루프에서는 맵 조회만 한다.
+    target_tickers = [_resolve_row_ticker(r)[0] for _, r in df.iterrows() if _is_target_row(r)]
+    cache_maps = {t_type: get_stock_cache_meta_map(t_type, target_tickers) for t_type in ticker_types}
+
     for _, row in df.iterrows():
-        raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
-        quantity = int(row.get("수량", row.get("quantity", 0)))
-        if quantity <= 0:
+        if not _is_target_row(row):
             continue
 
-        if ticker_type_filter is not None:
-            row_ticker_type = str(row.get("ticker_type") or "").strip().lower()
-            if row_ticker_type not in ticker_type_filter:
-                continue
+        quantity = int(row.get("수량", row.get("quantity", 0)))
 
         valuation = float(row.get("평가금액(KRW)") or 0.0)
         buy_amount = float(row.get("매입금액(KRW)") or 0.0)
@@ -242,19 +263,12 @@ def _append_account_components(
         etf_return_pct = float(row.get("수익률(%)") or 0.0)
         etf_daily_pct = row.get("일간(%)")
         etf_current_price = row.get("현재가")
-        etf_currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
-        etf_price_country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
-        # 호주 ETF/종목은 시스템 전 구간에서 ASX: 접두사를 강제 부착한다.
-        # (docs/developer_guide.md "호주 티커 식별 규칙" 참조)
-        if etf_price_country_code == "au" or etf_currency == "AUD":
-            ticker = _ensure_asx_prefix(raw_ticker)
-        else:
-            ticker = raw_ticker
+        ticker, etf_currency, etf_price_country_code = _resolve_row_ticker(row)
         portfolio_weight = valuation / total_valuation
 
         cache_doc = None
         for t_type in ticker_types:
-            cache_doc = get_stock_cache_meta(t_type, ticker)
+            cache_doc = cache_maps[t_type].get(ticker)
             if cache_doc and cache_doc.get("holdings_cache", {}).get("items"):
                 break
 
@@ -448,12 +462,15 @@ def load_account_holdings_components(
         total_assets_krw = 0.0
         for account in all_accounts:
             curr_account_id = str(account["account_id"])
-            curr_valuation_krw = _load_account_valuation_krw(curr_account_id)
+            # 보유 테이블은 시세 조회를 포함해 비싸므로 계좌당 1회만 로드해 아래 통합 단계와 공유한다.
+            curr_df = _load_account_holdings_frame(curr_account_id)
+            curr_valuation_krw = _account_valuation_krw(curr_df)
             curr_cash_krw = _load_account_cash_balance_krw(curr_account_id)
             account_totals.append(
                 {
                     "account_id": curr_account_id,
                     "account_name": str(account.get("name", curr_account_id)),
+                    "df": curr_df,
                     "valuation_krw": curr_valuation_krw,
                     "cash_krw": curr_cash_krw,
                 }
@@ -466,6 +483,7 @@ def load_account_holdings_components(
             _append_account_components(
                 account_id=curr_account_id,
                 account_name=curr_account_name,
+                df=account_total["df"],
                 merged=merged,
                 etf_details=etf_details,
                 total_valuation_krw=total_assets_krw,
@@ -481,12 +499,14 @@ def load_account_holdings_components(
                 )
     else:
         account_name = str(account_config.get("name", account_id_norm))
-        account_valuation_krw = _load_account_valuation_krw(account_id_norm)
+        account_df = _load_account_holdings_frame(account_id_norm)
+        account_valuation_krw = _account_valuation_krw(account_df)
         account_cash_krw = _load_account_cash_balance_krw(account_id_norm)
         account_total_assets_krw = account_valuation_krw + account_cash_krw
         _append_account_components(
             account_id=account_id_norm,
             account_name=account_name,
+            df=account_df,
             merged=merged,
             etf_details=etf_details,
             total_valuation_krw=account_total_assets_krw,
