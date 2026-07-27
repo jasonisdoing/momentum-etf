@@ -434,7 +434,8 @@ def load_real_holdings_table(
     for _, holding_row in df_holdings.iterrows():
         market = country_by_currency.get(str(holding_row.get("currency") or "").strip().upper())
         ticker_key = str(holding_row.get("ticker") or "").strip().upper()
-        if market and ticker_key:
+        # IS 는 시장에 없는 가상 티커 — 가격·일간은 위에서 VGS 프록시로 이미 채웠다.
+        if market and ticker_key and ticker_key != "IS":
             tickers_by_market.setdefault(market, set()).add(ticker_key)
     for market, market_tickers in tickers_by_market.items():
         df_holdings = _apply_realtime_overlay_to_holdings(
@@ -462,48 +463,58 @@ def load_real_holdings_table(
         intl_princi_krw = intl_princi * aud_krw
         intl_val_krw = intl_val * aud_krw
 
-        # 전일 intl_shares_value 로드하여 일간(%) 계산
-        intl_daily_pct = None
+        # IS 를 실제 VGS 보유처럼 표시한다 — 수량 = 평가액 ÷ VGS 가격, 일간(%) = VGS 변동률.
+        # (수량 × 현재가 = 입력한 평가액 항등식이 유지되므로 평가액·손익·수익률은 변하지 않는다)
+        # VGS 가격은 실시간(QuoteAPI) 우선, 실패 시 aus 캐시 종가. 둘 다 없으면 기존 방식
+        # (수량 1, 현재가 = 평가액, 일간 미표시)으로 표시한다 — 임의 값을 만들지 않는다.
+        is_proxy_ticker = "ASX:VGS"
+        vgs_price = None
+        vgs_daily_pct = None
         try:
-            from utils.db_manager import get_db_connection as _get_db
-            _db = _get_db()
-            if _db is not None:
-                today = _resolve_snapshot_date()
-                prev_snap = _db.daily_snapshots.find_one(
-                    {
-                        "snapshot_date": {"$lt": today},
-                        "accounts": {
-                            "$elemMatch": {
-                                "account_id": "aus_account",
-                                "intl_shares_value": {"$exists": True, "$type": "number", "$gt": 0}
-                            }
-                        }
-                    },
-                    sort=[("snapshot_date", -1)],
-                )
-                if prev_snap:
-                    for prev_acc in prev_snap.get("accounts", []):
-                        if prev_acc.get("account_id") == "aus_account":
-                            prev_intl = prev_acc.get("intl_shares_value")
-                            if prev_intl and float(prev_intl) > 0:
-                                intl_daily_pct = (intl_val - float(prev_intl)) / float(prev_intl) * 100.0
-                            break
-        except Exception:
-            pass
+            proxy_quote = get_realtime_snapshot("au", [is_proxy_ticker]).get(is_proxy_ticker) or {}
+            if proxy_quote.get("nowVal"):
+                vgs_price = float(proxy_quote["nowVal"])
+                if proxy_quote.get("changeRate") is not None:
+                    vgs_daily_pct = float(proxy_quote["changeRate"])
+        except Exception as exc:
+            logger.warning("IS 프록시(VGS) 실시간 조회 실패: %s", exc)
+        if vgs_price is None:
+            try:
+                from utils.cache_utils import load_cached_frame
+
+                vgs_frame = load_cached_frame("aus", is_proxy_ticker)
+                closes = pd.to_numeric(vgs_frame["Close"], errors="coerce").dropna()
+                if not closes.empty:
+                    vgs_price = float(closes.iloc[-1])
+                    if len(closes) > 1 and float(closes.iloc[-2]) > 0:
+                        vgs_daily_pct = (vgs_price / float(closes.iloc[-2]) - 1.0) * 100.0
+            except Exception as exc:
+                logger.warning("IS 프록시(VGS) 캐시 조회 실패: %s", exc)
+
+        if vgs_price is not None and vgs_price > 0 and intl_val > 0:
+            is_quantity = intl_val / vgs_price
+            is_price = vgs_price
+            is_avg_price = intl_princi / is_quantity
+            is_daily_pct = vgs_daily_pct
+        else:
+            is_quantity = 1.0
+            is_price = intl_val
+            is_avg_price = intl_princi
+            is_daily_pct = None
 
         # We append a row to df_holdings
         pseudo_row = {
             "ticker": "IS",
             "name": "International Shares",
-            "quantity": 1,
-            "average_buy_price": intl_princi,
+            "quantity": is_quantity,
+            "average_buy_price": is_avg_price,
             "currency": "AUD",
             "bucket": 2,  # "2. 시장지수"
             "first_buy_date": pd.Timestamp.now().normalize(),
-            "현재가": intl_val,
+            "현재가": is_price,
             "매입금액(KRW)": intl_princi_krw,
             "평가금액(KRW)": intl_val_krw,
-            "일간(%)": intl_daily_pct,
+            "일간(%)": is_daily_pct,
             "is_etf": False,
             "country_code": "au",
             "ticker_type": "aus",

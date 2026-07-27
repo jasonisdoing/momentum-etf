@@ -204,7 +204,14 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 except (ValueError, TypeError):
                     return 0
 
-            quantity = safe_int(row.get("수량"))
+            # IS(가상 VGS 수량) 처럼 소수 수량이 있는 행은 소수점을 보존한다.
+            try:
+                quantity = float(row.get("수량"))
+            except (TypeError, ValueError):
+                quantity = 0.0
+            if not math.isfinite(quantity):
+                quantity = 0.0
+            quantity = int(quantity) if quantity.is_integer() else round(quantity, 4)
             buy_amount = safe_int(row.get("매입금액(KRW)"))
             val_amount = safe_int(row.get("평가금액(KRW)"))
             pnl = safe_int(row.get("평가손익(KRW)"))
