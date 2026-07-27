@@ -44,9 +44,9 @@ SCHEDULE_ROWS = [
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 24시간 매 20분 KST",
+        "cadence": "월~토 24시간 매시 30분 KST",
         "command": "python scripts/collect_data.py",
-        "schedule": {"minutes": [0, 20, 40], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [30], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "asset_summary",
@@ -62,9 +62,9 @@ SCHEDULE_ROWS = [
         "job": "가격 캐시 업데이트",
         "target": "모든 종목 가격",
         "run_location": "SERVER/LOCAL",
-        "cadence": "월~토 24시간 매시 0분 KST",
+        "cadence": "월~토 24시간 매시 20분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
-        "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "reference_meta_updater",
