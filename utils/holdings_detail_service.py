@@ -449,9 +449,9 @@ def add_holding(
     master = load_portfolio_master(account_id)
     holdings = master.get("holdings", []) if master else []
 
-    # 중복 확인
+    # 중복 확인 — ASX: 접두사 유무가 달라도 같은 종목으로 판정한다.
     for h in holdings:
-        if str(h.get("ticker", "")).strip() == raw_ticker:
+        if _normalize_target_ticker(str(h.get("ticker", ""))) == _normalize_target_ticker(raw_ticker):
             raise RuntimeError(f"종목 {ticker}은 이미 등록되어 있습니다.")
 
     # 3. 정석적인 구조로 새로운 종목 구성
