@@ -87,11 +87,18 @@ def _apply_realtime_overlay_to_holdings(
     df_holdings: pd.DataFrame,
     country_code: str,
     realtime_data: dict[str, dict[str, float]] | None = None,
+    only_tickers: set[str] | None = None,
 ) -> pd.DataFrame:
-    """보유 종목 테이블에 실시간 현재가/NAV/괴리율 등을 덮어쓴다."""
+    """보유 종목 테이블에 실시간 현재가/NAV/괴리율 등을 덮어쓴다.
+
+    only_tickers 를 주면 그 티커들만 해당 시장 API 로 조회·적용한다
+    (한 계좌에 여러 시장 종목이 섞여 있을 때 시장별로 나눠 호출하기 위함).
+    """
     tickers = [
         str(ticker or "").strip().upper() for ticker in df_holdings.get("ticker", []) if str(ticker or "").strip()
     ]
+    if only_tickers is not None:
+        tickers = [ticker for ticker in tickers if ticker in only_tickers]
     if not tickers:
         return df_holdings
 
@@ -420,16 +427,21 @@ def load_real_holdings_table(
     if strict_price_cache and missing_price_tickers:
         raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
 
-    try:
-        account_settings = get_account_settings(account_id)
-        account_country = str(account_settings.get("country_code") or "").strip().lower()
-    except Exception:
-        account_country = ""
-    if account_country in ("kor", "au", "us"):
+    # 실시간 오버레이 — 계좌 국가가 아니라 "보유 종목의 통화" 기준으로 시장별 API 를 나눠 호출한다.
+    # kor 계좌가 미국 종목을 담아도 토스 실시간(프리장·애프터 포함)이 적용된다.
+    country_by_currency = {"KRW": "kor", "USD": "us", "AUD": "au"}
+    tickers_by_market: dict[str, set[str]] = {}
+    for _, holding_row in df_holdings.iterrows():
+        market = country_by_currency.get(str(holding_row.get("currency") or "").strip().upper())
+        ticker_key = str(holding_row.get("ticker") or "").strip().upper()
+        if market and ticker_key:
+            tickers_by_market.setdefault(market, set()).add(ticker_key)
+    for market, market_tickers in tickers_by_market.items():
         df_holdings = _apply_realtime_overlay_to_holdings(
             df_holdings,
-            country_code=account_country,
-            realtime_data=preloaded_kor_realtime_snapshot if account_country == "kor" else None,
+            country_code=market,
+            realtime_data=preloaded_kor_realtime_snapshot if market == "kor" else None,
+            only_tickers=market_tickers,
         )
 
     multiplier = df_holdings["currency"].apply(_get_multiplier)
@@ -577,9 +589,10 @@ def load_real_holdings_table(
     metrics_rows = [_build_cached_metrics(ticker) for ticker in df_holdings["티커"].tolist()]
     metrics_df = pd.DataFrame(metrics_rows)
     for col in metrics_df.columns:
-        if col == "일간(%)":
-            # 실시간 오버레이가 이미 값을 넣었을 수 있으므로, 비어있는 경우에만 캐시값으로 채움
-            df_holdings[col] = df_holdings.get(col, pd.Series(dtype=float)).fillna(metrics_df[col])
+        if col == "일간(%)" and col in df_holdings.columns:
+            # 실시간 오버레이가 이미 값을 넣었을 수 있으므로, 비어있는 경우에만 캐시값으로 채움.
+            # (컬럼이 없을 때 df.get() 의 빈 Series 에 fillna 하면 전부 NaN 이 되는 버그가 있었다)
+            df_holdings[col] = df_holdings[col].fillna(metrics_df[col])
         else:
             df_holdings[col] = metrics_df[col]
 
