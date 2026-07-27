@@ -3753,7 +3753,8 @@ a {
 }
 
 /* 종목명 — 원래 글씨 크기를 유지한 채 줄간격만 줄여 최대 2줄까지 표시 (그래도 넘치면 말줄임) */
-.rankAgGrid .rankNameCellText {
+.rankAgGrid .rankNameCellText,
+.assetsChildAgGrid .rankNameCellText {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
