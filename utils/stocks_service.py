@@ -1,16 +1,17 @@
 from __future__ import annotations
+
 from datetime import datetime
 from typing import Any
 
-from utils.ticker_registry import load_ticker_type_configs as load_account_configs
+from services.price_service import get_realtime_snapshot
+from services.stock_cache_service import delete_stock_cache
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.normalization import normalize_nullable_number, normalize_text
 from utils.rank_service import invalidate_rank_data_cache
 from utils.stock_list_io import add_stock, hard_remove_stock, invalidate_ticker_type_cache
 from utils.stock_meta_updater import fetch_stock_info
-from services.price_service import get_realtime_snapshot
-from services.stock_cache_service import delete_stock_cache
+from utils.ticker_registry import load_ticker_type_configs as load_account_configs
 
 BUCKETS: dict[int, str] = {
     1: "1. 모멘텀",
@@ -222,8 +223,13 @@ def validate_stock_candidate(ticker_type: str, ticker: str) -> dict[str, Any]:
     listing_date = normalize_text(stock_info.get("listing_date") or (existing or {}).get("listing_date"), "-")
     bucket_id = int((existing or {}).get("bucket") or 1)
 
+    # 반환 티커는 시스템 표준 표기 — 호주는 ASX: 접두사를 붙인다.
+    # (이 값이 stock_meta 등록·계좌 보유 저장에 그대로 쓰이므로 여기서 표준화해야
+    #  이후 경로 전부가 표준 표기로 저장된다. docs/developer_guide.md "호주 티커 식별 규칙")
+    from utils.asx_ticker import ensure_asx_prefix
+
     return {
-        "ticker": ticker_norm,
+        "ticker": ensure_asx_prefix(ticker_norm) if country_code == "au" else ticker_norm,
         "name": normalize_text(stock_info.get("name"), ""),
         "listing_date": listing_date,
         "status": "active" if is_active else "deleted" if is_deleted else "new",
