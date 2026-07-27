@@ -516,6 +516,7 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
 
     return {
         "tickers": weight_tickers,
+        "cash_weight_pct": helper_doc.get("cash_weight_pct"),
         "weight_mode": stored_weight_mode,
         "settings": _with_account_asset_helper_basis(settings, weight_mode=stored_weight_mode),
         "backtest_settings": backtest_settings,
@@ -533,6 +534,7 @@ def save_asset_helper_settings(
     settings: dict[str, Any] | None = None,
     backtest_settings: dict[str, Any] | None = None,
     account_id: str | None = None,
+    cash_weight_pct: float | None = None,
 ) -> dict[str, Any]:
     from utils.portfolio_io import load_portfolio_master, update_account_asset_helper
 
@@ -564,6 +566,12 @@ def save_asset_helper_settings(
         base=existing_helper.get("backtest_settings") or DEFAULT_BACKTEST_SETTINGS,
         require_benchmark=False,
     )
+    # 현금 목표 비중 — 저장값이 원본(로드 시 나머지로 자동 초기화하지 않기 위함).
+    clean_cash_weight = existing_helper.get("cash_weight_pct")
+    if cash_weight_pct is not None:
+        clean_cash_weight = round(float(cash_weight_pct), 2)
+        if not (0.0 <= clean_cash_weight <= 100.0):
+            raise ValueError(f"현금 비중은 0 ~ 100 범위여야 합니다: {clean_cash_weight}")
     updated_at = datetime.now(timezone.utc)
 
     # 종목별 목표비중 — 보유 항목의 target_ratio 필드로 저장 (비중 미입력 종목은 미설정 유지).
@@ -579,6 +587,7 @@ def save_asset_helper_settings(
             "weight_mode": clean_weight_mode,
             **clean_settings,
             "backtest_settings": clean_backtest_settings,
+            "cash_weight_pct": clean_cash_weight,
             "updated_at": updated_at,
         },
     )
@@ -591,25 +600,53 @@ def save_asset_helper_settings(
     }
 
 
+# IS(International Shares, 수동 고정자산)의 가격 프록시 — VGS 와 같이 움직인다고 가정한다.
+IS_PRICE_PROXY = {"IS": ("aus", "VGS")}
+
+
+def _cache_lookup_ticker(ticker: str, ticker_type: str) -> str:
+    """가격 캐시 조회 키 — 호주 풀은 시스템 표준 표기(ASX: 접두사)로 저장돼 있다."""
+    from utils.asx_ticker import ensure_asx_prefix
+    from utils.settings_loader import get_ticker_type_settings
+
+    try:
+        country = str(get_ticker_type_settings(ticker_type).get("country_code") or "").strip().lower()
+    except Exception:
+        country = ""
+    return ensure_asx_prefix(ticker) if country == "au" else ticker
+
+
 def _load_close_frame(tickers: list[dict[str, Any]]) -> tuple[pd.DataFrame, list[str]]:
-    grouped: dict[str, list[str]] = defaultdict(list)
+    # 종목풀별로 {캐시 조회 키: 요청 티커} 를 만든다.
+    # 요청 티커는 접두사 없는 형태(화면 표준)지만 호주 캐시 키는 ASX: 가 붙어 있고,
+    # IS 는 VGS 시계열로 대리하므로 조회 키와 요청 티커가 다를 수 있다.
+    grouped: dict[str, dict[str, str]] = defaultdict(dict)
     for item in tickers:
         ticker = str(item.get("ticker") or "").strip().upper()
         ticker_type = str(item.get("ticker_type") or "").strip().lower()
-        if ticker and ticker_type:
-            grouped[ticker_type].append(ticker)
+        if not ticker or not ticker_type:
+            continue
+        proxy = IS_PRICE_PROXY.get(ticker)
+        if proxy:
+            proxy_type, proxy_ticker = proxy
+            grouped[proxy_type][_cache_lookup_ticker(proxy_ticker, proxy_type)] = ticker
+        else:
+            grouped[ticker_type][_cache_lookup_ticker(ticker, ticker_type)] = ticker
 
     series_map: dict[str, pd.Series] = {}
-    for ticker_type, group_tickers in grouped.items():
-        fetched = load_cached_close_series_bulk_with_fallback(ticker_type, group_tickers)
-        for ticker, series in fetched.items():
+    for ticker_type, lookup_map in grouped.items():
+        fetched = load_cached_close_series_bulk_with_fallback(ticker_type, list(lookup_map))
+        for fetched_ticker, series in fetched.items():
             if series is None or series.empty:
+                continue
+            requested = lookup_map.get(str(fetched_ticker).strip().upper())
+            if not requested:
                 continue
             normalized = pd.to_numeric(series, errors="coerce").dropna()
             normalized.index = pd.to_datetime(normalized.index).normalize()
             normalized = normalized[~normalized.index.duplicated(keep="last")].sort_index()
             if not normalized.empty:
-                series_map[str(ticker).strip().upper()] = normalized
+                series_map[requested] = normalized
 
     unresolved = [
         str(item.get("ticker") or "").strip().upper()

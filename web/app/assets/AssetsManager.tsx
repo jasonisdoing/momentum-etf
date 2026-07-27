@@ -334,23 +334,11 @@ function getPreviewBuyAmountKrw(row: GridRow): number {
 
 function getPreviewWeightPct(row: GridRow, rows: HoldingsRow[], summary: AccountSummary): number {
   const normalizedTicker = String(row.ticker || "").trim().toUpperCase();
-  if (normalizedTicker === "IS") {
-    return 0;
-  }
+  // IS(International Shares 고정자산)도 총자산에 포함해 비중을 계산한다 — 백엔드 weight_pct 와 동일 기준.
   const previewTotalValuation = rows.reduce((sum, currentRow) => {
     return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
   }, 0);
-  const previewIsValuation = rows.reduce((sum, currentRow) => {
-    if (String(currentRow.ticker || "").trim().toUpperCase() !== "IS") {
-      return sum;
-    }
-    return sum + getPreviewValuationKrw({ ...currentRow, id: buildGridRowId(currentRow) });
-  }, 0);
-  const currency = String(summary.currency || "KRW").trim().toUpperCase();
-  const denominator =
-    currency === "AUD"
-      ? Number(summary.cash_balance_krw ?? 0) + previewTotalValuation - previewIsValuation
-      : Number(summary.cash_balance_krw ?? 0) + previewTotalValuation;
+  const denominator = Number(summary.cash_balance_krw ?? 0) + previewTotalValuation;
   if (denominator <= 0) {
     return 0;
   }
@@ -439,11 +427,7 @@ function buildCashGridRow(summary: AccountSummary): GridRow {
 
 function reorderRowsByTickers(rows: HoldingsRow[], orderedTickers: string[]): HoldingsRow[] {
   const normalizedTickers = orderedTickers.map((ticker) => String(ticker || "").trim().toUpperCase());
-  const rowMap = new Map(
-    rows
-      .filter((row) => String(row.ticker || "").trim().toUpperCase() !== "IS")
-      .map((row) => [String(row.ticker || "").trim().toUpperCase(), row] as const),
-  );
+  const rowMap = new Map(rows.map((row) => [String(row.ticker || "").trim().toUpperCase(), row] as const));
   const orderedRows: HoldingsRow[] = [];
   const seen = new Set<string>();
 
@@ -456,10 +440,7 @@ function reorderRowsByTickers(rows: HoldingsRow[], orderedTickers: string[]): Ho
     seen.add(ticker);
   }
 
-  const remainingRows = rows.filter((row) => {
-    const ticker = String(row.ticker || "").trim().toUpperCase();
-    return ticker === "IS" || !seen.has(ticker);
-  });
+  const remainingRows = rows.filter((row) => !seen.has(String(row.ticker || "").trim().toUpperCase()));
 
   return [...orderedRows, ...remainingRows.map((row) => ({ ...row }))].map((row, index) => ({
     ...row,
@@ -914,7 +895,7 @@ function AccountHoldingsDetailPanel({
   const processReorderUpdate = useCallback(async (orderedRows: HoldingsRow[]) => {
     const orderedTickers = orderedRows
       .map((row) => String(row.ticker || "").trim().toUpperCase())
-      .filter((ticker) => ticker && ticker !== "IS" && ticker !== CASH_ROW_TICKER);
+      .filter((ticker) => ticker && ticker !== CASH_ROW_TICKER);
     await reorderHoldings(summary.account_id, orderedTickers);
   }, [summary.account_id]);
 
@@ -1246,7 +1227,7 @@ function AccountHoldingsDetailPanel({
       resizable: false,
       suppressMovable: true,
       rowDrag: (params) =>
-        Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== "IS" && params.data.ticker !== CASH_ROW_TICKER),
+        Boolean(params.data && params.data.id !== "__adding__" && params.data.ticker !== CASH_ROW_TICKER),
       cellClass: "assetsDragCell",
       valueGetter: () => "",
     },

@@ -495,6 +495,14 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
     if not normalized_tickers:
         raise RuntimeError("정렬할 종목코드가 필요합니다.")
 
+    # IS(가짜 보유 행)는 실보유가 아니므로 목록에서 분리하고, 위치만 계좌 필드로 저장한다.
+    intl_shares_sort_order = None
+    if "IS" in normalized_tickers:
+        intl_shares_sort_order = normalized_tickers.index("IS")
+        normalized_tickers = [ticker for ticker in normalized_tickers if ticker != "IS"]
+    if not normalized_tickers:
+        raise RuntimeError("정렬할 종목코드가 필요합니다.")
+
     master = load_portfolio_master(normalized_account_id)
     if not master:
         raise RuntimeError("계좌 데이터를 찾을 수 없습니다.")
@@ -525,7 +533,11 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
         if ticker not in seen:
             ordered_holdings.append(holding)
 
-    save_portfolio_master(normalized_account_id, _assign_sort_order(ordered_holdings))
+    save_portfolio_master(
+        normalized_account_id,
+        _assign_sort_order(ordered_holdings),
+        intl_shares_sort_order=intl_shares_sort_order,
+    )
 
     try:
         from utils.snapshot_service import update_today_snapshot_all_accounts
