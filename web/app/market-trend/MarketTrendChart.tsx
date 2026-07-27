@@ -370,17 +370,26 @@ export function MarketTrendChart({
 
   useEffect(() => {
     let alive = true;
+    // 요청 시점의 ticker 를 고정해 둔다 — 응답이 늦게 도착해도 다른 지수 데이터를 그리지 않는다.
+    const requestedTicker = ticker;
     async function load() {
       try {
+        // ticker 가 바뀌면 이전 지수 데이터를 먼저 비운다(다른 지수 화면이 잠시 남는 것 방지).
+        setData(null);
         setLoading(true);
         setError(null);
         const response = await fetch(
-          `/api/market-trend/history?ticker=${encodeURIComponent(ticker)}`,
+          `/api/market-trend/history?ticker=${encodeURIComponent(requestedTicker)}`,
           { cache: "no-store" },
         );
         const payload = (await response.json()) as HistoryResponse;
         if (!response.ok) {
           throw new Error(payload.error ?? "히스토리를 불러오지 못했습니다.");
+        }
+        // 응답의 ticker 가 요청과 다르면 폐기한다(프록시·캐시 혼선 방어).
+        const responseTicker = String(payload.ticker ?? requestedTicker);
+        if (responseTicker !== requestedTicker) {
+          throw new Error(`응답 지수가 요청과 다릅니다: ${responseTicker} ≠ ${requestedTicker}`);
         }
         if (alive) setData(payload);
       } catch (loadError) {
