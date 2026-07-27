@@ -94,6 +94,17 @@ def _apply_target_metrics(
         if h.get("target_ratio") is not None
     }
     account_total_assets = _compute_account_total_assets_native(rows, cash_info, account_currency, rates)
+    # 목표수량은 통화 혼합 계좌(KRW 계좌의 USD 종목 등)를 위해 전부 KRW 로 환산해 계산한다.
+    account_total_krw = sum(float(row.get("valuation_krw") or 0.0) for row in rows) + float(
+        (cash_info or {}).get("cash_balance_krw") or 0.0
+    )
+
+    def _row_fx_rate_krw(row_currency: str) -> float | None:
+        currency_code = str(row_currency or "KRW").strip().upper() or "KRW"
+        if currency_code == "KRW":
+            return 1.0
+        rate = float(((rates or {}).get(currency_code) or {}).get("rate") or 0.0)
+        return rate if rate > 0 else None
 
     enriched_rows: list[dict[str, Any]] = []
     for row in rows:
@@ -106,10 +117,13 @@ def _apply_target_metrics(
         else:
             target_amount = round(account_total_assets * (target_ratio / 100.0), 2)
             next_row["target_amount"] = target_amount
+            # 목표수량 = KRW 목표금액 ÷ (현재가 × 종목 통화 환율). 환율이 없으면 계산 불가(None).
+            fx_rate = _row_fx_rate_krw(str(next_row.get("currency") or ""))
+            price_krw = float(next_row.get("current_price_num") or 0.0) * fx_rate if fx_rate else 0.0
             next_row["target_quantity"] = _compute_target_quantity(
-                target_amount,
-                float(next_row.get("current_price_num") or 0.0),
-                account_currency,
+                account_total_krw * (target_ratio / 100.0),
+                price_krw,
+                str(next_row.get("currency") or account_currency),
             )
         enriched_rows.append(next_row)
     return enriched_rows
