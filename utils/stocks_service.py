@@ -192,10 +192,16 @@ def validate_stock_candidate(ticker_type: str, ticker: str) -> dict[str, Any]:
     if db is None:
         raise RuntimeError("MongoDB 연결에 실패했습니다.")
 
+    # 호주(aus) 종목풀은 stock_meta 에 "ASX:TICKER" 접두어 형태로 저장돼 있어(예: ASX:ASIA),
+    # 접두어를 뗀 정규화 티커로만 조회하면 매칭이 안 된다. 두 형태를 모두 매칭한다.
+    ticker_candidates = [ticker_norm]
+    if country_code == "au":
+        ticker_candidates.append(f"ASX:{ticker_norm}")
+
     existing = db.stock_meta.find_one(
         {
             "ticker_type": ticker_type_norm,
-            "ticker": ticker_norm,
+            "ticker": {"$in": ticker_candidates},
         },
         {
             "name": 1,
