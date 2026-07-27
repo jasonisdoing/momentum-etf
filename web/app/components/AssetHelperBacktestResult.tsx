@@ -430,7 +430,8 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
         min_weight: result.cash_min_weight ?? 0,
         max_weight: result.cash_max_weight ?? 0,
       }),
-      ...result.positions.map(withContribution),
+      // 비중 0으로 설정돼 백테스트 내내 한 번도 편입되지 않은 종목(max_weight === 0)은 기여도가 없어 제외한다.
+      ...result.positions.filter((position) => position.max_weight !== 0).map(withContribution),
     ];
   }, [result]);
 
