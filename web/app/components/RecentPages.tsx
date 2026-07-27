@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { getNavLabel } from "@/lib/nav-menu";
+import { useFitOneLine } from "@/lib/use-fit-one-line";
 
 // 최근 방문한 페이지(메뉴)를 상단 헤더 아래에 칩으로 나열한다.
 // - 홈(/)과 메뉴 정의(nav-menu)에 없는 경로는 제외
@@ -56,32 +57,8 @@ export function RecentPages() {
     });
   }, [pathname]);
 
-  // 화면 폭에 한 줄로 들어가는 칩만 보이게 한다(넘치는 칩은 display:none). 리사이즈 시 재계산.
-  useLayoutEffect(() => {
-    const bar = barRef.current;
-    if (!bar) return;
-    const compute = () => {
-      const chips = Array.from(bar.querySelectorAll<HTMLElement>("[data-recent-chip]"));
-      // 측정을 위해 먼저 모두 보이게 한 뒤, 오른쪽 끝이 컨테이너를 넘는 첫 칩부터 숨긴다.
-      chips.forEach((chip) => {
-        chip.style.display = "";
-      });
-      const barWidth = bar.clientWidth;
-      let fits = true;
-      for (const chip of chips) {
-        if (fits && chip.offsetLeft + chip.offsetWidth <= barWidth + 0.5) {
-          chip.style.display = "";
-        } else {
-          fits = false;
-          chip.style.display = "none";
-        }
-      }
-    };
-    compute();
-    const observer = new ResizeObserver(compute);
-    observer.observe(bar);
-    return () => observer.disconnect();
-  }, [recent]);
+  // 화면 폭에 한 줄로 들어가는 칩만 보이게 한다(넘치는 칩은 숨김). 최근목록/리사이즈 변경 시 재계산.
+  useFitOneLine(barRef, [recent]);
 
   const remove = (href: string) => {
     setRecent((prev) => {
@@ -104,7 +81,7 @@ export function RecentPages() {
         return (
           <span
             key={item.href}
-            data-recent-chip
+            data-fit-hideable
             className={active ? "recentPageChip recentPageChip--active" : "recentPageChip"}
           >
             <Link href={item.href} className="recentPageChipLink">
