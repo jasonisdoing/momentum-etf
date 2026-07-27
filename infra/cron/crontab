@@ -25,10 +25,10 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # 기본 배치는 캘린더 평일(월~금, KST) 에 실행한다.
 # cron 의 요일 필드: 1=월, 2=화, ..., 6=토
 
-0 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+20 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
 45 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py reference_meta_updater python scripts/stock_reference_meta_updater.py >> logs/cron/reference_meta_updater.log 2>&1
 50 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py price_metrics_updater python scripts/stock_price_metrics_updater.py >> logs/cron/price_metrics_updater.log 2>&1
-0,20,40 * * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
+30 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
 40 9 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 10 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py asset_summary python scripts/slack_asset_summary.py >> logs/cron/asset_summary.log 2>&1
 0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
