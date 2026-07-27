@@ -1172,26 +1172,35 @@ export function ComparePageClient() {
       ...PERFORMANCE_METRIC_RANGES.slice(insertIndex),
     ];
   }, [selectedPerformanceRange.days, selectedPerformanceRange.key, selectedPerformanceRange.label]);
+  // 표시 순서는 사용자가 정한 선택 순서(selectedKeys)를 그대로 따른다.
+  // 상단 종목 카드를 드래그해 바꾸며, 그 순서가 그룹/임시 선택에 저장돼 다음에도 유지된다.
+  // (성과 기간을 바꿔도 순서는 바뀌지 않는다 — 수동 순서 고정)
   const sortedProducts = useMemo(() => {
+    const orderIndex = new Map(selectedKeys.map((key, index) => [key, index] as const));
     return products
-      .map((product, index) => ({
-        product,
-        index,
-        returnPct: selectedPerformanceRange.ytd
-          ? getYearToDateReturnPct(product.detail.rows)
-          : getReturnPct(product.detail.rows, selectedPerformanceRange.days),
-      }))
+      .map((product, index) => ({ product, index }))
       .sort((a, b) => {
-        const aValue = a.returnPct;
-        const bValue = b.returnPct;
-        if (aValue === null && bValue === null) return a.index - b.index;
-        if (aValue === null) return 1;
-        if (bValue === null) return -1;
-        if (bValue === aValue) return a.index - b.index;
-        return bValue - aValue;
+        const aOrder = orderIndex.get(tickerKey(a.product.item)) ?? Number.MAX_SAFE_INTEGER;
+        const bOrder = orderIndex.get(tickerKey(b.product.item)) ?? Number.MAX_SAFE_INTEGER;
+        return aOrder === bOrder ? a.index - b.index : aOrder - bOrder;
       })
       .map(({ product }) => product);
-  }, [products, selectedPerformanceRange.days, selectedPerformanceRange.ytd]);
+  }, [products, selectedKeys]);
+
+  // 카드 드래그로 순서 변경 — selectedKeys 를 재배열하면 저장(useEffect)까지 자동 반영된다.
+  const [draggingKey, setDraggingKey] = useState<string | null>(null);
+  const moveProductOrder = useCallback((fromKey: string, toKey: string) => {
+    if (!fromKey || !toKey || fromKey === toKey) return;
+    setSelectedKeys((prev) => {
+      const fromIndex = prev.indexOf(fromKey);
+      const toIndex = prev.indexOf(toKey);
+      if (fromIndex < 0 || toIndex < 0) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }, []);
 
   // 일간/월간/연간 분석 탭 — 종목별 기간 변동률 맵 + 표시할 기간 목록(최신이 위)
   const monthlyReturnMaps = useMemo(() => {
@@ -1566,7 +1575,31 @@ export function ComparePageClient() {
           {sortedProducts.map((product, index) => (
             <div
               key={tickerKey(product.item)}
-              className="compareProductCard"
+              className={
+                draggingKey === tickerKey(product.item)
+                  ? "compareProductCard is-dragging"
+                  : "compareProductCard"
+              }
+              draggable
+              onDragStart={(event) => {
+                setDraggingKey(tickerKey(product.item));
+                event.dataTransfer.effectAllowed = "move";
+                // Firefox 는 데이터가 없으면 드래그가 시작되지 않는다.
+                event.dataTransfer.setData("text/plain", tickerKey(product.item));
+              }}
+              onDragOver={(event) => {
+                if (!draggingKey) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                const fromKey = draggingKey ?? event.dataTransfer.getData("text/plain");
+                moveProductOrder(fromKey, tickerKey(product.item));
+                setDraggingKey(null);
+              }}
+              onDragEnd={() => setDraggingKey(null)}
+              title="드래그해서 순서를 바꿉니다"
               style={{
                 borderTopColor: CHART_COLORS[index % CHART_COLORS.length],
                 background: CHART_TINTS[index % CHART_TINTS.length],
