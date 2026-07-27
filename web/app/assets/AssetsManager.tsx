@@ -36,6 +36,7 @@ type HoldingsRow = {
   buy_amount_krw: number;
   valuation_krw: number;
   target_ratio?: number | null;
+  target_quantity?: number | null;
   memo?: string | null;
   sort_order?: number | null;
   original_quantity?: number;
@@ -1391,6 +1392,26 @@ function AccountHoldingsDetailPanel({
         // IS 행: 자동값(현재 비중)이 곧 목표 비중. 나머지는 저장된 target_ratio 그대로.
         const w = row.ticker === "IS" ? row.weight_pct : row.target_ratio;
         return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(1)}%`}</span>;
+      },
+    },
+    {
+      colId: "target_quantity",
+      headerName: "목표수량",
+      width: 88,
+      type: "rightAligned",
+      sortable: false,
+      cellStyle: { backgroundColor: "#f1f3f5" },
+      headerTooltip: "목표비중 × 총자산 ÷ 현재가 (단주거래 전제, 정수 반올림)",
+      cellRenderer: (params: { data?: GridRow }) => {
+        const row = params.data;
+        if (!row || row.id === "__adding__" || row.ticker === CASH_ROW_TICKER || row.ticker === "IS") {
+          return <span style={{ color: "var(--text-muted)" }}>-</span>;
+        }
+        const quantity = row.target_quantity;
+        if (quantity == null || !Number.isFinite(Number(quantity))) {
+          return <span style={{ color: "var(--text-muted)" }}>-</span>;
+        }
+        return <span style={{ fontWeight: 700 }}>{Math.round(Number(quantity)).toLocaleString()}</span>;
       },
     },
     {
