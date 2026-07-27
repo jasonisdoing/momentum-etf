@@ -16,7 +16,15 @@ export function HomeTrendCharts({ maDays, maType }: { maDays: number; maType: st
     <div className="homeTrendGrid">
       {HOME_TREND_CHARTS.map((chart) => (
         <div key={chart.ticker} className="card appCard homeTrendCell">
-          <MarketTrendChart ticker={chart.ticker} name={chart.name} maType={maType} maDays={maDays} compact />
+          {/* key 를 차트 컴포넌트에도 줘서 티커별 인스턴스를 완전히 분리한다(상태 혼선 차단). */}
+          <MarketTrendChart
+            key={chart.ticker}
+            ticker={chart.ticker}
+            name={chart.name}
+            maType={maType}
+            maDays={maDays}
+            compact
+          />
         </div>
       ))}
       <style jsx global>{`
