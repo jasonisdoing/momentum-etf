@@ -62,6 +62,8 @@ type AccountSummary = {
   cash_display_native?: number;
   cash_display_currency?: string;
   cash_target_ratio: number;
+  // 자산 헬퍼에서 저장한 현금 목표 비중(%) — 미저장이면 null ('-' 표시, 파생·기본값 없음)
+  helper_cash_weight_pct?: number | null;
   intl_shares_value: number | null;
   intl_shares_change: number | null;
   updated_at: string | null;
@@ -547,13 +549,6 @@ function AccountHoldingsDetailPanel({
     summary.cash_currencies && summary.cash_currencies.length > 0
       ? summary.cash_currencies.map((c) => c.toUpperCase())
       : [String(summary.currency || "KRW").toUpperCase()];
-  // 목표비중은 보유 행 자체의 target_ratio(portfolio_master 단일 소스)를 그대로 쓴다.
-  // 현금 행 계산(100 - 종목합)을 위해 최신 rows 를 ref 로 참조한다(컬럼 재생성 방지).
-  const rowsForTargetRef = useRef<HoldingsRow[]>([]);
-  useEffect(() => {
-    rowsForTargetRef.current = rows;
-    gridApiRef.current?.refreshCells({ force: true, columns: ["target_weight_pct"] });
-  }, [rows]);
   useEffect(() => {
     const nextRows = hydrateRows(initialRows);
     setRows(nextRows);
@@ -1385,23 +1380,15 @@ function AccountHoldingsDetailPanel({
       cellRenderer: (params: { data?: GridRow }) => {
         const row = params.data;
         if (!row || row.id === "__adding__") return <span style={{ color: "var(--text-muted)" }}>-</span>;
-        // 목표비중은 보유 행의 target_ratio(portfolio_master 단일 소스) 그대로.
-        const weights = rowsForTargetRef.current
-          .map((r) => {
-            const tk = String(r.ticker || "").trim().toUpperCase();
-            if (tk === CASH_ROW_TICKER) return null;
-            // IS 고정자산은 실제 평가 비중(자동값)이 곧 목표 비중이다.
-            if (tk === "IS") return r.weight_pct;
-            return r.target_ratio;
-          })
-          .filter((w): w is number => w != null && Number.isFinite(Number(w)));
-        // 현금 행: 목표 현금비중 = 100 - (종목 목표비중 + IS 자동 비중) 합.
+        // 현금 행: 자산 헬퍼에서 저장한 현금 목표 비중만 표시한다(미저장 = '-', 파생·기본값 없음).
         if (row.ticker === CASH_ROW_TICKER) {
-          if (weights.length === 0) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          const cashPct = Math.max(0, 100 - weights.reduce((a, b) => a + b, 0));
-          return <span style={{ color: "#000000", fontWeight: 700 }}>{cashPct.toFixed(1)}%</span>;
+          const saved = summary.helper_cash_weight_pct;
+          if (saved == null || !Number.isFinite(Number(saved))) {
+            return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          }
+          return <span style={{ color: "#000000", fontWeight: 700 }}>{Number(saved).toFixed(1)}%</span>;
         }
-        // IS 행: 자동값(현재 비중)을 목표로 표시.
+        // IS 행: 자동값(현재 비중)이 곧 목표 비중. 나머지는 저장된 target_ratio 그대로.
         const w = row.ticker === "IS" ? row.weight_pct : row.target_ratio;
         return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(1)}%`}</span>;
       },
