@@ -107,6 +107,9 @@ export function RecentPages() {
           overflow: hidden;
           padding: 8px 0 4px;
           margin-bottom: 4px;
+          /* 부모(.appContent)가 세로 flex 라 높이가 눌리면 칩이 찌그러진다 — 자체적으로 축소를 막는다. */
+          flex: 0 0 auto;
+          min-height: 40px;
         }
         .recentPageChip {
           display: inline-flex;
