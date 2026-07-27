@@ -11,6 +11,7 @@ import { StableInlineInput } from "../components/StableInlineInput";
 import { AppLoadingState } from "../components/AppLoadingState";
 import { AppModal } from "../components/AppModal";
 import { TickerDetailLink } from "../components/TickerDetailLink";
+import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { reorderHoldings } from "@/lib/holdings-store";
@@ -1323,10 +1324,11 @@ function AccountHoldingsDetailPanel({
 
         const value = String(params.value ?? "-");
         const badge = alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "";
+        // 종목명 표기 규칙은 pools-rank/자산 헬퍼와 동일 — 2줄 클램프 + 레버리지·액티브 강조.
         return (
-          <span className="assetsNameCellText" title={value}>
-            {value}
-            {badge ? ` ${badge}` : ""}
+          <span className="rankNameCellText" title={value}>
+            {renderNameWithLeverageHighlight(value)}
+            {badge ? <span> {badge}</span> : null}
           </span>
         );
       },
