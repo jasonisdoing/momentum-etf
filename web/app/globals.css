@@ -632,6 +632,12 @@ a {
   font-size: 13.75px;
   white-space: nowrap;
   line-height: 1;
+  /* 좁은 화면(모바일)에서 시세 스트립이 헤더에 안 들어가면 잘리지 않고 가로 스크롤(스와이프)되게 한다. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbarFx::-webkit-scrollbar {
+  display: none;
 }
 
 .topbarFxItem {

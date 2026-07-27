@@ -139,3 +139,24 @@ export function isFullWidthRoute(pathname: string | null): boolean {
   if (!pathname) return false;
   return FULL_WIDTH_ROUTES.some((route) => pathname === route || pathname.startsWith(route + "/"));
 }
+
+// 메뉴 정의(단일 소스)에서 경로에 해당하는 메뉴 이름을 찾는다. 최근 방문 페이지 표시 등에서 사용.
+// 그룹 항목은 "그룹-라벨"(예: 계좌-자산 관리)로, 루트/홈은 라벨만. 정확 일치 우선, 없으면 동적 하위경로 접두어 매칭(가장 긴 것).
+export function getNavLabel(pathname: string | null): string | null {
+  if (!pathname) return null;
+
+  // (href, 표시라벨) 목록 — 그룹 항목은 그룹명 접두어를 붙인다.
+  const entries: { href: string; label: string }[] = [
+    { href: HOME_ITEM.href, label: HOME_ITEM.label },
+    ...ROOT_ITEMS.map((item) => ({ href: item.href, label: item.label })),
+    ...NAV_GROUPS.flatMap((group) => group.items.map((item) => ({ href: item.href, label: `${group.title}-${item.label}` }))),
+  ];
+
+  const exact = entries.find((entry) => entry.href === pathname);
+  if (exact) return exact.label;
+
+  const prefixMatch = entries
+    .filter((entry) => entry.href !== "/" && pathname.startsWith(entry.href + "/"))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+  return prefixMatch ? prefixMatch.label : null;
+}
