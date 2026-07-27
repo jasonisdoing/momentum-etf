@@ -44,9 +44,9 @@ SCHEDULE_ROWS = [
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:30 · 16:00 KST",
+        "cadence": "평일 24시간 매 20분 KST",
         "command": "python scripts/collect_data.py",
-        "schedule": {"slots": [{"hour": 9, "minute": 30}, {"hour": 16, "minute": 0}], "weekdays": _WEEKDAYS_MON_FRI},
+        "schedule": {"minutes": [0, 20, 40], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "asset_summary",
