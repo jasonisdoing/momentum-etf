@@ -62,7 +62,9 @@ def _compute_account_total_assets_native(
 
 
 def _compute_target_quantity(target_amount: float, current_price: float, currency: str) -> float | int | None:
-    if current_price <= 0:
+    # NaN 은 `<= 0` 비교를 통과하므로(NaN 비교는 항상 False) 유한성 검사를 먼저 한다.
+    # 가격·목표금액을 알 수 없으면 목표수량도 계산 불가(None → 화면 '-') 로 명시한다.
+    if not math.isfinite(current_price) or current_price <= 0 or not math.isfinite(target_amount):
         return None
     quantity = target_amount / current_price
     currency_code = str(currency or "KRW").strip().upper()
