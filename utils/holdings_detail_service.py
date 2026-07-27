@@ -302,6 +302,11 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "cash_display_native": cash_display_native,
                 "cash_display_currency": currency,
                 "cash_target_ratio": cash_target_ratio,
+                # 자산 헬퍼에서 저장한 현금 목표 비중(%) — /assets 목표비중 칸의 유일한 소스.
+                # 미저장이면 None 그대로 내려 화면이 '-' 로 표시한다(파생·기본값 금지).
+                "helper_cash_weight_pct": (
+                    (load_portfolio_master(curr_account_id) or {}).get("asset_helper") or {}
+                ).get("cash_weight_pct"),
                 "intl_shares_value": (cash_info or {}).get("intl_shares_value"),
                 "intl_shares_change": (cash_info or {}).get("intl_shares_change"),
                 "updated_at": (cash_info or {}).get("updated_at"),
