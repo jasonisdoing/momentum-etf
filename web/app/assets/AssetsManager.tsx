@@ -1260,14 +1260,17 @@ function AccountHoldingsDetailPanel({
             />
           );
         }
+        if (row.ticker === CASH_ROW_TICKER) return <span>-</span>;
+        // IS 고정자산은 가격 프록시(VGS) 티커로 표시하고 상세도 VGS 로 연결한다(자산 헬퍼와 동일).
+        if (row.ticker === "IS") {
+          return <TickerDetailLink ticker="ASX:VGS" displayTicker="ASX:VGS" className="assetsTickerLink" />;
+        }
         return (
-          row.ticker === CASH_ROW_TICKER ? <span>-</span> : (
-            <TickerDetailLink
-              ticker={row.ticker}
-              displayTicker={String(params.value ?? row.ticker)}
-              className="assetsTickerLink"
-            />
-          )
+          <TickerDetailLink
+            ticker={row.ticker}
+            displayTicker={String(params.value ?? row.ticker)}
+            className="assetsTickerLink"
+          />
         );
       },
     },
@@ -1384,15 +1387,22 @@ function AccountHoldingsDetailPanel({
         if (!row || row.id === "__adding__") return <span style={{ color: "var(--text-muted)" }}>-</span>;
         // 목표비중은 보유 행의 target_ratio(portfolio_master 단일 소스) 그대로.
         const weights = rowsForTargetRef.current
-          .map((r) => (r.ticker === CASH_ROW_TICKER ? null : r.target_ratio))
+          .map((r) => {
+            const tk = String(r.ticker || "").trim().toUpperCase();
+            if (tk === CASH_ROW_TICKER) return null;
+            // IS 고정자산은 실제 평가 비중(자동값)이 곧 목표 비중이다.
+            if (tk === "IS") return r.weight_pct;
+            return r.target_ratio;
+          })
           .filter((w): w is number => w != null && Number.isFinite(Number(w)));
-        // 현금 행: 목표 현금비중 = 100 - 종목 목표비중 합.
+        // 현금 행: 목표 현금비중 = 100 - (종목 목표비중 + IS 자동 비중) 합.
         if (row.ticker === CASH_ROW_TICKER) {
           if (weights.length === 0) return <span style={{ color: "var(--text-muted)" }}>-</span>;
           const cashPct = Math.max(0, 100 - weights.reduce((a, b) => a + b, 0));
           return <span style={{ color: "#000000", fontWeight: 700 }}>{cashPct.toFixed(1)}%</span>;
         }
-        const w = row.target_ratio;
+        // IS 행: 자동값(현재 비중)을 목표로 표시.
+        const w = row.ticker === "IS" ? row.weight_pct : row.target_ratio;
         return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(1)}%`}</span>;
       },
     },
