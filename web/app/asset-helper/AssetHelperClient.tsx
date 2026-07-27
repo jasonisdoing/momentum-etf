@@ -34,6 +34,12 @@ import {
 // 종목 비중 합의 나머지는 현금으로 보유한다(백엔드 fixed 엔진이 __CASH__ = 1 - 합 으로 처리).
 // 현금 행은 편집 가능하며, 종목합 + 현금 = 100% 여야 유효하다(백엔드는 종목만 저장, 현금=100-종목합 파생).
 const CASH_TICKER = "__CASH__";
+// IS(International Shares) — /assets 에서 수동 입력하는 호주 고정자산.
+// 내부 티커는 IS 를 유지하되, 화면·백테스트에서는 VGS(가격 프록시)의 정식 명칭으로 보여준다.
+// 비중은 편집 불가(실제 평가액 기반 자동 계산)이고, 백테스트는 VGS 가격 시계열을 쓴다.
+const IS_TICKER = "IS";
+const IS_DISPLAY_NAME = "Vanguard MSCI Index International Shares ETF";
+const IS_PROXY_DISPLAY_TICKER = "ASX:VGS"; // 표시·지표 조회용 프록시 티커 (내부 키는 IS 유지)
 
 // 저장된 종목들의 고정비중 합의 나머지를 현금(%)으로 계산한다(로드 시 현금 초기화용).
 function cashFromTickers(rows: Array<{ ticker: string; name?: string; fixed_weight_pct?: number | null }>): number {
@@ -118,6 +124,8 @@ type HelperTicker = {
   current_weight_pct?: number | null;
   // 미저장(임시) 행 — 확인만 된 상태. 저장 버튼에서 보유목록에 커밋한다(/assets 와 동일).
   pending?: boolean;
+  // IS 고정자산 행 — 비중 편집·삭제 불가, 비중은 실제 평가액 기반 자동값.
+  is_fixed_asset?: boolean;
 };
 
 // 종목 목록의 소스는 자산 관리(보유 종목)다. 자산 헬퍼는 이 목록을 같은 순서로 보여주고 비중만 붙인다.
@@ -150,14 +158,25 @@ function mergeHoldingsWithWeights(holdings: HoldingRow[], weightTickers: HelperT
     if (tk) weightMap[tk] = t.fixed_weight_pct ?? null;
   }
   return holdings
-    .filter((r) => {
-      const tk = stripMarketPrefix(r.ticker);
-      return tk && tk !== "IS"; // IS(International Shares)는 수동 고정자산이라 제외
-    })
+    .filter((r) => Boolean(stripMarketPrefix(r.ticker)))
     .slice()
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map((r) => {
       const tk = stripMarketPrefix(r.ticker);
+      // IS 고정자산 — 비중은 실제 평가액 기반 자동값(편집 불가), 이름은 VGS(가격 프록시) 정식 명칭.
+      if (tk === IS_TICKER) {
+        return {
+          ticker: IS_TICKER,
+          name: IS_DISPLAY_NAME,
+          ticker_type: "aus", // IS 는 호주 계좌 전용 — 백테스트에서 VGS(aus 풀) 시계열을 쓴다.
+          country_code: r.country_code,
+          currency: r.currency,
+          bucket: r.bucket_id,
+          fixed_weight_pct: r.weight_pct ?? null,
+          current_weight_pct: r.weight_pct ?? null,
+          is_fixed_asset: true,
+        };
+      }
       return {
         ticker: tk,
         name: r.name,
@@ -383,6 +402,7 @@ export function AssetHelperClient() {
         const data = (await settingsResp.json()) as {
           tickers?: HelperTicker[];
           settings?: HelperSettings;
+          cash_weight_pct?: number | null;
           error?: string;
         };
         if (!settingsResp.ok || data.error) throw new Error(data.error ?? "포트폴리오를 불러오지 못했습니다.");
@@ -396,12 +416,27 @@ export function AssetHelperClient() {
         setNoteUpdatedAt(noteResp.ok ? noteData.updated_at ?? null : null);
         const loadedTickers = mergeHoldingsWithWeights(holdingsData.rows ?? [], data.tickers);
         setTickers(loadedTickers);
-        setCashWeight(cashFromTickers(loadedTickers)); // 저장된 종목합의 나머지를 현금으로 초기화
+        // 현금 비중은 저장값이 원본 — IS(자동)가 변해 합이 100에서 어긋나면 저장이 차단되고
+        // 사용자가 직접 조정한다(현금 자동 흡수 금지). 저장값이 없는 계좌만 나머지로 초기화.
+        setCashWeight(
+          data.cash_weight_pct != null && Number.isFinite(Number(data.cash_weight_pct))
+            ? Number(data.cash_weight_pct)
+            : cashFromTickers(loadedTickers),
+        );
         setSettings(data.settings ?? null);
         // 지표까지 로드가 끝난 뒤 그리드를 한 번에 표시한다(종목 먼저 뜨고 값이 나중에 채워지는 깜빡임 방지).
         const validLoaded = loadedTickers.filter((t) => t.ticker.trim() && t.name);
         if (validLoaded.length >= 3 && data.settings?.ACCOUNT_ID) {
-          setMetricByTicker(await fetchMetrics(validLoaded, data.settings));
+          // IS 고정자산은 VGS 로 대리 조회해 현재가·일간·기간수익률을 채운다.
+          const hasIsRow = validLoaded.some((t) => t.is_fixed_asset);
+          const metricsRequest = validLoaded
+            .filter((t) => !t.is_fixed_asset)
+            .concat(hasIsRow ? [{ ticker: "VGS", name: IS_DISPLAY_NAME, ticker_type: "aus" }] : []);
+          const fetched = await fetchMetrics(metricsRequest, data.settings);
+          if (hasIsRow && fetched["VGS"]) {
+            fetched[IS_TICKER] = { ...fetched["VGS"], ticker: IS_TICKER };
+          }
+          setMetricByTicker(fetched);
         } else {
           setMetricByTicker({});
         }
@@ -637,14 +672,16 @@ export function AssetHelperClient() {
         if (!addResp.ok || addData.error) throw new Error(addData.error ?? `${p.ticker} 추가에 실패했습니다.`);
       }
       // 2) 비중 저장(종목은 보유목록이 소스, 여기선 비중만).
+      // IS 고정자산은 자동값이라 저장하지 않고, 현금 비중은 저장값이 원본이므로 함께 저장한다.
       const resp = await fetch("/api/asset-helper-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           account_id: selectedAccount,
-          tickers: validTickers,
+          tickers: validTickers.filter((t) => !t.is_fixed_asset),
           weight_mode: "fixed",
           settings,
+          cash_weight_pct: cashWeight,
         }),
       });
       const data = (await resp.json()) as { tickers?: HelperTicker[]; error?: string; detail?: string };
@@ -766,7 +803,8 @@ export function AssetHelperClient() {
             );
           }
           {
-            const dt = displayTickerFor(row.ticker, row.country_code);
+            // IS 고정자산은 가격 프록시(VGS) 티커로 표시하고 상세도 VGS 로 연결한다.
+            const dt = row.is_fixed_asset ? IS_PROXY_DISPLAY_TICKER : displayTickerFor(row.ticker, row.country_code);
             return <TickerDetailLink ticker={dt} displayTicker={dt} />;
           }
         },
@@ -834,7 +872,8 @@ export function AssetHelperClient() {
         minWidth: 92,
         width: 92,
         type: "rightAligned",
-        editable: (params) => Boolean(params.data && !params.data.is_adding),
+        // IS 고정자산은 실제 평가액 기반 자동값이라 편집 불가.
+        editable: (params) => Boolean(params.data && !params.data.is_adding && !params.data.is_fixed_asset),
         valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(1)}`),
         cellClass: "assetsEditableCell",
       },
@@ -891,7 +930,8 @@ export function AssetHelperClient() {
       },
       rowSelection: {
         mode: "multiRow",
-        checkboxes: (params) => Boolean(params.data && !params.data.is_adding && params.data.ticker !== CASH_TICKER),
+        checkboxes: (params) =>
+          Boolean(params.data && !params.data.is_adding && params.data.ticker !== CASH_TICKER && !params.data.is_fixed_asset),
         headerCheckbox: true,
         hideDisabledCheckboxes: true,
         enableClickSelection: false,

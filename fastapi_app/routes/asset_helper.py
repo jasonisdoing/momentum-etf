@@ -24,6 +24,9 @@ class AssetHelperSettingsPayload(BaseModel):
     backtest_settings: dict[str, Any] | None = None
     account_id: str | None = None
     weight_mode: str
+    # 현금 목표 비중(%) — 저장값이 원본. IS(자동 비중)가 변해 합이 100에서 어긋나면
+    # 화면이 저장을 차단하고 사용자가 직접 조정한다(현금 자동 흡수 금지).
+    cash_weight_pct: float | None = None
 
 
 @router.get("/settings")
@@ -39,6 +42,7 @@ def put_settings(payload: AssetHelperSettingsPayload, _: None = Depends(require_
         payload.settings,
         payload.backtest_settings,
         account_id=payload.account_id,
+        cash_weight_pct=payload.cash_weight_pct,
     )
 
 

@@ -496,7 +496,16 @@ def load_real_holdings_table(
             "country_code": "au",
             "ticker_type": "aus",
         }
+        # IS 위치: 저장된 순서(intl_shares_sort_order)가 있으면 그 자리에, 없으면 맨 뒤.
+        # 실보유 sort_order 는 0..n-1 정수이므로 (위치 - 0.5) 로 끼워 넣은 뒤 재정렬한다.
+        stored_is_order = snapshot.get("intl_shares_sort_order")
+        pseudo_row["sort_order"] = (
+            float(stored_is_order) - 0.5 if stored_is_order is not None else float(len(df_holdings))
+        )
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
+        df_holdings["sort_order"] = pd.to_numeric(df_holdings["sort_order"], errors="coerce").fillna(0)
+        df_holdings = df_holdings.sort_values("sort_order", kind="stable").reset_index(drop=True)
+        df_holdings["sort_order"] = range(len(df_holdings))
         # Ensure value columns are numeric after concat
         for col in ["수량", "평균 매입가", "매입금액(KRW)", "평가금액(KRW)"]:
             if col in df_holdings.columns:
@@ -620,6 +629,7 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "intl_shares_change": intl_change,
                 "holdings": acc.get("holdings", []),
                 "asset_helper": acc.get("asset_helper"),
+                "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
             }
     return None
@@ -634,6 +644,7 @@ def save_portfolio_master(
     cash_currency: str | None = None,
     intl_shares_value: float | None = None,
     intl_shares_change: float | None = None,
+    intl_shares_sort_order: int | None = None,
 ) -> bool:
     """Save/Update one account's balance within the consolidated portfolio_master document."""
     db = get_db_connection()
@@ -662,6 +673,8 @@ def save_portfolio_master(
                     acc["intl_shares_value"] = float(intl_shares_value)
                 if intl_shares_change is not None:
                     acc["intl_shares_change"] = float(intl_shares_change)
+                if intl_shares_sort_order is not None:
+                    acc["intl_shares_sort_order"] = int(intl_shares_sort_order)
 
                 # Enforce integer quantity
                 import math
@@ -696,6 +709,8 @@ def save_portfolio_master(
                 new_acc["intl_shares_value"] = float(intl_shares_value)
             if intl_shares_change is not None:
                 new_acc["intl_shares_change"] = float(intl_shares_change)
+            if intl_shares_sort_order is not None:
+                new_acc["intl_shares_sort_order"] = int(intl_shares_sort_order)
             accounts.append(new_acc)
 
         db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
