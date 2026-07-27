@@ -16,6 +16,7 @@ import { useHideMoney } from "@/lib/hide-money-context";
 import { HOME_ITEM, NAV_GROUPS, ROOT_ITEMS, isNavItemActive } from "@/lib/nav-menu";
 import { HubMenu } from "./components/HubMenu";
 import { GlobalTickerSearch } from "./components/GlobalTickerSearch";
+import { RecentPages } from "./components/RecentPages";
 
 // 메뉴 정의는 nav-menu.ts 가 단일 소스 — 홈 허브 타일(HubMenu)과 공유한다.
 const homeItem = HOME_ITEM;
@@ -585,7 +586,10 @@ export function AppShell({ children }: AppShellProps) {
               {homeRail}
             </div>
           ) : (
-            <div className="container-fluid appContent">{children}</div>
+            <div className="container-fluid appContent">
+              <RecentPages />
+              {children}
+            </div>
           )}
         </div>
       </div>
