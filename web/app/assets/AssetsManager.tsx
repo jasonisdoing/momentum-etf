@@ -224,10 +224,6 @@ function buildHoldingEditableSnapshot(row: Pick<HoldingsRow, "quantity" | "avera
   };
 }
 
-function formatRatioPercent(value: number): string {
-  return `${value.toFixed(1)}%`;
-}
-
 function formatHiddenAmount(showAmounts: boolean, value: string): string {
   return showAmounts ? value : "••••";
 }
@@ -367,7 +363,7 @@ function buildSyncedHoldingRows(rows: HoldingsRow[], summary: AccountSummary): H
     const buyAmountKrw = Math.round(getPreviewBuyAmountKrw(previewRow));
     const pnlKrw = valuationKrw - buyAmountKrw;
     const returnPct = buyAmountKrw > 0 ? Number(((pnlKrw / buyAmountKrw) * 100).toFixed(2)) : 0;
-    const weightPct = Number(getPreviewWeightPct(previewRow, rows, summary).toFixed(1));
+    const weightPct = Number(getPreviewWeightPct(previewRow, rows, summary).toFixed(2));
 
     return {
       ...row,
@@ -1368,7 +1364,7 @@ function AccountHoldingsDetailPanel({
         const weightPct = getPreviewWeightPct(params.data, rowsRef.current, summaryRef.current);
         return (
           <span style={{ color: "#000000", fontWeight: 700 }}>
-            {weightPct.toFixed(1)}%
+            {weightPct.toFixed(2)}%
           </span>
         );
       },
@@ -1389,11 +1385,11 @@ function AccountHoldingsDetailPanel({
           if (saved == null || !Number.isFinite(Number(saved))) {
             return <span style={{ color: "var(--text-muted)" }}>-</span>;
           }
-          return <span style={{ color: "#000000", fontWeight: 700 }}>{Number(saved).toFixed(1)}%</span>;
+          return <span style={{ color: "#000000", fontWeight: 700 }}>{Number(saved).toFixed(2)}%</span>;
         }
         // IS 행: 자동값(현재 비중)이 곧 목표 비중. 나머지는 저장된 target_ratio 그대로.
         const w = row.ticker === "IS" ? row.weight_pct : row.target_ratio;
-        return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(1)}%`}</span>;
+        return <span style={{ color: w == null ? "var(--text-muted)" : "#000000", fontWeight: 700 }}>{w == null ? "-" : `${Number(w).toFixed(2)}%`}</span>;
       },
     },
     {
