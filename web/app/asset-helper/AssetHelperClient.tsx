@@ -637,7 +637,7 @@ export function AssetHelperClient() {
   const ensureWeightSum100 = useCallback((): boolean => {
     const sum = validTickers.reduce((acc, item) => acc + (Number(item.fixed_weight_pct) || 0), 0);
     if (Math.abs(sum + cashWeight - 100) >= 0.05) {
-      toast.error(`종목 ${sum.toFixed(1)}% + 현금 ${cashWeight.toFixed(1)}% = ${(sum + cashWeight).toFixed(1)}%. 합계를 100%로 맞춰주세요.`);
+      toast.error(`종목 ${sum.toFixed(2)}% + 현금 ${cashWeight.toFixed(2)}% = ${(sum + cashWeight).toFixed(2)}%. 합계를 100%로 맞춰주세요.`);
       return false;
     }
     return true;
@@ -864,7 +864,7 @@ export function AssetHelperClient() {
         minWidth: 92,
         width: 92,
         type: "rightAligned",
-        valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(1)}`),
+        valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(2)}`),
       },
       {
         field: "fixed_weight_pct",
@@ -874,7 +874,7 @@ export function AssetHelperClient() {
         type: "rightAligned",
         // IS 고정자산은 실제 평가액 기반 자동값이라 편집 불가.
         editable: (params) => Boolean(params.data && !params.data.is_adding && !params.data.is_fixed_asset),
-        valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(1)}`),
+        valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(2)}`),
         cellClass: "assetsEditableCell",
       },
     ],
@@ -1087,7 +1087,7 @@ export function AssetHelperClient() {
               <div>
                 <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목</h2>
                 <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: weightOk ? "#16a34a" : "#dc2626" }}>
-                  종목 {weightSum.toFixed(1)}% + 현금 {cashWeight.toFixed(1)}% = {totalWeight.toFixed(1)}%{weightOk ? " ✓" : " (100% 필요)"}
+                  종목 {weightSum.toFixed(2)}% + 현금 {cashWeight.toFixed(2)}% = {totalWeight.toFixed(2)}%{weightOk ? " ✓" : " (100% 필요)"}
                 </p>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>

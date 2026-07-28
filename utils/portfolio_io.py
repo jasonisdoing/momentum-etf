@@ -561,7 +561,7 @@ def load_real_holdings_table(
     total_assets = vals_for_sum.sum() + cash_val
 
     if total_assets > 0:
-        df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(1)
+        df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(2)
     else:
         df_holdings["weight_pct"] = 0.0
 
