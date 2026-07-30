@@ -40,9 +40,11 @@ def put_strategy_trade_settings(
 def post_strategy_trade_slack_test(
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """[미구현] 슬랙 수동 발송 테스트.
+    """슬랙 수동 발송 — 스위치·중복 방지를 무시하고 현재 상태를 보낸다.
 
-    알림 본문·발송 조건(거래시간 매시간 판정)은 아직 정하지 않았다. 화면 배선을
-    먼저 맞춰두고, 발송기는 다음 단계에서 붙인다.
+    신호가 있으면 신호를, 없으면 현재 대기 조건을 담아 보낸다.
     """
-    return {"sent": False, "message": "슬랙 알림은 아직 구현되지 않았습니다."}
+    from utils.strategy_trade_notify import notify_strategy_trade
+
+    result = notify_strategy_trade(force=True)
+    return {"sent": result["sent"], "message": result["reason"]}

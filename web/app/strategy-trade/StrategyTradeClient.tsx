@@ -166,8 +166,8 @@ export function StrategyTradeClient() {
       const resp = await fetch("/api/strategy-trade/slack-test", { method: "POST" });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "슬랙 발송에 실패했습니다.");
-      if (payload?.sent) toast.success("슬랙을 발송했습니다.");
-      else toast.warning(payload?.message ?? "슬랙 알림은 아직 구현되지 않았습니다.");
+      if (payload?.sent) toast.success(payload?.message ?? "슬랙을 발송했습니다.");
+      else toast.warning(payload?.message ?? "슬랙을 발송하지 못했습니다.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "슬랙 발송에 실패했습니다.");
     } finally {
@@ -232,7 +232,7 @@ export function StrategyTradeClient() {
               {slackTesting ? "발송 중…" : "테스트 발송"}
             </button>
             <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-              거래시간 매시간 판정 예정 · 발송기 미구현
+              평일 09:10~15:20 10분 간격 판정 · 같은 회차·동작은 하루 1회
             </span>
           </div>
         </div>
