@@ -27,10 +27,6 @@ type Status = {
   next_ticker: string | null;
   next_name: string | null;
   last_buy_price: number | null;
-  invested_amount: number;
-  valuation_amount: number;
-  profit_amount: number | null;
-  profit_pct: number | null;
 };
 
 type RoundRow = {
@@ -286,22 +282,6 @@ export function StrategyTradeClient() {
               <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
             )}
           </div>
-          {status.held_count > 0 ? (
-            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "0.86rem" }}>
-              <span>
-                매입 <b>{formatNumber(status.invested_amount)}</b>원
-              </span>
-              <span>
-                평가 <b>{formatNumber(status.valuation_amount)}</b>원
-              </span>
-              <span>
-                손익{" "}
-                <b style={{ color: signColor(status.profit_amount) }}>
-                  {formatNumber(status.profit_amount)}원 ({formatSigned(status.profit_pct)})
-                </b>
-              </span>
-            </div>
-          ) : null}
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: "0.84rem" }}>
               <thead>

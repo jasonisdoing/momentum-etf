@@ -158,8 +158,6 @@ def load_strategy_trade_view() -> dict[str, Any]:
             "fixed_round": fixed_round,
             "avg_price": avg_price if avg_price > 0 else None,
             "close": round(close, 2) if close > 0 else None,
-            # 평가금액 합계에만 쓰는 내부 값 — 화면 그리드에는 노출하지 않는다.
-            "_quantity": quantity,
         }
         if quantity > 0 and avg_price > 0:
             held.append(entry)
@@ -178,7 +176,6 @@ def load_strategy_trade_view() -> dict[str, Any]:
     for display_round, item in enumerate(held, start=1):
         avg_price = float(item["avg_price"])
         close = item["close"]
-        item = {key: value for key, value in item.items() if key != "_quantity"}
         sell_limit = avg_price * take_profit
         rows.append(
             {
@@ -206,7 +203,6 @@ def load_strategy_trade_view() -> dict[str, Any]:
     for offset, item in enumerate(unheld):
         is_next = next_target is not None and item["ticker"] == next_target["ticker"]
         close = item["close"]
-        item = {key: value for key, value in item.items() if key != "_quantity"}
         # 미보유 회차의 지정가는 마지막 매수가에서 회차마다 add_drop_pct 씩 낮춰
         # 연쇄로 잡는다(다음 회차뿐 아니라 그 이후 회차까지 미리 보여준다).
         # 보유가 없으면 1호는 현재가 -entry_drop_pct 가 기준이 된다.
@@ -231,13 +227,6 @@ def load_strategy_trade_view() -> dict[str, Any]:
             }
         )
 
-    holdings_value = sum(
-        float(item["_quantity"]) * float(item["close"])
-        for item in held
-        if item["close"] is not None
-    )
-    invested = sum(float(item["_quantity"]) * float(item["avg_price"]) for item in held)
-
     return {
         "account_id": ACCOUNT_ID,
         "config": {
@@ -256,12 +245,6 @@ def load_strategy_trade_view() -> dict[str, Any]:
             "next_ticker": next_target["ticker"] if next_target else None,
             "next_name": next_target["name"] if next_target else None,
             "last_buy_price": round(last_buy_price, 2) if last_buy_price is not None else None,
-            "invested_amount": round(invested),
-            "valuation_amount": round(holdings_value),
-            "profit_amount": round(holdings_value - invested) if held else None,
-            "profit_pct": (
-                round((holdings_value / invested - 1.0) * 100.0, 2) if invested > 0 else None
-            ),
         },
         "rounds": rows,
     }
