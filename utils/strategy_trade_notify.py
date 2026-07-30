@@ -85,32 +85,49 @@ def collect_triggers(view: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
-    """슬랙 본문. 트리거된 회차와 현재 보유 요약을 담는다."""
+    """슬랙 본문 — 전 회차 현황을 나열하고 조치가 필요한 줄만 표시한다.
+
+    회차 수는 신호를 **실행한 뒤**의 상태로 적는다(매수 신호면 +1, 매도면 −1).
+    트리거가 없으면(테스트 발송) 같은 형식에서 '필요!' 표시만 빠진다.
+    """
     now = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
     index = view["index"]
     status = view["status"]
+    rounds_total = view["config"]["rounds"]
 
-    lines = [f"*⚡ 전략 사고팔기 신호 ({now})*"]
-    for trigger in triggers:
-        if trigger["action"] == "sell":
-            lines.append(
-                f"🔴 *매도* {trigger['round']}호 {trigger['ticker']} {trigger['name']} — "
-                f"목표 {trigger['limit_price']:,.0f} 도달 (현재 {trigger['close']:,.0f}, "
-                f"{trigger['profit_pct']:+.2f}%)"
-            )
-        else:
-            lines.append(
-                f"🔵 *매수* {trigger['round']}호 {trigger['ticker']} {trigger['name']} — "
-                f"지정가 {trigger['limit_price']:,.0f} 도달 (현재 {trigger['close']:,.0f})"
-            )
+    triggered = {(t["round"], t["action"]) for t in triggers}
+    buy_count = sum(1 for t in triggers if t["action"] == "buy")
+    sell_count = sum(1 for t in triggers if t["action"] == "sell")
+    after_held = status["held_count"] + buy_count - sell_count
 
-    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append(f"{index['name']} {index['close']:,.2f} · 보유 {status['held_count']}/{view['config']['rounds']}회차")
-    if status["held_count"] > 0 and status["profit_amount"] is not None:
-        lines.append(
-            f"평가 {status['valuation_amount']:,}원 · 손익 {status['profit_amount']:,}원 "
-            f"({status['profit_pct']:+.2f}%)"
-        )
+    # 실제 신호와 테스트 발송을 상단에서 바로 구분한다.
+    # 실제 신호는 주문이 필요하므로 <!channel> 로 채널 전체에 알린다(테스트는 제외).
+    if triggers:
+        lines = [f"<!channel> *⚡ 전략 사고팔기 — 실제 신호* ({now})"]
+    else:
+        lines = [f"*🧪 전략 사고팔기 테스트* ({now})", "현재 매수·매도 신호는 없습니다."]
+    lines.append(f"{index['name']} {index['close']:,.2f} · {after_held}/{rounds_total}회차")
+
+    for row in view["rounds"]:
+        if row["held"]:
+            is_triggered = (row["round"], "sell") in triggered
+            line = (
+                f"{'🔴' if is_triggered else '·'} {row['round']}호 {row['name']} "
+                f"매도 {row['sell_limit']:,.0f} (현재 {row['close']:,.0f}, {row['profit_pct']:+.2f}%)"
+            )
+            if is_triggered:
+                line += " => *매도 필요!*"
+            lines.append(line)
+        elif row["is_next"] and row["buy_limit"] is not None:
+            is_triggered = (row["round"], "buy") in triggered
+            line = (
+                f"{'🔵' if is_triggered else '·'} {row['round']}호 {row['name']} "
+                f"매수 {row['buy_limit']:,.0f} (현재 {row['close']:,.0f})"
+            )
+            # 다음 진입 대상은 도달 전에도 대기 상태임을 알려준다.
+            line += " => *매수 필요!*" if is_triggered else " => 대기 중!"
+            lines.append(line)
+
     return "\n".join(lines)
 
 
@@ -134,12 +151,7 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
 
     if force:
         # 테스트 발송 — 트리거가 없으면 현재 현황만 보낸다.
-        message = (
-            build_message(view, triggers)
-            if triggers
-            else _build_status_only_message(view)
-        )
-        sent = send_slack_message_v2(message)
+        sent = send_slack_message_v2(build_message(view, triggers))
         return {
             "sent": bool(sent),
             "reason": "테스트 발송" if sent else "슬랙 전송에 실패했습니다.",
@@ -166,29 +178,3 @@ def notify_strategy_trade(*, force: bool = False) -> dict[str, Any]:
     _save_sent_log(sent_log)
 
     return {"sent": True, "reason": f"신호 {len(fresh)}건 발송", "triggers": fresh}
-
-
-def _build_status_only_message(view: dict[str, Any]) -> str:
-    """트리거가 없을 때의 테스트 발송 본문 — 현재 대기 조건을 알려준다."""
-    now = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-    index = view["index"]
-    status = view["status"]
-    config = view["config"]
-
-    lines = [
-        f"*🧪 전략 사고팔기 테스트 ({now})*",
-        "현재 매수·매도 신호는 없습니다.",
-        f"{index['name']} {index['close']:,.2f} · 보유 {status['held_count']}/{config['rounds']}회차",
-    ]
-    for row in view["rounds"]:
-        if row["held"]:
-            lines.append(
-                f"· {row['round']}호 {row['name']} 매도 {row['sell_limit']:,.0f} "
-                f"(현재 {row['close']:,.0f}, {row['profit_pct']:+.2f}%)"
-            )
-        elif row["is_next"] and row["buy_limit"] is not None:
-            lines.append(
-                f"· {row['round']}호 {row['name']} 매수 {row['buy_limit']:,.0f} "
-                f"(현재 {row['close']:,.0f})"
-            )
-    return "\n".join(lines)
