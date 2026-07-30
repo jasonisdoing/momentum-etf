@@ -84,6 +84,32 @@ python infra/server_scheduler.py
 - VM 의 cron 은 제거되어 있으므로, **자동 배치를 돌리려면 터미널 2 가 켜져 있어야** 합니다.
 - 수동 1회 실행은 `/system` 화면의 버튼으로도 가능하며, 동일한 `batch_locks` 락을 사용하므로 자동 실행과 충돌하지 않습니다.
 
+### ⚠️ 배치 추가·삭제 시 반드시 함께 고쳐야 하는 곳
+
+배치 목록(action 키)이 **백엔드·프론트 4곳에 각각 하드코딩**돼 있습니다. 한 곳만 고치면
+`/batch` 화면에는 보이지만 버튼을 누를 때 **"유효하지 않은 action 입니다"(400)** 가 납니다.
+백엔드에서 목록을 내려주지 않으므로, 아래를 모두 같은 값으로 맞춰야 합니다.
+
+| 위치 | 심볼 | 역할 |
+| --- | --- | --- |
+| `utils/system_service.py` | `SystemAction` (Literal) | 서버 검증 |
+| `utils/system_service.py` | `SCHEDULE_ROWS` | `/batch` 화면 표시·다음 실행 계산 |
+| `utils/system_service.py` | `_SCRIPT_BY_ACTION` | action → 실행 스크립트 |
+| `web/app/api/system/route.ts` | `allowed` Set | **여기서 400 이 난다** |
+| `web/lib/system-store.ts` | `SystemAction` 타입 | 프록시 타입 |
+| `web/app/batch/SystemManager.tsx` | `SystemJobKey` 타입 | 화면 버튼 타입 |
+| `infra/cron/crontab` | cron 라인 | **자동 실행의 단일 진실 소스** |
+
+체크리스트:
+
+- [ ] 위 7곳을 모두 갱신했는가? (`SCHEDULE_ROWS` 의 `schedule` 은 `crontab` 과 동기화)
+- [ ] `crontab` 의 job name 이 action 키와 정확히 같은가? (스케줄러가 이 값으로 큐에 넣는다)
+- [ ] 스케줄러가 무인자 스크립트만 실행하므로 `scripts/` 래퍼를 만들었는가?
+- [ ] `/batch` 화면에서 수동 실행 버튼이 400 없이 동작하는가?
+
+과거 누락 사례: `aus_market_stocks` 가 `system-store.ts` 에, `live_24h_slack` 이
+`SystemManager.tsx` 에 빠져 있었습니다(2026-07-30 일괄 보완).
+
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
