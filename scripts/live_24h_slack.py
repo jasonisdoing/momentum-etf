@@ -116,7 +116,8 @@ def main():
     quotes_by_symbol = {str(quote.get("symbol") or ""): quote for quote in quotes}
 
     rows = []
-    for symbol, name in (("NQ_FUT", "나스닥 100 선물"), ("USDKRW", "달러 환율"), ("VIX", "VIX")):
+    # VIX 는 슬랙 알림 대상에서 제외한다(/live-24h 화면에는 그대로 표시).
+    for symbol, name in (("NQ_FUT", "나스닥 100 선물"), ("USDKRW", "달러 환율")):
         quote = quotes_by_symbol.get(symbol)
         if not quote:
             raise RuntimeError(f"필수 시장지표 시세가 없습니다: {symbol}")
