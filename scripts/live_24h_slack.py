@@ -145,11 +145,16 @@ def main():
             f"{' 🚨' if triggered else ''}"
         )
 
-    lines = []
-    # 최근 1시간 급변 종목이 있으면 맨 위에 @channel 핑
-    if alerts:
-        tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
-        lines.append(f"<!channel> 🚨 *최근 1시간 급변* — {tags}")
+    # 급변 종목이 없으면 보내지 않는다 — 알릴 것이 있을 때만(@channel) 발송한다.
+    if not alerts:
+        logger.info(
+            "24H 시세 급변 없음 — 슬랙 발송 생략 (%d종목, 임계 %.1f%%)", len(rows), LIVE_24H_ALERT_PCT
+        )
+        return
+
+    # 최근 1시간 급변 종목을 맨 위에 @channel 핑으로 알린다.
+    tags = ", ".join(f"{name} {mv:+.1f}%" for name, mv in alerts)
+    lines = [f"<!channel> 🚨 *최근 1시간 급변* — {tags}"]
     lines.extend(body)
     # 타이틀(링크)은 목록 아래에 — 클릭 시 live-24h 페이지로 이동
     lines.append("*<https://etf.dojason.com/live-24h|🌐 24H 시세>*")
