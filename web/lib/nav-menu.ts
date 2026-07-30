@@ -93,11 +93,11 @@ export const NAV_GROUPS: readonly NavGroup[] = [
   },
   {
     id: "leverage",
-    title: "레버리지",
+    title: "전략",
     icon: IconChartLine,
     items: [
-      { href: "/leverage-scalp", label: "단타", icon: IconChartLine },
-      { href: "/leverage-settings", label: "설정", icon: IconSettings },
+      { href: "/strategy-trade", label: "사고팔기", icon: IconChartLine },
+      { href: "/leverage-settings", label: "레버리지", icon: IconSettings },
     ],
   },
   {

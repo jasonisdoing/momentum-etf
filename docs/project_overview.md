@@ -37,7 +37,7 @@
 > **부가 전략 모듈 (`leverage/`)**: 별도 앱 `leverage-switching` 에서 이전된 레버리지 스위칭 전략 패키지입니다.
 > 자체 엔진(`leverage/engine/`)을 두되, 시세는 `data_adapter` 로 `utils.data_loader` 를, Slack 은 `utils.notification` 을 재사용합니다.
 > 추천은 `leverage_ma_cross` 배치(`scripts/leverage_recommend_ma_cross.py`, 한국+미국 이동평균선 크로스)와 `/batch` 수동 트리거로 실행됩니다. (구 스위칭 배치는 폐기)
-> 이동평균선 크로스 전략은 레버리지-설정 화면에서 시장별(`ma_cross_kor`/`ma_cross_us`) 이동선과 고점대비 허용폭 튜닝을 즉시(라이브) 계산해 표로 보여줍니다. 설정·상태는 MongoDB 가 단일 소스입니다.
+> 이동평균선 크로스 전략은 전략-레버리지 화면에서 시장별(`ma_cross_kor`/`ma_cross_us`) 이동선과 고점대비 허용폭 튜닝을 즉시(라이브) 계산해 표로 보여줍니다. 설정·상태는 MongoDB 가 단일 소스입니다.
 
 ### 서비스 계층 역할
 
