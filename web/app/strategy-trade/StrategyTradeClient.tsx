@@ -217,23 +217,39 @@ export function StrategyTradeClient() {
 
         {/* 슬랙 알림 */}
         <div className="card appCard" style={cardStyle}>
-          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>슬랙 알림</span>
-            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: "0.86rem" }}>
+          <div style={{ fontWeight: 700, fontSize: "0.95rem" }}>슬랙 알람</div>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", lineHeight: 1.45, margin: 0 }}>
+            켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 매수·매도 지정가에 닿은 회차가
+            있을 때만 슬랙을 보냅니다. 같은 회차·동작은 하루 1회입니다.
+          </p>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginBottom: 0 }}>
               <input
+                className="form-check-input"
                 type="checkbox"
+                role="switch"
+                id="strategyTradeSlackToggle"
+                style={{ width: "2.2em", height: "1.2em" }}
                 checked={view.slack_enabled}
                 disabled={slackSaving}
                 onChange={(event) => void toggleSlack(event.target.checked)}
               />
-              매수·매도 조건 도달 시 알림
-            </label>
-            <button className="appButton" onClick={() => void testSlack()} disabled={slackTesting}>
-              {slackTesting ? "발송 중…" : "테스트 발송"}
+              <label
+                className="form-check-label"
+                htmlFor="strategyTradeSlackToggle"
+                style={{ fontWeight: 700, marginLeft: 6 }}
+              >
+                슬랙 알람 {view.slack_enabled ? "켜짐" : "꺼짐"}
+              </label>
+            </div>
+            <button
+              type="button"
+              className="btn btn-sm btn-outline-secondary"
+              disabled={slackTesting}
+              onClick={() => void testSlack()}
+            >
+              {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
             </button>
-            <span style={{ color: "var(--text-muted)", fontSize: "0.82rem" }}>
-              평일 09:10~15:20 10분 간격 판정 · 같은 회차·동작은 하루 1회
-            </span>
           </div>
         </div>
 
