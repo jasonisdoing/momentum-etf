@@ -33,54 +33,6 @@ def post_leverage_config(
     return save_leverage_settings(profile, config)
 
 
-@router.get("/candles")
-def get_leverage_candles(
-    code: str = Query(default="A122630"),
-    interval: str = Query(default="min:1"),
-    count: int = Query(default=390, ge=1, le=1000),
-    feed: str = Query(default="kr-stock"),
-    _: None = Depends(require_internal_token),
-) -> dict:
-    """레버리지 단타용 토스 c-chart 캔들을 과거→최신 순으로 반환한다.
-
-    지표(EMA)는 프런트에서 계산한다. feed: kr-stock(국내주식, 예: KODEX 레버리지) /
-    us-futures(미국 선물, 예: 나스닥100 RFU.NQc1).
-    """
-    from services.toss_market_service import fetch_toss_candles, fetch_toss_stock_candles
-
-    if feed == "kr-stock":
-        candles = fetch_toss_stock_candles(code, securities_type="kr-s", interval=interval, count=count)
-    elif feed == "us-futures":
-        candles = fetch_toss_candles(code, interval=interval, count=count)
-    else:
-        raise ValueError(f"지원하지 않는 feed 입니다: {feed}")
-    return {"code": code, "interval": interval, "feed": feed, "candles": candles}
-
-
-@router.get("/scalp-settings")
-def get_scalp_settings(
-    _: None = Depends(require_internal_token),
-) -> dict:
-    """레버리지 단타 슈퍼트렌드 설정을 반환한다. 저장 전이면 settings=null."""
-    from utils.scalp_service import load_scalp_settings
-
-    return {"settings": load_scalp_settings()}
-
-
-@router.put("/scalp-settings")
-def put_scalp_settings(
-    payload: dict = Body(...),
-    _: None = Depends(require_internal_token),
-) -> dict:
-    """레버리지 단타 슈퍼트렌드 설정을 검증 후 저장한다. body: ``{"settings": {...}}``."""
-    from utils.scalp_service import save_scalp_settings
-
-    settings = payload.get("settings") if isinstance(payload, dict) else None
-    if not isinstance(settings, dict):
-        raise ValueError("저장할 'settings' 가 필요합니다.")
-    return {"settings": save_scalp_settings(settings)}
-
-
 @router.get("/ma-cross")
 def get_ma_cross_view(
     market: str = Query(...),
