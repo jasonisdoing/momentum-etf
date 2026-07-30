@@ -51,9 +51,11 @@ type SystemAction =
   | "price_metrics_updater"
   | "asset_summary"
   | "us_market_stocks"
+  | "aus_market_stocks"
   | "live_24h_slack"
   | "leverage_ma_cross"
-  | "holdings_alarm";
+  | "holdings_alarm"
+  | "strategy_trade_notify";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");
