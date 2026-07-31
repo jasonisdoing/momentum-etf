@@ -26,22 +26,12 @@ SystemAction = Literal[
     "live_24h_slack",
     "leverage_ma_cross",
     "holdings_alarm",
-    "strategy_trade_notify",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
 _WEEKDAYS_MON_FRI = [0, 1, 2, 3, 4]
 _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
-
-# 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
-# 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간이다.
-_STRATEGY_TRADE_SLOTS = [
-    {"hour": hour, "minute": minute}
-    for hour in range(9, 16)
-    for minute in range(0, 60, 10)
-    if (hour, minute) >= (9, 10) and (hour, minute) <= (15, 20)
-]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
@@ -148,16 +138,6 @@ SCHEDULE_ROWS = [
         "command": "python scripts/holdings_alarm.py",
         "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
     },
-    {
-        "key": "strategy_trade_notify",
-        "job": "전략 사고팔기 알림",
-        "target": "kor_account 코스피200 ETF 6종",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
-    },
 ]
 
 # action 키 → 실행할 스크립트 경로
@@ -173,7 +153,6 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
-    "strategy_trade_notify": "scripts/strategy_trade_notify.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}

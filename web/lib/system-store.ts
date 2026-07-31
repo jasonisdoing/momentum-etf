@@ -54,8 +54,7 @@ type SystemAction =
   | "aus_market_stocks"
   | "live_24h_slack"
   | "leverage_ma_cross"
-  | "holdings_alarm"
-  | "strategy_trade_notify";
+  | "holdings_alarm";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");

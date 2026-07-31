@@ -39,11 +39,6 @@
 > 추천은 `leverage_ma_cross` 배치(`scripts/leverage_recommend_ma_cross.py`, 한국+미국 이동평균선 크로스)와 `/batch` 수동 트리거로 실행됩니다. (구 스위칭 배치는 폐기)
 > 이동평균선 크로스 전략은 전략-레버리지 화면에서 시장별(`ma_cross_kor`/`ma_cross_us`) 이동선과 고점대비 허용폭 튜닝을 즉시(라이브) 계산해 표로 보여줍니다. 설정·상태는 MongoDB 가 단일 소스입니다.
 
-> **전략 사고팔기 (`utils/strategy_trade_config.py`, `utils/strategy_trade_service.py`, `utils/strategy_trade_notify.py`)**:
-> 코스피200 ETF 6종을 회차로 분할 매수·매도하는 전략입니다. 백테스트 없이 `kor_account` 실제 보유
-> (수량·평균단가)를 읽어 회차 현황과 매수/매도 지정가를 계산하며, 전략-사고팔기 화면이 이를 표시합니다.
-> 저장 항목은 Slack 스위치 하나(`system_config.strategy_trade_settings`)이고, 알림은
-> `strategy_trade_notify` 배치가 평일 장중 10분 간격으로 판정해 신호가 있을 때만 발송합니다.
 
 ### 서비스 계층 역할
 
