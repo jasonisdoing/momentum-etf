@@ -71,6 +71,7 @@ type AccountSummary = {
   updated_at: string | null;
   valuation_krw: number;
   total_assets_krw: number;
+  prev_total_assets_krw: number | null;
   holdings_count: number;
   target_ratio_total: number;
   cash_ratio: number;
@@ -2216,15 +2217,6 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
     },
     {
-      field: "cash_ratio",
-      headerName: "현금 비중",
-      minWidth: 90,
-      flex: 0.7,
-      type: "rightAligned",
-      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
-        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
-    },
-    {
       colId: "asset_weight",
       headerName: "비중",
       minWidth: 80,
@@ -2250,6 +2242,56 @@ export function AssetsManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         params.value !== null && params.value !== undefined
           ? `${params.value.toFixed(2)}%`
           : "",
+    },
+    {
+      colId: "asset_weight_change",
+      headerName: "비중 변화",
+      minWidth: 96,
+      flex: 0.7,
+      type: "rightAligned",
+      // 전일 대비 비중 차이(%p). 계좌별 전일 총자산이 있어야 계산되며,
+      // 없으면 null 로 두고 화면에서 '-' 로 표시한다(임의 0 처리 금지).
+      valueGetter: (params) => {
+        if (!params.data || isDetailRow(params.data) || isTotalRow(params.data)) return null;
+        let totalNow = 0;
+        let totalPrev = 0;
+        params.api.forEachNode((node) => {
+          const d = node.data as ParentGridRow | undefined;
+          if (!d || isDetailRow(d) || isTotalRow(d)) return;
+          const prev = Number((d as Record<string, unknown>).prev_total_assets_krw ?? NaN);
+          if (!Number.isFinite(prev)) return;
+          totalNow += Number((d as Record<string, unknown>).total_assets_krw ?? 0);
+          totalPrev += prev;
+        });
+        if (totalNow <= 0 || totalPrev <= 0) return null;
+        const own = Number((params.data as Record<string, unknown>).total_assets_krw ?? 0);
+        const ownPrev = Number((params.data as Record<string, unknown>).prev_total_assets_krw ?? NaN);
+        if (!Number.isFinite(ownPrev)) return null;
+        return (own / totalNow) * 100 - (ownPrev / totalPrev) * 100;
+      },
+      cellRenderer: (params: { value?: number | null }) => {
+        const value = params.value;
+        if (value === null || value === undefined || !Number.isFinite(value)) return "-";
+        const rounded = Number(value.toFixed(2));
+        if (rounded === 0) {
+          return <span style={{ color: "var(--text-muted)" }}>-</span>;
+        }
+        const isUp = rounded > 0;
+        return (
+          <span style={{ color: isUp ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)" }}>
+            {isUp ? "▲" : "▼"} {isUp ? "+" : ""}{rounded.toFixed(2)}%
+          </span>
+        );
+      },
+    },
+    {
+      field: "cash_ratio",
+      headerName: "현금 비중",
+      minWidth: 90,
+      flex: 0.7,
+      type: "rightAligned",
+      cellRenderer: (params: { data?: ParentGridRow; value?: number }) =>
+        params.data && !isDetailRow(params.data) ? `${(params.value ?? 0).toFixed(2)}%` : "",
     },
     {
       colId: "daily_profit_pct",
