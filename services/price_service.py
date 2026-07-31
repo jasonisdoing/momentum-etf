@@ -218,9 +218,14 @@ def get_yahoo_symbol_snapshot(symbols: Sequence[str]) -> dict[str, dict[str, flo
 
 
 def _overlay_toss_usd_rate(rates: dict[str, Any]) -> dict[str, Any]:
-    """USD/KRW 를 토스 실시간 환율(REAL_TIME, 5초 TTL)로 덮어쓴다.
+    """USD/KRW **현재가**만 토스 실시간(REAL_TIME, 5초 TTL)으로 덮어쓴다.
 
-    실패 시 야후(KRW=X) 값이 백업으로 그대로 유지된다. AUD 등 나머지 통화는 야후 소스.
+    변동률은 토스의 ``base`` 를 쓰지 않고 야후 전일 종가 기준으로 다시 계산한다.
+    환율은 24시간 시장이라 소스마다 '전일'의 기준 시각이 달라, 토스 ``base`` 를
+    그대로 쓰면 USD 만 다른 기준이 되어 AUD 등 나머지 통화와 부호까지 어긋난다.
+    (실측: 토스 base 1441.10 → −0.30%, 야후 전일 1421.16 → +1.11%)
+
+    토스 조회 실패 시 야후(KRW=X) 값이 백업으로 그대로 유지된다.
     """
     result = dict(rates)
     try:
@@ -228,12 +233,26 @@ def _overlay_toss_usd_rate(rates: dict[str, Any]) -> dict[str, Any]:
 
         fx = fetch_toss_indicator_prices().get("EXCHANGE_RATE") or {}
         latest = fx.get("latest")
-        base = fx.get("base")
-        if latest and base:
-            result["USD"] = {
-                "rate": float(latest),
-                "change_pct": (float(latest) / float(base) - 1.0) * 100.0,
-            }
+        if not latest:
+            return result
+
+        # 야후 USD 값에서 전일 종가를 역산한다 — 나머지 통화와 같은 기준을 쓰기 위함.
+        yahoo_usd = rates.get("USD") or {}
+        yahoo_rate = yahoo_usd.get("rate")
+        yahoo_change_pct = yahoo_usd.get("change_pct")
+        previous_close = None
+        if yahoo_rate and yahoo_change_pct is not None:
+            divisor = 1.0 + float(yahoo_change_pct) / 100.0
+            if divisor != 0:
+                previous_close = float(yahoo_rate) / divisor
+
+        if previous_close and previous_close > 0:
+            change_pct = (float(latest) / previous_close - 1.0) * 100.0
+        else:
+            # 전일 종가를 구하지 못하면 야후 변동률을 그대로 유지한다(임의 값 만들지 않음).
+            change_pct = yahoo_change_pct
+
+        result["USD"] = {"rate": float(latest), "change_pct": change_pct}
     except Exception as exc:
         logger.warning("토스 달러 환율 조회 실패 — 야후 백업 사용: %s", exc)
     return result
