@@ -826,23 +826,15 @@ function AccountHoldingsDetailPanel({
     }
   }, [summary]);
 
-  const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number, cashNative?: number) => {
-    const finalCashNative = cashNative ?? Number(summary.cash_balance_native ?? 0);
-    const currentCashKrw = Number(summary.cash_balance_krw ?? 0);
-    const currentCashNative = Number(summary.cash_balance_native ?? 0);
-    // AUD 변경 시 KRW도 비율로 환산
-    const nextCashKrw =
-      currentCashNative > 0
-        ? (finalCashNative / currentCashNative) * currentCashKrw
-        : currentCashKrw;
+  // Intl Value/Change 만 저장한다. 현금 키를 함께 보내면 백엔드가 통화별 `cash` 맵을
+  // 레거시 필드로 재합성해 잔액이 0 으로 덮이므로, 현금 관련 필드는 보내지 않는다.
+  const processIntlUpdate = useCallback(async (intlSharesValue: number, intlSharesChange: number) => {
     const response = await fetch("/api/assets", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         account_id: summary.account_id,
         total_principal: summary.total_principal,
-        cash_balance_krw: nextCashKrw,
-        cash_balance_native: finalCashNative,
         cash_currency: summary.cash_currency,
         cash_target_ratio: summary.cash_target_ratio,
         intl_shares_value: intlSharesValue,
