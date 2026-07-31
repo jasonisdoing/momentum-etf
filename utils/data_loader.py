@@ -2235,31 +2235,6 @@ def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     return _resolve_toss_product_codes(normalized_symbols)
 
 
-def _us_session_state() -> str:
-    """미국 정규장 세션 상태: "pre" | "regular" | "post" (ET 기준, 주말은 "post").
-
-    - regular(09:30~16:00): 현재가=close, 변동=전일 종가 대비
-    - pre(04:00~09:30): close=프리장가, 변동=전일 종가 대비
-    - post(16:00~다음날 04:00 + 주말): 현재가=afterMarketClose, 변동=정규장 종가 대비
-    판정 불가 시 "regular"(기존 동작) 로 폴백한다.
-    """
-    schedule = (MARKET_SCHEDULES or {}).get("us") or {}
-    tz_name = schedule.get("timezone")
-    open_t = schedule.get("open")
-    close_t = schedule.get("close")
-    if not tz_name or ZoneInfo is None or open_t is None or close_t is None:
-        return "regular"
-    now = datetime.now(ZoneInfo(tz_name))
-    if now.weekday() >= 5:
-        return "post"
-    t = now.time()
-    if time(4, 0) <= t < open_t:
-        return "pre"
-    if open_t <= t < close_t:
-        return "regular"
-    return "post"
-
-
 def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """토스증권 API에서 미국 주식의 실시간 가격 정보를 조회합니다.
 
@@ -2293,9 +2268,6 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
     all_codes = list(symbol_to_code.values())
     snapshot: dict[str, dict[str, float]] = {}
-
-    # 정규장 마감 후(애프터마켓/야간)면 현재가=애프터, 변동=정규장 종가 대비로 본다.
-    us_post_close = _us_session_state() == "post"
 
     chunk_size = 50
     for i in range(0, len(all_codes), chunk_size):
@@ -2333,17 +2305,12 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             except (TypeError, ValueError):
                 continue
 
-            base_val = _safe_float(item.get("base"))
-            after_val = _safe_float(item.get("afterMarketClose"))
-
-            # 정규장 마감 후 + 애프터가 있으면: 현재가=애프터, 기준=정규장 종가(close).
-            # 그 외(정규장/프리장): 현재가=close, 기준=전일 종가(base).
-            if us_post_close and after_val and after_val > 0 and close_val > 0:
-                now_val: float = after_val
-                prev_val = close_val
-            else:
-                now_val = close_val
-                prev_val = base_val
+            # 토스 필드 의미: close = 현재 세션의 최신 체결가(프리/정규/야간 모두),
+            # base = 그 세션의 기준가(정규장 중엔 전일 종가, 야간엔 당일 정규장 종가).
+            # 세션별로 분기하지 않고 그대로 쓴다 — 예전에는 야간에 afterMarketClose 를
+            # 현재가로 보고 close 를 전일 종가로 뒤집어 써서 등락 부호가 반대로 나왔다.
+            now_val = close_val
+            prev_val = _safe_float(item.get("base"))
 
             entry: dict[str, float] = {"nowVal": now_val}
             if prev_val is not None and prev_val > 0:
