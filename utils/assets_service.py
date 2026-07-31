@@ -99,10 +99,17 @@ def save_cash_accounts(updates: list[dict[str, Any]]) -> dict[str, str]:
             "updated_at": now,
         }
 
-        # 통화별 native 현금 맵을 항상 동기화한다(신 형식 우선, 없으면 레거시 필드에서 합성).
-        # 레거시 단일 현금 편집이 신 형식 읽기에 그대로 반영되도록 보장한다.
+        # 통화별 native 현금 맵 동기화 (신 형식 우선, 없으면 레거시 필드에서 합성).
+        # 단, 현금 관련 키가 아예 없는 요청(예: Intl Value 만 저장)에서는 현금을 건드리지
+        # 않는다. 레거시 필드로 재합성하면 신 형식 `cash` 맵이 0 으로 덮여 잔액이 사라진다.
         cash_input = update.get("cash")
-        if isinstance(cash_input, dict) and cash_input:
+        has_cash_intent = isinstance(cash_input, dict) or any(
+            key in update for key in ("cash_balance_krw", "cash_balance_native")
+        )
+        if not has_cash_intent:
+            for key in ("cash", "cash_balance", "cash_balance_native"):
+                row.pop(key, None)
+        elif isinstance(cash_input, dict) and cash_input:
             cash_map: dict[str, float] = {}
             for key, value in cash_input.items():
                 code = str(key or "").strip().upper()
