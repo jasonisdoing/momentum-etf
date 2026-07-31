@@ -29,7 +29,6 @@ export async function POST(request: NextRequest) {
       "live_24h_slack",
       "leverage_ma_cross",
       "holdings_alarm",
-      "strategy_trade_notify",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {
