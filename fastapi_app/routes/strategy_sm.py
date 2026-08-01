@@ -5,11 +5,11 @@ from fastapi import APIRouter, Body, Depends
 from fastapi_app.dependencies import require_internal_token
 from utils.steady_momentum_service import compute_picks, load_settings, pool_labels, save_settings
 
-router = APIRouter(prefix="/internal/strategy-st", tags=["strategy-st"])
+router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 
 
 @router.get("")
-def get_strategy_st(
+def get_strategy_sm(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """저장된 설정(없으면 기본값 + is_saved=false)을 반환한다. 선정은 별도 실행."""
@@ -18,7 +18,7 @@ def get_strategy_st(
 
 
 @router.put("/settings")
-def put_strategy_st_settings(
+def put_strategy_sm_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
@@ -31,7 +31,7 @@ def put_strategy_st_settings(
 
 
 @router.post("/picks")
-def post_strategy_st_picks(
+def post_strategy_sm_picks(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """현재 월 확정 포트폴리오 선정을 실행한다 (가격 캐시 기반 — 수 초)."""
@@ -39,7 +39,7 @@ def post_strategy_st_picks(
 
 
 @router.post("/backtest")
-def post_strategy_st_backtest(
+def post_strategy_sm_backtest(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:

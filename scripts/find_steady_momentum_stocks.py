@@ -1,7 +1,7 @@
 """Steady Momentum 선정 결과를 콘솔 표로 출력한다.
 
 전략 규칙·계산은 `utils/steady_momentum_service.py` 가 단일 소스이며,
-이 스크립트는 화면(/strategy-st)과 같은 월 확정 포트폴리오를 콘솔에서 보는
+이 스크립트는 화면(/strategy-sm)과 같은 월 확정 포트폴리오를 콘솔에서 보는
 얇은 래퍼다. 설정은 화면에서 저장한 값(system_config.steady_momentum_settings)을
 쓰고, 저장 전이면 기본값으로 동작한다.
 
@@ -40,8 +40,8 @@ def main() -> int:
     result = compute_picks(settings)
     lookback = settings["lookback_months"]
 
-    headers = ["순위", "연속", "티커", "종목명", "풀", f"{lookback}개월(%)", f"상대{lookback}개월(%)", "월승률", "R²", "점수"]
-    aligns = ["r", "c", "l", "l", "l", "r", "r", "c", "r", "r"]
+    headers = ["순위", "연속", "티커", "종목명", f"{lookback}개월(%)", f"상대{lookback}개월(%)", "월승률", "R²", "점수"]
+    aligns = ["r", "c", "l", "l", "r", "r", "c", "r", "r"]
     rows = []
     for row in result["rows"]:
         streak = row["streak_months"]
@@ -52,8 +52,7 @@ def main() -> int:
                 streak_label,
                 row["ticker"],
                 row["name"][:16],
-                {"kor": "KS", "kor_kosdaq": "KQ"}.get(row["pool"], "US"),
-                f"{row['return_6m_pct']:+.1f}",
+                f"{row['return_lookback_pct']:+.1f}",
                 f"{row['rel_return_pct']:+.1f}",
                 row["win_label"],
                 f"{row['r_squared']:.3f}",

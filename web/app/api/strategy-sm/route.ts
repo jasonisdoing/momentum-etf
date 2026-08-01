@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 /** Steady Momentum 설정 조회 — FastAPI 프록시. */
 export async function GET() {
   try {
-    const data = await fetchFastApiJson("/internal/strategy-st");
+    const data = await fetchFastApiJson("/internal/strategy-sm");
     return jsonNoStore(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "설정을 불러오지 못했습니다.";
@@ -20,7 +20,7 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const data = await fetchFastApiJson("/internal/strategy-st/settings", {
+    const data = await fetchFastApiJson("/internal/strategy-sm/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

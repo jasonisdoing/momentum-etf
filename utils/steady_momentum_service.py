@@ -446,7 +446,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "pool": item["pool"],
-                "return_6m_pct": round(item["return_lookback_pct"], 1),
+                "return_lookback_pct": round(item["return_lookback_pct"], 1),
                 "rel_return_pct": round(item["rel_return_pct"], 1),
                 "win_label": f"{item['win_months']}/{item['months_count']}",
                 "slope_annual_pct": round(item["slope_annual_pct"], 1),

@@ -3466,6 +3466,12 @@ a {
   opacity: 0.75;
 }
 
+/* Steady Momentum 백테스트 예정 행 — 판정만 끝나고 체결 전인 달 */
+.ag-row.steadyPendingRow {
+  background: rgba(11, 123, 220, 0.07);
+  font-style: italic;
+}
+
 .assetsAgGrid {
   border: 0;
   background: transparent;
