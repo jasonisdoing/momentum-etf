@@ -68,6 +68,13 @@ type BacktestMonthRow = {
   is_pending?: boolean;
 };
 
+type BacktestDayRow = {
+  date: string;
+  strategy_pct: number | null;
+  benchmark_pct: number | null;
+  reference_pct: number | null;
+};
+
 type BacktestResult = {
   start_date: string;
   end_date: string;
@@ -88,6 +95,7 @@ type BacktestResult = {
   reference_mdd_pct: number | null;
   reference_sortino: number | null;
   monthly: BacktestMonthRow[];
+  daily: BacktestDayRow[];
 };
 
 type View = {
@@ -108,10 +116,10 @@ function needsRepick(before: Settings | null, after: Settings): boolean {
 }
 
 // 백테스트 표 보기 단위 — /compare 의 연간·월간·일간 구분과 같은 개념.
-// 일간은 백엔드에 일별 자산곡선이 아직 없어 미포함.
 const VIEW_MODES = [
   { key: "yearly", label: "연간" },
   { key: "monthly", label: "월간" },
+  { key: "daily", label: "일간" },
 ] as const;
 type ViewMode = (typeof VIEW_MODES)[number]["key"];
 
@@ -356,7 +364,8 @@ export function SteadyMomentumClient() {
       const resp = await fetch("/api/strategy-sm/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ months }),
+        // 일간 탭에서 실행할 때만 일별 행을 요청한다 (응답이 수천 행이라 무겁다).
+        body: JSON.stringify({ months, include_daily: viewMode === "daily" }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "백테스트에 실패했습니다.");
@@ -369,7 +378,7 @@ export function SteadyMomentumClient() {
       setBacktesting(false);
       setBacktestProgress(null);
     }
-  }, [toast, view?.settings.backtest_months]);
+  }, [toast, view?.settings.backtest_months, viewMode]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -534,6 +543,35 @@ export function SteadyMomentumClient() {
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
       },
     );
+    return columns;
+  }, [backtest]);
+
+  const dailyColumns = useMemo<ColDef<BacktestDayRow>[]>(() => {
+    if (!backtest) return [];
+    const pctColumn = (headerName: string, field: keyof BacktestDayRow, headerTooltip?: string): ColDef<BacktestDayRow> => ({
+      headerName,
+      field,
+      headerTooltip,
+      flex: 1,
+      minWidth: 110,
+      type: "numericColumn",
+      valueFormatter: (p) => formatSigned(p.value),
+      cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
+    });
+    const columns: ColDef<BacktestDayRow>[] = [
+      { headerName: "날짜", field: "date", width: 128, cellStyle: () => ({ fontWeight: 700 }) },
+      pctColumn("전략(%)", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
+      pctColumn(`${backtest.benchmark_ticker}(%)`, "benchmark_pct", `벤치마크 ${backtest.benchmark_name}`),
+    ];
+    if (backtest.reference_name) {
+      columns.push(
+        pctColumn(
+          `${backtest.reference_name}(%)`,
+          "reference_pct",
+          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
+        ),
+      );
+    }
     return columns;
   }, [backtest]);
 
@@ -845,7 +883,22 @@ export function SteadyMomentumClient() {
                     </b>
                   </span>
                 </div>
-                {viewMode === "monthly" ? (
+                {viewMode === "daily" && backtest.daily.length === 0 ? (
+                  <span style={{ ...hintStyle, fontSize: "0.84rem" }}>
+                    일간은 따로 계산합니다. 이 탭에서 실행을 누르면 일별 성과가 표시됩니다.
+                  </span>
+                ) : viewMode === "daily" ? (
+                  // 월간·연간과 같이 autoHeight — 카드 안에서 스크롤하지 않고 브라우저 스크롤로 본다.
+                  <AppAgGrid<BacktestDayRow>
+                    rowData={backtest.daily}
+                    columnDefs={dailyColumns}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight" }}
+                    getRowId={(p) => p.data.date}
+                  />
+                ) : viewMode === "monthly" ? (
                   <AppAgGrid<BacktestMonthRow>
                     rowData={backtest.monthly}
                     columnDefs={backtestColumns}

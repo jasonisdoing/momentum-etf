@@ -68,8 +68,15 @@ def _period_return(close: pd.Series, start: pd.Timestamp, end: pd.Timestamp) -> 
 def run_backtest(
     months: int,
     settings: dict[str, Any] | None = None,
+    *,
+    include_daily: bool,
 ) -> dict[str, Any]:
-    """월간 리밸런싱 백테스트. 월별 전략 vs 벤치마크 수익률을 반환한다."""
+    """월간 리밸런싱 백테스트. 월별 전략 vs 벤치마크 수익률을 반환한다.
+
+    ``include_daily`` 가 참일 때만 일별 행까지 만든다. 일별은 구간마다 종목별
+    시계열을 재색인해야 하고 응답도 수천 행이 되므로, 화면에서 일간 탭을 볼 때만
+    요청한다. 동작이 달라지는 값이라 기본값을 두지 않는다.
+    """
     max_months = get_max_backtest_months()
     if not isinstance(months, int) or not 1 <= months <= max_months:
         raise ValueError(f"'months' 는 1~{max_months} 사이의 정수여야 합니다.")
@@ -143,6 +150,24 @@ def run_backtest(
     slippage = float(settings["slippage_pct"]) / 100.0
     top_n = int(settings["top_n"])
 
+    # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
+    # 종가는 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
+    clean_closes: dict[str, pd.Series] = {}
+    clean_benchmark: pd.Series | None = None
+    clean_reference: pd.Series | None = None
+    if include_daily:
+        clean_closes = {
+            ticker: pd.to_numeric(frame["Close"], errors="coerce").dropna()
+            for ticker, frame in frames.items()
+        }
+        clean_benchmark = pd.to_numeric(benchmark_close, errors="coerce").dropna()
+        clean_reference = (
+            pd.to_numeric(reference_close, errors="coerce").dropna()
+            if reference_close is not None
+            else None
+        )
+    daily: list[dict[str, Any]] = []
+
     monthly: list[dict[str, Any]] = []
     strategy_returns: list[float] = []
     benchmark_returns: list[float] = []
@@ -204,6 +229,62 @@ def run_backtest(
             benchmark_returns.append(benchmark_pct / 100.0)
         if reference_pct is not None:
             reference_returns.append(reference_pct / 100.0)
+
+        # ── 일간 행 ──
+        # 이 구간(start→end)의 보유 종목은 고정이다. start 종가를 1 로 두고 매일의
+        # 동일가중 포트폴리오 가치를 구한 뒤 전일 대비 변동률을 낸다. 리밸런싱 비용은
+        # 구간 첫날에 한 번 반영한다(월간 계산과 같은 방식).
+        window = bench_index[(bench_index > start) & (bench_index <= end)] if include_daily else []
+        if len(window) > 0:
+            ratios = []
+            for ticker in holdings:
+                series = clean_closes.get(ticker)
+                if series is None:
+                    continue
+                base = series.asof(start)
+                if pd.isna(base) or float(base) <= 0:
+                    continue
+                ratios.append(series.reindex(window, method="ffill") / float(base))
+            portfolio = pd.concat(ratios, axis=1).mean(axis=1) if ratios else None
+
+            def _daily_series(source: pd.Series | None) -> pd.Series | None:
+                """구간 시작 종가를 1 로 정규화한 일별 가치."""
+                if source is None:
+                    return None
+                base_value = source.asof(start)
+                if pd.isna(base_value) or float(base_value) <= 0:
+                    return None
+                return source.reindex(window, method="ffill") / float(base_value)
+
+            bench_curve = _daily_series(clean_benchmark)
+            ref_curve = _daily_series(clean_reference)
+
+            def _step(curve: pd.Series | None, position_index: int) -> float | None:
+                """전일 대비(첫날은 구간 시작 종가 대비) 변동률(%)."""
+                if curve is None:
+                    return None
+                value = curve.iloc[position_index]
+                prior = 1.0 if position_index == 0 else curve.iloc[position_index - 1]
+                if pd.isna(value) or pd.isna(prior) or float(prior) <= 0:
+                    return None
+                return (float(value) / float(prior) - 1.0) * 100.0
+
+            for day_index, day in enumerate(window):
+                strategy_day = _step(portfolio, day_index)
+                if strategy_day is not None and day_index == 0:
+                    strategy_day -= cost * 100.0
+                daily.append(
+                    {
+                        "date": day.strftime("%Y-%m-%d"),
+                        "strategy_pct": round(strategy_day, 2) if strategy_day is not None else None,
+                        "benchmark_pct": (
+                            round(value, 2) if (value := _step(bench_curve, day_index)) is not None else None
+                        ),
+                        "reference_pct": (
+                            round(value, 2) if (value := _step(ref_curve, day_index)) is not None else None
+                        ),
+                    }
+                )
 
         monthly.append(
             {
@@ -293,4 +374,6 @@ def run_backtest(
         "reference_sortino": reference_sortino,
         # 최신 달이 위로 오게 뒤집는다 (화면 표)
         "monthly": list(reversed(monthly)),
+        # 일간 표 — 최신 날짜가 위로 오게 뒤집는다
+        "daily": list(reversed(daily)),
     }
