@@ -8,17 +8,24 @@ from utils.steady_momentum_service import compute_picks, load_settings, pool_lab
 router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 
 
-def _month_options(pool: str) -> list[int]:
+def _month_options(settings: dict) -> list[int]:
     """기간 선택지 — 종목풀 백테스트와 같은 목록을 쓰되, 이 전략이 실제로 돌릴 수
-    있는 개월 수(판정일 여유 포함)까지만 남긴다."""
+    있는 개월 수까지만 남긴다. 상한은 종목풀 데이터와 룩백이 함께 정한다."""
     from utils.pool_signal_backtest_service import get_month_options
     from utils.steady_momentum_service import available_backtest_months, load_benchmark_close
 
-    limit = available_backtest_months(load_benchmark_close(pool))
+    limit = available_backtest_months(
+        load_benchmark_close(settings["pool"]), settings["lookback_months"]
+    )
     options = [month for month in get_month_options() if month <= limit]
     if limit not in options:
         options.append(limit)
-    return options
+    # 상한이 줄기 전에 저장된 값은 선택지에 남겨 둔다 — 빼면 셀렉트가 빈칸이 되어
+    # 무엇이 저장돼 있는지 알 수 없다. 실행·저장할 때 명시적 에러로 안내된다.
+    saved = settings.get("backtest_months")
+    if isinstance(saved, int) and saved not in options:
+        options.append(saved)
+    return sorted(options)
 
 
 @router.get("")
@@ -30,7 +37,7 @@ def get_strategy_sm(
     return {
         "settings": settings,
         "pool_labels": pool_labels(),
-        "month_options": _month_options(settings["pool"]),
+        "month_options": _month_options(settings),
         "picks": None,
     }
 
@@ -48,7 +55,7 @@ def put_strategy_sm_settings(
     return {
         "settings": saved,
         "pool_labels": pool_labels(),
-        "month_options": _month_options(saved["pool"]),
+        "month_options": _month_options(saved),
         "picks": None,
     }
 

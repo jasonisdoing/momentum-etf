@@ -158,8 +158,22 @@ def load_settings() -> dict[str, Any]:
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """검증 후 저장하고 정규화된 설정을 반환한다."""
+    """검증 후 저장하고 정규화된 설정을 반환한다.
+
+    기간 상한은 룩백에 따라 달라지므로 여기서 실제 데이터로 한 번 더 막는다.
+    (읽기 경로인 `load_settings` 에는 넣지 않는다 — 설정 조회가 가격 캐시에
+    묶이면 캐시 문제로 설정 화면까지 못 여는 상황이 된다.)
+    """
     normalized = validate_settings(settings)
+    limit = available_backtest_months(
+        load_benchmark_close(normalized["pool"]), normalized["lookback_months"]
+    )
+    if normalized["backtest_months"] > limit:
+        raise ValueError(
+            f"룩백 {normalized['lookback_months']}개월 기준으로 이 종목풀은 백테스트 "
+            f"최대 {limit}개월입니다 (요청 {normalized['backtest_months']}개월). "
+            f"기간을 줄이거나 룩백을 짧게 하세요."
+        )
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
@@ -359,17 +373,27 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
     return prior[-1]
 
 
-def available_backtest_months(benchmark_close: pd.Series) -> int:
-    """이 종목풀에서 실제로 돌릴 수 있는 최대 개월 수.
+def available_backtest_months(benchmark_close: pd.Series, lookback_months: int) -> int:
+    """이 종목풀·룩백에서 실제로 돌릴 수 있는 최대 개월 수.
 
-    백테스트는 개월 수 + 1 개의 월말 거래일이 필요하고, 첫 교체일에도 그 **직전
-    거래일(판정일)** 이 있어야 한다. 그래서 월말 거래일 개수보다 2 적다.
-    가격 캐시 시작일로만 계산하는 `get_max_backtest_months()` 는 이 여유를
-    모르기 때문에 1~2개월 크게 나온다.
+    두 가지 제약을 함께 본다.
+
+    1. 각 교체일에는 그 **직전 거래일(판정일)** 이 있어야 한다.
+    2. 그 판정일까지 회귀에 쓸 ``룩백 × 21 + 4`` 거래일이 쌓여 있어야 한다.
+       이 조건 전 구간은 후보가 하나도 안 잡혀 성과가 통째로 비므로, 아예
+       백테스트 범위에서 제외한다. 그래야 전략과 벤치마크가 **같은 달**을
+       비교하게 된다.
+
+    가격 캐시 시작일만 보는 `get_max_backtest_months()` 는 룩백을 모르기 때문에
+    실제보다 크게 나온다. 룩백이 길수록 이 값은 줄어든다.
     """
     index = benchmark_close.index
-    month_ends = index.to_series().groupby(index.to_period("M")).max()
-    return max(len(month_ends) - 2, 1)
+    month_ends = index.to_series().groupby(index.to_period("M")).max().tolist()
+    required_bars = int(lookback_months) * TRADING_DAYS_PER_MONTH + 4
+    # 월말 직전 거래일까지 쌓인 봉 수가 required_bars 이상인 월말만 교체일이 될 수 있다.
+    usable = sum(1 for month_end in month_ends if index.searchsorted(month_end, side="left") >= required_bars)
+    # 개월 수 N 은 월말 N+1 개를 쓰므로, 쓸 수 있는 월말 개수보다 1 적다.
+    return max(usable - 1, 1)
 
 
 def completed_month_ends(benchmark_close: pd.Series) -> list[pd.Timestamp]:

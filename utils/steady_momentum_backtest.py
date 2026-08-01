@@ -89,10 +89,12 @@ def run_backtest(
     benchmark_close = load_benchmark_close(settings["pool"])
 
     # 실제 한계는 종목풀 데이터가 정한다 — 판정일 여유까지 반영해 여기서 다시 막는다.
-    pool_max = available_backtest_months(benchmark_close)
+    lookback_months = int(settings["lookback_months"])
+    pool_max = available_backtest_months(benchmark_close, lookback_months)
     if months > pool_max:
         raise ValueError(
-            f"이 종목풀은 최대 {pool_max}개월까지 백테스트할 수 있습니다 (요청 {months}개월)."
+            f"룩백 {lookback_months}개월 기준으로 이 종목풀은 최대 {pool_max}개월까지 "
+            f"백테스트할 수 있습니다 (요청 {months}개월)."
         )
 
     # 미국 풀이면 유사 컨셉 ETF(FMTM)를 참고 지수로 함께 계산한다. 한국 풀은 없음.
