@@ -12,9 +12,8 @@ router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 def get_strategy_sm(
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """저장된 설정(없으면 기본값 + is_saved=false)을 반환한다. 선정은 별도 실행."""
-    settings, is_saved = load_settings()
-    return {"settings": settings, "is_saved": is_saved, "pool_labels": pool_labels(), "picks": None}
+    """저장된 설정을 반환한다. 저장된 값이 없거나 깨졌으면 에러다(기본값 대체 없음)."""
+    return {"settings": load_settings(), "pool_labels": pool_labels(), "picks": None}
 
 
 @router.put("/settings")
@@ -26,8 +25,7 @@ def put_strategy_sm_settings(
     settings = payload.get("settings") if isinstance(payload, dict) else None
     if not isinstance(settings, dict):
         raise ValueError("저장할 'settings' 가 필요합니다.")
-    saved = save_settings(settings)
-    return {"settings": saved, "is_saved": True, "pool_labels": pool_labels(), "picks": None}
+    return {"settings": save_settings(settings), "pool_labels": pool_labels(), "picks": None}
 
 
 @router.post("/picks")

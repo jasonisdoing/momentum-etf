@@ -3,7 +3,7 @@
 전략 규칙·계산은 `utils/steady_momentum_service.py` 가 단일 소스이며,
 이 스크립트는 화면(/strategy-sm)과 같은 월 확정 포트폴리오를 콘솔에서 보는
 얇은 래퍼다. 설정은 화면에서 저장한 값(system_config.steady_momentum_settings)을
-쓰고, 저장 전이면 기본값으로 동작한다.
+쓴다. 저장된 설정이 없으면 기본값으로 넘어가지 않고 에러로 중단한다.
 
 사용법
 ------
@@ -32,10 +32,10 @@ def main() -> int:
 
     load_env_if_present()
 
-    settings, is_saved = load_settings()
+    settings = load_settings()
     if args.top is not None:
         settings = {**settings, "top_n": args.top}
-    print(f"설정({'저장됨' if is_saved else '기본값'}): {settings}")
+    print(f"설정: {settings}")
 
     result = compute_picks(settings)
     lookback = settings["lookback_months"]

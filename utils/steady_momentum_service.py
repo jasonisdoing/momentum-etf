@@ -71,16 +71,8 @@ _SETTINGS_KEY = "steady_momentum_settings"
 # 한계: 검증 구간 24개월이 대부분 강세장이고, 유니버스가 현재 종목풀 기준이라
 # 생존 편향이 있다. 하락장 표본으로는 재검증되지 않았다.
 #
-# 운영값은 DB(`system_config.steady_momentum_settings`)에 저장된다. 아래 기본값은
-# 한 번도 저장하지 않은 최초 상태에서만 쓰인다.
-DEFAULT_SETTINGS: dict[str, Any] = {
-    "pool": "kor",
-    "lookback_months": 6,
-    "top_n": 40,
-    "slippage_pct": 0.1,
-    "slope_filter": True,
-    "backtest_months": 12,
-}
+# 설정의 단일 소스는 DB(`system_config.steady_momentum_settings`)다. 코드에 기본값을
+# 두지 않는다 — 값이 없거나 깨졌으면 임의 값으로 대체하지 않고 에러를 낸다.
 
 
 # ── 설정 ──────────────────────────────────────────────────────────────────
@@ -138,22 +130,29 @@ def pool_labels() -> dict[str, str]:
     return labels
 
 
-def load_settings() -> tuple[dict[str, Any], bool]:
-    """(설정, 저장 여부). 저장 전이면 기본값과 False 를 반환한다."""
+def load_settings() -> dict[str, Any]:
+    """저장된 설정을 반환한다. 없거나 읽을 수 없으면 대체값 없이 에러를 낸다.
+
+    기본값으로 슬쩍 넘어가면 화면에는 그럴듯한 값이 뜨고, 그대로 저장하는 순간
+    실제 저장돼 있던 설정이 덮어써진다. 그래서 실패는 실패로 드러낸다.
+    """
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
     if db is None:
-        return dict(DEFAULT_SETTINGS), False
+        raise RuntimeError("DB 연결에 실패해 Steady Momentum 설정을 읽을 수 없습니다.")
     doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
     stored = doc.get("settings")
     if not isinstance(stored, dict):
-        return dict(DEFAULT_SETTINGS), False
+        raise RuntimeError(
+            f"저장된 Steady Momentum 설정이 없습니다 "
+            f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
+        )
     try:
-        return validate_settings(stored), True
-    except ValueError:
-        # 저장값이 깨졌으면(스키마 변경 등) 기본값으로 표시하되 미저장으로 알린다.
-        return dict(DEFAULT_SETTINGS), False
+        return validate_settings(stored)
+    except ValueError as error:
+        # 스키마에 항목이 늘어난 경우 등 — 어느 값이 문제인지 그대로 드러낸다.
+        raise ValueError(f"저장된 Steady Momentum 설정이 올바르지 않습니다: {error}") from error
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -424,7 +423,7 @@ def current_portfolio_dates(
 def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """현재 적용 중인 월 확정 포트폴리오 — 화면 ③ 카드와 스크립트가 함께 쓴다."""
     if settings is None:
-        settings, _ = load_settings()
+        settings = load_settings()
     settings = validate_settings(settings)
 
     universe = load_universe(settings["pool"])

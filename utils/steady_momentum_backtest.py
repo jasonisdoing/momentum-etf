@@ -72,7 +72,7 @@ def run_backtest(
     if not isinstance(months, int) or not 1 <= months <= MAX_BACKTEST_MONTHS:
         raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이의 정수여야 합니다.")
     if settings is None:
-        settings, _ = load_settings()
+        settings = load_settings()
     settings = validate_settings(settings)
 
     universe = load_universe(settings["pool"])

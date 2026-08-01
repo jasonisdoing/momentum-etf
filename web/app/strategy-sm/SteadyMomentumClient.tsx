@@ -95,7 +95,6 @@ type BacktestResult = {
 
 type View = {
   settings: Settings;
-  is_saved: boolean;
   pool_labels?: Record<string, string>;
   picks: PicksResult | null;
 };
@@ -622,13 +621,11 @@ export function SteadyMomentumClient() {
                     저장하지 않은 변경
                   </span>
                 ) : null}
-                {!view.is_saved ? <span style={hintStyle}>(미저장 — 기본값 표시 중)</span> : null}
                 <button
                   type="button"
                   className="btn btn-sm btn-primary"
                   onClick={() => void saveSettings()}
-                  // 아직 저장된 적이 없으면 기본값 그대로라도 저장할 수 있어야 한다.
-                  disabled={saving || (!isDirty && view.is_saved)}
+                  disabled={saving || !isDirty}
                 >
                   {saving ? "저장 중…" : "저장"}
                 </button>
