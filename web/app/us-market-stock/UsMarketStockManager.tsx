@@ -63,10 +63,13 @@ const INDEX_OPTIONS = ["SP500", "NDX100"] as const;
 type IndexOption = (typeof INDEX_OPTIONS)[number];
 
 function formatIndexLabel(index: IndexOption): string {
-  if (index === "SP500") return "S&P500";
+  if (index === "SP500") return "S&P";
   if (index === "NDX100") return "NASDAQ100";
   return index;
 }
+
+// S&P 선택 시 보여줄 시총 상위 개수 — 응답이 시총 순 정렬이라 상위 N 절단으로 처리한다.
+const SP_TOP_OPTIONS = [100, 200, 300, 400, 500] as const;
 
 function formatUsd(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -113,6 +116,7 @@ export function UsMarketStockManager({
   onSummaryChange?: (summary: { index: string; count: number; totalCount: number }) => void;
 }) {
   const [index, setIndex] = useState<IndexOption>("NDX100");
+  const [spTopCount, setSpTopCount] = useState<number>(500);
   const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -164,11 +168,17 @@ export function UsMarketStockManager({
     void load(index, minMarketCapUkm);
   }, [index, minMarketCapUkm, load]);
 
-  useEffect(() => {
-    onSummaryChange?.({ index, count: rows.length, totalCount });
-  }, [index, rows.length, totalCount, onSummaryChange]);
+  // S&P 는 시총 상위 spTopCount 개만 표시 (응답은 시총 순 정렬).
+  const visibleRows = useMemo(
+    () => (index === "SP500" ? rows.slice(0, spTopCount) : rows),
+    [index, rows, spTopCount],
+  );
 
-  const gridRows = useMemo(() => [...rows], [rows]);
+  useEffect(() => {
+    onSummaryChange?.({ index, count: visibleRows.length, totalCount });
+  }, [index, visibleRows.length, totalCount, onSummaryChange]);
+
+  const gridRows = useMemo(() => [...visibleRows], [visibleRows]);
 
   const allVisibleSelected = useMemo(() => {
     return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
@@ -460,6 +470,25 @@ export function UsMarketStockManager({
                         {formatIndexLabel(opt)}
                       </button>
                     ))}
+                    {index === "SP500" ? (
+                      <select
+                        value={spTopCount}
+                        onChange={(event) => setSpTopCount(Number(event.target.value))}
+                        style={{
+                          border: "1px solid rgba(148,163,184,0.4)",
+                          borderRadius: 6,
+                          padding: "3px 6px",
+                          fontSize: "0.84rem",
+                          marginLeft: 6,
+                        }}
+                      >
+                        {SP_TOP_OPTIONS.map((count) => (
+                          <option key={count} value={count}>
+                            상위 {count}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
                   </div>
                 </label>
 
