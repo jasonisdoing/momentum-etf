@@ -8,12 +8,31 @@ from utils.steady_momentum_service import compute_picks, load_settings, pool_lab
 router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 
 
+def _month_options(pool: str) -> list[int]:
+    """기간 선택지 — 종목풀 백테스트와 같은 목록을 쓰되, 이 전략이 실제로 돌릴 수
+    있는 개월 수(판정일 여유 포함)까지만 남긴다."""
+    from utils.pool_signal_backtest_service import get_month_options
+    from utils.steady_momentum_service import available_backtest_months, load_benchmark_close
+
+    limit = available_backtest_months(load_benchmark_close(pool))
+    options = [month for month in get_month_options() if month <= limit]
+    if limit not in options:
+        options.append(limit)
+    return options
+
+
 @router.get("")
 def get_strategy_sm(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """저장된 설정을 반환한다. 저장된 값이 없거나 깨졌으면 에러다(기본값 대체 없음)."""
-    return {"settings": load_settings(), "pool_labels": pool_labels(), "picks": None}
+    settings = load_settings()
+    return {
+        "settings": settings,
+        "pool_labels": pool_labels(),
+        "month_options": _month_options(settings["pool"]),
+        "picks": None,
+    }
 
 
 @router.put("/settings")
@@ -25,7 +44,13 @@ def put_strategy_sm_settings(
     settings = payload.get("settings") if isinstance(payload, dict) else None
     if not isinstance(settings, dict):
         raise ValueError("저장할 'settings' 가 필요합니다.")
-    return {"settings": save_settings(settings), "pool_labels": pool_labels(), "picks": None}
+    saved = save_settings(settings)
+    return {
+        "settings": saved,
+        "pool_labels": pool_labels(),
+        "month_options": _month_options(saved["pool"]),
+        "picks": None,
+    }
 
 
 @router.post("/picks")

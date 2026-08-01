@@ -12,9 +12,6 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 
 const gridTheme = createAppGridTheme();
 
-// 백테스트 기간 선택지 — 상한 24개월은 백엔드 MAX_BACKTEST_MONTHS 와 같아야 한다.
-const BACKTEST_MONTH_OPTIONS = [1, 2, 3, 6, 9, 12, 24] as const;
-
 // 종목풀 폴백 라벨 — 백엔드 미기동으로 pool_labels 를 못 받았을 때만 쓴다.
 // 실제 표시 이름은 종목풀 설정 DB 가 단일 소스이며 백엔드 응답을 우선한다.
 const POOL_OPTIONS: readonly { id: string; label: string }[] = [
@@ -96,6 +93,8 @@ type BacktestResult = {
 type View = {
   settings: Settings;
   pool_labels?: Record<string, string>;
+  // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
+  month_options?: number[];
   picks: PicksResult | null;
 };
 
@@ -607,7 +606,7 @@ export function SteadyMomentumClient() {
                     value={draftBacktestMonths}
                     onChange={(e) => setDraftBacktestMonths(Number(e.target.value))}
                   >
-                    {BACKTEST_MONTH_OPTIONS.map((m) => (
+                    {(view.month_options ?? [view.settings.backtest_months]).map((m) => (
                       <option key={m} value={m}>
                         {m}개월
                       </option>
