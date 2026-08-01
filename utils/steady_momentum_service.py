@@ -39,6 +39,8 @@ POOL_CONFIGS: dict[str, dict[str, Any]] = {
 }
 AVAILABLE_POOLS = tuple(POOL_CONFIGS)
 TRADING_DAYS_PER_MONTH = 21
+# 백테스트 기간 상한 — 설정 검증과 백테스트가 같은 값을 쓰도록 여기서만 정의한다.
+MAX_BACKTEST_MONTHS = 24
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
@@ -49,6 +51,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "top_n": 40,
     "slippage_pct": 0.1,
     "slope_filter": True,
+    "backtest_months": 12,
 }
 
 
@@ -76,6 +79,9 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     slope_filter = settings.get("slope_filter")
     if not isinstance(slope_filter, bool):
         raise ValueError("'slope_filter' 는 참/거짓이어야 합니다.")
+    backtest_months = int(_num("backtest_months"))
+    if not 1 <= backtest_months <= MAX_BACKTEST_MONTHS:
+        raise ValueError(f"'backtest_months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
     pool = str(settings.get("pool") or "").strip().lower()
     if pool not in AVAILABLE_POOLS:
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
@@ -86,6 +92,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "top_n": top_n,
         "slippage_pct": slippage_pct,
         "slope_filter": slope_filter,
+        "backtest_months": backtest_months,
     }
 
 

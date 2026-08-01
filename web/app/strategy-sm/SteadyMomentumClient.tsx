@@ -31,6 +31,7 @@ type Settings = {
   top_n: number;
   slippage_pct: number;
   slope_filter: boolean;
+  backtest_months: number;
 };
 
 const DEFAULT_SETTINGS: Settings = {
@@ -39,6 +40,7 @@ const DEFAULT_SETTINGS: Settings = {
   top_n: 40,
   slippage_pct: 0.1,
   slope_filter: true,
+  backtest_months: 12,
 };
 
 type PickRow = {
@@ -174,18 +176,19 @@ export function SteadyMomentumClient() {
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [pickProgress, setPickProgress] = useState<LoadingProgress | null>(null);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
-  const [backtestMonths, setBacktestMonths] = useState<number>(12);
   const autoPickedRef = useRef(false);
 
   // 설정 입력 초안 (문자열로 보관해 입력 중 상태를 그대로 둔다)
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [draftPool, setDraftPool] = useState<string>(DEFAULT_SETTINGS.pool);
   const [draftSlopeFilter, setDraftSlopeFilter] = useState(DEFAULT_SETTINGS.slope_filter);
+  const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(DEFAULT_SETTINGS.backtest_months);
 
   const applyView = useCallback((data: View) => {
     setView(data);
     setDraftPool(data.settings.pool);
     setDraftSlopeFilter(data.settings.slope_filter);
+    setDraftBacktestMonths(data.settings.backtest_months);
     setDraft({
       lookback_months: String(data.settings.lookback_months),
       top_n: String(data.settings.top_n),
@@ -261,6 +264,7 @@ export function SteadyMomentumClient() {
             top_n: topN,
             slippage_pct: slippage,
             slope_filter: draftSlopeFilter,
+            backtest_months: draftBacktestMonths,
           },
         }),
       });
@@ -275,9 +279,11 @@ export function SteadyMomentumClient() {
     } finally {
       setSaving(false);
     }
-  }, [applyView, draft, draftPool, draftSlopeFilter, toast]);
+  }, [applyView, draft, draftBacktestMonths, draftPool, draftSlopeFilter, toast]);
 
   const runBacktest = useCallback(async () => {
+    // 기간도 저장된 설정을 따른다 — 미저장 상태에서는 실행 버튼이 막혀 있다.
+    const months = view?.settings.backtest_months ?? DEFAULT_SETTINGS.backtest_months;
     setBacktesting(true);
     setBacktestProgress({ percent: 10, message: "월별 리밸런싱 시뮬레이션 중" });
     const stopRamp = startProgressRamp(setBacktestProgress);
@@ -285,7 +291,7 @@ export function SteadyMomentumClient() {
       const resp = await fetch("/api/strategy-sm/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ months: backtestMonths }),
+        body: JSON.stringify({ months }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "백테스트에 실패했습니다.");
@@ -298,7 +304,7 @@ export function SteadyMomentumClient() {
       setBacktesting(false);
       setBacktestProgress(null);
     }
-  }, [backtestMonths, toast]);
+  }, [toast, view?.settings.backtest_months]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -307,11 +313,12 @@ export function SteadyMomentumClient() {
     return (
       draftPool !== saved.pool ||
       draftSlopeFilter !== saved.slope_filter ||
+      draftBacktestMonths !== saved.backtest_months ||
       draft.lookback_months !== String(saved.lookback_months) ||
       draft.top_n !== String(saved.top_n) ||
       draft.slippage_pct !== String(saved.slippage_pct)
     );
-  }, [draft, draftPool, draftSlopeFilter, view]);
+  }, [draft, draftBacktestMonths, draftPool, draftSlopeFilter, view]);
 
   const lookbackMonths = view?.settings.lookback_months ?? DEFAULT_SETTINGS.lookback_months;
 
@@ -451,7 +458,10 @@ export function SteadyMomentumClient() {
         headerName: "편입",
         field: "added",
         flex: 1,
-        minWidth: 160,
+        minWidth: 200,
+        wrapText: true,
+        autoHeight: true,
+        cellClass: "steadyWrapCell",
         valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
         cellStyle: () => ({ color: "var(--up-color, #d64545)" }),
       },
@@ -459,7 +469,10 @@ export function SteadyMomentumClient() {
         headerName: "편출",
         field: "removed",
         flex: 1,
-        minWidth: 160,
+        minWidth: 200,
+        wrapText: true,
+        autoHeight: true,
+        cellClass: "steadyWrapCell",
         valueFormatter: (p) => (p.value?.length ? p.value.join(", ") : "-"),
         cellStyle: () => ({ color: "var(--down-color, #2f6fd0)" }),
       },
@@ -536,6 +549,21 @@ export function SteadyMomentumClient() {
                     onChange={(e) => setDraft((d) => ({ ...d, slippage_pct: e.target.value }))}
                     inputMode="decimal"
                   />
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">백테스트 기간</span>
+                  <select
+                    className="form-select form-select-sm"
+                    style={{ width: 104 }}
+                    value={draftBacktestMonths}
+                    onChange={(e) => setDraftBacktestMonths(Number(e.target.value))}
+                  >
+                    {BACKTEST_MONTH_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {m}개월
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: "0.84rem" }}>
                   <input
@@ -625,22 +653,9 @@ export function SteadyMomentumClient() {
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>백테스트</span>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">기간</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: 104 }}
-                    value={backtestMonths}
-                    onChange={(e) => setBacktestMonths(Number(e.target.value))}
-                  >
-                    {BACKTEST_MONTH_OPTIONS.map((m) => (
-                      <option key={m} value={m}>
-                        {m}개월
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <span style={hintStyle}>월간 리밸런싱 · 현재 종목풀 기준(생존 편향 있음)</span>
+                <span style={hintStyle}>
+                  {view.settings.backtest_months}개월 · 월간 리밸런싱 · 현재 종목풀 기준(생존 편향 있음)
+                </span>
               </div>
               <div className="appMainHeaderRight">
                 {isDirty ? <span style={hintStyle}>설정을 저장해야 실행할 수 있습니다</span> : null}
@@ -704,7 +719,7 @@ export function SteadyMomentumClient() {
               </>
             ) : !backtesting ? (
               <span style={{ ...hintStyle, fontSize: "0.84rem" }}>
-                기간을 고르고 실행을 누르면 월별 성과가 표시됩니다.
+                실행을 누르면 월별 성과가 표시됩니다. 기간은 위 변수 설정에서 바꿉니다.
               </span>
             ) : null}
           </div>
