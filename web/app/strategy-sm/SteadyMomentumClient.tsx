@@ -502,15 +502,6 @@ export function SteadyMomentumClient() {
       });
     }
     columns.push(
-      {
-        headerName: "초과(%p)",
-        field: "excess_pp",
-        headerTooltip: "전략 − 벤치마크",
-        width: 98,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value),
-        cellStyle: (p) => ({ color: signColor(p.value), fontWeight: 700 }),
-      },
       { headerName: "종목 수", field: "holdings_count", width: 88, type: "numericColumn" },
       {
         headerName: "교체율(%)",
