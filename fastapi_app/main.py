@@ -17,7 +17,6 @@ from .routes.holdings import router as holdings_router
 from .routes.holdings_components import router as holdings_components_router
 from .routes.kor_market_stocks import router as kor_market_stocks_router
 from .routes.leverage import router as leverage_router
-from .routes.strategy_st import router as strategy_st_router
 from .routes.live_24h import router as live_24h_router
 from .routes.market import router as market_router
 from .routes.market_trend import router as market_trend_router
@@ -28,6 +27,7 @@ from .routes.pool_settings import router as pool_settings_router
 from .routes.rank import router as rank_router
 from .routes.snapshots import router as snapshots_router
 from .routes.stocks import router as stocks_router
+from .routes.strategy_sm import router as strategy_sm_router
 from .routes.system import router as system_router
 from .routes.ticker_detail import router as ticker_detail_router
 from .routes.us_market_stocks import router as us_market_stocks_router
@@ -89,7 +89,7 @@ app.include_router(rank_router)
 app.include_router(snapshots_router)
 app.include_router(stocks_router)
 app.include_router(asset_helper_router)
-app.include_router(strategy_st_router)
+app.include_router(strategy_sm_router)
 from fastapi import Request
 from pymongo.errors import NetworkTimeout, PyMongoError
 from starlette.responses import JSONResponse

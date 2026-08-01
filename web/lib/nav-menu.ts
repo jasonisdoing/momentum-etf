@@ -97,7 +97,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconChartLine,
     items: [
       { href: "/leverage-settings", label: "레버리지", icon: IconSettings },
-      { href: "/strategy-st", label: "Steady Momentum", icon: IconTrendingUp },
+      { href: "/strategy-sm", label: "Steady Momentum", icon: IconTrendingUp },
     ],
   },
   {
