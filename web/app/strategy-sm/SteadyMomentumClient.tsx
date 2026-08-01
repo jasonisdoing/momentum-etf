@@ -109,6 +109,15 @@ type View = {
   picks: PicksResult | null;
 };
 
+// 선정 결과를 바꾸는 설정 — 이 값들이 바뀔 때만 저장 후 선정을 다시 계산한다.
+// 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
+const PICK_AFFECTING_KEYS = ["pool", "lookback_months", "top_n", "slope_filter"] as const;
+
+function needsRepick(before: Settings | null, after: Settings): boolean {
+  if (!before) return true;
+  return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
+}
+
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "0.8rem" };
 const numberInputStyle: React.CSSProperties = { width: 88, textAlign: "right" };
 
@@ -175,6 +184,7 @@ export function SteadyMomentumClient() {
   const [backtesting, setBacktesting] = useState(false);
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [pickProgress, setPickProgress] = useState<LoadingProgress | null>(null);
+  const [pickFailed, setPickFailed] = useState(false);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
   const autoPickedRef = useRef(false);
 
@@ -216,6 +226,7 @@ export function SteadyMomentumClient() {
 
   const runPicks = useCallback(async () => {
     setPicking(true);
+    setPickFailed(false);
     setPickProgress({ percent: 10, message: "월 확정 포트폴리오 계산 중" });
     const stopRamp = startProgressRamp(setPickProgress);
     try {
@@ -225,6 +236,7 @@ export function SteadyMomentumClient() {
       setPickProgress({ percent: 100, message: "선정 결과 반영 중" });
       setView((prev) => (prev ? { ...prev, picks: payload as PicksResult } : prev));
     } catch (error) {
+      setPickFailed(true);
       toast.error(error instanceof Error ? error.message : "선정에 실패했습니다.");
     } finally {
       stopRamp();
@@ -270,16 +282,20 @@ export function SteadyMomentumClient() {
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
-      applyView(payload as View);
-      // 설정이 바뀌면 이전 결과는 이 설정의 결과가 아니다. 선정과 백테스트를 함께 비운다.
+      const saved = payload as View;
+      const repick = needsRepick(view?.settings ?? null, saved.settings);
+      // 선정에 영향이 없는 변경(슬리피지·백테스트 기간)이면 기존 선정 결과를 그대로 둔다.
+      applyView({ ...saved, picks: repick ? null : (view?.picks ?? null) });
+      // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
       setBacktest(null);
-      toast.success("설정을 저장했습니다. 선정과 백테스트를 다시 실행하세요.");
+      toast.success(repick ? "설정을 저장했습니다. 선정을 다시 계산합니다." : "설정을 저장했습니다.");
+      if (repick) await runPicks();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [applyView, draft, draftBacktestMonths, draftPool, draftSlopeFilter, toast]);
+  }, [applyView, draft, draftBacktestMonths, draftPool, draftSlopeFilter, runPicks, toast, view]);
 
   const runBacktest = useCallback(async () => {
     // 기간도 저장된 설정을 따른다 — 미저장 상태에서는 실행 버튼이 막혀 있다.
@@ -551,6 +567,32 @@ export function SteadyMomentumClient() {
                   />
                 </label>
                 <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">시장 상대기울기 필터</span>
+                  <div
+                    className="appSegmentedToggle appSegmentedToggleCompact"
+                    role="group"
+                    aria-label="시장 상대기울기 필터"
+                  >
+                    {[true, false].map((on) => (
+                      <button
+                        key={String(on)}
+                        type="button"
+                        className={
+                          draftSlopeFilter === on
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        title={
+                          on ? "상대기울기가 음수인 종목(시장에 지는 추세)을 후보에서 제외" : "필터 없이 전 종목 대상"
+                        }
+                        onClick={() => setDraftSlopeFilter(on)}
+                      >
+                        {on ? "사용" : "미사용"}
+                      </button>
+                    ))}
+                  </div>
+                </label>
+                <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">백테스트 기간</span>
                   <select
                     className="form-select form-select-sm"
@@ -564,14 +606,6 @@ export function SteadyMomentumClient() {
                       </option>
                     ))}
                   </select>
-                </label>
-                <label style={{ display: "flex", gap: 5, alignItems: "center", fontSize: "0.84rem" }}>
-                  <input
-                    type="checkbox"
-                    checked={draftSlopeFilter}
-                    onChange={(e) => setDraftSlopeFilter(e.target.checked)}
-                  />
-                  시장 상대기울기 필터
                 </label>
               </div>
               <div className="appMainHeaderRight">
@@ -614,23 +648,14 @@ export function SteadyMomentumClient() {
                   </span>
                 ) : (
                   <span style={{ ...hintStyle, fontSize: "0.82rem" }}>
-                    선정 실행을 누르면 이번 달 확정 포트폴리오가 표시됩니다.
+                    {pickFailed
+                      ? "선정 결과를 불러오지 못했습니다. 설정을 저장하거나 새로고침하세요."
+                      : "이번 달 확정 포트폴리오를 계산하고 있습니다."}
                   </span>
                 )}
               </div>
-              <div className="appMainHeaderRight">
-                {isDirty ? <span style={hintStyle}>설정을 저장해야 실행할 수 있습니다</span> : null}
-                <button
-                  type="button"
-                  className="btn btn-sm btn-dark"
-                  onClick={() => void runPicks()}
-                  disabled={picking || isDirty}
-                >
-                  {picking ? "선정 중…" : "선정 실행"}
-                </button>
-              </div>
             </div>
-            {picking ? <AppLoadingProgress title="선정 실행 중..." progress={pickProgress} /> : null}
+            {picking ? <AppLoadingProgress title="선정 계산 중..." progress={pickProgress} /> : null}
             {view.picks && !picking ? (
               // autoHeight — 그리드가 행 수만큼만 높이를 차지해 하단 낭비가 없다.
               <AppAgGrid<PickRow>
