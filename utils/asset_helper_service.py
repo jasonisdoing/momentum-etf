@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from config import MIN_TRADING_DAYS, TRADING_DAYS_PER_MONTH
+from core.strategy.metrics import period_return_pct
 from core.strategy.scoring import build_composite_rank_scores
 from utils.cache_utils import (
     get_all_ticker_type_lookup_keys,
@@ -746,28 +747,6 @@ def _convert_close_frame_to_krw(close_frame: pd.DataFrame, currency_by_ticker: d
     return converted
 
 
-def _calculate_period_return(series: pd.Series, months: int, eval_date: pd.Timestamp) -> float | None:
-    normalized = pd.to_numeric(series, errors="coerce").dropna()
-    if normalized.empty:
-        return None
-
-    latest_candidates = normalized[normalized.index <= eval_date]
-    if latest_candidates.empty:
-        return None
-
-    latest_price = float(latest_candidates.iloc[-1])
-    target_date = latest_candidates.index[-1] - pd.DateOffset(months=months)
-    base_candidates = normalized[normalized.index <= target_date]
-    if base_candidates.empty:
-        return None
-
-    base_price = float(base_candidates.iloc[-1])
-    if base_price <= 0:
-        return None
-
-    return round(((latest_price / base_price) - 1.0) * 100.0, 2)
-
-
 def _build_return_map(close_frame: pd.DataFrame) -> dict[str, dict[str, float | None]]:
     if close_frame.empty:
         return {}
@@ -777,10 +756,10 @@ def _build_return_map(close_frame: pd.DataFrame) -> dict[str, dict[str, float | 
     for ticker in close_frame.columns:
         series = close_frame[ticker]
         result[str(ticker)] = {
-            "return_1m_pct": _calculate_period_return(series, 1, eval_date),
-            "return_3m_pct": _calculate_period_return(series, 3, eval_date),
-            "return_6m_pct": _calculate_period_return(series, 6, eval_date),
-            "return_12m_pct": _calculate_period_return(series, 12, eval_date),
+            "return_1m_pct": period_return_pct(series, 1, eval_date),
+            "return_3m_pct": period_return_pct(series, 3, eval_date),
+            "return_6m_pct": period_return_pct(series, 6, eval_date),
+            "return_12m_pct": period_return_pct(series, 12, eval_date),
         }
     return result
 

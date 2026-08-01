@@ -503,6 +503,24 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     portfolio_month = (rebalance_date.to_period("M") + 1).strftime("%Y-%m")
 
+    # 참고용 가격 정보 — 현재가는 캐시의 최신 종가, 기간수익률은 나머지 컬럼과 같은
+    # 판정일 기준이라 다음 교체 전까지 값이 바뀌지 않는다.
+    from core.strategy.metrics import period_return_pct
+
+    currency = str(POOL_CONFIGS[settings["pool"]]["currency"])
+
+    def price_info(ticker: str) -> dict[str, Any]:
+        frame = frames.get(ticker)
+        if frame is None or frame.empty:
+            return {"price": None, "return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None}
+        close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        return {
+            "price": round(float(close.iloc[-1]), 4) if not close.empty else None,
+            "return_1m_pct": period_return_pct(close, 1, signal_date),
+            "return_3m_pct": period_return_pct(close, 3, signal_date),
+            "return_12m_pct": period_return_pct(close, 12, signal_date),
+        }
+
     return {
         "as_of": signal_date.strftime("%Y-%m-%d"),
         "portfolio_month": portfolio_month,
@@ -519,6 +537,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "pool": item["pool"],
+                "currency": currency,
+                **price_info(item["ticker"]),
                 "return_lookback_pct": round(item["return_lookback_pct"], 1),
                 "rel_return_pct": round(item["rel_return_pct"], 1),
                 "win_label": f"{item['win_months']}/{item['months_count']}",
