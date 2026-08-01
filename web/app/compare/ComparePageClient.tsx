@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { createChart, ColorType, CrosshairMode, LineSeries } from "lightweight-charts";
 import type { IChartApi, LineData, Time } from "lightweight-charts";
 
+import { AppLoadingProgress } from "../components/AppLoadingProgress";
 import { PageFrame } from "../components/PageFrame";
 import { PortfolioChangeBreakdown } from "../components/PortfolioChangeBreakdown";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
@@ -1557,16 +1558,11 @@ export function ComparePageClient() {
         </section>
 
         {loading ? (
-          <div className="compareLoading">
-            <div className="compareLoadingText">
-              <span>비교 데이터를 불러오는 중...</span>
-              <strong>{loadingProgress?.percent ?? 0}%</strong>
-            </div>
-            <div className="compareLoadingBar" aria-hidden="true">
-              <div style={{ width: `${loadingProgress?.percent ?? 0}%` }} />
-            </div>
-            <small>{loadingProgress?.message ?? "비교 데이터 요청 중"}</small>
-          </div>
+          <AppLoadingProgress
+            title="비교 데이터를 불러오는 중..."
+            progress={loadingProgress}
+            fallbackMessage="비교 데이터 요청 중"
+          />
         ) : null}
 
         {/* 연/월/일간 분석은 기간 라벨에 동일가중 평균까지 넣어 라벨 열을 넓게 쓴다(헤더·본문 동일 적용). */}
