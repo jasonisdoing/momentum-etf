@@ -39,8 +39,6 @@ POOL_CONFIGS: dict[str, dict[str, Any]] = {
 }
 AVAILABLE_POOLS = tuple(POOL_CONFIGS)
 TRADING_DAYS_PER_MONTH = 21
-# 백테스트 기간 상한 — 설정 검증과 백테스트가 같은 값을 쓰도록 여기서만 정의한다.
-MAX_BACKTEST_MONTHS = 24
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
@@ -99,9 +97,13 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     slope_filter = settings.get("slope_filter")
     if not isinstance(slope_filter, bool):
         raise ValueError("'slope_filter' 는 참/거짓이어야 합니다.")
+    # 기간 상한은 종목풀 백테스트와 같은 계산(가격 캐시 시작일 기준)을 재사용한다.
+    from utils.pool_signal_backtest_service import get_max_backtest_months
+
+    max_months = get_max_backtest_months()
     backtest_months = int(_num("backtest_months"))
-    if not 1 <= backtest_months <= MAX_BACKTEST_MONTHS:
-        raise ValueError(f"'backtest_months' 는 1~{MAX_BACKTEST_MONTHS} 사이여야 합니다.")
+    if not 1 <= backtest_months <= max_months:
+        raise ValueError(f"'backtest_months' 는 1~{max_months} 사이여야 합니다.")
     pool = str(settings.get("pool") or "").strip().lower()
     if pool not in AVAILABLE_POOLS:
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
@@ -355,6 +357,19 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
     if len(prior) == 0:
         raise RuntimeError("판정 기준일(교체일 직전 거래일)을 구할 수 없습니다.")
     return prior[-1]
+
+
+def available_backtest_months(benchmark_close: pd.Series) -> int:
+    """이 종목풀에서 실제로 돌릴 수 있는 최대 개월 수.
+
+    백테스트는 개월 수 + 1 개의 월말 거래일이 필요하고, 첫 교체일에도 그 **직전
+    거래일(판정일)** 이 있어야 한다. 그래서 월말 거래일 개수보다 2 적다.
+    가격 캐시 시작일로만 계산하는 `get_max_backtest_months()` 는 이 여유를
+    모르기 때문에 1~2개월 크게 나온다.
+    """
+    index = benchmark_close.index
+    month_ends = index.to_series().groupby(index.to_period("M")).max()
+    return max(len(month_ends) - 2, 1)
 
 
 def completed_month_ends(benchmark_close: pd.Series) -> list[pd.Timestamp]:

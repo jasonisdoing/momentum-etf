@@ -1,4 +1,4 @@
-"""Steady Momentum 월간 리밸런싱 백테스트 (최대 24개월).
+"""Steady Momentum 월간 리밸런싱 백테스트.
 
 방식
 ----
@@ -25,9 +25,10 @@ from typing import Any
 import pandas as pd
 
 from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
+from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.steady_momentum_service import (
-    MAX_BACKTEST_MONTHS,
     POOL_CONFIGS,
+    available_backtest_months,
     benchmark_info,
     load_benchmark_close,
     load_price_frames,
@@ -69,8 +70,9 @@ def run_backtest(
     settings: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """월간 리밸런싱 백테스트. 월별 전략 vs 벤치마크 수익률을 반환한다."""
-    if not isinstance(months, int) or not 1 <= months <= MAX_BACKTEST_MONTHS:
-        raise ValueError(f"'months' 는 1~{MAX_BACKTEST_MONTHS} 사이의 정수여야 합니다.")
+    max_months = get_max_backtest_months()
+    if not isinstance(months, int) or not 1 <= months <= max_months:
+        raise ValueError(f"'months' 는 1~{max_months} 사이의 정수여야 합니다.")
     if settings is None:
         settings = load_settings()
     settings = validate_settings(settings)
@@ -85,6 +87,13 @@ def run_backtest(
 
     frames = load_price_frames(universe)
     benchmark_close = load_benchmark_close(settings["pool"])
+
+    # 실제 한계는 종목풀 데이터가 정한다 — 판정일 여유까지 반영해 여기서 다시 막는다.
+    pool_max = available_backtest_months(benchmark_close)
+    if months > pool_max:
+        raise ValueError(
+            f"이 종목풀은 최대 {pool_max}개월까지 백테스트할 수 있습니다 (요청 {months}개월)."
+        )
 
     # 미국 풀이면 유사 컨셉 ETF(FMTM)를 참고 지수로 함께 계산한다. 한국 풀은 없음.
     reference_close: pd.Series | None = None
