@@ -34,15 +34,6 @@ type Settings = {
   backtest_months: number;
 };
 
-const DEFAULT_SETTINGS: Settings = {
-  pool: "kor",
-  lookback_months: 6,
-  top_n: 40,
-  slippage_pct: 0.1,
-  slope_filter: true,
-  backtest_months: 12,
-};
-
 type PickRow = {
   rank: number;
   is_reserve: boolean;
@@ -185,14 +176,17 @@ export function SteadyMomentumClient() {
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [pickProgress, setPickProgress] = useState<LoadingProgress | null>(null);
   const [pickFailed, setPickFailed] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
   const autoPickedRef = useRef(false);
 
   // 설정 입력 초안 (문자열로 보관해 입력 중 상태를 그대로 둔다)
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [draftPool, setDraftPool] = useState<string>(DEFAULT_SETTINGS.pool);
-  const [draftSlopeFilter, setDraftSlopeFilter] = useState(DEFAULT_SETTINGS.slope_filter);
-  const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(DEFAULT_SETTINGS.backtest_months);
+  // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
+  // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
+  const [draftPool, setDraftPool] = useState<string>("");
+  const [draftSlopeFilter, setDraftSlopeFilter] = useState(false);
+  const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
 
   const applyView = useCallback((data: View) => {
     setView(data);
@@ -212,12 +206,15 @@ export function SteadyMomentumClient() {
       const resp = await fetch("/api/strategy-sm", { cache: "no-store" });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 불러오지 못했습니다.");
+      setLoadError(null);
       applyView(payload as View);
       return true;
     } catch (error) {
-      // 백엔드 미기동이어도 화면은 기본값으로 렌더한다 (저장 시 재시도).
-      applyView({ settings: DEFAULT_SETTINGS, is_saved: false, picks: null });
-      toast.warning(error instanceof Error ? error.message : "설정을 불러오지 못했습니다.");
+      // 설정을 못 받으면 값을 지어내지 않는다 — 폼을 그리지 않고 실패만 알린다.
+      // (기본값을 그렸다가 그대로 저장되면 저장돼 있던 설정이 덮어써진다.)
+      const message = error instanceof Error ? error.message : "설정을 불러오지 못했습니다.";
+      setLoadError(message);
+      toast.error(message);
       return false;
     } finally {
       setLoading(false);
@@ -299,7 +296,8 @@ export function SteadyMomentumClient() {
 
   const runBacktest = useCallback(async () => {
     // 기간도 저장된 설정을 따른다 — 미저장 상태에서는 실행 버튼이 막혀 있다.
-    const months = view?.settings.backtest_months ?? DEFAULT_SETTINGS.backtest_months;
+    const months = view?.settings.backtest_months;
+    if (months == null) return;
     setBacktesting(true);
     setBacktestProgress({ percent: 10, message: "월별 리밸런싱 시뮬레이션 중" });
     const stopRamp = startProgressRamp(setBacktestProgress);
@@ -336,10 +334,12 @@ export function SteadyMomentumClient() {
     );
   }, [draft, draftBacktestMonths, draftPool, draftSlopeFilter, view]);
 
-  const lookbackMonths = view?.settings.lookback_months ?? DEFAULT_SETTINGS.lookback_months;
+  const lookbackMonths = view?.settings.lookback_months ?? null;
 
-  const pickColumns = useMemo<ColDef<PickRow>[]>(
-    () => [
+  const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
+    // 설정을 받기 전에는 컬럼(룩백 개월 머리글)을 만들 수 없다.
+    if (lookbackMonths == null) return [];
+    return [
       { headerName: "순위", field: "rank", width: 72, type: "numericColumn" },
       {
         headerName: "연속",
@@ -408,9 +408,8 @@ export function SteadyMomentumClient() {
         valueFormatter: (p) => formatNumber(p.value, 1),
         cellStyle: () => ({ fontWeight: 700 }),
       },
-    ],
-    [lookbackMonths],
-  );
+    ];
+  }, [lookbackMonths]);
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
@@ -504,9 +503,18 @@ export function SteadyMomentumClient() {
     );
   }
   if (!view) {
+    // 설정을 못 받은 상태 — 값을 지어내 폼을 그리지 않고 실패와 재시도만 제공한다.
     return (
       <PageFrame title="Steady Momentum">
-        <div style={{ ...hintStyle, padding: 20 }}>데이터가 없습니다.</div>
+        <div className="card appCard">
+          <div className="card-body" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 700 }}>설정을 불러오지 못했습니다.</span>
+            <span style={hintStyle}>{loadError ?? "원인을 알 수 없습니다."}</span>
+            <button type="button" className="btn btn-sm btn-primary" onClick={() => void load()} disabled={loading}>
+              {loading ? "다시 시도 중…" : "다시 시도"}
+            </button>
+          </div>
+        </div>
       </PageFrame>
     );
   }
