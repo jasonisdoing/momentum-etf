@@ -107,6 +107,58 @@ function needsRepick(before: Settings | null, after: Settings): boolean {
   return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
 }
 
+// 백테스트 표 보기 단위 — /compare 의 연간·월간·일간 구분과 같은 개념.
+// 일간은 백엔드에 일별 자산곡선이 아직 없어 미포함.
+const VIEW_MODES = [
+  { key: "yearly", label: "연간" },
+  { key: "monthly", label: "월간" },
+] as const;
+type ViewMode = (typeof VIEW_MODES)[number]["key"];
+
+type YearRow = {
+  year: string;
+  strategy_pct: number | null;
+  benchmark_pct: number | null;
+  reference_pct: number | null;
+  strategy_partial: boolean;
+  benchmark_partial: boolean;
+  reference_partial: boolean;
+};
+
+/** 월별 수익률을 복리로 합성한다. 값이 하나도 없으면 null. */
+function compoundPct(values: (number | null)[]): number | null {
+  const usable = values.filter((v): v is number => v != null && Number.isFinite(v));
+  if (usable.length === 0) return null;
+  return (usable.reduce((acc, v) => acc * (1 + v / 100), 1) - 1) * 100;
+}
+
+/**
+ * 월별 행을 연도별로 묶는다. 12개월이 다 차지 않은 해는 `partial` 로 표시한다
+ * (/compare 의 부분 기간 `*` 표기와 같은 규칙). 예정 행은 수익률이 없어 제외한다.
+ */
+function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
+  const byYear = new Map<string, BacktestMonthRow[]>();
+  for (const row of monthly) {
+    if (row.is_pending) continue;
+    const year = row.month.slice(0, 4);
+    byYear.set(year, [...(byYear.get(year) ?? []), row]);
+  }
+  const countOf = (rows: BacktestMonthRow[], key: keyof BacktestMonthRow) =>
+    rows.filter((r) => r[key] != null).length;
+
+  return [...byYear.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([year, rows]) => ({
+      year,
+      strategy_pct: compoundPct(rows.map((r) => r.strategy_pct)),
+      benchmark_pct: compoundPct(rows.map((r) => r.benchmark_pct)),
+      reference_pct: compoundPct(rows.map((r) => r.reference_pct)),
+      strategy_partial: countOf(rows, "strategy_pct") < 12,
+      benchmark_partial: countOf(rows, "benchmark_pct") < 12,
+      reference_partial: countOf(rows, "reference_pct") < 12,
+    }));
+}
+
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "0.8rem" };
 const numberInputStyle: React.CSSProperties = { width: 88, textAlign: "right" };
 
@@ -176,6 +228,7 @@ export function SteadyMomentumClient() {
   const [pickFailed, setPickFailed] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("monthly");
   const autoPickedRef = useRef(false);
 
   // 설정 입력 초안 (문자열로 보관해 입력 중 상태를 그대로 둔다)
@@ -493,6 +546,53 @@ export function SteadyMomentumClient() {
     return columns;
   }, [backtest]);
 
+  const yearRows = useMemo<YearRow[]>(() => (backtest ? toYearRows(backtest.monthly) : []), [backtest]);
+
+  const yearColumns = useMemo<ColDef<YearRow>[]>(() => {
+    if (!backtest) return [];
+    // 부분 기간은 /compare 와 같은 규칙으로 값 뒤에 `*` 를 붙인다.
+    const pctColumn = (
+      headerName: string,
+      field: "strategy_pct" | "benchmark_pct" | "reference_pct",
+      partialField: "strategy_partial" | "benchmark_partial" | "reference_partial",
+      headerTooltip?: string,
+    ): ColDef<YearRow> => ({
+      headerName,
+      field,
+      headerTooltip,
+      flex: 1,
+      minWidth: 120,
+      type: "numericColumn",
+      valueFormatter: (p) =>
+        p.value == null ? "-" : `${formatSigned(p.value)}${p.data?.[partialField] ? "*" : ""}`,
+      cellStyle: (p) => ({ color: signColor(p.value), fontWeight: field === "strategy_pct" ? 700 : 400 }),
+      tooltipValueGetter: (p) =>
+        p.data?.[partialField] ? "12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간" : undefined,
+    });
+
+    const columns: ColDef<YearRow>[] = [
+      { headerName: "연도", field: "year", width: 110, cellStyle: () => ({ fontWeight: 700 }) },
+      pctColumn("전략(%)", "strategy_pct", "strategy_partial"),
+      pctColumn(
+        `${backtest.benchmark_ticker}(%)`,
+        "benchmark_pct",
+        "benchmark_partial",
+        `벤치마크 ${backtest.benchmark_name}`,
+      ),
+    ];
+    if (backtest.reference_name) {
+      columns.push(
+        pctColumn(
+          `${backtest.reference_name}(%)`,
+          "reference_pct",
+          "reference_partial",
+          "참고 지수 — 유사 컨셉 ETF (벤치마크가 아니며 선정에 관여하지 않는다)",
+        ),
+      );
+    }
+    return columns;
+  }, [backtest]);
+
   if (loading && !view) {
     return (
       <PageFrame title="Steady Momentum">
@@ -682,6 +782,25 @@ export function SteadyMomentumClient() {
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>백테스트</span>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">보기</span>
+                  <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="백테스트 보기 단위">
+                    {VIEW_MODES.map((mode) => (
+                      <button
+                        key={mode.key}
+                        type="button"
+                        className={
+                          viewMode === mode.key
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        onClick={() => setViewMode(mode.key)}
+                      >
+                        {mode.label}
+                      </button>
+                    ))}
+                  </div>
+                </label>
                 <span style={hintStyle}>
                   {view.settings.backtest_months}개월 · 월간 리밸런싱 · 현재 종목풀 기준(생존 편향 있음)
                 </span>
@@ -735,16 +854,37 @@ export function SteadyMomentumClient() {
                     </b>
                   </span>
                 </div>
-                <AppAgGrid<BacktestMonthRow>
-                  rowData={backtest.monthly}
-                  columnDefs={backtestColumns}
-                  theme={gridTheme}
-                  minHeight={0}
-                  height="auto"
-                  gridOptions={{ domLayout: "autoHeight" }}
-                  getRowClass={(p) => (p.data?.is_pending ? "steadyPendingRow" : "")}
-                  getRowId={(p) => p.data.month}
-                />
+                {viewMode === "monthly" ? (
+                  <AppAgGrid<BacktestMonthRow>
+                    rowData={backtest.monthly}
+                    columnDefs={backtestColumns}
+                    theme={gridTheme}
+                    minHeight={0}
+                    height="auto"
+                    gridOptions={{ domLayout: "autoHeight" }}
+                    getRowClass={(p) => (p.data?.is_pending ? "steadyPendingRow" : "")}
+                    getRowId={(p) => p.data.month}
+                  />
+                ) : (
+                  <>
+                    <AppAgGrid<YearRow>
+                      rowData={yearRows}
+                      columnDefs={yearColumns}
+                      theme={gridTheme}
+                      minHeight={0}
+                      height="auto"
+                      gridOptions={{ domLayout: "autoHeight" }}
+                      getRowId={(p) => p.data.year}
+                    />
+                    {yearRows.some(
+                      (row) => row.strategy_partial || row.benchmark_partial || row.reference_partial,
+                    ) ? (
+                      <span style={{ ...hintStyle, fontSize: "0.78rem" }}>
+                        * 12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간입니다.
+                      </span>
+                    ) : null}
+                  </>
+                )}
               </>
             ) : !backtesting ? (
               <span style={{ ...hintStyle, fontSize: "0.84rem" }}>
