@@ -73,10 +73,18 @@ def post_strategy_sm_backtest(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """월간 리밸런싱 백테스트. body: ``{"months": 12}`` (1~24)."""
+    """월간 리밸런싱 백테스트.
+
+    body: ``{"months": 12, "include_daily": false}``.
+    ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다 — 일별 계산은 응답이
+    수천 행으로 커지므로 필요할 때만 만든다.
+    """
     from utils.steady_momentum_backtest import run_backtest
 
     months = payload.get("months") if isinstance(payload, dict) else None
     if not isinstance(months, int) or isinstance(months, bool):
         raise ValueError("'months' 는 정수여야 합니다.")
-    return run_backtest(months)
+    include_daily = payload.get("include_daily") if isinstance(payload, dict) else None
+    if not isinstance(include_daily, bool):
+        raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
+    return run_backtest(months, include_daily=include_daily)
