@@ -565,16 +565,6 @@ export function SteadyMomentumClient() {
                   />
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">슬리피지(%)</span>
-                  <input
-                    className="form-control form-control-sm"
-                    style={numberInputStyle}
-                    value={draft.slippage_pct ?? ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, slippage_pct: e.target.value }))}
-                    inputMode="decimal"
-                  />
-                </label>
-                <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">시장 상대기울기 필터</span>
                   <div
                     className="appSegmentedToggle appSegmentedToggleCompact"
@@ -599,6 +589,16 @@ export function SteadyMomentumClient() {
                       </button>
                     ))}
                   </div>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">슬리피지(%)</span>
+                  <input
+                    className="form-control form-control-sm"
+                    style={numberInputStyle}
+                    value={draft.slippage_pct ?? ""}
+                    onChange={(e) => setDraft((d) => ({ ...d, slippage_pct: e.target.value }))}
+                    inputMode="decimal"
+                  />
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">백테스트 기간</span>
