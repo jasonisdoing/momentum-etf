@@ -3472,6 +3472,25 @@ a {
   font-style: italic;
 }
 
+/* 긴 목록(편입·편출 종목명)을 줄바꿈으로 전부 보여주는 셀.
+   공통 그리드 테마가 .ag-cell 을 flex 로 두기 때문에, 값 요소에 min-width:0 을
+   주지 않으면 줄바꿈되지 않고 옆 칸으로 넘쳐 흐른다. */
+.appAgGridTheme .ag-cell.steadyWrapCell,
+.appAgGridThemeLegacy .ag-cell.steadyWrapCell {
+  align-items: flex-start;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.appAgGridTheme .ag-cell.steadyWrapCell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.steadyWrapCell .ag-cell-value {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
 .assetsAgGrid {
   border: 0;
   background: transparent;

@@ -1,4 +1,4 @@
-"""Steady Momentum 월간 리밸런싱 백테스트 (최대 12개월).
+"""Steady Momentum 월간 리밸런싱 백테스트 (최대 24개월).
 
 방식
 ----
@@ -11,7 +11,8 @@
 - 슬리피지는 편도(%)로, 리밸런싱에서 실제 매매되는 금액 전체에 부과한다:
   편출 전량 매도 + 편입 1/N 매수 + **유지 종목의 1/N 재조정 매매**(한 달간
   흘러간 비중과 목표 1/N 의 차이)까지 포함 — 완전 리밸런싱 모델과 비용이 일치한다.
-- 벤치마크: 풀별 — 한국 KODEX 200 / 미국 S&P 500. 같은 구간 비교.
+- 벤치마크: 종목풀 설정(DB `pool_settings`)에 등록된 벤치마크 티커를 그대로 쓴다.
+  미설정이면 fallback 없이 에러다.
 
 한계(화면에 명시): 현재 종목풀 기준이라 상장폐지·풀 이탈 종목이 빠진
 생존 편향이 있다.
@@ -25,6 +26,7 @@ import pandas as pd
 
 from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
 from utils.steady_momentum_service import (
+    MAX_BACKTEST_MONTHS,
     POOL_CONFIGS,
     benchmark_info,
     load_benchmark_close,
@@ -37,7 +39,6 @@ from utils.steady_momentum_service import (
     validate_settings,
 )
 
-MAX_BACKTEST_MONTHS = 24
 # 미국 풀 참고 지수 — 유사 컨셉 ETF(FMTM)와 같은 구간을 나란히 비교한다 (벤치마크 아님).
 US_REFERENCE_TICKER = "FMTM"
 
@@ -76,6 +77,12 @@ def run_backtest(
 
     universe = load_universe(settings["pool"])
     name_by_ticker = {row["ticker"]: row["name"] for row in universe}
+
+    def holding_label(ticker: str) -> str:
+        """편입·편출 표시용 `종목명(티커)`. 이름을 모르면 티커만 쓴다."""
+        name = name_by_ticker.get(ticker)
+        return f"{name}({ticker})" if name else ticker
+
     frames = load_price_frames(universe)
     benchmark_close = load_benchmark_close(settings["pool"])
 
@@ -201,8 +208,8 @@ def run_backtest(
                 "holdings_count": len(holdings),
                 "turnover_pct": turnover_pct,
                 # 이 달 시작(직전 월말 종가)에 교체한 종목 — 첫 달은 전량 편입.
-                "added": [name_by_ticker.get(ticker, ticker) for ticker in added_tickers],
-                "removed": [name_by_ticker.get(ticker, ticker) for ticker in removed_tickers],
+                "added": [holding_label(ticker) for ticker in added_tickers],
+                "removed": [holding_label(ticker) for ticker in removed_tickers],
             }
         )
         previous_holdings = holdings_set
@@ -222,8 +229,8 @@ def run_backtest(
                 "excess_pp": None,
                 "holdings_count": len(pending_holdings),
                 "turnover_pct": round(len(pending_holdings - previous_holdings) / top_n * 100.0, 1),
-                "added": [name_by_ticker.get(t, t) for t in sorted(pending_holdings - previous_holdings)],
-                "removed": [name_by_ticker.get(t, t) for t in sorted(previous_holdings - pending_holdings)],
+                "added": [holding_label(t) for t in sorted(pending_holdings - previous_holdings)],
+                "removed": [holding_label(t) for t in sorted(previous_holdings - pending_holdings)],
                 "is_pending": True,
             }
         )
