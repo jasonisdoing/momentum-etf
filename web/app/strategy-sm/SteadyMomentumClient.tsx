@@ -9,6 +9,7 @@ import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
 
@@ -37,6 +38,11 @@ type PickRow = {
   streak_months: number | null;
   ticker: string;
   name: string;
+  currency: string;
+  price: number | null;
+  return_1m_pct: number | null;
+  return_3m_pct: number | null;
+  return_12m_pct: number | null;
   return_lookback_pct: number;
   rel_return_pct: number;
   win_label: string;
@@ -420,6 +426,23 @@ export function SteadyMomentumClient() {
       },
       { headerName: "종목명", field: "name", flex: 1, minWidth: 140 },
       {
+        headerName: "현재가",
+        field: "price",
+        headerTooltip: "가격 캐시의 최신 종가 (통화는 종목풀 기준)",
+        width: 100,
+        type: "numericColumn",
+        valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
+      },
+      {
+        headerName: "1개월(%)",
+        field: "return_1m_pct",
+        headerTooltip: "판정일 기준 1개월 수익률",
+        width: 92,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
+      {
         headerName: `${lookbackMonths}개월(%)`,
         field: "return_lookback_pct",
         headerTooltip: "룩백 구간 수익률 — 룩백(개월) 설정을 따른다",
@@ -433,6 +456,15 @@ export function SteadyMomentumClient() {
         field: "rel_return_pct",
         headerTooltip: "룩백 구간의 벤치마크 대비 초과 수익률",
         width: 108,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
+      {
+        headerName: "12개월(%)",
+        field: "return_12m_pct",
+        headerTooltip: "판정일 기준 12개월 수익률",
+        width: 98,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: (p) => ({ color: signColor(p.value) }),

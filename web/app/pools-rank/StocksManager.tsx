@@ -13,6 +13,7 @@ import {
   readRememberedTickerType,
   writeRememberedTickerType,
 } from "../components/account-selection";
+import { formatPrice } from "../../lib/price-format";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
 import { AppModal } from "../components/AppModal";
@@ -967,10 +968,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         width: 88,
         type: "rightAligned",
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          const currency = selectedTickerTypeItem?.currency?.toUpperCase();
-          const rowCurrency = String(params.data?.currency || currency || "").toUpperCase();
-          const decimals = rowCurrency === "USD" || rowCurrency === "AUD" ? 2 : 0;
-          return formatNumber(params.value ?? null, decimals);
+          const rowCurrency = params.data?.currency || selectedTickerTypeItem?.currency;
+          return formatPrice(params.value ?? null, rowCurrency);
         },
       },
       {
