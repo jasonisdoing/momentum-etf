@@ -117,6 +117,7 @@ Steady Momentum 은 "룩백 구간 동안 시장을 얼마나 일관되게 이�
 
 * 종목풀은 **미국 지수 기반 3개 중 하나만** 선택합니다: 나스닥100+S&P100 / 나스닥100 / S&P100. 한국 풀은 지원하지 않습니다.
 * **고정 종목 제외**: `exclude_from_ranking=true`는 비교 기준일 뿐이므로 순위·종목풀 백테스트와 같은 규칙으로 투자 후보에서 뺍니다.
+* **섹터·업종**은 `data/sp500_tickers.json` · `data/ndx100_tickers.json` 에서 읽습니다(`/us-market-stock` 과 같은 파일). 구성종목 목록은 위키피디아에서, **분류 값은 yfinance** 에서 받아 `scripts/update_us_market_stocks.py` 가 저장합니다. 두 지수가 한 체계를 쓰도록 yfinance 로 통일한 것이며, 위키 표를 쓰던 때는 S&P는 GICS·나스닥은 자체 표라 값이 뒤집히는 종목이 있었습니다(예: ARM 섹터 `Semiconductors` / 업종 `Technology`). yfinance 조회에 실패한 종목은 다른 출처로 대체하지 않고 빈 값으로 두며, 업종 상한 계산에서 제외됩니다.
 
 ### 월간 리밸런싱 — 판정일과 체결일
 

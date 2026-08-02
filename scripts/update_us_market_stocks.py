@@ -1,15 +1,22 @@
 """미국 개별주 인덱스 구성종목을 갱신하고 시가총액·기간 수익률을 저장한다.
 
+섹터·업종은 yfinance 에서 받는다. 종목별 개별 호출이라 비싸서, **이미 저장된
+값이 있으면 다시 조회하지 않는다**(분류는 거의 바뀌지 않는다). 전체를 다시 받으려면
+`--refresh-classification` 을 준다.
+
 사용법:
     python scripts/update_us_market_stocks.py
+    python scripts/update_us_market_stocks.py --refresh-classification
 """
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -26,6 +33,41 @@ _HEADERS = {
 }
 _YFINANCE_BATCH_SIZE = 50
 _YFINANCE_BATCH_DELAY = 1.0  # 초
+_CLASSIFICATION_WORKERS = 8  # 섹터·업종 개별 조회 동시 실행 수
+
+
+def _load_saved_classification(filename: str) -> dict[str, dict[str, str]]:
+    """이미 저장된 파일에서 티커별 섹터·업종을 읽는다. 없으면 빈 dict."""
+    path = DATA_DIR / filename
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    saved: dict[str, dict[str, str]] = {}
+    for item in payload.get("tickers") or []:
+        ticker = str(item.get("ticker") or "").strip().upper()
+        industry = str(item.get("industry") or "").strip()
+        if ticker and industry:  # 업종이 비어 있으면 실패했던 것이므로 다시 받는다
+            saved[ticker] = {"sector": str(item.get("sector") or "").strip(), "industry": industry}
+    return saved
+
+
+def _fetch_classification(tickers: list[str]) -> dict[str, dict[str, str]]:
+    """yfinance 에서 섹터·업종을 받는다 (종목별 호출이라 병렬로 돈다)."""
+    def one(ticker: str) -> tuple[str, dict[str, str]]:
+        try:
+            info = yf.Ticker(_normalize_yfinance_symbol(ticker)).get_info() or {}
+            return ticker, {
+                "sector": str(info.get("sector") or "").strip(),
+                "industry": str(info.get("industry") or "").strip(),
+            }
+        except Exception:
+            return ticker, {"sector": "", "industry": ""}
+
+    with ThreadPoolExecutor(max_workers=_CLASSIFICATION_WORKERS) as pool:
+        return dict(pool.map(one, tickers))
 
 
 def _read_html(url: str) -> list[pd.DataFrame]:
@@ -42,11 +84,10 @@ def _fetch_sp500() -> list[dict[str, Any]]:
     for _, row in df.iterrows():
         ticker = str(row.get("Symbol") or "").strip().upper().replace(".", "-")
         name = str(row.get("Security") or "").strip()
-        sector = str(row.get("GICS Sector") or "").strip()
-        sub_industry = str(row.get("GICS Sub-Industry") or "").strip()
+
         if not ticker:
             continue
-        result.append({"ticker": ticker, "name": name, "sector": sector, "industry": sub_industry})
+        result.append({"ticker": ticker, "name": name})
     return result
 
 
@@ -65,18 +106,14 @@ def _fetch_ndx100() -> list[dict[str, Any]]:
     cols = {str(c).strip(): c for c in df.columns}
     ticker_col = next((cols[c] for c in cols if "ticker" in c.lower() or "symbol" in c.lower()), None)
     name_col = next((cols[c] for c in cols if "company" in c.lower() or "name" in c.lower()), None)
-    sector_col = next((cols[c] for c in cols if "sector" in c.lower()), None)
-    industry_col = next((cols[c] for c in cols if "industry" in c.lower() and "sector" not in c.lower()), None)
 
     result: list[dict[str, Any]] = []
     for _, row in df.iterrows():
         ticker = str(row.get(ticker_col) or "").strip().upper().replace(".", "-") if ticker_col else ""
         name = str(row.get(name_col) or "").strip() if name_col else ""
-        sector = str(row.get(sector_col) or "").strip() if sector_col else ""
-        industry = str(row.get(industry_col) or "").strip() if industry_col else ""
         if not ticker or ticker in ("NAN", "TICKER", "SYMBOL"):
             continue
-        result.append({"ticker": ticker, "name": name, "sector": sector, "industry": industry})
+        result.append({"ticker": ticker, "name": name})
     return result
 
 
@@ -222,6 +259,8 @@ def _save(filename: str, tickers: list[dict[str, Any]], source_url: str) -> None
     payload = {
         "updated_at": date.today().isoformat(),
         "source": source_url,
+        # 구성종목 목록은 위 주소에서, 섹터·업종은 yfinance 에서 받는다.
+        "classification_source": "yfinance",
         "count": len(tickers),
         "tickers": tickers,
     }
@@ -230,11 +269,27 @@ def _save(filename: str, tickers: list[dict[str, Any]], source_url: str) -> None
     print(f"저장 완료: {path} ({len(tickers)}개)")
 
 
-def _enrich_constituents(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _enrich_constituents(
+    items: list[dict[str, Any]], filename: str, refresh_classification: bool
+) -> list[dict[str, Any]]:
     ticker_list = [str(item["ticker"]) for item in items]
+
+    # 섹터·업종 — 저장된 값이 있으면 재사용한다. 종목별 호출이라 전체를 매번 받으면
+    # 배치가 몇 분씩 길어지는데, 분류는 거의 바뀌지 않아 그럴 이유가 없다.
+    saved = {} if refresh_classification else _load_saved_classification(filename)
+    todo = [t for t in ticker_list if t not in saved]
+    if todo:
+        print(f"  섹터·업종 조회 {len(todo)}종목 (재사용 {len(saved)}종목)...")
+        saved.update(_fetch_classification(todo))
+    else:
+        print(f"  섹터·업종 전부 재사용 ({len(saved)}종목)")
+
     meta_map = _fetch_stock_meta(ticker_list)
     for item in items:
+        classification = saved.get(str(item["ticker"]), {})
         meta = meta_map.get(str(item["ticker"]), {})
+        item["sector"] = classification.get("sector") or ""
+        item["industry"] = classification.get("industry") or ""
         item["market_cap"] = meta.get("market_cap")
         item["volume"] = meta.get("volume")
         for months in (1, 3, 12):
@@ -243,15 +298,28 @@ def _enrich_constituents(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             item[f"return_{months}m_latest_price"] = meta.get(f"return_{months}m_latest_price")
             item[f"return_{months}m_pct"] = meta.get(f"return_{months}m_pct")
         item["mdd_12m_pct"] = meta.get("mdd_12m_pct")
+
+    missing = [item["ticker"] for item in items if not item["industry"]]
+    if missing:
+        print(f"  업종 조회 실패 {len(missing)}종목: {', '.join(missing[:10])}"
+              f"{' 외' if len(missing) > 10 else ''}")
     return items
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="미국 지수 구성종목 갱신")
+    parser.add_argument(
+        "--refresh-classification",
+        action="store_true",
+        help="저장된 섹터·업종을 무시하고 전부 다시 조회한다",
+    )
+    args = parser.parse_args()
+
     print("S&P500 구성종목 조회 중...")
     try:
         sp500 = _fetch_sp500()
         print(f"  Wikipedia에서 {len(sp500)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
-        sp500 = _enrich_constituents(sp500)
+        sp500 = _enrich_constituents(sp500, "sp500_tickers.json", args.refresh_classification)
         _save("sp500_tickers.json", sp500, "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
     except Exception as exc:
         print(f"S&P500 조회 실패: {exc}", file=sys.stderr)
@@ -260,7 +328,7 @@ def main() -> None:
     try:
         ndx100 = _fetch_ndx100()
         print(f"  Wikipedia에서 {len(ndx100)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
-        ndx100 = _enrich_constituents(ndx100)
+        ndx100 = _enrich_constituents(ndx100, "ndx100_tickers.json", args.refresh_classification)
         _save("ndx100_tickers.json", ndx100, "https://en.wikipedia.org/wiki/Nasdaq-100")
     except Exception as exc:
         print(f"NASDAQ100 조회 실패: {exc}", file=sys.stderr)
