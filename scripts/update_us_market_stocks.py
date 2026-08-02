@@ -92,7 +92,8 @@ def _fetch_sp500() -> list[dict[str, Any]]:
 
 
 def _fetch_ndx100() -> list[dict[str, Any]]:
-    url = "https://en.wikipedia.org/wiki/Nasdaq-100"
+    # 구성종목 표는 별도 문서로 분리됐다 (기존 Nasdaq-100 문서에는 더 이상 없다).
+    url = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
     tables = _read_html(url)
     df = None
     for table in tables:
@@ -329,7 +330,9 @@ def main() -> None:
         ndx100 = _fetch_ndx100()
         print(f"  Wikipedia에서 {len(ndx100)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
         ndx100 = _enrich_constituents(ndx100, "ndx100_tickers.json", args.refresh_classification)
-        _save("ndx100_tickers.json", ndx100, "https://en.wikipedia.org/wiki/Nasdaq-100")
+        _save(
+            "ndx100_tickers.json", ndx100, "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
+        )
     except Exception as exc:
         print(f"NASDAQ100 조회 실패: {exc}", file=sys.stderr)
 
