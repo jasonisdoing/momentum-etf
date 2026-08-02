@@ -104,16 +104,15 @@ def run_backtest(
             f"백테스트할 수 있습니다 (요청 {months}개월)."
         )
 
-    # 미국 풀이면 유사 컨셉 ETF(FMTM)를 참고 지수로 함께 계산한다. 한국 풀은 없음.
-    reference_close: pd.Series | None = None
-    if POOL_CONFIGS[settings["pool"]]["country"] == "us":
-        from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    # 유사 컨셉 ETF(FMTM)를 참고 지수로 함께 계산한다.
+    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
-        reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(
-            US_REFERENCE_TICKER
-        )
-        if reference_frame is not None and not reference_frame.empty:
-            reference_close = pd.to_numeric(reference_frame["Close"], errors="coerce").dropna()
+    reference_close: pd.Series | None = None
+    reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(
+        US_REFERENCE_TICKER
+    )
+    if reference_frame is not None and not reference_frame.empty:
+        reference_close = pd.to_numeric(reference_frame["Close"], errors="coerce").dropna()
     dates = _rebalance_dates(benchmark_close, months)
 
     # 판정 시점 = 각 리밸런싱일(체결일)의 직전 거래일. 벤치마크 달력 기준.
