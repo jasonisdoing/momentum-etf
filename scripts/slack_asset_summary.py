@@ -20,6 +20,12 @@ from utils.account_registry import load_account_configs
 from utils.daily_fund_service import load_daily_docs_for_aggregation
 from utils.db_manager import get_db_connection
 from utils.env import load_env_if_present
+from utils.monthly_service import (
+    MONTHLY_COLLECTION,
+)
+from utils.monthly_service import (
+    _apply_running_total_principal as _apply_monthly_running,
+)
 from utils.notification import send_slack_message_v2
 from utils.portfolio_io import (
     MissingPriceCacheError,
@@ -29,13 +35,11 @@ from utils.portfolio_io import (
     save_daily_snapshot,
 )
 from utils.report import format_kr_money, format_kr_money_man
-from utils.monthly_service import (
-    MONTHLY_COLLECTION,
-    _apply_running_total_principal as _apply_monthly_running,
-)
 from utils.weekly_service import _apply_running_total_principal as _apply_weekly_running
 from utils.yearly_service import (
     YEARLY_COLLECTION,
+)
+from utils.yearly_service import (
     _apply_running_total_principal as _apply_yearly_running,
 )
 

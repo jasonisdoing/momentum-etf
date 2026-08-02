@@ -123,8 +123,12 @@ APScheduler 에 등록한다.
 
 ### 개별주 인덱스 캐시
 
+- **저장 위치는 MongoDB `index_constituents` 컬렉션입니다** (`_id` 가 `SP500`/`NDX100`/`ASX200`). 예전에는 `data/*_tickers.json` 파일이었는데, 배치는 로컬에서만 자동 실행되는 반면 서버 컨테이너의 `data/` 는 읽기 전용 마운트(`./data:/app/data:ro`)라 서버 데이터가 갱신되지 않고 사람이 직접 올려야 했습니다. DB 는 서버·로컬이 함께 보므로 어디서 돌든 결과가 공유됩니다. 읽기·쓰기는 `utils/index_constituents_loader.py` 만 거칩니다.
 - 미국 개별주 캐시는 `us_market_stocks` 배치가 평일 08:00 KST에 `scripts/update_us_market_stocks.py`를 실행해 갱신합니다.
-- 호주 개별주 캐시는 `aus_market_stocks` 배치가 평일 08:10 KST에 `scripts/update_aus_market_stocks.py`를 실행해 `data/asx200_tickers.json`을 갱신합니다.
+  - 출처: S&P500은 위키피디아 구성종목 표, NASDAQ100은 나스닥 공식 API(`api.nasdaq.com/api/quote/list-type/nasdaq100`), 섹터·업종은 yfinance입니다.
+  - 구성종목 수가 기대 범위(S&P500 490~510, NASDAQ100 95~110)를 벗어나면 저장하지 않고 종료 코드 1로 끝납니다. cron 래퍼가 이를 실패로 보고 슬랙 알림을 보냅니다. 위키 문서가 옮겨져 NASDAQ100 갱신이 한 달간 조용히 실패했던 일을 막기 위한 장치입니다.
+  - 섹터·업종은 이미 저장된 값을 재사용하고 새로 편입된 종목만 조회합니다. 전부 다시 받으려면 `--refresh-classification` 을 줍니다.
+- 호주 개별주 캐시는 `aus_market_stocks` 배치가 평일 08:10 KST에 `scripts/update_aus_market_stocks.py`를 실행해 `index_constituents` 의 `ASX200` 문서를 갱신합니다.
 - 미국·호주 개별주 캐시는 yfinance 일봉으로 1개월·3개월·12개월 수익률과 12개월 MDD를 보강합니다.
 - 호주 캐시는 Wikipedia `S&P/ASX 200` 구성종목을 기준으로 하고, yfinance의 `.AX` 심볼로 시가총액·거래량·기간 지표를 보강합니다. 화면과 종목풀 저장 티커는 시스템 원칙대로 `ASX:` 접두사를 사용합니다.
 - leverage 전략 데이터는 `ticker_type="etf"`(MongoDB 캐시 키)로 조회하며 대상은 모두 한국 ETF.

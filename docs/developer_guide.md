@@ -174,7 +174,7 @@ python infra/server_scheduler.py
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
 
-국가별 거래일 캘린더는 DB가 아니라 파일 캐시로 관리합니다. 런타임은 `data/country/{country}/market_calendars.json`만 읽고, 파일이 없거나 범위를 벗어나면 즉시 에러를 발생시킵니다.
+국가별 거래일 캘린더는 DB가 아니라 파일 캐시로 관리합니다(연 단위로만 바뀌는 정적 데이터). 반면 **지수 구성종목은 매일 갱신되므로 MongoDB `index_constituents` 컬렉션**에 둡니다 — 서버 컨테이너의 `data/` 가 읽기 전용 마운트라 파일로 두면 서버에서 갱신할 수 없기 때문입니다. 런타임은 `data/country/{country}/market_calendars.json`만 읽고, 파일이 없거나 범위를 벗어나면 즉시 에러를 발생시킵니다.
 
 ### 서비스 사용 원칙
 
