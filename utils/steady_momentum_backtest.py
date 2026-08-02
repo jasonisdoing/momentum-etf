@@ -36,7 +36,9 @@ from utils.steady_momentum_service import (
     load_universe,
     month_last_two_trading_days,
     rank_candidates,
+    sector_industry_map,
     select_candidates,
+    select_top,
     validate_settings,
 )
 
@@ -148,6 +150,11 @@ def run_backtest(
 
     slippage = float(settings["slippage_pct"]) / 100.0
     top_n = int(settings["top_n"])
+    # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
+    max_per_industry = int(settings["max_per_industry"])
+    industry_by_ticker = {
+        ticker: meta["industry"] for ticker, meta in sector_industry_map(settings["pool"]).items()
+    }
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
     # 종가는 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
@@ -180,7 +187,10 @@ def run_backtest(
         end = dates[position + 1]
         # 판정은 전 거래일(signal_dates) 기준, 체결·보유 구간은 월말 종가(start→end).
         scored = rank_candidates(candidates_by_date[position])
-        holdings = [item["ticker"] for item in scored[: int(settings["top_n"])]]
+        holdings = [
+            item["ticker"]
+            for item in select_top(scored, top_n, max_per_industry, industry_by_ticker)
+        ]
         holdings_set = set(holdings)
         added_tickers = sorted(holdings_set - previous_holdings)
         removed_tickers = sorted(previous_holdings - holdings_set)
@@ -310,7 +320,10 @@ def run_backtest(
     # 예정 행 — 마지막 월말 종가에 실행될 교체 (수익률은 아직 없음)
     if pending_signal is not None:
         scored = rank_candidates(candidates_by_date[-1])
-        pending_holdings = {item["ticker"] for item in scored[: int(settings["top_n"])]}
+        pending_holdings = {
+            item["ticker"]
+            for item in select_top(scored, top_n, max_per_industry, industry_by_ticker)
+        }
         monthly.append(
             {
                 "month": (dates[-1].to_period("M") + 1).strftime("%Y-%m"),

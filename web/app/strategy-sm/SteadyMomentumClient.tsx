@@ -27,9 +27,12 @@ type Settings = {
   lookback_months: number;
   top_n: number;
   slippage_pct: number;
-  slope_filter: boolean;
+  max_per_industry: number;
   backtest_months: number;
 };
+
+// 한 업종에서 최대 몇 종목까지 담을지 — 백엔드 MAX_PER_INDUSTRY_OPTIONS 와 같아야 한다.
+const MAX_PER_INDUSTRY_OPTIONS = [1, 2, 3, 4, 5, 10] as const;
 
 type PickRow = {
   rank: number;
@@ -115,7 +118,12 @@ type View = {
 
 // 선정 결과를 바꾸는 설정 — 이 값들이 바뀔 때만 저장 후 선정을 다시 계산한다.
 // 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
-const PICK_AFFECTING_KEYS = ["pool", "lookback_months", "top_n", "slope_filter"] as const;
+const PICK_AFFECTING_KEYS = [
+  "pool",
+  "lookback_months",
+  "top_n",
+  "max_per_industry",
+] as const;
 
 function needsRepick(before: Settings | null, after: Settings): boolean {
   if (!before) return true;
@@ -251,14 +259,14 @@ export function SteadyMomentumClient() {
   // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
   const [draftPool, setDraftPool] = useState<string>("");
-  const [draftSlopeFilter, setDraftSlopeFilter] = useState(false);
   const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
+  const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
 
   const applyView = useCallback((data: View) => {
     setView(data);
     setDraftPool(data.settings.pool);
-    setDraftSlopeFilter(data.settings.slope_filter);
     setDraftBacktestMonths(data.settings.backtest_months);
+    setDraftMaxPerIndustry(data.settings.max_per_industry);
     setDraft({
       lookback_months: String(data.settings.lookback_months),
       top_n: String(data.settings.top_n),
@@ -338,7 +346,7 @@ export function SteadyMomentumClient() {
             lookback_months: lookback,
             top_n: topN,
             slippage_pct: slippage,
-            slope_filter: draftSlopeFilter,
+            max_per_industry: draftMaxPerIndustry,
             backtest_months: draftBacktestMonths,
           },
         }),
@@ -358,7 +366,16 @@ export function SteadyMomentumClient() {
     } finally {
       setSaving(false);
     }
-  }, [applyView, draft, draftBacktestMonths, draftPool, draftSlopeFilter, runPicks, toast, view]);
+  }, [
+    applyView,
+    draft,
+    draftBacktestMonths,
+    draftMaxPerIndustry,
+    draftPool,
+    runPicks,
+    toast,
+    view,
+  ]);
 
   const runBacktest = useCallback(async () => {
     // 기간도 저장된 설정을 따른다 — 미저장 상태에서는 실행 버튼이 막혀 있다.
@@ -393,13 +410,13 @@ export function SteadyMomentumClient() {
     const saved = view.settings;
     return (
       draftPool !== saved.pool ||
-      draftSlopeFilter !== saved.slope_filter ||
       draftBacktestMonths !== saved.backtest_months ||
+      draftMaxPerIndustry !== saved.max_per_industry ||
       draft.lookback_months !== String(saved.lookback_months) ||
       draft.top_n !== String(saved.top_n) ||
       draft.slippage_pct !== String(saved.slippage_pct)
     );
-  }, [draft, draftBacktestMonths, draftPool, draftSlopeFilter, view]);
+  }, [draft, draftBacktestMonths, draftMaxPerIndustry, draftPool, view]);
 
   const lookbackMonths = view?.settings.lookback_months ?? null;
 
@@ -745,30 +762,19 @@ export function SteadyMomentumClient() {
                   />
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">시장 상대기울기 필터</span>
-                  <div
-                    className="appSegmentedToggle appSegmentedToggleCompact"
-                    role="group"
-                    aria-label="시장 상대기울기 필터"
+                  <span className="appLabeledFieldLabel">업종별 최대 보유</span>
+                  <select
+                    className="form-select form-select-sm"
+                    style={{ width: 80 }}
+                    value={draftMaxPerIndustry}
+                    onChange={(e) => setDraftMaxPerIndustry(Number(e.target.value))}
                   >
-                    {[true, false].map((on) => (
-                      <button
-                        key={String(on)}
-                        type="button"
-                        className={
-                          draftSlopeFilter === on
-                            ? "btn appSegmentedToggleButton is-active"
-                            : "btn appSegmentedToggleButton"
-                        }
-                        title={
-                          on ? "상대기울기가 음수인 종목(시장에 지는 추세)을 후보에서 제외" : "필터 없이 전 종목 대상"
-                        }
-                        onClick={() => setDraftSlopeFilter(on)}
-                      >
-                        {on ? "사용" : "미사용"}
-                      </button>
+                    {MAX_PER_INDUSTRY_OPTIONS.map((count) => (
+                      <option key={count} value={count}>
+                        {count}
+                      </option>
                     ))}
-                  </div>
+                  </select>
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">슬리피지(%)</span>
@@ -813,8 +819,7 @@ export function SteadyMomentumClient() {
               </div>
             </div>
             <div style={hintStyle}>
-              시장 대비 꾸준한 상대 모멘텀(연율화 상대기울기 × R²)으로 선정 · 고정 종목 제외 · 시장 상대기울기
-              필터를 켜면 시장에 지는 추세를 후보에서 뺍니다
+              시장 대비 꾸준한 상대 모멘텀(연율화 상대기울기 × R²)으로 선정 · 고정 종목 제외
             </div>
           </div>
         </div>

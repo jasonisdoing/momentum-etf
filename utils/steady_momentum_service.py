@@ -6,9 +6,7 @@
 2. 점수: **상대 가격선(종가 ÷ 벤치마크)** 에 룩백 구간 로그 회귀를 돌려
    ``연율화 상대기울기 × R²``. 시장을 얼마나 빠르고(기울기) 꾸준하게(R²)
    이겨왔는지를 하나의 점수로 본다. 점수 순 상위 top_n 동일가중.
-3. 시장 상대기울기 필터(체크박스): 켜면 상대기울기 음수(시장에 지는 추세)를
-   후보에서 제외한다.
-4. 월간 리밸런싱: 판정은 월말 직전 거래일(L−1) 종가, 체결은 월말(L) 종가.
+3. 월간 리밸런싱: 판정은 월말 직전 거래일(L−1) 종가, 체결은 월말(L) 종가.
    L−1 종가가 확정된 다음날부터 다음 달 포트폴리오를 보여준다(거래일 캘린더 기준).
 
 벤치마크는 종목풀 설정(DB)의 BENCHMARK 를 단일 소스로 쓴다.
@@ -36,13 +34,15 @@ POOL_CONFIGS: dict[str, dict[str, Any]] = {
     "us_snp": {"label": "S&P100", "country": "us", "currency": "USD"},
 }
 AVAILABLE_POOLS = tuple(POOL_CONFIGS)
+# 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
+MAX_PER_INDUSTRY_OPTIONS = (1, 2, 3, 4, 5, 10)
 TRADING_DAYS_PER_MONTH = 21
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
 
 # ── 종목 수(top_n) 를 10 으로 쓰는 근거 ────────────────────────────────────
-# 2026-08-01 검증. 미국 풀 · 룩백 3개월 · 슬리피지 0.5% · 상대기울기 필터 켬 상태에서
+# 2026-08-01 검증. 미국 풀 · 룩백 3개월 · 슬리피지 0.5% 기준으로
 # top_n 3~30 을 전부 백테스트해 12개월/24개월 두 구간을 비교했다.
 #
 #   종목수   12M수익   24M수익   12M소르티노  24M소르티노   12M MDD  12M교체율
@@ -92,13 +92,14 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     slippage_pct = _num("slippage_pct")
     if not 0.0 <= slippage_pct <= 1.0:
         raise ValueError("'slippage_pct' 는 0~1(%) 사이여야 합니다.")
-    slope_filter = settings.get("slope_filter")
-    if not isinstance(slope_filter, bool):
-        raise ValueError("'slope_filter' 는 참/거짓이어야 합니다.")
     # 기간 상한은 종목풀 백테스트와 같은 계산(가격 캐시 시작일 기준)을 재사용한다.
     from utils.pool_signal_backtest_service import get_max_backtest_months
 
     max_months = get_max_backtest_months()
+    max_per_industry = int(_num("max_per_industry"))
+    if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
+        allowed = ", ".join(str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
+        raise ValueError(f"'max_per_industry' 는 {allowed} 중 하나여야 합니다.")
     backtest_months = int(_num("backtest_months"))
     if not 1 <= backtest_months <= max_months:
         raise ValueError(f"'backtest_months' 는 1~{max_months} 사이여야 합니다.")
@@ -111,7 +112,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "lookback_months": lookback_months,
         "top_n": top_n,
         "slippage_pct": slippage_pct,
-        "slope_filter": slope_filter,
+        "max_per_industry": max_per_industry,
         "backtest_months": backtest_months,
     }
 
@@ -342,9 +343,6 @@ def select_candidates(
         )
         if metrics is None:
             continue
-        # 시장 상대기울기 필터(설정) — 켜면 시장에 지는 추세를 후보에서 제외.
-        if settings["slope_filter"] and metrics["slope_annual_pct"] <= 0:
-            continue
         candidates.append({**row, **metrics})
     return candidates
 
@@ -352,6 +350,32 @@ def select_candidates(
 def rank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """꾸준한 모멘텀 점수 순 정렬 — 선정·백테스트·연속 추적이 같은 순위를 쓴다."""
     return sorted(candidates, key=lambda item: item["momentum_score"], reverse=True)
+
+
+def select_top(
+    scored: list[dict[str, Any]],
+    top_n: int,
+    max_per_industry: int,
+    industry_by_ticker: dict[str, str],
+) -> list[dict[str, Any]]:
+    """점수 순서를 지키되 **한 업종이 상한을 넘지 않도록** 상위 top_n 을 고른다.
+
+    상한에 걸린 종목은 건너뛰고 다음 순위가 그 자리를 채운다. 업종을 모르는
+    종목(구성종목 파일에 없는 경우)은 묶을 근거가 없으므로 상한을 적용하지 않는다.
+    선정·백테스트·연속 추적이 모두 이 함수를 써야 결과가 서로 어긋나지 않는다.
+    """
+    counts: dict[str, int] = {}
+    picked: list[dict[str, Any]] = []
+    for item in scored:
+        if len(picked) >= top_n:
+            break
+        industry = industry_by_ticker.get(item["ticker"], "")
+        if industry:
+            if counts.get(industry, 0) >= max_per_industry:
+                continue
+            counts[industry] = counts.get(industry, 0) + 1
+        picked.append(item)
+    return picked
 
 
 # ── 월간 리밸런싱 시점 ─────────────────────────────────────────────────────
@@ -363,7 +387,7 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
     return prior[-1]
 
 
-def _sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
+def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
 
     구성종목 파일이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
@@ -489,9 +513,15 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
-    selected = scored[:top_n]
-    # 차순위 후보 — 선정에 못 든 다음 N개 (화면에서 흐리게 붙여 보여준다)
-    reserve = scored[top_n : top_n * 2]
+    max_per_industry = int(settings["max_per_industry"])
+    sector_map = sector_industry_map(settings["pool"])
+    industry_by_ticker = {ticker: meta["industry"] for ticker, meta in sector_map.items()}
+
+    selected = select_top(scored, top_n, max_per_industry, industry_by_ticker)
+    # 차순위 후보 — 선정에 못 든 종목 중 점수 상위 N개 (화면에서 흐리게 붙여 보여준다).
+    # 선정에서 빠진 자리를 메울 후보라 업종 상한은 적용하지 않는다.
+    selected_tickers = {item["ticker"] for item in selected}
+    reserve = [item for item in scored if item["ticker"] not in selected_tickers][:top_n]
 
     # 연속 편입 개월 — 직전 최대 11개월의 판정일마다 같은 규칙으로 선정을 재계산해,
     # 현재 종목이 연속으로 상위 N 에 들어 있던 횟수(+이번 달)를 센다. 끊기면 중단.
@@ -508,7 +538,12 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         prior_candidates = select_candidates(
             universe, frames, settings, benchmark_close, as_of=prior_signal
         )
-        prior_top = {item["ticker"] for item in rank_candidates(prior_candidates)[:top_n]}
+        prior_top = {
+            item["ticker"]
+            for item in select_top(
+                rank_candidates(prior_candidates), top_n, max_per_industry, industry_by_ticker
+            )
+        }
         for ticker in list(alive):
             if ticker in prior_top:
                 streaks[ticker] += 1
@@ -522,7 +557,6 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     from core.strategy.metrics import period_return_pct
 
     currency = str(POOL_CONFIGS[settings["pool"]]["currency"])
-    sector_map = _sector_industry_map(settings["pool"])
 
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
