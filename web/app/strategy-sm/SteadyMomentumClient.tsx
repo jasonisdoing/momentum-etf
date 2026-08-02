@@ -38,6 +38,8 @@ type PickRow = {
   streak_months: number | null;
   ticker: string;
   name: string;
+  sector: string;
+  industry: string;
   currency: string;
   price: number | null;
   return_1m_pct: number | null;
@@ -425,6 +427,26 @@ export function SteadyMomentumClient() {
         cellRenderer: (p: { value: string | null | undefined }) => <TickerDetailLink ticker={p.value} />,
       },
       { headerName: "종목명", field: "name", flex: 1, minWidth: 140 },
+      {
+        headerName: "섹터",
+        field: "sector",
+        headerTooltip: "지수 구성종목 메타 (미국 풀만 제공)",
+        width: 150,
+        minWidth: 110,
+        cellClass: "appTextEllipsisCell",
+        tooltipValueGetter: (p) => p.value || undefined,
+        valueFormatter: (p) => p.value || "-",
+      },
+      {
+        headerName: "업종",
+        field: "industry",
+        headerTooltip: "지수 구성종목 메타 (미국 풀만 제공)",
+        width: 170,
+        minWidth: 110,
+        cellClass: "appTextEllipsisCell",
+        tooltipValueGetter: (p) => p.value || undefined,
+        valueFormatter: (p) => p.value || "-",
+      },
       {
         headerName: "현재가",
         field: "price",

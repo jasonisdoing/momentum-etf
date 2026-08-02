@@ -373,6 +373,34 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
     return prior[-1]
 
 
+def _sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
+    """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
+
+    한국 풀은 이 파일에 대응하는 자료가 없어 빈 맵을 돌려주고, 화면에는 '-' 로 나온다.
+    구성종목 파일이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
+    빈 맵으로 두되, 파일이 없다는 사실 자체는 로그로 남긴다.
+    """
+    if POOL_CONFIGS[pool]["country"] != "us":
+        return {}
+
+    from utils.index_constituents_loader import load_index_constituents
+
+    result: dict[str, dict[str, str]] = {}
+    for index_name in ("SP500", "NDX100"):
+        try:
+            constituents = load_index_constituents(index_name)
+        except FileNotFoundError as error:
+            warnings.warn(f"{index_name} 구성종목 파일이 없어 섹터·업종을 채우지 못했습니다: {error}", stacklevel=2)
+            continue
+        for item in constituents:
+            ticker = str(item.get("ticker") or "").strip().upper()
+            if not ticker or ticker in result:
+                continue
+            sector = str(item.get("sector") or "")
+            result[ticker] = {"sector": sector, "industry": str(item.get("industry") or sector)}
+    return result
+
+
 def available_backtest_months(benchmark_close: pd.Series, lookback_months: int) -> int:
     """이 종목풀·룩백에서 실제로 돌릴 수 있는 최대 개월 수.
 
@@ -508,6 +536,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     from core.strategy.metrics import period_return_pct
 
     currency = str(POOL_CONFIGS[settings["pool"]]["currency"])
+    sector_map = _sector_industry_map(settings["pool"])
 
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
@@ -537,6 +566,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "pool": item["pool"],
+                "sector": sector_map.get(item["ticker"], {}).get("sector", ""),
+                "industry": sector_map.get(item["ticker"], {}).get("industry", ""),
                 "currency": currency,
                 **price_info(item["ticker"]),
                 "return_lookback_pct": round(item["return_lookback_pct"], 1),
