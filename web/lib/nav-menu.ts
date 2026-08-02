@@ -17,6 +17,7 @@ import {
   IconList,
   IconListDetails,
   IconMedal2,
+  IconNotes,
   IconReceipt2,
   IconSettings,
   IconTrendingUp,
@@ -106,6 +107,7 @@ export const NAV_GROUPS: readonly NavGroup[] = [
     icon: IconSettings,
     items: [
       { href: "/alarms", label: "알람", icon: IconBell },
+      { href: "/memos", label: "메모", icon: IconNotes },
       { href: "/data_source", label: "데이터 소스", icon: IconDatabase },
       { href: "/batch", label: "배치", icon: IconListDetails },
     ],
