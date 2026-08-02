@@ -1,5 +1,14 @@
 """미국 개별주 인덱스 구성종목을 갱신하고 시가총액·기간 수익률을 저장한다.
 
+출처
+----
+- S&P500: 위키피디아 구성종목 표
+- NASDAQ100: 나스닥 공식 API (지수 산출 주체가 직접 제공)
+- 섹터·업종: yfinance
+
+구성종목 수가 기대 범위를 벗어나면 저장하지 않고 실패로 끝난다(종료 코드 1).
+원본 구조가 바뀌었을 때 조용히 낡은 데이터를 쓰는 상황을 막기 위한 것이다.
+
 섹터·업종은 yfinance 에서 받는다. 종목별 개별 호출이라 비싸서, **이미 저장된
 값이 있으면 다시 조회하지 않는다**(분류는 거의 바뀌지 않는다). 전체를 다시 받으려면
 `--refresh-classification` 을 준다.
@@ -13,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import io
-import json
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -25,7 +33,13 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from utils.index_constituents_loader import (  # noqa: E402
+    load_index_constituents,
+    load_index_meta,
+    save_index_constituents,
+)
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -35,18 +49,40 @@ _YFINANCE_BATCH_SIZE = 50
 _YFINANCE_BATCH_DELAY = 1.0  # 초
 _CLASSIFICATION_WORKERS = 8  # 섹터·업종 개별 조회 동시 실행 수
 
+_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+_NDX100_API_URL = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+_API_HEADERS = {**_HEADERS, "Accept": "application/json, */*"}
 
-def _load_saved_classification(filename: str) -> dict[str, dict[str, str]]:
-    """이미 저장된 파일에서 티커별 섹터·업종을 읽는다. 없으면 빈 dict."""
-    path = DATA_DIR / filename
-    if not path.exists():
-        return {}
+# 구성종목 수가 이 범위를 벗어나면 원본이 깨진 것으로 보고 저장하지 않는다.
+# (위키 문서가 옮겨졌을 때처럼 조용히 실패하는 것을 막기 위한 장치)
+_EXPECTED_COUNTS = {"S&P500": (490, 510), "NASDAQ100": (95, 110)}
+
+
+def _check_count(label: str, items: list[dict[str, Any]]) -> None:
+    low, high = _EXPECTED_COUNTS[label]
+    if not low <= len(items) <= high:
+        raise RuntimeError(
+            f"{label} 구성종목 수가 비정상입니다: {len(items)}개 (기대 {low}~{high}). "
+            "원본 페이지·API 구조가 바뀌었을 수 있어 저장하지 않습니다."
+        )
+
+
+def _load_saved_classification(index: str) -> dict[str, dict[str, str]]:
+    """이미 저장된 값에서 티커별 섹터·업종을 읽는다. 없으면 빈 dict.
+
+    `classification_source` 가 yfinance 인 경우만 재사용한다. 예전에 위키 표에서
+    받은 값이 남아 있으면 체계가 다른 값을 그대로 물려받게 되기 때문이다
+    (ARM 이 섹터 `Semiconductors` · 업종 `Technology` 로 뒤집혀 남아 있던 사례).
+    """
     try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        meta = load_index_meta(index)
+        if meta.get("classification_source") != "yfinance":
+            return {}
+        stored = load_index_constituents(index)
     except Exception:
         return {}
     saved: dict[str, dict[str, str]] = {}
-    for item in payload.get("tickers") or []:
+    for item in stored:
         ticker = str(item.get("ticker") or "").strip().upper()
         industry = str(item.get("industry") or "").strip()
         if ticker and industry:  # 업종이 비어 있으면 실패했던 것이므로 다시 받는다
@@ -92,28 +128,29 @@ def _fetch_sp500() -> list[dict[str, Any]]:
 
 
 def _fetch_ndx100() -> list[dict[str, Any]]:
-    # 구성종목 표는 별도 문서로 분리됐다 (기존 Nasdaq-100 문서에는 더 이상 없다).
-    url = "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
-    tables = _read_html(url)
-    df = None
-    for table in tables:
-        cols = [str(c).strip() for c in table.columns]
-        if any("ticker" in c.lower() or "symbol" in c.lower() for c in cols):
-            df = table
-            break
-    if df is None:
-        raise RuntimeError("NASDAQ-100 구성종목 테이블을 찾지 못했습니다.")
+    """나스닥 공식 API 에서 나스닥100 구성종목을 받는다.
 
-    cols = {str(c).strip(): c for c in df.columns}
-    ticker_col = next((cols[c] for c in cols if "ticker" in c.lower() or "symbol" in c.lower()), None)
-    name_col = next((cols[c] for c in cols if "company" in c.lower() or "name" in c.lower()), None)
+    위키피디아를 쓰다가 옮겼다 — 문서가 `List_of_NASDAQ-100_companies` 로 분리되면서
+    한 달 넘게 조용히 실패했다. 지수를 산출하는 나스닥이 직접 주는 JSON 이라
+    문서 편집·이동에 영향받지 않는다.
+    """
+    resp = requests.get(_NDX100_API_URL, headers=_API_HEADERS, timeout=30)
+    resp.raise_for_status()
+    payload = resp.json().get("data") or {}
+    rows = ((payload.get("data") or {}).get("rows")) or []
 
     result: list[dict[str, Any]] = []
-    for _, row in df.iterrows():
-        ticker = str(row.get(ticker_col) or "").strip().upper().replace(".", "-") if ticker_col else ""
-        name = str(row.get(name_col) or "").strip() if name_col else ""
-        if not ticker or ticker in ("NAN", "TICKER", "SYMBOL"):
+    seen: set[str] = set()
+    for row in rows:
+        ticker = str(row.get("symbol") or "").strip().upper().replace(".", "-")
+        if not ticker or ticker in seen:
             continue
+        name = str(row.get("companyName") or "").strip()
+        # "Apple Inc. Common Stock" 처럼 증권 종류가 붙어 있어 떼어낸다.
+        for suffix in (" Common Stock", " Common Shares", " Ordinary Shares", " Class A", " Class C"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)].strip()
+        seen.add(ticker)
         result.append({"ticker": ticker, "name": name})
     return result
 
@@ -255,29 +292,28 @@ def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
     return result
 
 
-def _save(filename: str, tickers: list[dict[str, Any]], source_url: str) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "updated_at": date.today().isoformat(),
-        "source": source_url,
-        # 구성종목 목록은 위 주소에서, 섹터·업종은 yfinance 에서 받는다.
-        "classification_source": "yfinance",
-        "count": len(tickers),
-        "tickers": tickers,
-    }
-    path = DATA_DIR / filename
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"저장 완료: {path} ({len(tickers)}개)")
+def _save(index: str, tickers: list[dict[str, Any]], source_url: str) -> None:
+    save_index_constituents(
+        index,
+        tickers,
+        {
+            "updated_at": date.today().isoformat(),
+            "source": source_url,
+            # 구성종목 목록은 위 주소에서, 섹터·업종은 yfinance 에서 받는다.
+            "classification_source": "yfinance",
+        },
+    )
+    print(f"저장 완료: {index} ({len(tickers)}개)")
 
 
 def _enrich_constituents(
-    items: list[dict[str, Any]], filename: str, refresh_classification: bool
+    items: list[dict[str, Any]], index: str, refresh_classification: bool
 ) -> list[dict[str, Any]]:
     ticker_list = [str(item["ticker"]) for item in items]
 
     # 섹터·업종 — 저장된 값이 있으면 재사용한다. 종목별 호출이라 전체를 매번 받으면
     # 배치가 몇 분씩 길어지는데, 분류는 거의 바뀌지 않아 그럴 이유가 없다.
-    saved = {} if refresh_classification else _load_saved_classification(filename)
+    saved = {} if refresh_classification else _load_saved_classification(index)
     todo = [t for t in ticker_list if t not in saved]
     if todo:
         print(f"  섹터·업종 조회 {len(todo)}종목 (재사용 {len(saved)}종목)...")
@@ -316,25 +352,27 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    print("S&P500 구성종목 조회 중...")
-    try:
-        sp500 = _fetch_sp500()
-        print(f"  Wikipedia에서 {len(sp500)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
-        sp500 = _enrich_constituents(sp500, "sp500_tickers.json", args.refresh_classification)
-        _save("sp500_tickers.json", sp500, "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies")
-    except Exception as exc:
-        print(f"S&P500 조회 실패: {exc}", file=sys.stderr)
+    failed: list[str] = []
 
-    print("NASDAQ100 구성종목 조회 중...")
-    try:
-        ndx100 = _fetch_ndx100()
-        print(f"  Wikipedia에서 {len(ndx100)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
-        ndx100 = _enrich_constituents(ndx100, "ndx100_tickers.json", args.refresh_classification)
-        _save(
-            "ndx100_tickers.json", ndx100, "https://en.wikipedia.org/wiki/List_of_NASDAQ-100_companies"
-        )
-    except Exception as exc:
-        print(f"NASDAQ100 조회 실패: {exc}", file=sys.stderr)
+    for label, index, fetch, source in (
+        ("S&P500", "SP500", _fetch_sp500, _SP500_URL),
+        ("NASDAQ100", "NDX100", _fetch_ndx100, _NDX100_API_URL),
+    ):
+        print(f"{label} 구성종목 조회 중...")
+        try:
+            items = fetch()
+            _check_count(label, items)
+            print(f"  {len(items)}개 종목 확인. 시가총액/기간 수익률 조회 시작...")
+            items = _enrich_constituents(items, index, args.refresh_classification)
+            _save(index, items, source)
+        except Exception as exc:
+            print(f"{label} 조회 실패: {exc}", file=sys.stderr)
+            failed.append(label)
+
+    if failed:
+        # 종료 코드를 남겨야 cron 래퍼가 실패로 보고 슬랙 알림을 보낸다.
+        print(f"실패한 인덱스: {', '.join(failed)}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

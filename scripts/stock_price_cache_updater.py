@@ -680,7 +680,8 @@ def refresh_cache_for_target(
                     failed_tickers.append(t)
         else:
             # 병렬 모드
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {

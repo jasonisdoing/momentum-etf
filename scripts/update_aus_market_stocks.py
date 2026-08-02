@@ -7,7 +7,6 @@
 from __future__ import annotations
 
 import io
-import json
 import sys
 import time
 from datetime import date
@@ -18,7 +17,9 @@ import pandas as pd
 import requests
 import yfinance as yf
 
-DATA_DIR = Path(__file__).parent.parent / "data"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from utils.index_constituents_loader import save_index_constituents  # noqa: E402
 
 _SOURCE_URL = "https://en.wikipedia.org/wiki/S%26P/ASX_200"
 _HEADERS = {
@@ -237,16 +238,10 @@ def _fetch_stock_meta(tickers: list[str]) -> dict[str, dict[str, Any]]:
 
 
 def _save(items: list[dict[str, Any]]) -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "updated_at": date.today().isoformat(),
-        "source": _SOURCE_URL,
-        "count": len(items),
-        "tickers": items,
-    }
-    path = DATA_DIR / "asx200_tickers.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"저장 완료: {path} ({len(items)}개)")
+    save_index_constituents(
+        "ASX200", items, {"updated_at": date.today().isoformat(), "source": _SOURCE_URL}
+    )
+    print(f"저장 완료: ASX200 ({len(items)}개)")
 
 
 def main() -> None:
