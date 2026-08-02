@@ -129,6 +129,9 @@ npm run dev
 종목 메타 배치는 2개로 분리돼 있습니다. 식별·상세(이름·상장일·마켓·업종 + ETF holdings·배당)와 가격지표(거래량·기간수익률·backtest)를 각각 실행합니다.
 
 ```bash
+# 미국 지수 구성종목 + 섹터·업종(yfinance) 갱신
+./.venv/bin/python scripts/update_us_market_stocks.py
+
 # 식별·상세 메타 (배치 B) — 전체 / 특정 종목풀
 ./.venv/bin/python scripts/stock_reference_meta_updater.py
 ./.venv/bin/python scripts/stock_reference_meta_updater.py kor_us

@@ -390,6 +390,10 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
 def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
 
+    분류 값은 yfinance 에서 받아 파일에 저장된 것이다(`scripts/update_us_market_stocks.py`).
+    구성종목 목록만 위키피디아에서 오고, 섹터·업종은 두 지수가 한 체계를 쓰도록
+    yfinance 로 통일했다.
+
     구성종목 파일이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
     빈 맵으로 두되, 파일이 없다는 사실 자체는 로그로 남긴다.
     """
