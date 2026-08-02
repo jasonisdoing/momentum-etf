@@ -12,13 +12,14 @@ type StockSummary = {
 };
 
 function formatIndexLabel(index: string): string {
+  if (index === "COMBINED") return "통합";
   if (index === "SP500") return "S&P500";
   if (index === "NDX100") return "NASDAQ100";
   return index;
 }
 
 export function UsMarketStockPageClient() {
-  const [summary, setSummary] = useState<StockSummary>({ index: "NDX100", count: 0, totalCount: 0 });
+  const [summary, setSummary] = useState<StockSummary>({ index: "COMBINED", count: 0, totalCount: 0 });
 
   const handleSummaryChange = useCallback((s: StockSummary) => setSummary(s), []);
 
