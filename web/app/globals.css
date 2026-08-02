@@ -4970,3 +4970,62 @@ a {
 .usMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
   flex: 0 0 9rem;
 }
+
+
+/* ── 메모 화면 (/memos) ────────────────────────────────────────────── */
+.memoLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2.6fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .memoLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.memoList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memoListItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.memoListItem:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.memoListItem.is-active {
+  background: rgba(11, 123, 220, 0.1);
+  border-color: rgba(11, 123, 220, 0.35);
+}
+
+.memoListTitle {
+  font-weight: 700;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoListMeta {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+}
