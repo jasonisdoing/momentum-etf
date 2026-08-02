@@ -34,6 +34,17 @@ type Settings = {
 // 한 업종에서 최대 몇 종목까지 담을지 — 백엔드 MAX_PER_INDUSTRY_OPTIONS 와 같아야 한다.
 const MAX_PER_INDUSTRY_OPTIONS = [1, 2, 3, 4, 5, 10] as const;
 
+// 룩백·종목 수 선택지 — 백엔드 검증 범위(룩백 1~24, 종목 수 5~100) 안에서 자주 쓰는 값만 노출한다.
+const LOOKBACK_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24];
+const TOP_N_OPTIONS = [5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100];
+
+/** 저장된 값이 선택지에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어 무엇이 저장돼 있는지 알 수 없다. */
+function withSavedValue(options: number[], saved: string | undefined): number[] {
+  const value = Number(saved);
+  if (!Number.isFinite(value) || options.includes(value)) return options;
+  return [...options, value].sort((a, b) => a - b);
+}
+
 type PickRow = {
   rank: number;
   is_reserve: boolean;
@@ -761,23 +772,33 @@ export function SteadyMomentumClient() {
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">룩백(개월)</span>
-                  <input
-                    className="form-control form-control-sm"
-                    style={numberInputStyle}
+                  <select
+                    className="form-select form-select-sm"
+                    style={{ width: 80 }}
                     value={draft.lookback_months ?? ""}
                     onChange={(e) => setDraft((d) => ({ ...d, lookback_months: e.target.value }))}
-                    inputMode="numeric"
-                  />
+                  >
+                    {withSavedValue(LOOKBACK_OPTIONS, draft.lookback_months).map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">종목 수</span>
-                  <input
-                    className="form-control form-control-sm"
-                    style={numberInputStyle}
+                  <select
+                    className="form-select form-select-sm"
+                    style={{ width: 80 }}
                     value={draft.top_n ?? ""}
                     onChange={(e) => setDraft((d) => ({ ...d, top_n: e.target.value }))}
-                    inputMode="numeric"
-                  />
+                  >
+                    {withSavedValue(TOP_N_OPTIONS, draft.top_n).map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">업종별 최대 보유</span>
