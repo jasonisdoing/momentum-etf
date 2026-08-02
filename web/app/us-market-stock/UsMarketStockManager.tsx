@@ -59,17 +59,21 @@ type UsMarketStocksResponse = {
 };
 
 const usMarketStockGridTheme = createAppGridTheme();
-const INDEX_OPTIONS = ["SP500", "NDX100"] as const;
-type IndexOption = (typeof INDEX_OPTIONS)[number];
+// 화면에서 고르는 보기 — `통합` 은 두 지수를 합쳐 중복 종목을 한 번만 센다.
+const VIEW_OPTIONS = [
+  { key: "COMBINED", label: "통합", indices: ["SP500", "NDX100"] },
+  { key: "SP500", label: "S&P", indices: ["SP500"] },
+  { key: "NDX100", label: "나스닥", indices: ["NDX100"] },
+] as const;
+type ViewOption = (typeof VIEW_OPTIONS)[number]["key"];
 
-function formatIndexLabel(index: IndexOption): string {
-  if (index === "SP500") return "S&P";
-  if (index === "NDX100") return "NASDAQ100";
-  return index;
+function viewIndices(view: ViewOption): readonly string[] {
+  return VIEW_OPTIONS.find((option) => option.key === view)?.indices ?? [];
 }
 
-// S&P 선택 시 보여줄 시총 상위 개수 — 응답이 시총 순 정렬이라 상위 N 절단으로 처리한다.
-const SP_TOP_OPTIONS = [100, 200, 300, 400, 500] as const;
+// 시총 상위 몇 개까지 볼지 — 응답이 시총 순 정렬이라 상위 N 절단으로 처리한다.
+// null 이면 전체(절단 없음).
+const TOP_OPTIONS = [null, 100, 200, 300, 400, 500] as const;
 
 function formatUsd(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -115,8 +119,8 @@ export function UsMarketStockManager({
 }: {
   onSummaryChange?: (summary: { index: string; count: number; totalCount: number }) => void;
 }) {
-  const [index, setIndex] = useState<IndexOption>("NDX100");
-  const [spTopCount, setSpTopCount] = useState<number>(500);
+  const [view, setView] = useState<ViewOption>("COMBINED");
+  const [topCount, setTopCount] = useState<number | null>(null);
   const [minMarketCapUkm, setMinMarketCapUkm] = useState<string>("");
   const [rows, setRows] = useState<UsMarketStockRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -132,22 +136,42 @@ export function UsMarketStockManager({
 
   const toast = useToast();
 
-  const load = useCallback(async (idx: IndexOption, minCapUkmText: string) => {
+  const load = useCallback(async (currentView: ViewOption, minCapUkmText: string) => {
     setLoading(true);
     setError(null);
     try {
       const minCap = String(minCapUkmText || "").trim() || "0";
-      const [resp, allStocksPayload, usStocksPayload] = await Promise.all([
-        fetch(`/api/us-market-stocks?index=${encodeURIComponent(idx)}&min_market_cap_ukm=${encodeURIComponent(minCap)}`, { cache: "no-store" }),
+      const indices = viewIndices(currentView);
+      const [responses, allStocksPayload, usStocksPayload] = await Promise.all([
+        Promise.all(
+          indices.map((idx) =>
+            fetch(
+              `/api/us-market-stocks?index=${encodeURIComponent(idx)}&min_market_cap_ukm=${encodeURIComponent(minCap)}`,
+              { cache: "no-store" },
+            ),
+          ),
+        ),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
         loadStocksTable("us").catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
-      const data = (await resp.json()) as UsMarketStocksResponse;
-      if (!resp.ok) {
-        throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
+      const payloads: UsMarketStocksResponse[] = [];
+      for (const resp of responses) {
+        const data = (await resp.json()) as UsMarketStocksResponse;
+        if (!resp.ok) throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
+        payloads.push(data);
       }
-      setRows(data.rows ?? []);
-      setTotalCount(data.total_count ?? 0);
+      // 합집합 — 같은 종목이 두 지수에 있으면 한 번만 담고, 시총 내림차순으로 다시 정렬한다.
+      const merged = new Map<string, UsMarketStockRow>();
+      for (const data of payloads) {
+        for (const row of data.rows ?? []) {
+          if (!merged.has(row.ticker)) merged.set(row.ticker, row);
+        }
+      }
+      const mergedRows = [...merged.values()].sort(
+        (a, b) => (b.market_cap ?? 0) - (a.market_cap ?? 0),
+      );
+      setRows(mergedRows);
+      setTotalCount(mergedRows.length);
       setTickerPools(allStocksPayload.ticker_types ?? []);
 
       const registered = new Set<string>();
@@ -165,18 +189,18 @@ export function UsMarketStockManager({
   }, []);
 
   useEffect(() => {
-    void load(index, minMarketCapUkm);
-  }, [index, minMarketCapUkm, load]);
+    void load(view, minMarketCapUkm);
+  }, [view, minMarketCapUkm, load]);
 
-  // S&P 는 시총 상위 spTopCount 개만 표시 (응답은 시총 순 정렬).
+  // 시총 상위 N 만 표시 (전체면 절단 없음). rows 는 이미 시총 내림차순이다.
   const visibleRows = useMemo(
-    () => (index === "SP500" ? rows.slice(0, spTopCount) : rows),
-    [index, rows, spTopCount],
+    () => (topCount === null ? rows : rows.slice(0, topCount)),
+    [rows, topCount],
   );
 
   useEffect(() => {
-    onSummaryChange?.({ index, count: visibleRows.length, totalCount });
-  }, [index, visibleRows.length, totalCount, onSummaryChange]);
+    onSummaryChange?.({ index: view, count: visibleRows.length, totalCount });
+  }, [view, visibleRows.length, totalCount, onSummaryChange]);
 
   const gridRows = useMemo(() => [...visibleRows], [visibleRows]);
 
@@ -268,9 +292,9 @@ export function UsMarketStockManager({
 
     if (addedCount > 0) {
       setSelectedTickers([]);
-      await load(index, minMarketCapUkm);
+      await load(view, minMarketCapUkm);
     }
-  }, [load, index, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
+  }, [load, view, minMarketCapUkm, selectedBucketId, selectedTickerPool, selectedTickers, toast]);
 
   const columnDefs = useMemo<ColDef<UsMarketStockGridRow>[]>(
     () => [
@@ -460,35 +484,40 @@ export function UsMarketStockManager({
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">인덱스</span>
                   <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="인덱스 선택">
-                    {INDEX_OPTIONS.map((opt) => (
+                    {VIEW_OPTIONS.map((option) => (
                       <button
-                        key={opt}
+                        key={option.key}
                         type="button"
-                        className={index === opt ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setIndex(opt)}
+                        className={
+                          view === option.key
+                            ? "btn appSegmentedToggleButton is-active"
+                            : "btn appSegmentedToggleButton"
+                        }
+                        title={option.key === "COMBINED" ? "S&P 500 과 나스닥 100 의 합집합" : undefined}
+                        onClick={() => setView(option.key)}
                       >
-                        {formatIndexLabel(opt)}
+                        {option.label}
                       </button>
                     ))}
-                    {index === "SP500" ? (
-                      <select
-                        value={spTopCount}
-                        onChange={(event) => setSpTopCount(Number(event.target.value))}
-                        style={{
-                          border: "1px solid rgba(148,163,184,0.4)",
-                          borderRadius: 6,
-                          padding: "3px 6px",
-                          fontSize: "0.84rem",
-                          marginLeft: 6,
-                        }}
-                      >
-                        {SP_TOP_OPTIONS.map((count) => (
-                          <option key={count} value={count}>
-                            상위 {count}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
+                    <select
+                      value={topCount === null ? "all" : String(topCount)}
+                      onChange={(event) =>
+                        setTopCount(event.target.value === "all" ? null : Number(event.target.value))
+                      }
+                      style={{
+                        border: "1px solid rgba(148,163,184,0.4)",
+                        borderRadius: 6,
+                        padding: "3px 6px",
+                        fontSize: "0.84rem",
+                        marginLeft: 6,
+                      }}
+                    >
+                      {TOP_OPTIONS.map((count) => (
+                        <option key={count ?? "all"} value={count === null ? "all" : String(count)}>
+                          {count === null ? "전체" : `상위 ${count}`}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </label>
 
