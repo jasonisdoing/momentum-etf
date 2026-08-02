@@ -424,14 +424,14 @@ export function SteadyMomentumClient() {
     // 설정을 받기 전에는 컬럼(룩백 개월 머리글)을 만들 수 없다.
     if (lookbackMonths == null) return [];
     return [
-      { headerName: "순위", field: "rank", width: 72, type: "numericColumn" },
+      { headerName: "순위", field: "rank", width: 60, type: "numericColumn" },
       {
         headerName: "연속",
         field: "streak_months",
         headerTooltip: "이번 포트폴리오까지 몇 달 연속 편입됐는지 (신규 = 이번 달 첫 편입, 최대 12개월 추적)",
-        width: 84,
+        width: 68,
         valueFormatter: (p) =>
-          p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12개월+" : `${p.value}개월째`,
+          p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}개월`,
         cellStyle: (p) => ({
           color: p.value != null && p.value <= 1 && !p.data?.is_reserve ? "var(--up-color, #d64545)" : "inherit",
         }),
@@ -439,17 +439,33 @@ export function SteadyMomentumClient() {
       {
         headerName: "티커",
         field: "ticker",
-        width: 112,
+        // 미국 티커 전용 화면이라 최장 5자(BRK-B)면 충분하다.
+        // `/pools-rank` 는 한국 6자리 코드와 `ASX:` 접두사까지 담아야 해서 더 넓다.
+        width: 82,
         cellRenderer: (p: { value: string | null | undefined }) => <TickerDetailLink ticker={p.value} />,
       },
-      { headerName: "종목명", field: "name", flex: 1, minWidth: 150, maxWidth: 260 },
+      {
+        headerName: "종목명",
+        field: "name",
+        // 이 표에서 유일한 flex 컬럼 — 남는 폭을 종목명이 가져간다.
+        // 상한(maxWidth)을 두지 않아 넓은 화면에서 계속 늘어난다.
+        flex: 1,
+        minWidth: 220,
+        // `/pools-rank` 와 같은 셀 스타일 — 2줄까지 보이고 넘치면 말줄임.
+        cellRenderer: (p: { value?: string | null }) => (
+          <span className="appNameCellText" title={String(p.value ?? "")}>
+            {String(p.value ?? "-")}
+          </span>
+        ),
+      },
       {
         headerName: "섹터",
         field: "sector",
         headerTooltip: "지수 구성종목 메타",
-        // 실제 값 최장 45자 — 잘리지 않는 폭으로 잡는다.
-        width: 300,
-        minWidth: 300,
+        // yfinance 값 최장 22자. 좁은 화면에서는 줄어들고 말줄임 처리된다.
+        width: 170,
+        minWidth: 110,
+        cellClass: "appTextEllipsisCell",
         tooltipValueGetter: (p) => p.value || undefined,
         valueFormatter: (p) => p.value || "-",
       },
@@ -457,9 +473,11 @@ export function SteadyMomentumClient() {
         headerName: "업종",
         field: "industry",
         headerTooltip: "지수 구성종목 메타",
-        // 실제 값 최장 55자 — 잘리지 않는 폭으로 잡는다.
-        width: 360,
-        minWidth: 360,
+        // 실제로 쓰이는 값은 `Software - Infrastructure`(25자) 정도까지다.
+        // 최장 40자짜리는 드물어 말줄임에 맡기고, 폭은 섹터와 비슷하게 잡는다.
+        width: 200,
+        minWidth: 110,
+        cellClass: "appTextEllipsisCell",
         tooltipValueGetter: (p) => p.value || undefined,
         valueFormatter: (p) => p.value || "-",
       },
@@ -581,12 +599,12 @@ export function SteadyMomentumClient() {
       });
     }
     columns.push(
-      { headerName: "종목 수", field: "holdings_count", width: 88, type: "numericColumn" },
+      { headerName: "종목 수", field: "holdings_count", width: 74, type: "numericColumn" },
       {
         headerName: "교체율(%)",
         field: "turnover_pct",
         headerTooltip: "직전 달 대비 교체된 종목 비중",
-        width: 100,
+        width: 84,
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : formatNumber(p.value)),
       },

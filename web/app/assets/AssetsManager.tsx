@@ -1315,7 +1315,7 @@ function AccountHoldingsDetailPanel({
         const badge = alertBadges[normalizeBadgeTicker(params.data?.ticker ?? "")] ?? "";
         // 종목명 표기 규칙은 pools-rank/자산 헬퍼와 동일 — 2줄 클램프 + 레버리지·액티브 강조.
         return (
-          <span className="rankNameCellText" title={value}>
+          <span className="appNameCellText" title={value}>
             {renderNameWithLeverageHighlight(value)}
             {badge ? <span> {badge}</span> : null}
           </span>

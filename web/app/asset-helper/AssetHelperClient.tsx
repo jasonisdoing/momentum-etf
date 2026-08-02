@@ -836,7 +836,7 @@ export function AssetHelperClient() {
           }
           const badge = alertBadges[normalizeBadgeTicker(row.ticker)] ?? "";
           return (
-            <span className="rankNameCellText" title={params.value ?? ""}>
+            <span className="appNameCellText" title={params.value ?? ""}>
               {renderNameWithLeverageHighlight(String(params.value ?? ""))}
               {badge ? <span> {badge}</span> : null}
             </span>
