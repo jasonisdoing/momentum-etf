@@ -1,17 +1,33 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconGripVertical } from "@tabler/icons-react";
 
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 
+/** 리스트형 메모의 한 줄 — 체크 여부를 함께 저장한다. */
+type MemoItem = { text: string; done: boolean };
+
+type MemoType = "text" | "list";
+
 type Memo = {
   id: string;
+  type: MemoType;
   title: string;
+  /** 텍스트형 본문 */
   content: string;
+  /** 리스트형 항목 */
+  items: MemoItem[];
   updated_at: string | null;
 };
+
+// 메모 형식 토글 — 다른 화면의 세그먼트 토글과 같은 마크업을 쓴다.
+const MEMO_TYPES = [
+  { key: "text", label: "텍스트" },
+  { key: "list", label: "리스트" },
+] as const;
 
 /** 새 메모의 임시 id — 저장 전까지만 쓰이며 서버로 보내지 않는다. */
 const DRAFT_ID = "__draft__";
@@ -43,6 +59,29 @@ export function MemosClient() {
   // 편집 중인 값 — 목록의 원본과 비교해 변경 여부를 판단한다.
   const [draftTitle, setDraftTitle] = useState("");
   const [draftContent, setDraftContent] = useState("");
+  const [draftType, setDraftType] = useState<MemoType>("text");
+  const [draftItems, setDraftItems] = useState<MemoItem[]>([]);
+  // 항목 드래그 재정렬 — 손잡이를 누른 동안에만 draggable 을 켠다.
+  // (행 전체를 항상 draggable 로 두면 텍스트 입력칸에서 글자 선택이 안 된다)
+  const [handleHeld, setHandleHeld] = useState(false);
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  const moveItem = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    setDraftItems((prev) => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  }, []);
+
+  const endDrag = useCallback(() => {
+    setHandleHeld(false);
+    setDragIndex(null);
+    setDragOverIndex(null);
+  }, []);
 
   const load = useCallback(
     async (keepId?: string) => {
@@ -59,6 +98,8 @@ export function MemosClient() {
         const selected = rows.find((m) => m.id === next);
         setDraftTitle(selected?.title ?? "");
         setDraftContent(selected?.content ?? "");
+        setDraftType(selected?.type ?? "text");
+        setDraftItems(selected?.items ?? []);
       } catch (error) {
         const message = error instanceof Error ? error.message : "메모를 불러오지 못했습니다.";
         setLoadError(message);
@@ -80,9 +121,15 @@ export function MemosClient() {
     [memos, selectedId],
   );
   const isDraft = selectedId === DRAFT_ID;
+  const itemsChanged = (a: MemoItem[], b: MemoItem[]) =>
+    a.length !== b.length || a.some((item, i) => item.text !== b[i].text || item.done !== b[i].done);
   const isDirty = isDraft
-    ? draftTitle.trim().length > 0 || draftContent.length > 0
-    : Boolean(selected) && (draftTitle !== selected!.title || draftContent !== selected!.content);
+    ? draftTitle.trim().length > 0 || draftContent.length > 0 || draftItems.length > 0
+    : Boolean(selected) &&
+      (draftTitle !== selected!.title ||
+        draftType !== selected!.type ||
+        draftContent !== selected!.content ||
+        itemsChanged(draftItems, selected!.items));
 
   const selectMemo = useCallback(
     (memo: Memo) => {
@@ -90,6 +137,8 @@ export function MemosClient() {
       setSelectedId(memo.id);
       setDraftTitle(memo.title);
       setDraftContent(memo.content);
+      setDraftType(memo.type);
+      setDraftItems(memo.items);
     },
     [isDirty],
   );
@@ -97,12 +146,14 @@ export function MemosClient() {
   const addMemo = useCallback(() => {
     if (isDirty && !window.confirm("저장하지 않은 변경이 있습니다. 새 메모를 시작할까요?")) return;
     setMemos((prev) => [
-      { id: DRAFT_ID, title: "", content: "", updated_at: null },
+      { id: DRAFT_ID, type: "text", title: "", content: "", items: [], updated_at: null },
       ...prev.filter((m) => m.id !== DRAFT_ID),
     ]);
     setSelectedId(DRAFT_ID);
     setDraftTitle("");
     setDraftContent("");
+    setDraftType("text");
+    setDraftItems([]);
   }, [isDirty]);
 
   const save = useCallback(async () => {
@@ -117,7 +168,8 @@ export function MemosClient() {
       const resp = await fetch(isNew ? "/api/memos" : `/api/memos/${encodeURIComponent(selectedId!)}`, {
         method: isNew ? "POST" : "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, content: draftContent }),
+        // 두 형식의 값을 모두 보낸다 — 토글로 오가도 반대편 내용이 지워지지 않는다.
+        body: JSON.stringify({ type: draftType, title, content: draftContent, items: draftItems }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "메모를 저장하지 못했습니다.");
@@ -128,7 +180,7 @@ export function MemosClient() {
     } finally {
       setSaving(false);
     }
-  }, [draftContent, draftTitle, load, selectedId, toast]);
+  }, [draftContent, draftItems, draftTitle, draftType, load, selectedId, toast]);
 
   const remove = useCallback(async () => {
     if (!selectedId || selectedId === DRAFT_ID) {
@@ -242,15 +294,127 @@ export function MemosClient() {
                           />
                         </label>
                       </div>
+                      <div className="appMainHeaderRight">
+                        <label className="appLabeledField">
+                          <span className="appLabeledFieldLabel">형식</span>
+                          <div
+                            className="appSegmentedToggle appSegmentedToggleCompact"
+                            role="group"
+                            aria-label="메모 형식"
+                          >
+                            {MEMO_TYPES.map((option) => (
+                              <button
+                                key={option.key}
+                                type="button"
+                                className={
+                                  draftType === option.key
+                                    ? "btn appSegmentedToggleButton is-active"
+                                    : "btn appSegmentedToggleButton"
+                                }
+                                onClick={() => setDraftType(option.key)}
+                              >
+                                {option.label}
+                              </button>
+                            ))}
+                          </div>
+                        </label>
+                      </div>
                     </div>
-                    <textarea
-                      className="form-control"
-                      style={{ fontSize: "0.9rem", minHeight: "24rem", marginTop: 10 }}
-                      rows={18}
-                      placeholder="내용을 입력하세요. 서식 없는 일반 텍스트로 저장됩니다."
-                      value={draftContent}
-                      onChange={(e) => setDraftContent(e.target.value)}
-                    />
+                    {draftType === "text" ? (
+                      <textarea
+                        className="form-control"
+                        style={{ fontSize: "0.9rem", minHeight: "24rem", marginTop: 10 }}
+                        rows={18}
+                        placeholder="내용을 입력하세요. 서식 없는 일반 텍스트로 저장됩니다."
+                        value={draftContent}
+                        onChange={(e) => setDraftContent(e.target.value)}
+                      />
+                    ) : (
+                      <div className="memoChecklist">
+                        {draftItems.length === 0 ? (
+                          <div style={{ ...hintStyle, padding: "8px 0" }}>
+                            항목이 없습니다. 아래에서 추가하세요.
+                          </div>
+                        ) : (
+                          draftItems.map((item, index) => (
+                            <div
+                              key={index}
+                              className={
+                                dragOverIndex === index && dragIndex !== index
+                                  ? "memoChecklistRow is-dragover"
+                                  : "memoChecklistRow"
+                              }
+                              draggable={handleHeld}
+                              onDragStart={(e) => {
+                                setDragIndex(index);
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragOver={(e) => {
+                                if (dragIndex === null) return;
+                                e.preventDefault();
+                                setDragOverIndex(index);
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (dragIndex !== null) moveItem(dragIndex, index);
+                                endDrag();
+                              }}
+                              onDragEnd={endDrag}
+                            >
+                              <span
+                                className="memoChecklistHandle"
+                                aria-label="순서 이동"
+                                onMouseDown={() => setHandleHeld(true)}
+                                onMouseUp={() => setHandleHeld(false)}
+                              >
+                                <IconGripVertical size={16} />
+                              </span>
+                              <input
+                                type="checkbox"
+                                className="form-check-input"
+                                checked={item.done}
+                                aria-label={item.text || `항목 ${index + 1}`}
+                                onChange={(e) =>
+                                  setDraftItems((prev) =>
+                                    prev.map((row, i) =>
+                                      i === index ? { ...row, done: e.target.checked } : row,
+                                    ),
+                                  )
+                                }
+                              />
+                              <input
+                                className={item.done ? "form-control form-control-sm is-done" : "form-control form-control-sm"}
+                                value={item.text}
+                                placeholder="할 일"
+                                onChange={(e) =>
+                                  setDraftItems((prev) =>
+                                    prev.map((row, i) =>
+                                      i === index ? { ...row, text: e.target.value } : row,
+                                    ),
+                                  )
+                                }
+                              />
+                              <button
+                                type="button"
+                                className="memoChecklistRemove"
+                                aria-label="항목 삭제"
+                                onClick={() => setDraftItems((prev) => prev.filter((_, i) => i !== index))}
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          style={{ alignSelf: "flex-start", marginTop: 6 }}
+                          onClick={() => setDraftItems((prev) => [...prev, { text: "", done: false }])}
+                        >
+                          + 항목 추가
+                        </button>
+                      </div>
+                    )}
                     <div style={{ ...hintStyle, marginTop: 6 }}>
                       마지막 저장 {formatUpdatedAt(selected?.updated_at ?? null)}
                     </div>
