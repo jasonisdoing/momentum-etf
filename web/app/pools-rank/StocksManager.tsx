@@ -933,7 +933,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             }
             if (!isDraftDirty && addingRow?.is_validated) {
               return (
-                <span className="rankNameCellText fw-semibold" title={addingRow.name}>
+                <span className="appNameCellText fw-semibold" title={addingRow.name}>
                   {addingRow.name}
                 </span>
               );
@@ -954,7 +954,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           }
           const value = String(params.value ?? "-");
           return (
-            <span className="rankNameCellText" title={value}>
+            <span className="appNameCellText" title={value}>
               {renderNameWithLeverageHighlight(value)}
             </span>
           );
