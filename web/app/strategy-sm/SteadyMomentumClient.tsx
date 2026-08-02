@@ -14,10 +14,9 @@ import { formatPrice } from "../../lib/price-format";
 const gridTheme = createAppGridTheme();
 
 // 종목풀 폴백 라벨 — 백엔드 미기동으로 pool_labels 를 못 받았을 때만 쓴다.
+// 미국 지수 기반 풀만 지원한다 (백엔드 POOL_CONFIGS 와 같아야 한다).
 // 실제 표시 이름은 종목풀 설정 DB 가 단일 소스이며 백엔드 응답을 우선한다.
 const POOL_OPTIONS: readonly { id: string; label: string }[] = [
-  { id: "kor", label: "코스피 개별주" },
-  { id: "kor_kosdaq", label: "코스닥 개별주" },
   { id: "us", label: "나스닥 100 + S&P 100" },
   { id: "us_nasdaq", label: "나스닥 100" },
   { id: "us_snp", label: "S&P100" },
@@ -430,7 +429,7 @@ export function SteadyMomentumClient() {
       {
         headerName: "섹터",
         field: "sector",
-        headerTooltip: "지수 구성종목 메타 (미국 풀만 제공)",
+        headerTooltip: "지수 구성종목 메타",
         width: 150,
         minWidth: 110,
         cellClass: "appTextEllipsisCell",
@@ -440,7 +439,7 @@ export function SteadyMomentumClient() {
       {
         headerName: "업종",
         field: "industry",
-        headerTooltip: "지수 구성종목 메타 (미국 풀만 제공)",
+        headerTooltip: "지수 구성종목 메타",
         width: 170,
         minWidth: 110,
         cellClass: "appTextEllipsisCell",
@@ -814,7 +813,7 @@ export function SteadyMomentumClient() {
               </div>
             </div>
             <div style={hintStyle}>
-              시장 대비 꾸준한 상대 모멘텀(연율화 상대기울기 × R²)으로 선정 · 우선주와 고정 종목 제외 · 시장 상대기울기
+              시장 대비 꾸준한 상대 모멘텀(연율화 상대기울기 × R²)으로 선정 · 고정 종목 제외 · 시장 상대기울기
               필터를 켜면 시장에 지는 추세를 후보에서 뺍니다
             </div>
           </div>

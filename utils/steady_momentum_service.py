@@ -2,8 +2,7 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 종목풀 1개. 한국 풀은 우선주 제외(티커 끝자리가 '0'
-   이 아니면 우선주), 고정 보유 종목(exclude_from_ranking)은 전 풀에서 제외.
+1. 유니버스: 설정에서 고른 미국 종목풀 1개. 고정 보유 종목(exclude_from_ranking)은 제외.
 2. 점수: **상대 가격선(종가 ÷ 벤치마크)** 에 룩백 구간 로그 회귀를 돌려
    ``연율화 상대기울기 × R²``. 시장을 얼마나 빠르고(기울기) 꾸준하게(R²)
    이겨왔는지를 하나의 점수로 본다. 점수 순 상위 top_n 동일가중.
@@ -30,9 +29,8 @@ warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
 # 선택 가능한 종목풀 — 한 번에 1개만 선택한다(통화·벤치마크·달력 혼합 방지).
+# 미국 지수 기반 종목풀만 지원한다.
 POOL_CONFIGS: dict[str, dict[str, Any]] = {
-    "kor": {"label": "코스피 개별주", "country": "kor", "currency": "KRW"},
-    "kor_kosdaq": {"label": "코스닥 개별주", "country": "kor", "currency": "KRW"},
     "us": {"label": "나스닥 100 + S&P 100", "country": "us", "currency": "USD"},
     "us_nasdaq": {"label": "나스닥 100", "country": "us", "currency": "USD"},
     "us_snp": {"label": "S&P100", "country": "us", "currency": "USD"},
@@ -188,27 +186,19 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── 유니버스 · 가격 ────────────────────────────────────────────────────────
-def is_preferred_share(ticker: str) -> bool:
-    """한국 우선주 판별 — 티커 끝자리가 '0' 이 아니면 우선주 (예: 005935, 00680K)."""
-    return not str(ticker).endswith("0")
-
-
 def load_universe(pool: str) -> list[dict[str, str]]:
     """선택한 종목풀 1개의 종목 목록. [{ticker, name, pool}]
 
-    우선주 제외(끝자리 규칙)는 한국 풀에만 적용한다 — 미국 티커(AAPL 등)는
-    알파벳이라 이 규칙을 적용하면 전부 걸러진다.
     고정 보유 종목(exclude_from_ranking)은 투자 후보가 아니므로 제외한다
     (순위·종목풀 백테스트와 같은 규칙).
     """
     from utils.stock_list_io import _load_ticker_type_stocks_raw
 
-    is_korean = POOL_CONFIGS[pool]["country"] == "kor"
     universe: list[dict[str, str]] = []
     seen: set[str] = set()
     for item in _load_ticker_type_stocks_raw(pool):
         ticker = str(item.get("ticker") or "").strip()
-        if not ticker or ticker in seen or (is_korean and is_preferred_share(ticker)):
+        if not ticker or ticker in seen:
             continue
         if bool(item.get("exclude_from_ranking")):
             continue
@@ -258,7 +248,7 @@ def benchmark_info(pool: str) -> dict[str, str]:
 def load_benchmark_close(pool: str) -> pd.Series:
     """풀 설정의 벤치마크 티커 종가 — 전체 종목풀 캐시에서 찾는다.
 
-    (예: kor_kosdaq 의 벤치마크 069500 은 kor 캐시에, us 의 QQQ 는 us 캐시에 있다)
+    (예: us 풀의 벤치마크 QQQ 는 us 캐시에 있다)
     """
     from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
@@ -376,13 +366,9 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
 def _sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
 
-    한국 풀은 이 파일에 대응하는 자료가 없어 빈 맵을 돌려주고, 화면에는 '-' 로 나온다.
     구성종목 파일이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
     빈 맵으로 두되, 파일이 없다는 사실 자체는 로그로 남긴다.
     """
-    if POOL_CONFIGS[pool]["country"] != "us":
-        return {}
-
     from utils.index_constituents_loader import load_index_constituents
 
     result: dict[str, dict[str, str]] = {}
