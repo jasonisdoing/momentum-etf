@@ -425,14 +425,14 @@ export function SteadyMomentumClient() {
         width: 112,
         cellRenderer: (p: { value: string | null | undefined }) => <TickerDetailLink ticker={p.value} />,
       },
-      { headerName: "종목명", field: "name", flex: 1, minWidth: 140 },
+      { headerName: "종목명", field: "name", flex: 1, minWidth: 150, maxWidth: 260 },
       {
         headerName: "섹터",
         field: "sector",
         headerTooltip: "지수 구성종목 메타",
-        width: 150,
-        minWidth: 110,
-        cellClass: "appTextEllipsisCell",
+        // 실제 값 최장 45자 — 잘리지 않는 폭으로 잡는다.
+        width: 300,
+        minWidth: 300,
         tooltipValueGetter: (p) => p.value || undefined,
         valueFormatter: (p) => p.value || "-",
       },
@@ -440,9 +440,9 @@ export function SteadyMomentumClient() {
         headerName: "업종",
         field: "industry",
         headerTooltip: "지수 구성종목 메타",
-        width: 170,
-        minWidth: 110,
-        cellClass: "appTextEllipsisCell",
+        // 실제 값 최장 55자 — 잘리지 않는 폭으로 잡는다.
+        width: 360,
+        minWidth: 360,
         tooltipValueGetter: (p) => p.value || undefined,
         valueFormatter: (p) => p.value || "-",
       },
@@ -677,7 +677,7 @@ export function SteadyMomentumClient() {
 
   if (loading && !view) {
     return (
-      <PageFrame title="Steady Momentum">
+      <PageFrame title="Steady Momentum" fullWidth>
         <div style={{ ...hintStyle, padding: 20 }}>불러오는 중…</div>
       </PageFrame>
     );
@@ -685,7 +685,7 @@ export function SteadyMomentumClient() {
   if (!view) {
     // 설정을 못 받은 상태 — 값을 지어내 폼을 그리지 않고 실패와 재시도만 제공한다.
     return (
-      <PageFrame title="Steady Momentum">
+      <PageFrame title="Steady Momentum" fullWidth>
         <div className="card appCard">
           <div className="card-body" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700 }}>설정을 불러오지 못했습니다.</span>
@@ -703,7 +703,7 @@ export function SteadyMomentumClient() {
   const reserveCount = view.picks?.rows.filter((row) => row.is_reserve).length ?? 0;
 
   return (
-    <PageFrame title="Steady Momentum">
+    <PageFrame title="Steady Momentum" fullWidth>
       <div className="appPageStack">
         {/* ① 변수 설정 */}
         <div className="card appCard">
