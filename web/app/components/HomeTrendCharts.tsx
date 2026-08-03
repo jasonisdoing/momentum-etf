@@ -3,10 +3,10 @@
 import { MarketTrendChart } from "../market-trend/MarketTrendChart";
 
 // 홈 메인 — 시장지수 추세 4개 차트(2×2). 각 MarketTrendChart 는 ticker(yf 심볼)로 자체 history 를 조회한다.
-// 배열: 좌상 합성지수 · 우상 코스피 · 좌하 나스닥100 · 우하 필라델피아 반도체.
+// 배열: 좌상 코스피 · 우상 코스닥 · 좌하 나스닥100 · 우하 필라델피아 반도체.
 const HOME_TREND_CHARTS: { ticker: string; name: string }[] = [
-  { ticker: "CORE", name: "합성지수" },
   { ticker: "^KS11", name: "코스피" },
+  { ticker: "^KQ11", name: "코스닥" },
   { ticker: "^NDX", name: "나스닥 100" },
   { ticker: "^SOX", name: "필라델피아 반도체" },
 ];
