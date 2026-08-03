@@ -84,6 +84,36 @@ body {
   font-size: var(--fs-sm);
 }
 
+/* Tabler 유틸리티 클래스도 토큰에 못박는다.
+   className 으로 크기가 정해지는 자리라 `font-size` 검사만으로는 안 잡힌다.
+   여기 없는 크기 클래스를 새로 쓰면 scripts/check-font-tokens.mjs 가 빌드를 세운다.
+
+   `.small` 은 원래 0.875em 이라 부모에 따라 12.25px 처럼 표준 밖 값이 나왔다.
+   나머지는 마침 표준값과 같았지만, Tabler 를 올릴 때 조용히 틀어지지 않게 함께 고정한다. */
+.small,
+small,
+.subheader {
+  font-size: var(--fs-sm);
+}
+
+.modal-title {
+  font-size: var(--fs-base);
+}
+
+/* 일반 HTML 표. AG Grid 와 같은 14px 로 맞춘다 — Tabler 는 머리글만 12px 로 줄인다. */
+.table,
+.table thead th {
+  font-size: var(--fs-sm);
+}
+
+.h1 {
+  font-size: var(--fs-2xl);
+}
+
+.navbar {
+  font-size: var(--fs-xl);
+}
+
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button {
   margin: 0;
