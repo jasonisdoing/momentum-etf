@@ -1310,7 +1310,7 @@ export function TickerDetailManager({
           <div className="card-body appCardBodyTight appTableCardBodyFill">
             {!selectedTicker && !loading ? (
               <div style={{ display: "flex", alignItems: "center", justifyContent: "center", flex: 1, color: "#5b6778" }}>
-                <span style={{ fontSize: 15 }}>티커 또는 종목명을 검색하세요.</span>
+                <span style={{ fontSize: "var(--fs-base)" }}>티커 또는 종목명을 검색하세요.</span>
               </div>
             ) : (
               <>

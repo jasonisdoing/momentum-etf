@@ -44,7 +44,7 @@ export function GridToolbarButton({
           gap: 0.35rem;
           height: 34px;
           padding: 0 1rem;
-          font-size: 0.875rem;
+          font-size: var(--fs-sm);
           font-weight: 700;
           line-height: 1;
           white-space: nowrap;

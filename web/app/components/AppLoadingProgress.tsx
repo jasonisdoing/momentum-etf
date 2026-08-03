@@ -49,7 +49,7 @@ export function AppLoadingProgress({ title, progress, fallbackMessage }: AppLoad
     <div style={boxStyle}>
       <div style={textRowStyle}>
         <span>{title}</span>
-        <strong style={{ color: "var(--text-strong, #0f172a)", fontSize: "1rem" }}>{percent}%</strong>
+        <strong style={{ color: "var(--text-strong, #0f172a)", fontSize: "var(--fs-base)" }}>{percent}%</strong>
       </div>
       <div style={barStyle} aria-hidden="true">
         <div

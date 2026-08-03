@@ -697,13 +697,13 @@ export function MarketManager({
           min-width: 76px;
         }
         .marketNewOnlyDaysLabel {
-          font-size: 0.95rem;
+          font-size: var(--fs-base);
           font-weight: 600;
           color: #5b6778;
           white-space: nowrap;
         }
         .marketNewOnlyHint {
-          font-size: 0.95rem;
+          font-size: var(--fs-base);
           font-weight: 700;
           color: #206bc4;
           white-space: nowrap;

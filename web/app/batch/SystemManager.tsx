@@ -289,7 +289,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
               style={{
                 marginLeft: 8,
                 padding: "0 4px",
-                fontSize: "20px",
+                fontSize: "var(--fs-xl)",
                 fontWeight: 700,
                 lineHeight: 1,
                 color: alreadyRequested ? "var(--text-muted)" : "#dc2626",

@@ -35,9 +35,9 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.4)",
   borderRadius: 6,
   padding: "4px 8px",
-  fontSize: "0.88rem",
+  fontSize: "var(--fs-base)",
 };
-const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "0.83rem", flexShrink: 0 };
+const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 600, fontSize: "var(--fs-sm)", flexShrink: 0 };
 
 /** 계좌 1개 편집 행 (자체 저장). account_id 는 원장 FK 라 수정 불가. */
 function AccountRow({
@@ -181,7 +181,7 @@ function AccountRow({
           {icon} {name} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({account.account_id})</span>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>
+          <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
             마지막 저장: {updatedAt ? formatKstDateTime(updatedAt) : "저장 이력 없음"}
           </span>
           <button
@@ -246,7 +246,7 @@ function AccountRow({
                 display: "inline-flex",
                 alignItems: "center",
                 gap: 4,
-                fontSize: "0.85rem",
+                fontSize: "var(--fs-sm)",
                 color: isBase ? "var(--text-muted)" : undefined,
                 cursor: isBase ? "not-allowed" : "pointer",
               }}
@@ -296,7 +296,7 @@ function AccountRow({
           </>
         ) : (
           <>
-            <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
+            <span style={{ fontSize: "var(--fs-base)", fontWeight: 600 }}>
               {benchName} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({benchTicker})</span>
             </span>
             <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setBenchEditing(true)}>
@@ -379,8 +379,8 @@ function AddAccountModal({ onClose, onCreated }: { onClose: () => void; onCreate
         onClick={(e) => e.stopPropagation()}
       >
         <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <h3 style={{ fontSize: "1rem", fontWeight: 800, margin: 0 }}>계좌 추가</h3>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", margin: 0 }}>
+          <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, margin: 0 }}>계좌 추가</h3>
+          <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", margin: 0 }}>
             계좌 ID는 원장 FK라 생성 후 변경할 수 없습니다(영문 소문자·숫자·-·_). 벤치마크·전략 상세는 추가 후 편집하세요.
           </p>
           {[
@@ -456,10 +456,10 @@ export function AccountSettingsManager() {
     <div className="card appCard">
       <div className="card-body">
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-          <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>계좌 설정</h2>
+          <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, margin: 0 }}>계좌 설정</h2>
           <button type="button" className="btn btn-sm btn-primary" onClick={() => setAddOpen(true)}>+ 계좌 추가</button>
         </div>
-        <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
+        <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
           계좌 메타(이름/순서/벤치마크 등)는 DB(account_settings)가 단일 소스입니다. 삭제는 보유종목이 없는 계좌만 가능합니다.
         </p>
         {loading ? (

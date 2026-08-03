@@ -28,7 +28,7 @@ export default async function HomePage() {
       {trendDefaults ? (
         <HomeTrendCharts maDays={trendDefaults.ma_days} maType={trendDefaults.ma_type} />
       ) : (
-        <div className="text-secondary" style={{ fontSize: "0.9rem" }}>
+        <div className="text-secondary" style={{ fontSize: "var(--fs-base)" }}>
           시장추세 기준값을 불러오지 못했습니다. 시장지수 추세 화면에서 확인해주세요.
         </div>
       )}

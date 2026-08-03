@@ -323,7 +323,7 @@ export function UsMarketStockManager({
         minWidth: 88,
         cellStyle: {
           fontFamily: "var(--font-mono, monospace)",
-          fontSize: "13px",
+          fontSize: "var(--fs-sm)",
         } as CellStyle,
         cellRenderer: (params: { value?: string }) => {
           const raw = String(params.value ?? "").trim();
@@ -508,7 +508,7 @@ export function UsMarketStockManager({
                         border: "1px solid rgba(148,163,184,0.4)",
                         borderRadius: 6,
                         padding: "3px 6px",
-                        fontSize: "0.84rem",
+                        fontSize: "var(--fs-sm)",
                         marginLeft: 6,
                       }}
                     >
@@ -549,7 +549,7 @@ export function UsMarketStockManager({
 
         <div className="card-body appCardBodyTight appTableCardBodyFill">
           {error && (
-            <div style={{ padding: "0.5rem 0.75rem", marginBottom: "0.5rem", background: "#fef2f2", color: "#dc2626", borderRadius: "6px", fontSize: "0.85rem" }}>
+            <div style={{ padding: "0.5rem 0.75rem", marginBottom: "0.5rem", background: "#fef2f2", color: "#dc2626", borderRadius: "6px", fontSize: "var(--fs-sm)" }}>
               {error}
             </div>
           )}

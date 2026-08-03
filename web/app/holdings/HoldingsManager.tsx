@@ -727,7 +727,7 @@ export function HoldingsManager({
           gap: 6px;
           width: 100%;
           min-width: 0;
-          font-size: 0.95rem;
+          font-size: var(--fs-base);
           font-weight: 700;
           color: #1d273b;
           word-break: keep-all;
@@ -742,7 +742,7 @@ export function HoldingsManager({
           color: #206bc4;
         }
         .holdingsExpandIcon {
-          font-size: 9px;
+          font-size: var(--fs-xs);
           color: #8b949e;
           flex-shrink: 0;
           transition: transform 0.15s;

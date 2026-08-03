@@ -56,7 +56,7 @@ function SourceBadge({ source, label }: { source: string | null; label: string |
         borderRadius: "0.35rem",
         background: tone.bg,
         color: tone.fg,
-        fontSize: "0.82rem",
+        fontSize: "var(--fs-sm)",
         fontWeight: 700,
         whiteSpace: "nowrap",
       }}
@@ -159,7 +159,7 @@ export function DataSourcePageClient() {
                         <tr key={`${row.provider}-${row.endpoint}-${row.usage}`}>
                           <td style={{ whiteSpace: "nowrap" }}>{COUNTRY_LABEL[row.country] ?? row.country}</td>
                           <td style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{row.provider}</td>
-                          <td style={{ fontSize: "0.9rem" }}>
+                          <td style={{ fontSize: "var(--fs-base)" }}>
                             {/* 호주 발행사 행은 수집 경로를 배지로 강조한다(공식 소스 / yfinance 폴백 구분). */}
                             {row.source_label ? (
                               <div
@@ -185,22 +185,22 @@ export function DataSourcePageClient() {
                               row.usage
                             )}
                             {row.note ? (
-                              <div style={{ marginTop: "0.2rem", color: "var(--text-muted)", fontSize: "0.83rem" }}>
+                              <div style={{ marginTop: "0.2rem", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                                 {row.note}
                               </div>
                             ) : null}
                             {row.missing_tickers?.length ? (
-                              <div style={{ marginTop: "0.2rem", color: "#991b1b", fontSize: "0.83rem" }}>
+                              <div style={{ marginTop: "0.2rem", color: "#991b1b", fontSize: "var(--fs-sm)" }}>
                                 미수집: <span className="appCodeText">{row.missing_tickers.join(", ")}</span>
                               </div>
                             ) : null}
                           </td>
-                          <td className="appCodeText" style={{ fontSize: "0.82rem", wordBreak: "break-all" }}>
+                          <td className="appCodeText" style={{ fontSize: "var(--fs-sm)", wordBreak: "break-all" }}>
                             {row.endpoint}
                           </td>
                           <td
                             className="appCodeText"
-                            style={{ fontSize: "0.8rem", color: "var(--text-muted)", whiteSpace: "nowrap" }}
+                            style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", whiteSpace: "nowrap" }}
                           >
                             {row.code_ref}
                           </td>

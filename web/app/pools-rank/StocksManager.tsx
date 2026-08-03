@@ -622,7 +622,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (params.data?.is_benchmark) {
             return (
-              <span style={{ fontSize: "0.95rem", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 700 }} title="벤치마크 종목">
+              <span style={{ fontSize: "var(--fs-base)", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: 700 }} title="벤치마크 종목">
                 ⭐ {params.value == null ? "-" : formatNumber(params.value, 0)}
               </span>
             );
@@ -639,7 +639,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   border: "1px solid #c7d2fe",
                   background: "#eef2ff",
                   color: "#4338ca",
-                  fontSize: "0.75rem",
+                  fontSize: "var(--fs-sm)",
                   fontWeight: 700,
                   lineHeight: 1,
                   padding: "0.15rem 0.4rem",
@@ -713,7 +713,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         valueGetter: (params) => (params.data?.보유대상 ? 1 : 0),
         cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
           if (!params.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
-          return <span style={{ fontSize: "1rem" }}>✅</span>;
+          return <span style={{ fontSize: "var(--fs-base)" }}>✅</span>;
         },
       },
       {

@@ -112,10 +112,10 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.45)",
   borderRadius: 6,
   padding: "4px 8px",
-  fontSize: "0.86rem",
+  fontSize: "var(--fs-sm)",
   minHeight: 30,
 };
-const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 700, fontSize: "0.82rem", flexShrink: 0 };
+const labelStyle: React.CSSProperties = { color: "var(--text-muted)", fontWeight: 700, fontSize: "var(--fs-sm)", flexShrink: 0 };
 
 function toDraft(pool: PoolEntry): PoolDraft {
   return {
@@ -234,7 +234,7 @@ function BenchmarkField({
   if (!editing) {
     return (
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ fontSize: "0.86rem", fontWeight: 600, whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: "var(--fs-sm)", fontWeight: 600, whiteSpace: "nowrap" }}>
           {name} <span style={{ color: "var(--text-muted)", fontWeight: 500 }}>({ticker})</span>
         </span>
         <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setEditing(true)}>
@@ -531,7 +531,7 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           <SelectField value={draft.SELL_SLIPPAGE_PCT} options={slippageOptions} width={90} onChange={(value) => onChange("SELL_SLIPPAGE_PCT", value)} />,
           { minWidth: 196, labelWidth: 94 },
         )}
-        <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>% 단위</span>
+        <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>% 단위</span>
       </div>
 
       <div style={{ ...rowStyle, marginBottom: 0 }}>
@@ -585,11 +585,11 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     <div style={{ border: "1px solid rgba(148,163,184,0.25)", borderRadius: 10, padding: "10px 12px", background: "#fff" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, flexWrap: "wrap", marginBottom: 8 }}>
         <div>
-          <div style={{ fontWeight: 850, fontSize: "0.98rem" }}>{title}</div>
-          <div style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>{subtitle}</div>
+          <div style={{ fontWeight: 850, fontSize: "var(--fs-base)" }}>{title}</div>
+          <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>{subtitle}</div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          {updatedAt ? <span style={{ color: "var(--text-muted)", fontSize: "0.78rem" }}>{formatKstDateTime(updatedAt)}</span> : null}
+          {updatedAt ? <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>{formatKstDateTime(updatedAt)}</span> : null}
           {primaryButton}
           {secondaryButton}
         </div>
@@ -606,8 +606,8 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <div>
-                  <h2 style={{ fontSize: "1.05rem", fontWeight: 800, margin: 0 }}>종목풀 설정</h2>
-                  <div className="tableFooterMeta" style={{ margin: 0, color: "var(--text-muted)", fontSize: "0.85rem" }}>
+                  <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, margin: 0 }}>종목풀 설정</h2>
+                  <div className="tableFooterMeta" style={{ margin: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                     종목풀 구조와 이평선 설정은 DB(pool_settings)가 단일 소스입니다.
                   </div>
                 </div>
