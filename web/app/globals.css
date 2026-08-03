@@ -15,7 +15,7 @@
      12/14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
      크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 여섯 줄을 같이 조정한다.
      (단계 간격이 무너지면 토큰을 나눠 둔 의미가 없어진다) */
-  --fs-xs: 0.75rem; /* 12px — 텍스트 아님. 접기 화살표 같은 글리프 전용 */
+  --fs-xs: 0.75rem; /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
   --fs-sm: 0.875rem; /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
   --fs-base: 1rem; /* 16px — 본문, 입력, 버튼, 카드 (기준) */
   --fs-lg: 1.125rem; /* 18px — 카드·섹션 제목 */
@@ -104,6 +104,43 @@ small,
 .table,
 .table thead th {
   font-size: var(--fs-sm);
+}
+
+/* 제목 태그. className 없이 <h2> 만 써도 Tabler 기본 크기가 걸리는데,
+   className 이 아니라 태그라서 검사기가 못 잡는다 → 여기서 토큰으로 고정한다.
+   h4~h6 은 Tabler 기본이 14/12/10px 인데 규칙대로 14px 한 단계로 모은다. */
+h1 {
+  font-size: var(--fs-2xl);
+}
+
+h2 {
+  font-size: var(--fs-xl);
+}
+
+h3 {
+  font-size: var(--fs-base);
+}
+
+h4,
+h5,
+h6 {
+  font-size: var(--fs-sm);
+}
+
+/* 상대값(em)으로 지정돼 부모에 따라 표준 밖 크기가 나오는 태그들. */
+sub,
+sup {
+  font-size: var(--fs-xs);
+}
+
+code,
+kbd,
+pre {
+  font-size: var(--fs-sm);
+}
+
+legend {
+  font-size: var(--fs-lg);
 }
 
 .h1 {
