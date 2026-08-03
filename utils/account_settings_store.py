@@ -58,9 +58,23 @@ class AccountSettingsStoreError(ValueError):
 
 
 def invalidate_account_settings_cache() -> None:
+    """계좌 설정 변경에 의존하는 프로세스 내 캐시를 모두 비운다.
+
+    이 모듈의 TTL 캐시만 비우면 부족하다. `settings_loader.get_account_settings` 는
+    만료 없는 `functools.cache` 라, 여기서 함께 비우지 않으면 순서(`order`) 를 바꿔도
+    프로세스를 재시작할 때까지 옛 값이 계속 나온다(종목풀은
+    `pool_settings_store._invalidate_dependent_caches` 가 같은 일을 한다).
+    """
     global _cache
     with _cache_lock:
         _cache = None
+
+    try:
+        from utils import settings_loader
+
+        settings_loader.get_account_settings.cache_clear()
+    except Exception as exc:  # 캐시 무효화 실패가 저장 자체를 막지는 않는다
+        logger.warning("계좌 설정 로더 캐시 무효화 실패: %s", exc)
 
 
 def _db():
