@@ -53,9 +53,18 @@ SCHEDULE_ROWS = [
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
         "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:40 · 16:10 KST",
+        "cadence": "평일 09:40 · 16:10 / 토 09:40 KST",
         "command": "python scripts/slack_asset_summary.py",
-        "schedule": {"slots": [{"hour": 9, "minute": 40}, {"hour": 16, "minute": 10}], "weekdays": _WEEKDAYS_MON_FRI},
+        # 토요일 09:40 은 금요일 미국 장 마감(한국시간 토 05~06시)을 반영하기 위한 것이다.
+        # 그 시각이면 `가격 캐시 업데이트`·`데이터 집계`(둘 다 월~토 매시)가 이미 여러 번
+        # 돈 뒤다. 토요일 16:10 은 양쪽 장이 모두 닫혀 09:40 과 같은 값이라 두지 않는다.
+        "schedule": {
+            "slots": [
+                {"hour": 9, "minute": 40, "weekdays": _WEEKDAYS_MON_SAT},
+                {"hour": 16, "minute": 10, "weekdays": _WEEKDAYS_MON_FRI},
+            ],
+            "weekdays": _WEEKDAYS_MON_SAT,
+        },
     },
     {
         "key": "cache_refresh",
@@ -262,6 +271,9 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
 
     minutes×hours 교차곱으로 표현 못 하는 시각(예: 09:20·15:35)은 ``slots``
     (``[{"hour":9,"minute":20}, ...]``)로 명시한다. slots 가 있으면 그것을 우선한다.
+
+    슬롯마다 요일이 다르면 슬롯에 ``weekdays`` 를 직접 준다(예: 09:40 은 월~토,
+    16:10 은 평일). 없으면 스케줄 공통 ``weekdays`` 를 쓴다.
     """
     if not schedule:
         return None
@@ -274,11 +286,17 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
 
     slots = schedule.get("slots")
     if slots:
-        slot_set = {(int(s["hour"]), int(s["minute"])) for s in slots}
+        slot_rules = {
+            (int(s["hour"]), int(s["minute"])): frozenset(
+                int(w) for w in s.get("weekdays", weekdays)
+            )
+            for s in slots
+        }
         candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         end = candidate + timedelta(days=8)
         while candidate < end:
-            if candidate.weekday() in weekdays and (candidate.hour, candidate.minute) in slot_set:
+            slot_weekdays = slot_rules.get((candidate.hour, candidate.minute))
+            if slot_weekdays is not None and candidate.weekday() in slot_weekdays:
                 return candidate
             candidate += timedelta(minutes=1)
         return None
