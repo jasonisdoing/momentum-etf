@@ -1,11 +1,13 @@
 """시스템 메모 저장소 (MongoDB `memos` 컬렉션).
 
-제목과 함께 두 형식을 보관한다.
+제목과 함께 세 가지 타입을 보관한다.
 - `text`: 서식 없는 본문(`content`)
-- `list`: 체크박스 할 일 목록(`items` = [{text, done}])
+- `list`: 체크박스 없는 목록(`items`)
+- `todo`: 체크박스 있는 할일 목록(`items` 의 `done` 사용)
 
-두 필드를 항상 같이 저장한다. 형식을 오갈 때 반대편 내용이 사라지지 않게 하기 위한
-것이며, `type` 은 화면에 무엇을 보여줄지만 정한다.
+`content` 와 `items` 를 항상 같이 저장한다. 타입을 오갈 때 반대편 내용이 사라지지
+않게 하기 위한 것이며, `type` 은 화면에 무엇을 보여줄지만 정한다. `done` 도 `list`
+에서 지우지 않는다 — 다시 `todo` 로 바꾸면 체크 상태가 그대로 돌아온다.
 
 계좌별 메모(`utils/account_notes.py`)와는 별개다 — 그쪽은 계좌마다 본문 하나뿐이고
 제목이 없다.
@@ -22,7 +24,7 @@ from bson.errors import InvalidId
 COLLECTION = "memos"
 MAX_TITLE_LENGTH = 200
 MAX_ITEM_LENGTH = 500
-MEMO_TYPES = ("text", "list")
+MEMO_TYPES = ("text", "list", "todo")
 
 
 def _collection():
@@ -65,7 +67,7 @@ def _validate(memo_type: Any, title: Any, content: Any, items: Any) -> dict[str,
     """입력을 검증해 저장할 형태로 정규화한다. 값이 이상하면 보정하지 않고 에러."""
     normalized_type = str(memo_type or "").strip()
     if normalized_type not in MEMO_TYPES:
-        raise ValueError(f"'type' 은 {' 또는 '.join(MEMO_TYPES)} 이어야 합니다.")
+        raise ValueError(f"'type' 은 {', '.join(MEMO_TYPES)} 중 하나여야 합니다.")
 
     normalized_title = str(title or "").strip()
     if not normalized_title:

@@ -7,10 +7,11 @@ import { GridToolbarButton } from "../components/GridToolbarButton";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 
-/** 리스트형 메모의 한 줄 — 체크 여부를 함께 저장한다. */
+/** 리스트형 메모의 한 줄. `done` 은 할일 리스트에서만 쓰지만, 타입을 오갈 때
+ *  체크 상태가 사라지지 않도록 두 타입 모두 그대로 보관한다. */
 type MemoItem = { text: string; done: boolean };
 
-type MemoType = "text" | "list";
+type MemoType = "text" | "list" | "todo";
 
 type Memo = {
   id: string;
@@ -23,11 +24,17 @@ type Memo = {
   updated_at: string | null;
 };
 
-// 메모 형식 토글 — 다른 화면의 세그먼트 토글과 같은 마크업을 쓴다.
+// 메모 타입 토글 — 다른 화면의 세그먼트 토글과 같은 마크업을 쓴다.
 const MEMO_TYPES = [
   { key: "text", label: "텍스트" },
   { key: "list", label: "리스트" },
+  { key: "todo", label: "할일 리스트" },
 ] as const;
+
+/** 항목 목록으로 편집하는 타입 (텍스트만 본문 편집기를 쓴다). */
+function isListType(type: MemoType): boolean {
+  return type === "list" || type === "todo";
+}
 
 /** 새 메모의 임시 id — 저장 전까지만 쓰이며 서버로 보내지 않는다. */
 const DRAFT_ID = "__draft__";
@@ -296,11 +303,11 @@ export function MemosClient() {
                       </div>
                       <div className="appMainHeaderRight">
                         <label className="appLabeledField">
-                          <span className="appLabeledFieldLabel">형식</span>
+                          <span className="appLabeledFieldLabel">타입</span>
                           <div
                             className="appSegmentedToggle appSegmentedToggleCompact"
                             role="group"
-                            aria-label="메모 형식"
+                            aria-label="메모 타입"
                           >
                             {MEMO_TYPES.map((option) => (
                               <button
@@ -320,7 +327,7 @@ export function MemosClient() {
                         </label>
                       </div>
                     </div>
-                    {draftType === "text" ? (
+                    {!isListType(draftType) ? (
                       <textarea
                         className="form-control"
                         style={{ fontSize: "0.9rem", minHeight: "24rem", marginTop: 10 }}
@@ -369,21 +376,27 @@ export function MemosClient() {
                               >
                                 <IconGripVertical size={16} />
                               </span>
+                              {draftType === "todo" ? (
+                                <input
+                                  type="checkbox"
+                                  className="form-check-input"
+                                  checked={item.done}
+                                  aria-label={item.text || `항목 ${index + 1}`}
+                                  onChange={(e) =>
+                                    setDraftItems((prev) =>
+                                      prev.map((row, i) =>
+                                        i === index ? { ...row, done: e.target.checked } : row,
+                                      ),
+                                    )
+                                  }
+                                />
+                              ) : null}
                               <input
-                                type="checkbox"
-                                className="form-check-input"
-                                checked={item.done}
-                                aria-label={item.text || `항목 ${index + 1}`}
-                                onChange={(e) =>
-                                  setDraftItems((prev) =>
-                                    prev.map((row, i) =>
-                                      i === index ? { ...row, done: e.target.checked } : row,
-                                    ),
-                                  )
+                                className={
+                                  draftType === "todo" && item.done
+                                    ? "form-control form-control-sm memoChecklistText is-done"
+                                    : "form-control form-control-sm memoChecklistText"
                                 }
-                              />
-                              <input
-                                className={item.done ? "form-control form-control-sm is-done" : "form-control form-control-sm"}
                                 value={item.text}
                                 placeholder="할 일"
                                 onChange={(e) =>
