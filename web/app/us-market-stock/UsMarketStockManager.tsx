@@ -73,7 +73,32 @@ function viewIndices(view: ViewOption): readonly string[] {
 
 // 시총 상위 몇 개까지 볼지 — 응답이 시총 순 정렬이라 상위 N 절단으로 처리한다.
 // null 이면 전체(절단 없음).
-const TOP_OPTIONS = [null, 100, 200, 300, 400, 500] as const;
+// 통합은 두 지수를 합쳐 600 종목에 가까워 100 단위로는 구간이 너무 성기다 → 50 단위.
+// 단일 지수는 종목 수가 적어 100 단위 그대로 둔다.
+const COMBINED_TOP_STEP = 50;
+const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400, 500];
+
+/**
+ * 보기별 상위 N 선택지. 통합은 실제 종목 수까지만 50 단위로 채운다
+ * (전체 개수 이상은 `전체` 와 같은 결과라 만들지 않는다).
+ *
+ * 지금 고른 값이 목록에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어
+ * 무엇이 적용 중인지 알 수 없다 (`/strategy-sm` 의 저장값 처리와 같은 규칙).
+ */
+function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
+  const options: (number | null)[] =
+    view === "COMBINED"
+      ? [null, ...Array.from(
+          { length: Math.max(0, Math.ceil(rowCount / COMBINED_TOP_STEP) - 1) },
+          (_, i) => (i + 1) * COMBINED_TOP_STEP,
+        )]
+      : [...SINGLE_TOP_OPTIONS];
+  if (current !== null && !options.includes(current)) {
+    options.push(current);
+    options.sort((a, b) => (a ?? -1) - (b ?? -1));
+  }
+  return options;
+}
 
 function formatUsd(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";
@@ -198,11 +223,19 @@ export function UsMarketStockManager({
     [rows, topCount],
   );
 
+  const topChoices = useMemo(() => topOptions(view, rows.length, topCount), [view, rows.length, topCount]);
+
   useEffect(() => {
     onSummaryChange?.({ index: view, count: visibleRows.length, totalCount });
   }, [view, visibleRows.length, totalCount, onSummaryChange]);
 
-  const gridRows = useMemo(() => [...visibleRows], [visibleRows]);
+  // `#` 은 지금 보고 있는 목록에서의 위치다. 백엔드가 준 rank 는 지수 안에서의 순위라
+  // 통합 보기에서는 두 지수의 번호가 섞여 중복·누락이 생긴다(상위 150 인데 144 까지만 보이는 등).
+  // 시총 내림차순으로 합쳐 자른 뒤 여기서 1 번부터 다시 매긴다.
+  const gridRows = useMemo(
+    () => visibleRows.map((row, index) => ({ ...row, rank: index + 1 })),
+    [visibleRows],
+  );
 
   const allVisibleSelected = useMemo(() => {
     return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
@@ -512,7 +545,7 @@ export function UsMarketStockManager({
                         marginLeft: 6,
                       }}
                     >
-                      {TOP_OPTIONS.map((count) => (
+                      {topChoices.map((count) => (
                         <option key={count ?? "all"} value={count === null ? "all" : String(count)}>
                           {count === null ? "전체" : `상위 ${count}`}
                         </option>
