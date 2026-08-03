@@ -75,7 +75,14 @@ def main() -> int:
         f"yearly={yearly_result['year_date']} "
         f"(미래 row 제거 {cleanup['deleted']}건)"
     )
-    _send_data_aggregate_summary()
+    # 슬랙 발송 중단 (2026-08-03) — 이 배치는 월~토 매시 30분(주 144회) 도는데,
+    # 보내던 내용(총자산·금일/금주/금월/금년 손익·현금)이 `전체 자산 요약`
+    # (`scripts/slack_asset_summary.py`, 평일 09:40·16:10) 메시지에 그대로 포함된다.
+    # 같은 내용이 14배 자주 와서 채널이 묻히므로 알림은 그쪽으로 일원화했다.
+    # 집계 자체는 그대로 매시 수행한다. 배치가 죽는 경우는 `infra/cron/run_batch.py`
+    # 래퍼가 여전히 `<!channel>` 로 알린다.
+    # 되살리려면 아래 한 줄의 주석을 풀면 된다 (함수는 그대로 남겨 두었다).
+    # _send_data_aggregate_summary()
     return 0
 
 
