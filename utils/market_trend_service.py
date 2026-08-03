@@ -34,10 +34,10 @@ INDICES: list[dict[str, str]] = [
     {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
     {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "코스닥", "yf_ticker": "^KQ11", "kor_naver_symbol": "KOSDAQ"},
+    {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
     {"name": "다우존스", "yf_ticker": "^DJI"},
     {"name": "S&P 500", "yf_ticker": "^GSPC"},
     {"name": "나스닥 100", "yf_ticker": "^NDX"},
-    {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
     {"name": "나스닥 100 선물", "yf_ticker": "NQ=F"},  # 이력=yfinance, 최신 봉=토스(RFU.NQc1) 보강
 ]
 
