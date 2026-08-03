@@ -200,7 +200,7 @@ a {
   padding: 0.15rem 0.5rem;
   border-radius: 0.375rem;
   color: #475569;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 500;
   line-height: 1.2;
   text-align: left;
@@ -222,7 +222,7 @@ a {
   border-radius: 0.375rem;
   background: transparent;
   color: #334155;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 500;
   line-height: 1.2;
   text-align: left;
@@ -322,7 +322,7 @@ a {
   padding: 0.6rem 0.65rem;
   border-radius: 8px;
   background: #f1f5f9;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   color: #334155;
 }
 
@@ -520,7 +520,7 @@ a {
   font-weight: 600;
 }
 .appRailPeriodRow strong {
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 @media (max-width: 900px) {
@@ -746,7 +746,7 @@ a {
   outline: 0;
   background: transparent;
   color: var(--ink);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 500;
 }
 
@@ -855,7 +855,7 @@ a {
 .globalTickerSearchRank {
   min-width: 1.35rem;
   color: #2f6fed;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -869,14 +869,14 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
 .globalTickerSearchResultTicker {
   margin-top: 0.2rem;
   color: #738093;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
 }
 
 .globalTickerSearchResultMeta {
@@ -890,7 +890,7 @@ a {
 
 .globalTickerSearchResultPrice {
   color: var(--ink);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -1047,7 +1047,7 @@ a {
 
 .appLoadingLabel {
   color: var(--muted);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   line-height: 1.35;
 }
 
@@ -1435,7 +1435,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: var(--accent);
   color: #fff;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1447,7 +1447,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--ink);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1474,7 +1474,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--muted);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -2276,7 +2276,7 @@ a {
   gap: 0.45rem;
   align-items: center;
   color: #64748b;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -2416,7 +2416,7 @@ a {
   width: 100%;
   border-collapse: collapse;
   color: #1f2937;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
 }
 
 .compareMetricsTable th,
@@ -2945,7 +2945,7 @@ a {
 
 .comparePerformanceHint {
   color: #64748b;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -3263,7 +3263,7 @@ a {
   width: 15rem;
   overflow: visible;
   pointer-events: none;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   display: flex;
   flex-direction: column;
@@ -3306,7 +3306,7 @@ a {
   background: #fff;
   color: #1f2937;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -4083,7 +4083,7 @@ a {
 }
 
 .live24hPriceCardValue {
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 500;
   letter-spacing: -0.03em;
 }
@@ -4290,7 +4290,7 @@ a {
 
 .appHeaderSubtle {
   color: #6c7a91;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -4317,7 +4317,7 @@ a {
 
 .appResponsiveFiltersToggle {
   min-height: 32px;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -4412,7 +4412,7 @@ a {
 .noteMetaRow {
   margin-bottom: 0.75rem;
   color: #6c7a91;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -4935,7 +4935,7 @@ a {
   }
 
   .globalTickerSearchInputField {
-    font-size: var(--fs-base);
+    font-size: var(--fs-sm);
   }
 
   .globalTickerSearchTopMoversGrid {
@@ -5055,7 +5055,7 @@ a {
 
 .memoListTitle {
   font-weight: 700;
-  font-size: var(--fs-base);
+  font-size: var(--fs-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
