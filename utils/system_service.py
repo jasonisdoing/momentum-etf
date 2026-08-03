@@ -136,7 +136,13 @@ SCHEDULE_ROWS = [
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10 · 15:00 · 16:00 KST",
         "command": "python scripts/leverage_recommend_ma_cross.py",
-        "schedule": {"minutes": [0], "hours": [16], "weekdays": _WEEKDAYS_MON_FRI},
+        # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
+        # (한국시간 새벽 5~6시), 15:00·16:00 은 한국 마감용이다. 시장별로 '장 마감 직후'
+        # 이고 오늘 아직 안 보낸 경우에만 1회 발송하므로 여러 번 돌아도 중복되지 않는다.
+        "schedule": {
+            "slots": [{"hour": 9, "minute": 10}, {"hour": 15, "minute": 0}, {"hour": 16, "minute": 0}],
+            "weekdays": _WEEKDAYS_MON_FRI,
+        },
     },
     {
         "key": "holdings_alarm",
