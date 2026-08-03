@@ -54,7 +54,7 @@ export function HubMenu() {
         }
         .hubMenuGroupTitle {
           margin-bottom: 4px;
-          font-size: 0.74rem;
+          font-size: var(--fs-sm);
           font-weight: 800;
           letter-spacing: 0.06em;
           text-transform: uppercase;
@@ -72,7 +72,7 @@ export function HubMenu() {
           padding: 4px 8px;
           border-radius: 7px;
           color: inherit;
-          font-size: 0.88rem;
+          font-size: var(--fs-base);
           font-weight: 600;
           text-decoration: none;
         }
@@ -87,7 +87,7 @@ export function HubMenu() {
           color: var(--text-muted, #64748b);
         }
         .hubMenuEmoji {
-          font-size: 0.92rem;
+          font-size: var(--fs-base);
           line-height: 1;
         }
       `}</style>

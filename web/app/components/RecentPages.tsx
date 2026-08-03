@@ -120,7 +120,7 @@ export function RecentPages() {
           border: 1px solid rgba(148, 163, 184, 0.45);
           border-radius: 999px;
           background: var(--surface, #ffffff);
-          font-size: 0.82rem;
+          font-size: var(--fs-sm);
           line-height: 1;
           white-space: nowrap;
           flex: 0 0 auto;
@@ -148,7 +148,7 @@ export function RecentPages() {
           border-radius: 999px;
           background: transparent;
           color: var(--text-muted, #64748b);
-          font-size: 1rem;
+          font-size: var(--fs-base);
           line-height: 1;
           cursor: pointer;
         }

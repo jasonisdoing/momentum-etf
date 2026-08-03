@@ -228,7 +228,7 @@ function AssetHelperWeightHistoryChart({
   items: AssetHelperWeightItem[];
 }) {
   if (!rows.length || !items.length) {
-    return <div style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>비중 이력이 없습니다.</div>;
+    return <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-base)" }}>비중 이력이 없습니다.</div>;
   }
 
   const sortedItems = [...items].sort((a, b) => {
@@ -437,8 +437,8 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
 
   const summaryChip = (label: string, value: string, color?: string) => (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-      <span style={{ fontSize: "0.76rem", color: "var(--text-muted)" }}>{label}</span>
-      <strong style={{ fontSize: "0.98rem", color: color ?? "var(--text-normal)" }}>{value}</strong>
+      <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>{label}</span>
+      <strong style={{ fontSize: "var(--fs-base)", color: color ?? "var(--text-normal)" }}>{value}</strong>
     </div>
   );
 
@@ -446,11 +446,11 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
     <div className="assetHelperBacktestResultLayout">
       <div className="assetHelperBacktestTopLayout">
         <div className="assetHelperBacktestResultPanel">
-          <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 4 }}>백테스트 결과</h3>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 4 }}>
+          <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 4 }}>백테스트 결과</h3>
+          <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 4 }}>
             {result.buy_date} ~ {result.end_date} ({result.months}개월)
           </p>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 12 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
             초기 {formatKrw(result.initial_capital)} → 최종 {formatKrw(result.final_value)} · 리밸런싱: {rebalanceLabel(result.rebalance)}
             {result.slippage ? (
               <>
@@ -485,8 +485,8 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
           <LabChart result={result} />
         </div>
         <div className="assetHelperBacktestResultPanel">
-          <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 4 }}>비중 변화</h3>
-          <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 10 }}>
+          <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 4 }}>비중 변화</h3>
+          <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 10 }}>
             매주 금요일 기준 가격 변동이 반영된 종목별 평가금액
           </p>
           <AssetHelperWeightHistoryChart
@@ -496,9 +496,9 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
         </div>
       </div>
       <div className="assetHelperBacktestPerformancePanel">
-        <h3 style={{ fontSize: "0.98rem", fontWeight: 800, marginBottom: 8 }}>백테스트 종목별 성과</h3>
+        <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 8 }}>백테스트 종목별 성과</h3>
         {result.has_late_entry ? (
-          <p style={{ color: "#b45309", background: "rgba(245,158,11,0.08)", fontSize: "0.8rem", padding: "6px 10px", borderRadius: 6, marginBottom: 10 }}>
+          <p style={{ color: "#b45309", background: "rgba(245,158,11,0.08)", fontSize: "var(--fs-sm)", padding: "6px 10px", borderRadius: 6, marginBottom: 10 }}>
             실험 시작 이후 상장된 종목은 배정 예산을 현금으로 대기시켰다가 상장일 종가에 편입합니다.
           </p>
         ) : null}
@@ -542,7 +542,7 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
         }
         .assetHelperWeightTipDate {
           margin-bottom: 5px;
-          font-size: 0.8rem;
+          font-size: var(--fs-sm);
           font-weight: 900;
         }
         .assetHelperWeightTipRow {
@@ -550,7 +550,7 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
           justify-content: space-between;
           gap: 10px;
           min-width: 0;
-          font-size: 0.78rem;
+          font-size: var(--fs-sm);
           line-height: 1.5;
         }
         .assetHelperWeightTipRow span {
@@ -588,7 +588,7 @@ export function AssetHelperBacktestResult({ result }: { result: LabResult }) {
           gap: 7px;
           margin-bottom: 5px;
           color: #334155;
-          font-size: 0.86rem;
+          font-size: var(--fs-sm);
           font-weight: 800;
           overflow: hidden;
           text-overflow: ellipsis;

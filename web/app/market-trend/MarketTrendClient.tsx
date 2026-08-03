@@ -196,7 +196,7 @@ export function MarketTrendPanel({
           const isExpanded = expandedTicker === data.ticker;
           return (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>{isExpanded ? "▾" : "▸"}</span>
+              <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>{isExpanded ? "▾" : "▸"}</span>
               <span>{params.value}</span>
             </span>
           );
@@ -350,7 +350,7 @@ export function MarketTrendPanel({
         .regimeBtTable {
           width: 100%;
           border-collapse: collapse;
-          font-size: 0.9rem;
+          font-size: var(--fs-base);
           white-space: nowrap;
         }
         .regimeBtTable th,
@@ -372,7 +372,7 @@ export function MarketTrendPanel({
           font-weight: 700;
         }
         .regimeBtSectionTitle {
-          font-size: 0.92rem;
+          font-size: var(--fs-base);
           font-weight: 700;
           margin: 14px 0 6px;
         }
@@ -412,7 +412,7 @@ export function MarketTrendClient({
         </section>
         <section className="appSection">
           <div className="card appCard">
-            <div className="card-body" style={{ fontSize: "1rem", lineHeight: 1.7 }}>
+            <div className="card-body" style={{ fontSize: "var(--fs-base)", lineHeight: 1.7 }}>
               <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                 {REGIME_DESCRIPTIONS.map(({ key, text }) => (
                   <li key={key} style={{ marginBottom: "2px", color: REGIME_COLORS[key] }}>
@@ -425,7 +425,7 @@ export function MarketTrendClient({
                 style={{
                   margin: 0,
                   paddingLeft: "1.2rem",
-                  fontSize: "0.9rem",
+                  fontSize: "var(--fs-base)",
                   color: "#5f6b82",
                 }}
               >

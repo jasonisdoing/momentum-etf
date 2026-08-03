@@ -796,11 +796,11 @@ export function AssetChartsManager({
                       key={item.label}
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)", height: "48px" }}
                     >
-                      <span style={{ color: "#475569", fontWeight: 700, fontSize: "0.9rem" }}>{item.label}</span>
+                      <span style={{ color: "#475569", fontWeight: 700, fontSize: "var(--fs-sm)" }}>{item.label}</span>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                        <span style={{ fontWeight: 800, color: item.color ?? "var(--text-strong)", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
+                        <span style={{ fontWeight: 800, color: item.color ?? "var(--text-strong)", fontSize: "var(--fs-base)", textAlign: "right" }}>{item.value}</span>
                         {item.subValue && (
-                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2, fontWeight: 600 }}>
+                          <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", marginTop: 2, fontWeight: 600 }}>
                             {item.subValue}
                           </span>
                         )}
@@ -878,11 +878,11 @@ export function AssetChartsManager({
                       key={item.label}
                       style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "4px 4px", borderBottom: "1px solid rgba(148,163,184,0.18)", height: "48px" }}
                     >
-                      <span style={{ color: "#475569", fontWeight: 700, fontSize: "0.9rem" }}>{item.label}</span>
+                      <span style={{ color: "#475569", fontWeight: 700, fontSize: "var(--fs-sm)" }}>{item.label}</span>
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end" }}>
-                        <span style={{ fontWeight: 800, color: item.color ?? "var(--text-strong)", fontSize: "0.98rem", textAlign: "right" }}>{item.value}</span>
+                        <span style={{ fontWeight: 800, color: item.color ?? "var(--text-strong)", fontSize: "var(--fs-base)", textAlign: "right" }}>{item.value}</span>
                         {item.subValue && (
-                          <span style={{ fontSize: "0.72rem", color: "var(--text-muted)", marginTop: 2, fontWeight: 600 }}>
+                          <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", marginTop: 2, fontWeight: 600 }}>
                             {item.subValue}
                           </span>
                         )}

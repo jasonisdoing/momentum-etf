@@ -492,7 +492,7 @@ export function AppShell({ children }: AppShellProps) {
                     background: "#fef3c7",
                     color: "#92400e",
                     fontWeight: 700,
-                    fontSize: "0.82rem",
+                    fontSize: "var(--fs-sm)",
                     whiteSpace: "nowrap",
                   }}
                 >

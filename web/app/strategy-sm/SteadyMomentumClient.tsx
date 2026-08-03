@@ -193,7 +193,7 @@ function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
     }));
 }
 
-const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "0.8rem" };
+const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 const numberInputStyle: React.CSSProperties = { width: 88, textAlign: "right" };
 
 function formatNumber(value: number | null | undefined, digits = 0): string {
@@ -699,7 +699,7 @@ export function SteadyMomentumClient() {
     });
 
     const columns: ColDef<YearRow>[] = [
-      { headerName: "연도", field: "year", width: 110, cellStyle: () => ({ fontWeight: 700 }) },
+      { headerName: "연도", field: "year", width: 104, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략(%)", "strategy_pct", "strategy_partial"),
       pctColumn(
         `${backtest.benchmark_ticker}(%)`,
@@ -868,16 +868,16 @@ export function SteadyMomentumClient() {
           <div className="card-body">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>현재 선정 종목</span>
+                <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 선정 종목</span>
                 {view.picks ? (
-                  <span style={{ ...hintStyle, fontSize: "0.82rem" }}>
+                  <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     <b style={{ color: "inherit" }}>{view.picks.portfolio_month} 포트폴리오</b> ·{" "}
                     {view.picks.rebalance_date} 종가 교체 (판정 {view.picks.signal_date}) · 유니버스{" "}
                     {view.picks.universe_count} → 후보 {view.picks.candidate_count} → 선정 {selectedCount}
                     {reserveCount > 0 ? ` (+차순위 ${reserveCount})` : ""} · 다음 교체 전까지 결과가 바뀌지 않습니다
                   </span>
                 ) : (
-                  <span style={{ ...hintStyle, fontSize: "0.82rem" }}>
+                  <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     {pickFailed
                       ? "선정 결과를 불러오지 못했습니다. 설정을 저장하거나 새로고침하세요."
                       : "이번 달 확정 포트폴리오를 계산하고 있습니다."}
@@ -907,7 +907,7 @@ export function SteadyMomentumClient() {
           <div className="card-body">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <span style={{ fontWeight: 700, fontSize: "0.95rem" }}>백테스트</span>
+                <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>백테스트</span>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">보기</span>
                   <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="백테스트 보기 단위">
@@ -946,7 +946,7 @@ export function SteadyMomentumClient() {
             {backtesting ? <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} /> : null}
             {backtest && !backtesting ? (
               <>
-                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "0.86rem", padding: "2px 0 8px" }}>
+                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)", padding: "2px 0 8px" }}>
                   <span>
                     {backtest.start_date} ~ {backtest.end_date}
                   </span>
@@ -981,7 +981,7 @@ export function SteadyMomentumClient() {
                   </span>
                 </div>
                 {viewMode === "daily" && backtest.daily.length === 0 ? (
-                  <span style={{ ...hintStyle, fontSize: "0.84rem" }}>
+                  <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     일간은 따로 계산합니다. 이 탭에서 실행을 누르면 일별 성과가 표시됩니다.
                   </span>
                 ) : viewMode === "daily" ? (
@@ -1020,7 +1020,7 @@ export function SteadyMomentumClient() {
                     {yearRows.some(
                       (row) => row.strategy_partial || row.benchmark_partial || row.reference_partial,
                     ) ? (
-                      <span style={{ ...hintStyle, fontSize: "0.78rem" }}>
+                      <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                         * 12개월이 다 차지 않은 해 — 있는 달만 합성한 부분 기간입니다.
                       </span>
                     ) : null}
@@ -1028,7 +1028,7 @@ export function SteadyMomentumClient() {
                 )}
               </>
             ) : !backtesting ? (
-              <span style={{ ...hintStyle, fontSize: "0.84rem" }}>
+              <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                 실행을 누르면 월별 성과가 표시됩니다. 기간은 위 변수 설정에서 바꿉니다.
               </span>
             ) : null}

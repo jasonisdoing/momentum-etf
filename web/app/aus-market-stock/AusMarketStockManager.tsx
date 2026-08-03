@@ -283,7 +283,7 @@ export function AusMarketStockManager({
         minWidth: 96,
         cellStyle: {
           fontFamily: "var(--font-mono, monospace)",
-          fontSize: "13px",
+          fontSize: "var(--fs-sm)",
         } as CellStyle,
         cellRenderer: (params: { value?: string }) => {
           const raw = normalizeAsxTicker(String(params.value ?? ""));
@@ -467,7 +467,7 @@ export function AusMarketStockManager({
 
         <div className="card-body appCardBodyTight appTableCardBodyFill">
           {error && (
-            <div style={{ padding: "0.5rem 0.75rem", marginBottom: "0.5rem", background: "#fef2f2", color: "#dc2626", borderRadius: "6px", fontSize: "0.85rem" }}>
+            <div style={{ padding: "0.5rem 0.75rem", marginBottom: "0.5rem", background: "#fef2f2", color: "#dc2626", borderRadius: "6px", fontSize: "var(--fs-sm)" }}>
               {error}
             </div>
           )}

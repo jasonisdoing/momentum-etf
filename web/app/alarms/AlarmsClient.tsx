@@ -29,7 +29,7 @@ const selectStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.4)",
   borderRadius: 6,
   padding: "3px 6px",
-  fontSize: "0.85rem",
+  fontSize: "var(--fs-sm)",
 };
 
 export function AlarmsClient() {
@@ -168,8 +168,8 @@ export function AlarmsClient() {
         {/* 이동선 이탈 */}
         <div className="card appCard">
           <div className="card-body">
-            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>📉 이동선 이탈 알림</h2>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
+            <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>📉 이동선 이탈 알림</h2>
+            <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
               계좌별로 켜고, 계좌마다 다른 기준 이평선을 선택할 수 있습니다. 보유 종목의 종가가 그 이평선 아래면 알립니다.
               맨 오른쪽 아이콘은 자산 관리·자산 헬퍼 종목명에 붙는 배지입니다(비우면 표시 안 함).
             </p>
@@ -182,8 +182,8 @@ export function AlarmsClient() {
         {/* 손절 */}
         <div className="card appCard">
           <div className="card-body">
-            <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>🛑 손절 알림</h2>
-            <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
+            <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>🛑 손절 알림</h2>
+            <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
               계좌별로 켜고, 계좌마다 다른 손절 기준을 선택할 수 있습니다. 보유 종목의 수익률이 그 기준 이하면 알립니다.
               맨 오른쪽 아이콘은 자산 관리·자산 헬퍼 종목명에 붙는 배지입니다(비우면 표시 안 함).
             </p>

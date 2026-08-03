@@ -1,4 +1,27 @@
 :root {
+  /* 글꼴 — `Pretendard Variable` 은 app/layout.tsx 에서 실제로 로드한다.
+     그 뒤는 로드 실패나 구형 브라우저를 위한 대비책일 뿐 평상시엔 쓰이지 않는다. */
+  --app-font-sans:
+    "Pretendard Variable", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Segoe UI", sans-serif;
+  --app-font-mono:
+    "SFMono-Regular", "SF Mono", "JetBrains Mono", "Fira Code", "Menlo", "Monaco", "Consolas",
+    "Liberation Mono", monospace;
+
+  /* 글자 크기 6단계. 새 font-size 는 반드시 이 토큰만 쓴다 — 원시 px/rem 금지.
+     루트(html)는 브라우저 기본 16px 그대로 둔다(건드리면 Tabler 내부까지 흔들린다).
+
+     기준 16px 는 브라우저 기본값이자 접근성 권장치다. 단계는 Tailwind 와 같은
+     12/14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
+     크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 여섯 줄을 같이 조정한다.
+     (단계 간격이 무너지면 토큰을 나눠 둔 의미가 없어진다) */
+  --fs-xs: 0.75rem; /* 12px — 텍스트 아님. 접기 화살표 같은 글리프 전용 */
+  --fs-sm: 0.875rem; /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
+  --fs-base: 1rem; /* 16px — 본문, 입력, 버튼, 카드 (기준) */
+  --fs-lg: 1.125rem; /* 18px — 카드·섹션 제목 */
+  --fs-xl: 1.25rem; /* 20px — 화면 제목 */
+  --fs-2xl: 1.5rem; /* 24px — 대시보드 큰 숫자 */
+
   --app-content-max-width: 1680px;
   --app-page-inset: 0.875rem;
   --app-header-height: 2.585rem;
@@ -29,18 +52,36 @@ body {
   overflow-x: hidden;
   background: var(--bg);
   color: var(--ink);
-  font-family:
-    "Pretendard",
-    "Noto Sans KR",
-    "Apple SD Gothic Neo",
-    "Malgun Gothic",
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--app-font-sans);
 }
 
 body {
   display: flex;
   flex-direction: column;
+  /* 크기는 body 에만 준다. html 에 주면 rem 의 기준 자체가 바뀌어
+     rem 으로 쓴 모든 값이 같은 비율로 따라 움직인다(= 아무것도 안 바뀐 셈). */
+  font-size: var(--fs-base);
+}
+
+/* Tabler 기본 컨트롤 크기를 토큰에 맞춘다.
+   Tabler 는 본문 14px, `-sm` 컨트롤 12px 를 쓰는데 이 앱 기준은 15px 라
+   그대로 두면 같은 화면 안에서 크기가 어긋난다(메모 화면이 그랬다). */
+.form-control,
+.form-select {
+  font-size: var(--fs-base);
+}
+
+.form-control-sm,
+.form-select-sm {
+  font-size: var(--fs-sm);
+}
+
+.btn {
+  font-size: var(--fs-base);
+}
+
+.btn-sm {
+  font-size: var(--fs-sm);
 }
 
 input[type="number"]::-webkit-outer-spin-button,
@@ -115,7 +156,7 @@ a {
   align-items: center;
   min-height: 2.25rem;
   padding: 0.125rem 0.25rem 0.5rem;
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   line-height: 1.2;
   color: #f8fafc;
   font-weight: 700;
@@ -159,7 +200,7 @@ a {
   padding: 0.15rem 0.5rem;
   border-radius: 0.375rem;
   color: #475569;
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   font-weight: 500;
   line-height: 1.2;
   text-align: left;
@@ -181,7 +222,7 @@ a {
   border-radius: 0.375rem;
   background: transparent;
   color: #334155;
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   font-weight: 500;
   line-height: 1.2;
   text-align: left;
@@ -255,7 +296,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   line-height: 1;
 }
 
@@ -281,7 +322,7 @@ a {
   padding: 0.6rem 0.65rem;
   border-radius: 8px;
   background: #f1f5f9;
-  font-size: 0.88rem;
+  font-size: var(--fs-base);
   color: #334155;
 }
 
@@ -319,13 +360,13 @@ a {
 }
 
 .appSidebarSentimentValue strong {
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   color: #1e293b;
 }
 
 .appSidebarSentimentSub {
   color: #64748b;
-  font-size: 0.78rem;
+  font-size: var(--fs-sm);
 }
 
 .appMain {
@@ -373,7 +414,7 @@ a {
 
 .appMobileBrand {
   color: var(--ink);
-  font-size: 1.08rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
   line-height: 1;
 }
@@ -413,7 +454,7 @@ a {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  font-size: 0.96rem;
+  font-size: var(--fs-base);
   padding: 0 0 1rem;
 }
 
@@ -472,14 +513,14 @@ a {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
 }
 .appRailPeriodLabel {
   color: var(--text-muted, #64748b);
   font-weight: 600;
 }
 .appRailPeriodRow strong {
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 @media (max-width: 900px) {
@@ -499,7 +540,7 @@ a {
 }
 
 .page-title {
-  font-size: 1.5rem;
+  font-size: var(--fs-2xl);
   line-height: 1.25;
 }
 
@@ -535,7 +576,7 @@ a {
 
 .pageFrameTitle h1 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--fs-lg);
   line-height: 1.2;
   font-weight: 600;
   color: var(--muted);
@@ -569,16 +610,7 @@ a {
 }
 
 .appCodeText {
-  font-family:
-    "SFMono-Regular",
-    "SF Mono",
-    "JetBrains Mono",
-    "Fira Code",
-    "Menlo",
-    "Monaco",
-    "Consolas",
-    "Liberation Mono",
-    monospace;
+  font-family: var(--app-font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   letter-spacing: 0.01em;
@@ -629,7 +661,7 @@ a {
   flex-wrap: nowrap;
   min-width: 0;
   color: var(--muted);
-  font-size: 13.75px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
   line-height: 1;
   /* 좁은 화면에서 넘치는 시세 값은 useFitOneLine 훅이 오른쪽부터 숨긴다(잘림 방지). */
@@ -663,7 +695,7 @@ a {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   text-align: left;
   cursor: pointer;
@@ -714,7 +746,7 @@ a {
   outline: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.96rem;
+  font-size: var(--fs-base);
   font-weight: 500;
 }
 
@@ -736,7 +768,7 @@ a {
 
 .globalTickerSearchSectionTitle {
   color: var(--ink);
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
 }
 
@@ -754,7 +786,7 @@ a {
   border-radius: 999px;
   background: #eef1f5;
   color: #556173;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -798,7 +830,7 @@ a {
 
 .globalTickerSearchTopMoversTitle {
   color: var(--ink);
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -823,7 +855,7 @@ a {
 .globalTickerSearchRank {
   min-width: 1.35rem;
   color: #2f6fed;
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -837,14 +869,14 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink);
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
 .globalTickerSearchResultTicker {
   margin-top: 0.2rem;
   color: #738093;
-  font-size: 0.88rem;
+  font-size: var(--fs-base);
 }
 
 .globalTickerSearchResultMeta {
@@ -858,14 +890,14 @@ a {
 
 .globalTickerSearchResultPrice {
   color: var(--ink);
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
 .globalTickerSearchEmpty {
   padding: 0.25rem 0.1rem;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 @keyframes globalTickerSearchPanelIn {
@@ -882,7 +914,7 @@ a {
 
 .topbarFxItem strong {
   color: var(--ink);
-  font-size: 18.15px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   line-height: 1;
 }
@@ -921,7 +953,7 @@ a {
 
 .topbarSentimentText {
   color: var(--muted);
-  font-size: 13.75px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -968,7 +1000,7 @@ a {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 
 .appPageStack {
@@ -1015,7 +1047,7 @@ a {
 
 .appLoadingLabel {
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   line-height: 1.35;
 }
 
@@ -1086,7 +1118,7 @@ a {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 0.875rem;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 .appToastClose {
@@ -1128,13 +1160,13 @@ a {
 
 .pageHeaderCompact h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--fs-2xl);
   line-height: 1.15;
 }
 
 .section h2 {
   margin: 0 0 12px;
-  font-size: 26px;
+  font-size: var(--fs-2xl);
 }
 
 .sectionHeaderCompact {
@@ -1147,7 +1179,7 @@ a {
 
 .sectionHeaderCompact h2 {
   margin: 0;
-  font-size: 19px;
+  font-size: var(--fs-xl);
 }
 
 .launcherGrid {
@@ -1176,13 +1208,13 @@ a {
   border-radius: 10px;
   background: rgba(32, 107, 196, 0.08);
   color: var(--accent);
-  font-size: 22px;
+  font-size: var(--fs-2xl);
   font-weight: 700;
   margin-bottom: 0.875rem;
 }
 
 .appLauncherTitle {
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 700;
   line-height: 1.35;
   margin-bottom: 0.375rem;
@@ -1190,7 +1222,7 @@ a {
 
 .appLauncherDescription {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -1212,7 +1244,7 @@ a {
   align-items: center;
   justify-content: center;
   min-height: 2.5rem;
-  font-size: 1.5rem;
+  font-size: var(--fs-2xl);
   font-weight: 700;
   color: var(--ink);
 }
@@ -1256,7 +1288,7 @@ a {
 }
 
 .dashboardMiniChartTitle {
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
 }
 
 .dashboardMiniChartBody {
@@ -1298,7 +1330,7 @@ a {
 }
 
 .dashboardPeriodProfitLabel {
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: #1f2d3d;
 }
@@ -1311,12 +1343,12 @@ a {
 }
 
 .dashboardPeriodProfitAmount {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
 }
 
 .dashboardPeriodProfitPct {
-  font-size: 0.94rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -1381,7 +1413,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--ink);
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-family: inherit;
 }
 
@@ -1403,7 +1435,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: var(--accent);
   color: #fff;
-  font-size: 0.93rem;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1415,7 +1447,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--ink);
-  font-size: 0.93rem;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1442,7 +1474,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--muted);
-  font-size: 0.93rem;
+  font-size: var(--fs-base);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1469,7 +1501,7 @@ a {
   margin-bottom: 0.75rem;
   padding: 0.625rem 0.75rem;
   border-radius: var(--tblr-border-radius);
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -1551,13 +1583,13 @@ a {
 .accountToolbarMeta {
   flex-wrap: wrap;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .rankToolbarMeta {
   justify-content: flex-end;
   gap: 10px;
-  font-size: 16px;
+  font-size: var(--fs-base);
   font-weight: 500;
 }
 
@@ -1578,7 +1610,7 @@ a {
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .summaryReadonlyBlock {
@@ -1589,7 +1621,7 @@ a {
 
 .summaryReadonlyLabel {
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -1614,7 +1646,7 @@ a {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.74);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -1631,7 +1663,7 @@ a {
   gap: 14px;
   margin-bottom: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .marketTableWrap {
@@ -1649,7 +1681,7 @@ a {
   min-width: 1120px;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 .marketTable thead th {
@@ -1782,7 +1814,7 @@ a {
 }
 
 .tickerDetailHeroTitle {
-  font-size: 1.9rem;
+  font-size: var(--fs-2xl);
   line-height: 1.15;
   font-weight: 800;
   color: #1f2937;
@@ -1795,14 +1827,14 @@ a {
 }
 
 .tickerDetailHeroPrice {
-  font-size: 1.75rem;
+  font-size: var(--fs-2xl);
   line-height: 1;
   font-weight: 800;
   color: #0f172a;
 }
 
 .tickerDetailHeroChange {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   line-height: 1;
   font-weight: 800;
 }
@@ -1828,12 +1860,12 @@ a {
 
 .tickerDetailTableTitle {
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--fs-base);
   line-height: 1.35;
 }
 
 .tickerDetailTableMeta {
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .tickerDetailChartWrap {
@@ -1926,7 +1958,7 @@ a {
 }
 
 .tickerDetailInfoLabel {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: #4b5563;
 }
@@ -1940,7 +1972,7 @@ a {
 
 .tickerDetailInfoMain strong,
 .tickerDetailInfoMetric strong {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   line-height: 1.1;
   font-weight: 800;
   color: #1f2937;
@@ -1984,7 +2016,7 @@ a {
 
 .tickerDetailInfoTrackerHint {
   color: #8a94a6;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 
 .tickerDetailInfoTrackerRow {
@@ -2002,13 +2034,13 @@ a {
 }
 
 .tickerDetailInfoTrackerLabel {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 800;
   color: #1f2937;
 }
 
 .tickerDetailInfoTrackerRow strong {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   font-weight: 800;
   color: #1f2937;
 }
@@ -2024,7 +2056,7 @@ a {
 
 .tickerDetailInfoTrackerValue span {
   color: #8a94a6;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -2044,7 +2076,7 @@ a {
   margin-top: 0.2rem;
   border-top: 1px dashed #d6deea;
   color: #64748b;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   line-height: 1.25;
 }
 
@@ -2081,7 +2113,7 @@ a {
   gap: 0.18rem;
   min-width: 0;
   color: #64748b;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   line-height: 1.25;
 }
 
@@ -2113,7 +2145,7 @@ a {
   align-items: baseline;
   justify-content: flex-end;
   gap: 0.35rem;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: #4b5563;
   white-space: nowrap;
@@ -2128,7 +2160,7 @@ a {
   display: inline-flex;
   align-items: baseline;
   gap: 0.25rem;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   color: #1f2937;
 }
 
@@ -2145,7 +2177,7 @@ a {
   align-items: center;
   gap: 0.55rem;
   flex-wrap: wrap;
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -2244,7 +2276,7 @@ a {
   gap: 0.45rem;
   align-items: center;
   color: #64748b;
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -2288,7 +2320,7 @@ a {
 
 .compareHeroTicker {
   color: #111827;
-  font-size: 1.35rem;
+  font-size: var(--fs-2xl);
   font-weight: 800;
 }
 
@@ -2296,7 +2328,7 @@ a {
   margin-top: 0.25rem;
   min-height: 1.4rem;
   color: #64748b;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -2309,7 +2341,7 @@ a {
 
 .compareHeroPrice strong {
   color: #1f2937;
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
 }
 
 .compareSection {
@@ -2327,13 +2359,13 @@ a {
 .compareSectionHeader h2 {
   margin: 0;
   color: #111827;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 800;
 }
 
 .compareSectionMeta {
   color: #64748b;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-align: right;
 }
@@ -2343,7 +2375,7 @@ a {
   gap: 0.85rem;
   align-items: center;
   color: #64748b;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -2384,7 +2416,7 @@ a {
   width: 100%;
   border-collapse: collapse;
   color: #1f2937;
-  font-size: 0.92rem;
+  font-size: var(--fs-base);
 }
 
 .compareMetricsTable th,
@@ -2471,14 +2503,14 @@ a {
 .assetChartsCardHeader h2 {
   margin: 0;
   color: #1f2937;
-  font-size: 1.05rem;
+  font-size: var(--fs-lg);
   font-weight: 800;
 }
 
 .assetChartsCardHeader p {
   margin: 0.2rem 0 0;
   color: #64748b;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -2499,7 +2531,7 @@ a {
 .assetChartsTooltipTitle {
   margin-bottom: 0.35rem;
   color: #cbd5e1;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 800;
 }
 
@@ -2508,7 +2540,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -2571,7 +2603,7 @@ a {
   color: #1f2937;
   font-weight: 800;
   /* 라벨 열을 좁게 쓰기 위해 본문보다 약간 작은 크기로 고정한다. */
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   text-align: center;
   white-space: nowrap;
 }
@@ -2601,7 +2633,7 @@ a {
 .compareSharpeLegend {
   grid-column: 1 / -1;
   padding: 0.6rem 1rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #475569;
   background: #f8fafc;
   border-top: 1px solid #d6deea;
@@ -2631,7 +2663,7 @@ a {
 }
 
 .compareMetricsGroupLabel .compareMatrixLabelHint {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: #64748b;
   font-weight: 400;
   /* 라벨은 한 줄 고정이지만 보조 설명(기간 등)은 좁은 열에서 접히게 둔다. */
@@ -2657,7 +2689,7 @@ a {
   color: #64748b;
   /* 좁아진 라벨 열에 맞춰 좌우 패딩·글자 크기를 줄인다(값 셀은 그대로). */
   padding-inline: 0.35rem;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   white-space: nowrap;
 }
 
@@ -2722,7 +2754,7 @@ a {
      flex 아이템으로 늘려야 년월(왼쪽)·평균(오른쪽) 끝이 셀 양끝에 정확히 맞는다. */
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 0.96rem; /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
+  font-size: var(--fs-base); /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
   /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다.
      폰트가 font-variant-numeric 을 무시하는 경우까지 대비해 feature-settings 도 함께 준다. */
   font-variant-numeric: tabular-nums;
@@ -2759,7 +2791,7 @@ a {
 
 .compareMetricCellHint {
   color: var(--text-muted, #64748b);
-  font-size: 0.7rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -2824,7 +2856,7 @@ a {
 .compareBasicValue strong:not(.metricPositive):not(.metricNegative),
 .compareBasicCell strong:not(.metricPositive):not(.metricNegative) {
   color: #1f2937;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 900;
 }
 
@@ -2838,7 +2870,7 @@ a {
   gap: 0.15rem;
   align-items: flex-end;
   color: #64748b;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   line-height: 1.25;
 }
 
@@ -2861,12 +2893,12 @@ a {
   border-radius: 999px;
   background: #eef2f7;
   color: #6b7280;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   line-height: 1;
 }
 
 .compareProductCode {
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 900;
   padding-right: 2rem;
 }
@@ -2874,7 +2906,7 @@ a {
 .compareProductName {
   overflow: hidden;
   color: #1f2937;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 800;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -2913,7 +2945,7 @@ a {
 
 .comparePerformanceHint {
   color: #64748b;
-  font-size: 0.88rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -2928,7 +2960,7 @@ a {
   min-height: 3rem;
   padding: 0.55rem 1rem;
   color: #1f2937;
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
   font-weight: 900;
 }
 
@@ -3051,7 +3083,7 @@ a {
   min-width: 0;
   overflow: hidden;
   color: #9ca3af;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3080,7 +3112,7 @@ a {
 }
 
 .tickerDetailChartMaLabel {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #5b6778;
   font-weight: 600;
 }
@@ -3089,7 +3121,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .tickerDetailChartMaSwatch {
@@ -3219,7 +3251,7 @@ a {
   align-items: center;
   justify-content: center;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   padding: 1.5rem;
 }
@@ -3231,7 +3263,7 @@ a {
   width: 15rem;
   overflow: visible;
   pointer-events: none;
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   font-weight: 600;
   display: flex;
   flex-direction: column;
@@ -3257,7 +3289,7 @@ a {
 
 .tickerDetailChartBadgeArrow {
   position: absolute;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   line-height: 1;
   transform: translateX(-50%);
 }
@@ -3274,7 +3306,7 @@ a {
   background: #fff;
   color: #1f2937;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -3317,8 +3349,12 @@ a {
   --ag-border-color: rgba(220, 225, 231, 0.85);
   --ag-row-border-color: rgba(220, 225, 231, 0.85);
   --ag-header-column-resize-handle-color: rgba(32, 107, 196, 0.25);
-  --ag-font-size: 0.95rem;
-  --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  /* 표는 본문보다 한 단계 작은 --fs-sm 을 쓴다(밀도 확보). 이유는 app-grid-theme.ts 참고.
+     다만 이 CSS 경로는 AppAgGrid 에 theme="legacy" 를 넘길 때만 쓰인다.
+     현재 모든 화면이 createAppGridTheme() 객체를 넘기므로 실제 표 글자 크기는
+     app/components/app-grid-theme.ts 의 fontSize 가 정한다. 둘을 같이 맞춰 둔다. */
+  --ag-font-size: var(--fs-sm);
+  --ag-font-family: var(--app-font-sans);
 }
 
 @media (max-width: 0px) {
@@ -3337,15 +3373,15 @@ a {
   }
 
   .tickerDetailHeroTitle {
-    font-size: 1.5rem;
+    font-size: var(--fs-2xl);
   }
 
   .tickerDetailHeroPrice {
-    font-size: 1.35rem;
+    font-size: var(--fs-2xl);
   }
 
   .tickerDetailHeroChange {
-    font-size: 1rem;
+    font-size: var(--fs-base);
   }
 
   .tickerDetailLayoutGrid,
@@ -3952,7 +3988,7 @@ a {
   min-width: 0;
   height: 2rem;
   padding: 0.2rem 0.45rem;
-  font-size: 0.84rem;
+  font-size: var(--fs-sm);
   line-height: 1.2;
 }
 
@@ -3983,7 +4019,7 @@ a {
 }
 
 .assetsInlineLinkButton {
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
 }
 
 .assetsMoveLinkButton {
@@ -4043,11 +4079,11 @@ a {
 
 .live24hPriceCardName {
   min-width: 0;
-  font-size: 0.84rem;
+  font-size: var(--fs-sm);
 }
 
 .live24hPriceCardValue {
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   font-weight: 500;
   letter-spacing: -0.03em;
 }
@@ -4059,7 +4095,7 @@ a {
 .live24hPriceCardSession {
   margin-left: auto;
   padding: 2px 6px;
-  font-size: 0.74rem;
+  font-size: var(--fs-sm);
   font-weight: 800;
 }
 
@@ -4118,7 +4154,7 @@ a {
 
 .appLabeledFieldLabel {
   color: #5b6778;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
@@ -4134,7 +4170,7 @@ a {
 
 .appInlineFieldLabel {
   color: #5b6778;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
@@ -4159,7 +4195,7 @@ a {
 .appSegmentedToggleButton,
 .appActionHeaderInner .btn {
   min-height: 36px;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -4229,14 +4265,14 @@ a {
   align-items: center;
   gap: 0.35rem;
   color: #6c7a91;
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .appHeaderMetricValue {
   color: #182433;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -4254,7 +4290,7 @@ a {
 
 .appHeaderSubtle {
   color: #6c7a91;
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -4281,7 +4317,7 @@ a {
 
 .appResponsiveFiltersToggle {
   min-height: 32px;
-  font-size: 0.88rem;
+  font-size: var(--fs-base);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -4376,7 +4412,7 @@ a {
 .noteMetaRow {
   margin-bottom: 0.75rem;
   color: #6c7a91;
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -4411,7 +4447,7 @@ a {
   z-index: 1;
   padding: 10px 12px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--app-table-head-color);
   background: var(--app-table-head-bg);
@@ -4423,7 +4459,7 @@ a {
   padding: 10px 12px;
   border-top: 1px solid var(--line);
   vertical-align: middle;
-  font-size: 0.96rem;
+  font-size: var(--fs-base);
 }
 
 .erpTable tbody tr:hover {
@@ -4473,7 +4509,7 @@ a {
   justify-content: center;
   width: 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .snapshotsDetailPanel {
@@ -4502,7 +4538,7 @@ a {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 .snapshotsDetailTable th,
@@ -4547,12 +4583,12 @@ a {
 }
 
 .tableAccountCell strong {
-  font-size: 15px;
+  font-size: var(--fs-base);
   line-height: 1.25;
 }
 
 .tableAccountCell span {
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .tableCellStack {
@@ -4624,14 +4660,14 @@ a {
 }
 
 .cashHint {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   line-height: 1.4;
 }
 
 .tableFooterMeta {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   text-align: right;
 }
@@ -4652,7 +4688,7 @@ a {
   gap: 4px;
   margin-bottom: 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .bulkGuide p {
@@ -4714,7 +4750,7 @@ a {
   }
 
   .appMobileBrand {
-    font-size: 1.35rem;
+    font-size: var(--fs-2xl);
     line-height: 1;
   }
 
@@ -4873,7 +4909,7 @@ a {
   }
 
   .topbarFxItem strong {
-    font-size: 1.1rem;
+    font-size: var(--fs-lg);
   }
 
   .topbarSentimentItem {
@@ -4899,7 +4935,7 @@ a {
   }
 
   .globalTickerSearchInputField {
-    font-size: 0.9rem;
+    font-size: var(--fs-base);
   }
 
   .globalTickerSearchTopMoversGrid {
@@ -4939,7 +4975,7 @@ a {
 
 @media (max-width: 0px) {
   .pageHeaderCompact h1 {
-    font-size: 22px;
+    font-size: var(--fs-2xl);
   }
 }
 
@@ -5019,7 +5055,7 @@ a {
 
 .memoListTitle {
   font-weight: 700;
-  font-size: 0.9rem;
+  font-size: var(--fs-base);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -5027,7 +5063,7 @@ a {
 
 .memoListMeta {
   color: var(--text-muted);
-  font-size: 0.76rem;
+  font-size: var(--fs-sm);
 }
 
 /* 메모 체크리스트 (리스트형 메모) */
@@ -5058,7 +5094,7 @@ a {
   border-radius: 6px;
   background: transparent;
   color: var(--text-muted);
-  font-size: 1rem;
+  font-size: var(--fs-lg);
   line-height: 1;
   cursor: pointer;
 }

@@ -13,7 +13,7 @@ const inputStyle: React.CSSProperties = {
   border: "1px solid rgba(148,163,184,0.4)",
   borderRadius: 6,
   padding: "4px 7px",
-  fontSize: "0.86rem",
+  fontSize: "var(--fs-sm)",
 };
 
 const compactRowStyle: React.CSSProperties = {
@@ -29,7 +29,7 @@ const compactLabelStyle: React.CSSProperties = {
   flexShrink: 0,
   color: "var(--text-muted)",
   fontWeight: 700,
-  fontSize: "0.82rem",
+  fontSize: "var(--fs-sm)",
   whiteSpace: "nowrap",
 };
 
@@ -515,7 +515,7 @@ export function LeverageSettingsClient() {
             borderRadius: 6,
             padding: "5px 14px",
             fontWeight: 700,
-            fontSize: "0.9rem",
+            fontSize: "var(--fs-base)",
             cursor: "pointer",
             background: market === m ? "var(--surface, #fff)" : "transparent",
             color: market === m ? "var(--text-normal)" : "var(--text-muted)",
@@ -540,7 +540,7 @@ export function LeverageSettingsClient() {
         <span style={compactLabelStyle}>{label}</span>
         <div style={{ flex: 1, minWidth: 0, display: "flex", gap: 4, alignItems: "center", flexWrap: "nowrap" }}>
           {allowCash && (
-            <label style={{ display: "flex", gap: 3, alignItems: "center", fontSize: "0.8rem", color: "var(--text-muted)", flexShrink: 0 }}>
+            <label style={{ display: "flex", gap: 3, alignItems: "center", fontSize: "var(--fs-sm)", color: "var(--text-muted)", flexShrink: 0 }}>
               <input type="checkbox" checked={isCash} onChange={(e) => setDefenseCash(e.target.checked)} />
               현금
             </label>
@@ -554,7 +554,7 @@ export function LeverageSettingsClient() {
                 onChange={(e) => setAsset(key, "ticker", e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void resolveAsset(key, e.currentTarget.value); } }}
               />
-              <button type="button" className="btn btn-sm btn-outline-secondary" style={{ padding: "3px 6px", fontSize: "0.76rem", flexShrink: 0 }} onClick={() => void resolveAsset(key, a?.ticker ?? "")}>확인</button>
+              <button type="button" className="btn btn-sm btn-outline-secondary" style={{ padding: "3px 6px", fontSize: "var(--fs-sm)", flexShrink: 0 }} onClick={() => void resolveAsset(key, a?.ticker ?? "")}>확인</button>
             </>
           )}
           <input
@@ -598,11 +598,11 @@ export function LeverageSettingsClient() {
             <div style={{ flex: "1 1 340px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="card appCard" style={{ minWidth: 0 }}>
               <div className="card-body">
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>전략 설정</h2>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", lineHeight: 1.45, marginBottom: 8 }}>
+                <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>전략 설정</h2>
+                <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, marginBottom: 8 }}>
                   지수 종가가 이동선 위면 <b>레버리지</b>, 아래면 <b>방어(현금/종목)</b>를 보유합니다. {MARKET_LABEL[market]} 시장.
                 </p>
-                {configMissing && <div className="alert alert-warning py-2" style={{ fontSize: "0.85rem" }}>이 시장의 설정이 아직 없습니다. 값을 채우고 저장하세요.</div>}
+                {configMissing && <div className="alert alert-warning py-2" style={{ fontSize: "var(--fs-sm)" }}>이 시장의 설정이 아직 없습니다. 값을 채우고 저장하세요.</div>}
                 {loadingConfig || !config ? (
                   <div style={{ color: "var(--text-muted)", padding: 12 }}>불러오는 중…</div>
                 ) : (
@@ -614,7 +614,7 @@ export function LeverageSettingsClient() {
                         value={config.index?.name ? `${config.index.name}(${config.index.ticker})` : ""}
                         readOnly
                       />
-                      <span style={{ color: "var(--text-muted)", fontSize: "0.75rem", whiteSpace: "nowrap" }}>고정</span>
+                      <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" }}>고정</span>
                     </div>
                     {assetRow("leverage", "레버리지", false)}
                     {assetRow("defense", "방어", true)}
@@ -647,8 +647,8 @@ export function LeverageSettingsClient() {
 
             <div className="card appCard" style={{ minWidth: 0 }}>
               <div className="card-body">
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>튜닝 설정</h2>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
+                <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>튜닝 설정</h2>
+                <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
                   아래 튜닝 결과와 전략 설정의 선택 가능 범위에 함께 사용됩니다.
                 </p>
                 <div style={{ display: "flex", gap: "10px 12px", alignItems: "flex-end", flexWrap: "wrap" }}>
@@ -663,7 +663,7 @@ export function LeverageSettingsClient() {
                     </select>
                   </label>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "0.82rem" }}>이동선</span>
+                    <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>이동선</span>
                     {([["min", tuneMin, setTuneMin], ["max", tuneMax, setTuneMax], ["step", tuneStep, setTuneStep]] as const).map(([lbl, val, setter]) => (
                       <label key={lbl} className="appInlineField" style={{ flex: "0 0 auto" }}>
                         <span className="appInlineFieldLabel">{lbl}</span>
@@ -672,7 +672,7 @@ export function LeverageSettingsClient() {
                     ))}
                   </div>
                   <div style={{ display: "flex", gap: 7, alignItems: "flex-end", flexWrap: "wrap" }}>
-                    <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "0.82rem" }}>고점대비(%)</span>
+                    <span style={{ color: "var(--text-muted)", fontWeight: 700, paddingBottom: 7, fontSize: "var(--fs-sm)" }}>고점대비(%)</span>
                     {([["min", peakMin, setPeakMin], ["max", peakMax, setPeakMax], ["step", peakStep, setPeakStep]] as const).map(([lbl, val, setter]) => (
                       <label key={lbl} className="appInlineField" style={{ flex: "0 0 auto" }}>
                         <span className="appInlineFieldLabel">{lbl}</span>
@@ -688,8 +688,8 @@ export function LeverageSettingsClient() {
             <div style={{ flex: "1 1 340px", minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="card appCard" style={{ minWidth: 0 }}>
               <div className="card-body">
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>슬랙 알람</h2>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.8rem", lineHeight: 1.45, marginBottom: 12 }}>
+                <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>슬랙 알람</h2>
+                <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, marginBottom: 12 }}>
                   켜두면 배치가 장 마감 직후 {MARKET_LABEL[market]} 추천을 슬랙으로 보냅니다.
                 </p>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
@@ -721,17 +721,17 @@ export function LeverageSettingsClient() {
 
             <div className="card appCard" style={{ minWidth: 0 }}>
               <div className="card-body">
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 12 }}>추천 상태</h2>
+                <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 12 }}>추천 상태</h2>
                 {view?.judgment && rec ? (
                   <>
                     {/* 지금 판정 헤더 */}
                     <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", marginBottom: 2 }}>
-                      <span style={{ fontSize: "1.02rem", fontWeight: 800 }}>
+                      <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
                         {rec.side === "leverage" ? "🟢 레버리지 보유" : "🔵 방어 보유"}
                       </span>
                       <span style={{ color: "var(--text-muted)", fontWeight: 700 }}>· {rec.target_name}({rec.target_ticker})</span>
                     </div>
-                    <div style={{ color: "var(--text-muted)", fontSize: "0.8rem", marginBottom: 10 }}>
+                    <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 10 }}>
                       기준일 {view.judgment.as_of} · {view.ma_type} {view.ma_days}일 / 고점대비 한도 {view.judgment.peak_drawdown_limit_pct.toFixed(0)}%
                     </div>
                     {(() => {
@@ -742,7 +742,7 @@ export function LeverageSettingsClient() {
                         <div
                           style={{
                             color: "var(--text-primary)",
-                            fontSize: "0.86rem",
+                            fontSize: "var(--fs-sm)",
                             fontWeight: 800,
                             marginBottom: 10,
                           }}
@@ -774,8 +774,8 @@ export function LeverageSettingsClient() {
                         { name: "고점대비", needValue: peakRecoveryPct, need: fmtPct(peakRecoveryPct), base: `≥ -${j.peak_drawdown_limit_pct.toFixed(0)}%`, ok: peakOk, margin: peakMargin },
                       ];
                       const signedColor = (value: number) => (value > 0 ? "#dc2626" : value < 0 ? "#2563eb" : "var(--text-primary)");
-                      const th: React.CSSProperties = { textAlign: "left", color: "var(--text-muted)", fontWeight: 600, fontSize: "0.76rem", padding: "2px 6px" };
-                      const td: React.CSSProperties = { padding: "5px 6px", borderTop: "1px solid rgba(148,163,184,0.15)", fontSize: "0.85rem", whiteSpace: "nowrap" };
+                      const th: React.CSSProperties = { textAlign: "left", color: "var(--text-muted)", fontWeight: 600, fontSize: "var(--fs-sm)", padding: "2px 6px" };
+                      const td: React.CSSProperties = { padding: "5px 6px", borderTop: "1px solid rgba(148,163,184,0.15)", fontSize: "var(--fs-sm)", whiteSpace: "nowrap" };
                       return (
                         <table style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
@@ -801,7 +801,7 @@ export function LeverageSettingsClient() {
                     })()}
 
                     {rec.is_changed ? (
-                      <div className="alert alert-warning py-2 mb-0" style={{ marginTop: 10, fontSize: "0.84rem" }}>
+                      <div className="alert alert-warning py-2 mb-0" style={{ marginTop: 10, fontSize: "var(--fs-sm)" }}>
                         ⚠ 전환 예정: {rec.prev_target ?? "-"} → {rec.target_ticker} (다음 종가 확정 시)
                       </div>
                     ) : null}
@@ -812,7 +812,7 @@ export function LeverageSettingsClient() {
 
                 {/* 현재 상태 (실제 보유, 읽기 전용) */}
                 <div style={{ marginTop: 12, paddingTop: 8, borderTop: "1px solid rgba(148,163,184,0.25)" }}>
-                  <div style={{ color: "var(--text-muted)", fontSize: "0.78rem", fontWeight: 700, marginBottom: 4 }}>현재 상태</div>
+                  <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 700, marginBottom: 4 }}>현재 상태</div>
                   {([
                     ["보유 종목", state?.target_name ? `${state.target_name}(${state.target})` : "-"],
                     ["보유 시작일", state?.holding_start_date ?? "-"],
@@ -820,8 +820,8 @@ export function LeverageSettingsClient() {
                     ["갱신 시각", state?.updated_at ? formatKstDateTime(state.updated_at) : "-"],
                   ] as const).map(([label, value]) => (
                     <div key={label} style={{ display: "flex", gap: 12, padding: "4px 0" }}>
-                      <span style={{ width: 84, flexShrink: 0, color: "var(--text-muted)", fontSize: "0.82rem" }}>{label}</span>
-                      <span style={{ fontWeight: 600, fontSize: "0.86rem" }}>{value}</span>
+                      <span style={{ width: 84, flexShrink: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>{label}</span>
+                      <span style={{ fontWeight: 600, fontSize: "var(--fs-sm)" }}>{value}</span>
                     </div>
                   ))}
                 </div>
@@ -832,8 +832,8 @@ export function LeverageSettingsClient() {
 
           <div className="card appCard appTableCardFill" style={{ width: "100%", minHeight: 0 }}>
             <div className="card-body appTableCardBodyFill">
-              <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>튜닝</h2>
-              <p style={{ color: "var(--text-muted)", fontSize: "0.85rem", marginBottom: 12 }}>
+              <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>튜닝</h2>
+              <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 12 }}>
                 기간과 이동선 범위를 지정해 실행하면, 후보 이동선별 성과를 소르티노·CAGR 내림차순으로 보여줍니다.
                 특정 값만 튀지 않고 넓게 완만하면 강건한 규칙입니다.
               </p>
@@ -849,9 +849,9 @@ export function LeverageSettingsClient() {
                   <small>{tuneProgress?.message ?? "계산 중"}</small>
                 </div>
               ) : null}
-              {tuneError ? <div className="alert alert-warning py-2" style={{ fontSize: "0.85rem" }}>{tuneError}</div> : null}
+              {tuneError ? <div className="alert alert-warning py-2" style={{ fontSize: "var(--fs-sm)" }}>{tuneError}</div> : null}
               {tuneResult && !tuneError ? (
-                <div style={{ color: "var(--text-muted)", fontSize: "0.82rem", marginBottom: 6 }}>
+                <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", marginBottom: 6 }}>
                   최근 {tuneResult.months}개월 · 이동선 {tuneResult.ma_range.min}~{tuneResult.ma_range.max} (step {tuneResult.ma_range.step})
                   {" · "}고점대비 {tuneResult.peak_drawdown_range.min}~{tuneResult.peak_drawdown_range.max}% (step {tuneResult.peak_drawdown_range.step}) · 후보 {tuneResult.rows.length}개
                 </div>

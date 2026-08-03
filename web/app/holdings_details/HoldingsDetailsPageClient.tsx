@@ -232,7 +232,7 @@ function HoldingsBoxView({
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 color: "var(--text-strong)",
-                fontSize: "1rem",
+                fontSize: "var(--fs-base)",
                 fontWeight: 800,
                 lineHeight: 1.25,
               }}
@@ -249,15 +249,15 @@ function HoldingsBoxView({
                 marginTop: "0.15rem",
               }}
             >
-              <div style={{ flex: "0 0 auto", color: "var(--text-muted)", fontSize: "0.85rem" }}>
+              <div style={{ flex: "0 0 auto", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
                 {row.ticker}
               </div>
-              <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
+              <span style={{ color: "#475569", fontWeight: 900, fontSize: "var(--fs-base)" }}>
                 {weight.toFixed(2)}%
               </span>
               <span
                 className={getSignedClass(changePct)}
-                style={{ fontSize: "0.95rem", fontWeight: 800 }}
+                style={{ fontSize: "var(--fs-base)", fontWeight: 800 }}
               >
                 {formatSignedPercentWithPlus(changePct)}
               </span>
@@ -436,7 +436,7 @@ export function HoldingsDetailsPageClient() {
             style={{ userSelect: "none" }}
           >
             {hasSources && (
-              <span className="text-primary d-flex align-items-center" style={{ fontSize: "10px", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>
+              <span className="text-primary d-flex align-items-center" style={{ fontSize: "var(--fs-sm)", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>
                 ▶
               </span>
             )}
@@ -521,7 +521,7 @@ export function HoldingsDetailsPageClient() {
         {params.data.sources.map((src, idx) => (
           <div key={idx} className="holdingsDetailRow">
             {/* 1. 티커 (100px) - 좌측 패딩 12px, 폰트 13px 고정 */}
-            <div className="hdColTicker fw-semibold text-muted" style={{ fontFamily: "monospace", fontSize: "13px" }}>
+            <div className="hdColTicker fw-semibold text-muted" style={{ fontFamily: "monospace", fontSize: "var(--fs-sm)" }}>
               <TickerDetailLink ticker={src.etf_ticker} />
             </div>
             
@@ -639,7 +639,7 @@ export function HoldingsDetailsPageClient() {
           >
             {formatSignedPercentWithPlus(averageStats.avgPct)}
           </span>
-          <span style={{ color: "var(--text-muted)", marginLeft: "0.25rem", fontSize: "0.85rem" }}>
+          <span style={{ color: "var(--text-muted)", marginLeft: "0.25rem", fontSize: "var(--fs-sm)" }}>
             (추적 {averageStats.trackedWeight.toFixed(0)}%)
           </span>
         </div>
@@ -775,7 +775,7 @@ export function HoldingsDetailsPageClient() {
           align-items: center;
           border-right: 1px solid #e2e8f0;
           box-sizing: border-box;
-          font-size: 14px;
+          font-size: var(--fs-sm);
         }
         .holdingsDetailRow > div:last-child {
           border-right: none;
@@ -846,7 +846,7 @@ export function HoldingsDetailsPageClient() {
         }
         .holdingsTreemapHeader h3 {
           margin: 0;
-          font-size: 18px;
+          font-size: var(--fs-xl);
           font-weight: 800;
           color: #1f2937;
         }
@@ -857,7 +857,7 @@ export function HoldingsDetailsPageClient() {
           gap: 10px;
         }
         .holdingsTreemapHeader span {
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 700;
           color: #718096;
         }
@@ -866,7 +866,7 @@ export function HoldingsDetailsPageClient() {
           background: transparent;
           color: #4a5568;
           cursor: pointer;
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 800;
           line-height: 1;
           padding: 4px 0;
@@ -912,23 +912,23 @@ export function HoldingsDetailsPageClient() {
           justify-content: space-between;
           margin-top: 6px;
           color: #8a94a6;
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 800;
           line-height: 1;
         }
         .holdingsTreemapTicker {
-          font-size: 16px;
+          font-size: var(--fs-base);
           font-weight: 800;
           letter-spacing: 0;
           dominant-baseline: hanging;
         }
         .holdingsTreemapChange {
-          font-size: 15px;
+          font-size: var(--fs-base);
           font-weight: 800;
           dominant-baseline: hanging;
         }
         .holdingsTreemapWeight {
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 800;
           dominant-baseline: text-after-edge;
         }

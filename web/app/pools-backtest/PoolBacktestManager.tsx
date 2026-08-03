@@ -307,7 +307,7 @@ export function PoolBacktestManager() {
           </div>
 
           <div className="card-body appCardBodyTight appTableCardBodyFill" style={{ overflowY: "auto", padding: "16px 20px" }}>
-            <p style={{ fontSize: "0.88rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "0 0 16px" }}>
+            <p style={{ fontSize: "var(--fs-base)", color: "var(--text-muted)", lineHeight: 1.6, margin: "0 0 16px" }}>
               등급은 <strong>같은 날짜 안에서 종목끼리 상대비교</strong>해 나눕니다(시장 타이밍 효과 제거 — 순위 화면과 같은 관점). <strong>1등급 = 신호 상위</strong>. 고정 보유 종목 제외.
               <br />
               주 지표는 <strong>평균수익</strong>입니다 — 모멘텀은 승률이 아니라 손익비로 벌기 때문에 상승확률로는 안 잡힙니다.{" "}
@@ -329,14 +329,14 @@ export function PoolBacktestManager() {
             <div className="card appCard">
               <div className="card-body">
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
-                  <h3 style={{ fontSize: "0.98rem", fontWeight: 800, margin: "0 0 2px" }}>
+                  <h3 style={{ fontSize: "var(--fs-base)", fontWeight: 800, margin: "0 0 2px" }}>
                     최근 {result.months}개월 실적 — 현재 설정 그대로
                   </h3>
-                  <span style={{ fontSize: "0.85rem", fontWeight: 700, color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "var(--text-muted)" }}>
                     분석 기간 {result.date_from} ~ {result.date_to}
                   </span>
                 </div>
-                <p style={{ color: "var(--text-muted)", fontSize: "0.82rem", margin: "0 0 10px" }}>
+                <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", margin: "0 0 10px" }}>
                   순위 화면의 추천(✅)과 같은 규칙: 이격 상위 {result.performance.top_n_hold}종목, 단기이격이 음수면 제외.
                   {result.forward_days}일마다 리밸런싱({result.performance.rounds}회
                   {result.performance.cash_rounds > 0 ? `, 전부 현금 ${result.performance.cash_rounds}회` : ""}
@@ -409,7 +409,7 @@ export function PoolBacktestManager() {
                           </tr>
                         </tbody>
                       </table>
-                      <p style={{ fontSize: "0.85rem", margin: "8px 2px 0", color: "var(--text-muted)" }}>
+                      <p style={{ fontSize: "var(--fs-sm)", margin: "8px 2px 0", color: "var(--text-muted)" }}>
                         <strong>규칙 − 벤치마크(기여한 몫):</strong>{" "}
                         {bench ? (
                           <span className={signedClass(p.rule.cumulative_pct - bench.cumulative_pct)} style={{ fontWeight: 800 }}>
@@ -424,7 +424,7 @@ export function PoolBacktestManager() {
                     </div>
                   );
                 })()}
-                <p style={{ fontSize: "0.83rem", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
+                <p style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", lineHeight: 1.6, margin: "10px 0 0" }}>
                   <strong>기대수익이 아니라 지나간 {result.months}개월의 실적입니다</strong> — 리밸런싱{" "}
                   {result.performance.rounds}회가 표본의 전부라, 큰 상승장이 통째로 들어오면 숫자가 커집니다. 다음 기간에
                   이만큼을 기대하면 안 됩니다. <strong>벤치마크와의 차이(규칙이 기여한 몫)</strong>를 보세요 — 이 값이 작으면
@@ -439,11 +439,11 @@ export function PoolBacktestManager() {
               <div className="card-body">
                 <details>
                   <summary
-                    style={{ fontSize: "0.98rem", fontWeight: 800, cursor: "pointer", listStyle: "revert" }}
+                    style={{ fontSize: "var(--fs-base)", fontWeight: 800, cursor: "pointer", listStyle: "revert" }}
                   >
                     백테스트 방식
                   </summary>
-                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: "0.85rem", color: "var(--text-muted)", lineHeight: 1.7 }}>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: "var(--fs-sm)", color: "var(--text-muted)", lineHeight: 1.7 }}>
                   <li>
                     <strong>선택</strong>: {result.forward_days}일마다 리밸런싱. 그날 이격&gt;0 그리고 단기이격&ge;0 인
                     종목 중 <strong>이격 상위 {result.performance.top_n_hold}종목</strong>을 보유(순위 화면 추천 ✅ 과 동일).
@@ -481,7 +481,7 @@ export function PoolBacktestManager() {
         .poolBtTable {
           width: 100%;
           border-collapse: collapse;
-          font-size: 0.9rem;
+          font-size: var(--fs-base);
           white-space: nowrap;
         }
         .poolBtTable th,

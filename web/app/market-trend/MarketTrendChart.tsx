@@ -722,7 +722,7 @@ export function MarketTrendChart({
       const statusRows = fc
         ? `
         <div style="margin-top: 6px; border-top: 1px dashed rgba(255,255,255,0.25); padding-top: 6px; display: flex; flex-direction: column; gap: 3px;">
-          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">ST(SuperTrend) 전환 조건</div>
+          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: var(--fs-sm);">ST(SuperTrend) 전환 조건</div>
           <div style="display: flex; justify-content: space-between; gap: 15px;">
             <span>상승:</span> <strong>${getRegimeStatusText("accel_up")}</strong>
           </div>
@@ -737,8 +737,8 @@ export function MarketTrendChart({
       const regimeTextColor = point.regime ? REGIME_COLOR[point.regime] : "#ffffff";
 
       tooltip.innerHTML = `
-        <div style="font-weight:700;margin-bottom:6px;color:#ffffff;font-size:12px;">${point.date}</div>
-        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #e2e8f0;">
+        <div style="font-weight:700;margin-bottom:6px;color:#ffffff;font-size:var(--fs-sm);">${point.date}</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: #e2e8f0;">
           <div>상태: <strong style="color: ${regimeTextColor}">${regimeLabelText} (${days}일차)</strong></div>
           <div>추세 점수: <strong style="color: #ffffff">${formatScore(point.trend_score)}</strong></div>
           ${statusRows}
@@ -823,12 +823,12 @@ export function MarketTrendChart({
             })();
             return (
               <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-                <strong style={{ fontSize: "1.7rem", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>{name}</strong>
+                <strong style={{ fontSize: "var(--fs-2xl)", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>{name}</strong>
                 {cClose != null ? (
-                  <span style={{ fontSize: "1.4rem", fontWeight: 800, color: "#1e293b" }}>{formatNumber(cClose)}</span>
+                  <span style={{ fontSize: "var(--fs-2xl)", fontWeight: 800, color: "#1e293b" }}>{formatNumber(cClose)}</span>
                 ) : null}
                 {cPct != null ? (
-                  <span style={{ fontSize: "1.18rem", fontWeight: 800, color: cPct >= 0 ? "#d62828" : "#1971c2" }}>
+                  <span style={{ fontSize: "var(--fs-xl)", fontWeight: 800, color: cPct >= 0 ? "#d62828" : "#1971c2" }}>
                     {cPct >= 0 ? "+" : ""}
                     {cPct.toFixed(2)}%
                   </span>
@@ -838,7 +838,7 @@ export function MarketTrendChart({
                     <span
                       title={`${formatNumber(trans.target_price)}pt ${trans.mode === "drop_below" ? "아래로 내려가면" : "이상으로 마감하면"} ${REGIME_LABEL[trans.next_regime]} 추세로 전환`}
                       style={{
-                        fontSize: "0.98rem",
+                        fontSize: "var(--fs-base)",
                         fontWeight: 800,
                         color: transColor,
                         whiteSpace: "nowrap",
@@ -851,7 +851,7 @@ export function MarketTrendChart({
                   {latestPoint?.regime ? (
                     <span
                       style={{
-                        fontSize: "1rem",
+                        fontSize: "var(--fs-base)",
                         fontWeight: 800,
                         padding: "5px 15px",
                         borderRadius: 999,
@@ -876,10 +876,10 @@ export function MarketTrendChart({
                 {/* 왼쪽 반: 합성지수는 '구성 지수 기여도', 개별 지수는 '기간 수익률'. */}
                 {data.components && data.components.length > 0 ? (
                   <div style={{ flex: "1 1 0", minWidth: 0 }}>
-                    <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>구성 지수 기여도</div>
+                    <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>구성 지수 기여도</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       {data.components.map((c) => (
-                        <div key={c.ticker} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "0.76rem" }}>
+                        <div key={c.ticker} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-sm)" }}>
                           <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
                           <span style={{ flex: "0 0 auto", color: (c.trend_pct ?? 0) >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(c.trend_pct)}</span>
                           <span style={{ flex: "0 0 auto", fontWeight: 800, color: (c.offense_pct ?? 0) >= (c.defense_pct ?? 0) ? "#d62828" : "#2f9e44" }}>
@@ -894,10 +894,10 @@ export function MarketTrendChart({
                   </div>
                 ) : periodReturns.length > 0 ? (
                   <div style={{ flex: "1 1 0", minWidth: 0 }}>
-                    <div style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
+                    <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                       {periodReturns.map((r) => (
-                        <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "0.76rem" }}>
+                        <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "var(--fs-sm)" }}>
                           <span style={{ fontWeight: 700 }}>{r.label}</span>
                           <span style={{ fontWeight: 800, color: r.pct == null ? "#94a3b8" : r.pct >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(r.pct)}</span>
                         </div>
@@ -909,10 +909,10 @@ export function MarketTrendChart({
                 <div style={{ flex: "1 1 0", minWidth: 0 }}>
                   {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                    <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "#5f6b82" }}>
+                    <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82" }}>
                       공격 / 방어 <span style={{ fontWeight: 400 }}>({maType}{maDays} 기준)</span>
                     </span>
-                    <span style={{ fontSize: "0.82rem", fontWeight: 800 }}>
+                    <span style={{ fontSize: "var(--fs-sm)", fontWeight: 800 }}>
                       <span style={{ color: "#d62828" }}>공격 {data.offense_pct}%</span>
                       <span style={{ color: "#94a3b8" }}> · </span>
                       <span style={{ color: "#2f9e44" }}>방어 {data.defense_pct}%</span>
@@ -936,7 +936,7 @@ export function MarketTrendChart({
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
-                            fontSize: "0.72rem",
+                            fontSize: "var(--fs-sm)",
                             fontWeight: 800,
                           }}
                         >
@@ -947,7 +947,7 @@ export function MarketTrendChart({
                   </div>
                   {/* 다음 단계 예측: 공격/방어 비중이 한 단계 바뀌는 지수 종가(추세 전환 조건과 같은 형식). */}
                   {ratioForecast ? (
-                    <div style={{ fontSize: "0.78rem", color: "#5f6b82", marginTop: 6, lineHeight: 1.5 }}>
+                    <div style={{ fontSize: "var(--fs-sm)", color: "#5f6b82", marginTop: 6, lineHeight: 1.5 }}>
                       <span style={{ fontWeight: 800, textDecoration: "underline" }}>{formatNumber(ratioForecast.targetPrice)}</span>
                       pt {ratioForecast.rising ? "이상으로 마감하면" : "아래로 내려가면"} (현재 대비{" "}
                       <span style={{ fontWeight: 800 }}>
@@ -974,14 +974,14 @@ export function MarketTrendChart({
                 background: "rgba(245, 158, 11, 0.08)",
                 border: "1px solid rgba(245, 158, 11, 0.25)",
                 color: "#d97706",
-                fontSize: "0.82rem",
+                fontSize: "var(--fs-sm)",
                 lineHeight: 1.5,
                 boxShadow: "0 2px 8px rgba(245, 158, 11, 0.03)",
               }}
             >
               <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: "1.1rem", lineHeight: 1 }}>⚠️</span>
-                <strong style={{ fontSize: "0.85rem" }}>
+                <span style={{ fontSize: "var(--fs-lg)", lineHeight: 1 }}>⚠️</span>
+                <strong style={{ fontSize: "var(--fs-sm)" }}>
                   추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(SuperTrend 기준)</span>
                 </strong>
               </div>
@@ -1016,7 +1016,7 @@ export function MarketTrendChart({
           {/* 최근 레짐 이력 뱃지 타임라인 (차트 밖 상단으로 배치하여 차트 가림 방지) */}
           {recentRegimeRanges.length > 0 && (
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: 10, alignItems: "center", justifyContent: "flex-end" }}>
-              <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "#5f6b82" }}>최근 레짐 구간:</span>
+              <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82" }}>최근 레짐 구간:</span>
               {recentRegimeRanges.slice().reverse().map((range, idx) => {
                 const startTxt = formatShortMonthDay(range.startDate);
                 const endTxt = range.isCurrent ? "현재" : formatShortMonthDay(range.endDate);
@@ -1026,7 +1026,7 @@ export function MarketTrendChart({
                     style={{
                       padding: "2px 8px",
                       borderRadius: "10px",
-                      fontSize: "0.72rem",
+                      fontSize: "var(--fs-sm)",
                       fontWeight: "700",
                       color: "#fff",
                       background: REGIME_COLOR[range.regime],
@@ -1085,7 +1085,7 @@ export function MarketTrendChart({
                 borderRadius: 6,
                 background: "rgba(30, 41, 59, 0.95)",
                 color: "#fff",
-                fontSize: "0.84rem",
+                fontSize: "var(--fs-sm)",
                 lineHeight: 1.5,
                 pointerEvents: "none",
                 boxShadow: "0 8px 20px rgba(15, 23, 42, 0.18)",

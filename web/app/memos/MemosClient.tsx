@@ -39,7 +39,7 @@ function isListType(type: MemoType): boolean {
 /** 새 메모의 임시 id — 저장 전까지만 쓰이며 서버로 보내지 않는다. */
 const DRAFT_ID = "__draft__";
 
-const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "0.8rem" };
+const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
 function formatUpdatedAt(value: string | null): string {
   if (!value) return "저장 전";
@@ -294,7 +294,7 @@ export function MemosClient() {
                         <label className="appLabeledField" style={{ flex: 1, minWidth: 0 }}>
                           <span className="appLabeledFieldLabel">제목</span>
                           <input
-                            className="form-control form-control-sm"
+                            className="form-control"
                             value={draftTitle}
                             onChange={(e) => setDraftTitle(e.target.value)}
                             placeholder="메모 제목"
@@ -330,7 +330,7 @@ export function MemosClient() {
                     {!isListType(draftType) ? (
                       <textarea
                         className="form-control"
-                        style={{ fontSize: "0.9rem", minHeight: "24rem", marginTop: 10 }}
+                        style={{ minHeight: "24rem", marginTop: 10 }}
                         rows={18}
                         placeholder="내용을 입력하세요. 서식 없는 일반 텍스트로 저장됩니다."
                         value={draftContent}
@@ -394,8 +394,8 @@ export function MemosClient() {
                               <input
                                 className={
                                   draftType === "todo" && item.done
-                                    ? "form-control form-control-sm memoChecklistText is-done"
-                                    : "form-control form-control-sm memoChecklistText"
+                                    ? "form-control memoChecklistText is-done"
+                                    : "form-control memoChecklistText"
                                 }
                                 value={item.text}
                                 placeholder="할 일"

@@ -1778,7 +1778,7 @@ export function ComparePageClient() {
                 >
                   <div className="compareMatrixLabelText">{metric.label}</div>
                   {metric.label === "포트폴리오 변동" && portfolioChangeBaseDate && (
-                    <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
+                    <div className="compareMatrixLabelHint" style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
                       ({formatKoreanDateLabel(portfolioChangeBaseDate)}
                       {portfolioChangeBaseIsOpen ? " 시초가" : ""} 이후)
                     </div>
@@ -1809,7 +1809,7 @@ export function ComparePageClient() {
             <div className="compareMatrixLabel compareMatrixLabelWide" style={{ flexDirection: "column" }}>
               <div className="compareMatrixLabelText">포트폴리오 변동</div>
               {portfolioChangeBaseDate && (
-                <div className="compareMatrixLabelHint" style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
+                <div className="compareMatrixLabelHint" style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", fontWeight: "normal", marginTop: "4px" }}>
                   ({formatKoreanDateLabel(portfolioChangeBaseDate)} 이후)
                 </div>
               )}
@@ -1895,12 +1895,12 @@ export function ComparePageClient() {
                             <div className="compareHoldingCode" style={{ flex: "0 0 auto" }}>
                               {holdingCode}
                             </div>
-                            <span style={{ color: weightTextColor, fontWeight: 900, fontSize: "0.95rem" }}>
+                            <span style={{ color: weightTextColor, fontWeight: 900, fontSize: "var(--fs-base)" }}>
                               {weight.toFixed(2)}%
                             </span>
                             <span
                               className={getSignedClass(holding.change_pct ?? null)}
-                              style={{ fontSize: "0.95rem", fontWeight: 800 }}
+                              style={{ fontSize: "var(--fs-base)", fontWeight: 800 }}
                             >
                               {formatSignedPercent(holding.change_pct ?? null)}
                             </span>

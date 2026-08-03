@@ -996,9 +996,9 @@ export function AssetHelperClient() {
         <div className="assetHelperMemoLayout">
           <div className="card appCard">
             <div className="card-body">
-              <h2 style={{ fontSize: "1.0rem", fontWeight: 800, marginBottom: 6 }}>시장 상황</h2>
+              <h2 style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 6 }}>시장 상황</h2>
               <div style={{ minHeight: "16rem" }}>
-                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "0.9rem", lineHeight: 1.6 }}>
+                <ul style={{ margin: 0, paddingLeft: "1.1rem", fontSize: "var(--fs-base)", lineHeight: 1.6 }}>
                   {marketRegime ? (
                     <li>
                       <span style={{ fontWeight: 700 }}>{marketRegime.indexName}</span>{" "}
@@ -1058,7 +1058,7 @@ export function AssetHelperClient() {
               </div>
               <textarea
                 className="form-control"
-                style={{ fontSize: "0.9rem", minHeight: "16rem" }}
+                style={{ fontSize: "var(--fs-base)", minHeight: "16rem" }}
                 rows={12}
                 placeholder="이 계좌에 대한 투자 전략이나 주의사항을 메모하세요. AI가 요약할 때 함께 참고합니다."
                 value={memo}
@@ -1085,8 +1085,8 @@ export function AssetHelperClient() {
           <div className="card-body">
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
               <div>
-                <h2 style={{ fontSize: "1.05rem", fontWeight: 800, marginBottom: 4 }}>종목</h2>
-                <p style={{ margin: 0, fontSize: "0.9rem", fontWeight: 700, color: weightOk ? "#16a34a" : "#dc2626" }}>
+                <h2 style={{ fontSize: "var(--fs-lg)", fontWeight: 800, marginBottom: 4 }}>종목</h2>
+                <p style={{ margin: 0, fontSize: "var(--fs-base)", fontWeight: 700, color: weightOk ? "#16a34a" : "#dc2626" }}>
                   종목 {weightSum.toFixed(2)}% + 현금 {cashWeight.toFixed(2)}% = {totalWeight.toFixed(2)}%{weightOk ? " ✓" : " (100% 필요)"}
                 </p>
               </div>
@@ -1150,7 +1150,7 @@ export function AssetHelperClient() {
             {btResult ? (
               <AssetHelperBacktestResult result={btResult} />
             ) : (
-              <div style={{ color: "var(--text-muted)", fontSize: "0.9rem", padding: "6px 0" }}>백테스트 버튼을 눌러 결과를 확인하세요.</div>
+              <div style={{ color: "var(--text-muted)", fontSize: "var(--fs-base)", padding: "6px 0" }}>백테스트 버튼을 눌러 결과를 확인하세요.</div>
             )}
           </div>
         </div>

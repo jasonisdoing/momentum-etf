@@ -422,7 +422,7 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
     <div className="card appCard" style={{ height: "100%" }}>
       <div className="card-body" style={{ padding: "0.7rem 1rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 6 }}>
-          <strong style={{ fontSize: "1rem" }}>{title}</strong>
+          <strong style={{ fontSize: "var(--fs-base)" }}>{title}</strong>
           {controls}
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
@@ -435,10 +435,10 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
               style={{ display: "block", flex: "0 0 auto", objectFit: "contain" }}
             />
           ) : null}
-          <span aria-label={q.country === "kor" ? "한국" : "미국"} style={{ fontSize: "0.9rem", lineHeight: 1 }}>
+          <span aria-label={q.country === "kor" ? "한국" : "미국"} style={{ fontSize: "var(--fs-base)", lineHeight: 1 }}>
             {q.type === "toss" && !q.source_ticker ? "" : q.country === "kor" ? "🇰🇷" : "🇺🇸"}
           </span>
-          <span style={{ fontSize: "1.05rem", fontWeight: 800 }}>{q.name}</span>
+          <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>{q.name}</span>
           <a
             href={getQuoteLink(q.symbol, q.source_ticker)}
             target="_blank"
@@ -448,12 +448,12 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
             {displaySymbol(q.symbol, q.source_ticker)}
           </a>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 7 }}>
-            <span style={{ fontSize: "1.25rem", fontWeight: 800, color: signColor(q.diff_pct) }}>
+            <span style={{ fontSize: "var(--fs-xl)", fontWeight: 800, color: signColor(q.diff_pct) }}>
               {formatPct(q.diff_pct)}
             </span>
             <span
               style={{
-                fontSize: "0.74rem",
+                fontSize: "var(--fs-sm)",
                 fontWeight: 700,
                 padding: "2px 8px",
                 borderRadius: 999,
@@ -473,7 +473,7 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
           </div>
         </div>
         <div style={{ marginTop: 3 }}>
-          <span style={{ fontSize: "1.55rem", fontWeight: 800 }}>{formatPrice(q.hyper_price, q.currency)}</span>
+          <span style={{ fontSize: "var(--fs-2xl)", fontWeight: 800 }}>{formatPrice(q.hyper_price, q.currency)}</span>
         </div>
         <div
           style={{
@@ -482,7 +482,7 @@ function QuoteCard({ q, title, controls, compact = false }: { q: Quote; title: s
             gap: 8,
             flexWrap: "wrap",
             marginTop: 2,
-            fontSize: "0.9rem",
+            fontSize: "var(--fs-base)",
             color: "var(--text-muted)",
           }}
         >
@@ -827,17 +827,17 @@ function ComparisonCard({
       <div className="card-body" style={{ padding: "0.7rem 1rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <strong style={{ fontSize: "1.18rem" }}>{title}</strong>
+            <strong style={{ fontSize: "var(--fs-xl)" }}>{title}</strong>
           </div>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6, whiteSpace: "nowrap" }}>
-            <span style={{ fontSize: "0.85rem", color: "var(--text-muted)", fontWeight: 500 }}>
+            <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", fontWeight: 500 }}>
               {representative.source === "Hyperliquid"
                 ? "하이퍼리퀴드"
                 : representative.source === "국내시장"
                   ? "한국 거래소"
                   : "미국 거래소"}
             </span>
-            <strong style={{ fontSize: "1.18rem", color: signColor(representative.changePct) }}>
+            <strong style={{ fontSize: "var(--fs-xl)", color: signColor(representative.changePct) }}>
               {formatPct(representative.changePct)}
             </strong>
           </div>
@@ -918,14 +918,14 @@ function ComparisonCard({
             alignItems: "center",
             marginTop: 9,
             color: "#475569",
-            fontSize: "1rem",
+            fontSize: "var(--fs-base)",
           }}
         >
-          <strong style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>기준시장 대비</strong>
+          <strong style={{ color: "var(--text-muted)", fontSize: "var(--fs-base)" }}>기준시장 대비</strong>
           {differences.map((difference) => (
             <span key={difference.label}>
               <strong>{difference.label}</strong>{" "}
-              <strong style={{ color: signColor(difference.value), fontSize: "1.08rem" }}>{formatPct(difference.value)}</strong>
+              <strong style={{ color: signColor(difference.value), fontSize: "var(--fs-lg)" }}>{formatPct(difference.value)}</strong>
             </span>
           ))}
         </div>
@@ -980,7 +980,7 @@ export function Live24hBoard({ compact = false }: { compact?: boolean }) {
   const quoteColClass = compact ? "hubLive24hQuote" : "col-12 col-md-6 col-xxl-4";
   const comparisonColClass = compact ? "hubLive24hComparison" : "col-12 col-md-6 col-xxl-4";
   const metaLine = (
-    <div className="d-flex justify-content-end text-secondary" style={{ fontSize: "0.8rem" }}>
+    <div className="d-flex justify-content-end text-secondary" style={{ fontSize: "var(--fs-sm)" }}>
       마지막 갱신: {updatedAt ?? "-"} (10초 마다) · 차트: 15분봉
     </div>
   );
