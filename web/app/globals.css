@@ -5045,9 +5045,9 @@ a {
   gap: 8px;
 }
 
-.memoChecklistRow .form-control.is-done {
-  color: var(--text-muted);
-  text-decoration: line-through;
+/* 체크된 항목 — 글자는 그대로 두고 입력칸 배경만 회색으로 구분한다. */
+.memoChecklistText.is-done {
+  background: rgba(148, 163, 184, 0.16);
 }
 
 .memoChecklistRemove {
