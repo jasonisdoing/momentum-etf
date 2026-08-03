@@ -41,15 +41,6 @@ type HistoryPoint = {
   supertrend_dir: number | null;
 };
 
-type ComponentContribution = {
-  name: string;
-  ticker: string;
-  trend_pct: number | null;
-  offense_pct: number | null;
-  defense_pct: number | null;
-  regime: RegimeKey | null;
-};
-
 type HistoryResponse = {
   ticker: string;
   name: string;
@@ -60,7 +51,6 @@ type HistoryResponse = {
   trend_max_12m: number | null;
   offense_pct: number | null;
   defense_pct: number | null;
-  components?: ComponentContribution[];
   error?: string;
 };
 
@@ -473,8 +463,7 @@ export function MarketTrendChart({
     return { targetPrice, changePct, kind: "offense" as const, ratioValue: offense + 20, rising: true };
   }, [data, latestPoint]);
 
-  // 개별 지수(합성이 아닌) 왼쪽 패널용 기간 수익률 — 최신 종가 대비 N거래일 전 종가.
-  // (합성지수는 대신 '구성 지수 기여도'를 왼쪽에 둔다.)
+  // 왼쪽 패널용 기간 수익률 — 최신 종가 대비 N거래일 전 종가.
   const periodReturns = useMemo(() => {
     const hist = data?.history ?? [];
     const lastClose = hist.at(-1)?.close;
@@ -873,26 +862,8 @@ export function MarketTrendChart({
           <div style={{ marginBottom: 12 }}>
             {data?.offense_pct != null && data?.defense_pct != null ? (
               <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-                {/* 왼쪽 반: 합성지수는 '구성 지수 기여도', 개별 지수는 '기간 수익률'. */}
-                {data.components && data.components.length > 0 ? (
-                  <div style={{ flex: "1 1 0", minWidth: 0 }}>
-                    <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>구성 지수 기여도</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                      {data.components.map((c) => (
-                        <div key={c.ticker} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: "var(--fs-sm)" }}>
-                          <span style={{ flex: "1 1 auto", minWidth: 0, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
-                          <span style={{ flex: "0 0 auto", color: (c.trend_pct ?? 0) >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(c.trend_pct)}</span>
-                          <span style={{ flex: "0 0 auto", fontWeight: 800, color: (c.offense_pct ?? 0) >= (c.defense_pct ?? 0) ? "#d62828" : "#2f9e44" }}>
-                            {c.offense_pct == null || c.defense_pct == null ? "-" : `공${c.offense_pct}·방${c.defense_pct}`}
-                          </span>
-                          <span style={{ flex: "0 0 auto", fontWeight: 700, color: c.regime ? REGIME_COLOR[c.regime] : "#94a3b8" }}>
-                            {c.regime ? REGIME_LABEL[c.regime] : "-"}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : periodReturns.length > 0 ? (
+                {/* 왼쪽 반: 기간 수익률. */}
+                {periodReturns.length > 0 ? (
                   <div style={{ flex: "1 1 0", minWidth: 0 }}>
                     <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
@@ -905,7 +876,7 @@ export function MarketTrendChart({
                     </div>
                   </div>
                 ) : null}
-                {/* 공격/방어 게이지 — 구성 기여도가 있으면 오른쪽 반, 없으면(일반 지수) 전체 폭. */}
+                {/* 공격/방어 게이지 — 오른쪽 반. */}
                 <div style={{ flex: "1 1 0", minWidth: 0 }}>
                   {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
