@@ -4,7 +4,8 @@
 가격 소스:
     - 한국 인덱스(KOSPI/KOSDAQ): 네이버 차트 API (yfinance 가 1거래일 지연되는 이슈 회피)
     - 미국 인덱스(S&P500/나스닥/나스닥100): yfinance
-    - 나스닥 100 선물: 이력은 yfinance(NQ=F), 최신 봉은 토스(RFU.NQc1, REAL_TIME)로 보강
+    - 나스닥 100 선물: 이력은 yfinance(NQ=F), 직전 종가·현재가는 토스(RFU.NQc1, REAL_TIME)
+      — 상단 헤더(/internal/live-24h/nq-future)와 같은 소스라 변동률이 일치한다
 MA 계산은 utils.moving_averages 사용.
 """
 
@@ -14,7 +15,9 @@ import logging
 import math
 import threading
 import time
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import yfinance as yf
@@ -115,33 +118,50 @@ _TOSS_DAILY_OVERLAY = {"NQ=F": "RFU.NQc1"}
 
 
 def _apply_toss_latest_overlay(close_series: pd.Series, toss_code: str) -> pd.Series | None:
-    """토스 최신 일봉(형성 중 포함)으로 마지막 종가를 갱신/추가한다. 실패 시 None."""
-    try:
-        from services.toss_market_service import fetch_toss_latest_daily_close
+    """토스 지표 시세로 마지막 두 점(직전 확정 종가 · 현재가)을 맞춘다. 실패 시 None.
 
-        date_str, latest_close = fetch_toss_latest_daily_close(toss_code)
-        latest_date = pd.Timestamp(date_str)
+    상단 헤더(`/internal/live-24h/nq-future`)와 **같은 소스·같은 기준가**를 쓰기 위한 것이다.
+    토스 mini-chart 는 ``basePrice`` = 직전 확정 세션 종가, ``latestPrice`` = 진행 중 세션의
+    현재가로 준다. 예전에는 토스 '최신 일봉'만 뒤에 붙였는데, 그 일봉이 실제로는 이미 끝난
+    세션이라 그것을 현재가로 오인해 한 세션 건너뛴 변동률(예: +1.7% vs 실제 +0.2%)이 나왔다.
+    """
+    try:
+        from services.toss_market_service import fetch_toss_indicator_prices, fetch_toss_latest_daily_close
+
+        info = fetch_toss_indicator_prices().get(toss_code) or {}
+        latest_price = info.get("latest")
+        base_price = info.get("base")
+        if latest_price is None or base_price is None:
+            return None
+        # 확정 세션의 날짜는 일봉에서 받는다 (mini-chart 는 가격만 준다).
+        base_date = pd.Timestamp(fetch_toss_latest_daily_close(toss_code)[0]).normalize()
+
         series = close_series.copy()
         idx = pd.to_datetime(series.index)
         if idx.tz is not None:
             idx = idx.tz_localize(None)
         series.index = idx.normalize()
-        if series.index[-1] == latest_date:
-            series.iloc[-1] = latest_close
-        elif series.index[-1] < latest_date:
-            series = pd.concat([series, pd.Series([latest_close], index=[latest_date])])
-        return series
+
+        # 확정 세션 이후 구간(yfinance 가 진행 중 봉으로 붙여 둔 것)은 토스 값으로 대체한다.
+        series = series[series.index <= base_date]
+        series.loc[base_date] = float(base_price)
+
+        # 진행 중 세션은 KST 오늘로 붙인다 (아직 날짜가 안 넘어갔으면 확정일 다음 날).
+        today_kst = pd.Timestamp(datetime.now(ZoneInfo("Asia/Seoul")).date())
+        series.loc[max(today_kst, base_date + pd.Timedelta(days=1))] = float(latest_price)
+        return series.sort_index()
     except Exception as exc:
-        logger.warning("토스 최신 일봉 보강 실패 (%s): %s", toss_code, exc)
+        logger.warning("토스 최신 시세 보강 실패 (%s): %s", toss_code, exc)
         return None
 
 
 def _apply_intraday_boost(close_series: pd.Series | None, yf_ticker: str) -> pd.Series | None:
     """미국 인덱스 daily 마지막 종가가 Yahoo 갱신 지연으로 누락된 경우 최신 종가를 보강한다.
 
-    나스닥 100 선물 등 토스 REAL_TIME 심볼은 토스 최신 일봉으로 갱신/추가(오늘 형성 중 봉 포함)하고,
-    그 외/토스 실패 시엔 기존 Yahoo intraday 1분봉 마감가를 덧붙인다. 표(_build_item)와
-    차트(compute_index_history)가 동일한 최신 종가를 쓰도록 공통 사용한다.
+    나스닥 100 선물 등 토스 REAL_TIME 심볼은 토스 기준가·현재가로 마지막 두 점을 맞춰
+    상단 헤더와 변동률이 일치하게 하고, 그 외/토스 실패 시엔 기존 Yahoo intraday 1분봉
+    마감가를 덧붙인다. 표(_build_item)와 차트(compute_index_history)가 동일한 최신 종가를
+    쓰도록 공통 사용한다.
     """
     if close_series is None or close_series.empty:
         return close_series
