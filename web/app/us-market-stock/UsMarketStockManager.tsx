@@ -83,7 +83,7 @@ const SINGLE_TOP_OPTIONS: readonly (number | null)[] = [null, 100, 200, 300, 400
  * (전체 개수 이상은 `전체` 와 같은 결과라 만들지 않는다).
  *
  * 지금 고른 값이 목록에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어
- * 무엇이 적용 중인지 알 수 없다 (`/strategy-sm` 의 저장값 처리와 같은 규칙).
+ * 무엇이 적용 중인지 알 수 없다.
  */
 function topOptions(view: ViewOption, rowCount: number, current: number | null): (number | null)[] {
   const options: (number | null)[] =
