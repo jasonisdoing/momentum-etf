@@ -533,18 +533,6 @@ def _index_uses_naver(yf_ticker: str) -> bool:
 
 
 
-def _extract_bulk_us_ohlc(df: pd.DataFrame | None, yf_ticker: str) -> pd.DataFrame | None:
-    """compute_market_trend 의 yfinance 일괄 다운로드 결과에서 단일 티커 OHLC 를 추출한다."""
-    if df is None:
-        return None
-    try:
-        if (yf_ticker, "Close") in df.columns:
-            return df.xs(yf_ticker, axis=1, level=0).copy()
-    except Exception:
-        return None
-    return None
-
-
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     """단일 지수의 일별 OHLC 히스토리를 반환한다 (한국: 네이버 5년, 미국: yfinance 10년).
 
