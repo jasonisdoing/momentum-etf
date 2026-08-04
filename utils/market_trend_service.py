@@ -1,8 +1,8 @@
 """시장지수 추세 데이터 서비스.
 
-코스피/코스피200/S&P500/나스닥/나스닥100 의 현재가, 변동률, MA 대비 추세% 를 계산한다.
+코스피/코스닥/S&P500/나스닥/나스닥100 의 현재가, 변동률, MA 대비 추세% 를 계산한다.
 가격 소스:
-    - 한국 인덱스(KOSPI/KOSPI200): 네이버 차트 API (yfinance 가 1거래일 지연되는 이슈 회피)
+    - 한국 인덱스(KOSPI/KOSDAQ): 네이버 차트 API (yfinance 가 1거래일 지연되는 이슈 회피)
     - 미국 인덱스(S&P500/나스닥/나스닥100): yfinance
     - 나스닥 100 선물: 이력은 yfinance(NQ=F), 최신 봉은 토스(RFU.NQc1, REAL_TIME)로 보강
 MA 계산은 utils.moving_averages 사용.
@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 # kor_naver_symbol 이 있으면 한국 인덱스로 간주하고 가격은 네이버에서 받는다.
 INDICES: list[dict[str, str]] = [
     {"name": "코스피", "yf_ticker": "^KS11", "kor_naver_symbol": "KOSPI"},
-    {"name": "코스피 200", "yf_ticker": "^KS200", "kor_naver_symbol": "KPI200"},
     {"name": "코스닥", "yf_ticker": "^KQ11", "kor_naver_symbol": "KOSDAQ"},
     {"name": "필라델피아 반도체", "yf_ticker": "^SOX"},
     {"name": "다우존스", "yf_ticker": "^DJI"},
@@ -61,7 +60,7 @@ def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
     """네이버 차트 API 에서 한국 인덱스 일봉 종가 시계열을 받아온다.
 
     Args:
-        symbol: KOSPI 또는 KPI200.
+        symbol: KOSPI 또는 KOSDAQ.
         count: 최근부터 N 거래일.
 
     Returns:
@@ -207,7 +206,7 @@ def compute_market_trend() -> dict[str, Any]:
         logger.exception("yfinance 시장지수 다운로드 실패")
         df = None
 
-    # 한국 인덱스(KOSPI/KPI200/KOSDAQ) OHLC 는 네이버 차트 API 로 조회 (2년치 ≈ 500거래일).
+    # 한국 인덱스(KOSPI/KOSDAQ) OHLC 는 네이버 차트 API 로 조회 (2년치 ≈ 500거래일).
     kor_ohlc_by_ticker: dict[str, pd.DataFrame] = {}
     for idx in INDICES:
         naver_symbol = idx.get("kor_naver_symbol")
