@@ -167,11 +167,10 @@ MARKET_TREND_SUPERTREND_PERIOD = 10
 
 # 지수별 슈퍼트렌드 곱수 (yf_ticker → multiplier). 사용하는 모든 지수를 반드시 등록한다.
 # 값↑=방향 전환이 뜸해져 휩쏘↓(지연 없음) / 값↓=추세 전환에 민감. 지수마다 변동성이 달라 개별 설정.
-# yf_ticker: ^KS11=코스피, ^KS200=코스피200, ^KQ11=코스닥, ^DJI=다우존스, ^GSPC=S&P500,
+# yf_ticker: ^KS11=코스피, ^KQ11=코스닥, ^DJI=다우존스, ^GSPC=S&P500,
 #            ^NDX=나스닥100, ^SOX=필라델피아 반도체, NQ=F=나스닥100 선물.
 MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
     "^KS11": 1.5,    # 코스피 (빠른 대응이 필요)
-    "^KS200": 1.5,   # 코스피200 (빠른 대응이 필요)
     "^KQ11": 1.5,    # 코스닥 (빠른 대응이 필요)
     "^DJI": 3.0,     # 다우존스
     "^GSPC": 3.0,    # S&P500
