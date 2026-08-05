@@ -139,6 +139,19 @@ const SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
 const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
 const DEFAULT_TICKER_TYPE = "";
+// 추세가 꺾인 종목을 종목명 뒤에 표시하는 배지 (알람 화면의 이동선 이탈 배지와 같은 기호).
+const TREND_BROKEN_BADGE = "❗";
+
+/** 장기·단기 이격 중 하나라도 음수면 보유 대상이 될 수 없다고 본다.
+ *
+ * 값이 없으면 판단 자체가 불가하므로 같이 이탈로 둔다(상장 직후 등 이평선 계산 불가).
+ * 보유종목 알람(`utils/holdings_alarm_service._ma_status`)의 이동선 이탈 판정과 같은 기준이다.
+ */
+function isTrendBroken(row: RankGridRow | undefined): boolean {
+  const longDisparity = row?.이격 ?? null;
+  const shortDisparity = row?.단기이격 ?? null;
+  return longDisparity === null || shortDisparity === null || longDisparity < 0 || shortDisparity < 0;
+}
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
@@ -953,9 +966,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             );
           }
           const value = String(params.value ?? "-");
+          const broken = isTrendBroken(params.data);
           return (
-            <span className="appNameCellText" title={value}>
+            <span className="appNameCellText" title={broken ? `${value} (추세 이탈)` : value}>
               {renderNameWithLeverageHighlight(value)}
+              {broken ? <span title="단기·장기 이평선 중 하나 이상 이탈"> {TREND_BROKEN_BADGE}</span> : null}
             </span>
           );
         },
@@ -1658,18 +1673,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 장기·단기 중 하나라도 음수이면 보유 대상이 될 수
-                  // 없으므로 흐리게. 값이 없으면 판단 자체가 불가하므로 같이 흐리게 둔다.
-                  const disparity = params.data?.이격 ?? null;
-                  const shortDisparity = params.data?.단기이격 ?? null;
-                  if (
-                    disparity === null ||
-                    shortDisparity === null ||
-                    disparity < 0 ||
-                    shortDisparity < 0
-                  ) {
-                    classes.push("rankNegativeTrendRow");
-                  }
+                  // 추세 이탈(장기·단기 중 하나라도 음수)은 행 배경 대신 종목명 뒤 ❗ 로 표시한다.
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
                   }
