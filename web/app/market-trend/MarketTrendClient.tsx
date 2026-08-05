@@ -18,9 +18,6 @@ type MarketTrendItem = {
   trend_pct: number | null;
   // MA를 0점으로 두고 12개월 위/아래 괴리율로 정규화한 점수 (-100 ~ +100, 참조용)
   trend_score: number | null;
-  // 공격/방어 비중 (각 0~100, 20% 단위)
-  offense_pct: number | null;
-  defense_pct: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
   // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
@@ -28,6 +25,14 @@ type MarketTrendItem = {
   // 현재 레짐(SuperTrend 방향) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
+  // 직전 레짐 구간. start_truncated = 12개월 창에 잘려 실제 시작이 더 앞일 수 있음.
+  prev_regime: {
+    regime: RegimeKey;
+    start_date: string;
+    end_date: string;
+    days: number;
+    start_truncated: boolean;
+  } | null;
   days_since_last_up: number | null;
   days_since_last_neutral: number | null;
 };
@@ -67,16 +72,6 @@ function getSignedClass(value: number | null | undefined): string {
 function renderSignedPercentCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatPct(params.value)}</span>;
 }
-
-function renderRatioCell(color: string) {
-  return function RatioCell(params: { value: number | null | undefined }) {
-    if (params.value === null || params.value === undefined) {
-      return <span style={{ color: "var(--text-muted)" }}>-</span>;
-    }
-    return <span style={{ color, fontWeight: 700 }}>{params.value}%</span>;
-  };
-}
-
 
 type RegimeKey = "accel_up" | "accel_down";
 
@@ -267,22 +262,40 @@ export function MarketTrendPanel({
         },
       },
       {
-        field: "offense_pct",
-        headerName: "공격비중",
-        flex: 0.6,
-        minWidth: 88,
-        sortable: true,
-        type: "rightAligned",
-        cellRenderer: renderRatioCell("#d62828"),
-      },
-      {
-        field: "defense_pct",
-        headerName: "수비비중",
-        flex: 0.6,
-        minWidth: 88,
-        sortable: true,
-        type: "rightAligned",
-        cellRenderer: renderRatioCell("#1971c2"),
+        field: "prev_regime",
+        headerName: "이전 추세",
+        flex: 1.5,
+        minWidth: 260,
+        sortable: false,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+        },
+        headerClass: "marketTrendRegimeHeader",
+        headerTooltip: "현재 추세 직전 구간 — 어떤 추세가 언제부터 언제까지 며칠간 이어졌는지",
+        cellRenderer: (params: { data?: GridRow }) => {
+          const data = params.data;
+          if (!data || isDetailRow(data)) return null;
+          const prev = data.prev_regime;
+          if (!prev) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          // 12개월 창에 잘린 구간은 실제로는 더 길다 — '+' 로 최소값임을 표시한다.
+          const daysText = prev.start_truncated ? `${prev.days}일+` : `${prev.days}일`;
+          return (
+            <span
+              style={{ color: "var(--text-strong)" }}
+              title={
+                prev.start_truncated
+                  ? `${REGIME_LABEL[prev.regime]} — 12개월 표시 구간 이전부터 이어져 실제 시작일은 더 앞입니다.`
+                  : REGIME_LABEL[prev.regime]
+              }
+            >
+              <strong style={{ color: REGIME_COLORS[prev.regime] }}>{REGIME_LABEL[prev.regime]}</strong>
+              {` ${daysText} · ${prev.start_date} ~ ${prev.end_date}`}
+            </span>
+          );
+        },
       },
       {
         field: "pct_from_high",
@@ -393,19 +406,8 @@ export function MarketTrendClient({
   scoreAnchorPercentile: _scoreAnchorPercentile,
   maType,
 }: MarketTrendClientProps) {
-  const titleRight = (
-    <div className="appHeaderMetrics rankToolbarMeta">
-      <div className="appHeaderMetric">
-        <span>기준:</span>
-        <span className="appHeaderMetricValue">
-          {maType} {maDays}일
-        </span>
-      </div>
-    </div>
-  );
-
   return (
-    <PageFrame title="시장지수 추세" fullWidth titleRight={titleRight}>
+    <PageFrame title="시장지수 추세" fullWidth>
       <div className="appPageStack">
         <section className="appSection">
           <MarketTrendPanel maDays={maDays} maType={maType} />
@@ -432,9 +434,12 @@ export function MarketTrendClient({
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
                 <li>일간(%): 전일 종가 대비 등락률.</li>
                 <li>
-                  공격/수비 비중: 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
-                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다
-                  (조금만 내려가도 수비 20%부터, 연최저 근처면 수비 100%). 상세 차트의 바와 같은 기준입니다.
+                  이전 추세: 현재 추세 <strong>직전 구간</strong>의 방향·지속일수·기간입니다. 최근 12개월만 보므로,
+                  그보다 앞에서 시작된 구간은 일수 뒤에 <strong>+</strong>가 붙습니다(실제로는 더 깁니다).
+                </li>
+                <li>
+                  공격/수비 비중(지수를 펼치면 나오는 상세 차트): 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
+                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다.
                 </li>
                 <li>
                   레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.
