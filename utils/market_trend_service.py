@@ -205,7 +205,7 @@ def compute_market_trend() -> dict[str, Any]:
     Returns:
         ``{"ma_days", "items": [{
             name, ticker, price, change_pct, trend_pct, trend_score,
-            pct_from_high, current_regime, current_regime_days,
+            pct_from_high, current_regime, current_regime_days, prev_regime,
         }, ...]}``
     """
     ma_days = MARKET_TREND_SCORE_MA_DAYS
@@ -264,9 +264,6 @@ def _build_item(
         "trend_pct": None,
         # 12개월 정규화 점수 (-100 ~ +100, 화면 표시용)
         "trend_score": None,
-        # 공격/방어 비중 (각 0~100, 20% 단위) — MA 위=공격100, 아래는 12개월 최저까지 거리로 방어↑
-        "offense_pct": None,
-        "defense_pct": None,
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
@@ -275,6 +272,9 @@ def _build_item(
         # 현재 레짐 + 지속 일수 (테이블 표시용)
         "current_regime": None,
         "current_regime_days": None,
+        # 직전 레짐 구간 — {regime, start_date, end_date, days, start_truncated}.
+        # start_truncated 는 12개월 창에 잘려 실제 시작일이 더 앞일 수 있다는 표시.
+        "prev_regime": None,
         # 현재 레짐이 상승이 아닐 때: 마지막 상승 구간 종료 후 경과 거래일 (12개월 내 상승 없으면 None)
         "days_since_last_up": None,
         # 현재 레짐이 하락일 때: 마지막 중립 구간 종료 후 경과 거래일 (12개월 내 중립 없으면 None)
@@ -352,6 +352,14 @@ def _build_item(
         base["current_regime"] = ranges[-1]["regime"]
         base["current_regime_days"] = ranges[-1]["days"]
 
+        if len(ranges) >= 2:
+            prev = ranges[-2]
+            base["prev_regime"] = {
+                **prev,
+                # 창의 첫 구간이면 그 앞이 잘려 있어 시작일·일수가 실제보다 짧다.
+                "start_truncated": prev is ranges[0],
+            }
+
         def _days_since_last(target_regime: str) -> int | None:
             elapsed = 0
             for seg in reversed(ranges):
@@ -380,12 +388,6 @@ def _build_item(
         base["score_range_low"] = score_min
         base["trend_score"] = _normalize_score(base["trend_pct"], score_min, score_max)
 
-    # 공격/방어 비중 — 화면 게이지와 동일 앵커(12개월 '최저'=score_range_low)를 쓴다.
-    offense_defense = _offense_defense(base["trend_pct"], base["score_range_low"])
-    if offense_defense is not None:
-        base["offense_pct"] = offense_defense["offense_pct"]
-        base["defense_pct"] = offense_defense["defense_pct"]
-
     return base
 
 
@@ -412,6 +414,9 @@ def _trend_pct_series(
 
 def _offense_defense(trend_pct: float | None, trend_min: float | None) -> dict[str, int] | None:
     """기준 이동평균선 대비 위치로 공격/방어 비율(각 0~100, 20% 단위)을 산출한다.
+
+    상세 차트(`compute_index_history`)의 공격/방어 바 전용이다. 목록 그리드에서는 '이전 추세'
+    컬럼으로 대체되어 더 이상 쓰지 않는다.
 
     - 종가가 MA 위(괴리 ≥ 0): 공격 100 / 방어 0.
     - MA 아래: 12개월 최저 괴리(``trend_min``, 화면의 '최저')까지의 진행률 f 를 20% 단위로
