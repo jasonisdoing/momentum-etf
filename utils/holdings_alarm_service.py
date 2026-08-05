@@ -1,11 +1,13 @@
 """보유종목 알람 서비스 (화면·배치 공용).
 
 여러 알람 종류를 한 번에 처리해 **한 건의 슬랙 메시지**로 보낸다.
-- 이동선 이탈: 보유 종가 < 이동평균(계좌별 이평선 일수)
+- 이동선 이탈: 보유 종가가 **단기·장기 이평선 중 하나라도** 아래 (종목풀 순위 화면의
+  회색 처리 기준과 같다 — 둘 중 하나만 꺾여도 보유 대상이 아니라고 본다)
 - 손절: 보유 수익률 <= 계좌별 손절 기준(예: -7%)
 
 설정은 **계좌별**이다(각 계좌 문서):
-    ma20_alarm_enabled / ma20_ma_days,  stoploss_alarm_enabled / stoploss_threshold_pct
+    ma_alarm_enabled / ma_short_days / ma_long_days,
+    stoploss_alarm_enabled / stoploss_threshold_pct
 계좌마다 On/Off 와 기준(이평선 일수·손절 %)을 다르게 둘 수 있다. 새 알람 종류는 계산 로직만
 추가하면 함께 발송된다. 이격은 종목풀 순위와 동일하게 실시간 스냅샷을 종가에 반영해 계산한다.
 """
@@ -27,7 +29,8 @@ from utils.rankings import build_effective_close_series
 logger = get_app_logger()
 
 _WARMUP_EXTRA_BDAYS = 40
-_DEFAULT_MA_DAYS = 20
+_DEFAULT_MA_SHORT_DAYS = 20
+_DEFAULT_MA_LONG_DAYS = 120
 _DEFAULT_STOPLOSS_PCT = -7.0
 # 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
 MA_DAYS_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 200)
@@ -35,17 +38,22 @@ STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-3.0, -5.0, -7.0, -10.0, -15.0, -20.0
 
 
 # 화면 배지용 기본 아이콘 — 계좌별로 저장해 덮어쓸 수 있다(빈값 저장 = 배지 미표시).
-_DEFAULT_MA_ICON = "🚫"
+_DEFAULT_MA_ICON = "🚫"  # 이동선 이탈(단기·장기 공용)
 _DEFAULT_STOPLOSS_ICON = "✂️"
 
 
-def _account_ma_days(doc: dict[str, Any]) -> int:
-    value = doc.get("ma20_ma_days")
-    return int(value) if isinstance(value, (int, float)) and int(value) >= 2 else _DEFAULT_MA_DAYS
+def _account_ma_days(doc: dict[str, Any]) -> tuple[int, int]:
+    """계좌의 (단기, 장기) 이평선 일수. 단기 >= 장기로 저장돼 있으면 그대로 두고 판정만 한다."""
+    short = doc.get("ma_short_days")
+    long = doc.get("ma_long_days")
+    return (
+        int(short) if isinstance(short, (int, float)) and int(short) >= 2 else _DEFAULT_MA_SHORT_DAYS,
+        int(long) if isinstance(long, (int, float)) and int(long) >= 2 else _DEFAULT_MA_LONG_DAYS,
+    )
 
 
 def _account_ma_icon(doc: dict[str, Any]) -> str:
-    value = doc.get("ma20_alarm_icon")
+    value = doc.get("ma_alarm_icon")
     return str(value).strip() if isinstance(value, str) else _DEFAULT_MA_ICON
 
 
@@ -76,15 +84,21 @@ def _ma_status(
     fetch_ticker: str,
     ticker_type: str,
     country: str,
-    ma_days: int,
+    ma_days: tuple[int, int],
     realtime_entry: dict[str, float] | None = None,
 ) -> dict[str, Any] | None:
-    """종가와 기준 이평선을 계산해 이탈 여부를 반환한다. 데이터 부족/실패 시 None.
+    """종가와 단기·장기 이평선을 계산해 이탈 여부를 반환한다. 데이터 부족/실패 시 None.
 
-    종목풀 순위 화면과 **동일하게** 실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌워 계산한다
-    (``build_effective_close_series``). 실시간이 없으면 캐시 일봉 종가만으로 계산한다.
+    종목풀 순위 화면과 **동일하게** 실시간 현재가(스냅샷)를 종가 시리즈에 덮어씌워 계산하고
+    (``build_effective_close_series``), **하나라도 아래면 이탈**로 본다(순위 화면 회색 기준).
+    실시간이 없으면 캐시 일봉 종가만으로 계산한다.
+
+    둘 중 하나라도 이평선을 못 구하면(상장 직후 등) 판정 불가로 None — 절반만 보고
+    이탈 여부를 정하면 장기가 꺾인 종목을 놓치기 때문이다.
     """
-    start = (pd.Timestamp.today().normalize() - pd.offsets.BDay(ma_days + _WARMUP_EXTRA_BDAYS)).strftime("%Y-%m-%d")
+    short_days, long_days = ma_days
+    warmup_days = max(short_days, long_days) + _WARMUP_EXTRA_BDAYS
+    start = (pd.Timestamp.today().normalize() - pd.offsets.BDay(warmup_days)).strftime("%Y-%m-%d")
     df = fetch_ohlcv(fetch_ticker, country, months_back=None, date_range=[start, None], ticker_type=ticker_type)
     if df is None or df.empty or "Close" not in df.columns:
         return None
@@ -93,19 +107,23 @@ def _ma_status(
     effective = build_effective_close_series(close, realtime_entry)
     if effective is not None and not effective.empty:
         close = effective
-    if len(close) < ma_days:
+    if len(close) < max(short_days, long_days):
         return None
+
     # 이동평균 종류는 config(SMA/EMA). 최신 봉의 이동평균 값으로 이탈을 판정한다.
-    sma = float(calculate_moving_average(close, ma_days, min_periods=ma_days).iloc[-1])
-    if sma == 0.0:
-        return None
     last = float(close.iloc[-1])
-    return {
-        "last": last,
-        "sma": round(sma, 2),
-        "deviation_pct": round((last / sma - 1.0) * 100.0, 2),
-        "below": last < sma,
-    }
+    result: dict[str, Any] = {"last": last}
+    for label, days in (("short", short_days), ("long", long_days)):
+        ma = float(calculate_moving_average(close, days, min_periods=days).iloc[-1])
+        if ma == 0.0:
+            return None
+        result[f"{label}_days"] = days
+        result[f"{label}_ma"] = round(ma, 2)
+        result[f"{label}_deviation_pct"] = round((last / ma - 1.0) * 100.0, 2)
+        result[f"{label}_below"] = last < ma
+
+    result["below"] = bool(result["short_below"] or result["long_below"])
+    return result
 
 
 def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
@@ -116,10 +134,10 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
 
     ma_days = _account_ma_days(account_doc)
     threshold = _account_stoploss_pct(account_doc)
-    ma20_on = bool(account_doc.get("ma20_alarm_enabled"))
+    ma_on = bool(account_doc.get("ma_alarm_enabled"))
     stoploss_on = bool(account_doc.get("stoploss_alarm_enabled"))
 
-    ma20_hits: list[dict[str, Any]] = []
+    ma_hits: list[dict[str, Any]] = []
     stoploss_hits: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -135,7 +153,7 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
                 })
 
     # 이동선 이탈: 종가 vs 이동평균. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
-    if ma20_on:
+    if ma_on:
         candidates: list[tuple[dict[str, Any], str, str, str]] = []  # (row, fetch_ticker, ticker_type, country)
         by_country: dict[str, list[str]] = {}
         for row in rows:
@@ -159,9 +177,15 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
             if status is None:
                 errors.append(f"{fetch_ticker}: 가격 데이터 부족")
             elif status["below"]:
-                ma20_hits.append({"ticker": str(row["ticker"]).strip(), "name": str(row.get("name") or row["ticker"]), **status})
+                ma_hits.append({"ticker": str(row["ticker"]).strip(), "name": str(row.get("name") or row["ticker"]), **status})
 
-    return {"ma20": ma20_hits, "stoploss": stoploss_hits, "ma_days": ma_days, "threshold": threshold}, errors
+    return {
+        "ma": ma_hits,
+        "stoploss": stoploss_hits,
+        "ma_short_days": ma_days[0],
+        "ma_long_days": ma_days[1],
+        "threshold": threshold,
+    }, errors
 
 
 # 배지 계산은 보유 종목별 가격 시계열 조회라 수 초 걸린다 — 계좌별 TTL 캐시로 재계산을 줄인다.
@@ -200,7 +224,7 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
         return str(value or "").strip().upper().split(":")[-1]
 
     if ma_icon:
-        for hit in alerts["ma20"]:
+        for hit in alerts["ma"]:
             key = _norm_ticker(hit["ticker"])
             if key:
                 badge_by_ticker[key] = badge_by_ticker.get(key, "") + ma_icon
@@ -213,9 +237,10 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     result = {
         "account_id": norm_id,
         "badge_by_ticker": badge_by_ticker,
-        "ma20_icon": ma_icon,
+        "ma_icon": ma_icon,
         "stoploss_icon": stoploss_icon,
-        "ma_days": alerts["ma_days"],
+        "ma_short_days": alerts["ma_short_days"],
+        "ma_long_days": alerts["ma_long_days"],
         "threshold": alerts["threshold"],
     }
     _badges_cache[norm_id] = (_time.monotonic(), dict(result))
@@ -234,9 +259,10 @@ def get_alarm_view() -> dict[str, Any]:
                 "name": str(doc.get("name") or doc["account_id"]),
                 "icon": str(doc.get("icon") or ""),
                 "order": int(doc.get("order") or 0),
-                "ma20_enabled": bool(doc.get("ma20_alarm_enabled", False)),
-                "ma20_ma_days": _account_ma_days(doc),
-                "ma20_icon": _account_ma_icon(doc),
+                "ma_enabled": bool(doc.get("ma_alarm_enabled", False)),
+                "ma_short_days": _account_ma_days(doc)[0],
+                "ma_long_days": _account_ma_days(doc)[1],
+                "ma_icon": _account_ma_icon(doc),
                 "stoploss_enabled": bool(doc.get("stoploss_alarm_enabled", False)),
                 "stoploss_threshold_pct": _account_stoploss_pct(doc),
                 "stoploss_icon": _account_stoploss_icon(doc),
@@ -247,15 +273,30 @@ def get_alarm_view() -> dict[str, Any]:
 
 
 def set_account_alarm(
-    account_id: str, alarm_type: str, *, enabled: bool, value: float, icon: str | None = None
+    account_id: str, alarm_type: str, *, enabled: bool, values: dict[str, Any], icon: str | None = None
 ) -> dict[str, Any]:
-    """계좌별 알람 On/Off + 기준값(+화면 배지 아이콘) 저장. alarm_type: 'ma20'|'stoploss'."""
-    if alarm_type == "ma20":
-        payload: dict[str, Any] = {"ma20_alarm_enabled": bool(enabled), "ma20_ma_days": int(value)}
+    """계좌별 알람 On/Off + 기준값(+화면 배지 아이콘) 저장. alarm_type: 'ma'|'stoploss'.
+
+    values 는 알람 종류가 요구하는 기준값 전부다 — 없는 키는 채우지 않고 에러를 낸다.
+      ma       : {"short_days": int, "long_days": int}
+      stoploss : {"threshold_pct": float}
+    """
+
+    def _need(key: str) -> Any:
+        if key not in values:
+            raise ValueError(f"'{alarm_type}' 알람에는 '{key}' 값이 필요합니다.")
+        return values[key]
+
+    if alarm_type == "ma":
+        payload: dict[str, Any] = {
+            "ma_alarm_enabled": bool(enabled),
+            "ma_short_days": int(_need("short_days")),
+            "ma_long_days": int(_need("long_days")),
+        }
         if icon is not None:
-            payload["ma20_alarm_icon"] = str(icon).strip()
+            payload["ma_alarm_icon"] = str(icon).strip()
     elif alarm_type == "stoploss":
-        payload = {"stoploss_alarm_enabled": bool(enabled), "stoploss_threshold_pct": float(value)}
+        payload = {"stoploss_alarm_enabled": bool(enabled), "stoploss_threshold_pct": float(_need("threshold_pct"))}
         if icon is not None:
             payload["stoploss_alarm_icon"] = str(icon).strip()
     else:
@@ -267,14 +308,22 @@ def set_account_alarm(
 
 def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
     tag = "🖐 [수동]" if manual else "🔔"
-    total = sum(len(s["ma20"]) + len(s["stoploss"]) for s in sections)
+    total = sum(len(s["ma"]) + len(s["stoploss"]) for s in sections)
     header = f"{tag} 보유종목 알람"
     blocks: list[dict] = [{"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}}]
     for s in sections:
         parts: list[str] = [f"*{s['account']}*"]
-        if s["ma20"]:
-            parts.append(f"📉 *이동선 이탈* ({get_moving_average_type()} {s['ma_days']}일)")
-            parts += [f"  • {b['name']}({b['ticker']}): 이격 {b['deviation_pct']:+.2f}%" for b in s["ma20"]]
+        if s["ma"]:
+            ma_type = get_moving_average_type()
+            parts.append(f"📉 *이동선 이탈* ({ma_type} 단기 {s['ma_short_days']}일 · 장기 {s['ma_long_days']}일)")
+            for b in s["ma"]:
+                # 어느 쪽이 꺾였는지 보이게 이탈한 선만 표시한다.
+                broken = [
+                    f"{label} {b[f'{key}_deviation_pct']:+.2f}%"
+                    for key, label in (("short", "단기"), ("long", "장기"))
+                    if b[f"{key}_below"]
+                ]
+                parts.append(f"  • {b['name']}({b['ticker']}): {' / '.join(broken)}")
         if s["stoploss"]:
             parts.append(f"🛑 *손절* ({s['threshold']:.1f}% 이하)")
             parts += [f"  • {b['name']}({b['ticker']}): 수익률 {b['return_pct']:+.2f}%" for b in s["stoploss"]]
@@ -297,11 +346,11 @@ def send_holdings_alarms(*, manual: bool = False) -> dict[str, Any]:
     sections: list[dict[str, Any]] = []
     all_errors: list[str] = []
     for doc in load_account_docs():
-        if not (doc.get("ma20_alarm_enabled") or doc.get("stoploss_alarm_enabled")):
+        if not (doc.get("ma_alarm_enabled") or doc.get("stoploss_alarm_enabled")):
             continue
         alerts, errors = compute_account_alerts(doc)
         all_errors.extend(f"{doc['account_id']}/{e}" for e in errors)
-        if alerts["ma20"] or alerts["stoploss"]:
+        if alerts["ma"] or alerts["stoploss"]:
             sections.append({"account": str(doc.get("name") or doc["account_id"]), **alerts})
 
     if not sections:
