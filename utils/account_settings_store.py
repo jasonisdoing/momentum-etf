@@ -4,7 +4,7 @@
 
     {_id: <account_id>, name, icon, order, country_code, currency,
      benchmark: {ticker, name}, ticker_types?, market_regime_index?, URL?,
-     ma20_*/stoploss_* 알람 설정, updated_at, save_method}
+     ma_*/stoploss_* 알람 설정, updated_at, save_method}
 
 DB 가 유일한 소스다. 문서가 없으면 임의 기본값 없이 **명확히 에러**를 낸다.
 계좌 추가/삭제/값 수정 모두 지원한다 (account_id 는 불변 키).
@@ -37,9 +37,10 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "ticker_types",
     "market_regime_index",
     "URL",
-    "ma20_alarm_enabled",
-    "ma20_ma_days",
-    "ma20_alarm_icon",
+    "ma_alarm_enabled",
+    "ma_short_days",
+    "ma_long_days",
+    "ma_alarm_icon",
     "stoploss_alarm_enabled",
     "stoploss_threshold_pct",
     "stoploss_alarm_icon",
@@ -205,15 +206,15 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             cleaned[key] = {"ticker": ticker, "name": allowed[ticker]}
         elif key == "URL":
             cleaned[key] = str(raw or "").strip()
-        elif key == "ma20_alarm_enabled":
+        elif key == "ma_alarm_enabled":
             cleaned[key] = bool(raw)
-        elif key == "ma20_ma_days":
+        elif key in ("ma_short_days", "ma_long_days"):
             try:
                 days = int(raw)
             except (TypeError, ValueError) as exc:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 ma20_ma_days 는 정수여야 합니다: {raw}") from exc
+                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 정수여야 합니다: {raw}") from exc
             if days < 2:
-                raise AccountSettingsStoreError(f"'{account_id}' 의 ma20_ma_days 는 2 이상이어야 합니다: {days}")
+                raise AccountSettingsStoreError(f"'{account_id}' 의 {key} 는 2 이상이어야 합니다: {days}")
             cleaned[key] = days
         elif key == "stoploss_alarm_enabled":
             cleaned[key] = bool(raw)
@@ -225,7 +226,7 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             if pct >= 0:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 stoploss_threshold_pct 는 음수여야 합니다(예: -7): {pct}")
             cleaned[key] = pct
-        elif key in ("ma20_alarm_icon", "stoploss_alarm_icon"):
+        elif key in ("ma_alarm_icon", "stoploss_alarm_icon"):
             # 화면 배지용 아이콘(이모지). 빈 문자열 = 배지 미표시(명시적 미설정).
             icon = str(raw or "").strip()
             if len(icon) > 8:
