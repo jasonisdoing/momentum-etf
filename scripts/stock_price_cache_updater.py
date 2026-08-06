@@ -746,26 +746,24 @@ def refresh_cache_for_target(
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
-    """해당 종목풀 설정에 정의된 벤치마크 티커들을 수집합니다."""
-    tickers = set()
+    """해당 종목풀 설정에 정의된 벤치마크 티커를 수집합니다.
+
+    벤치마크는 종목풀 구성 종목이 아닐 수 있으므로(예: kor 풀의 226490) 여기서 따로 담아
+    가격 캐시에 넣는다. 넣지 않으면 백테스트가 벤치마크를 못 읽는다.
+
+    키 해석은 ``get_pool_benchmark_ticker`` 한 곳에서만 한다 — 예전에 여기서 직접
+    ``settings.get("benchmark")`` (소문자)로 읽어 항상 빈 목록이 나오던 버그가 있었다.
+    """
+    from utils.pool_settings_store import get_pool_benchmark_ticker
 
     try:
         if target_id not in list_available_ticker_types():
             return []
-        settings = get_ticker_type_settings(target_id)
-
-        # 'benchmark' (dict, single) 처리
-        single_bm = settings.get("benchmark")
-        if single_bm and isinstance(single_bm, dict):
-            ticker = str(single_bm.get("ticker") or "").strip().upper()
-            if ticker:
-                tickers.add(ticker)
-
-        return sorted(tickers)
+        ticker = get_pool_benchmark_ticker(get_ticker_type_settings(target_id))
     except Exception:
-        pass
-
-    return sorted(tickers)
+        get_app_logger().exception("벤치마크 티커 수집 실패: %s", target_id)
+        return []
+    return [ticker] if ticker else []
 
 
 def _build_parser() -> argparse.ArgumentParser:
