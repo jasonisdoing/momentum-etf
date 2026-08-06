@@ -1,7 +1,7 @@
 """종목풀 신호(이격/단기이격) 규칙 백테스트 — 읽기 전용 분석.
 
 이격 상위 N종목 보유 + 단기이격 손절 규칙을 포트폴리오로 시뮬레이션해
-규칙 / 종목풀 보유 / 벤치마크의 누적수익·MDD·소르티노를 비교한다.
+규칙과 벤치마크의 누적수익·MDD·소르티노를 비교한다.
 
 통계 주의(화면에도 함께 노출):
     - 전망 N일 수익률은 매일 겹치므로 행 수가 곧 표본 수가 아니다.
@@ -81,24 +81,6 @@ def _curve_mdd_info(curve: pd.Series) -> dict[str, Any]:
     }
 
 
-def _curve_mdd(curve: pd.Series) -> float | None:
-    """자산 곡선(일별 등)에서 최대낙폭(MDD, 음수 %)."""
-    return _curve_mdd_info(curve)["mdd_pct"]
-
-
-def _daily_returns_mdd_info(daily_returns: pd.Series) -> dict[str, Any]:
-    """일별 수익률(소수) 시리즈 → 누적 곡선 → MDD 정보."""
-    returns = daily_returns.dropna()
-    if len(returns) < 2:
-        return {"mdd_pct": None, "mdd_start_date": None, "mdd_end_date": None}
-    return _curve_mdd_info((1.0 + returns).cumprod())
-
-
-def _daily_returns_mdd(daily_returns: pd.Series) -> float | None:
-    """일별 수익률(소수) 시리즈 → 누적 곡선 → MDD(%)."""
-    return _daily_returns_mdd_info(daily_returns)["mdd_pct"]
-
-
 def _sortino(segment_returns: pd.Series, forward_days: int) -> float | None:
     """회차별 수익률(%)의 소르티노 지수(연율화). 하방편차(0% 미만 수익만) 기준.
 
@@ -115,6 +97,27 @@ def _sortino(segment_returns: pd.Series, forward_days: int) -> float | None:
         return None
     periods_per_year = 252.0 / forward_days
     return round(float(values.mean() / downside_dev) * float(np.sqrt(periods_per_year)), 2)
+
+
+def _monthly_returns(curve: pd.Series) -> dict[str, float]:
+    """일별 자산(또는 종가) 곡선을 월별 수익률(%)로 자른다. {"YYYY-MM": pct}.
+
+    첫 달의 기준은 곡선의 **시작값**이다 — 그 달 도중에 운용이 시작됐다면 그 부분 기간의
+    수익률이 된다(직전 달 종가가 아니라). 마지막 달도 마찬가지로 부분 기간일 수 있다.
+    """
+    series = pd.to_numeric(curve, errors="coerce").dropna()
+    if series.empty:
+        return {}
+    series.index = pd.to_datetime(series.index)
+    series = series.sort_index()
+
+    monthly_last = series.groupby(series.index.to_period("M")).last()
+    if monthly_last.empty:
+        return {}
+    # 첫 달을 계산하려면 그 앞에 기준점 하나가 필요하다 — 곡선의 시작값을 직전 달 자리에 둔다.
+    seed = pd.Series([float(series.iloc[0])], index=[monthly_last.index[0] - 1])
+    changes = pd.concat([seed, monthly_last]).pct_change().dropna() * 100.0
+    return {str(period): round(float(value), 2) for period, value in changes.items()}
 
 
 def _rule_performance(
@@ -321,32 +324,21 @@ def _rule_performance(
     turnover = float(np.mean(round_turnovers)) if round_turnovers else 0.0
     cost_per_round = float(np.mean(round_costs_pct)) if round_costs_pct else 0.0
 
-    baseline = scored[scored["date"].isin(rebalance_dates)].groupby("date")["fwd"].mean().reindex(rebalance_dates)
-
     def _compound(values: pd.Series) -> float:
         return float((1.0 + values / 100.0).prod() - 1.0) * 100.0
 
-    # ② 종목풀 보유(전체 동일가중=기저) 의 일별 곡선.
-    pool_daily = close_wide.pct_change().mean(axis=1)
-
     # ① 종목풀 규칙: 누적·소르티노는 개별 fwd 기반 회차수익(정확), MDD 는 일별 곡선(근사).
-    rule_mdd = _curve_mdd_info(rule_curve)
-    pool_hold_mdd = _daily_returns_mdd_info(pool_daily)
     rule_stats = {
         "cumulative_pct": round(_compound(round_returns_s), 1),
-        **rule_mdd,
+        **_curve_mdd_info(rule_curve),
         "sortino": _sortino(round_returns_s, forward_days),
     }
-    pool_hold_stats = {
-        "cumulative_pct": round(_compound(baseline), 1),
-        **pool_hold_mdd,
-        "sortino": _sortino(baseline, forward_days),
-    }
 
-    # ③ 벤치마크: 운용 기간(첫 리밸런싱 ~ 마지막 청산일) 동안 그냥 계속 보유.
+    # ② 벤치마크: 운용 기간(첫 리밸런싱 ~ 마지막 청산일) 동안 그냥 계속 보유.
     # 누적은 시작·끝 종가비로(텔레스코핑 오차 없음). MDD 는 그 구간 일별 종가곡선으로,
     # 소르티노는 회차별 수익으로. 미설정/데이터 없음이면 None(기저로 대체 금지).
     benchmark_payload: dict[str, Any] | None = None
+    benchmark_window: pd.Series | None = None
     if benchmark is not None:
         bclose = benchmark["close"]
         start_d = pd.Timestamp(rebalance_dates[0]).normalize()
@@ -366,7 +358,8 @@ def _rule_performance(
                 if pos + forward_days < len(bclose):
                     bench_seg.append((float(bclose.iloc[pos + forward_days]) / float(bclose.iloc[pos]) - 1.0) * 100.0)
             bench_series = pd.Series(bench_seg, dtype="float64")
-            benchmark_mdd = _curve_mdd_info(bclose.iloc[i0 : i_end + 1])
+            benchmark_window = bclose.iloc[i0 : i_end + 1]
+            benchmark_mdd = _curve_mdd_info(benchmark_window)
             benchmark_payload = {
                 "ticker": benchmark["ticker"],
                 "name": benchmark["name"],
@@ -374,6 +367,31 @@ def _rule_performance(
                 **benchmark_mdd,
                 "sortino": _sortino(bench_series, forward_days),
             }
+
+    # 월별 상세 — 전략은 일별 자산곡선, 벤치마크는 같은 운용구간의 종가곡선 기준.
+    # 캐시 마지막 날짜가 종목마다 달라 두 곡선의 끝이 어긋난다(전략 쪽은 ffill 로 평평한
+    # 꼬리가 붙기도 한다). 그대로 두면 한쪽만 있는 달이 생겨 비교가 안 되므로 **겹치는
+    # 구간으로 잘라** 같은 기간끼리 비교한다.
+    strategy_window = rule_curve
+    if benchmark_window is not None and not benchmark_window.empty and not rule_curve.empty:
+        strategy_index = pd.to_datetime(rule_curve.index)
+        bench_index = pd.to_datetime(benchmark_window.index)
+        overlap_start = max(strategy_index.min(), bench_index.min())
+        overlap_end = min(strategy_index.max(), bench_index.max())
+        strategy_window = rule_curve.loc[overlap_start:overlap_end]
+        benchmark_window = benchmark_window.loc[overlap_start:overlap_end]
+
+    strategy_monthly = _monthly_returns(strategy_window)
+    benchmark_monthly = _monthly_returns(benchmark_window) if benchmark_window is not None else {}
+    monthly_rows: list[dict[str, Any]] = []
+    for month in sorted(set(strategy_monthly) | set(benchmark_monthly)):
+        monthly_rows.append(
+            {
+                "month": month,
+                "strategy_pct": strategy_monthly.get(month),
+                "benchmark_pct": benchmark_monthly.get(month),
+            }
+        )
 
     return {
         "top_n_hold": int(top_n),
@@ -391,8 +409,8 @@ def _rule_performance(
         "market_regime_index": market_regime["index"] if market_regime is not None else None,
         "down_market_rounds": down_market_rounds,
         "rule": rule_stats,
-        "pool_hold": pool_hold_stats,
         "benchmark": benchmark_payload,
+        "monthly": monthly_rows,
     }
 
 
@@ -477,7 +495,7 @@ def compute_pool_signal_backtest(
     hold_threshold_k: float | None = None,
     down_market_invest_pct: float,
 ) -> dict[str, Any]:
-    """종목풀의 이격/단기이격 규칙 → 최근 기간 실적(규칙/종목풀 보유/벤치마크)을 반환한다.
+    """종목풀의 이격/단기이격 규칙 → 최근 기간 실적(규칙/벤치마크)을 반환한다.
 
     신호 정의는 순위 화면(`utils.rankings`)과 같다. 이격은 장기 이평선, 단기이격은
     단기 이평선 기준이며, 두 이평선의 역할(선택/손절)로 포트폴리오를 시뮬레이션한다.

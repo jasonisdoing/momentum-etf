@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
+import { AppAgGrid } from "../components/AppAgGrid";
+import { createAppGridTheme } from "../components/app-grid-theme";
 import { useToast } from "../components/ToastProvider";
 
 type StrategyStats = {
@@ -29,8 +32,15 @@ type Performance = {
   market_regime_index?: { ticker: string; name: string } | null;
   down_market_rounds?: number;
   rule: StrategyStats;
-  pool_hold: StrategyStats;
   benchmark: (StrategyStats & { ticker: string; name: string }) | null;
+  // 월별 상세 — 전략·벤치마크가 겹치는 구간을 달 단위로 자른 것.
+  monthly: MonthlyRow[];
+};
+
+type MonthlyRow = {
+  month: string;
+  strategy_pct: number | null;
+  benchmark_pct: number | null;
 };
 
 type BacktestResult = {
@@ -72,6 +82,8 @@ function fieldToInt(field: PoolSettingField | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+const monthlyGridTheme = createAppGridTheme();
+
 function signedClass(value: number): string {
   if (value === 0) return "";
   return value < 0 ? "metricNegative" : "metricPositive";
@@ -98,6 +110,43 @@ export function PoolBacktestManager() {
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 월별 상세 그리드 — 앱 표준 AppAgGrid(자산 헬퍼 백테스트 결과 그리드와 같은 구성).
+  const monthlyBenchmarkName = result?.performance?.benchmark?.name ?? null;
+  const monthlyColumns = useMemo<ColDef<MonthlyRow>[]>(() => {
+    const pctCell = (params: { value: number | null | undefined }) =>
+      params.value === null || params.value === undefined ? (
+        <span style={{ color: "var(--text-muted)" }}>-</span>
+      ) : (
+        <span className={signedClass(params.value)} style={{ fontWeight: 700 }}>
+          {formatSigned(params.value, 2)}%
+        </span>
+      );
+    return [
+      // 최근 달이 위. "YYYY-MM" 이라 문자열 내림차순이 곧 시간 역순이다.
+      { field: "month", headerName: "월", minWidth: 96, flex: 0.7, sort: "desc" },
+      {
+        field: "strategy_pct",
+        headerName: "종목풀 규칙",
+        minWidth: 118,
+        flex: 1,
+        type: "rightAligned",
+        cellRenderer: pctCell,
+      },
+      {
+        field: "benchmark_pct",
+        headerName: monthlyBenchmarkName ? `벤치마크 (${monthlyBenchmarkName})` : "벤치마크",
+        minWidth: 150,
+        flex: 1.3,
+        type: "rightAligned",
+        cellRenderer: pctCell,
+      },
+    ];
+  }, [monthlyBenchmarkName]);
+  const monthlyGridOptions = useMemo<GridOptions<MonthlyRow>>(
+    () => ({ domLayout: "autoHeight", suppressMovableColumns: true }),
+    [],
+  );
 
   useEffect(() => {
     let alive = true;
@@ -377,12 +426,11 @@ export function PoolBacktestManager() {
                   const labelCell: React.CSSProperties = { textAlign: "left", padding: "6px 10px", color: "var(--text-muted)" };
                   return (
                     <div style={{ overflowX: "auto" }}>
-                      <table className="poolBtTable" style={{ minWidth: 460 }}>
+                      <table className="poolBtTable" style={{ minWidth: 360 }}>
                         <thead>
                           <tr>
                             <th style={labelCell}>지표</th>
                             <th style={th}>종목풀 규칙</th>
-                            <th style={th}>종목풀 보유</th>
                             <th style={th}>{bench ? `벤치마크 (${bench.name})` : "벤치마크"}</th>
                           </tr>
                         </thead>
@@ -390,7 +438,6 @@ export function PoolBacktestManager() {
                           <tr>
                             <td style={labelCell}>누적수익 (슬리피지 차감)</td>
                             <td style={td}>{cell(p.rule.cumulative_pct)}</td>
-                            <td style={td}>{cell(p.pool_hold.cumulative_pct)}</td>
                             <td style={td}>
                               {bench ? cell(bench.cumulative_pct) : <span style={{ color: "var(--text-muted)" }}>미설정</span>}
                             </td>
@@ -398,13 +445,11 @@ export function PoolBacktestManager() {
                           <tr>
                             <td style={labelCell}>최대낙폭 (MDD)</td>
                             <td style={td}>{mdd(p.rule)}</td>
-                            <td style={td}>{mdd(p.pool_hold)}</td>
                             <td style={td}>{bench ? mdd(bench) : <span style={{ color: "var(--text-muted)" }}>-</span>}</td>
                           </tr>
                           <tr>
                             <td style={labelCell}>소르티노 (연율)</td>
                             <td style={td}>{sortino(p.rule.sortino)}</td>
-                            <td style={td}>{sortino(p.pool_hold.sortino)}</td>
                             <td style={td}>{bench ? sortino(bench.sortino) : <span style={{ color: "var(--text-muted)" }}>-</span>}</td>
                           </tr>
                         </tbody>
@@ -430,6 +475,26 @@ export function PoolBacktestManager() {
                   이만큼을 기대하면 안 됩니다. <strong>벤치마크와의 차이(규칙이 기여한 몫)</strong>를 보세요 — 이 값이 작으면
                   수익의 대부분은 규칙이 아니라 시장이 만든 것입니다.
                 </p>
+              </div>
+            </div>
+          ) : null}
+
+          {result.performance && result.performance.monthly.length > 0 ? (
+            <div className="card appCard">
+              <div className="card-body">
+                <div style={{ fontSize: "var(--fs-base)", fontWeight: 800, marginBottom: 6 }}>월별 상세</div>
+                <p style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)", margin: "0 0 10px", lineHeight: 1.6 }}>
+                  전략은 일별 자산곡선, 벤치마크는 같은 구간의 종가 기준입니다. 종목마다 가격 캐시의 마지막 날짜가
+                  달라 <strong>두 곡선이 겹치는 구간</strong>만 비교하므로, 첫 달과 마지막 달은 부분 기간일 수 있습니다.
+                </p>
+                <AppAgGrid<MonthlyRow>
+                  rowData={result.performance.monthly}
+                  columnDefs={monthlyColumns}
+                  className="rankAgGrid"
+                  theme={monthlyGridTheme}
+                  getRowId={(params) => params.data.month}
+                  gridOptions={monthlyGridOptions}
+                />
               </div>
             </div>
           ) : null}
