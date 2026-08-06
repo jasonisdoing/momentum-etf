@@ -33,6 +33,10 @@ type Performance = {
   down_market_rounds?: number;
   rule: StrategyStats;
   benchmark: (StrategyStats & { ticker: string; name: string }) | null;
+  // 벤치마크를 못 쓸 때 원인 구분 (미설정 / 가격 캐시 없음 / 기간 불일치).
+  benchmark_status: "ok" | "unset" | "no_cache" | "no_overlap";
+  benchmark_ticker: string | null;
+  benchmark_name: string | null;
   // 월별 상세 — 전략·벤치마크가 겹치는 구간을 달 단위로 자른 것.
   monthly: MonthlyRow[];
 };
@@ -87,6 +91,16 @@ const monthlyGridTheme = createAppGridTheme();
 function signedClass(value: number): string {
   if (value === 0) return "";
   return value < 0 ? "metricNegative" : "metricPositive";
+}
+
+/** 벤치마크를 못 쓰는 사유를 사람이 읽을 문구로. 원인이 다르면 조치도 다르다. */
+function benchmarkUnavailableText(
+  status: Performance["benchmark_status"],
+  ticker: string | null,
+): string {
+  if (status === "no_cache") return `가격 캐시 없음 (${ticker ?? "-"})`;
+  if (status === "no_overlap") return `기간 불일치 (${ticker ?? "-"})`;
+  return "미설정";
 }
 
 function formatSigned(value: number, digits = 1): string {
@@ -439,7 +453,13 @@ export function PoolBacktestManager() {
                             <td style={labelCell}>누적수익 (슬리피지 차감)</td>
                             <td style={td}>{cell(p.rule.cumulative_pct)}</td>
                             <td style={td}>
-                              {bench ? cell(bench.cumulative_pct) : <span style={{ color: "var(--text-muted)" }}>미설정</span>}
+                              {bench ? (
+                                cell(bench.cumulative_pct)
+                              ) : (
+                                <span style={{ color: "var(--text-muted)" }}>
+                                  {benchmarkUnavailableText(p.benchmark_status, p.benchmark_ticker)}
+                                </span>
+                              )}
                             </td>
                           </tr>
                           <tr>
@@ -461,7 +481,7 @@ export function PoolBacktestManager() {
                             {formatSigned(p.rule.cumulative_pct - bench.cumulative_pct, 1)}%p
                           </span>
                         ) : (
-                          "벤치마크 미설정"
+                          `벤치마크 ${benchmarkUnavailableText(p.benchmark_status, p.benchmark_ticker)}`
                         )}
                         {" · "}회차당 {formatSigned(p.mean_return, 2)}% · {p.wins}승 {p.losses}패 · 회전율{" "}
                         {p.turnover_pct.toFixed(0)}% · 회차비용 −{p.cost_per_round_pct.toFixed(2)}%

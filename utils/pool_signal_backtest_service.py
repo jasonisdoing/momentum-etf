@@ -125,7 +125,7 @@ def _rule_performance(
     pool_id: str,
     top_n: int,
     forward_days: int,
-    benchmark: dict[str, Any] | None,
+    benchmark: dict[str, Any],
     hold_threshold_k: float | None = None,
     down_market_invest_pct: float = 100.0,
 ) -> dict[str, Any] | None:
@@ -336,10 +336,13 @@ def _rule_performance(
 
     # ② 벤치마크: 운용 기간(첫 리밸런싱 ~ 마지막 청산일) 동안 그냥 계속 보유.
     # 누적은 시작·끝 종가비로(텔레스코핑 오차 없음). MDD 는 그 구간 일별 종가곡선으로,
-    # 소르티노는 회차별 수익으로. 미설정/데이터 없음이면 None(기저로 대체 금지).
+    # 소르티노는 회차별 수익으로. 못 쓰면 기저로 대체하지 않고 사유를 그대로 내려보낸다.
     benchmark_payload: dict[str, Any] | None = None
     benchmark_window: pd.Series | None = None
-    if benchmark is not None:
+    # 설정·캐시는 있는데 운용 구간과 날짜가 안 맞는 경우도 구분해 둔다.
+    benchmark_status = str(benchmark.get("status") or "unset")
+    if benchmark["close"] is not None:
+        benchmark_status = "no_overlap"
         bclose = benchmark["close"]
         start_d = pd.Timestamp(rebalance_dates[0]).normalize()
         last_d = pd.Timestamp(rebalance_dates[-1]).normalize()
@@ -360,6 +363,7 @@ def _rule_performance(
             bench_series = pd.Series(bench_seg, dtype="float64")
             benchmark_window = bclose.iloc[i0 : i_end + 1]
             benchmark_mdd = _curve_mdd_info(benchmark_window)
+            benchmark_status = "ok"
             benchmark_payload = {
                 "ticker": benchmark["ticker"],
                 "name": benchmark["name"],
@@ -410,6 +414,10 @@ def _rule_performance(
         "down_market_rounds": down_market_rounds,
         "rule": rule_stats,
         "benchmark": benchmark_payload,
+        # 벤치마크를 못 쓸 때 화면이 원인을 구분해 보여주기 위한 값.
+        "benchmark_status": benchmark_status,
+        "benchmark_ticker": benchmark["ticker"] or None,
+        "benchmark_name": benchmark["name"] or None,
         "monthly": monthly_rows,
     }
 
@@ -450,28 +458,36 @@ def _resolve_market_regime_for_date(regime: pd.Series, as_of: Any) -> str:
     return value
 
 
-def _load_benchmark_close(pool_id: str, pool_settings: dict[str, Any]) -> dict[str, Any] | None:
-    """벤치마크 종목의 종가 시리즈. 미설정/데이터 없음이면 None.
+def _load_benchmark_close(pool_id: str, pool_settings: dict[str, Any]) -> dict[str, Any]:
+    """벤치마크 종목의 종가 시리즈와 **왜 못 쓰는지**를 함께 반환한다.
 
     벤치마크는 매수 후보에서 빠지므로 종가를 여기서 따로 불러온다. 벤치마크 누적은
     '규칙 운용 기간 동안 이 종목을 그냥 계속 보유'로, 시작·끝 종가비로만 계산한다
     (리밸런싱마다 끊어 곱하면 거래일 경계에서 텔레스코핑이 깨져 부정확해진다).
-    반환: ``{"ticker", "name", "close"}`` (close 는 normalize 된 날짜 인덱스).
+
+    ``status`` 를 나눠 두는 이유: 예전에는 미설정과 가격 캐시 없음을 똑같이 None 으로
+    돌려줘 화면이 둘 다 '미설정'으로 표시했다. 설정은 돼 있는데 캐시가 없는 경우
+    (벤치마크가 종목풀 구성 종목이 아닐 때) 원인을 엉뚱한 곳에서 찾게 된다.
+
+    반환: ``{"status", "ticker", "name", "close"}``
+      - ``ok``       : close 사용 가능
+      - ``unset``    : 종목풀에 벤치마크 미설정
+      - ``no_cache`` : 설정은 있으나 해당 종목풀 가격 캐시에 종가가 없음
     """
-    benchmark = pool_settings.get("BENCHMARK")
-    if not isinstance(benchmark, dict):
-        return None
-    ticker = str(benchmark.get("ticker") or "").strip().upper()
-    name = str(benchmark.get("name") or "").strip()
+    ticker = get_pool_benchmark_ticker(pool_settings)
     if not ticker:
-        return None
+        return {"status": "unset", "ticker": "", "name": "", "close": None}
+
+    benchmark = pool_settings.get("BENCHMARK") or {}
+    name = str(benchmark.get("name") or "").strip() or ticker
 
     series_map = load_cached_close_series_bulk(pool_id, [ticker])
     close = pd.to_numeric(series_map.get(ticker, pd.Series(dtype="float64")), errors="coerce").dropna()
     if len(close) < 2:
-        return None
+        return {"status": "no_cache", "ticker": ticker, "name": name, "close": None}
+
     close.index = pd.to_datetime(close.index).normalize()
-    return {"ticker": ticker, "name": name or ticker, "close": close}
+    return {"status": "ok", "ticker": ticker, "name": name, "close": close}
 
 
 def _resolve_int_override(value: int | None, fallback: int, allowed: tuple[int, ...], label: str) -> int:
