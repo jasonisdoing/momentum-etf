@@ -137,25 +137,6 @@ def _set_holding_target_ratio(holding: dict[str, Any], target_ratio: float | Non
         holding.pop("target_ratio", None)
 
 
-def _load_previous_total_assets() -> dict[str, float]:
-    """전일(오늘 이전 최신) 스냅샷의 계좌별 총자산 맵.
-
-    비중 변화 계산 전용이며, 스냅샷이 없으면 빈 맵을 반환한다(임의 값 만들지 않음).
-    """
-    from utils.portfolio_io import get_latest_daily_snapshot
-
-    doc = get_latest_daily_snapshot("TOTAL", before_today=True)
-    if not isinstance(doc, dict):
-        return {}
-    result: dict[str, float] = {}
-    for account in doc.get("accounts") or []:
-        account_id = str(account.get("account_id") or "").strip()
-        value = account.get("total_assets")
-        if account_id and isinstance(value, (int, float)) and not isinstance(value, bool):
-            result[account_id] = float(value)
-    return result
-
-
 def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     """모든 계좌 또는 특정 계좌의 보유 종목을 반환한다."""
     all_accounts = load_account_configs()
@@ -175,9 +156,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     # target_id가 비어있으면 모든 계좌를 순회하며 데이터를 수집함
     all_rows: list[dict[str, Any]] = []
     account_summaries: list[dict[str, Any]] = []
-    # 비중 변화(전일 대비) 계산용 — 전일 스냅샷의 계좌별 총자산.
-    # 문서를 한 번만 읽어 계좌마다 재조회하지 않는다.
-    prev_total_assets_by_account = _load_previous_total_assets()
     selected_account_currency = "KRW"
     selected_cash_info: dict[str, Any] | None = None
 
@@ -357,9 +335,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
                 "updated_at": (cash_info or {}).get("updated_at"),
                 "valuation_krw": valuation_krw,
                 "total_assets_krw": valuation_krw + cash_balance_krw,
-                # 전일 총자산 — 화면에서 '비중 변화'(전일 대비 %p)를 구하는 데 쓴다.
-                # 전일 스냅샷이 없으면 None 그대로 내려 화면이 '-' 로 표시한다.
-                "prev_total_assets_krw": prev_total_assets_by_account.get(curr_account_id),
                 "holdings_count": len([r for r in account_rows if str(r.get("ticker") or "") != "IS"]),
                 "target_ratio_total": target_ratio_total,
             }

@@ -54,9 +54,10 @@ SCHEDULE_ROWS = [
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
         "run_location": "SERVER/LOCAL",
-        "cadence": "월~토 24시간 매시 30분 KST",
+        "cadence": "월~토 24시간 10분 간격 KST",
         "command": "python scripts/collect_data.py",
-        "schedule": {"minutes": [30], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        # 1분이면 끝나는 가벼운 집계라 촘촘히 돌린다(00·10·20·30·40·50분).
+        "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "asset_summary",
