@@ -21,18 +21,27 @@ def put_strategy_trade_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """슬랙 스위치를 저장하고 갱신된 화면 데이터를 반환한다.
+    """슬랙 스위치 / 전략 파라미터를 저장하고 갱신된 화면 데이터를 반환한다.
 
-    body: ``{"slack_enabled": true}``
+    body 는 둘 중 하나 이상을 담는다 (없는 항목은 미변경):
+      ``{"slack_enabled": true}``
+      ``{"config": {"entry_drop_pct": 5, "add_drop_pct": 3, "take_profit_pct": 7}}``
+    config 는 세 값을 모두 담아야 한다 (검증은 validate_strategy_trade_config).
     """
     if not isinstance(payload, dict):
         raise ValueError("요청 형식이 올바르지 않습니다.")
 
     slack_enabled = payload.get("slack_enabled")
-    if slack_enabled is None:
-        raise ValueError("'slack_enabled' 가 필요합니다.")
+    config = payload.get("config")
+    if slack_enabled is None and config is None:
+        raise ValueError("'slack_enabled' 또는 'config' 가 필요합니다.")
+    if config is not None and not isinstance(config, dict):
+        raise ValueError("'config' 는 객체여야 합니다.")
 
-    save_settings(slack_enabled=bool(slack_enabled))
+    save_settings(
+        slack_enabled=None if slack_enabled is None else bool(slack_enabled),
+        config=config,
+    )
     return load_strategy_trade_view()
 
 

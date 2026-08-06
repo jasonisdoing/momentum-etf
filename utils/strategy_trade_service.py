@@ -27,12 +27,14 @@ from typing import Any
 
 from utils.strategy_trade_config import (
     ACCOUNT_ID,
-    DEFAULT_CONFIG,
+    EDITABLE_PCT_KEYS,
     INDEX_NAME,
     INDEX_TICKER,
+    MAX_ROUNDS,
     PRICE_CACHE_TICKER_TYPE,
     ROUND_TICKERS,
     round_ticker_names,
+    validate_strategy_trade_config,
 )
 
 _CONFIG_COLLECTION = "system_config"
@@ -40,28 +42,52 @@ _SETTINGS_KEY = "strategy_trade_settings"
 
 
 def load_settings() -> dict[str, Any]:
-    """저장된 슬랙 스위치를 반환한다."""
+    """저장된 슬랙 스위치 + 전략 파라미터(%)를 반환한다.
+
+    파라미터가 없거나 깨졌으면 코드 기본값으로 슬쩍 넘어가지 않고 에러를 낸다 —
+    그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
+    """
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
     if db is None:
-        return {"slack_enabled": False}
+        raise RuntimeError("DB 연결에 실패해 전략 사고팔기 설정을 읽을 수 없습니다.")
     doc = db[_CONFIG_COLLECTION].find_one({"_id": _SETTINGS_KEY}) or {}
-    return {"slack_enabled": bool(doc.get("slack_enabled", False))}
+
+    missing = [key for key in EDITABLE_PCT_KEYS if doc.get(key) is None]
+    if missing:
+        raise RuntimeError(
+            f"저장된 전략 사고팔기 파라미터가 없습니다: {', '.join(missing)} "
+            f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
+        )
+    try:
+        config = validate_strategy_trade_config({key: doc.get(key) for key in EDITABLE_PCT_KEYS})
+    except ValueError as error:
+        raise ValueError(f"저장된 전략 사고팔기 파라미터가 올바르지 않습니다: {error}") from error
+
+    return {"slack_enabled": bool(doc.get("slack_enabled", False)), **config}
 
 
-def save_settings(*, slack_enabled: bool) -> dict[str, Any]:
-    """슬랙 스위치를 저장하고, 저장된 설정을 반환한다."""
+def save_settings(*, slack_enabled: bool | None = None, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """슬랙 스위치 / 전략 파라미터를 저장하고, 저장된 설정을 반환한다.
+
+    둘 다 선택 항목이지만 최소 하나는 있어야 한다 — 빈 저장은 실수일 가능성이 높다.
+    """
     from utils.db_manager import get_db_connection
+
+    if slack_enabled is None and config is None:
+        raise ValueError("저장할 값이 없습니다.")
+
+    updates: dict[str, Any] = {"updated_at": datetime.now().isoformat()}
+    if slack_enabled is not None:
+        updates["slack_enabled"] = bool(slack_enabled)
+    if config is not None:
+        updates.update(validate_strategy_trade_config(config))
 
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결에 실패했습니다.")
-    db[_CONFIG_COLLECTION].update_one(
-        {"_id": _SETTINGS_KEY},
-        {"$set": {"slack_enabled": bool(slack_enabled), "updated_at": datetime.now().isoformat()}},
-        upsert=True,
-    )
+    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, {"$set": updates}, upsert=True)
     return load_settings()
 
 
@@ -134,7 +160,7 @@ def _index_level_for(
     return round(index_close * (limit_price / close), 2)
 
 
-def _load_index_status() -> dict[str, Any]:
+def _load_index_status(entry_drop_pct: float) -> dict[str, Any]:
     """1호 진입 판정용 지수 현황 — 최근 종가와 진입 트리거 가격."""
     from utils.market_trend_service import load_index_ohlc
 
@@ -148,7 +174,7 @@ def _load_index_status() -> dict[str, Any]:
     if close.empty:
         raise RuntimeError(f"{INDEX_NAME} 지수 종가가 없습니다.")
 
-    entry_ratio = 1.0 - float(DEFAULT_CONFIG["entry_drop_pct"]) / 100.0
+    entry_ratio = 1.0 - float(entry_drop_pct) / 100.0
     last_close = float(close.iloc[-1])
     return {
         "name": INDEX_NAME,
@@ -161,16 +187,16 @@ def _load_index_status() -> dict[str, Any]:
 def load_strategy_trade_view() -> dict[str, Any]:
     """계좌 실제 보유 기준의 운용 현황을 화면용으로 묶어 반환한다."""
     settings = load_settings()
-    rounds_count = int(DEFAULT_CONFIG["rounds"])
+    rounds_count = MAX_ROUNDS
 
     names = round_ticker_names()
     tickers = [code for code, _ in ROUND_TICKERS]
     account_rows = _load_account_rows()
     cached_closes = _load_cached_closes()
-    index_status = _load_index_status()
+    index_status = _load_index_status(settings["entry_drop_pct"])
 
-    take_profit = 1.0 + float(DEFAULT_CONFIG["take_profit_pct"]) / 100.0
-    add_ratio = 1.0 - float(DEFAULT_CONFIG["add_drop_pct"]) / 100.0
+    take_profit = 1.0 + float(settings["take_profit_pct"]) / 100.0
+    add_ratio = 1.0 - float(settings["add_drop_pct"]) / 100.0
 
     # 계좌에 없는 티커는 미보유로 다룬다(0주로 등록된 경우도 동일).
     held: list[dict[str, Any]] = []
@@ -228,7 +254,7 @@ def load_strategy_trade_view() -> dict[str, Any]:
             }
         )
 
-    entry_ratio = 1.0 - float(DEFAULT_CONFIG["entry_drop_pct"]) / 100.0
+    entry_ratio = 1.0 - float(settings["entry_drop_pct"]) / 100.0
     for offset, item in enumerate(unheld):
         is_next = next_target is not None and item["ticker"] == next_target["ticker"]
         close = item["close"]
@@ -259,9 +285,9 @@ def load_strategy_trade_view() -> dict[str, Any]:
     return {
         "account_id": ACCOUNT_ID,
         "config": {
-            "entry_drop_pct": DEFAULT_CONFIG["entry_drop_pct"],
-            "add_drop_pct": DEFAULT_CONFIG["add_drop_pct"],
-            "take_profit_pct": DEFAULT_CONFIG["take_profit_pct"],
+            "entry_drop_pct": settings["entry_drop_pct"],
+            "add_drop_pct": settings["add_drop_pct"],
+            "take_profit_pct": settings["take_profit_pct"],
             "rounds": rounds_count,
             "index_name": INDEX_NAME,
         },

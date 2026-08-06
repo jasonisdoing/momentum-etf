@@ -56,6 +56,27 @@ type View = {
   rounds: RoundRow[];
 };
 
+// 편집 대상 파라미터 (백엔드 EDITABLE_PCT_KEYS 와 같은 순서·같은 범위)
+type PctKey = "entry_drop_pct" | "add_drop_pct" | "take_profit_pct";
+type PctDraft = Record<PctKey, string>;
+
+const PCT_FIELDS: ReadonlyArray<readonly [PctKey, string]> = [
+  ["entry_drop_pct", "1호 진입 하락률"],
+  ["add_drop_pct", "추가 진입 하락률"],
+  ["take_profit_pct", "매도 목표 상승률"],
+];
+const PCT_MIN = 0.1;
+const PCT_MAX = 50;
+
+const pctInputStyle: React.CSSProperties = {
+  width: 74,
+  border: "1px solid rgba(148,163,184,0.4)",
+  borderRadius: 6,
+  padding: "3px 6px",
+  fontSize: "var(--fs-sm)",
+  textAlign: "right",
+};
+
 const cardStyle: React.CSSProperties = {
   padding: 14,
   display: "flex",
@@ -105,8 +126,16 @@ export function StrategyTradeClient() {
   const [loading, setLoading] = useState(true);
   const [slackSaving, setSlackSaving] = useState(false);
   const [slackTesting, setSlackTesting] = useState(false);
+  // 파라미터 편집 초안 — 저장 전까지는 화면 값과 별개로 들고 있는다.
+  const [draft, setDraft] = useState<PctDraft | null>(null);
+  const [configSaving, setConfigSaving] = useState(false);
   const applyView = useCallback((data: View) => {
     setView(data);
+    setDraft({
+      entry_drop_pct: String(data.config.entry_drop_pct),
+      add_drop_pct: String(data.config.add_drop_pct),
+      take_profit_pct: String(data.config.take_profit_pct),
+    });
   }, []);
 
   const load = useCallback(async () => {
@@ -156,6 +185,28 @@ export function StrategyTradeClient() {
     [putSettings, toast],
   );
 
+  const saveConfig = useCallback(async () => {
+    if (!draft) return;
+    const parsed: Record<string, number> = {};
+    for (const [key, label] of PCT_FIELDS) {
+      const value = Number(draft[key]);
+      if (!Number.isFinite(value) || value < PCT_MIN || value > PCT_MAX) {
+        toast.error(`${label} 은(는) ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
+        return;
+      }
+      parsed[key] = value;
+    }
+    setConfigSaving(true);
+    try {
+      await putSettings({ config: parsed });
+      toast.success("전략 파라미터를 저장했습니다.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
+    } finally {
+      setConfigSaving(false);
+    }
+  }, [draft, putSettings, toast]);
+
   const testSlack = useCallback(async () => {
     setSlackTesting(true);
     try {
@@ -187,23 +238,66 @@ export function StrategyTradeClient() {
   }
 
   const { config, status, index } = view;
+  // 저장된 값과 같으면 저장 버튼을 잠근다 — 같은 값을 다시 쓰는 호출을 막는다.
+  const isDraftDirty = Boolean(draft) && PCT_FIELDS.some(([key]) => Number(draft?.[key]) !== config[key]);
 
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
         {/* 전략 규칙 + 회차당 투입금 */}
         <div className="card appCard" style={cardStyle}>
-          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
             <span style={{ fontWeight: 700 }}>전략 규칙</span>
-            <span>
-              1호 진입: {config.index_name} 일간 <b>−{config.entry_drop_pct}%</b>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              1호 진입: {config.index_name} 일간 −
+              <input
+                type="number"
+                step="0.1"
+                min={PCT_MIN}
+                max={PCT_MAX}
+                style={pctInputStyle}
+                value={draft?.entry_drop_pct ?? ""}
+                disabled={configSaving}
+                onChange={(event) => setDraft((d) => d && { ...d, entry_drop_pct: event.target.value })}
+              />
+              %
             </span>
-            <span>
-              추가 진입: 마지막 매수가 <b>−{config.add_drop_pct}%</b>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              추가 진입: 마지막 매수가 −
+              <input
+                type="number"
+                step="0.1"
+                min={PCT_MIN}
+                max={PCT_MAX}
+                style={pctInputStyle}
+                value={draft?.add_drop_pct ?? ""}
+                disabled={configSaving}
+                onChange={(event) => setDraft((d) => d && { ...d, add_drop_pct: event.target.value })}
+              />
+              %
             </span>
-            <span>
-              매도: 평균단가 <b>+{config.take_profit_pct}%</b>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              매도: 평균단가 +
+              <input
+                type="number"
+                step="0.1"
+                min={PCT_MIN}
+                max={PCT_MAX}
+                style={pctInputStyle}
+                value={draft?.take_profit_pct ?? ""}
+                disabled={configSaving}
+                onChange={(event) => setDraft((d) => d && { ...d, take_profit_pct: event.target.value })}
+              />
+              %
             </span>
+            <button
+              type="button"
+              className="btn btn-sm btn-dark"
+              disabled={configSaving || !isDraftDirty}
+              onClick={() => void saveConfig()}
+            >
+              {configSaving ? "저장 중…" : "저장"}
+            </button>
             <span>
               회차: <b>{config.rounds}회</b>
             </span>
