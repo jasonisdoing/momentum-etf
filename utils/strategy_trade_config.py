@@ -7,14 +7,15 @@
 
 - 회차별 배분: 1호~6호가 각각 다른 ETF 를 담당한다(전략별 고정, 아래 정의).
 - 자금 배분: 총 투입금을 회차 수로 균등 분할한다.
-- 1호 진입: 판정 지수(코스피/코스닥)가 **일간** ``entry_drop_pct`` 이상 하락한 날 매수.
-- 2~6호 진입: **직전 회차 종목**이 자기 진입가 대비 ``add_drop_pct`` 이상
+- 파라미터는 전략당 **``trigger_pct`` 하나**다 — 진입·추가·매도가 같은 간격을 쓴다.
+- 1호 진입: 판정 지수(코스피/코스닥)가 **일간** ``trigger_pct`` 이상 하락한 날 매수.
+- 2~6호 진입: **직전 회차 종목**이 자기 진입가 대비 ``trigger_pct`` 이상
   하락하면 다음 회차를 매수.
-- 매도: 각 회차 종목이 자기 진입가 대비 ``take_profit_pct`` 이상 오르면
+- 매도: 각 회차 종목이 자기 진입가 대비 ``trigger_pct`` 이상 오르면
   그 회차만 개별 매도한다.
 - 리셋: 전 회차가 모두 매도되면 다음 거래일부터 1호 진입 대기로 돌아간다.
 
-진입 트리거·추가 매수 간격·매도 목표(%)는 **전략별로 화면에서 편집**하며
+``trigger_pct`` 는 **전략별로 화면에서 편집**하며
 DB(``system_config.strategy_trade_settings.strategies``)가 단일 소스다.
 검증은 ``validate_strategy_trade_config`` 한 곳에서만 한다.
 회차 티커는 전략별 ``round_tickers`` 코드 고정값이다.
@@ -41,7 +42,7 @@ STRATEGIES: dict[str, dict[str, Any]] = {
             ("152100", "PLUS 200"),
             ("293180", "HANARO 200"),
         ),
-        "seed_config": {"entry_drop_pct": 5.0, "add_drop_pct": 5.0, "take_profit_pct": 5.0},
+        "seed_config": {"trigger_pct": 5.0},
     },
     "kosdaq150": {
         "label": "코스닥150",
@@ -56,7 +57,7 @@ STRATEGIES: dict[str, dict[str, Any]] = {
             ("301400", "PLUS 코스닥150"),
             ("304770", "HANARO 코스닥150"),
         ),
-        "seed_config": {"entry_drop_pct": 5.0, "add_drop_pct": 5.0, "take_profit_pct": 5.0},
+        "seed_config": {"trigger_pct": 5.0},
     },
 }
 STRATEGY_IDS: tuple[str, ...] = tuple(STRATEGIES)
@@ -70,7 +71,8 @@ ACCOUNT_ID = "kor_account"
 PRICE_CACHE_TICKER_TYPE = "kor_kr"
 
 # 화면에서 편집하는 파라미터 키 — DB 문서에 이 키로 저장된다.
-EDITABLE_PCT_KEYS: tuple[str, ...] = ("entry_drop_pct", "add_drop_pct", "take_profit_pct")
+# 진입 하락·추가 하락·매도 상승이 모두 이 한 값을 쓴다(전략당 1개로 관리).
+EDITABLE_PCT_KEYS: tuple[str, ...] = ("trigger_pct",)
 
 # 편집 가능 범위 (%) — 화면 입력과 API 가 같은 한계를 쓴다.
 PCT_MIN, PCT_MAX = 0.1, 50.0
@@ -81,11 +83,7 @@ def validate_strategy_trade_config(values: dict[str, Any]) -> dict[str, float]:
     if not isinstance(values, dict):
         raise ValueError("설정 형식이 올바르지 않습니다.")
 
-    labels = {
-        "entry_drop_pct": "1호 진입 하락률",
-        "add_drop_pct": "추가 진입 하락률",
-        "take_profit_pct": "매도 목표 상승률",
-    }
+    labels = {"trigger_pct": "매매 간격"}
     cleaned: dict[str, float] = {}
     for key in EDITABLE_PCT_KEYS:
         raw = values.get(key)

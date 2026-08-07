@@ -6,9 +6,8 @@ import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
 
 type StrategyConfig = {
-  entry_drop_pct: number;
-  add_drop_pct: number;
-  take_profit_pct: number;
+  // 매매 간격(%) 하나로 진입·추가·매도를 모두 관리한다.
+  trigger_pct: number;
   rounds: number;
   index_name: string;
 };
@@ -31,6 +30,8 @@ type Status = {
   next_ticker: string | null;
   next_name: string | null;
   last_buy_price: number | null;
+  // 다음 회차 매수까지 남은 하락률(%, 음수). 도달했으면 0 이상. 다음 회차 없으면 null.
+  next_buy_drop_pct: number | null;
 };
 
 type RoundRow = {
@@ -66,15 +67,7 @@ type View = {
   strategies: StrategyView[];
 };
 
-// 편집 대상 파라미터 (백엔드 EDITABLE_PCT_KEYS 와 같은 순서·같은 범위)
-type PctKey = "entry_drop_pct" | "add_drop_pct" | "take_profit_pct";
-type PctDraft = Record<PctKey, string>;
-
-const PCT_FIELDS: ReadonlyArray<readonly [PctKey, string]> = [
-  ["entry_drop_pct", "1호 진입 하락률"],
-  ["add_drop_pct", "추가 진입 하락률"],
-  ["take_profit_pct", "매도 목표 상승률"],
-];
+// 편집 파라미터는 매매 간격(trigger_pct) 하나 — 백엔드 EDITABLE_PCT_KEYS 와 동일.
 const PCT_MIN = 0.1;
 const PCT_MAX = 50;
 
@@ -159,34 +152,23 @@ function StrategySection({
 }) {
   const toast = useToast();
   const { config, status, index } = view;
-  const [draft, setDraft] = useState<PctDraft>({
-    entry_drop_pct: String(config.entry_drop_pct),
-    add_drop_pct: String(config.add_drop_pct),
-    take_profit_pct: String(config.take_profit_pct),
-  });
+  const [draft, setDraft] = useState(String(config.trigger_pct));
   const [saving, setSaving] = useState(false);
 
   // 서버가 최신 값을 돌려주면(다른 전략 저장 포함) 초안도 그 값으로 동기화한다.
   useEffect(() => {
-    setDraft({
-      entry_drop_pct: String(config.entry_drop_pct),
-      add_drop_pct: String(config.add_drop_pct),
-      take_profit_pct: String(config.take_profit_pct),
-    });
-  }, [config.entry_drop_pct, config.add_drop_pct, config.take_profit_pct]);
+    setDraft(String(config.trigger_pct));
+  }, [config.trigger_pct]);
 
-  const isDraftDirty = PCT_FIELDS.some(([key]) => Number(draft[key]) !== config[key]);
+  const isDraftDirty = Number(draft) !== config.trigger_pct;
 
   const saveConfig = useCallback(async () => {
-    const parsed: Record<string, number> = {};
-    for (const [key, label] of PCT_FIELDS) {
-      const value = Number(draft[key]);
-      if (!Number.isFinite(value) || value < PCT_MIN || value > PCT_MAX) {
-        toast.error(`${label} 은(는) ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
-        return;
-      }
-      parsed[key] = value;
+    const value = Number(draft);
+    if (!Number.isFinite(value) || value < PCT_MIN || value > PCT_MAX) {
+      toast.error(`매매 간격은 ${PCT_MIN}~${PCT_MAX} 사이 숫자여야 합니다.`);
+      return;
     }
+    const parsed = { trigger_pct: value };
     setSaving(true);
     try {
       const resp = await fetch("/api/strategy-trade", {
@@ -205,32 +187,28 @@ function StrategySection({
     }
   }, [draft, onSaved, toast, view.label, view.strategy_id]);
 
-  const pctInput = (key: PctKey) => (
-    <input
-      type="number"
-      step="0.1"
-      min={PCT_MIN}
-      max={PCT_MAX}
-      style={pctInputStyle}
-      value={draft[key]}
-      disabled={saving}
-      onChange={(event) => setDraft((d) => ({ ...d, [key]: event.target.value }))}
-    />
-  );
-
   return (
     <div className="card appCard" style={cardStyle}>
       {/* 전략 제목 + 규칙 편집 */}
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
         <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          1호 진입: {config.index_name} 일간 −{pctInput("entry_drop_pct")}%
+          매매 간격
+          <input
+            type="number"
+            step="0.1"
+            min={PCT_MIN}
+            max={PCT_MAX}
+            style={pctInputStyle}
+            value={draft}
+            disabled={saving}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+          %
         </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          추가 진입: 마지막 매수가 −{pctInput("add_drop_pct")}%
-        </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          매도: 평균단가 +{pctInput("take_profit_pct")}%
+        <span style={{ color: "var(--text-muted)" }}>
+          1호 진입 {config.index_name} 일간 −{config.trigger_pct}% · 추가 진입 마지막 매수가 −{config.trigger_pct}% ·
+          매도 평균단가 +{config.trigger_pct}%
         </span>
         <button
           type="button"
@@ -275,6 +253,21 @@ function StrategySection({
         ) : (
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
         )}
+        {status.next_buy_drop_pct != null ? (
+          <span
+            style={{
+              fontWeight: 800,
+              padding: "2px 10px",
+              borderRadius: 6,
+              border: `1.5px solid ${status.next_buy_drop_pct >= 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)"}`,
+              color: status.next_buy_drop_pct >= 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)",
+            }}
+          >
+            {status.next_buy_drop_pct >= 0
+              ? `📉 ${status.next_round}호 매수가 도달!`
+              : `📉 ${index.name} ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 더 내리면 ${status.next_round}호 매수`}
+          </span>
+        ) : null}
       </div>
 
       {/* 회차 표 */}
