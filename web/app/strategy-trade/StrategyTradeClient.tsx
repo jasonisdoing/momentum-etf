@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -18,6 +18,10 @@ type IndexStatus = {
   as_of: string;
   close: number;
   buy_trigger: number;
+  // 최근 지수 저점(라벨은 서버가 정한다) — 회차 지정가가 어느 층에 걸리는지 가늠하는 기준선.
+  recent_low: number;
+  recent_low_date: string;
+  recent_low_label: string;
 };
 
 type Status = {
@@ -123,6 +127,23 @@ function ReachedBadge() {
     >
       도달
     </span>
+  );
+}
+
+/** 최근 저점 기준선 행 — 회차 지정가의 지수 환산이 이 아래로 내려가는 경계에 긋는다. */
+function RecentLowRow({ index }: { index: IndexStatus }) {
+  return (
+    <tr>
+      <td colSpan={9} style={{ padding: "2px 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--down-color, #2f6fd0)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
+          <span style={{ flex: 1, borderTop: "2px dashed var(--down-color, #2f6fd0)", opacity: 0.55 }} />
+          <span>
+            {index.name} {index.recent_low_label} {formatNumber(index.recent_low, 2)} ({index.recent_low_date})
+          </span>
+          <span style={{ flex: 1, borderTop: "2px dashed var(--down-color, #2f6fd0)", opacity: 0.55 }} />
+        </div>
+      </td>
+    </tr>
   );
 }
 
@@ -232,6 +253,10 @@ function StrategySection({
           <span style={{ color: "var(--text-muted)" }}> ({index.as_of})</span>
         </span>
         <span>
+          {index.recent_low_label} <b>{formatNumber(index.recent_low, 2)}</b>
+          <span style={{ color: "var(--text-muted)" }}> ({index.recent_low_date})</span>
+        </span>
+        <span>
           보유 <b>{status.held_count}</b>/{config.rounds}회차
         </span>
         {status.last_buy_price != null ? (
@@ -269,8 +294,19 @@ function StrategySection({
             </tr>
           </thead>
           <tbody>
-            {view.rounds.map((row) => (
-              <tr key={row.ticker} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+            {view.rounds.map((row, rowIdx) => {
+              // 최근 저점 라인: 이 행의 지수 환산이 저점 아래로 처음 내려가는 지점 앞에 긋는다.
+              // (마지막 행까지 저점 위면 맨 아래에) — 값이 없는 행은 판정에서 건너뛴다.
+              const prevLevels = view.rounds.slice(0, rowIdx).map((r) => r.buy_index).filter((v): v is number => v != null);
+              const ownLevel = row.buy_index;
+              const lowLineHere =
+                ownLevel != null &&
+                ownLevel < index.recent_low &&
+                (prevLevels.length === 0 || prevLevels[prevLevels.length - 1] >= index.recent_low);
+              return (
+              <React.Fragment key={row.ticker}>
+              {lowLineHere ? <RecentLowRow index={index} /> : null}
+              <tr style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
                 <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
                   {row.round}호
                   {row.is_next ? (
@@ -298,7 +334,13 @@ function StrategySection({
                 </td>
                 <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(row.sell_index, 2)}</td>
               </tr>
-            ))}
+              </React.Fragment>
+              );
+            })}
+            {view.rounds.length > 0 &&
+            view.rounds.every((r) => r.buy_index == null || r.buy_index >= index.recent_low) ? (
+              <RecentLowRow index={index} />
+            ) : null}
           </tbody>
         </table>
       </div>
