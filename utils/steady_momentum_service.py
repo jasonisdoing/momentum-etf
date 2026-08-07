@@ -130,18 +130,29 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def pool_labels() -> dict[str, str]:
-    """풀 표시 이름 — 종목풀 설정(DB)의 공식 이름을 단일 소스로 쓴다."""
+def pool_options() -> list[dict[str, Any]]:
+    """풀 셀렉트 옵션 — 종목풀 설정(DB)의 이름·아이콘·순서를 단일 소스로 쓴다.
+
+    화면은 이 목록을 공용 `formatPoolLabel`(pools-rank 와 같은 표준 표기)에 그대로
+    넣는다. 반환 순서 = 종목풀 order 순.
+    """
     from utils.settings_loader import get_ticker_type_settings
 
-    labels: dict[str, str] = {}
+    options: list[dict[str, Any]] = []
     for pool, config in POOL_CONFIGS.items():
         try:
-            name = str((get_ticker_type_settings(pool) or {}).get("name") or "").strip()
+            settings = get_ticker_type_settings(pool) or {}
         except Exception:
-            name = ""
-        labels[pool] = name or str(config["label"])
-    return labels
+            settings = {}
+        options.append(
+            {
+                "ticker_type": pool,
+                "name": str(settings.get("name") or "").strip() or str(config["label"]),
+                "icon": str(settings.get("icon") or "").strip(),
+                "order": settings.get("order"),
+            }
+        )
+    return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
 
 
 def load_settings() -> dict[str, Any]:
