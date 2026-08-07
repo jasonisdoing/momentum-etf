@@ -36,6 +36,8 @@ POOL_CONFIGS: dict[str, dict[str, Any]] = {
 AVAILABLE_POOLS = tuple(POOL_CONFIGS)
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
 MAX_PER_INDUSTRY_OPTIONS = (1, 2, 3, 4, 5, 10)
+# 차순위 후보를 종목 수의 몇 배까지 보여줄지.
+RESERVE_MULTIPLIER = 3
 TRADING_DAYS_PER_MONTH = 21
 
 _CONFIG_COLLECTION = "system_config"
@@ -304,8 +306,8 @@ def momentum_metrics(
     점수 = **장기 이평선 이격(%)** = (종가 ÷ 장기 이평 − 1) × 100. 이평선 일수는
     종목풀 설정(SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을
     그대로 쓴다 — 순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
-    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓰며, 룩백 구간 절대·상대
-    수익률을 참고 지표로 함께 계산한다.
+    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓰며, 룩백 구간 수익률을
+    참고 지표로 함께 계산한다.
     ``as_of`` 를 주면 그 날짜까지의 데이터만 사용한다(백테스트·판정일 재현).
     """
     series = pd.to_numeric(close, errors="coerce").dropna()
@@ -342,8 +344,6 @@ def momentum_metrics(
     if (window["stock"] <= 0).any() or (window["bench"] <= 0).any():
         return None
 
-    relative = window["stock"] / window["bench"]
-    rel_return_pct = (float(relative.iloc[-1]) / float(relative.iloc[0]) - 1.0) * 100.0
     absolute_return_pct = (float(window["stock"].iloc[-1]) / float(window["stock"].iloc[0]) - 1.0) * 100.0
 
     return {
@@ -352,7 +352,6 @@ def momentum_metrics(
         "slope_pct": slope_pct,
         "momentum_score": disparity_pct,
         "return_lookback_pct": absolute_return_pct,
-        "rel_return_pct": rel_return_pct,
     }
 
 
@@ -595,7 +594,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # 차순위 후보 — 선정에 못 든 종목 중 점수 상위 N개 (화면에서 흐리게 붙여 보여준다).
     # 선정에서 빠진 자리를 메울 후보라 업종 상한은 적용하지 않는다.
     selected_tickers = {item["ticker"] for item in selected}
-    reserve = [item for item in scored if item["ticker"] not in selected_tickers][:top_n]
+    # 차순위 후보는 종목 수의 3배 — 선정 경계 아래 어디까지 올라와 있는지 넉넉히 본다.
+    reserve = [item for item in scored if item["ticker"] not in selected_tickers][: top_n * RESERVE_MULTIPLIER]
 
     # 연속 편입 개월 — 직전 최대 11개월의 판정일마다 같은 규칙으로 선정을 재계산해,
     # 현재 종목이 연속으로 상위 N 에 들어 있던 횟수(+이번 달)를 센다. 끊기면 중단.
@@ -689,7 +689,6 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "currency": currency,
                 **price_info(item["ticker"]),
                 "return_lookback_pct": round(item["return_lookback_pct"], 1),
-                "rel_return_pct": round(item["rel_return_pct"], 1),
                 "short_disparity_pct": round(item["short_disparity_pct"], 1),
                 "slope_pct": round(item["slope_pct"], 2) if item["slope_pct"] is not None else None,
                 "momentum_score": round(item["momentum_score"], 1),

@@ -59,7 +59,6 @@ type PickRow = {
   return_3m_pct: number | null;
   return_12m_pct: number | null;
   return_lookback_pct: number;
-  rel_return_pct: number;
   daily_change_pct: number | null;
   short_disparity_pct: number;
   slope_pct: number | null;
@@ -560,15 +559,6 @@ export function SteadyMomentumClient() {
         field: "return_lookback_pct",
         headerTooltip: "룩백 구간 수익률 — 룩백(개월) 설정을 따른다",
         width: 92,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: `상대${lookbackMonths}개월(%)`,
-        field: "rel_return_pct",
-        headerTooltip: "룩백 구간의 벤치마크 대비 초과 수익률",
-        width: 108,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: (p) => ({ color: signColor(p.value) }),
