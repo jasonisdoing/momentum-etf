@@ -62,6 +62,7 @@ type PickRow = {
   rel_return_pct: number;
   daily_change_pct: number | null;
   short_disparity_pct: number;
+  slope_pct: number | null;
   momentum_score: number;
 };
 
@@ -561,6 +562,15 @@ export function SteadyMomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: () => ({ fontWeight: 700 }),
+      },
+      {
+        headerName: "기울기(%)",
+        field: "slope_pct",
+        headerTooltip: "단기 이평선의 기울기 일수(종목풀 설정) 전 대비 변화율 — 순위 화면과 동일",
+        width: 92,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 2),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
   }, [lookbackMonths]);

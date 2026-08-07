@@ -27,7 +27,8 @@ const KEY_LABELS: Record<EditableKey, string> = {
 };
 
 const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
-const DEFAULT_SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
+// 기울기도 단기·장기와 같은 눈금을 쓴다 (백엔드 SLOPE_DAY_OPTIONS 와 같아야 한다).
+const DEFAULT_SLOPE_DAY_OPTIONS = DEFAULT_MA_DAY_OPTIONS;
 const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
 const COUNTRY_OPTIONS = ["kor", "us", "au"] as const;
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
