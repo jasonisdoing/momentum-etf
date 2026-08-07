@@ -29,8 +29,15 @@ def _round_snapshot_money(value: Any) -> int:
 
 
 def _resolve_snapshot_date() -> str:
-    """자산 스냅샷은 시장 거래일이 아니라 KST 달력 날짜를 사용한다."""
-    return _now_kst().strftime("%Y-%m-%d")
+    """자산 스냅샷의 기준일 — 일별 집계(`daily_fund_data`)와 같은 거래일을 쓴다.
+
+    예전에는 KST 달력 날짜였다. 그러면 토요일에 스냅샷만 새 행이 생기는데 집계는
+    금요일 행을 계속 갱신해서, `/assets` 의 금일 손익이 합계(집계 기준)와
+    계좌별 값(스냅샷 기준)이 서로 다른 구간을 비교하게 됐다.
+    """
+    from utils.data_loader import resolve_active_trading_date
+
+    return resolve_active_trading_date()
 
 
 class MissingPriceCacheError(RuntimeError):

@@ -495,6 +495,30 @@ def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -
     return sorted(merged)
 
 
+# 자산 집계의 기준일로 쓰는 국가 조합 — 한국 또는 호주 중 하나라도 열린 날.
+# (미국 장은 한국시간으로 다음 날 새벽에 끝나 별도 거래일을 만들지 않는다)
+ASSET_TRADING_COUNTRIES = ["kor", "au"]
+
+
+def resolve_active_trading_date() -> str:
+    """오늘 이하의 마지막 자산 거래일(KST, YYYY-MM-DD).
+
+    일별 집계(`daily_fund_data`)와 자산 스냅샷(`daily_snapshots`)이 **같은 날짜 기준**을
+    쓰도록 하는 단일 소스다. 예전에는 집계만 거래일, 스냅샷은 달력 날짜를 써서
+    토요일에 스냅샷만 새 행이 생겼고, 그 탓에 `/assets` 의 금일 손익 합계와
+    계좌별 값이 서로 다른 구간을 비교했다.
+
+    주말·휴일에도 직전 거래일을 돌려주므로 그 날짜의 행이 계속 갱신된다.
+    미국·호주 장이 한국시간 새벽까지 이어지는 몫을 그 거래일에 담기 위한 것이다.
+    """
+    today = _now_with_zone("Asia/Seoul").date()
+    search_start = today - timedelta(days=370)
+    trading_days = get_trading_days_any(str(search_start), str(today), ASSET_TRADING_COUNTRIES)
+    if not trading_days:
+        raise RuntimeError("오늘 이하의 한국/호주 거래일을 찾지 못했습니다.")
+    return max(day.date().isoformat() for day in trading_days)
+
+
 def is_trading_day(
     country: str,
     date: str | datetime | pd.Timestamp | None = None,
