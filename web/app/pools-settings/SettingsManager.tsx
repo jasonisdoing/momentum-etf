@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { useToast } from "../components/ToastProvider";
 import { AppModal } from "../components/AppModal";
 
@@ -26,9 +27,6 @@ const KEY_LABELS: Record<EditableKey, string> = {
   MARKET_REGIME_INDEX: "시장 레짐",
 };
 
-const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
-// 기울기도 단기·장기와 같은 눈금을 쓴다 (백엔드 SLOPE_DAY_OPTIONS 와 같아야 한다).
-const DEFAULT_SLOPE_DAY_OPTIONS = DEFAULT_MA_DAY_OPTIONS;
 const DEFAULT_SLIPPAGE_PCT_OPTIONS = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5];
 const COUNTRY_OPTIONS = ["kor", "us", "au"] as const;
 const CURRENCY_OPTIONS = ["KRW", "USD", "AUD"] as const;
@@ -419,10 +417,10 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
     );
   }
   if (!data) return null;
-  const maDayOptions = data.constraints.ma_day_options?.length ? data.constraints.ma_day_options : DEFAULT_MA_DAY_OPTIONS;
+  const maDayOptions = data.constraints.ma_day_options?.length ? data.constraints.ma_day_options : MA_DAY_OPTIONS;
   const slopeDayOptions = data.constraints.slope_day_options?.length
     ? data.constraints.slope_day_options
-    : DEFAULT_SLOPE_DAY_OPTIONS;
+    : SLOPE_DAY_OPTIONS;
   const slippageOptions = data.constraints.slippage_pct_options?.length
     ? data.constraints.slippage_pct_options
     : DEFAULT_SLIPPAGE_PCT_OPTIONS;
