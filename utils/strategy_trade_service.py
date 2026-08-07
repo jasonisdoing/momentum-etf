@@ -298,14 +298,23 @@ def _build_strategy_view(
         )
 
     entry_ratio = 1.0 - trigger_pct / 100.0
+    # 하락 판정은 **마지막 매수 종목**의 가격으로 한다(규칙: 직전 회차 종목이 자기
+    # 진입가 대비 -간격% 하락하면 다음 회차 매수). 같은 지수 추종이라도 운용사마다
+    # 가격 스케일이 다르므로(예: TIGER 코스닥150 이 KODEX 보다 +2%), 체인 지정가를
+    # 다른 종목 가격에 그대로 대면 필요 하락률이 왜곡된다 — 각 회차의 표시 지정가는
+    # '필요 하락 비율'을 자기 현재가에 곱해 자기 스케일로 환산한다.
+    monitored_close = held[-1]["close"] if held else None
     for offset, item in enumerate(unheld):
         is_next = next_target is not None and item["ticker"] == next_target["ticker"]
         close = item["close"]
-        # 미보유 회차의 지정가는 마지막 매수가에서 회차마다 add_drop_pct 씩 낮춰
-        # 연쇄로 잡는다. 보유가 없으면 1호는 현재가 -entry_drop_pct 가 기준이 된다.
-        base_price = last_buy_price if last_buy_price is not None else (close * entry_ratio if close else None)
-        exponent = offset + 1 if last_buy_price is not None else offset
-        buy_limit = base_price * (add_ratio**exponent) if base_price is not None else None
+        if last_buy_price is not None:
+            # 감시 종목 기준 체인 레벨 → 지금부터 필요한 하락 비율 → 자기 스케일 지정가.
+            chain_level = last_buy_price * (add_ratio ** (offset + 1))
+            required_ratio = (chain_level / monitored_close) if monitored_close else None
+            buy_limit = close * required_ratio if (close and required_ratio is not None) else None
+        else:
+            # 보유가 없으면 1호는 자기 현재가 -간격% 가 기준(자기 스케일이라 왜곡 없음).
+            buy_limit = close * entry_ratio * (add_ratio**offset) if close else None
         rows.append(
             {
                 **item,
