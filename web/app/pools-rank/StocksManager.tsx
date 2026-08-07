@@ -5,6 +5,7 @@ import type { ColDef, RowClassParams } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
@@ -134,8 +135,6 @@ type RankAddingRowState = {
 };
 
 const rankGridTheme = createAppGridTheme();
-const MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
-const SLOPE_DAY_OPTIONS = [1, 2, 3, 5, 10, 20, 40, 60];
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
 const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
 const DEFAULT_TICKER_TYPE = "";

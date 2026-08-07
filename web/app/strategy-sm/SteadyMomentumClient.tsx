@@ -561,7 +561,8 @@ export function SteadyMomentumClient() {
         width: 88,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: () => ({ fontWeight: 700 }),
+        // 선정 점수라 볼드는 유지하되, 색은 단기·기울기와 같은 부호 색 규칙을 따른다.
+        cellStyle: (p) => ({ fontWeight: 700, color: signColor(p.value) }),
       },
       {
         headerName: "기울기(%)",

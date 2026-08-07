@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
 import { formatPoolLabel } from "@/lib/pool-label";
+import { MA_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { readRememberedTickerType, writeRememberedTickerType } from "../components/account-selection";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
@@ -75,7 +76,6 @@ type BacktestOptions = { forward_day_options?: number[]; month_options?: number[
 
 const FORWARD_DAY_OPTIONS = [5, 10, 20, 40, 60];
 const DEFAULT_MONTH_OPTIONS = [1, 2, 3, 4, 5, 6, 12, 24, 36, 48, 60];
-const DEFAULT_MA_DAY_OPTIONS = [5, 10, 20, 40, 60, 120, 240];
 const DOWN_MARKET_INVEST_OPTIONS = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0];
 
 /** 종목풀 설정 필드에서 정수를 꺼낸다. 값이 없으면 null. */
@@ -120,7 +120,7 @@ export function PoolBacktestManager() {
   const [longMa, setLongMa] = useState<number | null>(null);
   const [holdK, setHoldK] = useState<number | null>(null); // 상대 임계(보유 유지). null=끔(매 회차 재선택)
   const [downMarketInvestPct, setDownMarketInvestPct] = useState(100);
-  const [maDayOptions, setMaDayOptions] = useState(DEFAULT_MA_DAY_OPTIONS);
+  const [maDayOptions, setMaDayOptions] = useState(MA_DAY_OPTIONS);
   const [result, setResult] = useState<BacktestResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
