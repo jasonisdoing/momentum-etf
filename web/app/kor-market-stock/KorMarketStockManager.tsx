@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { formatPoolLabel } from "@/lib/pool-label";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -28,6 +29,10 @@ type KorMarketStockRow = {
   change_pct: number | null;
   volume: number | null;
   market_cap: number | null;
+  return_1m_pct: number | null;
+  return_3m_pct: number | null;
+  return_12m_pct: number | null;
+  mdd_12m_pct: number | null;
 };
 
 type KorMarketStockGridRow = KorMarketStockRow & {
@@ -87,6 +92,7 @@ export function KorMarketStockManager({
   const [totalCount, setTotalCount] = useState(0);
   const [tickerPools, setTickerPools] = useState<StocksAccountItem[]>([]);
   const [selectedTickers, setSelectedTickers] = useState<string[]>([]);
+  const [registeredTickers, setRegisteredTickers] = useState<Set<string>>(new Set());
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedTickerPool, setSelectedTickerPool] = useState("");
   const [selectedBucketId, setSelectedBucketId] = useState<number | "">("");
@@ -101,9 +107,10 @@ export function KorMarketStockManager({
     setError(null);
     try {
       const minCapJo = String(minCapJoText || "").trim() || "0";
-      const [resp, stocksPayload] = await Promise.all([
+      const [resp, allStocksPayload, korStocksPayload] = await Promise.all([
         fetch(`/api/kor-market-stocks?market=${m}&limit=${l}&min_market_cap_jo=${encodeURIComponent(minCapJo)}`, { cache: "no-store" }),
         loadStocksTable().catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
+        loadStocksTable("kor").catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as KorMarketStocksResponse;
       if (!resp.ok) {
@@ -111,7 +118,15 @@ export function KorMarketStockManager({
       }
       setRows(data.rows ?? []);
       setTotalCount(data.total_count ?? 0);
-      setTickerPools(stocksPayload.ticker_types ?? []);
+      setTickerPools(allStocksPayload.ticker_types ?? []);
+
+      const registered = new Set<string>();
+      (korStocksPayload.rows ?? []).forEach((row: any) => {
+        if (row.ticker) {
+          registered.add(String(row.ticker).trim().toUpperCase());
+        }
+      });
+      setRegisteredTickers(registered);
     } catch (e) {
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
@@ -151,10 +166,9 @@ export function KorMarketStockManager({
     [rows],
   );
 
-  const allVisibleSelected = useMemo(
-    () => gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker)),
-    [gridRows, selectedTickers],
-  );
+  const allVisibleSelected = useMemo(() => {
+    return gridRows.length > 0 && gridRows.every((row) => selectedTickers.includes(row.ticker));
+  }, [gridRows, selectedTickers]);
 
   const toggleTickerSelection = useCallback((ticker: string) => {
     setSelectedTickers((current) =>
@@ -163,21 +177,22 @@ export function KorMarketStockManager({
   }, []);
 
   const toggleSelectAllVisible = useCallback(() => {
-    const visibleTickers = gridRows.map((row) => row.ticker);
+    const selectableTickers = gridRows
+      .map((row) => row.ticker);
     setSelectedTickers((current) => {
-      if (visibleTickers.length === 0) return current;
-      const allSelected = visibleTickers.every((ticker) => current.includes(ticker));
+      if (selectableTickers.length === 0) return current;
+      const allSelected = selectableTickers.every((ticker) => current.includes(ticker));
       if (allSelected) {
-        return current.filter((ticker) => !visibleTickers.includes(ticker));
+        return current.filter((ticker) => !selectableTickers.includes(ticker));
       }
-      return [...new Set([...current, ...visibleTickers])];
+      return [...new Set([...current, ...selectableTickers])];
     });
-  }, [gridRows]);
+  }, [gridRows, registeredTickers]);
 
   const handleOpenAddModal = useCallback(() => {
     if (selectedTickers.length === 0) return;
 
-    const stockPools = tickerPools.filter((p) => p.name.includes("한국 개별주"));
+    const stockPools = tickerPools.filter((p) => p.country_code === "kor");
     const remembered = readRememberedTickerType();
 
     if (remembered && stockPools.some(p => p.ticker_type === remembered)) {
@@ -269,7 +284,7 @@ export function KorMarketStockManager({
         minWidth: 84,
         cellStyle: {
           fontFamily: "var(--font-mono, monospace)",
-          fontSize: "13px",
+          fontSize: "var(--fs-sm)",
         } as CellStyle,
         cellClass: "korMarketStockTickerCell",
         cellRenderer: (params: { value?: string }) => <TickerDetailLink ticker={String(params.value ?? "")} />,
@@ -281,6 +296,18 @@ export function KorMarketStockManager({
         minWidth: 180,
       },
       {
+        headerName: "등락률",
+        field: "change_pct",
+        width: 110,
+        minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
         headerName: "현재가",
         field: "current_price",
         width: 130,
@@ -289,10 +316,46 @@ export function KorMarketStockManager({
         valueFormatter: (p) => formatKrw(p.value),
       },
       {
-        headerName: "등락률",
-        field: "change_pct",
-        width: 110,
+        headerName: "1개월",
+        field: "return_1m_pct",
+        width: 104,
         minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "3개월",
+        field: "return_3m_pct",
+        width: 104,
+        minWidth: 96,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "12개월",
+        field: "return_12m_pct",
+        width: 108,
+        minWidth: 100,
+        type: "rightAligned",
+        valueFormatter: (p) => formatPercent(p.value),
+        cellClassRules: {
+          metricPositive: (p) => p.value != null && p.value > 0,
+          metricNegative: (p) => p.value != null && p.value < 0,
+        },
+      },
+      {
+        headerName: "MDD(12개월)",
+        field: "mdd_12m_pct",
+        width: 132,
+        minWidth: 122,
         type: "rightAligned",
         valueFormatter: (p) => formatPercent(p.value),
         cellClassRules: {
@@ -349,7 +412,7 @@ export function KorMarketStockManager({
         },
       },
     ],
-    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection],
+    [allVisibleSelected, selectedTickers, toggleSelectAllVisible, toggleTickerSelection, registeredTickers],
   );
 
   return (
@@ -422,7 +485,7 @@ export function KorMarketStockManager({
 
         <div className="card-body appCardBodyTight appTableCardBodyFill">
           {error && (
-            <div style={{ padding: "0.5rem 0.75rem", marginBottom: "0.5rem", background: "#fef2f2", color: "#dc2626", borderRadius: "6px", fontSize: "0.85rem" }}>
+            <div style={{ padding: "0.5rem 0.75rem", marginBottom: "0.5rem", background: "#fef2f2", color: "#dc2626", borderRadius: "6px", fontSize: "var(--fs-sm)" }}>
               {error}
             </div>
           )}
@@ -479,10 +542,10 @@ export function KorMarketStockManager({
             >
               <option value="">종목풀 선택</option>
               {tickerPools
-                .filter((p) => p.name.includes("한국 개별주"))
+                .filter((p) => p.country_code === "kor")
                 .map((pool) => (
                   <option key={pool.ticker_type} value={pool.ticker_type}>
-                    {pool.name}
+                    {formatPoolLabel(pool)}
                   </option>
                 ))}
             </select>

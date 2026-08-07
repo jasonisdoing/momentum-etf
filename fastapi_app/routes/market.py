@@ -20,16 +20,6 @@ def get_fx_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
     return get_exchange_rates()
 
 
-@router.get("/vkospi")
-def get_vkospi_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
-    from services.vkospi_service import get_vkospi
-
-    data = get_vkospi()
-    if not data:
-        return {"error": "VKOSPI 데이터를 가져올 수 없습니다."}
-    return data
-
-
 @router.get("/fear-greed")
 def get_fear_greed_data(_: None = Depends(require_internal_token)) -> dict[str, object]:
     from services.fear_greed_service import get_fear_greed_summary

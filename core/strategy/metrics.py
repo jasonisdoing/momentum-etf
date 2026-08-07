@@ -46,7 +46,6 @@ def process_ticker_data(
     df: pd.DataFrame,
     ma_days: int,
     precomputed_entry: Mapping[str, Any] | None = None,
-    ma_type: str = "SMA",
     enable_data_sufficiency_check: bool = False,
 ) -> dict | None:
     """
@@ -57,7 +56,6 @@ def process_ticker_data(
         df: 가격 데이터프레임
         ma_days: 이동평균 기간
         precomputed_entry: 미리 계산된 캐시 데이터 (옵션)
-        ma_type: 이동평균 타입 (SMA, EMA, WMA, DEMA, TEMA, HMA, ALMA)
         enable_data_sufficiency_check: 데이터 충분성 검사 활성화 여부
     Returns:
         Dict: 계산된 지표들 또는 None (처리 실패 시)
@@ -115,15 +113,9 @@ def process_ticker_data(
         else:
             open_prices = close_prices.copy()
 
-    # 데이터 충분성 검증: MA 타입별 이상적인 데이터 요구량
+    # 데이터 충분성 검증: 이동평균 기준으로 필요한 데이터 수를 확인합니다.
     if enable_data_sufficiency_check:
-        ma_type_upper = (ma_type or "SMA").upper()
-        if ma_type_upper in {"EMA", "DEMA", "TEMA"}:
-            ideal_multiplier = 2.0
-        elif ma_type_upper == "HMA":
-            ideal_multiplier = 1.5
-        else:  # SMA, WMA 등
-            ideal_multiplier = 1.0
+        ideal_multiplier = 1.0
         ideal_data_required = int(current_ma_days * ideal_multiplier)
 
         # 데이터가 이상적인 양보다 적으면 완화된 기준 적용
@@ -143,8 +135,7 @@ def process_ticker_data(
         return None
 
     # 이동평균 기반 점수 계산
-    ma_type_key = (ma_type or "SMA").upper()
-    ma_key = f"{ma_type_key}_{int(current_ma_days)}"
+    ma_key = f"SMA_{int(current_ma_days)}"
     moving_average = None
     ma_score = None
     if isinstance(precomputed_entry, Mapping):
@@ -154,7 +145,7 @@ def process_ticker_data(
         ma_score = ma_score_cache.get(ma_key)
 
     if moving_average is None:
-        moving_average = calculate_moving_average(close_prices, current_ma_days, ma_type)
+        moving_average = calculate_moving_average(close_prices, current_ma_days)
     if ma_score is None:
         ma_score = _calculate_score(close_prices, moving_average)
 
@@ -170,3 +161,30 @@ def process_ticker_data(
         "buy_signal_days": consecutive_buy_days,
         "ma_days": current_ma_days,
     }
+
+
+def period_return_pct(series: pd.Series, months: int, eval_date: pd.Timestamp) -> float | None:
+    """`eval_date` 까지의 마지막 종가를 `months` 개월 전 종가와 비교한 수익률(%).
+
+    기준일이 휴장이면 그 이전 마지막 거래일 종가를 쓴다. 데이터가 모자라면 None.
+    화면마다 같은 계산이 흩어져 있어 공용으로 뺀 것이며, 기간 수익률이 필요한
+    곳은 이 함수를 쓴다.
+    """
+    normalized = pd.to_numeric(series, errors="coerce").dropna()
+    if normalized.empty:
+        return None
+
+    latest_candidates = normalized[normalized.index <= eval_date]
+    if latest_candidates.empty:
+        return None
+    latest_price = float(latest_candidates.iloc[-1])
+
+    target_date = latest_candidates.index[-1] - pd.DateOffset(months=months)
+    base_candidates = normalized[normalized.index <= target_date]
+    if base_candidates.empty:
+        return None
+    base_price = float(base_candidates.iloc[-1])
+    if base_price <= 0:
+        return None
+
+    return round(((latest_price / base_price) - 1.0) * 100.0, 2)

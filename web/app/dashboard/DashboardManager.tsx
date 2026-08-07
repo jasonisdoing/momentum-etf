@@ -127,7 +127,7 @@ function SparklineTooltip({ active, payload }: { active?: boolean; payload?: Arr
         color: "#fff",
         padding: "4px 8px",
         borderRadius: 4,
-        fontSize: "0.72rem",
+        fontSize: "var(--fs-sm)",
         lineHeight: 1.4,
         whiteSpace: "nowrap",
       }}
@@ -188,6 +188,8 @@ function Sparkline({
   }, []);
 
   if (data.length < 2) return null;
+  // 차트 축 눈금은 SVG 라 토큰(var) 대신 숫자를 쓴다 — recharts 가 이 값으로
+  // 축 여백을 계산하므로 CSS 변수를 넣으면 레이아웃이 어긋난다.
   const tickStyle = { fontSize: 12, fill: "#4a5568", fontWeight: 500 };
   return (
     <div ref={containerRef} style={{ width: "100%", height: "100%", minHeight: 120, minWidth: 0 }}>
@@ -280,7 +282,7 @@ function DashboardDonutChart({ buckets }: { buckets: DashboardBucketItem[] }) {
           </Pie>
           <Tooltip
             formatter={(value) => `${Number(value).toFixed(2)}%`}
-            contentStyle={{ fontSize: "0.82rem", borderRadius: 6 }}
+            contentStyle={{ fontSize: "var(--fs-sm)", borderRadius: 6 }}
           />
         </PieChart>
       ) : null}
@@ -306,7 +308,7 @@ function DashboardBucketLegend({ buckets }: { buckets: DashboardBucketItem[] }) 
             <span
               className="text-secondary"
               style={{
-                fontSize: "0.72rem",
+                fontSize: "var(--fs-sm)",
                 minWidth: 0,
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -423,7 +425,7 @@ function DashboardMetricCard({
         <div className="d-flex align-items-start justify-content-between">
           <div
             className="subheader"
-            style={{ fontSize: "1rem", fontWeight: 700, color: "#1f2d3d", letterSpacing: 0 }}
+            style={{ fontSize: "var(--fs-base)", fontWeight: 700, color: "#1f2d3d", letterSpacing: 0 }}
           >
             {item.label}
           </div>
@@ -439,13 +441,13 @@ function DashboardMetricCard({
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
                 <span
                   className="subheader"
-                  style={{ fontSize: "0.78rem", fontWeight: 600, color: "#8a94a6" }}
+                  style={{ fontSize: "var(--fs-sm)", fontWeight: 600, color: "#8a94a6" }}
                 >
                   {periodLabel}
                 </span>
                 <span
                   className={colorClass}
-                  style={{ fontSize: "0.94rem", fontWeight: 600, whiteSpace: "nowrap" }}
+                  style={{ fontSize: "var(--fs-base)", fontWeight: 600, whiteSpace: "nowrap" }}
                 >
                   {deltaText}
                   {pctRounded.toFixed(1)}%{arrow}
@@ -456,25 +458,25 @@ function DashboardMetricCard({
         </div>
         {item.sub_value !== undefined && item.sub_kind === "count" ? (
           <div className="d-flex align-items-baseline gap-1" style={{ whiteSpace: "nowrap" }}>
-            <span className="h1 mb-0 metricPositive" style={{ fontSize: "1.1rem" }}>
+            <span className="h1 mb-0 metricPositive" style={{ fontSize: "var(--fs-lg)" }}>
               {formatMetricValue(item.value, item.kind)}
             </span>
-            <span className="text-secondary" style={{ fontSize: "1rem", fontWeight: 600 }}>
+            <span className="text-secondary" style={{ fontSize: "var(--fs-base)", fontWeight: 600 }}>
               /
             </span>
-            <span className="h1 mb-0 metricNegative" style={{ fontSize: "1.1rem" }}>
+            <span className="h1 mb-0 metricNegative" style={{ fontSize: "var(--fs-lg)" }}>
               {formatMetricValue(item.sub_value, item.sub_kind)}
             </span>
           </div>
         ) : (
           <div className="d-flex align-items-baseline gap-2">
-            <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "1.32rem" }}>
+            <div className={`h1 mb-0 ${signClass}`.trim()} style={{ fontSize: "var(--fs-xl)" }}>
               {mask(item.value, item.kind)}
             </div>
             {item.sub_value !== undefined && item.sub_kind ? (
               <span
                 className={getSignedClass(item.sub_value)}
-                style={{ fontSize: "0.94rem", fontWeight: 600, whiteSpace: "nowrap" }}
+                style={{ fontSize: "var(--fs-base)", fontWeight: 600, whiteSpace: "nowrap" }}
               >
                 {formatMetricValue(item.sub_value, item.sub_kind)}
               </span>
@@ -563,7 +565,7 @@ export function DashboardManager() {
 
       {/* 헤더 + 기준일 */}
       <div className="d-flex align-items-center justify-content-between">
-        <div className="text-secondary" style={{ fontSize: "0.82rem" }}>
+        <div className="text-secondary" style={{ fontSize: "var(--fs-sm)" }}>
           스냅샷 {data?.latest_snapshot_date ?? "-"} · 주별 {data?.weekly_date ?? "-"} · 갱신 {formatUpdatedAt(data?.updated_at)}
         </div>
         <div className="d-flex align-items-center gap-2">
@@ -582,7 +584,7 @@ export function DashboardManager() {
           {holdingsStatusMetric && holdingsStatusMetric.sub_value !== undefined ? (
             <div
               className="text-secondary"
-              style={{ fontSize: "0.85rem", fontWeight: 600, whiteSpace: "nowrap" }}
+              style={{ fontSize: "var(--fs-sm)", fontWeight: 600, whiteSpace: "nowrap" }}
             >
               수익/손실 종목 수{" "}
               <span className="metricPositive">{formatMetricValue(holdingsStatusMetric.value, holdingsStatusMetric.kind)}</span>

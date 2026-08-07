@@ -83,7 +83,14 @@ location = /robots.txt {
 
 1 OCPU ARM VM 에서 배치 실행 시 CPU 100% 폭주로 시스템 다운이 반복돼,
 momentum-etf 의 VM cron 항목은 모두 제거되었다 (`infra/cron/install.sh --uninstall`).
-같은 VM 의 `leverage-switching` cron 은 영향받지 않는다.
+
+> **leverage-switching 앱 통합(2026-06)**: 같은 VM 에서 별도 호스트 cron 으로 돌던
+> `leverage-switching`(레버리지 스위칭) 앱은 폐기되었고, 전략이 momentum-etf 의
+> `leverage/` 패키지로 이전되었다. 추천 배치는 momentum-etf 배치 체계의 `leverage_ma_cross`
+> 잡(`scripts/leverage_recommend_ma_cross.py`, 한국+미국 이동평균선 크로스+고점대비)으로 편입되어 동일한
+> crontab·스케줄러·큐로 실행된다. (드로다운 컷 기반 구 스위칭 배치는 폐기됨)
+> leverage-switching VM cron 제거는
+> `bash ~/apps/leverage-switching/infra/cron/install.sh --uninstall`.
 
 ### 로컬 스케줄러로 전환
 
@@ -95,6 +102,36 @@ APScheduler 에 등록한다.
   → 로컬 자동 실행과 `/system` 화면 수동 실행이 동일한 락을 거치므로 중복 방지됨
 - 락 소유자 식별: `APP_TYPE` 환경변수 (`Local` vs 미설정 시 `PROD`)
 - 노트북이 꺼져 있던 시간의 미실행 분은 따라잡지 않는다 (misfire_grace_time=None)
+
+### 로컬 전용 잡 (워커 친화도)
+
+큐는 서버·로컬 워커가 공유한다. **무거운 계산 + 결과가 로컬 파일에 남는** 잡을 로컬 워커만
+픽하게 하려면 `utils/batch_queue.py` 의 `LOCAL_ONLY_JOBS` 에 잡 이름을 등록한다(현재는 비어 있음).
+
+- `enqueue` 가 잡 doc 에 `local_only` 플래그를 자동 기록(잡 이름 기준) → 모든 트리거 경로에 일관 적용.
+- `claim_next_pending` 은 워커가 `APP_TYPE != "Local"` 이면 `local_only: {$ne: True}` 로 필터 →
+  **서버 워커는 로컬 전용 잡을 claim 하지 않는다.** 로컬 워커는 전부 claim.
+- 로컬 전용 잡을 다시 둘 경우: **로컬 워커가 꺼져 있으면 pending 으로 대기**(서버가 안 가져감).
+
+### 스케줄러·배치 작성 시 주의
+
+`infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱할 때의 비자명한 동작:
+
+- **무인자 스크립트만 실행**: `python <script.py>` 형태만 파싱하며 `-m`/추가 인자는 인식하지 못한다. 인자가 필요한 진입점은 무인자 **래퍼 스크립트**로 감싼다(예: `scripts/leverage_recommend_ma_cross.py`).
+- **주석 cron 라인도 활성으로 파싱**: 주석(`#`) 처리된 잡 라인도 등록될 수 있으므로, 잡 비활성화는 주석이 아니라 **라인 삭제**로 한다.
+- 배치 코드/스크립트는 Docker 이미지에 포함되므로 변경 시 **재배포** 필요. `crontab`/`run_batch` 는 `./infra/cron` 마운트로 즉시 반영.
+
+### 개별주 인덱스 캐시
+
+- **저장 위치는 MongoDB `index_constituents` 컬렉션입니다** (`_id` 가 `SP500`/`NDX100`/`ASX200`). 예전에는 `data/*_tickers.json` 파일이었는데, 배치는 로컬에서만 자동 실행되는 반면 서버 컨테이너의 `data/` 는 읽기 전용 마운트(`./data:/app/data:ro`)라 서버 데이터가 갱신되지 않고 사람이 직접 올려야 했습니다. DB 는 서버·로컬이 함께 보므로 어디서 돌든 결과가 공유됩니다. 읽기·쓰기는 `utils/index_constituents_loader.py` 만 거칩니다.
+- 미국 개별주 캐시는 `us_market_stocks` 배치가 평일 08:00 KST에 `scripts/update_us_market_stocks.py`를 실행해 갱신합니다.
+  - 출처: S&P500은 위키피디아 구성종목 표, NASDAQ100은 나스닥 공식 API(`api.nasdaq.com/api/quote/list-type/nasdaq100`), 섹터·업종은 yfinance입니다.
+  - 구성종목 수가 기대 범위(S&P500 490~510, NASDAQ100 95~110)를 벗어나면 저장하지 않고 종료 코드 1로 끝납니다. cron 래퍼가 이를 실패로 보고 슬랙 알림을 보냅니다. 위키 문서가 옮겨져 NASDAQ100 갱신이 한 달간 조용히 실패했던 일을 막기 위한 장치입니다.
+  - 섹터·업종은 이미 저장된 값을 재사용하고 새로 편입된 종목만 조회합니다. 전부 다시 받으려면 `--refresh-classification` 을 줍니다.
+- 호주 개별주 캐시는 `aus_market_stocks` 배치가 평일 08:10 KST에 `scripts/update_aus_market_stocks.py`를 실행해 `index_constituents` 의 `ASX200` 문서를 갱신합니다.
+- 미국·호주 개별주 캐시는 yfinance 일봉으로 1개월·3개월·12개월 수익률과 12개월 MDD를 보강합니다.
+- 호주 캐시는 Wikipedia `S&P/ASX 200` 구성종목을 기준으로 하고, yfinance의 `.AX` 심볼로 시가총액·거래량·기간 지표를 보강합니다. 화면과 종목풀 저장 티커는 시스템 원칙대로 `ASX:` 접두사를 사용합니다.
+- leverage 전략 데이터는 `ticker_type="etf"`(MongoDB 캐시 키)로 조회하며 대상은 모두 한국 ETF.
 
 ### VM 의 역할 (현재)
 
@@ -113,11 +150,11 @@ APScheduler 에 등록한다.
 **종목당 동적 sleep** 을 적용한다. 종목 처리 elapsed 가 목표 간격 미만이면
 부족분만큼 채워서 호출 빈도를 일정 수준 이하로 유지한다.
 
-- 목표 간격: `KOR_FETCH_TARGET_MS` 환경변수 (기본 **300ms**)
+- 목표 간격: `scripts/stock_price_cache_updater.py` 상단의 `KOR_FETCH_TARGET_SECONDS` 상수 (기본 **0.3초**)
 - 적용 대상: `country_code == "kor"` 풀만 (US/AUS 는 yfinance 일괄 prefetch 라 무영향)
 - 로그 표시 예: `소요 0.1s + 0.2s 대기(속도조절)`
 - 로컬은 종목당 자연 소요(0.2~0.4s) 가 이미 충분히 느려 sleep 0 → 영향 없음
-- 서버는 0.1s × ~60종목 부족분 = 약 +12s 보충 → 풀 전체 +1~2분, 30분 timeout 한참 여유
+- 서버는 0.1s × ~60종목 부족분 = 약 +12s 보충 → 풀 전체 +1~2분, 20분 timeout 한참 여유
 
-**튜닝**: 위 기본값으로도 차단되면 환경변수를 늘린다 (예: `500` → 분당 ~100회).
-컨테이너에 환경변수가 없으면 코드 기본값(300ms) 이 적용된다.
+**튜닝**: 위 기본값으로도 차단되면 `KOR_FETCH_TARGET_SECONDS` 값을 늘린다.
+예를 들어 `0.6` 으로 바꾸면 종목당 최소 0.6초 간격으로 pykrx 호출을 늦춘다.

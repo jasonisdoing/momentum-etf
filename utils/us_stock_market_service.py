@@ -125,9 +125,16 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
                     "change_pct": change_pct,
                     "volume": _parse_int(item.get("accumulatedTradingVolume")),
                     "market_cap": market_cap,
+                    "return_1m_base_date": None,
+                    "return_1m_base_price": None,
+                    "return_1m_pct": None,
                     "return_3m_base_date": None,
                     "return_3m_base_price": None,
                     "return_3m_pct": None,
+                    "return_12m_base_date": None,
+                    "return_12m_base_price": None,
+                    "return_12m_pct": None,
+                    "mdd_12m_pct": None,
                 }
             )
             if len(rows) >= target_count:
@@ -182,9 +189,16 @@ def load_index_stock_market(index: str, min_market_cap_ukm: int = 0) -> dict[str
                 "change_pct": None,
                 "volume": item.get("volume"),
                 "market_cap": market_cap,
+                "return_1m_base_date": item.get("return_1m_base_date"),
+                "return_1m_base_price": item.get("return_1m_base_price"),
+                "return_1m_pct": item.get("return_1m_pct"),
                 "return_3m_base_date": item.get("return_3m_base_date"),
                 "return_3m_base_price": item.get("return_3m_base_price"),
                 "return_3m_pct": item.get("return_3m_pct"),
+                "return_12m_base_date": item.get("return_12m_base_date"),
+                "return_12m_base_price": item.get("return_12m_base_price"),
+                "return_12m_pct": item.get("return_12m_pct"),
+                "mdd_12m_pct": item.get("mdd_12m_pct"),
             }
         )
 
@@ -279,6 +293,7 @@ def _apply_us_realtime_overlay(rows: list[dict[str, Any]]) -> None:
         if change_rate is not None:
             row["change_pct"] = change_rate
 
-        base_price = _parse_float(row.get("return_3m_base_price"))
-        if base_price is not None and base_price > 0 and row.get("current_price") is not None:
-            row["return_3m_pct"] = round(((float(row["current_price"]) / base_price) - 1.0) * 100.0, 4)
+        for months in (1, 3, 12):
+            base_price = _parse_float(row.get(f"return_{months}m_base_price"))
+            if base_price is not None and base_price > 0 and row.get("current_price") is not None:
+                row[f"return_{months}m_pct"] = round(((float(row["current_price"]) / base_price) - 1.0) * 100.0, 4)

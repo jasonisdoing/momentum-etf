@@ -218,10 +218,7 @@ def _is_korean_etf_ticker_type(ticker_type: str) -> bool:
         settings = get_ticker_type_settings(ticker_type)
     except Exception:
         return False
-    return (
-        str(settings.get("country_code") or "").strip().lower() == "kor"
-        and str(settings.get("type_source") or "").strip().lower() == "naver"
-    )
+    return str(settings.get("country_code") or "").strip().lower() == "kor"
 
 
 def infer_ticker_type_for_account_ticker(account_id: str, ticker: str) -> str:

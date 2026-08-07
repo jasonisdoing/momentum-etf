@@ -19,6 +19,10 @@ type KorMarketStocksResponse = {
     change_pct: number | null;
     volume: number | null;
     market_cap: number | null;
+    return_1m_pct: number | null;
+    return_3m_pct: number | null;
+    return_12m_pct: number | null;
+    mdd_12m_pct: number | null;
   }>;
 };
 

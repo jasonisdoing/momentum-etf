@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Any
 
 from services.component_price_service import enrich_component_prices
-from services.stock_cache_service import get_stock_cache_meta
+from services.stock_cache_service import get_stock_cache_meta_map
 from utils.account_registry import load_account_configs
+from utils.asx_ticker import ensure_asx_prefix
 from utils.logger import get_app_logger
 from utils.ticker_registry import load_ticker_type_configs
 
@@ -45,18 +46,21 @@ def _infer_price_country_code(ticker: str) -> str:
 
 
 # 종목 국가 분류 (보유종목 상세 화면의 필터 셀렉터용).
-# 미국 / 한국 / 호주 / 기타국가 4개 그룹.
+# 전체 / 미국 / 한국 / 호주 / 기타국가 5개 그룹 (전체는 분류 결과가 아니라 "필터 없음").
+_HOLDING_COUNTRY_ALL = "all"
 _HOLDING_COUNTRY_US = "us"
 _HOLDING_COUNTRY_KOR = "kor"
 _HOLDING_COUNTRY_AU = "au"
 _HOLDING_COUNTRY_OTHER = "other"
 _HOLDING_COUNTRY_LABELS: dict[str, str] = {
+    _HOLDING_COUNTRY_ALL: "전체",
     _HOLDING_COUNTRY_US: "미국",
     _HOLDING_COUNTRY_KOR: "한국",
     _HOLDING_COUNTRY_AU: "호주",
     _HOLDING_COUNTRY_OTHER: "기타국가",
 }
 _HOLDING_COUNTRY_ORDER: list[str] = [
+    _HOLDING_COUNTRY_ALL,
     _HOLDING_COUNTRY_US,
     _HOLDING_COUNTRY_KOR,
     _HOLDING_COUNTRY_AU,
@@ -64,7 +68,7 @@ _HOLDING_COUNTRY_ORDER: list[str] = [
 ]
 
 
-def _classify_holding_country(ticker: str) -> str:
+def _classify_ticker_country(ticker: str) -> str:
     """티커 패턴만으로 종목 국가를 미국/한국/호주/기타국가 4개로 분류한다.
 
     호주 종목은 시스템 전 구간에서 `ASX:` 접두사가 강제 부착되어 유통된다
@@ -85,26 +89,51 @@ def _classify_holding_country(ticker: str) -> str:
     return _HOLDING_COUNTRY_OTHER
 
 
-def _ensure_asx_prefix(ticker: str) -> str:
-    """호주 시장 종목 ticker 에 `ASX:` 접두사를 강제 부착한다.
+# 상장 통화 → 종목 국가. 표에 없는 통화는 기타국가로 본다(임의 추정하지 않는다).
+_HOLDING_COUNTRY_BY_LISTING_CURRENCY: dict[str, str] = {
+    "AUD": _HOLDING_COUNTRY_AU,
+    "KRW": _HOLDING_COUNTRY_KOR,
+    "USD": _HOLDING_COUNTRY_US,
+}
 
-    이미 접두사가 있으면 그대로, 없으면 부착. `.AX` 접미사 형태(`2454.AX`) 도
-    `ASX:2454` 형태로 표준화한다. 6자리 숫자/현금 등 명백히 호주가 아닌 패턴은
-    그대로 둔다 (호출자가 호주임을 이미 알고 부르는 함수이므로 ticker 형식만 본다).
+
+def _classify_holding_country(component: dict[str, Any]) -> str:
+    """구성종목의 상장 국가를 미국/한국/호주/기타국가 4개로 분류한다.
+
+    구성종목 수집 소스가 알려준 원본 심볼(`yahoo_symbol`, 예: `NAB.AX`)과 상장 통화
+    (`listing_currency`)가 티커 패턴보다 정확하므로 먼저 본다. 둘 다 없을 때만
+    티커 패턴으로 판정한다. (`NAB` 처럼 점 없는 영문 티커는 패턴만으로는 미국과
+    구분되지 않는다.)
     """
-    raw = (ticker or "").strip()
-    if not raw:
-        return raw
-    upper = raw.upper()
-    if upper.startswith("ASX:"):
-        return upper
-    if upper.endswith(".AX"):
-        return f"ASX:{upper[:-3]}"
-    return f"ASX:{upper}"
+    yahoo_symbol = _normalize_ticker(component.get("yahoo_symbol"))
+    if yahoo_symbol.endswith(".AX"):
+        return _HOLDING_COUNTRY_AU
+
+    listing_currency = _normalize_ticker(component.get("listing_currency"))
+    if listing_currency:
+        return _HOLDING_COUNTRY_BY_LISTING_CURRENCY.get(listing_currency, _HOLDING_COUNTRY_OTHER)
+
+    return _classify_ticker_country(component.get("ticker"))
+
+
+def _resolve_row_ticker(row: Any) -> tuple[str, str, str]:
+    """보유 행에서 (표준 티커, 환종, 가격 조회 국가코드) 를 뽑는다.
+
+    호주 ETF/종목은 시스템 전 구간에서 ASX: 접두사를 강제 부착한다.
+    (docs/developer_guide.md "호주 티커 식별 규칙" 참조)
+    """
+    raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
+    currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
+    country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
+    ticker = ensure_asx_prefix(raw_ticker) if (country_code == "au" or currency == "AUD") else raw_ticker
+    return ticker, currency, country_code
 
 
 def list_holding_country_options() -> list[dict[str, str]]:
-    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (미국, 한국, 호주, 기타국가 순)."""
+    """종목 국가 셀렉터에 사용할 코드/라벨 목록 (전체, 미국, 한국, 호주, 기타국가 순).
+
+    첫 항목이 화면의 기본 선택값이 된다.
+    """
     return [
         {"code": code, "label": _HOLDING_COUNTRY_LABELS[code]}
         for code in _HOLDING_COUNTRY_ORDER
@@ -115,15 +144,41 @@ def _is_hidden_component_ticker(ticker: Any) -> bool:
     return _normalize_ticker(str(ticker or "")) == "IS"
 
 
-def _load_account_valuation_krw(account_id: str) -> float:
+def _is_cash_component_item(item: dict[str, Any]) -> bool:
+    """ETF 구성종목 항목이 현금(통화) 포지션인지 — 수집 소스가 준 정보로만 판별한다.
+
+    티커가 통화코드와 같다는 이유만으로 걸러내면 NOK(노키아)·SGD(Snowline Gold)처럼
+    통화코드와 겹치는 실제 종목이 함께 사라지므로, 다음 순서로만 판단한다.
+    1. `asset_class` 가 있으면 그 값이 Cash 인지 (BetaShares CSV)
+    2. 없으면 티커가 자기 자신의 상장 통화와 같은지 (예: ticker=USD, listing_currency=USD)
+    """
+    asset_class = str(item.get("asset_class") or "").strip().lower()
+    if asset_class:
+        return asset_class == "cash"
+
+    listing_currency = str(item.get("listing_currency") or "").strip().upper()
+    if listing_currency:
+        base_ticker = _normalize_ticker(item.get("ticker")).removeprefix("ASX:")
+        return base_ticker == listing_currency
+
+    return False
+
+
+def _load_account_holdings_frame(account_id: str) -> Any:
+    """계좌 보유 테이블을 1회 로드한다 (시세 조회를 포함하므로 계좌당 한 번만 부른다).
+
+    평가금액 합산과 구성종목 통합이 같은 테이블을 쓰므로 호출자가 결과를 공유한다.
+    """
     from utils.portfolio_io import load_real_holdings_table
 
     try:
-        df = load_real_holdings_table(account_id)
+        return load_real_holdings_table(account_id)
     except Exception as exc:
         logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", account_id, exc)
-        return 0.0
+        return None
 
+
+def _account_valuation_krw(df: Any) -> float:
     if df is None or df.empty:
         return 0.0
     return float(df["평가금액(KRW)"].sum())
@@ -190,6 +245,7 @@ def _append_account_components(
     *,
     account_id: str,
     account_name: str,
+    df: Any,
     merged: dict[str, dict[str, Any]],
     etf_details: list[dict[str, Any]],
     total_valuation_krw: float | None = None,
@@ -197,17 +253,10 @@ def _append_account_components(
 ) -> None:
     """단일 계좌의 보유 ETF 구성종목을 누적 병합한다.
 
+    df 는 호출자가 `_load_account_holdings_frame` 으로 미리 로드한 보유 테이블이다.
     ticker_type_filter 가 주어지면 해당 ticker_type 의 ETF 만 통합 대상으로 한다
     (노출국가 필터에 사용).
     """
-    from utils.portfolio_io import load_real_holdings_table
-
-    try:
-        df = load_real_holdings_table(account_id)
-    except Exception as exc:
-        logger.warning("포트폴리오 조회를 실패했습니다 (%s): %s", account_id, exc)
-        return
-
     if df is None or df.empty:
         return
 
@@ -219,16 +268,25 @@ def _append_account_components(
     if total_valuation <= 0:
         total_valuation = 1.0
 
+    def _is_target_row(target_row: Any) -> bool:
+        """통합 대상 보유 행인지 — 수량이 있고 ticker_type 필터를 통과하는 행."""
+        if int(target_row.get("수량", target_row.get("quantity", 0))) <= 0:
+            return False
+        if ticker_type_filter is None:
+            return True
+        return str(target_row.get("ticker_type") or "").strip().lower() in ticker_type_filter
+
+    # 구성종목 캐시를 ETF×종목풀 조합마다 개별 조회하면 수백 회 DB 왕복이 된다.
+    # 종목풀당 1회 배치 조회로 모아 두고 아래 루프에서는 맵 조회만 한다.
+    # 캐시도 시스템 표준 표기(ASX:SYI)로 저장되므로 접두사를 그대로 두고 조회한다.
+    target_tickers = [_resolve_row_ticker(r)[0] for _, r in df.iterrows() if _is_target_row(r)]
+    cache_maps = {t_type: get_stock_cache_meta_map(t_type, target_tickers) for t_type in ticker_types}
+
     for _, row in df.iterrows():
-        raw_ticker = _normalize_ticker(row.get("티커", row.get("ticker", "")))
-        quantity = int(row.get("수량", row.get("quantity", 0)))
-        if quantity <= 0:
+        if not _is_target_row(row):
             continue
 
-        if ticker_type_filter is not None:
-            row_ticker_type = str(row.get("ticker_type") or "").strip().lower()
-            if row_ticker_type not in ticker_type_filter:
-                continue
+        quantity = int(row.get("수량", row.get("quantity", 0)))
 
         valuation = float(row.get("평가금액(KRW)") or 0.0)
         buy_amount = float(row.get("매입금액(KRW)") or 0.0)
@@ -236,19 +294,12 @@ def _append_account_components(
         etf_return_pct = float(row.get("수익률(%)") or 0.0)
         etf_daily_pct = row.get("일간(%)")
         etf_current_price = row.get("현재가")
-        etf_currency = str(row.get("환종") or row.get("currency") or "").strip().upper() or "KRW"
-        etf_price_country_code = str(row.get("country_code") or "").strip().lower() or _infer_price_country_code(raw_ticker)
-        # 호주 ETF/종목은 시스템 전 구간에서 ASX: 접두사를 강제 부착한다.
-        # (docs/developer_guide.md "호주 티커 식별 규칙" 참조)
-        if etf_price_country_code == "au" or etf_currency == "AUD":
-            ticker = _ensure_asx_prefix(raw_ticker)
-        else:
-            ticker = raw_ticker
+        ticker, etf_currency, etf_price_country_code = _resolve_row_ticker(row)
         portfolio_weight = valuation / total_valuation
 
         cache_doc = None
         for t_type in ticker_types:
-            cache_doc = get_stock_cache_meta(t_type, ticker)
+            cache_doc = cache_maps[t_type].get(ticker)
             if cache_doc and cache_doc.get("holdings_cache", {}).get("items"):
                 break
 
@@ -334,6 +385,8 @@ def _append_account_components(
             comp_ticker = _normalize_ticker(item.get("ticker", ""))
             if not comp_ticker:
                 continue
+            if _is_cash_component_item(item):
+                continue
             comp_name = str(item.get("name") or item.get("raw_name") or "").strip()
 
             if "현금" in comp_name:
@@ -347,12 +400,18 @@ def _append_account_components(
             source_current_value = valuation * component_ratio
             source_cumulative_profit = etf_profit * component_ratio
             source_return_pct = (source_cumulative_profit / source_buy_amount * 100.0) if source_buy_amount > 0 else None
-            component_price_country_code = _infer_price_country_code(comp_ticker)
-            component_currency = "KRW" if component_price_country_code == "kor" else "AUD" if component_price_country_code == "au" else "USD"
+            # 거래소 접미사가 붙은 원본 심볼(NAB.AX)이 티커(NAB)보다 상장 시장을 정확히 알려준다.
+            component_yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
+            component_listing_currency = str(item.get("listing_currency") or "").strip().upper()
+            component_price_country_code = _infer_price_country_code(component_yahoo_symbol or comp_ticker)
+            component_currency = component_listing_currency or (
+                "KRW" if component_price_country_code == "kor" else "AUD" if component_price_country_code == "au" else "USD"
+            )
             component_price_fields = {
                 "raw_code": item.get("raw_code"),
                 "reuters_code": item.get("reuters_code"),
                 "yahoo_symbol": item.get("yahoo_symbol"),
+                "listing_currency": item.get("listing_currency"),
             }
 
             if comp_ticker in merged:
@@ -442,12 +501,15 @@ def load_account_holdings_components(
         total_assets_krw = 0.0
         for account in all_accounts:
             curr_account_id = str(account["account_id"])
-            curr_valuation_krw = _load_account_valuation_krw(curr_account_id)
+            # 보유 테이블은 시세 조회를 포함해 비싸므로 계좌당 1회만 로드해 아래 통합 단계와 공유한다.
+            curr_df = _load_account_holdings_frame(curr_account_id)
+            curr_valuation_krw = _account_valuation_krw(curr_df)
             curr_cash_krw = _load_account_cash_balance_krw(curr_account_id)
             account_totals.append(
                 {
                     "account_id": curr_account_id,
                     "account_name": str(account.get("name", curr_account_id)),
+                    "df": curr_df,
                     "valuation_krw": curr_valuation_krw,
                     "cash_krw": curr_cash_krw,
                 }
@@ -460,6 +522,7 @@ def load_account_holdings_components(
             _append_account_components(
                 account_id=curr_account_id,
                 account_name=curr_account_name,
+                df=account_total["df"],
                 merged=merged,
                 etf_details=etf_details,
                 total_valuation_krw=total_assets_krw,
@@ -475,12 +538,14 @@ def load_account_holdings_components(
                 )
     else:
         account_name = str(account_config.get("name", account_id_norm))
-        account_valuation_krw = _load_account_valuation_krw(account_id_norm)
+        account_df = _load_account_holdings_frame(account_id_norm)
+        account_valuation_krw = _account_valuation_krw(account_df)
         account_cash_krw = _load_account_cash_balance_krw(account_id_norm)
         account_total_assets_krw = account_valuation_krw + account_cash_krw
         _append_account_components(
             account_id=account_id_norm,
             account_name=account_name,
+            df=account_df,
             merged=merged,
             etf_details=etf_details,
             total_valuation_krw=account_total_assets_krw,
@@ -598,11 +663,12 @@ def load_account_holdings_components(
 
 
 def load_holding_country_components(country_code: str) -> dict[str, Any]:
-    """종목 국가(us/kor/au/other) 기준 보유 ETF 구성종목 통합.
+    """종목 국가(all/us/kor/au/other) 기준 보유 ETF 구성종목 통합.
 
     모든 계좌의 보유 ETF 의 구성종목을 통합한 뒤, 각 종목의 티커 패턴으로 분류된
-    국가가 인자와 일치하는 종목만 남긴다. 현금은 항상 제외하며 비중은 원본
-    (전체 자산 대비) 그대로 유지한다.
+    국가가 인자와 일치하는 종목만 남긴다. `all` 은 이 필터를 건너뛴다(추가 계산 없음
+    — 어차피 아래 통합 단계에서 전 국가를 모두 계산하고 있다). 현금은 항상 제외하며
+    비중은 원본(전체 자산 대비) 그대로 유지한다.
     """
     code = str(country_code or "").strip().lower()
     if code not in _HOLDING_COUNTRY_LABELS:
@@ -611,10 +677,11 @@ def load_holding_country_components(country_code: str) -> dict[str, Any]:
     # 국가 필터 후 박스 뷰에서 작은 비중 종목까지 보여야 하므로, 통합 시 cap 을 적용하지 않는다.
     # (TOTAL cap=100 을 그대로 두면 한국·호주의 작은 종목들이 미국 큰 종목 100개에 밀려 응답에서 통째 사라짐.)
     base = load_account_holdings_components("TOTAL", include_cash=False, max_components=0)
-    filtered_components: list[dict[str, Any]] = []
-    for comp in base.get("components") or []:
-        if _classify_holding_country(str(comp.get("ticker") or "")) == code:
-            filtered_components.append(comp)
+    all_components: list[dict[str, Any]] = base.get("components") or []
+    if code == _HOLDING_COUNTRY_ALL:
+        filtered_components = all_components
+    else:
+        filtered_components = [comp for comp in all_components if _classify_holding_country(comp) == code]
 
     return {
         "account_id": f"HOLDING_COUNTRY:{code}",

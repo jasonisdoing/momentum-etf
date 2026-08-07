@@ -5,21 +5,24 @@ import {
   ColorType,
   CrosshairMode,
   LineSeries,
+  LineStyle,
   CandlestickSeries,
   HistogramSeries,
   createChart,
+  createSeriesMarkers,
 } from "lightweight-charts";
 import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "lightweight-charts";
 
 
-type RegimeKey = "accel_up" | "neutral" | "accel_down";
+type RegimeKey = "accel_up" | "accel_down";
 
-// 그 일자 기준 '내일 종가 전환 예측' 경계 (상승↔중립=up, 중립↔하락=dn). 범위 밖이면 null.
+// 그 일자 기준 SuperTrend 전환 가격선(상승/하락). 즉시 전환 기준이다.
 type ForecastThresholds = {
   up_pct: number | null;
   up_price: number | null;
   dn_pct: number | null;
   dn_price: number | null;
+  raw_regime: RegimeKey | null;
 };
 
 type HistoryPoint = {
@@ -34,16 +37,20 @@ type HistoryPoint = {
   trend_score: number | null;
   regime: RegimeKey | null;
   forecast: ForecastThresholds | null;
+  supertrend: number | null;
+  supertrend_dir: number | null;
 };
 
 type HistoryResponse = {
   ticker: string;
   name: string;
-  ma_type: string;
-  ma_months: number;
+  ma_days: number;
+  ma_short_days: number;
   history: HistoryPoint[];
   trend_min_12m: number | null;
   trend_max_12m: number | null;
+  offense_pct: number | null;
+  defense_pct: number | null;
   error?: string;
 };
 
@@ -51,7 +58,9 @@ type MarketTrendChartProps = {
   ticker: string;
   name: string;
   maType: string;
-  maMonths: number;
+  maDays: number;
+  /** compact: 좌패널·게이지·추세전환·레짐·기간버튼을 숨기고 타이틀 + 차트만 표시(홈 대시보드용). */
+  compact?: boolean;
 };
 
 type RegimeRange = {
@@ -59,6 +68,7 @@ type RegimeRange = {
   startDate: string;
   endDate: string;
   isCurrent: boolean;
+  days: number;
 };
 
 type ChartRangeKey = "1m" | "3m" | "6m" | "ytd" | "1y" | "3y" | "5y";
@@ -73,16 +83,14 @@ const CHART_RANGES: Array<{ key: ChartRangeKey; label: string; days?: number; yt
   { key: "5y", label: "5년", days: 365 * 5 },
 ];
 
-// 3단계: 상승(빨강) / 중립(녹색) / 하락(파랑).
+// 2단계: 상승(빨강) / 하락(파랑).
 const REGIME_COLOR: Record<RegimeKey, string> = {
   accel_up: "#d62828",   // 빨강 — 상승
-  neutral: "#2f9e44",    // 녹색 — 중립
   accel_down: "#1971c2", // 파랑 — 하락
 };
 
 const REGIME_LABEL: Record<RegimeKey, string> = {
   accel_up: "⬆️ 상승",
-  neutral: "➡️ 중립",
   accel_down: "⬇️ 하락",
 };
 
@@ -90,7 +98,13 @@ function parseDateKey(date: string): Date {
   return new Date(`${date}T00:00:00`);
 }
 
-function formatKoreanAxisMonth(time: Time): string {
+function formatKoreanAxisMonth(time: Time, tickMarkType: number): string {
+  // tickMarkType이 0(Year) 또는 1(Month) 일 때만 년월을 출력하고,
+  // 2(Day) 이하의 상세 일별 틱마크는 빈 문자열로 리턴하여 중복 출력을 차단합니다.
+  if (tickMarkType !== 0 && tickMarkType !== 1) {
+    return "";
+  }
+
   if (typeof time === "string") {
     const [year, month] = time.split("-");
     if (year && month) return `${year}년 ${Number(month)}월`;
@@ -127,10 +141,7 @@ function formatSignedPct(value: number): string {
 }
 
 /**
- * 현재 레짐에서 ``target`` 레짐으로 넘어가는 '내일 등락률 임계 + 그 지수'를 표기.
- *   "−9.1% (8,355.38)" 형태. 이상/이하 표기는 생략(단일 임계값이면 사용자가 이해).
- *   상승 진입=up, 하락 진입=dn, 중립 진입=현재가 상승이면 up·하락이면 dn.
- * 해당 경계가 탐색 범위 밖(null)이면 "-".
+ * 현재 레짐에서 ``target`` 레짐으로 넘어가는 SuperTrend 전환 가격선을 표기한다.
  */
 function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, target: RegimeKey): string {
   let pct: number | null = null;
@@ -148,52 +159,10 @@ function regimeEntryText(fc: ForecastThresholds, current: RegimeKey | null, targ
     pct = fc.dn_pct;
     price = fc.dn_price;
   }
-  if (pct === null) return "-";
-  return price !== null ? `${formatSignedPct(pct)} (${formatNumber(price)})` : formatSignedPct(pct);
-}
-
-type GaugeData = {
-  todayPct: number; // 오늘 추세%의 막대 내 위치 (0~100)
-  zeroPct: number | null; // MA선(0%)의 위치 (범위가 0을 교차할 때만)
-  trendMin: number;
-  trendMax: number;
-};
-
-/**
- * 12개월 추세% 범위를 가로 막대로 표시.
- *   0% = 12개월 최저 추세 (trendMin) / 100% = 12개월 최고 추세 (trendMax)
- * 막대는 MA선(0)을 기준으로 아래(파랑)/위(빨강) 두 영역으로 나뉘고,
- * 오늘 핀의 색은 현재 레짐(slope 기반)으로 칠한다. (가속/감속 밴드는 그리지 않음 —
- * 레짐은 위치가 아니라 추세% 기울기로 결정되므로 1D 위치 밴드로 표현할 수 없다.)
- */
-function computeGaugeData({
-  trend,
-  trendMin,
-  trendMax,
-}: {
-  trend: number | null | undefined;
-  trendMin: number | null | undefined;
-  trendMax: number | null | undefined;
-}): GaugeData | null {
-  if (
-    trend === null || trend === undefined || Number.isNaN(trend) ||
-    trendMin === null || trendMin === undefined || Number.isNaN(trendMin) ||
-    trendMax === null || trendMax === undefined || Number.isNaN(trendMax) ||
-    trendMax <= trendMin
-  ) {
-    return null;
-  }
-  const project = (v: number) =>
-    Math.max(0, Math.min(100, ((v - trendMin) / (trendMax - trendMin)) * 100));
-
-  const zeroPct = trendMin < 0 && trendMax > 0 ? project(0) : null;
-
-  return {
-    todayPct: project(trend),
-    zeroPct,
-    trendMin,
-    trendMax,
-  };
+  if (pct === null || price === null) return "-";
+  const rank: Record<RegimeKey, number> = { accel_up: 1, accel_down: 0 };
+  const suffix = current !== null && rank[target] < rank[current] ? " 미만" : " 이상";
+  return `${formatSignedPct(pct)} (${formatNumber(price)})${suffix}`;
 }
 
 function filterHistoryByRange(history: HistoryPoint[], rangeKey: ChartRangeKey): HistoryPoint[] {
@@ -241,6 +210,7 @@ function buildRawRegimeRanges(history: HistoryPoint[]): RegimeRange[] {
     startDate: history[range.startIdx].date,
     endDate: history[range.endIdx].date,
     isCurrent: range.endIdx === history.length - 1,
+    days: range.endIdx - range.startIdx + 1,
   }));
 }
 
@@ -266,6 +236,32 @@ function buildLineData(history: HistoryPoint[], key: "close" | "ma"): LineData<T
       time: point.date as Time,
       value: point[key] as number,
     }));
+}
+
+function buildSuperTrendSegments(
+  history: HistoryPoint[],
+  targetDir: number
+): LineData<Time>[][] {
+  const segments: LineData<Time>[][] = [];
+  let currentSegment: LineData<Time>[] = [];
+
+  history.forEach((point) => {
+    if (point.supertrend_dir === targetDir && point.supertrend !== null) {
+      currentSegment.push({
+        time: point.date as Time,
+        value: point.supertrend,
+      });
+    } else if (currentSegment.length > 0) {
+      segments.push(currentSegment);
+      currentSegment = [];
+    }
+  });
+
+  if (currentSegment.length > 0) {
+    segments.push(currentSegment);
+  }
+
+  return segments;
 }
 
 function buildCandleData(history: HistoryPoint[]): CandlestickData<Time>[] {
@@ -336,61 +332,7 @@ function renderRegimeBands(
   }
 }
 
-/** 현재 + 최근 3개 레짐 구간을 차트 상단에 라벨로 표시 (4개). */
-function renderRecentRegimeLabels(
-  chart: IChartApi,
-  overlay: HTMLDivElement,
-  history: HistoryPoint[],
-): void {
-  overlay.innerHTML = "";
-  const width = overlay.clientWidth;
-  if (width <= 0) return;
-  // 현재(가장 최근) + 직전 3개 = 4개. ranges[0] 이 현재.
-  const ranges = buildRecentRegimeRanges(history, 4);
 
-  // 현재(top)부터 1단계씩 내려가며 4단으로 배치.
-  const ROW_HEIGHT = 22;
-  const TOP_OFFSET = 4;
-  ranges.forEach((range, idx) => {
-    const start = chart.timeScale().timeToCoordinate(range.startDate as Time);
-    const end = chart.timeScale().timeToCoordinate(range.endDate as Time);
-    if (start === null && end === null) return;
-    const left = Math.max(0, start ?? 0);
-    const right = Math.min(width, end ?? width);
-    // 1일치 구간(start === end)도 허용 — center 는 그 단일 좌표.
-    if (right < left) return;
-    const center = (left + right) / 2;
-
-    const label = document.createElement("div");
-    label.style.position = "absolute";
-    label.style.top = `${TOP_OFFSET + idx * ROW_HEIGHT}px`;
-    label.style.left = `${center}px`;
-    label.style.transform = "translateX(-50%)";
-    label.style.padding = "2px 8px";
-    label.style.borderRadius = "10px";
-    label.style.fontSize = "11px";
-    label.style.fontWeight = "700";
-    label.style.color = "#fff";
-    label.style.background = REGIME_COLOR[range.regime];
-    label.style.whiteSpace = "nowrap";
-    label.style.pointerEvents = "none";
-    label.style.boxShadow = "0 2px 6px rgba(15, 23, 42, 0.18)";
-
-    const startTxt = formatShortMonthDay(range.startDate);
-    const endTxt = range.isCurrent ? "현재" : formatShortMonthDay(range.endDate);
-    label.textContent = `${REGIME_LABEL[range.regime].replace(/^[^\s]+\s/, "")} ${startTxt}~${endTxt}`;
-    overlay.appendChild(label);
-
-    // 라벨이 차트 경계를 넘으면 안쪽으로 클램프 (특히 현재 구간이 오른쪽 끝에 있을 때).
-    const half = label.offsetWidth / 2;
-    const minCenter = half + 4;
-    const maxCenter = width - half - 4;
-    const clamped = Math.max(minCenter, Math.min(maxCenter, center));
-    if (clamped !== center) {
-      label.style.left = `${clamped}px`;
-    }
-  });
-}
 
 function formatShortMonthDay(date: string): string {
   const parts = date.split("-");
@@ -403,31 +345,41 @@ export function MarketTrendChart({
   ticker,
   name,
   maType,
-  maMonths,
+  maDays,
+  compact = false,
 }: MarketTrendChartProps) {
   const [data, setData] = useState<HistoryResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rangeKey, setRangeKey] = useState<ChartRangeKey>("ytd");
+  const [rangeKey, setRangeKey] = useState<ChartRangeKey>("1y");
+  const showSuperTrend = true;
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const bandOverlayRef = useRef<HTMLDivElement | null>(null);
-  const labelOverlayRef = useRef<HTMLDivElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
   useEffect(() => {
     let alive = true;
+    // 요청 시점의 ticker 를 고정해 둔다 — 응답이 늦게 도착해도 다른 지수 데이터를 그리지 않는다.
+    const requestedTicker = ticker;
     async function load() {
       try {
+        // ticker 가 바뀌면 이전 지수 데이터를 먼저 비운다(다른 지수 화면이 잠시 남는 것 방지).
+        setData(null);
         setLoading(true);
         setError(null);
         const response = await fetch(
-          `/api/market-trend/history?ticker=${encodeURIComponent(ticker)}&ma_type=${encodeURIComponent(maType)}&ma_months=${encodeURIComponent(String(maMonths))}`,
+          `/api/market-trend/history?ticker=${encodeURIComponent(requestedTicker)}`,
           { cache: "no-store" },
         );
         const payload = (await response.json()) as HistoryResponse;
         if (!response.ok) {
           throw new Error(payload.error ?? "히스토리를 불러오지 못했습니다.");
+        }
+        // 응답의 ticker 가 요청과 다르면 폐기한다(프록시·캐시 혼선 방어).
+        const responseTicker = String(payload.ticker ?? requestedTicker);
+        if (responseTicker !== requestedTicker) {
+          throw new Error(`응답 지수가 요청과 다릅니다: ${responseTicker} ≠ ${requestedTicker}`);
         }
         if (alive) setData(payload);
       } catch (loadError) {
@@ -441,23 +393,27 @@ export function MarketTrendChart({
     return () => {
       alive = false;
     };
-  }, [ticker, maType, maMonths]);
+  }, [ticker]);
 
   const visibleHistory = useMemo(
     () => (data?.history ? filterHistoryByRange(data.history, rangeKey) : []),
     [data, rangeKey],
   );
- 
-  // 현재 레짐에서 다른 레짐으로 넘어가는 '전환 임계'를 문장형으로 보여주기 위해 밴드에서 도출.
-  // 현재보다 약세 밴드는 그 밴드의 상단(pct_high)이 진입 경계, 강세 밴드는 하단(pct_low).
-  // 최신일 임계로부터 '현재 레짐 → 다른 레짐' 전환 문장을 도출(근접 순). 상승이면 중립·하락 2줄.
+
+  // 최신 SuperTrend 기준으로 다음 레짐 전환에 필요한 가격선을 보여준다.
   const forecastTransitions = useMemo(() => {
     const latest = data?.history.at(-1) ?? null;
     const fc = latest?.forecast;
     const current = latest?.regime;
     if (!fc || !current) return [];
-    const out: { next_regime: RegimeKey; target_price: number | null; change_pct: number | null }[] = [];
-    (["accel_up", "neutral", "accel_down"] as RegimeKey[]).forEach((rg) => {
+    const rank: Record<RegimeKey, number> = { accel_up: 1, accel_down: 0 };
+    const out: {
+      next_regime: RegimeKey;
+      target_price: number | null;
+      change_pct: number | null;
+      mode: "drop_below" | "rise_above";
+    }[] = [];
+    (["accel_up", "accel_down"] as RegimeKey[]).forEach((rg) => {
       if (rg === current) return;
       let pct: number | null = null;
       let price: number | null = null;
@@ -467,44 +423,72 @@ export function MarketTrendChart({
       } else if (rg === "accel_down") {
         pct = fc.dn_pct;
         price = fc.dn_price;
-      } else if (current === "accel_up") {
-        // 상승→중립: 가까운 경계는 상승 이탈선(up)
-        pct = fc.up_pct;
-        price = fc.up_price;
-      } else if (current === "accel_down") {
-        // 하락→중립: 가까운 경계는 하락 이탈선(dn)
-        pct = fc.dn_pct;
-        price = fc.dn_price;
       }
-      out.push({ next_regime: rg, target_price: price, change_pct: pct });
+      const mode: "drop_below" | "rise_above" = rank[rg] < rank[current] ? "drop_below" : "rise_above";
+      out.push({ next_regime: rg, target_price: price, change_pct: pct, mode });
     });
-    // 상승 → 중립 → 하락 고정 순서로 배치.
-    const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, neutral: 1, accel_down: 2 };
+    // 상승 → 하락 고정 순서로 배치.
+    const regimeOrder: Record<RegimeKey, number> = { accel_up: 0, accel_down: 1 };
     out.sort((a, c) => regimeOrder[a.next_regime] - regimeOrder[c.next_regime]);
     return out.filter((t) => t.target_price !== null && t.change_pct !== null);
   }, [data]);
 
+  const recentRegimeRanges = useMemo(() => {
+    return visibleHistory.length > 0 ? buildRecentRegimeRanges(visibleHistory, 4) : [];
+  }, [visibleHistory]);
+
   const latestPoint = data?.history.at(-1) ?? null;
-  const gaugeData = computeGaugeData({
-    trend: latestPoint?.trend_pct,
-    trendMin: data?.trend_min_12m,
-    trendMax: data?.trend_max_12m,
-  });
-  const gaugeLeft = gaugeData?.todayPct ?? null;
-  const latestRegime = latestPoint?.regime ?? null;
+
+  // 공격/방어 비중이 다음 단계로 바뀌는 지수 종가 예측(추세 전환 조건과 같은 형식).
+  // 공격<100: 한 단계 위 공격까지 필요한 상승 종가. 공격=100: MA 아래로 내려가 방어 20이 되는 종가.
+  const ratioForecast = useMemo(() => {
+    const offense = data?.offense_pct;
+    const defense = data?.defense_pct;
+    const close = latestPoint?.close;
+    const ma = latestPoint?.ma;
+    const gapMin = data?.trend_min_12m;
+    if (offense == null || defense == null || close == null || ma == null || !(close > 0) || !(ma > 0)) {
+      return null;
+    }
+    if (offense >= 100) {
+      // 이미 공격 100 — MA 아래로 내려가면 방어 20으로 상승.
+      const changePct = (ma / close - 1) * 100;
+      return { targetPrice: ma, changePct, kind: "defense" as const, ratioValue: 20, rising: false };
+    }
+    if (gapMin == null || gapMin >= 0) return null;
+    const steps = defense / 20; // 현재 방어 단계(1~5)
+    const targetGapPct = ((steps - 1) / 5) * gapMin; // 한 단계 위(공격+20)에 해당하는 괴리율
+    const targetPrice = ma * (1 + targetGapPct / 100);
+    const changePct = (targetPrice / close - 1) * 100;
+    return { targetPrice, changePct, kind: "offense" as const, ratioValue: offense + 20, rising: true };
+  }, [data, latestPoint]);
+
+  // 왼쪽 패널용 기간 수익률 — 최신 종가 대비 N거래일 전 종가.
+  const periodReturns = useMemo(() => {
+    const hist = data?.history ?? [];
+    const lastClose = hist.at(-1)?.close;
+    if (lastClose == null || !(lastClose > 0)) return [];
+    return [
+      { label: "1개월", days: 20 },
+      { label: "3개월", days: 60 },
+      { label: "1년", days: 240 },
+    ].map((p) => {
+      const past = hist[hist.length - 1 - p.days]?.close;
+      const pct = past != null && past > 0 ? (lastClose / past - 1) * 100 : null;
+      return { label: p.label, pct };
+    });
+  }, [data]);
 
   useEffect(() => {
     const container = chartContainerRef.current;
     const overlay = bandOverlayRef.current;
-    const labelsOverlay = labelOverlayRef.current;
     const tooltip = tooltipRef.current;
-    if (!container || !overlay || !tooltip || !labelsOverlay) return;
+    if (!container || !overlay || !tooltip) return;
 
     chartRef.current?.remove();
     chartRef.current = null;
     tooltip.style.display = "none";
     overlay.innerHTML = "";
-    labelsOverlay.innerHTML = "";
 
     if (visibleHistory.length < 2) return;
 
@@ -526,7 +510,7 @@ export function MarketTrendChart({
         borderColor: "#e2e8f0",
         timeVisible: false,
         secondsVisible: false,
-        tickMarkFormatter: (time: Time) => formatKoreanAxisMonth(time),
+        tickMarkFormatter: (time: Time, tickMarkType: number) => formatKoreanAxisMonth(time, tickMarkType),
         rightOffset: 0,
         barSpacing: Math.max(6, Math.min(12, container.clientWidth / Math.max(visibleHistory.length, 1))),
       },
@@ -543,34 +527,134 @@ export function MarketTrendChart({
       wickUpColor: "#dc2626",
       wickDownColor: "#2563eb",
       priceLineVisible: false,
-      lastValueVisible: true,
+      // 마지막 종가 라벨은 아래 "현재가" 가로선 라벨과 중복이라 끈다.
+      lastValueVisible: false,
     });
     candleSeries.setData(buildCandleData(visibleHistory));
 
-    const volumeSeries = chart.addSeries(HistogramSeries, {
-      priceFormat: {
-        type: "volume",
-      },
-      priceScaleId: "volume",
+    // 가로 점선: 현재가(검정) / 상승 전환 조건(빨강) / 하락 전환 조건(파랑).
+    const latestForPriceLines = visibleHistory.at(-1) ?? null;
+    const currentClose = latestForPriceLines?.close ?? null;
+    const upTurnPrice = latestForPriceLines?.forecast?.up_price ?? null;
+    const dnTurnPrice = latestForPriceLines?.forecast?.dn_price ?? null;
+    // 제목은 라벨을 넓혀 최근 캔들을 가리므로 생략하고, 우측 축에는 값 라벨만 색으로 구분해 표시한다.
+    if (currentClose != null) {
+      candleSeries.createPriceLine({
+        price: currentClose,
+        color: "#111827",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      });
+    }
+    if (upTurnPrice != null) {
+      candleSeries.createPriceLine({
+        price: upTurnPrice,
+        color: "#dc2626",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      });
+    }
+    if (dnTurnPrice != null) {
+      candleSeries.createPriceLine({
+        price: dnTurnPrice,
+        color: "#2563eb",
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+      });
+    }
+
+    const markerLineSeries = chart.addSeries(LineSeries, {
+      color: "rgba(0, 0, 0, 0)",
       priceLineVisible: false,
       lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
     });
-    volumeSeries.setData(buildVolumeData(visibleHistory));
 
-    chart.priceScale("volume").applyOptions({
-      scaleMargins: {
-        top: 0.75,
-        bottom: 0,
-      },
-    });
+    const markerLineData: any[] = [];
+    const markers: any[] = [];
+    if (showSuperTrend) {
+      let prevDir: number | null = null;
+      visibleHistory.forEach((point) => {
+        if (point.supertrend_dir === null || point.supertrend_dir === undefined) return;
+        if (prevDir !== null && point.supertrend_dir !== prevDir) {
+          const isUp = point.supertrend_dir === 1;
+          const lowVal = ((point.low !== null && point.low !== undefined) ? point.low : point.close) as number;
+          const highVal = ((point.high !== null && point.high !== undefined) ? point.high : point.close) as number;
+          const offsetPrice = isUp ? lowVal * 0.935 : highVal * 1.065;
+
+          markerLineData.push({
+            time: point.date as Time,
+            value: offsetPrice,
+          });
+
+          markers.push({
+            time: point.date as Time,
+            position: "inBar",
+            color: isUp ? "#fa5252" : "#228be6",
+            shape: isUp ? "arrowUp" : "arrowDown",
+            size: 1.5,
+          });
+        }
+        prevDir = point.supertrend_dir;
+      });
+    }
+    markerLineSeries.setData(markerLineData);
+    createSeriesMarkers(markerLineSeries, markers);
+
+    // 거래량 데이터가 없는 지수(예: 필라델피아 반도체)는 히스토그램의 빈 바닥선만 남으므로 아예 그리지 않는다.
+    const hasVolume = visibleHistory.some((point) => point.volume != null && point.volume > 0);
+    if (hasVolume) {
+      const volumeSeries = chart.addSeries(HistogramSeries, {
+        priceFormat: {
+          type: "volume",
+        },
+        priceScaleId: "volume",
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      volumeSeries.setData(buildVolumeData(visibleHistory));
+
+      chart.priceScale("volume").applyOptions({
+        scaleMargins: {
+          top: 0.75,
+          bottom: 0,
+        },
+      });
+    }
 
     chart.addSeries(LineSeries, {
-      color: "#fa5252",
-      lineWidth: 1,
-      lineStyle: 2,
+      color: "#16a34a",
+      lineWidth: 2,
+      lineStyle: 0,
       priceLineVisible: false,
       lastValueVisible: false,
     }).setData(buildLineData(visibleHistory, "ma"));
+
+    if (showSuperTrend) {
+      buildSuperTrendSegments(visibleHistory, 1).forEach((segment) => {
+        chart.addSeries(LineSeries, {
+          color: "#fa5252",
+          lineWidth: 2,
+          lineStyle: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        }).setData(segment);
+      });
+
+      buildSuperTrendSegments(visibleHistory, -1).forEach((segment) => {
+        chart.addSeries(LineSeries, {
+          color: "#228be6",
+          lineWidth: 2,
+          lineStyle: 0,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        }).setData(segment);
+      });
+    }
 
     chart.timeScale().fitContent();
 
@@ -611,7 +695,7 @@ export function MarketTrendChart({
       }
 
       const days = regimeDaysByDate.get(point.date) || 1;
-      // 각 일자는 '그날 기준 내일 종가 전환 예측'을 자체적으로 갖는다(point.forecast).
+      // 각 일자는 그날 기준 SuperTrend 전환 가격선을 자체적으로 갖는다(point.forecast).
       const fc = point.forecast;
 
       const getRegimeStatusText = (key: RegimeKey) => {
@@ -627,12 +711,9 @@ export function MarketTrendChart({
       const statusRows = fc
         ? `
         <div style="margin-top: 6px; border-top: 1px dashed rgba(255,255,255,0.25); padding-top: 6px; display: flex; flex-direction: column; gap: 3px;">
-          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: 11px;">내일 종가 기준 전환 예측</div>
+          <div style="font-weight: 700; color: #ffffff; margin-bottom: 2px; font-size: var(--fs-sm);">ST(SuperTrend) 전환 조건</div>
           <div style="display: flex; justify-content: space-between; gap: 15px;">
             <span>상승:</span> <strong>${getRegimeStatusText("accel_up")}</strong>
-          </div>
-          <div style="display: flex; justify-content: space-between; gap: 15px;">
-            <span>중립:</span> <strong>${getRegimeStatusText("neutral")}</strong>
           </div>
           <div style="display: flex; justify-content: space-between; gap: 15px;">
             <span>하락:</span> <strong>${getRegimeStatusText("accel_down")}</strong>
@@ -645,8 +726,8 @@ export function MarketTrendChart({
       const regimeTextColor = point.regime ? REGIME_COLOR[point.regime] : "#ffffff";
 
       tooltip.innerHTML = `
-        <div style="font-weight:700;margin-bottom:6px;color:#ffffff;font-size:12px;">${point.date}</div>
-        <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: #e2e8f0;">
+        <div style="font-weight:700;margin-bottom:6px;color:#ffffff;font-size:var(--fs-sm);">${point.date}</div>
+        <div style="display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-sm); color: #e2e8f0;">
           <div>상태: <strong style="color: ${regimeTextColor}">${regimeLabelText} (${days}일차)</strong></div>
           <div>추세 점수: <strong style="color: #ffffff">${formatScore(point.trend_score)}</strong></div>
           ${statusRows}
@@ -671,7 +752,6 @@ export function MarketTrendChart({
     const redrawBands = () => {
       requestAnimationFrame(() => {
         renderRegimeBands(chart, overlay, visibleHistory);
-        renderRecentRegimeLabels(chart, labelsOverlay, visibleHistory);
       });
     };
     redrawBands();
@@ -690,16 +770,15 @@ export function MarketTrendChart({
       chart.remove();
       chartRef.current = null;
       overlay.innerHTML = "";
-      labelsOverlay.innerHTML = "";
       tooltip.style.display = "none";
     };
-  }, [visibleHistory]);
+  }, [visibleHistory, showSuperTrend]);
 
   return (
     <div
       style={{
-        padding: "16px 20px",
-        background: "#f8f9fa",
+        padding: compact ? "12px 14px" : "16px 20px",
+        background: compact ? "#ffffff" : "#f8f9fa",
         height: "100%",
         boxSizing: "border-box",
       }}
@@ -707,120 +786,154 @@ export function MarketTrendChart({
       {error ? (
         <div className="alert alert-danger mb-0">{error}</div>
       ) : loading && !data ? (
-        <div style={{ color: "#868e96", padding: 20 }}>불러오는 중...</div>
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>불러오는 중...</div>
       ) : visibleHistory.length < 2 ? (
-        <div style={{ color: "#868e96", padding: 20 }}>표시할 데이터가 없습니다.</div>
+        <div style={{ color: "var(--text-muted)", padding: 20 }}>표시할 데이터가 없습니다.</div>
       ) : (
-        <div style={{ display: "flex", height: "calc(100% - 32px)", minHeight: 300, flexDirection: "column" }}>
-          <div style={{ marginBottom: 12 }}>
-            {gaugeData ? (
-              <>
-                {/* 게이지 본체 — MA(0) 기준 아래(파랑)/위(빨강) 배경, 오늘 핀은 레짐색 */}
-                <div
-                  style={{
-                    position: "relative",
-                    height: 34,
-                    marginTop: 18,
-                    overflow: "visible",
-                    borderRadius: 8,
-                    border: "1px solid #e2e8f0",
-                    background: "#fff",
-                  }}
-                >
-                  {/* 방향 배경: MA 아래(파랑) / 위(빨강) */}
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "flex",
-                      borderRadius: 8,
-                      overflow: "hidden",
-                    }}
-                  >
-                    {gaugeData.zeroPct === null ? (
-                      <div
-                        style={{
-                          width: "100%",
-                          background: gaugeData.trendMin >= 0 ? "#d62828" : "#1971c2",
-                          opacity: 0.14,
-                        }}
-                      />
-                    ) : (
-                      <>
-                        <div style={{ width: `${gaugeData.zeroPct}%`, background: "#1971c2", opacity: 0.14 }} />
-                        <div style={{ width: `${100 - gaugeData.zeroPct}%`, background: "#d62828", opacity: 0.14 }} />
-                      </>
-                    )}
-                  </div>
-                  {/* MA(0) marker */}
-                  {gaugeData.zeroPct !== null ? (
-                    <div
+        <div style={{ display: "flex", height: compact ? "100%" : "calc(100% - 32px)", minHeight: compact ? 0 : 300, flexDirection: "column" }}>
+          {compact ? (() => {
+            const cClose = latestPoint?.close ?? null;
+            const cPrev = data?.history.at(-2)?.close ?? null;
+            const cPct = cClose != null && cPrev != null && cPrev !== 0 ? (cClose / cPrev - 1) * 100 : null;
+            // 추세 전환 조건 — 반대 레짐으로 바뀌는 목표가/변화율(SuperTrend 기준). 레짐은 2상태라 1건.
+            const trans = forecastTransitions[0];
+            const transColor = trans ? REGIME_COLOR[trans.next_regime] : "#64748b";
+            // 현재 레짐 지속일수 — /market-trend 의 "상승/하락 N일째"와 동일 개념(현재 레짐 연속일).
+            const regimeDays = (() => {
+              const hist = data?.history ?? [];
+              const cur = latestPoint?.regime;
+              if (!cur) return null;
+              let count = 0;
+              for (let i = hist.length - 1; i >= 0; i -= 1) {
+                if (hist[i].regime === cur) count += 1;
+                else break;
+              }
+              return count;
+            })();
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+                <strong style={{ fontSize: "var(--fs-2xl)", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>{name}</strong>
+                {cClose != null ? (
+                  <span style={{ fontSize: "var(--fs-2xl)", fontWeight: 800, color: "#1e293b" }}>{formatNumber(cClose)}</span>
+                ) : null}
+                {cPct != null ? (
+                  <span style={{ fontSize: "var(--fs-xl)", fontWeight: 800, color: cPct >= 0 ? "#d62828" : "#1971c2" }}>
+                    {cPct >= 0 ? "+" : ""}
+                    {cPct.toFixed(2)}%
+                  </span>
+                ) : null}
+                <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                  {trans && trans.change_pct != null ? (
+                    <span
+                      title={`${formatNumber(trans.target_price)}pt ${trans.mode === "drop_below" ? "아래로 내려가면" : "이상으로 마감하면"} ${REGIME_LABEL[trans.next_regime]} 추세로 전환`}
                       style={{
-                        position: "absolute",
-                        left: `${gaugeData.zeroPct}%`,
-                        top: 0,
-                        bottom: 0,
-                        width: 0,
-                        borderLeft: "1px dashed #475569",
-                        transform: "translateX(-0.5px)",
-                      }}
-                      title="MA(0)"
-                    >
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: -16,
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          fontSize: "0.68rem",
-                          fontWeight: 700,
-                          color: "#475569",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        MA
-                      </div>
-                    </div>
-                  ) : null}
-                  {/* 오늘 핀 — 색은 현재 레짐(slope 기반), 라벨은 추세% */}
-                  {gaugeLeft !== null ? (
-                    <div
-                      style={{
-                        position: "absolute",
-                        left: `${gaugeLeft}%`,
-                        top: "50%",
-                        transform: "translate(-50%, -50%)",
-                        padding: "2px 8px",
-                        borderRadius: 999,
-                        background: latestRegime ? REGIME_COLOR[latestRegime] : "#1f2937",
-                        color: "#fff",
-                        fontSize: "0.78rem",
+                        fontSize: "var(--fs-base)",
                         fontWeight: 800,
-                        boxShadow: "0 4px 12px rgba(15, 23, 42, 0.2)",
+                        color: transColor,
+                        whiteSpace: "nowrap",
                       }}
-                      title={`추세 점수 ${formatScore(latestPoint?.trend_score)} (MA 괴리율 ${formatPct(
-                        latestPoint?.trend_pct,
-                      )}, ${latestRegime ? REGIME_LABEL[latestRegime] : "-"})`}
                     >
-                      {formatScore(latestPoint?.trend_score)}
+                      {trans.mode === "drop_below" ? "↓" : "↑"} {trans.change_pct >= 0 ? "+" : ""}
+                      {trans.change_pct.toFixed(1)}%면 {REGIME_LABEL[trans.next_regime]}
+                    </span>
+                  ) : null}
+                  {latestPoint?.regime ? (
+                    <span
+                      style={{
+                        fontSize: "var(--fs-base)",
+                        fontWeight: 800,
+                        padding: "5px 15px",
+                        borderRadius: 999,
+                        color: "#fff",
+                        background: REGIME_COLOR[latestPoint.regime],
+                        boxShadow: `0 2px 8px ${REGIME_COLOR[latestPoint.regime]}45`,
+                      }}
+                    >
+                      {latestPoint.regime === "accel_up" ? "상승" : "하락"}
+                      {regimeDays != null ? ` ${regimeDays}일째` : ""}
+                    </span>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })() : null}
+          {!compact ? (
+          <>
+          <div style={{ marginBottom: 12 }}>
+            {data?.offense_pct != null && data?.defense_pct != null ? (
+              <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
+                {/* 왼쪽 반: 기간 수익률. */}
+                {periodReturns.length > 0 ? (
+                  <div style={{ flex: "1 1 0", minWidth: 0 }}>
+                    <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                      {periodReturns.map((r) => (
+                        <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "var(--fs-sm)" }}>
+                          <span style={{ fontWeight: 700 }}>{r.label}</span>
+                          <span style={{ fontWeight: 800, color: r.pct == null ? "#94a3b8" : r.pct >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(r.pct)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {/* 공격/방어 게이지 — 오른쪽 반. */}
+                <div style={{ flex: "1 1 0", minWidth: 0 }}>
+                  {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                    <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82" }}>
+                      공격 / 방어 <span style={{ fontWeight: 400 }}>({maType}{maDays} 기준)</span>
+                    </span>
+                    <span style={{ fontSize: "var(--fs-sm)", fontWeight: 800 }}>
+                      <span style={{ color: "#d62828" }}>공격 {data.offense_pct}%</span>
+                      <span style={{ color: "#94a3b8" }}> · </span>
+                      <span style={{ color: "#2f9e44" }}>방어 {data.defense_pct}%</span>
+                    </span>
+                  </div>
+                  {/* 5개 균등 덩어리(각 20%). 왼쪽부터 공격 비중만큼 빨강, 나머지는 방어 녹색. */}
+                  <div
+                    style={{ display: "flex", gap: 3, height: 34 }}
+                    title={`${maType}${maDays} 괴리율 ${formatPct(latestPoint?.trend_pct)} · 공격 ${data.offense_pct}% / 방어 ${data.defense_pct}%`}
+                  >
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const isOffense = i < Math.round((data.offense_pct ?? 0) / 20);
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            flex: 1,
+                            background: isOffense ? "#d62828" : "#2f9e44",
+                            borderRadius: 4,
+                            color: "#fff",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontSize: "var(--fs-sm)",
+                            fontWeight: 800,
+                          }}
+                        >
+                          {isOffense ? "공격" : "방어"}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {/* 다음 단계 예측: 공격/방어 비중이 한 단계 바뀌는 지수 종가(추세 전환 조건과 같은 형식). */}
+                  {ratioForecast ? (
+                    <div style={{ fontSize: "var(--fs-sm)", color: "#5f6b82", marginTop: 6, lineHeight: 1.5 }}>
+                      <span style={{ fontWeight: 800, textDecoration: "underline" }}>{formatNumber(ratioForecast.targetPrice)}</span>
+                      pt {ratioForecast.rising ? "이상으로 마감하면" : "아래로 내려가면"} (현재 대비{" "}
+                      <span style={{ fontWeight: 800 }}>
+                        {ratioForecast.changePct > 0 ? "+" : ""}
+                        {ratioForecast.changePct.toFixed(1)}%
+                      </span>
+                      ),{" "}
+                      <span style={{ fontWeight: 800, color: ratioForecast.kind === "offense" ? "#d62828" : "#2f9e44" }}>
+                        {ratioForecast.kind === "offense" ? "공격" : "방어"} 비중이 {ratioForecast.ratioValue}%
+                      </span>
+                      로 상승할 것으로 예상됩니다.
                     </div>
                   ) : null}
                 </div>
-                {/* 범례: 최저 / MA / 최고 */}
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: "0.7rem",
-                    color: "#5f6b82",
-                    marginTop: 6,
-                  }}
-                >
-                  <span>최저: {formatPct(gaugeData.trendMin)}</span>
-                  <span>MA: 0%</span>
-                  <span>최고: {formatPct(gaugeData.trendMax)}</span>
-                </div>
-              </>
+              </div>
             ) : null}
           </div>
           {forecastTransitions.length > 0 && (
@@ -832,25 +945,33 @@ export function MarketTrendChart({
                 background: "rgba(245, 158, 11, 0.08)",
                 border: "1px solid rgba(245, 158, 11, 0.25)",
                 color: "#d97706",
-                fontSize: "0.82rem",
+                fontSize: "var(--fs-sm)",
                 lineHeight: 1.5,
                 boxShadow: "0 2px 8px rgba(245, 158, 11, 0.03)",
               }}
             >
               <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: "1.1rem", lineHeight: 1 }}>⚠️</span>
-                <strong style={{ fontSize: "0.85rem" }}>
-                  추세 전환 예측 <span style={{ fontWeight: 400, opacity: 0.85 }}>(내일 종가 기준)</span>
+                <span style={{ fontSize: "var(--fs-lg)", lineHeight: 1 }}>⚠️</span>
+                <strong style={{ fontSize: "var(--fs-sm)" }}>
+                  추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(SuperTrend 기준)</span>
                 </strong>
               </div>
               <ul style={{ margin: 0, paddingLeft: 20 }}>
                 {forecastTransitions.map((item, idx) => (
-                  <li key={idx} style={{ marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4 }}>
+                  <li
+                    key={idx}
+                    style={{
+                      marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4,
+                      color: REGIME_COLOR[item.next_regime],
+                    }}
+                  >
                     {data?.name} 지수가{" "}
                     <span style={{ fontWeight: 800, textDecoration: "underline" }}>
                       {formatNumber(item.target_price)}
                     </span>
-                    pt에 도달할 경우 (현재 대비{" "}
+                    pt
+                    {item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
+                    {" "}(현재 대비{" "}
                     <span style={{ fontWeight: 800 }}>
                       {item.change_pct! > 0 ? "+" : ""}
                       {item.change_pct!.toFixed(1)}%
@@ -863,8 +984,37 @@ export function MarketTrendChart({
               </ul>
             </div>
           )}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 8 }}>
-            <div className="appSegmentedToggle" role="group" aria-label="시장지수 추세 차트 기간">
+          {/* 최근 레짐 이력 뱃지 타임라인 (차트 밖 상단으로 배치하여 차트 가림 방지) */}
+          {recentRegimeRanges.length > 0 && (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: 10, alignItems: "center", justifyContent: "flex-end" }}>
+              <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82" }}>최근 레짐 구간:</span>
+              {recentRegimeRanges.slice().reverse().map((range, idx) => {
+                const startTxt = formatShortMonthDay(range.startDate);
+                const endTxt = range.isCurrent ? "현재" : formatShortMonthDay(range.endDate);
+                return (
+                  <span
+                    key={idx}
+                    style={{
+                      padding: "2px 8px",
+                      borderRadius: "10px",
+                      fontSize: "var(--fs-sm)",
+                      fontWeight: "700",
+                      color: "#fff",
+                      background: REGIME_COLOR[range.regime],
+                      boxShadow: "0 1px 4px rgba(15, 23, 42, 0.12)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    {REGIME_LABEL[range.regime].replace(/^[^\s]+\s/, "")} {startTxt}~{endTxt}({range.days}일)
+                  </span>
+                );
+              })}
+            </div>
+          )}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 8, justifyContent: "space-between", alignItems: "center" }}>
+            <div className="appSegmentedToggle" role="group" aria-label="시장지수 차트 기간">
               {CHART_RANGES.map((range) => (
                 <button
                   key={range.key}
@@ -877,6 +1027,8 @@ export function MarketTrendChart({
               ))}
             </div>
           </div>
+          </>
+          ) : null}
           <div style={{ position: "relative", width: "100%", minHeight: 220, flex: "1 1 auto" }}>
             <div
               ref={bandOverlayRef}
@@ -893,16 +1045,6 @@ export function MarketTrendChart({
               style={{ position: "absolute", inset: 0, zIndex: 1 }}
             />
             <div
-              ref={labelOverlayRef}
-              style={{
-                position: "absolute",
-                inset: 0,
-                zIndex: 2,
-                overflow: "hidden",
-                pointerEvents: "none",
-              }}
-            />
-            <div
               ref={tooltipRef}
               style={{
                 display: "none",
@@ -914,7 +1056,7 @@ export function MarketTrendChart({
                 borderRadius: 6,
                 background: "rgba(30, 41, 59, 0.95)",
                 color: "#fff",
-                fontSize: "0.84rem",
+                fontSize: "var(--fs-sm)",
                 lineHeight: 1.5,
                 pointerEvents: "none",
                 boxShadow: "0 8px 20px rgba(15, 23, 42, 0.18)",

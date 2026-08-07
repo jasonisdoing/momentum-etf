@@ -14,6 +14,9 @@ from utils.holdings_components_service import (
 
 router = APIRouter(prefix="/internal/holdings-components", tags=["holdings-components"])
 
+# 계좌 통화는 country_code 에서 파생한다(단일 소스: settings_loader 와 동일 매핑).
+_ACCOUNT_CURRENCY_BY_COUNTRY = {"kor": "KRW", "au": "AUD", "us": "USD"}
+
 
 @router.get("/accounts")
 def get_accounts(
@@ -25,6 +28,9 @@ def get_accounts(
         {
             "account_id": str(c["account_id"]),
             "name": str(c.get("name", c["account_id"])),
+            "currency": _ACCOUNT_CURRENCY_BY_COUNTRY.get(
+                str(c.get("country_code") or "").strip().lower(), ""
+            ),
         }
         for c in configs
     ]

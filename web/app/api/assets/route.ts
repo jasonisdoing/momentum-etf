@@ -4,6 +4,7 @@ import { fetchFastApiJson } from "@/lib/internal-api";
 import { jsonNoStore } from "@/lib/no-store-response";
 
 type HoldingsRow = {
+  account_id?: string;
   account_name: string;
   currency: string;
   bucket: string;
@@ -18,13 +19,11 @@ type HoldingsRow = {
   buy_amount_krw: number;
   valuation_krw: number;
   target_ratio?: number | null;
-  target_quantity?: number | null;
-  target_amount?: number | null;
+  memo?: string | null;
   sort_order: number;
   ticker_type?: string;
   country_code?: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 export async function GET(request: Request) {
@@ -33,11 +32,7 @@ export async function GET(request: Request) {
 
   try {
     const search = account ? `?account=${encodeURIComponent(account)}` : "";
-    const payload = await fetchFastApiJson<{
-      accounts?: any[];
-      account_id?: string;
-      rows: HoldingsRow[];
-    }>(`/internal/holdings${search}`);
+    const payload = await fetchFastApiJson<{ rows: HoldingsRow[] }>(`/internal/holdings${search}`);
     return jsonNoStore(payload);
   } catch (error) {
     return jsonNoStore(
@@ -138,7 +133,6 @@ export async function POST(request: Request) {
           quantity: body.quantity,
           average_buy_price: body.average_buy_price,
           target_ratio: body.target_ratio,
-          memo: body.memo,
         }),
       },
     );

@@ -1,4 +1,27 @@
 :root {
+  /* 글꼴 — `Pretendard Variable` 은 app/layout.tsx 에서 실제로 로드한다.
+     그 뒤는 로드 실패나 구형 브라우저를 위한 대비책일 뿐 평상시엔 쓰이지 않는다. */
+  --app-font-sans:
+    "Pretendard Variable", "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic",
+    "Segoe UI", sans-serif;
+  --app-font-mono:
+    "SFMono-Regular", "SF Mono", "JetBrains Mono", "Fira Code", "Menlo", "Monaco", "Consolas",
+    "Liberation Mono", monospace;
+
+  /* 글자 크기 6단계. 새 font-size 는 반드시 이 토큰만 쓴다 — 원시 px/rem 금지.
+     루트(html)는 브라우저 기본 16px 그대로 둔다(건드리면 Tabler 내부까지 흔들린다).
+
+     기준 16px 는 브라우저 기본값이자 접근성 권장치다. 단계는 Tailwind 와 같은
+     12/14/16/18/20/24 를 쓴다 — 널리 쓰여 눈에 익고 rem 값도 딱 떨어진다.
+     크기를 바꿀 일이 생기면 --fs-base 만 고치지 말고 여섯 줄을 같이 조정한다.
+     (단계 간격이 무너지면 토큰을 나눠 둔 의미가 없어진다) */
+  --fs-xs: 0.75rem; /* 12px — 본문 아님. 접기 화살표 같은 글리프, 첨자(sub/sup) */
+  --fs-sm: 0.875rem; /* 14px — 보조 라벨, 캡션, 표(그리드) 전체 */
+  --fs-base: 1rem; /* 16px — 본문, 입력, 버튼, 카드 (기준) */
+  --fs-lg: 1.125rem; /* 18px — 카드·섹션 제목 */
+  --fs-xl: 1.25rem; /* 20px — 화면 제목 */
+  --fs-2xl: 1.5rem; /* 24px — 대시보드 큰 숫자 */
+
   --app-content-max-width: 1680px;
   --app-page-inset: 0.875rem;
   --app-header-height: 2.585rem;
@@ -9,6 +32,10 @@
   --panel: var(--tblr-bg-surface, #ffffff);
   --ink: var(--tblr-body-color, #182433);
   --muted: var(--tblr-secondary-color, #667382);
+  /* 텍스트 3단계 표준: 진한 볼드 / 일반 / 약간 흐린(너무 흐리지 않게) */
+  --text-strong: #0f172a;
+  --text-normal: var(--ink);
+  --text-muted: #5b6675;
   --line: var(--tblr-border-color, #dce1e7);
   --accent: var(--tblr-primary, #206bc4);
   --accent-soft: rgba(32, 107, 196, 0.08);
@@ -25,18 +52,103 @@ body {
   overflow-x: hidden;
   background: var(--bg);
   color: var(--ink);
-  font-family:
-    "Pretendard",
-    "Noto Sans KR",
-    "Apple SD Gothic Neo",
-    "Malgun Gothic",
-    "Segoe UI",
-    sans-serif;
+  font-family: var(--app-font-sans);
 }
 
 body {
   display: flex;
   flex-direction: column;
+  /* 크기는 body 에만 준다. html 에 주면 rem 의 기준 자체가 바뀌어
+     rem 으로 쓴 모든 값이 같은 비율로 따라 움직인다(= 아무것도 안 바뀐 셈). */
+  font-size: var(--fs-base);
+}
+
+/* Tabler 기본 컨트롤 크기를 토큰에 맞춘다.
+   Tabler 는 본문 14px, `-sm` 컨트롤 12px 를 쓰는데 이 앱 기준은 15px 라
+   그대로 두면 같은 화면 안에서 크기가 어긋난다(메모 화면이 그랬다). */
+.form-control,
+.form-select {
+  font-size: var(--fs-base);
+}
+
+.form-control-sm,
+.form-select-sm {
+  font-size: var(--fs-sm);
+}
+
+.btn {
+  font-size: var(--fs-base);
+}
+
+.btn-sm {
+  font-size: var(--fs-sm);
+}
+
+/* Tabler 유틸리티 클래스도 토큰에 못박는다.
+   className 으로 크기가 정해지는 자리라 `font-size` 검사만으로는 안 잡힌다.
+   여기 없는 크기 클래스를 새로 쓰면 scripts/check-font-tokens.mjs 가 빌드를 세운다.
+
+   `.small` 은 원래 0.875em 이라 부모에 따라 12.25px 처럼 표준 밖 값이 나왔다.
+   나머지는 마침 표준값과 같았지만, Tabler 를 올릴 때 조용히 틀어지지 않게 함께 고정한다. */
+.small,
+small,
+.subheader {
+  font-size: var(--fs-sm);
+}
+
+.modal-title {
+  font-size: var(--fs-base);
+}
+
+/* 일반 HTML 표. AG Grid 와 같은 14px 로 맞춘다 — Tabler 는 머리글만 12px 로 줄인다. */
+.table,
+.table thead th {
+  font-size: var(--fs-sm);
+}
+
+/* 제목 태그. className 없이 <h2> 만 써도 Tabler 기본 크기가 걸리는데,
+   className 이 아니라 태그라서 검사기가 못 잡는다 → 여기서 토큰으로 고정한다.
+   h4~h6 은 Tabler 기본이 14/12/10px 인데 규칙대로 14px 한 단계로 모은다. */
+h1 {
+  font-size: var(--fs-2xl);
+}
+
+h2 {
+  font-size: var(--fs-xl);
+}
+
+h3 {
+  font-size: var(--fs-base);
+}
+
+h4,
+h5,
+h6 {
+  font-size: var(--fs-sm);
+}
+
+/* 상대값(em)으로 지정돼 부모에 따라 표준 밖 크기가 나오는 태그들. */
+sub,
+sup {
+  font-size: var(--fs-xs);
+}
+
+code,
+kbd,
+pre {
+  font-size: var(--fs-sm);
+}
+
+legend {
+  font-size: var(--fs-lg);
+}
+
+.h1 {
+  font-size: var(--fs-2xl);
+}
+
+.navbar {
+  font-size: var(--fs-xl);
 }
 
 input[type="number"]::-webkit-outer-spin-button,
@@ -62,7 +174,7 @@ a {
   overflow-x: hidden;
 }
 
-.appLayout > .navbar-vertical.appSidebar,
+.appLayout>.navbar-vertical.appSidebar,
 .appSidebar {
   width: 11rem;
   min-width: 11rem;
@@ -70,10 +182,11 @@ a {
   top: 0;
   height: 100vh;
   flex: 0 0 11rem;
-  border-right: 1px solid rgba(255, 255, 255, 0.06);
-  background: #1f2937;
+  border-right: 1px solid var(--line);
+  background: #ffffff;
   z-index: 1035;
   overflow-y: auto;
+  overflow-x: hidden;
   transition:
     width 180ms ease,
     min-width 180ms ease,
@@ -81,7 +194,7 @@ a {
     border-color 180ms ease;
 }
 
-.appLayoutSidebarCollapsed > .navbar-vertical.appSidebar,
+.appLayoutSidebarCollapsed>.navbar-vertical.appSidebar,
 .appLayoutSidebarCollapsed .appSidebar {
   width: 0;
   min-width: 0;
@@ -94,9 +207,9 @@ a {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0.375rem;
+  gap: 0.2rem;
   min-height: 100vh;
-  padding: 0.625rem 0.375rem 0.75rem;
+  padding: 0.4rem 0.375rem 0.4rem;
   transition: opacity 120ms ease;
 }
 
@@ -110,7 +223,7 @@ a {
   align-items: center;
   min-height: 2.25rem;
   padding: 0.125rem 0.25rem 0.5rem;
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   line-height: 1.2;
   color: #f8fafc;
   font-weight: 700;
@@ -120,13 +233,13 @@ a {
 .appSidebarNav {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0;
 }
 
 .appSidebarNavGroups {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0;
   flex: 0 0 auto;
   min-height: auto;
   width: 100%;
@@ -135,7 +248,14 @@ a {
 .appSidebarGroup {
   display: flex;
   flex-direction: column;
-  gap: 0.125rem;
+  gap: 0;
+}
+
+/* 그룹 사이 얇은 구분선 — 간격을 키우지 않고 그룹 경계를 명확히 한다. */
+.appSidebarNavGroups .appSidebarGroup+.appSidebarGroup,
+.appSidebarNavGroups {
+  border-top: 1px solid var(--line);
+  padding-top: 0.1rem;
 }
 
 .appSidebarItem .nav-link {
@@ -143,11 +263,11 @@ a {
   align-items: center;
   justify-content: flex-start;
   gap: 0.625rem;
-  min-height: 2.25rem;
-  padding: 0.375rem 0.5rem;
+  min-height: 1.55rem;
+  padding: 0.15rem 0.5rem;
   border-radius: 0.375rem;
-  color: rgba(241, 245, 249, 0.78);
-  font-size: 0.92rem;
+  color: #475569;
+  font-size: var(--fs-sm);
   font-weight: 500;
   line-height: 1.2;
   text-align: left;
@@ -163,13 +283,13 @@ a {
   justify-content: space-between;
   gap: 0.5rem;
   width: 100%;
-  min-height: 2.25rem;
-  padding: 0.375rem 0.5rem;
+  min-height: 1.55rem;
+  padding: 0.15rem 0.5rem;
   border: 0;
   border-radius: 0.375rem;
   background: transparent;
-  color: rgba(241, 245, 249, 0.78);
-  font-size: 0.92rem;
+  color: #334155;
+  font-size: var(--fs-sm);
   font-weight: 500;
   line-height: 1.2;
   text-align: left;
@@ -177,12 +297,12 @@ a {
 }
 
 .appSidebarGroupToggle:hover {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.04);
+  color: #1e293b;
+  background: rgba(15, 23, 42, 0.05);
 }
 
 .appSidebarGroupToggle.is-active {
-  color: #f8fafc;
+  color: #1e293b;
 }
 
 .appSidebarGroupLead {
@@ -201,7 +321,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: rgba(241, 245, 249, 0.68);
+  color: #94a3b8;
   transition: transform 160ms ease;
 }
 
@@ -219,15 +339,15 @@ a {
 }
 
 .appSidebarItem .nav-link:hover {
-  color: #f8fafc;
-  background: rgba(255, 255, 255, 0.04);
+  color: #1e293b;
+  background: rgba(15, 23, 42, 0.05);
 }
 
 .appSidebarItem .nav-link.active {
-  background: rgba(255, 255, 255, 0.05);
-  color: #f8fafc;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
   font-weight: 600;
-  box-shadow: inset 2px 0 0 #206bc4;
+  box-shadow: inset 2px 0 0 #2563eb;
 }
 
 .appSidebarIcon {
@@ -243,7 +363,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   line-height: 1;
 }
 
@@ -268,9 +388,9 @@ a {
   gap: 0.35rem;
   padding: 0.6rem 0.65rem;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.08);
-  font-size: 0.88rem;
-  color: #f1f5f9;
+  background: #f1f5f9;
+  font-size: var(--fs-sm);
+  color: #334155;
 }
 
 .appSidebarSentimentItem {
@@ -278,7 +398,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  color: #f1f5f9;
+  color: #334155;
   text-decoration: none;
   padding: 0.25rem 0.3rem;
   border-radius: 5px;
@@ -286,15 +406,15 @@ a {
 }
 
 .appSidebarSentimentItem:hover {
-  background: rgba(255, 255, 255, 0.12);
-  color: #ffffff;
+  background: rgba(15, 23, 42, 0.06);
+  color: #0f172a;
 }
 
 .appSidebarSentimentLabel {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  color: #cbd5e1;
+  color: #64748b;
   white-space: nowrap;
   font-weight: 600;
 }
@@ -307,13 +427,13 @@ a {
 }
 
 .appSidebarSentimentValue strong {
-  font-size: 0.95rem;
-  color: #ffffff;
+  font-size: var(--fs-base);
+  color: #1e293b;
 }
 
 .appSidebarSentimentSub {
-  color: #cbd5e1;
-  font-size: 0.78rem;
+  color: #64748b;
+  font-size: var(--fs-sm);
 }
 
 .appMain {
@@ -361,7 +481,7 @@ a {
 
 .appMobileBrand {
   color: var(--ink);
-  font-size: 1.08rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
   line-height: 1;
 }
@@ -388,8 +508,8 @@ a {
 .appMobileMenuInner {
   padding-top: 0.375rem;
   padding-bottom: 0.625rem;
-  background: #1f2937;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: #ffffff;
+  border-bottom: 1px solid var(--line);
 }
 
 .appMobileMenuFooter {
@@ -401,7 +521,7 @@ a {
   flex: 1 1 auto;
   flex-direction: column;
   min-height: 0;
-  font-size: 0.96rem;
+  font-size: var(--fs-base);
   padding: 0 0 1rem;
 }
 
@@ -413,12 +533,81 @@ a {
   padding-bottom: 0.5rem;
 }
 
+/* 홈 허브 — 좌측 사이드바 제거 대체. 메인 컨텐츠(좌) + 메뉴 레일(우). */
+.appContentHome {
+  flex-direction: row;
+  gap: 12px;
+  padding: 0 12px 1rem;
+  align-items: flex-start;
+}
+.appHomeMainCol {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.appHomeRail {
+  flex: 0 0 200px;
+  width: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  position: sticky;
+  top: 8px;
+  align-self: flex-start;
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
+}
+.appHomeRail .hubMenuCard {
+  position: static;
+}
+.appHomeRailFooter {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 2px;
+}
+/* 레일 기간 수익률(금일/금주/금월/금년) — CNN 아래 4줄 */
+.appRailPeriod {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--line, rgba(148, 163, 184, 0.25));
+  border-radius: 8px;
+  background: #fff;
+}
+.appRailPeriodRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--fs-sm);
+}
+.appRailPeriodLabel {
+  color: var(--text-muted, #64748b);
+  font-weight: 600;
+}
+.appRailPeriodRow strong {
+  font-size: var(--fs-sm);
+  font-weight: 700;
+}
+@media (max-width: 900px) {
+  .appContentHome {
+    flex-direction: column;
+  }
+  .appHomeRail {
+    flex: none;
+    width: 100%;
+    position: static;
+    max-height: none;
+  }
+}
+
 .page-header {
   margin-bottom: 0.25rem;
 }
 
 .page-title {
-  font-size: 1.5rem;
+  font-size: var(--fs-2xl);
   line-height: 1.25;
 }
 
@@ -454,7 +643,7 @@ a {
 
 .pageFrameTitle h1 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: var(--fs-lg);
   line-height: 1.2;
   font-weight: 600;
   color: var(--muted);
@@ -482,22 +671,13 @@ a {
   min-height: 0;
 }
 
-.pageFrameBody > *,
-.pageFrameBodyFullHeight > * {
+.pageFrameBody>*,
+.pageFrameBodyFullHeight>* {
   min-width: 0;
 }
 
 .appCodeText {
-  font-family:
-    "SFMono-Regular",
-    "SF Mono",
-    "JetBrains Mono",
-    "Fira Code",
-    "Menlo",
-    "Monaco",
-    "Consolas",
-    "Liberation Mono",
-    monospace;
+  font-family: var(--app-font-mono);
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
   letter-spacing: 0.01em;
@@ -548,9 +728,11 @@ a {
   flex-wrap: nowrap;
   min-width: 0;
   color: var(--muted);
-  font-size: 13.75px;
+  font-size: var(--fs-sm);
   white-space: nowrap;
   line-height: 1;
+  /* 좁은 화면에서 넘치는 시세 값은 useFitOneLine 훅이 오른쪽부터 숨긴다(잘림 방지). */
+  overflow: hidden;
 }
 
 .topbarFxItem {
@@ -580,7 +762,7 @@ a {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.82);
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   text-align: left;
   cursor: pointer;
@@ -631,7 +813,7 @@ a {
   outline: 0;
   background: transparent;
   color: var(--ink);
-  font-size: 0.96rem;
+  font-size: var(--fs-sm);
   font-weight: 500;
 }
 
@@ -653,7 +835,7 @@ a {
 
 .globalTickerSearchSectionTitle {
   color: var(--ink);
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
   font-weight: 700;
 }
 
@@ -671,7 +853,7 @@ a {
   border-radius: 999px;
   background: #eef1f5;
   color: #556173;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -715,7 +897,7 @@ a {
 
 .globalTickerSearchTopMoversTitle {
   color: var(--ink);
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -740,7 +922,7 @@ a {
 .globalTickerSearchRank {
   min-width: 1.35rem;
   color: #2f6fed;
-  font-size: 0.9rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -754,14 +936,14 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--ink);
-  font-size: 0.92rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
 .globalTickerSearchResultTicker {
   margin-top: 0.2rem;
   color: #738093;
-  font-size: 0.88rem;
+  font-size: var(--fs-sm);
 }
 
 .globalTickerSearchResultMeta {
@@ -775,14 +957,14 @@ a {
 
 .globalTickerSearchResultPrice {
   color: var(--ink);
-  font-size: 0.92rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
 .globalTickerSearchEmpty {
   padding: 0.25rem 0.1rem;
   color: var(--muted);
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 @keyframes globalTickerSearchPanelIn {
@@ -790,6 +972,7 @@ a {
     opacity: 0;
     transform: translateY(-8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -798,7 +981,7 @@ a {
 
 .topbarFxItem strong {
   color: var(--ink);
-  font-size: 18.15px;
+  font-size: var(--fs-xl);
   font-weight: 700;
   line-height: 1;
 }
@@ -837,7 +1020,7 @@ a {
 
 .topbarSentimentText {
   color: var(--muted);
-  font-size: 13.75px;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -884,7 +1067,7 @@ a {
   border-radius: 999px;
   background: var(--accent-soft);
   color: var(--accent);
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 
 .appPageStack {
@@ -931,7 +1114,7 @@ a {
 
 .appLoadingLabel {
   color: var(--muted);
-  font-size: 0.92rem;
+  font-size: var(--fs-sm);
   line-height: 1.35;
 }
 
@@ -1002,7 +1185,7 @@ a {
   justify-content: space-between;
   gap: 0.75rem;
   padding: 0.75rem 0.875rem;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 .appToastClose {
@@ -1044,13 +1227,13 @@ a {
 
 .pageHeaderCompact h1 {
   margin: 0;
-  font-size: 1.5rem;
+  font-size: var(--fs-2xl);
   line-height: 1.15;
 }
 
 .section h2 {
   margin: 0 0 12px;
-  font-size: 26px;
+  font-size: var(--fs-2xl);
 }
 
 .sectionHeaderCompact {
@@ -1063,7 +1246,7 @@ a {
 
 .sectionHeaderCompact h2 {
   margin: 0;
-  font-size: 19px;
+  font-size: var(--fs-xl);
 }
 
 .launcherGrid {
@@ -1092,13 +1275,13 @@ a {
   border-radius: 10px;
   background: rgba(32, 107, 196, 0.08);
   color: var(--accent);
-  font-size: 22px;
+  font-size: var(--fs-2xl);
   font-weight: 700;
   margin-bottom: 0.875rem;
 }
 
 .appLauncherTitle {
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 700;
   line-height: 1.35;
   margin-bottom: 0.375rem;
@@ -1106,7 +1289,7 @@ a {
 
 .appLauncherDescription {
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -1128,7 +1311,7 @@ a {
   align-items: center;
   justify-content: center;
   min-height: 2.5rem;
-  font-size: 1.5rem;
+  font-size: var(--fs-2xl);
   font-weight: 700;
   color: var(--ink);
 }
@@ -1172,7 +1355,7 @@ a {
 }
 
 .dashboardMiniChartTitle {
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
 }
 
 .dashboardMiniChartBody {
@@ -1214,7 +1397,7 @@ a {
 }
 
 .dashboardPeriodProfitLabel {
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: #1f2d3d;
 }
@@ -1227,12 +1410,12 @@ a {
 }
 
 .dashboardPeriodProfitAmount {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   font-weight: 700;
 }
 
 .dashboardPeriodProfitPct {
-  font-size: 0.94rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -1297,7 +1480,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--ink);
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-family: inherit;
 }
 
@@ -1319,7 +1502,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: var(--accent);
   color: #fff;
-  font-size: 0.93rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1331,7 +1514,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--ink);
-  font-size: 0.93rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1358,7 +1541,7 @@ a {
   border-radius: var(--tblr-border-radius);
   background: #fff;
   color: var(--muted);
-  font-size: 0.93rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
 }
@@ -1385,7 +1568,7 @@ a {
   margin-bottom: 0.75rem;
   padding: 0.625rem 0.75rem;
   border-radius: var(--tblr-border-radius);
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -1467,13 +1650,13 @@ a {
 .accountToolbarMeta {
   flex-wrap: wrap;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .rankToolbarMeta {
   justify-content: flex-end;
   gap: 10px;
-  font-size: 16px;
+  font-size: var(--fs-base);
   font-weight: 500;
 }
 
@@ -1494,7 +1677,7 @@ a {
   align-items: center;
   gap: 10px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .summaryReadonlyBlock {
@@ -1505,7 +1688,7 @@ a {
 
 .summaryReadonlyLabel {
   color: var(--muted);
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -1530,7 +1713,7 @@ a {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.74);
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   cursor: pointer;
 }
 
@@ -1547,7 +1730,7 @@ a {
   gap: 14px;
   margin-bottom: 8px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .marketTableWrap {
@@ -1565,7 +1748,7 @@ a {
   min-width: 1120px;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 .marketTable thead th {
@@ -1645,10 +1828,6 @@ a {
   color: #2e7d32;
 }
 
-.rankHeldRow {
-  background: rgba(46, 125, 50, 0.1);
-}
-
 .rankGridWrap,
 .appGridFillWrap {
   overflow: hidden;
@@ -1702,7 +1881,7 @@ a {
 }
 
 .tickerDetailHeroTitle {
-  font-size: 1.9rem;
+  font-size: var(--fs-2xl);
   line-height: 1.15;
   font-weight: 800;
   color: #1f2937;
@@ -1715,14 +1894,14 @@ a {
 }
 
 .tickerDetailHeroPrice {
-  font-size: 1.75rem;
+  font-size: var(--fs-2xl);
   line-height: 1;
   font-weight: 800;
   color: #0f172a;
 }
 
 .tickerDetailHeroChange {
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
   line-height: 1;
   font-weight: 800;
 }
@@ -1748,12 +1927,12 @@ a {
 
 .tickerDetailTableTitle {
   font-weight: 700;
-  font-size: 15px;
+  font-size: var(--fs-base);
   line-height: 1.35;
 }
 
 .tickerDetailTableMeta {
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .tickerDetailChartWrap {
@@ -1816,11 +1995,11 @@ a {
   flex-direction: column;
 }
 
-.tickerDetailInfoSummary > .tickerDetailInfoSummaryRow {
+.tickerDetailInfoSummary>.tickerDetailInfoSummaryRow {
   flex: 1;
 }
 
-.tickerDetailInfoSummary > .tickerDetailInfoSummaryGrid {
+.tickerDetailInfoSummary>.tickerDetailInfoSummaryGrid {
   flex: 3;
 }
 
@@ -1846,7 +2025,7 @@ a {
 }
 
 .tickerDetailInfoLabel {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 700;
   color: #4b5563;
 }
@@ -1860,7 +2039,7 @@ a {
 
 .tickerDetailInfoMain strong,
 .tickerDetailInfoMetric strong {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   line-height: 1.1;
   font-weight: 800;
   color: #1f2937;
@@ -1885,7 +2064,7 @@ a {
   border-bottom: 1px solid #e6edf5;
 }
 
-.tickerDetailInfoSummaryGrid > .tickerDetailInfoMetric:nth-last-child(-n + 2) {
+.tickerDetailInfoSummaryGrid>.tickerDetailInfoMetric:nth-last-child(-n + 2) {
   border-bottom: 0;
 }
 
@@ -1898,13 +2077,13 @@ a {
   flex-direction: column;
 }
 
-.tickerDetailInfoTracker > .tickerDetailInfoTrackerRow {
+.tickerDetailInfoTracker>.tickerDetailInfoTrackerRow {
   flex: 1;
 }
 
 .tickerDetailInfoTrackerHint {
   color: #8a94a6;
-  font-size: 14px;
+  font-size: var(--fs-sm);
 }
 
 .tickerDetailInfoTrackerRow {
@@ -1922,13 +2101,13 @@ a {
 }
 
 .tickerDetailInfoTrackerLabel {
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 800;
   color: #1f2937;
 }
 
 .tickerDetailInfoTrackerRow strong {
-  font-size: 17px;
+  font-size: var(--fs-lg);
   font-weight: 800;
   color: #1f2937;
 }
@@ -1944,7 +2123,7 @@ a {
 
 .tickerDetailInfoTrackerValue span {
   color: #8a94a6;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
 }
@@ -1964,7 +2143,7 @@ a {
   margin-top: 0.2rem;
   border-top: 1px dashed #d6deea;
   color: #64748b;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   line-height: 1.25;
 }
 
@@ -1981,7 +2160,7 @@ a {
   border-bottom: 0;
 }
 
-.portfolioChangeBreakdownDetailRow > span {
+.portfolioChangeBreakdownDetailRow>span {
   white-space: nowrap;
 }
 
@@ -2001,7 +2180,7 @@ a {
   gap: 0.18rem;
   min-width: 0;
   color: #64748b;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   line-height: 1.25;
 }
 
@@ -2033,7 +2212,7 @@ a {
   align-items: baseline;
   justify-content: flex-end;
   gap: 0.35rem;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   font-weight: 700;
   color: #4b5563;
   white-space: nowrap;
@@ -2048,7 +2227,7 @@ a {
   display: inline-flex;
   align-items: baseline;
   gap: 0.25rem;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   color: #1f2937;
 }
 
@@ -2065,7 +2244,7 @@ a {
   align-items: center;
   gap: 0.55rem;
   flex-wrap: wrap;
-  font-size: 15px;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -2164,11 +2343,10 @@ a {
   gap: 0.45rem;
   align-items: center;
   color: #64748b;
-  font-size: 0.92rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
-.compareLoading,
 .compareEmpty {
   padding: 1rem;
   border: 1px dashed #d8e0ec;
@@ -2177,6 +2355,8 @@ a {
   font-weight: 700;
   text-align: center;
 }
+
+
 
 .compareHeroGrid {
   display: grid;
@@ -2207,7 +2387,7 @@ a {
 
 .compareHeroTicker {
   color: #111827;
-  font-size: 1.35rem;
+  font-size: var(--fs-2xl);
   font-weight: 800;
 }
 
@@ -2215,7 +2395,7 @@ a {
   margin-top: 0.25rem;
   min-height: 1.4rem;
   color: #64748b;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 600;
 }
 
@@ -2228,7 +2408,7 @@ a {
 
 .compareHeroPrice strong {
   color: #1f2937;
-  font-size: 1.25rem;
+  font-size: var(--fs-xl);
 }
 
 .compareSection {
@@ -2246,13 +2426,13 @@ a {
 .compareSectionHeader h2 {
   margin: 0;
   color: #111827;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 800;
 }
 
 .compareSectionMeta {
   color: #64748b;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-align: right;
 }
@@ -2262,7 +2442,7 @@ a {
   gap: 0.85rem;
   align-items: center;
   color: #64748b;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -2303,7 +2483,7 @@ a {
   width: 100%;
   border-collapse: collapse;
   color: #1f2937;
-  font-size: 0.92rem;
+  font-size: var(--fs-sm);
 }
 
 .compareMetricsTable th,
@@ -2390,14 +2570,14 @@ a {
 .assetChartsCardHeader h2 {
   margin: 0;
   color: #1f2937;
-  font-size: 1.05rem;
+  font-size: var(--fs-lg);
   font-weight: 800;
 }
 
 .assetChartsCardHeader p {
   margin: 0.2rem 0 0;
   color: #64748b;
-  font-size: 0.85rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -2418,7 +2598,7 @@ a {
 .assetChartsTooltipTitle {
   margin-bottom: 0.35rem;
   color: #cbd5e1;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 800;
 }
 
@@ -2427,7 +2607,7 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   line-height: 1.5;
 }
 
@@ -2456,7 +2636,13 @@ a {
 
 .compareMatrix {
   display: grid;
-  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(11rem, 1fr));
+  /* .comparePage 가 flex column 이라, 본문 행이 많은 탭(월간 분석)에서 헤더 섹션이 눌려
+     overflow:hidden 에 잘렸다. 섹션은 축소하지 않고 내용 높이를 유지한다. */
+  flex: 0 0 auto;
+  /* 비교 상품 최대 8개(ComparePageClient MAX_PRODUCTS) — 컬럼 수를 그에 맞춘다.
+     앞 2열은 지표 라벨 영역(대부분 span 2 로 합쳐 씀). 합계 7.2rem 은 라벨 폰트(0.86rem)에서
+     가장 긴 문구('포트폴리오 변동')가 한 줄로 들어가는 최소 폭이다. */
+  grid-template-columns: 2.9rem 4.3rem repeat(8, minmax(8.5rem, 1fr));
   overflow: hidden;
   border: 1px solid #d6deea;
   border-radius: 0.5rem;
@@ -2464,7 +2650,7 @@ a {
 }
 
 .compareMatrixWithTotal {
-  grid-template-columns: 4.75rem 6.8rem repeat(6, minmax(10rem, 1fr)) minmax(9rem, 0.7fr);
+  grid-template-columns: 2.9rem 4.3rem repeat(8, minmax(8rem, 1fr)) minmax(9rem, 0.7fr);
 }
 
 .compareMatrixBody {
@@ -2476,13 +2662,17 @@ a {
   align-items: center;
   justify-content: center;
   min-height: 6rem;
-  padding: 0.9rem;
+  /* 좌우 패딩을 줄여 좁은 라벨 열에서도 문구가 한 줄로 들어가게 한다. */
+  padding: 0.9rem 0.35rem;
   border-right: 1px solid #d6deea;
   border-bottom: 1px solid #d6deea;
   background: #f3f6fc;
   color: #1f2937;
   font-weight: 800;
+  /* 라벨 열을 좁게 쓰기 위해 본문보다 약간 작은 크기로 고정한다. */
+  font-size: var(--fs-sm);
   text-align: center;
+  white-space: nowrap;
 }
 
 .compareMatrixLabelWide {
@@ -2491,7 +2681,7 @@ a {
 
 .compareProductHeaderLabel,
 .compareProductHeaderEmpty {
-  height: 8rem;
+  /* 카드와 같은 최소 높이만 두고, 내용이 길어지면 행 전체가 함께 늘어나게 한다. */
   min-height: 8rem;
 }
 
@@ -2510,7 +2700,7 @@ a {
 .compareSharpeLegend {
   grid-column: 1 / -1;
   padding: 0.6rem 1rem;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #475569;
   background: #f8fafc;
   border-top: 1px solid #d6deea;
@@ -2530,7 +2720,7 @@ a {
 }
 
 .compareGroupControl select.form-select {
-  width: 14rem;
+  width: 22rem;
   flex: 0 0 auto;
 }
 
@@ -2540,9 +2730,11 @@ a {
 }
 
 .compareMetricsGroupLabel .compareMatrixLabelHint {
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: #64748b;
   font-weight: 400;
+  /* 라벨은 한 줄 고정이지만 보조 설명(기간 등)은 좁은 열에서 접히게 둔다. */
+  white-space: normal;
 }
 
 .compareMetricPeriodLabel,
@@ -2562,6 +2754,10 @@ a {
   justify-content: center;
   background: #f8fafc;
   color: #64748b;
+  /* 좁아진 라벨 열에 맞춰 좌우 패딩·글자 크기를 줄인다(값 셀은 그대로). */
+  padding-inline: 0.35rem;
+  font-size: var(--fs-sm);
+  white-space: nowrap;
 }
 
 .compareMetricCell {
@@ -2586,6 +2782,87 @@ a {
   color: #1d4ed8;
 }
 
+/* 월간 분석 — 종목 헤더는 화면에 고정하고 월별 행 영역만 자체 스크롤한다.
+   부모(.comparePage)가 flex:1 1 auto + min-height:0 으로 뷰포트 높이에 갇혀 있어
+   position:sticky 는 한 화면 분량만 유지된다. 그래서 본문 섹션이 남은 높이를 차지하고
+   그 안에서 스크롤하게 한다. 헤더/본문 컬럼 폭이 어긋나지 않게 스크롤바 자리를 미리 확보한다. */
+/* 월간 분석 전용 — 년월("202607")과 동일가중 평균을 한 줄에 담는다.
+   라벨 셀은 값 셀과 같은 좌우 패딩(0.85rem)을 써서 라벨 안 평균값 끝이 옆 종목 값 끝과
+   같은 선에 놓이게 하고, 그만큼 라벨 열 폭(합 9rem)을 준다.
+   헤더/본문 모두 스크롤바 자리를 확보해 두 섹션의 컬럼이 어긋나지 않게 한다. */
+.compareMatrixMonthly {
+  grid-template-columns: 3.6rem 5.4rem repeat(8, minmax(8.5rem, 1fr));
+  scrollbar-gutter: stable;
+}
+
+.compareMatrixMonthly .compareMatrixLabel {
+  padding-inline: 0.85rem;
+}
+
+/* 일간 분석은 라벨이 8자리(20260724)라 라벨 열을 조금 더 넓게 쓴다. */
+.compareMatrixDaily {
+  grid-template-columns: 4.2rem 6.3rem repeat(8, minmax(8.5rem, 1fr));
+}
+
+.compareMatrixMonthlyScroll {
+  flex: 1 1 auto;
+  min-height: 12rem;
+  overflow-y: auto;
+}
+
+/* 월간 분석 라벨 — "202607"(왼쪽) + 동일가중 평균(오른쪽)을 한 줄에 양쪽 정렬로 둔다.
+   글자 크기는 값 셀(.compareMetricCell)과 같게 두어 행 간 크기가 튀지 않게 한다. */
+.compareMonthlyLabelRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem;
+  /* 부모(.compareMatrixLabel)가 flex 라서 width:100% 만으로는 셀 폭을 채우지 못한다.
+     flex 아이템으로 늘려야 년월(왼쪽)·평균(오른쪽) 끝이 셀 양끝에 정확히 맞는다. */
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-base); /* 값 셀이 .appContent 에서 상속받는 크기와 동일 */
+  /* 자릿수가 달라도(-1.90 / +10.52) 숫자 폭이 같아야 끝이 가지런히 맞는다.
+     폰트가 font-variant-numeric 을 무시하는 경우까지 대비해 feature-settings 도 함께 준다. */
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  white-space: nowrap;
+}
+
+/* 기간 라벨(2026 / 202607 / 20260724)은 폭을 고정한다 — 등폭 폰트라 자릿수만큼 늘어난다.
+   '1' 이 '0' 보다 좁은 비례폭 폰트로 폴백돼도 201911/201910 폭이 같아진다. */
+.compareMonthlyLabelRow > span:first-child {
+  flex: 0 0 auto;
+  min-width: 4ch;
+  text-align: left;
+}
+
+/* 평균값은 항상 오른쪽 끝에 붙인다(년월 길이와 무관하게). */
+.compareMonthlyLabelRow > span:last-child {
+  margin-left: auto;
+  text-align: right;
+}
+
+/* 월간 분석 — 해가 바뀌는 행 위에 굵은 구분선. */
+.compareMonthlyYearBoundary {
+  border-top: 2px solid #94a3b8;
+}
+
+/* 지표 셀 보조 설명(예: MDD 낙폭 구간) — 값 아래 작게. */
+.compareMetricCell:has(.compareMetricCellHint) {
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1px;
+}
+
+.compareMetricCellHint {
+  color: var(--text-muted, #64748b);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
 .compareProductCard,
 .compareProductEmpty,
 .compareHoldingCount,
@@ -2603,9 +2880,16 @@ a {
   grid-template-rows: auto auto auto;
   align-content: start;
   row-gap: 0.45rem;
-  height: 8rem;
+  /* height 고정이면 내용(티커·종목명·가격)이 카드 밖으로 잘린다 — 최소 높이만 보장한다. */
   min-height: 8rem;
   border-top: 3px solid transparent;
+  /* 카드 드래그로 표시 순서를 바꾼다(순서는 선택 목록에 저장된다). */
+  cursor: grab;
+}
+
+.compareProductCard.is-dragging {
+  opacity: 0.45;
+  cursor: grabbing;
 }
 
 .compareBasicCell {
@@ -2639,7 +2923,7 @@ a {
 .compareBasicValue strong:not(.metricPositive):not(.metricNegative),
 .compareBasicCell strong:not(.metricPositive):not(.metricNegative) {
   color: #1f2937;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 900;
 }
 
@@ -2653,7 +2937,7 @@ a {
   gap: 0.15rem;
   align-items: flex-end;
   color: #64748b;
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
   line-height: 1.25;
 }
 
@@ -2676,12 +2960,12 @@ a {
   border-radius: 999px;
   background: #eef2f7;
   color: #6b7280;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   line-height: 1;
 }
 
 .compareProductCode {
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 900;
   padding-right: 2rem;
 }
@@ -2689,7 +2973,7 @@ a {
 .compareProductName {
   overflow: hidden;
   color: #1f2937;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   font-weight: 800;
   line-height: 1.25;
   text-overflow: ellipsis;
@@ -2706,7 +2990,8 @@ a {
 }
 
 .compareMatrixWide {
-  grid-column: span 6;
+  /* 상품 컬럼 전체를 차지하는 셀(차트 등) — MAX_PRODUCTS(8) 와 같아야 이후 행이 밀리지 않는다. */
+  grid-column: span 8;
   min-width: 0;
   padding: 1rem;
   border-bottom: 1px solid #d6deea;
@@ -2727,7 +3012,7 @@ a {
 
 .comparePerformanceHint {
   color: #64748b;
-  font-size: 0.88rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
 }
 
@@ -2742,7 +3027,7 @@ a {
   min-height: 3rem;
   padding: 0.55rem 1rem;
   color: #1f2937;
-  font-size: 1.1rem;
+  font-size: var(--fs-lg);
   font-weight: 900;
 }
 
@@ -2811,12 +3096,12 @@ a {
   font-weight: 800;
 }
 
-.compareHoldingLine + .compareHoldingLine {
+.compareHoldingLine+.compareHoldingLine {
   margin-top: 0.08rem;
 }
 
-.compareHoldingLine > span,
-.compareHoldingLine > strong {
+.compareHoldingLine>span,
+.compareHoldingLine>strong {
   flex: 0 0 auto;
 }
 
@@ -2865,7 +3150,7 @@ a {
   min-width: 0;
   overflow: hidden;
   color: #9ca3af;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2894,7 +3179,7 @@ a {
 }
 
 .tickerDetailChartMaLabel {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: #5b6778;
   font-weight: 600;
 }
@@ -2903,7 +3188,7 @@ a {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .tickerDetailChartMaSwatch {
@@ -2921,15 +3206,15 @@ a {
   flex-direction: column;
 }
 
-.tickerDetailLayoutGrid > .tickerDetailChartWrap {
+.tickerDetailLayoutGrid>.tickerDetailChartWrap {
   grid-area: chart;
 }
 
-.tickerDetailLayoutGrid > .tickerDetailTablePanel {
+.tickerDetailLayoutGrid>.tickerDetailTablePanel {
   grid-area: table;
 }
 
-.tickerDetailClassicLayout > .tickerDetailChartWrap {
+.tickerDetailClassicLayout>.tickerDetailChartWrap {
   min-height: 520px;
 }
 
@@ -2950,6 +3235,26 @@ a {
   display: block;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 자산 헬퍼 종목명: 종목풀 순위와 동일하게 최대 2줄까지 표시한다. */
+.assetHelperPreviewGrid .ag-cell.assetHelperNameCell,
+.assetHelperPreviewGrid .ag-cell.assetHelperNameCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.assetHelperPreviewGrid .assetHelperNameCellText {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.1;
 }
 
 .tickerDetailCodeContent {
@@ -3013,7 +3318,7 @@ a {
   align-items: center;
   justify-content: center;
   text-align: center;
-  font-size: 14px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   padding: 1.5rem;
 }
@@ -3025,7 +3330,7 @@ a {
   width: 15rem;
   overflow: visible;
   pointer-events: none;
-  font-size: 0.9rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   display: flex;
   flex-direction: column;
@@ -3051,7 +3356,7 @@ a {
 
 .tickerDetailChartBadgeArrow {
   position: absolute;
-  font-size: 1rem;
+  font-size: var(--fs-base);
   line-height: 1;
   transform: translateX(-50%);
 }
@@ -3068,7 +3373,7 @@ a {
   background: #fff;
   color: #1f2937;
   box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-  font-size: 0.9rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   line-height: 1.2;
   white-space: nowrap;
@@ -3111,8 +3416,12 @@ a {
   --ag-border-color: rgba(220, 225, 231, 0.85);
   --ag-row-border-color: rgba(220, 225, 231, 0.85);
   --ag-header-column-resize-handle-color: rgba(32, 107, 196, 0.25);
-  --ag-font-size: 0.95rem;
-  --ag-font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", "Segoe UI", sans-serif;
+  /* 표는 본문보다 한 단계 작은 --fs-sm 을 쓴다(밀도 확보). 이유는 app-grid-theme.ts 참고.
+     다만 이 CSS 경로는 AppAgGrid 에 theme="legacy" 를 넘길 때만 쓰인다.
+     현재 모든 화면이 createAppGridTheme() 객체를 넘기므로 실제 표 글자 크기는
+     app/components/app-grid-theme.ts 의 fontSize 가 정한다. 둘을 같이 맞춰 둔다. */
+  --ag-font-size: var(--fs-sm);
+  --ag-font-family: var(--app-font-sans);
 }
 
 @media (max-width: 0px) {
@@ -3131,15 +3440,15 @@ a {
   }
 
   .tickerDetailHeroTitle {
-    font-size: 1.5rem;
+    font-size: var(--fs-2xl);
   }
 
   .tickerDetailHeroPrice {
-    font-size: 1.35rem;
+    font-size: var(--fs-2xl);
   }
 
   .tickerDetailHeroChange {
-    font-size: 1rem;
+    font-size: var(--fs-base);
   }
 
   .tickerDetailLayoutGrid,
@@ -3239,12 +3548,50 @@ a {
   background: rgba(102, 204, 102, 0.42);
 }
 
+
 .appAgGridThemeLegacy .ag-row.appHeldRow {
   background: rgba(102, 204, 102, 0.35);
 }
 
 .appAgGridThemeLegacy .ag-row.appHeldRow:hover {
   background: rgba(102, 204, 102, 0.42);
+}
+
+/* 튜닝 표 상단 고정행: 지수/레버리지 단순보유 벤치마크 */
+.ag-row.appBenchmarkRow {
+  background: rgba(148, 163, 184, 0.16);
+  font-weight: 700;
+}
+
+/* Steady Momentum 차순위 후보 행 — 선정과 구분되게 흐리게 */
+.ag-row.steadyReserveRow {
+  background: rgba(148, 163, 184, 0.08);
+  opacity: 0.75;
+}
+
+/* Steady Momentum 백테스트 예정 행 — 판정만 끝나고 체결 전인 달 */
+.ag-row.steadyPendingRow {
+  background: rgba(11, 123, 220, 0.07);
+  font-style: italic;
+}
+
+/* 긴 목록(편입·편출 종목명)을 줄바꿈으로 전부 보여주는 셀.
+   공통 그리드 테마가 .ag-cell 을 flex 로 두기 때문에, 값 요소에 min-width:0 을
+   주지 않으면 줄바꿈되지 않고 옆 칸으로 넘쳐 흐른다. */
+.appAgGridTheme .ag-cell.steadyWrapCell,
+.appAgGridThemeLegacy .ag-cell.steadyWrapCell {
+  align-items: flex-start;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.appAgGridTheme .ag-cell.steadyWrapCell .ag-cell-value,
+.appAgGridThemeLegacy .ag-cell.steadyWrapCell .ag-cell-value {
+  width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
 }
 
 .assetsAgGrid {
@@ -3449,42 +3796,38 @@ a {
   color: #fff;
 }
 
-.rankAgGrid .ag-row.rankHeldRow {
-  background: rgba(102, 204, 102, 0.35);
+/* 보유 계좌 목록 — 계좌가 여러 개면 길어지므로 한 줄 말줄임.
+   .ag-cell 이 flex 라서 자식의 min-width 가 auto 면 줄어들지 않아 말줄임이 안 걸린다. */
+.rankAgGrid .ag-cell.rankHoldCell,
+.rankAgGrid .ag-cell.rankHoldCell .ag-cell-value {
+  min-width: 0;
+  overflow: hidden;
 }
 
-.rankAgGrid .ag-row.rankHeldRow:hover {
-  background: rgba(102, 204, 102, 0.42);
+.rankAgGrid .rankHoldAccountsCell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.rankAgGrid .ag-row.rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.3);
-}
-
-.rankAgGrid .ag-row.rankNegativeTrendRow:hover {
-  background: rgba(100, 116, 139, 0.38);
-}
-
-.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow {
-  background: rgba(102, 180, 102, 0.38);
-}
-
-.rankAgGrid .ag-row.rankHeldRow.rankNegativeTrendRow:hover {
-  background: rgba(102, 180, 102, 0.45);
-}
-
-.rankAgGrid .ag-row.rankFixedRow,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow,
-.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow {
+.rankAgGrid .ag-row.rankFixedRow {
   background: rgba(199, 210, 254, 0.5);
 }
 
-.rankAgGrid .ag-row.rankFixedRow:hover,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow:hover,
-.rankAgGrid .ag-row.rankFixedRow.rankNegativeTrendRow:hover,
-.rankAgGrid .ag-row.rankFixedRow.rankHeldRow.rankNegativeTrendRow:hover {
+.rankAgGrid .ag-row.rankFixedRow:hover {
   background: rgba(199, 210, 254, 0.62);
+}
+
+/* 실제 보유 중인 종목 — 배경 녹색(보유 컬럼 대체). 고정 행보다 우선. */
+.rankAgGrid .ag-row.rankHeldRow,
+.rankAgGrid .ag-row.rankHeldRow.rankFixedRow {
+  background: rgba(34, 197, 94, 0.28);
+}
+
+.rankAgGrid .ag-row.rankHeldRow:hover,
+.rankAgGrid .ag-row.rankHeldRow.rankFixedRow:hover {
+  background: rgba(34, 197, 94, 0.38);
 }
 
 .rankAgGrid .ag-cell-value,
@@ -3493,16 +3836,24 @@ a {
   min-width: 0;
 }
 
-.rankAgGrid .rankNameCellText {
-  display: block;
+/* 종목명 — 원래 글씨 크기를 유지한 채 줄간격만 줄여 최대 2줄까지 표시 (그래도 넘치면 말줄임) */
+/* 그리드 종목명 셀 — 2줄까지 보이고 넘치면 말줄임.
+   `/pools-rank` 에만 있던 스타일을 화면에 묶이지 않게 공용화한 것이다. */
+.appNameCellText {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   width: 100%;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  line-height: 1.1;
 }
 
-.rankAgGrid .ag-cell[col-id="종목명"] {
+.rankAgGrid .ag-cell[col-id="종목명"],
+.assetsAgGrid .ag-cell[col-id="name"] {
   overflow: hidden;
 }
 
@@ -3683,7 +4034,7 @@ a {
   min-width: 0;
   height: 2rem;
   padding: 0.2rem 0.45rem;
-  font-size: 0.84rem;
+  font-size: var(--fs-sm);
   line-height: 1.2;
 }
 
@@ -3714,7 +4065,7 @@ a {
 }
 
 .assetsInlineLinkButton {
-  font-size: 0.82rem;
+  font-size: var(--fs-sm);
 }
 
 .assetsMoveLinkButton {
@@ -3726,10 +4077,6 @@ a {
 .assetsMoveLinkButton:hover {
   color: #174e95;
   text-decoration: underline;
-}
-
-.rankNegativeTrendRow {
-  background: rgba(100, 116, 139, 0.3);
 }
 
 .tableWrap {
@@ -3744,6 +4091,67 @@ a {
   box-shadow: 0 1px 2px rgba(9, 30, 66, 0.04);
 }
 
+.live24hPriceCardList {
+  display: grid;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.live24hPriceCardList.is-two {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.live24hPriceCardList.is-three {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.live24hPriceCardList.is-three .live24hPriceCard:first-child {
+  grid-column: 1 / -1;
+}
+
+.live24hPriceCard {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 38px;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.live24hPriceCardName {
+  min-width: 0;
+  font-size: var(--fs-sm);
+}
+
+.live24hPriceCardValue {
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  letter-spacing: -0.03em;
+}
+
+.live24hPriceCardValue.is-active {
+  font-weight: 900;
+}
+
+.live24hPriceCardSession {
+  margin-left: auto;
+  padding: 2px 6px;
+  font-size: var(--fs-sm);
+  font-weight: 800;
+}
+
+@media (max-width: 768px) {
+  .live24hPriceCardList {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .live24hPriceCard {
+    flex: 1 1 240px;
+  }
+}
+
 .appCardHeader {
   display: flex;
   align-items: center;
@@ -3752,7 +4160,7 @@ a {
   padding: 0.75rem 1rem;
 }
 
-.appCard > .card-header {
+.appCard>.card-header {
   padding: 0.375rem 1rem;
 }
 
@@ -3788,7 +4196,7 @@ a {
 
 .appLabeledFieldLabel {
   color: #5b6778;
-  font-size: 0.8rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
@@ -3804,7 +4212,7 @@ a {
 
 .appInlineFieldLabel {
   color: #5b6778;
-  font-size: 0.86rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   line-height: 1.1;
   white-space: nowrap;
@@ -3829,7 +4237,7 @@ a {
 .appSegmentedToggleButton,
 .appActionHeaderInner .btn {
   min-height: 36px;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -3899,14 +4307,14 @@ a {
   align-items: center;
   gap: 0.35rem;
   color: #6c7a91;
-  font-size: 0.875rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
 }
 
 .appHeaderMetricValue {
   color: #182433;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
   font-weight: 700;
 }
 
@@ -3924,7 +4332,7 @@ a {
 
 .appHeaderSubtle {
   color: #6c7a91;
-  font-size: 0.9rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -3951,7 +4359,7 @@ a {
 
 .appResponsiveFiltersToggle {
   min-height: 32px;
-  font-size: 0.88rem;
+  font-size: var(--fs-sm);
   font-weight: 700;
   white-space: nowrap;
 }
@@ -3998,7 +4406,7 @@ a {
 }
 
 .rankMainHeaderLeft .appLabeledField:nth-child(2) {
-  flex: 0 0 12rem;
+  flex: 0 0 16rem;
 }
 
 .rankRuleFieldRow {
@@ -4046,7 +4454,7 @@ a {
 .noteMetaRow {
   margin-bottom: 0.75rem;
   color: #6c7a91;
-  font-size: 0.9rem;
+  font-size: var(--fs-sm);
   font-weight: 600;
 }
 
@@ -4065,7 +4473,7 @@ a {
   padding: 0.875rem 1rem 1rem;
 }
 
-.appCardSection + .appCardSection {
+.appCardSection+.appCardSection {
   margin-top: 0.375rem;
 }
 
@@ -4081,7 +4489,7 @@ a {
   z-index: 1;
   padding: 10px 12px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--app-table-head-color);
   background: var(--app-table-head-bg);
@@ -4093,7 +4501,7 @@ a {
   padding: 10px 12px;
   border-top: 1px solid var(--line);
   vertical-align: middle;
-  font-size: 0.96rem;
+  font-size: var(--fs-base);
 }
 
 .erpTable tbody tr:hover {
@@ -4143,7 +4551,7 @@ a {
   justify-content: center;
   width: 16px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .snapshotsDetailPanel {
@@ -4172,7 +4580,7 @@ a {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  font-size: 0.95rem;
+  font-size: var(--fs-base);
 }
 
 .snapshotsDetailTable th,
@@ -4217,12 +4625,12 @@ a {
 }
 
 .tableAccountCell strong {
-  font-size: 15px;
+  font-size: var(--fs-base);
   line-height: 1.25;
 }
 
 .tableAccountCell span {
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .tableCellStack {
@@ -4294,14 +4702,14 @@ a {
 }
 
 .cashHint {
-  font-size: 13px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   line-height: 1.4;
 }
 
 .tableFooterMeta {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--muted);
   text-align: right;
 }
@@ -4322,7 +4730,7 @@ a {
   gap: 4px;
   margin-bottom: 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .bulkGuide p {
@@ -4384,7 +4792,7 @@ a {
   }
 
   .appMobileBrand {
-    font-size: 1.35rem;
+    font-size: var(--fs-2xl);
     line-height: 1;
   }
 
@@ -4543,7 +4951,7 @@ a {
   }
 
   .topbarFxItem strong {
-    font-size: 1.1rem;
+    font-size: var(--fs-lg);
   }
 
   .topbarSentimentItem {
@@ -4569,7 +4977,7 @@ a {
   }
 
   .globalTickerSearchInputField {
-    font-size: 0.9rem;
+    font-size: var(--fs-sm);
   }
 
   .globalTickerSearchTopMoversGrid {
@@ -4609,7 +5017,7 @@ a {
 
 @media (max-width: 0px) {
   .pageHeaderCompact h1 {
-    font-size: 22px;
+    font-size: var(--fs-2xl);
   }
 }
 
@@ -4639,4 +5047,118 @@ a {
 
 .usMarketStockMainHeaderLeft .appLabeledField:nth-child(2) {
   flex: 0 0 9rem;
+}
+
+
+/* ── 메모 화면 (/memos) ────────────────────────────────────────────── */
+.memoLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2.6fr);
+  gap: 12px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .memoLayout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.memoList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.memoListItem {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.memoListItem:hover {
+  background: rgba(148, 163, 184, 0.12);
+}
+
+.memoListItem.is-active {
+  background: rgba(11, 123, 220, 0.1);
+  border-color: rgba(11, 123, 220, 0.35);
+}
+
+.memoListTitle {
+  font-weight: 700;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memoListMeta {
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+}
+
+/* 메모 체크리스트 (리스트형 메모) */
+.memoChecklist {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+  min-height: 24rem;
+}
+
+.memoChecklistRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 체크된 항목 — 글자는 그대로 두고 입력칸 배경만 회색으로 구분한다. */
+.memoChecklistText.is-done {
+  background: rgba(148, 163, 184, 0.16);
+}
+
+.memoChecklistRemove {
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.memoChecklistRemove:hover {
+  background: var(--tblr-danger, #d63939);
+  border-color: var(--tblr-danger, #d63939);
+  color: #fff;
+}
+
+.memoChecklistHandle {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  cursor: grab;
+}
+
+.memoChecklistHandle:active {
+  cursor: grabbing;
+}
+
+.memoChecklistRow.is-dragover {
+  box-shadow: inset 0 2px 0 0 var(--tblr-primary, #206bc4);
 }

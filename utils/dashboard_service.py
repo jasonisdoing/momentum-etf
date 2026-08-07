@@ -21,13 +21,23 @@ BUCKET_NAMES = ["1. 모멘텀", "2. 시장지수", "3. 배당방어", "4. 대체
 
 
 def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """계좌별 benchmark(accounts.json) 의 일간 등락률을 계좌 country 소스로 일괄 조회한다.
+    """계좌별 benchmark(DB account_settings) 의 일간 등락률을 **원화 기준**으로 반환한다.
 
     가격 소스는 계좌의 country_code 로 정한다 (kor→네이버, au→QuoteAPI, us→토스).
-    각 계좌가 자기 통화 ETF 를 벤치마크하므로 환율 환산은 불필요하다.
-    반환: {account_id: {"name": 표시명, "pct": 일간%|None}}
+
+    외화 상장 벤치마크(IVV=AUD, VOO=USD 등)는 현지통화 등락률로 내려오는데, 비교 대상인
+    계좌 금일% 는 원화 총자산 기준이라 환율 변동이 계좌 쪽에만 섞인다. 그러면 환율이 오른
+    날은 무조건 이겨 보이는 편향이 생기므로, 여기서 환율 변동률을 곱해 양쪽 기준을 맞춘다.
+    (원화 상장 ETF 는 환율이 이미 가격에 반영돼 있어 환산하지 않는다 — 하면 이중 계산이다.)
+
+    환율을 못 구하면 환산 못 한 값을 그대로 쓰지 않고 pct=None 으로 둔다 — 기준이 다른 값을
+    비교하면 승부가 조용히 틀리기 때문이다.
+
+    반환: {account_id: {"name": 표시명, "pct": 원화기준 일간%|None}}
     """
-    from services.price_service import get_realtime_snapshot
+    from services.price_service import get_exchange_rates, get_realtime_snapshot
+
+    from utils.cash_model import currency_for_country
 
     # country -> 조회할 ticker 집합, account -> (country, fetch_ticker, name)
     tickers_by_country: dict[str, set[str]] = {}
@@ -55,14 +65,32 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
             logger.warning("benchmark 일간%% 조회 실패 (country=%s): %s", country, exc)
             snap_by_country[country] = {}
 
+    # 외화 벤치마크가 하나라도 있을 때만 환율을 조회한다.
+    fx_rates: dict[str, Any] = {}
+    if any(currency_for_country(meta["country"]) != "KRW" for meta in acc_meta.values()):
+        try:
+            fx_rates = get_exchange_rates()
+        except Exception as exc:
+            logger.warning("benchmark 원화환산용 환율 조회 실패: %s", exc)
+
     result: dict[str, dict[str, Any]] = {}
     for account_id, meta in acc_meta.items():
         snap = (snap_by_country.get(meta["country"]) or {}).get(meta["fetch_ticker"]) or {}
         pct = snap.get("changeRate")
-        result[account_id] = {
-            "name": meta["name"],
-            "pct": float(pct) if pct is not None else None,
-        }
+        pct = float(pct) if pct is not None else None
+
+        currency = currency_for_country(meta["country"])
+        if pct is not None and currency != "KRW":
+            fx_change_pct = (fx_rates.get(currency) or {}).get("change_pct")
+            if fx_change_pct is None:
+                logger.warning(
+                    "%s 환율 변동률이 없어 benchmark 원화환산을 못 했습니다 (account=%s)", currency, account_id
+                )
+                pct = None
+            else:
+                pct = ((1.0 + pct / 100.0) * (1.0 + float(fx_change_pct) / 100.0) - 1.0) * 100.0
+
+        result[account_id] = {"name": meta["name"], "pct": pct}
     return result
 
 

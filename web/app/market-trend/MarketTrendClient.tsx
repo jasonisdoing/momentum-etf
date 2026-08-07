@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ColDef, GridOptions, ValueFormatterParams } from "ag-grid-community";
 
 import { AppAgGrid } from "../components/AppAgGrid";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { PageFrame } from "../components/PageFrame";
-import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
+import { SystemPoolGrid } from "../components/SystemPoolGrid";
 import { MarketTrendChart } from "./MarketTrendChart";
 
 type MarketTrendItem = {
@@ -16,15 +16,25 @@ type MarketTrendItem = {
   change_pct: number | null;
   // 원본 추세 % (MA 괴리율 — 화면 미표시)
   trend_pct: number | null;
-  // MA를 0점으로 두고 12개월 위/아래 괴리율로 정규화한 점수 (-100 ~ +100, 화면 표시용)
+  // MA를 0점으로 두고 12개월 위/아래 괴리율로 정규화한 점수 (-100 ~ +100, 참조용)
   trend_score: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
   // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
   pct_from_high: number | null;
-  // 현재 레짐(백엔드 slope 기반) + 지속일수
+  // 현재 레짐(SuperTrend 방향) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
+  // 직전 레짐 구간. start_truncated = 12개월 창에 잘려 실제 시작이 더 앞일 수 있음.
+  prev_regime: {
+    regime: RegimeKey;
+    start_date: string;
+    end_date: string;
+    days: number;
+    start_truncated: boolean;
+  } | null;
+  days_since_last_up: number | null;
+  days_since_last_neutral: number | null;
 };
 
 type MainRow = MarketTrendItem & { rowType: "main"; id: string };
@@ -36,8 +46,7 @@ function isDetailRow(row: GridRow | undefined): row is DetailRow {
 }
 
 type MarketTrendResponse = {
-  ma_type: string;
-  ma_months: number;
+  ma_days: number;
   items: MarketTrendItem[];
   error?: string;
 };
@@ -55,13 +64,6 @@ function formatPct(value: number | null | undefined): string {
   return `${sign}${value.toFixed(2)}%`;
 }
 
-function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  const rounded = Math.round(value);
-  const sign = rounded > 0 ? "+" : "";
-  return `${sign}${rounded}`;
-}
-
 function getSignedClass(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) return "";
   return value < 0 ? "metricNegative" : "metricPositive";
@@ -71,36 +73,28 @@ function renderSignedPercentCell(params: { value: number | null | undefined }) {
   return <span className={getSignedClass(params.value)}>{formatPct(params.value)}</span>;
 }
 
-function renderSignedScoreCell(params: { value: number | null | undefined }) {
-  return <span className={getSignedClass(params.value)}>{formatScore(params.value)}</span>;
-}
-
-type RegimeKey = "accel_up" | "neutral" | "accel_down";
+type RegimeKey = "accel_up" | "accel_down";
 
 const REGIME_LABEL: Record<RegimeKey, string> = {
   accel_up: "⬆️ 상승",
-  neutral: "➡️ 중립",
   accel_down: "⬇️ 하락",
 };
 
 const REGIME_COLORS: Record<RegimeKey, string> = {
   accel_up: "#d62828",   // 빨강
-  neutral: "#2f9e44",    // 녹색 (중립)
   accel_down: "#1971c2", // 파랑
 };
 
-// 하단 설명도 3단계로.
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
-  { key: "accel_up", text: "⬆️ 상승: 가격이 MA 위에 있고, 추세 기울기가 상승(강화) 중인 국면입니다." },
-  { key: "neutral", text: "➡️ 중립: 추세 기울기가 약화되거나 가격이 MA 주위에 수렴하는 대기 국면입니다." },
-  { key: "accel_down", text: "⬇️ 하락: 가격이 MA 아래에 있고, 추세 기울기가 하락(약화) 중인 위험 국면입니다." },
+  { key: "accel_up", text: "⬆️ 상승: 가격이 SuperTrend 위에 위치한 강세 국면입니다." },
+  { key: "accel_down", text: "⬇️ 하락: 가격이 SuperTrend 아래로 내려간 위험 국면입니다." },
 ];
 
 function renderRegimeCell(params: { data?: GridRow }) {
   const data = params.data;
   if (!data || isDetailRow(data)) return null;
   const key = data.current_regime;
-  if (!key) return <span style={{ color: "#adb5bd" }}>-</span>;
+  if (!key) return <span style={{ color: "var(--text-muted)" }}>-</span>;
   const fontWeight = key === "accel_up" || key === "accel_down" ? 700 : 500;
   return (
     <span style={{ color: REGIME_COLORS[key], fontWeight }}>
@@ -109,30 +103,32 @@ function renderRegimeCell(params: { data?: GridRow }) {
   );
 }
 
+
+
 type MarketTrendClientProps = {
-  defaultMaType: string;
-  defaultMaMonths: number;
-  // config.py 단일 소스 (page.tsx 가 /defaults 응답으로 전달)
-  maTypes: string[];
-  maMonthsMax: number;
+  // config.py 화면 고정값 (page.tsx 가 /defaults 응답으로 전달 — 표시 전용)
+  maDays: number;
   scoreAnchorPercentile: number;
+  maType: string;
 };
 
-export function MarketTrendClient({
-  defaultMaType,
-  defaultMaMonths,
-  maTypes,
-  maMonthsMax,
-  scoreAnchorPercentile,
-}: MarketTrendClientProps) {
-  const [maType, setMaType] = useState<string>(defaultMaType);
-  const [maMonths, setMaMonths] = useState<number>(defaultMaMonths);
+// 시장지수 추세 패널 — 페이지(/market-trend)와 홈 허브가 공유하는 본문(그리드 카드).
+// compact(홈 허브): 핵심 컬럼(지수/일간/추세/기간)만 남긴 요약 그리드.
+const COMPACT_TREND_HEADERS = ["지수", "현재가", "일간(%)", "추세", "기간(거래일)"];
+
+export function MarketTrendPanel({
+  maDays,
+  maType,
+  compact = false,
+}: {
+  maDays: number;
+  maType: string;
+  compact?: boolean;
+}) {
   const [items, setItems] = useState<MarketTrendItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
-  // 페이지 첫 진입 시 최상단(코스피) 행을 한 번 자동 확장한다 (이후엔 사용자 제어).
-  const didInitialExpandRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
@@ -140,22 +136,13 @@ export function MarketTrendClient({
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch(
-          `/api/market-trend?ma_type=${encodeURIComponent(maType)}&ma_months=${encodeURIComponent(String(maMonths))}`,
-          { cache: "no-store" },
-        );
+        const response = await fetch("/api/market-trend", { cache: "no-store" });
         const payload = (await response.json()) as MarketTrendResponse;
         if (!response.ok) {
           throw new Error(payload.error ?? "시장지수 추세 데이터를 불러오지 못했습니다.");
         }
         if (alive) {
-          const loaded = payload.items ?? [];
-          setItems(loaded);
-          // 첫 로드 1회만 최상단 행 자동 확장 (MA 변경 재로드 때는 사용자 상태 유지).
-          if (!didInitialExpandRef.current && loaded.length > 0) {
-            didInitialExpandRef.current = true;
-            setExpandedTicker(loaded[0].ticker);
-          }
+          setItems(payload.items ?? []);
         }
       } catch (loadError) {
         if (alive)
@@ -170,7 +157,8 @@ export function MarketTrendClient({
     return () => {
       alive = false;
     };
-  }, [maType, maMonths]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const rowData = useMemo<GridRow[]>(() => {
     const result: GridRow[] = [];
@@ -194,8 +182,8 @@ export function MarketTrendClient({
       {
         field: "name",
         headerName: "지수",
-        flex: 1,
-        minWidth: 95,
+        flex: 0.8,
+        minWidth: 85,
         sortable: true,
         cellRenderer: (params: { data?: GridRow; value?: string }) => {
           const data = params.data;
@@ -203,7 +191,7 @@ export function MarketTrendClient({
           const isExpanded = expandedTicker === data.ticker;
           return (
             <span style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-              <span style={{ fontSize: "0.8rem", color: "#868e96" }}>{isExpanded ? "▾" : "▸"}</span>
+              <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>{isExpanded ? "▾" : "▸"}</span>
               <span>{params.value}</span>
             </span>
           );
@@ -212,8 +200,8 @@ export function MarketTrendClient({
       {
         field: "price",
         headerName: "현재가",
-        flex: 0.9,
-        minWidth: 90,
+        flex: 0.6,
+        minWidth: 78,
         sortable: true,
         type: "rightAligned",
         valueFormatter: (params: ValueFormatterParams<GridRow>) =>
@@ -222,16 +210,16 @@ export function MarketTrendClient({
       {
         field: "change_pct",
         headerName: "일간(%)",
-        flex: 0.7,
-        minWidth: 75,
+        flex: 0.5,
+        minWidth: 66,
         sortable: true,
         type: "rightAligned",
         cellRenderer: renderSignedPercentCell,
       },
       {
         headerName: "추세",
-        flex: 0.9,
-        minWidth: 95,
+        flex: 0.6,
+        minWidth: 80,
         sortable: true,
         headerClass: "marketTrendRegimeHeader",
         cellStyle: {
@@ -250,9 +238,9 @@ export function MarketTrendClient({
       },
       {
         field: "current_regime_days",
-        headerName: "기간",
-        flex: 0.6,
-        minWidth: 75,
+        headerName: "기간(거래일)",
+        flex: 1.4,
+        minWidth: 240,
         sortable: true,
         cellStyle: {
           display: "flex",
@@ -261,20 +249,53 @@ export function MarketTrendClient({
           textAlign: "center",
         },
         headerClass: "marketTrendRegimeHeader",
-        cellRenderer: (params: { value?: number | null }) => {
+        cellRenderer: (params: { value?: number | null; data?: MarketTrendItem }) => {
           const d = params.value;
-          if (d === null || d === undefined) return <span style={{ color: "#adb5bd" }}>-</span>;
-          return <span style={{ color: "#1f2937" }}>{d}일째</span>;
+          if (d === null || d === undefined) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          const regime = params.data?.current_regime;
+          if (regime === "accel_up") {
+            return <span style={{ color: "var(--text-strong)" }}>상승 {d}일째</span>;
+          }
+          const sinceUp = params.data?.days_since_last_up;
+          const upText = sinceUp !== null && sinceUp !== undefined ? `하락 ${sinceUp}일째` : "1년 내 상승 없음";
+          return <span style={{ color: "var(--text-strong)" }}>{upText}</span>;
         },
       },
       {
-        field: "trend_score",
-        headerName: "추세 점수",
-        flex: 0.7,
-        minWidth: 100,
-        sortable: true,
-        type: "rightAligned",
-        cellRenderer: renderSignedScoreCell,
+        field: "prev_regime",
+        headerName: "이전 추세",
+        flex: 1.5,
+        minWidth: 260,
+        sortable: false,
+        cellStyle: {
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          textAlign: "center",
+        },
+        headerClass: "marketTrendRegimeHeader",
+        headerTooltip: "현재 추세 직전 구간 — 어떤 추세가 언제부터 언제까지 며칠간 이어졌는지",
+        cellRenderer: (params: { data?: GridRow }) => {
+          const data = params.data;
+          if (!data || isDetailRow(data)) return null;
+          const prev = data.prev_regime;
+          if (!prev) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          // 12개월 창에 잘린 구간은 실제로는 더 길다 — '+' 로 최소값임을 표시한다.
+          const daysText = prev.start_truncated ? `${prev.days}일+` : `${prev.days}일`;
+          return (
+            <span
+              style={{ color: "var(--text-strong)" }}
+              title={
+                prev.start_truncated
+                  ? `${REGIME_LABEL[prev.regime]} — 12개월 표시 구간 이전부터 이어져 실제 시작일은 더 앞입니다.`
+                  : REGIME_LABEL[prev.regime]
+              }
+            >
+              <strong style={{ color: REGIME_COLORS[prev.regime] }}>{REGIME_LABEL[prev.regime]}</strong>
+              {` ${daysText} · ${prev.start_date} ~ ${prev.end_date}`}
+            </span>
+          );
+        },
       },
       {
         field: "pct_from_high",
@@ -289,7 +310,7 @@ export function MarketTrendClient({
     [expandedTicker],
   );
 
-  const detailHeight = 640;
+  const detailHeight = 768;
   const gridOptions = useMemo<GridOptions<GridRow>>(
     () => ({
       isFullWidthRow: (params) => isDetailRow(params.rowNode.data ?? undefined),
@@ -301,7 +322,7 @@ export function MarketTrendClient({
             ticker={data.parentTicker}
             name={data.parentName}
             maType={maType}
-            maMonths={maMonths}
+            maDays={maDays}
           />
         );
       },
@@ -318,82 +339,82 @@ export function MarketTrendClient({
       },
       domLayout: "autoHeight",
     }),
-    [maType, maMonths],
-  );
-
-  const titleRight = useMemo(
-    () => (
-      <div className="appHeaderMetrics rankToolbarMeta">
-        <div className="appHeaderMetric">
-          <span>기준:</span>
-          <span className="appHeaderMetricValue">
-            MA: {maType} {maMonths}개월
-          </span>
-        </div>
-      </div>
-    ),
-    [maType, maMonths],
+    [maDays, maType],
   );
 
   return (
-    <PageFrame title="시장지수 추세" fullWidth titleRight={titleRight}>
+    <div className="card appCard">
+      <div className="card-body appCardBodyTight">
+        {error ? <div className="alert alert-danger mb-2">{error}</div> : null}
+        <AppAgGrid<GridRow>
+          rowData={rowData}
+          columnDefs={compact ? columnDefs.filter((col) => COMPACT_TREND_HEADERS.includes(String(col.headerName ?? ""))) : columnDefs}
+          loading={loading}
+          minHeight="auto"
+          theme={gridTheme}
+          getRowId={(params) => params.data.id}
+          gridOptions={gridOptions}
+        />
+      </div>
+      <style jsx global>{`
+        .marketTrendRegimeHeader .ag-header-cell-label {
+          justify-content: center;
+        }
+        .regimeBtTable {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: var(--fs-base);
+          white-space: nowrap;
+        }
+        .regimeBtTable th,
+        .regimeBtTable td {
+          padding: 5px 10px;
+          text-align: right;
+          border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .regimeBtTable th {
+          color: var(--text-muted);
+          font-weight: 600;
+        }
+        .regimeBtTable tr.regimeBtFixed {
+          background: rgba(32, 107, 196, 0.06);
+          font-weight: 700;
+        }
+        .regimeBtTable tr.regimeBtBest {
+          background: rgba(47, 158, 68, 0.12);
+          font-weight: 700;
+        }
+        .regimeBtSectionTitle {
+          font-size: var(--fs-base);
+          font-weight: 700;
+          margin: 14px 0 6px;
+        }
+        .regimeBtSectionTitle:first-of-type {
+          margin-top: 4px;
+        }
+        .regimeBtTable tr.regimeBtBh td {
+          color: var(--text-muted);
+          border-bottom: none;
+        }
+      `}</style>
+    </div>
+  );
+}
+
+export function MarketTrendClient({
+  maDays,
+  scoreAnchorPercentile: _scoreAnchorPercentile,
+  maType,
+}: MarketTrendClientProps) {
+  return (
+    <PageFrame title="시장지수 추세" fullWidth>
       <div className="appPageStack">
         <section className="appSection">
-          <div className="card appCard">
-            <div className="card-header">
-              <ResponsiveFiltersSection>
-                <div className="appMainHeader">
-                  <div className="appMainHeaderLeft">
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">MA</span>
-                      <div className="rankRuleFieldRow">
-                        <select
-                          className="form-select"
-                          value={maType}
-                          onChange={(event) => setMaType(event.target.value)}
-                          disabled={loading}
-                        >
-                          {maTypes.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </select>
-                        <select
-                          className="form-select"
-                          value={String(maMonths)}
-                          onChange={(event) => setMaMonths(Number(event.target.value))}
-                          disabled={loading}
-                        >
-                          {Array.from({ length: maMonthsMax }, (_, index) => index + 1).map((month) => (
-                            <option key={month} value={month}>
-                              {month}개월
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </label>
-                  </div>
-                </div>
-              </ResponsiveFiltersSection>
-            </div>
-            <div className="card-body appCardBodyTight">
-              {error ? <div className="alert alert-danger mb-2">{error}</div> : null}
-              <AppAgGrid<GridRow>
-                rowData={rowData}
-                columnDefs={columnDefs}
-                loading={loading}
-                minHeight="auto"
-                theme={gridTheme}
-                getRowId={(params) => params.data.id}
-                gridOptions={gridOptions}
-              />
-            </div>
-          </div>
+          <MarketTrendPanel maDays={maDays} maType={maType} />
         </section>
         <section className="appSection">
           <div className="card appCard">
-            <div className="card-body" style={{ fontSize: "1rem", lineHeight: 1.7 }}>
+            <div className="card-body" style={{ fontSize: "var(--fs-base)", lineHeight: 1.7 }}>
               <ul style={{ margin: 0, paddingLeft: "1.2rem" }}>
                 {REGIME_DESCRIPTIONS.map(({ key, text }) => (
                   <li key={key} style={{ marginBottom: "2px", color: REGIME_COLORS[key] }}>
@@ -406,37 +427,29 @@ export function MarketTrendClient({
                 style={{
                   margin: 0,
                   paddingLeft: "1.2rem",
-                  fontSize: "0.9rem",
+                  fontSize: "var(--fs-base)",
                   color: "#5f6b82",
                 }}
               >
                 <li>현재가: 최신 거래일 종가 (Yahoo Finance · 배당/분할 자동 조정).</li>
-                <li>일간(%): (오늘 종가 ÷ 전일 종가 − 1) × 100.</li>
+                <li>일간(%): 전일 종가 대비 등락률.</li>
                 <li>
-                  추세 점수: 먼저 (종가 ÷ MA[{maType} {maMonths}개월] − 1) × 100 으로 원본 추세% 를
-                  구한 뒤, MA와 같은 지점을 0점으로 둔 정규화 점수(−100 ~ +100). MA 위쪽은 최근 12개월
-                  괴리율의 상위 {100 - scoreAnchorPercentile}%({scoreAnchorPercentile}퍼센타일)를 +100,
-                  아래쪽은 하위 {100 - scoreAnchorPercentile}%({100 - scoreAnchorPercentile}퍼센타일)를 −100으로 환산합니다.
-                  (단발 극단치 대신 상위/하위 {100 - scoreAnchorPercentile}% 구간을 천장·바닥으로 봅니다.)
-                  12개월 내내 MA 위에 있으면 양수, 내내 아래에 있으면 음수입니다. <strong>수익률이 아닙니다.</strong>
+                  이전 추세: 현재 추세 <strong>직전 구간</strong>의 방향·지속일수·기간입니다. 최근 12개월만 보므로,
+                  그보다 앞에서 시작된 구간은 일수 뒤에 <strong>+</strong>가 붙습니다(실제로는 더 깁니다).
                 </li>
                 <li>
-                  레짐: 방향(MA 위/아래) × 가속/감속으로 상승·조정·진정·하락 4단계로 분류합니다.
-                  가속/감속은 추세% 의 회귀 기울기로 판정하되 비대칭 창을 씁니다 — 강화는 짧은 창으로
-                  빨리(저점 반등 포착), 약화는 긴 창으로 천천히. 기울기가 작은 구간(데드밴드)에서는
-                  직전 상태를 유지해 잦은 라벨 변경(휩소)을 막습니다.
+                  공격/수비 비중(지수를 펼치면 나오는 상세 차트): 종가가 {maType}{maDays}선 <strong>위면 공격 100%</strong>,
+                  아래면 12개월 최저 괴리율까지의 거리로 <strong>수비 비중</strong>을 20% 단위로 매깁니다.
+                </li>
+                <li>
+                  레짐: <strong>SuperTrend</strong> 기반으로 계산되며 상승과 하락 두 가지 상태만 존재합니다.
                 </li>
               </ul>
             </div>
           </div>
         </section>
+        <SystemPoolGrid />
       </div>
-
-      <style jsx global>{`
-        .marketTrendRegimeHeader .ag-header-cell-label {
-          justify-content: center;
-        }
-      `}</style>
     </PageFrame>
   );
 }

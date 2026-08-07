@@ -11,26 +11,58 @@
 1. **저장·전달 시점부터 호주 종목 ticker 는 `ASX:` 접두사를 강제** 부착한다.
    - 예: `TECH` (X) / `ASX:TECH` (O)
    - 예: `HACK` (X) / `ASX:HACK` (O)
-2. **모든 내부 데이터(메모리/캐시/DB/API 응답)** 에서 호주 종목은 `ASX:` 가 붙은 형태로 유통된다.
-3. **화면에 표시할 때만** display helper 로 `ASX:` 접두사를 제거하고 사용자에게 보여준다.
-   - 예: 그리드/박스 셀 — `ASX:TECH` → 사용자에게 "TECH" 만 보임
-4. **국가 분류 / 가격 조회 분기 / 라우팅** 은 ticker 의 `ASX:` 패턴을 직접 보고 호주로 식별한다.
-5. **위반 시 미국 종목과 혼동되어 잘못된 가격이 표시**된다 (실제로 과거에 `TECH`, `HACK`, `ACDC` 등이 미국 토스 API 로 조회되어 호주 시장 미개장임에도 미국 변동률이 표시되는 버그 발생).
+2. **모든 내부 데이터에서** 호주 종목은 `ASX:` 가 붙은 형태로 유통된다. 메모리·캐시뿐 아니라
+   **DB 저장 값과 API 응답까지 포함**한다. ETF 자체는 물론 **ETF 구성종목(holdings)** 도 같다
+   (예: SYI 의 구성종목은 `NAB` 이 아니라 `ASX:NAB` 으로 저장한다).
+3. **화면에도 `ASX:` 를 그대로 노출**한다. 표시 단계에서 접두사를 벗기지 않는다 —
+   사용자가 미국 동명 티커와 구분할 수 있어야 한다.
+4. **접두사를 벗기는 것은 외부로 나갈 때뿐**이다. 외부 소스마다 요구 형식이 다르므로
+   `utils/asx_ticker.py` 의 변환 함수를 쓴다.
+   - yfinance: `to_yahoo_symbol("ASX:NAB")` → `NAB.AX`
+   - BetaShares CSV / Vanguard API / QuoteAPI: `strip_asx_prefix("ASX:NAB")` → `NAB`
+5. **국가 분류 / 가격 조회 분기 / 라우팅** 은 ticker 의 `ASX:` 패턴을 직접 보고 호주로 식별한다.
+6. **위반 시 미국 종목과 혼동되어 잘못된 가격이 표시**된다 (실제로 과거에 `TECH`, `HACK`, `ACDC` 등이 미국 토스 API 로 조회되어 호주 시장 미개장임에도 미국 변동률이 표시되는 버그 발생).
+
+### 공용 유틸 — `utils/asx_ticker.py`
+
+접두사 부착·제거를 각 파일에서 `.replace("ASX:", "")` 로 인라인 처리하지 말고 이 모듈을 쓴다.
+
+| 함수 | 용도 |
+| --- | --- |
+| `ensure_asx_prefix(t)` | `NAB` / `NAB.AX` / `ASX:NAB` → `ASX:NAB` (호주임을 아는 경우에만 사용) |
+| `strip_asx_prefix(t)` | `ASX:NAB` → `NAB` (외부 API 호출 직전) |
+| `to_yahoo_symbol(t)` | `ASX:NAB` → `NAB.AX` (yfinance 조회) |
+| `from_yahoo_symbol(s)` | `NAB.AX` → `ASX:NAB`, 호주가 아니면 `None` |
+| `is_asx_ticker(t)` | 호주 종목 여부 |
+
+### 구성종목의 상장 국가 판별
+
+구성종목 티커만으로는 상장 시장을 알 수 없다(`NAB` 은 점 없는 영문이라 미국과 구분 불가).
+**수집 소스가 알려주는 국가 정보를 반드시 보존**하고, 그걸 근거로 `ASX:` 를 붙인다. 추정하지 않는다.
+
+| 소스 | 국가 신호 | 보존 필드 |
+| --- | --- | --- |
+| yfinance | 원본 심볼 접미사 (`NAB.AX`) | `yahoo_symbol` |
+| BetaShares CSV | `Currency` / `Country` / `Asset Class` 열 | `listing_currency`, `listing_country`, `asset_class` |
+| Vanguard API | `countryCode` 필드 | `listing_country_code` |
+
+`Asset Class` 가 `Cash` 인 항목(`AUD - AUSTRALIA DOLLAR`)은 상장 종목이 아니므로 접두사를 붙이지 않는다.
 
 ### 적용 위치
 
 - `_normalize_ticker` 류의 정규화 함수: ASX 종목 진입 시 접두사 부착
 - `_append_account_components` 등 ETF·구성종목 통합 진입점: row 의 country_code 또는 currency 가 호주이면 ticker 에 `ASX:` 자동 부착
+- `utils/stock_meta_updater.fetch_*_holdings`: 구성종목 수집 시 호주 상장이면 `ASX:` 부착
 - `services/component_price_service.enrich_component_prices`: 가격 조회 분기에서 `ASX:` 접두사 인식 → 호주 QuoteAPI 로 라우팅 (`.AX` 와 동등 처리)
 - `_classify_holding_country`: ticker 가 `ASX:` 로 시작하면 즉시 `au` 로 분류
-- 프론트엔드 표시: `displayTicker(t)` 같은 helper 로 `"ASX:TECH"` → `"TECH"` 변환 후 노출
 
 ### 새 진입점 추가 시 체크리스트
 
 - [ ] 외부에서 들어오는 호주 종목 ticker 에 `ASX:` 가 붙어 있는가?
 - [ ] 정규화 함수가 `ASX:` 를 보존하는가? (대문자/소문자 변환은 prefix 도 정규화)
 - [ ] 가격 조회 시 `ASX:` 접두사로 호주 시장 라우팅이 되는가?
-- [ ] 화면 표시 직전에만 `ASX:` 를 제거하는가?
+- [ ] 외부 API 호출 직전에만 `utils/asx_ticker` 변환 함수로 벗기는가?
+- [ ] DB 에 저장하는 값에도 접두사가 붙어 있는가? (화면 표시용으로 벗겨 저장하지 않는다)
 
 ## 0. 로컬 실행
 
@@ -52,13 +84,39 @@ python infra/server_scheduler.py
 - VM 의 cron 은 제거되어 있으므로, **자동 배치를 돌리려면 터미널 2 가 켜져 있어야** 합니다.
 - 수동 1회 실행은 `/system` 화면의 버튼으로도 가능하며, 동일한 `batch_locks` 락을 사용하므로 자동 실행과 충돌하지 않습니다.
 
+### ⚠️ 배치 추가·삭제 시 반드시 함께 고쳐야 하는 곳
+
+배치 목록(action 키)이 **백엔드·프론트 4곳에 각각 하드코딩**돼 있습니다. 한 곳만 고치면
+`/batch` 화면에는 보이지만 버튼을 누를 때 **"유효하지 않은 action 입니다"(400)** 가 납니다.
+백엔드에서 목록을 내려주지 않으므로, 아래를 모두 같은 값으로 맞춰야 합니다.
+
+| 위치 | 심볼 | 역할 |
+| --- | --- | --- |
+| `utils/system_service.py` | `SystemAction` (Literal) | 서버 검증 |
+| `utils/system_service.py` | `SCHEDULE_ROWS` | `/batch` 화면 표시·다음 실행 계산 |
+| `utils/system_service.py` | `_SCRIPT_BY_ACTION` | action → 실행 스크립트 |
+| `web/app/api/system/route.ts` | `allowed` Set | **여기서 400 이 난다** |
+| `web/lib/system-store.ts` | `SystemAction` 타입 | 프록시 타입 |
+| `web/app/batch/SystemManager.tsx` | `SystemJobKey` 타입 | 화면 버튼 타입 |
+| `infra/cron/crontab` | cron 라인 | **자동 실행의 단일 진실 소스** |
+
+체크리스트:
+
+- [ ] 위 7곳을 모두 갱신했는가? (`SCHEDULE_ROWS` 의 `schedule` 은 `crontab` 과 동기화)
+- [ ] `crontab` 의 job name 이 action 키와 정확히 같은가? (스케줄러가 이 값으로 큐에 넣는다)
+- [ ] 스케줄러가 무인자 스크립트만 실행하므로 `scripts/` 래퍼를 만들었는가?
+- [ ] `/batch` 화면에서 수동 실행 버튼이 400 없이 동작하는가?
+
+과거 누락 사례: `aus_market_stocks` 가 `system-store.ts` 에, `live_24h_slack` 이
+`SystemManager.tsx` 에 빠져 있었습니다(2026-07-30 일괄 보완).
+
 ## 1. 시스템 아키텍처
 
 ### 모듈 구조
-*   `backtest/`: 백테스트 전용 실행기, 스윕 설정, 결과 로그 생성 엔진
-*   `core/strategy/`: 지표/점수/비중 계산 공용 전략 유틸
+*   `core/strategy/`: 지표/추세/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**
-    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시
+    *   `price_service.py`: 실시간 가격/환율 오케스트레이션 및 TTL 캐시. 환율은 USD/KRW 만 토스 실시간(REAL_TIME, 5초 TTL) 우선 + 실패 시 야후(KRW=X) 백업이며, AUD 등 나머지 통화는 야후(1시간 TTL).
+    *   `toss_market_service.py`: 토스 시장지표(mini-chart)·차트(c-chart) 연동 — /live-24h 카드(나스닥 100 선물·달러 환율·VIX), 헤더 나스닥선물, USD 환율, market-trend 나스닥 선물 최신 봉 보강에 사용
     *   `reference_data_service.py`: KIS ETF 마스터, 종목 메타데이터, 상장일 조회
     *   `etf_holdings_service.py`: 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 조회해 메타 캐시에 저장할 형태로 정규화합니다. 국내 구성종목은 6자리 종목코드, 해외 구성종목은 `componentReutersCode`에서 추출한 심볼을 표시용 `ticker`로 사용하고, 원본 ISIN은 `raw_code`에 저장합니다. 해외 구성종목 가격 조회는 응답 시점에 Yahoo를 사용하고 서비스 메모리 TTL 캐시를 적용합니다.
     *   `vkospi_service.py`: VKOSPI 등 외부 시장 지표 연동 및 메모리 캐시
@@ -73,8 +131,11 @@ python infra/server_scheduler.py
     *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
+    *   `asset_helper_service.py`: 자산 헬퍼 설정 저장, 적용 계좌 기준 목표 비중·목표수량 계산, 자산 헬퍼 전용 백테스트와 가격 변동이 반영된 매주 금요일 기준 종목·현금별 평가금액 이력(`weight_history`) 생성을 담당합니다. Next API `/api/asset-helper-settings/backtest`는 FastAPI `/internal/asset-helper/backtest`로 프록시합니다.
+    *   `steady_momentum_service.py`: Steady Momentum(`/strategy-sm`) 설정 저장·검증, 유니버스 로드, 상대 모멘텀 점수 계산(`momentum_metrics`), 점수 순위(`rank_candidates`), 월 확정 포트폴리오 선정(`compute_picks`)의 단일 소스입니다. 판정일/체결일 산출도 여기(`month_last_two_trading_days`, `current_portfolio_dates`)에 있습니다.
+    *   `steady_momentum_backtest.py`: 같은 선정 규칙을 과거 리밸런싱 시점마다 적용하는 월간 백테스트(`run_backtest`)입니다. 후보 선정·순위는 반드시 `steady_momentum_service` 함수를 재사용해 화면 선정 결과와 어긋나지 않게 합니다. Next API `/api/strategy-sm/*`는 FastAPI `/internal/strategy-sm/*`로 프록시합니다.
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
-*   `accounts.json`: 계좌 메타데이터 단일 설정 파일. 각 계좌의 `ticker_types`는 해당 계좌가 보유할 수 있는 종목풀 목록이며, 보유종목이 종목풀에서 제거된 뒤에도 가격/메타 캐시 갱신 대상의 ticker_type을 결정하는 기준입니다.
+*   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.
@@ -83,8 +144,8 @@ python infra/server_scheduler.py
     *   `services/price_service.py`가 실시간 가격/환율과 TTL 캐시를 관리합니다.
     *   `services/reference_data_service.py`가 KIS ETF 목록과 메타데이터 조회를 관리합니다.
     *   `services/etf_holdings_service.py`가 한국 ETF 구성종목 비중을 네이버 `ETFComponent` API로 수집하고, 응답 시점에는 메타 캐시에 저장된 구성종목에 해외 가격만 Yahoo TTL 캐시로 보조합니다.
-4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 점수를 계산.
-5.  **순위 생성**: `utils/rankings.py`가 종목별 점수, 규칙별 추세, RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
+4.  **지표 계산**: `core/strategy/metrics.py`가 이동평균과 추세(%)를 계산.
+5.  **순위 생성**: `utils/rankings.py`가 종목별 추세(%), RSI, 기간 수익률을 합쳐 화면용 DataFrame 생성.
 
 ### 일별 원장 원칙
 
@@ -107,13 +168,13 @@ python infra/server_scheduler.py
     *   상장일, 배당률, 보수, 순자산총액/시가총액, 업종, ETF 구성종목 같은 저빈도 정보
     *   Mongo `stock_cache_meta` 컬렉션
     *   `utils/stock_cache_meta_io.py`, `services/stock_cache_service.py`
-    *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_meta_cache_updater.py`가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다.
+    *   한국 ETF 저빈도 메타와 구성종목은 `scripts/stock_reference_meta_updater.py`(배치 B)가 네이버 `ETFBase`, `ETFDividend`, `ETFComponent`를 조회해 `stock_cache_meta.meta_cache`, `stock_cache_meta.holdings_cache`로 저장합니다. 거래량·기간수익률·backtest 등 가격 파생 지표는 `scripts/stock_price_metrics_updater.py`(배치 A)가 담당합니다.
     *   미국 개별주는 네이버 `foreign/market/stock/global`에서 업종, 배당률, 시가총액을 조회해 `stock_meta.etf_category`와 `stock_cache_meta.meta_cache`에 저장합니다. 미국 개별주에는 보수 개념을 적용하지 않습니다.
     *   종목풀에 등록되지 않았더라도 포트폴리오 마스터에서 현재 보유 중인 티커는 계좌 `ticker_types` 기준으로 종목 메타/가격 캐시 갱신 대상에 포함됩니다.
 
 `stock_meta` 컬렉션은 종목 관리 원본(버킷, 종목명 등)으로 유지하고, 저빈도 메타 캐시는 `stock_cache_meta`로 분리하는 것을 기본 방향으로 삼습니다. 종목 삭제는 별도 휴지통 없이 즉시 하드 딜리트를 기본으로 합니다.
 
-국가별 거래일 캘린더는 DB가 아니라 파일 캐시로 관리합니다. 런타임은 `zcountry/{country}/market_calendars.json`만 읽고, 파일이 없거나 범위를 벗어나면 즉시 에러를 발생시킵니다.
+국가별 거래일 캘린더는 DB가 아니라 파일 캐시로 관리합니다(연 단위로만 바뀌는 정적 데이터). 반면 **지수 구성종목은 매일 갱신되므로 MongoDB `index_constituents` 컬렉션**에 둡니다 — 서버 컨테이너의 `data/` 가 읽기 전용 마운트라 파일로 두면 서버에서 갱신할 수 없기 때문입니다. 런타임은 `data/country/{country}/market_calendars.json`만 읽고, 파일이 없거나 범위를 벗어나면 즉시 에러를 발생시킵니다.
 
 ### 서비스 사용 원칙
 
@@ -176,6 +237,19 @@ python infra/server_scheduler.py
 - 정책 변경 시 raw 데이터(`total_assets`, `total_principal`, `deposit_withdrawal`, `total_expense`)는 그대로 유지되고 파생 필드만 계산식이 바뀌므로, 정책 변경 자체에는 재집계가 필요하지 않습니다. 화면 새로고침 시점부터 적용됩니다.
 - 과거 일별 입출금 값을 수정한 경우에는 주/월/년 raw 집계(`deposit_withdrawal`, `total_assets` 등)를 다시 만들기 위해 관련 집계 버튼을 눌러야 합니다.
 
+자산 헬퍼 데이터 (단일 컬렉션 원칙):
+
+- `/assets` 와 `/asset-helper` 는 **portfolio_master 하나만** 저장소로 쓴다. 별도 컬렉션을 만들지 않는다.
+- 종목별 목표비중: `accounts[].holdings[].target_ratio` (%). 미설정이면 필드 자체가 없다(임의 0 보정 금지).
+  `/asset-helper` 의 "비중" 컬럼에서 편집하고, `/assets` 의 "목표비중" 컬럼은 같은 값을 읽기 전용으로 보여준다.
+- 계좌 단위 헬퍼 설정(weight_mode·STOCK_MAX_WEIGHT·백테스트 설정): `accounts[].asset_helper` 하위 객체.
+- 현금 목표 비중: `accounts[].asset_helper.cash_weight_pct` — 저장값이 원본. 로드 시 나머지로
+  자동 초기화하지 않으며, IS(자동 비중)가 변해 합이 100에서 어긋나면 저장이 차단된다.
+- IS(International Shares, 호주 수동 고정자산): `/assets` 에서는 기존대로 수동 입력·표기.
+  자산 헬퍼에서는 VGS 정식 명칭으로 표시하고 비중은 평가액 기반 자동값(편집 불가),
+  백테스트는 VGS 가격 시계열로 대리한다(`asset_helper_service.IS_PRICE_PROXY`).
+- 과거의 `asset_helper_settings` / `account_targets` 컬렉션은 2026-07 통합 마이그레이션으로 삭제됐다.
+
 ## 2. 순위 화면 정합성 원칙
 
 > **Critical**: 이 시스템은 **순위 화면이 단일 진실 원천(single source of truth)** 입니다. 화면에서 보이는 값은 계좌 종목 목록, 가격 캐시, 실제 보유 데이터로 직접 계산되어야 합니다.
@@ -185,15 +259,15 @@ python infra/server_scheduler.py
 |-----------------|------|
 | `web/app/*` | Next.js 기반 사용자 화면과 API 라우트 |
 | `utils/rankings.py` | 순위 계산과 정렬 |
-| `core/strategy/metrics.py` | 이동평균 점수 계산 |
+| `core/strategy/metrics.py` | 이동평균 추세 계산 |
 | `services/price_service.py` | 실시간 가격/환율 조회의 공식 진입점 |
 | `services/reference_data_service.py` | ETF 마스터/메타데이터/상장일 조회의 공식 진입점 |
 | `utils/account_notes.py` | 계좌 메모 저장/조회 |
 
 ### 핵심 일관성 체크리스트
 
-1.  **입력 단순화**: 종목풀 설정의 `MA_TYPE`, `MA_MONTHS`를 사용하고, 순위 화면에서도 같은 단일 MA 기준만 변경할 수 있다.
-2.  **정렬 기준 고정**: `점수`가 있는 종목을 `점수` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
+1.  **입력 단순화**: 추세 타입은 config(SMA/EMA)로 고정하고, 종목풀 설정의 `SHORT_MA_DAYS`와 `LONG_MA_DAYS`만 사용한다.
+2.  **정렬 기준 고정**: `추세(%)`가 있는 종목을 `추세(%)` 내림차순으로 정렬하고, 계산 불가 종목은 맨 아래로 보낸다.
 3.  **데이터 기준**:
     *   모든 의사결정은 **판단 시점의 전일 종가 데이터**를 기준으로 함
     *   "오늘"의 순위는 "어제까지의 마감 데이터"를 보고 계산된 것임
@@ -204,40 +278,39 @@ python infra/server_scheduler.py
 
 ## 3. 전략 설정 규칙
 
-종목풀 설정 포맷(`pools.json`):
+종목풀 설정(DB `pool_settings`):
 
 ```json
 {
-  "all": {
-    "TOP_N_HOLD": 3,
-    "HOLDING_BONUS_SCORE": 10,
-    "MA_TYPE": "ALMA",
-    "MA_MONTHS": 5,
-    "RSI_LIMIT": 100,
-    "include": ["kor_kr", "kor_us", "kor"]
-  },
-  "pools": [
-    {
-      "order": 1,
-      "ticker_type": "kor_kr",
-      "icon": "🇰🇷",
-      "name": "국내상장 국내",
-      "country_code": "kor",
-      "currency": "KRW",
-      "MA_TYPE": "SMA",
-      "MA_MONTHS": 10
-    }
-  ]
+  "_id": "kor_kr",
+  "name": "국내상장 국내",
+  "icon": "🇰🇷",
+  "order": 1,
+  "country_code": "kor",
+  "currency": "KRW",
+  "TOP_N_HOLD": 10,
+  "SHORT_MA_DAYS": 10,
+  "LONG_MA_DAYS": 20,
+  "is_active": true
 }
 ```
+
+런타임 종목풀 목록은 DB `pool_settings`가 단일 소스입니다. 종목풀 설정 화면(`/pools-settings`)에서 종목풀 추가·수정·삭제와 `TOP_N_HOLD`/`SHORT_MA_DAYS`/`LONG_MA_DAYS` 편집을 수행합니다.
 
 종목풀 설정의 `country_code`는 현재 `kor`, `au`, `us`를 허용합니다.
 
 검증 원칙(현재 운영):
 
-* 전체 종목풀: `all.TOP_N_HOLD`, `all.HOLDING_BONUS_SCORE`, `all.MA_TYPE`, `all.MA_MONTHS`, `all.RSI_LIMIT`, `all.include` 필수
-* 개별 종목풀: `MA_TYPE`, `MA_MONTHS` 필수
+* 개별 종목풀: `SHORT_MA_DAYS`, `LONG_MA_DAYS` 필수
 * 필수값 누락 시 fallback 없이 명시적 에러
+* 종목풀 구조와 편집값(`TOP_N_HOLD`/`SHORT_MA_DAYS`/`LONG_MA_DAYS`)은 **DB `pool_settings`** 가 단일 소스다. `/pools-settings` 화면에서 추가·수정·삭제하며, 삭제는 연결 계좌가 없을 때만 허용한다.
+
+#### 선정 기준 = 추세(%)
+
+순위 선정 기준은 추세(%)만 사용한다. 보조지표(Sortino/Sharpe)와 보유 여부는 종목 선정에 사용하지 않는다.
+
+* **추세(%)**: `(종가 ÷ MA − 1) × 100`.
+* 라이브(`utils/rankings.py`)가 추세(%)를 계산한다.
 
 ## 4. 테스트 및 검증
 
@@ -247,25 +320,25 @@ python infra/server_scheduler.py
     *   가격/환율 문제면 `services/price_service.py`를 함께 확인
     *   KIS ETF 목록/메타데이터/상장일 문제면 `services/reference_data_service.py`를 함께 확인
 2.  **검증**:
-    *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 점수가 즉시 갱신되는지 확인
+    *   순위 화면에서 종목풀 변경 또는 `MA` 변경 시 컬럼과 추세(%)가 즉시 갱신되는지 확인
     *   실제 보유 종목이 녹색 행으로 표시되는지 확인
 3.  **확인**:
-    *   `점수`, `추세` 컬럼이 `현재가` 뒤에 표시되는지 확인
+    *   `추세(%)` 컬럼이 `현재가` 뒤에 표시되는지 확인(`보유` 컬럼은 숨김)
 
 ## 5. 순위 화면의 정의
 
-**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 `MA_TYPE`, `MA_MONTHS` 기준 점수를 계산한 결과입니다.
+**"순위(Rank)"**는 종목풀의 현재 종목 유니버스에서 이동평균 고정 장기 이평선(`LONG_MA_DAYS`) 기준 추세(%)를 계산한 결과입니다.
 
 ### 핵심 원칙
 1.  **화면 기준 계산**: 순위는 별도 저장 결과를 읽지 않고, 가격 캐시와 계좌 종목으로 즉시 계산합니다.
 2.  **실보유 구분**: 실제 보유 종목만 행 색상으로 표시합니다.
-3.  **정렬 규칙**: `점수` 내림차순, `점수` 계산 불가 종목은 맨 아래입니다.
+3.  **정렬 규칙**: `추세(%)` 내림차순, `추세(%)` 계산 불가 종목은 맨 아래입니다.
 4.  **계좌 종목 직접 관리**: 계좌가 자신의 종목 유니버스를 직접 보유하며, 별도 종목풀 fallback은 사용하지 않습니다.
-5.  **고정 종목 표시**: `exclude_from_ranking=true`인 고정 종목은 순위 번호 없이 현재 위치만 보여줍니다.
+5.  **고정 종목 표시**: `exclude_from_ranking=true`인 고정 종목은 다른 종목의 순위 비교용 참고 기준입니다. 순위 번호 없이 현재 위치만 보여주며, 종목풀 보유 계산과 종목을 대상으로 하는 모든 백테스트·시뮬레이션 투자 유니버스에서는 제외합니다.
 
 ## 6. 화면 UI 표준
 
-AG Grid 기반 주요 화면은 현재 `/pools`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
+AG Grid 기반 주요 화면은 현재 `/pools-rank`에서 정리한 레이아웃을 공통 기준으로 사용합니다.
 
 ### 공통 레이아웃 순서
 1.  **메뉴 헤더**

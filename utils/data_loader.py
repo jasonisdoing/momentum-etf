@@ -94,6 +94,7 @@ if requests is not None:
 
 # from utils.notification import send_verbose_log_to_slack
 
+from utils.asx_ticker import strip_asx_prefix, to_yahoo_symbol
 from utils.cache_utils import (
     load_cached_frame,
     load_cached_frame_with_fallback,
@@ -492,6 +493,30 @@ def get_trading_days_any(start_date: str, end_date: str, countries: list[str]) -
     for country in countries:
         merged.update(get_trading_days(start_date, end_date, country))
     return sorted(merged)
+
+
+# 자산 집계의 기준일로 쓰는 국가 조합 — 한국 또는 호주 중 하나라도 열린 날.
+# (미국 장은 한국시간으로 다음 날 새벽에 끝나 별도 거래일을 만들지 않는다)
+ASSET_TRADING_COUNTRIES = ["kor", "au"]
+
+
+def resolve_active_trading_date() -> str:
+    """오늘 이하의 마지막 자산 거래일(KST, YYYY-MM-DD).
+
+    일별 집계(`daily_fund_data`)와 자산 스냅샷(`daily_snapshots`)이 **같은 날짜 기준**을
+    쓰도록 하는 단일 소스다. 예전에는 집계만 거래일, 스냅샷은 달력 날짜를 써서
+    토요일에 스냅샷만 새 행이 생겼고, 그 탓에 `/assets` 의 금일 손익 합계와
+    계좌별 값이 서로 다른 구간을 비교했다.
+
+    주말·휴일에도 직전 거래일을 돌려주므로 그 날짜의 행이 계속 갱신된다.
+    미국·호주 장이 한국시간 새벽까지 이어지는 몫을 그 거래일에 담기 위한 것이다.
+    """
+    today = _now_with_zone("Asia/Seoul").date()
+    search_start = today - timedelta(days=370)
+    trading_days = get_trading_days_any(str(search_start), str(today), ASSET_TRADING_COUNTRIES)
+    if not trading_days:
+        raise RuntimeError("오늘 이하의 한국/호주 거래일을 찾지 못했습니다.")
+    return max(day.date().isoformat() for day in trading_days)
 
 
 def is_trading_day(
@@ -958,9 +983,8 @@ def prefetch_yfinance_bulk(
         t_norm = str(t or "").strip().upper()
         if not t_norm or t_norm.startswith("^"):
             continue
-        dl = t_norm
-        if country_norm == "au" and not dl.endswith(".AX"):
-            dl = f"{t_norm}.AX"
+        # 시스템 표준 티커(ASX:ACDC)를 yfinance 심볼(ACDC.AX)로 바꾼다.
+        dl = to_yahoo_symbol(t_norm) if country_norm == "au" else t_norm
         download_tickers.append(dl)
         ticker_to_download[t_norm] = dl
 
@@ -1050,10 +1074,10 @@ def _fetch_ohlcv_core(
             logger.error("yfinance 라이브러리가 설치되어 있지 않습니다. 'pip install yfinance'로 설치해주세요.")
             return None
 
-        # [AU] 호주 주식은 .AX 접미사가 필요함 (이미 있는 경우 제외)
+        # [AU] 호주 주식은 ASX: 접두사를 벗기고 .AX 접미사를 붙인다 (지수(^)는 그대로).
         download_ticker = ticker
-        if country_code == "au" and not download_ticker.endswith(".AX") and not download_ticker.startswith("^"):
-            download_ticker = f"{ticker}.AX"
+        if country_code == "au" and not download_ticker.startswith("^"):
+            download_ticker = to_yahoo_symbol(ticker)
 
         try:
             with _silence_yfinance_output():
@@ -1738,6 +1762,58 @@ def fetch_naver_etf_inav_snapshot(tickers: Sequence[str]) -> dict[str, dict[str,
     return {code: all_data[code] for code in normalized_codes if code in all_data}
 
 
+# 해외 ETF NAV 캐시 — 종목별로 조회하므로 티커 단위로 담는다(한국은 전체 목록 1회 조회).
+# (모듈 상단에서 datetime.time 을 import 하고 있어 시간 비교는 datetime 으로 한다.)
+_OVERSEAS_NAV_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
+_OVERSEAS_NAV_TTL_SECONDS = 300
+
+
+def fetch_overseas_etf_nav_snapshot(ticker: str, country_code: str) -> dict[str, float]:
+    """해외(미국·호주) ETF 의 NAV·괴리율을 yfinance ``navPrice`` 로 조회한다.
+
+    괴리율 계산식은 한국과 동일하다: ``(현재가 / NAV - 1) × 100``.
+    한국 네이버 iNAV 와 달리 실시간 추정치(iNAV)가 아니라 **직전 공시 NAV** 라 장중에는 지연이 있다.
+    값이 없으면 빈 dict(화면은 '-').
+    """
+    code = str(ticker or "").strip().upper()
+    cc = str(country_code or "").strip().lower()
+    if not code or cc not in ("us", "au"):
+        return {}
+
+    cache_key = f"{cc}:{code}"
+    now = datetime.now()
+    cached = _OVERSEAS_NAV_CACHE.get(cache_key)
+    if cached is not None and (now - cached[0]).total_seconds() < _OVERSEAS_NAV_TTL_SECONDS:
+        return dict(cached[1])
+
+    symbol = to_yahoo_symbol(code) if cc == "au" else code
+    try:
+        import yfinance as yf
+
+        info = getattr(yf.Ticker(symbol), "info", {}) or {}
+    except Exception as exc:
+        logger.debug("해외 ETF NAV 조회 실패 (%s): %s", symbol, exc)
+        return {}
+
+    def _positive_float(value: Any) -> float | None:
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return float(value)
+        return None
+
+    nav_value = _positive_float(info.get("navPrice"))
+    price_value = _positive_float(info.get("regularMarketPrice")) or _positive_float(info.get("previousClose"))
+    if nav_value is None:
+        return {}
+
+    entry: dict[str, float] = {"nav": nav_value}
+    if price_value is not None:
+        entry["price"] = price_value
+        entry["deviation"] = ((price_value / nav_value) - 1.0) * 100.0
+
+    _OVERSEAS_NAV_CACHE[cache_key] = (now, dict(entry))
+    return entry
+
+
 def _parse_comma_number(value: str | None) -> float | None:
     """쉼표가 포함된 숫자 문자열을 float로 변환한다."""
     if value is None:
@@ -1975,8 +2051,8 @@ def fetch_au_quoteapi_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, fl
     # 병렬 처리를 위한 내부 함수
     def _fetch_single_quote(ticker: str) -> tuple[str, dict[str, float] | None]:
         try:
-            # 호주 ETF 티커 형식: ticker.asx (소문자)
-            url = f"{AU_QUOTEAPI_URL}/{ticker.lower()}.asx"
+            # 호주 ETF 티커 형식: ticker.asx (소문자). 시스템 표준 ASX: 접두사는 벗겨서 보낸다.
+            url = f"{AU_QUOTEAPI_URL}/{strip_asx_prefix(ticker).lower()}.asx"
             # params = {"appID": AU_QUOTEAPI_APP_ID} # URL에 포함되지 않는 경우도 있음
 
             # API 호출 (타임아웃 단축)
@@ -2102,6 +2178,8 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
     Returns:
         {symbol: productCode} 매핑 (매핑 실패 심볼은 제외)
     """
+    import concurrent.futures
+
     from utils.symbol_resolution_blacklist import get_active_blacklist, mark_failed
 
     result: dict[str, str] = {}
@@ -2128,7 +2206,8 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
 
     search_url = f"{TOSS_INVEST_API_BASE_URL}/api/v2/search/stocks"
 
-    for sym in uncached:
+    def _search_one(sym: str) -> tuple[str, str | None]:
+        """심볼 1개를 검색해 (심볼, productCode) 를 반환한다. 실패 시 코드는 None."""
         try:
             # 토스는 BRK-A 등 하이픈(-)이 들어간 경우 BRK.A로 검색해야 결과가 나옵니다.
             search_query = sym.replace("-", ".")
@@ -2146,57 +2225,38 @@ def _resolve_toss_product_codes(symbols: Sequence[str]) -> dict[str, str]:
             us_stocks = [s for s in stocks if not str(s.get("stockCode") or "").startswith("A")]
 
             # matchType이 EXACT인 첫 번째 미국 종목 사용
-            product_code: str | None = None
             for stock in us_stocks:
                 if stock.get("matchType") == "EXACT":
-                    product_code = stock.get("stockCode")
-                    break
+                    return sym, stock.get("stockCode")
 
             # EXACT 없으면 stockName이 심볼(원래 심볼 또는 검색 심볼)과 동일한 첫 번째 미국 종목
-            if not product_code:
-                for stock in us_stocks:
-                    name = str(stock.get("stockName") or "").strip().upper()
-                    if name == sym or name == search_query:
-                        product_code = stock.get("stockCode")
-                        break
+            for stock in us_stocks:
+                name = str(stock.get("stockName") or "").strip().upper()
+                if name == sym or name == search_query:
+                    return sym, stock.get("stockCode")
 
+            logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
+            mark_failed(sym, source="토스", reason="미국 주식 검색 결과 없음")
+            return sym, None
+        except Exception as exc:
+            logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
+            return sym, None
+
+    # 심볼당 1회 요청이라 순차로 돌면 수백 개일 때 수십 초가 걸린다(응답 자체는 ~80ms).
+    # 실시간 시세 병렬 조회와 동일하게 10 스레드로 제한해 동시에 요청한다.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        for sym, product_code in executor.map(_search_one, uncached):
             if product_code:
                 _TOSS_SYMBOL_CODE_CACHE[sym] = product_code
                 result[sym] = product_code
-            else:
-                logger.warning("토스 심볼 매핑 실패: %s (미국 주식 검색 결과 없음)", sym)
-                mark_failed(sym, source="토스", reason="미국 주식 검색 결과 없음")
-
-        except Exception as exc:
-            logger.warning("토스 심볼 검색 API 실패: %s error=%s", sym, exc)
-            mark_failed(sym, source="토스", reason=f"API 오류: {exc}")
 
     return result
 
 
-def _us_session_state() -> str:
-    """미국 정규장 세션 상태: "pre" | "regular" | "post" (ET 기준, 주말은 "post").
-
-    - regular(09:30~16:00): 현재가=close, 변동=전일 종가 대비
-    - pre(04:00~09:30): close=프리장가, 변동=전일 종가 대비
-    - post(16:00~다음날 04:00 + 주말): 현재가=afterMarketClose, 변동=정규장 종가 대비
-    판정 불가 시 "regular"(기존 동작) 로 폴백한다.
-    """
-    schedule = (MARKET_SCHEDULES or {}).get("us") or {}
-    tz_name = schedule.get("timezone")
-    open_t = schedule.get("open")
-    close_t = schedule.get("close")
-    if not tz_name or ZoneInfo is None or open_t is None or close_t is None:
-        return "regular"
-    now = datetime.now(ZoneInfo(tz_name))
-    if now.weekday() >= 5:
-        return "post"
-    t = now.time()
-    if time(4, 0) <= t < open_t:
-        return "pre"
-    if open_t <= t < close_t:
-        return "regular"
-    return "post"
+def resolve_toss_us_product_codes(symbols: Sequence[str]) -> dict[str, str]:
+    """미국 티커를 토스 캔들 조회용 상품 코드로 변환한다."""
+    normalized_symbols = [str(symbol).strip().upper() for symbol in symbols if str(symbol or "").strip()]
+    return _resolve_toss_product_codes(normalized_symbols)
 
 
 def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
@@ -2232,9 +2292,6 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
     all_codes = list(symbol_to_code.values())
     snapshot: dict[str, dict[str, float]] = {}
-
-    # 정규장 마감 후(애프터마켓/야간)면 현재가=애프터, 변동=정규장 종가 대비로 본다.
-    us_post_close = _us_session_state() == "post"
 
     chunk_size = 50
     for i in range(0, len(all_codes), chunk_size):
@@ -2272,17 +2329,12 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             except (TypeError, ValueError):
                 continue
 
-            base_val = _safe_float(item.get("base"))
-            after_val = _safe_float(item.get("afterMarketClose"))
-
-            # 정규장 마감 후 + 애프터가 있으면: 현재가=애프터, 기준=정규장 종가(close).
-            # 그 외(정규장/프리장): 현재가=close, 기준=전일 종가(base).
-            if us_post_close and after_val and after_val > 0 and close_val > 0:
-                now_val: float = after_val
-                prev_val = close_val
-            else:
-                now_val = close_val
-                prev_val = base_val
+            # 토스 필드 의미: close = 현재 세션의 최신 체결가(프리/정규/야간 모두),
+            # base = 그 세션의 기준가(정규장 중엔 전일 종가, 야간엔 당일 정규장 종가).
+            # 세션별로 분기하지 않고 그대로 쓴다 — 예전에는 야간에 afterMarketClose 를
+            # 현재가로 보고 close 를 전일 종가로 뒤집어 써서 등락 부호가 반대로 나왔다.
+            now_val = close_val
+            prev_val = _safe_float(item.get("base"))
 
             entry: dict[str, float] = {"nowVal": now_val}
             if prev_val is not None and prev_val > 0:
@@ -2297,6 +2349,53 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
 
     if snapshot:
         logger.info("[US] 토스증권 API에서 %d개 종목의 실시간 가격을 조회했습니다.", len(snapshot))
+
+    return snapshot
+
+
+def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
+    """토스증권 API에서 한국 주식의 실시간 가격 정보를 조회한다."""
+    normalized_tickers = [str(ticker).strip().upper() for ticker in tickers if str(ticker or "").strip()]
+    if not normalized_tickers or not requests:
+        return {}
+
+    code_to_ticker = {
+        (ticker if ticker.startswith("A") else f"A{ticker}"): ticker.removeprefix("A")
+        for ticker in normalized_tickers
+    }
+    price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
+    snapshot: dict[str, dict[str, float]] = {}
+
+    all_codes = list(code_to_ticker)
+    for start in range(0, len(all_codes), 50):
+        codes = all_codes[start : start + 50]
+        try:
+            resp = requests.get(
+                price_url,
+                params={"productCodes": ",".join(codes)},
+                headers=TOSS_INVEST_HEADERS,
+                timeout=5,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:
+            logger.warning("토스 국내주식 가격 API 실패: %s", exc)
+            continue
+
+        items = data if isinstance(data, list) else (data.get("result") or [])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ticker = code_to_ticker.get(str(item.get("code") or ""))
+            close_val = _safe_float(item.get("close"))
+            if not ticker or close_val is None or close_val <= 0:
+                continue
+            base_val = _safe_float(item.get("base"))
+            entry: dict[str, float] = {"nowVal": close_val}
+            if base_val is not None and base_val > 0:
+                entry["prevClose"] = base_val
+                entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+            snapshot[ticker] = entry
 
     return snapshot
 

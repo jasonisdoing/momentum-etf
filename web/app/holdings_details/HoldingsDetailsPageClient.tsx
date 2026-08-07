@@ -5,7 +5,7 @@ import type { ColDef, RowClassParams, GridOptions } from "ag-grid-community";
 import { PageFrame } from "../components/PageFrame";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { ResponsiveFiltersSection } from "../components/ResponsiveFiltersSection";
-import { TickerDetailLink, stripAsxPrefix } from "../components/TickerDetailLink";
+import { TickerDetailLink } from "../components/TickerDetailLink";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { readSessionTtlCache, writeSessionTtlCache } from "../../lib/session-ttl-cache";
 
@@ -160,7 +160,7 @@ function HoldingsBoxView({
           justifyContent: "center",
           padding: "3rem 1.5rem",
           minHeight: "240px",
-          color: "#64748b",
+          color: "var(--text-muted)",
         }}
       >
         구성종목 불러오는 중...
@@ -177,7 +177,7 @@ function HoldingsBoxView({
           justifyContent: "center",
           padding: "3rem 1.5rem",
           minHeight: "240px",
-          color: "#64748b",
+          color: "var(--text-muted)",
         }}
       >
         표시할 구성종목이 없습니다.
@@ -231,13 +231,13 @@ function HoldingsBoxView({
                 whiteSpace: "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
-                color: "#1f2937",
-                fontSize: "1rem",
+                color: "var(--text-strong)",
+                fontSize: "var(--fs-base)",
                 fontWeight: 800,
                 lineHeight: 1.25,
               }}
             >
-              {formatDisplayName(row.name) || stripAsxPrefix(row.ticker)}
+              {formatDisplayName(row.name) || row.ticker}
             </div>
             {/* 아랫줄: 티커 + 비중 + 변동률 */}
             <div
@@ -249,15 +249,15 @@ function HoldingsBoxView({
                 marginTop: "0.15rem",
               }}
             >
-              <div style={{ flex: "0 0 auto", color: "#9ca3af", fontSize: "0.85rem" }}>
-                {stripAsxPrefix(row.ticker)}
+              <div style={{ flex: "0 0 auto", color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
+                {row.ticker}
               </div>
-              <span style={{ color: "#475569", fontWeight: 900, fontSize: "0.95rem" }}>
+              <span style={{ color: "#475569", fontWeight: 900, fontSize: "var(--fs-base)" }}>
                 {weight.toFixed(2)}%
               </span>
               <span
                 className={getSignedClass(changePct)}
-                style={{ fontSize: "0.95rem", fontWeight: 800 }}
+                style={{ fontSize: "var(--fs-base)", fontWeight: 800 }}
               >
                 {formatSignedPercentWithPlus(changePct)}
               </span>
@@ -308,7 +308,7 @@ export function HoldingsDetailsPageClient() {
   const [showAmounts, setShowAmounts] = useState(true);
   const requestSequenceRef = useRef(0);
 
-  // 종목 국가 목록 로드 (미국/한국/호주/기타국가 고정 4개)
+  // 종목 국가 목록 로드 (전체/미국/한국/호주/기타국가 고정 5개, 첫 항목이 기본 선택값)
   useEffect(() => {
     async function fetchHoldingCountries() {
       try {
@@ -436,7 +436,7 @@ export function HoldingsDetailsPageClient() {
             style={{ userSelect: "none" }}
           >
             {hasSources && (
-              <span className="text-primary d-flex align-items-center" style={{ fontSize: "10px", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>
+              <span className="text-primary d-flex align-items-center" style={{ fontSize: "var(--fs-sm)", transition: "transform 0.15s", transform: isExpanded ? "rotate(90deg)" : "none" }}>
                 ▶
               </span>
             )}
@@ -459,7 +459,7 @@ export function HoldingsDetailsPageClient() {
     {
       headerName: "현재가",
       field: "current_price",
-      width: 110,
+      width: 128,
       type: "rightAligned",
       cellRenderer: (params: { data?: GridRow; value?: number | null }) => {
         if (!params.data || isDetailRow(params.data)) return null;
@@ -521,7 +521,7 @@ export function HoldingsDetailsPageClient() {
         {params.data.sources.map((src, idx) => (
           <div key={idx} className="holdingsDetailRow">
             {/* 1. 티커 (100px) - 좌측 패딩 12px, 폰트 13px 고정 */}
-            <div className="hdColTicker fw-semibold text-muted" style={{ fontFamily: "monospace", fontSize: "13px" }}>
+            <div className="hdColTicker fw-semibold text-muted" style={{ fontFamily: "monospace", fontSize: "var(--fs-sm)" }}>
               <TickerDetailLink ticker={src.etf_ticker} />
             </div>
             
@@ -535,7 +535,7 @@ export function HoldingsDetailsPageClient() {
               {formatWeight(src.weight)}
             </div>
             
-            {/* 4. 현재가 (110px) - 우측 패딩 12px */}
+            {/* 4. 현재가 (128px) - 우측 패딩 12px */}
             <div className="hdColPrice">
               {formatPrice(src.current_price, src.currency)}
             </div>
@@ -639,7 +639,7 @@ export function HoldingsDetailsPageClient() {
           >
             {formatSignedPercentWithPlus(averageStats.avgPct)}
           </span>
-          <span style={{ color: "#94a3b8", marginLeft: "0.25rem", fontSize: "0.85rem" }}>
+          <span style={{ color: "var(--text-muted)", marginLeft: "0.25rem", fontSize: "var(--fs-sm)" }}>
             (추적 {averageStats.trackedWeight.toFixed(0)}%)
           </span>
         </div>
@@ -775,7 +775,7 @@ export function HoldingsDetailsPageClient() {
           align-items: center;
           border-right: 1px solid #e2e8f0;
           box-sizing: border-box;
-          font-size: 14px;
+          font-size: var(--fs-sm);
         }
         .holdingsDetailRow > div:last-child {
           border-right: none;
@@ -784,7 +784,7 @@ export function HoldingsDetailsPageClient() {
         .hdColTicker { width: 100px; padding-left: 12px; }
         .hdColName   { flex: 1; min-width: 0; padding-left: 12px; overflow: hidden; }
         .hdColWeight { width: 90px; padding-right: 12px; justify-content: flex-end; }
-        .hdColPrice  { width: 110px; padding-right: 12px; justify-content: flex-end; }
+        .hdColPrice  { width: 128px; padding-right: 12px; justify-content: flex-end; }
         .hdColChange { width: 100px; padding-right: 12px; justify-content: flex-end; }
         .hdColDailyProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
         .hdColCumulativeProfit { width: 140px; padding-right: 12px; justify-content: flex-end; }
@@ -846,7 +846,7 @@ export function HoldingsDetailsPageClient() {
         }
         .holdingsTreemapHeader h3 {
           margin: 0;
-          font-size: 18px;
+          font-size: var(--fs-xl);
           font-weight: 800;
           color: #1f2937;
         }
@@ -857,7 +857,7 @@ export function HoldingsDetailsPageClient() {
           gap: 10px;
         }
         .holdingsTreemapHeader span {
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 700;
           color: #718096;
         }
@@ -866,7 +866,7 @@ export function HoldingsDetailsPageClient() {
           background: transparent;
           color: #4a5568;
           cursor: pointer;
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 800;
           line-height: 1;
           padding: 4px 0;
@@ -912,23 +912,23 @@ export function HoldingsDetailsPageClient() {
           justify-content: space-between;
           margin-top: 6px;
           color: #8a94a6;
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 800;
           line-height: 1;
         }
         .holdingsTreemapTicker {
-          font-size: 16px;
+          font-size: var(--fs-base);
           font-weight: 800;
           letter-spacing: 0;
           dominant-baseline: hanging;
         }
         .holdingsTreemapChange {
-          font-size: 15px;
+          font-size: var(--fs-base);
           font-weight: 800;
           dominant-baseline: hanging;
         }
         .holdingsTreemapWeight {
-          font-size: 13px;
+          font-size: var(--fs-sm);
           font-weight: 800;
           dominant-baseline: text-after-edge;
         }

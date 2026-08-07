@@ -1,8 +1,4 @@
-"""종목풀 편집 가능 설정(pool_settings) 조회/저장 API.
-
-pools.json 의 구조는 유지하고, 자주 바뀌는 5개 값(TOP_N_HOLD/HOLDING_BONUS_SCORE/
-MA_TYPE/MA_MONTHS/RSI_LIMIT)만 DB 오버라이드로 수정한다 (utils.pool_settings_store).
-"""
+"""종목풀 편집 가능 설정(pool_settings) 조회/저장 API."""
 
 from __future__ import annotations
 
@@ -13,14 +9,19 @@ from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
 from utils.pool_settings_store import (
-    ALL_POOL_ID,
-    OVERRIDABLE_KEYS,
+    MA_DAY_OPTIONS,
+    POOL_EDITABLE_KEYS,
+    SLIPPAGE_PCT_OPTIONS,
+    SLOPE_DAY_OPTIONS,
     PoolSettingsError,
+    create_pool,
+    delete_pool,
+    get_pool_delete_impact,
+    load_pool_definitions,
     save_pool_settings,
+    update_pool,
 )
-from utils.rankings import ALLOWED_MA_TYPES, get_rank_months_max
-from utils.settings_loader import get_all_pool_settings, get_ticker_type_settings
-from utils.ticker_registry import load_ticker_type_configs
+from utils.market_trend_service import INDICES
 
 router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 
@@ -28,42 +29,50 @@ router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 class PoolSettingsUpdatePayload(BaseModel):
     pool_id: str
     values: dict[str, Any]
+    save_method: str = "수동"
+
+
+class PoolDefinitionPayload(BaseModel):
+    values: dict[str, Any]
+    save_method: str = "사용자"
 
 
 def _editable(settings: dict[str, Any]) -> dict[str, Any]:
-    """편집 가능한 5개 키의 현재(DB) 값을 반환한다."""
-    return {key: {"value": settings.get(key)} for key in OVERRIDABLE_KEYS}
+    """편집 가능한 키의 현재(DB) 값을 반환한다."""
+    return {key: {"value": settings.get(key)} for key in POOL_EDITABLE_KEYS}
+
+
+def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "ticker_type": settings["ticker_type"],
+        "name": settings["name"],
+        "icon": settings["icon"],
+        "order": settings["order"],
+        "country_code": settings["country_code"],
+        "currency": settings["currency"],
+        "type_source": settings.get("type_source"),
+        "settings": _editable(settings),
+        "updated_at": settings.get("updated_at"),
+        "save_method": settings.get("save_method"),
+    }
 
 
 @router.get("")
 def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, object]:
-    """전체(all) + 풀별 편집 가능 설정과 입력 제약(MA 타입/개월 범위)을 반환한다."""
-    all_settings = get_all_pool_settings()
-    pools: list[dict[str, Any]] = []
-    for config in load_ticker_type_configs():
-        t_id = str(config["ticker_type"])
-        settings = get_ticker_type_settings(t_id)
-        pools.append(
-            {
-                "ticker_type": t_id,
-                "name": config["name"],
-                "icon": config["icon"],
-                "order": config["order"],
-                "settings": _editable(settings),
-            }
-        )
+    """풀별 편집 가능 설정과 입력 제약을 반환한다."""
+    try:
+        pools = [_pool_payload(settings) for settings in load_pool_definitions()]
+    except PoolSettingsError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {
-        "all": {
-            "pool_id": ALL_POOL_ID,
-            "name": "전체 (가상 종목풀)",
-            "settings": _editable(all_settings),
-        },
         "pools": pools,
         "constraints": {
-            "ma_types": ALLOWED_MA_TYPES,
-            "ma_months_max": get_rank_months_max(),
-            "editable_keys": list(OVERRIDABLE_KEYS),
+            "ma_day_options": list(MA_DAY_OPTIONS),
+            "slope_day_options": list(SLOPE_DAY_OPTIONS),
+            "slippage_pct_options": list(SLIPPAGE_PCT_OPTIONS),
+            "editable_keys": list(POOL_EDITABLE_KEYS),
+            "market_indices": [{"ticker": item["yf_ticker"], "name": item["name"]} for item in INDICES],
         },
     }
 
@@ -72,9 +81,52 @@ def get_pool_settings(_: None = Depends(require_internal_token)) -> dict[str, ob
 def put_pool_settings(
     payload: PoolSettingsUpdatePayload, _: None = Depends(require_internal_token)
 ) -> dict[str, object]:
-    """편집한 값을 저장한다 (pool_id = '__all__' 또는 ticker_type)."""
+    """편집한 값을 저장한다 (pool_id = ticker_type)."""
     try:
-        saved = save_pool_settings(payload.pool_id, payload.values)
+        saved = save_pool_settings(payload.pool_id, payload.values, save_method=payload.save_method)
     except PoolSettingsError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"ok": True, "pool_id": payload.pool_id, "saved": saved}
+
+
+@router.post("/pools")
+def post_pool_definition(
+    payload: PoolDefinitionPayload, _: None = Depends(require_internal_token)
+) -> dict[str, object]:
+    """신규 종목풀을 생성한다."""
+    try:
+        saved = create_pool(payload.values, save_method=payload.save_method)
+    except PoolSettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "pool": saved}
+
+
+@router.patch("/pools/{pool_id}")
+def patch_pool_definition(
+    pool_id: str, payload: PoolDefinitionPayload, _: None = Depends(require_internal_token)
+) -> dict[str, object]:
+    """기존 종목풀의 메타/설정을 수정한다. ticker_type 은 변경 불가."""
+    try:
+        saved = update_pool(pool_id, payload.values, save_method=payload.save_method)
+    except PoolSettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "pool_id": pool_id, "saved": saved}
+
+
+@router.get("/pools/{pool_id}/delete-impact")
+def get_pool_delete_impact_route(pool_id: str, _: None = Depends(require_internal_token)) -> dict[str, object]:
+    """종목풀 삭제 영향도를 반환한다."""
+    try:
+        return get_pool_delete_impact(pool_id)
+    except PoolSettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/pools/{pool_id}")
+def delete_pool_definition(pool_id: str, _: None = Depends(require_internal_token)) -> dict[str, object]:
+    """계좌 연결이 없는 종목풀을 하드 삭제한다."""
+    try:
+        deleted = delete_pool(pool_id)
+    except PoolSettingsError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "deleted": deleted}
