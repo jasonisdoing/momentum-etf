@@ -42,7 +42,7 @@ def load_settings() -> dict[str, Any]:
     전략 항목이 없거나 깨졌으면 시드값으로 슬쩍 넘어가지 않고 에러를 낸다 —
     그럴듯한 값이 화면에 떴다가 그대로 저장돼 실제 설정이 덮어써지는 것을 막는다.
 
-    반환: ``{"slack_enabled", "strategies": {sid: {entry/add/take_profit pct}}}``
+    반환: ``{"slack_enabled", "strategies": {sid: {"trigger_pct": float}}}``
     """
     from utils.db_manager import get_db_connection
 
@@ -189,7 +189,7 @@ def _index_level_for(
     return round(index_close * (limit_price / close), 2)
 
 
-def _load_index_status(index_ticker: str, index_name: str, entry_drop_pct: float) -> dict[str, Any]:
+def _load_index_status(index_ticker: str, index_name: str, trigger_pct: float) -> dict[str, Any]:
     """1호 진입 판정용 지수 현황 — 최근 종가와 진입 트리거 가격."""
     from utils.market_trend_service import load_index_ohlc
 
@@ -203,7 +203,7 @@ def _load_index_status(index_ticker: str, index_name: str, entry_drop_pct: float
     if close.empty:
         raise RuntimeError(f"{index_name} 지수 종가가 없습니다.")
 
-    entry_ratio = 1.0 - float(entry_drop_pct) / 100.0
+    entry_ratio = 1.0 - float(trigger_pct) / 100.0
     last_close = float(close.iloc[-1])
 
     # 최근 3개월(92일) 저점 — 회차 지정가가 지수 어느 층에 걸리는지 가늠하는 기준선.
@@ -235,12 +235,11 @@ def _build_strategy_view(
         t for t in tickers if not ((account_rows.get(t) or {}).get("quantity") or 0)
     ]
     unheld_closes = _load_unheld_closes(unheld_tickers)
-    index_status = _load_index_status(
-        meta["index_ticker"], meta["index_name"], strategy_settings["entry_drop_pct"]
-    )
+    trigger_pct = float(strategy_settings["trigger_pct"])
+    index_status = _load_index_status(meta["index_ticker"], meta["index_name"], trigger_pct)
 
-    take_profit = 1.0 + float(strategy_settings["take_profit_pct"]) / 100.0
-    add_ratio = 1.0 - float(strategy_settings["add_drop_pct"]) / 100.0
+    take_profit = 1.0 + trigger_pct / 100.0
+    add_ratio = 1.0 - trigger_pct / 100.0
 
     # 계좌에 없는 티커는 미보유로 다룬다(0주로 등록된 경우도 동일).
     held: list[dict[str, Any]] = []
@@ -298,7 +297,7 @@ def _build_strategy_view(
             }
         )
 
-    entry_ratio = 1.0 - float(strategy_settings["entry_drop_pct"]) / 100.0
+    entry_ratio = 1.0 - trigger_pct / 100.0
     for offset, item in enumerate(unheld):
         is_next = next_target is not None and item["ticker"] == next_target["ticker"]
         close = item["close"]
@@ -325,13 +324,19 @@ def _build_strategy_view(
             }
         )
 
+    # 다음 회차 매수까지 남은 하락률(%) — 다음 대상 회차의 지정가 ÷ 현재가.
+    # ETF 가격과 지수는 비례하므로 '지수가 이만큼 내리면 산다'와 같은 값이다.
+    # 이미 도달했으면 0 이상(+)이 나온다. 다음 대상이 없거나 가격이 없으면 None.
+    next_buy_drop_pct = None
+    next_row = next((r for r in rows if r["is_next"]), None)
+    if next_row is not None and next_row["buy_limit"] is not None and next_row["close"]:
+        next_buy_drop_pct = round((next_row["buy_limit"] / next_row["close"] - 1.0) * 100.0, 2)
+
     return {
         "strategy_id": strategy_id,
         "label": meta["label"],
         "config": {
-            "entry_drop_pct": strategy_settings["entry_drop_pct"],
-            "add_drop_pct": strategy_settings["add_drop_pct"],
-            "take_profit_pct": strategy_settings["take_profit_pct"],
+            "trigger_pct": trigger_pct,
             "rounds": len(tickers),
             "index_name": meta["index_name"],
         },
@@ -343,6 +348,7 @@ def _build_strategy_view(
             "next_ticker": next_target["ticker"] if next_target else None,
             "next_name": next_target["name"] if next_target else None,
             "last_buy_price": round(last_buy_price, 2) if last_buy_price is not None else None,
+            "next_buy_drop_pct": next_buy_drop_pct,
         },
         "rounds": rows,
     }

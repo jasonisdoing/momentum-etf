@@ -116,8 +116,16 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
         sell_count = sum(1 for t in triggers if t["strategy_id"] == sid and t["action"] == "sell")
         after_held = status["held_count"] + buy_count - sell_count
 
+        # 가장 중요한 정보 — 지수가 몇 % 내리면 다음 회차를 사는지 헤더에 바로 보여준다.
+        drop = status.get("next_buy_drop_pct")
+        if drop is None:
+            next_text = "다음 매수 없음(회차 소진)"
+        elif drop >= 0:
+            next_text = f"📉 *{status['next_round']}호 매수가 도달!*"
+        else:
+            next_text = f"📉 {abs(drop):.2f}% 더 내리면 {status['next_round']}호 매수"
         lines.append(
-            f"*[{strategy_view['label']}]* {index['name']} {index['close']:,.2f} · {after_held}/{rounds_total}회차"
+            f"*[{strategy_view['label']}]* {index['name']} {index['close']:,.2f} · {after_held}/{rounds_total}회차 · {next_text}"
         )
         # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
         #   🔴 지금 팔 것 / 🔵 지금 살 것 / 🟢 보유 중 / ⏳ 다음 매수 대기 / ⚪ 이후 회차
