@@ -119,25 +119,39 @@ def build_message(view: dict[str, Any], triggers: list[dict[str, Any]]) -> str:
         lines.append(
             f"*[{strategy_view['label']}]* {index['name']} {index['close']:,.2f} · {after_held}/{rounds_total}회차"
         )
+        # 1~6호 전부 나열 — 상태를 이모지로 즉시 구분한다.
+        #   🔴 지금 팔 것 / 🔵 지금 살 것 / 🟢 보유 중 / ⏳ 다음 매수 대기 / ⚪ 이후 회차
         for row in strategy_view["rounds"]:
+            close_text = f"{row['close']:,.0f}" if row["close"] is not None else "-"
             if row["held"]:
                 is_triggered = (row["round"], "sell") in triggered
-                line = (
-                    f"{'🔴' if is_triggered else '·'} {row['round']}호 {row['name']} "
-                    f"매도 {row['sell_limit']:,.0f} (현재 {row['close']:,.0f}, {row['profit_pct']:+.2f}%)"
-                )
+                profit_text = f"{row['profit_pct']:+.2f}%" if row["profit_pct"] is not None else "-"
                 if is_triggered:
-                    line += " => *매도 필요!*"
-                lines.append(line)
-            elif row["is_next"] and row["buy_limit"] is not None:
+                    lines.append(
+                        f"🔴 {row['round']}호 {row['name']} *지금 매도!* "
+                        f"목표 {row['sell_limit']:,.0f} 도달 (현재 {close_text}, {profit_text})"
+                    )
+                else:
+                    lines.append(
+                        f"🟢 {row['round']}호 {row['name']} 보유 중 ({profit_text}) · "
+                        f"매도 목표 {row['sell_limit']:,.0f} (현재 {close_text})"
+                    )
+            elif row["is_next"]:
                 is_triggered = (row["round"], "buy") in triggered
-                line = (
-                    f"{'🔵' if is_triggered else '·'} {row['round']}호 {row['name']} "
-                    f"매수 {row['buy_limit']:,.0f} (현재 {row['close']:,.0f})"
-                )
-                # 다음 진입 대상은 도달 전에도 대기 상태임을 알려준다.
-                line += " => *매수 필요!*" if is_triggered else " => 대기 중!"
-                lines.append(line)
+                buy_text = f"{row['buy_limit']:,.0f}" if row["buy_limit"] is not None else "-"
+                if is_triggered:
+                    lines.append(
+                        f"🔵 {row['round']}호 {row['name']} *지금 매수!* "
+                        f"지정가 {buy_text} 도달 (현재 {close_text})"
+                    )
+                else:
+                    lines.append(
+                        f"⏳ {row['round']}호 {row['name']} 다음 매수 대기 · "
+                        f"지정가 {buy_text} (현재 {close_text})"
+                    )
+            else:
+                buy_text = f"{row['buy_limit']:,.0f}" if row["buy_limit"] is not None else "-"
+                lines.append(f"⚪ {row['round']}호 {row['name']} 이후 회차 · 매수 예정가 {buy_text}")
 
     return "\n".join(lines)
 

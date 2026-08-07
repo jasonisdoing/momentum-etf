@@ -205,11 +205,19 @@ def _load_index_status(index_ticker: str, index_name: str, entry_drop_pct: float
 
     entry_ratio = 1.0 - float(entry_drop_pct) / 100.0
     last_close = float(close.iloc[-1])
+
+    # 최근 3개월(92일) 저점 — 회차 지정가가 지수 어느 층에 걸리는지 가늠하는 기준선.
+    low_window = close[close.index >= close.index[-1] - pd.Timedelta(days=92)]
+    low_date = low_window.idxmin()
+
     return {
         "name": index_name,
         "as_of": close.index[-1].strftime("%Y-%m-%d"),
         "close": round(last_close, 2),
         "buy_trigger": round(last_close * entry_ratio, 2),
+        "recent_low": round(float(low_window.min()), 2),
+        "recent_low_date": low_date.strftime("%Y-%m-%d"),
+        "recent_low_label": "3개월 저점",
     }
 
 
