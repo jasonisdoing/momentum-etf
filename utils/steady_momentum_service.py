@@ -2,10 +2,11 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 미국 종목풀 1개. 고정 보유 종목(exclude_from_ranking)은 제외.
-2. 점수: **상대 가격선(종가 ÷ 벤치마크)** 에 룩백 구간 로그 회귀를 돌려
-   ``연율화 상대기울기 × R²``. 시장을 얼마나 빠르고(기울기) 꾸준하게(R²)
-   이겨왔는지를 하나의 점수로 본다. 점수 순 상위 top_n 동일가중.
+1. 유니버스: 설정에서 고른 한국 개별주 종목풀 1개. 고정 보유 종목(exclude_from_ranking)은 제외.
+2. 점수: **장기 이평선 이격(%)** — 순위 화면·종목풀 백테스트와 같은 신호
+   (이평선 일수는 종목풀 설정, 장기 이격 > 0 & 단기 이격 >= 0 만 후보).
+   점수 순 상위 top_n 동일가중. 같은 규칙을 **월간 리듬으로 유지**하는 것이
+   이 화면의 차이다 — 편입·편출을 월 단위로 보고, 한 달 동안 손절 없이 든다.
 3. 월간 리밸런싱: 판정은 월말 직전 거래일(L−1) 종가, 체결은 월말(L) 종가.
    L−1 종가가 확정된 다음날부터 다음 달 포트폴리오를 보여준다(거래일 캘린더 기준).
 
@@ -27,11 +28,10 @@ warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
 # 선택 가능한 종목풀 — 한 번에 1개만 선택한다(통화·벤치마크·달력 혼합 방지).
-# 미국 지수 기반 종목풀만 지원한다.
+# 한국 개별주 종목풀만 지원한다.
 POOL_CONFIGS: dict[str, dict[str, Any]] = {
-    "us": {"label": "나스닥 100 + S&P 100", "country": "us", "currency": "USD"},
-    "us_nasdaq": {"label": "나스닥 100", "country": "us", "currency": "USD"},
-    "us_snp": {"label": "S&P100", "country": "us", "currency": "USD"},
+    "kor": {"label": "코스피 개별주", "country": "kor", "currency": "KRW"},
+    "kor_kosdaq": {"label": "코스닥 개별주", "country": "kor", "currency": "KRW"},
 }
 AVAILABLE_POOLS = tuple(POOL_CONFIGS)
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
@@ -42,6 +42,9 @@ _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
 
 # ── 룩백 4 · 종목 수 6 · 업종 상한 2 를 쓰는 근거 ──────────────────────────
+# ⚠ 아래 표는 **옛 점수 방식(연율화 상대기울기 × R²)·미국 풀** 기준이다. 점수를
+#   t-통계량으로, 종목풀을 한국 개별주로 바꾼 뒤에는 최적 조합이 다를 수 있어
+#   재검증이 필요하다.
 # 2026-08-02 검증. 미국 풀 · 슬리피지 0.5% · **84개월** 단일 구간에서
 # 룩백 3~6 × 종목수 5~10 × 업종상한 2~5 = 96조합을 전부 백테스트했다.
 # (84개월인 이유: 룩백 6 의 상한이 84 라 그 이상은 룩백별로 구간이 달라져 비교가 안 된다)
@@ -280,13 +283,17 @@ def momentum_metrics(
     benchmark_close: pd.Series,
     *,
     lookback_days: int,
+    short_ma_days: int,
+    long_ma_days: int,
     as_of: pd.Timestamp | None = None,
 ) -> dict[str, float] | None:
-    """상대 가격선(종가÷벤치마크) 로그 회귀 — 꾸준한 모멘텀 점수.
+    """종목풀 설정 이평선 기준 이격 — 순위 화면과 같은 신호의 월간 버전.
 
-    점수 = 연율화 상대기울기 × R². 기울기는 시장을 이기는 속도, R² 는 그
-    아웃퍼폼이 얼마나 꾸준했는지다. 월승률(최근 6개 월별 상대수익 중 플러스
-    비율)은 참고 지표로 함께 계산한다.
+    점수 = **장기 이평선 이격(%)** = (종가 ÷ 장기 이평 − 1) × 100. 이평선 일수는
+    종목풀 설정(SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을
+    그대로 쓴다 — 순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
+    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓰며, 상대기울기·R²·월승률은
+    참고 지표로 함께 계산한다.
     ``as_of`` 를 주면 그 날짜까지의 데이터만 사용한다(백테스트·판정일 재현).
     """
     series = pd.to_numeric(close, errors="coerce").dropna()
@@ -296,9 +303,21 @@ def momentum_metrics(
         bench = bench[bench.index <= as_of]
 
     aligned = pd.concat([series.rename("stock"), bench.rename("bench")], axis=1, join="inner").dropna()
-    min_rows = lookback_days + 4
+    min_rows = max(lookback_days, long_ma_days) + 4
     if len(aligned) < min_rows:
         return None
+
+    # 이격 — 순위 화면과 같은 계산(공통 이동평균 헬퍼, min_periods=일수).
+    from utils.moving_averages import calculate_moving_average
+
+    stock_close = aligned["stock"]
+    long_ma = float(calculate_moving_average(stock_close, long_ma_days, min_periods=long_ma_days).iloc[-1])
+    short_ma = float(calculate_moving_average(stock_close, short_ma_days, min_periods=short_ma_days).iloc[-1])
+    if long_ma <= 0 or short_ma <= 0:
+        return None
+    last_price = float(stock_close.iloc[-1])
+    disparity_pct = (last_price / long_ma - 1.0) * 100.0
+    short_disparity_pct = (last_price / short_ma - 1.0) * 100.0
     window = aligned.iloc[-lookback_days:]
     if (window["stock"] <= 0).any() or (window["bench"] <= 0).any():
         return None
@@ -311,6 +330,16 @@ def momentum_metrics(
     ss_res = float(np.sum((log_rel - fitted) ** 2))
     ss_tot = float(np.sum((log_rel - log_rel.mean()) ** 2))
     r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    # t-통계량 — 기울기를 기울기 표준오차로 나눈다. 잔차가 0 에 가까운 완벽한
+    # 직선은 표준오차가 0 이라 나눗셈이 불가한데, 그건 사실상 이상 데이터라 0 점 처리.
+    n_points = len(log_rel)
+    x_var = float(np.sum((x - x.mean()) ** 2))
+    if n_points > 2 and x_var > 0 and ss_res > 0:
+        slope_stderr = math.sqrt(ss_res / (n_points - 2) / x_var)
+        t_stat = slope / slope_stderr if slope_stderr > 0 else 0.0
+    else:
+        t_stat = 0.0
 
     rel_slope_annual_pct = (math.exp(slope * 252) - 1.0) * 100.0
     rel_return_pct = (float(relative.iloc[-1]) / float(relative.iloc[0]) - 1.0) * 100.0
@@ -325,7 +354,10 @@ def momentum_metrics(
     return {
         "slope_annual_pct": rel_slope_annual_pct,
         "r_squared": r_squared,
-        "momentum_score": rel_slope_annual_pct * r_squared,
+        "t_stat": t_stat,
+        "disparity_pct": disparity_pct,
+        "short_disparity_pct": short_disparity_pct,
+        "momentum_score": disparity_pct,
         "return_lookback_pct": absolute_return_pct,
         "rel_return_pct": rel_return_pct,
         "win_months": win_months,
@@ -341,20 +373,39 @@ def select_candidates(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> list[dict[str, Any]]:
-    """상대 모멘텀 후보 목록 (유동성 필터 없음 — 지수 기반 풀)."""
+    """이격 후보 목록 — 보유 가능 조건은 순위 화면과 같은 hold_eligible_mask 를 쓴다."""
+    from utils.rankings import get_ticker_type_ma_rules, hold_eligible_mask
+
     lookback_days = int(settings["lookback_months"]) * TRADING_DAYS_PER_MONTH
+    ma_rule = get_ticker_type_ma_rules(str(settings["pool"]))[0]
+    short_ma_days = int(ma_rule["short_ma_days"])
+    long_ma_days = int(ma_rule["long_ma_days"])
+
     candidates: list[dict[str, Any]] = []
     for row in universe:
         frame = frames.get(row["ticker"])
         if frame is None:
             continue
         metrics = momentum_metrics(
-            frame["Close"], benchmark_close, lookback_days=lookback_days, as_of=as_of
+            frame["Close"],
+            benchmark_close,
+            lookback_days=lookback_days,
+            short_ma_days=short_ma_days,
+            long_ma_days=long_ma_days,
+            as_of=as_of,
         )
         if metrics is None:
             continue
         candidates.append({**row, **metrics})
-    return candidates
+
+    if not candidates:
+        return []
+    # 장기 이격 > 0 & 단기 이격 >= 0 — 순위/종목풀 백테스트와 같은 단일 규칙.
+    eligible = hold_eligible_mask(
+        pd.Series([c["disparity_pct"] for c in candidates]),
+        pd.Series([c["short_disparity_pct"] for c in candidates]),
+    )
+    return [c for c, ok in zip(candidates, eligible, strict=True) if ok]
 
 
 def rank_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -400,6 +451,9 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
 def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
 
+    한국 개별주 풀은 업종 데이터 소스가 없다(stock_meta·네이버 모두 미제공) —
+    빈 맵을 반환하며, 이 경우 select_top 의 업종 상한은 적용되지 않는다.
+
     분류 값은 yfinance 에서 받아 파일에 저장된 것이다(`scripts/update_us_market_stocks.py`).
     구성종목 목록만 위키피디아에서 오고, 섹터·업종은 두 지수가 한 체계를 쓰도록
     yfinance 로 통일했다.
@@ -408,6 +462,9 @@ def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     빈 맵으로 두되, 파일이 없다는 사실 자체는 로그로 남긴다.
     """
     from utils.index_constituents_loader import load_index_constituents
+
+    if str(POOL_CONFIGS.get(pool, {}).get("country")) != "us":
+        return {}
 
     result: dict[str, dict[str, str]] = {}
     for index_name in ("SP500", "NDX100"):
