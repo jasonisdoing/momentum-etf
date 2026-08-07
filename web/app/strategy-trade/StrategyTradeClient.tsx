@@ -128,12 +128,12 @@ function RecentLowRow({ index }: { index: IndexStatus }) {
   return (
     <tr>
       <td colSpan={9} style={{ padding: "2px 8px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--down-color, #2f6fd0)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
-          <span style={{ flex: 1, borderTop: "2px dashed var(--down-color, #2f6fd0)", opacity: 0.55 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--up-color, #d64545)", fontSize: "var(--fs-sm)", fontWeight: 700 }}>
+          <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
           <span>
             {index.name} {index.recent_low_label} {formatNumber(index.recent_low, 2)} ({index.recent_low_date})
           </span>
-          <span style={{ flex: 1, borderTop: "2px dashed var(--down-color, #2f6fd0)", opacity: 0.55 }} />
+          <span style={{ flex: 1, borderTop: "2px dashed var(--up-color, #d64545)", opacity: 0.55 }} />
         </div>
       </td>
     </tr>
@@ -259,8 +259,8 @@ function StrategySection({
               fontWeight: 800,
               padding: "2px 10px",
               borderRadius: 6,
-              border: `1.5px solid ${status.next_buy_drop_pct >= 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)"}`,
-              color: status.next_buy_drop_pct >= 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)",
+              border: "1.5px solid var(--up-color, #d64545)",
+              color: "var(--up-color, #d64545)",
             }}
           >
             {status.next_buy_drop_pct >= 0
