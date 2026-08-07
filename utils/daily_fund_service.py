@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 from services.price_service import get_exchange_rate_series
 from utils.account_registry import load_account_configs
-from utils.data_loader import get_trading_days_any
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
@@ -83,13 +82,13 @@ def _get_now_kst() -> datetime.datetime:
 
 
 def _get_active_daily_date() -> str:
-    """오늘 이하의 마지막 한국/호주 합집합 거래일을 반환한다."""
-    today = _get_now_kst().date()
-    search_start = today - datetime.timedelta(days=370)
-    trading_days = get_trading_days_any(str(search_start), str(today), ["kor", "au"])
-    if not trading_days:
-        raise RuntimeError("오늘 이하의 한국/호주 거래일을 찾지 못했습니다.")
-    return max(day.date().isoformat() for day in trading_days)
+    """오늘 이하의 마지막 한국/호주 합집합 거래일을 반환한다.
+
+    자산 스냅샷(`daily_snapshots`)과 같은 기준을 써야 해서 공용 함수를 부른다.
+    """
+    from utils.data_loader import resolve_active_trading_date
+
+    return resolve_active_trading_date()
 
 
 def _to_int(value: object) -> int:
