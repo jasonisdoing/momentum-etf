@@ -60,9 +60,8 @@ type PickRow = {
   return_12m_pct: number | null;
   return_lookback_pct: number;
   rel_return_pct: number;
-  win_label: string;
-  slope_annual_pct: number;
-  r_squared: number;
+  daily_change_pct: number | null;
+  short_disparity_pct: number;
   momentum_score: number;
 };
 
@@ -493,9 +492,18 @@ export function SteadyMomentumClient() {
         valueFormatter: (p) => p.value || "-",
       },
       {
+        headerName: "일간(%)",
+        field: "daily_change_pct",
+        headerTooltip: "실시간 일간 등락률 (실시간 실패 시 캐시 종가 기준)",
+        width: 88,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 2),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
+      {
         headerName: "현재가",
         field: "price",
-        headerTooltip: "가격 캐시의 최신 종가 (통화는 종목풀 기준)",
+        headerTooltip: "실시간 현재가 (실시간 실패 시 가격 캐시 최신 종가, 통화는 종목풀 기준)",
         width: 100,
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
@@ -537,34 +545,21 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "월승률",
-        field: "win_label",
-        headerTooltip: "룩백 구간의 월별 상대수익 중 벤치마크를 이긴 달",
-        width: 78,
-      },
-      {
-        headerName: "상대기울기(%)",
-        field: "slope_annual_pct",
-        headerTooltip: "상대 가격선(종가÷벤치마크) 회귀의 연율화 기울기",
-        width: 112,
+        headerName: "단기(%)",
+        field: "short_disparity_pct",
+        headerTooltip: "종가와 단기 이평선의 이격률 — 음수면 후보에서 제외 (순위 화면과 동일)",
+        width: 88,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "R²",
-        field: "r_squared",
-        headerTooltip: "상대 가격선이 회귀선에 얼마나 잘 맞는지 (1에 가까울수록 매끄러운 추세)",
-        width: 82,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value != null ? p.value.toFixed(3) : "-"),
-      },
-      {
-        headerName: "점수(이격%)",
+        headerName: "장기(%)",
         field: "momentum_score",
-        headerTooltip: "장기 이평선 이격(%) — 순위 화면과 같은 신호(이평선 일수는 종목풀 설정)",
-        width: 92,
+        headerTooltip: "종가와 장기 이평선의 이격률 = 선정 점수 (이평선 일수는 종목풀 설정)",
+        width: 88,
         type: "numericColumn",
-        valueFormatter: (p) => formatNumber(p.value, 1),
+        valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: () => ({ fontWeight: 700 }),
       },
     ];

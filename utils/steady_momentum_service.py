@@ -303,8 +303,8 @@ def momentum_metrics(
     점수 = **장기 이평선 이격(%)** = (종가 ÷ 장기 이평 − 1) × 100. 이평선 일수는
     종목풀 설정(SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을
     그대로 쓴다 — 순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
-    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓰며, 상대기울기·R²·월승률은
-    참고 지표로 함께 계산한다.
+    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓰며, 룩백 구간 절대·상대
+    수익률을 참고 지표로 함께 계산한다.
     ``as_of`` 를 주면 그 날짜까지의 데이터만 사용한다(백테스트·판정일 재현).
     """
     series = pd.to_numeric(close, errors="coerce").dropna()
@@ -334,45 +334,15 @@ def momentum_metrics(
         return None
 
     relative = window["stock"] / window["bench"]
-    log_rel = np.log(relative.to_numpy())
-    x = np.arange(len(log_rel), dtype=float)
-    slope, intercept = np.polyfit(x, log_rel, 1)
-    fitted = slope * x + intercept
-    ss_res = float(np.sum((log_rel - fitted) ** 2))
-    ss_tot = float(np.sum((log_rel - log_rel.mean()) ** 2))
-    r_squared = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
-
-    # t-통계량 — 기울기를 기울기 표준오차로 나눈다. 잔차가 0 에 가까운 완벽한
-    # 직선은 표준오차가 0 이라 나눗셈이 불가한데, 그건 사실상 이상 데이터라 0 점 처리.
-    n_points = len(log_rel)
-    x_var = float(np.sum((x - x.mean()) ** 2))
-    if n_points > 2 and x_var > 0 and ss_res > 0:
-        slope_stderr = math.sqrt(ss_res / (n_points - 2) / x_var)
-        t_stat = slope / slope_stderr if slope_stderr > 0 else 0.0
-    else:
-        t_stat = 0.0
-
-    rel_slope_annual_pct = (math.exp(slope * 252) - 1.0) * 100.0
     rel_return_pct = (float(relative.iloc[-1]) / float(relative.iloc[0]) - 1.0) * 100.0
     absolute_return_pct = (float(window["stock"].iloc[-1]) / float(window["stock"].iloc[0]) - 1.0) * 100.0
 
-    # 월승률 — 룩백 창의 월별 상대수익 중 플러스 달의 비율 (참고, 최대 6개월)
-    monthly_last = relative.groupby(relative.index.to_period("M")).last()
-    monthly_rel_returns = monthly_last.pct_change().dropna().tail(6)
-    win_months = int((monthly_rel_returns > 0).sum())
-    months_count = int(len(monthly_rel_returns))
-
     return {
-        "slope_annual_pct": rel_slope_annual_pct,
-        "r_squared": r_squared,
-        "t_stat": t_stat,
         "disparity_pct": disparity_pct,
         "short_disparity_pct": short_disparity_pct,
         "momentum_score": disparity_pct,
         "return_lookback_pct": absolute_return_pct,
         "rel_return_pct": rel_return_pct,
-        "win_months": win_months,
-        "months_count": months_count,
     }
 
 
@@ -644,19 +614,43 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     portfolio_month = (rebalance_date.to_period("M") + 1).strftime("%Y-%m")
 
-    # 참고용 가격 정보 — 현재가는 캐시의 최신 종가, 기간수익률은 나머지 컬럼과 같은
-    # 판정일 기준이라 다음 교체 전까지 값이 바뀌지 않는다.
+    # 참고용 가격 정보 — 현재가·일간(%)은 실시간 스냅샷(pools-rank 와 같은 소스),
+    # 실패 시 캐시 종가로 폴백. 기간수익률은 나머지 컬럼과 같은 판정일 기준이라
+    # 다음 교체 전까지 값이 바뀌지 않는다.
     from core.strategy.metrics import period_return_pct
 
     currency = str(POOL_CONFIGS[settings["pool"]]["currency"])
+    country = str(POOL_CONFIGS[settings["pool"]]["country"])
+
+    row_tickers = [item["ticker"] for item in selected + reserve]
+    realtime: dict[str, dict[str, Any]] = {}
+    try:
+        from services.price_service import get_realtime_snapshot
+
+        realtime = get_realtime_snapshot(country, row_tickers)
+    except Exception:
+        realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
 
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
         if frame is None or frame.empty:
-            return {"price": None, "return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None}
+            return {"price": None, "daily_change_pct": None, "return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None}
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        snap = realtime.get(ticker) or {}
+        now_val = snap.get("nowVal")
+        change_rate = snap.get("changeRate")
+        price = float(now_val) if isinstance(now_val, (int, float)) and float(now_val) > 0 else (
+            float(close.iloc[-1]) if not close.empty else None
+        )
+        if isinstance(change_rate, (int, float)):
+            daily_change_pct = round(float(change_rate), 2)
+        elif len(close) >= 2:
+            daily_change_pct = round((float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0, 2)
+        else:
+            daily_change_pct = None
         return {
-            "price": round(float(close.iloc[-1]), 4) if not close.empty else None,
+            "price": round(price, 4) if price is not None else None,
+            "daily_change_pct": daily_change_pct,
             "return_1m_pct": period_return_pct(close, 1, signal_date),
             "return_3m_pct": period_return_pct(close, 3, signal_date),
             "return_12m_pct": period_return_pct(close, 12, signal_date),
@@ -684,9 +678,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 **price_info(item["ticker"]),
                 "return_lookback_pct": round(item["return_lookback_pct"], 1),
                 "rel_return_pct": round(item["rel_return_pct"], 1),
-                "win_label": f"{item['win_months']}/{item['months_count']}",
-                "slope_annual_pct": round(item["slope_annual_pct"], 1),
-                "r_squared": round(item["r_squared"], 3),
+                "short_disparity_pct": round(item["short_disparity_pct"], 1),
                 "momentum_score": round(item["momentum_score"], 1),
             }
             for rank, item in enumerate([*selected, *reserve], start=1)
