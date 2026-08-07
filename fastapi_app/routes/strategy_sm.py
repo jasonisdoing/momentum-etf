@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Body, Depends
 
 from fastapi_app.dependencies import require_internal_token
-from utils.steady_momentum_service import compute_picks, load_settings, pool_labels, save_settings
+from utils.steady_momentum_service import compute_picks, load_settings, pool_options, save_settings
 
 router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 
@@ -36,7 +36,7 @@ def get_strategy_sm(
     settings = load_settings()
     return {
         "settings": settings,
-        "pool_labels": pool_labels(),
+        "pool_options": pool_options(),
         "month_options": _month_options(settings),
         "picks": None,
     }
@@ -54,7 +54,7 @@ def put_strategy_sm_settings(
     saved = save_settings(settings)
     return {
         "settings": saved,
-        "pool_labels": pool_labels(),
+        "pool_options": pool_options(),
         "month_options": _month_options(saved),
         "picks": None,
     }

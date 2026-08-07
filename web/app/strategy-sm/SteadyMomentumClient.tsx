@@ -9,16 +9,17 @@ import { PageFrame } from "../components/PageFrame";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
+import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
 
-// 종목풀 폴백 라벨 — 백엔드 미기동으로 pool_labels 를 못 받았을 때만 쓴다.
+// 종목풀 폴백 목록 — 백엔드 미기동으로 pool_options 를 못 받았을 때만 쓴다.
 // 한국 개별주 풀만 지원한다 (백엔드 POOL_CONFIGS 와 같아야 한다).
-// 실제 표시 이름은 종목풀 설정 DB 가 단일 소스이며 백엔드 응답을 우선한다.
-const POOL_OPTIONS: readonly { id: string; label: string }[] = [
-  { id: "kor", label: "코스피 개별주" },
-  { id: "kor_kosdaq", label: "코스닥 개별주" },
+// 실제 표기는 pools-rank 와 같은 공용 formatPoolLabel(이름·아이콘·순서는 백엔드 응답)이다.
+const POOL_OPTIONS: readonly PoolLabelSource[] = [
+  { ticker_type: "kor", name: "코스피 개별주" },
+  { ticker_type: "kor_kosdaq", name: "코스닥 개별주" },
 ];
 
 type Settings = {
@@ -120,7 +121,7 @@ type BacktestResult = {
 
 type View = {
   settings: Settings;
-  pool_labels?: Record<string, string>;
+  pool_options?: PoolLabelSource[];
   // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
   month_options?: number[];
   picks: PicksResult | null;
@@ -762,9 +763,9 @@ export function SteadyMomentumClient() {
                     value={draftPool}
                     onChange={(e) => setDraftPool(e.target.value)}
                   >
-                    {POOL_OPTIONS.map((pool) => (
-                      <option key={pool.id} value={pool.id}>
-                        {view.pool_labels?.[pool.id] ?? pool.label}
+                    {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => (
+                      <option key={pool.ticker_type} value={pool.ticker_type}>
+                        {formatPoolLabel(pool)}
                       </option>
                     ))}
                   </select>
