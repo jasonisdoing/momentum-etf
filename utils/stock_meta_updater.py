@@ -1265,7 +1265,21 @@ def update_single_stock_metadata(
                 try:
                     info = t.info
                     if country_code == "us":
-                        stock["is_etf"] = str(info.get("quoteType") or "").strip().upper() == "ETF"
+                        is_etf = str(info.get("quoteType") or "").strip().upper() == "ETF"
+                        if not is_etf:
+                            # Yahoo 가 신생 ETF 를 EQUITY 로 잘못 분류하는 경우가 있다
+                            # (NYSX 'Global X NYSE 100 ETF', 2026-03 상장에서 확인).
+                            # 이름이 'ETF' 로 끝나면 이름을 믿는다 — ETN 은 'ETN' 으로 끝나 안 걸린다.
+                            yahoo_name = str(
+                                info.get("longName") or info.get("shortName") or stock.get("name") or ""
+                            ).strip()
+                            if yahoo_name.upper().endswith("ETF"):
+                                is_etf = True
+                                logger.info(
+                                    f"[{account_norm.upper()}/{ticker}] quoteType={info.get('quoteType')} 이지만 "
+                                    f"종목명({yahoo_name})이 ETF 로 끝나 ETF 로 판정합니다."
+                                )
+                        stock["is_etf"] = is_etf
                     if need_name:
                         fetched_name = info.get("longName") or info.get("shortName")
                         if fetched_name:
