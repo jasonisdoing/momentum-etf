@@ -451,8 +451,9 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
 def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
 
-    한국 개별주 풀은 업종 데이터 소스가 없다(stock_meta·네이버 모두 미제공) —
-    빈 맵을 반환하며, 이 경우 select_top 의 업종 상한은 적용되지 않는다.
+    한국 개별주 풀은 stock_meta 의 sector/industry 를 쓴다 — 배치 B(식별·상세)가
+    yfinance 로 수집한 값이라 미국 풀과 같은 분류 체계다. 아직 수집 전이거나
+    yfinance 에 분류가 없는 종목(코스닥 소형주 등)은 업종 상한이 적용되지 않는다.
 
     분류 값은 yfinance 에서 받아 파일에 저장된 것이다(`scripts/update_us_market_stocks.py`).
     구성종목 목록만 위키피디아에서 오고, 섹터·업종은 두 지수가 한 체계를 쓰도록
@@ -464,7 +465,16 @@ def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     from utils.index_constituents_loader import load_index_constituents
 
     if str(POOL_CONFIGS.get(pool, {}).get("country")) != "us":
-        return {}
+        from utils.stock_list_io import _load_ticker_type_stocks_raw
+
+        result: dict[str, dict[str, str]] = {}
+        for item in _load_ticker_type_stocks_raw(pool):
+            ticker = str(item.get("ticker") or "").strip()
+            sector = str(item.get("sector") or "").strip()
+            industry = str(item.get("industry") or "").strip()
+            if ticker and (sector or industry):
+                result[ticker] = {"sector": sector, "industry": industry or sector}
+        return result
 
     result: dict[str, dict[str, str]] = {}
     for index_name in ("SP500", "NDX100"):
