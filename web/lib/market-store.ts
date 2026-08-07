@@ -8,6 +8,8 @@ type MarketRowItem = {
   current_price: number | null;
   nav: number | null;
   deviation: number | null;
+  return_1m_pct: number | null;
+  return_2m_pct: number | null;
   return_3m_pct: number | null;
   prev_volume: number;
   market_cap: number;

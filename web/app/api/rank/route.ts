@@ -10,23 +10,20 @@ export async function GET(request: NextRequest) {
     const searchParams = request.nextUrl.searchParams;
     const tickerType = searchParams.get("ticker_type") ?? undefined;
     const asOfDate = searchParams.get("as_of_date") ?? undefined;
-    const heldBonusScore = searchParams.get("held_bonus_score");
-    const maType = searchParams.get("ma_type");
-    const maMonthsRaw = searchParams.get("ma_months");
+    const shortMaDaysRaw = searchParams.get("short_ma_days");
+    const longMaDaysRaw = searchParams.get("long_ma_days");
     const maRuleOverride =
-      maType || maMonthsRaw
+      shortMaDaysRaw || longMaDaysRaw
         ? {
-            ma_type: maType ?? "",
-            ma_months: maMonthsRaw ? Number(maMonthsRaw) : 0,
-            ma_days: 0,
-            score_column: "추세",
+            short_ma_days: shortMaDaysRaw ? Number(shortMaDaysRaw) : 0,
+            long_ma_days: longMaDaysRaw ? Number(longMaDaysRaw) : 0,
+            score_column: "추세(수동)",
           }
         : undefined;
     const data = await loadRankData({
       ticker_type: tickerType,
       ma_rule_override: maRuleOverride,
       as_of_date: asOfDate,
-      held_bonus_score: heldBonusScore === null ? undefined : Number(heldBonusScore),
     }, request.signal);
     return jsonNoStore(data);
   } catch (error) {

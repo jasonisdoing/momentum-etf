@@ -18,16 +18,30 @@ SystemAction = Literal[
     "data_aggregate",
     "cache_refresh",
     "market_hours_analysis",
-    "metadata_updater",
+    "reference_meta_updater",
+    "price_metrics_updater",
     "asset_summary",
     "us_market_stocks",
+    "aus_market_stocks",
     "live_24h_slack",
+    "leverage_ma_cross",
+    "holdings_alarm",
+    "strategy_trade_notify",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
 _WEEKDAYS_MON_FRI = [0, 1, 2, 3, 4]
 _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
+
+# 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
+# 한국 장중(09:00~15:30)에서 개시 직후·마감 직전을 뺀 구간이다.
+_STRATEGY_TRADE_SLOTS = [
+    {"hour": hour, "minute": minute}
+    for hour in range(9, 16)
+    for minute in range(0, 60, 10)
+    if (hour, minute) >= (9, 10) and (hour, minute) <= (15, 20)
+]
 
 # 배치 정의: 키는 infra/cron/crontab 의 job name 과 동일해야 합니다.
 # schedule 필드는 infra/cron/crontab 과 동기화해야 합니다.
@@ -39,50 +53,80 @@ SCHEDULE_ROWS = [
         "key": "data_aggregate",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
-        "cadence": "평일 09:10 ~ 15:40 매 30분 KST",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "월~토 24시간 10분 간격 KST",
         "command": "python scripts/collect_data.py",
-        "schedule": {
-            "minutes": [10, 40],
-            "hours": list(range(9, 16)),
-            "weekdays": _WEEKDAYS_MON_FRI,
-        },
+        # 1분이면 끝나는 가벼운 집계라 촘촘히 돌린다(00·10·20·30·40·50분).
+        "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "asset_summary",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
-        "cadence": "평일 09:20, 15:35 KST",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:40 · 16:10 / 토 09:40 KST",
         "command": "python scripts/slack_asset_summary.py",
-        "schedule": {"slots": [{"hour": 9, "minute": 20}, {"hour": 15, "minute": 35}], "weekdays": _WEEKDAYS_MON_FRI},
+        # 토요일 09:40 은 금요일 미국 장 마감(한국시간 토 05~06시)을 반영하기 위한 것이다.
+        # 그 시각이면 `가격 캐시 업데이트`·`데이터 집계`(둘 다 월~토 매시)가 이미 여러 번
+        # 돈 뒤다. 토요일 16:10 은 양쪽 장이 모두 닫혀 09:40 과 같은 값이라 두지 않는다.
+        "schedule": {
+            "slots": [
+                {"hour": 9, "minute": 40, "weekdays": _WEEKDAYS_MON_SAT},
+                {"hour": 16, "minute": 10, "weekdays": _WEEKDAYS_MON_FRI},
+            ],
+            "weekdays": _WEEKDAYS_MON_SAT,
+        },
     },
     {
         "key": "cache_refresh",
         "job": "가격 캐시 업데이트",
         "target": "모든 종목 가격",
-        "cadence": "월~토 24시간 매시 0분 KST",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "월~토 24시간 매시 20분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
-        "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+        "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
-        "key": "metadata_updater",
-        "job": "종목 메타데이터 업데이트",
-        "target": "모든 종목타입",
-        "cadence": "평일 09:45 ~ 17:45 매시 45분 KST",
-        "command": "python scripts/stock_meta_cache_updater.py",
-        "schedule": {"minutes": [45], "hours": list(range(9, 18)), "weekdays": _WEEKDAYS_MON_FRI},
+        "key": "reference_meta_updater",
+        "job": "종목 메타 업데이트",
+        "target": "이름·상장일·마켓·업종 + ETF holdings·배당",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 07:45 KST",
+        "command": "python scripts/stock_reference_meta_updater.py",
+        "schedule": {"minutes": [45], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "price_metrics_updater",
+        "job": "종목 가격지표 업데이트",
+        "target": "거래량·기간수익률·backtest",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 07:50 KST",
+        "command": "python scripts/stock_price_metrics_updater.py",
+        "schedule": {"minutes": [50], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "us_market_stocks",
         "job": "미국 개별주 업데이트",
         "target": "S&P500, NASDAQ100",
+        "run_location": "SERVER/LOCAL",
         "cadence": "평일 08:00 KST",
         "command": "python scripts/update_us_market_stocks.py",
         "schedule": {"minutes": [0], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "key": "aus_market_stocks",
+        "job": "호주 개별주 업데이트",
+        "target": "S&P/ASX 200",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 08:10 KST",
+        "command": "python scripts/update_aus_market_stocks.py",
+        "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
         "key": "market_hours_analysis",
         "job": "장 시간 분석",
         "target": "시장 스케줄",
+        "run_location": "SERVER/LOCAL",
         "cadence": "평일 07:00 KST",
         "command": "python scripts/analyze_market_hours.py",
         "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
@@ -91,21 +135,60 @@ SCHEDULE_ROWS = [
         "key": "live_24h_slack",
         "job": "24H 시세 알림",
         "target": "하이퍼리퀴드/바이낸스",
-        "cadence": "매일 24시간 매시 0분 KST",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "매일 24시간 매시 0분 KST (급변 시에만 발송)",
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
+    {
+        "key": "leverage_ma_cross",
+        "job": "레버리지 스위칭",
+        "target": "한국/미국 지수(코스피·나스닥100)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10 · 15:00 · 16:00 KST",
+        "command": "python scripts/leverage_recommend_ma_cross.py",
+        # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
+        # (한국시간 새벽 5~6시), 15:00·16:00 은 한국 마감용이다. 시장별로 '장 마감 직후'
+        # 이고 오늘 아직 안 보낸 경우에만 1회 발송하므로 여러 번 돌아도 중복되지 않는다.
+        "schedule": {
+            "slots": [{"hour": 9, "minute": 10}, {"hour": 15, "minute": 0}, {"hour": 16, "minute": 0}],
+            "weekdays": _WEEKDAYS_MON_FRI,
+        },
+    },
+    {
+        "key": "holdings_alarm",
+        "job": "보유종목 알람",
+        "target": "알람 On 계좌의 보유 종목",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10 KST (한국 개시 직후)",
+        "command": "python scripts/holdings_alarm.py",
+        "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "strategy_trade_notify",
+        "job": "전략 사고팔기 알림",
+        "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/strategy_trade_notify.py",
+        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
+        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
 ]
-
 # action 키 → 실행할 스크립트 경로
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
-    "metadata_updater": "scripts/stock_meta_cache_updater.py",
+    "reference_meta_updater": "scripts/stock_reference_meta_updater.py",
+    "price_metrics_updater": "scripts/stock_price_metrics_updater.py",
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
+    "aus_market_stocks": "scripts/update_aus_market_stocks.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
+    "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
+    "holdings_alarm": "scripts/holdings_alarm.py",
+    "strategy_trade_notify": "scripts/strategy_trade_notify.py",
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
@@ -155,7 +238,7 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
     if db is None:
         raise RuntimeError("DB 연결 실패로 종목풀 요약을 조회할 수 없습니다.")
 
-    # cache_refresh 배치가 저장한 풀별 점수 양수 요약 (없으면 0 표시)
+    # cache_refresh 배치가 저장한 풀별 매수 후보 요약 (없으면 0 표시)
     rank_summary_by_type: dict[str, dict[str, object]] = {}
     try:
         for doc in db.pool_rank_summary.find({}, {"ticker_type": 1, "score_up_count": 1, "score_total_count": 1}):
@@ -172,17 +255,12 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                 {
                     "_id": 0,
                     "ticker": 1,
-                    "is_etf": 1,
-                    "1_day_change_pct": 1,
                 },
             )
         )
 
         stock_count = len(docs)
-        # 일간 등락 기준 — cache_refresh 배치(매시 0분)가 1_day_change_pct 를 저장한다.
-        rising_count = sum(1 for doc in docs if _to_float(doc.get("1_day_change_pct")) > 0)
-        etf_count = sum(1 for doc in docs if bool(doc.get("is_etf")))
-        # 점수 양수 기준 — cache_refresh 배치가 pool_rank_summary 에 저장한다.
+        # 매수 후보 기준 — cache_refresh 배치가 pool_rank_summary 에 저장한다.
         rank_summary = rank_summary_by_type.get(ticker_type, {})
         score_up_count = int(_to_float(rank_summary.get("score_up_count")))
         score_total_count = int(_to_float(rank_summary.get("score_total_count")))
@@ -194,14 +272,11 @@ def _build_pool_summary_rows() -> list[dict[str, object]]:
                 "ticker_type": ticker_type,
                 "country_code": str(config.get("country_code") or "").upper(),
                 "stock_count": stock_count,
-                "rising_count": rising_count,
-                "rising_ratio": round((rising_count / stock_count) * 100, 2) if stock_count > 0 else 0.0,
                 "score_up_count": score_up_count,
                 "score_total_count": score_total_count,
                 "score_up_ratio": round((score_up_count / score_total_count) * 100, 2)
                 if score_total_count > 0
                 else 0.0,
-                "etf_count": etf_count,
             }
         )
 
@@ -223,6 +298,9 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
 
     minutes×hours 교차곱으로 표현 못 하는 시각(예: 09:20·15:35)은 ``slots``
     (``[{"hour":9,"minute":20}, ...]``)로 명시한다. slots 가 있으면 그것을 우선한다.
+
+    슬롯마다 요일이 다르면 슬롯에 ``weekdays`` 를 직접 준다(예: 09:40 은 월~토,
+    16:10 은 평일). 없으면 스케줄 공통 ``weekdays`` 를 쓴다.
     """
     if not schedule:
         return None
@@ -235,11 +313,17 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
 
     slots = schedule.get("slots")
     if slots:
-        slot_set = {(int(s["hour"]), int(s["minute"])) for s in slots}
+        slot_rules = {
+            (int(s["hour"]), int(s["minute"])): frozenset(
+                int(w) for w in s.get("weekdays", weekdays)
+            )
+            for s in slots
+        }
         candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         end = candidate + timedelta(days=8)
         while candidate < end:
-            if candidate.weekday() in weekdays and (candidate.hour, candidate.minute) in slot_set:
+            slot_weekdays = slot_rules.get((candidate.hour, candidate.minute))
+            if slot_weekdays is not None and candidate.weekday() in slot_weekdays:
                 return candidate
             candidate += timedelta(minutes=1)
         return None
@@ -484,8 +568,13 @@ def _read_last_job_run_from_queue(
         db = get_db_connection()
         if db is None:
             return None
+        import re
         doc = db.batch_queue.find_one(
-            {"job_name": job_key, "status": {"$in": ["done", "failed"]}, "ended_at": {"$ne": None}},
+            {
+                "job_name": {"$regex": f"^{re.escape(job_key)}(:|$)"},
+                "status": {"$in": ["done", "failed"]},
+                "ended_at": {"$ne": None},
+            },
             sort=[("ended_at", -1)],
             projection={"_id": 0, "status": 1, "started_at": 1, "ended_at": 1, "app_type": 1},
         )
@@ -606,7 +695,7 @@ def _cleanup_stale_locks() -> int:
         deleted = 0
         for doc in db.batch_locks.find({}, {"_id": 1, "acquired_at": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
-            if key not in _SCRIPT_BY_ACTION:
+            if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
 
             # (1) expires_at 기반 정리 — TTL 인덱스가 어떤 이유로 안 도는 경우의 안전망
@@ -690,7 +779,7 @@ def get_running_jobs() -> list[str]:
         # 1) batch_locks
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1}):
             key = str(doc.get("_id") or "")
-            if key not in _SCRIPT_BY_ACTION:
+            if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
             expires_at = doc.get("expires_at")
             # MongoDB는 datetime을 UTC 기준으로 저장하고 naive datetime으로 반환할 수 있다.
@@ -711,7 +800,7 @@ def get_running_jobs() -> list[str]:
             heartbeat_threshold = now - timedelta(minutes=3)
             for doc in db.batch_queue.find({"status": "running"}, {"_id": 0, "job_name": 1, "last_heartbeat": 1}):
                 key = str(doc.get("job_name") or "")
-                if not key or key not in _SCRIPT_BY_ACTION:
+                if not key or key.split(":")[0] not in _SCRIPT_BY_ACTION:
                     continue
                 last_heartbeat = doc.get("last_heartbeat")
                 if isinstance(last_heartbeat, datetime):
@@ -755,7 +844,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
         # 1) batch_locks 기반 (락이 살아있는 작업)
         for doc in db.batch_locks.find({}, {"_id": 1, "expires_at": 1, "acquired_at": 1, "app_type": 1}):
             key = str(doc.get("_id") or "")
-            if key not in _SCRIPT_BY_ACTION:
+            if key.split(":")[0] not in _SCRIPT_BY_ACTION:
                 continue
             expires_at = doc.get("expires_at")
             if isinstance(expires_at, datetime):
@@ -774,7 +863,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                     else acquired_at.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
                 )
 
-            estimated_seconds = _read_average_job_elapsed_seconds(key)
+            estimated_seconds = _read_average_job_elapsed_seconds(key.split(":")[0])
             elapsed_seconds = max(0, int((now_kst - started_at).total_seconds())) if started_at else None
             remaining_seconds = (
                 max(0, int(round(estimated_seconds)) - int(elapsed_seconds))
@@ -810,7 +899,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                 },
             ):
                 key = str(doc.get("job_name") or "")
-                if not key or key not in _SCRIPT_BY_ACTION:
+                if not key or key.split(":")[0] not in _SCRIPT_BY_ACTION:
                     continue
                 if key in details:
                     continue  # batch_locks 정보 우선
@@ -831,7 +920,7 @@ def get_running_job_details() -> dict[str, dict[str, object]]:
                         if started_raw.tzinfo
                         else started_raw.replace(tzinfo=timezone.utc).astimezone(ZoneInfo("Asia/Seoul"))
                     )
-                q_estimated_seconds = _read_average_job_elapsed_seconds(key)
+                q_estimated_seconds = _read_average_job_elapsed_seconds(key.split(":")[0])
                 q_elapsed_seconds = (
                     max(0, int((now_kst - queue_started_at).total_seconds())) if queue_started_at else None
                 )

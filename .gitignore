@@ -20,7 +20,7 @@ web/next-env.d.ts
 .DS_Store
 
 # 백테스트 결과
-backtest/results
+leverage/zresults
 
 
 # 노트 파일
@@ -42,9 +42,11 @@ tmp/
 
 # 캐시 — data/ 내부는 서버에 직접 배치하고 컨테이너로 bind-mount 함 (git 추적 제외)
 data/*
+!data/country/
+!data/country/**
 
-# DB 백업 (Atlas → VM 마이그레이션, 로컬 자동 백업)
-.backups/
+# DB 백업 (Atlas → VM 마이그레이션, 로컬 자동 백업, 마이그레이션 스크립트 백업)
+backups/
 
 # MongoDB 컨테이너 데이터 (VM 전용, 로컬에는 없어야 함)
 mongo-data/

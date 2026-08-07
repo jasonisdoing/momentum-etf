@@ -6,23 +6,19 @@ type RankTickerType = {
   name: string;
   icon: string;
   country_code: string;
-  holding_bonus_score?: number;
   top_n_hold?: number;
-  rsi_limit?: number | null;
-  type_source?: string;
   currency?: string;
   include?: string[];
 };
 
 type RankMaRule = {
-  ma_type: string;
-  ma_months: number;
-  ma_days: number;
+  short_ma_days: number;
+  long_ma_days: number;
   score_column: string;
 };
 
 type RankRow = {
-  [key: string]: string | number | null;
+  [key: string]: string | number | null | undefined;
   순번: string;
   순위: number | null;
   이전순위: number | null;
@@ -32,9 +28,6 @@ type RankRow = {
   티커: string;
   종목명: string;
   상장일: string;
-  분류: string;
-  "전체 분류": string;
-  점수: number | null;
   현재가: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
@@ -56,14 +49,14 @@ type RankRow = {
   "12달(%)": number | null;
   고점: number | null;
   RSI: number | null;
+  추세: number | null;
+  배열?: string | null;
 };
 
 type RankData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_type_options: string[];
-  ma_months_max: number;
   as_of_date: string | null;
   monthly_return_labels: string[];
   rows: RankRow[];
@@ -73,7 +66,6 @@ type RankData = {
   ranking_computed_at: string | null;
   realtime_fetched_at: string | null;
   previous_trading_day: string | null;
-  held_bonus_score: number;
   missing_tickers: string[];
   missing_ticker_labels: string[];
   stale_tickers: string[];
@@ -83,9 +75,6 @@ type RankToolbarData = {
   ticker_types: RankTickerType[];
   ticker_type: string;
   ma_rules: RankMaRule[];
-  ma_type_options: string[];
-  ma_months_max: number;
-  held_bonus_score: number;
 };
 
 export async function loadRankToolbarData(params?: {
@@ -104,7 +93,6 @@ export async function loadRankData(params?: {
   ticker_type?: string;
   ma_rule_override?: RankMaRule;
   as_of_date?: string;
-  held_bonus_score?: number;
 }, signal?: AbortSignal): Promise<RankData> {
   const search = new URLSearchParams();
   if (params?.ticker_type) {
@@ -113,12 +101,9 @@ export async function loadRankData(params?: {
   if (params?.as_of_date) {
     search.set("as_of_date", params.as_of_date);
   }
-  if (typeof params?.held_bonus_score === "number") {
-    search.set("held_bonus_score", String(params.held_bonus_score));
-  }
   if (params?.ma_rule_override) {
-    search.set("ma_type", params.ma_rule_override.ma_type);
-    search.set("ma_months", String(params.ma_rule_override.ma_months));
+    search.set("short_ma_days", String(params.ma_rule_override.short_ma_days));
+    search.set("long_ma_days", String(params.ma_rule_override.long_ma_days));
   }
 
   const query = search.size > 0 ? `?${search.toString()}` : "";

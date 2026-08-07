@@ -19,7 +19,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -32,7 +32,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push fastapi image (linux/arm64)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.fastapi
@@ -45,7 +45,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=fastapi-arm64
 
       - name: Build & push node image (linux/arm64)
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: web/Dockerfile
@@ -153,7 +153,7 @@ jobs:
           echo "disk_use=${DISK_USE:-unknown}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout for version extraction
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Extract APP_VERSION
         id: app_version

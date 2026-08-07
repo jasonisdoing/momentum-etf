@@ -451,6 +451,42 @@ def load_kis_domestic_etf_master() -> pd.DataFrame:
     return etf_df
 
 
+def _enrich_rows_with_base_closes(rows: list[dict]) -> None:
+    """각 ETF 에 1/2개월 전 기준종가를 붙인다 (네이버 fchart 일봉, 병렬 조회).
+
+    기준일이 휴장일이면 직전 거래일 종가를 쓴다(asof). 조회 실패 시 None —
+    마켓 화면의 1달/2달(%) 컬럼이 '-' 로 표시된다.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    from utils.naver_chart import fetch_naver_daily_ohlc
+
+    today = pd.Timestamp.now(tz="Asia/Seoul").tz_localize(None).normalize()
+    base_1m = today - pd.DateOffset(months=1)
+    base_2m = today - pd.DateOffset(months=2)
+
+    def _one(row: dict) -> None:
+        row["기준종가_1m"] = None
+        row["기준종가_2m"] = None
+        ticker = str(row.get("티커") or "").strip()
+        if not ticker:
+            return
+        df = fetch_naver_daily_ohlc(ticker, count=50)  # 2개월 ≈ 42거래일 + 여유
+        if df is None or df.empty:
+            return
+        closes = df["Close"]
+        v1 = closes.asof(base_1m)
+        v2 = closes.asof(base_2m)
+        row["기준종가_1m"] = float(v1) if pd.notna(v1) else None
+        row["기준종가_2m"] = float(v2) if pd.notna(v2) else None
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(_one, rows))
+
+    filled = sum(1 for r in rows if r.get("기준종가_1m") is not None)
+    logger.info("ETF 기준종가(1/2개월 전) 수집 완료: %d/%d건", filled, len(rows))
+
+
 def refresh_kis_domestic_etf_master_cache() -> int:
     """KIS 국내 ETF 마스터를 갱신하여 MongoDB 캐시에 저장합니다."""
 
@@ -460,6 +496,7 @@ def refresh_kis_domestic_etf_master_cache() -> int:
 
     df = load_kis_domestic_etf_master()
     rows = df.to_dict(orient="records")
+    _enrich_rows_with_base_closes(rows)
     now = datetime.now(timezone.utc)
 
     coll = db[_COLLECTION_NAME]
@@ -487,11 +524,11 @@ def load_cached_kis_domestic_etf_master() -> tuple[pd.DataFrame, datetime | None
     coll = db[_COLLECTION_NAME]
     doc = coll.find_one({"master_id": _MASTER_ID}, {"_id": 0})
     if not doc:
-        raise RuntimeError("KIS ETF 마스터 캐시가 없습니다. stock_meta_cache_updater를 먼저 실행하세요.")
+        raise RuntimeError("KIS ETF 마스터 캐시가 없습니다. stock_reference_meta_updater를 먼저 실행하세요.")
 
     rows = doc.get("rows")
     if not isinstance(rows, list) or not rows:
-        raise RuntimeError("KIS ETF 마스터 캐시가 비어 있습니다. stock_meta_cache_updater를 다시 실행하세요.")
+        raise RuntimeError("KIS ETF 마스터 캐시가 비어 있습니다. stock_reference_meta_updater를 다시 실행하세요.")
 
     updated_at = doc.get("updated_at")
     if isinstance(updated_at, pd.Timestamp):

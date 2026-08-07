@@ -66,7 +66,7 @@ export function PortfolioChangeBreakdown({
               <span className="portfolioChangeBreakdownRegion">
                 <strong>합계</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>(추적 {formatWeight(summary.totalWeight)})</span>
               </span>
-              <strong className={getSignedClass(summary.weightedAvg)} style={{ fontSize: "1.2em" }}>
+              <strong className={getSignedClass(summary.weightedAvg)} style={{ fontSize: "var(--fs-lg)" }}>
                 {formatSignedPercent(summary.weightedAvg)}
               </strong>
             </div>
@@ -92,7 +92,7 @@ export function PortfolioChangeBreakdown({
               <span className="portfolioChangeBreakdownRegion">
                 <strong>{item.label}</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>({formatWeight(item.weight)})</span>
               </span>
-              <strong className={getSignedClass(item.adjusted_change_pct)} style={{ fontSize: "1.2em" }}>
+              <strong className={getSignedClass(item.adjusted_change_pct)} style={{ fontSize: "var(--fs-lg)" }}>
                 {formatSignedPercent(item.adjusted_change_pct)}
               </strong>
             </div>
@@ -108,7 +108,7 @@ export function PortfolioChangeBreakdown({
         <>
           <span className="portfolioChangeBreakdownCompactItem">
             <strong>합계</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>(추적 {formatWeight(summary.totalWeight)})</span>{" "}
-            <strong className={getSignedClass(summary.weightedAvg)} style={{ fontSize: "1.2em" }}>
+            <strong className={getSignedClass(summary.weightedAvg)} style={{ fontSize: "var(--fs-lg)" }}>
               {formatSignedPercent(summary.weightedAvg)}
             </strong>
           </span>
@@ -129,7 +129,7 @@ export function PortfolioChangeBreakdown({
         items.map((item) => (
           <span key={item.currency} className="portfolioChangeBreakdownCompactItem">
             <strong>{item.label}</strong> <span style={{ color: "#5f6b82", fontWeight: 400 }}>({formatWeight(item.weight)})</span>{" "}
-            <strong className={getSignedClass(item.adjusted_change_pct)} style={{ fontSize: "1.2em" }}>
+            <strong className={getSignedClass(item.adjusted_change_pct)} style={{ fontSize: "var(--fs-lg)" }}>
               {formatSignedPercent(item.adjusted_change_pct)}
             </strong>
           </span>

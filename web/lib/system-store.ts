@@ -47,10 +47,15 @@ type SystemAction =
   | "data_aggregate"
   | "cache_refresh"
   | "market_hours_analysis"
-  | "metadata_updater"
+  | "reference_meta_updater"
+  | "price_metrics_updater"
   | "asset_summary"
   | "us_market_stocks"
-  | "live_24h_slack";
+  | "aus_market_stocks"
+  | "live_24h_slack"
+  | "leverage_ma_cross"
+  | "holdings_alarm"
+    | "strategy_trade_notify";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");

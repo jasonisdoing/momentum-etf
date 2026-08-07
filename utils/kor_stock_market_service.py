@@ -6,10 +6,12 @@ import logging
 import math
 from typing import Any
 
+import pandas as pd
 import requests
 
 from config import NAVER_FINANCE_HEADERS
 from utils.market_service import load_ticker_pool_map
+from utils.naver_chart import fetch_naver_daily_ohlc
 from utils.portfolio_io import load_all_holding_tickers
 from services.price_service import get_realtime_snapshot
 
@@ -130,6 +132,7 @@ def load_kor_stock_market(
 
     rows = rows[:target_count]
     _apply_kor_realtime_overlay(rows)
+    _apply_kor_history_metrics(rows)
     for idx, row in enumerate(rows, start=1):
         row["rank"] = idx
 
@@ -170,3 +173,48 @@ def _apply_kor_realtime_overlay(rows: list[dict[str, Any]]) -> None:
         volume = realtime.get("volume")
         if volume is not None:
             row["volume"] = volume
+
+
+def _calculate_period_return(close: pd.Series, latest_price: float, months: int) -> float | None:
+    target_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months)
+    base_candidates = close[close.index >= target_date]
+    if close.empty:
+        return None
+    base_date = close.index.min() if base_candidates.empty else base_candidates.index.min()
+    base_price = float(close.loc[base_date])
+    if base_price <= 0:
+        return None
+    return round(((latest_price / base_price) - 1.0) * 100.0, 4)
+
+
+def _calculate_mdd(close: pd.Series, months: int) -> float | None:
+    target_date = pd.Timestamp.today().normalize() - pd.DateOffset(months=months)
+    period = close[close.index >= target_date]
+    if period.empty:
+        period = close
+    if period.empty:
+        return None
+    drawdown = (period / period.cummax() - 1.0) * 100.0
+    return round(float(drawdown.min()), 4)
+
+
+def _apply_kor_history_metrics(rows: list[dict[str, Any]]) -> None:
+    """한국 개별주 일봉으로 기간 수익률과 MDD를 보강한다."""
+    for row in rows:
+        ticker = str(row.get("ticker") or "").strip()
+        if not ticker:
+            continue
+        history = fetch_naver_daily_ohlc(ticker, count=280)
+        if history is None or history.empty or "Close" not in history.columns:
+            row.update({"return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None, "mdd_12m_pct": None})
+            continue
+        close = pd.to_numeric(history["Close"], errors="coerce").dropna()
+        close = close[close > 0]
+        if close.empty:
+            row.update({"return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None, "mdd_12m_pct": None})
+            continue
+        latest_price = float(row.get("current_price") or close.iloc[-1])
+        row["return_1m_pct"] = _calculate_period_return(close, latest_price, 1)
+        row["return_3m_pct"] = _calculate_period_return(close, latest_price, 3)
+        row["return_12m_pct"] = _calculate_period_return(close, latest_price, 12)
+        row["mdd_12m_pct"] = _calculate_mdd(close, 12)

@@ -1,0 +1,438 @@
+"""Slack 알림 전송 유틸리티.
+
+전송은 momentum-etf 의 공용 Slack 전송기(utils.notification.send_slack_message_v2)를 사용한다.
+(봇 토큰 + settings_loader.get_slack_channel 기준 채널)
+"""
+
+from datetime import datetime
+from typing import Any
+
+from utils.moving_averages import get_moving_average_type
+from utils.notification import send_slack_message_v2
+
+
+def _format_display_name(ticker: str, name: str | None) -> str:
+    if name and name != ticker:
+        return f"{name}({ticker})"
+    return ticker
+
+
+def _required_number(source: dict[str, Any], key: str) -> float:
+    """슬랙 문구에 필요한 계산값이 없으면 명확히 실패시킨다."""
+    value = source.get(key)
+    if not isinstance(value, (int, float)):
+        raise ValueError(f"레버리지 슬랙 메시지 필수 계산값이 없습니다: {key}")
+    return float(value)
+
+
+def _index_point_label(market: str) -> str:
+    return "나스닥 100" if market == "us" else "코스피"
+
+
+def _format_index_point(value: float) -> str:
+    return f"{value:,.2f}pt"
+
+
+def _post(text: str, blocks: list[dict], label: str) -> bool:
+    """momentum-etf 공용 전송기로 blocks 메시지를 보낸다."""
+    ts = send_slack_message_v2(text=text, blocks=blocks)
+    if ts:
+        print(f" [SLACK] {label} 전송 완료")
+        return True
+    print(f" [SLACK] {label} 전송 실패")
+    return False
+
+
+def send_slack_ma_cross(
+    view: dict[str, Any],
+    *,
+    market_phase: str = "장 마감 직후",
+    test: bool = False,
+) -> bool:
+    """이동평균선 크로스(+고점대비) 전략 추천을 Slack 으로 전송한다.
+
+    ``view`` 는 ``utils.leverage_ma_service.compute_ma_cross_view`` 의 반환값.
+    기존 스위칭(드로다운 컷) 메시지와 형식은 맞추되, 기준이 이동선/고점대비로 바뀐 내용을 반영한다.
+    """
+    market = str(view.get("market") or "kor")
+    market_name = "🇺🇸 미국" if market == "us" else "🇰🇷 한국"
+    phase_tag = f"[{market_phase}]"
+
+    rec = view.get("recommendation") or {}
+    judgment = view.get("judgment") or {}
+    state = view.get("state") or {}
+    assets = view.get("assets") or {}
+    ma_days = int(view.get("ma_days") or 0)
+    peak_limit = float(view.get("peak_drawdown_pct") or 0.0)
+
+    is_changed = bool(rec.get("is_changed"))
+    want_leverage = bool(judgment.get("want_leverage"))
+
+    index_display = _format_display_name(assets.get("index", {}).get("ticker", ""), assets.get("index", {}).get("name"))
+    leverage_display = _format_display_name(assets.get("leverage", {}).get("ticker", ""), assets.get("leverage", {}).get("name"))
+    defense_display = _format_display_name(assets.get("defense", {}).get("ticker", ""), assets.get("defense", {}).get("name"))
+    target_display = _format_display_name(rec.get("target_ticker", ""), rec.get("target_name")) if rec else "-"
+
+    if is_changed:
+        header_emoji = "🚨"
+        header_text = f"{market_name} {phase_tag} 포지션 변경 확정! (다음 거래일 시초가 매매)"
+    else:
+        header_emoji = "✅"
+        header_text = f"{market_name} {phase_tag} 정기 보고"
+    blocks: list[dict] = [
+        {"type": "header", "text": {"type": "plain_text", "text": f"{header_emoji} {header_text}", "emoji": True}},
+    ]
+
+    # 전략 설정(파라미터)
+    ma_type = get_moving_average_type()
+    param_text = (
+        "*🏆 전략 설정 (이동평균선 크로스 + 고점대비)*\n"
+        f"• 지수(신호): {index_display}\n"
+        f"• 레버리지 자산: {leverage_display}\n"
+        f"• 방어 자산: {defense_display}\n"
+        f"• 이동선: {ma_type} {ma_days}일\n"
+        f"• 고점대비 한도: {peak_limit:.0f}%"
+    )
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": param_text}})
+    blocks.append({"type": "divider"})
+
+    # 판정 근거 (이격 / 고점대비)
+    if judgment:
+        gap_pct = float(judgment.get("gap_pct") or 0.0)
+        peak_dd = float(judgment.get("peak_drawdown_pct") or 0.0)
+        limit = float(judgment.get("peak_drawdown_limit_pct") or 0.0)
+        gap_ok = gap_pct >= 0.0
+        peak_ok = peak_dd >= -limit
+        judge_text = (
+            "*=== 판정 근거 ===*\n"
+            f"• 이격({ma_type} {ma_days}일): {gap_pct:+.2f}% / 기준 ≥ 0% {'✅' if gap_ok else '❌'}\n"
+            f"• 고점대비: {peak_dd:+.2f}% / 한도 ≥ -{limit:.0f}% {'✅' if peak_ok else '❌'}\n"
+            f"• 결과: {'🟢 레버리지 보유' if want_leverage else '🔵 방어 보유'} → *{target_display}*"
+        )
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": judge_text}})
+        blocks.append({"type": "divider"})
+
+    # 요약
+    as_of = rec.get("as_of") or state.get("date") or "-"
+    holding_days = state.get("holding_days")
+    summary_text = f"ℹ️ *기준일*: {as_of}\n🎯 *최종 타깃*: *{target_display}*"
+    if holding_days is not None:
+        summary_text += f"\n⏳ *보유일*: *{holding_days}거래일째*"
+    if is_changed:
+        summary_text += (
+            "\n\n*🔔 실행 안내*: 오늘 종가 기준으로 시그널이 확정되었습니다. "
+            "내일(다음 거래일) 아침 시초가에 해당 종목을 매매하세요."
+        )
+
+    # 보유 상태에 맞춰 레버리지 진입/방어 전환 기준을 안내합니다.
+    if judgment:
+        gap_pct = float(judgment.get("gap_pct") or 0.0)
+        peak_dd = float(judgment.get("peak_drawdown_pct") or 0.0)
+        limit = float(judgment.get("peak_drawdown_limit_pct") or 0.0)
+        current_index_close = _required_number(judgment, "index_close")
+        ma_threshold_close = _required_number(judgment, "ma_threshold_close")
+        peak_threshold_close = _required_number(judgment, "peak_threshold_close")
+        required_index_close = _required_number(judgment, "required_index_close")
+        required_move_pct = (required_index_close / current_index_close - 1.0) * 100.0
+        ma_recovery_pct = (ma_threshold_close / current_index_close - 1.0) * 100.0
+        peak_recovery_pct = (peak_threshold_close / current_index_close - 1.0) * 100.0
+        gap_ok = gap_pct >= 0
+        peak_ok = peak_dd >= -limit
+
+        if want_leverage:
+            threshold_line = (
+                f"  • 방어 전환 기준 지수: {_index_point_label(market)} "
+                f"*{_format_index_point(required_index_close)} 이하 ({required_move_pct:+.2f}%)*"
+            )
+            needs = [
+                f"① {ma_days}일 이동평균선 아래로 *{ma_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
+                f"② 전고점 대비 -{limit:.0f}% 아래로 *{peak_recovery_pct:+.2f}%* 하락하기 전까지 레버리지 보유",
+            ]
+            summary_text += (
+                f"\n\n💡 *설명*: {leverage_display}를 유지하려면 다음을 **모두** 유지해야 합니다.\n"
+                + threshold_line
+                + "\n"
+                + "\n".join(f"  {n}" for n in needs)
+            )
+        else:
+            threshold_line = (
+                f"  • 전환 필요 지수: {_index_point_label(market)} "
+                f"*{_format_index_point(required_index_close)} 이상 ({required_move_pct:+.2f}%)*"
+            )
+            needs = []
+            if not gap_ok:
+                needs.append(f"① {ma_days}일 이동평균선 위로 *{ma_recovery_pct:+.2f}%* 회복 필요")
+            if not peak_ok:
+                needs.append(f"② 전고점 대비 -{limit:.0f}% 이내로 *{peak_recovery_pct:+.2f}%* 회복 필요")
+            if needs:
+                summary_text += (
+                    f"\n\n💡 *설명*: {leverage_display}로 전환하려면 다음을 **모두** 충족해야 합니다.\n"
+                    + threshold_line
+                    + "\n"
+                    + "\n".join(f"  {n}" for n in needs)
+                )
+
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
+
+    if is_changed:
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "<!channel> 포지션이 변경되었습니다! 확인해주세요."}})
+
+    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "이동평균선 크로스 추천")
+
+
+def send_slack_recommendation(
+    country: str,
+    as_of: str,
+    target_display: str,
+    table_lines: list[str],
+    tuning_meta: dict[str, Any] | None = None,
+    is_changed: bool = False,
+    holding_days: int = 0,
+    is_warning: bool = False,
+    warning_target_display: str | None = None,
+    market_phase: str = "장 마감 후",
+) -> bool:
+    """나스닥 스위칭 추천 결과를 Slack으로 전송합니다."""
+    market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
+    phase_tag = f"[{market_phase}]"
+
+    # 이모지 및 타이틀 분기
+    if is_warning:
+        # 장중 / 장전 (미확정). 신호가 실제 보유와 다르면(warning_target_display) '변경 예상'.
+        if is_changed or warning_target_display:
+            header_emoji = "⚠️"
+            header_text = f"{market_name} {phase_tag} 포지션 변경 예상 (경고)"
+        else:
+            header_emoji = "📊"
+            header_text = f"{market_name} {phase_tag} 정기 보고"
+    else:
+        # 장 마감 직후 / 장 마감 후 (확정)
+        if is_changed:
+            header_emoji = "🚨"
+            header_text = f"{market_name} {phase_tag} 포지션 변경 확정! (다음 거래일 시초가 매매)"
+        else:
+            header_emoji = "✅"
+            header_text = f"{market_name} {phase_tag} 정기 보고"
+
+    # 메시지 블록 구성
+    blocks = []
+
+    # 1. 헤더
+    blocks.append(
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"{header_emoji} {header_text}",
+                "emoji": True,
+            },
+        }
+    )
+
+    # 2. 최적 파라미터 정보 (최근 튜닝 결과)
+    if tuning_meta:
+        offense_ticker = tuning_meta.get("offense_ticker", "N/A")
+        offense_name = tuning_meta.get("offense_name", "")
+        offense_display = _format_display_name(offense_ticker, offense_name)
+
+        defense_ticker = tuning_meta.get("defense_ticker", "N/A")
+        defense_name = tuning_meta.get("defense_name", "")
+        defense_display = _format_display_name(defense_ticker, defense_name)
+
+        tuning_text = (
+            f"*🏆 최적 파라미터 (CAGR 기준)*\n"
+            f"• 공격 자산: {offense_display}\n"
+            f"• 방어 자산: {defense_display}\n"
+            f"• 매수 컷: {tuning_meta.get('buy_cutoff', 0):.1f}%\n"
+            f"• 매도 컷: {tuning_meta.get('sell_cutoff', 0):.1f}%\n"
+            f"• CAGR: {tuning_meta.get('cagr', 0) * 100:.2f}%"
+        )
+
+        period_start = tuning_meta.get("period_start")
+        period_end = tuning_meta.get("period_end")
+        if period_start and period_end:
+            try:
+                from datetime import date as _date
+
+                _s = _date.fromisoformat(period_start)
+                _e = _date.fromisoformat(period_end)
+                _months = max(1, int(round((_e - _s).days / 30)))
+                tuning_text += f"\n• 백테스트 기간: {period_start} ~ {period_end} ({_months} 개월)"
+            except Exception:
+                tuning_text += f"\n• 백테스트 기간: {period_start} ~ {period_end}"
+
+        blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": tuning_text}})
+        blocks.append({"type": "divider"})
+
+    # 3. 추천 목록 (상세 테이블)
+    if table_lines:
+        # 가독성을 위해 간결하게 변환
+        clean_lines = []
+        for line in table_lines:
+            if line.strip().startswith("📌"):
+                clean_lines.append(f"*{line.strip()}*")
+            elif line.strip():
+                clean_lines.append(f"  {line.strip()}")
+
+        table_text = "\n".join(clean_lines)
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*=== 추천 목록 ===*\n{table_text}",
+                },
+            }
+        )
+        blocks.append({"type": "divider"})
+
+    # 4. 요약 정보
+    summary_text = f"ℹ️ *기준일*: {as_of}"
+    holding_days_text = f"\n⏳ *보유일*: *{holding_days}거래일째*"
+
+    if is_warning and warning_target_display:
+        # 경고 모드: 현재 보유 + 전환 가능성 안내
+        summary_text += f"\n💼 *현재 보유*: *{target_display}*"
+        summary_text += holding_days_text
+        summary_text += (
+            f"\n\n*⚠️ 전환 예상*: 이대로 장 마감 시 "
+            f"*{warning_target_display}*(으)로 전환될 수 있습니다. "
+            "장 마감 후 최종 확정 알림을 기다려주세요."
+        )
+    elif is_warning:
+        # 경고 모드이지만 변경 없음
+        summary_text += f"\n🎯 *현재 보유*: *{target_display}*"
+        summary_text += holding_days_text
+        summary_text += "\n\n*ℹ️ 안내*: 장 마감 시까지 변동될 수 있습니다. 장 마감 후 최종 확정 알림을 기다려주세요."
+    elif is_changed:
+        # 확정 모드에서 변경됨
+        summary_text += f"\n🎯 *최종 타깃*: *{target_display}*"
+        summary_text += holding_days_text
+        summary_text += (
+            "\n\n*🔔 실행 안내*: 오늘 종가 기준으로 시그널이 확정되었습니다. "
+            "내일(다음 거래일) 아침 시초가에 해당 종목을 매매하세요."
+        )
+    else:
+        # 확정 모드에서 변경 없음
+        summary_text += f"\n🎯 *최종 타깃*: *{target_display}*"
+        summary_text += holding_days_text
+
+    # 방어 자산 보유 시, 공격 자산으로 전환하기 위해 필요한 시그널 회복률에 대한 설명 추가
+    if tuning_meta and "defense_ticker" in tuning_meta:
+        defense_ticker = tuning_meta.get("defense_ticker")
+        defense_name = tuning_meta.get("defense_name", "")
+        defense_display = _format_display_name(defense_ticker, defense_name)
+
+        n_rec = tuning_meta.get("needed_recovery", 0.0)
+        # 방어 자산 보유 중일 때 설명 표시.
+        # 장중에는 실시간 드로다운으로 매시간 갱신되며, 매수 기준에 도달(n_rec<=0)해도 안내한다.
+        if target_display == defense_display and (n_rec > 0 or is_warning):
+            sig_name = tuning_meta.get("signal_name", "신호 자산")
+            offense_ticker = tuning_meta.get("offense_ticker", "")
+            offense_name = tuning_meta.get("offense_name", "")
+            off_display = _format_display_name(offense_ticker, offense_name)
+            curr_dd = tuning_meta.get("current_drawdown", 0.0) * 100
+            b_cut = tuning_meta.get("buy_cutoff", 0.0)
+            live_tag = " (장중 실시간)" if is_warning else ""
+
+            if n_rec > 0:
+                explanation = (
+                    f"\n\n💡 *설명{live_tag}*: 현재 {sig_name}가 최고점 대비 {curr_dd:+.2f}% 하락해 있는 상태이므로, "
+                    f"공격 자산({off_display})으로 전환하기 위한 매수 기준인 *{-b_cut:+.1f}%*에 도달하기 위해선 "
+                    f"지수가 *{n_rec:+.2f}%만큼 추가 회복(상승)*해야 합니다."
+                )
+            else:
+                explanation = (
+                    f"\n\n💡 *설명{live_tag}*: 현재 {sig_name}가 최고점 대비 {curr_dd:+.2f}% 로 "
+                    f"매수 기준 *{-b_cut:+.1f}%* 에 도달했습니다. "
+                    f"장 마감 종가로 확정되면 공격 자산({off_display})으로 전환됩니다."
+                )
+            summary_text += explanation
+
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
+
+    # 5. 채널 맨션 (확정 알림에서 변경이 있을 때만, 경고 모드에서는 멘션 안 함)
+    if is_changed and not is_warning:
+        blocks.append(
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "<!channel> 포지션이 변경되었습니다! 확인해주세요.",
+                },
+            }
+        )
+
+    return _post(f"[{market_name}] {header_text} ({as_of})", blocks, "스위칭 추천")
+
+
+def send_slack_tuning_result(
+    country: str,
+    started_at: datetime,
+    ended_at: datetime,
+    elapsed: str,
+    best_result: dict[str, Any],
+    table_lines: list[str],
+    meta: dict[str, Any] | None = None,
+    log_path: str | None = None,
+) -> bool:
+    """튜닝 완료 결과를 Slack으로 전송합니다."""
+
+    market_name = "🇺🇸 미국" if country.lower() == "us" else "🇰🇷 한국"
+    params = best_result.get("params", {})
+    # 공격 자산은 튜닝 조합 차원이 아님 — 진입 시점마다 후보 중 이동평균 20일 이격도 1위를 동적 선택
+    if params.get("offense_ticker"):
+        offense_display = _format_display_name(str(params["offense_ticker"]), params.get("offense_name"))
+    else:
+        candidates = params.get("offense_candidates") or []
+        offense_display = f"동적 선택 (후보 {len(candidates)}종, 진입 시 {get_moving_average_type()} 20일 이격도 1위)"
+    defense_display = _format_display_name(
+        str(params.get("defense_ticker", "N/A")),
+        params.get("defense_name"),
+    )
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {
+                "type": "plain_text",
+                "text": f"🏆 {market_name} 튜닝 완료",
+                "emoji": True,
+            },
+        }
+    ]
+
+    period_start = meta.get("period_start") if meta else None
+    period_end = meta.get("period_end") if meta else None
+    period_text = f"\n• 백테스트 기간: {period_start} ~ {period_end}" if period_start and period_end else ""
+    log_text = f"\n• 로그: `{log_path}`" if log_path else ""
+
+    summary_text = (
+        f"*최적 파라미터 (CAGR 기준)*\n"
+        f"• 공격 자산: {offense_display}\n"
+        f"• 방어 자산: {defense_display}\n"
+        f"• 매수 컷: {float(params.get('drawdown_buy_cutoff', 0)):.1f}%\n"
+        f"• 매도 컷: {float(params.get('drawdown_sell_cutoff', 0)):.1f}%\n"
+        f"• 기간 수익률: {best_result.get('period_return', 0.0) * 100:.2f}%\n"
+        f"• CAGR: {best_result.get('cagr', 0.0) * 100:.2f}%\n"
+        f"• MDD: {best_result.get('mdd', 0.0) * 100:.2f}%\n"
+        f"• Sharpe: {best_result.get('sharpe', 0.0):.2f}\n"
+        f"• 시작: {started_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"• 종료: {ended_at.strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"• 소요: {elapsed}"
+        f"{period_text}"
+        f"{log_text}"
+    )
+    blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": summary_text}})
+
+    if table_lines:
+        top_text = "\n".join(table_lines[:12])
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*상위 튜닝 결과*\n```{top_text}```"},
+            }
+        )
+
+    return _post(f"[{market_name}] 튜닝 완료 ({ended_at.date().isoformat()})", blocks, "튜닝 결과")

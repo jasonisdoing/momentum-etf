@@ -2,66 +2,51 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
+import config
 from fastapi_app.dependencies import require_internal_token
-from utils.market_trend_service import compute_index_history, compute_market_trend
-from utils.rankings import ALLOWED_MA_TYPES
-from utils.settings_loader import get_all_pool_settings
+from utils.market_trend_service import (
+    INDICES,
+    compute_index_history,
+    compute_market_trend,
+)
 
 router = APIRouter(prefix="/internal/market-trend", tags=["market-trend"])
 
 
-def _normalize_ma_type(ma_type: str) -> str:
-    normalized = (ma_type or "").strip().upper()
-    if normalized not in ALLOWED_MA_TYPES:
-        raise ValueError(
-            f"지원하지 않는 MA 타입입니다: {ma_type}. 허용 값: {', '.join(ALLOWED_MA_TYPES)}"
-        )
-    return normalized
-
-
-def _resolve_default_ma() -> tuple[str, int]:
-    """pools.json 의 all.MA_TYPE / all.MA_MONTHS 를 그대로 사용 (설명은 pools.json 참고)."""
-    settings = get_all_pool_settings()
-    return _normalize_ma_type(str(settings["MA_TYPE"])), int(settings["MA_MONTHS"])
+@router.get("/indices")
+def get_market_trend_indices(
+    _: None = Depends(require_internal_token),
+) -> dict[str, object]:
+    """시장추세 지수 목록 (시장 레짐 셀렉터 등에서 사용)."""
+    return {"indices": [{"ticker": idx["yf_ticker"], "name": idx["name"]} for idx in INDICES]}
 
 
 @router.get("/defaults")
 def get_market_trend_defaults(
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    """화면 진입 시 사용할 MA 기본값 + 추세점수 설정 (config.py 가 단일 진실 소스)."""
-    import config
-
-    ma_type, ma_months = _resolve_default_ma()
+    """화면 표시용 MA/추세점수 설정 (config.py 가 단일 진실 소스)."""
     return {
-        "ma_type": ma_type,
-        "ma_months": ma_months,
-        "ma_types": ALLOWED_MA_TYPES,
-        "ma_months_max": config.MARKET_TREND_MA_MONTHS_MAX,
+        "ma_days": config.MARKET_TREND_SCORE_MA_DAYS,
         "score_anchor_percentile": config.MARKET_TREND_SCORE_ANCHOR_PERCENTILE,
+        "ma_type": config.MOVING_AVERAGE_TYPE,
     }
 
 
 @router.get("")
 def get_market_trend(
-    ma_type: str | None = Query(None, description="이동평균 타입"),
-    ma_months: int | None = Query(None, ge=1, le=12, description="이동평균 기간(개월)"),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    default_type, default_months = _resolve_default_ma()
-    resolved_type = _normalize_ma_type(ma_type) if ma_type else default_type
-    resolved_months = int(ma_months) if ma_months is not None else default_months
-    return compute_market_trend(resolved_type, resolved_months)
+    """5개 시장지수의 현재가/추세/레짐 — MA 는 이동평균 {SHORT_MA_DAYS}일 고정."""
+    return compute_market_trend()
+
+
 
 
 @router.get("/history")
 def get_market_trend_history(
     ticker: str = Query(..., description="Yahoo Finance 지수 심볼 (예: ^GSPC)"),
-    ma_type: str | None = Query(None, description="이동평균 타입"),
-    ma_months: int | None = Query(None, ge=1, le=12, description="이동평균 기간(개월)"),
     _: None = Depends(require_internal_token),
 ) -> dict[str, object]:
-    default_type, default_months = _resolve_default_ma()
-    resolved_type = _normalize_ma_type(ma_type) if ma_type else default_type
-    resolved_months = int(ma_months) if ma_months is not None else default_months
-    return compute_index_history(ticker, resolved_type, resolved_months)
+    """단일 지수의 가격/추세/레짐 히스토리 — MA 는 이동평균 {SHORT_MA_DAYS}일 고정."""
+    return compute_index_history(ticker)

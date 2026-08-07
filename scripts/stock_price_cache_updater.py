@@ -35,6 +35,8 @@ from utils.stock_list_io import get_all_etfs_including_deleted, get_etfs
 FETCH_RETRY_ATTEMPTS = 3
 FETCH_RETRY_DELAY_SECONDS = 2.0
 PER_TICKER_TIMEOUT_SECONDS = 90
+# KOR_FETCH_TARGET_SECONDS = 0.5 서버에서 freeze 1초로 늘려서 테스트중
+KOR_FETCH_TARGET_SECONDS = 1
 
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
@@ -266,30 +268,34 @@ def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
 
 
 def _update_pool_rank_summary(target_id: str) -> None:
-    """종목풀 순위(점수)를 계산해 점수 양수 개수를 pool_rank_summary 컬렉션에 저장한다.
+    """종목풀 순위를 계산해 추세(%) 양수 개수를 pool_rank_summary 컬렉션에 저장한다.
 
-    /system 종목풀 표의 상승수(점수)/상승비율(점수) 가 이 문서를 읽는다.
-    점수 계산은 방금 갱신된 가격 캐시를 사용하므로 외부 호출이 없다.
+    /system 종목풀 표의 매수 후보 수/비율이 이 문서를 읽는다.
+    추세 계산은 방금 갱신된 가격 캐시를 사용하므로 외부 호출이 없다.
     """
     logger = get_app_logger()
     try:
         from utils.db_manager import get_db_connection
         from utils.rank_service import load_rank_data
 
-        payload = load_rank_data(ticker_type=target_id, held_bonus_score=None)
+        payload = load_rank_data(ticker_type=target_id)
         rows = payload.get("rows") or []
         total_count = len(rows)
         up_count = 0
         for row in rows:
             try:
-                if row.get("점수") is not None and float(row["점수"]) > 0:
+                trend = row.get("추세")
+                is_below = bool(row.get("is_below_benchmark"))
+                is_bm = bool(row.get("is_benchmark"))
+                is_excl = bool(row.get("exclude_from_ranking"))
+                if trend is not None and float(trend) > 0 and not is_below and not is_bm and not is_excl:
                     up_count += 1
             except (TypeError, ValueError):
                 continue
 
         db = get_db_connection()
         if db is None:
-            logger.warning("[%s] DB 연결 실패로 점수 요약 저장 생략", target_id.upper())
+            logger.warning("[%s] 종목풀 요약 저장 생략: DB 연결 실패", target_id.upper())
             return
         db.pool_rank_summary.update_one(
             {"_id": target_id},
@@ -304,13 +310,13 @@ def _update_pool_rank_summary(target_id: str) -> None:
             upsert=True,
         )
         logger.info(
-            "[%s] 점수 요약 저장 완료: 양수 %d / 전체 %d",
+            "[%s] 매수 후보 요약 저장 완료: 후보 %d / 전체 %d",
             target_id.upper(),
             up_count,
             total_count,
         )
     except Exception as exc:
-        logger.warning("[%s] 점수 요약 저장 실패: %s", target_id.upper(), exc)
+        logger.warning("[%s] 종목풀 요약 저장 실패: %s", target_id.upper(), exc)
 
 
 def _refresh_portfolio_change_cache_for_target(
@@ -609,7 +615,7 @@ def refresh_cache_for_target(
 
             KOR 풀(pykrx 사용)은 KRX 가 단위 시간당 호출 빈도로 IP 차단을 거는 듯하다.
             서버처럼 응답이 너무 빠른 환경(종목당 ~0.1s)에서는 30종목 즈음 차단되어 hang
-            상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_MS, 기본 300ms) 미만으로
+            상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_SECONDS) 미만으로
             끝났을 때 부족분만큼 동적으로 sleep 한다. 로컬처럼 자연 소요가 충분히 느린
             환경(0.3s 이상)은 영향이 없다.
             """
@@ -628,8 +634,7 @@ def refresh_cache_for_target(
                 # KOR 풀에만 동적 sleep — 부족분만큼 채워 호출 빈도를 늦춘다.
                 sleep_secs = 0.0
                 if country_code == "kor":
-                    target = max(0.0, float(os.environ.get("KOR_FETCH_TARGET_MS") or 300) / 1000.0)
-                    sleep_secs = max(0.0, target - elapsed)
+                    sleep_secs = max(0.0, KOR_FETCH_TARGET_SECONDS - elapsed)
                     if sleep_secs > 0:
                         time.sleep(sleep_secs)
                 sleep_suffix = f" + {sleep_secs:.1f}s 대기(속도조절)" if sleep_secs > 0 else ""
@@ -675,7 +680,8 @@ def refresh_cache_for_target(
                     failed_tickers.append(t)
         else:
             # 병렬 모드
-            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+            from concurrent.futures import TimeoutError as FuturesTimeoutError
 
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_idx = {
@@ -732,7 +738,7 @@ def refresh_cache_for_target(
         # /system 종목풀 표용 일간 등락률을 stock_meta 에 저장
         _update_daily_change_pct(target_norm, success_tickers)
 
-        # /system 종목풀 표용 점수 양수 요약을 pool_rank_summary 에 저장
+        # /system 종목풀 표용 추세(%) 양수 요약을 pool_rank_summary 에 저장
         _update_pool_rank_summary(target_norm)
 
         # 포트폴리오 변동 캐시는 조회 시 TTL 기준으로 갱신한다.
@@ -740,26 +746,24 @@ def refresh_cache_for_target(
 
 
 def _collect_benchmark_tickers(target_id: str) -> list[str]:
-    """해당 종목풀 설정에 정의된 벤치마크 티커들을 수집합니다."""
-    tickers = set()
+    """해당 종목풀 설정에 정의된 벤치마크 티커를 수집합니다.
+
+    벤치마크는 종목풀 구성 종목이 아닐 수 있으므로(예: kor 풀의 226490) 여기서 따로 담아
+    가격 캐시에 넣는다. 넣지 않으면 백테스트가 벤치마크를 못 읽는다.
+
+    키 해석은 ``get_pool_benchmark_ticker`` 한 곳에서만 한다 — 예전에 여기서 직접
+    ``settings.get("benchmark")`` (소문자)로 읽어 항상 빈 목록이 나오던 버그가 있었다.
+    """
+    from utils.pool_settings_store import get_pool_benchmark_ticker
 
     try:
         if target_id not in list_available_ticker_types():
             return []
-        settings = get_ticker_type_settings(target_id)
-
-        # 'benchmark' (dict, single) 처리
-        single_bm = settings.get("benchmark")
-        if single_bm and isinstance(single_bm, dict):
-            ticker = str(single_bm.get("ticker") or "").strip().upper()
-            if ticker:
-                tickers.add(ticker)
-
-        return sorted(tickers)
+        ticker = get_pool_benchmark_ticker(get_ticker_type_settings(target_id))
     except Exception:
-        pass
-
-    return sorted(tickers)
+        get_app_logger().exception("벤치마크 티커 수집 실패: %s", target_id)
+        return []
+    return [ticker] if ticker else []
 
 
 def _build_parser() -> argparse.ArgumentParser:

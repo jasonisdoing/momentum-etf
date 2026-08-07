@@ -151,18 +151,22 @@ def _enqueue_from_schedule(job_name: str, script_path: str) -> None:
         log.exception("스케줄 enqueue 실패: %s — %s", job_name, exc)
 
 
-def _run_subprocess(job_name: str, script_path: str, item_id: Any = None) -> int:
+def _run_subprocess(job_name: str, script_path: str, arguments: list[str] | None = None, item_id: Any = None) -> int:
     """run_batch.py 래퍼를 통해 배치 1건 실행하고 exit code 반환."""
-    log.info("배치 시작: %s (%s)", job_name, script_path)
+    log.info("배치 시작: %s (%s, args=%s)", job_name, script_path, arguments)
     env = os.environ.copy()
     env.setdefault("APP_TYPE", "Local")
     env.setdefault("PYTHONUNBUFFERED", "1")
     sys.path.insert(0, str(ROOT_DIR))
     from utils.batch_queue import is_cancel_requested
 
+    cmd = [str(PYTHON_BIN), str(RUN_BATCH), job_name, str(PYTHON_BIN), script_path]
+    if arguments:
+        cmd.extend(arguments)
+
     try:
         proc = subprocess.Popen(
-            [str(PYTHON_BIN), str(RUN_BATCH), job_name, str(PYTHON_BIN), script_path],
+            cmd,
             cwd=str(ROOT_DIR),
             env=env,
         )
@@ -226,7 +230,8 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
             item_id = item["_id"]
             job_name = item["job_name"]
             script_path = item["script_path"]
-            log.info("큐 → 실행: %s (id=%s)", job_name, item_id)
+            arguments = item.get("arguments")
+            log.info("큐 → 실행: %s (id=%s, args=%s)", job_name, item_id, arguments)
 
             # heartbeat 갱신 스레드 — 30초마다
             hb_stop = threading.Event()
@@ -243,7 +248,7 @@ def _queue_worker_loop(stop_event: threading.Event) -> None:
             hb_thread.start()
 
             try:
-                exit_code = _run_subprocess(job_name, script_path, item_id)
+                exit_code = _run_subprocess(job_name, script_path, arguments, item_id)
                 mark_done(item_id, exit_code)
             except Exception as exc:
                 log.exception("큐 항목 처리 실패: %s — %s", job_name, exc)

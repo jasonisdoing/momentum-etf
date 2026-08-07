@@ -20,7 +20,6 @@ venv/
 # 로그/데이터 (앱 런타임 생성물)
 logs/
 mongo-data/
-.backups/
 backups/
 tmp/
 # 주의: data/ 는 거래일 캘린더 등 정적 데이터라 포함시켜야 함

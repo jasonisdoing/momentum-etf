@@ -33,7 +33,7 @@ class StockStats(NamedTuple):
 
 def load_market_data(
     ticker_type: str,
-) -> tuple[pd.DataFrame, dict[str, StockStats], int, int, list[str], list[str]]:
+) -> tuple[pd.DataFrame, dict[str, StockStats], int, list[str], list[str]]:
     """종목풀의 전체 종목 종가 데이터와 통계를 로드합니다."""
     ticker_settings = get_ticker_type_settings(ticker_type)
     country_code = str(ticker_settings.get("country_code") or "").strip().lower()
@@ -41,10 +41,7 @@ def load_market_data(
         raise ValueError(f"종목풀 '{ticker_type}'의 country_code가 비어 있습니다.")
 
     ma_rules = get_ticker_type_ma_rules(ticker_type)
-    ma_month = max(int(rule["ma_months"]) for rule in ma_rules)
-
-    # 1개월 = 20거래일 기준
-    lookback_days = int(ma_month * 20)
+    lookback_days = max(int(rule["long_ma_days"]) for rule in ma_rules)
 
     etfs = get_etfs(ticker_type)
     tickers = sorted({str(etf["ticker"]).strip().upper() for etf in etfs if etf.get("ticker")})
@@ -116,7 +113,7 @@ def load_market_data(
 
     prices_df = pd.DataFrame(close_dict)
     prices_df = prices_df.dropna(how="all")
-    return prices_df, stats_dict, lookback_days, ma_month, missing_tickers, short_tickers
+    return prices_df, stats_dict, lookback_days, missing_tickers, short_tickers
 
 
 def build_similarity_groups(
@@ -199,13 +196,12 @@ def print_report(
     threshold: float,
     total_tickers: int,
     lookback_days: int,
-    ma_month: int,
 ) -> None:
     """상관관계 및 수익률 비교 리포트를 출력합니다."""
     print()
     print(f"{'=' * 70}")
     print(f"  📊 상관관계 유사 그룹 분석: {ticker_type.upper()}")
-    print(f"  분석 기간: 최근 {ma_month}개월 ({lookback_days} 거래일) | 대상 종목: {total_tickers}개")
+    print(f"  분석 기간: 최근 {lookback_days} 거래일 | 대상 종목: {total_tickers}개")
     print(f"  기준: 상관계수 ≥ {threshold}")
     print(f"{'=' * 70}")
 
@@ -273,7 +269,7 @@ def main() -> None:
     threshold = args.threshold
 
     print(f"\n[{ticker_type.upper()}] 가격 데이터 로딩 중...")
-    prices_df, stats, lookback_days, ma_month, missing, short = load_market_data(ticker_type)
+    prices_df, stats, lookback_days, missing, short = load_market_data(ticker_type)
 
     if missing:
         print(f"\n[오류] 데이터가 없는 {len(missing)}개 종목이 발견되었습니다:")
@@ -299,7 +295,6 @@ def main() -> None:
         threshold=threshold,
         total_tickers=len(prices_df.columns),
         lookback_days=lookback_days,
-        ma_month=ma_month,
     )
 
 

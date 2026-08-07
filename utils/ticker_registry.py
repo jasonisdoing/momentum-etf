@@ -20,7 +20,7 @@ def _normalize_code(value: Any, fallback: str) -> str:
 
 
 def load_ticker_type_configs() -> list[dict[str, Any]]:
-    """pools.json에 정의된 종목풀 정보를 정렬된 리스트로 반환합니다."""
+    """DB(pool_settings)에 정의된 활성 종목풀 정보를 정렬된 리스트로 반환합니다."""
 
     configs: list[dict[str, Any]] = []
 

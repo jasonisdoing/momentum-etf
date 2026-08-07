@@ -5,14 +5,11 @@ import { jsonNoStore } from "@/lib/no-store-response";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const maType = url.searchParams.get("ma_type") ?? "ALMA";
-  const maMonths = url.searchParams.get("ma_months") ?? "4";
+export async function GET() {
 
   try {
     const data = await fetchFastApiJson<unknown>(
-      `/internal/market-trend?ma_type=${encodeURIComponent(maType)}&ma_months=${encodeURIComponent(maMonths)}`,
+      "/internal/market-trend",
     );
     return jsonNoStore(data as Record<string, unknown>);
   } catch (error) {

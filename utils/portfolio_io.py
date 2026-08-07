@@ -6,7 +6,7 @@ import pandas as pd
 from bson import ObjectId
 
 from services.price_service import get_exchange_rates, get_realtime_snapshot
-from utils.data_loader import get_latest_trading_day
+from utils.asx_ticker import ensure_asx_prefix
 from utils.db_manager import get_db_connection
 from utils.logger import get_app_logger
 from utils.settings_loader import get_account_settings
@@ -29,8 +29,15 @@ def _round_snapshot_money(value: Any) -> int:
 
 
 def _resolve_snapshot_date() -> str:
-    """자산 스냅샷은 시장 거래일이 아니라 KST 달력 날짜를 사용한다."""
-    return _now_kst().strftime("%Y-%m-%d")
+    """자산 스냅샷의 기준일 — 일별 집계(`daily_fund_data`)와 같은 거래일을 쓴다.
+
+    예전에는 KST 달력 날짜였다. 그러면 토요일에 스냅샷만 새 행이 생기는데 집계는
+    금요일 행을 계속 갱신해서, `/assets` 의 금일 손익이 합계(집계 기준)와
+    계좌별 값(스냅샷 기준)이 서로 다른 구간을 비교하게 됐다.
+    """
+    from utils.data_loader import resolve_active_trading_date
+
+    return resolve_active_trading_date()
 
 
 class MissingPriceCacheError(RuntimeError):
@@ -43,44 +50,62 @@ class MissingPriceCacheError(RuntimeError):
         super().__init__(f"[{self.ticker_type}] 가격 캐시 누락: {joined}")
 
 
+def load_holding_accounts_by_ticker(country_code: str | None = None) -> dict[str, list[str]]:
+    """실보유 티커 → 그 종목을 보유한 계좌명 목록.
+
+    계좌 순서는 ``list_available_accounts()`` 순서를 따른다.
+    country_code를 지정하면 해당 국가 계좌만 본다.
+    """
+    from utils.settings_loader import get_account_settings, list_available_accounts
+
+    accounts_by_ticker: dict[str, list[str]] = {}
+    for t_id in list_available_accounts():
+        account_settings = get_account_settings(t_id)
+        account_country = str(account_settings.get("country_code") or "").strip().lower()
+        if country_code is not None and account_country != country_code.strip().lower():
+            continue
+        snapshot = load_portfolio_master(t_id)
+        if not snapshot:
+            continue
+
+        account_name = str(account_settings.get("name") or t_id)
+        for holding in snapshot.get("holdings", []):
+            ticker = str(holding.get("ticker") or "").strip().upper()
+            if account_country == "au" and ticker:
+                ticker = ensure_asx_prefix(ticker)
+            qty = float(holding.get("quantity") or 0)
+            if ticker and qty > 0:
+                names = accounts_by_ticker.setdefault(ticker, [])
+                if account_name not in names:
+                    names.append(account_name)
+
+    return accounts_by_ticker
+
+
 def load_all_holding_tickers(country_code: str | None = None) -> set[str]:
     """전체 계좌의 실보유 티커 집합을 반환한다.
 
     country_code를 지정하면 해당 국가 계좌의 보유 종목만 반환한다.
     """
-    from utils.settings_loader import list_available_accounts, get_account_settings
-
-    held_tickers: set[str] = set()
-    for t_id in list_available_accounts():
-        account_settings = get_account_settings(t_id)
-        account_country = str(account_settings.get("country_code") or "").strip().lower()
-        if country_code is not None:
-            if account_country != country_code.strip().lower():
-                continue
-        snapshot = load_portfolio_master(t_id)
-        if not snapshot:
-            continue
-
-        for holding in snapshot.get("holdings", []):
-            ticker = str(holding.get("ticker") or "").strip().upper()
-            if account_country == "au" and ticker and not ticker.startswith("ASX:"):
-                ticker = f"ASX:{ticker}"
-            qty = float(holding.get("quantity") or 0)
-            if ticker and qty > 0:
-                held_tickers.add(ticker)
-
-    return held_tickers
+    return set(load_holding_accounts_by_ticker(country_code))
 
 
 def _apply_realtime_overlay_to_holdings(
     df_holdings: pd.DataFrame,
     country_code: str,
     realtime_data: dict[str, dict[str, float]] | None = None,
+    only_tickers: set[str] | None = None,
 ) -> pd.DataFrame:
-    """보유 종목 테이블에 실시간 현재가/NAV/괴리율 등을 덮어쓴다."""
+    """보유 종목 테이블에 실시간 현재가/NAV/괴리율 등을 덮어쓴다.
+
+    only_tickers 를 주면 그 티커들만 해당 시장 API 로 조회·적용한다
+    (한 계좌에 여러 시장 종목이 섞여 있을 때 시장별로 나눠 호출하기 위함).
+    """
     tickers = [
         str(ticker or "").strip().upper() for ticker in df_holdings.get("ticker", []) if str(ticker or "").strip()
     ]
+    if only_tickers is not None:
+        tickers = [ticker for ticker in tickers if ticker in only_tickers]
     if not tickers:
         return df_holdings
 
@@ -149,50 +174,59 @@ def load_real_holdings_table(
     if db is not None and not df_holdings.empty:
         all_tickers = df_holdings["ticker"].unique().tolist()
 
-        bucket_map = {}
-        name_map = {}
-        type_map = {}
-        is_etf_map = {}
-        has_holdings_map = {}
+        # 같은 티커가 여러 시장(stock_meta 문서 여러 개, 예: 미국·호주 IOO)일 수 있으므로 티커별로 문서를 모은다.
+        docs_by_ticker: dict[str, list[dict[str, Any]]] = {}
         cursor = db.stock_meta.find(
             {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
-            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1, "has_holdings": 1}
+            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1}
         )
         for doc in cursor:
-            t = doc["ticker"]
-            if t not in bucket_map:
-                bucket_map[t] = doc.get("bucket", 1)
-            if t not in name_map:
-                name_map[t] = doc.get("name")
-            if t not in type_map:
-                type_map[t] = doc.get("ticker_type")
-            if t not in is_etf_map:
-                is_etf_map[t] = doc.get("is_etf", False)
-            if t not in has_holdings_map:
-                has_holdings_map[t] = doc.get("has_holdings", False)
+            docs_by_ticker.setdefault(doc["ticker"], []).append(doc)
 
-        cache_cursor = db.stock_cache_meta.find(
-            {"ticker": {"$in": all_tickers}},
-            {"ticker": 1, "holdings_cache.items": 1},
-        )
-        for doc in cache_cursor:
-            ticker = str(doc.get("ticker") or "").strip().upper()
-            if not ticker:
-                continue
-            items = (((doc.get("holdings_cache") or {}).get("items")) or [])
-            has_items = bool(items)
-            if has_items:
-                has_holdings_map[ticker] = True
+        # 종목풀(ticker_type) → 통화 매핑 캐시. 보유의 통화로 올바른 시장 문서를 고르기 위해 사용.
+        from utils.cash_model import currency_for_country
+        from utils.settings_loader import get_ticker_type_settings
 
-        # 데이터 업데이트 (종목풀 정보 우선 적용)
-        df_holdings["bucket"] = df_holdings["ticker"].map(lambda t: bucket_map.get(t, 1))
-        df_holdings["name"] = df_holdings.apply(
-            lambda row: name_map.get(row["ticker"], row.get("name", row["ticker"])),
-            axis=1
-        )
-        df_holdings["ticker_type"] = df_holdings["ticker"].map(lambda t: type_map.get(t, ""))
-        df_holdings["is_etf"] = df_holdings["ticker"].map(lambda t: is_etf_map.get(t, False))
-        df_holdings["has_holdings"] = df_holdings["ticker"].map(lambda t: has_holdings_map.get(t, False))
+        _tt_currency: dict[str, str] = {}
+
+        def _ticker_type_currency(ticker_type: object) -> str:
+            key = str(ticker_type or "").strip().lower()
+            if key not in _tt_currency:
+                try:
+                    country = str(get_ticker_type_settings(key).get("country_code") or "").strip().lower()
+                except Exception:
+                    country = ""
+                _tt_currency[key] = currency_for_country(country)
+            return _tt_currency[key]
+
+        def _pick_meta_doc(ticker: str, currency: object) -> dict[str, Any] | None:
+            docs = docs_by_ticker.get(ticker) or []
+            if not docs:
+                return None
+            if len(docs) == 1:
+                return docs[0]
+            # 여러 시장 — 보유 통화와 일치하는 시장 문서를 우선(없으면 첫 문서).
+            cur = str(currency or "").strip().upper()
+            for doc in docs:
+                if _ticker_type_currency(doc.get("ticker_type")) == cur:
+                    return doc
+            return docs[0]
+
+        picked_docs = [
+            _pick_meta_doc(str(row.get("ticker") or ""), row.get("currency"))
+            for _, row in df_holdings.iterrows()
+        ]
+
+        # 데이터 업데이트 (종목풀 정보 우선 적용, 다시장은 보유 통화 기준 문서 사용)
+        df_holdings["bucket"] = [(doc or {}).get("bucket", 1) for doc in picked_docs]
+        df_holdings["name"] = [
+            ((doc.get("name") if doc else None) or orig_name or ticker)
+            for doc, orig_name, ticker in zip(
+                picked_docs, list(df_holdings.get("name", [])), list(df_holdings["ticker"])
+            )
+        ]
+        df_holdings["ticker_type"] = [(doc.get("ticker_type") if doc else "") or "" for doc in picked_docs]
+        df_holdings["is_etf"] = [bool(doc.get("is_etf", False)) if doc else False for doc in picked_docs]
 
         # 계좌의 country_code 찾아와서 부여
         try:
@@ -239,10 +273,34 @@ def load_real_holdings_table(
     # DB 의 first_buy_date / last_buy_date 필드는 그대로 유지.
 
     # Fetch prices from price cache and exchange rates
-    from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
+    # 다시장 티커(예: 미국·호주 IOO)가 올바른 시장 가격을 쓰도록, 보유별 ticker_type 의 캐시를 우선 사용한다.
+    # (전체 종목풀에서 먼저 걸리는 캐시를 쓰면 호주/미국이 뒤바뀔 수 있다.)
+    from utils.cache_utils import (
+        load_cached_frames_bulk_from_all_ticker_types,
+        load_cached_frames_bulk_from_ticker_types,
+    )
 
     tickers = df_holdings["ticker"].tolist()
-    cached_frames = load_cached_frames_bulk_from_all_ticker_types(tickers)
+    tickers_by_type: dict[str, list[str]] = {}
+    for _, row in df_holdings.iterrows():
+        ticker_type = str(row.get("ticker_type") or "").strip().lower()
+        ticker_upper = str(row.get("ticker") or "").strip().upper()
+        if ticker_type and ticker_upper:
+            tickers_by_type.setdefault(ticker_type, []).append(ticker_upper)
+
+    cached_frames: dict[str, pd.DataFrame] = {}
+    for ticker_type, type_tickers in tickers_by_type.items():
+        fetched = load_cached_frames_bulk_from_ticker_types([ticker_type], type_tickers)
+        for ticker_key, frame in fetched.items():
+            cached_frames.setdefault(str(ticker_key).strip().upper(), frame)
+
+    # ticker_type 이 없거나 그 종목풀 캐시에 없던 티커는 전체 종목풀에서 폴백 조회.
+    missing_for_cache = [tk for tk in tickers if str(tk).strip().upper() not in cached_frames]
+    if missing_for_cache:
+        fallback = load_cached_frames_bulk_from_all_ticker_types(missing_for_cache)
+        for ticker_key, frame in fallback.items():
+            cached_frames.setdefault(str(ticker_key).strip().upper(), frame)
+
     missing_price_tickers: set[str] = set()
 
     def _get_current_price(row):
@@ -376,16 +434,22 @@ def load_real_holdings_table(
     if strict_price_cache and missing_price_tickers:
         raise MissingPriceCacheError(account_id, sorted(missing_price_tickers))
 
-    try:
-        account_settings = get_account_settings(account_id)
-        account_country = str(account_settings.get("country_code") or "").strip().lower()
-    except Exception:
-        account_country = ""
-    if account_country in ("kor", "au"):
+    # 실시간 오버레이 — 계좌 국가가 아니라 "보유 종목의 통화" 기준으로 시장별 API 를 나눠 호출한다.
+    # kor 계좌가 미국 종목을 담아도 토스 실시간(프리장·애프터 포함)이 적용된다.
+    country_by_currency = {"KRW": "kor", "USD": "us", "AUD": "au"}
+    tickers_by_market: dict[str, set[str]] = {}
+    for _, holding_row in df_holdings.iterrows():
+        market = country_by_currency.get(str(holding_row.get("currency") or "").strip().upper())
+        ticker_key = str(holding_row.get("ticker") or "").strip().upper()
+        # IS 는 시장에 없는 가상 티커 — 가격·일간은 위에서 VGS 프록시로 이미 채웠다.
+        if market and ticker_key and ticker_key != "IS":
+            tickers_by_market.setdefault(market, set()).add(ticker_key)
+    for market, market_tickers in tickers_by_market.items():
         df_holdings = _apply_realtime_overlay_to_holdings(
             df_holdings,
-            country_code=account_country,
-            realtime_data=preloaded_kor_realtime_snapshot if account_country == "kor" else None,
+            country_code=market,
+            realtime_data=preloaded_kor_realtime_snapshot if market == "kor" else None,
+            only_tickers=market_tickers,
         )
 
     multiplier = df_holdings["currency"].apply(_get_multiplier)
@@ -406,54 +470,73 @@ def load_real_holdings_table(
         intl_princi_krw = intl_princi * aud_krw
         intl_val_krw = intl_val * aud_krw
 
-        # 전일 intl_shares_value 로드하여 일간(%) 계산
-        intl_daily_pct = None
+        # IS 를 실제 VGS 보유처럼 표시한다 — 수량 = 평가액 ÷ VGS 가격, 일간(%) = VGS 변동률.
+        # (수량 × 현재가 = 입력한 평가액 항등식이 유지되므로 평가액·손익·수익률은 변하지 않는다)
+        # VGS 가격은 실시간(QuoteAPI) 우선, 실패 시 aus 캐시 종가. 둘 다 없으면 기존 방식
+        # (수량 1, 현재가 = 평가액, 일간 미표시)으로 표시한다 — 임의 값을 만들지 않는다.
+        is_proxy_ticker = "ASX:VGS"
+        vgs_price = None
+        vgs_daily_pct = None
         try:
-            from utils.db_manager import get_db_connection as _get_db
-            _db = _get_db()
-            if _db is not None:
-                today = _resolve_snapshot_date()
-                prev_snap = _db.daily_snapshots.find_one(
-                    {
-                        "snapshot_date": {"$lt": today},
-                        "accounts": {
-                            "$elemMatch": {
-                                "account_id": "aus_account",
-                                "intl_shares_value": {"$exists": True, "$type": "number", "$gt": 0}
-                            }
-                        }
-                    },
-                    sort=[("snapshot_date", -1)],
-                )
-                if prev_snap:
-                    for prev_acc in prev_snap.get("accounts", []):
-                        if prev_acc.get("account_id") == "aus_account":
-                            prev_intl = prev_acc.get("intl_shares_value")
-                            if prev_intl and float(prev_intl) > 0:
-                                intl_daily_pct = (intl_val - float(prev_intl)) / float(prev_intl) * 100.0
-                            break
-        except Exception:
-            pass
+            proxy_quote = get_realtime_snapshot("au", [is_proxy_ticker]).get(is_proxy_ticker) or {}
+            if proxy_quote.get("nowVal"):
+                vgs_price = float(proxy_quote["nowVal"])
+                if proxy_quote.get("changeRate") is not None:
+                    vgs_daily_pct = float(proxy_quote["changeRate"])
+        except Exception as exc:
+            logger.warning("IS 프록시(VGS) 실시간 조회 실패: %s", exc)
+        if vgs_price is None:
+            try:
+                from utils.cache_utils import load_cached_frame
+
+                vgs_frame = load_cached_frame("aus", is_proxy_ticker)
+                closes = pd.to_numeric(vgs_frame["Close"], errors="coerce").dropna()
+                if not closes.empty:
+                    vgs_price = float(closes.iloc[-1])
+                    if len(closes) > 1 and float(closes.iloc[-2]) > 0:
+                        vgs_daily_pct = (vgs_price / float(closes.iloc[-2]) - 1.0) * 100.0
+            except Exception as exc:
+                logger.warning("IS 프록시(VGS) 캐시 조회 실패: %s", exc)
+
+        if vgs_price is not None and vgs_price > 0 and intl_val > 0:
+            is_quantity = intl_val / vgs_price
+            is_price = vgs_price
+            is_avg_price = intl_princi / is_quantity
+            is_daily_pct = vgs_daily_pct
+        else:
+            is_quantity = 1.0
+            is_price = intl_val
+            is_avg_price = intl_princi
+            is_daily_pct = None
 
         # We append a row to df_holdings
         pseudo_row = {
             "ticker": "IS",
-            "name": "International Shares",
-            "quantity": 1,
-            "average_buy_price": intl_princi,
+            # 표시명은 가격 프록시(VGS)의 정식 명칭으로 통일한다 — 내부 티커·고정자산 역할은 IS 유지.
+            "name": "Vanguard MSCI Index International Shares ETF",
+            "quantity": is_quantity,
+            "average_buy_price": is_avg_price,
             "currency": "AUD",
             "bucket": 2,  # "2. 시장지수"
             "first_buy_date": pd.Timestamp.now().normalize(),
-            "현재가": intl_val,
+            "현재가": is_price,
             "매입금액(KRW)": intl_princi_krw,
             "평가금액(KRW)": intl_val_krw,
-            "일간(%)": intl_daily_pct,
+            "일간(%)": is_daily_pct,
             "is_etf": False,
-            "has_holdings": False,
             "country_code": "au",
             "ticker_type": "aus",
         }
+        # IS 위치: 저장된 순서(intl_shares_sort_order)가 있으면 그 자리에, 없으면 맨 뒤.
+        # 실보유 sort_order 는 0..n-1 정수이므로 (위치 - 0.5) 로 끼워 넣은 뒤 재정렬한다.
+        stored_is_order = snapshot.get("intl_shares_sort_order")
+        pseudo_row["sort_order"] = (
+            float(stored_is_order) - 0.5 if stored_is_order is not None else float(len(df_holdings))
+        )
         df_holdings = pd.concat([df_holdings, pd.DataFrame([pseudo_row])], ignore_index=True)
+        df_holdings["sort_order"] = pd.to_numeric(df_holdings["sort_order"], errors="coerce").fillna(0)
+        df_holdings = df_holdings.sort_values("sort_order", kind="stable").reset_index(drop=True)
+        df_holdings["sort_order"] = range(len(df_holdings))
         # Ensure value columns are numeric after concat
         for col in ["수량", "평균 매입가", "매입금액(KRW)", "평가금액(KRW)"]:
             if col in df_holdings.columns:
@@ -485,7 +568,7 @@ def load_real_holdings_table(
     total_assets = vals_for_sum.sum() + cash_val
 
     if total_assets > 0:
-        df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(1)
+        df_holdings["weight_pct"] = (vals_for_sum / total_assets * 100).round(2)
     else:
         df_holdings["weight_pct"] = 0.0
 
@@ -499,9 +582,19 @@ def load_real_holdings_table(
         if col in df_holdings.columns:
             df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").round(2)
 
+    # 가격 반올림 자리수는 계좌가 아니라 "종목 통화"별로 정한다(다통화 계좌 지원).
+    # USD/AUD 4자리, KRW 0자리. 통화 컬럼(환종)이 없으면 계좌 기준(price_digits)으로 폴백.
+    if "환종" in df_holdings.columns:
+        row_digits = df_holdings["환종"].astype(str).str.upper().map(lambda cur: 4 if cur in ("USD", "AUD") else 0)
+    else:
+        row_digits = pd.Series(price_digits, index=df_holdings.index)
     for col in price_cols:
         if col in df_holdings.columns:
-            df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").round(price_digits)
+            numeric = pd.to_numeric(df_holdings[col], errors="coerce")
+            df_holdings[col] = [
+                round(float(value), int(digits)) if pd.notna(value) else value
+                for value, digits in zip(numeric, row_digits)
+            ]
 
     for col in int_cols:
         if col in df_holdings.columns:
@@ -515,9 +608,10 @@ def load_real_holdings_table(
     metrics_rows = [_build_cached_metrics(ticker) for ticker in df_holdings["티커"].tolist()]
     metrics_df = pd.DataFrame(metrics_rows)
     for col in metrics_df.columns:
-        if col == "일간(%)":
-            # 실시간 오버레이가 이미 값을 넣었을 수 있으므로, 비어있는 경우에만 캐시값으로 채움
-            df_holdings[col] = df_holdings.get(col, pd.Series(dtype=float)).fillna(metrics_df[col])
+        if col == "일간(%)" and col in df_holdings.columns:
+            # 실시간 오버레이가 이미 값을 넣었을 수 있으므로, 비어있는 경우에만 캐시값으로 채움.
+            # (컬럼이 없을 때 df.get() 의 빈 Series 에 fillna 하면 전부 NaN 이 되는 버그가 있었다)
+            df_holdings[col] = df_holdings[col].fillna(metrics_df[col])
         else:
             df_holdings[col] = metrics_df[col]
 
@@ -566,6 +660,8 @@ def load_portfolio_master(account_id: str) -> dict[str, Any] | None:
                 "intl_shares_value": intl_val,
                 "intl_shares_change": intl_change,
                 "holdings": acc.get("holdings", []),
+                "asset_helper": acc.get("asset_helper"),
+                "intl_shares_sort_order": acc.get("intl_shares_sort_order"),
                 "updated_at": acc.get("updated_at"),
             }
     return None
@@ -580,6 +676,7 @@ def save_portfolio_master(
     cash_currency: str | None = None,
     intl_shares_value: float | None = None,
     intl_shares_change: float | None = None,
+    intl_shares_sort_order: int | None = None,
 ) -> bool:
     """Save/Update one account's balance within the consolidated portfolio_master document."""
     db = get_db_connection()
@@ -608,6 +705,8 @@ def save_portfolio_master(
                     acc["intl_shares_value"] = float(intl_shares_value)
                 if intl_shares_change is not None:
                     acc["intl_shares_change"] = float(intl_shares_change)
+                if intl_shares_sort_order is not None:
+                    acc["intl_shares_sort_order"] = int(intl_shares_sort_order)
 
                 # Enforce integer quantity
                 import math
@@ -642,6 +741,8 @@ def save_portfolio_master(
                 new_acc["intl_shares_value"] = float(intl_shares_value)
             if intl_shares_change is not None:
                 new_acc["intl_shares_change"] = float(intl_shares_change)
+            if intl_shares_sort_order is not None:
+                new_acc["intl_shares_sort_order"] = int(intl_shares_sort_order)
             accounts.append(new_acc)
 
         db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
@@ -649,6 +750,55 @@ def save_portfolio_master(
     except Exception as e:
         logger.error(f"Error saving portfolio master: {e}")
         return False
+
+
+def update_account_asset_helper(
+    account_id: str,
+    *,
+    target_ratio_by_ticker: dict[str, float],
+    helper_settings: dict[str, Any],
+) -> None:
+    """자산 헬퍼 데이터를 portfolio_master 에 저장한다 (단일 컬렉션 원칙).
+
+    - 종목별 목표비중: 해당 계좌 보유 항목의 ``target_ratio`` 필드로 저장.
+      맵에 없는 보유 항목은 필드를 제거한다(미설정 명시 — 임의 0 보정 금지).
+    - 계좌 단위 설정(weight_mode·백테스트 등): 계좌 객체의 ``asset_helper`` 필드로 저장.
+
+    맵의 티커가 보유 목록에 없으면 에러를 낸다(fail loud — 종목 목록의 소스는 보유 목록이다).
+    """
+    from utils.asx_ticker import strip_asx_prefix
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("MongoDB 연결 실패 — portfolio_master 를 저장할 수 없습니다.")
+
+    doc = db.portfolio_master.find_one({"master_id": "GLOBAL"})
+    if not doc:
+        raise RuntimeError("portfolio_master 문서가 없습니다.")
+
+    accounts = doc.get("accounts", [])
+    account = next((a for a in accounts if str(a.get("account_id")) == str(account_id)), None)
+    if account is None:
+        raise RuntimeError(f"portfolio_master 에 계좌가 없습니다: {account_id}")
+
+    # 비교 키는 ASX: 접두사를 벗겨 통일한다(저장 표기는 보유 항목 원본을 유지).
+    normalized_ratios = {strip_asx_prefix(t): float(r) for t, r in target_ratio_by_ticker.items()}
+    holdings = account.get("holdings", [])
+    holding_keys = {strip_asx_prefix(str(h.get("ticker") or "")) for h in holdings}
+    unmatched = sorted(set(normalized_ratios) - holding_keys)
+    if unmatched:
+        raise RuntimeError(f"보유 목록에 없는 종목의 비중은 저장할 수 없습니다: {', '.join(unmatched)}")
+
+    for holding in holdings:
+        key = strip_asx_prefix(str(holding.get("ticker") or ""))
+        if key in normalized_ratios:
+            holding["target_ratio"] = normalized_ratios[key]
+        else:
+            holding.pop("target_ratio", None)
+
+    account["asset_helper"] = dict(helper_settings)
+    account["updated_at"] = _now_kst()
+    db.portfolio_master.update_one({"master_id": "GLOBAL"}, {"$set": {"accounts": accounts}}, upsert=True)
 
 
 def save_daily_snapshot(

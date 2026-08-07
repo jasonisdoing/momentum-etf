@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 
 from services.price_service import get_exchange_rate_series
 from utils.account_registry import load_account_configs
-from utils.data_loader import get_trading_days_any
 from utils.db_manager import get_db_connection
 from utils.normalization import to_iso_string
 from utils.portfolio_io import load_portfolio_master, load_real_holdings_table
@@ -83,13 +82,13 @@ def _get_now_kst() -> datetime.datetime:
 
 
 def _get_active_daily_date() -> str:
-    """오늘 이하의 마지막 한국/호주 합집합 거래일을 반환한다."""
-    today = _get_now_kst().date()
-    search_start = today - datetime.timedelta(days=370)
-    trading_days = get_trading_days_any(str(search_start), str(today), ["kor", "au"])
-    if not trading_days:
-        raise RuntimeError("오늘 이하의 한국/호주 거래일을 찾지 못했습니다.")
-    return max(day.date().isoformat() for day in trading_days)
+    """오늘 이하의 마지막 한국/호주 합집합 거래일을 반환한다.
+
+    자산 스냅샷(`daily_snapshots`)과 같은 기준을 써야 해서 공용 함수를 부른다.
+    """
+    from utils.data_loader import resolve_active_trading_date
+
+    return resolve_active_trading_date()
 
 
 def _to_int(value: object) -> int:
@@ -248,6 +247,13 @@ def _get_live_exchange_rate() -> float:
     return float(series.iloc[-1])
 
 
+# 총자산 급변 허용 한도(%) — 직전 기록 대비 이 비율을 넘는 변동(입출금 제외)은
+# 캐시/조회 사고로 간주하고 일별 집계 기록을 거부한다.
+# 2026-07-24 사고(해외 평가액 누락)가 -16.6% 였으므로 그보다 낮게 잡는다.
+# (현금 비중이 높아 정상 일일 변동은 1% 미만 — 10% 면 여유가 충분하다)
+DAILY_TOTAL_JUMP_GUARD_PCT = 10.0
+
+
 def _collect_live_daily_summary() -> dict[str, Any]:
     total_assets = 0.0
     total_purchase = 0.0
@@ -263,6 +269,7 @@ def _collect_live_daily_summary() -> dict[str, Any]:
         "4. 대체헷지": 0.0,
     }
     all_missing_tickers: list[str] = []
+    all_zero_valuation_tickers: list[str] = []
 
     for account in load_account_configs():
         if not account.get("settings", {}).get("show_hold", True):
@@ -275,12 +282,26 @@ def _collect_live_daily_summary() -> dict[str, Any]:
 
         holdings_df = load_real_holdings_table(account_id)
         if holdings_df is None or holdings_df.empty:
+            # 원장에는 보유가 있는데 테이블이 비면 조회 실패다 — 평가액 0 으로 기록하면
+            # 총자산이 내려앉으므로 집계를 중단한다 (2026-07-24 캐시 사고 재발 방지).
+            master_holding_count = len((master_data or {}).get("holdings") or [])
+            if master_holding_count > 0:
+                raise RuntimeError(
+                    f"'{account_id}' 계좌 보유 {master_holding_count}종목의 조회가 실패해 일별 집계를 중단합니다."
+                )
             account_purchase = 0.0
             account_valuation = 0.0
         else:
             missing = holdings_df.attrs.get("missing_price_tickers") or []
             if missing:
                 all_missing_tickers.extend(missing)
+            # 수량이 있는데 평가금액이 0 이하인 종목 = 가격을 못 얻은 종목.
+            # (캐시 문서는 있으나 값이 비정상인 경우 — missing_price_tickers 가드가 못 잡는 구멍)
+            zero_rows = holdings_df[
+                (holdings_df["수량"].fillna(0) > 0) & (holdings_df["평가금액(KRW)"].fillna(0) <= 0)
+            ]
+            if not zero_rows.empty:
+                all_zero_valuation_tickers.extend(str(t) for t in zero_rows["티커"].tolist())
 
             account_purchase = float(holdings_df["매입금액(KRW)"].sum())
             account_valuation = float(holdings_df["평가금액(KRW)"].sum())
@@ -300,6 +321,12 @@ def _collect_live_daily_summary() -> dict[str, Any]:
         raise RuntimeError(
             f"가격 캐시가 없는 종목이 있어 일별 집계를 중단합니다: {joined}. "
             "종목 관리에서 해당 종목의 메타/캐시 새로고침을 실행하세요."
+        )
+    if all_zero_valuation_tickers:
+        joined = ", ".join(all_zero_valuation_tickers)
+        raise RuntimeError(
+            f"평가금액을 계산하지 못한 종목이 있어 일별 집계를 중단합니다: {joined}. "
+            "가격 캐시 상태를 확인한 뒤 다시 실행하세요."
         )
 
     if total_assets > 0:
@@ -469,11 +496,42 @@ def remove_future_daily_rows() -> dict[str, int]:
     return {"deleted": int(deleted)}
 
 
+def _check_total_jump_guard(
+    new_total: float, baseline_total: float | None, deposit_withdrawal: float
+) -> None:
+    """총자산 급변 서킷브레이커 — 직전 기록 대비 허용 범위를 벗어나면 기록을 거부한다.
+
+    2026-07-24 캐시 사고처럼 조회 실패로 평가액이 통째로 빠진 값이 통계에 들어가는 것을
+    마지막 단계에서 막는다. 입출금(deposit_withdrawal) 반영분은 정상 변동으로 제외한다.
+    진짜 폭락/급등이면 로그를 확인하고 수동으로 기록하면 된다.
+    """
+    if baseline_total is None or baseline_total <= 0:
+        return
+    jump_pct = abs(new_total - baseline_total - deposit_withdrawal) / baseline_total * 100.0
+    if jump_pct > DAILY_TOTAL_JUMP_GUARD_PCT:
+        raise RuntimeError(
+            f"총자산이 직전 기록 대비 {jump_pct:.1f}% 변동해 일별 집계 기록을 거부합니다 "
+            f"(허용 {DAILY_TOTAL_JUMP_GUARD_PCT:.0f}%, 직전 {baseline_total:,.0f} → 신규 {new_total:,.0f}). "
+            "가격 캐시 상태를 확인하세요. 실제 급변이면 수동으로 기록하세요."
+        )
+
+
 def aggregate_today_daily_data() -> dict[str, str]:
     db = _require_db()
     target_date = _get_active_daily_date()
     update_doc = _collect_live_daily_summary()
     update_doc["updated_at"] = _get_now_kst()
+
+    # 서킷브레이커 기준: 대상일 직전의 마지막 기록(과거 문서). 첫 기록이면 통과.
+    previous_doc = db[DAILY_COLLECTION].find_one(
+        {"date": {"$lt": target_date}}, sort=[("date", -1)]
+    )
+    existing_doc = db[DAILY_COLLECTION].find_one({"date": target_date}) or {}
+    _check_total_jump_guard(
+        float(update_doc.get("total_assets") or 0),
+        float(previous_doc["total_assets"]) if previous_doc and previous_doc.get("total_assets") else None,
+        float(existing_doc.get("deposit_withdrawal") or 0),
+    )
 
     db[DAILY_COLLECTION].update_one(
         {"date": target_date},

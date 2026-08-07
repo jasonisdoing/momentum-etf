@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { PageFrame } from "../components/PageFrame";
+import { PeriodNavTabs } from "../components/PeriodNavTabs";
 import { MonthlyManager } from "./MonthlyManager";
 
 type MonthlyHeaderSummary = {
@@ -46,6 +47,7 @@ export function MonthlyPageClient() {
 
   return (
     <PageFrame title="월별" fullHeight fullWidth titleRight={titleRight}>
+      <PeriodNavTabs />
       <MonthlyManager onHeaderSummaryChange={setSummary} />
     </PageFrame>
   );

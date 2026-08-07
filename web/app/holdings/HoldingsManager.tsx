@@ -29,7 +29,6 @@ type HoldingsRow = {
   ticker_type?: string;
   country_code?: string;
   is_etf?: boolean;
-  has_holdings?: boolean;
 };
 
 type AccountSummary = {
@@ -61,19 +60,20 @@ type DailyRow = {
 type DetailData = {
   constituents: ConstituentRow[];
   priceRows: DailyRow[];
+  source?: string;
 };
 
 // 부모 그리드에 올라갈 row 타입: main 행 또는 detail(자식) 행
 type ParentRow =
   | (AggregatedHoldingRow & { rowType: "main" })
-  | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean };
+  | { rowType: "detail"; parentTicker: string; constituents: ConstituentRow[]; priceRows: DailyRow[]; loading: boolean; source?: string };
 
 const holdingsGridTheme = createAppGridTheme();
 
 // 구성종목이 있을 수 있는 종목인지 판별 (ETF 및 구성종목 추적 가능 여부)
 function canHaveConstituents(row: AggregatedHoldingRow): boolean {
   if (row.ticker === "__CASH__") return false;
-  return row.has_holdings === true;
+  return row.is_etf === true;
 }
 
 const DETAIL_PANEL_HEIGHT = 460;
@@ -106,7 +106,7 @@ export function HoldingsManager({
   const constituentColDefs = useMemo<ColDef<ConstituentRow>[]>(() => [
     {
       field: "ticker",
-      headerName: "종목코드",
+      headerName: "티커",
       minWidth: 120,
       width: 120,
       cellClass: "tickerDetailCodeCell",
@@ -270,7 +270,7 @@ export function HoldingsManager({
     }, new Map<string, HoldingsRow>()).values(),
   );
 
-  const visibleBaseHoldings = aggregatedBaseHoldings.filter((row) => normalizeDisplayTicker(row.ticker) !== "IS");
+  const visibleBaseHoldings = aggregatedBaseHoldings;
   const holdingsValuation = visibleBaseHoldings.reduce((sum, row) => sum + row.valuation_krw, 0);
   const totalValuation = holdingsValuation + totalCashKrw;
   const aggregatedHoldings: AggregatedHoldingRow[] = visibleBaseHoldings.map((row) => ({
@@ -343,7 +343,7 @@ export function HoldingsManager({
         constituentsCacheRef.current.set(ticker, null);
         return null;
       }
-      const result: DetailData = { constituents: items, priceRows };
+      const result: DetailData = { constituents: items, priceRows, source: data.etf_info?.source };
       constituentsCacheRef.current.set(ticker, result);
       return result;
     } catch {
@@ -392,6 +392,7 @@ export function HoldingsManager({
           constituents: cached?.constituents ?? [],
           priceRows: cached?.priceRows ?? [],
           loading: detailLoading,
+          source: cached?.source,
         });
       }
     }
@@ -552,18 +553,6 @@ export function HoldingsManager({
         return row.is_etf ? <span className="holdingsCheckMark">✅</span> : "-";
       },
     },
-    {
-      headerName: "구성종목보유",
-      field: "has_holdings",
-      width: 116,
-      cellClass: "tableAlignCenter",
-      cellRenderer: (params: { data?: ParentRow }) => {
-        if (!params.data || isDetailRow(params.data)) return null;
-        const row = params.data as AggregatedHoldingRow;
-        if (isCashRow(row)) return "-";
-        return row.has_holdings ? <span className="holdingsCheckMark">✅</span> : "-";
-      },
-    },
   ], [isCashRow, isDetailRow, showAmounts, expandedTicker, handleNameClick]);
 
   // detail(자식) fullWidth renderer — ticker 페이지와 동일한 2패널(구성종목 + 일별) 레이아웃
@@ -577,7 +566,10 @@ export function HoldingsManager({
           <div className="tickerDetailHoldingsPanel" style={{ flex: 1, minWidth: 0, height: DETAIL_PANEL_HEIGHT }}>
             <div className="tickerDetailTableHeader">
               <span className="tickerDetailTableTitle">구성종목</span>
-              <span className="tickerDetailTableMeta">상위 {constituents.length}개</span>
+              <span className="tickerDetailTableMeta">
+                상위 {constituents.length}개
+                {params.data.source === "yfinance_holdings" && " (yfinance 무료 API 제약으로 상위 10개만 제공)"}
+              </span>
             </div>
             <div className="appGridFillWrap">
               <AppAgGrid
@@ -735,7 +727,7 @@ export function HoldingsManager({
           gap: 6px;
           width: 100%;
           min-width: 0;
-          font-size: 0.95rem;
+          font-size: var(--fs-base);
           font-weight: 700;
           color: #1d273b;
           word-break: keep-all;
@@ -750,7 +742,7 @@ export function HoldingsManager({
           color: #206bc4;
         }
         .holdingsExpandIcon {
-          font-size: 9px;
+          font-size: var(--fs-xs);
           color: #8b949e;
           flex-shrink: 0;
           transition: transform 0.15s;

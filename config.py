@@ -3,8 +3,14 @@
 import json
 from pathlib import Path
 
-CACHE_START_DATE = "2024-01-01"
+# python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
+CACHE_START_DATE = "2018-12-31"
 SLACK_CHANNEL = "C0A0X2LTS3X"
+
+# 전략 이동평균 종류 — 추세선·이격도·순위 계산에 쓰는 이동평균. "SMA"(단순) 또는 "EMA"(지수).
+# 이 값 하나로 시스템 전체의 이동평균 계산·표시 문구가 바뀐다
+# MOVING_AVERAGE_TYPE = "SMA"
+MOVING_AVERAGE_TYPE = "EMA"
 
 
 # -----------------------------------------------------------------------
@@ -37,15 +43,6 @@ NAVER_FINANCE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-# 네이버 ETF 카테고리/테마 API (투자국가/섹터/지수 등 ETF 분류 조회용)
-NAVER_ETF_THEMES_URL = "https://stock.naver.com/api/stockSecurity/etfs/v1/domestic/themes"
-NAVER_ETF_DOMESTIC_URL = "https://stock.naver.com/api/stockSecurity/etfs/v1/domestic"
-NAVER_ETF_CATEGORY_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-    "Referer": "https://stock.naver.com/",
-    "Accept": "application/json, text/plain, */*",
-}
-
 # 네이버 벌크 종목 시세 정보 (KOSPI/KOSDAQ)
 NAVER_STOCK_MARKET_VALUE_URL = "https://m.stock.naver.com/api/stocks/marketValue/{market}"
 NAVER_STOCK_MARKET_VALUE_HEADERS = {
@@ -54,8 +51,9 @@ NAVER_STOCK_MARKET_VALUE_HEADERS = {
     "Accept": "application/json, text/plain, */*",
 }
 
-# 토스증권 API 설정 (미국 주식 실시간)
+# 토스증권 API 설정 (미국 주식 실시간 / 시장지표 mini-chart)
 TOSS_INVEST_API_BASE_URL = "https://wts-info-api.tossinvest.com"
+TOSS_INVEST_CERT_API_BASE_URL = "https://wts-cert-api.tossinvest.com"
 TOSS_INVEST_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
     "Referer": "https://tossinvest.com/",
@@ -66,29 +64,6 @@ TOSS_INVEST_HEADERS = {
 
 # 네이버 미국 개별주 시가총액/업종 정보
 NAVER_US_STOCK_MARKET_VALUE_URL = "https://stock.naver.com/api/foreign/market/stock/global"
-
-# 네이버 ETF 대분류 설정 (use: 대표 분류용, show: 개별 컬럼 표시용)
-# 코드가 클수록 Representative(Main) 분류를 정할 때 우선순위가 높음
-NAVER_ETF_CATEGORY_CONFIG = [
-    {"code": "0101", "name": "주식", "use": True, "show": True},
-    {"code": "0102", "name": "채권", "use": False, "show": False},
-    {"code": "0103", "name": "부동산", "use": False, "show": False},
-    {"code": "0104", "name": "멀티에셋", "use": False, "show": False},
-    {"code": "0105", "name": "원자재", "use": False, "show": False},
-    {"code": "0106", "name": "통화", "use": False, "show": False},
-    {"code": "0108", "name": "단기자금(파킹형)", "use": False, "show": False},
-    {"code": "0201", "name": "투자국가", "use": True, "show": True},
-    {"code": "0301", "name": "배율", "use": False, "show": False},
-    {"code": "0401", "name": "섹터", "use": True, "show": True},
-    {"code": "0501", "name": "지수", "use": True, "show": True},
-    {"code": "0601", "name": "혁신기술", "use": True, "show": True},
-    {"code": "0606", "name": "투자전략", "use": False, "show": False},
-    {"code": "0607", "name": "ESG", "use": False, "show": True},
-    {"code": "0609", "name": "배당", "use": True, "show": True},
-    {"code": "0610", "name": "단일종목", "use": False, "show": False},
-    {"code": "0701", "name": "트렌드", "use": True, "show": True},
-    {"code": "0803", "name": "국내운용사", "use": False, "show": False},
-]
 
 # 호주 MarketIndex QuoteAPI 설정
 AU_QUOTEAPI_URL = "https://quoteapi.com/api/v5/symbols"
@@ -134,12 +109,6 @@ HYPERLIQUID_SYMBOLS = [
         "country": "us",
         "actual_ticker": "MU",
     },
-    {
-        "symbol": "SP500",
-        "name": "S&P500",
-        "type": "index",
-        "yahoo_symbol": "^GSPC",
-    },
 ]
 
 
@@ -170,16 +139,11 @@ MARKET_SCHEDULES = {
     },
 }
 
-# 지원 이동평균(MA) 타입 — 시스템 전체 단일 진실 소스.
-# 백엔드(rankings/market_trend/pool_settings 검증·옵션) + 프론트(MA 드롭다운)에서 모두 이 값만 본다.
-# 프론트에는 API 응답(rank: ma_type_options / market-trend defaults: ma_types)으로 전달된다.
-ALLOWED_MA_TYPES = ["SMA", "EMA", "WMA", "DEMA", "TEMA", "HMA", "ALMA"]
-
 # 1개월 = 20 거래일 (MA 개월 → 거래일 변환에 사용)
 TRADING_DAYS_PER_MONTH = 20
 
-# 지표 계산에 필요한 절대 최소 거래일 수 (MA 타입 무관, 항상 적용)
-# ENABLE_DATA_SUFFICIENCY_CHECK = True  → MA 타입별 엄격 기준 적용 (60~120일)
+# 지표 계산에 필요한 절대 최소 거래일 수 (항상 적용)
+# ENABLE_DATA_SUFFICIENCY_CHECK = True  → 엄격 기준 적용
 # ENABLE_DATA_SUFFICIENCY_CHECK = False → 이 값만 체크 (신규 상장 ETF 조기 포착용)
 # 5일(1주) 미만 데이터는 추세 판단이 불가하므로 제외
 MIN_TRADING_DAYS = 5
@@ -187,104 +151,30 @@ MIN_TRADING_DAYS = 5
 # -----------------------------------------------------------------------
 # 시장지수 추세 (/market-trend)
 # -----------------------------------------------------------------------
-# 백엔드(추세점수 정규화 / 레짐 판정) + 프론트(MA 선택)에서 함께 쓰는 단일 진실 소스.
-# 프론트에는 /internal/market-trend/defaults 응답으로 전달된다.
+# 백엔드(추세점수 정규화 / 레짐 판정)에서 쓰는 단일 진실 소스.
 
 # 추세점수 정규화 앵커 퍼센타일. 12개월 괴리율의 상위 P%를 +100, 하위 (100-P)%를 −100 으로
 # 환산한다. 예) 95 → 상위 5%/하위 5%, 90 → 상위 10%/하위 10%. 값↓ = 100%/10% 에 더 쉽게 도달.
 MARKET_TREND_SCORE_ANCHOR_PERCENTILE = 90
 
-# MA 기간 선택 드롭다운 상한 (개월). 1 ~ 이 값.
-MARKET_TREND_MA_MONTHS_MAX = 12
+# 추세 점수용 이동평균 일수
+MARKET_TREND_SCORE_MA_DAYS = 20
 
-# 레짐(가속/감속) 판정: 추세%의 회귀 기울기 + 데드밴드(히스테리시스). 비대칭 창을 쓴다 —
-# "상승은 빠르게, 약화는 천천히".
-#   강화(상향) 판정: 최근 UP_WINDOW 거래일 기울기 > +DEADBAND  → 짧게 잡아 저점 반등을 빨리 포착
-#   약화(하향) 판정: 최근 WINDOW    거래일 기울기 < −DEADBAND  → 길게 잡아 노이즈에 안 흔들림
-#   둘 다 아니면 직전 상태 유지(라벨 휩소 차단).
-# 값↑(WINDOW) = 하향 더 둔감 / 값↓(UP_WINDOW) = 상승 전환 더 빠름(대신 바닥 false 상승↑) /
-# 값↑(DEADBAND) = 라벨이 덜 바뀜.
-MARKET_TREND_REGIME_SLOPE_UP_WINDOW = 5
-MARKET_TREND_REGIME_SLOPE_WINDOW = 7
-MARKET_TREND_REGIME_SLOPE_DEADBAND = 0.05
+# 슈퍼트렌드(SuperTrend) 지표 설정.
+# 차트 보조선/화살표 표시 전용이다. 레짐 판정과 현금비중에는 쓰지 않는다.
+# ATR 계산 기간(PERIOD)은 전 지수 공통. 곱수(MULTIPLIER)는 지수마다 개별 등록한다.
+MARKET_TREND_SUPERTREND_PERIOD = 10
 
-# -----------------------------------------------------------------------
-# 백테스트 파라미터 스윕 설정
-# -----------------------------------------------------------------------
-BACKTEST_START_DATE = "2025-06-01"
-BACKTEST_INITIAL_KRW_AMOUNT = 100_000_000
-
-# 슬리피지는 % 단위로 입력한다.
-SLIPPAGE_CONFIG: dict[str, dict[str, float]] = {
-    "kor_kr": {
-        "BUY_PCT": 0.25,
-        "SELL_PCT": 0.25,
-    },
-    "kor_us": {
-        "BUY_PCT": 0.25,
-        "SELL_PCT": 0.25,
-    },
-    "aus": {
-        "BUY_PCT": 0.5,
-        "SELL_PCT": 0.5,
-    },
-    "us": {
-        "BUY_PCT": 0.15,
-        "SELL_PCT": 0.15,
-    },
-    "kor": {
-        "BUY_PCT": 0.25,
-        "SELL_PCT": 0.25,
-    },
-}
-
-BACKTEST_CONFIG: dict[str, dict] = {
-    "all": {
-        "BENCHMARK": {"ticker": "456600", "name": "TIME 글로벌AI인공지능액티브"},
-        "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [10],
-        "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [6],
-        "RSI_LIMIT": [100],
-    },
-    "kor_kr": {
-        "BENCHMARK": {"ticker": "069500", "name": "KODEX 200"},
-        "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
-        "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6, 9, 12],
-        "RSI_LIMIT": [100],
-    },
-    "kor_us": {
-        "BENCHMARK": {"ticker": "379800", "name": "KODEX 미국S&P500"},
-        "TOP_N_HOLD": [3],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
-        "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6, 9, 12],
-        "RSI_LIMIT": [100],
-    },
-    "aus": {
-        "BENCHMARK": {"ticker": "IVV", "name": "iShares S&P 500"},
-        "TOP_N_HOLD": [8],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
-        "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6, 9, 12],
-        "RSI_LIMIT": [100],
-    },
-    "us": {
-        "BENCHMARK": {"ticker": "QQQ", "name": "인베스코 QQQ ETF"},
-        "TOP_N_HOLD": [5],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
-        "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6, 9, 12],
-        "RSI_LIMIT": [100],
-    },
-    "kor": {
-        "BENCHMARK": {"ticker": "005930", "name": "삼성전자"},
-        "TOP_N_HOLD": [4],
-        "HOLDING_BONUS_SCORE": [0, 10, 20],
-        "MA_TYPE": ["ALMA"],
-        "MA_MONTHS": [3, 6, 9, 12],
-        "RSI_LIMIT": [100],
-    },
+# 지수별 슈퍼트렌드 곱수 (yf_ticker → multiplier). 사용하는 모든 지수를 반드시 등록한다.
+# 값↑=방향 전환이 뜸해져 휩쏘↓(지연 없음) / 값↓=추세 전환에 민감. 지수마다 변동성이 달라 개별 설정.
+# yf_ticker: ^KS11=코스피, ^KQ11=코스닥, ^DJI=다우존스, ^GSPC=S&P500,
+#            ^NDX=나스닥100, ^SOX=필라델피아 반도체, NQ=F=나스닥100 선물.
+MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
+    "^KS11": 1.5,    # 코스피 (빠른 대응이 필요)
+    "^KQ11": 1.5,    # 코스닥 (빠른 대응이 필요)
+    "^DJI": 3.0,     # 다우존스
+    "^GSPC": 3.0,    # S&P500
+    "^NDX": 3.0,     # 나스닥100
+    "^SOX": 1.5,     # 필라델피아 반도체 (빠른 대응이 필요)
+    "NQ=F": 3.0,     # 나스닥100 선물
 }

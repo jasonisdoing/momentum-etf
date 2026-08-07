@@ -7,25 +7,11 @@ import { AppAgGrid } from "../components/AppAgGrid";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 
-type SystemPoolRow = {
-  id: string;
-  order: number;
-  pool: string;
-  ticker_type: string;
-  country_code: string;
-  stock_count: number;
-  rising_count: number;
-  rising_ratio: number;
-  score_up_count: number;
-  score_total_count: number;
-  score_up_ratio: number;
-  etf_count: number;
-};
-
 type SystemScheduleRow = {
   key: string;
   job: string;
   target: string;
+  run_location?: string;
   cadence: string;
   command: string;
 };
@@ -59,9 +45,15 @@ type SystemJobKey =
   | "data_aggregate"
   | "cache_refresh"
   | "market_hours_analysis"
-  | "metadata_updater"
+  | "reference_meta_updater"
+  | "price_metrics_updater"
   | "asset_summary"
-  | "us_market_stocks";
+  | "us_market_stocks"
+  | "aus_market_stocks"
+  | "live_24h_slack"
+  | "leverage_ma_cross"
+  | "holdings_alarm"
+    | "strategy_trade_notify";
 
 type BatchQueueItem = {
   id: string;
@@ -76,7 +68,6 @@ type BatchQueueItem = {
 };
 
 type SystemResponse = {
-  pool_rows?: SystemPoolRow[];
   schedule_rows?: SystemScheduleRow[];
   schedule_note?: string;
   running_jobs?: string[];
@@ -89,7 +80,6 @@ type SystemResponse = {
   error?: string;
 };
 
-type SystemPoolGridRow = SystemPoolRow;
 type SystemScheduleGridRow = SystemScheduleRow & {
   id: string;
   running: boolean;
@@ -107,6 +97,7 @@ type SystemScheduleGridRow = SystemScheduleRow & {
   nextRunAt: string | null;
   nextRunDisplay: string;
   pendingPosition: number; // 0 = 대기 없음, 1~ = N번째 대기
+  pendingDisplay?: string; // 대기 중인 모든 항목 상세 나열 (예: "⏳ 대기 1: 미국 ETF | ⏳ 대기 2: 호주 ETF")
 };
 
 function formatRelativeUntil(iso: string | null | undefined, nowMs: number): string | null {
@@ -170,85 +161,7 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
   return `▶ ${ownerLabel}${stateLabel}(${remainingText}, 예상시간 ${formatDurationSeconds(estimatedSeconds)})... `;
 }
 
-function formatCount(value: number): string {
-  return new Intl.NumberFormat("ko-KR").format(value);
-}
-
-function formatPercent(value: number): string {
-  return `${new Intl.NumberFormat("ko-KR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value)}%`;
-}
-
 const appGridTheme = createAppGridTheme();
-
-const poolColumns: ColDef<SystemPoolGridRow>[] = [
-  {
-    field: "order",
-    headerName: "순서",
-    minWidth: 72,
-    flex: 0.45,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
-  { field: "pool", headerName: "종목풀", minWidth: 180, flex: 1.8 },
-  { field: "ticker_type", headerName: "ID", minWidth: 100, flex: 0.7 },
-  { field: "country_code", headerName: "국가", minWidth: 82, flex: 0.55 },
-  {
-    field: "stock_count",
-    headerName: "종목수",
-    minWidth: 100,
-    flex: 0.65,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
-  {
-    field: "rising_count",
-    headerName: "상승수(일간)",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number; data?: SystemPoolGridRow }) => {
-      const total = params.data?.stock_count ?? 0;
-      return `${formatCount(params.value)}/${formatCount(total)}`;
-    },
-  },
-  {
-    field: "rising_ratio",
-    headerName: "상승비율(일간)",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellStyle: { color: "#dc2626" },
-    cellRenderer: (params: { value: number }) => formatPercent(params.value),
-  },
-  {
-    field: "score_up_count",
-    headerName: "상승수",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number; data?: SystemPoolGridRow }) => {
-      const total = params.data?.score_total_count ?? 0;
-      return `${formatCount(params.value)}/${formatCount(total)}`;
-    },
-  },
-  {
-    field: "score_up_ratio",
-    headerName: "상승비율",
-    minWidth: 100,
-    flex: 0.75,
-    type: "rightAligned",
-    cellStyle: { color: "#dc2626" },
-    cellRenderer: (params: { value: number }) => formatPercent(params.value),
-  },
-  {
-    field: "etf_count",
-    headerName: "ETF",
-    minWidth: 82,
-    flex: 0.55,
-    type: "rightAligned",
-    cellRenderer: (params: { value: number }) => formatCount(params.value),
-  },
-];
 
 const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
   {
@@ -261,7 +174,7 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
     type: "rightAligned",
     valueGetter: (params) => (params.node ? (params.node.rowIndex ?? -1) + 1 : ""),
   },
-  { field: "job", headerName: "작업", minWidth: 140, width: 150 },
+  { field: "job", headerName: "작업", minWidth: 220, flex: 1 },
   {
     field: "cadence",
     headerName: "자동 주기",
@@ -367,7 +280,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
       let badge: React.ReactNode = null;
       let cancelBtn: React.ReactNode = null;
       if (row?.running) {
-        badge = <span style={{ color: "#d97706", fontWeight: 700, marginRight: 6 }}>{row.runningCommandPrefix}</span>;
+        const pendingPart = row.pendingDisplay ? ` | ${row.pendingDisplay}` : "";
+        badge = <span style={{ color: "#d97706", fontWeight: 700, marginRight: 6 }}>{row.runningCommandPrefix}{pendingPart}</span>;
         if (row.runningCancellable) {
           const alreadyRequested = row.runningCancelRequested;
           cancelBtn = (
@@ -376,10 +290,10 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
               style={{
                 marginLeft: 8,
                 padding: "0 4px",
-                fontSize: "20px",
+                fontSize: "var(--fs-xl)",
                 fontWeight: 700,
                 lineHeight: 1,
-                color: alreadyRequested ? "#9ca3af" : "#dc2626",
+                color: alreadyRequested ? "var(--text-muted)" : "#dc2626",
                 background: "transparent",
                 border: "none",
                 cursor: alreadyRequested ? "not-allowed" : "pointer",
@@ -410,10 +324,10 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
             </button>
           );
         }
-      } else if (row && row.pendingPosition > 0) {
+      } else if (row && row.pendingDisplay) {
         badge = (
           <span style={{ color: "#2563eb", fontWeight: 700, marginRight: 6 }}>
-            ⏳ 대기 {row.pendingPosition} ▶
+            {row.pendingDisplay} ▶
           </span>
         );
       }
@@ -444,9 +358,8 @@ const scheduleColumns: ColDef<SystemScheduleGridRow>[] = [
 export function SystemManager({
   onHeaderSummaryChange,
 }: {
-  onHeaderSummaryChange?: (summary: { poolCount: number; scheduleCount: number }) => void;
+  onHeaderSummaryChange?: (summary: { scheduleCount: number }) => void;
 }) {
-  const [poolRows, setPoolRows] = useState<SystemPoolRow[]>([]);
   const [scheduleRows, setScheduleRows] = useState<SystemScheduleRow[]>([]);
   const [scheduleNote, setScheduleNote] = useState("");
   const [loading, setLoading] = useState(true);
@@ -461,26 +374,68 @@ export function SystemManager({
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [, startTransition] = useTransition();
   const toast = useToast();
-  const runningSet = new Set(runningJobs);
-  const anyRunning = runningSet.size > 0;
+  const isJobRunning = (jobKey: string) => {
+    return runningJobs.some((j) => j === jobKey || j.startsWith(`${jobKey}:`));
+  };
+  const anyRunning = runningJobs.length > 0;
   // 대기 중 (pending) 큐 항목 — 오래된 순. FIFO 처리 순번 매핑.
   const pendingOrder = new Map<string, number>();
   batchQueue
     .filter((q) => q.status === "pending")
     .sort((a, b) => String(a.triggered_at ?? "").localeCompare(String(b.triggered_at ?? "")))
     .forEach((q, idx) => {
-      if (!pendingOrder.has(q.job_name)) {
-        pendingOrder.set(q.job_name, idx + 1);
+      const baseJobName = q.job_name.split(":")[0];
+      if (!pendingOrder.has(baseJobName)) {
+        pendingOrder.set(baseJobName, idx + 1);
       }
     });
-  const poolGridRows: SystemPoolGridRow[] = poolRows;
+
+  const buildPendingQueueDisplay = (jobKey: string) => {
+    const POOL_NAME_MAP: Record<string, string> = {
+      kor_kr: "한국 ETF",
+      kor_us: "한국 미국주식",
+      aus: "호주 ETF",
+      us: "미국 ETF",
+      kor: "한국 개별주",
+    };
+    const matchedPendings = batchQueue
+      .filter((q) => q.status === "pending" && (q.job_name === jobKey || q.job_name.startsWith(`${jobKey}:`)))
+      .sort((a, b) => String(a.triggered_at ?? "").localeCompare(String(b.triggered_at ?? "")));
+    
+    if (matchedPendings.length === 0) return "";
+    
+    const parts = matchedPendings.map((q, idx) => {
+      const suffix = q.job_name.includes(":") ? q.job_name.split(":")[1] : "";
+      const label = POOL_NAME_MAP[suffix] || suffix;
+      return `⏳ 대기 ${idx + 1}${label ? `: ${label}` : ""}`;
+    });
+    return parts.join(" | ");
+  };
+
   const scheduleGridRows: SystemScheduleGridRow[] = scheduleRows.map((row) => {
     const nextRunAt = nextRunByJob[row.key]?.at ?? null;
     const fallbackDisplay = String(nextRunByJob[row.key]?.display ?? "-");
+    const isRunning = isJobRunning(row.key);
+    const runningDetailKey = Object.keys(runningJobDetails).find(
+      (k) => k === row.key || k.startsWith(`${row.key}:`)
+    ) ?? row.key;
+    const suffix = runningDetailKey.includes(":") ? runningDetailKey.split(":")[1] : "";
+    const POOL_NAME_MAP: Record<string, string> = {
+      kor_kr: "한국 ETF",
+      kor_us: "한국 미국주식",
+      aus: "호주 ETF",
+      us: "미국 ETF",
+      kor: "한국 개별주",
+    };
+    const suffixLabel = suffix ? `(${POOL_NAME_MAP[suffix] || suffix})` : "";
+    const rawPrefix = formatRunningCommandPrefix(runningJobDetails[runningDetailKey], nowTick);
+    const runningCommandPrefix = suffixLabel && rawPrefix.includes("실행 중")
+      ? rawPrefix.replace("실행 중", `실행 중${suffixLabel}`)
+      : rawPrefix;
     return {
       ...row,
       id: row.key,
-      running: runningSet.has(row.key),
+      running: isRunning,
       anyRunning,
       isDeploying,
       lastRunDisplay: String(lastRunByJob[row.key]?.display ?? "-"),
@@ -489,13 +444,14 @@ export function SystemManager({
       lastRunStartedAt: lastRunByJob[row.key]?.started_at ?? null,
       lastRunEndedAt: lastRunByJob[row.key]?.ended_at ?? null,
       estimatedDisplay: String(estimatedByJob[row.key]?.display ?? "-"),
-      runningCommandPrefix: formatRunningCommandPrefix(runningJobDetails[row.key], nowTick),
+      runningCommandPrefix,
       runningCancellable:
-        runningSet.has(row.key) && Boolean(runningJobDetails[row.key]?.is_mine),
-      runningCancelRequested: Boolean(runningJobDetails[row.key]?.cancel_requested),
+        isRunning && Boolean(runningJobDetails[runningDetailKey]?.is_mine),
+      runningCancelRequested: Boolean(runningJobDetails[runningDetailKey]?.cancel_requested),
       nextRunAt,
       nextRunDisplay: formatRelativeUntil(nextRunAt, nowTick) ?? fallbackDisplay,
       pendingPosition: pendingOrder.get(row.key) ?? 0,
+      pendingDisplay: buildPendingQueueDisplay(row.key),
     };
   });
 
@@ -506,10 +462,9 @@ export function SystemManager({
 
   useEffect(() => {
     onHeaderSummaryChange?.({
-      poolCount: poolRows.length,
       scheduleCount: scheduleRows.length,
     });
-  }, [onHeaderSummaryChange, poolRows.length, scheduleRows.length]);
+  }, [onHeaderSummaryChange, scheduleRows.length]);
 
   useEffect(() => {
     let alive = true;
@@ -526,7 +481,6 @@ export function SystemManager({
 
         if (!alive) return;
 
-        setPoolRows(payload.pool_rows ?? []);
         setScheduleRows(payload.schedule_rows ?? []);
         setScheduleNote(payload.schedule_note ?? "");
         setRunningJobs(payload.running_jobs ?? []);
@@ -557,7 +511,7 @@ export function SystemManager({
   }, []);
 
   function handleTriggerJob(action: SystemJobKey, label: string) {
-    if (runningSet.has(action)) {
+    if (isJobRunning(action)) {
       toast.success(`${label} 은(는) 현재 실행 중입니다.`);
       return;
     }
@@ -628,9 +582,9 @@ export function SystemManager({
               }}
             />
             {(() => {
-              // 백엔드 schedule_note 한 문장 + 30분 timeout 안내 한 문장.
+              // 백엔드 schedule_note 한 문장 + 20분 timeout 안내 한 문장.
               // 모두 한국어 문장이라 "다. " 단위로 split 하여 한 문장 한 줄로 표시.
-              const timeoutLine = "배치 실행이 30분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.";
+              const timeoutLine = "배치 실행이 20분을 초과하면 hang 으로 간주하여 자동 종료(SIGKILL)되고 Slack 알림이 전송됩니다.";
               const combined = scheduleNote ? `${scheduleNote} ${timeoutLine}` : timeoutLine;
               // "다. " 뒤에서 split 후 종결 마침표 복원.
               const sentences = combined
@@ -658,29 +612,6 @@ export function SystemManager({
         </div>
       </section>
 
-      <section className="appSection">
-        <div className="card appCard">
-          <div className="card-header">
-            <div className="appMainHeader">
-              <div className="appMainHeaderLeft">
-                <span className="appHeaderMetricValue">종목풀</span>
-              </div>
-            </div>
-          </div>
-          <div className="card-body appCardBodyTight">
-            <AppAgGrid
-              rowData={poolGridRows}
-              columnDefs={poolColumns}
-              loading={loading}
-              minHeight="18rem"
-              theme={appGridTheme}
-              // 행 단위 diff 업데이트 — polling 시 전체 그리드 재마운트 방지(깜박임 제거).
-              getRowId={(params) => params.data.id}
-              gridOptions={{ suppressMovableColumns: true, domLayout: "autoHeight" }}
-            />
-          </div>
-        </div>
-      </section>
     </div>
   );
 }
