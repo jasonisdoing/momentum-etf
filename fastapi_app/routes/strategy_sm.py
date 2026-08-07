@@ -28,6 +28,21 @@ def _month_options(settings: dict) -> list[int]:
     return sorted(options)
 
 
+def _ma_rule_payload(pool: str) -> dict:
+    """선택 풀의 이평선 규칙 + 선택지 — 종목풀 설정이 단일 소스(순위 화면과 동일)."""
+    from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS
+    from utils.rankings import get_ticker_type_ma_rules
+
+    rule = get_ticker_type_ma_rules(pool)[0]
+    return {
+        "short_ma_days": int(rule["short_ma_days"]),
+        "long_ma_days": int(rule["long_ma_days"]),
+        "slope_days": int(rule["slope_days"]),
+        "ma_day_options": list(MA_DAY_OPTIONS),
+        "slope_day_options": list(SLOPE_DAY_OPTIONS),
+    }
+
+
 @router.get("")
 def get_strategy_sm(
     _: None = Depends(require_internal_token),
@@ -38,6 +53,7 @@ def get_strategy_sm(
         "settings": settings,
         "pool_options": pool_options(),
         "month_options": _month_options(settings),
+        "ma_rule": _ma_rule_payload(settings["pool"]),
         "picks": None,
     }
 
@@ -47,15 +63,36 @@ def put_strategy_sm_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """설정을 검증 후 저장한다. body: ``{"settings": {...}}``."""
+    """설정을 검증 후 저장한다. body: ``{"settings": {...}, "ma_rule": {...}?}``.
+
+    ``ma_rule`` (단기/장기 이평선·기울기 일수)이 오면 **종목풀 설정에 저장**한다 —
+    순위·종목풀 백테스트·자산 헬퍼가 같은 값을 쓰므로 그 화면들도 함께 바뀐다.
+    검증·캐시 무효화는 save_pool_settings 한 곳이 담당한다.
+    """
     settings = payload.get("settings") if isinstance(payload, dict) else None
     if not isinstance(settings, dict):
         raise ValueError("저장할 'settings' 가 필요합니다.")
     saved = save_settings(settings)
+
+    ma_rule = payload.get("ma_rule")
+    if isinstance(ma_rule, dict) and ma_rule:
+        from utils.pool_settings_store import save_pool_settings
+
+        save_pool_settings(
+            str(saved["pool"]),
+            {
+                "SHORT_MA_DAYS": ma_rule.get("short_ma_days"),
+                "LONG_MA_DAYS": ma_rule.get("long_ma_days"),
+                "SLOPE_DAYS": ma_rule.get("slope_days"),
+            },
+            save_method="Steady Momentum",
+        )
+
     return {
         "settings": saved,
         "pool_options": pool_options(),
         "month_options": _month_options(saved),
+        "ma_rule": _ma_rule_payload(saved["pool"]),
         "picks": None,
     }
 

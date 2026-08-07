@@ -122,6 +122,14 @@ type BacktestResult = {
 type View = {
   settings: Settings;
   pool_options?: PoolLabelSource[];
+  // 선택 풀의 이평선 규칙 — 종목풀 설정이 단일 소스(여기서 저장하면 그 설정이 바뀐다).
+  ma_rule?: {
+    short_ma_days: number;
+    long_ma_days: number;
+    slope_days: number;
+    ma_day_options: number[];
+    slope_day_options: number[];
+  };
   // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
   month_options?: number[];
   picks: PicksResult | null;
@@ -272,6 +280,8 @@ export function SteadyMomentumClient() {
   const [draftPool, setDraftPool] = useState<string>("");
   const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
+  // 이평선·기울기 초안 — 저장하면 종목풀 설정(SHORT/LONG_MA_DAYS·SLOPE_DAYS)이 바뀐다.
+  const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number; slope: number } | null>(null);
 
   const applyView = useCallback((data: View) => {
     setView(data);
@@ -283,6 +293,11 @@ export function SteadyMomentumClient() {
       top_n: String(data.settings.top_n),
       slippage_pct: String(data.settings.slippage_pct),
     });
+    setDraftMaRule(
+      data.ma_rule
+        ? { short: data.ma_rule.short_ma_days, long: data.ma_rule.long_ma_days, slope: data.ma_rule.slope_days }
+        : null,
+    );
   }, []);
 
   const load = useCallback(async (): Promise<boolean> => {
@@ -348,6 +363,12 @@ export function SteadyMomentumClient() {
     }
     setSaving(true);
     try {
+      const maRuleChanged =
+        draftMaRule != null &&
+        view?.ma_rule != null &&
+        (draftMaRule.short !== view.ma_rule.short_ma_days ||
+          draftMaRule.long !== view.ma_rule.long_ma_days ||
+          draftMaRule.slope !== view.ma_rule.slope_days);
       const resp = await fetch("/api/strategy-sm", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -360,12 +381,23 @@ export function SteadyMomentumClient() {
             max_per_industry: draftMaxPerIndustry,
             backtest_months: draftBacktestMonths,
           },
+          // 이평선·기울기는 종목풀 설정에 저장된다 — 바뀐 경우에만 보낸다.
+          ...(maRuleChanged && draftMaRule
+            ? {
+                ma_rule: {
+                  short_ma_days: draftMaRule.short,
+                  long_ma_days: draftMaRule.long,
+                  slope_days: draftMaRule.slope,
+                },
+              }
+            : {}),
         }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
       const saved = payload as View;
-      const repick = needsRepick(view?.settings ?? null, saved.settings);
+      // 이평선이 바뀌면 이격 점수가 달라지므로 무조건 재선정한다.
+      const repick = maRuleChanged || needsRepick(view?.settings ?? null, saved.settings);
       // 선정에 영향이 없는 변경(슬리피지·백테스트 기간)이면 기존 선정 결과를 그대로 둔다.
       applyView({ ...saved, picks: repick ? null : (view?.picks ?? null) });
       // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
@@ -425,9 +457,14 @@ export function SteadyMomentumClient() {
       draftMaxPerIndustry !== saved.max_per_industry ||
       draft.lookback_months !== String(saved.lookback_months) ||
       draft.top_n !== String(saved.top_n) ||
-      draft.slippage_pct !== String(saved.slippage_pct)
+      draft.slippage_pct !== String(saved.slippage_pct) ||
+      (draftMaRule != null &&
+        view.ma_rule != null &&
+        (draftMaRule.short !== view.ma_rule.short_ma_days ||
+          draftMaRule.long !== view.ma_rule.long_ma_days ||
+          draftMaRule.slope !== view.ma_rule.slope_days))
     );
-  }, [draft, draftBacktestMonths, draftMaxPerIndustry, draftPool, view]);
+  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
   const lookbackMonths = view?.settings.lookback_months ?? null;
 
@@ -821,6 +858,54 @@ export function SteadyMomentumClient() {
                     ))}
                   </select>
                 </label>
+                {draftMaRule != null && view.ma_rule != null ? (
+                  <>
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">이평선</span>
+                      <span style={{ display: "inline-flex", gap: 6 }}>
+                        <select
+                          className="form-select form-select-sm"
+                          style={{ width: 110 }}
+                          value={draftMaRule.short}
+                          onChange={(e) => setDraftMaRule((r) => r && { ...r, short: Number(e.target.value) })}
+                        >
+                          {view.ma_rule.ma_day_options.map((d) => (
+                            <option key={d} value={d}>
+                              단기 {d}일
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          className="form-select form-select-sm"
+                          style={{ width: 110 }}
+                          value={draftMaRule.long}
+                          onChange={(e) => setDraftMaRule((r) => r && { ...r, long: Number(e.target.value) })}
+                        >
+                          {view.ma_rule.ma_day_options.map((d) => (
+                            <option key={d} value={d}>
+                              장기 {d}일
+                            </option>
+                          ))}
+                        </select>
+                      </span>
+                    </label>
+                    <label className="appLabeledField">
+                      <span className="appLabeledFieldLabel">기울기 일수</span>
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: 92 }}
+                        value={draftMaRule.slope}
+                        onChange={(e) => setDraftMaRule((r) => r && { ...r, slope: Number(e.target.value) })}
+                      >
+                        {view.ma_rule.slope_day_options.map((d) => (
+                          <option key={d} value={d}>
+                            {d}일
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                ) : null}
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">슬리피지(%)</span>
                   <input
