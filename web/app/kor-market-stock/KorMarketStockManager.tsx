@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
@@ -64,17 +65,6 @@ function formatVolume(value: number | null): string {
   return new Intl.NumberFormat("ko-KR").format(value);
 }
 
-function formatMarketCap(value: number | null): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return "-";
-  if (value >= 10000) {
-    const jo = Math.floor(value / 10000);
-    const eok = value % 10000;
-    return eok > 0
-      ? `${new Intl.NumberFormat("ko-KR").format(jo)}조 ${new Intl.NumberFormat("ko-KR").format(eok)}억`
-      : `${new Intl.NumberFormat("ko-KR").format(jo)}조`;
-  }
-  return `${new Intl.NumberFormat("ko-KR").format(value)}억`;
-}
 
 const MARKET_OPTIONS = ["KOSPI", "KOSDAQ"] as const;
 const KOSPI_LIMIT_OPTIONS = [200, 150, 100, 50] as const;
@@ -378,7 +368,7 @@ export function KorMarketStockManager({
         minWidth: 140,
         type: "rightAligned",
         sort: "desc",
-        valueFormatter: (p) => formatMarketCap(p.value),
+        valueFormatter: (p) => formatKorMarketCap(p.value),
       },
       {
         field: "__selected__",

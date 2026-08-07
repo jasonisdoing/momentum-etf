@@ -218,3 +218,51 @@ def _apply_kor_history_metrics(rows: list[dict[str, Any]]) -> None:
         row["return_3m_pct"] = _calculate_period_return(close, latest_price, 3)
         row["return_12m_pct"] = _calculate_period_return(close, latest_price, 12)
         row["mdd_12m_pct"] = _calculate_mdd(close, 12)
+# 티커→시가총액 맵은 화면 재방문마다 페이지 순회를 반복하지 않게 짧은 TTL 로 캐시한다.
+_MARKET_CAP_CACHE: dict[str, tuple[float, dict[str, int]]] = {}
+_MARKET_CAP_CACHE_TTL_SEC = 600.0
+
+
+def load_kor_market_caps(tickers: list[str]) -> dict[str, int]:
+    """티커 → 시가총액(억 원) 맵 — 네이버 marketValue 리스트(위 화면과 같은 소스).
+
+    KOSPI·KOSDAQ 를 시총 상위부터 순회하며 요청 티커를 찾는다. 요청 티커를 모두
+    찾으면 조기 종료한다. 목록에 없는 티커(순위권 밖)는 맵에서 빠진다 — 값이 없으면
+    화면은 '-' 로 둔다(임의 보정 없음).
+    """
+    import time as _time
+
+    wanted = {str(t or "").strip() for t in tickers if str(t or "").strip()}
+    if not wanted:
+        return {}
+
+    now = _time.monotonic()
+    cached = _MARKET_CAP_CACHE.get("kor")
+    if cached is not None and now - cached[0] < _MARKET_CAP_CACHE_TTL_SEC:
+        return {t: cap for t, cap in cached[1].items() if t in wanted}
+
+    caps: dict[str, int] = {}
+    page_size = 100
+    for market in ("KOSPI", "KOSDAQ"):
+        try:
+            first = _fetch_market_value_page(market, page=1, page_size=page_size)
+        except RuntimeError:
+            continue  # 한 시장 실패가 다른 시장까지 막지 않게 — 실패분은 맵에서 빠진다.
+        total_count = int(first.get("totalCount") or 0)
+        total_pages = max(1, math.ceil(total_count / page_size)) if total_count > 0 else 1
+        payload = first
+        for page in range(1, total_pages + 1):
+            for item in payload.get("stocks") or []:
+                ticker = str(item.get("itemCode") or "").strip()
+                cap = _parse_number(item.get("marketValue"))
+                if ticker and cap is not None:
+                    caps[ticker] = cap
+            if wanted <= set(caps):
+                break
+            if page < total_pages:
+                payload = _fetch_market_value_page(market, page=page + 1, page_size=page_size)
+        if wanted <= set(caps):
+            break
+
+    _MARKET_CAP_CACHE["kor"] = (now, caps)
+    return {t: cap for t, cap in caps.items() if t in wanted}

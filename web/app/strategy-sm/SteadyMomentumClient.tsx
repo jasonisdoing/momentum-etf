@@ -10,6 +10,7 @@ import { TickerDetailLink } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
+import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
@@ -60,6 +61,7 @@ type PickRow = {
   return_12m_pct: number | null;
   return_lookback_pct: number;
   daily_change_pct: number | null;
+  market_cap_eok: number | null;
   short_disparity_pct: number;
   slope_pct: number | null;
   momentum_score: number;
@@ -412,6 +414,7 @@ export function SteadyMomentumClient() {
     applyView,
     draft,
     draftBacktestMonths,
+    draftMaRule,
     draftMaxPerIndustry,
     draftPool,
     runPicks,
@@ -544,6 +547,14 @@ export function SteadyMomentumClient() {
         width: 100,
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
+      },
+      {
+        headerName: "시가총액",
+        field: "market_cap_eok",
+        headerTooltip: "네이버 시가총액 (/kor-market-stock 과 같은 소스, 10분 캐시)",
+        width: 120,
+        type: "numericColumn",
+        valueFormatter: (p) => formatKorMarketCap(p.value),
       },
       {
         headerName: "1개월(%)",

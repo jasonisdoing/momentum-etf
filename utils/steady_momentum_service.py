@@ -643,6 +643,16 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     except Exception:
         realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
 
+    # 시가총액(억) — /kor-market-stock 과 같은 네이버 marketValue 소스(10분 캐시).
+    market_caps: dict[str, int] = {}
+    if country == "kor":
+        try:
+            from utils.kor_stock_market_service import load_kor_market_caps
+
+            market_caps = load_kor_market_caps(row_tickers)
+        except Exception:
+            market_caps = {}  # 보조 정보 — 실패해도 선정 표는 그대로 뜬다.
+
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
         if frame is None or frame.empty:
@@ -663,6 +673,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "price": round(price, 4) if price is not None else None,
             "daily_change_pct": daily_change_pct,
+            "market_cap_eok": market_caps.get(ticker),
             "return_1m_pct": period_return_pct(close, 1, signal_date),
             "return_3m_pct": period_return_pct(close, 3, signal_date),
             "return_12m_pct": period_return_pct(close, 12, signal_date),
