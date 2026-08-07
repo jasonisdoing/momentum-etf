@@ -32,6 +32,9 @@ type Status = {
   last_buy_price: number | null;
   // 다음 회차 매수까지 남은 하락률(%, 음수). 도달했으면 0 이상. 다음 회차 없으면 null.
   next_buy_drop_pct: number | null;
+  // 가장 가까운 매도 회차와 목표까지 남은 상승률(%, 양수). 0 이하면 도달. 보유 없으면 null.
+  next_sell_round: number | null;
+  next_sell_rise_pct: number | null;
 };
 
 type RoundRow = {
@@ -86,6 +89,20 @@ const cardStyle: React.CSSProperties = {
   flexDirection: "column",
   gap: 10,
 };
+
+// 매수·매도 행동 배지 — 이 화면에서 가장 중요한 정보라 테두리로 강조한다.
+// 내리면 매수 = 파란색(하락), 오르면 매도 = 빨간색(상승).
+function actionBadgeStyle(color: string): React.CSSProperties {
+  return {
+    fontWeight: 800,
+    padding: "2px 10px",
+    borderRadius: 6,
+    border: `1.5px solid ${color}`,
+    color,
+  };
+}
+const BUY_BADGE_COLOR = "var(--down-color, #2f6fd0)";
+const SELL_BADGE_COLOR = "var(--up-color, #d64545)";
 
 const thStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
 const tdStyle: React.CSSProperties = { padding: "6px 8px", textAlign: "right" };
@@ -254,18 +271,17 @@ function StrategySection({
           <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
         )}
         {status.next_buy_drop_pct != null ? (
-          <span
-            style={{
-              fontWeight: 800,
-              padding: "2px 10px",
-              borderRadius: 6,
-              border: "1.5px solid var(--up-color, #d64545)",
-              color: "var(--up-color, #d64545)",
-            }}
-          >
+          <span style={actionBadgeStyle(BUY_BADGE_COLOR)}>
             {status.next_buy_drop_pct >= 0
               ? `📉 ${status.next_round}호 매수가 도달!`
               : `📉 ${index.name} ${Math.abs(status.next_buy_drop_pct).toFixed(2)}% 더 내리면 ${status.next_round}호 매수`}
+          </span>
+        ) : null}
+        {status.next_sell_rise_pct != null ? (
+          <span style={actionBadgeStyle(SELL_BADGE_COLOR)}>
+            {status.next_sell_rise_pct <= 0
+              ? `📈 ${status.next_sell_round}호 매도가 도달!`
+              : `📈 ${index.name} ${status.next_sell_rise_pct.toFixed(2)}% 더 오르면 ${status.next_sell_round}호 매도`}
           </span>
         ) : null}
       </div>

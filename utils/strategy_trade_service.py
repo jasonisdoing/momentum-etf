@@ -341,6 +341,19 @@ def _build_strategy_view(
     if next_row is not None and next_row["buy_limit"] is not None and next_row["close"]:
         next_buy_drop_pct = round((next_row["buy_limit"] / next_row["close"] - 1.0) * 100.0, 2)
 
+    # 가장 가까운 매도 회차 — 보유 중 목표가까지 남은 상승률이 최소인 회차.
+    # 값이 0 이하면 이미 도달. 보유가 없으면 None.
+    next_sell_round = None
+    next_sell_rise_pct = None
+    sell_candidates = [
+        (r["round"], (r["sell_limit"] / r["close"] - 1.0) * 100.0)
+        for r in rows
+        if r["held"] and r["sell_limit"] is not None and r["close"]
+    ]
+    if sell_candidates:
+        next_sell_round, rise = min(sell_candidates, key=lambda pair: pair[1])
+        next_sell_rise_pct = round(rise, 2)
+
     return {
         "strategy_id": strategy_id,
         "label": meta["label"],
@@ -358,6 +371,8 @@ def _build_strategy_view(
             "next_name": next_target["name"] if next_target else None,
             "last_buy_price": round(last_buy_price, 2) if last_buy_price is not None else None,
             "next_buy_drop_pct": next_buy_drop_pct,
+            "next_sell_round": next_sell_round,
+            "next_sell_rise_pct": next_sell_rise_pct,
         },
         "rounds": rows,
     }
