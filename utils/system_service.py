@@ -167,7 +167,7 @@ SCHEDULE_ROWS = [
     {
         "key": "strategy_trade_notify",
         "job": "전략 사고팔기 알림",
-        "target": "kor_account 코스피200 ETF 6종",
+        "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
         "run_location": "SERVER/LOCAL",
         "cadence": "평일 09:10~15:20 KST 10분 간격",
         "command": "python scripts/strategy_trade_notify.py",

@@ -47,13 +47,19 @@ type RoundRow = {
   is_next: boolean;
 };
 
-type View = {
-  account_id: string;
+type StrategyView = {
+  strategy_id: string;
+  label: string;
   config: StrategyConfig;
-  slack_enabled: boolean;
   index: IndexStatus;
   status: Status;
   rounds: RoundRow[];
+};
+
+type View = {
+  account_id: string;
+  slack_enabled: boolean;
+  strategies: StrategyView[];
 };
 
 // 편집 대상 파라미터 (백엔드 EDITABLE_PCT_KEYS 와 같은 순서·같은 범위)
@@ -120,73 +126,37 @@ function ReachedBadge() {
   );
 }
 
-export function StrategyTradeClient() {
+/** 전략 하나(규칙 편집 + 현재 판단 표) — 코스피200/코스닥150 이 같은 구성을 쓴다. */
+function StrategySection({
+  view,
+  accountId,
+  onSaved,
+}: {
+  view: StrategyView;
+  accountId: string;
+  onSaved: (next: View) => void;
+}) {
   const toast = useToast();
-  const [view, setView] = useState<View | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [slackSaving, setSlackSaving] = useState(false);
-  const [slackTesting, setSlackTesting] = useState(false);
-  // 파라미터 편집 초안 — 저장 전까지는 화면 값과 별개로 들고 있는다.
-  const [draft, setDraft] = useState<PctDraft | null>(null);
-  const [configSaving, setConfigSaving] = useState(false);
-  const applyView = useCallback((data: View) => {
-    setView(data);
-    setDraft({
-      entry_drop_pct: String(data.config.entry_drop_pct),
-      add_drop_pct: String(data.config.add_drop_pct),
-      take_profit_pct: String(data.config.take_profit_pct),
-    });
-  }, []);
+  const { config, status, index } = view;
+  const [draft, setDraft] = useState<PctDraft>({
+    entry_drop_pct: String(config.entry_drop_pct),
+    add_drop_pct: String(config.add_drop_pct),
+    take_profit_pct: String(config.take_profit_pct),
+  });
+  const [saving, setSaving] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "운용 현황을 불러오지 못했습니다.");
-      applyView(payload as View);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "운용 현황을 불러오지 못했습니다.");
-    } finally {
-      setLoading(false);
-    }
-  }, [applyView, toast]);
-
+  // 서버가 최신 값을 돌려주면(다른 전략 저장 포함) 초안도 그 값으로 동기화한다.
   useEffect(() => {
-    void load();
-  }, [load]);
+    setDraft({
+      entry_drop_pct: String(config.entry_drop_pct),
+      add_drop_pct: String(config.add_drop_pct),
+      take_profit_pct: String(config.take_profit_pct),
+    });
+  }, [config.entry_drop_pct, config.add_drop_pct, config.take_profit_pct]);
 
-  const putSettings = useCallback(
-    async (body: Record<string, unknown>) => {
-      const resp = await fetch("/api/strategy-trade", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
-      applyView(payload as View);
-    },
-    [applyView],
-  );
-
-  const toggleSlack = useCallback(
-    async (enabled: boolean) => {
-      setSlackSaving(true);
-      try {
-        await putSettings({ slack_enabled: enabled });
-        toast.success(enabled ? "슬랙 알림을 켰습니다." : "슬랙 알림을 껐습니다.");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
-      } finally {
-        setSlackSaving(false);
-      }
-    },
-    [putSettings, toast],
-  );
+  const isDraftDirty = PCT_FIELDS.some(([key]) => Number(draft[key]) !== config[key]);
 
   const saveConfig = useCallback(async () => {
-    if (!draft) return;
     const parsed: Record<string, number> = {};
     for (const [key, label] of PCT_FIELDS) {
       const value = Number(draft[key]);
@@ -196,16 +166,192 @@ export function StrategyTradeClient() {
       }
       parsed[key] = value;
     }
-    setConfigSaving(true);
+    setSaving(true);
     try {
-      await putSettings({ config: parsed });
-      toast.success("전략 파라미터를 저장했습니다.");
+      const resp = await fetch("/api/strategy-trade", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ strategy_id: view.strategy_id, config: parsed }),
+      });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
+      onSaved(payload as View);
+      toast.success(`${view.label} 전략 파라미터를 저장했습니다.`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
     } finally {
-      setConfigSaving(false);
+      setSaving(false);
     }
-  }, [draft, putSettings, toast]);
+  }, [draft, onSaved, toast, view.label, view.strategy_id]);
+
+  const pctInput = (key: PctKey) => (
+    <input
+      type="number"
+      step="0.1"
+      min={PCT_MIN}
+      max={PCT_MAX}
+      style={pctInputStyle}
+      value={draft[key]}
+      disabled={saving}
+      onChange={(event) => setDraft((d) => ({ ...d, [key]: event.target.value }))}
+    />
+  );
+
+  return (
+    <div className="card appCard" style={cardStyle}>
+      {/* 전략 제목 + 규칙 편집 */}
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
+        <span style={{ fontWeight: 800, fontSize: "var(--fs-base)" }}>{view.label}</span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          1호 진입: {config.index_name} 일간 −{pctInput("entry_drop_pct")}%
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          추가 진입: 마지막 매수가 −{pctInput("add_drop_pct")}%
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+          매도: 평균단가 +{pctInput("take_profit_pct")}%
+        </span>
+        <button
+          type="button"
+          className="btn btn-sm btn-dark"
+          disabled={saving || !isDraftDirty}
+          onClick={() => void saveConfig()}
+        >
+          {saving ? "저장 중…" : "저장"}
+        </button>
+        <span>
+          회차: <b>{config.rounds}회</b>
+        </span>
+        <span style={{ color: "var(--text-muted)" }}>계좌 {accountId}</span>
+      </div>
+
+      {/* 현재 판단 요약 */}
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
+        <span>
+          {index.name} <b>{formatNumber(index.close, 2)}</b>
+          <span style={{ color: "var(--text-muted)" }}> ({index.as_of})</span>
+        </span>
+        <span>
+          보유 <b>{status.held_count}</b>/{config.rounds}회차
+        </span>
+        {status.last_buy_price != null ? (
+          <span>
+            마지막 매수가 <b>{formatNumber(status.last_buy_price)}</b>
+          </span>
+        ) : null}
+        {status.waiting_first_entry ? (
+          <span style={{ fontWeight: 700 }}>
+            1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger, 2)} 이하
+          </span>
+        ) : status.next_round != null ? (
+          <span style={{ fontWeight: 700 }}>
+            다음 진입: {status.next_round}호 {status.next_ticker} {status.next_name}
+          </span>
+        ) : (
+          <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
+        )}
+      </div>
+
+      {/* 회차 표 */}
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
+          <thead>
+            <tr style={{ color: "var(--text-muted)" }}>
+              <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
+              <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
+              <th style={thStyle}>평균단가</th>
+              <th style={thStyle}>현재가</th>
+              <th style={thStyle}>손익</th>
+              <th style={thStyle}>매수 지정가</th>
+              <th style={thStyle}>매수 {index.name}</th>
+              <th style={thStyle}>매도 지정가</th>
+              <th style={thStyle}>매도 {index.name}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.rounds.map((row) => (
+              <tr key={row.ticker} style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}>
+                <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
+                  {row.round}호
+                  {row.is_next ? (
+                    <span style={{ marginLeft: 5, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 400 }}>
+                      다음
+                    </span>
+                  ) : null}
+                </td>
+                <td style={{ ...tdStyle, textAlign: "left" }}>
+                  {row.ticker} {row.name}
+                </td>
+                <td style={tdStyle}>{formatNumber(row.avg_price)}</td>
+                <td style={tdStyle}>{formatNumber(row.close)}</td>
+                <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
+                  {formatSigned(row.profit_pct)}
+                </td>
+                <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
+                  {formatNumber(row.buy_limit)}
+                  {row.buy_reached ? <ReachedBadge /> : null}
+                </td>
+                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(row.buy_index, 2)}</td>
+                <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
+                  {formatNumber(row.sell_limit)}
+                  {row.sell_reached ? <ReachedBadge /> : null}
+                </td>
+                <td style={{ ...tdStyle, color: "var(--text-muted)" }}>{formatNumber(row.sell_index, 2)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function StrategyTradeClient() {
+  const toast = useToast();
+  const [view, setView] = useState<View | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [slackSaving, setSlackSaving] = useState(false);
+  const [slackTesting, setSlackTesting] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const resp = await fetch("/api/strategy-trade", { cache: "no-store" });
+      const payload = await resp.json();
+      if (!resp.ok) throw new Error(payload?.error ?? "운용 현황을 불러오지 못했습니다.");
+      setView(payload as View);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "운용 현황을 불러오지 못했습니다.");
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggleSlack = useCallback(
+    async (enabled: boolean) => {
+      setSlackSaving(true);
+      try {
+        const resp = await fetch("/api/strategy-trade", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ slack_enabled: enabled }),
+        });
+        const payload = await resp.json();
+        if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
+        setView(payload as View);
+        toast.success(enabled ? "슬랙 알림을 켰습니다." : "슬랙 알림을 껐습니다.");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
+      } finally {
+        setSlackSaving(false);
+      }
+    },
+    [toast],
+  );
 
   const testSlack = useCallback(async () => {
     setSlackTesting(true);
@@ -237,80 +383,20 @@ export function StrategyTradeClient() {
     );
   }
 
-  const { config, status, index } = view;
-  // 저장된 값과 같으면 저장 버튼을 잠근다 — 같은 값을 다시 쓰는 호출을 막는다.
-  const isDraftDirty = Boolean(draft) && PCT_FIELDS.some(([key]) => Number(draft?.[key]) !== config[key]);
-
   return (
     <PageFrame title="전략 사고팔기">
       <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {/* 전략 규칙 + 회차당 투입금 */}
-        <div className="card appCard" style={cardStyle}>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", fontSize: "var(--fs-sm)" }}>
-            <span style={{ fontWeight: 700 }}>전략 규칙</span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              1호 진입: {config.index_name} 일간 −
-              <input
-                type="number"
-                step="0.1"
-                min={PCT_MIN}
-                max={PCT_MAX}
-                style={pctInputStyle}
-                value={draft?.entry_drop_pct ?? ""}
-                disabled={configSaving}
-                onChange={(event) => setDraft((d) => d && { ...d, entry_drop_pct: event.target.value })}
-              />
-              %
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              추가 진입: 마지막 매수가 −
-              <input
-                type="number"
-                step="0.1"
-                min={PCT_MIN}
-                max={PCT_MAX}
-                style={pctInputStyle}
-                value={draft?.add_drop_pct ?? ""}
-                disabled={configSaving}
-                onChange={(event) => setDraft((d) => d && { ...d, add_drop_pct: event.target.value })}
-              />
-              %
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              매도: 평균단가 +
-              <input
-                type="number"
-                step="0.1"
-                min={PCT_MIN}
-                max={PCT_MAX}
-                style={pctInputStyle}
-                value={draft?.take_profit_pct ?? ""}
-                disabled={configSaving}
-                onChange={(event) => setDraft((d) => d && { ...d, take_profit_pct: event.target.value })}
-              />
-              %
-            </span>
-            <button
-              type="button"
-              className="btn btn-sm btn-dark"
-              disabled={configSaving || !isDraftDirty}
-              onClick={() => void saveConfig()}
-            >
-              {configSaving ? "저장 중…" : "저장"}
-            </button>
-            <span>
-              회차: <b>{config.rounds}회</b>
-            </span>
-            <span style={{ color: "var(--text-muted)" }}>계좌 {view.account_id}</span>
-          </div>
-        </div>
+        {/* 전략 섹션 — 상단 코스피200, 하단 코스닥150 (백엔드 정의 순서) */}
+        {view.strategies.map((strategy) => (
+          <StrategySection key={strategy.strategy_id} view={strategy} accountId={view.account_id} onSaved={setView} />
+        ))}
 
-        {/* 슬랙 알림 */}
+        {/* 슬랙 알림 (두 전략 공용) */}
         <div className="card appCard" style={cardStyle}>
           <div style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>슬랙 알람</div>
           <p style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)", lineHeight: 1.45, margin: 0 }}>
-            켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 매수·매도 지정가에 닿은 회차가
-            있을 때만 슬랙을 보냅니다. 같은 회차·동작은 하루 1회입니다.
+            켜두면 배치가 평일 09:10~15:20 을 10분 간격으로 판정해, 두 전략에서 매수·매도 지정가에 닿은
+            회차가 있을 때만 슬랙을 보냅니다. 같은 전략·회차·동작은 하루 1회입니다.
           </p>
           <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginBottom: 0 }}>
@@ -340,97 +426,6 @@ export function StrategyTradeClient() {
             >
               {slackTesting ? "발송 중…" : "지금 발송(테스트)"}
             </button>
-          </div>
-        </div>
-
-        {/* 현재 판단 */}
-        <div className="card appCard" style={cardStyle}>
-          <div style={{ display: "flex", gap: 14, alignItems: "baseline", flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>현재 판단</span>
-            <span style={{ color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>
-              계좌 실제 보유 기준 · 회차는 평균단가 높은 순 · 코스피 환산은 참고값
-            </span>
-          </div>
-          <div style={{ display: "flex", gap: 18, flexWrap: "wrap", fontSize: "var(--fs-sm)" }}>
-            <span>
-              {index.name} <b>{formatNumber(index.close, 2)}</b>
-              <span style={{ color: "var(--text-muted)" }}> ({index.as_of})</span>
-            </span>
-            <span>
-              보유 <b>{status.held_count}</b>/{config.rounds}회차
-            </span>
-            {status.last_buy_price != null ? (
-              <span>
-                마지막 매수가 <b>{formatNumber(status.last_buy_price)}</b>
-              </span>
-            ) : null}
-            {status.waiting_first_entry ? (
-              <span style={{ fontWeight: 700 }}>
-                1호 진입 대기 — {index.name} {formatNumber(index.buy_trigger, 2)} 이하
-              </span>
-            ) : status.next_round != null ? (
-              <span style={{ fontWeight: 700 }}>
-                다음 진입: {status.next_round}호 {status.next_ticker} {status.next_name}
-              </span>
-            ) : (
-              <span style={{ fontWeight: 700, color: "var(--text-muted)" }}>회차 소진 — 매도 대기</span>
-            )}
-          </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", minWidth: 920, borderCollapse: "collapse", fontSize: "var(--fs-sm)" }}>
-              <thead>
-                <tr style={{ color: "var(--text-muted)" }}>
-                  <th style={{ ...thStyle, textAlign: "left" }}>회차</th>
-                  <th style={{ ...thStyle, textAlign: "left" }}>종목</th>
-                  <th style={thStyle}>평균단가</th>
-                  <th style={thStyle}>현재가</th>
-                  <th style={thStyle}>손익</th>
-                  <th style={thStyle}>매수 지정가</th>
-                  <th style={thStyle}>매수 코스피</th>
-                  <th style={thStyle}>매도 지정가</th>
-                  <th style={thStyle}>매도 코스피</th>
-                </tr>
-              </thead>
-              <tbody>
-                {view.rounds.map((row) => (
-                  <tr
-                    key={row.ticker}
-                    style={{ borderTop: "1px solid rgba(148,163,184,0.15)" }}
-                  >
-                    <td style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
-                      {row.round}호
-                      {row.is_next ? (
-                        <span style={{ marginLeft: 5, color: "var(--text-muted)", fontSize: "var(--fs-sm)", fontWeight: 400 }}>
-                          다음
-                        </span>
-                      ) : null}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "left" }}>
-                      {row.ticker} {row.name}
-                    </td>
-                    <td style={tdStyle}>{formatNumber(row.avg_price)}</td>
-                    <td style={tdStyle}>{formatNumber(row.close)}</td>
-                    <td style={{ ...tdStyle, color: signColor(row.profit_pct), fontWeight: 700 }}>
-                      {formatSigned(row.profit_pct)}
-                    </td>
-                    <td style={{ ...tdStyle, fontWeight: row.is_next ? 700 : undefined }}>
-                      {formatNumber(row.buy_limit)}
-                      {row.buy_reached ? <ReachedBadge /> : null}
-                    </td>
-                    <td style={{ ...tdStyle, color: "var(--text-muted)" }}>
-                      {formatNumber(row.buy_index, 2)}
-                    </td>
-                    <td style={{ ...tdStyle, fontWeight: row.sell_limit != null ? 700 : undefined }}>
-                      {formatNumber(row.sell_limit)}
-                      {row.sell_reached ? <ReachedBadge /> : null}
-                    </td>
-                    <td style={{ ...tdStyle, color: "var(--text-muted)" }}>
-                      {formatNumber(row.sell_index, 2)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
           </div>
         </div>
       </div>
