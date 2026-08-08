@@ -601,7 +601,7 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "판정일-단기(%)",
+        headerName: "판정일-단기",
         field: "signal_short_pct",
         headerTooltip: "판정일 종가 기준 단기 이평선 이격 — 이번 달 선정에 쓰인 값 (음수면 후보 제외)",
         width: 108,
@@ -610,7 +610,7 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "판정일-장기(%)",
+        headerName: "판정일-장기",
         field: "signal_long_pct",
         headerTooltip: "판정일 종가 기준 장기 이평선 이격 = 이번 달 선정 점수",
         width: 108,
@@ -620,7 +620,7 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ fontWeight: 700, color: signColor(p.value) }),
       },
       {
-        headerName: "현재-단기(%)",
+        headerName: "현재-단기",
         field: "current_short_pct",
         headerTooltip: "오늘까지의 가격(캐시 최신 종가) 기준 단기 이격 — 다음달 예상 판정에 쓰이는 값",
         width: 100,
@@ -629,7 +629,7 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "현재-장기(%)",
+        headerName: "현재-장기",
         field: "current_long_pct",
         headerTooltip: "오늘까지의 가격(캐시 최신 종가) 기준 장기 이격 — 다음달 예상 판정에 쓰이는 값",
         width: 100,
