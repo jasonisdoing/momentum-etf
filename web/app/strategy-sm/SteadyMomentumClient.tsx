@@ -876,7 +876,7 @@ export function SteadyMomentumClient() {
                       <span style={{ display: "inline-flex", gap: 6 }}>
                         <select
                           className="form-select form-select-sm"
-                          style={{ width: 110 }}
+                          style={{ width: 130 }}
                           value={draftMaRule.short}
                           onChange={(e) => setDraftMaRule((r) => r && { ...r, short: Number(e.target.value) })}
                         >
@@ -888,7 +888,7 @@ export function SteadyMomentumClient() {
                         </select>
                         <select
                           className="form-select form-select-sm"
-                          style={{ width: 110 }}
+                          style={{ width: 130 }}
                           value={draftMaRule.long}
                           onChange={(e) => setDraftMaRule((r) => r && { ...r, long: Number(e.target.value) })}
                         >
