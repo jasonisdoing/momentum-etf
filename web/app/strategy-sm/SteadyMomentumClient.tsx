@@ -84,8 +84,6 @@ type BacktestMonthRow = {
   strategy_pct: number | null;
   // 수익인출(고정원금) 누적 순수익 — 원금 대비 %, 월 수익률의 산술 누적.
   harvest_cum_pct: number | null;
-  // 이 달 인출(+)/입금(−) 흐름 — 손실 달은 원금을 되채우는 전액 입금이다.
-  harvest_flow_pct: number | null;
   benchmark_pct: number | null;
   reference_pct: number | null;
   excess_pp: number | null;
@@ -171,8 +169,6 @@ type YearRow = {
   strategy_pct: number | null;
   // 그 해 연말(마지막 데이터 월) 시점의 수익인출전략 누적(%).
   harvest_cum_pct: number | null;
-  // 그 해 인출(+)·입금(−) 흐름의 합계(원금 대비 %).
-  harvest_flow_pct: number | null;
   benchmark_pct: number | null;
   reference_pct: number | null;
   strategy_partial: boolean;
@@ -212,10 +208,6 @@ function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
           .filter((r) => r.harvest_cum_pct != null)
           .reduce<BacktestMonthRow | null>((a, b) => (a == null || b.month > a.month ? b : a), null)
           ?.harvest_cum_pct ?? null,
-      // 흐름은 그 해의 합 — 인출 총량에서 외부 입금 총량을 뺀 값이 된다.
-      harvest_flow_pct: rows.some((r) => r.harvest_flow_pct != null)
-        ? rows.reduce((sum, r) => sum + (r.harvest_flow_pct ?? 0), 0)
-        : null,
       benchmark_pct: compoundPct(rows.map((r) => r.benchmark_pct)),
       reference_pct: compoundPct(rows.map((r) => r.reference_pct)),
       strategy_partial: countOf(rows, "strategy_pct") < 12,
@@ -701,16 +693,6 @@ export function SteadyMomentumClient() {
         valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
-      {
-        headerName: "인출/입금(%)",
-        field: "harvest_flow_pct",
-        headerTooltip:
-          "월말 원금 리셋 흐름 — 수익 달은 전액 인출(+), 손실 달은 원금을 되채우는 전액 입금(−). 누적(수익인출전략)이 곧 남은 수익이다",
-        width: 110,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
     ];
     if (backtest.reference_name) {
       columns.push({
@@ -827,16 +809,6 @@ export function SteadyMomentumClient() {
         headerTooltip: "그 해 연말 시점의 고정원금 운용 누적 순수익 (원금 대비 %, 월 수익률 산술 누적)",
         flex: 1,
         minWidth: 128,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSigned(p.value, 1)),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "인출/입금(%)",
-        field: "harvest_flow_pct",
-        headerTooltip: "그 해 인출(+)·입금(−) 흐름 합계 (원금 대비 %) — 손실 달은 원금을 되채우는 전액 입금",
-        flex: 1,
-        minWidth: 110,
         type: "numericColumn",
         valueFormatter: (p) => (p.value == null ? "-" : formatSigned(p.value, 1)),
         cellStyle: (p) => ({ color: signColor(p.value) }),

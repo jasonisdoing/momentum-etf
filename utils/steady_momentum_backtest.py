@@ -375,19 +375,15 @@ def run_backtest(
 
         # 수익인출(고정원금) 누적 — 매월 원금으로 리셋하고 수익은 잘라내는 운용이라
         # 원금 대비 누적 순수익 = 월 수익률의 **산술 합**이다 (복리 총수익과 비교용).
-        # 인출/입금 = 그 달 손익 **전액**: 수익 달은 전액 인출(+), 손실 달은 원금을
-        # 되채우는 전액 입금(−). 누적 컬럼이 곧 '남은 수익(수익통 잔고)'이다.
-        harvest_flow_pct: float | None = None
+        # 그 달의 인출/입금 흐름 자체는 전략(%)과 같은 값이라 따로 싣지 않는다.
         if strategy_pct is not None:
             harvest_cum_pct += strategy_pct
-            harvest_flow_pct = strategy_pct
 
         monthly.append(
             {
                 "month": end.strftime("%Y-%m"),
                 "strategy_pct": round(strategy_pct, 2) if strategy_pct is not None else None,
                 "harvest_cum_pct": round(harvest_cum_pct, 2) if strategy_pct is not None else None,
-                "harvest_flow_pct": round(harvest_flow_pct, 2) if harvest_flow_pct is not None else None,
                 "benchmark_pct": round(benchmark_pct, 2) if benchmark_pct is not None else None,
                 "reference_pct": round(reference_pct, 2) if reference_pct is not None else None,
                 "excess_pp": (
@@ -432,7 +428,6 @@ def run_backtest(
                 "month": (dates[-1].to_period("M") + 1).strftime("%Y-%m"),
                 "strategy_pct": None,
                 "harvest_cum_pct": None,
-                "harvest_flow_pct": None,
                 "benchmark_pct": None,
                 "reference_pct": None,
                 "excess_pp": None,
