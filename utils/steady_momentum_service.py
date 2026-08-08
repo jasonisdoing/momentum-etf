@@ -24,6 +24,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from utils.sector_labels import industry_ko, sector_ko
+
 warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
@@ -681,8 +683,9 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "pool": item["pool"],
-                "sector": sector_map.get(item["ticker"], {}).get("sector", ""),
-                "industry": sector_map.get(item["ticker"], {}).get("industry", ""),
+                # 한국 풀 표시용 한글 번역 — 그룹핑 키(sector_map)는 영문 원본 그대로다.
+                "sector": sector_ko(sector_map.get(item["ticker"], {}).get("sector", "")),
+                "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
                 "currency": currency,
                 **price_info(item["ticker"]),
                 "short_disparity_pct": round(item["short_disparity_pct"], 1),
