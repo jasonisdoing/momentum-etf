@@ -594,6 +594,19 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     portfolio_month = (rebalance_date.to_period("M") + 1).strftime("%Y-%m")
 
+    # 다음 달 예상 — 오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 한 번 더 돌려,
+    # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(월말 직전) 종가다.
+    current_top = select_top(
+        rank_candidates(select_candidates(universe, frames, settings, as_of=None)),
+        top_n,
+        max_per_industry,
+        industry_by_ticker,
+    )
+    next_expected: set[str] = {item["ticker"] for item in current_top}
+    # 현재 표(선정+후보)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.
+    table_tickers = {item["ticker"] for item in selected + reserve}
+    extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
+
     # 참고용 가격 정보 — 현재가·일간(%)은 실시간 스냅샷(pools-rank 와 같은 소스),
     # 실패 시 캐시 종가로 폴백. 기간수익률은 나머지 컬럼과 같은 판정일 기준이라
     # 다음 교체 전까지 값이 바뀌지 않는다.
@@ -602,7 +615,9 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     currency = str(POOL_CONFIGS[settings["pool"]]["currency"])
     country = str(POOL_CONFIGS[settings["pool"]]["country"])
 
-    row_tickers = [item["ticker"] for item in selected + reserve]
+    row_tickers = [item["ticker"] for item in selected + reserve] + [
+        item["ticker"] for item in extra_expected
+    ]
     realtime: dict[str, dict[str, Any]] = {}
     try:
         from services.price_service import get_realtime_snapshot
@@ -678,8 +693,10 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             {
                 "rank": rank,
                 "is_reserve": rank > top_n,
+                "is_expected_only": False,
                 # 연속 편입은 선정분에만 의미가 있다 — 차순위는 표시하지 않는다(None → '-')
                 "streak_months": streaks.get(item["ticker"], 1) if rank <= top_n else None,
+                "next_month_expected": item["ticker"] in next_expected,
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "pool": item["pool"],
@@ -692,5 +709,26 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "momentum_score": round(item["momentum_score"], 1),
             }
             for rank, item in enumerate([*selected, *reserve], start=1)
+        ]
+        + [
+            # 표 밖인데 다음 달 편입이 예상되는 종목 — 이격(단기/장기)은 '지금' 기준이다
+            # (판정일 기준 후보 밖이라 그 시점 값이 없고, 예상의 근거가 지금 값이다).
+            {
+                "rank": None,
+                "is_reserve": True,
+                "is_expected_only": True,
+                "streak_months": None,
+                "next_month_expected": True,
+                "ticker": item["ticker"],
+                "name": item["name"],
+                "pool": item["pool"],
+                "sector": sector_ko(sector_map.get(item["ticker"], {}).get("sector", "")),
+                "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
+                "currency": currency,
+                **price_info(item["ticker"]),
+                "short_disparity_pct": round(item["short_disparity_pct"], 1),
+                "momentum_score": round(item["momentum_score"], 1),
+            }
+            for item in extra_expected
         ],
     }
