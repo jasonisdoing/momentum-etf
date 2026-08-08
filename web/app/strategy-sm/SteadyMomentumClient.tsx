@@ -873,7 +873,7 @@ export function SteadyMomentumClient() {
                   <span className="appLabeledFieldLabel">백테스트 기간</span>
                   <select
                     className="form-select form-select-sm"
-                    style={{ width: 104 }}
+                    style={{ width: 120 }}
                     value={draftBacktestMonths}
                     onChange={(e) => setDraftBacktestMonths(Number(e.target.value))}
                   >
