@@ -298,7 +298,6 @@ def momentum_metrics(
     lookback_days: int,
     short_ma_days: int,
     long_ma_days: int,
-    slope_days: int,
     as_of: pd.Timestamp | None = None,
 ) -> dict[str, float] | None:
     """종목풀 설정 이평선 기준 이격 — 순위 화면과 같은 신호의 월간 버전.
@@ -326,20 +325,12 @@ def momentum_metrics(
 
     stock_close = aligned["stock"]
     long_ma = float(calculate_moving_average(stock_close, long_ma_days, min_periods=long_ma_days).iloc[-1])
-    short_ma_series = calculate_moving_average(stock_close, short_ma_days, min_periods=short_ma_days)
-    short_ma = float(short_ma_series.iloc[-1])
+    short_ma = float(calculate_moving_average(stock_close, short_ma_days, min_periods=short_ma_days).iloc[-1])
     if long_ma <= 0 or short_ma <= 0:
         return None
     last_price = float(stock_close.iloc[-1])
     disparity_pct = (last_price / long_ma - 1.0) * 100.0
     short_disparity_pct = (last_price / short_ma - 1.0) * 100.0
-
-    # 기울기 — 순위 화면과 같은 정의: 단기 이평선의 slope_days 일 전 대비 변화율(%).
-    slope_pct = None
-    if len(short_ma_series) > slope_days:
-        past_short_ma = short_ma_series.iloc[-1 - slope_days]
-        if pd.notna(past_short_ma) and float(past_short_ma) != 0.0:
-            slope_pct = (short_ma / float(past_short_ma) - 1.0) * 100.0
     window = aligned.iloc[-lookback_days:]
     if (window["stock"] <= 0).any() or (window["bench"] <= 0).any():
         return None
@@ -349,7 +340,6 @@ def momentum_metrics(
     return {
         "disparity_pct": disparity_pct,
         "short_disparity_pct": short_disparity_pct,
-        "slope_pct": slope_pct,
         "momentum_score": disparity_pct,
         "return_lookback_pct": absolute_return_pct,
     }
@@ -370,7 +360,6 @@ def select_candidates(
     ma_rule = get_ticker_type_ma_rules(str(settings["pool"]))[0]
     short_ma_days = int(ma_rule["short_ma_days"])
     long_ma_days = int(ma_rule["long_ma_days"])
-    slope_days = int(ma_rule["slope_days"])
 
     candidates: list[dict[str, Any]] = []
     for row in universe:
@@ -383,7 +372,6 @@ def select_candidates(
             lookback_days=lookback_days,
             short_ma_days=short_ma_days,
             long_ma_days=long_ma_days,
-            slope_days=slope_days,
             as_of=as_of,
         )
         if metrics is None:
@@ -701,7 +689,6 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 **price_info(item["ticker"]),
                 "return_lookback_pct": round(item["return_lookback_pct"], 1),
                 "short_disparity_pct": round(item["short_disparity_pct"], 1),
-                "slope_pct": round(item["slope_pct"], 2) if item["slope_pct"] is not None else None,
                 "momentum_score": round(item["momentum_score"], 1),
             }
             for rank, item in enumerate([*selected, *reserve], start=1)
