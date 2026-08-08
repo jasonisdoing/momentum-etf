@@ -82,6 +82,10 @@ type PicksResult = {
 type BacktestMonthRow = {
   month: string;
   strategy_pct: number | null;
+  // 수익인출(고정원금) 누적 순수익 — 원금 대비 %, 월 수익률의 산술 누적.
+  harvest_cum_pct: number | null;
+  // 이 달 인출(+)/입금(−) 흐름 — 손실 달은 원금을 되채우는 전액 입금이다.
+  harvest_flow_pct: number | null;
   benchmark_pct: number | null;
   reference_pct: number | null;
   excess_pp: number | null;
@@ -112,6 +116,11 @@ type BacktestResult = {
   strategy_cagr_pct: number | null;
   benchmark_cagr_pct: number | null;
   reference_cagr_pct: number | null;
+  // 수익인출전략(고정원금) 요약 — 총자산(원금+남은 수익) 경로 기준.
+  harvest_total_pct: number;
+  harvest_mdd_pct: number | null;
+  harvest_sortino: number | null;
+  harvest_cagr_pct: number | null;
   benchmark_name: string;
   benchmark_ticker: string;
   reference_name: string | null;
@@ -160,6 +169,10 @@ type ViewMode = (typeof VIEW_MODES)[number]["key"];
 type YearRow = {
   year: string;
   strategy_pct: number | null;
+  // 그 해 연말(마지막 데이터 월) 시점의 수익인출전략 누적(%).
+  harvest_cum_pct: number | null;
+  // 그 해 인출(+)·입금(−) 흐름의 합계(원금 대비 %).
+  harvest_flow_pct: number | null;
   benchmark_pct: number | null;
   reference_pct: number | null;
   strategy_partial: boolean;
@@ -193,6 +206,16 @@ function toYearRows(monthly: BacktestMonthRow[]): YearRow[] {
     .map(([year, rows]) => ({
       year,
       strategy_pct: compoundPct(rows.map((r) => r.strategy_pct)),
+      // 누적값이라 합성하지 않고 그 해 마지막 달(월 문자열 최대) 시점 값을 쓴다 — 행 순서에 의존하지 않는다.
+      harvest_cum_pct:
+        rows
+          .filter((r) => r.harvest_cum_pct != null)
+          .reduce<BacktestMonthRow | null>((a, b) => (a == null || b.month > a.month ? b : a), null)
+          ?.harvest_cum_pct ?? null,
+      // 흐름은 그 해의 합 — 인출 총량에서 외부 입금 총량을 뺀 값이 된다.
+      harvest_flow_pct: rows.some((r) => r.harvest_flow_pct != null)
+        ? rows.reduce((sum, r) => sum + (r.harvest_flow_pct ?? 0), 0)
+        : null,
       benchmark_pct: compoundPct(rows.map((r) => r.benchmark_pct)),
       reference_pct: compoundPct(rows.map((r) => r.reference_pct)),
       strategy_partial: countOf(rows, "strategy_pct") < 12,
@@ -668,6 +691,26 @@ export function SteadyMomentumClient() {
         valueFormatter: (p) => formatSigned(p.value),
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
+      {
+        headerName: "수익인출전략(%)",
+        field: "harvest_cum_pct",
+        headerTooltip:
+          "고정원금 운용의 누적 순수익 — 매월 원금으로 리셋하고 수익은 잘라내는 방식이라 월 수익률의 산술 누적(원금 대비 %)이다",
+        width: 128,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
+      {
+        headerName: "인출/입금(%)",
+        field: "harvest_flow_pct",
+        headerTooltip:
+          "월말 원금 리셋 흐름 — 수익 달은 전액 인출(+), 손실 달은 원금을 되채우는 전액 입금(−). 누적(수익인출전략)이 곧 남은 수익이다",
+        width: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
     ];
     if (backtest.reference_name) {
       columns.push({
@@ -778,6 +821,26 @@ export function SteadyMomentumClient() {
         "benchmark_partial",
         `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
       ),
+      {
+        headerName: "수익인출전략(%)",
+        field: "harvest_cum_pct",
+        headerTooltip: "그 해 연말 시점의 고정원금 운용 누적 순수익 (원금 대비 %, 월 수익률 산술 누적)",
+        flex: 1,
+        minWidth: 128,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : formatSigned(p.value, 1)),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
+      {
+        headerName: "인출/입금(%)",
+        field: "harvest_flow_pct",
+        headerTooltip: "그 해 인출(+)·입금(−) 흐름 합계 (원금 대비 %) — 손실 달은 원금을 되채우는 전액 입금",
+        flex: 1,
+        minWidth: 110,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : formatSigned(p.value, 1)),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
     ];
     if (backtest.reference_name) {
       columns.push(
@@ -1076,6 +1139,13 @@ export function SteadyMomentumClient() {
                     cagrPct={backtest.benchmark_cagr_pct}
                     mddPct={backtest.benchmark_mdd_pct}
                     sortino={backtest.benchmark_sortino}
+                  />
+                  <PerformanceSummary
+                    label="수익인출전략"
+                    totalPct={backtest.harvest_total_pct}
+                    cagrPct={backtest.harvest_cagr_pct}
+                    mddPct={backtest.harvest_mdd_pct}
+                    sortino={backtest.harvest_sortino}
                   />
                   {backtest.reference_name && backtest.reference_total_pct != null ? (
                     <PerformanceSummary

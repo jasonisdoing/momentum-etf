@@ -224,6 +224,8 @@ def run_backtest(
     daily: list[dict[str, Any]] = []
 
     monthly: list[dict[str, Any]] = []
+    # 수익인출(고정원금) 누적 순수익(%) — 월 수익률의 산술 합 (아래 monthly 루프 주석 참고).
+    harvest_cum_pct = 0.0
     strategy_returns: list[float] = []
     benchmark_returns: list[float] = []
     reference_returns: list[float] = []
@@ -371,10 +373,21 @@ def run_backtest(
                     }
                 )
 
+        # 수익인출(고정원금) 누적 — 매월 원금으로 리셋하고 수익은 잘라내는 운용이라
+        # 원금 대비 누적 순수익 = 월 수익률의 **산술 합**이다 (복리 총수익과 비교용).
+        # 인출/입금 = 그 달 손익 **전액**: 수익 달은 전액 인출(+), 손실 달은 원금을
+        # 되채우는 전액 입금(−). 누적 컬럼이 곧 '남은 수익(수익통 잔고)'이다.
+        harvest_flow_pct: float | None = None
+        if strategy_pct is not None:
+            harvest_cum_pct += strategy_pct
+            harvest_flow_pct = strategy_pct
+
         monthly.append(
             {
                 "month": end.strftime("%Y-%m"),
                 "strategy_pct": round(strategy_pct, 2) if strategy_pct is not None else None,
+                "harvest_cum_pct": round(harvest_cum_pct, 2) if strategy_pct is not None else None,
+                "harvest_flow_pct": round(harvest_flow_pct, 2) if harvest_flow_pct is not None else None,
                 "benchmark_pct": round(benchmark_pct, 2) if benchmark_pct is not None else None,
                 "reference_pct": round(reference_pct, 2) if reference_pct is not None else None,
                 "excess_pp": (
@@ -418,6 +431,8 @@ def run_backtest(
             {
                 "month": (dates[-1].to_period("M") + 1).strftime("%Y-%m"),
                 "strategy_pct": None,
+                "harvest_cum_pct": None,
+                "harvest_flow_pct": None,
                 "benchmark_pct": None,
                 "reference_pct": None,
                 "excess_pp": None,
@@ -451,6 +466,16 @@ def run_backtest(
 
     strategy_total, strategy_mdd, strategy_sortino, strategy_cagr = _summarize(strategy_returns)
     benchmark_total, benchmark_mdd, benchmark_sortino, benchmark_cagr = _summarize(benchmark_returns)
+
+    # 수익인출전략 요약 — 총자산(원금+남은 수익) 경로 기준. 자산 = 1 + 월 수익률의
+    # 산술 누적이고, 월별 자산 수익률 = 그 달 손익 ÷ 직전 총자산 (자산이 커질수록
+    # 같은 손익도 비율로는 작아진다 — 고정원금 운용의 실제 체감 경로).
+    harvest_wealth_returns: list[float] = []
+    wealth = 1.0
+    for monthly_return in strategy_returns:
+        harvest_wealth_returns.append(monthly_return / wealth)
+        wealth += monthly_return
+    harvest_total, harvest_mdd, harvest_sortino, harvest_cagr = _summarize(harvest_wealth_returns)
     if reference_close is not None and reference_returns:
         reference_total, reference_mdd, reference_sortino, reference_cagr = _summarize(reference_returns)
     else:
@@ -470,6 +495,10 @@ def run_backtest(
         "strategy_cagr_pct": strategy_cagr,
         "benchmark_cagr_pct": benchmark_cagr,
         "reference_cagr_pct": reference_cagr,
+        "harvest_total_pct": harvest_total,
+        "harvest_mdd_pct": harvest_mdd,
+        "harvest_sortino": harvest_sortino,
+        "harvest_cagr_pct": harvest_cagr,
         "benchmark_name": benchmark_info(base_pool)["name"],
         "benchmark_ticker": benchmark_info(base_pool)["ticker"],
         "reference_name": reference_name if reference_close is not None else None,
