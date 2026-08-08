@@ -753,6 +753,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             return {
                 "price": None,
                 "daily_change_pct": None,
+                "high_drawdown_pct": None,
                 "month_return_pct": None,
                 "market_cap_eok": None,
                 "return_1m_pct": None,
@@ -761,6 +762,13 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "return_12m_pct": None,
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        # 고점 대비(%) — pools-rank 와 같은 규칙: 캐시 전 기간 최고가 대비 마지막 종가.
+        # 0 이면 신고점. 실시간가가 아닌 캐시 기준이라 두 화면 값이 일치한다.
+        high_drawdown_pct = None
+        if not close.empty:
+            max_price = float(close.max())
+            if max_price > 0:
+                high_drawdown_pct = round((float(close.iloc[-1]) / max_price - 1.0) * 100.0, 2)
         snap = realtime.get(ticker) or {}
         now_val = snap.get("nowVal")
         change_rate = snap.get("changeRate")
@@ -785,6 +793,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         return {
             "price": round(price, 4) if price is not None else None,
             "daily_change_pct": daily_change_pct,
+            "high_drawdown_pct": high_drawdown_pct,
             "month_return_pct": month_return_pct,
             "market_cap_eok": market_caps.get(ticker),
             "return_1m_pct": period_return_pct(close, 1, signal_date),
