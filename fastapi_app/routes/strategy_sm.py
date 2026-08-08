@@ -30,16 +30,14 @@ def _month_options(settings: dict) -> list[int]:
 
 def _ma_rule_payload(pool: str) -> dict:
     """선택 풀의 이평선 규칙 + 선택지 — 종목풀 설정이 단일 소스(순위 화면과 동일)."""
-    from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS
+    from utils.pool_settings_store import MA_DAY_OPTIONS
     from utils.rankings import get_ticker_type_ma_rules
 
     rule = get_ticker_type_ma_rules(pool)[0]
     return {
         "short_ma_days": int(rule["short_ma_days"]),
         "long_ma_days": int(rule["long_ma_days"]),
-        "slope_days": int(rule["slope_days"]),
         "ma_day_options": list(MA_DAY_OPTIONS),
-        "slope_day_options": list(SLOPE_DAY_OPTIONS),
     }
 
 
@@ -83,7 +81,6 @@ def put_strategy_sm_settings(
             {
                 "SHORT_MA_DAYS": ma_rule.get("short_ma_days"),
                 "LONG_MA_DAYS": ma_rule.get("long_ma_days"),
-                "SLOPE_DAYS": ma_rule.get("slope_days"),
             },
             save_method="Steady Momentum",
         )

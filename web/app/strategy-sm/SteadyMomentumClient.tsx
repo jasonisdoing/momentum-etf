@@ -63,7 +63,6 @@ type PickRow = {
   daily_change_pct: number | null;
   market_cap_eok: number | null;
   short_disparity_pct: number;
-  slope_pct: number | null;
   momentum_score: number;
 };
 
@@ -127,9 +126,7 @@ type View = {
   ma_rule?: {
     short_ma_days: number;
     long_ma_days: number;
-    slope_days: number;
     ma_day_options: number[];
-    slope_day_options: number[];
   };
   // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
   month_options?: number[];
@@ -282,7 +279,7 @@ export function SteadyMomentumClient() {
   const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
   // 이평선·기울기 초안 — 저장하면 종목풀 설정(SHORT/LONG_MA_DAYS·SLOPE_DAYS)이 바뀐다.
-  const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number; slope: number } | null>(null);
+  const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
 
   const applyView = useCallback((data: View) => {
     setView(data);
@@ -295,9 +292,7 @@ export function SteadyMomentumClient() {
       slippage_pct: String(data.settings.slippage_pct),
     });
     setDraftMaRule(
-      data.ma_rule
-        ? { short: data.ma_rule.short_ma_days, long: data.ma_rule.long_ma_days, slope: data.ma_rule.slope_days }
-        : null,
+      data.ma_rule ? { short: data.ma_rule.short_ma_days, long: data.ma_rule.long_ma_days } : null,
     );
   }, []);
 
@@ -368,8 +363,7 @@ export function SteadyMomentumClient() {
         draftMaRule != null &&
         view?.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
-          draftMaRule.long !== view.ma_rule.long_ma_days ||
-          draftMaRule.slope !== view.ma_rule.slope_days);
+          draftMaRule.long !== view.ma_rule.long_ma_days);
       const resp = await fetch("/api/strategy-sm", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -388,7 +382,6 @@ export function SteadyMomentumClient() {
                 ma_rule: {
                   short_ma_days: draftMaRule.short,
                   long_ma_days: draftMaRule.long,
-                  slope_days: draftMaRule.slope,
                 },
               }
             : {}),
@@ -463,8 +456,7 @@ export function SteadyMomentumClient() {
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
-          draftMaRule.long !== view.ma_rule.long_ma_days ||
-          draftMaRule.slope !== view.ma_rule.slope_days))
+          draftMaRule.long !== view.ma_rule.long_ma_days))
     );
   }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
@@ -601,15 +593,6 @@ export function SteadyMomentumClient() {
         valueFormatter: (p) => formatSigned(p.value, 1),
         // 선정 점수라 볼드는 유지하되, 색은 단기·기울기와 같은 부호 색 규칙을 따른다.
         cellStyle: (p) => ({ fontWeight: 700, color: signColor(p.value) }),
-      },
-      {
-        headerName: "기울기(%)",
-        field: "slope_pct",
-        headerTooltip: "단기 이평선의 기울기 일수(종목풀 설정) 전 대비 변화율 — 순위 화면과 동일",
-        width: 92,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 2),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
   }, [lookbackMonths]);
@@ -889,21 +872,6 @@ export function SteadyMomentumClient() {
                           ))}
                         </select>
                       </span>
-                    </label>
-                    <label className="appLabeledField">
-                      <span className="appLabeledFieldLabel">기울기 일수</span>
-                      <select
-                        className="form-select form-select-sm"
-                        style={{ width: 92 }}
-                        value={draftMaRule.slope}
-                        onChange={(e) => setDraftMaRule((r) => r && { ...r, slope: Number(e.target.value) })}
-                      >
-                        {view.ma_rule.slope_day_options.map((d) => (
-                          <option key={d} value={d}>
-                            {d}일
-                          </option>
-                        ))}
-                      </select>
                     </label>
                   </>
                 ) : null}
