@@ -63,6 +63,7 @@ type PickRow = {
   return_12m_pct: number | null;
   return_6m_pct: number | null;
   daily_change_pct: number | null;
+  high_drawdown_pct: number | null;
   market_cap_eok: number | null;
   month_return_pct: number | null;
   signal_short_pct: number | null;
@@ -489,6 +490,19 @@ export function SteadyMomentumClient() {
         cellDataType: "text",
         cellRenderer: (p: { value?: boolean }) =>
           p.value ? <span style={{ color: "#2f9e44", fontWeight: 700 }}>예상</span> : <span style={{ color: "var(--text-muted)" }}>-</span>,
+      },
+      {
+        headerName: "고점",
+        field: "high_drawdown_pct",
+        headerTooltip: "캐시 전 기간 최고가 대비 마지막 종가(%) — pools-rank 고점과 같은 규칙, 0 = 신고점",
+        width: 80,
+        type: "rightAligned",
+        // `/pools-rank` 고점 컬럼과 같은 렌더링 — 0 이면 ⭐신고점.
+        cellRenderer: (p: { value?: number | null }) => {
+          const value = p.value ?? null;
+          if (value === 0) return <span style={{ color: "#d93025", fontWeight: 700 }}>⭐신고점</span>;
+          return <span>{value == null ? "-" : `${value.toFixed(1)}%`}</span>;
+        },
       },
       {
         headerName: "마켓",
