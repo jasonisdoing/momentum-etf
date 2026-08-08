@@ -8,6 +8,8 @@
   다음날 종가 주문에 해당한다.
 - 선정은 꾸준한 모멘텀 점수(연율화 상대기울기 × R²) 순 — 화면 선정과 같은
   ``rank_candidates`` 를 써서 두 화면이 항상 일치한다.
+- 슬롯 고정 비중: 종목당 1/top_n 로 배분하고, 자격 종목이 top_n 보다 적으면
+  **빈 슬롯은 현금(수익 0)** 으로 남긴다 — 약세로 후보가 줄면 자동 현금 방어.
 - 슬리피지는 편도(%)로, 리밸런싱에서 실제 매매되는 금액 전체에 부과한다:
   편출 전량 매도 + 편입 1/N 매수 + **유지 종목의 1/N 재조정 매매**(한 달간
   흘러간 비중과 목표 1/N 의 차이)까지 포함 — 완전 리밸런싱 모델과 비용이 일치한다.
@@ -232,13 +234,17 @@ def run_backtest(
         holdings_set = set(holdings)
         added_tickers = sorted(holdings_set - previous_holdings)
         removed_tickers = sorted(previous_holdings - holdings_set)
-        target_weight = 1.0 / max(len(holdings_set), 1)
+        # 슬롯 고정 비중 — 선정이 top_n 보다 적으면 빈 슬롯은 현금(수익 0)으로 남긴다.
+        target_weight = 1.0 / top_n
 
         # ── 리밸런싱 매매 금액(포트폴리오 대비 비율) ──
         # 유지 종목도 매월 1/N 로 재조정하므로, 드리프트 비중과 목표의 차이가 전부 매매다.
-        if previous_holdings:
+        # 현금 슬롯(__CASH__)은 비중 분모에는 들어가지만 매매 비용은 없다.
+        if position > 0:
             growth = {ticker: previous_growth.get(ticker, 1.0) for ticker in previous_holdings}
-            total_growth = sum(growth.values())
+            if "__CASH__" in previous_growth:
+                growth["__CASH__"] = previous_growth["__CASH__"]
+            total_growth = sum(growth.values()) or 1.0
             drifted = {ticker: value / total_growth for ticker, value in growth.items()}
             sell_notional = sum(drifted[t] for t in removed_tickers) + sum(
                 max(drifted[t] - target_weight, 0.0) for t in holdings_set & previous_holdings
@@ -249,7 +255,7 @@ def run_backtest(
             traded_notional = sell_notional + buy_notional
             turnover_pct = round(len(added_tickers) / top_n * 100.0, 1)
         else:
-            traded_notional = 1.0  # 첫 달은 전량 신규 매수 (매수측만)
+            traded_notional = len(holdings) * target_weight  # 첫 달은 투자분만 신규 매수
             turnover_pct = None
         cost = slippage * traded_notional
 
@@ -264,7 +270,13 @@ def run_backtest(
                 period_returns[ticker] = value
                 if exit_date is not None:
                     stops[ticker] = exit_date
-        gross = sum(period_returns.values()) / len(period_returns) if period_returns else None
+        # 슬롯 모델: 보유 종목은 각 1/N, 빈 슬롯은 현금(0%) — 분모는 항상 top_n.
+        if not holdings:
+            gross: float | None = 0.0  # 전량 현금인 달
+        elif period_returns:
+            gross = sum(period_returns.values()) / top_n
+        else:
+            gross = None  # 보유 종목의 가격 데이터가 전혀 없음 — 데이터 문제를 그대로 드러낸다
         # 손절 매도는 구간 중 추가 매매 — 그 종목 비중(1/N)에 편도 슬리피지를 물린다.
         cost += slippage * target_weight * len(stops)
 
@@ -303,7 +315,13 @@ def run_backtest(
                     # 손절 이후는 현금 — 매도일 가치로 고정한다.
                     curve = curve.where(curve.index <= stop).ffill()
                 ratios.append(curve)
-            portfolio = pd.concat(ratios, axis=1).mean(axis=1) if ratios else None
+            # 슬롯 모델 — 보유 곡선 합 + 현금 슬롯(가치 1 고정), 분모는 top_n.
+            if ratios:
+                portfolio = (pd.concat(ratios, axis=1).sum(axis=1) + float(top_n - len(ratios))) / top_n
+            elif not holdings:
+                portfolio = pd.Series(1.0, index=window)  # 전량 현금인 달 — 변동 없음
+            else:
+                portfolio = None
 
             def _daily_series(source: pd.Series | None) -> pd.Series | None:
                 """구간 시작 종가를 1 로 정규화한 일별 가치."""
@@ -373,8 +391,12 @@ def run_backtest(
         previous_growth = {
             ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in previous_holdings
         }
-        if stops:
-            previous_growth["__CASH__"] = sum(1.0 + period_returns.get(t, 0.0) for t in stops)
+        # 현금 = 빈 슬롯(각 성장배수 1.0) + 이 달 손절로 판 슬롯 — 다음 교체일 비중 분모에 남긴다.
+        cash_multiplier = float(top_n - len(holdings)) + sum(
+            1.0 + period_returns.get(t, 0.0) for t in stops
+        )
+        if cash_multiplier > 0:
+            previous_growth["__CASH__"] = cash_multiplier
 
     # 예정 행 — 마지막 월말 종가에 실행될 교체 (수익률은 아직 없음)
     if pending_signal is not None:
