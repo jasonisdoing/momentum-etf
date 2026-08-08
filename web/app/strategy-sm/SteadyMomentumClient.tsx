@@ -873,7 +873,7 @@ export function SteadyMomentumClient() {
                   <>
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>
-                      <span style={{ display: "inline-flex", gap: 6 }}>
+                      <span className="appMaRuleRow">
                         <select
                           className="form-select appMaRuleSelect"
                           value={draftMaRule.short}
