@@ -38,8 +38,9 @@ POOL_CONFIGS: dict[str, dict[str, Any]] = {
 AVAILABLE_POOLS = tuple(POOL_CONFIGS)
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
 MAX_PER_INDUSTRY_OPTIONS = (1, 2, 3, 4, 5, 10)
-# 차순위 후보를 종목 수의 몇 배까지 보여줄지.
-RESERVE_MULTIPLIER = 3
+# 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
+# 표를 짧게 유지한다. 표 밖 '다음달 예상' 종목은 하단에 별도 행으로 붙는다.
+RESERVE_MULTIPLIER = 1
 TRADING_DAYS_PER_MONTH = 21
 
 _CONFIG_COLLECTION = "system_config"
