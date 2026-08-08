@@ -4409,21 +4409,27 @@ a {
   flex: 0 0 16rem;
 }
 
-.rankRuleFieldRow {
+/* 이평선 단기·장기 셀렉트 한 쌍 (`/pools-rank`, `/strategy-sm` 공용).
+
+   폭: `단기 240일` 이 가장 긴 값이다. Tabler 의 `.form-select` 는 화살표 자리로
+   오른쪽에만 3rem 을 써서 좌우 패딩만 4rem 이라, 글자 폭(약 5rem)을 더해 9.25rem 이 필요하다.
+   둘을 같은 폭으로 둔다 — 값 목록이 같은데 폭만 다르면 눈에 거슬린다.
+
+   항상 한 줄이다. `flex-wrap` 도 `min-width: 0` 도 주지 않는다 — 둘 중 하나라도 있으면
+   자리가 빠듯할 때 셀렉트가 아래로 접히거나 찌그러진다. 자리가 모자라면 이 칸 전체가
+   부모(`.appMainHeaderLeft`)에서 다음 줄로 내려간다. */
+.appMaRuleRow {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  min-width: 0;
 }
 
-/* 이평선 단기·장기 셀렉트 (`/pools-rank`, `/strategy-sm` 공용).
-   `단기 240일` 처럼 가장 긴 값이 잘리지 않을 폭을 못 박는다.
-   Tabler 의 `.form-select` 는 화살표 자리로 오른쪽에만 3rem 을 쓰므로
-   글자 폭(약 5rem)에 좌우 패딩 4rem 을 더해야 한다.
-   두 셀렉트를 같은 폭으로 둔다 — 값 목록이 같은데 폭이 다르면 눈에 거슬린다. */
+/* Tabler 기본은 화살표 자리로 오른쪽에만 3rem 을 비워 둔다. 값이 짧아 그만큼 필요 없으므로
+   줄이고, 그 덕에 셀렉트를 좁게 두고도 `장기 240일` 이 잘리지 않는다. */
 .appMaRuleSelect {
-  min-width: 9.25rem;
-  flex-shrink: 0;
+  min-width: 8rem;
+  padding-right: 1.75rem;
+  background-position: right 0.5rem center;
 }
 
 .rankSwitchField {
@@ -4901,16 +4907,8 @@ a {
     flex: 1 1 100%;
   }
 
-  .rankRuleFieldRow {
+  .appMaRuleRow {
     width: 100%;
-  }
-
-  /* 좁은 화면에서는 잘리더라도 줄을 넘기지 않게 둘이 폭을 나눠 갖는다. */
-  .rankRuleFieldRow .form-select,
-  .appMaRuleSelect {
-    flex: 1 1 0;
-    min-width: 0;
-    flex-shrink: 1;
   }
 
   .stocksMainHeaderLeft .appLabeledField:first-child,

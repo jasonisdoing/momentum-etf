@@ -1579,7 +1579,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   {pageMode === "rank" && maRule ? (
                     <label className="appLabeledField">
                       <span className="appLabeledFieldLabel">이평선</span>
-                      <div className="rankRuleFieldRow">
+                      <div className="appMaRuleRow">
                         <select
                           className="form-select appMaRuleSelect"
                           value={String(maRule.short_ma_days)}
