@@ -107,7 +107,8 @@ def post_strategy_sm_backtest(
 ) -> dict:
     """월간 리밸런싱 백테스트.
 
-    body: ``{"months": 12, "include_daily": false}``.
+    body: ``{"months": 12, "include_daily": false, "stop_loss_exit": false}``.
+    ``stop_loss_exit`` = 단기이격 이탈 시 월중 손절(매도 후 월말까지 현금).
     ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다 — 일별 계산은 응답이
     수천 행으로 커지므로 필요할 때만 만든다.
     """
@@ -119,4 +120,7 @@ def post_strategy_sm_backtest(
     include_daily = payload.get("include_daily") if isinstance(payload, dict) else None
     if not isinstance(include_daily, bool):
         raise ValueError("'include_daily' 는 참/거짓이어야 합니다.")
-    return run_backtest(months, include_daily=include_daily)
+    stop_loss_exit = payload.get("stop_loss_exit") if isinstance(payload, dict) else None
+    if not isinstance(stop_loss_exit, bool):
+        raise ValueError("'stop_loss_exit' 는 참/거짓이어야 합니다.")
+    return run_backtest(months, include_daily=include_daily, stop_loss_exit=stop_loss_exit)

@@ -72,12 +72,18 @@ def run_backtest(
     settings: dict[str, Any] | None = None,
     *,
     include_daily: bool,
+    stop_loss_exit: bool,
 ) -> dict[str, Any]:
     """월간 리밸런싱 백테스트. 월별 전략 vs 벤치마크 수익률을 반환한다.
 
     ``include_daily`` 가 참일 때만 일별 행까지 만든다. 일별은 구간마다 종목별
     시계열을 재색인해야 하고 응답도 수천 행이 되므로, 화면에서 일간 탭을 볼 때만
     요청한다. 동작이 달라지는 값이라 기본값을 두지 않는다.
+
+    ``stop_loss_exit`` (단기이격 손절): 참이면 보유 구간 중 **종가가 단기 이평선
+    아래로 처음 내려간 날** 그 종목만 종가 매도하고 월말까지 현금으로 둔다(편도
+    슬리피지 1회 추가). 지표·이평선 일수는 진입 필터와 같은 종목풀 설정이라 새
+    파라미터가 없다. 다음 교체일에는 정상 재선정한다.
     """
     max_months = get_max_backtest_months()
     if not isinstance(months, int) or not 1 <= months <= max_months:
@@ -152,6 +158,36 @@ def run_backtest(
 
     slippage = float(settings["slippage_pct"]) / 100.0
     top_n = int(settings["top_n"])
+
+    # 손절 판정용 단기 이평선 — 진입 필터·순위 화면과 같은 종목풀 설정/공통 헬퍼.
+    from utils.moving_averages import calculate_moving_average
+    from utils.rankings import get_ticker_type_ma_rules
+
+    short_ma_days = int(get_ticker_type_ma_rules(str(settings["pool"]))[0]["short_ma_days"])
+    _stop_cache: dict[str, tuple[pd.Series, pd.Series]] = {}
+
+    def _close_and_short_ma(ticker: str) -> tuple[pd.Series, pd.Series] | None:
+        if ticker in _stop_cache:
+            return _stop_cache[ticker]
+        frame = frames.get(ticker)
+        if frame is None or frame.empty:
+            return None
+        close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+        short_ma = calculate_moving_average(close, short_ma_days, min_periods=short_ma_days)
+        _stop_cache[ticker] = (close, short_ma)
+        return _stop_cache[ticker]
+
+    def _stop_day(ticker: str, start: pd.Timestamp, end: pd.Timestamp) -> pd.Timestamp | None:
+        """보유 구간(start, end] 에서 종가 < 단기 이평이 처음 되는 날. 없으면 None."""
+        pair = _close_and_short_ma(ticker)
+        if pair is None:
+            return None
+        close, short_ma = pair
+        mask = (close.index > start) & (close.index <= end)
+        window_close = close[mask]
+        window_ma = short_ma[mask]
+        below = window_close[(window_ma.notna()) & (window_close < window_ma)]
+        return below.index[0] if not below.empty else None
     # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
     max_per_industry = int(settings["max_per_industry"])
     industry_by_ticker = {
@@ -218,13 +254,19 @@ def run_backtest(
         cost = slippage * traded_notional
 
         period_returns: dict[str, float] = {}
+        stops: dict[str, pd.Timestamp] = {}
         for ticker in holdings:
             if ticker not in frames:
                 continue
-            value = _period_return(frames[ticker]["Close"], start, end)
+            exit_date = _stop_day(ticker, start, end) if stop_loss_exit else None
+            value = _period_return(frames[ticker]["Close"], start, exit_date or end)
             if value is not None:
                 period_returns[ticker] = value
+                if exit_date is not None:
+                    stops[ticker] = exit_date
         gross = sum(period_returns.values()) / len(period_returns) if period_returns else None
+        # 손절 매도는 구간 중 추가 매매 — 그 종목 비중(1/N)에 편도 슬리피지를 물린다.
+        cost += slippage * target_weight * len(stops)
 
         strategy_pct = (gross - cost) * 100.0 if gross is not None else None
         benchmark_return = _period_return(benchmark_close, start, end)
@@ -255,7 +297,12 @@ def run_backtest(
                 base = series.asof(start)
                 if pd.isna(base) or float(base) <= 0:
                     continue
-                ratios.append(series.reindex(window, method="ffill") / float(base))
+                curve = series.reindex(window, method="ffill") / float(base)
+                stop = stops.get(ticker)
+                if stop is not None:
+                    # 손절 이후는 현금 — 매도일 가치로 고정한다.
+                    curve = curve.where(curve.index <= stop).ffill()
+                ratios.append(curve)
             portfolio = pd.concat(ratios, axis=1).mean(axis=1) if ratios else None
 
             def _daily_series(source: pd.Series | None) -> pd.Series | None:
@@ -313,11 +360,21 @@ def run_backtest(
                 # 이 달 시작(직전 월말 종가)에 교체한 종목 — 첫 달은 전량 편입.
                 "added": [holding_label(ticker) for ticker in added_tickers],
                 "removed": [holding_label(ticker) for ticker in removed_tickers],
+                # 이 달 중 단기이격 손절로 먼저 매도한 종목 (매도일 포함).
+                "stopped": [
+                    f"{holding_label(ticker)} {stop.strftime('%m/%d')}"
+                    for ticker, stop in sorted(stops.items(), key=lambda pair: pair[1])
+                ],
             }
         )
-        previous_holdings = holdings_set
-        # 이번 구간 성장배수 저장 (수익률 없는 종목은 1.0 으로 유지 취급)
-        previous_growth = {ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in holdings_set}
+        # 손절 종목은 이미 팔아 현금이다 — 다음 교체일에 또 매도 비용을 물지 않게
+        # 보유에서 빼고, 그 가치는 현금 항목으로 이월해 비중 분모에는 남긴다.
+        previous_holdings = holdings_set - set(stops)
+        previous_growth = {
+            ticker: 1.0 + period_returns.get(ticker, 0.0) for ticker in previous_holdings
+        }
+        if stops:
+            previous_growth["__CASH__"] = sum(1.0 + period_returns.get(t, 0.0) for t in stops)
 
     # 예정 행 — 마지막 월말 종가에 실행될 교체 (수익률은 아직 없음)
     if pending_signal is not None:
@@ -337,6 +394,7 @@ def run_backtest(
                 "turnover_pct": round(len(pending_holdings - previous_holdings) / top_n * 100.0, 1),
                 "added": [holding_label(t) for t in sorted(pending_holdings - previous_holdings)],
                 "removed": [holding_label(t) for t in sorted(previous_holdings - pending_holdings)],
+                "stopped": [],
                 "is_pending": True,
             }
         )
@@ -371,6 +429,7 @@ def run_backtest(
         "start_date": dates[0].strftime("%Y-%m-%d"),
         "end_date": dates[-1].strftime("%Y-%m-%d"),
         "months": months,
+        "stop_loss_exit": bool(stop_loss_exit),
         "strategy_total_pct": strategy_total,
         "benchmark_total_pct": benchmark_total,
         "strategy_mdd_pct": strategy_mdd,
