@@ -165,6 +165,44 @@ def _format_listed_date(value: Any) -> str | None:
     return normalized
 
 
+def _apply_sector_labels(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """stock_meta 의 섹터·업종을 한글 표기(utils.sector_labels)로 붙인다.
+
+    배치 B 가 yfinance 로 수집한 값이며, 없는 종목(ETF·코스닥 소형주 등)은 빈 값이다.
+    화면은 값이 있는 풀에서만 컬럼을 노출한다.
+    """
+    if dataframe.empty or "티커" not in dataframe.columns:
+        return dataframe
+
+    from utils.db_manager import get_db_connection
+    from utils.sector_labels import industry_ko, sector_ko
+
+    db = get_db_connection()
+    if db is None:
+        dataframe["섹터"] = ""
+        dataframe["업종"] = ""
+        return dataframe
+
+    tickers = sorted({str(v or "").strip().upper() for v in dataframe["티커"] if str(v or "").strip()})
+    sector_by: dict[str, tuple[str, str]] = {}
+    cursor = db.stock_meta.find(
+        {"ticker": {"$in": tickers}, "sector": {"$nin": [None, ""]}},
+        {"_id": 0, "ticker": 1, "sector": 1, "industry": 1},
+    )
+    for doc in cursor:
+        ticker = str(doc.get("ticker") or "").strip().upper()
+        if ticker and ticker not in sector_by:
+            sector_by[ticker] = (
+                sector_ko(doc.get("sector")),
+                industry_ko(doc.get("industry")),
+            )
+
+    upper = dataframe["티커"].astype(str).str.strip().str.upper()
+    dataframe["섹터"] = upper.map(lambda t: sector_by.get(t, ("", ""))[0])
+    dataframe["업종"] = upper.map(lambda t: sector_by.get(t, ("", ""))[1])
+    return dataframe
+
+
 def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
     if dataframe.empty:
         return dataframe
@@ -551,6 +589,7 @@ def _compute_rank_data_payload(
         dataframe.attrs.update(dataframe_attrs)
 
     dataframe = _apply_rank_info_cache(dataframe, selected_ticker_type)
+    dataframe = _apply_sector_labels(dataframe)
 
     return {
         "ticker_types": configs_payload,
