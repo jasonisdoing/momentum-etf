@@ -593,7 +593,7 @@ export function SteadyMomentumClient() {
           headerName: label.replace("(%)", ""),
           colId: label,
           headerTooltip: "전월 말 종가 대비 수익률 (이번 달은 캐시 마지막 종가까지) — pools-rank 월별과 같은 계산",
-          width: 96,
+          width: 92,
           type: "numericColumn",
           valueGetter: (p) => p.data?.monthly_returns?.[label] ?? null,
           valueFormatter: (p) => formatSigned(p.value, 1),

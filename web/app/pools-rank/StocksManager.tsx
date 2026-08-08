@@ -1164,8 +1164,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           field: label,
           // 데이터 키는 "YYYY-MM(%)" 그대로 두고 헤더만 (%) 없이 표시한다.
           headerName: label.replace("(%)", ""),
-          minWidth: 108,
-          width: 108,
+          // 헤더가 "YYYY-MM" 7자로 짧아져 폭도 그에 맞춰 줄인다 (84는 헤더가 잘렸다).
+          minWidth: 92,
+          width: 92,
           type: "rightAligned",
           cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
         }) as ColDef<RankGridRow>,
