@@ -1015,7 +1015,7 @@ export function SteadyMomentumClient() {
                   </div>
                 </label>
                 <span style={hintStyle}>
-                  {view.settings.backtest_months}개월 · 월간 리밸런싱 · 현재 종목풀 기준(생존 편향 있음)
+                  {view.settings.backtest_months}개월 · 월간 리밸런싱 · 빈 슬롯은 현금 · 현재 종목풀 기준(생존 편향 있음)
                 </span>
               </div>
               <div className="appMainHeaderRight">
