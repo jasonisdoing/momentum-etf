@@ -6,6 +6,7 @@ import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { formatPoolLabel } from "@/lib/pool-label";
+import { useLatestRequest } from "@/lib/use-latest-request";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
 import { AppAgGrid } from "../components/AppAgGrid";
@@ -126,8 +127,11 @@ export function AusMarketStockManager({
   const [error, setError] = useState<string | null>(null);
 
   const toast = useToast();
+  const { begin, isLatest } = useLatestRequest();
 
   const load = useCallback(async (minCapUkmText: string) => {
+    // 늦게 도착한 옛 응답이 새 결과를 덮지 않게 한다(공용 훅).
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
@@ -141,6 +145,7 @@ export function AusMarketStockManager({
       if (!resp.ok) {
         throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
       }
+      if (!isLatest(token)) return;
       setRows(data.rows ?? []);
       setTotalCount(data.total_count ?? 0);
       setTickerPools(allStocksPayload.ticker_types ?? []);
@@ -153,11 +158,12 @@ export function AusMarketStockManager({
       });
       setRegisteredTickers(registered);
     } catch (e) {
+      if (!isLatest(token)) return;
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
-      setLoading(false);
+      if (isLatest(token)) setLoading(false);
     }
-  }, []);
+  }, [begin, isLatest]);
 
   useEffect(() => {
     void load(minMarketCapUkm);

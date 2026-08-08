@@ -6,6 +6,7 @@ import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
+import { useLatestRequest } from "@/lib/use-latest-request";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
 import type { StocksAccountItem } from "@/lib/stocks-store";
@@ -91,8 +92,12 @@ export function KorMarketStockManager({
   const [error, setError] = useState<string | null>(null);
 
   const toast = useToast();
+  const { begin, isLatest } = useLatestRequest();
 
   const load = useCallback(async (m: string, l: number, minCapJoText: string) => {
+    // 코스피(200종목)가 코스닥(150종목)보다 느려서, 시장을 바꾸면 늦게 온 코스피 응답이
+    // 먼저 그려진 코스닥 화면을 덮었다. 마지막 요청의 응답만 반영한다.
+    const token = begin();
     setLoading(true);
     setError(null);
     try {
@@ -103,6 +108,7 @@ export function KorMarketStockManager({
         loadStocksTable("kor").catch(() => ({ ticker_types: [], rows: [], ticker_type: "" })),
       ]);
       const data = (await resp.json()) as KorMarketStocksResponse;
+      if (!isLatest(token)) return;
       if (!resp.ok) {
         throw new Error(data.error ?? "데이터를 불러오지 못했습니다.");
       }
@@ -118,11 +124,12 @@ export function KorMarketStockManager({
       });
       setRegisteredTickers(registered);
     } catch (e) {
+      if (!isLatest(token)) return;
       setError(e instanceof Error ? e.message : "데이터를 불러오지 못했습니다.");
     } finally {
-      setLoading(false);
+      if (isLatest(token)) setLoading(false);
     }
-  }, []);
+  }, [begin, isLatest]);
 
   useEffect(() => {
     load(market, limit, minMarketCapJo);

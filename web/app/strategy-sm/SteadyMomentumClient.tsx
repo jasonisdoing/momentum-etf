@@ -23,13 +23,17 @@ const POOL_OPTIONS: readonly PoolLabelSource[] = [
   { ticker_type: "kor_kosdaq", name: "코스닥 개별주" },
 ];
 
-type Settings = {
-  pools: string[];
+// 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
+type PoolSettings = {
   top_n: number;
   slippage_pct: number;
   max_per_industry: number;
   backtest_months: number;
+  short_ma_days: number;
+  long_ma_days: number;
 };
+
+type Settings = PoolSettings & { pool: string };
 
 // 한 업종에서 최대 몇 종목까지 담을지 — 백엔드 MAX_PER_INDUSTRY_OPTIONS 와 같아야 한다.
 const MAX_PER_INDUSTRY_OPTIONS = [1, 2, 3, 4, 5, 10] as const;
@@ -53,7 +57,8 @@ type PickRow = {
   next_month_expected: boolean;
   ticker: string;
   name: string;
-  pool: string;
+  // 종목의 소속 마켓(KOSPI/KOSDAQ) — 한국 통합 풀 구분 표시용, 없으면 빈 값.
+  market: string;
   sector: string;
   industry: string;
   currency: string;
@@ -75,6 +80,9 @@ type PicksResult = {
   signal_date: string;
   universe_count: number;
   candidate_count: number;
+  // 풀의 국가·통화 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX: 등)를 정한다.
+  country: string;
+  currency: string;
   monthly_return_labels: string[];
   rows: PickRow[];
 };
@@ -129,9 +137,18 @@ type BacktestResult = {
   daily: BacktestDayRow[];
 };
 
+// 풀 옵션 — 공용 라벨 소스에 국가·통화·풀 성격(stock/etf)이 붙는다.
+type PoolOption = PoolLabelSource & {
+  country_code?: string;
+  currency?: string;
+  pool_kind?: string | null;
+};
+
 type View = {
   settings: Settings;
-  pool_options?: PoolLabelSource[];
+  // 풀별 저장 설정 맵 — 셀렉트 전환 시 즉시 그 풀의 값으로 폼을 채운다.
+  settings_by_pool?: Record<string, PoolSettings>;
+  pool_options?: PoolOption[];
   // 전략 전용 이평선 — steady_momentum_settings 에 저장되며 종목풀 설정과 무관하다.
   ma_rule?: {
     short_ma_days: number;
@@ -146,13 +163,13 @@ type View = {
 // 선정 결과를 바꾸는 설정 — 이 값들이 바뀔 때만 저장 후 선정을 다시 계산한다.
 // 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
 const PICK_AFFECTING_KEYS = [
+  "pool",
   "top_n",
   "max_per_industry",
 ] as const;
 
 function needsRepick(before: Settings | null, after: Settings): boolean {
   if (!before) return true;
-  if (before.pools.join(",") !== after.pools.join(",")) return true;
   return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
 }
 
@@ -294,25 +311,33 @@ export function SteadyMomentumClient() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
-  const [draftPools, setDraftPools] = useState<string[]>([]);
+  const [draftPool, setDraftPool] = useState<string>("");
   const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
-  // 이평선 초안 — 전략 전용 값(steady_momentum_settings)으로 저장되며 종목풀 설정과 무관하다.
+  // 이평선 초안 — 전략 전용 값(steady_momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
 
-  const applyView = useCallback((data: View) => {
-    setView(data);
-    setDraftPools(data.settings.pools);
-    setDraftBacktestMonths(data.settings.backtest_months);
-    setDraftMaxPerIndustry(data.settings.max_per_industry);
+  // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
+  const fillDrafts = useCallback((values: PoolSettings) => {
+    setDraftBacktestMonths(values.backtest_months);
+    setDraftMaxPerIndustry(values.max_per_industry);
     setDraft({
-      top_n: String(data.settings.top_n),
-      slippage_pct: String(data.settings.slippage_pct),
+      top_n: String(values.top_n),
+      slippage_pct: String(values.slippage_pct),
     });
-    setDraftMaRule(
-      data.ma_rule ? { short: data.ma_rule.short_ma_days, long: data.ma_rule.long_ma_days } : null,
-    );
+    setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
   }, []);
+
+  const applyView = useCallback(
+    (data: View) => {
+      setView(data);
+      setDraftPool(data.settings.pool);
+      fillDrafts(data.settings);
+    },
+    [fillDrafts],
+  );
+
+  const isNewPoolDraft = view != null && draftPool !== "" && view.settings_by_pool?.[draftPool] == null;
 
   const load = useCallback(async (): Promise<boolean> => {
     setLoading(true);
@@ -367,64 +392,76 @@ export function SteadyMomentumClient() {
     })();
   }, [load, runPicks]);
 
+  // 저장 공용 경로 — 폼 저장 버튼과 풀 전환(저장된 풀의 설정 자동 적용)이 함께 쓴다.
+  const persistSettings = useCallback(
+    async (settings: Settings, successMessage: string) => {
+      setSaving(true);
+      try {
+        const maRuleChanged =
+          view?.ma_rule != null &&
+          (settings.short_ma_days !== view.ma_rule.short_ma_days ||
+            settings.long_ma_days !== view.ma_rule.long_ma_days);
+        const resp = await fetch("/api/strategy-sm", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings }),
+        });
+        const payload = await resp.json();
+        if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
+        const saved = payload as View;
+        // 이평선이 바뀌면 이격 점수가 달라지므로 무조건 재선정한다.
+        const repick = maRuleChanged || needsRepick(view?.settings ?? null, saved.settings);
+        // 선정에 영향이 없는 변경(슬리피지·백테스트 기간)이면 기존 선정 결과를 그대로 둔다.
+        applyView({ ...saved, picks: repick ? null : (view?.picks ?? null) });
+        // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
+        setBacktest(null);
+        toast.success(repick ? `${successMessage} 선정을 다시 계산합니다.` : successMessage);
+        if (repick) await runPicks();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
+      } finally {
+        setSaving(false);
+      }
+    },
+    [applyView, runPicks, toast, view],
+  );
+
   const saveSettings = useCallback(async () => {
     const topN = Number(draft.top_n);
     const slippage = Number(draft.slippage_pct);
-    if (![topN, slippage].every((v) => Number.isFinite(v))) {
+    if (![topN, slippage].every((v) => Number.isFinite(v)) || draftMaRule == null) {
       toast.error("설정 값이 올바르지 않습니다.");
       return;
     }
-    setSaving(true);
-    try {
-      const maRuleChanged =
-        draftMaRule != null &&
-        view?.ma_rule != null &&
-        (draftMaRule.short !== view.ma_rule.short_ma_days ||
-          draftMaRule.long !== view.ma_rule.long_ma_days);
-      const resp = await fetch("/api/strategy-sm", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          settings: {
-            pools: draftPools,
-            top_n: topN,
-            slippage_pct: slippage,
-            max_per_industry: draftMaxPerIndustry,
-            backtest_months: draftBacktestMonths,
-            // 이평선은 전략 전용 값 — 설정의 일부로 함께 저장한다(종목풀 설정과 무관).
-            ...(draftMaRule != null
-              ? { short_ma_days: draftMaRule.short, long_ma_days: draftMaRule.long }
-              : {}),
-          },
-        }),
-      });
-      const payload = await resp.json();
-      if (!resp.ok) throw new Error(payload?.error ?? "설정을 저장하지 못했습니다.");
-      const saved = payload as View;
-      // 이평선이 바뀌면 이격 점수가 달라지므로 무조건 재선정한다.
-      const repick = maRuleChanged || needsRepick(view?.settings ?? null, saved.settings);
-      // 선정에 영향이 없는 변경(슬리피지·백테스트 기간)이면 기존 선정 결과를 그대로 둔다.
-      applyView({ ...saved, picks: repick ? null : (view?.picks ?? null) });
-      // 백테스트는 어느 설정이 바뀌든 결과가 달라지므로 비운다.
-      setBacktest(null);
-      toast.success(repick ? "설정을 저장했습니다. 선정을 다시 계산합니다." : "설정을 저장했습니다.");
-      if (repick) await runPicks();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "설정을 저장하지 못했습니다.");
-    } finally {
-      setSaving(false);
-    }
-  }, [
-    applyView,
-    draft,
-    draftBacktestMonths,
-    draftMaRule,
-    draftMaxPerIndustry,
-    draftPools,
-    runPicks,
-    toast,
-    view,
-  ]);
+    await persistSettings(
+      {
+        pool: draftPool,
+        top_n: topN,
+        slippage_pct: slippage,
+        max_per_industry: draftMaxPerIndustry,
+        backtest_months: draftBacktestMonths,
+        // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
+        short_ma_days: draftMaRule.short,
+        long_ma_days: draftMaRule.long,
+      },
+      "설정을 저장했습니다.",
+    );
+  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
+
+  // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
+  // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
+  // 남기고, 현재 폼 값을 시작점으로 보여준 뒤 저장을 요구한다.
+  const handlePoolChange = useCallback(
+    (pool: string) => {
+      setDraftPool(pool);
+      const saved = view?.settings_by_pool?.[pool];
+      if (saved) {
+        fillDrafts(saved);
+        void persistSettings({ pool, ...saved }, "풀을 전환했습니다.");
+      }
+    },
+    [fillDrafts, persistSettings, view],
+  );
 
   const runBacktest = useCallback(async () => {
     // 기간도 저장된 설정을 따른다 — 미저장 상태에서는 실행 버튼이 막혀 있다.
@@ -458,7 +495,7 @@ export function SteadyMomentumClient() {
     if (!view) return false;
     const saved = view.settings;
     return (
-      draftPools.join(",") !== saved.pools.join(",") ||
+      draftPool !== saved.pool ||
       draftBacktestMonths !== saved.backtest_months ||
       draftMaxPerIndustry !== saved.max_per_industry ||
       draft.top_n !== String(saved.top_n) ||
@@ -468,9 +505,24 @@ export function SteadyMomentumClient() {
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPools, view]);
+  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
+  // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
+  const picksCountry = view?.picks?.country ?? "";
+  // 섹터·업종 UI 노출 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위:
+  // 개별주(stock)면 표시, ETF 면 숨김. 미설정(구 문서)이면 선정 행에 값이 있는지로
+  // 추정한다(pools-rank 와 같은 패턴). 업종을 모르는 종목엔 상한이 원래 미적용이라
+  // 숨겨도 동작은 그대로다.
+  const poolKind = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool)?.pool_kind ?? "";
+  const hasSectorData =
+    poolKind === "stock"
+      ? true
+      : poolKind === "etf"
+        ? false
+        : view?.picks
+          ? view.picks.rows.some((row) => row.sector || row.industry)
+          : true;
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
     return [
       {
@@ -517,27 +569,36 @@ export function SteadyMomentumClient() {
           return <span>{value == null ? "-" : `${value.toFixed(1)}%`}</span>;
         },
       },
-      {
-        headerName: "마켓",
-        field: "pool",
-        headerTooltip: "종목이 속한 종목풀 — 두 풀을 함께 선택했을 때 구분용",
-        width: 80,
-        // `/pools-rank` 마켓 컬럼과 같은 배지 스타일 (KOSPI 녹색 · KOSDAQ 파란색).
-        valueFormatter: (p) => (p.value === "kor_kosdaq" ? "KOSDAQ" : p.value === "kor" ? "KOSPI" : "-"),
-        cellStyle: (p) => {
-          if (p.value === "kor")
-            return { textAlign: "center", backgroundColor: "#d1e7dd", color: "#0f5132", fontWeight: "bold" };
-          if (p.value === "kor_kosdaq")
-            return { textAlign: "center", backgroundColor: "#cfe2ff", color: "#084298", fontWeight: "bold" };
-          return null;
-        },
-      },
+      // 마켓(KOSPI/KOSDAQ)은 한국 풀에서만 의미가 있다 — 통합 풀 구분 표시용.
+      ...(picksCountry === "kor"
+        ? [
+            {
+              headerName: "마켓",
+              field: "market",
+              headerTooltip: "종목의 소속 마켓 — 코스피+코스닥 통합 풀 구분용",
+              width: 80,
+              // `/pools-rank` 마켓 컬럼과 같은 배지 스타일 (KOSPI 녹색 · KOSDAQ 파란색).
+              cellStyle: (p) => {
+                if (p.value === "KOSPI")
+                  return { textAlign: "center", backgroundColor: "#d1e7dd", color: "#0f5132", fontWeight: "bold" };
+                if (p.value === "KOSDAQ")
+                  return { textAlign: "center", backgroundColor: "#cfe2ff", color: "#084298", fontWeight: "bold" };
+                return null;
+              },
+            } as ColDef<PickRow>,
+          ]
+        : []),
       {
         headerName: "티커",
         field: "ticker",
         // 한국 6자리 코드 + 상세 링크 아이콘이 잘리지 않는 폭.
         width: 96,
-        cellRenderer: (p: { value: string | null | undefined }) => <TickerDetailLink ticker={p.value} />,
+        // 호주 풀은 미국 동일 심볼과 구분되게 ASX: 접두를 붙인다 (pools-rank 와 동일).
+        cellRenderer: (p: { value: string | null | undefined }) => {
+          const raw = String(p.value ?? "-");
+          const display = picksCountry === "au" && raw !== "-" && !raw.startsWith("ASX:") ? `ASX:${raw}` : raw;
+          return <TickerDetailLink ticker={display} displayTicker={display} />;
+        },
       },
       {
         headerName: "종목명",
@@ -553,29 +614,34 @@ export function SteadyMomentumClient() {
           </span>
         ),
       },
-      {
-        headerName: "섹터",
-        field: "sector",
-        headerTooltip: "지수 구성종목 메타",
-        // yfinance 값 최장 22자. 좁은 화면에서는 줄어들고 말줄임 처리된다.
-        width: 96,
-        minWidth: 84,
-        cellClass: "appTextEllipsisCell",
-        tooltipValueGetter: (p) => p.value || undefined,
-        valueFormatter: (p) => p.value || "-",
-      },
-      {
-        headerName: "업종",
-        field: "industry",
-        headerTooltip: "지수 구성종목 메타",
-        // 실제로 쓰이는 값은 `Software - Infrastructure`(25자) 정도까지다.
-        // 최장 40자짜리는 드물어 말줄임에 맡기고, 폭은 섹터와 비슷하게 잡는다.
-        width: 130,
-        minWidth: 100,
-        cellClass: "appTextEllipsisCell",
-        tooltipValueGetter: (p) => p.value || undefined,
-        valueFormatter: (p) => p.value || "-",
-      },
+      // 섹터·업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
+      ...(hasSectorData
+        ? [
+            {
+              headerName: "섹터",
+              field: "sector",
+              headerTooltip: "지수 구성종목 메타",
+              // yfinance 값 최장 22자. 좁은 화면에서는 줄어들고 말줄임 처리된다.
+              width: 96,
+              minWidth: 84,
+              cellClass: "appTextEllipsisCell",
+              tooltipValueGetter: (p) => p.value || undefined,
+              valueFormatter: (p) => p.value || "-",
+            } as ColDef<PickRow>,
+            {
+              headerName: "업종",
+              field: "industry",
+              headerTooltip: "지수 구성종목 메타",
+              // 실제로 쓰이는 값은 `Software - Infrastructure`(25자) 정도까지다.
+              // 최장 40자짜리는 드물어 말줄임에 맡기고, 폭은 섹터와 비슷하게 잡는다.
+              width: 130,
+              minWidth: 100,
+              cellClass: "appTextEllipsisCell",
+              tooltipValueGetter: (p) => p.value || undefined,
+              valueFormatter: (p) => p.value || "-",
+            } as ColDef<PickRow>,
+          ]
+        : []),
       {
         headerName: "일간(%)",
         field: "daily_change_pct",
@@ -593,14 +659,19 @@ export function SteadyMomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatPrice(p.value, p.data?.currency),
       },
-      {
-        headerName: "시가총액",
-        field: "market_cap_eok",
-        headerTooltip: "네이버 시가총액 (/kor-market-stock 과 같은 소스, 10분 캐시)",
-        width: 120,
-        type: "numericColumn",
-        valueFormatter: (p) => formatKorMarketCap(p.value),
-      },
+      // 시가총액 소스(네이버)가 한국 전용이라 한국 풀에서만 보여준다.
+      ...(picksCountry === "kor"
+        ? [
+            {
+              headerName: "시가총액",
+              field: "market_cap_eok",
+              headerTooltip: "네이버 시가총액 (/kor-market-stock 과 같은 소스, 10분 캐시)",
+              width: 120,
+              type: "numericColumn",
+              valueFormatter: (p) => formatKorMarketCap(p.value),
+            } as ColDef<PickRow>,
+          ]
+        : []),
       // 월별 수익률 — pools-rank 월별과 같은 계산(전월 말 종가 대비, 이번 달은 마지막
       // 종가까지)의 최근 6개월. 라벨은 서버가 내려주고 헤더는 (%) 없이 표시한다.
       ...monthlyLabels.map(
@@ -653,8 +724,8 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
-    // 월별 라벨이 선정 응답에 실려 온다 — 라벨이 바뀌면(월이 넘어가면) 컬럼도 다시 만든다.
-  }, [monthlyLabels]);
+    // 월별 라벨·국가·섹터 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
+  }, [hasSectorData, monthlyLabels, picksCountry]);
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
@@ -863,35 +934,18 @@ export function SteadyMomentumClient() {
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목풀 (1~2개)</span>
-                  <span style={{ display: "inline-flex", gap: 12, alignItems: "center", minHeight: 31 }}>
-                    {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => {
-                      const checked = draftPools.includes(pool.ticker_type);
-                      return (
-                        <label
-                          key={pool.ticker_type}
-                          style={{ display: "inline-flex", gap: 6, alignItems: "center", marginBottom: 0, whiteSpace: "nowrap" }}
-                        >
-                          <input
-                            type="checkbox"
-                            className="form-check-input"
-                            style={{ marginTop: 0 }}
-                            checked={checked}
-                            // 마지막 1개는 해제 불가 — 최소 1개 풀은 항상 선택돼 있어야 한다.
-                            disabled={checked && draftPools.length === 1}
-                            onChange={(e) =>
-                              setDraftPools((pools) =>
-                                e.target.checked
-                                  ? [...pools, pool.ticker_type]
-                                  : pools.filter((p) => p !== pool.ticker_type),
-                              )
-                            }
-                          />
-                          {formatPoolLabel(pool)}
-                        </label>
-                      );
-                    })}
-                  </span>
+                  <span className="appLabeledFieldLabel">종목풀</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={draftPool}
+                    onChange={(e) => handlePoolChange(e.target.value)}
+                  >
+                    {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => (
+                      <option key={pool.ticker_type} value={pool.ticker_type}>
+                        {formatPoolLabel(pool)}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">종목 수</span>
@@ -908,21 +962,24 @@ export function SteadyMomentumClient() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">업종별 최대 보유</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: 80 }}
-                    value={draftMaxPerIndustry}
-                    onChange={(e) => setDraftMaxPerIndustry(Number(e.target.value))}
-                  >
-                    {MAX_PER_INDUSTRY_OPTIONS.map((count) => (
-                      <option key={count} value={count}>
-                        {count}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {/* 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미하므로 셀렉트를 숨긴다 (저장값은 유지). */}
+                {hasSectorData ? (
+                  <label className="appLabeledField">
+                    <span className="appLabeledFieldLabel">업종별 최대 보유</span>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ width: 80 }}
+                      value={draftMaxPerIndustry}
+                      onChange={(e) => setDraftMaxPerIndustry(Number(e.target.value))}
+                    >
+                      {MAX_PER_INDUSTRY_OPTIONS.map((count) => (
+                        <option key={count} value={count}>
+                          {count}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 {draftMaRule != null && view.ma_rule != null ? (
                   <>
                     <label className="appLabeledField">
@@ -972,7 +1029,8 @@ export function SteadyMomentumClient() {
                     value={draftBacktestMonths}
                     onChange={(e) => setDraftBacktestMonths(Number(e.target.value))}
                   >
-                    {(view.month_options ?? [view.settings.backtest_months]).map((m) => (
+                    {/* 풀 전환으로 넘어온 초안 값이 목록에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 된다. */}
+                    {withSavedValue(view.month_options ?? [view.settings.backtest_months], String(draftBacktestMonths)).map((m) => (
                       <option key={m} value={m}>
                         {m}개월
                       </option>
@@ -981,7 +1039,11 @@ export function SteadyMomentumClient() {
                 </label>
               </div>
               <div className="appMainHeaderRight">
-                {isDirty ? (
+                {isNewPoolDraft ? (
+                  <span style={{ ...hintStyle, color: "var(--up-color, #d64545)", fontWeight: 700 }}>
+                    이 풀은 첫 설정 — 저장해야 선정·백테스트가 실행됩니다
+                  </span>
+                ) : isDirty ? (
                   <span style={{ ...hintStyle, color: "var(--up-color, #d64545)", fontWeight: 700 }}>
                     저장하지 않은 변경
                   </span>
@@ -997,7 +1059,7 @@ export function SteadyMomentumClient() {
               </div>
             </div>
             <div style={hintStyle}>
-              장기 이평선 이격 상위(전략 전용 이평선, 단기 이격 음수 제외)로 선정 · 선택한 풀을 합쳐 한 순위로 경쟁 · 고정 종목 제외
+              장기 이평선 이격 상위(전략 전용 이평선, 단기 이격 음수 제외)로 선정 · 고정 종목 제외 · 업종 미상 종목은 업종상한 미적용 · 설정은 풀별 저장
             </div>
           </div>
         </div>

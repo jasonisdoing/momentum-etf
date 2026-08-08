@@ -29,18 +29,16 @@ import pandas as pd
 from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
 from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.steady_momentum_service import (
-    POOL_CONFIGS,
     available_backtest_months,
     benchmark_info,
     load_benchmark_close,
     load_price_frames,
     load_settings,
-    load_universe_multi,
+    load_universe,
     month_last_two_trading_days,
-    primary_pool,
+    pool_info,
     rank_candidates,
-    secondary_pool,
-    sector_industry_map_multi,
+    sector_industry_map,
     select_candidates,
     select_top,
     validate_settings,
@@ -95,10 +93,9 @@ def run_backtest(
     if settings is None:
         settings = load_settings()
     settings = validate_settings(settings)
-    pools = [str(pool) for pool in settings["pools"]]
-    base_pool = primary_pool(settings)
+    pool = str(settings["pool"])
 
-    universe = load_universe_multi(pools)
+    universe = load_universe(pool)
     name_by_ticker = {row["ticker"]: row["name"] for row in universe}
 
     def holding_label(ticker: str) -> str:
@@ -107,7 +104,7 @@ def run_backtest(
         return f"{name}({ticker})" if name else ticker
 
     frames = load_price_frames(universe)
-    benchmark_close = load_benchmark_close(base_pool)
+    benchmark_close = load_benchmark_close(pool)
 
     # 실제 한계는 종목풀 데이터가 정한다 — 판정일 여유까지 반영해 여기서 다시 막는다.
     pool_max = available_backtest_months(benchmark_close, int(settings["long_ma_days"]))
@@ -117,18 +114,13 @@ def run_backtest(
             f"백테스트할 수 있습니다 (요청 {months}개월)."
         )
 
-    # 참고 지수 — 두 풀 선택 시 두 번째 풀의 벤치마크를, 미국 풀은 유사 컨셉
-    # ETF(FMTM)를 나란히 보여준다(벤치마크가 아니며 선정에 관여하지 않는다).
+    # 참고 지수 — 미국 풀은 유사 컨셉 ETF(FMTM)를 나란히 보여준다
+    # (벤치마크가 아니며 선정에 관여하지 않는다).
     from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
     reference_close: pd.Series | None = None
     reference_name: str | None = None
-    second = secondary_pool(settings)
-    if second is not None and benchmark_info(second)["ticker"] != benchmark_info(base_pool)["ticker"]:
-        # 두 풀의 벤치마크가 같은 티커면 생략 — 같은 지수를 두 컬럼으로 보여줄 이유가 없다.
-        reference_close = load_benchmark_close(second)
-        reference_name = benchmark_info(second)["name"]
-    elif str(POOL_CONFIGS.get(base_pool, {}).get("country")) == "us":
+    if pool_info(pool)["country"] == "us":
         reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(
             US_REFERENCE_TICKER
         )
@@ -151,7 +143,7 @@ def run_backtest(
     # 진행 중인 달(부분 월)에서는 마지막 행이 이미 현재 포트폴리오라 예정 행이 없다.
     pending_signal: pd.Timestamp | None = None
     pair = month_last_two_trading_days(
-        POOL_CONFIGS[base_pool]["country"], dates[-1].to_period("M")
+        pool_info(pool)["country"], dates[-1].to_period("M")
     )
     if pair is not None:
         _, signal_calendar = pair
@@ -202,7 +194,7 @@ def run_backtest(
     # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
     max_per_industry = int(settings["max_per_industry"])
     industry_by_ticker = {
-        ticker: meta["industry"] for ticker, meta in sector_industry_map_multi(pools).items()
+        ticker: meta["industry"] for ticker, meta in sector_industry_map(pool).items()
     }
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
@@ -494,8 +486,8 @@ def run_backtest(
         "harvest_mdd_pct": harvest_mdd,
         "harvest_sortino": harvest_sortino,
         "harvest_cagr_pct": harvest_cagr,
-        "benchmark_name": benchmark_info(base_pool)["name"],
-        "benchmark_ticker": benchmark_info(base_pool)["ticker"],
+        "benchmark_name": benchmark_info(pool)["name"],
+        "benchmark_ticker": benchmark_info(pool)["ticker"],
         "reference_name": reference_name if reference_close is not None else None,
         "reference_total_pct": reference_total,
         "reference_mdd_pct": reference_mdd,

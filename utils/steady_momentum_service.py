@@ -2,19 +2,20 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 한국 개별주 종목풀 1~2개를 **합쳐 한 순위로 경쟁**시킨다.
-   고정 보유 종목(exclude_from_ranking)은 제외.
+1. 유니버스: 설정에서 고른 종목풀 1개(전체 활성 풀 중 선택 — 한국·미국·호주 등).
+   고정 보유 종목(exclude_from_ranking)은 제외. 코스피+코스닥 통합 같은 혼합
+   유니버스는 종목풀 자체를 합쳐 만든다(풀 관리 화면).
 2. 점수: **장기 이평선 이격(%)** — 계산식은 순위 화면과 같되, 이평선 일수는
-   **전략 전용 값**(이 설정의 short/long_ma_days)을 쓴다. 두 풀을 섞어도 같은
-   이평선이라 점수가 공정하게 비교된다. 장기 이격 > 0 & 단기 이격 >= 0 만 후보.
-   점수 순 상위 top_n 동일가중. 같은 규칙을 **월간 리듬으로 유지**하는 것이
-   이 화면의 차이다 — 편입·편출을 월 단위로 보고, 한 달 동안 손절 없이 든다.
+   **전략 전용 값**(풀별 설정의 short/long_ma_days)을 쓴다.
+   장기 이격 > 0 & 단기 이격 >= 0 만 후보. 점수 순 상위 top_n 동일가중.
+   같은 규칙을 **월간 리듬으로 유지**하는 것이 이 화면의 차이다 —
+   편입·편출을 월 단위로 보고, 한 달 동안 손절 없이 든다.
 3. 월간 리밸런싱: 판정은 월말 직전 거래일(L−1) 종가, 체결은 월말(L) 종가.
    L−1 종가가 확정된 다음날부터 다음 달 포트폴리오를 보여준다(거래일 캘린더 기준).
 
-벤치마크는 **첫 번째 풀**(POOL_CONFIGS 순서, 코스피 우선)의 종목풀 설정 BENCHMARK 를
-쓰고, 두 풀 선택 시 두 번째 풀의 벤치마크는 백테스트 참고 지수로 나란히 보여준다.
-설정은 MongoDB `system_config.steady_momentum_settings` 에 저장한다.
+벤치마크·국가·통화는 종목풀 설정(DB)을 단일 소스로 쓴다.
+설정은 MongoDB `system_config.steady_momentum_settings` 에 **풀별로** 저장한다
+(`{pool, settings_by_pool: {풀: {top_n, ...}}}`) — 풀을 바꾸면 그 풀의 설정으로 전환된다.
 """
 
 from __future__ import annotations
@@ -32,13 +33,8 @@ from utils.sector_labels import industry_ko, sector_ko
 warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
-# 선택 가능한 종목풀 — 1~2개를 함께 선택할 수 있다(같은 나라·통화·달력이라 혼합 가능).
-# 한국 개별주 종목풀만 지원한다. dict 순서가 우선순위다(벤치마크 = 첫 선택 풀).
-POOL_CONFIGS: dict[str, dict[str, Any]] = {
-    "kor": {"label": "코스피 개별주", "country": "kor", "currency": "KRW"},
-    "kor_kosdaq": {"label": "코스닥 개별주", "country": "kor", "currency": "KRW"},
-}
-AVAILABLE_POOLS = tuple(POOL_CONFIGS)
+# 종목풀은 DB(pool_settings)의 활성 풀 전체 중 1개를 선택한다 — 목록·국가·통화의
+# 단일 소스는 종목풀 설정이다 (하드코딩 목록을 두지 않는다).
 # 한 업종에서 최대 몇 종목까지 담을지 — 화면 셀렉트와 검증이 같은 목록을 쓴다.
 MAX_PER_INDUSTRY_OPTIONS = (1, 2, 3, 4, 5, 10)
 # 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
@@ -92,7 +88,38 @@ _SETTINGS_KEY = "steady_momentum_settings"
 # 두지 않는다 — 값이 없거나 깨졌으면 임의 값으로 대체하지 않고 에러를 낸다.
 
 
+# ── 풀 정보 (종목풀 설정 단일 소스) ─────────────────────────────────────────
+def available_pools() -> list[str]:
+    """DB(pool_settings)의 활성 종목풀 목록."""
+    from utils.settings_loader import list_available_ticker_types
+
+    return list_available_ticker_types()
+
+
+def pool_info(pool: str) -> dict[str, str]:
+    """풀의 국가·통화·이름 — 종목풀 설정(DB)이 단일 소스. 없으면 명시적 에러."""
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    country = str(settings.get("country_code") or "").strip().lower()
+    currency = str(settings.get("currency") or "").strip().upper()
+    if not country or not currency:
+        raise RuntimeError(f"종목풀({pool}) 설정에 country_code/currency 가 없습니다 — 종목풀 설정을 확인하세요.")
+    return {"country": country, "currency": currency, "name": str(settings.get("name") or pool)}
+
+
 # ── 설정 ──────────────────────────────────────────────────────────────────
+# 풀별로 따로 저장되는 항목 — 풀을 바꾸면 이 값들이 그 풀의 저장분으로 전환된다.
+PER_POOL_SETTING_KEYS = (
+    "top_n",
+    "slippage_pct",
+    "max_per_industry",
+    "backtest_months",
+    "short_ma_days",
+    "long_ma_days",
+)
+
+
 def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """설정을 검증해 정규화된 dict 를 반환한다. 실패 시 ValueError."""
     if not isinstance(settings, dict):
@@ -122,17 +149,9 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if not 1 <= backtest_months <= max_months:
         raise ValueError(f"'backtest_months' 는 1~{max_months} 사이여야 합니다.")
 
-    raw_pools = settings.get("pools")
-    if not isinstance(raw_pools, (list, tuple)) or not raw_pools:
-        raise ValueError("'pools' 는 종목풀 1~2개의 목록이어야 합니다.")
-    cleaned = {str(pool or "").strip().lower() for pool in raw_pools}
-    unknown = cleaned - set(AVAILABLE_POOLS)
-    if unknown:
-        raise ValueError(f"지원하지 않는 종목풀입니다: {', '.join(sorted(unknown))}")
-    # POOL_CONFIGS 순서로 정규화 — 첫 풀이 벤치마크 기준이 된다(코스피 우선).
-    pools = [pool for pool in AVAILABLE_POOLS if pool in cleaned]
-    if not 1 <= len(pools) <= 2:
-        raise ValueError("'pools' 는 1~2개여야 합니다.")
+    pool = str(settings.get("pool") or "").strip().lower()
+    if pool not in available_pools():
+        raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
 
     # 전략 전용 이평선 — 종목풀 설정과 별개다. 허용 일수 목록은 공용 상수를 재사용한다.
     from utils.pool_settings_store import MA_DAY_OPTIONS
@@ -147,7 +166,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("'short_ma_days' 는 'long_ma_days' 보다 작아야 합니다.")
 
     return {
-        "pools": pools,
+        "pool": pool,
         "top_n": top_n,
         "slippage_pct": slippage_pct,
         "max_per_industry": max_per_industry,
@@ -166,7 +185,7 @@ def pool_options() -> list[dict[str, Any]]:
     from utils.settings_loader import get_ticker_type_settings
 
     options: list[dict[str, Any]] = []
-    for pool, config in POOL_CONFIGS.items():
+    for pool in available_pools():
         try:
             settings = get_ticker_type_settings(pool) or {}
         except Exception:
@@ -174,19 +193,24 @@ def pool_options() -> list[dict[str, Any]]:
         options.append(
             {
                 "ticker_type": pool,
-                "name": str(settings.get("name") or "").strip() or str(config["label"]),
+                "name": str(settings.get("name") or "").strip() or pool,
                 "icon": str(settings.get("icon") or "").strip(),
                 "order": settings.get("order"),
+                # 화면이 국가별 컬럼(마켓·시가총액)과 통화 표기를 결정하는 데 쓴다.
+                "country_code": str(settings.get("country_code") or "").strip().lower(),
+                "currency": str(settings.get("currency") or "").strip().upper(),
+                # 풀 성격(stock/etf) — 섹터·업종 컬럼과 업종상한 노출 판단용. 미설정이면 빈 값.
+                "pool_kind": str(settings.get("pool_kind") or "").strip().lower(),
             }
         )
     return sorted(options, key=lambda item: (item["order"] is None, item["order"]))
 
 
-def load_settings() -> dict[str, Any]:
-    """저장된 설정을 반환한다. 없거나 읽을 수 없으면 대체값 없이 에러를 낸다.
+def _load_settings_doc() -> dict[str, Any]:
+    """저장 문서를 새 스키마(`{pool, settings_by_pool}`)로 읽는다. 구 스키마는 1회 마이그레이션.
 
-    기본값으로 슬쩍 넘어가면 화면에는 그럴듯한 값이 뜨고, 그대로 저장하는 순간
-    실제 저장돼 있던 설정이 덮어써진다. 그래서 실패는 실패로 드러낸다.
+    마이그레이션 대상: ① 2풀 배열 스키마(`pools: [..]`) ② 단일 pool 평면 스키마.
+    둘 다 선택 풀의 설정으로 승계하고, 원본은 백업 필드로 보존한다.
     """
     from utils.db_manager import get_db_connection
 
@@ -201,44 +225,57 @@ def load_settings() -> dict[str, Any]:
             f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
         )
 
-    # ── 일회성 마이그레이션: 구 스키마(pool 1개·이평 종목풀 공유) → 새 스키마 ──
-    # pools 가 없고 pool 이 있으면 딱 한 번 올린다. 원본은 백업 필드로 보존한다.
-    if "pools" not in stored and isinstance(stored.get("pool"), str):
-        from utils.rankings import get_ticker_type_ma_rules
+    if isinstance(stored.get("settings_by_pool"), dict) and isinstance(stored.get("pool"), str):
+        return stored
 
-        legacy_pool = str(stored["pool"]).strip().lower()
-        rule = get_ticker_type_ma_rules(legacy_pool)[0]
-        upgraded = {key: value for key, value in stored.items() if key != "pool"}
-        upgraded["pools"] = [legacy_pool]
-        upgraded["short_ma_days"] = int(rule["short_ma_days"])
-        upgraded["long_ma_days"] = int(rule["long_ma_days"])
-        normalized = validate_settings(upgraded)
-        update: dict[str, Any] = {
-            "settings": normalized,
-            "updated_at": datetime.now().isoformat(),
-        }
-        if "settings_before_pools_migration" not in doc:
-            update["settings_before_pools_migration"] = stored
-        db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, {"$set": update})
-        return normalized
+    # ── 일회성 마이그레이션 → 풀별 맵 스키마 ──
+    if isinstance(stored.get("pools"), (list, tuple)) and stored["pools"]:
+        pool = str(stored["pools"][0]).strip().lower()
+    elif isinstance(stored.get("pool"), str):
+        pool = str(stored["pool"]).strip().lower()
+    else:
+        raise RuntimeError("저장된 Steady Momentum 설정에서 종목풀을 알 수 없습니다.")
+    per_pool = {key: stored[key] for key in PER_POOL_SETTING_KEYS if key in stored}
+    validate_settings({"pool": pool, **per_pool})  # 승계 값 검증 — 깨진 값은 여기서 드러난다
+    upgraded = {"pool": pool, "settings_by_pool": {pool: per_pool}}
+    update: dict[str, Any] = {"settings": upgraded, "updated_at": datetime.now().isoformat()}
+    if "settings_before_per_pool_migration" not in doc:
+        update["settings_before_per_pool_migration"] = stored
+    db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, {"$set": update})
+    return upgraded
 
+
+def load_settings_map() -> dict[str, Any]:
+    """`{pool, settings_by_pool}` — 화면이 풀 전환 시 즉시 그 풀의 설정을 채우는 데 쓴다."""
+    return _load_settings_doc()
+
+
+def load_settings() -> dict[str, Any]:
+    """현재 선택된 풀의 설정을 평면 dict 로 반환한다 (`{pool, top_n, ...}`).
+
+    선택 풀의 저장분이 없거나 깨졌으면 대체값 없이 에러 — 기본값으로 슬쩍 넘어가면
+    그대로 저장되는 순간 실제 설정이 덮어써지기 때문이다.
+    """
+    stored = _load_settings_doc()
+    pool = str(stored["pool"]).strip().lower()
+    per_pool = stored["settings_by_pool"].get(pool)
+    if not isinstance(per_pool, dict):
+        raise RuntimeError(f"종목풀({pool})의 Steady Momentum 설정이 없습니다 — 화면에서 저장하세요.")
     try:
-        return validate_settings(stored)
+        return validate_settings({"pool": pool, **per_pool})
     except ValueError as error:
-        # 스키마에 항목이 늘어난 경우 등 — 어느 값이 문제인지 그대로 드러낸다.
         raise ValueError(f"저장된 Steady Momentum 설정이 올바르지 않습니다: {error}") from error
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """검증 후 저장하고 정규화된 설정을 반환한다.
+    """검증 후 선택 풀의 설정으로 저장하고 정규화된 평면 설정을 반환한다.
 
-    기간 상한은 룩백에 따라 달라지므로 여기서 실제 데이터로 한 번 더 막는다.
-    (읽기 경로인 `load_settings` 에는 넣지 않는다 — 설정 조회가 가격 캐시에
-    묶이면 캐시 문제로 설정 화면까지 못 여는 상황이 된다.)
+    다른 풀의 저장분은 건드리지 않는다(풀별 독립). 기간 상한은 벤치마크 데이터와
+    장기 이평선이 정하므로 여기서 실제 데이터로 한 번 더 막는다.
     """
     normalized = validate_settings(settings)
     limit = available_backtest_months(
-        load_benchmark_close(primary_pool(normalized)), int(normalized["long_ma_days"])
+        load_benchmark_close(normalized["pool"]), int(normalized["long_ma_days"])
     )
     if normalized["backtest_months"] > limit:
         raise ValueError(
@@ -250,49 +287,23 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     db = get_db_connection()
     if db is None:
         raise RuntimeError("DB 연결에 실패했습니다.")
+    pool = normalized["pool"]
+    per_pool = {key: normalized[key] for key in PER_POOL_SETTING_KEYS}
     db[_CONFIG_COLLECTION].update_one(
         {"_id": _SETTINGS_KEY},
-        {"$set": {"settings": normalized, "updated_at": datetime.now().isoformat()}},
+        {
+            "$set": {
+                "settings.pool": pool,
+                f"settings.settings_by_pool.{pool}": per_pool,
+                "updated_at": datetime.now().isoformat(),
+            }
+        },
         upsert=True,
     )
     return normalized
 
 
 # ── 유니버스 · 가격 ────────────────────────────────────────────────────────
-def primary_pool(settings: dict[str, Any]) -> str:
-    """선택 풀 중 기준 풀 — 벤치마크·달력·통화를 여기서 가져온다.
-
-    validate_settings 가 POOL_CONFIGS 순서로 정규화하므로 첫 항목(코스피 우선)이다.
-    """
-    return str(settings["pools"][0])
-
-
-def secondary_pool(settings: dict[str, Any]) -> str | None:
-    """두 번째 풀 (2개 선택 시) — 벤치마크를 백테스트 참고 지수로 쓴다."""
-    pools = settings["pools"]
-    return str(pools[1]) if len(pools) > 1 else None
-
-
-def load_universe_multi(pools: list[str]) -> list[dict[str, str]]:
-    """선택한 풀들의 종목을 합친 유니버스 — 티커 중복은 앞선 풀이 우선."""
-    universe: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for pool in pools:
-        for row in load_universe(pool):
-            if row["ticker"] in seen:
-                continue
-            seen.add(row["ticker"])
-            universe.append(row)
-    return universe
-
-
-def sector_industry_map_multi(pools: list[str]) -> dict[str, dict[str, str]]:
-    """선택한 풀들의 섹터·업종 맵을 합친다 — 티커 중복은 앞선 풀이 우선."""
-    result: dict[str, dict[str, str]] = {}
-    for pool in pools:
-        for ticker, meta in sector_industry_map(pool).items():
-            result.setdefault(ticker, meta)
-    return result
 
 
 def load_universe(pool: str) -> list[dict[str, str]]:
@@ -312,7 +323,15 @@ def load_universe(pool: str) -> list[dict[str, str]]:
         if bool(item.get("exclude_from_ranking")):
             continue
         seen.add(ticker)
-        universe.append({"ticker": ticker, "name": str(item.get("name") or ticker), "pool": pool})
+        universe.append(
+            {
+                "ticker": ticker,
+                "name": str(item.get("name") or ticker),
+                "pool": pool,
+                # 한국 통합 풀(코스피+코스닥)에서 마켓 구분 표시용 — 없으면 빈 값.
+                "market": str(item.get("market") or "").strip(),
+            }
+        )
     return universe
 
 
@@ -514,7 +533,7 @@ def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     """
     from utils.index_constituents_loader import load_index_constituents
 
-    if str(POOL_CONFIGS.get(pool, {}).get("country")) != "us":
+    if pool_info(pool)["country"] != "us":
         from utils.stock_list_io import _load_ticker_type_stocks_raw
 
         result: dict[str, dict[str, str]] = {}
@@ -634,20 +653,18 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         settings = load_settings()
     settings = validate_settings(settings)
 
-    pools = [str(pool) for pool in settings["pools"]]
-    base_pool = primary_pool(settings)
-    universe = load_universe_multi(pools)
+    pool = str(settings["pool"])
+    info = pool_info(pool)
+    universe = load_universe(pool)
     frames = load_price_frames(universe)
-    benchmark_close = load_benchmark_close(base_pool)
-    rebalance_date, signal_date = current_portfolio_dates(
-        benchmark_close, POOL_CONFIGS[base_pool]["country"]
-    )
+    benchmark_close = load_benchmark_close(pool)
+    rebalance_date, signal_date = current_portfolio_dates(benchmark_close, info["country"])
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
     max_per_industry = int(settings["max_per_industry"])
-    sector_map = sector_industry_map_multi(pools)
+    sector_map = sector_industry_map(pool)
     industry_by_ticker = {ticker: meta["industry"] for ticker, meta in sector_map.items()}
 
     selected = select_top(scored, top_n, max_per_industry, industry_by_ticker)
@@ -745,8 +762,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     month_labels = get_recent_monthly_return_labels(6)
 
-    currency = str(POOL_CONFIGS[base_pool]["currency"])
-    country = str(POOL_CONFIGS[base_pool]["country"])
+    currency = info["currency"]
+    country = info["country"]
 
     row_tickers = [item["ticker"] for item in selected + reserve] + [
         item["ticker"] for item in extra_expected
@@ -814,6 +831,9 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "signal_date": signal_date.strftime("%Y-%m-%d"),
         "universe_count": len(universe),
         "candidate_count": len(candidates),
+        # 풀의 국가·통화 — 화면이 마켓·시가총액 컬럼 표시와 티커 표기(ASX: 등)를 정한다.
+        "country": country,
+        "currency": currency,
         # 월별 컬럼 라벨(최근 6개월, pools-rank 와 같은 형식) — 화면이 이 순서로 컬럼을 만든다.
         "monthly_return_labels": month_labels,
         "rows": [
@@ -826,7 +846,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "next_month_expected": item["ticker"] in next_expected,
                 "ticker": item["ticker"],
                 "name": item["name"],
-                "pool": item["pool"],
+                "market": item.get("market", ""),
                 # 한국 풀 표시용 한글 번역 — 그룹핑 키(sector_map)는 영문 원본 그대로다.
                 "sector": sector_ko(sector_map.get(item["ticker"], {}).get("sector", "")),
                 "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
@@ -850,7 +870,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "next_month_expected": True,
                 "ticker": item["ticker"],
                 "name": item["name"],
-                "pool": item["pool"],
+                "market": item.get("market", ""),
                 "sector": sector_ko(sector_map.get(item["ticker"], {}).get("sector", "")),
                 "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
                 "currency": currency,
