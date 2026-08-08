@@ -596,6 +596,31 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     # 다음 달 예상 — 오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 한 번 더 돌려,
     # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(월말 직전) 종가다.
+    # 현재 기준 단기/장기 이격 — 표의 '현재-단기/장기' 컬럼용. 자격 필터와 무관하게
+    # 행에 있는 종목은 전부 계산한다(단기 음수로 후보 탈락한 종목도 값은 보여준다).
+    from utils.rankings import get_ticker_type_ma_rules
+
+    _ma_rule = get_ticker_type_ma_rules(str(settings["pool"]))[0]
+
+    def current_disparity(ticker: str) -> dict[str, float | None]:
+        frame = frames.get(ticker)
+        metrics = (
+            momentum_metrics(
+                frame["Close"],
+                short_ma_days=int(_ma_rule["short_ma_days"]),
+                long_ma_days=int(_ma_rule["long_ma_days"]),
+                as_of=None,
+            )
+            if frame is not None and not frame.empty
+            else None
+        )
+        if metrics is None:
+            return {"current_short_pct": None, "current_long_pct": None}
+        return {
+            "current_short_pct": round(metrics["short_disparity_pct"], 1),
+            "current_long_pct": round(metrics["disparity_pct"], 1),
+        }
+
     current_top = select_top(
         rank_candidates(select_candidates(universe, frames, settings, as_of=None)),
         top_n,
@@ -705,8 +730,9 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
                 "currency": currency,
                 **price_info(item["ticker"]),
-                "short_disparity_pct": round(item["short_disparity_pct"], 1),
-                "momentum_score": round(item["momentum_score"], 1),
+                "signal_short_pct": round(item["short_disparity_pct"], 1),
+                "signal_long_pct": round(item["momentum_score"], 1),
+                **current_disparity(item["ticker"]),
             }
             for rank, item in enumerate([*selected, *reserve], start=1)
         ]
@@ -726,8 +752,11 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
                 "currency": currency,
                 **price_info(item["ticker"]),
-                "short_disparity_pct": round(item["short_disparity_pct"], 1),
-                "momentum_score": round(item["momentum_score"], 1),
+                # 판정일 기준 값은 없다 — 그 시점엔 후보 밖이었다.
+                "signal_short_pct": None,
+                "signal_long_pct": None,
+                "current_short_pct": round(item["short_disparity_pct"], 1),
+                "current_long_pct": round(item["momentum_score"], 1),
             }
             for item in extra_expected
         ],

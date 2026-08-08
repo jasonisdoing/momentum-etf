@@ -64,8 +64,10 @@ type PickRow = {
   daily_change_pct: number | null;
   market_cap_eok: number | null;
   month_return_pct: number | null;
-  short_disparity_pct: number;
-  momentum_score: number;
+  signal_short_pct: number | null;
+  signal_long_pct: number | null;
+  current_short_pct: number | null;
+  current_long_pct: number | null;
 };
 
 type PicksResult = {
@@ -599,23 +601,41 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "단기(%)",
-        field: "short_disparity_pct",
-        headerTooltip: "종가와 단기 이평선의 이격률 — 음수면 후보에서 제외 (순위 화면과 동일)",
-        width: 88,
+        headerName: "판정일-단기(%)",
+        field: "signal_short_pct",
+        headerTooltip: "판정일 종가 기준 단기 이평선 이격 — 이번 달 선정에 쓰인 값 (음수면 후보 제외)",
+        width: 108,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: "장기(%)",
-        field: "momentum_score",
-        headerTooltip: "종가와 장기 이평선의 이격률 = 선정 점수 (이평선 일수는 종목풀 설정)",
-        width: 88,
+        headerName: "판정일-장기(%)",
+        field: "signal_long_pct",
+        headerTooltip: "판정일 종가 기준 장기 이평선 이격 = 이번 달 선정 점수",
+        width: 108,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
-        // 선정 점수라 볼드는 유지하되, 색은 단기·기울기와 같은 부호 색 규칙을 따른다.
+        // 선정 점수라 볼드 유지, 색은 부호 색 규칙.
         cellStyle: (p) => ({ fontWeight: 700, color: signColor(p.value) }),
+      },
+      {
+        headerName: "현재-단기(%)",
+        field: "current_short_pct",
+        headerTooltip: "오늘까지의 가격(캐시 최신 종가) 기준 단기 이격 — 다음달 예상 판정에 쓰이는 값",
+        width: 100,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
+      },
+      {
+        headerName: "현재-장기(%)",
+        field: "current_long_pct",
+        headerTooltip: "오늘까지의 가격(캐시 최신 종가) 기준 장기 이격 — 다음달 예상 판정에 쓰이는 값",
+        width: 100,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 1),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
   }, []);
