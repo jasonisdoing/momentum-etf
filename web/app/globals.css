@@ -4416,12 +4416,14 @@ a {
   min-width: 0;
 }
 
-.rankRuleFieldRow .form-select:first-child {
-  min-width: 6.5rem;
-}
-
-.rankRuleFieldRow .form-select:last-child {
-  min-width: 5.5rem;
+/* 이평선 단기·장기 셀렉트 (`/pools-rank`, `/strategy-sm` 공용).
+   `단기 240일` 처럼 가장 긴 값이 잘리지 않을 폭을 못 박는다.
+   Tabler 의 `.form-select` 는 화살표 자리로 오른쪽에만 3rem 을 쓰므로
+   글자 폭(약 5rem)에 좌우 패딩 4rem 을 더해야 한다.
+   두 셀렉트를 같은 폭으로 둔다 — 값 목록이 같은데 폭이 다르면 눈에 거슬린다. */
+.appMaRuleSelect {
+  min-width: 9.25rem;
+  flex-shrink: 0;
 }
 
 .rankSwitchField {
@@ -4903,9 +4905,12 @@ a {
     width: 100%;
   }
 
-  .rankRuleFieldRow .form-select {
+  /* 좁은 화면에서는 잘리더라도 줄을 넘기지 않게 둘이 폭을 나눠 갖는다. */
+  .rankRuleFieldRow .form-select,
+  .appMaRuleSelect {
     flex: 1 1 0;
     min-width: 0;
+    flex-shrink: 1;
   }
 
   .stocksMainHeaderLeft .appLabeledField:first-child,

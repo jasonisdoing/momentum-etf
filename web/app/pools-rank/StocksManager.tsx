@@ -1581,7 +1581,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                       <span className="appLabeledFieldLabel">이평선</span>
                       <div className="rankRuleFieldRow">
                         <select
-                          className="form-select"
+                          className="form-select appMaRuleSelect"
                           value={String(maRule.short_ma_days)}
                           onChange={(event) => handleMaRuleDaysChange("short_ma_days", Number(event.target.value))}
                         >
@@ -1592,7 +1592,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                           ))}
                         </select>
                         <select
-                          className="form-select"
+                          className="form-select appMaRuleSelect"
                           value={String(maRule.long_ma_days)}
                           onChange={(event) => handleMaRuleDaysChange("long_ma_days", Number(event.target.value))}
                         >
