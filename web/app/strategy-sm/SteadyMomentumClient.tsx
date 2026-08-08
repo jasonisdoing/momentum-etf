@@ -497,9 +497,8 @@ export function SteadyMomentumClient() {
       {
         headerName: "티커",
         field: "ticker",
-        // 미국 티커 전용 화면이라 최장 5자(BRK-B)면 충분하다.
-        // `/pools-rank` 는 한국 6자리 코드와 `ASX:` 접두사까지 담아야 해서 더 넓다.
-        width: 82,
+        // 한국 6자리 코드 + 상세 링크 아이콘이 잘리지 않는 폭.
+        width: 96,
         cellRenderer: (p: { value: string | null | undefined }) => <TickerDetailLink ticker={p.value} />,
       },
       {
@@ -521,8 +520,8 @@ export function SteadyMomentumClient() {
         field: "sector",
         headerTooltip: "지수 구성종목 메타",
         // yfinance 값 최장 22자. 좁은 화면에서는 줄어들고 말줄임 처리된다.
-        width: 170,
-        minWidth: 110,
+        width: 96,
+        minWidth: 84,
         cellClass: "appTextEllipsisCell",
         tooltipValueGetter: (p) => p.value || undefined,
         valueFormatter: (p) => p.value || "-",
@@ -533,8 +532,8 @@ export function SteadyMomentumClient() {
         headerTooltip: "지수 구성종목 메타",
         // 실제로 쓰이는 값은 `Software - Infrastructure`(25자) 정도까지다.
         // 최장 40자짜리는 드물어 말줄임에 맡기고, 폭은 섹터와 비슷하게 잡는다.
-        width: 200,
-        minWidth: 110,
+        width: 130,
+        minWidth: 100,
         cellClass: "appTextEllipsisCell",
         tooltipValueGetter: (p) => p.value || undefined,
         valueFormatter: (p) => p.value || "-",
