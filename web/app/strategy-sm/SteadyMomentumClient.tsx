@@ -48,6 +48,7 @@ type PickRow = {
   rank: number;
   is_reserve: boolean;
   streak_months: number | null;
+  next_month_expected: boolean;
   ticker: string;
   name: string;
   sector: string;
@@ -469,6 +470,17 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({
           color: p.value != null && p.value <= 1 && !p.data?.is_reserve ? "var(--up-color, #d64545)" : "inherit",
         }),
+      },
+      {
+        headerName: "다음달",
+        field: "next_month_expected",
+        headerTooltip:
+          "오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 돌렸을 때 편입·유지가 예상되는 종목 — 확정은 월말 직전 판정일 종가",
+        width: 72,
+        // boolean 필드는 AG Grid 가 체크박스로 자동 렌더링하므로 텍스트로 강제한다.
+        cellDataType: "text",
+        cellRenderer: (p: { value?: boolean }) =>
+          p.value ? <span style={{ color: "#2f9e44", fontWeight: 700 }}>예상</span> : <span style={{ color: "var(--text-muted)" }}>-</span>,
       },
       {
         headerName: "티커",
