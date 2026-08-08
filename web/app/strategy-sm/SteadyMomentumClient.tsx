@@ -24,7 +24,7 @@ const POOL_OPTIONS: readonly PoolLabelSource[] = [
 ];
 
 type Settings = {
-  pool: string;
+  pools: string[];
   top_n: number;
   slippage_pct: number;
   max_per_industry: number;
@@ -126,7 +126,7 @@ type BacktestResult = {
 type View = {
   settings: Settings;
   pool_options?: PoolLabelSource[];
-  // 선택 풀의 이평선 규칙 — 종목풀 설정이 단일 소스(여기서 저장하면 그 설정이 바뀐다).
+  // 전략 전용 이평선 — steady_momentum_settings 에 저장되며 종목풀 설정과 무관하다.
   ma_rule?: {
     short_ma_days: number;
     long_ma_days: number;
@@ -140,13 +140,13 @@ type View = {
 // 선정 결과를 바꾸는 설정 — 이 값들이 바뀔 때만 저장 후 선정을 다시 계산한다.
 // 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
 const PICK_AFFECTING_KEYS = [
-  "pool",
   "top_n",
   "max_per_industry",
 ] as const;
 
 function needsRepick(before: Settings | null, after: Settings): boolean {
   if (!before) return true;
+  if (before.pools.join(",") !== after.pools.join(",")) return true;
   return PICK_AFFECTING_KEYS.some((key) => before[key] !== after[key]);
 }
 
@@ -280,15 +280,15 @@ export function SteadyMomentumClient() {
   const [draft, setDraft] = useState<Record<string, string>>({});
   // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
-  const [draftPool, setDraftPool] = useState<string>("");
+  const [draftPools, setDraftPools] = useState<string[]>([]);
   const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
-  // 이평선·기울기 초안 — 저장하면 종목풀 설정(SHORT/LONG_MA_DAYS·SLOPE_DAYS)이 바뀐다.
+  // 이평선 초안 — 전략 전용 값(steady_momentum_settings)으로 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
 
   const applyView = useCallback((data: View) => {
     setView(data);
-    setDraftPool(data.settings.pool);
+    setDraftPools(data.settings.pools);
     setDraftBacktestMonths(data.settings.backtest_months);
     setDraftMaxPerIndustry(data.settings.max_per_industry);
     setDraft({
@@ -372,21 +372,16 @@ export function SteadyMomentumClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           settings: {
-            pool: draftPool,
+            pools: draftPools,
             top_n: topN,
             slippage_pct: slippage,
             max_per_industry: draftMaxPerIndustry,
             backtest_months: draftBacktestMonths,
+            // 이평선은 전략 전용 값 — 설정의 일부로 함께 저장한다(종목풀 설정과 무관).
+            ...(draftMaRule != null
+              ? { short_ma_days: draftMaRule.short, long_ma_days: draftMaRule.long }
+              : {}),
           },
-          // 이평선·기울기는 종목풀 설정에 저장된다 — 바뀐 경우에만 보낸다.
-          ...(maRuleChanged && draftMaRule
-            ? {
-                ma_rule: {
-                  short_ma_days: draftMaRule.short,
-                  long_ma_days: draftMaRule.long,
-                },
-              }
-            : {}),
         }),
       });
       const payload = await resp.json();
@@ -411,7 +406,7 @@ export function SteadyMomentumClient() {
     draftBacktestMonths,
     draftMaRule,
     draftMaxPerIndustry,
-    draftPool,
+    draftPools,
     runPicks,
     toast,
     view,
@@ -449,7 +444,7 @@ export function SteadyMomentumClient() {
     if (!view) return false;
     const saved = view.settings;
     return (
-      draftPool !== saved.pool ||
+      draftPools.join(",") !== saved.pools.join(",") ||
       draftBacktestMonths !== saved.backtest_months ||
       draftMaxPerIndustry !== saved.max_per_industry ||
       draft.top_n !== String(saved.top_n) ||
@@ -459,7 +454,7 @@ export function SteadyMomentumClient() {
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, view]);
+  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPools, view]);
 
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
     return [
@@ -826,18 +821,35 @@ export function SteadyMomentumClient() {
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">종목풀</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={draftPool}
-                    onChange={(e) => setDraftPool(e.target.value)}
-                  >
-                    {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => (
-                      <option key={pool.ticker_type} value={pool.ticker_type}>
-                        {formatPoolLabel(pool)}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="appLabeledFieldLabel">종목풀 (1~2개)</span>
+                  <span style={{ display: "inline-flex", gap: 12, alignItems: "center", minHeight: 31 }}>
+                    {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => {
+                      const checked = draftPools.includes(pool.ticker_type);
+                      return (
+                        <label
+                          key={pool.ticker_type}
+                          style={{ display: "inline-flex", gap: 6, alignItems: "center", marginBottom: 0, whiteSpace: "nowrap" }}
+                        >
+                          <input
+                            type="checkbox"
+                            className="form-check-input"
+                            style={{ marginTop: 0 }}
+                            checked={checked}
+                            // 마지막 1개는 해제 불가 — 최소 1개 풀은 항상 선택돼 있어야 한다.
+                            disabled={checked && draftPools.length === 1}
+                            onChange={(e) =>
+                              setDraftPools((pools) =>
+                                e.target.checked
+                                  ? [...pools, pool.ticker_type]
+                                  : pools.filter((p) => p !== pool.ticker_type),
+                              )
+                            }
+                          />
+                          {formatPoolLabel(pool)}
+                        </label>
+                      );
+                    })}
+                  </span>
                 </label>
                 <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">종목 수</span>
@@ -943,7 +955,7 @@ export function SteadyMomentumClient() {
               </div>
             </div>
             <div style={hintStyle}>
-              장기 이평선 이격 상위(순위 화면과 같은 신호, 단기 이격 음수 제외)로 선정 · 고정 종목 제외
+              장기 이평선 이격 상위(전략 전용 이평선, 단기 이격 음수 제외)로 선정 · 선택한 풀을 합쳐 한 순위로 경쟁 · 고정 종목 제외
             </div>
           </div>
         </div>

@@ -35,10 +35,12 @@ from utils.steady_momentum_service import (
     load_benchmark_close,
     load_price_frames,
     load_settings,
-    load_universe,
+    load_universe_multi,
     month_last_two_trading_days,
+    primary_pool,
     rank_candidates,
-    sector_industry_map,
+    secondary_pool,
+    sector_industry_map_multi,
     select_candidates,
     select_top,
     validate_settings,
@@ -84,7 +86,7 @@ def run_backtest(
 
     ``stop_loss_exit`` (단기이격 손절): 참이면 보유 구간 중 **종가가 단기 이평선
     아래로 처음 내려간 날** 그 종목만 종가 매도하고 월말까지 현금으로 둔다(편도
-    슬리피지 1회 추가). 지표·이평선 일수는 진입 필터와 같은 종목풀 설정이라 새
+    슬리피지 1회 추가). 이평선 일수는 진입 필터와 같은 전략 전용 설정이라 새
     파라미터가 없다. 다음 교체일에는 정상 재선정한다.
     """
     max_months = get_max_backtest_months()
@@ -93,8 +95,10 @@ def run_backtest(
     if settings is None:
         settings = load_settings()
     settings = validate_settings(settings)
+    pools = [str(pool) for pool in settings["pools"]]
+    base_pool = primary_pool(settings)
 
-    universe = load_universe(settings["pool"])
+    universe = load_universe_multi(pools)
     name_by_ticker = {row["ticker"]: row["name"] for row in universe}
 
     def holding_label(ticker: str) -> str:
@@ -103,28 +107,34 @@ def run_backtest(
         return f"{name}({ticker})" if name else ticker
 
     frames = load_price_frames(universe)
-    benchmark_close = load_benchmark_close(settings["pool"])
+    benchmark_close = load_benchmark_close(base_pool)
 
     # 실제 한계는 종목풀 데이터가 정한다 — 판정일 여유까지 반영해 여기서 다시 막는다.
-    pool_max = available_backtest_months(benchmark_close, str(settings["pool"]))
+    pool_max = available_backtest_months(benchmark_close, int(settings["long_ma_days"]))
     if months > pool_max:
         raise ValueError(
             f"장기 이평선 기준으로 이 종목풀은 최대 {pool_max}개월까지 "
             f"백테스트할 수 있습니다 (요청 {months}개월)."
         )
 
-    # 유사 컨셉 ETF(FMTM)를 참고 지수로 함께 계산한다 — 미국 풀 전용(달러 지수라
-    # 한국 풀 비교에는 의미가 없다).
-    from utils.steady_momentum_service import POOL_CONFIGS
+    # 참고 지수 — 두 풀 선택 시 두 번째 풀의 벤치마크를, 미국 풀은 유사 컨셉
+    # ETF(FMTM)를 나란히 보여준다(벤치마크가 아니며 선정에 관여하지 않는다).
     from utils.cache_utils import load_cached_frames_bulk_from_all_ticker_types
 
     reference_close: pd.Series | None = None
-    if str(POOL_CONFIGS.get(settings["pool"], {}).get("country")) == "us":
+    reference_name: str | None = None
+    second = secondary_pool(settings)
+    if second is not None and benchmark_info(second)["ticker"] != benchmark_info(base_pool)["ticker"]:
+        # 두 풀의 벤치마크가 같은 티커면 생략 — 같은 지수를 두 컬럼으로 보여줄 이유가 없다.
+        reference_close = load_benchmark_close(second)
+        reference_name = benchmark_info(second)["name"]
+    elif str(POOL_CONFIGS.get(base_pool, {}).get("country")) == "us":
         reference_frame = load_cached_frames_bulk_from_all_ticker_types([US_REFERENCE_TICKER]).get(
             US_REFERENCE_TICKER
         )
         if reference_frame is not None and not reference_frame.empty:
             reference_close = pd.to_numeric(reference_frame["Close"], errors="coerce").dropna()
+            reference_name = US_REFERENCE_TICKER
     dates = _rebalance_dates(benchmark_close, months)
 
     # 판정 시점 = 각 리밸런싱일(체결일)의 직전 거래일. 벤치마크 달력 기준.
@@ -141,7 +151,7 @@ def run_backtest(
     # 진행 중인 달(부분 월)에서는 마지막 행이 이미 현재 포트폴리오라 예정 행이 없다.
     pending_signal: pd.Timestamp | None = None
     pair = month_last_two_trading_days(
-        POOL_CONFIGS[settings["pool"]]["country"], dates[-1].to_period("M")
+        POOL_CONFIGS[base_pool]["country"], dates[-1].to_period("M")
     )
     if pair is not None:
         _, signal_calendar = pair
@@ -161,11 +171,10 @@ def run_backtest(
     slippage = float(settings["slippage_pct"]) / 100.0
     top_n = int(settings["top_n"])
 
-    # 손절 판정용 단기 이평선 — 진입 필터·순위 화면과 같은 종목풀 설정/공통 헬퍼.
+    # 손절 판정용 단기 이평선 — 진입 필터와 같은 전략 전용 설정/공통 헬퍼.
     from utils.moving_averages import calculate_moving_average
-    from utils.rankings import get_ticker_type_ma_rules
 
-    short_ma_days = int(get_ticker_type_ma_rules(str(settings["pool"]))[0]["short_ma_days"])
+    short_ma_days = int(settings["short_ma_days"])
     _stop_cache: dict[str, tuple[pd.Series, pd.Series]] = {}
 
     def _close_and_short_ma(ticker: str) -> tuple[pd.Series, pd.Series] | None:
@@ -193,7 +202,7 @@ def run_backtest(
     # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
     max_per_industry = int(settings["max_per_industry"])
     industry_by_ticker = {
-        ticker: meta["industry"] for ticker, meta in sector_industry_map(settings["pool"]).items()
+        ticker: meta["industry"] for ticker, meta in sector_industry_map_multi(pools).items()
     }
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
@@ -461,9 +470,9 @@ def run_backtest(
         "strategy_cagr_pct": strategy_cagr,
         "benchmark_cagr_pct": benchmark_cagr,
         "reference_cagr_pct": reference_cagr,
-        "benchmark_name": benchmark_info(settings["pool"])["name"],
-        "benchmark_ticker": benchmark_info(settings["pool"])["ticker"],
-        "reference_name": US_REFERENCE_TICKER if reference_close is not None else None,
+        "benchmark_name": benchmark_info(base_pool)["name"],
+        "benchmark_ticker": benchmark_info(base_pool)["ticker"],
+        "reference_name": reference_name if reference_close is not None else None,
         "reference_total_pct": reference_total,
         "reference_mdd_pct": reference_mdd,
         "reference_sortino": reference_sortino,

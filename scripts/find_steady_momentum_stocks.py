@@ -38,25 +38,28 @@ def main() -> int:
     print(f"설정: {settings}")
 
     result = compute_picks(settings)
-    lookback = settings["lookback_months"]
 
-    headers = ["순위", "연속", "티커", "종목명", f"{lookback}개월(%)", f"상대{lookback}개월(%)", "월승률", "R²", "점수"]
-    aligns = ["r", "c", "l", "l", "r", "r", "c", "r", "r"]
+    headers = ["순위", "연속", "티커", "종목명", "업종", "판정-단기(%)", "판정-장기(%)", "현재-장기(%)"]
+    aligns = ["r", "c", "l", "l", "l", "r", "r", "r"]
+
+    def _pct(value: float | None) -> str:
+        return f"{value:+.1f}" if value is not None else "-"
+
     rows = []
     for row in result["rows"]:
         streak = row["streak_months"]
         streak_label = "-" if streak is None else ("신규" if streak <= 1 else f"{streak}개월")
+        rank_label = "예상" if row["is_expected_only"] else str(row["rank"]) + ("*" if row["is_reserve"] else "")
         rows.append(
             [
-                str(row["rank"]) + ("*" if row["is_reserve"] else ""),
+                rank_label,
                 streak_label,
                 row["ticker"],
                 row["name"][:16],
-                f"{row['return_lookback_pct']:+.1f}",
-                f"{row['rel_return_pct']:+.1f}",
-                row["win_label"],
-                f"{row['r_squared']:.3f}",
-                f"{row['momentum_score']:.1f}",
+                row["industry"][:10],
+                _pct(row["signal_short_pct"]),
+                _pct(row["signal_long_pct"]),
+                _pct(row["current_long_pct"]),
             ]
         )
 
@@ -65,7 +68,7 @@ def main() -> int:
         f"Steady Momentum {result['portfolio_month']} 포트폴리오 · 교체 {result['rebalance_date']} "
         f"(판정 {result['signal_date']}) · 유니버스 {result['universe_count']} → 후보 {result['candidate_count']}"
     )
-    print("점수 = 연율화 상대기울기 × R² (시장 대비 꾸준한 모멘텀) · 순위* = 차순위 후보")
+    print("점수 = 장기 이평선 이격(%) (전략 전용 이평선) · 순위* = 차순위 후보 · 예상 = 다음달 편입 예상")
     for line in render_table_eaw(headers, rows, aligns):
         print(line)
     return 0
