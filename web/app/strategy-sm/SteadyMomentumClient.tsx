@@ -658,10 +658,10 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: `${backtest.benchmark_ticker}(%)`,
-        headerTooltip: `벤치마크 ${backtest.benchmark_name}`,
+        headerName: `${backtest.benchmark_name}(%)`,
+        headerTooltip: `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
         field: "benchmark_pct",
-        width: 96,
+        width: 140,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value),
         cellStyle: (p) => ({ color: signColor(p.value) }),
@@ -729,7 +729,7 @@ export function SteadyMomentumClient() {
     const columns: ColDef<BacktestDayRow>[] = [
       { headerName: "날짜", field: "date", width: 128, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략(%)", "strategy_pct", "보유 종목 동일가중 일간 변동률 (교체일에는 리밸런싱 비용 반영)"),
-      pctColumn(`${backtest.benchmark_ticker}(%)`, "benchmark_pct", `벤치마크 ${backtest.benchmark_name}`),
+      pctColumn(`${backtest.benchmark_name}(%)`, "benchmark_pct", `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`),
     ];
     if (backtest.reference_name) {
       columns.push(
@@ -771,10 +771,10 @@ export function SteadyMomentumClient() {
       { headerName: "연도", field: "year", width: 104, cellStyle: () => ({ fontWeight: 700 }) },
       pctColumn("전략(%)", "strategy_pct", "strategy_partial"),
       pctColumn(
-        `${backtest.benchmark_ticker}(%)`,
+        `${backtest.benchmark_name}(%)`,
         "benchmark_pct",
         "benchmark_partial",
-        `벤치마크 ${backtest.benchmark_name}`,
+        `벤치마크 ${backtest.benchmark_name}(${backtest.benchmark_ticker})`,
       ),
     ];
     if (backtest.reference_name) {
@@ -875,8 +875,7 @@ export function SteadyMomentumClient() {
                       <span className="appLabeledFieldLabel">이평선</span>
                       <span style={{ display: "inline-flex", gap: 6 }}>
                         <select
-                          className="form-select form-select-sm"
-                          style={{ width: 130 }}
+                          className="form-select appMaRuleSelect"
                           value={draftMaRule.short}
                           onChange={(e) => setDraftMaRule((r) => r && { ...r, short: Number(e.target.value) })}
                         >
@@ -887,8 +886,7 @@ export function SteadyMomentumClient() {
                           ))}
                         </select>
                         <select
-                          className="form-select form-select-sm"
-                          style={{ width: 130 }}
+                          className="form-select appMaRuleSelect"
                           value={draftMaRule.long}
                           onChange={(e) => setDraftMaRule((r) => r && { ...r, long: Number(e.target.value) })}
                         >
