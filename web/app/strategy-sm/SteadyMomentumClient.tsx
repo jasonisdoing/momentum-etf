@@ -45,8 +45,10 @@ function withSavedValue(options: number[], saved: string | undefined): number[] 
 }
 
 type PickRow = {
-  rank: number;
+  rank: number | null;
   is_reserve: boolean;
+  // 현재 표(선정+후보) 밖인데 다음 달 편입이 예상되는 종목 — 하단 별도 행.
+  is_expected_only: boolean;
   streak_months: number | null;
   next_month_expected: boolean;
   ticker: string;
@@ -459,7 +461,15 @@ export function SteadyMomentumClient() {
 
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
     return [
-      { headerName: "순위", field: "rank", width: 60, type: "numericColumn" },
+      {
+        headerName: "순위",
+        field: "rank",
+        width: 60,
+        type: "numericColumn",
+        // 표 밖 예상 행은 순위가 없다 — '예상' 으로 구분한다.
+        cellRenderer: (p: { value?: number | null; data?: PickRow }) =>
+          p.data?.is_expected_only ? <span style={{ color: "#2f9e44", fontWeight: 700 }}>예상</span> : (p.value ?? "-"),
+      },
       {
         headerName: "연속",
         field: "streak_months",
