@@ -53,6 +53,7 @@ type PickRow = {
   next_month_expected: boolean;
   ticker: string;
   name: string;
+  pool: string;
   sector: string;
   industry: string;
   currency: string;
@@ -488,6 +489,21 @@ export function SteadyMomentumClient() {
         cellDataType: "text",
         cellRenderer: (p: { value?: boolean }) =>
           p.value ? <span style={{ color: "#2f9e44", fontWeight: 700 }}>예상</span> : <span style={{ color: "var(--text-muted)" }}>-</span>,
+      },
+      {
+        headerName: "마켓",
+        field: "pool",
+        headerTooltip: "종목이 속한 종목풀 — 두 풀을 함께 선택했을 때 구분용",
+        width: 80,
+        // `/pools-rank` 마켓 컬럼과 같은 배지 스타일 (KOSPI 녹색 · KOSDAQ 파란색).
+        valueFormatter: (p) => (p.value === "kor_kosdaq" ? "KOSDAQ" : p.value === "kor" ? "KOSPI" : "-"),
+        cellStyle: (p) => {
+          if (p.value === "kor")
+            return { textAlign: "center", backgroundColor: "#d1e7dd", color: "#0f5132", fontWeight: "bold" };
+          if (p.value === "kor_kosdaq")
+            return { textAlign: "center", backgroundColor: "#cfe2ff", color: "#084298", fontWeight: "bold" };
+          return null;
+        },
       },
       {
         headerName: "티커",
