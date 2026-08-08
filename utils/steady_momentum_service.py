@@ -2,15 +2,18 @@
 
 전략 규칙
 --------
-1. 유니버스: 설정에서 고른 한국 개별주 종목풀 1개. 고정 보유 종목(exclude_from_ranking)은 제외.
-2. 점수: **장기 이평선 이격(%)** — 순위 화면·종목풀 백테스트와 같은 신호
-   (이평선 일수는 종목풀 설정, 장기 이격 > 0 & 단기 이격 >= 0 만 후보).
+1. 유니버스: 설정에서 고른 한국 개별주 종목풀 1~2개를 **합쳐 한 순위로 경쟁**시킨다.
+   고정 보유 종목(exclude_from_ranking)은 제외.
+2. 점수: **장기 이평선 이격(%)** — 계산식은 순위 화면과 같되, 이평선 일수는
+   **전략 전용 값**(이 설정의 short/long_ma_days)을 쓴다. 두 풀을 섞어도 같은
+   이평선이라 점수가 공정하게 비교된다. 장기 이격 > 0 & 단기 이격 >= 0 만 후보.
    점수 순 상위 top_n 동일가중. 같은 규칙을 **월간 리듬으로 유지**하는 것이
    이 화면의 차이다 — 편입·편출을 월 단위로 보고, 한 달 동안 손절 없이 든다.
 3. 월간 리밸런싱: 판정은 월말 직전 거래일(L−1) 종가, 체결은 월말(L) 종가.
    L−1 종가가 확정된 다음날부터 다음 달 포트폴리오를 보여준다(거래일 캘린더 기준).
 
-벤치마크는 종목풀 설정(DB)의 BENCHMARK 를 단일 소스로 쓴다.
+벤치마크는 **첫 번째 풀**(POOL_CONFIGS 순서, 코스피 우선)의 종목풀 설정 BENCHMARK 를
+쓰고, 두 풀 선택 시 두 번째 풀의 벤치마크는 백테스트 참고 지수로 나란히 보여준다.
 설정은 MongoDB `system_config.steady_momentum_settings` 에 저장한다.
 """
 
@@ -29,8 +32,8 @@ from utils.sector_labels import industry_ko, sector_ko
 warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
-# 선택 가능한 종목풀 — 한 번에 1개만 선택한다(통화·벤치마크·달력 혼합 방지).
-# 한국 개별주 종목풀만 지원한다.
+# 선택 가능한 종목풀 — 1~2개를 함께 선택할 수 있다(같은 나라·통화·달력이라 혼합 가능).
+# 한국 개별주 종목풀만 지원한다. dict 순서가 우선순위다(벤치마크 = 첫 선택 풀).
 POOL_CONFIGS: dict[str, dict[str, Any]] = {
     "kor": {"label": "코스피 개별주", "country": "kor", "currency": "KRW"},
     "kor_kosdaq": {"label": "코스닥 개별주", "country": "kor", "currency": "KRW"},
@@ -118,16 +121,39 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     backtest_months = int(_num("backtest_months"))
     if not 1 <= backtest_months <= max_months:
         raise ValueError(f"'backtest_months' 는 1~{max_months} 사이여야 합니다.")
-    pool = str(settings.get("pool") or "").strip().lower()
-    if pool not in AVAILABLE_POOLS:
-        raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
+
+    raw_pools = settings.get("pools")
+    if not isinstance(raw_pools, (list, tuple)) or not raw_pools:
+        raise ValueError("'pools' 는 종목풀 1~2개의 목록이어야 합니다.")
+    cleaned = {str(pool or "").strip().lower() for pool in raw_pools}
+    unknown = cleaned - set(AVAILABLE_POOLS)
+    if unknown:
+        raise ValueError(f"지원하지 않는 종목풀입니다: {', '.join(sorted(unknown))}")
+    # POOL_CONFIGS 순서로 정규화 — 첫 풀이 벤치마크 기준이 된다(코스피 우선).
+    pools = [pool for pool in AVAILABLE_POOLS if pool in cleaned]
+    if not 1 <= len(pools) <= 2:
+        raise ValueError("'pools' 는 1~2개여야 합니다.")
+
+    # 전략 전용 이평선 — 종목풀 설정과 별개다. 허용 일수 목록은 공용 상수를 재사용한다.
+    from utils.pool_settings_store import MA_DAY_OPTIONS
+
+    short_ma_days = int(_num("short_ma_days"))
+    long_ma_days = int(_num("long_ma_days"))
+    for key, value in (("short_ma_days", short_ma_days), ("long_ma_days", long_ma_days)):
+        if value not in MA_DAY_OPTIONS:
+            allowed = ", ".join(str(v) for v in MA_DAY_OPTIONS)
+            raise ValueError(f"'{key}' 는 {allowed} 중 하나여야 합니다.")
+    if short_ma_days >= long_ma_days:
+        raise ValueError("'short_ma_days' 는 'long_ma_days' 보다 작아야 합니다.")
 
     return {
-        "pool": pool,
+        "pools": pools,
         "top_n": top_n,
         "slippage_pct": slippage_pct,
         "max_per_industry": max_per_industry,
         "backtest_months": backtest_months,
+        "short_ma_days": short_ma_days,
+        "long_ma_days": long_ma_days,
     }
 
 
@@ -174,6 +200,28 @@ def load_settings() -> dict[str, Any]:
             f"저장된 Steady Momentum 설정이 없습니다 "
             f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
         )
+
+    # ── 일회성 마이그레이션: 구 스키마(pool 1개·이평 종목풀 공유) → 새 스키마 ──
+    # pools 가 없고 pool 이 있으면 딱 한 번 올린다. 원본은 백업 필드로 보존한다.
+    if "pools" not in stored and isinstance(stored.get("pool"), str):
+        from utils.rankings import get_ticker_type_ma_rules
+
+        legacy_pool = str(stored["pool"]).strip().lower()
+        rule = get_ticker_type_ma_rules(legacy_pool)[0]
+        upgraded = {key: value for key, value in stored.items() if key != "pool"}
+        upgraded["pools"] = [legacy_pool]
+        upgraded["short_ma_days"] = int(rule["short_ma_days"])
+        upgraded["long_ma_days"] = int(rule["long_ma_days"])
+        normalized = validate_settings(upgraded)
+        update: dict[str, Any] = {
+            "settings": normalized,
+            "updated_at": datetime.now().isoformat(),
+        }
+        if "settings_before_pools_migration" not in doc:
+            update["settings_before_pools_migration"] = stored
+        db[_CONFIG_COLLECTION].update_one({"_id": _SETTINGS_KEY}, {"$set": update})
+        return normalized
+
     try:
         return validate_settings(stored)
     except ValueError as error:
@@ -189,7 +237,9 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     묶이면 캐시 문제로 설정 화면까지 못 여는 상황이 된다.)
     """
     normalized = validate_settings(settings)
-    limit = available_backtest_months(load_benchmark_close(normalized["pool"]), normalized["pool"])
+    limit = available_backtest_months(
+        load_benchmark_close(primary_pool(normalized)), int(normalized["long_ma_days"])
+    )
     if normalized["backtest_months"] > limit:
         raise ValueError(
             f"장기 이평선 기준으로 이 종목풀은 백테스트 최대 {limit}개월입니다 "
@@ -209,6 +259,42 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
 
 # ── 유니버스 · 가격 ────────────────────────────────────────────────────────
+def primary_pool(settings: dict[str, Any]) -> str:
+    """선택 풀 중 기준 풀 — 벤치마크·달력·통화를 여기서 가져온다.
+
+    validate_settings 가 POOL_CONFIGS 순서로 정규화하므로 첫 항목(코스피 우선)이다.
+    """
+    return str(settings["pools"][0])
+
+
+def secondary_pool(settings: dict[str, Any]) -> str | None:
+    """두 번째 풀 (2개 선택 시) — 벤치마크를 백테스트 참고 지수로 쓴다."""
+    pools = settings["pools"]
+    return str(pools[1]) if len(pools) > 1 else None
+
+
+def load_universe_multi(pools: list[str]) -> list[dict[str, str]]:
+    """선택한 풀들의 종목을 합친 유니버스 — 티커 중복은 앞선 풀이 우선."""
+    universe: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for pool in pools:
+        for row in load_universe(pool):
+            if row["ticker"] in seen:
+                continue
+            seen.add(row["ticker"])
+            universe.append(row)
+    return universe
+
+
+def sector_industry_map_multi(pools: list[str]) -> dict[str, dict[str, str]]:
+    """선택한 풀들의 섹터·업종 맵을 합친다 — 티커 중복은 앞선 풀이 우선."""
+    result: dict[str, dict[str, str]] = {}
+    for pool in pools:
+        for ticker, meta in sector_industry_map(pool).items():
+            result.setdefault(ticker, meta)
+    return result
+
+
 def load_universe(pool: str) -> list[dict[str, str]]:
     """선택한 종목풀 1개의 종목 목록. [{ticker, name, pool}]
 
@@ -337,12 +423,15 @@ def select_candidates(
     *,
     as_of: pd.Timestamp | None = None,
 ) -> list[dict[str, Any]]:
-    """이격 후보 목록 — 보유 가능 조건은 순위 화면과 같은 hold_eligible_mask 를 쓴다."""
-    from utils.rankings import get_ticker_type_ma_rules, hold_eligible_mask
+    """이격 후보 목록 — 보유 가능 조건은 순위 화면과 같은 hold_eligible_mask 를 쓴다.
 
-    ma_rule = get_ticker_type_ma_rules(str(settings["pool"]))[0]
-    short_ma_days = int(ma_rule["short_ma_days"])
-    long_ma_days = int(ma_rule["long_ma_days"])
+    이평선 일수는 **전략 전용 설정**(short/long_ma_days)이다 — 두 풀을 섞어도
+    같은 이평선으로 점수를 매겨 공정하게 비교된다.
+    """
+    from utils.rankings import hold_eligible_mask
+
+    short_ma_days = int(settings["short_ma_days"])
+    long_ma_days = int(settings["long_ma_days"])
 
     candidates: list[dict[str, Any]] = []
     for row in universe:
@@ -453,7 +542,7 @@ def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     return result
 
 
-def available_backtest_months(benchmark_close: pd.Series, pool: str) -> int:
+def available_backtest_months(benchmark_close: pd.Series, long_ma_days: int) -> int:
     """이 종목풀에서 실제로 돌릴 수 있는 최대 개월 수.
 
     두 가지 제약을 함께 본다.
@@ -465,13 +554,11 @@ def available_backtest_months(benchmark_close: pd.Series, pool: str) -> int:
        비교하게 된다.
 
     가격 캐시 시작일만 보는 `get_max_backtest_months()` 는 이 워밍업을 모르기
-    때문에 실제보다 크게 나온다.
+    때문에 실제보다 크게 나온다. ``long_ma_days`` 는 전략 전용 설정값이다.
     """
-    from utils.rankings import get_ticker_type_ma_rules
-
     index = benchmark_close.index
     month_ends = index.to_series().groupby(index.to_period("M")).max().tolist()
-    required_bars = int(get_ticker_type_ma_rules(pool)[0]["long_ma_days"]) + 4
+    required_bars = int(long_ma_days) + 4
     # 월말 직전 거래일까지 쌓인 봉 수가 required_bars 이상인 월말만 교체일이 될 수 있다.
     usable = sum(1 for month_end in month_ends if index.searchsorted(month_end, side="left") >= required_bars)
     # 개월 수 N 은 월말 N+1 개를 쓰므로, 쓸 수 있는 월말 개수보다 1 적다.
@@ -547,18 +634,20 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         settings = load_settings()
     settings = validate_settings(settings)
 
-    universe = load_universe(settings["pool"])
+    pools = [str(pool) for pool in settings["pools"]]
+    base_pool = primary_pool(settings)
+    universe = load_universe_multi(pools)
     frames = load_price_frames(universe)
-    benchmark_close = load_benchmark_close(settings["pool"])
+    benchmark_close = load_benchmark_close(base_pool)
     rebalance_date, signal_date = current_portfolio_dates(
-        benchmark_close, POOL_CONFIGS[settings["pool"]]["country"]
+        benchmark_close, POOL_CONFIGS[base_pool]["country"]
     )
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
     max_per_industry = int(settings["max_per_industry"])
-    sector_map = sector_industry_map(settings["pool"])
+    sector_map = sector_industry_map_multi(pools)
     industry_by_ticker = {ticker: meta["industry"] for ticker, meta in sector_map.items()}
 
     selected = select_top(scored, top_n, max_per_industry, industry_by_ticker)
@@ -599,17 +688,13 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(월말 직전) 종가다.
     # 현재 기준 단기/장기 이격 — 표의 '현재-단기/장기' 컬럼용. 자격 필터와 무관하게
     # 행에 있는 종목은 전부 계산한다(단기 음수로 후보 탈락한 종목도 값은 보여준다).
-    from utils.rankings import get_ticker_type_ma_rules
-
-    _ma_rule = get_ticker_type_ma_rules(str(settings["pool"]))[0]
-
     def current_disparity(ticker: str) -> dict[str, float | None]:
         frame = frames.get(ticker)
         metrics = (
             momentum_metrics(
                 frame["Close"],
-                short_ma_days=int(_ma_rule["short_ma_days"]),
-                long_ma_days=int(_ma_rule["long_ma_days"]),
+                short_ma_days=int(settings["short_ma_days"]),
+                long_ma_days=int(settings["long_ma_days"]),
                 as_of=None,
             )
             if frame is not None and not frame.empty
@@ -638,8 +723,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # 다음 교체 전까지 값이 바뀌지 않는다.
     from core.strategy.metrics import period_return_pct
 
-    currency = str(POOL_CONFIGS[settings["pool"]]["currency"])
-    country = str(POOL_CONFIGS[settings["pool"]]["country"])
+    currency = str(POOL_CONFIGS[base_pool]["currency"])
+    country = str(POOL_CONFIGS[base_pool]["country"])
 
     row_tickers = [item["ticker"] for item in selected + reserve] + [
         item["ticker"] for item in extra_expected

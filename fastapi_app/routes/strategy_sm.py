@@ -10,11 +10,17 @@ router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 
 def _month_options(settings: dict) -> list[int]:
     """기간 선택지 — 종목풀 백테스트와 같은 목록을 쓰되, 이 전략이 실제로 돌릴 수
-    있는 개월 수까지만 남긴다. 상한은 종목풀 데이터와 장기 이평선이 함께 정한다."""
+    있는 개월 수까지만 남긴다. 상한은 벤치마크 데이터와 전략 장기 이평선이 정한다."""
     from utils.pool_signal_backtest_service import get_month_options
-    from utils.steady_momentum_service import available_backtest_months, load_benchmark_close
+    from utils.steady_momentum_service import (
+        available_backtest_months,
+        load_benchmark_close,
+        primary_pool,
+    )
 
-    limit = available_backtest_months(load_benchmark_close(settings["pool"]), settings["pool"])
+    limit = available_backtest_months(
+        load_benchmark_close(primary_pool(settings)), int(settings["long_ma_days"])
+    )
     options = [month for month in get_month_options() if month <= limit]
     if limit not in options:
         options.append(limit)
@@ -26,15 +32,13 @@ def _month_options(settings: dict) -> list[int]:
     return sorted(options)
 
 
-def _ma_rule_payload(pool: str) -> dict:
-    """선택 풀의 이평선 규칙 + 선택지 — 종목풀 설정이 단일 소스(순위 화면과 동일)."""
+def _ma_rule_payload(settings: dict) -> dict:
+    """전략 전용 이평선 + 선택지 — steady_momentum_settings 가 단일 소스다."""
     from utils.pool_settings_store import MA_DAY_OPTIONS
-    from utils.rankings import get_ticker_type_ma_rules
 
-    rule = get_ticker_type_ma_rules(pool)[0]
     return {
-        "short_ma_days": int(rule["short_ma_days"]),
-        "long_ma_days": int(rule["long_ma_days"]),
+        "short_ma_days": int(settings["short_ma_days"]),
+        "long_ma_days": int(settings["long_ma_days"]),
         "ma_day_options": list(MA_DAY_OPTIONS),
     }
 
@@ -49,7 +53,7 @@ def get_strategy_sm(
         "settings": settings,
         "pool_options": pool_options(),
         "month_options": _month_options(settings),
-        "ma_rule": _ma_rule_payload(settings["pool"]),
+        "ma_rule": _ma_rule_payload(settings),
         "picks": None,
     }
 
@@ -59,35 +63,21 @@ def put_strategy_sm_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
-    """설정을 검증 후 저장한다. body: ``{"settings": {...}, "ma_rule": {...}?}``.
+    """설정을 검증 후 저장한다. body: ``{"settings": {...}}``.
 
-    ``ma_rule`` (단기/장기 이평선·기울기 일수)이 오면 **종목풀 설정에 저장**한다 —
-    순위·종목풀 백테스트·자산 헬퍼가 같은 값을 쓰므로 그 화면들도 함께 바뀐다.
-    검증·캐시 무효화는 save_pool_settings 한 곳이 담당한다.
+    이평선(short/long_ma_days)도 설정의 일부로 **전략 전용으로 저장**한다 —
+    종목풀 설정(순위·종목풀 백테스트·알람)에는 영향을 주지 않는다.
     """
     settings = payload.get("settings") if isinstance(payload, dict) else None
     if not isinstance(settings, dict):
         raise ValueError("저장할 'settings' 가 필요합니다.")
     saved = save_settings(settings)
 
-    ma_rule = payload.get("ma_rule")
-    if isinstance(ma_rule, dict) and ma_rule:
-        from utils.pool_settings_store import save_pool_settings
-
-        save_pool_settings(
-            str(saved["pool"]),
-            {
-                "SHORT_MA_DAYS": ma_rule.get("short_ma_days"),
-                "LONG_MA_DAYS": ma_rule.get("long_ma_days"),
-            },
-            save_method="Steady Momentum",
-        )
-
     return {
         "settings": saved,
         "pool_options": pool_options(),
         "month_options": _month_options(saved),
-        "ma_rule": _ma_rule_payload(saved["pool"]),
+        "ma_rule": _ma_rule_payload(saved),
         "picks": None,
     }
 
