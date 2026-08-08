@@ -10,13 +10,11 @@ router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
 
 def _month_options(settings: dict) -> list[int]:
     """기간 선택지 — 종목풀 백테스트와 같은 목록을 쓰되, 이 전략이 실제로 돌릴 수
-    있는 개월 수까지만 남긴다. 상한은 종목풀 데이터와 룩백이 함께 정한다."""
+    있는 개월 수까지만 남긴다. 상한은 종목풀 데이터와 장기 이평선이 함께 정한다."""
     from utils.pool_signal_backtest_service import get_month_options
     from utils.steady_momentum_service import available_backtest_months, load_benchmark_close
 
-    limit = available_backtest_months(
-        load_benchmark_close(settings["pool"]), settings["lookback_months"]
-    )
+    limit = available_backtest_months(load_benchmark_close(settings["pool"]), settings["pool"])
     options = [month for month in get_month_options() if month <= limit]
     if limit not in options:
         options.append(limit)

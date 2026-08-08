@@ -98,9 +98,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             raise ValueError(f"'{key}' 는 숫자여야 합니다.")
         return float(value)
 
-    lookback_months = int(_num("lookback_months"))
-    if not 1 <= lookback_months <= 24:
-        raise ValueError("'lookback_months' 는 1~24 사이여야 합니다.")
     top_n = int(_num("top_n"))
     if not 5 <= top_n <= 100:
         raise ValueError("'top_n' 은 5~100 사이여야 합니다.")
@@ -124,7 +121,6 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     return {
         "pool": pool,
-        "lookback_months": lookback_months,
         "top_n": top_n,
         "slippage_pct": slippage_pct,
         "max_per_industry": max_per_industry,
@@ -190,14 +186,11 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     묶이면 캐시 문제로 설정 화면까지 못 여는 상황이 된다.)
     """
     normalized = validate_settings(settings)
-    limit = available_backtest_months(
-        load_benchmark_close(normalized["pool"]), normalized["lookback_months"]
-    )
+    limit = available_backtest_months(load_benchmark_close(normalized["pool"]), normalized["pool"])
     if normalized["backtest_months"] > limit:
         raise ValueError(
-            f"룩백 {normalized['lookback_months']}개월 기준으로 이 종목풀은 백테스트 "
-            f"최대 {limit}개월입니다 (요청 {normalized['backtest_months']}개월). "
-            f"기간을 줄이거나 룩백을 짧게 하세요."
+            f"장기 이평선 기준으로 이 종목풀은 백테스트 최대 {limit}개월입니다 "
+            f"(요청 {normalized['backtest_months']}개월). 기간을 줄이세요."
         )
     from utils.db_manager import get_db_connection
 
@@ -293,9 +286,7 @@ def load_benchmark_close(pool: str) -> pd.Series:
 # ── 모멘텀 ─────────────────────────────────────────────────────────────────
 def momentum_metrics(
     close: pd.Series,
-    benchmark_close: pd.Series,
     *,
-    lookback_days: int,
     short_ma_days: int,
     long_ma_days: int,
     as_of: pd.Timestamp | None = None,
@@ -305,18 +296,15 @@ def momentum_metrics(
     점수 = **장기 이평선 이격(%)** = (종가 ÷ 장기 이평 − 1) × 100. 이평선 일수는
     종목풀 설정(SHORT_MA_DAYS/LONG_MA_DAYS)을, 이평 종류(SMA/EMA)는 공통 설정을
     그대로 쓴다 — 순위/종목풀 백테스트와 신호가 같고 리듬(월간 유지)만 다르다.
-    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓰며, 룩백 구간 수익률을
-    참고 지표로 함께 계산한다.
+    단기 이격은 후보 자격 판정(hold_eligible_mask)에 쓴다.
     ``as_of`` 를 주면 그 날짜까지의 데이터만 사용한다(백테스트·판정일 재현).
     """
     series = pd.to_numeric(close, errors="coerce").dropna()
-    bench = pd.to_numeric(benchmark_close, errors="coerce").dropna()
     if as_of is not None:
         series = series[series.index <= as_of]
-        bench = bench[bench.index <= as_of]
 
-    aligned = pd.concat([series.rename("stock"), bench.rename("bench")], axis=1, join="inner").dropna()
-    min_rows = max(lookback_days, long_ma_days) + 4
+    aligned = pd.DataFrame({"stock": series})
+    min_rows = long_ma_days + 4
     if len(aligned) < min_rows:
         return None
 
@@ -331,17 +319,11 @@ def momentum_metrics(
     last_price = float(stock_close.iloc[-1])
     disparity_pct = (last_price / long_ma - 1.0) * 100.0
     short_disparity_pct = (last_price / short_ma - 1.0) * 100.0
-    window = aligned.iloc[-lookback_days:]
-    if (window["stock"] <= 0).any() or (window["bench"] <= 0).any():
-        return None
-
-    absolute_return_pct = (float(window["stock"].iloc[-1]) / float(window["stock"].iloc[0]) - 1.0) * 100.0
 
     return {
         "disparity_pct": disparity_pct,
         "short_disparity_pct": short_disparity_pct,
         "momentum_score": disparity_pct,
-        "return_lookback_pct": absolute_return_pct,
     }
 
 
@@ -349,14 +331,12 @@ def select_candidates(
     universe: list[dict[str, str]],
     frames: dict[str, pd.DataFrame],
     settings: dict[str, Any],
-    benchmark_close: pd.Series,
     *,
     as_of: pd.Timestamp | None = None,
 ) -> list[dict[str, Any]]:
     """이격 후보 목록 — 보유 가능 조건은 순위 화면과 같은 hold_eligible_mask 를 쓴다."""
     from utils.rankings import get_ticker_type_ma_rules, hold_eligible_mask
 
-    lookback_days = int(settings["lookback_months"]) * TRADING_DAYS_PER_MONTH
     ma_rule = get_ticker_type_ma_rules(str(settings["pool"]))[0]
     short_ma_days = int(ma_rule["short_ma_days"])
     long_ma_days = int(ma_rule["long_ma_days"])
@@ -368,8 +348,6 @@ def select_candidates(
             continue
         metrics = momentum_metrics(
             frame["Close"],
-            benchmark_close,
-            lookback_days=lookback_days,
             short_ma_days=short_ma_days,
             long_ma_days=long_ma_days,
             as_of=as_of,
@@ -472,23 +450,25 @@ def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
     return result
 
 
-def available_backtest_months(benchmark_close: pd.Series, lookback_months: int) -> int:
-    """이 종목풀·룩백에서 실제로 돌릴 수 있는 최대 개월 수.
+def available_backtest_months(benchmark_close: pd.Series, pool: str) -> int:
+    """이 종목풀에서 실제로 돌릴 수 있는 최대 개월 수.
 
     두 가지 제약을 함께 본다.
 
     1. 각 교체일에는 그 **직전 거래일(판정일)** 이 있어야 한다.
-    2. 그 판정일까지 회귀에 쓸 ``룩백 × 21 + 4`` 거래일이 쌓여 있어야 한다.
-       이 조건 전 구간은 후보가 하나도 안 잡혀 성과가 통째로 비므로, 아예
+    2. 그 판정일까지 이격 계산에 쓸 ``장기 이평선 일수 + 4`` 거래일이 쌓여 있어야
+       한다. 이 조건 전 구간은 후보가 하나도 안 잡혀 성과가 통째로 비므로, 아예
        백테스트 범위에서 제외한다. 그래야 전략과 벤치마크가 **같은 달**을
        비교하게 된다.
 
-    가격 캐시 시작일만 보는 `get_max_backtest_months()` 는 룩백을 모르기 때문에
-    실제보다 크게 나온다. 룩백이 길수록 이 값은 줄어든다.
+    가격 캐시 시작일만 보는 `get_max_backtest_months()` 는 이 워밍업을 모르기
+    때문에 실제보다 크게 나온다.
     """
+    from utils.rankings import get_ticker_type_ma_rules
+
     index = benchmark_close.index
     month_ends = index.to_series().groupby(index.to_period("M")).max().tolist()
-    required_bars = int(lookback_months) * TRADING_DAYS_PER_MONTH + 4
+    required_bars = int(get_ticker_type_ma_rules(pool)[0]["long_ma_days"]) + 4
     # 월말 직전 거래일까지 쌓인 봉 수가 required_bars 이상인 월말만 교체일이 될 수 있다.
     usable = sum(1 for month_end in month_ends if index.searchsorted(month_end, side="left") >= required_bars)
     # 개월 수 N 은 월말 N+1 개를 쓰므로, 쓸 수 있는 월말 개수보다 1 적다.
@@ -570,7 +550,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     rebalance_date, signal_date = current_portfolio_dates(
         benchmark_close, POOL_CONFIGS[settings["pool"]]["country"]
     )
-    candidates = select_candidates(universe, frames, settings, benchmark_close, as_of=signal_date)
+    candidates = select_candidates(universe, frames, settings, as_of=signal_date)
     scored = rank_candidates(candidates)
 
     top_n = int(settings["top_n"])
@@ -597,9 +577,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         if not alive:
             break
         prior_signal = _signal_date_for(benchmark_close, prior_rebalance)
-        prior_candidates = select_candidates(
-            universe, frames, settings, benchmark_close, as_of=prior_signal
-        )
+        prior_candidates = select_candidates(universe, frames, settings, as_of=prior_signal)
         prior_top = {
             item["ticker"]
             for item in select_top(
@@ -644,7 +622,16 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     def price_info(ticker: str) -> dict[str, Any]:
         frame = frames.get(ticker)
         if frame is None or frame.empty:
-            return {"price": None, "daily_change_pct": None, "return_1m_pct": None, "return_3m_pct": None, "return_12m_pct": None}
+            return {
+                "price": None,
+                "daily_change_pct": None,
+                "month_return_pct": None,
+                "market_cap_eok": None,
+                "return_1m_pct": None,
+                "return_3m_pct": None,
+                "return_6m_pct": None,
+                "return_12m_pct": None,
+            }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
         snap = realtime.get(ticker) or {}
         now_val = snap.get("nowVal")
@@ -674,6 +661,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "market_cap_eok": market_caps.get(ticker),
             "return_1m_pct": period_return_pct(close, 1, signal_date),
             "return_3m_pct": period_return_pct(close, 3, signal_date),
+            "return_6m_pct": period_return_pct(close, 6, signal_date),
             "return_12m_pct": period_return_pct(close, 12, signal_date),
         }
 
@@ -697,7 +685,6 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "industry": sector_map.get(item["ticker"], {}).get("industry", ""),
                 "currency": currency,
                 **price_info(item["ticker"]),
-                "return_lookback_pct": round(item["return_lookback_pct"], 1),
                 "short_disparity_pct": round(item["short_disparity_pct"], 1),
                 "momentum_score": round(item["momentum_score"], 1),
             }
