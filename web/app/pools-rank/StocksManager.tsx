@@ -623,6 +623,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
 
 
+  // 섹터·업종 컬럼 노출 여부 — 값이 있는 행이 하나라도 있을 때만 (풀 하드코딩 없이).
+  const hasSectorData = useMemo(
+    () => displayGridRows.some((row) => String(row.섹터 ?? "").trim() !== ""),
+    [displayGridRows],
+  );
+
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [
       {
@@ -975,6 +981,25 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
+        field: "섹터",
+        headerName: "섹터",
+        // 섹터 데이터가 있는 풀(한국 개별주)에서만 노출 — ETF 풀은 값이 없어 숨긴다.
+        hide: !hasSectorData,
+        minWidth: 96,
+        width: 104,
+        headerTooltip: "yfinance 분류의 한글 표기 (배치 B 수집)",
+        cellRenderer: (params: { value?: string }) => params.value || "-",
+      },
+      {
+        field: "업종",
+        headerName: "업종",
+        hide: !hasSectorData,
+        minWidth: 120,
+        width: 140,
+        headerTooltip: "yfinance 분류의 한글 표기 (배치 B 수집)",
+        cellRenderer: (params: { value?: string }) => params.value || "-",
+      },
+      {
         field: "현재가",
         headerName: "현재가",
         hide: metricMode !== "cumulative",
@@ -1209,6 +1234,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [
     addingRow,
     dirtyCellKeys,
+    hasSectorData,
     maRule,
     metricMode,
     monthlyReturnLabels,
