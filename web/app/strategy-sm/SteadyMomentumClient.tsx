@@ -62,6 +62,7 @@ type PickRow = {
   return_lookback_pct: number;
   daily_change_pct: number | null;
   market_cap_eok: number | null;
+  month_return_pct: number | null;
   short_disparity_pct: number;
   momentum_score: number;
 };
@@ -547,6 +548,15 @@ export function SteadyMomentumClient() {
         width: 120,
         type: "numericColumn",
         valueFormatter: (p) => formatKorMarketCap(p.value),
+      },
+      {
+        headerName: "이번달(%)",
+        field: "month_return_pct",
+        headerTooltip: "교체일(전월 말 체결일) 종가 대비 현재가 수익률 — 이 달 포트폴리오의 실제 성과",
+        width: 92,
+        type: "numericColumn",
+        valueFormatter: (p) => formatSigned(p.value, 2),
+        cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
         headerName: "1개월(%)",

@@ -658,9 +658,19 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             daily_change_pct = round((float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0, 2)
         else:
             daily_change_pct = None
+        # 이번달 수익률 — 교체일(전월 말 체결일) 종가 대비 현재가. 신규든 유지든
+        # 이 달 포트폴리오는 그 시점 가격에서 출발했다는 기준이다.
+        month_return_pct = None
+        base_candidates = close[close.index <= rebalance_date]
+        if price is not None and not base_candidates.empty:
+            base_price = float(base_candidates.iloc[-1])
+            if base_price > 0:
+                month_return_pct = round((price / base_price - 1.0) * 100.0, 2)
+
         return {
             "price": round(price, 4) if price is not None else None,
             "daily_change_pct": daily_change_pct,
+            "month_return_pct": month_return_pct,
             "market_cap_eok": market_caps.get(ticker),
             "return_1m_pct": period_return_pct(close, 1, signal_date),
             "return_3m_pct": period_return_pct(close, 3, signal_date),
