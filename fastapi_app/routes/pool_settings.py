@@ -50,6 +50,8 @@ def _pool_payload(settings: dict[str, Any]) -> dict[str, Any]:
         "order": settings["order"],
         "country_code": settings["country_code"],
         "currency": settings["currency"],
+        # 풀 성격(stock/etf) — 미설정이면 None (화면이 '미설정' 으로 보여준다).
+        "pool_kind": settings.get("pool_kind"),
         "type_source": settings.get("type_source"),
         "settings": _editable(settings),
         "updated_at": settings.get("updated_at"),

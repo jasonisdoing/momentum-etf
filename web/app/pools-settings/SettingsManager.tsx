@@ -45,6 +45,8 @@ type PoolEntry = {
   order?: number;
   country_code?: string;
   currency?: string;
+  // 풀 성격(stock/etf) — 미설정이면 null. 전략 SM 등이 섹터·업종 UI 노출에 쓴다.
+  pool_kind?: string | null;
   settings: SettingsMap;
   updated_at?: string;
 };
@@ -68,6 +70,8 @@ type PoolDraft = {
   order: string;
   country_code: string;
   currency: string;
+  // 풀 성격 — "stock"(개별주) / "etf" / ""(미설정, 구 문서 하위 호환).
+  pool_kind: string;
   // 벤치마크는 {ticker, name} 이라 초안에서는 두 값으로 나눠 든다. 이름은 조회로만 채운다.
   benchmarkTicker: string;
   benchmarkName: string;
@@ -82,6 +86,7 @@ const EMPTY_DRAFT: PoolDraft = {
   order: "",
   country_code: "kor",
   currency: "KRW",
+  pool_kind: "etf",
   TOP_N_HOLD: "10",
   SHORT_MA_DAYS: "10",
   LONG_MA_DAYS: "20",
@@ -124,6 +129,7 @@ function toDraft(pool: PoolEntry): PoolDraft {
     order: pool.order === null || pool.order === undefined ? "" : String(pool.order),
     country_code: pool.country_code ?? "kor",
     currency: pool.currency ?? "KRW",
+    pool_kind: pool.pool_kind ?? "",
     TOP_N_HOLD: String(pool.settings.TOP_N_HOLD?.value ?? ""),
     SHORT_MA_DAYS: String(pool.settings.SHORT_MA_DAYS?.value ?? ""),
     LONG_MA_DAYS: String(pool.settings.LONG_MA_DAYS?.value ?? ""),
@@ -145,6 +151,8 @@ function draftToValues(draft: PoolDraft) {
     order: Number(draft.order),
     country_code: draft.country_code,
     currency: draft.currency,
+    // 빈 값(미설정)은 보내지 않아 기존 상태를 유지한다 — 토글은 항상 stock/etf 를 보낸다.
+    ...(draft.pool_kind ? { pool_kind: draft.pool_kind } : {}),
     TOP_N_HOLD: Number(draft.TOP_N_HOLD),
     SHORT_MA_DAYS: Number(draft.SHORT_MA_DAYS),
     LONG_MA_DAYS: Number(draft.LONG_MA_DAYS),
@@ -464,8 +472,18 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
         )}
         {renderField(
           "아이콘",
-          <input style={{ ...inputStyle, width: 56 }} value={draft.icon} onChange={(event) => onChange("icon", event.target.value)} />,
-          { minWidth: 126, labelWidth: 56 },
+          // 국기 3개 중 선택 — 저장값은 국기 이모지 그대로라 다른 화면 표시는 지금과 동일하다.
+          // 기존에 목록 밖 아이콘이 저장돼 있으면 그 값도 함께 노출한다(빈 셀렉트 방지).
+          <select style={{ ...inputStyle, width: 96 }} value={draft.icon} onChange={(event) => onChange("icon", event.target.value)}>
+            {draft.icon && !["🇰🇷", "🇦🇺", "🇺🇸"].includes(draft.icon) ? (
+              <option value={draft.icon}>{draft.icon}</option>
+            ) : null}
+            {draft.icon === "" ? <option value="">없음</option> : null}
+            <option value="🇰🇷">🇰🇷 한국</option>
+            <option value="🇦🇺">🇦🇺 호주</option>
+            <option value="🇺🇸">🇺🇸 미국</option>
+          </select>,
+          { minWidth: 158, labelWidth: 56 },
         )}
         {renderField(
           "순서",
@@ -489,6 +507,21 @@ export function SettingsManager({ onSummaryChange }: { onSummaryChange?: (totalC
           "통화",
           <SelectField value={draft.currency} options={CURRENCY_OPTIONS} width={88} onChange={(value) => onChange("currency", value)} />,
           { minWidth: 150, labelWidth: 44 },
+        )}
+        {renderField(
+          "구분",
+          // 풀 성격 토글 — 개별주(stock)면 섹터·업종 개념이 있고, ETF 면 없다.
+          // 구 문서는 미설정일 수 있어 그 상태도 그대로 보여준다(저장하면 선택값으로 확정).
+          <select
+            style={{ ...inputStyle, width: 96 }}
+            value={draft.pool_kind}
+            onChange={(event) => onChange("pool_kind", event.target.value)}
+          >
+            {draft.pool_kind === "" ? <option value="">미설정</option> : null}
+            <option value="stock">개별주</option>
+            <option value="etf">ETF</option>
+          </select>,
+          { minWidth: 158, labelWidth: 44 },
         )}
         {renderField(
           "보유 종목수",

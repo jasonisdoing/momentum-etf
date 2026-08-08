@@ -62,7 +62,12 @@ STRUCTURAL_KEYS: tuple[str, ...] = (
     "country_code",
     "currency",
     "is_active",
+    "pool_kind",
 )
+
+# 풀 성격 — 'stock'(개별주) 또는 'etf'. 섹터·업종 개념이 있는 풀인지 화면들이 이 값으로
+# 판단한다(예: 전략 SM 의 업종상한 노출). 기존 문서는 미설정일 수 있다(선택 값).
+POOL_KIND_OPTIONS: tuple[str, ...] = ("stock", "etf")
 
 MA_DAY_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 160, 180, 240)
 # 기울기 측정 일수(k): 단기 이평선의 k일 전 대비 변화율.
@@ -201,6 +206,14 @@ def _normalize_pool_values(values: dict[str, Any], *, require_ticker_type: bool)
         cleaned["currency"] = currency
     if "is_active" in values:
         cleaned["is_active"] = bool(values.get("is_active"))
+    if "pool_kind" in values:
+        pool_kind = str(values.get("pool_kind") or "").strip().lower()
+        # 빈 값은 '미설정 유지' — 기존 문서와의 하위 호환 (토글은 항상 둘 중 하나를 보낸다).
+        if pool_kind:
+            if pool_kind not in POOL_KIND_OPTIONS:
+                allowed = ", ".join(POOL_KIND_OPTIONS)
+                raise PoolSettingsError(f"pool_kind 는 {allowed} 중 하나여야 합니다: {pool_kind}")
+            cleaned["pool_kind"] = pool_kind
 
     editable_input = {k: values[k] for k in POOL_EDITABLE_KEYS if k in values}
     cleaned.update(_validate_values(editable_input) if editable_input else {})
