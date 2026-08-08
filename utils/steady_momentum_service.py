@@ -707,6 +707,26 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "current_long_pct": round(metrics["disparity_pct"], 1),
         }
 
+    def signal_disparity(ticker: str) -> dict[str, float | None]:
+        """판정일 기준 단기/장기 이격 — 후보 밖 종목(하단 예상 행)용 재계산."""
+        frame = frames.get(ticker)
+        metrics = (
+            momentum_metrics(
+                frame["Close"],
+                short_ma_days=int(settings["short_ma_days"]),
+                long_ma_days=int(settings["long_ma_days"]),
+                as_of=signal_date,
+            )
+            if frame is not None and not frame.empty
+            else None
+        )
+        if metrics is None:
+            return {"signal_short_pct": None, "signal_long_pct": None}
+        return {
+            "signal_short_pct": round(metrics["short_disparity_pct"], 1),
+            "signal_long_pct": round(metrics["disparity_pct"], 1),
+        }
+
     current_top = select_top(
         rank_candidates(select_candidates(universe, frames, settings, as_of=None)),
         top_n,
@@ -719,9 +739,11 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
 
     # 참고용 가격 정보 — 현재가·일간(%)은 실시간 스냅샷(pools-rank 와 같은 소스),
-    # 실패 시 캐시 종가로 폴백. 기간수익률은 나머지 컬럼과 같은 판정일 기준이라
-    # 다음 교체 전까지 값이 바뀌지 않는다.
-    from core.strategy.metrics import period_return_pct
+    # 실패 시 캐시 종가로 폴백. 월별 수익률은 pools-rank 와 같은 공용 계산
+    # (전월 말 종가 대비, 이번 달은 마지막 종가까지)을 최근 6개월치 쓴다.
+    from utils.rankings import build_recent_monthly_return_metrics, get_recent_monthly_return_labels
+
+    month_labels = get_recent_monthly_return_labels(6)
 
     currency = str(POOL_CONFIGS[base_pool]["currency"])
     country = str(POOL_CONFIGS[base_pool]["country"])
@@ -754,12 +776,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "price": None,
                 "daily_change_pct": None,
                 "high_drawdown_pct": None,
-                "month_return_pct": None,
                 "market_cap_eok": None,
-                "return_1m_pct": None,
-                "return_3m_pct": None,
-                "return_6m_pct": None,
-                "return_12m_pct": None,
+                "monthly_returns": {label: None for label in month_labels},
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
         # 고점 대비(%) — pools-rank 와 같은 규칙: 캐시 전 기간 최고가 대비 마지막 종가.
@@ -781,25 +799,12 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             daily_change_pct = round((float(close.iloc[-1]) / float(close.iloc[-2]) - 1.0) * 100.0, 2)
         else:
             daily_change_pct = None
-        # 이번달 수익률 — 교체일(전월 말 체결일) 종가 대비 현재가. 신규든 유지든
-        # 이 달 포트폴리오는 그 시점 가격에서 출발했다는 기준이다.
-        month_return_pct = None
-        base_candidates = close[close.index <= rebalance_date]
-        if price is not None and not base_candidates.empty:
-            base_price = float(base_candidates.iloc[-1])
-            if base_price > 0:
-                month_return_pct = round((price / base_price - 1.0) * 100.0, 2)
-
         return {
             "price": round(price, 4) if price is not None else None,
             "daily_change_pct": daily_change_pct,
             "high_drawdown_pct": high_drawdown_pct,
-            "month_return_pct": month_return_pct,
             "market_cap_eok": market_caps.get(ticker),
-            "return_1m_pct": period_return_pct(close, 1, signal_date),
-            "return_3m_pct": period_return_pct(close, 3, signal_date),
-            "return_6m_pct": period_return_pct(close, 6, signal_date),
-            "return_12m_pct": period_return_pct(close, 12, signal_date),
+            "monthly_returns": build_recent_monthly_return_metrics(close, labels=month_labels),
         }
 
     return {
@@ -809,6 +814,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "signal_date": signal_date.strftime("%Y-%m-%d"),
         "universe_count": len(universe),
         "candidate_count": len(candidates),
+        # 월별 컬럼 라벨(최근 6개월, pools-rank 와 같은 형식) — 화면이 이 순서로 컬럼을 만든다.
+        "monthly_return_labels": month_labels,
         "rows": [
             {
                 "rank": rank,
@@ -832,8 +839,9 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             for rank, item in enumerate([*selected, *reserve], start=1)
         ]
         + [
-            # 표 밖인데 다음 달 편입이 예상되는 종목 — 이격(단기/장기)은 '지금' 기준이다
-            # (판정일 기준 후보 밖이라 그 시점 값이 없고, 예상의 근거가 지금 값이다).
+            # 표 밖인데 다음 달 편입이 예상되는 종목 — 순위·현재 이격은 '지금' 기준이고,
+            # 판정일-단기/장기는 같은 이평선으로 판정일 시점을 재계산해 채운다
+            # (후보 필터 밖이었을 뿐 값 자체는 계산된다 — 단기 음수 등 탈락 사유가 그대로 보인다).
             {
                 "rank": None,
                 "is_reserve": True,
@@ -847,9 +855,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
                 "currency": currency,
                 **price_info(item["ticker"]),
-                # 판정일 기준 값은 없다 — 그 시점엔 후보 밖이었다.
-                "signal_short_pct": None,
-                "signal_long_pct": None,
+                # 판정일 기준 이격 — 후보 밖이었어도 같은 이평선으로 재계산해 보여준다.
+                **signal_disparity(item["ticker"]),
                 "current_short_pct": round(item["short_disparity_pct"], 1),
                 "current_long_pct": round(item["momentum_score"], 1),
             }

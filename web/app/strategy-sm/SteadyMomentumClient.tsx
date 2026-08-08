@@ -58,14 +58,10 @@ type PickRow = {
   industry: string;
   currency: string;
   price: number | null;
-  return_1m_pct: number | null;
-  return_3m_pct: number | null;
-  return_12m_pct: number | null;
-  return_6m_pct: number | null;
+  monthly_returns: Record<string, number | null>;
   daily_change_pct: number | null;
   high_drawdown_pct: number | null;
   market_cap_eok: number | null;
-  month_return_pct: number | null;
   signal_short_pct: number | null;
   signal_long_pct: number | null;
   current_short_pct: number | null;
@@ -79,6 +75,7 @@ type PicksResult = {
   signal_date: string;
   universe_count: number;
   candidate_count: number;
+  monthly_return_labels: string[];
   rows: PickRow[];
 };
 
@@ -458,6 +455,7 @@ export function SteadyMomentumClient() {
     );
   }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPools, view]);
 
+  const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
     return [
       {
@@ -588,42 +586,20 @@ export function SteadyMomentumClient() {
         type: "numericColumn",
         valueFormatter: (p) => formatKorMarketCap(p.value),
       },
-      {
-        headerName: "이번달(%)",
-        field: "month_return_pct",
-        headerTooltip: "교체일(전월 말 체결일) 종가 대비 현재가 수익률 — 이 달 포트폴리오의 실제 성과",
-        width: 92,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 2),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "1개월(%)",
-        field: "return_1m_pct",
-        headerTooltip: "판정일 기준 1개월 수익률",
-        width: 92,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "6개월(%)",
-        field: "return_6m_pct",
-        headerTooltip: "룩백 구간 수익률 — 룩백(개월) 설정을 따른다",
-        width: 92,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
-      {
-        headerName: "12개월(%)",
-        field: "return_12m_pct",
-        headerTooltip: "판정일 기준 12개월 수익률",
-        width: 98,
-        type: "numericColumn",
-        valueFormatter: (p) => formatSigned(p.value, 1),
-        cellStyle: (p) => ({ color: signColor(p.value) }),
-      },
+      // 월별 수익률 — pools-rank 월별과 같은 계산(전월 말 종가 대비, 이번 달은 마지막
+      // 종가까지)의 최근 6개월. 라벨은 서버가 내려주고 헤더는 (%) 없이 표시한다.
+      ...monthlyLabels.map(
+        (label): ColDef<PickRow> => ({
+          headerName: label.replace("(%)", ""),
+          colId: label,
+          headerTooltip: "전월 말 종가 대비 수익률 (이번 달은 캐시 마지막 종가까지) — pools-rank 월별과 같은 계산",
+          width: 96,
+          type: "numericColumn",
+          valueGetter: (p) => p.data?.monthly_returns?.[label] ?? null,
+          valueFormatter: (p) => formatSigned(p.value, 1),
+          cellStyle: (p) => ({ color: signColor(p.value) }),
+        }),
+      ),
       {
         headerName: "판정일-단기",
         field: "signal_short_pct",
@@ -662,7 +638,8 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
-  }, []);
+    // 월별 라벨이 선정 응답에 실려 온다 — 라벨이 바뀌면(월이 넘어가면) 컬럼도 다시 만든다.
+  }, [monthlyLabels]);
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];

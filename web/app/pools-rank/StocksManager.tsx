@@ -1162,7 +1162,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       (label) =>
         ({
           field: label,
-          headerName: label,
+          // 데이터 키는 "YYYY-MM(%)" 그대로 두고 헤더만 (%) 없이 표시한다.
+          headerName: label.replace("(%)", ""),
           minWidth: 108,
           width: 108,
           type: "rightAligned",
