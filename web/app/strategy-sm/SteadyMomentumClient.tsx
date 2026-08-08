@@ -25,7 +25,6 @@ const POOL_OPTIONS: readonly PoolLabelSource[] = [
 
 type Settings = {
   pool: string;
-  lookback_months: number;
   top_n: number;
   slippage_pct: number;
   max_per_industry: number;
@@ -35,8 +34,7 @@ type Settings = {
 // 한 업종에서 최대 몇 종목까지 담을지 — 백엔드 MAX_PER_INDUSTRY_OPTIONS 와 같아야 한다.
 const MAX_PER_INDUSTRY_OPTIONS = [1, 2, 3, 4, 5, 10] as const;
 
-// 룩백·종목 수 선택지 — 백엔드 검증 범위(룩백 1~24, 종목 수 5~100) 안에서 자주 쓰는 값만 노출한다.
-const LOOKBACK_OPTIONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 18, 24];
+// 종목 수 선택지 — 백엔드 검증 범위(5~100) 안에서 자주 쓰는 값만 노출한다.
 const TOP_N_OPTIONS = [5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100];
 
 /** 저장된 값이 선택지에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어 무엇이 저장돼 있는지 알 수 없다. */
@@ -59,7 +57,7 @@ type PickRow = {
   return_1m_pct: number | null;
   return_3m_pct: number | null;
   return_12m_pct: number | null;
-  return_lookback_pct: number;
+  return_6m_pct: number | null;
   daily_change_pct: number | null;
   market_cap_eok: number | null;
   month_return_pct: number | null;
@@ -138,7 +136,6 @@ type View = {
 // 슬리피지와 백테스트 기간은 백테스트에만 쓰이므로 선정을 다시 돌릴 이유가 없다.
 const PICK_AFFECTING_KEYS = [
   "pool",
-  "lookback_months",
   "top_n",
   "max_per_industry",
 ] as const;
@@ -288,7 +285,6 @@ export function SteadyMomentumClient() {
     setDraftBacktestMonths(data.settings.backtest_months);
     setDraftMaxPerIndustry(data.settings.max_per_industry);
     setDraft({
-      lookback_months: String(data.settings.lookback_months),
       top_n: String(data.settings.top_n),
       slippage_pct: String(data.settings.slippage_pct),
     });
@@ -351,10 +347,9 @@ export function SteadyMomentumClient() {
   }, [load, runPicks]);
 
   const saveSettings = useCallback(async () => {
-    const lookback = Number(draft.lookback_months);
     const topN = Number(draft.top_n);
     const slippage = Number(draft.slippage_pct);
-    if (![lookback, topN, slippage].every((v) => Number.isFinite(v))) {
+    if (![topN, slippage].every((v) => Number.isFinite(v))) {
       toast.error("설정 값이 올바르지 않습니다.");
       return;
     }
@@ -371,7 +366,6 @@ export function SteadyMomentumClient() {
         body: JSON.stringify({
           settings: {
             pool: draftPool,
-            lookback_months: lookback,
             top_n: topN,
             slippage_pct: slippage,
             max_per_industry: draftMaxPerIndustry,
@@ -451,7 +445,6 @@ export function SteadyMomentumClient() {
       draftPool !== saved.pool ||
       draftBacktestMonths !== saved.backtest_months ||
       draftMaxPerIndustry !== saved.max_per_industry ||
-      draft.lookback_months !== String(saved.lookback_months) ||
       draft.top_n !== String(saved.top_n) ||
       draft.slippage_pct !== String(saved.slippage_pct) ||
       (draftMaRule != null &&
@@ -461,11 +454,7 @@ export function SteadyMomentumClient() {
     );
   }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
-  const lookbackMonths = view?.settings.lookback_months ?? null;
-
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
-    // 설정을 받기 전에는 컬럼(룩백 개월 머리글)을 만들 수 없다.
-    if (lookbackMonths == null) return [];
     return [
       { headerName: "순위", field: "rank", width: 60, type: "numericColumn" },
       {
@@ -568,8 +557,8 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
       {
-        headerName: `${lookbackMonths}개월(%)`,
-        field: "return_lookback_pct",
+        headerName: "6개월(%)",
+        field: "return_6m_pct",
         headerTooltip: "룩백 구간 수익률 — 룩백(개월) 설정을 따른다",
         width: 92,
         type: "numericColumn",
@@ -605,7 +594,7 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ fontWeight: 700, color: signColor(p.value) }),
       },
     ];
-  }, [lookbackMonths]);
+  }, []);
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
@@ -803,21 +792,6 @@ export function SteadyMomentumClient() {
                     {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => (
                       <option key={pool.ticker_type} value={pool.ticker_type}>
                         {formatPoolLabel(pool)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">룩백(개월)</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: 80 }}
-                    value={draft.lookback_months ?? ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, lookback_months: e.target.value }))}
-                  >
-                    {withSavedValue(LOOKBACK_OPTIONS, draft.lookback_months).map((m) => (
-                      <option key={m} value={m}>
-                        {m}
                       </option>
                     ))}
                   </select>
