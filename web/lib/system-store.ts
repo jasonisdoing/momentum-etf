@@ -56,7 +56,8 @@ type SystemAction =
   | "live_24h_slack"
   | "leverage_ma_cross"
   | "holdings_alarm"
-    | "strategy_trade_notify";
+  | "strategy_trade_notify"
+  | "db_backup";
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");

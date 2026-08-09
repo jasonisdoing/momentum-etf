@@ -54,7 +54,8 @@ type SystemJobKey =
   | "live_24h_slack"
   | "leverage_ma_cross"
   | "holdings_alarm"
-    | "strategy_trade_notify";
+  | "strategy_trade_notify"
+  | "db_backup";
 
 type BatchQueueItem = {
   id: string;

@@ -36,6 +36,9 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
 10 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py aus_market_stocks python scripts/update_aus_market_stocks.py >> logs/cron/aus_market_stocks.log 2>&1
+# DB 백업 — 매시 fresh 백업(임시 폴더 → 성공 시 교체), 최근 30개 보존. 백업 폴더가 로컬(맥)이라 LOCAL 전용.
+40 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py db_backup python scripts/backup_mongo_full.py --gzip >> logs/cron/db_backup.log 2>&1
+
 # 최근 1시간 |변동| >= LIVE_24H_ALERT_PCT 인 종목이 있을 때만 <!channel> 로 발송(없으면 스킵).
 0 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py live_24h_slack python scripts/live_24h_slack.py >> logs/cron/live_24h_slack.log 2>&1
 

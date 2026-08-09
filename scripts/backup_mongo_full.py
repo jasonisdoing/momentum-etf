@@ -1,10 +1,10 @@
-"""MongoDB 전체 백업 — `backups/YYYYMMDD/` 에 mongodump(BSON) 로 저장한다.
+"""MongoDB 전체 백업 — `backups/YYYYMMDD/` 에 mongodump 로 저장한다.
 
-DB 정리·마이그레이션 같은 위험 작업 전에 스냅샷을 남기는 용도다. BSON 그대로 받으므로
-가격 캐시의 parquet 바이너리가 부풀지 않고, 복원은 `mongorestore` 한 줄로 끝난다.
+매시 크론(로컬 전용)이 실행해 오늘 폴더를 **항상 최신으로 덮어쓴다** — 임시 폴더에
+받은 뒤 성공했을 때만 교체하므로, 받다가 중단돼도 직전 정상 백업이 깨지지 않는다.
+복원은 `mongorestore` 한 줄로 끝난다. 보존은 최근 `--keep`(기본 30)개 날짜 폴더.
 
-    python scripts/backup_mongo_full.py                 # backups/YYYYMMDD/ 로 백업
-    python scripts/backup_mongo_full.py --gzip          # 각 컬렉션을 gzip 압축
+    python scripts/backup_mongo_full.py --gzip          # 표준 실행 (크론과 동일)
     python scripts/backup_mongo_full.py --dry-run       # 실행할 명령만 출력
 
 복원 예시(전체):
@@ -41,10 +41,31 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _rotate_backups(keep: int) -> None:
+    """날짜 폴더(YYYYMMDD)를 최신 keep 개만 남기고 오래된 것부터 삭제한다."""
+    if keep <= 0:
+        return
+    dated = sorted(
+        (p for p in _BACKUP_ROOT.iterdir() if p.is_dir() and re.fullmatch(r"\d{8}", p.name)),
+        key=lambda p: p.name,
+    )
+    for old in dated[:-keep]:
+        import shutil
+
+        shutil.rmtree(old)
+        print(f"보존 회전: 오래된 백업 삭제 — {old}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="MongoDB 전체 백업 (mongodump)")
     parser.add_argument("--gzip", action="store_true", help="컬렉션별 gzip 압축.")
     parser.add_argument("--dry-run", action="store_true", help="실행할 명령만 출력.")
+    parser.add_argument(
+        "--keep",
+        type=int,
+        default=30,
+        help="보존할 날짜 폴더 수 — 초과분은 오래된 것부터 삭제 (0=회전 안 함).",
+    )
     args = parser.parse_args()
 
     load_env_if_present()
@@ -52,11 +73,13 @@ def main() -> None:
     db_name = _require_env("MONGO_DB_NAME")
 
     out_dir = _BACKUP_ROOT / datetime.now().strftime("%Y%m%d")
+    # 임시 폴더에 받은 뒤 성공 시에만 교체 — 중단된 시도가 정상 백업을 덮지 않게 한다.
+    tmp_dir = _BACKUP_ROOT / f".tmp_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     command = [
         "mongodump",
         f"--uri={uri}",
         f"--db={db_name}",
-        f"--out={out_dir}",
+        f"--out={tmp_dir}",
     ]
     if args.gzip:
         command.append("--gzip")
@@ -67,19 +90,36 @@ def main() -> None:
         print("\n--dry-run 이라 실제로 백업하지 않았습니다.")
         return
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(command, capture_output=True, text=True)
+    import shutil
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        result = subprocess.run(command, capture_output=True, text=True)
+    except BaseException:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
     # mongodump 는 진행 로그를 stderr 로 보낸다 — 실패 판정은 반환코드로만 한다.
     if result.returncode != 0:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
         print(result.stderr.strip() or result.stdout.strip())
         raise SystemExit(f"mongodump 실패 (exit={result.returncode})")
 
+    # 성공 — 오늘 폴더를 원자적으로 교체한다.
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    tmp_dir.rename(out_dir)
+
     dumped = out_dir / db_name
-    files = sorted(dumped.glob("*.bson")) if dumped.exists() else []
+    pattern = "*.bson.gz" if args.gzip else "*.bson"
+    files = sorted(dumped.glob(pattern)) if dumped.exists() else []
     total = sum(f.stat().st_size for f in files)
     print(f"\n완료 — {dumped}")
     print(f"  컬렉션 {len(files)}개, 합계 {total / 1e6:.1f} MB")
-    print(f"\n복원: mongorestore --uri=\"<접속문자열>\" --drop {dumped}")
+
+    _rotate_backups(args.keep)
+
+    restore_gzip = " --gzip" if args.gzip else ""
+    print(f"\n복원: mongorestore --uri=\"<접속문자열>\" --drop{restore_gzip} {dumped}")
 
 
 if __name__ == "__main__":
