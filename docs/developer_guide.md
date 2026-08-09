@@ -126,7 +126,9 @@ python infra/server_scheduler.py
 *   `scripts/`: 데이터 수집, 캐시 갱신, 일별 원장 시드/집계 생성 등 유틸리티 스크립트
 *   `utils/`:
     *   `cache_utils.py`: **Parquet 기반 캐시 I/O** 및 직렬화 관리
-    *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수
+    *   `data_loader.py`: OHLCV 수집/보완 및 원천 fetch 함수. 거래일 캘린더와 실시간 시세는 아래 두 모듈로 분리됐고 기존 임포트 경로는 re-export 로 유지됩니다.
+    *   `trading_calendar.py`: 거래일 캘린더(`data/country/<국가>/market_calendars.json`) 조회 — `get_trading_days`, `get_latest_trading_day`, `resolve_active_trading_date` 등
+    *   `realtime_quotes.py`: 실시간 시세 스냅샷(네이버·토스·호주 quoteapi·iNAV) — `fetch_naver_stock_realtime_snapshot`, `fetch_toss_*` 등
     *   `ai_summary.py`: AI용 요약 데이터 생성 공용 유틸
     *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
