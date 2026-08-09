@@ -36,6 +36,17 @@ KST = ZoneInfo("Asia/Seoul")
 # 변경하려면 환경변수 BATCH_TIMEOUT_SECONDS 로 override.
 BATCH_TIMEOUT_SECONDS = int(os.environ.get("BATCH_TIMEOUT_SECONDS") or 1200)
 
+# 작업별 타임아웃 override — **정상 소요가 전역 기본(20분)에 근접·초과하는 배치**만 등록한다.
+# 전역을 늘리면 1~2분짜리 배치의 hang 감지가 함께 무뎌지므로 작업 단위로만 푼다.
+JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
+    # 전체 히스토리 재수집(--full)은 정상 소요가 ~20분이라 기본 한도에 걸린다. 60분 허용.
+    "cache_refresh_full": 3600,
+}
+
+
+def _timeout_for(job_name: str) -> int:
+    return JOB_TIMEOUT_OVERRIDES.get(job_name, BATCH_TIMEOUT_SECONDS)
+
 
 def _format_duration(seconds: float) -> str:
     """초 → 사람이 읽기 쉬운 표시. 예: 1200 → '20분', 75 → '1분 15초', 45 → '45초'."""
@@ -196,7 +207,7 @@ def main(argv: list[str]) -> int:
     # MongoDB 분산 락: 로컬/서버 어디서든 동일 작업 중복 실행 차단
     db_lock = None
     try:
-        db_lock = _acquire_db_lock(job_name)
+        db_lock = _acquire_db_lock(job_name, ttl_seconds=_timeout_for(job_name))
     except RuntimeError as exc:
         skip_line = f"[run_batch] SKIP job={job_name} reason={exc} at={started_at}"
         print(skip_line, file=sys.stderr)
@@ -220,14 +231,14 @@ def main(argv: list[str]) -> int:
             check=False,
             # 외부 API hang 등 무한 대기 방지. timeout 초과 시 자식 프로세스에
             # 자동으로 SIGKILL 이 전달되고 TimeoutExpired 가 raise 된다.
-            timeout=BATCH_TIMEOUT_SECONDS,
+            timeout=_timeout_for(job_name),
         )
     except subprocess.TimeoutExpired as exc:
         elapsed = time.monotonic() - started_monotonic
         job_display = _format_job_display(job_name)
         timeout_line = (
             f"[run_batch] TIMEOUT job={job_name} elapsed={elapsed:.1f}s "
-            f"limit={BATCH_TIMEOUT_SECONDS}s — 자식 프로세스 SIGKILL 처리됨"
+            f"limit={_timeout_for(job_name)}s — 자식 프로세스 SIGKILL 처리됨"
         )
         _append_log_line(job_name, timeout_line)
         # 자식 stdout 일부 (디버깅용)
@@ -242,7 +253,7 @@ def main(argv: list[str]) -> int:
             f"<!channel>\n"
             f"⏰ *[{app_label}] 배치 타임아웃*: {job_display}\n"
             f"• 시작: {started_at}\n"
-            f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(BATCH_TIMEOUT_SECONDS)})\n"
+            f"• 소요: {_format_duration(elapsed)} (제한 {_format_duration(_timeout_for(job_name))})\n"
             f"• 자식 프로세스는 SIGKILL 로 강제 종료됨"
         )
         print(timeout_line, file=sys.stderr)
