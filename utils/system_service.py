@@ -17,6 +17,7 @@ load_env_if_present()
 SystemAction = Literal[
     "data_aggregate",
     "cache_refresh",
+    "cache_refresh_full",
     "market_hours_analysis",
     "reference_meta_updater",
     "price_metrics_updater",
@@ -85,6 +86,17 @@ SCHEDULE_ROWS = [
         "cadence": "월~토 24시간 매시 20분 KST",
         "command": "python scripts/stock_price_cache_updater.py",
         "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    {
+        "key": "cache_refresh_full",
+        "job": "가격 캐시 전체 재수집",
+        "target": "모든 종목 가격 (전체 히스토리)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 17:10 KST",
+        # 매시 증분(가격 캐시 업데이트)이 다루지 않는 과거 행 변경(수정주가 — 배당·분할)을
+        # 하루 1회 전체 재수집으로 되돌린다.
+        "command": "python scripts/stock_price_cache_updater.py --full",
+        "schedule": {"minutes": [10], "hours": [17], "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
         "key": "reference_meta_updater",
@@ -179,6 +191,7 @@ SCHEDULE_ROWS = [
 _SCRIPT_BY_ACTION: dict[str, str] = {
     "data_aggregate": "scripts/collect_data.py",
     "cache_refresh": "scripts/stock_price_cache_updater.py",
+    "cache_refresh_full": "scripts/stock_price_cache_updater.py",
     "market_hours_analysis": "scripts/analyze_market_hours.py",
     "reference_meta_updater": "scripts/stock_reference_meta_updater.py",
     "price_metrics_updater": "scripts/stock_price_metrics_updater.py",
@@ -189,6 +202,11 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
     "strategy_trade_notify": "scripts/strategy_trade_notify.py",
+}
+
+# 액션별 추가 인자 — 워커가 스크립트 실행 시 그대로 붙인다.
+_ARGS_BY_ACTION: dict[str, list[str]] = {
+    "cache_refresh_full": ["--full"],
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
@@ -1078,7 +1096,7 @@ def trigger_system_action(action: SystemAction) -> str:
 
     script_rel = _SCRIPT_BY_ACTION[action]
     label = _LABEL_BY_ACTION.get(action, action)
-    result = enqueue(action, script_rel, triggered_by="manual")
+    result = enqueue(action, script_rel, triggered_by="manual", arguments=_ARGS_BY_ACTION.get(action))
     if not result.get("enqueued"):
         return f"[시스템-배치] {label} 이미 큐에 있습니다 ({result.get('reason')})."
     return f"[시스템-배치] {label} 큐에 추가됨. 워커가 순서대로 실행합니다."

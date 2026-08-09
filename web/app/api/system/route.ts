@@ -20,6 +20,7 @@ export async function POST(request: NextRequest) {
     const allowed = new Set([
       "data_aggregate",
       "cache_refresh",
+      "cache_refresh_full",
       "market_hours_analysis",
       "reference_meta_updater",
       "price_metrics_updater",

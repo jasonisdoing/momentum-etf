@@ -132,17 +132,19 @@ def _parse_crontab(path: Path) -> list[tuple[str, str, str]]:
             continue
         job_name = argv[idx + 1]
         script_path = argv[idx + 3]
-        jobs.append((cron_expr, job_name, script_path))
+        # 스크립트 뒤 인자(예: --full)도 그대로 보존해 큐로 전달한다.
+        arguments = argv[idx + 4 :] or None
+        jobs.append((cron_expr, job_name, script_path, arguments))
     return jobs
 
 
-def _enqueue_from_schedule(job_name: str, script_path: str) -> None:
+def _enqueue_from_schedule(job_name: str, script_path: str, arguments: list[str] | None = None) -> None:
     """APScheduler 가 호출 — 직접 실행하지 않고 batch_queue 에 enqueue 만."""
     sys.path.insert(0, str(ROOT_DIR))
     from utils.batch_queue import enqueue
 
     try:
-        result = enqueue(job_name, script_path, triggered_by="schedule")
+        result = enqueue(job_name, script_path, triggered_by="schedule", arguments=arguments)
         if result.get("enqueued"):
             log.info("스케줄 → 큐 추가: %s", job_name)
         else:
@@ -337,12 +339,12 @@ def main() -> int:
         # 같은 배치(job_name)가 서로 다른 시각으로 여러 크론 줄을 가질 수 있으므로
         # (예: asset_summary 09:20·15:35) APScheduler id 는 줄마다 유니크하게 둔다.
         # id 를 job_name 으로 두면 뒷줄이 앞줄을 덮어써 한 시각만 등록된다.
-        for index, (cron_expr, job_name, script_path) in enumerate(jobs):
+        for index, (cron_expr, job_name, script_path, arguments) in enumerate(jobs):
             trigger = _build_trigger(cron_expr)
             sched.add_job(
                 _enqueue_from_schedule,
                 trigger=trigger,
-                args=(job_name, script_path),
+                args=(job_name, script_path, arguments),
                 id=f"{job_name}#{index}",
                 name=job_name,
                 misfire_grace_time=None,  # 노트북 꺼져있던 시간은 따라잡지 않음
