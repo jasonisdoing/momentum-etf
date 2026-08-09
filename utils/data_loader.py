@@ -1342,6 +1342,11 @@ def prepare_price_data(
 
 
 _pykrx_name_cache: dict[str, str] = {}
+# pykrx 는 병렬 호출 시 행(deadlock) 전력이 있어(가격 배치 주석 참고) 이름 폴백 호출을
+# 직렬화한다 — 폴백은 드물어 성능 손해가 없다. (메타 배치 병렬화용 안전장치)
+import threading as _threading
+
+_PYKRX_NAME_LOCK = _threading.Lock()
 
 
 def fetch_pykrx_name(ticker: str) -> str:
@@ -1367,22 +1372,23 @@ def fetch_pykrx_name(ticker: str) -> str:
     except Exception:
         pass
 
-    # 2. pykrx 폴백 (네이버에 없는 ETF/ETN 등)
+    # 2. pykrx 폴백 (네이버에 없는 ETF/ETN 등) — 병렬 환경에서도 직렬 호출 보장
     if not name and _stock is not None:
-        try:
-            name_candidate = _stock.get_etf_ticker_name(ticker)
-            if isinstance(name_candidate, str) and name_candidate:
-                name = name_candidate
-        except Exception:
-            pass
-
-        if not name:
+        with _PYKRX_NAME_LOCK:
             try:
-                name_candidate = _stock.get_market_ticker_name(ticker)
+                name_candidate = _stock.get_etf_ticker_name(ticker)
                 if isinstance(name_candidate, str) and name_candidate:
                     name = name_candidate
             except Exception:
                 pass
+
+            if not name:
+                try:
+                    name_candidate = _stock.get_market_ticker_name(ticker)
+                    if isinstance(name_candidate, str) and name_candidate:
+                        name = name_candidate
+                except Exception:
+                    pass
 
         if not name:
             try:
