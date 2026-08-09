@@ -324,6 +324,10 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
                 continue
 
             entry: dict[str, Any] = {"nowVal": price_value}
+            # 일봉 스냅샷(fetch_naver_daily_ohlcv_snapshot)이 날짜 정합 검증에 쓴다.
+            local_traded_at = str(item.get("localTradedAt") or "").strip()
+            if local_traded_at:
+                entry["localTradedAt"] = local_traded_at
             if pre_market_info is not None:
                 entry["is_pre_market"] = True
 
@@ -356,6 +360,46 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         snapshot.update(_fetch_chunk(chunk))
 
     return snapshot
+
+
+def fetch_naver_daily_ohlcv_snapshot(
+    tickers: Sequence[str], target_day: pd.Timestamp
+) -> dict[str, dict[str, float]]:
+    """한국 종목들의 **확정 당일 일봉(OHLCV)** 을 폴링 API 로 일괄 조회한다.
+
+    가격 캐시 증분 갱신용 — 종목당 pykrx 호출 대신 50종목 단위 배치 호출로
+    `target_day`(마감된 최신 거래일)의 일봉 행을 만든다. 값의 날짜(localTradedAt)가
+    target_day 와 다르거나(거래정지·이월 표시), 장 전 예상가 상태(is_pre_market)거나,
+    OHLC 중 하나라도 없는 종목은 **제외**한다 — 잘못된 일봉을 저장하느니 빼고
+    종목별 pykrx 경로에 맡기는 쪽이 안전하다.
+    """
+    target = pd.Timestamp(target_day).normalize()
+    snapshot = fetch_naver_stock_realtime_snapshot(tickers)
+    result: dict[str, dict[str, float]] = {}
+    for code, entry in snapshot.items():
+        if entry.get("is_pre_market"):
+            continue
+        traded_at = str(entry.get("localTradedAt") or "")[:10]
+        traded_ts = pd.to_datetime(traded_at, errors="coerce")
+        if traded_ts is pd.NaT or pd.Timestamp(traded_ts).normalize() != target:
+            continue
+        open_val = entry.get("open")
+        high_val = entry.get("high")
+        low_val = entry.get("low")
+        close_val = entry.get("nowVal")
+        volume_val = entry.get("volume")
+        if any(v is None for v in (open_val, high_val, low_val, close_val, volume_val)):
+            continue
+        if min(float(open_val), float(high_val), float(low_val), float(close_val)) <= 0:
+            continue
+        result[code] = {
+            "Open": float(open_val),
+            "High": float(high_val),
+            "Low": float(low_val),
+            "Close": float(close_val),
+            "Volume": float(volume_val),
+        }
+    return result
 
 
 def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str, float | str]]:

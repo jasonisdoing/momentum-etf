@@ -1,5 +1,15 @@
 #!/usr/bin/env python
-"""계좌별 OHLCV 캐시를 종목 단위로 incremental 갱신합니다."""
+"""계좌별 OHLCV 캐시 갱신.
+
+실행 모드
+--------
+- 기본(증분): 캐시에 없는 구간만 조회한다. 한국 풀은 **최신 거래일 하루만 비는
+  종목을 네이버 일봉 스냅샷(50종목 배치 폴링)으로 일괄 적재**해 pykrx 종목별
+  호출(+1초 스로틀)을 없앤다. 매시 크론이 이 모드로 돈다.
+- ``--full``: 전체 히스토리 강제 재수집 — 수정주가(배당·분할) 재정렬용.
+  하루 1회 크론(17:10)이 담당하며, 네이버 스냅샷으로 들어온 당일 행도
+  이때 KRX 공식 값으로 덮어써진다.
+"""
 
 from __future__ import annotations
 
@@ -448,8 +458,15 @@ def refresh_cache_for_target(
     target_id: str,
     start_date: str | None,
     progress_callback: Callable[[int, int, str], None] | None = None,
+    *,
+    full_refresh: bool = False,
 ):
-    """지정된 계정(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다."""
+    """지정된 계정(target_id)에 대한 가격 데이터 캐시를 새로 고칩니다.
+
+    ``full_refresh=True`` 는 기존 동작(전체 히스토리 강제 재수집 — 수정주가 재정렬)이고,
+    기본(False)은 **증분**이다: 캐시에 없는 구간만 조회하며, 한국 풀은 최신 거래일
+    하루만 비는 종목을 네이버 일봉 스냅샷으로 일괄 적재해 pykrx 종목별 호출을 없앤다.
+    """
     logger = get_app_logger()
     target_norm = (target_id or "").strip().lower()
 
@@ -491,7 +508,9 @@ def refresh_cache_for_target(
                     months_back=None,
                     date_range=[range_start, None],
                     update_listing_meta=False,
-                    force_refresh=True,
+                    # 증분 모드는 캐시에 없는 구간만 조회한다. 전체 재수집(수정주가
+                    # 재정렬)은 하루 1회 --full 실행이 담당한다.
+                    force_refresh=full_refresh,
                     ticker_type=account_id,
                 )
                 if fetched_df is None or fetched_df.empty:
@@ -612,6 +631,62 @@ def refresh_cache_for_target(
                     exc,
                 )
 
+        # ── KOR 증분: 최신 거래일 하루만 비는 종목은 네이버 일봉 스냅샷으로 일괄 적재 ──
+        # (종목당 pykrx 호출 + 1초 스로틀 → 50종목 배치 폴링 몇 번으로 대체)
+        # 스냅샷으로 채워졌거나 이미 최신인 종목은 아래 루프에서 스로틀 없이 캐시 확인만 한다.
+        kor_snapshot_done: set[str] = set()
+        if country_code == "kor" and not full_refresh:
+            try:
+                from utils.cache_utils import load_cached_frame
+                from utils.data_loader import get_latest_trading_day, get_trading_days
+                from utils.realtime_quotes import fetch_naver_daily_ohlcv_snapshot
+
+                latest_day = get_latest_trading_day("kor").normalize()
+                recent_days = get_trading_days(
+                    (latest_day - pd.Timedelta(days=15)).strftime("%Y-%m-%d"),
+                    latest_day.strftime("%Y-%m-%d"),
+                    "kor",
+                )
+                prev_day = recent_days[-2].normalize() if len(recent_days) >= 2 else None
+                need_latest: list[str] = []
+                for item in target_items:
+                    t = str(item.get("ticker") or "").strip().upper()
+                    if not t:
+                        continue
+                    cached_range = get_cached_date_range(target_norm, t)
+                    if cached_range is None:
+                        continue  # 캐시 없음(신규) → 종목별 전체 수집 경로
+                    cache_end = pd.Timestamp(cached_range[1]).normalize()
+                    if cache_end >= latest_day:
+                        kor_snapshot_done.add(t)  # 이미 최신 — 네트워크·스로틀 불필요
+                    elif prev_day is not None and cache_end == prev_day:
+                        need_latest.append(t)  # 최신 거래일 하루만 부족 → 스냅샷 대상
+                if need_latest:
+                    snapshot = fetch_naver_daily_ohlcv_snapshot(need_latest, latest_day)
+                    for t, row in snapshot.items():
+                        cached_df = load_cached_frame(target_norm, t)
+                        if cached_df is None or cached_df.empty:
+                            continue
+                        addition = pd.DataFrame([row], index=pd.DatetimeIndex([latest_day]))
+                        merged = pd.concat(
+                            [cached_df[cached_df.index.normalize() != latest_day], addition]
+                        ).sort_index()
+                        save_cached_frame(target_norm, t, merged)
+                        kor_snapshot_done.add(t)
+                    logger.info(
+                        "[%s] 네이버 일봉 스냅샷 일괄 적재: %d/%d 종목 (기준일 %s, 미적재는 pykrx fallback)",
+                        target_norm.upper(),
+                        len(snapshot),
+                        len(need_latest),
+                        latest_day.date(),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "[%s] 네이버 일봉 스냅샷 건너뜀(종목별 pykrx fallback): %s",
+                    target_norm.upper(),
+                    exc,
+                )
+
         def _process_one(idx: int, etf_item: dict) -> tuple[bool, str, str]:
             """단일 종목 처리. 반환: (성공여부, ticker, log_message).
 
@@ -619,7 +694,8 @@ def refresh_cache_for_target(
             서버처럼 응답이 너무 빠른 환경(종목당 ~0.1s)에서는 30종목 즈음 차단되어 hang
             상태로 빠진다. 종목당 목표 간격(KOR_FETCH_TARGET_SECONDS) 미만으로
             끝났을 때 부족분만큼 동적으로 sleep 한다. 로컬처럼 자연 소요가 충분히 느린
-            환경(0.3s 이상)은 영향이 없다.
+            환경(0.3s 이상)은 영향이 없다. 스냅샷/캐시로 이미 최신인 종목은 pykrx 를
+            부르지 않으므로 스로틀도 건너뛴다.
             """
             t = str(etf_item.get("ticker") or "").strip().upper()
             n = etf_item.get("name") or "-"
@@ -634,8 +710,9 @@ def refresh_cache_for_target(
                 elapsed = time.perf_counter() - started
 
                 # KOR 풀에만 동적 sleep — 부족분만큼 채워 호출 빈도를 늦춘다.
+                # (스냅샷으로 이미 채워진 종목은 pykrx 호출이 없어 스로틀 제외)
                 sleep_secs = 0.0
-                if country_code == "kor":
+                if country_code == "kor" and (full_refresh or t not in kor_snapshot_done):
                     sleep_secs = max(0.0, KOR_FETCH_TARGET_SECONDS - elapsed)
                     if sleep_secs > 0:
                         time.sleep(sleep_secs)
@@ -777,6 +854,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--start",
         help="데이터 조회 시작일 (YYYY-MM-DD). 지정하지 않으면 공통 설정",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="전체 히스토리를 강제 재수집한다(수정주가 재정렬 — 하루 1회 크론용). 기본은 증분 갱신.",
+    )
     return parser
 
 
@@ -826,11 +908,16 @@ def main():
         logger.warning("갱신할 대상이 없습니다.")
         return
 
-    logger.info("전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s", targets_to_update, start_date)
+    logger.info(
+        "전체 종목풀 가격 캐시 갱신 시작: targets=%s, start=%s, mode=%s",
+        targets_to_update,
+        start_date,
+        "full(전체 재수집)" if args.full else "incremental(증분)",
+    )
 
     with _global_refresh_lock():
         for t_id in targets_to_update:
-            refresh_cache_for_target(t_id, start_date)
+            refresh_cache_for_target(t_id, start_date, full_refresh=args.full)
 
 
 if __name__ == "__main__":
