@@ -112,6 +112,23 @@ python infra/server_scheduler.py
 
 ## 1. 시스템 아키텍처
 
+### 새 파일 배치 규칙 (신규 코드부터 적용)
+
+새 모듈을 만들 때는 아래 기준으로 위치를 정합니다. **기존 파일은 옮기지 않습니다** —
+대이동은 임포트 회귀·이력 단절 비용이 이득보다 크므로, 신규부터 이 규칙으로 수렴시킵니다.
+
+| 성격 | 위치 | 예 |
+| --- | --- | --- |
+| 순수 계산 (네트워크·DB 없음) | `core/` | `core/strategy/metrics.py` |
+| 외부 API 어댑터 (1소스 1파일) | `services/` | `services/price_service.py` |
+| 화면·도메인 오케스트레이션 | `utils/<도메인>_service.py` | `utils/steady_momentum_service.py` |
+| 저장/IO (DB·파일) | `utils/<도메인>_store.py` · `_io.py` | `utils/pool_settings_store.py` |
+| 웹 공용 로직/표기 | `web/lib/` | `web/lib/grid-cells.tsx` |
+| 설정 파일(정적 데이터) | `data/` | `data/market_holiday_overrides.json` |
+
+참고: `web/lib/bucket_theme.json` 은 버킷 테마의 단일 소스로, 웹(정적 임포트)과
+파이썬(`config.py`)이 같은 파일을 읽습니다.
+
 ### 모듈 구조
 *   `core/strategy/`: 지표/추세/비중 계산 공용 전략 유틸
 *   `services/`: **외부 API/데이터 연동 통합 계층**

@@ -16,7 +16,9 @@ MOVING_AVERAGE_TYPE = "EMA"
 # -----------------------------------------------------------------------
 # 버킷(Bucket) 설정 및 스타일링
 # -----------------------------------------------------------------------
-_BUCKET_THEME_PATH = Path(__file__).resolve().parent / "shared" / "bucket_theme.json"
+# 버킷 테마의 단일 소스 — 웹(web/lib/bucket-theme.ts)이 정적 임포트하는 파일을
+# 파이썬도 같이 읽는다 (예전 shared/ 사본은 중복이라 제거).
+_BUCKET_THEME_PATH = Path(__file__).resolve().parent / "web" / "lib" / "bucket_theme.json"
 with _BUCKET_THEME_PATH.open("r", encoding="utf-8") as bucket_theme_file:
     _BUCKET_THEME = json.load(bucket_theme_file)
 
