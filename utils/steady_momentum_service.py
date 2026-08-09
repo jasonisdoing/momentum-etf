@@ -364,10 +364,6 @@ def _pool_benchmark(pool: str) -> dict[str, str]:
     return {"ticker": ticker, "name": str(benchmark.get("name") or ticker)}
 
 
-def benchmark_name(pool: str) -> str:
-    return _pool_benchmark(pool)["name"]
-
-
 def benchmark_info(pool: str) -> dict[str, str]:
     """벤치마크 {ticker, name} — 화면 표기용."""
     return _pool_benchmark(pool)
