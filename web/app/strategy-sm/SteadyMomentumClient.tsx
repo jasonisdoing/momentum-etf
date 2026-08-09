@@ -11,6 +11,7 @@ import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
+import { formatSignedPct, marketBadgeCellStyle, renderHighDrawdownCell, signColor } from "@/lib/grid-cells";
 import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
@@ -26,12 +27,6 @@ type PoolSettings = {
 };
 
 type Settings = PoolSettings & { pool: string };
-
-// 한 업종에서 최대 몇 종목까지 담을지 — 백엔드 MAX_PER_INDUSTRY_OPTIONS 와 같아야 한다.
-const MAX_PER_INDUSTRY_OPTIONS = [1, 2, 3, 4, 5, 10] as const;
-
-// 종목 수 선택지 — 백엔드 검증 범위(5~100) 안에서 자주 쓰는 값만 노출한다.
-const TOP_N_OPTIONS = [5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100];
 
 /** 저장된 값이 선택지에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 되어 무엇이 저장돼 있는지 알 수 없다. */
 function withSavedValue(options: number[], saved: string | undefined): number[] {
@@ -149,6 +144,11 @@ type View = {
   };
   // 기간 선택지는 서버가 가격 캐시 범위로 계산해 내려준다 (종목풀 백테스트와 동일).
   month_options?: number[];
+  // 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트에 복사본을 두지 않는다).
+  constraints?: {
+    top_n_options: number[];
+    max_per_industry_options: number[];
+  };
   picks: PicksResult | null;
 };
 
@@ -233,15 +233,8 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
   return value.toLocaleString("ko-KR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
-function formatSigned(value: number | null | undefined, digits = 2): string {
-  if (value == null || !Number.isFinite(value)) return "-";
-  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}%`;
-}
-
-function signColor(value: number | null | undefined): string {
-  if (value == null || !Number.isFinite(value) || value === 0) return "inherit";
-  return value > 0 ? "var(--up-color, #d64545)" : "var(--down-color, #2f6fd0)";
-}
+// 부호 %·색 헬퍼는 공용 모듈(@/lib/grid-cells)을 쓴다.
+const formatSigned = formatSignedPct;
 
 /** 성과 요약 한 덩어리 — 전략·벤치마크·참고 지수를 같은 형식으로 보여준다. */
 function PerformanceSummary({
@@ -554,12 +547,8 @@ export function SteadyMomentumClient() {
         headerTooltip: "캐시 전 기간 최고가 대비 마지막 종가(%) — pools-rank 고점과 같은 규칙, 0 = 신고점",
         width: 80,
         type: "rightAligned",
-        // `/pools-rank` 고점 컬럼과 같은 렌더링 — 0 이면 ⭐신고점.
-        cellRenderer: (p: { value?: number | null }) => {
-          const value = p.value ?? null;
-          if (value === 0) return <span style={{ color: "#d93025", fontWeight: 700 }}>⭐신고점</span>;
-          return <span>{value == null ? "-" : `${value.toFixed(1)}%`}</span>;
-        },
+        // `/pools-rank` 고점 컬럼과 같은 공용 렌더러 — 0 이면 ⭐신고점.
+        cellRenderer: (p: { value?: number | null }) => renderHighDrawdownCell(p.value, 1),
       },
       // 마켓(KOSPI/KOSDAQ)은 한국 풀에서만 의미가 있다 — 통합 풀 구분 표시용.
       ...(picksCountry === "kor"
@@ -569,14 +558,8 @@ export function SteadyMomentumClient() {
               field: "market",
               headerTooltip: "종목의 소속 마켓 — 코스피+코스닥 통합 풀 구분용",
               width: 80,
-              // `/pools-rank` 마켓 컬럼과 같은 배지 스타일 (KOSPI 녹색 · KOSDAQ 파란색).
-              cellStyle: (p) => {
-                if (p.value === "KOSPI")
-                  return { textAlign: "center", backgroundColor: "#d1e7dd", color: "#0f5132", fontWeight: "bold" };
-                if (p.value === "KOSDAQ")
-                  return { textAlign: "center", backgroundColor: "#cfe2ff", color: "#084298", fontWeight: "bold" };
-                return null;
-              },
+              // `/pools-rank` 마켓 컬럼과 같은 공용 배지 스타일.
+              cellStyle: (p) => marketBadgeCellStyle(p.value),
             } as ColDef<PickRow>,
           ]
         : []),
@@ -948,7 +931,7 @@ export function SteadyMomentumClient() {
                     value={draft.top_n ?? ""}
                     onChange={(e) => setDraft((d) => ({ ...d, top_n: e.target.value }))}
                   >
-                    {withSavedValue(TOP_N_OPTIONS, draft.top_n).map((n) => (
+                    {withSavedValue(view.constraints?.top_n_options ?? [], draft.top_n).map((n) => (
                       <option key={n} value={n}>
                         {n}
                       </option>
@@ -965,7 +948,7 @@ export function SteadyMomentumClient() {
                       value={draftMaxPerIndustry}
                       onChange={(e) => setDraftMaxPerIndustry(Number(e.target.value))}
                     >
-                      {MAX_PER_INDUSTRY_OPTIONS.map((count) => (
+                      {withSavedValue(view.constraints?.max_per_industry_options ?? [], String(draftMaxPerIndustry)).map((count) => (
                         <option key={count} value={count}>
                           {count}
                         </option>
