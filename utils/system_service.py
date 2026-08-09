@@ -148,7 +148,7 @@ SCHEDULE_ROWS = [
         "job": "24H 시세 알림",
         "target": "하이퍼리퀴드/바이낸스",
         "run_location": "SERVER/LOCAL",
-        "cadence": "매일 24시간 매시 0분 KST (급변 시에만 발송)",
+        "cadence": "매일 24시간 매시 0분 KST",
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
