@@ -46,6 +46,7 @@ type SystemData = {
 type SystemAction =
   | "data_aggregate"
   | "cache_refresh"
+  | "cache_refresh_full"
   | "market_hours_analysis"
   | "reference_meta_updater"
   | "price_metrics_updater"
