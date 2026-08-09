@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { formatPoolLabel } from "@/lib/pool-label";
+import { marketBadgeCellStyle, renderHighDrawdownCell } from "@/lib/grid-cells";
 import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
@@ -740,17 +741,9 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 80,
         width: 80,
         type: "rightAligned",
-        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) => {
-          const value = params.value ?? null;
-          if (value === 0) {
-            return (
-              <span style={{ color: "#d93025", fontWeight: 700 }}>
-                ⭐신고점
-              </span>
-            );
-          }
-          return <span>{formatPercent(value)}</span>;
-        },
+        // 공용 고점 렌더러 (strategy-sm 과 동일) — 0 이면 ⭐신고점.
+        cellRenderer: (params: { data?: RankGridRow; value: number | null | undefined }) =>
+          renderHighDrawdownCell(params.value, 2),
       },
       {
         field: "버킷",
@@ -886,14 +879,8 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
             headerName: "마켓",
             minWidth: 80,
             width: 80,
-            cellStyle: (params) => {
-              const val = params.value;
-              // KOSPI: 연한 녹색 배경 + 진한 녹색 글자
-              if (val === "KOSPI") return { textAlign: "center", backgroundColor: "#d1e7dd", color: "#0f5132", fontWeight: "bold" };
-              // KOSDAQ: 연한 파란색 배경 + 진한 파란색 글자
-              if (val === "KOSDAQ") return { textAlign: "center", backgroundColor: "#cfe2ff", color: "#084298", fontWeight: "bold" };
-              return { textAlign: "center" };
-            },
+            // 공용 마켓 배지 스타일 (strategy-sm 과 동일).
+            cellStyle: (params) => marketBadgeCellStyle(params.value),
           } as ColDef<RankGridRow>,
         ]
         : []),

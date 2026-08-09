@@ -45,6 +45,16 @@ def _ma_rule_payload(settings: dict) -> dict:
     }
 
 
+def _constraints_payload() -> dict:
+    """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
+    from utils.steady_momentum_service import MAX_PER_INDUSTRY_OPTIONS, TOP_N_OPTIONS
+
+    return {
+        "top_n_options": list(TOP_N_OPTIONS),
+        "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
+    }
+
+
 @router.get("")
 def get_strategy_sm(
     _: None = Depends(require_internal_token),
@@ -58,6 +68,7 @@ def get_strategy_sm(
         "pool_options": pool_options(),
         "month_options": _month_options(settings),
         "ma_rule": _ma_rule_payload(settings),
+        "constraints": _constraints_payload(),
         "picks": None,
     }
 
@@ -83,6 +94,7 @@ def put_strategy_sm_settings(
         "pool_options": pool_options(),
         "month_options": _month_options(saved),
         "ma_rule": _ma_rule_payload(saved),
+        "constraints": _constraints_payload(),
         "picks": None,
     }
 
