@@ -1,6 +1,5 @@
 """계좌 종목 메타데이터를 업데이트합니다."""
 
-import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -127,7 +126,13 @@ def compute_price_metrics(frame: "pd.DataFrame | None") -> dict[str, Any]:
         result["backtest_stats"] = _simulate_single_stock_ma_strategy(bt_close, RANK_BACKTEST_MONTHS)
     return result
 
+
 # -------------------------------------------------------------------------
+# 배치 B 종목 병렬 워커 수 — 종목당 작업이 네이버/야후 HTTP 대기 위주라 병렬 이득이 크다.
+# 사전 벤치마크: 네이버 x16·yfinance x12 까지 실패 0. 보수적으로 8을 쓴다.
+# 문제가 생기면 1 로 되돌리면 기존 직렬 동작이다. (pykrx 폴백은 데이터로더에서 락 직렬화)
+META_FETCH_WORKERS = 8
+
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
 # `update_stock_reference_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
 # -------------------------------------------------------------------------
@@ -775,12 +780,15 @@ def _load_ticker_entries(type_norm: str) -> tuple[str, list[dict[str, Any]]] | N
 
 def _update_reference_meta_for_type(
     type_norm: str, progress_callback: Callable[[int, int, str], None] | None = None
-):
-    """배치 B(식별·상세 메타) — 이름/상장일/마켓/업종 + ETF 상세 캐시(holdings/배당/ETFBase)."""
+) -> list[tuple[str, str]]:
+    """배치 B(식별·상세 메타) — 이름/상장일/마켓/업종 + ETF 상세 캐시(holdings/배당/ETFBase).
+
+    반환: 이 풀의 실패 목록 [(ticker, "단계: 사유")] — 상위에서 모아 슬랙으로 보고한다.
+    """
     logger = get_app_logger()
     loaded = _load_ticker_entries(type_norm)
     if loaded is None:
-        return
+        return []
     country_code, ticker_entries = loaded
     total_count = len(ticker_entries)
     logger.info(f"[{type_norm.upper()}] 식별·상세 메타 업데이트 시작 (총 {total_count}개 종목)")
@@ -824,11 +832,14 @@ def _update_reference_meta_for_type(
         naver_us_stock_map = fetch_naver_us_stock_info_map(us_tickers)
         logger.info(f"[{type_norm.upper()}] 네이버 미국 종목 업종 {len(naver_us_stock_map)}건 수집")
 
-    updates_for_db: list[dict[str, Any]] = []
-    for idx, stock in enumerate(ticker_entries, start=1):
-        ticker = stock.get("ticker")
-        if not ticker:
-            continue
+    def _process_one_stock(stock: dict[str, Any]) -> tuple[str, str, dict[str, Any] | None, list[str]]:
+        """단일 종목 처리 (워커 스레드). 반환: (ticker, name, update_doc|None, 실패목록).
+
+        실패 목록 항목은 "단계: 사유" 형식 — 배치 끝에 모아 슬랙으로 보고한다.
+        공유 맵(naver_*_map, existing_meta_cache_map)은 루프 전에 빌드 완료된 읽기 전용이다.
+        """
+        ticker = str(stock.get("ticker") or "")
+        failures: list[str] = []
         try:
             update_single_stock_metadata(
                 stock,
@@ -837,52 +848,81 @@ def _update_reference_meta_for_type(
                 type_norm,
                 naver_us_stock_map=naver_us_stock_map,
             )
-            name = stock.get("name") or "-"
-            logger.info(f"  -> 식별 메타 획득: {idx}/{total_count} - {name}({ticker})")
-
-            # 저장 필드 = 식별 필드만(가격지표는 배치 A 담당)
-            update_doc: dict[str, Any] = {"ticker": ticker}
-            for f in ("name", "listing_date", "market", "is_etf", "etf_category", "dividend_yield_ttm", "market_cap", "sector", "industry"):
-                if f in stock:
-                    update_doc[f] = stock[f]
-
-            # ETF 상세 캐시 갱신(holdings/배당 등). backtest_stats 는 배치 A(문서 필드)가 소유하므로 넘기지 않는다.
-            # ETF 가 아닌 국내 개별주(예: KOSDAQ 다우데이타)는 ETF 상세 API 가 404 이므로 호출 자체를 건너뛴다.
-            if country_code == "kor" and stock.get("is_etf"):
-                try:
-                    existing_doc = existing_meta_cache_map.get(str(ticker).strip().upper())
-                    _refresh_korean_etf_meta_cache(type_norm, str(ticker), str(name), existing_cache_doc=existing_doc)
-                except Exception as e:
-                    logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
-            elif country_code == "au":
-                try:
-                    _refresh_overseas_etf_meta_cache(type_norm, str(ticker), str(name), country_code)
-                except Exception as e:
-                    logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
-            elif country_code == "us":
-                # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
-                naver_entry = naver_us_stock_map.get(str(ticker).strip().upper(), {})
-                try:
-                    _refresh_us_stock_meta_cache(
-                        type_norm, str(ticker), str(name), naver_entry, is_etf=bool(stock.get("is_etf"))
-                    )
-                except Exception as e:
-                    logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 메타 캐시 갱신 건너뜀: {e}")
-
-            updates_for_db.append(update_doc)
-            if len(updates_for_db) >= 100:
-                try:
-                    modified = bulk_update_stocks(type_norm, updates_for_db)
-                    logger.info(f"[{type_norm.upper()}] 식별 메타 중간 저장 ({idx}/{total_count}, {modified}건)")
-                    updates_for_db.clear()
-                except Exception as e:
-                    logger.error(f"[{type_norm.upper()}] 중간 저장 실패: {e}")
-
-            if progress_callback:
-                progress_callback(idx, total_count, f"{name}({ticker})")
-            time.sleep(0.02)  # 외부 API 보호용 미소 슬립
         except Exception as e:
-            logger.error(f"[{type_norm.upper()}/{ticker}] 식별 메타 업데이트 실패: {e}")
+            failures.append(f"식별 메타: {str(e)[:80]}")
+            return ticker, str(stock.get("name") or "-"), None, failures
+
+        name = str(stock.get("name") or "-")
+        # 저장 필드 = 식별 필드만(가격지표는 배치 A 담당)
+        update_doc: dict[str, Any] = {"ticker": ticker}
+        for f in ("name", "listing_date", "market", "is_etf", "etf_category", "dividend_yield_ttm", "market_cap", "sector", "industry"):
+            if f in stock:
+                update_doc[f] = stock[f]
+
+        # ETF 상세 캐시 갱신(holdings/배당 등). backtest_stats 는 배치 A(문서 필드)가 소유하므로 넘기지 않는다.
+        # ETF 가 아닌 국내 개별주(예: KOSDAQ 다우데이타)는 ETF 상세 API 가 404 이므로 호출 자체를 건너뛴다.
+        if country_code == "kor" and stock.get("is_etf"):
+            try:
+                existing_doc = existing_meta_cache_map.get(ticker.strip().upper())
+                _refresh_korean_etf_meta_cache(type_norm, ticker, name, existing_cache_doc=existing_doc)
+            except Exception as e:
+                logger.warning(f"[{type_norm.upper()}/{ticker}] ETF 상세 캐시 갱신 건너뜀: {e}")
+                failures.append(f"ETF 상세: {str(e)[:80]}")
+        elif country_code == "au":
+            try:
+                _refresh_overseas_etf_meta_cache(type_norm, ticker, name, country_code)
+            except Exception as e:
+                logger.warning(f"[{type_norm.upper()}/{ticker}] 호주 ETF 상세 캐시 갱신 실패: {e}")
+                failures.append(f"호주 상세: {str(e)[:80]}")
+        elif country_code == "us":
+            # 네이버에 없어도(미국 ETF 등) yfinance 로 배당·순자산을 보완하도록 항상 호출.
+            naver_entry = naver_us_stock_map.get(ticker.strip().upper(), {})
+            try:
+                _refresh_us_stock_meta_cache(type_norm, ticker, name, naver_entry, is_etf=bool(stock.get("is_etf")))
+            except Exception as e:
+                logger.warning(f"[{type_norm.upper()}/{ticker}] 미국 메타 캐시 갱신 건너뜀: {e}")
+                failures.append(f"미국 메타: {str(e)[:80]}")
+
+        return ticker, name, update_doc, failures
+
+    # 종목 처리 병렬 실행 — 종목당 작업이 HTTP 대기 위주라 워커 수만큼 단축된다.
+    # DB 저장·진행 로그·progress_callback 은 메인 스레드에서만 수행한다.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    valid_entries = [s for s in ticker_entries if s.get("ticker")]
+    updates_for_db: list[dict[str, Any]] = []
+    pool_failures: list[tuple[str, str]] = []  # (ticker, "단계: 사유")
+    done_count = 0
+
+    def _handle_result(ticker: str, name: str, update_doc: dict[str, Any] | None, failures: list[str]) -> None:
+        nonlocal done_count
+        done_count += 1
+        for failure in failures:
+            pool_failures.append((ticker, failure))
+        if update_doc is None:
+            logger.error(f"[{type_norm.upper()}/{ticker}] 식별 메타 업데이트 실패: {failures}")
+        else:
+            logger.info(f"  -> 식별 메타 획득: {done_count}/{total_count} - {name}({ticker})")
+            updates_for_db.append(update_doc)
+        if len(updates_for_db) >= 100:
+            try:
+                modified = bulk_update_stocks(type_norm, updates_for_db)
+                logger.info(f"[{type_norm.upper()}] 식별 메타 중간 저장 ({done_count}/{total_count}, {modified}건)")
+                updates_for_db.clear()
+            except Exception as e:
+                logger.error(f"[{type_norm.upper()}] 중간 저장 실패: {e}")
+                pool_failures.append(("(일괄)", f"중간 저장: {str(e)[:80]}"))
+        if progress_callback:
+            progress_callback(done_count, total_count, f"{name}({ticker})")
+
+    if META_FETCH_WORKERS <= 1:
+        for stock in valid_entries:
+            _handle_result(*_process_one_stock(stock))
+    else:
+        with ThreadPoolExecutor(max_workers=META_FETCH_WORKERS) as executor:
+            futures = [executor.submit(_process_one_stock, stock) for stock in valid_entries]
+            for future in as_completed(futures):
+                _handle_result(*future.result())
 
     try:
         if updates_for_db:
@@ -890,6 +930,9 @@ def _update_reference_meta_for_type(
             logger.info(f"[{type_norm.upper()}] 식별 메타 최종 저장 완료 ({modified}건)")
     except Exception as e:
         logger.error(f"'{type_norm}' 식별 메타 최종 저장 실패: {e}")
+        pool_failures.append(("(일괄)", f"최종 저장: {str(e)[:80]}"))
+
+    return pool_failures
 
 
 def _update_price_metrics_for_type(
@@ -970,9 +1013,35 @@ def update_stock_reference_metadata(ticker_type: str | None = None):
             logger.error("KIS 국내 ETF 마스터 캐시 갱신 실패: %s", exc)
 
     logger.info(f"[배치 B] 식별·상세 메타 대상 종목타입: {targets}")
+    failures_by_pool: dict[str, list[tuple[str, str]]] = {}
     for type_norm in targets:
-        _update_reference_meta_for_type(type_norm)
+        pool_failures = _update_reference_meta_for_type(type_norm)
+        if pool_failures:
+            failures_by_pool[type_norm] = pool_failures
     logger.info("[배치 B] 식별·상세 메타 업데이트 완료.")
+
+    # 부분 실패 슬랙 보고 — 어떤 풀/종목/단계에서 실패했는지 명시한다.
+    # (배치 자체는 계속 진행되므로 run_batch 의 exit!=0 실패 알림으로는 잡히지 않는 케이스)
+    if failures_by_pool:
+        total_failures = sum(len(v) for v in failures_by_pool.values())
+        lines = [f"⚠️ [배치 B] 종목 메타 업데이트 부분 실패: {total_failures}건"]
+        shown = 0
+        for pool, pool_failures in failures_by_pool.items():
+            for ticker, reason in pool_failures:
+                if shown >= 15:
+                    break
+                lines.append(f"• [{pool.upper()}/{ticker}] {reason}")
+                shown += 1
+            if shown >= 15:
+                break
+        if total_failures > shown:
+            lines.append(f"… 외 {total_failures - shown}건 — 상세는 logs/cron/reference_meta_updater.log")
+        try:
+            from utils.notification import send_slack_message_v2
+
+            send_slack_message_v2("\n".join(lines))
+        except Exception as exc:
+            logger.error(f"[배치 B] 부분 실패 슬랙 보고 실패: {exc}")
 
 
 def update_stock_price_metrics(ticker_type: str | None = None):
