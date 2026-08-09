@@ -9,18 +9,10 @@ import pandas as pd
 import requests  # noqa: F401  # 타입 힌트/하위 호환을 위해 유지
 import yfinance as yf
 
-import numpy as np
 from services.etf_holdings_service import fetch_korean_etf_holdings_from_naver
 from services.etf_meta_service import fetch_korean_etf_info_from_naver
 from services.stock_cache_service import get_stock_cache_meta_map, refresh_stock_cache
 from services.vanguard_au_service import fetch_vanguard_au_expense_ratio_pct, fetch_vanguard_au_holdings
-from utils.data_loader import (
-    _YF_SESSION,
-    fetch_naver_kor_market,
-    fetch_naver_kor_stock_map,
-    fetch_pykrx_name,
-    fetch_ohlcv,
-)
 from utils.asx_ticker import (
     ensure_asx_prefix,
     from_yahoo_symbol,
@@ -28,12 +20,18 @@ from utils.asx_ticker import (
     strip_asx_prefix,
     to_yahoo_symbol,
 )
+from utils.data_loader import (
+    _YF_SESSION,
+    fetch_naver_kor_market,
+    fetch_naver_kor_stock_map,
+    fetch_ohlcv,
+    fetch_pykrx_name,
+)
 from utils.http_session import shared_session
 from utils.kis_market import refresh_kis_domestic_etf_master_cache
 from utils.logger import get_app_logger
-from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
-from utils.indicators import calculate_moving_average_signals
 from utils.perf_metrics import curve_metrics
+from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
 
 
 def _simulate_single_stock_ma_strategy(close_prices: pd.Series, lookback_months: int) -> dict[str, Any]:
@@ -133,6 +131,8 @@ def compute_price_metrics(frame: "pd.DataFrame | None") -> dict[str, Any]:
 # 배치 단위 공유 캐시 (메타 업데이트 1회 진입 시 1회만 빌드, 풀들 간 공유)
 # `update_stock_reference_metadata` 진입 시 `_reset_batch_caches()` 로 초기화한다.
 # -------------------------------------------------------------------------
+
+
 _BATCH_NAVER_ETF_NAMES_MAP: dict[str, str] | None = None
 
 
@@ -478,8 +478,8 @@ def _refresh_us_stock_meta_cache(
 
 def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
     """BetaShares 공식 홈페이지에서 portfolio holdings CSV를 긁어서 구성종목 딕셔너리를 반환합니다."""
-    import urllib.request
     import csv
+    import urllib.request
     from datetime import datetime
 
     logger = get_app_logger()
@@ -603,8 +603,9 @@ def fetch_betashares_holdings(ticker: str) -> dict[str, Any] | None:
 
 def fetch_yfinance_holdings(ticker: str, is_australian: bool = False) -> dict[str, Any] | None:
     """yfinance를 활용해 Top 10 구성종목 정보를 가져옵니다."""
-    import yfinance as yf
     from datetime import datetime
+
+    import yfinance as yf
 
     logger = get_app_logger()
     # 시스템 표준 티커는 ASX: 접두사를 달고 다니므로 외부 조회 직전에 벗긴다.

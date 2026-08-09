@@ -4,15 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import date
 from typing import Any
 
-import pandas as pd
 import requests
 
 from config import NAVER_FINANCE_HEADERS, NAVER_US_STOCK_MARKET_VALUE_URL
-from services.price_service import get_realtime_snapshot
-from utils.data_loader import get_today_str
 from utils.index_constituents_loader import load_index_constituents, load_index_meta
 from utils.market_service import load_ticker_pool_map
 from utils.portfolio_io import load_all_holding_tickers

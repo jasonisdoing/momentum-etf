@@ -48,10 +48,10 @@ def _load_ticker_types_payload() -> list[dict[str, Any]]:
 def _pick_ticker_type(ticker_types: list[dict[str, Any]], ticker_type: str | None) -> str:
     target = str(ticker_type or "").strip().lower()
     available_ids = [str(t["ticker_type"]).lower() for t in ticker_types]
-    
+
     if target and target in available_ids:
         return target
-        
+
     return available_ids[0] if available_ids else ""
 
 
@@ -155,7 +155,7 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "listing_date": normalize_text(doc.get("listing_date"), "-"),
                 "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
                 "return_1d": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate") 
+                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate")
                 ),
                 "괴리율": normalize_nullable_number(
                     realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
@@ -466,7 +466,7 @@ def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "listing_date": normalize_text(doc.get("listing_date"), "-"),
                 "week_volume": normalize_nullable_number(doc.get("1_week_avg_volume")),
                 "return_1d": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate") 
+                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate")
                 ),
                 "괴리율": normalize_nullable_number(
                     realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")

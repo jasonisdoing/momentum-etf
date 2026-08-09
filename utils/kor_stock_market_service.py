@@ -10,10 +10,10 @@ import pandas as pd
 import requests
 
 from config import NAVER_FINANCE_HEADERS
+from services.price_service import get_realtime_snapshot
 from utils.market_service import load_ticker_pool_map
 from utils.naver_chart import fetch_naver_daily_ohlc
 from utils.portfolio_io import load_all_holding_tickers
-from services.price_service import get_realtime_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +218,8 @@ def _apply_kor_history_metrics(rows: list[dict[str, Any]]) -> None:
         row["return_3m_pct"] = _calculate_period_return(close, latest_price, 3)
         row["return_12m_pct"] = _calculate_period_return(close, latest_price, 12)
         row["mdd_12m_pct"] = _calculate_mdd(close, 12)
+
+
 # 티커→시가총액 맵은 화면 재방문마다 페이지 순회를 반복하지 않게 짧은 TTL 로 캐시한다.
 _MARKET_CAP_CACHE: dict[str, tuple[float, dict[str, int]]] = {}
 _MARKET_CAP_CACHE_TTL_SEC = 600.0

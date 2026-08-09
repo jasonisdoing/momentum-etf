@@ -1865,8 +1865,8 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
         logger.debug("requests 라이브러리가 없어 네이버 주식 조회를 건너뜁니다.")
         return {}
 
-    _NAVER_STOCK_POLLING_URL = "https://stock.naver.com/api/polling/domestic/stock"
-    _NAVER_STOCK_POLLING_HEADERS = {
+    naver_stock_polling_url = "https://stock.naver.com/api/polling/domestic/stock"
+    naver_stock_polling_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -1878,10 +1878,10 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
 
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, Any]]:
         item_codes = ",".join(chunk)
-        url = f"{_NAVER_STOCK_POLLING_URL}?itemCodes={item_codes}"
+        url = f"{naver_stock_polling_url}?itemCodes={item_codes}"
 
         try:
-            response = requests.get(url, headers=_NAVER_STOCK_POLLING_HEADERS, timeout=5)
+            response = requests.get(url, headers=naver_stock_polling_headers, timeout=5)
             response.raise_for_status()
             data = response.json()
         except Exception as exc:
@@ -1948,8 +1948,8 @@ def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, d
         logger.debug("requests 라이브러리가 없어 네이버 worldstock 조회를 건너뜁니다.")
         return {}
 
-    _NAVER_WORLDSTOCK_POLLING_URL = "https://stock.naver.com/api/polling/worldstock/stock"
-    _NAVER_WORLDSTOCK_POLLING_HEADERS = {
+    naver_worldstock_polling_url = "https://stock.naver.com/api/polling/worldstock/stock"
+    naver_worldstock_polling_headers = {
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -1961,9 +1961,9 @@ def fetch_naver_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, d
 
     def _fetch_chunk(chunk: list[str]) -> dict[str, dict[str, float | str]]:
         codes = ",".join(chunk)
-        url = f"{_NAVER_WORLDSTOCK_POLLING_URL}?reutersCodes={codes}"
+        url = f"{naver_worldstock_polling_url}?reutersCodes={codes}"
         try:
-            response = requests.get(url, headers=_NAVER_WORLDSTOCK_POLLING_HEADERS, timeout=5)
+            response = requests.get(url, headers=naver_worldstock_polling_headers, timeout=5)
             response.raise_for_status()
             data = response.json()
         except Exception as exc:

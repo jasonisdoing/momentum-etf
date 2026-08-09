@@ -160,9 +160,9 @@ def _load_unheld_closes(tickers: list[str]) -> dict[str, float]:
 
     remaining = [t for t in tickers if t not in closes]
     if remaining:
-        from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
-
         import pandas as pd
+
+        from utils.cache_utils import load_cached_frames_bulk_from_ticker_types
 
         frames = load_cached_frames_bulk_from_ticker_types([PRICE_CACHE_TICKER_TYPE], remaining)
         for ticker in remaining:

@@ -6,15 +6,17 @@ from pydantic import BaseModel
 from fastapi_app.dependencies import require_internal_token
 from utils.stocks_service import (
     add_active_stock,
-    delete_active_stock as delete_active_stock_entry,
     hard_delete_stocks,
     load_active_stocks_table,
     load_deleted_stocks_table,
     refresh_single_stock,
     restore_deleted_stocks,
+    toggle_exclude_from_ranking,
     update_stock_bucket,
     validate_stock_candidate,
-    toggle_exclude_from_ranking,
+)
+from utils.stocks_service import (
+    delete_active_stock as delete_active_stock_entry,
 )
 
 router = APIRouter(prefix="/internal/stocks", tags=["stocks"])
