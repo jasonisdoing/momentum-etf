@@ -117,8 +117,8 @@ APScheduler 에 등록한다.
 
 `infra/server_scheduler.py` 가 `infra/cron/crontab` 을 파싱할 때의 비자명한 동작:
 
-- **무인자 스크립트만 실행**: `python <script.py>` 형태만 파싱하며 `-m`/추가 인자는 인식하지 못한다. 인자가 필요한 진입점은 무인자 **래퍼 스크립트**로 감싼다(예: `scripts/leverage_recommend_ma_cross.py`).
-- **주석 cron 라인도 활성으로 파싱**: 주석(`#`) 처리된 잡 라인도 등록될 수 있으므로, 잡 비활성화는 주석이 아니라 **라인 삭제**로 한다.
+- **스크립트 인자 전달 지원**: `python <script.py> --옵션` 형태의 뒤 인자도 그대로 큐·실행으로 전달된다(예: `cache_refresh_full` 의 `--full`, `db_backup` 의 `--gzip`). 단 `-m` 모듈 실행은 지원하지 않는다.
+- **`#` 로 시작하는 라인은 스킵**되지만, 과거 파서가 주석 잡 라인을 등록한 전력이 있으므로 잡 비활성화는 가급적 **라인 삭제**로 한다.
 - 배치 코드/스크립트는 Docker 이미지에 포함되므로 변경 시 **재배포** 필요. `crontab`/`run_batch` 는 `./infra/cron` 마운트로 즉시 반영.
 
 ### 개별주 인덱스 캐시

@@ -38,7 +38,7 @@ _HEARTBEAT_STALE_MINUTES = 5
 
 # 무거운 계산이라 서버(약한 VM)에서 돌리면 안 되고, 로컬 워커(APP_TYPE=Local)만 픽하게 하는 잡들.
 # (서버 워커는 이 잡들을 claim 하지 않는다 → 로컬이 꺼져 있으면 pending 으로 대기)
-LOCAL_ONLY_JOBS: set[str] = set()
+LOCAL_ONLY_JOBS: set[str] = {"db_backup"}  # 백업 폴더가 로컬 디스크라 서버 워커가 잡으면 안 된다
 
 
 def _now_utc() -> datetime:

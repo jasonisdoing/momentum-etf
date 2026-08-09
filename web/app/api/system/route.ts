@@ -31,6 +31,7 @@ export async function POST(request: NextRequest) {
       "leverage_ma_cross",
       "holdings_alarm",
         "strategy_trade_notify",
+      "db_backup",
     ] as const);
     const actionStr = String(payload.action || "").trim();
     if (!actionStr || !allowed.has(actionStr as never)) {

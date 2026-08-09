@@ -28,6 +28,7 @@ SystemAction = Literal[
     "leverage_ma_cross",
     "holdings_alarm",
     "strategy_trade_notify",
+    "db_backup",
 ]
 
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
@@ -153,6 +154,16 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
+        "key": "db_backup",
+        "job": "DB 백업",
+        "target": "MongoDB 전체 → backups/ (최근 30개 보존)",
+        "run_location": "LOCAL",
+        "cadence": "매일 24시간 매시 40분 KST",
+        # 매시 fresh 백업 — 임시 폴더에 받고 성공 시에만 오늘 폴더로 교체. 백업 폴더가 로컬이라 LOCAL 전용.
+        "command": "python scripts/backup_mongo_full.py --gzip",
+        "schedule": {"minutes": [40], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
+    },
+    {
         "key": "leverage_ma_cross",
         "job": "레버리지 스위칭",
         "target": "한국/미국 지수(코스피·나스닥100)",
@@ -202,11 +213,13 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
     "strategy_trade_notify": "scripts/strategy_trade_notify.py",
+    "db_backup": "scripts/backup_mongo_full.py",
 }
 
 # 액션별 추가 인자 — 워커가 스크립트 실행 시 그대로 붙인다.
 _ARGS_BY_ACTION: dict[str, list[str]] = {
     "cache_refresh_full": ["--full"],
+    "db_backup": ["--gzip"],
 }
 
 _LABEL_BY_ACTION: dict[str, str] = {row["key"]: row["job"] for row in SCHEDULE_ROWS}
