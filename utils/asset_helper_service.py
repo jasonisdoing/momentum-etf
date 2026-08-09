@@ -129,8 +129,12 @@ def _clean_tickers(items: Any) -> list[dict[str, Any]]:
             continue
         ticker = str(item.get("ticker") or "").strip().upper()
         name = str(item.get("name") or "").strip()
-        if not ticker or not name or ticker in seen:
+        if not ticker or ticker in seen:
             continue
+        # 이름 없는 행을 조용히 버리면 그 종목의 비중이 소리 없이 증발한다(silent drop 금지).
+        # 이름 조회가 실패한 종목은 티커를 이름으로 대신 써서 비중을 보존한다.
+        if not name:
+            name = ticker
         if len(clean) >= MAX_TICKERS_LIMIT:
             raise ValueError(f"ETF는 최대 {MAX_TICKERS_LIMIT}개까지 등록할 수 있습니다.")
         seen.add(ticker)
@@ -505,8 +509,14 @@ def load_asset_helper_settings_for_edit(account_id: str) -> dict[str, Any]:
     holdings = master.get("holdings") or []
     helper_doc = master.get("asset_helper") or {}
 
+    # name 을 함께 실어 GET→PUT 왕복이 대칭이 되게 한다 — name 없이 내보내면
+    # 이 응답을 그대로 저장에 되돌렸을 때 행이 걸러져 비중이 통째로 지워졌다.
     weight_tickers = [
-        {"ticker": str(h.get("ticker") or "").strip().upper(), "fixed_weight_pct": float(h["target_ratio"])}
+        {
+            "ticker": str(h.get("ticker") or "").strip().upper(),
+            "name": str(h.get("name") or "").strip() or str(h.get("ticker") or "").strip().upper(),
+            "fixed_weight_pct": float(h["target_ratio"]),
+        }
         for h in holdings
         if h.get("target_ratio") is not None
     ]

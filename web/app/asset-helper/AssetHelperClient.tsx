@@ -39,7 +39,9 @@ const CASH_TICKER = "__CASH__";
 // 비중은 편집 불가(실제 평가액 기반 자동 계산)이고, 백테스트는 VGS 가격 시계열을 쓴다.
 const IS_TICKER = "IS";
 const IS_DISPLAY_NAME = "Vanguard MSCI Index International Shares ETF";
-const IS_PROXY_DISPLAY_TICKER = "ASX:VGS"; // 표시·지표 조회용 프록시 티커 (내부 키는 IS 유지)
+// 화면 표기용 티커. 예전에는 가격 프록시인 `ASX:VGS` 로 보여줬는데, 실제 VGS 를 따로
+// 매수해 등록하면 같은 티커가 두 줄이 되어 구분이 안 됐다. 특수 티커 그대로 보여준다.
+const IS_DISPLAY_TICKER = "ASX:IS";
 
 // 저장된 종목들의 고정비중 합의 나머지를 현금(%)으로 계산한다(로드 시 현금 초기화용).
 function cashFromTickers(rows: Array<{ ticker: string; name?: string; fixed_weight_pct?: number | null }>): number {
@@ -803,8 +805,12 @@ export function AssetHelperClient() {
             );
           }
           {
-            // IS 고정자산은 가격 프록시(VGS) 티커로 표시하고 상세도 VGS 로 연결한다.
-            const dt = row.is_fixed_asset ? IS_PROXY_DISPLAY_TICKER : displayTickerFor(row.ticker, row.country_code);
+            // IS 고정자산은 상장 종목이 아니라 상세 화면이 없다 — 내부 티커(IS)를 넘겨
+            // TickerDetailLink 의 비활성 경로를 태우고, 표기만 ASX:IS 로 한다(링크 없음).
+            if (row.is_fixed_asset) {
+              return <TickerDetailLink ticker={IS_TICKER} displayTicker={IS_DISPLAY_TICKER} />;
+            }
+            const dt = displayTickerFor(row.ticker, row.country_code);
             return <TickerDetailLink ticker={dt} displayTicker={dt} />;
           }
         },
@@ -875,7 +881,8 @@ export function AssetHelperClient() {
         // IS 고정자산은 실제 평가액 기반 자동값이라 편집 불가.
         editable: (params) => Boolean(params.data && !params.data.is_adding && !params.data.is_fixed_asset),
         valueFormatter: (p) => (p.value == null || p.value === "" ? "-" : `${Number(p.value).toFixed(2)}`),
-        cellClass: "assetsEditableCell",
+        // 편집 가능한 셀에만 녹색 배경을 준다 — IS 행은 색을 빼서 "여기는 못 고친다"가 보이게 한다.
+        cellClass: (params) => (params.data?.is_fixed_asset ? undefined : "assetsEditableCell"),
       },
     ],
     // add(useAddingTickerRow) 는 매 렌더 새로 생성되므로 의존성에 포함해
