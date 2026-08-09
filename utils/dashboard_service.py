@@ -36,7 +36,6 @@ def _load_account_benchmarks(configs: list[dict[str, Any]]) -> dict[str, dict[st
     반환: {account_id: {"name": 표시명, "pct": 원화기준 일간%|None}}
     """
     from services.price_service import get_exchange_rates, get_realtime_snapshot
-
     from utils.cash_model import currency_for_country
 
     # country -> 조회할 ticker 집합, account -> (country, fetch_ticker, name)

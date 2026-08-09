@@ -471,7 +471,6 @@ def _trend_pct_at(
     return (price / ma_value - 1.0) * 100.0
 
 
-
 def _resolve_supertrend_params(yf_ticker: str) -> tuple[int, float]:
     """차트 표시용 SuperTrend 기간/곱수를 반환한다."""
     if yf_ticker not in MARKET_TREND_SUPERTREND_MULTIPLIER:
@@ -539,8 +538,6 @@ def is_market_trend_index(ticker: str) -> bool:
     return any(idx["yf_ticker"] == ticker for idx in INDICES)
 
 
-
-
 def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> list[dict[str, Any]]:
     """레짐 시리즈를 최근 window_days 기준 연속 구간 목록으로 변환한다."""
     if regime is None or regime.empty:
@@ -567,12 +564,10 @@ def _build_regime_ranges_from_series(regime: pd.Series, window_days: int) -> lis
     return ranges
 
 
-
 def _index_uses_naver(yf_ticker: str) -> bool:
     """해당 지수가 한국(네이버) 소스인지 여부."""
     meta = next((idx for idx in INDICES if idx["yf_ticker"] == yf_ticker), None)
     return bool(meta and meta.get("kor_naver_symbol"))
-
 
 
 def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
@@ -626,8 +621,6 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     with _YF_LOCK:
         _OHLC_CACHE[yf_ticker] = (time.monotonic(), frame)
     return frame.copy()
-
-
 
 
 def compute_index_history(yf_ticker: str) -> dict[str, Any]:

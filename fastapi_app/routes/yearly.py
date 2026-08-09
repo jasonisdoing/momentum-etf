@@ -19,7 +19,7 @@ class YearlyRowUpdatePayload(BaseModel):
     year_date: str
 
     @model_validator(mode="after")
-    def strip_year_date(self) -> "YearlyRowUpdatePayload":
+    def strip_year_date(self) -> YearlyRowUpdatePayload:
         self.year_date = self.year_date.strip()
         if not self.year_date:
             raise ValueError("year_date는 필수입니다.")

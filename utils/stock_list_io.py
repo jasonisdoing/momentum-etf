@@ -132,7 +132,11 @@ def _load_ticker_type_stocks_raw(ticker_type: str) -> list[dict]:
 # 공개 API — 읽기
 # ---------------------------------------------------------------------------
 
-from utils.settings_loader import get_account_settings, get_ticker_type_settings, list_available_ticker_types  # noqa: E402
+from utils.settings_loader import (  # noqa: E402
+    get_account_settings,
+    get_ticker_type_settings,
+    list_available_ticker_types,
+)
 
 
 @lru_cache(maxsize=1)

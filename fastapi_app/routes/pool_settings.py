@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from fastapi_app.dependencies import require_internal_token
+from utils.market_trend_service import INDICES
 from utils.pool_settings_store import (
     MA_DAY_OPTIONS,
     POOL_EDITABLE_KEYS,
@@ -21,7 +22,6 @@ from utils.pool_settings_store import (
     save_pool_settings,
     update_pool,
 )
-from utils.market_trend_service import INDICES
 
 router = APIRouter(prefix="/internal/pool-settings", tags=["pool-settings"])
 

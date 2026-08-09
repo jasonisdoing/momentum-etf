@@ -33,6 +33,7 @@ from utils.cache_utils import (
     load_cached_updated_at_bulk_before_or_at_with_fallback,
     load_cached_updated_at_bulk_with_fallback,
 )
+from utils.cash_model import currency_for_country
 from utils.data_loader import (
     fetch_naver_etf_inav_snapshot,
     fetch_ohlcv,
@@ -41,7 +42,6 @@ from utils.data_loader import (
     get_trading_days,
 )
 from utils.kis_market import load_cached_kis_domestic_etf_master
-from utils.cash_model import currency_for_country
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history

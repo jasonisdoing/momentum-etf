@@ -239,7 +239,8 @@ def load_real_holdings_table(
 
         # ticker_type이 없는 미등록 종목인 경우, 국가 코드를 기반으로 기본값 할당
         def _fallback_ticker_type(row):
-            if row.get("ticker_type"): return row["ticker_type"]
+            if row.get("ticker_type"):
+                return row["ticker_type"]
             c_code = row.get("country_code", "kor")
             return "us" if c_code == "us" else "aus" if c_code == "au" else "kor"
 
@@ -541,7 +542,6 @@ def load_real_holdings_table(
         for col in ["수량", "평균 매입가", "매입금액(KRW)", "평가금액(KRW)"]:
             if col in df_holdings.columns:
                 df_holdings[col] = pd.to_numeric(df_holdings[col], errors="coerce").fillna(0)
-
 
     # Rename columns to match UI
     df_holdings = df_holdings.rename(

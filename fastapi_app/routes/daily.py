@@ -19,7 +19,7 @@ class DailyRowUpdatePayload(BaseModel):
     date: str
 
     @model_validator(mode="after")
-    def strip_date(self) -> "DailyRowUpdatePayload":
+    def strip_date(self) -> DailyRowUpdatePayload:
         self.date = self.date.strip()
         if not self.date:
             raise ValueError("date는 필수입니다.")

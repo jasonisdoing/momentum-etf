@@ -156,7 +156,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     # target_id가 비어있으면 모든 계좌를 순회하며 데이터를 수집함
     all_rows: list[dict[str, Any]] = []
     account_summaries: list[dict[str, Any]] = []
-    selected_account_currency = "KRW"
     selected_cash_info: dict[str, Any] | None = None
 
     for account in all_accounts:
@@ -188,7 +187,6 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         currency = str(settings.get("currency") or "KRW").strip().upper()
         cash_info = cash_map.get(curr_account_id)
         if curr_account_id == target_id:
-            selected_account_currency = currency
             selected_cash_info = cash_info
 
         account_rows: list[dict[str, Any]] = []
@@ -209,6 +207,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
             avg_price = float(row.get("평균 매입가") or 0)
             current_price = float(row.get("현재가") or 0)
             # NaN/None 방어 로직 추가
+
             def safe_int(val):
                 import pandas as pd
                 if pd.isna(val) or val is None:

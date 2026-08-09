@@ -35,6 +35,7 @@ _cache: dict[str, Any] = {
     "expires_at": 0.0,
 }
 
+
 def get_fear_greed_summary() -> dict[str, Any] | None:
     """공포탐욕지수 요약을 반환합니다 (캐시 적용)."""
     now = time.time()
@@ -48,6 +49,7 @@ def get_fear_greed_summary() -> dict[str, Any] | None:
         _cache["expires_at"] = now + _CACHE_TTL
 
     return data
+
 
 def _fetch_from_cnn() -> dict[str, Any] | None:
     """CNN에서 데이터를 직접 가져와 파싱합니다."""
@@ -80,6 +82,7 @@ def _fetch_from_cnn() -> dict[str, Any] | None:
         logger.error(f"CNN Fear & Greed 조회 오류: {e}")
         return None
 
+
 def _to_iso_timestamp(ts: Any) -> str | None:
     """타임스탬프를 ISO 문자열로 변환합니다."""
     if not ts:
@@ -92,5 +95,5 @@ def _to_iso_timestamp(ts: Any) -> str | None:
         else:
             val = val / 1000
         return datetime.fromtimestamp(val).isoformat()
-    except:
+    except Exception:
         return str(ts)

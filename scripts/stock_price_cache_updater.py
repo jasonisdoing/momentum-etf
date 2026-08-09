@@ -38,6 +38,7 @@ PER_TICKER_TIMEOUT_SECONDS = 90
 # KOR_FETCH_TARGET_SECONDS = 0.5 서버에서 freeze 1초로 늘려서 테스트중
 KOR_FETCH_TARGET_SECONDS = 1
 
+
 def _resolve_fetch_workers() -> int:
     """종목 fetch 병렬 워커 수.
 
@@ -45,6 +46,7 @@ def _resolve_fetch_workers() -> int:
     안전하게 직렬(1) 로 고정한다. 추후 ProcessPoolExecutor 또는 asyncio 기반 재설계 필요.
     """
     return 1
+
 
 # 풀 전체 NaN 비율이 이 임계값을 초과하는 날짜는 데이터 소스 오류로 간주하고
 # 모든 종목 캐시에서 그 날짜 행을 제거한다. 다음 cron 시 자동 재fetch.
