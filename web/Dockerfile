@@ -9,7 +9,6 @@ COPY web/package.json web/package-lock.json* ./
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefer-offline --no-audit --no-fund
 
-COPY shared /shared
 COPY static /static
 COPY web .
 
