@@ -15,14 +15,6 @@ import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
 
-// 종목풀 폴백 목록 — 백엔드 미기동으로 pool_options 를 못 받았을 때만 쓴다.
-// 한국 개별주 풀만 지원한다 (백엔드 POOL_CONFIGS 와 같아야 한다).
-// 실제 표기는 pools-rank 와 같은 공용 formatPoolLabel(이름·아이콘·순서는 백엔드 응답)이다.
-const POOL_OPTIONS: readonly PoolLabelSource[] = [
-  { ticker_type: "kor", name: "코스피 개별주" },
-  { ticker_type: "kor_kosdaq", name: "코스닥 개별주" },
-];
-
 // 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
 type PoolSettings = {
   top_n: number;
@@ -940,7 +932,8 @@ export function SteadyMomentumClient() {
                     value={draftPool}
                     onChange={(e) => handlePoolChange(e.target.value)}
                   >
-                    {(view.pool_options?.length ? view.pool_options : POOL_OPTIONS).map((pool) => (
+                    {/* 설정을 못 받으면 폼 자체를 그리지 않으므로(로드 실패 화면) 폴백 목록이 필요 없다. */}
+                    {(view.pool_options ?? []).map((pool) => (
                       <option key={pool.ticker_type} value={pool.ticker_type}>
                         {formatPoolLabel(pool)}
                       </option>

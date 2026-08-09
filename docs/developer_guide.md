@@ -132,7 +132,7 @@ python infra/server_scheduler.py
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
     *   `asset_helper_service.py`: 자산 헬퍼 설정 저장, 적용 계좌 기준 목표 비중·목표수량 계산, 자산 헬퍼 전용 백테스트와 가격 변동이 반영된 매주 금요일 기준 종목·현금별 평가금액 이력(`weight_history`) 생성을 담당합니다. Next API `/api/asset-helper-settings/backtest`는 FastAPI `/internal/asset-helper/backtest`로 프록시합니다.
-    *   `steady_momentum_service.py`: Steady Momentum(`/strategy-sm`) 설정 저장·검증, 유니버스 로드, 상대 모멘텀 점수 계산(`momentum_metrics`), 점수 순위(`rank_candidates`), 월 확정 포트폴리오 선정(`compute_picks`)의 단일 소스입니다. 판정일/체결일 산출도 여기(`month_last_two_trading_days`, `current_portfolio_dates`)에 있습니다.
+    *   `steady_momentum_service.py`: Steady Momentum(`/strategy-sm`) 설정 저장·검증(**풀별 저장** — `{pool, settings_by_pool}` 스키마), 유니버스 로드, 장기 이평 이격 점수 계산(`momentum_metrics` — 이평 일수는 전략 전용), 점수 순위(`rank_candidates`), 월 확정 포트폴리오 선정(`compute_picks`)의 단일 소스입니다. 판정일/체결일 산출도 여기(`month_last_two_trading_days`, `current_portfolio_dates`)에 있으며, 풀 국가·통화는 종목풀 설정(DB)을 따릅니다(`pool_info`).
     *   `steady_momentum_backtest.py`: 같은 선정 규칙을 과거 리밸런싱 시점마다 적용하는 월간 백테스트(`run_backtest`)입니다. 후보 선정·순위는 반드시 `steady_momentum_service` 함수를 재사용해 화면 선정 결과와 어긋나지 않게 합니다. Next API `/api/strategy-sm/*`는 FastAPI `/internal/strategy-sm/*`로 프록시합니다.
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
