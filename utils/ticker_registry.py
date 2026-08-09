@@ -51,6 +51,8 @@ def load_ticker_type_configs() -> list[dict[str, Any]]:
                 "icon": icon,
                 "is_default": is_default,
                 "order": order,
+                # 풀 성격(stock/etf) — 종목풀 설정의 '구분' 토글. 미설정이면 빈 값.
+                "pool_kind": str(settings.get("pool_kind") or ""),
                 "settings": settings,
             }
         )

@@ -263,6 +263,8 @@ def _build_configs_payload() -> tuple[list[dict[str, Any]], dict[str, Any]]:
             "name": str(cfg["name"]),
             "icon": str(cfg.get("icon") or ""),
             "country_code": str(cfg.get("country_code") or ""),
+            # 풀 성격(stock/etf) — 미설정이면 빈 값(화면이 행 값으로 추정).
+            "pool_kind": str(cfg.get("pool_kind") or ""),
             "top_n_hold": int(cfg["settings"].get("TOP_N_HOLD", 0)),
             "currency": str(cfg["settings"].get("currency") or ""),
         }

@@ -133,11 +133,13 @@ python infra/server_scheduler.py
     *   `daily_fund_service.py`: `daily_fund_data` 일별 원장 조회/수정/주별 시드 이관
     *   `weekly_service.py`: `daily_fund_data` 기준 주별 재집계 및 `weekly_fund_data` 조회/비고 수정
     *   `monthly_service.py`: `daily_fund_data` 기준 월별 재집계 및 `monthly_fund_data` 조회/비고 수정
-    *   `asset_helper_service.py`: 자산 헬퍼 설정 저장, 적용 계좌 기준 목표 비중·목표수량 계산, 자산 헬퍼 전용 백테스트와 가격 변동이 반영된 매주 금요일 기준 종목·현금별 평가금액 이력(`weight_history`) 생성을 담당합니다. Next API `/api/asset-helper-settings/backtest`는 FastAPI `/internal/asset-helper/backtest`로 프록시합니다.
+    *   `asset_helper_service.py`: 자산 헬퍼 설정 저장·정리와 적용 계좌 기준 목표 비중·목표수량 계산. 시장 데이터 층(`asset_helper_market_data.py` — 종가 프레임·KRW 환산·수익률/MDD/실시간 맵·계좌 스냅샷)과 백테스트(`asset_helper_backtest.py` — 리밸런싱 시뮬레이션·금요일 `weight_history`)는 분리 모듈이며, 기존 임포트 경로는 서비스가 re-export 로 유지합니다. Next API `/api/asset-helper-settings/backtest`는 FastAPI `/internal/asset-helper/backtest`로 프록시합니다.
     *   `steady_momentum_service.py`: Steady Momentum(`/strategy-sm`) 설정 저장·검증(**풀별 저장** — `{pool, settings_by_pool}` 스키마), 유니버스 로드, 장기 이평 이격 점수 계산(`momentum_metrics` — 이평 일수는 전략 전용), 점수 순위(`rank_candidates`), 월 확정 포트폴리오 선정(`compute_picks`)의 단일 소스입니다. 판정일/체결일 산출도 여기(`month_last_two_trading_days`, `current_portfolio_dates`)에 있으며, 풀 국가·통화는 종목풀 설정(DB)을 따릅니다(`pool_info`).
     *   `steady_momentum_backtest.py`: 같은 선정 규칙을 과거 리밸런싱 시점마다 적용하는 월간 백테스트(`run_backtest`)입니다. 후보 선정·순위는 반드시 `steady_momentum_service` 함수를 재사용해 화면 선정 결과와 어긋나지 않게 합니다. Next API `/api/strategy-sm/*`는 FastAPI `/internal/strategy-sm/*`로 프록시합니다.
 *   `.github/workflows/`: GitHub Actions를 이용한 일일 배포 및 자동화 정의
 *   계좌 메타데이터: MongoDB `account_settings` 컬렉션이 단일 소스입니다(`utils/account_settings_store.py`). 웹 `/account-settings` 화면에서 값 수정만 지원하며(`account_id` 불변), 계좌 추가/삭제는 화면에서 지원하지 않습니다(DB 문서 직접 추가/삭제로 관리).
+*   Next API 프록시: 로직 없는 순수 FastAPI 프록시 라우트는 `web/lib/fastapi-proxy.ts` 의 `createFastApiProxy`(경로·에러 문구·body 전달·타임아웃 선언)로 작성합니다. 쿼리 가공·body 재구성 등 로직이 있는 라우트만 직접 구현합니다.
+*   그리드 공용 셀: 여러 화면이 공유하는 셀 표기(부호 %, KOSPI/KOSDAQ 마켓 배지, ⭐신고점)는 `web/lib/grid-cells.tsx` 가 단일 소스입니다. 섹터·업종 UI 노출은 종목풀 설정의 풀 성격(`pool_kind`, 개별주/ETF 토글)을 우선 기준으로 씁니다(pools-rank·strategy-sm 공통).
 
 ### 데이터 파이프라인 및 캐싱
 1.  **데이터 수집**: `pykrx`, `yfinance` 등을 통해 원천 데이터 수집.

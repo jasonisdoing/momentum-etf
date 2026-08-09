@@ -29,6 +29,8 @@ type RankTickerType = {
   name: string;
   icon: string;
   country_code: string;
+  // 풀 성격(stock/etf) — 종목풀 설정의 '구분' 토글. 미설정이면 빈 값.
+  pool_kind?: string;
   top_n_hold?: number;
   currency?: string;
   include?: string[];
@@ -624,11 +626,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
 
 
-  // 섹터·업종 컬럼 노출 여부 — 값이 있는 행이 하나라도 있을 때만 (풀 하드코딩 없이).
-  const hasSectorData = useMemo(
-    () => displayGridRows.some((row) => String(row.섹터 ?? "").trim() !== ""),
-    [displayGridRows],
-  );
+  // 섹터·업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
+  // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-sm 과 같은 기준).
+  const hasSectorData = useMemo(() => {
+    const poolKind = String(selectedTickerTypeItem?.pool_kind ?? "");
+    if (poolKind === "stock") return true;
+    if (poolKind === "etf") return false;
+    return displayGridRows.some((row) => String(row.섹터 ?? "").trim() !== "");
+  }, [displayGridRows, selectedTickerTypeItem?.pool_kind]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
     const leadingColumns: ColDef<RankGridRow>[] = [

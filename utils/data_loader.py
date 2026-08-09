@@ -2,30 +2,20 @@
 데이터 조회, 파일 입출력 등 공통으로 사용되는 유틸리티 함수 모음.
 """
 
-import functools
 import json
 import logging
 import os
 import warnings
 from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import datetime, time, timedelta
+from datetime import datetime
 from io import StringIO
-from pathlib import Path
-from typing import Any
 
 import pandas as pd
 
 from config import (
-    AU_QUOTEAPI_APP_ID,
-    AU_QUOTEAPI_HEADERS,
-    AU_QUOTEAPI_URL,
     MARKET_SCHEDULES,
     MIN_TRADING_DAYS,
-    NAVER_FINANCE_ETF_API_URL,
-    NAVER_FINANCE_HEADERS,
-    TOSS_INVEST_API_BASE_URL,
-    TOSS_INVEST_HEADERS,
 )
 
 # pkg_resources 워닝 억제 (가장 강력한 방법)
@@ -94,7 +84,7 @@ if requests is not None:
 
 # from utils.notification import send_verbose_log_to_slack
 
-from utils.asx_ticker import strip_asx_prefix, to_yahoo_symbol
+from utils.asx_ticker import to_yahoo_symbol
 from utils.cache_utils import (
     load_cached_frame,
     load_cached_frame_with_fallback,
@@ -102,7 +92,6 @@ from utils.cache_utils import (
     save_cached_frame,
 )
 from utils.logger import get_app_logger
-from utils.stock_list_io import get_etfs_by_country, set_listing_date
 
 # ── 분리 이동된 모듈 re-export (하위 호환) ─────────────────────────────────
 # 거래일 캘린더와 실시간 시세는 별도 모듈로 분리했다. 기존 `from utils.data_loader
@@ -123,6 +112,7 @@ from utils.realtime_quotes import (  # noqa: F401
     prime_naver_etf_realtime_snapshot,
     resolve_toss_us_product_codes,
 )
+from utils.stock_list_io import get_etfs_by_country, set_listing_date
 from utils.trading_calendar import (  # noqa: F401
     ASSET_TRADING_COUNTRIES,
     MARKET_OPEN_INFO,
