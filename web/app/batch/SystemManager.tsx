@@ -144,6 +144,10 @@ function formatRunningCommandPrefix(detail: SystemRunningJobDetail | undefined, 
   const estimatedSeconds = detail?.estimated_seconds;
   const estimatedDisplay = detail?.estimated_display;
   if (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0 || !detail?.started_at) {
+    // 성공 이력이 없어 예상시간을 모르는 잡 — 최초 실행임을 표시한다 (중단 중이면 그대로).
+    if (!detail?.cancel_requested && (typeof estimatedSeconds !== "number" || estimatedSeconds <= 0)) {
+      return `▶ ${ownerLabel}실행 중 (최초 실행이라 예상시간 없음)... `;
+    }
     return `▶ ${ownerLabel}${stateLabel}... `;
   }
   const startedMs = new Date(detail.started_at).getTime();
