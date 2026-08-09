@@ -26,6 +26,8 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 # cron 의 요일 필드: 1=월, 2=화, ..., 6=토
 
 20 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py >> logs/cron/cache_refresh.log 2>&1
+# 하루 1회 전체 재수집(--full) — 수정주가(배당·분할) 재정렬용. 매시 라인은 증분만 수행한다.
+10 17 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py cache_refresh python scripts/stock_price_cache_updater.py --full >> logs/cron/cache_refresh.log 2>&1
 45 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py reference_meta_updater python scripts/stock_reference_meta_updater.py >> logs/cron/reference_meta_updater.log 2>&1
 50 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py price_metrics_updater python scripts/stock_price_metrics_updater.py >> logs/cron/price_metrics_updater.log 2>&1
 */10 * * * 1-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py data_aggregate python scripts/collect_data.py >> logs/cron/data_aggregate.log 2>&1
