@@ -19,6 +19,7 @@ from utils.data_loader import (
     get_exchange_rate_series as load_exchange_rate_series,
 )
 from utils.logger import get_app_logger
+from utils.yfinance_guard import yfinance_lock
 
 logger = get_app_logger()
 
@@ -498,15 +499,16 @@ def _fetch_bulk_fx_closes(symbols: list[str]) -> dict[str, tuple[float, float]]:
 
     out: dict[str, tuple[float, float]] = {}
     try:
-        frame = yf.download(
-            tickers=symbols,
-            period="10d",
-            interval="1d",
-            progress=False,
-            auto_adjust=False,
-            threads=False,
-            group_by="ticker",
-        )
+        with yfinance_lock():
+            frame = yf.download(
+                tickers=symbols,
+                period="10d",
+                interval="1d",
+                progress=False,
+                auto_adjust=False,
+                threads=False,
+                group_by="ticker",
+            )
     except Exception as exc:
         logger.warning("환율 일괄 조회 실패(개별 조회로 진행): %s", exc)
         return out
@@ -558,8 +560,9 @@ def _fetch_exchange_rates() -> dict[str, Any]:
                 continue
             # 일괄 조회에서 빠진 통화만 개별로 보완한다(데이터가 짧은 통화 등).
             try:
-                ticker = yf.Ticker(symbol)
-                _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
+                with yfinance_lock():
+                    ticker = yf.Ticker(symbol)
+                    _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
             except Exception as exc:
                 if attempt >= _FX_FETCH_MAX_ATTEMPTS:
                     logger.warning("%s 환율 조회 실패: %s", currency, exc)
