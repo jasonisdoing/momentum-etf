@@ -40,7 +40,8 @@ TOP_N_OPTIONS = (5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100)
 # 차순위 후보를 종목 수의 몇 배까지 보여줄지 — 선정과 같은 수(합계 2배)만 보여
 # 표를 짧게 유지한다. 표 밖 '다음달 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
-TRADING_DAYS_PER_MONTH = 21
+# 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
+from config import TRADING_DAYS_PER_MONTH  # noqa: E402
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
@@ -785,9 +786,12 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # 참고용 가격 정보 — 현재가·일간(%)은 위에서 받은 실시간 스냅샷을 쓰고, 실패 시
     # 캐시 종가로 폴백. 월별 수익률은 pools-rank 와 같은 공용 계산이며, frames 에
     # 실시간이 반영돼 있어 이번 달 값은 장중 가격 기준이다.
+    # 개월 수 = 이번 달 + 장기 이평선이 커버하는 과거 개월(장기 일수 ÷ 월 거래일)
+    # — 점수가 보는 기간만큼의 월별 흐름을 함께 보여준다 (장기 120일·월 20일 → 1+6).
     from utils.rankings import build_recent_monthly_return_metrics, get_recent_monthly_return_labels
 
-    month_labels = get_recent_monthly_return_labels(6)
+    month_count = 1 + max(1, int(settings["long_ma_days"]) // TRADING_DAYS_PER_MONTH)
+    month_labels = get_recent_monthly_return_labels(month_count)
 
     row_tickers = [item["ticker"] for item in selected + reserve] + [
         item["ticker"] for item in extra_expected
