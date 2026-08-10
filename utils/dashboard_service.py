@@ -260,15 +260,22 @@ def load_dashboard_data() -> dict[str, Any]:
         # daily_profit / weekly_profit 은 입출금 영향을 제거한 시장 변동분만 계산한다.
         previous_account_principal = normalize_number(previous_snapshot_account.get("total_principal"))
         weekly_base_account_principal = normalize_number(weekly_base_snapshot_account.get("total_principal"))
-        daily_deposit = (total_principal - previous_account_principal) if previous_snapshot_account else 0.0
-        weekly_deposit = (total_principal - weekly_base_account_principal) if weekly_base_snapshot_account else 0.0
-        daily_profit = (total_assets - previous_total_assets - daily_deposit) if previous_snapshot_account else 0.0
-        weekly_profit = (
-            (total_assets - weekly_base_total_assets - weekly_deposit) if weekly_base_snapshot_account else 0.0
-        )
+        # 전일 스냅샷에 계좌가 없으면(생성 첫날) 전일 자산·원금을 0으로 보고 계산한다 —
+        # 첫날 손익 = 총자산 − 원금, 수익률 분모 = 당일 입금(원금). 0 처리하면 첫날이 공백이 된다.
+        daily_deposit = total_principal - previous_account_principal
+        weekly_deposit = total_principal - weekly_base_account_principal
+        daily_profit = total_assets - previous_total_assets - daily_deposit
+        weekly_profit = total_assets - weekly_base_total_assets - weekly_deposit
 
-        daily_return_pct_acc = calculate_period_return_pct(daily_profit, previous_total_assets)
-        weekly_return_pct_acc = calculate_period_return_pct(weekly_profit, weekly_base_total_assets)
+        # 수익률 분모 = 직전 자산 + 당일(주간) 입금 — 신규 계좌(전일 0)나 큰 입금이 있는
+        # 날에도 유입 자금 기준의 수익률이 나온다. 인출(음수)은 분모에서 빼지 않는다
+        # (인출한 돈도 그 시점까지는 운용됐으므로). Modified Dietz 의 단순형.
+        daily_return_pct_acc = calculate_period_return_pct(
+            daily_profit, previous_total_assets + max(daily_deposit, 0.0)
+        )
+        weekly_return_pct_acc = calculate_period_return_pct(
+            weekly_profit, weekly_base_total_assets + max(weekly_deposit, 0.0)
+        )
         accounts.append(
             {
                 "account_id": config["account_id"],
