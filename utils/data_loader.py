@@ -357,6 +357,22 @@ def _silence_yfinance_output():
             yield
 
 
+def canonical_cache_ticker(ticker: str, country: str) -> str:
+    """가격 캐시 문서 키로 쓰는 시스템 표준 티커로 정규화한다.
+
+    호주는 종목풀 표준이 ``ASX:IOO`` 형식인데, 종목 상세·비교 화면 등 일부 경로가
+    접두사를 뗀 ``IOO`` 로 조회하면 같은 종목의 캐시 문서가 2벌 생기고
+    (배치의 --full 수정주가 재정렬이 접두사 문서만 갱신) 병합·배당 재조정 시
+    무접두 사본에 가짜 가격 점프가 남는다. 지수(^)는 그대로 둔다.
+    """
+    ticker_norm = (ticker or "").strip().upper()
+    country_norm = (country or "").strip().lower()
+    # 국가 코드는 로더 표준 "au"와 종목풀 id 유래 "aus"가 혼용된다 — 둘 다 호주로 취급.
+    if country_norm in ("au", "aus") and ticker_norm and ":" not in ticker_norm and not ticker_norm.startswith("^"):
+        return f"ASX:{ticker_norm}"
+    return ticker_norm
+
+
 def fetch_ohlcv(
     ticker: str,
     country: str,
@@ -433,6 +449,10 @@ def _fetch_ohlcv_with_cache(
 
     if not ticker_type:
         raise ValueError(f"OHLCV 데이터 조회 시 ticker_type가 필요합니다. (Ticker: {ticker})")
+
+    # 호출 경로마다 티커 표기가 달라도(예: aus 의 IOO vs ASX:IOO) 같은 캐시 문서를 쓰도록
+    # 단일 관문에서 표준 형식으로 정규화한다.
+    ticker = canonical_cache_ticker(ticker, country_code)
 
     cache_key = ticker_type.strip().lower()
 
@@ -564,8 +584,10 @@ def _fetch_ohlcv_with_cache(
                 raise
             logger.warning(
                 "[CACHE] %s/%s 구간(%s~%s) pykrx 데이터 없음 — 기존 캐시로 진행합니다.",
-                cache_key_display, ticker,
-                miss_start.strftime("%Y-%m-%d"), effective_end.strftime("%Y-%m-%d"),
+                cache_key_display,
+                ticker,
+                miss_start.strftime("%Y-%m-%d"),
+                effective_end.strftime("%Y-%m-%d"),
             )
             unfilled_ranges.append((miss_start, effective_end))
             continue
@@ -611,10 +633,11 @@ def _fetch_ohlcv_with_cache(
         logger.warning("%s의 가격 데이터 일부 누락 구간을 남긴 채 부분 캐시를 사용합니다: %s", ticker, ranges_text)
     elif unfilled_ranges:
         # 캐시 데이터 범위 이전의 unfilled 구간(상장 전 기간)은 무시
-        cache_min_for_check = combined_df.index.min().normalize() if combined_df is not None and not combined_df.empty else None
+        cache_min_for_check = (
+            combined_df.index.min().normalize() if combined_df is not None and not combined_df.empty else None
+        )
         critical_unfilled = [
-            (s, e) for s, e in unfilled_ranges
-            if cache_min_for_check is None or e >= cache_min_for_check
+            (s, e) for s, e in unfilled_ranges if cache_min_for_check is None or e >= cache_min_for_check
         ]
         if critical_unfilled:
             ranges_text = ", ".join(
@@ -1749,14 +1772,14 @@ def _has_invalid_exchange_rate_values(symbol: str, rates: pd.Series) -> bool:
     # 통화별 KRW 환산율 정상 범위 (캐시에 다른 통화 값이 섞이는 경우 방지).
     # 범위를 벗어나면 비정상 값으로 간주해 강제 재조회한다.
     expected_ranges: dict[str, tuple[float, float]] = {
-        "KRW=X": (1000.0, 1900.0),      # USD/KRW (현재 ~1389)
-        "AUDKRW=X": (650.0, 1100.0),    # AUD/KRW (현재 ~900)
-        "JPYKRW=X": (6.0, 15.0),        # JPY/KRW (현재 ~9)
-        "CNYKRW=X": (140.0, 280.0),     # CNY/KRW (현재 ~190)
-        "TWDKRW=X": (30.0, 60.0),       # TWD/KRW (현재 ~43)
-        "HKDKRW=X": (130.0, 250.0),     # HKD/KRW (현재 ~175)
-        "GBPKRW=X": (1400.0, 2400.0),   # GBP/KRW (현재 ~1750)
-        "EURKRW=X": (1200.0, 2100.0),   # EUR/KRW (현재 ~1500)
+        "KRW=X": (1000.0, 1900.0),  # USD/KRW (현재 ~1389)
+        "AUDKRW=X": (650.0, 1100.0),  # AUD/KRW (현재 ~900)
+        "JPYKRW=X": (6.0, 15.0),  # JPY/KRW (현재 ~9)
+        "CNYKRW=X": (140.0, 280.0),  # CNY/KRW (현재 ~190)
+        "TWDKRW=X": (30.0, 60.0),  # TWD/KRW (현재 ~43)
+        "HKDKRW=X": (130.0, 250.0),  # HKD/KRW (현재 ~175)
+        "GBPKRW=X": (1400.0, 2400.0),  # GBP/KRW (현재 ~1750)
+        "EURKRW=X": (1200.0, 2100.0),  # EUR/KRW (현재 ~1500)
     }
     bounds = expected_ranges.get(normalized)
     if bounds is not None:
