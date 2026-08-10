@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Any
@@ -34,6 +35,10 @@ _WORLDSTOCK_TTL_SECONDS = 900
 _YAHOO_SYMBOL_TTL_SECONDS = 900
 _IDLE_TTL_SECONDS = 60
 _FX_TTL_SECONDS = 3600
+# 환율 조회 재시도 횟수. `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에서는
+# stale 폴백이 없다 — 배치가 기댈 수 있는 건 이 재시도뿐이다.
+_FX_FETCH_MAX_ATTEMPTS = 3
+_FX_RETRY_BASE_SECONDS = 3.0
 
 # 하위 호환: 기존 쿼리 단위 캐시 (환율 전용으로 유지)
 _FX_CACHE: dict[str, dict[str, Any]] = {}
@@ -482,6 +487,44 @@ def _is_market_active(country: str) -> bool:
     return market_open_dt <= now_local <= market_close_dt
 
 
+def _fetch_bulk_fx_closes(symbols: list[str]) -> dict[str, tuple[float, float]]:
+    """여러 통화의 (최신 종가, 직전 종가)를 **한 번의 요청**으로 받는다.
+
+    통화마다 따로 부르면 8회 요청이라 야후 레이트리밋에 쉽게 걸린다(전 통화 동시 실패의
+    원인). 일봉 마지막 종가는 `fast_info.last_price` 와 같은 값이라 결과는 동일하다.
+    데이터가 모자란 통화는 결과에서 빠지며, 호출자가 개별 조회로 보완한다.
+    """
+    import yfinance as yf
+
+    out: dict[str, tuple[float, float]] = {}
+    try:
+        frame = yf.download(
+            tickers=symbols,
+            period="10d",
+            interval="1d",
+            progress=False,
+            auto_adjust=False,
+            threads=False,
+            group_by="ticker",
+        )
+    except Exception as exc:
+        logger.warning("환율 일괄 조회 실패(개별 조회로 진행): %s", exc)
+        return out
+    if frame is None or frame.empty:
+        return out
+
+    import pandas as pd
+
+    for symbol in symbols:
+        try:
+            closes = pd.to_numeric(frame[symbol]["Close"], errors="coerce").dropna()
+            if len(closes) >= 2:
+                out[symbol] = (float(closes.iloc[-1]), float(closes.iloc[-2]))
+        except Exception:
+            continue
+    return out
+
+
 def _fetch_exchange_rates() -> dict[str, Any]:
     import yfinance as yf
 
@@ -495,30 +538,50 @@ def _fetch_exchange_rates() -> dict[str, Any]:
         "GBP": "GBPKRW=X",
         "EUR": "EURKRW=X",
     }
+
+    def _put(currency: str, current_rate: float, previous_close: float) -> None:
+        change_pct = ((current_rate - previous_close) / previous_close * 100.0) if previous_close > 0 else 0.0
+        rates[currency] = {"rate": current_rate, "change_pct": change_pct}
+
     rates: dict[str, Any] = {}
-    missing_currencies: list[str] = []
+    # 야후가 간헐적으로 전 통화를 한꺼번에 거절한다(일시 장애·레이트리밋). 그때마다 배치가
+    # 통째로 죽으므로, 요청 수를 줄이고(일괄 조회) 남은 것만 짧게 재시도한다.
+    # `_FX_CACHE` 는 프로세스 메모리라 매번 새로 뜨는 배치에는 stale 폴백이 없다 —
+    # 배치가 기댈 수 있는 건 이 재시도뿐이다.
+    pending = dict(mapping)
+    for attempt in range(1, _FX_FETCH_MAX_ATTEMPTS + 1):
+        bulk = _fetch_bulk_fx_closes(list(pending.values()))
+        failed: dict[str, str] = {}
+        for currency, symbol in pending.items():
+            if symbol in bulk:
+                _put(currency, *bulk[symbol])
+                continue
+            # 일괄 조회에서 빠진 통화만 개별로 보완한다(데이터가 짧은 통화 등).
+            try:
+                ticker = yf.Ticker(symbol)
+                _put(currency, float(ticker.fast_info.last_price), float(ticker.fast_info.previous_close))
+            except Exception as exc:
+                if attempt >= _FX_FETCH_MAX_ATTEMPTS:
+                    logger.warning("%s 환율 조회 실패: %s", currency, exc)
+                failed[currency] = symbol
 
-    for currency, symbol in mapping.items():
-        try:
-            ticker = yf.Ticker(symbol)
-            current_rate = float(ticker.fast_info.last_price)
-            previous_close = float(ticker.fast_info.previous_close)
-        except Exception as exc:
-            logger.warning("%s 환율 조회 실패: %s", currency, exc)
-            missing_currencies.append(currency)
-            continue
+        # 남은 목록을 먼저 갱신한다 — 성공해서 break 할 때도 pending 이 비어야
+        # 아래 최종 검사에 걸리지 않는다.
+        pending = failed
+        if not pending:
+            break
+        if attempt < _FX_FETCH_MAX_ATTEMPTS:
+            logger.warning(
+                "환율 일시 오류 재시도 (%d/%d): %s",
+                attempt,
+                _FX_FETCH_MAX_ATTEMPTS,
+                ", ".join(sorted(pending)),
+            )
+            # 레이트리밋은 초 단위로 풀린다 — 짧게 끊지 말고 넉넉히 기다린다.
+            time.sleep(_FX_RETRY_BASE_SECONDS * attempt)
 
-        change_pct = 0.0
-        if previous_close > 0:
-            change_pct = ((current_rate - previous_close) / previous_close) * 100.0
-
-        rates[currency] = {
-            "rate": current_rate,
-            "change_pct": change_pct,
-        }
-
-    if missing_currencies:
-        joined = ", ".join(missing_currencies)
+    if pending:
+        joined = ", ".join(sorted(pending))
         raise RuntimeError(f"환율 데이터를 조회하지 못했습니다: {joined}")
 
     rates["updated_at"] = datetime.now()
