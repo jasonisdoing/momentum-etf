@@ -630,6 +630,22 @@ function getSortinoRatio(rows: PriceRow[], dateRange: ChartDateRange | null): nu
   return (mean / downsideStd) * Math.sqrt(252);
 }
 
+/**
+ * 유효 값이 2개 이상일 때 최댓값(1위) 인덱스를 돌려준다. 동률이면 앞 종목.
+ * MDD 는 음수라 최댓값 = 낙폭이 가장 작은 종목(최하 낙폭)이 된다.
+ */
+function getBestValueIndex(values: (number | null)[]): number | null {
+  let best: number | null = null;
+  let validCount = 0;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (v === null || Number.isNaN(v)) continue;
+    validCount++;
+    if (best === null || v > (values[best] as number)) best = i;
+  }
+  return validCount >= 2 ? best : null;
+}
+
 function buildReturnSeries(rows: PriceRow[], dateRange: ChartDateRange | null): LineData[] {
   if (!dateRange) return [];
   const seriesRows = getPricedRows(rows).filter((row) => row.date >= dateRange.startDate && row.date <= dateRange.endDate);
@@ -871,7 +887,8 @@ function CompareChart({ products, dateRange }: { products: SelectedProduct[]; da
     const container = containerRef.current;
     const chart = createChart(container, {
       width: container.clientWidth,
-      height: 360,
+      // 높이는 CSS(flex)가 정한 컨테이너 높이를 따른다 — 뷰포트에 맞춰 늘고 줄어든다.
+      height: container.clientHeight || 360,
       layout: { background: { type: ColorType.Solid, color: "#ffffff" }, textColor: "#475569", fontSize: 12 },
       grid: { vertLines: { color: "#eef2f7" }, horzLines: { color: "#d8e0ec", style: 2 } },
       crosshair: { mode: CrosshairMode.Normal },
@@ -891,7 +908,9 @@ function CompareChart({ products, dateRange }: { products: SelectedProduct[]; da
     chart.timeScale().fitContent();
 
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) chart.applyOptions({ width: entry.contentRect.width });
+      for (const entry of entries) {
+        chart.applyOptions({ width: entry.contentRect.width, height: entry.contentRect.height });
+      }
     });
     observer.observe(container);
 
@@ -1641,7 +1660,7 @@ export function ComparePageClient() {
         </section>
 
         {activeTab === "performance" ? (
-          <section className="compareMatrix compareMatrixBody">
+          <section className="compareMatrix compareMatrixBody compareMatrixPerformance">
             <div className="compareMatrixLabel compareMatrixLabelWide">수익률 추이</div>
             <div className="compareMatrixWide">
               <div className="comparePerformanceToolbar">
@@ -1714,21 +1733,29 @@ export function ComparePageClient() {
                   : `${selectedPerformanceRange.label} 기준`}
               </div>
             </div>
-            {sortedProducts.map((product) => {
-              const mdd = getMaxDrawdown(product.detail.rows, chartDateRange);
-              const value = mdd?.pct ?? null;
-              // MDD 값 아래에 낙폭 구간(고점일~저점일)을 작게 표기한다.
-              const period =
-                mdd?.peakDate && mdd?.troughDate
-                  ? `${formatDateKey(mdd.peakDate)}~${formatDateKey(mdd.troughDate)}`
-                  : null;
-              return (
-                <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
-                  {formatPercent(value)}
-                  {period ? <div className="compareMetricCellHint">({period})</div> : null}
-                </div>
-              );
-            })}
+            {(() => {
+              const mdds = sortedProducts.map((product) => getMaxDrawdown(product.detail.rows, chartDateRange));
+              // MDD 는 음수라 최댓값 = 낙폭이 가장 작은 종목에 ⭐ 표시.
+              const bestIndex = getBestValueIndex(mdds.map((mdd) => mdd?.pct ?? null));
+              return sortedProducts.map((product, index) => {
+                const mdd = mdds[index];
+                const value = mdd?.pct ?? null;
+                return (
+                  <div key={`mdd-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    {bestIndex === index ? "⭐ " : ""}
+                    {formatPercent(value)}
+                    {/* MDD 값 아래에 낙폭 구간(고점일~저점일)을 두 줄로 작게 표기한다. */}
+                    {mdd?.peakDate && mdd?.troughDate ? (
+                      <div className="compareMetricCellHint">
+                        ({formatDateKey(mdd.peakDate)}~
+                        <br />
+                        {formatDateKey(mdd.troughDate)})
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              });
+            })()}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
               <div key={`empty-mdd-${index}`} className="compareMetricCell">-</div>
             ))}
@@ -1741,20 +1768,47 @@ export function ComparePageClient() {
                   : `${selectedPerformanceRange.label} 기준`}
               </div>
             </div>
-            {sortedProducts.map((product) => {
-              const value = getSortinoRatio(product.detail.rows, chartDateRange);
-              return (
-                <div key={`sortino-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
-                  {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
-                </div>
-              );
-            })}
+            {(() => {
+              const values = sortedProducts.map((product) => getSortinoRatio(product.detail.rows, chartDateRange));
+              const bestIndex = getBestValueIndex(values);
+              return sortedProducts.map((product, index) => {
+                const value = values[index];
+                return (
+                  <div key={`sortino-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    {bestIndex === index ? "⭐ " : ""}
+                    {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
+                  </div>
+                );
+              });
+            })()}
             {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
               <div key={`empty-sortino-${index}`} className="compareMetricCell">-</div>
             ))}
-            <div className="compareSharpeLegend">
-              소르티노 지수 해석: <strong>0 미만</strong> 손실 · <strong>0~1</strong> 평범 · <strong>1~2</strong> 양호 · <strong>2~3</strong> 우수 · <strong>3 이상</strong> 매우 우수 (하방 변동성(Downside Deviation)만을 기준으로 손실 위험 대비 초과수익을 측정, 연율화)
+
+            <div className="compareMatrixLabel compareMetricsGroupLabel compareMetricsGroupLabelSingle">
+              샤프 지수
+              <div className="compareMatrixLabelHint">
+                {chartDateRange?.shortened
+                  ? `${formatDateKey(chartDateRange.startDate)} ~ ${formatDateKey(chartDateRange.endDate)}`
+                  : `${selectedPerformanceRange.label} 기준`}
+              </div>
             </div>
+            {(() => {
+              const values = sortedProducts.map((product) => getSharpeRatio(product.detail.rows, chartDateRange));
+              const bestIndex = getBestValueIndex(values);
+              return sortedProducts.map((product, index) => {
+                const value = values[index];
+                return (
+                  <div key={`sharpe-${tickerKey(product.item)}`} className={`compareMetricCell ${getSignedClass(value)}`}>
+                    {bestIndex === index ? "⭐ " : ""}
+                    {value === null || Number.isNaN(value) ? "-" : value.toFixed(2)}
+                  </div>
+                );
+              });
+            })()}
+            {Array.from({ length: Math.max(0, MAX_PRODUCTS - sortedProducts.length) }).map((_, index) => (
+              <div key={`empty-sharpe-${index}`} className="compareMetricCell">-</div>
+            ))}
           </section>
         ) : PERIOD_TABS.includes(activeTab) ? (
           (() => {
