@@ -650,6 +650,37 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     info = pool_info(pool)
     universe = load_universe(pool)
     frames = load_price_frames(universe)
+    country = info["country"]
+    currency = info["currency"]
+
+    # ── 실시간 반영 (종목풀 화면과 같은 규칙) ──────────────────────────────
+    # 유니버스 전체의 종가 시리즈 끝에 실시간 현재가를 붙인다(공용
+    # build_effective_close_series). 이후의 '현재' 기준 계산 — 다음달 예상·예상
+    # 순위·현재 이격·이번달 수익률·고점 — 이 전부 장중 가격을 본다.
+    # 판정일 기준 계산은 as_of 필터가 오늘 행을 잘라내므로 영향이 없다.
+    realtime: dict[str, dict[str, Any]] = {}
+    try:
+        from services.price_service import get_realtime_snapshot
+
+        realtime = get_realtime_snapshot(country, [row["ticker"] for row in universe])
+    except Exception:
+        realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
+    if realtime:
+        from utils.rankings import build_effective_close_series
+
+        effective_frames: dict[str, pd.DataFrame] = {}
+        for frame_ticker, frame in frames.items():
+            entry = realtime.get(frame_ticker)
+            if not entry or frame is None or frame.empty:
+                effective_frames[frame_ticker] = frame
+                continue
+            cached_close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
+            eff_close = build_effective_close_series(cached_close, entry)
+            effective_frames[frame_ticker] = (
+                frame if eff_close is None else pd.DataFrame({"Close": eff_close})
+            )
+        frames = effective_frames
+
     benchmark_close = load_benchmark_close(pool)
     rebalance_date, signal_date = current_portfolio_dates(benchmark_close, info["country"])
     candidates = select_candidates(universe, frames, settings, as_of=signal_date)
@@ -694,7 +725,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     portfolio_month = (rebalance_date.to_period("M") + 1).strftime("%Y-%m")
 
-    # 다음 달 예상 — 오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 한 번 더 돌려,
+    # 다음 달 예상 — 오늘까지의 가격(실시간 반영 종가)으로 같은 규칙을 한 번 더 돌려,
     # 지금 교체한다면 뽑힐 종목을 표시한다. 실제 확정은 다음 판정일(월말 직전) 종가다.
     # 현재 기준 단기/장기 이격 — 표의 '현재-단기/장기' 컬럼용. 자격 필터와 무관하게
     # 행에 있는 종목은 전부 계산한다(단기 음수로 후보 탈락한 종목도 값은 보여준다).
@@ -751,26 +782,16 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     table_tickers = {item["ticker"] for item in selected + reserve}
     extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
 
-    # 참고용 가격 정보 — 현재가·일간(%)은 실시간 스냅샷(pools-rank 와 같은 소스),
-    # 실패 시 캐시 종가로 폴백. 월별 수익률은 pools-rank 와 같은 공용 계산
-    # (전월 말 종가 대비, 이번 달은 마지막 종가까지)을 최근 6개월치 쓴다.
+    # 참고용 가격 정보 — 현재가·일간(%)은 위에서 받은 실시간 스냅샷을 쓰고, 실패 시
+    # 캐시 종가로 폴백. 월별 수익률은 pools-rank 와 같은 공용 계산이며, frames 에
+    # 실시간이 반영돼 있어 이번 달 값은 장중 가격 기준이다.
     from utils.rankings import build_recent_monthly_return_metrics, get_recent_monthly_return_labels
 
     month_labels = get_recent_monthly_return_labels(6)
 
-    currency = info["currency"]
-    country = info["country"]
-
     row_tickers = [item["ticker"] for item in selected + reserve] + [
         item["ticker"] for item in extra_expected
     ]
-    realtime: dict[str, dict[str, Any]] = {}
-    try:
-        from services.price_service import get_realtime_snapshot
-
-        realtime = get_realtime_snapshot(country, row_tickers)
-    except Exception:
-        realtime = {}  # 실시간 실패는 캐시 폴백 — 화면이 값 없이 뜨는 것보단 어제 종가가 낫다.
 
     # 시가총액(억) — /kor-market-stock 과 같은 네이버 marketValue 소스(10분 캐시).
     market_caps: dict[str, int] = {}
@@ -794,7 +815,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
         # 고점 대비(%) — pools-rank 와 같은 규칙: 캐시 전 기간 최고가 대비 마지막 종가.
-        # 0 이면 신고점. 실시간가가 아닌 캐시 기준이라 두 화면 값이 일치한다.
+        # 0 이면 신고점. frames 에 실시간 현재가가 반영돼 있어 pools-rank 와 일치한다.
         high_drawdown_pct = None
         if not close.empty:
             max_price = float(close.max())

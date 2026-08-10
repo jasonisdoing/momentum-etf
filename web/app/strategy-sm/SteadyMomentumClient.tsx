@@ -543,7 +543,7 @@ export function SteadyMomentumClient() {
         headerName: "다음달",
         field: "next_month_expected",
         headerTooltip:
-          "오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 돌렸을 때의 다음달 예상 — 유지(보유 중·계속 편입) / 신규(새로 편입) / -(편출 예상). 확정은 월말 직전 판정일 종가",
+          "오늘까지의 가격(실시간 반영)으로 같은 규칙을 돌렸을 때의 다음달 예상 — 유지(보유 중·계속 편입) / 신규(새로 편입) / -(편출 예상). 확정은 월말 직전 판정일 종가",
         width: 64,
         // boolean 필드는 AG Grid 가 체크박스로 자동 렌더링하므로 텍스트로 강제한다.
         cellDataType: "text",
@@ -655,7 +655,7 @@ export function SteadyMomentumClient() {
         (label): ColDef<PickRow> => ({
           headerName: label.replace("(%)", ""),
           colId: label,
-          headerTooltip: "전월 말 종가 대비 수익률 (이번 달은 캐시 마지막 종가까지) — pools-rank 월별과 같은 계산",
+          headerTooltip: "전월 말 종가 대비 수익률 (이번 달은 실시간 현재가까지) — pools-rank 월별과 같은 계산",
           width: 92,
           type: "numericColumn",
           valueGetter: (p) => p.data?.monthly_returns?.[label] ?? null,
@@ -685,7 +685,7 @@ export function SteadyMomentumClient() {
       {
         headerName: "현재-단기",
         field: "current_short_pct",
-        headerTooltip: "오늘까지의 가격(캐시 최신 종가) 기준 단기 이격 — 다음달 예상 판정에 쓰이는 값",
+        headerTooltip: "오늘까지의 가격(실시간 반영) 기준 단기 이격 — 다음달 예상 판정에 쓰이는 값",
         width: 100,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
@@ -694,7 +694,7 @@ export function SteadyMomentumClient() {
       {
         headerName: "현재-장기",
         field: "current_long_pct",
-        headerTooltip: "오늘까지의 가격(캐시 최신 종가) 기준 장기 이격 — 다음달 예상 판정에 쓰이는 값",
+        headerTooltip: "오늘까지의 가격(실시간 반영) 기준 장기 이격 — 다음달 예상 판정에 쓰이는 값",
         width: 100,
         type: "numericColumn",
         valueFormatter: (p) => formatSigned(p.value, 1),
