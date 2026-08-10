@@ -37,6 +37,8 @@ function withSavedValue(options: number[], saved: string | undefined): number[] 
 
 type PickRow = {
   rank: number | null;
+  // 다음달 예상 순위 — 현재 가격 기준으로 같은 선정 규칙을 돌린 순위 (자격 미달은 null).
+  expected_rank: number | null;
   is_reserve: boolean;
   // 현재 표(선정+후보) 밖인데 다음 달 편입이 예상되는 종목 — 하단 별도 행.
   is_expected_only: boolean;
@@ -512,11 +514,19 @@ export function SteadyMomentumClient() {
       {
         headerName: "순위",
         field: "rank",
+        headerTooltip: "판정일 기준 순위 — 선정 1~N, 차순위 그 아래. 표 밖 예상 행은 판정일 후보 밖이라 없음",
         width: 52,
         type: "numericColumn",
-        // 표 밖 예상 행은 순위가 없다 — '예상' 으로 구분한다.
-        cellRenderer: (p: { value?: number | null; data?: PickRow }) =>
-          p.data?.is_expected_only ? <span style={{ color: "#2f9e44", fontWeight: 700 }}>예상</span> : (p.value ?? "-"),
+        valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
+      },
+      {
+        headerName: "예상",
+        field: "expected_rank",
+        headerTooltip:
+          "다음달 예상 순위 — 오늘까지의 가격으로 같은 선정 규칙을 돌린 순위 (편입 예상 1~N, 그 아래는 점수순). 자격 미달은 '-'",
+        width: 56,
+        type: "numericColumn",
+        valueFormatter: (p) => (p.value == null ? "-" : String(p.value)),
       },
       {
         headerName: "연속",

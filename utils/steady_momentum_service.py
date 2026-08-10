@@ -737,13 +737,16 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             "signal_long_pct": round(metrics["disparity_pct"], 1),
         }
 
-    current_top = select_top(
-        rank_candidates(select_candidates(universe, frames, settings, as_of=None)),
-        top_n,
-        max_per_industry,
-        industry_by_ticker,
-    )
+    current_scored = rank_candidates(select_candidates(universe, frames, settings, as_of=None))
+    current_top = select_top(current_scored, top_n, max_per_industry, industry_by_ticker)
     next_expected: set[str] = {item["ticker"] for item in current_top}
+    # 예상 순위 — 판정일 순위와 같은 규칙의 '현재 기준' 버전: 선정분 1~top_n,
+    # 그 아래는 점수순으로 이어 붙인다(상한 미적용). 자격 미달(후보 밖)은 없음(None).
+    expected_rank_by_ticker: dict[str, int] = {}
+    for expected_rank, item in enumerate(
+        [*current_top, *[c for c in current_scored if c["ticker"] not in next_expected]], start=1
+    ):
+        expected_rank_by_ticker[item["ticker"]] = expected_rank
     # 현재 표(선정+후보)에 없는 예상 종목 — 하단에 별도 행으로 붙인다.
     table_tickers = {item["ticker"] for item in selected + reserve}
     extra_expected = [item for item in current_top if item["ticker"] not in table_tickers]
@@ -832,6 +835,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         "rows": [
             {
                 "rank": rank,
+                "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
                 "is_reserve": rank > top_n,
                 "is_expected_only": False,
                 # 연속 편입은 선정분에만 의미가 있다 — 차순위는 표시하지 않는다(None → '-')
@@ -855,6 +859,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
             # (후보 필터 밖이었을 뿐 값 자체는 계산된다 — 단기 음수 등 탈락 사유가 그대로 보인다).
             {
                 "rank": None,
+                "expected_rank": expected_rank_by_ticker.get(item["ticker"]),
                 "is_reserve": True,
                 "is_expected_only": True,
                 "streak_months": None,
