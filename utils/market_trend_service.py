@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import logging
 import math
-import threading
 import time
 from datetime import datetime
 from typing import Any
@@ -30,6 +29,7 @@ from config import (
     TRADING_DAYS_PER_MONTH,
 )
 from utils.moving_averages import calculate_moving_average
+from utils.yfinance_guard import yfinance_lock
 
 logger = logging.getLogger(__name__)
 
@@ -75,17 +75,9 @@ def _fetch_naver_kor_index_close(symbol: str, count: int) -> pd.Series | None:
     return df["Close"]
 
 
-# yfinance 호출 직렬화 락.
-#
-# yfinance 는 프로세스 전역 상태를 공유해서 여러 스레드가 동시에 받으면 서로 결과를
-# 덮어쓴다. FastAPI 는 동기 엔드포인트를 스레드풀에서 돌리는데, 홈 화면이 지수 4개
-# 차트를 한꺼번에 요청하면 이 조건에 정확히 걸린다.
-# 실제로 '필라델피아 반도체' 카드에 나스닥 100 가격이 그려졌다(2026-08-04 확인).
-# 티커별 SuperTrend 설정은 제 것이 적용돼 가격만 남의 것이 되는 형태라 알아채기 어렵다.
-#
-# 락으로 한 번에 하나씩만 받게 한다. 그러면 4개가 순차 다운로드가 되어 느려지므로
+# yfinance 동시 호출 오염 방지는 공용 락(utils/yfinance_guard)을 쓴다.
+# 락으로 직렬화하면 홈의 지수 4개가 순차 다운로드가 되어 느려지므로,
 # 짧은 TTL 캐시를 함께 둔다 — 같은 화면의 뒤이은 요청은 캐시로 즉시 응답한다.
-_YF_LOCK = threading.Lock()
 _OHLC_CACHE: dict[str, tuple[float, pd.DataFrame]] = {}
 _OHLC_CACHE_TTL_SEC = 60.0
 
@@ -100,7 +92,7 @@ def _fetch_yf_intraday_last_close(yf_ticker: str) -> tuple[pd.Timestamp, float] 
     실패 시 None — 호출자는 보강 없이 기존 daily 시리즈를 그대로 사용한다.
     """
     try:
-        with _YF_LOCK:
+        with yfinance_lock():
             df = yf.Ticker(yf_ticker).history(period="1d", interval="1m")
     except Exception as exc:
         logger.warning("intraday 보강 호출 실패 (%s): %s", yf_ticker, exc)
@@ -585,7 +577,7 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
     # 다운로드와 캐시 조회를 같은 락 안에서 처리한다 — 동시에 들어온 다른 티커 요청이
     # yfinance 전역 상태를 건드려 남의 데이터를 받아오는 것을 막는다(_YF_LOCK 주석 참고).
     try:
-        with _YF_LOCK:
+        with yfinance_lock():
             cached = _OHLC_CACHE.get(yf_ticker)
             if cached is not None and time.monotonic() - cached[0] < _OHLC_CACHE_TTL_SEC:
                 return cached[1].copy()
@@ -618,7 +610,7 @@ def load_index_ohlc(yf_ticker: str) -> pd.DataFrame | None:
                 col_raw = col_raw.iloc[:, 0]
             cleaned_cols[col] = col_raw
     frame = pd.DataFrame(cleaned_cols).dropna()
-    with _YF_LOCK:
+    with yfinance_lock():
         _OHLC_CACHE[yf_ticker] = (time.monotonic(), frame)
     return frame.copy()
 
