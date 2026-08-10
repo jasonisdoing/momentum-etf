@@ -27,8 +27,6 @@ from typing import Any
 
 import pandas as pd
 
-from utils.sector_labels import industry_ko, sector_ko
-
 warnings.filterwarnings("ignore")
 
 # ── 상수 ──────────────────────────────────────────────────────────────────
@@ -515,48 +513,45 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
     return prior[-1]
 
 
-def sector_industry_map(pool: str) -> dict[str, dict[str, str]]:
-    """티커 → {sector, industry}. `/us-market-stock` 과 같은 지수 구성종목 파일을 쓴다.
+def industry_map(pool: str) -> dict[str, str]:
+    """티커 → 업종. 업종 상한(`max_per_industry`) 그룹핑과 화면 표시에 함께 쓴다.
 
-    한국 개별주 풀은 stock_meta 의 sector/industry 를 쓴다 — 배치 B(식별·상세)가
-    yfinance 로 수집한 값이라 미국 풀과 같은 분류 체계다. 아직 수집 전이거나
-    yfinance 에 분류가 없는 종목(코스닥 소형주 등)은 업종 상한이 적용되지 않는다.
+    한국 개별주는 네이버 분류(한국어 원본)를, 미국은 지수 구성종목의 yfinance 분류를 쓴다.
+    시장마다 체계가 다르지만 종목풀이 국가별로 나뉘어 있어 한 풀 안에서는 항상 한 체계다.
 
-    분류 값은 yfinance 에서 받아 파일에 저장된 것이다(`scripts/update_us_market_stocks.py`).
-    구성종목 목록만 위키피디아에서 오고, 섹터·업종은 두 지수가 한 체계를 쓰도록
-    yfinance 로 통일했다.
+    분류가 없는 종목은 맵에 넣지 않는다 — 업종 상한이 적용되지 않을 뿐,
+    임의 값으로 묶지 않는다.
 
-    구성종목 파일이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
-    빈 맵으로 두되, 파일이 없다는 사실 자체는 로그로 남긴다.
+    구성종목이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
+    빈 맵으로 두되, 없다는 사실 자체는 로그로 남긴다.
     """
     from utils.index_constituents_loader import load_index_constituents
+
+    result: dict[str, str] = {}
 
     if pool_info(pool)["country"] != "us":
         from utils.stock_list_io import _load_ticker_type_stocks_raw
 
-        result: dict[str, dict[str, str]] = {}
         for item in _load_ticker_type_stocks_raw(pool):
             ticker = str(item.get("ticker") or "").strip()
-            sector = str(item.get("sector") or "").strip()
             industry = str(item.get("industry") or "").strip()
-            if ticker and (sector or industry):
-                result[ticker] = {"sector": sector, "industry": industry or sector}
+            if ticker and industry:
+                result[ticker] = industry
         return result
 
-    result: dict[str, dict[str, str]] = {}
     for index_name in ("SP500", "NDX100"):
         try:
             constituents = load_index_constituents(index_name)
         except FileNotFoundError as error:
-            warnings.warn(f"{index_name} 구성종목 파일이 없어 섹터·업종을 채우지 못했습니다: {error}", stacklevel=2)
+            warnings.warn(f"{index_name} 구성종목이 없어 업종을 채우지 못했습니다: {error}", stacklevel=2)
             continue
         for item in constituents:
             ticker = str(item.get("ticker") or "").strip().upper()
-            if not ticker or ticker in result:
-                continue
-            sector = str(item.get("sector") or "")
-            result[ticker] = {"sector": sector, "industry": str(item.get("industry") or sector)}
+            industry = str(item.get("industry") or "").strip()
+            if ticker and industry and ticker not in result:
+                result[ticker] = industry
     return result
+
 
 
 def available_backtest_months(benchmark_close: pd.Series, long_ma_days: int) -> int:
@@ -662,8 +657,8 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
 
     top_n = int(settings["top_n"])
     max_per_industry = int(settings["max_per_industry"])
-    sector_map = sector_industry_map(pool)
-    industry_by_ticker = {ticker: meta["industry"] for ticker, meta in sector_map.items()}
+    industry_map_by_ticker = industry_map(pool)
+    industry_by_ticker = industry_map_by_ticker
 
     selected = select_top(scored, top_n, max_per_industry, industry_by_ticker)
     # 차순위 후보 — 선정에 못 든 종목 중 점수 상위 N개 (화면에서 흐리게 붙여 보여준다).
@@ -845,9 +840,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "market": item.get("market", ""),
-                # 한국 풀 표시용 한글 번역 — 그룹핑 키(sector_map)는 영문 원본 그대로다.
-                "sector": sector_ko(sector_map.get(item["ticker"], {}).get("sector", "")),
-                "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
+                "industry": industry_map_by_ticker.get(item["ticker"], ""),
                 "currency": currency,
                 **price_info(item["ticker"]),
                 "signal_short_pct": round(item["short_disparity_pct"], 1),
@@ -869,8 +862,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "ticker": item["ticker"],
                 "name": item["name"],
                 "market": item.get("market", ""),
-                "sector": sector_ko(sector_map.get(item["ticker"], {}).get("sector", "")),
-                "industry": industry_ko(sector_map.get(item["ticker"], {}).get("industry", "")),
+                "industry": industry_map_by_ticker.get(item["ticker"], ""),
                 "currency": currency,
                 **price_info(item["ticker"]),
                 # 판정일 기준 이격 — 후보 밖이었어도 같은 이평선으로 재계산해 보여준다.

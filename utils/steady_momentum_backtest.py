@@ -31,6 +31,7 @@ from utils.pool_signal_backtest_service import get_max_backtest_months
 from utils.steady_momentum_service import (
     available_backtest_months,
     benchmark_info,
+    industry_map,
     load_benchmark_close,
     load_price_frames,
     load_settings,
@@ -38,7 +39,6 @@ from utils.steady_momentum_service import (
     month_last_two_trading_days,
     pool_info,
     rank_candidates,
-    sector_industry_map,
     select_candidates,
     select_top,
     validate_settings,
@@ -193,9 +193,7 @@ def run_backtest(
         return below.index[0] if not below.empty else None
     # 업종 상한 — 선정 화면과 같은 규칙으로 상위 종목을 고른다.
     max_per_industry = int(settings["max_per_industry"])
-    industry_by_ticker = {
-        ticker: meta["industry"] for ticker, meta in sector_industry_map(pool).items()
-    }
+    industry_by_ticker = industry_map(pool)
 
     # 일간 표용 — 보유 구간 안에서 매일의 동일가중 포트폴리오 수익률.
     # 종가는 한 번만 정제해 재사용한다(구간마다 다시 정제하면 느리다).
