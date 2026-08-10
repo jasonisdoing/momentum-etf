@@ -1300,28 +1300,18 @@ def update_single_stock_metadata(
             except Exception as e:
                 logger.warning(f"[{account_norm.upper()}/{ticker}] 마켓 정보 조회 실패: {e}")
 
-        # 4. 섹터·업종 — 국내 개별주만, yfinance 로 1회 수집(미국 풀과 같은 분류 체계).
+        # 4. 업종 — 국내 개별주는 네이버에서 받는다(한국어 원본, 번역 불필요).
+        # yfinance 는 국내 종목 셋 중 하나에 분류가 없어서 그만큼 업종 상한에서 빠졌다.
         # 값이 이미 있으면 건너뛴다 — 최초 1회만 무겁고 이후엔 신규 종목만 조회한다.
-        # 코스닥 소형·신규상장은 yfinance 에 분류가 없을 수 있다(빈 값 그대로 = 업종 상한 미적용).
-        if not stock.get("is_etf") and (not stock.get("sector") or not stock.get("industry")):
-            yf_kor_symbol = f"{ticker}.KQ" if str(stock.get("market") or "").upper() == "KOSDAQ" else f"{ticker}.KS"
-            try:
-                kor_t = (
-                    yf.Ticker(yf_kor_symbol, session=_YF_SESSION)
-                    if _YF_SESSION is not None
-                    else yf.Ticker(yf_kor_symbol)
-                )
-                kor_info = kor_t.info
-                sector = str(kor_info.get("sector") or "").strip()
-                industry = str(kor_info.get("industry") or "").strip()
-                if sector:
-                    stock["sector"] = sector
-                if industry:
-                    stock["industry"] = industry
-                if sector and account_norm:
-                    logger.debug(f"[{account_norm.upper()}/{ticker}] 섹터·업종 획득: {sector} / {industry}")
-            except Exception as e:
-                logger.warning(f"[{account_norm.upper()}/{ticker}] 섹터·업종 조회 실패: {e}")
+        # 빈 문자열은 '미설정'이라 그대로 둔다(임의 값으로 메우면 업종 상한이 엉뚱하게 묶인다).
+        if not stock.get("is_etf") and not stock.get("industry"):
+            from services.naver_industry_service import fetch_industry
+
+            industry = fetch_industry(ticker)
+            if industry:
+                stock["industry"] = industry
+                if account_norm:
+                    logger.debug(f"[{account_norm.upper()}/{ticker}] 업종 획득: {industry}")
 
     elif country_code in ("us", "au"):
         # 호주 풀은 ETF 전용. 미국은 종목 자체 속성(yfinance quoteType)으로 판정한다 — 아래 .info 블록에서 설정.

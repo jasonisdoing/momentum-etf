@@ -46,7 +46,6 @@ type PickRow = {
   name: string;
   // 종목의 소속 마켓(KOSPI/KOSDAQ) — 한국 통합 풀 구분 표시용, 없으면 빈 값.
   market: string;
-  sector: string;
   industry: string;
   currency: string;
   price: number | null;
@@ -495,18 +494,18 @@ export function SteadyMomentumClient() {
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
   const picksCountry = view?.picks?.country ?? "";
-  // 섹터·업종 UI 노출 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위:
+  // 업종 UI 노출 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위:
   // 개별주(stock)면 표시, ETF 면 숨김. 미설정(구 문서)이면 선정 행에 값이 있는지로
   // 추정한다(pools-rank 와 같은 패턴). 업종을 모르는 종목엔 상한이 원래 미적용이라
   // 숨겨도 동작은 그대로다.
   const poolKind = view?.pool_options?.find((option) => option.ticker_type === view?.settings.pool)?.pool_kind ?? "";
-  const hasSectorData =
+  const hasIndustryData =
     poolKind === "stock"
       ? true
       : poolKind === "etf"
         ? false
         : view?.picks
-          ? view.picks.rows.some((row) => row.sector || row.industry)
+          ? view.picks.rows.some((row) => row.industry)
           : true;
   const pickColumns = useMemo<ColDef<PickRow>[]>(() => {
     return [
@@ -589,26 +588,15 @@ export function SteadyMomentumClient() {
           </span>
         ),
       },
-      // 섹터·업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
-      ...(hasSectorData
+      // 업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
+      ...(hasIndustryData
         ? [
-            {
-              headerName: "섹터",
-              field: "sector",
-              headerTooltip: "지수 구성종목 메타",
-              // yfinance 값 최장 22자. 좁은 화면에서는 줄어들고 말줄임 처리된다.
-              width: 96,
-              minWidth: 84,
-              cellClass: "appTextEllipsisCell",
-              tooltipValueGetter: (p) => p.value || undefined,
-              valueFormatter: (p) => p.value || "-",
-            } as ColDef<PickRow>,
             {
               headerName: "업종",
               field: "industry",
               headerTooltip: "지수 구성종목 메타",
-              // 실제로 쓰이는 값은 `Software - Infrastructure`(25자) 정도까지다.
-              // 최장 40자짜리는 드물어 말줄임에 맡기고, 폭은 섹터와 비슷하게 잡는다.
+              // 한국은 네이버 분류(`섬유,의류,신발,호화품` 처럼 긴 값 있음),
+              // 미국은 yfinance 영문(`Software - Infrastructure` 25자 정도).
               width: 130,
               minWidth: 100,
               cellClass: "appTextEllipsisCell",
@@ -699,8 +687,8 @@ export function SteadyMomentumClient() {
         cellStyle: (p) => ({ color: signColor(p.value) }),
       },
     ];
-    // 월별 라벨·국가·섹터 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
-  }, [hasSectorData, monthlyLabels, picksCountry]);
+    // 월별 라벨·국가·업종 유무가 선정 응답에 실려 온다 — 바뀌면(월 전환·풀 전환) 컬럼도 다시 만든다.
+  }, [hasIndustryData, monthlyLabels, picksCountry]);
 
   const backtestColumns = useMemo<ColDef<BacktestMonthRow>[]>(() => {
     if (!backtest) return [];
@@ -939,7 +927,7 @@ export function SteadyMomentumClient() {
                   </select>
                 </label>
                 {/* 업종 데이터가 없는 풀(ETF 모음 등)은 상한이 무의미하므로 셀렉트를 숨긴다 (저장값은 유지). */}
-                {hasSectorData ? (
+                {hasIndustryData ? (
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">업종별 최대 보유</span>
                     <select

@@ -626,13 +626,13 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   );
 
 
-  // 섹터·업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
+  // 업종 컬럼 노출 여부 — 종목풀 설정의 풀 성격(pool_kind) 토글이 1순위
   // (개별주=표시, ETF=숨김), 미설정 풀은 행 값 유무로 추정 (strategy-sm 과 같은 기준).
-  const hasSectorData = useMemo(() => {
+  const hasIndustryData = useMemo(() => {
     const poolKind = String(selectedTickerTypeItem?.pool_kind ?? "");
     if (poolKind === "stock") return true;
     if (poolKind === "etf") return false;
-    return displayGridRows.some((row) => String(row.섹터 ?? "").trim() !== "");
+    return displayGridRows.some((row) => String(row.업종 ?? "").trim() !== "");
   }, [displayGridRows, selectedTickerTypeItem?.pool_kind]);
 
   const columns = useMemo<ColDef<RankGridRow>[]>(() => {
@@ -973,22 +973,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         },
       },
       {
-        field: "섹터",
-        headerName: "섹터",
-        // 섹터 데이터가 있는 풀(한국 개별주)에서만 노출 — ETF 풀은 값이 없어 숨긴다.
-        hide: !hasSectorData,
-        minWidth: 96,
-        width: 104,
-        headerTooltip: "yfinance 분류의 한글 표기 (배치 B 수집)",
-        cellRenderer: (params: { value?: string }) => params.value || "-",
-      },
-      {
         field: "업종",
         headerName: "업종",
-        hide: !hasSectorData,
+        hide: !hasIndustryData,
         minWidth: 120,
         width: 140,
-        headerTooltip: "yfinance 분류의 한글 표기 (배치 B 수집)",
+        headerTooltip: "한국은 네이버 분류, 미국·호주는 yfinance 분류",
         cellRenderer: (params: { value?: string }) => params.value || "-",
       },
       {
@@ -1228,7 +1218,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
   }, [
     addingRow,
     dirtyCellKeys,
-    hasSectorData,
+    hasIndustryData,
     maRule,
     metricMode,
     monthlyReturnLabels,
