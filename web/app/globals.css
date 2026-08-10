@@ -2468,7 +2468,9 @@ a {
 
 .compareChart {
   width: 100%;
-  min-height: 280px;
+  /* 성과 분석 탭에서는 부모(flex column)가 남긴 높이를 전부 차지한다 — 뷰포트에 맞춰 늘고 준다. */
+  flex: 1 1 auto;
+  min-height: 200px;
 }
 
 .compareMetricsTableWrap,
@@ -2691,6 +2693,9 @@ a {
   flex-direction: column;
   justify-content: center;
   gap: 2px;
+  /* 소르티노·샤프 등 지표 행의 높이를 줄인다 — 라벨(제목+기간 힌트 2줄)의 세로 패딩이 행 높이를 키우던 원인.
+     MDD 행은 값 셀의 기간 2줄이 높이를 정하므로 이 축소와 무관하게 조금 더 높게 유지된다. */
+  padding-block: 0.3rem;
 }
 
 .compareMetricsGroupLabel.compareMetricsGroupLabelSingle {
@@ -2810,6 +2815,22 @@ a {
   overflow-y: auto;
 }
 
+/* 성과 분석 — 세로 스크롤이 생기지 않게 차트 행이 뷰포트의 남은 높이를 흡수한다.
+   지표 행들은 내용 높이(min-content)를 유지하고, 첫 행(차트)만 1fr 로 남은 공간을 채운다.
+   뷰포트가 아주 낮으면 차트가 최소 높이(200px)까지만 줄어든다. */
+.compareMatrixPerformance {
+  flex: 1 1 auto;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr);
+  grid-auto-rows: min-content;
+}
+
+.compareMatrixPerformance > .compareMatrixWide {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
 /* 월간 분석 라벨 — "202607"(왼쪽) + 동일가중 평균(오른쪽)을 한 줄에 양쪽 정렬로 둔다.
    글자 크기는 값 셀(.compareMetricCell)과 같게 두어 행 간 크기가 튀지 않게 한다. */
 .compareMonthlyLabelRow {
@@ -2861,6 +2882,8 @@ a {
   font-size: var(--fs-sm);
   font-weight: 600;
   white-space: nowrap;
+  /* MDD 기간이 두 줄일 때 값과 같은 오른쪽 선에 맞춘다. */
+  text-align: right;
 }
 
 .compareProductCard,
