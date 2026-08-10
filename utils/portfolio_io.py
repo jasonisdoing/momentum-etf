@@ -823,6 +823,11 @@ def save_daily_snapshot(
         return False
 
     snapshot_date = _resolve_snapshot_date()
+    # 소급 갱신 여부 — 주말·휴일 실행은 직전 거래일 행을 갱신한다(자산은 미국·호주 장
+    # 새벽 반영을 위해 소급이 맞다). 그러나 **원금은 달력일 귀속**이라 소급하면 안 된다:
+    # 주말에 옮긴 원금이 금요일 행에 스며들면 다음 거래일의 입출금 차감(Δ원금)이 0이 되어
+    # 이동액이 금일 손익으로 잡힌다. 소급 갱신에서는 기존 원금 값을 보존한다.
+    is_backfill = snapshot_date < _now_kst().strftime("%Y-%m-%d")
 
     try:
         # Find existing snapshot for today
@@ -841,7 +846,8 @@ def save_daily_snapshot(
 
         if account_id == "TOTAL":
             doc["total_assets"] = _round_snapshot_money(total_assets)
-            doc["total_principal"] = _round_snapshot_money(total_principal)
+            if not (is_backfill and doc.get("total_principal")):
+                doc["total_principal"] = _round_snapshot_money(total_principal)
             doc["cash_balance"] = _round_snapshot_money(cash_balance)
             doc["valuation_krw"] = _round_snapshot_money(valuation_krw)
             if purchase_amount is not None:
@@ -853,7 +859,8 @@ def save_daily_snapshot(
             for acc in accounts:
                 if acc["account_id"] == account_id:
                     acc["total_assets"] = _round_snapshot_money(total_assets)
-                    acc["total_principal"] = _round_snapshot_money(total_principal)
+                    if not (is_backfill and acc.get("total_principal")):
+                        acc["total_principal"] = _round_snapshot_money(total_principal)
                     acc["cash_balance"] = _round_snapshot_money(cash_balance)
                     acc["valuation_krw"] = _round_snapshot_money(valuation_krw)
                     if purchase_amount is not None:
