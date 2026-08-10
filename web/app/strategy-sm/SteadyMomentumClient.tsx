@@ -512,7 +512,7 @@ export function SteadyMomentumClient() {
       {
         headerName: "순위",
         field: "rank",
-        width: 60,
+        width: 52,
         type: "numericColumn",
         // 표 밖 예상 행은 순위가 없다 — '예상' 으로 구분한다.
         cellRenderer: (p: { value?: number | null; data?: PickRow }) =>
@@ -522,7 +522,7 @@ export function SteadyMomentumClient() {
         headerName: "연속",
         field: "streak_months",
         headerTooltip: "이번 포트폴리오까지 몇 달 연속 편입됐는지 (신규 = 이번 달 첫 편입, 최대 12개월 추적)",
-        width: 68,
+        width: 60,
         valueFormatter: (p) =>
           p.value == null ? "-" : p.value <= 1 ? "신규" : p.value >= 12 ? "12+" : `${p.value}개월`,
         cellStyle: (p) => ({
@@ -534,7 +534,7 @@ export function SteadyMomentumClient() {
         field: "next_month_expected",
         headerTooltip:
           "오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 돌렸을 때 편입·유지가 예상되는 종목 — 확정은 월말 직전 판정일 종가",
-        width: 72,
+        width: 64,
         // boolean 필드는 AG Grid 가 체크박스로 자동 렌더링하므로 텍스트로 강제한다.
         cellDataType: "text",
         cellRenderer: (p: { value?: boolean }) =>
@@ -595,10 +595,10 @@ export function SteadyMomentumClient() {
               headerName: "업종",
               field: "industry",
               headerTooltip: "지수 구성종목 메타",
-              // 한국은 네이버 분류(`섬유,의류,신발,호화품` 처럼 긴 값 있음),
-              // 미국은 yfinance 영문(`Software - Infrastructure` 25자 정도).
-              width: 130,
-              minWidth: 100,
+              // 한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
+              // 40자짜리(`Drug Manufacturers - Specialty & Generic`)는 드물어 말줄임에 맡긴다.
+              width: 200,
+              minWidth: 150,
               cellClass: "appTextEllipsisCell",
               tooltipValueGetter: (p) => p.value || undefined,
               valueFormatter: (p) => p.value || "-",

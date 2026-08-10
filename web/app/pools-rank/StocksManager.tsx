@@ -976,8 +976,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         field: "업종",
         headerName: "업종",
         hide: !hasIndustryData,
-        minWidth: 120,
-        width: 140,
+        // 한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
+        // 40자짜리(`Drug Manufacturers - Specialty & Generic`)는 드물어 말줄임에 맡긴다.
+        minWidth: 150,
+        width: 200,
         headerTooltip: "한국은 네이버 분류, 미국·호주는 yfinance 분류",
         cellRenderer: (params: { value?: string }) => params.value || "-",
       },
