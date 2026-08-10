@@ -928,11 +928,25 @@ export function ComparePageClient() {
     return map;
   }, [tickerItems]);
 
-  /** is_etf === true 인 ETF 만 검색 대상. (국내상장 국내/해외 ETF) */
-  const searchableItems = useMemo(
-    () => tickerItems.filter((item) => item.is_etf === true),
-    [tickerItems],
+  // ETF 와 개별주 모두 검색 대상 — 개별주는 기본 정보·구성 종목 탭이 숨겨진다.
+  const searchableItems = tickerItems;
+
+  // 첫 번째 선택 종목이 개별주면 ETF 전용 탭(기본 정보·구성 종목)을 숨긴다 —
+  // 개별주에는 보수·구성종목 개념이 없어 빈 탭만 남기 때문이다.
+  const firstItemIsStock = useMemo(() => {
+    const firstKey = selectedKeys[0];
+    if (!firstKey) return false;
+    const item = itemByKey.get(firstKey);
+    return item != null && item.is_etf !== true;
+  }, [selectedKeys, itemByKey]);
+  const visibleTabs = useMemo(
+    () => (firstItemIsStock ? COMPARE_TABS.filter((tab) => tab.key !== "basic" && tab.key !== "holdings") : COMPARE_TABS),
+    [firstItemIsStock],
   );
+  // 숨겨진 탭을 보고 있던 상태라면 성과 분석으로 되돌린다.
+  useEffect(() => {
+    if (!visibleTabs.some((tab) => tab.key === activeTab)) setActiveTab("performance");
+  }, [visibleTabs, activeTab]);
 
   // 마지막으로 로드한 조합 + 범위("종목키::full|price"). 탭 전환 시 중복 요청을 막는다.
   const loadedSignatureRef = useRef<string | null>(null);
@@ -1439,7 +1453,7 @@ export function ComparePageClient() {
   );
 
   return (
-    <PageFrame title="ETF 비교" fullHeight fullWidth titleRight={titleRight}>
+    <PageFrame title="종목 비교" fullHeight fullWidth titleRight={titleRight}>
       <div className="appPageStack appPageStackFill comparePage">
         {error ? <div className="alert alert-danger mb-0">{error}</div> : null}
 
@@ -1505,7 +1519,7 @@ export function ComparePageClient() {
                     <label className="appLabeledField" style={{ minWidth: 0, width: "auto" }}>
                       <span className="appLabeledFieldLabel">탭</span>
                       <div className="compareHeaderTabs appSegmentedToggle" role="group" aria-label="비교 보기 선택">
-                        {COMPARE_TABS.map((tab) => (
+                        {visibleTabs.map((tab) => (
                           <button
                             key={tab.key}
                             type="button"
