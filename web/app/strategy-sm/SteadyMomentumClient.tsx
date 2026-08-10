@@ -533,12 +533,16 @@ export function SteadyMomentumClient() {
         headerName: "다음달",
         field: "next_month_expected",
         headerTooltip:
-          "오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 돌렸을 때 편입·유지가 예상되는 종목 — 확정은 월말 직전 판정일 종가",
+          "오늘까지의 가격(캐시 최신 종가)으로 같은 규칙을 돌렸을 때의 다음달 예상 — 유지(보유 중·계속 편입) / 신규(새로 편입) / -(편출 예상). 확정은 월말 직전 판정일 종가",
         width: 64,
         // boolean 필드는 AG Grid 가 체크박스로 자동 렌더링하므로 텍스트로 강제한다.
         cellDataType: "text",
-        cellRenderer: (p: { value?: boolean }) =>
-          p.value ? <span style={{ color: "#2f9e44", fontWeight: 700 }}>예상</span> : <span style={{ color: "var(--text-muted)" }}>-</span>,
+        cellRenderer: (p: { value?: boolean; data?: PickRow }) => {
+          if (!p.value) return <span style={{ color: "var(--text-muted)" }}>-</span>;
+          // 이번 달 보유(선정분)면 계속 편입 예상 = 유지, 차순위·표 밖 예상 행은 새로 편입 예상 = 신규.
+          const label = p.data && !p.data.is_reserve && !p.data.is_expected_only ? "유지" : "신규";
+          return <span style={{ color: "#2f9e44", fontWeight: 700 }}>{label}</span>;
+        },
       },
       {
         headerName: "고점",
