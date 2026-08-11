@@ -8,8 +8,8 @@ SLACK_CHANNEL = "C0A0X2LTS3X"
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"
 
-# 고점 대비(%) 기준 창(개월) — 모든 '고점'은 최근 이 기간의 최고가 대비로 계산한다.
-HIGH_WATERMARK_MONTHS = 12
+# 지표 기준 창(개월) — 고점 대비(%)·MDD·소르티노 등 화면 지표는 최근 이 기간을 기준으로 계산한다.
+METRIC_WINDOW_MONTHS = 12
 
 # 전략 이동평균 종류 — 추세선·이격도·순위 계산에 쓰는 이동평균. "SMA"(단순) 또는 "EMA"(지수).
 # 이 값 하나로 시스템 전체의 이동평균 계산·표시 문구가 바뀐다

@@ -41,7 +41,7 @@ TOP_N_OPTIONS = (5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100)
 # 표를 짧게 유지한다. 표 밖 '다음달 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
-from config import HIGH_WATERMARK_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
+from config import METRIC_WINDOW_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
@@ -804,11 +804,11 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "monthly_returns": {label: None for label in month_labels},
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-        # 고점 대비(%) — pools-rank 와 같은 규칙: 최근 HIGH_WATERMARK_MONTHS(12개월) 최고가 대비 마지막 종가.
+        # 고점 대비(%) — pools-rank 와 같은 규칙: 최근 METRIC_WINDOW_MONTHS(12개월) 최고가 대비 마지막 종가.
         # 0 이면 신고점. frames 에 실시간 현재가가 반영돼 있어 pools-rank 와 일치한다.
         high_drawdown_pct = None
         if not close.empty:
-            high_window = close.loc[close.index[-1] - pd.DateOffset(months=HIGH_WATERMARK_MONTHS) :]
+            high_window = close.loc[close.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
             max_price = float(high_window.max()) if not high_window.empty else 0.0
             if max_price > 0:
                 high_drawdown_pct = round((float(close.iloc[-1]) / max_price - 1.0) * 100.0, 2)

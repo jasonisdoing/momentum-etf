@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from bson import ObjectId
 
-from config import HIGH_WATERMARK_MONTHS
+from config import METRIC_WINDOW_MONTHS
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.asx_ticker import ensure_asx_prefix
 from utils.db_manager import get_db_connection
@@ -403,8 +403,8 @@ def load_real_holdings_table(
             if prev_close > 0:
                 daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-        # 고점 대비(%) — 순위 화면과 같은 규칙: 최근 HIGH_WATERMARK_MONTHS(12개월) 최고가 대비.
-        high_window = close_series.loc[close_series.index[-1] - pd.DateOffset(months=HIGH_WATERMARK_MONTHS) :]
+        # 고점 대비(%) — 순위 화면과 같은 규칙: 최근 METRIC_WINDOW_MONTHS(12개월) 최고가 대비.
+        high_window = close_series.loc[close_series.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
         max_price = float(high_window.max()) if not high_window.empty else 0.0
         drawdown = None
         if max_price > 0:
