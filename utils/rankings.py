@@ -10,6 +10,7 @@ import pandas as pd
 
 from config import (
     BUCKET_MAPPING,
+    HIGH_WATERMARK_MONTHS,
     MARKET_SCHEDULES,
     TRADING_DAYS_PER_MONTH,
 )
@@ -347,7 +348,9 @@ def _extract_price_metrics_from_close_series(
         if prev_close > 0:
             daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-    max_price = float(series.max()) if not series.empty else 0.0
+    # 고점 대비(%) — 캐시 전 기간이 아니라 최근 HIGH_WATERMARK_MONTHS(12개월) 창의 최고가 대비.
+    high_window = series.loc[series.index[-1] - pd.DateOffset(months=HIGH_WATERMARK_MONTHS) :]
+    max_price = float(high_window.max()) if not high_window.empty else 0.0
     drawdown = None
     if max_price > 0:
         drawdown = (current_price / max_price - 1.0) * 100.0

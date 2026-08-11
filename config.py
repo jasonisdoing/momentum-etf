@@ -3,9 +3,13 @@
 import json
 from pathlib import Path
 
+SLACK_CHANNEL = "C0A0X2LTS3X"
+
 # python scripts/update_market_calendars.py CACHE_START_DATE 변경시 실행
 CACHE_START_DATE = "2018-12-31"
-SLACK_CHANNEL = "C0A0X2LTS3X"
+
+# 고점 대비(%) 기준 창(개월) — 모든 '고점'은 최근 이 기간의 최고가 대비로 계산한다.
+HIGH_WATERMARK_MONTHS = 12
 
 # 전략 이동평균 종류 — 추세선·이격도·순위 계산에 쓰는 이동평균. "SMA"(단순) 또는 "EMA"(지수).
 # 이 값 하나로 시스템 전체의 이동평균 계산·표시 문구가 바뀐다
@@ -172,11 +176,11 @@ MARKET_TREND_SUPERTREND_PERIOD = 10
 # yf_ticker: ^KS11=코스피, ^KQ11=코스닥, ^DJI=다우존스, ^GSPC=S&P500,
 #            ^NDX=나스닥100, ^SOX=필라델피아 반도체, NQ=F=나스닥100 선물.
 MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
-    "^KS11": 1.5,    # 코스피 (빠른 대응이 필요)
-    "^KQ11": 1.5,    # 코스닥 (빠른 대응이 필요)
-    "^DJI": 3.0,     # 다우존스
-    "^GSPC": 3.0,    # S&P500
-    "^NDX": 3.0,     # 나스닥100
-    "^SOX": 1.5,     # 필라델피아 반도체 (빠른 대응이 필요)
-    "NQ=F": 3.0,     # 나스닥100 선물
+    "^KS11": 1.5,  # 코스피 (빠른 대응이 필요)
+    "^KQ11": 1.5,  # 코스닥 (빠른 대응이 필요)
+    "^DJI": 3.0,  # 다우존스
+    "^GSPC": 3.0,  # S&P500
+    "^NDX": 3.0,  # 나스닥100
+    "^SOX": 1.5,  # 필라델피아 반도체 (빠른 대응이 필요)
+    "NQ=F": 3.0,  # 나스닥100 선물
 }

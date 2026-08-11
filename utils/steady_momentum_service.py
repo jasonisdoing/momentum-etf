@@ -41,7 +41,7 @@ TOP_N_OPTIONS = (5, 6, 7, 8, 9, 10, 12, 15, 20, 30, 50, 100)
 # 표를 짧게 유지한다. 표 밖 '다음달 예상' 종목은 하단에 별도 행으로 붙는다.
 RESERVE_MULTIPLIER = 1
 # 월↔거래일 환산 — 공용 상수(config, =20)를 재사용한다 (자산헬퍼·시장추세와 동일 기준).
-from config import TRADING_DAYS_PER_MONTH  # noqa: E402
+from config import HIGH_WATERMARK_MONTHS, TRADING_DAYS_PER_MONTH  # noqa: E402
 
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "steady_momentum_settings"
@@ -222,8 +222,7 @@ def _load_settings_doc() -> dict[str, Any]:
     stored = doc.get("settings")
     if not isinstance(stored, dict):
         raise RuntimeError(
-            f"저장된 Steady Momentum 설정이 없습니다 "
-            f"({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
+            f"저장된 Steady Momentum 설정이 없습니다 ({_CONFIG_COLLECTION}.{_SETTINGS_KEY} 문서를 먼저 저장하세요)."
         )
 
     if isinstance(stored.get("settings_by_pool"), dict) and isinstance(stored.get("pool"), str):
@@ -275,9 +274,7 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     장기 이평선이 정하므로 여기서 실제 데이터로 한 번 더 막는다.
     """
     normalized = validate_settings(settings)
-    limit = available_backtest_months(
-        load_benchmark_close(normalized["pool"]), int(normalized["long_ma_days"])
-    )
+    limit = available_backtest_months(load_benchmark_close(normalized["pool"]), int(normalized["long_ma_days"]))
     if normalized["backtest_months"] > limit:
         raise ValueError(
             f"장기 이평선 기준으로 이 종목풀은 백테스트 최대 {limit}개월입니다 "
@@ -554,7 +551,6 @@ def industry_map(pool: str) -> dict[str, str]:
     return result
 
 
-
 def available_backtest_months(benchmark_close: pd.Series, long_ma_days: int) -> int:
     """이 종목풀에서 실제로 돌릴 수 있는 최대 개월 수.
 
@@ -586,9 +582,7 @@ def completed_month_ends(benchmark_close: pd.Series) -> list[pd.Timestamp]:
     return [stamp for period, stamp in month_ends.items() if period < today_period]
 
 
-def month_last_two_trading_days(
-    country: str, period: pd.Period
-) -> tuple[pd.Timestamp, pd.Timestamp] | None:
+def month_last_two_trading_days(country: str, period: pd.Period) -> tuple[pd.Timestamp, pd.Timestamp] | None:
     """해당 월의 (마지막 거래일 L, 그 직전 거래일 L−1) — 거래일 캘린더 기준.
 
     캘린더가 그 달을 커버하지 않거나 거래일이 2일 미만이면 None.
@@ -608,9 +602,7 @@ def month_last_two_trading_days(
     return days[-1].normalize(), days[-2].normalize()
 
 
-def current_portfolio_dates(
-    benchmark_close: pd.Series, country: str
-) -> tuple[pd.Timestamp, pd.Timestamp]:
+def current_portfolio_dates(benchmark_close: pd.Series, country: str) -> tuple[pd.Timestamp, pd.Timestamp]:
     """현재 보여줄 포트폴리오의 (교체일 L, 판정일 L−1) — 거래일 캘린더 기준.
 
     판정일(L−1) 종가가 확정된 다음날(달력)부터 다음 달 포트폴리오를 보여준다:
@@ -677,9 +669,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 continue
             cached_close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
             eff_close = build_effective_close_series(cached_close, entry)
-            effective_frames[frame_ticker] = (
-                frame if eff_close is None else pd.DataFrame({"Close": eff_close})
-            )
+            effective_frames[frame_ticker] = frame if eff_close is None else pd.DataFrame({"Close": eff_close})
         frames = effective_frames
 
     benchmark_close = load_benchmark_close(pool)
@@ -702,9 +692,9 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     # 연속 편입 개월 — 직전 최대 11개월의 판정일마다 같은 규칙으로 선정을 재계산해,
     # 현재 종목이 연속으로 상위 N 에 들어 있던 횟수(+이번 달)를 센다. 끊기면 중단.
     streak_lookback = 11
-    prior_rebalances = [
-        stamp for stamp in completed_month_ends(benchmark_close) if stamp < rebalance_date
-    ][-streak_lookback:]
+    prior_rebalances = [stamp for stamp in completed_month_ends(benchmark_close) if stamp < rebalance_date][
+        -streak_lookback:
+    ]
     streaks = {item["ticker"]: 1 for item in selected}
     alive = set(streaks)
     for prior_rebalance in reversed(prior_rebalances):
@@ -714,9 +704,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
         prior_candidates = select_candidates(universe, frames, settings, as_of=prior_signal)
         prior_top = {
             item["ticker"]
-            for item in select_top(
-                rank_candidates(prior_candidates), top_n, max_per_industry, industry_by_ticker
-            )
+            for item in select_top(rank_candidates(prior_candidates), top_n, max_per_industry, industry_by_ticker)
         }
         for ticker in list(alive):
             if ticker in prior_top:
@@ -793,9 +781,7 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
     month_count = 1 + max(1, int(settings["long_ma_days"]) // TRADING_DAYS_PER_MONTH)
     month_labels = get_recent_monthly_return_labels(month_count)
 
-    row_tickers = [item["ticker"] for item in selected + reserve] + [
-        item["ticker"] for item in extra_expected
-    ]
+    row_tickers = [item["ticker"] for item in selected + reserve] + [item["ticker"] for item in extra_expected]
 
     # 시가총액(억) — /kor-market-stock 과 같은 네이버 marketValue 소스(10분 캐시).
     market_caps: dict[str, int] = {}
@@ -818,18 +804,21 @@ def compute_picks(settings: dict[str, Any] | None = None) -> dict[str, Any]:
                 "monthly_returns": {label: None for label in month_labels},
             }
         close = pd.to_numeric(frame["Close"], errors="coerce").dropna()
-        # 고점 대비(%) — pools-rank 와 같은 규칙: 캐시 전 기간 최고가 대비 마지막 종가.
+        # 고점 대비(%) — pools-rank 와 같은 규칙: 최근 HIGH_WATERMARK_MONTHS(12개월) 최고가 대비 마지막 종가.
         # 0 이면 신고점. frames 에 실시간 현재가가 반영돼 있어 pools-rank 와 일치한다.
         high_drawdown_pct = None
         if not close.empty:
-            max_price = float(close.max())
+            high_window = close.loc[close.index[-1] - pd.DateOffset(months=HIGH_WATERMARK_MONTHS) :]
+            max_price = float(high_window.max()) if not high_window.empty else 0.0
             if max_price > 0:
                 high_drawdown_pct = round((float(close.iloc[-1]) / max_price - 1.0) * 100.0, 2)
         snap = realtime.get(ticker) or {}
         now_val = snap.get("nowVal")
         change_rate = snap.get("changeRate")
-        price = float(now_val) if isinstance(now_val, (int, float)) and float(now_val) > 0 else (
-            float(close.iloc[-1]) if not close.empty else None
+        price = (
+            float(now_val)
+            if isinstance(now_val, (int, float)) and float(now_val) > 0
+            else (float(close.iloc[-1]) if not close.empty else None)
         )
         if isinstance(change_rate, (int, float)):
             daily_change_pct = round(float(change_rate), 2)
