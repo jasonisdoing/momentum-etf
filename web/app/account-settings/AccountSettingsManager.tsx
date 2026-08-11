@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { ensureAsxPrefix } from "../components/TickerDetailLink";
 import { useToast } from "../components/ToastProvider";
 
 type Benchmark = { ticker?: string; name?: string };
@@ -95,7 +96,9 @@ function AccountRow({
 
   // 벤치마크 티커 → 종목명 조회 (공통: 종목풀 stock_meta). 이름은 조회로만 채움.
   const resolveBench = async () => {
-    const t = benchTicker.trim();
+    // 호주 계좌는 `ASX:` 를 붙여 조회·저장한다 — 종목풀·가격 캐시가 그 형태로 보관하고,
+    // 미국에도 같은 티커가 있어(예: IVV) 접두사가 없으면 구분되지 않는다.
+    const t = countryCode === "au" ? ensureAsxPrefix(benchTicker) : benchTicker.trim().toUpperCase();
     if (!t) {
       toast.error("티커를 입력해주세요.");
       return;
@@ -108,6 +111,8 @@ function AccountRow({
         toast.error(data.error ?? "종목명을 찾을 수 없습니다.");
         return;
       }
+      // 정규화된 티커를 입력칸에도 되돌려 저장값과 화면이 어긋나지 않게 한다.
+      setBenchTicker(t);
       setBenchName(data.name);
       setBenchEditing(false);
       toast.success(`${data.name}(${t}) 확인 완료`);

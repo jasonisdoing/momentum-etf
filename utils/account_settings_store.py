@@ -173,6 +173,16 @@ def _validate_values(account_id: str, values: dict[str, Any], existing_doc: dict
             bench_name = str(raw.get("name") or "").strip()
             if not ticker or not bench_name:
                 raise AccountSettingsStoreError(f"'{account_id}' 의 benchmark 에는 ticker/name 이 모두 필요합니다.")
+            # 호주 계좌는 `ASX:` 를 붙여 저장한다. 가격 캐시가 호주 종목을 그 형태로 보관하고,
+            # 미국에도 같은 티커가 있어(예: IVV) 접두사가 없으면 구분되지 않는다.
+            # 이 값이 없으면 자산 헬퍼 백테스트가 "가격 캐시 누락: IVV" 로 실패한다.
+            country = str(
+                values.get("country_code") or existing_doc.get("country_code") or ""
+            ).strip().lower()
+            if country == "au":
+                from utils.asx_ticker import ensure_asx_prefix
+
+                ticker = ensure_asx_prefix(ticker)
             cleaned[key] = {"ticker": ticker, "name": bench_name}
         elif key == "ticker_types":
             # 후보 출처 종목풀 연결(trend). 유효한 종목풀 id 목록이어야 한다.
