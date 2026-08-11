@@ -12,7 +12,14 @@ from utils.logger import get_app_logger
 logger = get_app_logger()
 
 _COLLECTION_NAME = "stock_cache_meta"
+_HISTORY_COLLECTION_NAME = "stock_cache_meta_history"
 _INDEX_ENSURED = False
+
+# 히스토리 보관 기간(일). 조회는 `get_previous_stock_cache_meta_history` 하나뿐이고
+# '그 날짜 직전 1건'만 찾으므로 오래된 기록은 쓰이지 않는다.
+# 정리하지 않으면 하루 약 270건씩 무한히 쌓여 DB 절반을 차지하고(2026-08 기준 193MB),
+# mongodump 가 도중에 끊긴다.
+HISTORY_RETENTION_DAYS = 90
 
 
 def _get_collection():
@@ -93,6 +100,31 @@ def get_stock_cache_meta_docs(ticker_type: str, tickers: list[str]) -> dict[str,
     return result
 
 
+def prune_stock_cache_meta_history(retention_days: int = HISTORY_RETENTION_DAYS) -> int:
+    """보관 기간이 지난 히스토리를 지우고 삭제 건수를 반환한다.
+
+    ``date`` 는 "YYYY-MM-DD" 문자열이라 문자열 비교로 자른다(사전순 = 날짜순).
+    삭제 건수를 로그로 남긴다 — 조용히 지우면 데이터가 왜 없는지 알 수 없다.
+    """
+    if retention_days <= 0:
+        raise ValueError(f"보관 기간은 1일 이상이어야 합니다: {retention_days}")
+
+    db = get_db_connection()
+    if db is None:
+        raise RuntimeError("DB 연결에 실패해 히스토리를 정리할 수 없습니다.")
+
+    cutoff = (datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(days=retention_days)).strftime("%Y-%m-%d")
+    result = db[_HISTORY_COLLECTION_NAME].delete_many({"date": {"$lt": cutoff}})
+    if result.deleted_count:
+        logger.info(
+            "종목 캐시 메타 히스토리 정리: %s 이전 %d건 삭제 (보관 %d일)",
+            cutoff,
+            result.deleted_count,
+            retention_days,
+        )
+    return int(result.deleted_count)
+
+
 def get_previous_stock_cache_meta_history(
     ticker_type: str,
     ticker: str,
@@ -106,7 +138,7 @@ def get_previous_stock_cache_meta_history(
     if db is None:
         return None
 
-    coll = db["stock_cache_meta_history"]
+    coll = db[_HISTORY_COLLECTION_NAME]
     # before_date보다 작은 날짜 중 가장 최근 것 하나 조회
     doc = coll.find_one(
         {
@@ -173,7 +205,7 @@ def upsert_stock_cache_meta_doc(
     # 2. 일자별 히스토리 스냅샷 저장
     db = get_db_connection()
     if db is not None:
-        history_coll = db["stock_cache_meta_history"]
+        history_coll = db[_HISTORY_COLLECTION_NAME]
 
         # 한국 시간 기준으로 귀속 날짜 결정
         now_kst = datetime.now(ZoneInfo("Asia/Seoul"))

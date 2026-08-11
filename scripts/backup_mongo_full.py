@@ -27,6 +27,9 @@ from utils.db_manager import _resolve_connection_string  # noqa: E402
 from utils.env import load_env_if_present  # noqa: E402
 
 _BACKUP_ROOT = Path("backups")
+# 연결 끊김 같은 일시 장애용 재시도 (첫 시도 포함 횟수).
+_MAX_ATTEMPTS = 3
+_RETRY_WAIT_SECONDS = 10.0
 
 
 def _mask_uri(uri: str) -> str:
@@ -91,18 +94,32 @@ def main() -> None:
         return
 
     import shutil
+    import time
 
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    try:
-        result = subprocess.run(command, capture_output=True, text=True)
-    except BaseException:
+    # 대용량 컬렉션을 읽는 도중 연결이 끊기는 일이 있다(관측: 2026-08-12,
+    # "use of closed network connection" — 로컬 맥 절전/일시 부하). 일시 장애라
+    # 다시 돌리면 대개 성공하므로 짧게 재시도한다. 매번 처음부터 다시 받는다.
+    last_result = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
-    # mongodump 는 진행 로그를 stderr 로 보낸다 — 실패 판정은 반환코드로만 한다.
-    if result.returncode != 0:
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            last_result = subprocess.run(command, capture_output=True, text=True)
+        except BaseException:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
+        # mongodump 는 진행 로그를 stderr 로 보낸다 — 실패 판정은 반환코드로만 한다.
+        if last_result.returncode == 0:
+            break
+        if attempt < _MAX_ATTEMPTS:
+            print(f"[backup] mongodump 실패 (exit={last_result.returncode}) — 재시도 {attempt}/{_MAX_ATTEMPTS - 1}")
+            time.sleep(_RETRY_WAIT_SECONDS * attempt)
+
+    if last_result is None or last_result.returncode != 0:
         shutil.rmtree(tmp_dir, ignore_errors=True)
-        print(result.stderr.strip() or result.stdout.strip())
-        raise SystemExit(f"mongodump 실패 (exit={result.returncode})")
+        if last_result is not None:
+            print(last_result.stderr.strip() or last_result.stdout.strip())
+        raise SystemExit(f"mongodump 실패 (exit={last_result.returncode if last_result else -1})")
 
     # 성공 — 오늘 폴더를 원자적으로 교체한다.
     if out_dir.exists():
