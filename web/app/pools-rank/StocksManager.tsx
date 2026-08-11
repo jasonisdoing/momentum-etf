@@ -141,6 +141,17 @@ const rankGridTheme = createAppGridTheme();
 const RANK_SESSION_CACHE_TTL_MS = 60_000;
 const RANK_SESSION_CACHE_PREFIX = "stocks:rank";
 const DEFAULT_TICKER_TYPE = "";
+
+/** 그리드에 어떤 컬럼 묶음을 보여줄지. 화면 전환용 `pageMode` 와는 다른 축이다. */
+type MetricMode = "basic" | "ranking" | "monthly" | "info";
+
+const METRIC_MODE_OPTIONS: { value: MetricMode; label: string }[] = [
+  { value: "basic", label: "기본" },
+  { value: "ranking", label: "랭킹" },
+  { value: "monthly", label: "월별" },
+  { value: "info", label: "정보" },
+];
+
 // 추세가 꺾인 종목을 종목명 뒤에 표시하는 배지 (알람 화면의 이동선 이탈 배지와 같은 기호).
 const TREND_BROKEN_BADGE = "❗";
 
@@ -328,7 +339,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     rankToolbarCache?.ticker_type ?? DEFAULT_TICKER_TYPE,
   );
   const [maRule, setMaRule] = useState<RankMaRule | null>(rankToolbarCache?.ma_rule ?? null);
-  const [metricMode, setMetricMode] = useState<"cumulative" | "monthly" | "info">("cumulative");
+  const [metricMode, setMetricMode] = useState<MetricMode>("basic");
   const [monthlyReturnLabels, setMonthlyReturnLabels] = useState<string[]>([]);
   const [selectedAsOfDate, setSelectedAsOfDate] = useState<string>(getTodayDateInputValue());
   const [rows, setRows] = useState<RankRow[]>([]);
@@ -987,9 +998,18 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         cellRenderer: (params: { value?: string }) => params.value || "-",
       },
       {
+        field: "일간(%)",
+        headerName: "일간(%)",
+        hide: metricMode !== "basic",
+        minWidth: 86,
+        width: 86,
+        type: "rightAligned",
+        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
+      },
+      {
         field: "현재가",
         headerName: "현재가",
-        hide: metricMode !== "cumulative",
+        hide: metricMode !== "basic",
         minWidth: 88,
         width: 88,
         type: "rightAligned",
@@ -998,18 +1018,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return formatPrice(params.value ?? null, rowCurrency);
         },
       },
-      {
-        field: "일간(%)",
-        headerName: "일간(%)",
-        hide: metricMode !== "cumulative",
-        minWidth: 86,
-        width: 86,
-        type: "rightAligned",
-        cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
-      },
     ];
 
-    const cumulativeColumns: ColDef<RankGridRow>[] = [
+    // 순위 산정에 직접 쓰이는 지표들. 종목을 고르는 눈으로 볼 때만 필요하다.
+    const rankingColumns: ColDef<RankGridRow>[] = [
       {
         field: "단기이격",
         headerName: "단기",
@@ -1036,26 +1048,6 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         type: "rightAligned",
         cellRenderer: (params: { value: number | null | undefined }) => renderSignedPercentCell(params.value ?? null),
       },
-      ...(showDeviationColumn
-        ? [
-          {
-            field: "괴리율",
-            headerName: "괴리율",
-            minWidth: 78,
-            width: 78,
-            type: "rightAligned",
-            cellRenderer: (params: { value: number | null | undefined }) => {
-              const val = params.value ?? 0;
-              const isExtreme = val > 2.0 || val < -2.0;
-              return (
-                <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
-                  {formatPercent(params.value ?? null)}
-                </span>
-              );
-            },
-          } as ColDef<RankGridRow>,
-        ]
-        : []),
       {
         field: "RSI",
         headerName: "RSI",
@@ -1109,6 +1101,30 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           return null;
         },
       },
+    ];
+
+    // 가격과 기간별 수익률. 종목의 성적을 훑어볼 때 보는 기본 화면이다.
+    const basicColumns: ColDef<RankGridRow>[] = [
+      ...(showDeviationColumn
+        ? [
+          {
+            field: "괴리율",
+            headerName: "괴리율",
+            minWidth: 78,
+            width: 78,
+            type: "rightAligned",
+            cellRenderer: (params: { value: number | null | undefined }) => {
+              const val = params.value ?? 0;
+              const isExtreme = val > 2.0 || val < -2.0;
+              return (
+                <span style={{ color: isExtreme ? "#d63939" : "inherit", fontWeight: isExtreme ? 700 : 400 }}>
+                  {formatPercent(params.value ?? null)}
+                </span>
+              );
+            },
+          } as ColDef<RankGridRow>,
+        ]
+        : []),
       {
         field: "1주(%)",
         headerName: "1주",
@@ -1212,14 +1228,14 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
       },
     ];
 
-    return [
-      ...leadingColumns,
-      ...(metricMode === "cumulative"
-        ? cumulativeColumns
-        : metricMode === "monthly"
-          ? monthlyColumns
-          : infoColumns),
-    ];
+    const columnsByMode: Record<MetricMode, ColDef<RankGridRow>[]> = {
+      basic: basicColumns,
+      ranking: rankingColumns,
+      monthly: monthlyColumns,
+      info: infoColumns,
+    };
+
+    return [...leadingColumns, ...columnsByMode[metricMode]];
   }, [
     addingRow,
     dirtyCellKeys,
@@ -1613,27 +1629,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                   <label className="appLabeledField">
                     <span className="appLabeledFieldLabel">컬럼</span>
                     <div className="appSegmentedToggle appSegmentedToggleCompact" role="group" aria-label="컬럼 표시 방식">
-                      <button
-                        type="button"
-                        className={metricMode === "cumulative" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setMetricMode("cumulative")}
-                      >
-                        누적
-                      </button>
-                      <button
-                        type="button"
-                        className={metricMode === "monthly" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setMetricMode("monthly")}
-                      >
-                        월별
-                      </button>
-                      <button
-                        type="button"
-                        className={metricMode === "info" ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
-                        onClick={() => setMetricMode("info")}
-                      >
-                        정보
-                      </button>
+                      {METRIC_MODE_OPTIONS.map(({ value, label }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          className={metricMode === value ? "btn appSegmentedToggleButton is-active" : "btn appSegmentedToggleButton"}
+                          onClick={() => setMetricMode(value)}
+                        >
+                          {label}
+                        </button>
+                      ))}
                     </div>
                   </label>
                 </div>
