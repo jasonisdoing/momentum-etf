@@ -26,7 +26,16 @@ from __future__ import annotations
 from typing import Any
 
 # 전략 정의 — id 순서가 화면 표시 순서(상단부터)다.
-# round_tickers: 회차 → 담당 ETF(1호부터). 두 전략 모두 같은 운용사 순서다.
+# round_tickers: 회차 → 담당 ETF(1호부터).
+#
+# **두 전략의 회차별 운용사를 맞춘다** — 같은 호차면 같은 브랜드라 화면에서 바로 대응된다.
+# 순서는 '두 지수 중 작은 쪽 시총' 기준이다. 양쪽 다 거래 가능해야 하므로 작은 쪽이 병목이다.
+#   KODEX 52,364 · TIGER 13,837 · RISE 3,309 · ACE 1,558 · KIWOOM 478 · HANARO 213 · PLUS 103 (억)
+#
+# 제외한 것
+#   TR(총수익)형 — 분배금 재투자로 가격 경로가 일반형과 미세하게 다르다.
+#   SOL — 코스닥150은 있으나 코스피200은 TR형만 있어 짝이 안 맞는다.
+#   IBK — 양쪽 다 있지만 코스피200 거래량이 하루 1,463주 수준이라 분할 매매에 부적합.
 # seed_config 는 최초 1회 DB 를 심을 때만 쓴다. 평상시 읽기 경로는 DB 만 본다
 # (값이 없으면 시드로 슬쩍 넘어가지 않고 에러를 낸다).
 STRATEGIES: dict[str, dict[str, Any]] = {
@@ -39,8 +48,9 @@ STRATEGIES: dict[str, dict[str, Any]] = {
             ("102110", "TIGER 200"),
             ("148020", "RISE 200"),
             ("105190", "ACE 200"),
-            ("152100", "PLUS 200"),
+            ("069660", "KIWOOM 200"),
             ("293180", "HANARO 200"),
+            ("152100", "PLUS 200"),
         ),
         "seed_config": {"trigger_pct": 5.0},
     },
@@ -54,15 +64,16 @@ STRATEGIES: dict[str, dict[str, Any]] = {
             ("232080", "TIGER 코스닥150"),
             ("270810", "RISE 코스닥150"),
             ("354500", "ACE 코스닥150"),
-            ("301400", "PLUS 코스닥150"),
+            ("316670", "KIWOOM 코스닥150"),
             ("304770", "HANARO 코스닥150"),
+            ("301400", "PLUS 코스닥150"),
         ),
         "seed_config": {"trigger_pct": 5.0},
     },
 }
 STRATEGY_IDS: tuple[str, ...] = tuple(STRATEGIES)
 
-MAX_ROUNDS = 6
+MAX_ROUNDS = 7
 
 # 이 전략을 운용하는 계좌. 실제 보유 수량·평균단가를 여기서 읽는다(두 전략 공용).
 ACCOUNT_ID = "kor_account"
