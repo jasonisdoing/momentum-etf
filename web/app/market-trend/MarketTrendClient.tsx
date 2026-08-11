@@ -20,8 +20,10 @@ type MarketTrendItem = {
   trend_score: number | null;
   score_range_high: number | null;
   score_range_low: number | null;
-  // 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100, 0 이하
+  // 전고점 대비 등락률 (현재가 ÷ 최근 12개월 최고 − 1) × 100, 0 이하
   pct_from_high: number | null;
+  // 전저점 대비 등락률 (현재가 ÷ 최근 12개월 최저 − 1) × 100, 0 이상
+  pct_from_low: number | null;
   // 현재 레짐(SuperTrend 방향) + 지속일수
   current_regime: RegimeKey | null;
   current_regime_days: number | null;
@@ -300,6 +302,15 @@ export function MarketTrendPanel({
       {
         field: "pct_from_high",
         headerName: "전고점 대비",
+        flex: 0.8,
+        minWidth: 110,
+        sortable: true,
+        type: "rightAligned",
+        cellRenderer: renderSignedPercentCell,
+      },
+      {
+        field: "pct_from_low",
+        headerName: "전저점 대비",
         flex: 0.8,
         minWidth: 110,
         sortable: true,

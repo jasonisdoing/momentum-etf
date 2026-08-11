@@ -26,6 +26,7 @@ from config import (
     MARKET_TREND_SCORE_MA_DAYS,
     MARKET_TREND_SUPERTREND_MULTIPLIER,
     MARKET_TREND_SUPERTREND_PERIOD,
+    METRIC_WINDOW_MONTHS,
     TRADING_DAYS_PER_MONTH,
 )
 from utils.moving_averages import calculate_moving_average
@@ -197,7 +198,7 @@ def compute_market_trend() -> dict[str, Any]:
     Returns:
         ``{"ma_days", "items": [{
             name, ticker, price, change_pct, trend_pct, trend_score,
-            pct_from_high, current_regime, current_regime_days, prev_regime,
+            pct_from_high, pct_from_low, current_regime, current_regime_days, prev_regime,
         }, ...]}``
     """
     ma_days = MARKET_TREND_SCORE_MA_DAYS
@@ -259,8 +260,10 @@ def _build_item(
         # 점수 환산 기준 (참조용)
         "score_range_high": None,
         "score_range_low": None,
-        # 52주 전고점 대비 등락률 (현재가 ÷ 52주 최고 − 1) × 100 — 0 이하(고점=0)
+        # 전고점 대비 등락률 (현재가 ÷ 최근 METRIC_WINDOW_MONTHS 최고 − 1) × 100 — 0 이하(고점=0)
         "pct_from_high": None,
+        # 전저점 대비 등락률 (현재가 ÷ 최근 METRIC_WINDOW_MONTHS 최저 − 1) × 100 — 0 이상(저점=0)
+        "pct_from_low": None,
         # 현재 레짐 + 지속 일수 (테이블 표시용)
         "current_regime": None,
         "current_regime_days": None,
@@ -322,11 +325,15 @@ def _build_item(
 
     base["trend_pct"] = _trend_pct_at(close_series, ma_series, offset=0)
 
-    # 52주(252거래일) 전고점 대비 등락률. 현재가가 고점이면 0, 아래면 음수.
-    high_window = close_series.tail(TRADING_DAYS_PER_MONTH * 12 + 12)
-    high_52w = _to_float(high_window.max()) if not high_window.empty else None
-    if high_52w is not None and high_52w > 0 and latest_price is not None:
-        base["pct_from_high"] = (latest_price / high_52w - 1.0) * 100.0
+    # 전고점·전저점 대비 등락률 — 다른 화면의 고점과 같은 공용 창(METRIC_WINDOW_MONTHS, 12개월).
+    # 고점 대비는 0 이하(고점=0), 저점 대비는 0 이상(저점=0).
+    hl_window = close_series.loc[close_series.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
+    high_price = _to_float(hl_window.max()) if not hl_window.empty else None
+    if high_price is not None and high_price > 0 and latest_price is not None:
+        base["pct_from_high"] = (latest_price / high_price - 1.0) * 100.0
+    low_price = _to_float(hl_window.min()) if not hl_window.empty else None
+    if low_price is not None and low_price > 0 and latest_price is not None:
+        base["pct_from_low"] = (latest_price / low_price - 1.0) * 100.0
 
     # 최근 12개월 일별 레짐을 ST(SuperTrend)로 계산한다.
     try:
@@ -499,8 +506,12 @@ def _calculate_supertrend(df: pd.DataFrame, period: int = 10, multiplier: float 
         prev_lower = final_lower.iloc[i - 1]
         prev_close = close.iloc[i - 1]
 
-        final_upper.iloc[i] = basic_upper.iloc[i] if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper else prev_upper
-        final_lower.iloc[i] = basic_lower.iloc[i] if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower else prev_lower
+        final_upper.iloc[i] = (
+            basic_upper.iloc[i] if basic_upper.iloc[i] < prev_upper or prev_close > prev_upper else prev_upper
+        )
+        final_lower.iloc[i] = (
+            basic_lower.iloc[i] if basic_lower.iloc[i] > prev_lower or prev_close < prev_lower else prev_lower
+        )
 
         prev_dir = direction.iloc[i - 1]
         if prev_dir == 1:

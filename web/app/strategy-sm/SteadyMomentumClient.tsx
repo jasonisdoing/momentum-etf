@@ -283,8 +283,6 @@ export function SteadyMomentumClient() {
   const [saving, setSaving] = useState(false);
   const [picking, setPicking] = useState(false);
   const [backtesting, setBacktesting] = useState(false);
-  // 단기이격 손절(실험 옵션) — 저장되지 않는 백테스트 실행 조건이다.
-  const [stopLossExit, setStopLossExit] = useState(false);
   const [backtest, setBacktest] = useState<BacktestResult | null>(null);
   const [pickProgress, setPickProgress] = useState<LoadingProgress | null>(null);
   const [pickFailed, setPickFailed] = useState(false);
@@ -461,7 +459,7 @@ export function SteadyMomentumClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // 일간 탭에서 실행할 때만 일별 행을 요청한다 (응답이 수천 행이라 무겁다).
-        body: JSON.stringify({ months, include_daily: viewMode === "daily", stop_loss_exit: stopLossExit }),
+        body: JSON.stringify({ months, include_daily: viewMode === "daily" }),
       });
       const payload = await resp.json();
       if (!resp.ok) throw new Error(payload?.error ?? "백테스트에 실패했습니다.");
@@ -474,7 +472,7 @@ export function SteadyMomentumClient() {
       setBacktesting(false);
       setBacktestProgress(null);
     }
-  }, [stopLossExit, toast, view?.settings.backtest_months, viewMode]);
+  }, [toast, view?.settings.backtest_months, viewMode]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -1051,7 +1049,7 @@ export function SteadyMomentumClient() {
                 {view.picks ? (
                   <span style={{ ...hintStyle, fontSize: "var(--fs-sm)" }}>
                     <b style={{ color: "inherit" }}>{view.picks.portfolio_month} 포트폴리오</b> ·{" "}
-                    {view.picks.rebalance_date} 종가 교체 (판정 {view.picks.signal_date}) · 유니버스{" "}
+                    {view.picks.rebalance_date} 시가 교체 (판정 {view.picks.signal_date} 종가) · 유니버스{" "}
                     {view.picks.universe_count} → 후보 {view.picks.candidate_count} → 선정 {selectedCount}
                     {reserveCount > 0 ? ` (+차순위 ${reserveCount})` : ""} · 다음 교체 전까지 결과가 바뀌지 않습니다
                   </span>
@@ -1107,19 +1105,10 @@ export function SteadyMomentumClient() {
                   </div>
                 </label>
                 <span style={hintStyle}>
-                  {view.settings.backtest_months}개월 · 월간 리밸런싱 · 빈 슬롯은 현금 · 현재 종목풀 기준(생존 편향 있음)
+                  {view.settings.backtest_months}개월 · 매월 교체(월말 직전 거래일 종가 판정 → 월말 시가 체결) · 빈 슬롯은 현금 · 현재 종목풀 기준(생존 편향 있음)
                 </span>
               </div>
               <div className="appMainHeaderRight">
-                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: "var(--fs-sm)", marginBottom: 0 }}>
-                  <input
-                    type="checkbox"
-                    checked={stopLossExit}
-                    onChange={(e) => setStopLossExit(e.target.checked)}
-                    disabled={backtesting}
-                  />
-                  단기이격 손절
-                </label>
                 {isDirty ? <span style={hintStyle}>설정을 저장해야 실행할 수 있습니다</span> : null}
                 <button
                   type="button"
