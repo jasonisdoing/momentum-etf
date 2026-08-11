@@ -2,6 +2,7 @@
  *
  * 레버리지 등 위험·특성 키워드를 색+굵게 강조하고 뒤에 이모지를 붙인다.
  * 여러 화면(종목풀 순위·자산 헬퍼 등)이 같은 규칙을 쓰도록 여기서만 정의한다.
+ * 신규상장(백테스트 기간 미달) 종목은 호출부가 isNew 를 넘기면 맨 뒤에 🆕 를 붙인다.
  */
 
 import type { ReactNode } from "react";
@@ -15,6 +16,8 @@ const NAME_HIGHLIGHT_KEYWORDS: Record<string, { color: string; emoji: string }> 
 
 const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).join("|")})`, "i");
 
+const NEW_LISTING_BADGE = "🆕";
+
 function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
   const lower = part.toLowerCase();
   for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
@@ -25,10 +28,24 @@ function getNameHighlight(part: string): { color: string; emoji: string } | unde
   return undefined;
 }
 
-export function renderNameWithLeverageHighlight(name: string): ReactNode {
+export function renderNameWithLeverageHighlight(
+  name: string,
+  options?: { isNew?: boolean },
+): ReactNode {
+  const newBadge = options?.isNew ? (
+    <span title="신규상장 — 백테스트 기준 기간(12개월)보다 상장 기간이 짧습니다"> {NEW_LISTING_BADGE}</span>
+  ) : null;
+
   const parts = name.split(NAME_HIGHLIGHT_RE);
   if (parts.length === 1) {
-    return name;
+    return newBadge ? (
+      <>
+        {name}
+        {newBadge}
+      </>
+    ) : (
+      name
+    );
   }
   const emojis: string[] = [];
   const rendered = parts.map((part, index) => {
@@ -49,6 +66,7 @@ export function renderNameWithLeverageHighlight(name: string): ReactNode {
     <>
       {rendered}
       {emojis.length > 0 && <span> {emojis.join("")}</span>}
+      {newBadge}
     </>
   );
 }

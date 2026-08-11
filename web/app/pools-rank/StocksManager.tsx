@@ -966,7 +966,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           const broken = isTrendBroken(params.data);
           return (
             <span className="appNameCellText" title={broken ? `${value} (추세 이탈)` : value}>
-              {renderNameWithLeverageHighlight(value)}
+              {renderNameWithLeverageHighlight(value, {
+                // MDD·소르티노 노란색과 같은 기준 — 상장 12개월 미만(부분 기간 계산) 종목.
+                isNew: params.data?.backtest_stats?.is_partial === true,
+              })}
               {broken ? <span title="단기·장기 이평선 중 하나 이상 이탈"> {TREND_BROKEN_BADGE}</span> : null}
             </span>
           );
