@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import time as _time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -14,11 +14,10 @@ from config import MARKET_SCHEDULES
 from fastapi_app.dependencies import require_internal_token
 from services.component_price_service import build_component_price_snapshot, enrich_component_prices
 from services.portfolio_change_service import (
-    _resolve_base_date_to_trading_day,
-    compute_portfolio_change_bundle,
+    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
 )
 from services.portfolio_change_service import (
-    build_daily_fx_rates as _build_daily_fx_rates_for_holdings,
+    compute_portfolio_change_bundle,
 )
 from services.price_service import (
     get_exchange_rates,
@@ -44,7 +43,7 @@ from utils.data_loader import (
 from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
-from utils.stock_cache_meta_io import get_previous_stock_cache_meta_history
+from utils.stock_cache_meta_io import get_previous_stock_cache_meta
 from utils.stock_list_io import get_active_holding_tickers, get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
@@ -488,32 +487,14 @@ def _build_korean_etf_info_payload(
         except (TypeError, ValueError):
             market_cap_krw = None
 
-    # 최근 공식 iNAV 기준일과 비교 기준 iNAV 히스토리 조회
-    # 오늘 날짜의 히스토리도 포함하기 위해 내일 날짜를 전달한다 (함수는 $lt 비교).
-    today_dt = datetime.now(ZoneInfo("Asia/Seoul"))
-    tomorrow_str = (today_dt + timedelta(days=1)).strftime("%Y-%m-%d")
-    latest_history = get_previous_stock_cache_meta_history(ticker_type, ticker, tomorrow_str)
+    # 비교는 (현재 값 vs 직전 영업일 값) 한 쌍 — 조회 1회.
+    # 직전값의 date 는 저장 시점에 이미 거래일이라 휴장일 보정이 필요 없다.
+    previous_meta = get_previous_stock_cache_meta(ticker_type, ticker)
     prev_nav = None
     portfolio_change_base_date = None
-    if latest_history and "meta_cache" in latest_history:
-        latest_history_nav = latest_history["meta_cache"].get("nav")
-        raw_base_date = str(latest_history.get("date") or "").strip() or None
-        # 한국 종목 풀: base_date 가 휴장일이면 직전 거래일로 보정
-        if raw_base_date and str(ticker_type or "").strip().lower().startswith("kor"):
-            portfolio_change_base_date = _resolve_base_date_to_trading_day(ticker_type, ticker, raw_base_date)
-        else:
-            portfolio_change_base_date = raw_base_date
-        if (
-            nav_value is not None
-            and latest_history_nav is not None
-            and float(nav_value) == float(latest_history_nav)
-            and portfolio_change_base_date
-        ):
-            prev_history = get_previous_stock_cache_meta_history(ticker_type, ticker, portfolio_change_base_date)
-            if prev_history and "meta_cache" in prev_history:
-                prev_nav = prev_history["meta_cache"].get("nav")
-        else:
-            prev_nav = latest_history_nav
+    if previous_meta and "meta_cache" in previous_meta:
+        prev_nav = previous_meta["meta_cache"].get("nav")
+        portfolio_change_base_date = str(previous_meta.get("date") or "").strip() or None
 
     nav_change = None
     nav_change_pct = None
