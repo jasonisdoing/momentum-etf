@@ -10,9 +10,8 @@ import pandas as pd
 
 from config import (
     BUCKET_MAPPING,
-    HIGH_WATERMARK_MONTHS,
     MARKET_SCHEDULES,
-    TRADING_DAYS_PER_MONTH,
+    METRIC_WINDOW_MONTHS,
 )
 from core.strategy.scoring import build_composite_rank_scores, compute_trend_frame
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
@@ -348,8 +347,8 @@ def _extract_price_metrics_from_close_series(
         if prev_close > 0:
             daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-    # 고점 대비(%) — 캐시 전 기간이 아니라 최근 HIGH_WATERMARK_MONTHS(12개월) 창의 최고가 대비.
-    high_window = series.loc[series.index[-1] - pd.DateOffset(months=HIGH_WATERMARK_MONTHS) :]
+    # 고점 대비(%) — 캐시 전 기간이 아니라 최근 METRIC_WINDOW_MONTHS(12개월) 창의 최고가 대비.
+    high_window = series.loc[series.index[-1] - pd.DateOffset(months=METRIC_WINDOW_MONTHS) :]
     max_price = float(high_window.max()) if not high_window.empty else 0.0
     drawdown = None
     if max_price > 0:
@@ -779,10 +778,9 @@ def build_ticker_type_rankings(
         realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
 
     effective_ma_rules = ma_rules or get_ticker_type_ma_rules(ticker_type)
-    # MDD·소르티노·is_partial(신규상장) 기준 기간을 장기 이평선에서 파생한다 (120일 → 6개월).
-    # 배치 고정값 대신 화면의 장기 선택·기준일·실시간 가격과 항상 같은 기준으로 계산된다.
-    long_ma_days = int((effective_ma_rules[0] or {}).get("long_ma_days") or 0) if effective_ma_rules else 0
-    backtest_months = max(1, long_ma_days // TRADING_DAYS_PER_MONTH) if long_ma_days > 0 else None
+    # MDD·소르티노·is_partial(신규상장) 기준 기간 — 고점과 같은 공용 창(METRIC_WINDOW_MONTHS).
+    # 배치 저장값 대신 기준일·실시간 가격과 항상 같은 기준으로 계산된다.
+    backtest_months = METRIC_WINDOW_MONTHS
     rows: list[dict[str, Any]] = []
     effective_close_series_map: dict[str, pd.Series] = {}
     preprocess_elapsed = 0.0
@@ -841,9 +839,7 @@ def build_ticker_type_rankings(
             "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,
             "backtest_stats": (
                 single_stock_backtest_stats(effective_close_series, backtest_months)
-                if backtest_months is not None
-                and effective_close_series is not None
-                and not effective_close_series.empty
+                if effective_close_series is not None and not effective_close_series.empty
                 else None
             ),
         }
