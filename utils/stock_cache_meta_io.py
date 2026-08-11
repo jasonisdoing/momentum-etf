@@ -12,14 +12,17 @@ from utils.logger import get_app_logger
 logger = get_app_logger()
 
 _COLLECTION_NAME = "stock_cache_meta"
-_HISTORY_COLLECTION_NAME = "stock_cache_meta_history"
+# 종목별 **직전 영업일 스냅샷 1건**만 보관한다(티커당 문서 1개).
+#
+# 예전에는 `stock_cache_meta_history` 에 날짜별 스냅샷을 전부 쌓았다. 오늘 것까지
+# 들어가다 보니 "가장 최근 1건"이 오늘인지 어제인지 알 수 없어 조회를 2번 했고,
+# 휴장일이면 최대 7번까지 거슬러 올라갔다. 데이터는 무한히 늘어 193MB(DB의 55%)가
+# 되어 mongodump 가 끊겼다.
+#
+# 지금은 **현재 값은 stock_cache_meta, 직전 값은 여기** 로 역할을 나눈다.
+# 비교가 늘 (현재 vs 직전) 한 쌍이라 조회 1회면 되고, 크기도 티커 수로 고정된다.
+_PREVIOUS_COLLECTION_NAME = "previous_stock_cache_meta"
 _INDEX_ENSURED = False
-
-# 히스토리 보관 기간(일). 조회는 `get_previous_stock_cache_meta_history` 하나뿐이고
-# '그 날짜 직전 1건'만 찾으므로 오래된 기록은 쓰이지 않는다.
-# 정리하지 않으면 하루 약 270건씩 무한히 쌓여 DB 절반을 차지하고(2026-08 기준 193MB),
-# mongodump 가 도중에 끊긴다.
-HISTORY_RETENTION_DAYS = 90
 
 
 def _get_collection():
@@ -100,37 +103,11 @@ def get_stock_cache_meta_docs(ticker_type: str, tickers: list[str]) -> dict[str,
     return result
 
 
-def prune_stock_cache_meta_history(retention_days: int = HISTORY_RETENTION_DAYS) -> int:
-    """보관 기간이 지난 히스토리를 지우고 삭제 건수를 반환한다.
+def get_previous_stock_cache_meta(ticker_type: str, ticker: str) -> dict[str, Any] | None:
+    """직전 영업일 스냅샷 1건. 없으면 None(비교 기준이 없다는 뜻).
 
-    ``date`` 는 "YYYY-MM-DD" 문자열이라 문자열 비교로 자른다(사전순 = 날짜순).
-    삭제 건수를 로그로 남긴다 — 조용히 지우면 데이터가 왜 없는지 알 수 없다.
+    ``date`` 는 저장 시점에 이미 거래일로 정해져 있어 호출자가 휴장일 보정을 할 필요가 없다.
     """
-    if retention_days <= 0:
-        raise ValueError(f"보관 기간은 1일 이상이어야 합니다: {retention_days}")
-
-    db = get_db_connection()
-    if db is None:
-        raise RuntimeError("DB 연결에 실패해 히스토리를 정리할 수 없습니다.")
-
-    cutoff = (datetime.now(ZoneInfo("Asia/Seoul")) - timedelta(days=retention_days)).strftime("%Y-%m-%d")
-    result = db[_HISTORY_COLLECTION_NAME].delete_many({"date": {"$lt": cutoff}})
-    if result.deleted_count:
-        logger.info(
-            "종목 캐시 메타 히스토리 정리: %s 이전 %d건 삭제 (보관 %d일)",
-            cutoff,
-            result.deleted_count,
-            retention_days,
-        )
-    return int(result.deleted_count)
-
-
-def get_previous_stock_cache_meta_history(
-    ticker_type: str,
-    ticker: str,
-    before_date: str
-) -> dict[str, Any] | None:
-    """특정 날짜(YYYY-MM-DD) 이전의 가장 최근 히스토리 스냅샷을 반환한다."""
     type_norm = (ticker_type or "").strip().lower()
     ticker_norm = str(ticker or "").strip().upper()
 
@@ -138,18 +115,28 @@ def get_previous_stock_cache_meta_history(
     if db is None:
         return None
 
-    coll = db[_HISTORY_COLLECTION_NAME]
-    # before_date보다 작은 날짜 중 가장 최근 것 하나 조회
-    doc = coll.find_one(
-        {
-            "ticker_type": type_norm,
-            "ticker": ticker_norm,
-            "date": {"$lt": before_date}
-        },
-        sort=[("date", -1)],
-        projection={"_id": 0}
+    doc = db[_PREVIOUS_COLLECTION_NAME].find_one(
+        {"ticker_type": type_norm, "ticker": ticker_norm},
+        projection={"_id": 0},
     )
     return dict(doc) if isinstance(doc, dict) else None
+
+
+def _resolve_snapshot_date() -> str:
+    """스냅샷 귀속 거래일 — 9시 이후이고 오늘이 거래일이면 오늘, 아니면 직전 거래일."""
+    from utils.data_loader import get_trading_days
+
+    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    today_str = now_kst.strftime("%Y-%m-%d")
+    trading_days = get_trading_days(
+        (now_kst - timedelta(days=14)).strftime("%Y-%m-%d"), today_str, "kor"
+    )
+    trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
+
+    if now_kst.hour >= 9 and today_str in trading_days_str:
+        return today_str
+    past_days = [d for d in trading_days_str if d < today_str]
+    return past_days[-1] if past_days else today_str
 
 
 def upsert_stock_cache_meta_doc(
@@ -192,7 +179,24 @@ def upsert_stock_cache_meta_doc(
     if holdings_cache is not None:
         payload["holdings_cache"] = holdings_cache
 
-    # 1. 최신 정보 업데이트 (기존 로직)
+    snapshot_date = _resolve_snapshot_date()
+    payload["snapshot_date"] = snapshot_date
+
+    db = get_db_connection()
+    # 오늘 값을 덮기 전에, 저장돼 있던 값이 **다른 날짜의 것**이면 직전값으로 옮긴다.
+    # 같은 날 여러 번 돌아도 직전값은 그대로다(귀속 날짜가 같으므로).
+    if db is not None:
+        current = coll.find_one(
+            {"ticker_type": type_norm, "ticker": ticker_norm},
+            projection={"_id": 0, "created_at": 0},
+        )
+        if current and str(current.get("snapshot_date") or "") not in ("", snapshot_date):
+            db[_PREVIOUS_COLLECTION_NAME].update_one(
+                {"ticker_type": type_norm, "ticker": ticker_norm},
+                {"$set": {**current, "date": current["snapshot_date"]}},
+                upsert=True,
+            )
+
     coll.update_one(
         {"ticker_type": type_norm, "ticker": ticker_norm},
         {
@@ -201,48 +205,6 @@ def upsert_stock_cache_meta_doc(
         },
         upsert=True,
     )
-
-    # 2. 일자별 히스토리 스냅샷 저장
-    db = get_db_connection()
-    if db is not None:
-        history_coll = db[_HISTORY_COLLECTION_NAME]
-
-        # 한국 시간 기준으로 귀속 날짜 결정
-        now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
-        from utils.data_loader import get_trading_days
-
-        # 최근 7일간 거래일 조회
-        start_search = (now_kst - timedelta(days=7)).strftime("%Y-%m-%d")
-        end_search = now_kst.strftime("%Y-%m-%d")
-        trading_days = get_trading_days(start_search, end_search, "kor")
-        trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
-
-        today_str = now_kst.strftime("%Y-%m-%d")
-
-        # 9시 이후이고 오늘이 거래일이면 오늘 날짜 사용, 아니면 직전 거래일 사용
-        if now_kst.hour >= 9 and today_str in trading_days_str:
-            snapshot_date = today_str
-        else:
-            # 오늘이 거래일이어도 9시 전이면 직전 거래일, 오늘이 휴장일이면 가장 최근 거래일
-            past_days = [d for d in trading_days_str if d < today_str]
-            snapshot_date = past_days[-1] if past_days else today_str
-
-        history_payload = payload.copy()
-        history_payload["date"] = snapshot_date
-
-        # 히스토리 컬렉션 인덱스 (최초 1회)
-        history_coll.create_index(
-            [("ticker_type", 1), ("ticker", 1), ("date", -1)],
-            unique=True,
-            name="ticker_date_history_unique",
-            background=True
-        )
-
-        history_coll.update_one(
-            {"ticker_type": type_norm, "ticker": ticker_norm, "date": snapshot_date},
-            {"$set": history_payload},
-            upsert=True
-        )
 
 
 def update_stock_portfolio_change_cache_doc(
