@@ -23,6 +23,20 @@ function normalizeTickerForDetailRoute(ticker: string | null | undefined): strin
   return upper;
 }
 
+/**
+ * 호주 종목 티커에 `ASX:` 를 붙인다. `IVV` / `IVV.AX` / `ASX:IVV` 어느 형태로 들어와도
+ * `ASX:IVV` 를 돌려준다. 백엔드 `utils/asx_ticker.ensure_asx_prefix` 와 같은 규칙이다.
+ *
+ * 호주 종목임을 **호출자가 아는 경우에만** 쓴다 — 티커 모양만 보고 판단하지 않는다.
+ * 미국에도 같은 티커가 있어(예: IVV) 접두사가 곧 구분자다.
+ */
+export function ensureAsxPrefix(ticker: string | null | undefined): string {
+  const text = String(ticker ?? "").trim().toUpperCase();
+  if (!text) return "";
+  if (text.startsWith("ASX:")) return text;
+  return `ASX:${text.endsWith(".AX") ? text.slice(0, -3) : text}`;
+}
+
 /** 외부 조회용 — `ASX:` 접두사를 벗긴 티커. 화면 표시에는 쓰지 않는다. */
 export function stripAsxPrefix(ticker: string | null | undefined): string {
   const text = String(ticker ?? "").trim();
