@@ -11,6 +11,7 @@ import pandas as pd
 from config import (
     BUCKET_MAPPING,
     MARKET_SCHEDULES,
+    TRADING_DAYS_PER_MONTH,
 )
 from core.strategy.scoring import build_composite_rank_scores, compute_trend_frame
 from services.price_service import get_realtime_snapshot, get_realtime_snapshot_meta
@@ -22,6 +23,7 @@ from utils.cache_utils import (
 from utils.data_loader import get_latest_trading_day, get_trading_days
 from utils.logger import get_app_logger
 from utils.moving_averages import calculate_moving_average, get_moving_average_type
+from utils.perf_metrics import single_stock_backtest_stats
 from utils.pool_settings_store import MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS, get_pool_benchmark_ticker
 from utils.settings_loader import AccountSettingsError, get_ticker_type_settings
 from utils.stock_list_io import get_etfs
@@ -627,10 +629,7 @@ def _apply_common_rank_scores(
             trend_maps[column] = {}
 
     tickers_col = df["티커"].astype(str)
-    trend_values_by_rule = [
-        tickers_col.map(trend_map).astype(float)
-        for trend_map in trend_maps.values()
-    ]
+    trend_values_by_rule = [tickers_col.map(trend_map).astype(float) for trend_map in trend_maps.values()]
     if trend_values_by_rule:
         trend_sum = trend_values_by_rule[0].copy()
         for values in trend_values_by_rule[1:]:
@@ -673,9 +672,7 @@ def _apply_common_rank_scores(
     slope_days = int(main_rule["slope_days"])
     eval_pos = short_ma_frame.index.get_loc(eval_date)
     past_pos = eval_pos - slope_days
-    past_short_ma_row = (
-        short_ma_frame.iloc[past_pos] if past_pos >= 0 else pd.Series(dtype="float64")
-    )
+    past_short_ma_row = short_ma_frame.iloc[past_pos] if past_pos >= 0 else pd.Series(dtype="float64")
 
     slope_map: dict[str, float | None] = {}
     for ticker in close_frame.columns:
@@ -779,6 +776,10 @@ def build_ticker_type_rankings(
         realtime_meta = get_realtime_snapshot_meta(country_code, tickers)
 
     effective_ma_rules = ma_rules or get_ticker_type_ma_rules(ticker_type)
+    # MDD·소르티노·is_partial(신규상장) 기준 기간을 장기 이평선에서 파생한다 (120일 → 6개월).
+    # 배치 고정값 대신 화면의 장기 선택·기준일·실시간 가격과 항상 같은 기준으로 계산된다.
+    long_ma_days = int((effective_ma_rules[0] or {}).get("long_ma_days") or 0) if effective_ma_rules else 0
+    backtest_months = max(1, long_ma_days // TRADING_DAYS_PER_MONTH) if long_ma_days > 0 else None
     rows: list[dict[str, Any]] = []
     effective_close_series_map: dict[str, pd.Series] = {}
     preprocess_elapsed = 0.0
@@ -830,13 +831,18 @@ def build_ticker_type_rankings(
             "is_benchmark": ticker == benchmark_ticker,
             "상장일": etf.get("listing_date", "-"),
             # 보유: 이 종목을 실제로 들고 있는 계좌명 목록(쉼표 구분). 없으면 빈 문자열.
-            "보유": ", ".join(
-                holding_accounts.get(ensure_asx_prefix(ticker) if country_code == "au" else ticker, [])
-            ),
+            "보유": ", ".join(holding_accounts.get(ensure_asx_prefix(ticker) if country_code == "au" else ticker, [])),
             "exclude_from_ranking": bool(etf.get("exclude_from_ranking")),
             **ma_rule_scores,
             **price_metrics,
             "거래량": float(etf.get("volume", 0)) if etf.get("volume") is not None else None,
+            "backtest_stats": (
+                single_stock_backtest_stats(effective_close_series, backtest_months)
+                if backtest_months is not None
+                and effective_close_series is not None
+                and not effective_close_series.empty
+                else None
+            ),
         }
 
         rows.append(row)

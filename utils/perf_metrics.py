@@ -11,13 +11,13 @@ def sharpe_from_curve(start_val: float, values: np.ndarray, cagr_pct: float = 0.
     if curve.size < 3 or np.any(curve[:-1] <= 0):
         return 0.0
     daily_rets = np.diff(curve) / curve[:-1]
-    
+
     # 일간 평균 수익률의 단순 연율화 (분자)
     ann_ret = float(np.mean(daily_rets)) * 252.0
-    
+
     # 일간 변동성의 연율화 (분모)
     vol = float(np.std(daily_rets, ddof=1)) * float(np.sqrt(252.0))
-    
+
     if vol <= 0:
         return 0.0
     return ann_ret / vol
@@ -29,14 +29,14 @@ def sortino_from_curve(start_val: float, values: np.ndarray) -> float:
     if curve.size < 3 or np.any(curve[:-1] <= 0):
         return 0.0
     daily_rets = np.diff(curve) / curve[:-1]
-    
+
     # 일간 평균 수익률의 단순 연율화 (분자)
     ann_ret = float(np.mean(daily_rets)) * 252.0
-    
+
     # 하방 변동성(Downside Deviation) 계산: 음수 수익률의 제곱합 기준 (분모)
     downside_rets = np.minimum(0, daily_rets)
-    downside_std = float(np.sqrt(np.sum(downside_rets ** 2) / (daily_rets.size - 1))) * float(np.sqrt(252.0))
-    
+    downside_std = float(np.sqrt(np.sum(downside_rets**2) / (daily_rets.size - 1))) * float(np.sqrt(252.0))
+
     if downside_std <= 0:
         return 0.0
     return ann_ret / downside_std
@@ -81,3 +81,41 @@ def curve_metrics(start_val: float, values: np.ndarray) -> dict[str, float]:
         "mdd_pct": mdd_pct,
         "sortino": sortino_from_curve(start_val, values),
     }
+
+
+def single_stock_backtest_stats(close_prices, lookback_months: int) -> dict:
+    """단일 종목 종가 시계열(pd.Series)의 최근 N개월 단순 보유 성과(수익률·MDD·소르티노)를 구한다.
+
+    상장일이 시작일보다 뒤라 가용 기간이 N개월에 못 미치면 전체 기간으로 계산하고
+    is_partial=True 를 표시한다(화면에서 노란색·🆕 강조 기준).
+    순위 화면과 공유하는 단일 소스 — 기간은 호출부가 장기 이평선에서 파생해 넘긴다.
+    """
+    import pandas as pd
+
+    empty = {"cagr": 0.0, "mdd": 0.0, "sortino": 0.0, "is_partial": False}
+    if close_prices is None or len(close_prices) == 0:
+        return empty
+
+    try:
+        last_date = close_prices.index[-1]
+        start_date = last_date - pd.DateOffset(months=int(lookback_months))
+
+        # 상장일이 시작일보다 나중인지 여부 판정
+        is_partial = close_prices.index[0] > start_date
+
+        target_series = close_prices.loc[start_date:]
+        if len(target_series) < 2:
+            return {**empty, "is_partial": is_partial}
+
+        start_val = float(target_series.iloc[0])
+        values = target_series.iloc[1:].to_numpy()
+
+        metrics = curve_metrics(start_val, values)
+        return {
+            "cagr": round(float(metrics.get("total_return_pct", 0.0)), 2),  # CAGR 대신 단순 누적 수익률(%) 저장
+            "mdd": round(float(metrics.get("mdd_pct", 0.0)), 2),
+            "sortino": round(float(metrics.get("sortino", 0.0)), 2),
+            "is_partial": is_partial,
+        }
+    except Exception:
+        return empty

@@ -157,9 +157,7 @@ def load_active_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "return_1d": normalize_nullable_number(
                     realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate")
                 ),
-                "괴리율": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
-                ),
+                "괴리율": normalize_nullable_number(realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")),
                 "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
                 "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
                 "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
@@ -274,7 +272,8 @@ def refresh_single_stock(ticker_type: str, ticker: str) -> dict[str, str]:
     except Exception as e:
         logger.error(f"[{type_norm.upper()}/{ticker_norm}] 가격 캐시 갱신 실패: {e}")
 
-    # 2) 메타데이터 업데이트 — 위에서 채운 가격 캐시로 backtest_stats(3달 MDD/수익/소르티노)를 계산·저장.
+    # 2) 메타데이터 업데이트 — 이름/상장일 등 식별 메타를 채운다.
+    #    (MDD·소르티노는 순위 조회 시 실시간 계산이라 여기서 만들지 않는다.)
     from utils.stock_meta_updater import update_single_ticker_metadata
 
     try:
@@ -468,9 +467,7 @@ def load_deleted_stocks_table(ticker_type: str | None = None) -> dict[str, Any]:
                 "return_1d": normalize_nullable_number(
                     realtime_snapshot.get(doc.get("ticker", ""), {}).get("changeRate")
                 ),
-                "괴리율": normalize_nullable_number(
-                    realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")
-                ),
+                "괴리율": normalize_nullable_number(realtime_snapshot.get(doc.get("ticker", ""), {}).get("deviation")),
                 "return_1w": normalize_nullable_number(doc.get("1_week_earn_rate")),
                 "return_2w": normalize_nullable_number(doc.get("2_week_earn_rate")),
                 "return_1m": normalize_nullable_number(doc.get("1_month_earn_rate")),
