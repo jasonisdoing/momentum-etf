@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 from bson import ObjectId
 
+from config import HIGH_WATERMARK_MONTHS
 from services.price_service import get_exchange_rates, get_realtime_snapshot
 from utils.asx_ticker import ensure_asx_prefix
 from utils.db_manager import get_db_connection
@@ -178,7 +179,7 @@ def load_real_holdings_table(
         docs_by_ticker: dict[str, list[dict[str, Any]]] = {}
         cursor = db.stock_meta.find(
             {"ticker": {"$in": all_tickers}, "is_deleted": {"$ne": True}},
-            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1}
+            {"ticker": 1, "bucket": 1, "name": 1, "ticker_type": 1, "is_etf": 1},
         )
         for doc in cursor:
             docs_by_ticker.setdefault(doc["ticker"], []).append(doc)
@@ -213,8 +214,7 @@ def load_real_holdings_table(
             return docs[0]
 
         picked_docs = [
-            _pick_meta_doc(str(row.get("ticker") or ""), row.get("currency"))
-            for _, row in df_holdings.iterrows()
+            _pick_meta_doc(str(row.get("ticker") or ""), row.get("currency")) for _, row in df_holdings.iterrows()
         ]
 
         # 데이터 업데이트 (종목풀 정보 우선 적용, 다시장은 보유 통화 기준 문서 사용)
@@ -261,7 +261,9 @@ def load_real_holdings_table(
         "memo",
     ]:
         if col not in df_holdings.columns:
-            df_holdings[col] = "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date", "memo") else 0
+            df_holdings[col] = (
+                "" if col in ("ticker", "name", "currency", "first_buy_date", "last_buy_date", "memo") else 0
+            )
 
     df_holdings["memo"] = df_holdings["memo"].fillna("").astype(str)
 
@@ -401,7 +403,9 @@ def load_real_holdings_table(
             if prev_close > 0:
                 daily_pct = ((current_price / prev_close) - 1.0) * 100.0
 
-        max_price = float(close_series.max()) if not close_series.empty else 0.0
+        # 고점 대비(%) — 순위 화면과 같은 규칙: 최근 HIGH_WATERMARK_MONTHS(12개월) 최고가 대비.
+        high_window = close_series.loc[close_series.index[-1] - pd.DateOffset(months=HIGH_WATERMARK_MONTHS) :]
+        max_price = float(high_window.max()) if not high_window.empty else 0.0
         drawdown = None
         if max_price > 0:
             drawdown = (current_price / max_price - 1.0) * 100.0
