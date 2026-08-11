@@ -33,7 +33,7 @@ export function renderNameWithLeverageHighlight(
   options?: { isNew?: boolean },
 ): ReactNode {
   const newBadge = options?.isNew ? (
-    <span title="신규상장 — 백테스트 기준 기간(12개월)보다 상장 기간이 짧습니다"> {NEW_LISTING_BADGE}</span>
+    <span title="신규상장 — 백테스트 기준 기간(장기 이평선 파생)보다 상장 기간이 짧습니다"> {NEW_LISTING_BADGE}</span>
   ) : null;
 
   const parts = name.split(NAME_HIGHLIGHT_RE);

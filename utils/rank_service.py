@@ -199,16 +199,13 @@ def _apply_industry_labels(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
+    """정보 컬럼(배당률·보수·순자산·상장일)을 메타 캐시에서 붙인다.
+
+    backtest_stats(MDD·소르티노·is_partial)는 순위 계산(rankings)이 장기 이평선 파생
+    기간으로 실시간 계산해 행에 이미 담겨 있으므로 여기서 건드리지 않는다.
+    """
     if dataframe.empty:
         return dataframe
-
-    from utils.stock_list_io import get_all_etfs_including_deleted
-    meta_docs = get_all_etfs_including_deleted(ticker_type)
-    meta_stats_map = {}
-    for d in meta_docs:
-        t = str(d.get("ticker") or "").strip().upper()
-        if t and "backtest_stats" in d:
-            meta_stats_map[t] = d["backtest_stats"]
 
     tickers = [
         str(record.get("티커") or "").strip().upper()
@@ -222,7 +219,6 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["보수"] = None
         enriched["순자산총액"] = None
         enriched["상장일"] = None
-        enriched["backtest_stats"] = enriched["티커"].map(lambda t: meta_stats_map.get(str(t).strip().upper()))
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 
@@ -236,7 +232,6 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["보수"] = meta_cache.get("expense_ratio")
         row["순자산총액"] = meta_cache.get("total_net_assets")
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
-        row["backtest_stats"] = meta_stats_map.get(ticker)
 
         rows.append(row)
 
@@ -511,7 +506,9 @@ def load_rank_toolbar_data(ticker_type: str | None = None) -> dict[str, Any]:
     else:
         selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
 
-    selected_config = next((cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None)
+    selected_config = next(
+        (cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None
+    )
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
@@ -627,7 +624,9 @@ def load_rank_data(
         selected_ticker_type = target
     else:
         selected_ticker_type = str(default_config["ticker_type"]).strip().lower()
-    selected_config = next((cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None)
+    selected_config = next(
+        (cfg for cfg in configs_payload if str(cfg["ticker_type"]).lower() == selected_ticker_type), None
+    )
     country_code = str(selected_config.get("country_code") or "") if selected_config else ""
 
     ma_rules = build_effective_ma_rules(selected_ticker_type, ma_rule_override)
@@ -644,9 +643,7 @@ def load_rank_data(
     if selected_config is None:
         raise ValueError("선택된 종목풀 설정을 찾을 수 없습니다.")
 
-    cache_key = _build_rank_cache_key(
-        selected_ticker_type, selected_as_of_date, ma_rules
-    )
+    cache_key = _build_rank_cache_key(selected_ticker_type, selected_as_of_date, ma_rules)
     cached_payload = _get_rank_data_cache(cache_key)
     if cached_payload is not None:
         return cached_payload
