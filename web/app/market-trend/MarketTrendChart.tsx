@@ -13,6 +13,14 @@ import {
 } from "lightweight-charts";
 import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "lightweight-charts";
 
+import {
+  ADR_LINE_COLOR,
+  ADR_OVERHEATED_COLOR,
+  ADR_OVERSOLD_COLOR,
+  describeAdrLevel,
+} from "./adr-types";
+import type { AdrPoint, AdrResponse } from "./adr-types";
+
 
 type RegimeKey = "accel_up" | "accel_down";
 
@@ -49,8 +57,8 @@ type HistoryResponse = {
   history: HistoryPoint[];
   trend_min_12m: number | null;
   trend_max_12m: number | null;
-  offense_pct: number | null;
-  defense_pct: number | null;
+  /** 한국 지수만 값이 있다. 구성종목 데이터가 없는 지수는 null. */
+  adr: AdrResponse | null;
   error?: string;
 };
 
@@ -358,6 +366,25 @@ export function MarketTrendChart({
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
 
+  // 차트 판에는 라벨을 넣을 자리가 없어, 기간 버튼 줄 오른쪽에 ADR 현재값을 적는다.
+  const adr = data?.adr ?? null;
+  const adrSummary = useMemo(() => {
+    if (!adr) return null;
+    const level = describeAdrLevel(adr.latest_adr, adr);
+    return (
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8 }}>
+        <span style={{ fontWeight: 700, color: ADR_LINE_COLOR }}>ADR</span>
+        <span style={{ fontSize: "var(--fs-lg)", fontWeight: 700, color: level.color }}>
+          {adr.latest_adr != null ? adr.latest_adr.toFixed(1) : "-"}
+        </span>
+        <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: level.color }}>{level.label}</span>
+        <span style={{ fontSize: "var(--fs-sm)", color: "var(--text-muted)" }}>
+          {adr.window_days}일 누적 · 대상 {adr.universe_size}종목 · 과열 {adr.overheated} / 침체 {adr.oversold}
+        </span>
+      </div>
+    );
+  }, [adr]);
+
   useEffect(() => {
     let alive = true;
     // 요청 시점의 ticker 를 고정해 둔다 — 응답이 늦게 도착해도 다른 지수 데이터를 그리지 않는다.
@@ -439,31 +466,7 @@ export function MarketTrendChart({
 
   const latestPoint = data?.history.at(-1) ?? null;
 
-  // 공격/방어 비중이 다음 단계로 바뀌는 지수 종가 예측(추세 전환 조건과 같은 형식).
-  // 공격<100: 한 단계 위 공격까지 필요한 상승 종가. 공격=100: MA 아래로 내려가 방어 20이 되는 종가.
-  const ratioForecast = useMemo(() => {
-    const offense = data?.offense_pct;
-    const defense = data?.defense_pct;
-    const close = latestPoint?.close;
-    const ma = latestPoint?.ma;
-    const gapMin = data?.trend_min_12m;
-    if (offense == null || defense == null || close == null || ma == null || !(close > 0) || !(ma > 0)) {
-      return null;
-    }
-    if (offense >= 100) {
-      // 이미 공격 100 — MA 아래로 내려가면 방어 20으로 상승.
-      const changePct = (ma / close - 1) * 100;
-      return { targetPrice: ma, changePct, kind: "defense" as const, ratioValue: 20, rising: false };
-    }
-    if (gapMin == null || gapMin >= 0) return null;
-    const steps = defense / 20; // 현재 방어 단계(1~5)
-    const targetGapPct = ((steps - 1) / 5) * gapMin; // 한 단계 위(공격+20)에 해당하는 괴리율
-    const targetPrice = ma * (1 + targetGapPct / 100);
-    const changePct = (targetPrice / close - 1) * 100;
-    return { targetPrice, changePct, kind: "offense" as const, ratioValue: offense + 20, rising: true };
-  }, [data, latestPoint]);
-
-  // 왼쪽 패널용 기간 수익률 — 최신 종가 대비 N거래일 전 종가.
+  // 추세 전환 조건 아래에 붙는 기간 수익률 — 최신 종가 대비 N거래일 전 종가.
   const periodReturns = useMemo(() => {
     const hist = data?.history ?? [];
     const lastClose = hist.at(-1)?.close;
@@ -626,6 +629,53 @@ export function MarketTrendChart({
       });
     }
 
+    // ADR 은 지수와 단위가 달라(60~200 대 수천 pt) 같은 축에 얹으면 축 설정에 따라
+    // 교차점이 멋대로 움직인다. 별도 판(pane)에 두면 축은 나뉘고 시간축만 공유해
+    // 세로로 같은 위치가 항상 같은 날짜가 된다 — 지수와 어긋나는 구간을 그대로 읽을 수 있다.
+    if (adr && adr.points.length >= 2) {
+      // 지수와 같은 구간만 남긴다. ADR 이 지수보다 앞선 날짜를 갖고 있으면 시간축이 그만큼
+      // 늘어나, 기간 버튼으로 고른 구간(예: 6개월)의 캔들이 오른쪽으로 밀려 좁아진다.
+      const fromDate = visibleHistory[0].date;
+      const toDate = visibleHistory[visibleHistory.length - 1].date;
+      const adrLine = adr.points
+        .filter((point): point is AdrPoint & { adr: number } => point.adr != null)
+        .filter((point) => point.date >= fromDate && point.date <= toDate)
+        .map((point) => ({ time: point.date as Time, value: point.adr }));
+
+      if (adrLine.length >= 2) {
+        const ADR_PANE_INDEX = 1;
+        const adrSeries = chart.addSeries(
+          LineSeries,
+          {
+            color: ADR_LINE_COLOR,
+            lineWidth: 2,
+            priceLineVisible: false,
+            lastValueVisible: true,
+          },
+          ADR_PANE_INDEX,
+        );
+        adrSeries.setData(adrLine);
+
+        // 과열·침체 경계. 이 선을 넘나드는 지점이 판단 기준이라 축 라벨까지 남긴다.
+        for (const [price, color] of [
+          [adr.overheated, ADR_OVERHEATED_COLOR],
+          [adr.oversold, ADR_OVERSOLD_COLOR],
+        ] as const) {
+          adrSeries.createPriceLine({
+            price,
+            color,
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+          });
+        }
+
+        // 지수 판 4 : ADR 판 1 — 거래량이 차지하던 정도의 높이.
+        chart.panes()[0]?.setStretchFactor(4);
+        chart.panes()[ADR_PANE_INDEX]?.setStretchFactor(1);
+      }
+    }
+
     chart.addSeries(LineSeries, {
       color: "#16a34a",
       lineWidth: 2,
@@ -772,7 +822,7 @@ export function MarketTrendChart({
       overlay.innerHTML = "";
       tooltip.style.display = "none";
     };
-  }, [visibleHistory, showSuperTrend]);
+  }, [visibleHistory, showSuperTrend, adr]);
 
   return (
     <div
@@ -859,131 +909,72 @@ export function MarketTrendChart({
           })() : null}
           {!compact ? (
           <>
-          <div style={{ marginBottom: 12 }}>
-            {data?.offense_pct != null && data?.defense_pct != null ? (
-              <div style={{ display: "flex", gap: 16, alignItems: "flex-start" }}>
-                {/* 왼쪽 반: 기간 수익률. */}
-                {periodReturns.length > 0 ? (
-                  <div style={{ flex: "1 1 0", minWidth: 0 }}>
-                    <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                      {periodReturns.map((r) => (
-                        <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "var(--fs-sm)" }}>
-                          <span style={{ fontWeight: 700 }}>{r.label}</span>
-                          <span style={{ fontWeight: 800, color: r.pct == null ? "#94a3b8" : r.pct >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(r.pct)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-                {/* 공격/방어 게이지 — 오른쪽 반. */}
-                <div style={{ flex: "1 1 0", minWidth: 0 }}>
-                  {/* 공격/방어 비율 — 기준 이동평균선(MA) 위면 공격 100, 아래면 12개월 최저까지의 거리로 방어. */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-                    <span style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82" }}>
-                      공격 / 방어 <span style={{ fontWeight: 400 }}>({maType}{maDays} 기준)</span>
-                    </span>
-                    <span style={{ fontSize: "var(--fs-sm)", fontWeight: 800 }}>
-                      <span style={{ color: "#d62828" }}>공격 {data.offense_pct}%</span>
-                      <span style={{ color: "#94a3b8" }}> · </span>
-                      <span style={{ color: "#2f9e44" }}>방어 {data.defense_pct}%</span>
-                    </span>
-                  </div>
-                  {/* 5개 균등 덩어리(각 20%). 왼쪽부터 공격 비중만큼 빨강, 나머지는 방어 녹색. */}
-                  <div
-                    style={{ display: "flex", gap: 3, height: 34 }}
-                    title={`${maType}${maDays} 괴리율 ${formatPct(latestPoint?.trend_pct)} · 공격 ${data.offense_pct}% / 방어 ${data.defense_pct}%`}
-                  >
-                    {[0, 1, 2, 3, 4].map((i) => {
-                      const isOffense = i < Math.round((data.offense_pct ?? 0) / 20);
-                      return (
-                        <div
-                          key={i}
-                          style={{
-                            flex: 1,
-                            background: isOffense ? "#d62828" : "#2f9e44",
-                            borderRadius: 4,
-                            color: "#fff",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: "var(--fs-sm)",
-                            fontWeight: 800,
-                          }}
-                        >
-                          {isOffense ? "공격" : "방어"}
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {/* 다음 단계 예측: 공격/방어 비중이 한 단계 바뀌는 지수 종가(추세 전환 조건과 같은 형식). */}
-                  {ratioForecast ? (
-                    <div style={{ fontSize: "var(--fs-sm)", color: "#5f6b82", marginTop: 6, lineHeight: 1.5 }}>
-                      <span style={{ fontWeight: 800, textDecoration: "underline" }}>{formatNumber(ratioForecast.targetPrice)}</span>
-                      pt {ratioForecast.rising ? "이상으로 마감하면" : "아래로 내려가면"} (현재 대비{" "}
+          {/* 추세 전환 조건(왼쪽) · 기간 수익률(오른쪽) — 좌우 반반. */}
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "stretch", marginBottom: 12 }}>
+            <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+            {forecastTransitions.length > 0 && (
+              <div
+                style={{
+                  margin: 0,
+                  padding: "12px 16px",
+                  borderRadius: "8px",
+                  background: "rgba(245, 158, 11, 0.08)",
+                  border: "1px solid rgba(245, 158, 11, 0.25)",
+                  color: "#d97706",
+                  fontSize: "var(--fs-sm)",
+                  lineHeight: 1.5,
+                  boxShadow: "0 2px 8px rgba(245, 158, 11, 0.03)",
+                }}
+              >
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
+                  <span style={{ fontSize: "var(--fs-lg)", lineHeight: 1 }}>⚠️</span>
+                  <strong style={{ fontSize: "var(--fs-sm)" }}>
+                    추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(SuperTrend 기준)</span>
+                  </strong>
+                </div>
+                <ul style={{ margin: 0, paddingLeft: 20, overflowWrap: "anywhere", whiteSpace: "normal" }}>
+                  {forecastTransitions.map((item, idx) => (
+                    <li
+                      key={idx}
+                      style={{
+                        marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4,
+                        color: REGIME_COLOR[item.next_regime],
+                      }}
+                    >
+                      {data?.name} 지수가{" "}
+                      <span style={{ fontWeight: 800, textDecoration: "underline" }}>
+                        {formatNumber(item.target_price)}
+                      </span>
+                      pt
+                      {item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
+                      {" "}(현재 대비{" "}
                       <span style={{ fontWeight: 800 }}>
-                        {ratioForecast.changePct > 0 ? "+" : ""}
-                        {ratioForecast.changePct.toFixed(1)}%
+                        {item.change_pct! > 0 ? "+" : ""}
+                        {item.change_pct!.toFixed(1)}%
                       </span>
-                      ),{" "}
-                      <span style={{ fontWeight: 800, color: ratioForecast.kind === "offense" ? "#d62828" : "#2f9e44" }}>
-                        {ratioForecast.kind === "offense" ? "공격" : "방어"} 비중이 {ratioForecast.ratioValue}%
-                      </span>
-                      로 상승할 것으로 예상됩니다.
+                      ), 시장 상태가{" "}
+                      <span style={{ fontWeight: 800 }}>{REGIME_LABEL[item.next_regime]}</span>
+                      으로 변경될 것으로 예상됩니다.
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            </div>
+            {periodReturns.length > 0 ? (
+              <div style={{ flex: "1 1 320px", minWidth: 0 }}>
+                <div style={{ fontSize: "var(--fs-sm)", fontWeight: 700, color: "#5f6b82", marginBottom: 4 }}>기간 수익률</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  {periodReturns.map((r) => (
+                    <div key={r.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, fontSize: "var(--fs-sm)" }}>
+                      <span style={{ fontWeight: 700 }}>{r.label}</span>
+                      <span style={{ fontWeight: 800, color: r.pct == null ? "#94a3b8" : r.pct >= 0 ? "#d62828" : "#1971c2" }}>{formatPct(r.pct)}</span>
                     </div>
-                  ) : null}
+                  ))}
                 </div>
               </div>
             ) : null}
           </div>
-          {forecastTransitions.length > 0 && (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: "12px 16px",
-                borderRadius: "8px",
-                background: "rgba(245, 158, 11, 0.08)",
-                border: "1px solid rgba(245, 158, 11, 0.25)",
-                color: "#d97706",
-                fontSize: "var(--fs-sm)",
-                lineHeight: 1.5,
-                boxShadow: "0 2px 8px rgba(245, 158, 11, 0.03)",
-              }}
-            >
-              <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: 6 }}>
-                <span style={{ fontSize: "var(--fs-lg)", lineHeight: 1 }}>⚠️</span>
-                <strong style={{ fontSize: "var(--fs-sm)" }}>
-                  추세 전환 조건 <span style={{ fontWeight: 400, opacity: 0.85 }}>(SuperTrend 기준)</span>
-                </strong>
-              </div>
-              <ul style={{ margin: 0, paddingLeft: 20 }}>
-                {forecastTransitions.map((item, idx) => (
-                  <li
-                    key={idx}
-                    style={{
-                      marginBottom: idx === forecastTransitions.length - 1 ? 0 : 4,
-                      color: REGIME_COLOR[item.next_regime],
-                    }}
-                  >
-                    {data?.name} 지수가{" "}
-                    <span style={{ fontWeight: 800, textDecoration: "underline" }}>
-                      {formatNumber(item.target_price)}
-                    </span>
-                    pt
-                    {item.mode === "drop_below" ? " 아래로 내려가면" : " 이상으로 마감하면"}
-                    {" "}(현재 대비{" "}
-                    <span style={{ fontWeight: 800 }}>
-                      {item.change_pct! > 0 ? "+" : ""}
-                      {item.change_pct!.toFixed(1)}%
-                    </span>
-                    ), 시장 상태가{" "}
-                    <span style={{ fontWeight: 800 }}>{REGIME_LABEL[item.next_regime]}</span>
-                    으로 변경될 것으로 예상됩니다.
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
           {/* 최근 레짐 이력 뱃지 타임라인 (차트 밖 상단으로 배치하여 차트 가림 방지) */}
           {recentRegimeRanges.length > 0 && (
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: 10, alignItems: "center", justifyContent: "flex-end" }}>
@@ -1026,6 +1017,7 @@ export function MarketTrendChart({
                 </button>
               ))}
             </div>
+            {adrSummary}
           </div>
           </>
           ) : null}

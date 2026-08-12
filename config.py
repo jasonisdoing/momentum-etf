@@ -184,3 +184,20 @@ MARKET_TREND_SUPERTREND_MULTIPLIER: dict[str, float] = {
     "^SOX": 1.5,  # 필라델피아 반도체 (빠른 대응이 필요)
     "NQ=F": 3.0,  # 나스닥100 선물
 }
+
+# ADR(등락비율, Advance-Decline Ratio) 설정.
+# ADR = 기간 내 상승종목수 합 / 하락종목수 합 × 100. 지수는 대형주 몇 종목에 끌려가지만
+# ADR 은 '얼마나 많은 종목이 함께 오르는가'(시장 폭)를 본다. 지수가 오르는데 ADR 이 빠지면
+# 상승 종목이 좁아지는 국면이라 모멘텀 전략에 불리하다.
+MARKET_ADR_WINDOW_DAYS = 20
+
+# 과매수/과매도 판정 경계. 한국 시장에서 통용되는 관례값이다.
+MARKET_ADR_OVERHEATED = 120.0
+MARKET_ADR_OVERSOLD = 75.0
+
+# 강세/약세를 가르는 중립선. ADR 100 = 상승 종목수와 하락 종목수가 같다.
+MARKET_ADR_NEUTRAL = 100.0
+
+# ADR 대상 종목 수 — 시가총액 상위 N 종목. 전 종목이 아니라 상위 N 인 이유는
+# 동전주·거래정지 종목의 잡음을 빼고 매일 같은 기준으로 비교하기 위해서다.
+MARKET_ADR_UNIVERSE_SIZE = 200

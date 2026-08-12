@@ -522,6 +522,17 @@ def delete_pool(pool_id: str) -> dict[str, Any]:
     db = _db()
     deleted_pool = db[COLLECTION].delete_one({"_id": norm_id}).deleted_count
     deleted_stocks = db["stock_meta"].delete_many({"ticker_type": norm_id}).deleted_count
+
+    # 가격 캐시 컬렉션(`cache_<ticker_type>_stocks`)도 함께 지운다.
+    # 남겨두면 갱신 배치가 그 종목풀을 더 이상 돌지 않아 그 시점에 얼어붙은 채로 남는다.
+    # 종목풀이 없어졌으니 되살릴 때는 어차피 처음부터 다시 받는다.
+    try:
+        from utils.cache_utils import drop_cache_collection
+
+        drop_cache_collection(norm_id)
+    except Exception as exc:
+        logger.warning("가격 캐시 삭제 실패(종목풀 삭제 후): %s", exc)
+
     invalidate_overlay_cache()
     try:
         from utils.stock_list_io import invalidate_ticker_type_cache
