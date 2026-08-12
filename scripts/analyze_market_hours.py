@@ -10,7 +10,7 @@ import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
 
-from utils.notification import send_slack_message_v2
+from utils.notification import EXIT_ALREADY_NOTIFIED, send_slack_message_v2
 
 # 사용자 종목풀 정보 로드 모듈
 from utils.settings_loader import get_ticker_type_settings, list_available_ticker_types
@@ -22,7 +22,6 @@ load_dotenv()
 # yfinance 버전 업데이트 경고숨김 처리
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
-EXIT_ALREADY_NOTIFIED = 66
 
 
 class OutputCollector:

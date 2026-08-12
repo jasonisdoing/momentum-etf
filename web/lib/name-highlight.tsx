@@ -18,6 +18,22 @@ const NAME_HIGHLIGHT_RE = new RegExp(`(${Object.keys(NAME_HIGHLIGHT_KEYWORDS).jo
 
 const NEW_LISTING_BADGE = "🆕";
 
+/** 추세가 꺾인 종목 배지. 보유종목 알람의 이동선 이탈 표시와 같은 기호다. */
+const TREND_BROKEN_BADGE = "❗";
+
+/** 장기·단기 이격 중 하나라도 음수면 보유 대상이 될 수 없다고 본다.
+ *
+ * 값이 없으면 판단 자체가 불가하므로 같이 이탈로 둔다(상장 직후 등 이평선 계산 불가).
+ * 백엔드 `utils/holdings_alarm_service._ma_status` 의 이동선 이탈 판정과 같은 기준이다.
+ */
+export function isTrendBroken(
+  shortDisparity: number | null | undefined,
+  longDisparity: number | null | undefined,
+): boolean {
+  if (shortDisparity == null || longDisparity == null) return true;
+  return shortDisparity < 0 || longDisparity < 0;
+}
+
 function getNameHighlight(part: string): { color: string; emoji: string } | undefined {
   const lower = part.toLowerCase();
   for (const [keyword, style] of Object.entries(NAME_HIGHLIGHT_KEYWORDS)) {
@@ -28,20 +44,31 @@ function getNameHighlight(part: string): { color: string; emoji: string } | unde
   return undefined;
 }
 
+export type StockNameOptions = {
+  /** 상장 기간이 백테스트 기준 창보다 짧은 종목 */
+  isNew?: boolean;
+  /** 단기·장기 이평선 중 하나 이상 이탈 — `isTrendBroken()` 의 결과를 넘긴다 */
+  trendBroken?: boolean;
+};
+
 export function renderNameWithLeverageHighlight(
   name: string,
-  options?: { isNew?: boolean },
+  options?: StockNameOptions,
 ): ReactNode {
   const newBadge = options?.isNew ? (
     <span title="신규상장 — 백테스트 기준 기간(12개월)보다 상장 기간이 짧습니다"> {NEW_LISTING_BADGE}</span>
   ) : null;
+  const brokenBadge = options?.trendBroken ? (
+    <span title="단기·장기 이평선 중 하나 이상 이탈"> {TREND_BROKEN_BADGE}</span>
+  ) : null;
 
   const parts = name.split(NAME_HIGHLIGHT_RE);
   if (parts.length === 1) {
-    return newBadge ? (
+    return newBadge || brokenBadge ? (
       <>
         {name}
         {newBadge}
+        {brokenBadge}
       </>
     ) : (
       name
@@ -67,6 +94,28 @@ export function renderNameWithLeverageHighlight(
       {rendered}
       {emojis.length > 0 && <span> {emojis.join("")}</span>}
       {newBadge}
+      {brokenBadge}
     </>
+  );
+}
+
+/** 그리드 종목명 셀 표준. 말줄임 스타일·툴팁·배지를 한곳에서 정한다.
+ *
+ * 종목명을 보여주는 화면은 전부 이걸 쓴다 — 화면마다 배지가 붙었다 말았다 하지 않도록.
+ */
+export function renderStockNameCell(
+  name: string | null | undefined,
+  options?: StockNameOptions & {
+    /** 보유종목 알람 배지 등 화면 고유의 꼬리표. 종목명 맨 뒤에 붙는다. */
+    badge?: string;
+  },
+): ReactNode {
+  const value = String(name ?? "-") || "-";
+  const title = options?.trendBroken ? `${value} (추세 이탈)` : value;
+  return (
+    <span className="appNameCellText" title={title}>
+      {renderNameWithLeverageHighlight(value, options)}
+      {options?.badge ? <span> {options.badge}</span> : null}
+    </span>
   );
 }

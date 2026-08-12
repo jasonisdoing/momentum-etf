@@ -29,6 +29,11 @@ from utils.settings_loader import get_slack_channel
 _LAST_ERROR: str | None = None
 logger = get_app_logger()
 
+# 배치가 스스로 슬랙 알림을 보냈을 때 쓰는 종료 코드.
+# `infra/cron/run_batch.py` 래퍼가 이 코드를 보면 로그 꼬리를 붙인 일반 실패 알림을 보내지 않는다.
+# (래퍼는 프로젝트 임포트 없이 도는 독립 스크립트라 같은 값을 자체 상수로 들고 있다.)
+EXIT_ALREADY_NOTIFIED = 66
+
 
 # ---------------------------------------------------------------------------
 # 슬랙 웹훅 관련 헬퍼

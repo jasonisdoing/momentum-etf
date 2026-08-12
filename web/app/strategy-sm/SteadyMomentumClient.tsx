@@ -12,6 +12,7 @@ import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { formatSignedPct, marketBadgeCellStyle, renderHighDrawdownCell, signColor } from "@/lib/grid-cells";
+import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPrice } from "../../lib/price-format";
 
 const gridTheme = createAppGridTheme();
@@ -593,12 +594,12 @@ export function SteadyMomentumClient() {
         // 상한(maxWidth)을 두지 않아 넓은 화면에서 계속 늘어난다.
         flex: 1,
         minWidth: 220,
-        // `/pools-rank` 와 같은 셀 스타일 — 2줄까지 보이고 넘치면 말줄임.
-        cellRenderer: (p: { value?: string | null }) => (
-          <span className="appNameCellText" title={String(p.value ?? "")}>
-            {String(p.value ?? "-")}
-          </span>
-        ),
+        // 종목명 셀 표준(`@/lib/name-highlight`) — 말줄임·레버리지 강조·추세 이탈 배지가 전 화면 공통이다.
+        // 이탈 판정은 `현재-단기/장기` 기준이다. 선정 당시가 아니라 지금 상태를 보여준다.
+        cellRenderer: (p: { value?: string | null; data?: PickRow }) =>
+          renderStockNameCell(p.value, {
+            trendBroken: isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct),
+          }),
       },
       // 업종 데이터가 아예 없는 풀(ETF 모음 등)에서는 빈 컬럼을 숨긴다.
       ...(hasIndustryData
