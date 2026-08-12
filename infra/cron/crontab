@@ -36,6 +36,10 @@ APP_DIR=/home/ubuntu/apps/momentum-etf
 0 7 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_hours_analysis python scripts/analyze_market_hours.py >> logs/cron/market_hours_analysis.log 2>&1
 0 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py us_market_stocks python scripts/update_us_market_stocks.py >> logs/cron/us_market_stocks.log 2>&1
 10 8 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py aus_market_stocks python scripts/update_aus_market_stocks.py >> logs/cron/aus_market_stocks.log 2>&1
+# 시장 폭(ADR) — 한국 마감(15:30) 뒤 종가 확정 시각. 코스피 200 / 코스닥 150 의 일별 상승·하락 종목수를 적립한다.
+30 16 * * 1-5 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
+# 07:00 은 미국 마감(KST 새벽 05~06시) 뒤. 금요일 미국 장은 토요일 새벽에 끝나므로 화~토(2-6)에 돈다.
+0 7 * * 2-6 cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py market_breadth python scripts/collect_market_breadth.py >> logs/cron/market_breadth.log 2>&1
 # DB 백업 — 매시 fresh 백업(임시 폴더 → 성공 시 교체), 최근 30개 보존. 백업 폴더가 로컬(맥)이라 LOCAL 전용.
 40 * * * * cd $APP_DIR && mkdir -p logs/cron && docker compose exec -T fastapi_app python infra/cron/run_batch.py db_backup python scripts/backup_mongo_full.py --gzip >> logs/cron/db_backup.log 2>&1
 

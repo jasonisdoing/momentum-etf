@@ -31,8 +31,8 @@ yfinance 는 프로세스 전역 상태를 공유해서, 여러 스레드가 동
 from __future__ import annotations
 
 import threading
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 _YF_LOCK = threading.RLock()
 

@@ -24,6 +24,7 @@ SystemAction = Literal[
     "asset_summary",
     "us_market_stocks",
     "aus_market_stocks",
+    "market_breadth",
     "live_24h_slack",
     "leverage_ma_cross",
     "holdings_alarm",
@@ -34,6 +35,8 @@ SystemAction = Literal[
 # 평일(월~금) / 월~토 / 매일 weekday 셋. (Python: 0=월 ... 6=일)
 _WEEKDAYS_MON_FRI = [0, 1, 2, 3, 4]
 _WEEKDAYS_MON_SAT = [0, 1, 2, 3, 4, 5]
+# 미국 장 마감이 KST 새벽이라, 미국 종가를 받는 아침 배치는 화~토에 돈다.
+_WEEKDAYS_TUE_SAT = [1, 2, 3, 4, 5]
 _WEEKDAYS_ALL = [0, 1, 2, 3, 4, 5, 6]
 
 # 전략 사고팔기 알림 슬롯 — 평일 09:10~15:20 을 10분 간격으로.
@@ -75,6 +78,25 @@ SCHEDULE_ROWS = [
             "slots": [
                 {"hour": 9, "minute": 40, "weekdays": _WEEKDAYS_MON_SAT},
                 {"hour": 16, "minute": 10, "weekdays": _WEEKDAYS_MON_FRI},
+            ],
+            "weekdays": _WEEKDAYS_MON_SAT,
+        },
+    },
+    {
+        "key": "market_breadth",
+        "job": "시장 폭(ADR) 집계",
+        "target": "코스피 200 · 코스닥 150",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "월~금 16:30 · 화~토 07:00 KST",
+        "command": "python scripts/collect_market_breadth.py",
+        # 16:30 = 한국 마감(15:30) 뒤 종가 확정. 07:00 = 미국 마감(KST 새벽 05~06시) 뒤.
+        # 한 번 실행에 네 시장을 모두 훑지만, 이미 최신인 시장은 새로 받을 것이 없어 곧 끝난다.
+        # 07:00 을 화~토로 두는 이유: 미국 금요일 장은 토요일 새벽에 끝나고,
+        # 월요일 아침에는 새로 마감된 미국 장이 없다.
+        "schedule": {
+            "slots": [
+                {"hour": 16, "minute": 30, "weekdays": _WEEKDAYS_MON_FRI},
+                {"hour": 7, "minute": 0, "weekdays": _WEEKDAYS_TUE_SAT},
             ],
             "weekdays": _WEEKDAYS_MON_SAT,
         },
@@ -209,6 +231,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "asset_summary": "scripts/slack_asset_summary.py",
     "us_market_stocks": "scripts/update_us_market_stocks.py",
     "aus_market_stocks": "scripts/update_aus_market_stocks.py",
+    "market_breadth": "scripts/collect_market_breadth.py",
     "live_24h_slack": "scripts/live_24h_slack.py",
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",

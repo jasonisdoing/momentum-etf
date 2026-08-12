@@ -912,6 +912,40 @@ def delete_cached_frame(account_id: str, ticker: str) -> None:
         return
 
 
+def prune_cache_to_tickers(account_id: str, keep_tickers: Iterable[str]) -> list[str]:
+    """``keep_tickers`` 에 없는 캐시 문서를 지우고 지운 티커 목록을 돌려준다.
+
+    종목풀에서 빠진 종목의 캐시는 아무도 갱신하지 않아 그 시점에 얼어붙는다. 그대로 두면
+    한 컬렉션 안에 최신 종목과 멈춘 종목이 섞이고, 나중에 컬렉션을 통째로 읽는 쪽이
+    서로 다른 날짜의 값을 한 표본으로 쓰게 된다.
+
+    보유 중인 종목은 호출자가 ``keep_tickers`` 에 포함시켜야 한다 — 풀에서 빠져도
+    자산 화면이 그 가격을 계속 쓴다 (`utils/stocks_service` 의 종목 삭제 규칙과 같다).
+    """
+    collection = _get_collection(account_id)
+    if collection is None:
+        return []
+
+    keep = {str(ticker or "").strip().upper() for ticker in keep_tickers}
+    keep.discard("")
+    if not keep:
+        # 지킬 목록을 못 만든 상태에서 지우면 캐시를 통째로 날린다.
+        logger.warning("[%s] 캐시 정리 대상 목록이 비어 있어 정리를 건너뜁니다.", account_id)
+        return []
+
+    try:
+        orphans = [
+            str(doc.get("ticker") or "").strip().upper()
+            for doc in collection.find({"ticker": {"$nin": list(keep)}}, {"ticker": 1})
+        ]
+        if orphans:
+            collection.delete_many({"ticker": {"$in": orphans}})
+    except Exception as exc:
+        logger.warning("[%s] 고아 캐시 정리 실패: %s", account_id, exc)
+        return []
+    return orphans
+
+
 def drop_cache_collection(account_id: str) -> None:
     db = get_db_connection()
     if db is None:

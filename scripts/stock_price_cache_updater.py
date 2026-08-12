@@ -33,6 +33,7 @@ from services.stock_cache_service import get_stock_cache_meta
 from utils.cache_utils import (
     get_cached_date_range,
     load_cached_frame_with_fallback,
+    prune_cache_to_tickers,
     save_cached_frame,
     set_cache_refresh_completed_at,
 )
@@ -807,6 +808,19 @@ def refresh_cache_for_target(
             for etf in target_items
             if str(etf.get("ticker") or "").strip().upper() not in failed_tickers
         ]
+
+        # 이 배치가 다루지 않는 캐시 문서 제거. 남겨두면 그 시점에 얼어붙은 채로 남아,
+        # 나중에 컬렉션을 통째로 읽는 쪽이 최신 종목과 멈춘 종목을 한 표본으로 쓰게 된다.
+        # `all_map` 은 풀 종목 + 삭제된 종목 + 벤치마크 + 보유 종목을 모두 담고 있다.
+        try:
+            orphans = prune_cache_to_tickers(target_norm, all_map.keys())
+            if orphans:
+                preview = ", ".join(orphans[:10])
+                suffix = " ..." if len(orphans) > 10 else ""
+                logger.info("[%s] 갱신 대상 밖 캐시 %d건 제거: %s%s",
+                            target_norm.upper(), len(orphans), preview, suffix)
+        except Exception as exc:
+            logger.warning("[%s] 고아 캐시 정리 중 오류: %s", target_norm.upper(), exc)
 
         # 풀 전체 검증: 데이터 소스 오류로 다수 종목의 close 가 NaN인 날짜 자동 제거
         try:
