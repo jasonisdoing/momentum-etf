@@ -8,7 +8,7 @@ import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { marketBadgeCellStyle, renderHighDrawdownCell } from "@/lib/grid-cells";
-import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
+import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
 import {
@@ -151,20 +151,6 @@ const METRIC_MODE_OPTIONS: { value: MetricMode; label: string }[] = [
   { value: "monthly", label: "월별" },
   { value: "info", label: "정보" },
 ];
-
-// 추세가 꺾인 종목을 종목명 뒤에 표시하는 배지 (알람 화면의 이동선 이탈 배지와 같은 기호).
-const TREND_BROKEN_BADGE = "❗";
-
-/** 장기·단기 이격 중 하나라도 음수면 보유 대상이 될 수 없다고 본다.
- *
- * 값이 없으면 판단 자체가 불가하므로 같이 이탈로 둔다(상장 직후 등 이평선 계산 불가).
- * 보유종목 알람(`utils/holdings_alarm_service._ma_status`)의 이동선 이탈 판정과 같은 기준이다.
- */
-function isTrendBroken(row: RankGridRow | undefined): boolean {
-  const longDisparity = row?.이격 ?? null;
-  const shortDisparity = row?.단기이격 ?? null;
-  return longDisparity === null || shortDisparity === null || longDisparity < 0 || shortDisparity < 0;
-}
 
 type RankToolbarCache = {
   ticker_types: RankTickerType[];
@@ -973,17 +959,11 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
               </div>
             );
           }
-          const value = String(params.value ?? "-");
-          const broken = isTrendBroken(params.data);
-          return (
-            <span className="appNameCellText" title={broken ? `${value} (추세 이탈)` : value}>
-              {renderNameWithLeverageHighlight(value, {
-                // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
-                isNew: params.data?.backtest_stats?.is_partial === true,
-              })}
-              {broken ? <span title="단기·장기 이평선 중 하나 이상 이탈"> {TREND_BROKEN_BADGE}</span> : null}
-            </span>
-          );
+          return renderStockNameCell(params.value, {
+            // MDD·소르티노 노란색과 같은 기준 — 상장 기간이 백테스트 기준 창(METRIC_WINDOW_MONTHS)보다 짧은 종목.
+            isNew: params.data?.backtest_stats?.is_partial === true,
+            trendBroken: isTrendBroken(params.data?.단기이격, params.data?.이격),
+          });
         },
       },
       {

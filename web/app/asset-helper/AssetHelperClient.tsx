@@ -11,7 +11,7 @@ import { useAddingTickerRow } from "../components/useAddingTickerRow";
 import { TickerDetailLink } from "../components/TickerDetailLink";
 import { AssetHelperBacktestResult, type LabResult } from "../components/AssetHelperBacktestResult";
 import { BUCKET_THEME } from "@/lib/bucket-theme";
-import { renderNameWithLeverageHighlight } from "@/lib/name-highlight";
+import { renderStockNameCell } from "@/lib/name-highlight";
 import { reorderHoldings } from "@/lib/holdings-store";
 import { fetchAlertBadges, normalizeBadgeTicker, type AlertBadges } from "@/lib/alert-badges";
 
@@ -840,13 +840,9 @@ export function AssetHelperClient() {
               </div>
             );
           }
-          const badge = alertBadges[normalizeBadgeTicker(row.ticker)] ?? "";
-          return (
-            <span className="appNameCellText" title={params.value ?? ""}>
-              {renderNameWithLeverageHighlight(String(params.value ?? ""))}
-              {badge ? <span> {badge}</span> : null}
-            </span>
-          );
+          return renderStockNameCell(params.value, {
+            badge: alertBadges[normalizeBadgeTicker(row.ticker)] ?? "",
+          });
         },
       },
       { field: "daily_change_pct", headerName: "일간", minWidth: 88, width: 88, type: "rightAligned", cellRenderer: renderPctCell },
