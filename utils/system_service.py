@@ -54,8 +54,10 @@ _STRATEGY_TRADE_SLOTS = [
 # 가 infra/cron/crontab 을 읽어 APScheduler 로 큐에 enqueue 합니다. worker 는
 # 서버와 로컬(`python infra/server_scheduler.py`) 양쪽에서 큐를 atomic 하게 claim 합니다.
 SCHEDULE_ROWS = [
+    # ① 상시 집계 — 가장 자주 돌고 짧다. 실패하면 화면 전체가 틀어진다.
     {
         "key": "data_aggregate",
+        "group": "상시 집계",
         "job": "데이터 집계",
         "target": "일별/주별/월별/년별 데이터",
         "run_location": "SERVER/LOCAL",
@@ -65,7 +67,56 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": list(range(0, 60, 10)), "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
+        "key": "cache_refresh",
+        "group": "상시 집계",
+        "job": "가격 캐시 업데이트",
+        "target": "모든 종목 가격",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "월~토 24시간 매시 20분 KST",
+        "command": "python scripts/stock_price_cache_updater.py",
+        "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    # ② 장중 알림 — 사람이 보고 바로 반응해야 하는 것들.
+    {
+        "key": "strategy_trade_notify",
+        "group": "장중 알림",
+        "job": "전략 사고팔기 알림",
+        "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/strategy_trade_notify.py",
+        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
+        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "holdings_alarm",
+        "group": "장중 알림",
+        "job": "보유종목 알람",
+        "target": "알람 On 계좌의 보유 종목",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10 KST (한국 개시 직후)",
+        "command": "python scripts/holdings_alarm.py",
+        "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
+        "key": "leverage_ma_cross",
+        "group": "장중 알림",
+        "job": "레버리지 스위칭",
+        "target": "한국/미국 지수(코스피·나스닥100)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10 · 15:00 · 16:00 KST",
+        "command": "python scripts/leverage_recommend_ma_cross.py",
+        # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
+        # (한국시간 새벽 5~6시), 15:00·16:00 은 한국 마감용이다. 시장별로 '장 마감 직후'
+        # 이고 오늘 아직 안 보낸 경우에만 1회 발송하므로 여러 번 돌아도 중복되지 않는다.
+        "schedule": {
+            "slots": [{"hour": 9, "minute": 10}, {"hour": 15, "minute": 0}, {"hour": 16, "minute": 0}],
+            "weekdays": _WEEKDAYS_MON_FRI,
+        },
+    },
+    {
         "key": "asset_summary",
+        "group": "장중 알림",
         "job": "전체 자산 요약 알림",
         "target": "전체 계좌",
         "run_location": "SERVER/LOCAL",
@@ -82,8 +133,10 @@ SCHEDULE_ROWS = [
             "weekdays": _WEEKDAYS_MON_SAT,
         },
     },
+    # ③ 마감 후 지표 — 하루 1~2회.
     {
         "key": "market_breadth",
+        "group": "마감 후 지표",
         "job": "시장 폭(ADR) 집계",
         "target": "코스피 200 · 코스닥 150",
         "run_location": "SERVER/LOCAL",
@@ -102,16 +155,8 @@ SCHEDULE_ROWS = [
         },
     },
     {
-        "key": "cache_refresh",
-        "job": "가격 캐시 업데이트",
-        "target": "모든 종목 가격",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "월~토 24시간 매시 20분 KST",
-        "command": "python scripts/stock_price_cache_updater.py",
-        "schedule": {"minutes": [20], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
-    },
-    {
         "key": "cache_refresh_full",
+        "group": "마감 후 지표",
         "job": "가격 캐시 전체 재수집",
         "target": "모든 종목 가격 (전체 히스토리)",
         "run_location": "SERVER/LOCAL",
@@ -121,8 +166,20 @@ SCHEDULE_ROWS = [
         "command": "python scripts/stock_price_cache_updater.py --full",
         "schedule": {"minutes": [10], "hours": [17], "weekdays": _WEEKDAYS_MON_FRI},
     },
+    # ④ 개장 전 준비 — 아침에 한 번, 오래 걸린다(실행 시각 순).
+    {
+        "key": "market_hours_analysis",
+        "group": "개장 전 준비",
+        "job": "장 시간 분석",
+        "target": "시장 스케줄",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 07:00 KST",
+        "command": "python scripts/analyze_market_hours.py",
+        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
+    },
     {
         "key": "reference_meta_updater",
+        "group": "개장 전 준비",
         "job": "종목 메타 업데이트",
         "target": "이름·상장일·마켓·업종 + ETF holdings·배당",
         "run_location": "SERVER/LOCAL",
@@ -132,6 +189,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "price_metrics_updater",
+        "group": "개장 전 준비",
         "job": "종목 가격지표 업데이트",
         "target": "거래량·기간수익률·backtest",
         "run_location": "SERVER/LOCAL",
@@ -141,6 +199,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "us_market_stocks",
+        "group": "개장 전 준비",
         "job": "미국 개별주 업데이트",
         "target": "S&P500, NASDAQ100",
         "run_location": "SERVER/LOCAL",
@@ -150,6 +209,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "aus_market_stocks",
+        "group": "개장 전 준비",
         "job": "호주 개별주 업데이트",
         "target": "S&P/ASX 200",
         "run_location": "SERVER/LOCAL",
@@ -157,17 +217,10 @@ SCHEDULE_ROWS = [
         "command": "python scripts/update_aus_market_stocks.py",
         "schedule": {"minutes": [10], "hours": [8], "weekdays": _WEEKDAYS_MON_FRI},
     },
-    {
-        "key": "market_hours_analysis",
-        "job": "장 시간 분석",
-        "target": "시장 스케줄",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 07:00 KST",
-        "command": "python scripts/analyze_market_hours.py",
-        "schedule": {"minutes": [0], "hours": [7], "weekdays": _WEEKDAYS_MON_FRI},
-    },
+    # ⑤ 상시 운영 — 자동으로 돌고 손댈 일이 거의 없다.
     {
         "key": "live_24h_slack",
+        "group": "상시 운영",
         "job": "24H 시세 알림",
         "target": "하이퍼리퀴드/바이낸스",
         "run_location": "SERVER/LOCAL",
@@ -177,6 +230,7 @@ SCHEDULE_ROWS = [
     },
     {
         "key": "db_backup",
+        "group": "상시 운영",
         "job": "DB 백업",
         "target": "MongoDB 전체 → backups/ (최근 30개 보존)",
         "run_location": "LOCAL",
@@ -184,40 +238,6 @@ SCHEDULE_ROWS = [
         # 매시 fresh 백업 — 임시 폴더에 받고 성공 시에만 오늘 폴더로 교체. 백업 폴더가 로컬이라 LOCAL 전용.
         "command": "python scripts/backup_mongo_full.py --gzip",
         "schedule": {"minutes": [40], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
-    },
-    {
-        "key": "leverage_ma_cross",
-        "job": "레버리지 스위칭",
-        "target": "한국/미국 지수(코스피·나스닥100)",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10 · 15:00 · 16:00 KST",
-        "command": "python scripts/leverage_recommend_ma_cross.py",
-        # 한국·미국 두 시장의 마감을 각각 커버해야 해서 여러 번 돈다. 09:10 은 미국 마감
-        # (한국시간 새벽 5~6시), 15:00·16:00 은 한국 마감용이다. 시장별로 '장 마감 직후'
-        # 이고 오늘 아직 안 보낸 경우에만 1회 발송하므로 여러 번 돌아도 중복되지 않는다.
-        "schedule": {
-            "slots": [{"hour": 9, "minute": 10}, {"hour": 15, "minute": 0}, {"hour": 16, "minute": 0}],
-            "weekdays": _WEEKDAYS_MON_FRI,
-        },
-    },
-    {
-        "key": "holdings_alarm",
-        "job": "보유종목 알람",
-        "target": "알람 On 계좌의 보유 종목",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10 KST (한국 개시 직후)",
-        "command": "python scripts/holdings_alarm.py",
-        "schedule": {"minutes": [10], "hours": [9], "weekdays": _WEEKDAYS_MON_FRI},
-    },
-    {
-        "key": "strategy_trade_notify",
-        "job": "전략 사고팔기 알림",
-        "target": "kor_account 코스피200·코스닥150 ETF 각 6종",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "평일 09:10~15:20 KST 10분 간격",
-        "command": "python scripts/strategy_trade_notify.py",
-        # 09:10~15:20 을 10분 간격으로 — 09:00·15:30 은 제외해야 하므로 슬롯으로 지정한다.
-        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
 ]
 # action 키 → 실행할 스크립트 경로

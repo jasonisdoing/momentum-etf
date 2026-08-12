@@ -5188,3 +5188,19 @@ a {
 .memoChecklistRow.is-dragover {
   box-shadow: inset 0 2px 0 0 var(--tblr-primary, #206bc4);
 }
+
+/* 배치 표의 그룹 구분줄 — 실제 배치가 아니라 성격이 비슷한 묶음의 머리글이다.
+   행처럼 보이면 클릭할 수 있다고 오해하므로 배경을 깔고 글자를 줄여 구분한다. */
+.batchGroupRow {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 0.75rem;
+  background: var(--bs-secondary-bg, #f1f5f9);
+  border-top: 1px solid var(--bs-border-color, #e2e8f0);
+  border-bottom: 1px solid var(--bs-border-color, #e2e8f0);
+  color: #5f6b82;
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}

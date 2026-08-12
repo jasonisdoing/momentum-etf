@@ -17,28 +17,14 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const payload = (await request.json()) as { action?: string };
-    const allowed = new Set([
-      "data_aggregate",
-      "cache_refresh",
-      "cache_refresh_full",
-      "market_hours_analysis",
-      "reference_meta_updater",
-      "price_metrics_updater",
-      "asset_summary",
-      "us_market_stocks",
-      "aus_market_stocks",
-      "live_24h_slack",
-      "leverage_ma_cross",
-      "holdings_alarm",
-        "strategy_trade_notify",
-      "db_backup",
-    ] as const);
     const actionStr = String(payload.action || "").trim();
-    if (!actionStr || !allowed.has(actionStr as never)) {
-      return NextResponse.json({ error: "유효하지 않은 action 입니다." }, { status: 400 });
+    if (!actionStr) {
+      return NextResponse.json({ error: "실행할 배치를 지정해야 합니다." }, { status: 400 });
     }
 
-    const message = await triggerSystemAction(actionStr as SystemAction);
+    // 실행 가능한 배치 목록은 백엔드(`utils/system_service._SCRIPT_BY_ACTION`)가 단일 소스다.
+    // 여기에 목록을 복사해 두면 배치를 추가할 때마다 어긋난다 (실제로 시장 폭 집계가 그랬다).
+    const message = await triggerSystemAction(actionStr);
     return NextResponse.json({ message });
   } catch (error) {
     const message = error instanceof Error ? error.message : "시스템 작업 실행에 실패했습니다.";

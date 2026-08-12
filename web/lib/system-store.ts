@@ -43,21 +43,9 @@ type SystemData = {
   running_job_details?: Record<string, SystemRunningJobDetail>;
 };
 
-type SystemAction =
-  | "data_aggregate"
-  | "cache_refresh"
-  | "cache_refresh_full"
-  | "market_hours_analysis"
-  | "reference_meta_updater"
-  | "price_metrics_updater"
-  | "asset_summary"
-  | "us_market_stocks"
-  | "aus_market_stocks"
-  | "live_24h_slack"
-  | "leverage_ma_cross"
-  | "holdings_alarm"
-  | "strategy_trade_notify"
-  | "db_backup";
+/** 배치 키. 목록은 백엔드(`utils/system_service`)가 단일 소스이며 화면은 그 응답으로 받는다.
+ *  여기에 union 으로 복사해 두면 배치를 추가할 때마다 빠뜨린다. */
+type SystemAction = string;
 
 export async function loadSystemData(): Promise<SystemData> {
   return fetchFastApiJson<SystemData>("/internal/system");
