@@ -819,7 +819,12 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
 
 
 def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
-    """토스증권 API에서 한국 주식의 실시간 가격 정보를 조회한다."""
+    """토스증권 API에서 한국 주식의 실시간 시세를 조회한다.
+
+    같은 응답에 **당일 누적 거래대금(`value`)·거래량(`volume`)** 도 들어 있어 함께 담는다.
+    가격 캐시의 거래대금은 `종가 × 거래량` 추정이고 그나마 마감된 날 것뿐이라,
+    장중 거래대금을 보여주려면 이 값이 필요하다. 50개씩 묶어 부르므로 358종목이 8회다.
+    """
     normalized_tickers = [str(ticker).strip().upper() for ticker in tickers if str(ticker or "").strip()]
     if not normalized_tickers or not requests:
         return {}
@@ -860,6 +865,10 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
             if base_val is not None and base_val > 0:
                 entry["prevClose"] = base_val
                 entry["changeRate"] = ((close_val - base_val) / base_val) * 100.0
+            for key, field in (("tradeValue", "value"), ("tradeVolume", "volume")):
+                parsed = _safe_float(item.get(field))
+                if parsed is not None and parsed > 0:
+                    entry[key] = parsed
             snapshot[ticker] = entry
 
     return snapshot

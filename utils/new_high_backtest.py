@@ -404,6 +404,52 @@ def _next_session(pool: str, last: pd.Timestamp) -> str | None:
     return str(days[0].date()) if days else None
 
 
+def _apply_live_trade_values(
+    rows: list[dict[str, Any]],
+    pool: str,
+    value_df: pd.DataFrame,
+    last: pd.Timestamp,
+    min_value_mult: float | None,
+) -> None:
+    """진행 중인 세션의 누적 거래대금으로 `trade_value`·`value_mult`·`qualifies` 를 다시 쓴다.
+
+    분모는 확정된 직전 19거래일 합에 오늘을 더한 20일 평균이다 — 백테스트가 쓰는 식과 같다.
+    백테스트는 확정된 과거만 보므로 여기서 바꾼 값이 성과 계산에 섞이지 않는다.
+    국내 상장이 아니거나 조회에 실패하면 아무것도 바꾸지 않는다(캐시 값 유지).
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(pool) or {}
+    if str(settings.get("country_code") or "").strip().lower() != "kor":
+        return
+    tickers = [row["ticker"] for row in rows]
+    try:
+        from utils.data_loader import fetch_toss_kr_stock_snapshot
+
+        snapshot = fetch_toss_kr_stock_snapshot(tickers)
+    except Exception:
+        logger.exception("[new_high] 실시간 거래대금 조회 실패 (%s)", pool)
+        return
+    if not snapshot:
+        return
+
+    # 오늘을 뺀 직전 19거래일 — 확정된 값만 쓴다.
+    recent = value_df.loc[:last].tail(19)
+    for row in rows:
+        today = (snapshot.get(row["ticker"]) or {}).get("tradeValue")
+        if today is None or float(today) <= 0 or row["ticker"] not in recent.columns:
+            continue
+        history = recent[row["ticker"]].dropna()
+        if len(history) < 19:
+            continue
+        base = (float(history.sum()) + float(today)) / 20
+        if base <= 0:
+            continue
+        row["trade_value"] = float(today)
+        row["value_mult"] = round(float(today) / base, 2)
+        row["qualifies"] = _meets_min_mult(row["value_mult"], min_value_mult)
+
+
 def _cache_refreshed_at(pool: str) -> str | None:
     """이 종목풀 가격 캐시의 마지막 갱신 시각(ISO). 배치가 안 돌았으면 None."""
     from utils.cache_utils import get_cache_refresh_completed_at
@@ -638,6 +684,11 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
                 row["gap_high_pct"] = round((price / row["prior_high_intraday"] - 1) * 100, 2)
             # 장중 고가가 선을 건드렸는지도 실시간 고가로 다시 본다.
             row["touched"] = bool(live["high"] >= row["prior_high"] and price < row["prior_high"])
+
+        # 거래대금·배수도 오늘 값으로 바꾼다. 캐시 값(어제)을 그대로 두면 진입 자격을
+        # 어제 자금 유입으로 판정하게 된다 — 오늘 돌파한 종목을 오늘 거래대금으로 봐야 한다.
+        _apply_live_trade_values(rows, pool, panel["value"], last, settings["min_value_mult"])
+
         for held in holdings:
             live = quotes["by_ticker"].get(held["ticker"])
             if not live:

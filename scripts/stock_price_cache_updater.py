@@ -215,11 +215,15 @@ def _purge_suspicious_dates(
     return suspicious
 
 
-def _trade_value_mult(df: pd.DataFrame) -> float | None:
-    """20일 평균 거래대금 대비 당일 배수. `utils.new_high_service` 와 같은 정의다.
+def _trade_value_fields(df: pd.DataFrame) -> dict[str, float] | None:
+    """거래대금 배수와, 장중 배수를 다시 계산할 때 쓸 재료.
 
-    거래대금은 `종가 × 거래량` 이고 분모는 **당일을 포함한** 20일 평균이다 — 신고가 화면과
-    순위 화면이 다른 값을 보이면 안 되므로 정의를 맞춘다. 20일이 안 되면 None(미산출).
+    거래대금은 `종가 × 거래량` 이고 분모는 **당일을 포함한** 20일 평균이다
+    (`utils.new_high_service` 와 같은 정의 — 두 화면이 다른 숫자를 보이면 안 된다).
+
+    `trade_value_sum19` 는 직전 19거래일 합이다. 장중에는 오늘 거래대금을 실시간으로
+    받아 `(sum19 + 오늘) / 20` 을 분모로 쓰는데, 순위 화면은 거래량 이력이 없어서
+    그 합을 여기서 미리 넘겨준다. 20일이 안 되면 None(미산출 — 값을 지어내지 않는다).
     """
     if "Close" not in df or "Volume" not in df:
         return None
@@ -232,7 +236,11 @@ def _trade_value_mult(df: pd.DataFrame) -> float | None:
     base = float(window.mean())
     if base <= 0:
         return None
-    return float(value.iloc[-1]) / base
+    return {
+        "trade_value": round(float(value.iloc[-1]), 2),
+        "trade_value_mult": round(float(value.iloc[-1]) / base, 4),
+        "trade_value_sum19": round(float(window.iloc[1:].sum()), 2),
+    }
 
 
 def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
@@ -282,9 +290,9 @@ def _update_daily_change_pct(target_id: str, tickers: list[str]) -> None:
                 "1_day_change_pct": round(change_pct, 4),
                 "1_day_change_date": pd.Timestamp(close_series.index[-1]).strftime("%Y-%m-%d"),
             }
-            mult = _trade_value_mult(df)
-            if mult is not None:
-                fields["trade_value_mult"] = round(mult, 4)
+            trade_fields = _trade_value_fields(df)
+            if trade_fields:
+                fields.update(trade_fields)
             ops.append(UpdateOne({"ticker_type": target_id, "ticker": ticker}, {"$set": fields}))
         if ops:
             result = db.stock_meta.bulk_write(ops, ordered=False)

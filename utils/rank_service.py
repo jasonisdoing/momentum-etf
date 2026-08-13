@@ -185,9 +185,13 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
 
 
 def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> dict[str, float]:
-    """티커별 거래대금 배수(20일 평균 대비). 가격 캐시 배치가 저장해 둔 값을 읽는다.
+    """티커별 거래대금 배수(20일 평균 대비).
 
-    배치가 아직 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
+    기본은 가격 캐시 배치가 저장해 둔 **직전 거래일** 값이다. 국내 상장 종목은 여기에
+    오늘 누적 거래대금을 실시간으로 받아 덮어써서, 장중에도 지금 값이 보이게 한다
+    (배치 값만 쓰면 마감 후 갱신될 때까지 하루 종일 어제 숫자가 남는다).
+
+    배치가 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
     """
     if not tickers:
         return {}
@@ -197,17 +201,56 @@ def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> dict[str, fl
         db = get_db_connection()
         if db is None:
             return {}
-        cursor = db.stock_meta.find(
-            {"ticker_type": ticker_type, "ticker": {"$in": tickers}},
-            {"_id": 0, "ticker": 1, "trade_value_mult": 1},
+        docs = list(
+            db.stock_meta.find(
+                {"ticker_type": ticker_type, "ticker": {"$in": tickers}},
+                {"_id": 0, "ticker": 1, "trade_value_mult": 1, "trade_value_sum19": 1},
+            )
         )
-        return {
-            str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult"])
-            for doc in cursor
-            if doc.get("trade_value_mult") is not None
-        }
     except Exception:
         return {}
+
+    result = {
+        str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult"])
+        for doc in docs
+        if doc.get("trade_value_mult") is not None
+    }
+    sum19 = {
+        str(doc["ticker"]).strip().upper(): float(doc["trade_value_sum19"])
+        for doc in docs
+        if doc.get("trade_value_sum19") is not None
+    }
+    result.update(_live_trade_value_mult(ticker_type, sum19))
+    return result
+
+
+def _live_trade_value_mult(ticker_type: str, sum19: dict[str, float]) -> dict[str, float]:
+    """오늘 누적 거래대금으로 다시 계산한 배수. 국내 상장 종목만 해당한다.
+
+    분모는 배치가 넘겨준 직전 19거래일 합에 오늘을 더한 20일 평균이다 — 확정된 날의
+    계산식과 같다. 조회에 실패하거나 오늘 값이 없는 종목은 비워 두고 배치 값을 쓴다.
+    """
+    from utils.settings_loader import get_ticker_type_settings
+
+    settings = get_ticker_type_settings(ticker_type) or {}
+    if str(settings.get("country_code") or "").strip().lower() != "kor" or not sum19:
+        return {}
+    try:
+        from utils.data_loader import fetch_toss_kr_stock_snapshot
+
+        snapshot = fetch_toss_kr_stock_snapshot(list(sum19))
+    except Exception:
+        return {}
+
+    out: dict[str, float] = {}
+    for ticker, base_sum in sum19.items():
+        today = (snapshot.get(ticker) or {}).get("tradeValue")
+        if today is None or float(today) <= 0:
+            continue
+        base = (base_sum + float(today)) / 20
+        if base > 0:
+            out[ticker] = float(today) / base
+    return out
 
 
 def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
