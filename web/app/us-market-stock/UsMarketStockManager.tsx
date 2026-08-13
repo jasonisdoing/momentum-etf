@@ -5,6 +5,7 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import { INDUSTRY_COLUMN_MIN_WIDTH, INDUSTRY_COLUMN_WIDTH, renderIndustryCell } from "@/lib/grid-cells";
 import { formatPoolLabel } from "@/lib/pool-label";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { addStockCandidate, loadStocksTable } from "@/lib/stocks-store";
@@ -388,10 +389,10 @@ export function UsMarketStockManager({
       {
         headerName: "업종",
         field: "industry",
-        width: 180,
-        minWidth: 120,
+        width: INDUSTRY_COLUMN_WIDTH,
+        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
         cellClass: "usMarketStockTextCell",
-        cellRenderer: (params: { value?: string }) => renderTruncatedText(params.value),
+        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
       },
       {
         headerName: "등락률",

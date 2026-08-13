@@ -513,44 +513,8 @@ def _signal_date_for(benchmark_close: pd.Series, rebalance_date: pd.Timestamp) -
     return prior[-1]
 
 
-def industry_map(pool: str) -> dict[str, str]:
-    """티커 → 업종. 업종 상한(`max_per_industry`) 그룹핑과 화면 표시에 함께 쓴다.
-
-    한국 개별주는 네이버 분류(한국어 원본)를, 미국은 지수 구성종목의 yfinance 분류를 쓴다.
-    시장마다 체계가 다르지만 종목풀이 국가별로 나뉘어 있어 한 풀 안에서는 항상 한 체계다.
-
-    분류가 없는 종목은 맵에 넣지 않는다 — 업종 상한이 적용되지 않을 뿐,
-    임의 값으로 묶지 않는다.
-
-    구성종목이 아직 없으면 표시용 정보 하나 때문에 선정 전체가 막히지 않도록
-    빈 맵으로 두되, 없다는 사실 자체는 로그로 남긴다.
-    """
-    from utils.index_constituents_loader import load_index_constituents
-
-    result: dict[str, str] = {}
-
-    if pool_info(pool)["country"] != "us":
-        from utils.stock_list_io import _load_ticker_type_stocks_raw
-
-        for item in _load_ticker_type_stocks_raw(pool):
-            ticker = str(item.get("ticker") or "").strip()
-            industry = str(item.get("industry") or "").strip()
-            if ticker and industry:
-                result[ticker] = industry
-        return result
-
-    for index_name in ("SP500", "NDX100"):
-        try:
-            constituents = load_index_constituents(index_name)
-        except FileNotFoundError as error:
-            warnings.warn(f"{index_name} 구성종목이 없어 업종을 채우지 못했습니다: {error}", stacklevel=2)
-            continue
-        for item in constituents:
-            ticker = str(item.get("ticker") or "").strip().upper()
-            industry = str(item.get("industry") or "").strip()
-            if ticker and industry and ticker not in result:
-                result[ticker] = industry
-    return result
+# 업종 맵은 공용 모듈(utils/industry_map)이 단일 소스 — 순위·신고점 화면과 같은 값을 쓴다.
+from utils.industry_map import industry_map  # noqa: E402
 
 
 def available_backtest_months(benchmark_close: pd.Series, long_ma_days: int) -> int:

@@ -11,7 +11,15 @@ import { useToast } from "../components/ToastProvider";
 import { createAppGridTheme } from "../components/app-grid-theme";
 import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
-import { formatSignedPct, marketBadgeCellStyle, renderHighDrawdownCell, signColor } from "@/lib/grid-cells";
+import {
+  INDUSTRY_COLUMN_MIN_WIDTH,
+  INDUSTRY_COLUMN_WIDTH,
+  formatSignedPct,
+  marketBadgeCellStyle,
+  renderHighDrawdownCell,
+  renderIndustryCell,
+  signColor,
+} from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { formatPrice } from "../../lib/price-format";
 
@@ -607,14 +615,10 @@ export function SteadyMomentumClient() {
             {
               headerName: "업종",
               field: "industry",
-              headerTooltip: "지수 구성종목 메타",
-              // 한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
-              // 40자짜리(`Drug Manufacturers - Specialty & Generic`)는 드물어 말줄임에 맡긴다.
-              width: 200,
-              minWidth: 150,
-              cellClass: "appTextEllipsisCell",
-              tooltipValueGetter: (p) => p.value || undefined,
-              valueFormatter: (p) => p.value || "-",
+              headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
+              width: INDUSTRY_COLUMN_WIDTH,
+              minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+              cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
             } as ColDef<PickRow>,
           ]
         : []),
