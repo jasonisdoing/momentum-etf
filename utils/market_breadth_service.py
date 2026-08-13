@@ -463,6 +463,8 @@ def load_adr_for_index(yf_ticker: str, limit_days: int | None = None) -> dict[st
         "universe_size": int(latest_doc.get("universe_size") or 0),
         "window_days": MARKET_ADR_WINDOW_DAYS,
         "overheated": MARKET_ADR_OVERHEATED,
+        # 강세/약세를 가르는 중간선 — 상승 종목수와 하락 종목수가 같아지는 지점이다.
+        "neutral": MARKET_ADR_NEUTRAL,
         "oversold": MARKET_ADR_OVERSOLD,
         "latest_adr": latest["adr"] if latest else None,
         # 지금 단계와 그 단계가 이어진 거래일 수 — 그리드의 'ADR' 컬럼이 쓴다.

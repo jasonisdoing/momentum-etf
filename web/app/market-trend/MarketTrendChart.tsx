@@ -15,6 +15,7 @@ import type { IChartApi, LineData, CandlestickData, HistogramData, Time } from "
 
 import {
   ADR_LINE_COLOR,
+  ADR_NEUTRAL_COLOR,
   ADR_OVERHEATED_COLOR,
   ADR_OVERSOLD_COLOR,
   describeAdrLevel,
@@ -656,9 +657,11 @@ export function MarketTrendChart({
         );
         adrSeries.setData(adrLine);
 
-        // 과열·침체 경계. 이 선을 넘나드는 지점이 판단 기준이라 축 라벨까지 남긴다.
+        // 과열·강세약세·침체 경계. 이 선을 넘나드는 지점이 판단 기준이라 축 라벨까지 남긴다.
+        // 가운데 100 은 상승 종목수와 하락 종목수가 같아지는 지점 — 강세/약세를 가른다.
         for (const [price, color] of [
           [adr.overheated, ADR_OVERHEATED_COLOR],
+          [adr.neutral, ADR_NEUTRAL_COLOR],
           [adr.oversold, ADR_OVERSOLD_COLOR],
         ] as const) {
           adrSeries.createPriceLine({

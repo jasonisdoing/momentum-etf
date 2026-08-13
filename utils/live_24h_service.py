@@ -213,7 +213,11 @@ def _update_candle_caches_sync(usd_krw: float | None) -> None:
     try:
         import yfinance as yf
 
-        fx = yf.Ticker("KRW=X").history(period="2d", interval="15m")
+        from utils.yfinance_guard import yfinance_lock
+
+        # 동시 호출 시 남의 티커 데이터를 받는 것을 막는다(utils/yfinance_guard).
+        with yfinance_lock():
+            fx = yf.Ticker("KRW=X").history(period="2d", interval="15m")
         fx_candles = []
         for timestamp, row in fx.iterrows():
             o, h, low, c = (_to_float(row.get(k)) for k in ("Open", "High", "Low", "Close"))
@@ -521,7 +525,10 @@ def _fetch_regular_close(yahoo_symbol: str, session_open: bool) -> tuple[float |
     try:
         import yfinance as yf
 
-        hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
+        from utils.yfinance_guard import yfinance_lock
+
+        with yfinance_lock():
+            hist = yf.Ticker(yahoo_symbol).history(period="7d", interval="1d")
         closes = hist["Close"].dropna() if hist is not None and "Close" in hist else None
         result = _regular_close_from_series(closes, session_open, "America/New_York")
     except Exception as exc:

@@ -8,6 +8,8 @@
 export const ADR_LINE_COLOR = "#7c3aed";
 export const ADR_OVERHEATED_COLOR = "#dc2626";
 export const ADR_OVERSOLD_COLOR = "#2563eb";
+/** 강세/약세 경계(100) — 과열·침체선 사이의 기준선이라 계열색을 피해 무채색을 쓴다. */
+export const ADR_NEUTRAL_COLOR = "#212529";
 
 export type AdrPoint = {
   /** YYYY-MM-DD */
@@ -26,6 +28,7 @@ export type AdrResponse = {
   universe_size: number;
   window_days: number;
   overheated: number;
+  neutral: number;
   oversold: number;
   latest_adr: number | null;
   points: AdrPoint[];
