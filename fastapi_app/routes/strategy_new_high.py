@@ -8,6 +8,7 @@ from utils.new_high_service import (
     ENTRY_PRIORITY_OPTIONS,
     EXIT_MA_OPTIONS,
     HIGH_WINDOW_WEEKS,
+    MAX_PER_INDUSTRY_OPTIONS,
     MIN_VALUE_MULT_OPTIONS,
     STOP_LOSS_OPTIONS,
     TOP_N_OPTIONS,
@@ -31,6 +32,7 @@ def _constraints() -> dict:
         "exit_ma_options": list(EXIT_MA_OPTIONS),
         "entry_priority_options": list(ENTRY_PRIORITY_OPTIONS),
         "min_value_mult_options": list(MIN_VALUE_MULT_OPTIONS),
+        "max_per_industry_options": list(MAX_PER_INDUSTRY_OPTIONS),
         "month_options": list(_MONTH_OPTIONS),
         # 신고가 창 — 화면 문구("52주 신고가")를 이 값에서 만든다.
         "high_window_weeks": HIGH_WINDOW_WEEKS,

@@ -47,6 +47,13 @@ ENTRY_PRIORITY_OPTIONS = ("value_surge", "market_cap")
 # None 은 '조건 없음'. 배수를 모르는 종목(상장 직후 등)도 자격 미달로 본다 — 추정하지 않는다.
 MIN_VALUE_MULT_OPTIONS: tuple[float | None, ...] = (5.0, 4.0, 3.0, 2.0, 1.0, None)
 
+# 한 업종에서 최대 몇 종목까지 담을지. None 은 '제한 없음'.
+# 돌파는 주도 섹터에서 무더기로 나오는데, 그대로 담으면 계좌가 한 업황에 걸린다.
+# kor 60개월 기준 상한 2 가 7749% → 9416% 로 오르고 MDD 도 -29% → -27% 로 낮아진다.
+# 상한 1 은 과하다(1330%). 8종목에 상한 5 이상은 걸릴 일이 없어 '제한 없음' 과 같다.
+# 업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
+MAX_PER_INDUSTRY_OPTIONS: tuple[int | None, ...] = (1, 2, 3, 4, 5, None)
+
 _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "new_high_settings"
 
@@ -65,6 +72,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "entry_priority": "value_surge",
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
+    # 상한 2 는 세 구간(12·36·60개월) 모두에서 제한 없음보다 수익이 높고 MDD 가 낮았다.
+    "max_per_industry": 2,
 }
 
 
@@ -341,10 +350,18 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
             f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})"
         )
 
+    raw_cap = settings.get("max_per_industry", DEFAULT_SETTINGS["max_per_industry"])
+    max_per_industry = None if raw_cap in (None, "", "none") else int(raw_cap)
+    if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
+        raise ValueError(
+            f"max_per_industry 는 {list(MAX_PER_INDUSTRY_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_cap})"
+        )
+
     return {
         "pool": pool,
         "entry_priority": priority,
         "min_value_mult": min_value_mult,
+        "max_per_industry": max_per_industry,
         "top_n": pick("top_n", TOP_N_OPTIONS, int),
         "stop_loss_pct": pick("stop_loss_pct", STOP_LOSS_OPTIONS, float),
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
@@ -387,6 +404,7 @@ def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
 __all__ = [
     "DEFAULT_SETTINGS",
     "ENTRY_PRIORITY_OPTIONS",
+    "MAX_PER_INDUSTRY_OPTIONS",
     "MIN_VALUE_MULT_OPTIONS",
     "EXIT_MA_OPTIONS",
     "HIGH_WINDOW_WEEKS",
