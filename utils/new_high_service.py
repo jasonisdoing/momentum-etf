@@ -234,6 +234,10 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
         "prior_high": prior_high,
         "prior_high_intraday": prior_high_intraday,
         # 20일 평균 거래대금 대비 배수 — 돌파에 자금이 실렸는지 본다.
+        # **당일을 분모에 포함**한다. 급증한 당일이 스스로 평균을 끌어올려 배수가 눌리고
+        # (실제 20배가 10.3배로 표기) 표기값 상한이 20배가 되지만, 참고하는 외부 시스템이
+        # 같은 정의를 쓴다(NHN 777억→5.3배, 855억→5.7배 — 분모가 당일 값을 따라 움직인다).
+        # 하한 최적값(kor 5배 등)도 이 정의 위에서 찾은 것이라 바꾸면 다시 잡아야 한다.
         "value_mult": value_df / value_df.rolling(20, min_periods=20).mean(),
     }
 

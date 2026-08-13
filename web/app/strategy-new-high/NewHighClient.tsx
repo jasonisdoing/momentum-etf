@@ -97,6 +97,8 @@ type Holding = {
   ticker: string;
   name: string;
   industry: string;
+  /** 직전 거래일 종가 대비 등락률 — 진입 후보 표와 같은 값. */
+  change_pct: number | null;
   entry_date: string;
   entry_price: number;
   price: number;
@@ -114,7 +116,11 @@ type PlanRow = {
   ticker: string;
   name: string;
   industry: string;
-  price: number;
+  change_pct: number | null;
+  /** 현재 시세 — 이탈 행도 지금 값이다(청산가는 exit_price). */
+  price: number | null;
+  /** 청산가 — 오늘 이탈한 행에만 있다. */
+  exit_price: number | null;
   entry_date: string | null;
   entry_price: number | null;
   return_pct: number | null;
@@ -152,6 +158,9 @@ type Trade = {
   ticker: string;
   name: string;
   industry: string;
+  change_pct?: number | null;
+  /** 청산 후 현재 시세 — 현재 상태 표에서만 쓴다(백테스트 체결 목록에는 없다). */
+  price?: number | null;
   entry_date: string;
   entry_price: number;
   exit_date: string;
@@ -281,6 +290,18 @@ const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "관찰", key: "watch" },
   { label: "보유중", key: "held" },
 ];
+
+/** 일간(%)·현재가 컬럼 — 보유 종목 표와 진입 후보 표가 같은 정의를 쓴다. */
+function dailyChangeColumn<T extends { change_pct?: number | null }>(): ColDef<T> {
+  return {
+    field: "change_pct" as ColDef<T>["field"],
+    headerName: "일간(%)",
+    width: 96,
+    type: "numericColumn",
+    valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
+    cellStyle: (p) => ({ color: signColor(p.value as number) }),
+  };
+}
 
 /** 시가총액 표기 — 조/억 단위. 자리수가 커 그대로 두면 표가 밀린다. */
 function formatMarketCap(value: number | null | undefined): string {
@@ -521,14 +542,7 @@ export function NewHighClient() {
         headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
         cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
       },
-      {
-        field: "change_pct",
-        headerName: "일간(%)",
-        width: 96,
-        type: "numericColumn",
-        valueFormatter: (p) => (p.value == null ? "-" : formatSignedPct(p.value as number, 2)),
-        cellStyle: (p) => ({ color: signColor(p.value as number) }),
-      },
+      dailyChangeColumn<PositionRow>(),
       {
         field: "price",
         headerName: "현재가",
@@ -633,18 +647,21 @@ export function NewHighClient() {
   const planRows = useMemo<PlanRow[]>(() => {
     if (!positions) return [];
     const held: PlanRow[] = positions.holdings.map((h) => ({
-      ticker: h.ticker, name: h.name, industry: h.industry, price: h.price,
+      ticker: h.ticker, name: h.name, industry: h.industry, change_pct: h.change_pct, price: h.price,
+      exit_price: null,
       entry_date: h.entry_date, entry_price: h.entry_price, return_pct: h.return_pct,
       plan: h.status, days: h.days, is_new: h.is_new, exit_reason: h.exit_reason,
     }));
     const buys: PlanRow[] = positions.planned_entries.map((row) => ({
-      ticker: row.ticker, name: row.name, industry: row.industry, price: row.price,
+      ticker: row.ticker, name: row.name, industry: row.industry, change_pct: row.change_pct, price: row.price,
+      exit_price: null,
       entry_date: null, entry_price: null, return_pct: null,
       plan: "buy", days: null, is_new: false, exit_reason: null,
     }));
-    // 오늘 이미 청산된 종목 — 현재가 자리에는 청산가가 들어간다.
+    // 오늘 이미 청산된 종목 — 현재가는 지금 시세, 청산가는 따로 담는다.
     const exited: PlanRow[] = positions.exited_today.map((t) => ({
-      ticker: t.ticker, name: t.name, industry: t.industry, price: t.exit_price,
+      ticker: t.ticker, name: t.name, industry: t.industry, change_pct: t.change_pct ?? null,
+      price: t.price ?? null, exit_price: t.exit_price,
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
     }));
@@ -743,6 +760,15 @@ export function NewHighClient() {
         headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
         cellRenderer: (p: { value?: string }) => renderIndustryCell(p.value),
       },
+      dailyChangeColumn<PlanRow>(),
+      {
+        field: "price",
+        headerName: "현재가",
+        width: 110,
+        type: "numericColumn",
+        headerTooltip: "이탈한 종목도 지금 시세다 — 판 뒤의 흐름을 청산가와 견줘 볼 수 있다.",
+        valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
+      },
       {
         field: "entry_date",
         headerName: "편입일",
@@ -759,12 +785,12 @@ export function NewHighClient() {
         valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
       {
-        field: "price",
-        headerName: "현재가/청산가",
-        width: 128,
+        field: "exit_price",
+        headerName: "청산가",
+        width: 110,
         type: "numericColumn",
-        headerTooltip: "보유·예정 행은 현재가, 이탈 행은 청산가다.",
-        valueFormatter: (p) => formatPrice(p.value as number),
+        headerTooltip: "오늘 이탈한 종목의 체결가. 아직 들고 있는 종목은 값이 없다.",
+        valueFormatter: (p) => (p.value == null ? "-" : formatPrice(p.value as number)),
       },
       {
         field: "return_pct",

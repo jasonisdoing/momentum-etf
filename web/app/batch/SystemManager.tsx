@@ -43,21 +43,10 @@ type SystemNextRunInfo = {
   display?: string | null;
 };
 
-type SystemJobKey =
-  | "data_aggregate"
-  | "cache_refresh"
-  | "cache_refresh_full"
-  | "market_hours_analysis"
-  | "reference_meta_updater"
-  | "price_metrics_updater"
-  | "asset_summary"
-  | "us_market_stocks"
-  | "aus_market_stocks"
-  | "live_24h_slack"
-  | "leverage_ma_cross"
-  | "holdings_alarm"
-  | "strategy_trade_notify"
-  | "db_backup";
+/** 배치 action 키. 목록은 백엔드 `SystemAction` 이 단일 소스다 — 여기에 복사본을 두면
+ *  배치를 추가할 때마다 어긋난다(실제로 `market_breadth` 가 빠진 채 방치돼 있었다).
+ *  화면은 `SCHEDULE_ROWS` 가 내려준 `key` 를 그대로 넘기고, 검증은 서버가 한다. */
+type SystemJobKey = string;
 
 type BatchQueueItem = {
   id: string;
