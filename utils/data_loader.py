@@ -130,6 +130,7 @@ from utils.trading_calendar import (  # noqa: F401
     is_trading_day,
     resolve_active_trading_date,
 )
+from utils.yfinance_guard import yfinance_lock
 
 # ... (omitted code)
 
@@ -736,7 +737,9 @@ def prefetch_yfinance_bulk(
 
     saved = 0
     try:
-        with _silence_yfinance_output():
+        # yfinance 는 프로세스 전역 상태를 공유해 동시 호출 시 서로 결과를 덮어쓴다
+        # (utils/yfinance_guard 참고 — 실제로 지수·ETF 가격이 뒤바뀌어 캐시에 저장된 적이 있다).
+        with yfinance_lock(), _silence_yfinance_output():
             df = yf.download(
                 download_tickers,
                 start=start_dt.strftime("%Y-%m-%d"),
@@ -823,7 +826,8 @@ def _fetch_ohlcv_core(
             download_ticker = to_yahoo_symbol(ticker)
 
         try:
-            with _silence_yfinance_output():
+            # 동시 호출 시 남의 티커 데이터를 받아오는 것을 막는다(utils/yfinance_guard).
+            with yfinance_lock(), _silence_yfinance_output():
                 fetched = yf.download(
                     download_ticker,
                     start=start_dt.strftime("%Y-%m-%d"),
@@ -1661,15 +1665,16 @@ def fetch_latest_unadjusted_price(ticker: str, country: str) -> float | None:
         # I will insert the print statement as given, but replace `batch_tickers` with `[yfinance_ticker]`
         # to satisfy the "syntactically correct" requirement while being as faithful as possible to the `len(batch_tickers)` structure.
 
-        df = yf.download(
-            yfinance_ticker,
-            start=start_date.strftime("%Y-%m-%d"),
-            end=end_date.strftime("%Y-%m-%d"),
-            auto_adjust=True,
-            progress=False,
-            show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
-            session=_YF_SESSION,
-        )
+        with yfinance_lock():
+            df = yf.download(
+                yfinance_ticker,
+                start=start_date.strftime("%Y-%m-%d"),
+                end=end_date.strftime("%Y-%m-%d"),
+                auto_adjust=True,
+                progress=False,
+                show_errors=False,  # 에러 로그를 직접 제어하기 위해 False로 설정
+                session=_YF_SESSION,
+            )
 
         if df is not None and not df.empty:
             return df["Close"].iloc[-1]
