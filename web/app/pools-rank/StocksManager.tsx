@@ -205,6 +205,20 @@ function formatPercent(value: number | null): string {
   return `${value.toFixed(2)}%`;
 }
 
+/** 거래대금 배수 색 — 클수록 진해진다.
+ *
+ *  대부분의 종목은 1배 근처에 몰려 있어(중앙값 0.94배) 평상시 값에 색을 주면 표가 시끄러워진다.
+ *  그래서 1.5배까지는 흐린 회색으로 눌러두고, 그 위부터 같은 빨강을 진하게 올린다.
+ *  단계는 실제 분포에 맞춘 값이다 — 90%분위 1.6배, 99%분위 6.3배. */
+function tradeValueMultStyle(value: number | null | undefined): { color: string; fontWeight?: number } {
+  if (value == null || Number.isNaN(value)) return { color: "var(--text-muted)" };
+  if (value >= 5) return { color: "rgb(214, 40, 40)", fontWeight: 700 };
+  if (value >= 3) return { color: "rgba(214, 40, 40, 0.85)", fontWeight: 700 };
+  if (value >= 2) return { color: "rgba(214, 40, 40, 0.7)" };
+  if (value >= 1.5) return { color: "rgba(214, 40, 40, 0.5)" };
+  return { color: "var(--text-muted)" };
+}
+
 function getSignedClass(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
     return "";
@@ -1012,8 +1026,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         minWidth: 88,
         width: 88,
         type: "rightAligned",
-        headerTooltip: "20일 평균 거래대금 대비 배수 — 신고가 돌파 화면과 같은 값. 가격 캐시 배치 시각 기준이다.",
+        headerTooltip:
+          "20일 평균 거래대금 대비 배수 — 신고가 돌파 화면과 같은 값. 국내 상장은 장중 실시간, 그 외는 직전 마감 기준.",
         valueFormatter: (params) => (params.value == null ? "-" : `${(params.value as number).toFixed(1)}배`),
+        cellStyle: (params) => tradeValueMultStyle(params.value as number | null | undefined),
       },
     ];
 
