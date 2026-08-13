@@ -72,8 +72,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "entry_priority": "value_surge",
     # 기본은 조건 없음 — 풀마다 적정값이 달라 사용자가 시험해 보고 저장한다.
     "min_value_mult": None,
-    # 상한 2 는 세 구간(12·36·60개월) 모두에서 제한 없음보다 수익이 높고 MDD 가 낮았다.
-    "max_per_industry": 2,
+    # 기본은 제한 없음 — 하한과 마찬가지로 풀마다 적정값이 다르다. kor 은 상한 2 가
+    # 세 구간 모두에서 가장 좋았지만(60개월 7749% → 9416%), us 는 종목이 100개뿐이라
+    # 상한에 걸리면 대체할 후보가 없어 자리를 놀린다(240% → 113%). ETF 풀은 업종 자체가 없다.
+    "max_per_industry": None,
 }
 
 
