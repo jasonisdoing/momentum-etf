@@ -180,7 +180,8 @@ def run_backtest(
         if free > 0:
             row = breakout.loc[day]
             picks = [
-                t for t in row[row].index
+                t
+                for t in row[row].index
                 if t not in holdings
                 and not pd.isna(open_df.at[nxt, t])
                 and _meets_min_mult(value_mult.at[day, t], min_mult)
@@ -264,8 +265,11 @@ def run_backtest(
         # 날짜 셀렉트가 '그날 실제로 살 수 있던 돌파' 만 세는 데 쓴다.
         "held_by_day": held_by_day,
         "daily": [
-            {"date": str(d.date()), "strategy_pct": round((v - 1) * 100, 2),
-             "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 2)}
+            {
+                "date": str(d.date()),
+                "strategy_pct": round((v - 1) * 100, 2),
+                "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 2),
+            }
             for d, v in strategy.items()
         ],
     }
@@ -549,7 +553,8 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         if free <= 0:
             return []
         ready = [
-            row for row in rows
+            row
+            for row in rows
             if row["gap_pct"] >= 0 and row["qualifies"] and row["ticker"] not in {h["ticker"] for h in holdings}
         ]
         ready.sort(
@@ -578,13 +583,20 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
             if held.get("status") != "sell" or not open_px:
                 stayed.append(held)
                 continue
-            simulated["exited_today"].append({
-                "ticker": held["ticker"], "name": held["name"], "industry": held["industry"],
-                "entry_date": held["entry_date"], "entry_price": held["entry_price"],
-                "exit_date": session, "exit_price": float(open_px),
-                "return_pct": round((float(open_px) / held["entry_price"] - 1) * 100, 2),
-                "days": held["days"], "reason": held.get("exit_reason") or "이탈",
-            })
+            simulated["exited_today"].append(
+                {
+                    "ticker": held["ticker"],
+                    "name": held["name"],
+                    "industry": held["industry"],
+                    "entry_date": held["entry_date"],
+                    "entry_price": held["entry_price"],
+                    "exit_date": session,
+                    "exit_price": float(open_px),
+                    "return_pct": round((float(open_px) / held["entry_price"] - 1) * 100, 2),
+                    "days": held["days"],
+                    "reason": held.get("exit_reason") or "이탈",
+                }
+            )
         holdings[:] = stayed
 
         # ② 남은 보유의 보유일을 하루 늘린다. 백테스트가 매긴 값은 as_of(마지막 확정 거래일)
@@ -598,11 +610,21 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
             open_px = (quotes["by_ticker"].get(row["ticker"]) or {}).get("open")
             if not open_px:
                 continue
-            holdings.append({
-                "ticker": row["ticker"], "name": row["name"], "industry": row["industry"],
-                "entry_date": session, "entry_price": float(open_px), "price": float(open_px),
-                "return_pct": 0.0, "days": 0, "is_new": True, "status": "hold", "exit_reason": None,
-            })
+            holdings.append(
+                {
+                    "ticker": row["ticker"],
+                    "name": row["name"],
+                    "industry": row["industry"],
+                    "entry_date": session,
+                    "entry_price": float(open_px),
+                    "price": float(open_px),
+                    "return_pct": 0.0,
+                    "days": 0,
+                    "is_new": True,
+                    "status": "hold",
+                    "exit_reason": None,
+                }
+            )
 
         for row in rows:
             live = quotes["by_ticker"].get(row["ticker"])
@@ -669,9 +691,7 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         "universe_count": len(rows),
         "window_weeks": HIGH_WINDOW_WEEKS,
         "min_value_mult": settings["min_value_mult"],
-        "available_dates": available_dates(
-            context, settings["min_value_mult"], held_by_day=simulated["held_by_day"]
-        ),
+        "available_dates": available_dates(context, settings["min_value_mult"], held_by_day=simulated["held_by_day"]),
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),
         # 진행 중인 세션의 시세를 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.
