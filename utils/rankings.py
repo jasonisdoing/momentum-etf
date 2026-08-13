@@ -191,6 +191,41 @@ def _get_latest_trading_day_for_reference(country_code: str, reference_date: pd.
     return reference
 
 
+# 마감 후 가격 캐시가 채워지기까지 기다려 주는 시간. 캐시 배치는 매시 20분에 돌고 실행에
+# 7분 안팎이 걸려서, 마감 직후 최대 한 시간 남짓은 아직 당일 봉이 없는 게 정상이다.
+_CACHE_REFRESH_GRACE = pd.Timedelta(minutes=90)
+
+
+def _expected_cache_trading_day(country_code: str, latest_trading_day: pd.Timestamp) -> pd.Timestamp:
+    """가격 캐시가 **이미 갖고 있어야 마땅한** 거래일.
+
+    최신 거래일은 시장 마감(+여유) 시각에 바뀌는데 캐시는 그다음 배치에서야 채워진다.
+    그 사이를 '오래된 캐시' 로 판정하면 매일 마감 직후 순위 화면 전체가 막힌다
+    (한국은 16:00~16:27). 배치가 한 번 돌 시간을 준 뒤에도 없으면 그때 진짜 문제다.
+    """
+    schedule = (MARKET_SCHEDULES or {}).get((country_code or "").strip().lower())
+    if not isinstance(schedule, dict):
+        return latest_trading_day
+    tz_name = str(schedule.get("timezone") or "").strip()
+    close_time = schedule.get("close")
+    if not tz_name or close_time is None:
+        return latest_trading_day
+    try:
+        closed_at = pd.Timestamp(
+            f"{latest_trading_day.date()} {close_time.hour:02d}:{close_time.minute:02d}", tz=tz_name
+        ) + pd.Timedelta(minutes=int(schedule.get("close_offset_minutes") or 0))
+        if pd.Timestamp.now(tz=tz_name) >= closed_at + _CACHE_REFRESH_GRACE:
+            return latest_trading_day
+        previous = get_trading_days(
+            (latest_trading_day - pd.DateOffset(days=10)).strftime("%Y-%m-%d"),
+            (latest_trading_day - pd.DateOffset(days=1)).strftime("%Y-%m-%d"),
+            country_code,
+        )
+    except Exception:
+        return latest_trading_day
+    return max(previous).normalize() if previous else latest_trading_day
+
+
 def _slice_close_series_to_date(close_series: pd.Series | None, cutoff_date: pd.Timestamp) -> pd.Series | None:
     if close_series is None or close_series.empty:
         return close_series
@@ -734,8 +769,11 @@ def build_ticker_type_rankings(
         for ticker, updated_at in cache_updated_map_raw.items()
         if (normalized := _normalize_market_timestamp(updated_at, country_code, assume_utc=True)) is not None
     }
+    # 판정 기준은 최신 거래일이 아니라 '캐시가 이미 갖고 있어야 할 거래일' 이다.
+    # 마감 직후 배치가 아직 안 돈 구간까지 막으면 매일 그 시간에 화면을 못 쓴다.
+    expected_day = _expected_cache_trading_day(country_code, latest_trading_day)
     stale_tickers = sorted(
-        ticker for ticker, updated_at in normalized_cache_updated.items() if updated_at.normalize() < latest_trading_day
+        ticker for ticker, updated_at in normalized_cache_updated.items() if updated_at.normalize() < expected_day
     )
     latest_cache_updated_at = max(normalized_cache_updated.values()) if normalized_cache_updated else None
 
