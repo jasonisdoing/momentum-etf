@@ -106,6 +106,8 @@ def get_pool_benchmark_ticker(settings: dict[str, Any]) -> str:
     benchmark = settings.get("BENCHMARK")
     if not isinstance(benchmark, dict):
         return ""
+    # 저장 시점에 종목풀 등록 표기로 맞춰 두므로(save_pool_settings) 여기서 고치지 않는다.
+    # 읽으면서 조용히 보정하면 잘못 저장된 값이 드러나지 않는다.
     return str(benchmark.get("ticker") or "").strip().upper()
 
 
@@ -422,12 +424,20 @@ def save_pool_settings(pool_id: str, values: dict[str, Any], save_method: str = 
         def _norm_ticker(value: Any) -> str:
             return str(value or "").strip().upper().removeprefix("ASX:")
 
-        pool_tickers = {_norm_ticker(item.get("ticker")) for item in get_etfs(norm_id)}
-        if _norm_ticker(benchmark["ticker"]) not in pool_tickers:
+        # 접두사를 뗀 형태로 대조하되, **저장은 풀에 등록된 표기 그대로** 한다.
+        # 호주는 시스템 내부에서 `ASX:` 접두사를 쓰는데(utils/asx_ticker), 사용자가
+        # `IVV` 로 입력하면 대조는 통과하고 저장만 접두사 없이 남아 캐시 조회가 빗나갔다.
+        canonical_by_norm = {
+            _norm_ticker(item.get("ticker")): str(item.get("ticker") or "").strip().upper()
+            for item in get_etfs(norm_id)
+        }
+        canonical = canonical_by_norm.get(_norm_ticker(benchmark["ticker"]))
+        if canonical is None:
             raise PoolSettingsError(
                 f"벤치마크 '{benchmark['ticker']}' 는 이 종목풀에 등록된 종목이 아닙니다. "
                 "종목풀에 있는 종목만 벤치마크로 지정할 수 있습니다."
             )
+        benchmark["ticker"] = canonical
 
     db = _db()
     db[COLLECTION].update_one(

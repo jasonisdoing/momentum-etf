@@ -7,7 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
 import { MA_DAY_OPTIONS, SLOPE_DAY_OPTIONS } from "@/lib/ma-day-options";
 import { formatPoolLabel } from "@/lib/pool-label";
-import { marketBadgeCellStyle, renderHighDrawdownCell } from "@/lib/grid-cells";
+import {
+  INDUSTRY_COLUMN_MIN_WIDTH,
+  INDUSTRY_COLUMN_WIDTH,
+  marketBadgeCellStyle,
+  renderHighDrawdownCell,
+  renderIndustryCell,
+} from "@/lib/grid-cells";
 import { isTrendBroken, renderStockNameCell } from "@/lib/name-highlight";
 import { readSessionTtlCache, writeSessionTtlCache } from "@/lib/session-ttl-cache";
 import { addStockCandidate, deleteStock, updateStockBucket, validateStockCandidate, updateStockExclude } from "@/lib/stocks-store";
@@ -970,12 +976,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         field: "업종",
         headerName: "업종",
         hide: !hasIndustryData,
-        // 한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
-        // 40자짜리(`Drug Manufacturers - Specialty & Generic`)는 드물어 말줄임에 맡긴다.
-        minWidth: 150,
-        width: 200,
-        headerTooltip: "한국은 네이버 분류, 미국·호주는 yfinance 분류",
-        cellRenderer: (params: { value?: string }) => params.value || "-",
+        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+        width: INDUSTRY_COLUMN_WIDTH,
+        headerTooltip: "한국은 네이버 분류, 미국은 지수 구성종목의 yfinance 분류",
+        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
       },
       {
         field: "일간(%)",

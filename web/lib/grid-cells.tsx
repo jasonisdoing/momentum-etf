@@ -26,6 +26,28 @@ export function marketBadgeCellStyle(value: unknown): React.CSSProperties | null
   return { textAlign: "center" };
 }
 
+/** 종목명 컬럼 폭 — 종목명 컬럼이 있는 모든 화면이 같은 값을 쓴다.
+ *  남는 폭은 종목명이 가져가되(flex), 좁아져도 이 폭 아래로는 줄지 않는다.
+ *  긴 이름은 2줄까지 보이고 넘치면 말줄임 (renderStockNameCell). */
+export const STOCK_NAME_COLUMN_MIN_WIDTH = 220;
+
+/** 업종 컬럼 폭 — 종목풀 순위 화면 기준. 업종 컬럼이 있는 모든 화면이 같은 값을 쓴다.
+ *  한글 최장은 `섬유,의류,신발,호화품`(12자). 영문은 25자 안팎이 흔하고
+ *  40자짜리(`Drug Manufacturers - Specialty & Generic`)는 2줄까지 보이고 넘치면 말줄임. */
+export const INDUSTRY_COLUMN_WIDTH = 200;
+export const INDUSTRY_COLUMN_MIN_WIDTH = 150;
+
+/** 업종 셀 — 종목풀 화면의 종목명과 같이 2줄까지 보이고 넘치면 말줄임(전체 값은 툴팁). */
+export function renderIndustryCell(value: string | null | undefined) {
+  const text = String(value ?? "").trim();
+  if (!text) return <span>-</span>;
+  return (
+    <span className="appNameCellText" title={text}>
+      {text}
+    </span>
+  );
+}
+
 /** 고점 대비(%) 셀 — 정확히 0 이면 ⭐신고점(빨강 볼드), 그 외 퍼센트 표기. */
 export function renderHighDrawdownCell(value: number | null | undefined, digits = 1) {
   if (value === 0) return <span style={{ color: "#d93025", fontWeight: 700 }}>⭐신고점</span>;

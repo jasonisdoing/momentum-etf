@@ -4183,6 +4183,22 @@ a {
   padding: 0.75rem 1rem;
 }
 
+/* Tabler 의 card-header-tabs 는 카드 헤더 패딩이 기본값(1rem/1.25rem)이라고 보고 음수 마진을
+   준다. 이 앱은 헤더를 더 좁게 쓰므로(.appCard>.card-header = 0.375rem 1rem) 그대로 두면
+   탭 띠가 헤더 밖으로 밀려 옆에 놓인 문구와 높이가 어긋난다. 실제 패딩에 맞춰 다시 잡는다. */
+.appCard > .card-header > .card-header-tabs {
+  /* flex:1 을 풀어 탭 너비만 차지하게 한다 — 오른쪽 문구가 제자리(우측 끝)에 놓인다. */
+  flex: 0 1 auto;
+  margin: -0.375rem 0 -0.375rem -1rem;
+  padding: 0.375rem 0.5rem 0;
+  border-radius: var(--tblr-card-border-radius) 0 0 0;
+}
+
+/* 탭은 헤더 아래쪽에 붙으므로 옆 문구도 같은 바닥선에 맞춘다. */
+.appCardHeader:has(> .card-header-tabs) {
+  align-items: flex-end;
+}
+
 .appCard>.card-header {
   padding: 0.375rem 1rem;
 }

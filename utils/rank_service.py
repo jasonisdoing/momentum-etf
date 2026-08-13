@@ -165,33 +165,19 @@ def _format_listed_date(value: Any) -> str | None:
     return normalized
 
 
-def _apply_industry_labels(dataframe: pd.DataFrame) -> pd.DataFrame:
-    """stock_meta 의 업종을 붙인다.
+def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
+    """업종을 붙인다 — 공용 맵(utils/industry_map)이 단일 소스.
 
-    한국 종목은 네이버 분류(한국어 원본), 미국·호주는 yfinance 분류다. 번역하지 않는다 —
-    각 시장에서 쓰는 용어 그대로 보여주는 게 정확하다.
+    한국 종목은 네이버 분류(한국어 원본), 미국은 지수 구성종목의 yfinance 분류다.
+    번역하지 않는다 — 각 시장에서 쓰는 용어 그대로 보여주는 게 정확하다.
     분류가 없는 종목(ETF 등)은 빈 값이며, 화면은 값이 있는 풀에서만 컬럼을 노출한다.
     """
     if dataframe.empty or "티커" not in dataframe.columns:
         return dataframe
 
-    from utils.db_manager import get_db_connection
+    from utils.industry_map import industry_map
 
-    db = get_db_connection()
-    if db is None:
-        dataframe["업종"] = ""
-        return dataframe
-
-    tickers = sorted({str(v or "").strip().upper() for v in dataframe["티커"] if str(v or "").strip()})
-    industry_by: dict[str, str] = {}
-    cursor = db.stock_meta.find(
-        {"ticker": {"$in": tickers}, "industry": {"$nin": [None, ""]}},
-        {"_id": 0, "ticker": 1, "industry": 1},
-    )
-    for doc in cursor:
-        ticker = str(doc.get("ticker") or "").strip().upper()
-        if ticker and ticker not in industry_by:
-            industry_by[ticker] = str(doc.get("industry") or "").strip()
+    industry_by = {str(k).strip().upper(): v for k, v in industry_map(ticker_type).items()}
 
     upper = dataframe["티커"].astype(str).str.strip().str.upper()
     dataframe["업종"] = upper.map(lambda t: industry_by.get(t, ""))
@@ -580,7 +566,7 @@ def _compute_rank_data_payload(
         dataframe.attrs.update(dataframe_attrs)
 
     dataframe = _apply_rank_info_cache(dataframe, selected_ticker_type)
-    dataframe = _apply_industry_labels(dataframe)
+    dataframe = _apply_industry_labels(dataframe, selected_ticker_type)
 
     return {
         "ticker_types": configs_payload,
