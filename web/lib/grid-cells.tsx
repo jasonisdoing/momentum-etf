@@ -54,3 +54,26 @@ export function renderHighDrawdownCell(value: number | null | undefined, digits 
   if (value == null || Number.isNaN(value)) return <span>-</span>;
   return <span>{`${value.toFixed(digits)}%`}</span>;
 }
+
+/** 거래대금 배수(20일 평균 대비) 셀 색 — 클수록 진해진다. 종목풀 순위·신고가 돌파 공용.
+ *
+ *  대부분 1배 근처에 몰려 있어(중앙값 0.94배) 평상시 값까지 물들이면 표가 시끄러워지고
+ *  정작 봐야 할 종목이 묻힌다. 1.5배까지는 흐린 회색으로 눌러두고 그 위부터 같은 빨강의
+ *  농도만 올린다 — 색상을 섞으면 등락률 색과 헷갈린다.
+ *  단계는 실제 분포에 맞췄다(90%분위 1.6배 · 99%분위 6.3배).
+ *
+ *  `bold` 를 주면 농도와 별개로 굵기를 강제한다. 신고가 화면이 '진입 자격 통과' 를
+ *  이걸로 표시한다 — 자격 하한은 설정값이라 농도 단계와 일치하지 않는다.
+ */
+export function tradeValueMultStyle(
+  value: number | null | undefined,
+  bold?: boolean,
+): { color: string; fontWeight?: number } {
+  const weight = bold ? { fontWeight: 700 } : {};
+  if (value == null || Number.isNaN(value)) return { color: "var(--text-muted)", ...weight };
+  if (value >= 5) return { color: "rgb(214, 40, 40)", fontWeight: 700 };
+  if (value >= 3) return { color: "rgba(214, 40, 40, 0.85)", fontWeight: 700 };
+  if (value >= 2) return { color: "rgba(214, 40, 40, 0.7)", ...weight };
+  if (value >= 1.5) return { color: "rgba(214, 40, 40, 0.5)", ...weight };
+  return { color: "var(--text-muted)", ...weight };
+}
