@@ -395,7 +395,7 @@ export function UsMarketStockManager({
         cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
       },
       {
-        headerName: "등락률",
+        headerName: "일간(%)",
         field: "change_pct",
         width: 110,
         minWidth: 96,

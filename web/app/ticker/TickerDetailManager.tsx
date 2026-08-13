@@ -1098,7 +1098,7 @@ export function TickerDetailManager({
         cellRenderer: (params: { value: number | null }) => formatTickerPrice(params.value, selectedCountryCode)
       },
       {
-        field: "change_pct", headerName: "등락률", minWidth: 92, flex: 0.95, type: "rightAligned",
+        field: "change_pct", headerName: "일간(%)", minWidth: 92, flex: 0.95, type: "rightAligned",
         cellRenderer: (params: { value: number | null }) => (
           <span className={getSignedClass(params.value)}>{formatPercent(params.value)}</span>
         )
