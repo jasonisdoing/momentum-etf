@@ -406,19 +406,35 @@ def classify_adr(adr: float | None) -> str | None:
     return "oversold"
 
 
+# 4단계를 강세/약세 두 덩어리로 묶는다. 과매수는 강세의 연장이고 과매도는 약세의 연장이라,
+# 100 을 넘나들지 않았는데 120 을 스쳤다고 '1일차' 로 되돌리면 국면이 끊긴 것처럼 보인다.
+_ADR_GROUP = {"overbought": "bullish", "bullish": "bullish", "bearish": "bearish", "oversold": "bearish"}
+
+
+def adr_group(level: str | None) -> str | None:
+    """세부 단계가 속한 큰 국면(강세/약세)."""
+    return _ADR_GROUP.get(level or "")
+
+
 def _count_level_streak(points: list[dict[str, Any]]) -> tuple[str | None, int]:
-    """마지막 단계와 그 단계가 이어진 거래일 수. 값이 끊기면 거기서 멈춘다."""
+    """마지막 세부 단계와, 그 단계가 속한 **국면**이 이어진 거래일 수.
+
+    연속일은 강세(강세·과매수)/약세(약세·과매도) 덩어리로 센다. 표시용 단계는 마지막
+    값 그대로 돌려줘서 화면이 '강세 3일째 (과매수)' 처럼 괄호로 덧붙일 수 있게 한다.
+    값이 끊기면 거기서 멈춘다.
+    """
     level: str | None = None
+    group: str | None = None
     days = 0
     for point in reversed(points):
         current = classify_adr(point["adr"])
         if current is None:
             break
         if level is None:
-            level = current
+            level, group = current, adr_group(current)
             days = 1
             continue
-        if current != level:
+        if adr_group(current) != group:
             break
         days += 1
     return level, days
