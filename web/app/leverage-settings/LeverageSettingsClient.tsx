@@ -4,6 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { formatKstDateTime } from "@/lib/datetime";
+import { formatSignedPct, signColor } from "@/lib/grid-cells";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { PageFrame } from "../components/PageFrame";
 import { useToast } from "../components/ToastProvider";
@@ -128,7 +129,19 @@ type MaView = {
     prev_target: string | null;
     is_changed: boolean;
   } | null;
-  state: { date?: string; target?: string; target_name?: string; side?: string; updated_at?: string; holding_days?: number; holding_start_date?: string } | null;
+  state: {
+    date?: string;
+    target?: string;
+    target_name?: string;
+    side?: string;
+    updated_at?: string;
+    holding_days?: number;
+    holding_start_date?: string;
+    /** 보유 시작일 대비 수익률 — 현금 보유 중이면 없다. */
+    holding_return_pct?: number | null;
+    holding_entry_price?: number | null;
+    holding_current_price?: number | null;
+  } | null;
   error?: string;
 };
 
@@ -824,6 +837,18 @@ export function LeverageSettingsClient() {
                       <span style={{ fontWeight: 600, fontSize: "var(--fs-sm)" }}>{value}</span>
                     </div>
                   ))}
+                  {/* 수익률은 현금이 아니라 실제 종목을 들고 있을 때만 뜻이 있다. */}
+                  {state?.holding_return_pct != null ? (
+                    <div style={{ display: "flex", gap: 12, padding: "4px 0" }}>
+                      <span style={{ width: 84, flexShrink: 0, color: "var(--text-muted)", fontSize: "var(--fs-sm)" }}>수익률</span>
+                      <span style={{ fontWeight: 700, fontSize: "var(--fs-sm)", color: signColor(state.holding_return_pct) }}>
+                        {formatSignedPct(state.holding_return_pct, 2)}
+                        <span style={{ marginLeft: 6, fontWeight: 500, color: "var(--text-muted)" }}>
+                          ({state.holding_entry_price} → {state.holding_current_price})
+                        </span>
+                      </span>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
