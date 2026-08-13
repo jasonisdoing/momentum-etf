@@ -818,6 +818,12 @@ def fetch_toss_us_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     return snapshot
 
 
+# 토스 국내 스냅샷 TTL — 앱 표준 실시간 주기(60초)에 맞춘다.
+# 신고가 화면과 종목풀 순위가 같은 종목을 잇달아 조회하므로 프로세스 전역으로 공유한다.
+_TOSS_KR_SNAPSHOT_TTL_SECONDS = 60
+_TOSS_KR_SNAPSHOT_CACHE: dict[str, tuple[datetime, dict[str, float]]] = {}
+
+
 def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, float]]:
     """토스증권 API에서 한국 주식의 실시간 시세를 조회한다.
 
@@ -829,12 +835,23 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
     if not normalized_tickers or not requests:
         return {}
 
+    now = datetime.now()
+    snapshot: dict[str, dict[str, float]] = {}
+    expired: list[str] = []
+    for ticker in normalized_tickers:
+        cached = _TOSS_KR_SNAPSHOT_CACHE.get(ticker)
+        if cached and (now - cached[0]).total_seconds() < _TOSS_KR_SNAPSHOT_TTL_SECONDS:
+            snapshot[ticker] = cached[1]
+        else:
+            expired.append(ticker)
+    if not expired:
+        return snapshot
+
     code_to_ticker = {
         (ticker if ticker.startswith("A") else f"A{ticker}"): ticker.removeprefix("A")
-        for ticker in normalized_tickers
+        for ticker in expired
     }
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
-    snapshot: dict[str, dict[str, float]] = {}
 
     all_codes = list(code_to_ticker)
     for start in range(0, len(all_codes), 50):
@@ -870,6 +887,7 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
                 if parsed is not None and parsed > 0:
                     entry[key] = parsed
             snapshot[ticker] = entry
+            _TOSS_KR_SNAPSHOT_CACHE[ticker] = (now, entry)
 
     return snapshot
 
