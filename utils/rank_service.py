@@ -184,6 +184,32 @@ def _apply_industry_labels(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
     return dataframe
 
 
+def _load_trade_value_mult(ticker_type: str, tickers: list[str]) -> dict[str, float]:
+    """티커별 거래대금 배수(20일 평균 대비). 가격 캐시 배치가 저장해 둔 값을 읽는다.
+
+    배치가 아직 안 돌았거나 20일치가 없는 종목은 키가 없다 — 화면은 '-' 로 둔다.
+    """
+    if not tickers:
+        return {}
+    try:
+        from utils.db_manager import get_db_connection
+
+        db = get_db_connection()
+        if db is None:
+            return {}
+        cursor = db.stock_meta.find(
+            {"ticker_type": ticker_type, "ticker": {"$in": tickers}},
+            {"_id": 0, "ticker": 1, "trade_value_mult": 1},
+        )
+        return {
+            str(doc["ticker"]).strip().upper(): float(doc["trade_value_mult"])
+            for doc in cursor
+            if doc.get("trade_value_mult") is not None
+        }
+    except Exception:
+        return {}
+
+
 def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.DataFrame:
     """정보 컬럼(배당률·보수·순자산·상장일)을 메타 캐시에서 붙인다.
 
@@ -198,6 +224,10 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         for record in dataframe.to_dict(orient="records")
         if str(record.get("티커") or "").strip()
     ]
+    # 거래대금 배수는 가격 캐시 배치가 stock_meta 에 미리 넣어둔 값을 읽는다.
+    # 여기서 직접 계산하려면 거래량이 든 큰 blob 을 받아야 해서 순위 계산이 3초 더 걸린다.
+    mult_map = _load_trade_value_mult(ticker_type, tickers)
+
     cache_map = get_stock_cache_meta_map(ticker_type, tickers)
     if not cache_map:
         enriched = dataframe.copy()
@@ -205,6 +235,9 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         enriched["보수"] = None
         enriched["순자산총액"] = None
         enriched["상장일"] = None
+        enriched["거래대금"] = enriched["티커"].map(
+            lambda t: mult_map.get(str(t or "").strip().upper())
+        ) if "티커" in enriched.columns else None
         enriched.attrs.update(dict(dataframe.attrs))
         return enriched
 
@@ -218,6 +251,7 @@ def _apply_rank_info_cache(dataframe: pd.DataFrame, ticker_type: str) -> pd.Data
         row["보수"] = meta_cache.get("expense_ratio")
         row["순자산총액"] = meta_cache.get("total_net_assets")
         row["상장일"] = _format_listed_date(meta_cache.get("listed_date") or row.get("상장일"))
+        row["거래대금"] = mult_map.get(ticker)
 
         rows.append(row)
 

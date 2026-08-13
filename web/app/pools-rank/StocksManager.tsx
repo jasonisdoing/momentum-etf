@@ -78,6 +78,8 @@ type RankRow = {
   보유대상?: boolean;
   보유: string;
   현재가: number | null;
+  /** 20일 평균 거래대금 대비 배수. 신고가 돌파 화면과 같은 값이다. */
+  거래대금: number | null;
   "괴리율": number | null;
   "일간(%)": number | null;
   "1주(%)": number | null;
@@ -591,6 +593,7 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
         보유: "",
         보유대상: false,
         현재가: null,
+        거래대금: null,
         괴리율: null,
         "일간(%)": null,
         "1주(%)": null,
@@ -1001,6 +1004,16 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
           const rowCurrency = params.data?.currency || selectedTickerTypeItem?.currency;
           return formatPrice(params.value ?? null, rowCurrency);
         },
+      },
+      {
+        field: "거래대금",
+        headerName: "거래대금",
+        hide: metricMode !== "basic",
+        minWidth: 88,
+        width: 88,
+        type: "rightAligned",
+        headerTooltip: "20일 평균 거래대금 대비 배수 — 신고가 돌파 화면과 같은 값. 가격 캐시 배치 시각 기준이다.",
+        valueFormatter: (params) => (params.value == null ? "-" : `${(params.value as number).toFixed(1)}배`),
       },
     ];
 
