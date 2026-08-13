@@ -3580,6 +3580,18 @@ a {
   background: rgba(102, 204, 102, 0.42);
 }
 
+/* 추세 이탈 행 — 종목명 뒤 ❗ 와 같은 조건에서 행 전체를 연한 회색으로 눌러 둔다.
+   판정 기준은 화면마다 각자다(종목풀은 화면 이평선, 계좌는 계좌별 알람 설정).
+   보유 강조(녹색)보다 약해야 하므로 아래에 두지 않고, 보유 행에는 덧칠하지 않는다. */
+.ag-row.appTrendBrokenRow {
+  background: rgba(148, 163, 184, 0.14);
+  color: var(--text-muted, #64748b);
+}
+
+.ag-row.appTrendBrokenRow:hover {
+  background: rgba(148, 163, 184, 0.22);
+}
+
 /* 튜닝 표 상단 고정행: 지수/레버리지 단순보유 벤치마크 */
 .ag-row.appBenchmarkRow {
   background: rgba(148, 163, 184, 0.16);

@@ -83,10 +83,14 @@ export function AccountHoldingsDetailPanel({
   const addingTickerDraftRef = useRef("");
   // 종목명 알람 배지(이동선 이탈·손절 아이콘) — /alarms 설정·판정 그대로. 보조 정보라 실패 시 빈 맵.
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
+  // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
+  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
   useEffect(() => {
     let alive = true;
-    void fetchAlertBadges(summary.account_id).then((badges) => {
-      if (alive) setAlertBadges(badges);
+    void fetchAlertBadges(summary.account_id).then((info) => {
+      if (!alive) return;
+      setAlertBadges(info.badgeByTicker);
+      setMaBrokenTickers(new Set(info.maTickers));
     });
     return () => {
       alive = false;
@@ -1296,6 +1300,9 @@ export function AccountHoldingsDetailPanel({
             }
             if (Number(params.data?.quantity ?? 0) > 0) {
               classes.push("appHeldRow");
+            }
+            if (maBrokenTickers.has(normalizeBadgeTicker(params.data?.ticker ?? ""))) {
+              classes.push("appTrendBrokenRow");
             }
             return classes.join(" ");
           }}

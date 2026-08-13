@@ -26,8 +26,11 @@ from utils.new_high_service import (
 
 logger = logging.getLogger(__name__)
 
-# 백테스트 기간 상한 — 신고가 창(240거래일)만큼 앞선 데이터가 있어야 판정이 된다.
+# 백테스트 기간 상한 — 신고가 창(52주)만큼 앞선 데이터가 있어야 판정이 된다.
 MAX_BACKTEST_MONTHS = 60
+
+# 날짜별 보유 목록을 남겨 둘 최근 거래일 수. 날짜 셀렉트가 쓰는 범위(20일)보다 넉넉히 잡는다.
+_HELD_HISTORY_DAYS = 40
 
 
 def _drawdown_pct(series: pd.Series) -> float:
@@ -127,6 +130,10 @@ def run_backtest(
     trades: list[dict[str, Any]] = []
     curve: list[float] = []
     last_day = span[-1]
+    # 날짜별 '그날 이미 들고 있어서 살 수 없던 종목'. 날짜 셀렉트의 돌파 수가 이걸 빼고 센다.
+    # 최근 구간만 담는다 — 셀렉트가 쓰는 범위 밖은 payload 만 키운다.
+    held_by_day: dict[str, list[str]] = {}
+    held_from = span[-_HELD_HISTORY_DAYS] if len(span) > _HELD_HISTORY_DAYS else span[0]
 
     for index, day in enumerate(span[:-1]):
         nxt = span[index + 1]
@@ -164,6 +171,10 @@ def run_backtest(
             )
             del holdings[ticker]
 
+        # 청산으로 자리가 빈 뒤의 보유 목록이 곧 '오늘 살 수 없는 종목' 이다.
+        if day >= held_from:
+            held_by_day[str(day.date())] = list(holdings)
+
         # 2) 진입 — 빈 자리만큼, 거래대금 급증이 큰 순
         free = slots - len(holdings)
         if free > 0:
@@ -190,6 +201,9 @@ def run_backtest(
             if pd.notna(close_df.at[day, t])
         )
         curve.append(equity * (1 + open_pnl))
+
+    # 마지막 날은 루프가 판정하지 않는다(체결할 다음 날이 없어서). 보유 목록만 남겨 둔다.
+    held_by_day[str(last_day.date())] = list(holdings)
 
     # 아직 청산하지 않은 종목 — 성과에는 평가손익으로 이미 반영돼 있지만 체결 내역에는 없다.
     open_positions = []
@@ -247,6 +261,8 @@ def run_backtest(
         "as_of": str(last_day.date()),
         "open_positions": open_positions,
         "exited_today": exited_today,
+        # 날짜 셀렉트가 '그날 실제로 살 수 있던 돌파' 만 세는 데 쓴다.
+        "held_by_day": held_by_day,
         "daily": [
             {"date": str(d.date()), "strategy_pct": round((v - 1) * 100, 2),
              "benchmark_pct": round((float(benchmark.loc[d]) - 1) * 100, 2)}
@@ -335,9 +351,13 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         price = quote.get("nowVal")
         if price is None or float(price) <= 0:
             continue
+        # 오늘 시가 — 어제 확정된 진입·청산이 체결된 가격이다. ETF 는 이 값이 안 와서
+        # None 이 되고, 그런 종목은 체결로 처리하지 않는다(가격을 지어내지 않는다).
+        open_val = quote.get("open")
         by_ticker[ticker] = {
             "price": float(price),
             "high": float(quote.get("high") or price),
+            "open": float(open_val) if open_val is not None and float(open_val) > 0 else None,
             "change_pct": float(quote.get("changeRate")) if quote.get("changeRate") is not None else None,
         }
         if quote.get("is_pre_market"):
@@ -389,12 +409,15 @@ def _cache_refreshed_at(pool: str) -> str | None:
 
 
 def available_dates(
-    context: dict[str, Any], min_value_mult: float | None, limit: int = 20
+    context: dict[str, Any],
+    min_value_mult: float | None,
+    limit: int = 20,
+    held_by_day: dict[str, list[str]] | None = None,
 ) -> list[dict[str, Any]]:
     """최근 거래일 목록과 그날의 후보·돌파 종목 수. 날짜 셀렉트가 이 값을 쓴다.
 
-    돌파 수에는 **자격을 통과한 것만** 센다. 거래대금 하한에 걸려 사지 못하는 종목까지
-    세면 "돌파 2"인데 실제로는 살 게 없는 날이 생겨 목록이 사람을 오해하게 만든다.
+    돌파 수는 **그날 실제로 살 수 있던 것만** 센다. 거래대금 하한에 걸린 종목이나 이미
+    보유 중이던 종목까지 세면 "돌파 4"인데 진입은 3건인 날이 생겨 사람을 오해하게 만든다.
     """
     panel, signals = context["panel"], context["signals"]
     close_df, prior_high, value_mult = panel["close"], signals["prior_high"], signals["value_mult"]
@@ -405,11 +428,15 @@ def available_dates(
     for day in close_df.index[-limit:]:
         row, ok = gap.loc[day], qualified.loc[day]
         breakout = row >= 0
+        buyable = breakout & ok
+        held = (held_by_day or {}).get(str(day.date()))
+        if held:
+            buyable = buyable & ~buyable.index.isin(held)
         rows.append(
             {
                 "date": str(day.date()),
                 "candidate_count": int((breakout | ((row >= -12) & (row < 0))).sum()),
-                "breakout_count": int((breakout & ok).sum()),
+                "breakout_count": int(buyable.sum()),
             }
         )
     return rows[::-1]
@@ -495,7 +522,88 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         if not as_of
         else {"live": False, "pre_market": False, "traded_at": None, "by_ticker": {}}
     )
+    # 마지막 거래일 종가로 '다음 시가에 할 일' 을 판정한다. 백테스트 루프는 마지막 날을
+    # 판정하지 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다 — 이게 없으면
+    # 화면에 살 종목만 보이고 팔 종목이 안 보인다.
+    stop_pct = float(settings["stop_loss_pct"])
+    exit_ma_days = int(settings["exit_ma_days"])
+    below_ma_last = signals["below_ma"].loc[last]
+    use_market_cap = settings["entry_priority"] == "market_cap"
+    caps = _market_caps(pool, [row["ticker"] for row in universe]) if use_market_cap else {}
+
+    def mark_exits(price_of) -> None:
+        """청산 여부를 표시한다. price_of 가 None 을 돌려주면 판정하지 않는다."""
+        for held in holdings:
+            price = price_of(held["ticker"])
+            if price is None:
+                continue
+            hit_stop = (price / held["entry_price"] - 1) * 100 <= stop_pct
+            hit_ma = bool(below_ma_last.get(held["ticker"]))
+            held["status"] = "sell" if (hit_stop or hit_ma) else "hold"
+            held["exit_reason"] = "손절" if hit_stop else ("이탈" if hit_ma else None)
+
+    def pick_entries() -> list[dict[str, Any]]:
+        """자리·자격·우선순위를 적용해 다음 시가에 살 종목을 고른다."""
+        planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
+        free = int(settings["top_n"]) - (len(holdings) - planned_exits)
+        if free <= 0:
+            return []
+        ready = [
+            row for row in rows
+            if row["gap_pct"] >= 0 and row["qualifies"] and row["ticker"] not in {h["ticker"] for h in holdings}
+        ]
+        ready.sort(
+            key=lambda row: caps.get(row["ticker"], 0.0) if use_market_cap else (row["value_mult"] or 0.0),
+            reverse=True,
+        )
+        return ready[:free]
+
+    def confirmed_close(ticker: str) -> float | None:
+        price = close_df.at[last, ticker]
+        return None if pd.isna(price) else float(price)
+
+    mark_exits(confirmed_close)
+    entries = pick_entries()
+
     if quotes["live"]:
+        # 장이 열려 있다는 것은 위에서 고른 진입·청산이 **오늘 시가에 이미 체결됐다**는 뜻이다.
+        # 그 결과를 반영하지 않으면 마감 후 배치가 돌 때까지(한국은 16시 이후) 하루 종일
+        # '진입 예정' 으로 남아 실제 계좌와 어긋난다.
+        session = str(quotes["traded_at"])[:10]
+        # ① 청산 — 오늘 시가에 나갔다. 보유일은 청산 신호가 난 어제까지로 세므로 그대로 쓴다.
+        #    시가를 모르는 종목(ETF 등)은 체결로 처리하지 않고 그대로 둔다.
+        stayed = []
+        for held in holdings:
+            open_px = (quotes["by_ticker"].get(held["ticker"]) or {}).get("open")
+            if held.get("status") != "sell" or not open_px:
+                stayed.append(held)
+                continue
+            simulated["exited_today"].append({
+                "ticker": held["ticker"], "name": held["name"], "industry": held["industry"],
+                "entry_date": held["entry_date"], "entry_price": held["entry_price"],
+                "exit_date": session, "exit_price": float(open_px),
+                "return_pct": round((float(open_px) / held["entry_price"] - 1) * 100, 2),
+                "days": held["days"], "reason": held.get("exit_reason") or "이탈",
+            })
+        holdings[:] = stayed
+
+        # ② 남은 보유의 보유일을 하루 늘린다. 백테스트가 매긴 값은 as_of(마지막 확정 거래일)
+        #    기준이고, 오늘은 그 다음 거래일이다. 이걸 안 하면 어제 산 종목이 계속 '진입' 으로 보인다.
+        for held in holdings:
+            held["days"] = int(held["days"]) + 1
+            held["is_new"] = False
+
+        # ③ 진입 — 어제 종가로 확정된 목록이 오늘 시가에 체결됐다.
+        for row in entries:
+            open_px = (quotes["by_ticker"].get(row["ticker"]) or {}).get("open")
+            if not open_px:
+                continue
+            holdings.append({
+                "ticker": row["ticker"], "name": row["name"], "industry": row["industry"],
+                "entry_date": session, "entry_price": float(open_px), "price": float(open_px),
+                "return_pct": 0.0, "days": 0, "is_new": True, "status": "hold", "exit_reason": None,
+            })
+
         for row in rows:
             live = quotes["by_ticker"].get(row["ticker"])
             if not live:
@@ -515,36 +623,18 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
             held["price"] = live["price"]
             held["return_pct"] = round((live["price"] / held["entry_price"] - 1) * 100, 2)
 
-    # 마지막 거래일 종가로 '내일 할 일'을 판정한다. 백테스트 루프는 마지막 날을 판정하지
-    # 않는다(체결할 다음 날이 없어서). 그래서 여기서 한 번 더 본다 — 이게 없으면
-    # 화면에 살 종목만 보이고 팔 종목이 안 보인다.
-    stop_pct = float(settings["stop_loss_pct"])
-    below_ma_last = signals["below_ma"].loc[last]
-    for held in holdings:
-        price = close_df.at[last, held["ticker"]]
-        if pd.isna(price):
-            continue
-        hit_stop = (float(price) / held["entry_price"] - 1) * 100 <= stop_pct
-        hit_ma = bool(below_ma_last.get(held["ticker"]))
-        held["status"] = "sell" if (hit_stop or hit_ma) else "hold"
-        held["exit_reason"] = "손절" if hit_stop else ("이탈" if hit_ma else None)
-
-    # 내일 살 종목 — 오늘 청산 예정분만큼 자리가 더 생긴다(둘 다 내일 시가에 체결).
-    planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
-    free = int(settings["top_n"]) - (len(holdings) - planned_exits)
-    entries: list[dict[str, Any]] = []
-    if free > 0:
-        use_market_cap = settings["entry_priority"] == "market_cap"
-        caps = _market_caps(pool, [row["ticker"] for row in universe]) if use_market_cap else {}
-        ready = [
-            row for row in rows
-            if row["gap_pct"] >= 0 and row["qualifies"] and row["ticker"] not in {h["ticker"] for h in holdings}
-        ]
-        ready.sort(
-            key=lambda row: caps.get(row["ticker"], 0.0) if use_market_cap else (row["value_mult"] or 0.0),
-            reverse=True,
-        )
-        entries = ready[:free]
+        # 남은 보유·후보는 이제 **오늘 잠정 종가** 기준으로 다시 판정한다 — 내일 할 일이다.
+        # 이탈 이평선도 오늘 잠정 종가를 넣어 다시 계산한다(어제 선으로 보면 하루 뒤처진다).
+        recent = close_df.loc[:last].tail(exit_ma_days - 1)
+        for held in holdings:
+            live = quotes["by_ticker"].get(held["ticker"])
+            if not live or held["ticker"] not in recent.columns:
+                continue
+            window = recent[held["ticker"]].tolist() + [live["price"]]
+            if len(window) == exit_ma_days and not any(pd.isna(v) for v in window):
+                below_ma_last[held["ticker"]] = live["price"] < sum(window) / exit_ma_days
+        mark_exits(lambda ticker: (quotes["by_ticker"].get(ticker) or {}).get("price"))
+        entries = pick_entries()
 
     # 이미 보유 중인 종목은 다시 사지 않는다(백테스트도 같다). 목록에는 남기되 표시를 구분한다 —
     # 보유 종목이 아직 신고가를 갱신 중인지가 추세 판단에 쓸모 있다.
@@ -553,10 +643,12 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         row["is_held"] = row["ticker"] in held
 
     rows.sort(key=lambda r: r["gap_pct"], reverse=True)
+    # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
+    fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
     return {
         "as_of": str(last.date()),
         # 진입 예정·매도 예정이 실제로 체결되는 날. 화면이 '오늘/내일' 을 이 값으로 가른다.
-        "next_session": _next_session(pool, last),
+        "next_session": _next_session(pool, fill_base),
         "holdings": holdings,
         # 내일 시가에 살 종목 (자리·자격·우선순위를 모두 적용한 결과).
         "planned_entries": entries,
@@ -565,7 +657,9 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         "universe_count": len(rows),
         "window_weeks": HIGH_WINDOW_WEEKS,
         "min_value_mult": settings["min_value_mult"],
-        "available_dates": available_dates(context, settings["min_value_mult"]),
+        "available_dates": available_dates(
+            context, settings["min_value_mult"], held_by_day=simulated["held_by_day"]
+        ),
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),
         # 진행 중인 세션의 시세를 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.

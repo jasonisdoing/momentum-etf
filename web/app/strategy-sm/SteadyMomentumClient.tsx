@@ -1077,7 +1077,15 @@ export function SteadyMomentumClient() {
                 minHeight={0}
                 height="auto"
                 gridOptions={{ domLayout: "autoHeight" }}
-                getRowClass={(p) => (p.data?.is_reserve ? "steadyReserveRow" : "")}
+                getRowClass={(p) => {
+                  // 추세 이탈은 종목명 뒤 ❗ 와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
+                  const classes: string[] = [];
+                  if (p.data?.is_reserve) classes.push("steadyReserveRow");
+                  if (isTrendBroken(p.data?.current_short_pct, p.data?.current_long_pct)) {
+                    classes.push("appTrendBrokenRow");
+                  }
+                  return classes.join(" ");
+                }}
                 getRowId={(p) => p.data.ticker}
               />
             ) : null}
