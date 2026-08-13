@@ -17,6 +17,7 @@ import {
   formatSignedPct,
   renderIndustryCell,
   signColor,
+  tradeValueMultStyle,
 } from "@/lib/grid-cells";
 import { formatKstDateTime } from "@/lib/datetime";
 import { renderStockNameCell } from "@/lib/name-highlight";
@@ -589,12 +590,10 @@ export function NewHighClient() {
         headerName: "거래대금",
         width: 104,
         type: "numericColumn",
-        headerTooltip: "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다.",
+        headerTooltip: "20일 평균 거래대금 대비 배수 — 하한 이상이어야 진입한다. 굵은 글씨가 자격 통과다.",
         valueFormatter: (p) => (p.value == null ? "-" : `${(p.value as number).toFixed(1)}배`),
-        cellStyle: (p) => {
-          const row = p.data as PositionRow | undefined;
-          return row?.qualifies ? { fontWeight: 700, color: "#d62828" } : null;
-        },
+        // 농도는 배수 크기, 굵기는 진입 자격. 자격 하한은 설정값이라 농도 단계와 다를 수 있다.
+        cellStyle: (p) => tradeValueMultStyle(p.value as number | null, (p.data as PositionRow | undefined)?.qualifies),
       },
     ],
     // live 가 빠지면 장전에 만든 컬럼이 그대로 남아 장중에도 '돌파성공' 으로 보인다.
