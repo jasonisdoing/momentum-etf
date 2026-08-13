@@ -206,6 +206,12 @@ function formatPercent(value: number | null): string {
   return `${value.toFixed(2)}%`;
 }
 
+/** 티커 목록을 짧게 — 수백 개를 그대로 나열하면 경고가 화면을 덮는다. */
+function summarizeTickers(tickers: string[], limit = 5): string {
+  if (tickers.length <= limit) return tickers.join(", ");
+  return `${tickers.slice(0, limit).join(", ")} 외 ${tickers.length - limit}개`;
+}
+
 function getSignedClass(value: number | null): string {
   if (value === null || value === undefined || Number.isNaN(value) || value === 0) {
     return "";
@@ -1465,13 +1471,12 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
     }
 
     const parts: string[] = ["일부 종목의 가격 캐시가 없습니다."];
-    if (missingTickerLabels.length > 0) {
-      parts.push(`누락 ${missingTickerLabels.join(", ")}`);
-    } else if (missingTickers.length > 0) {
-      parts.push(`누락 ${missingTickers.join(", ")}`);
+    const missing = missingTickerLabels.length > 0 ? missingTickerLabels : missingTickers;
+    if (missing.length > 0) {
+      parts.push(`누락 ${summarizeTickers(missing)}`);
     }
     if (staleTickers.length > 0) {
-      parts.push(`오래된 캐시 ${staleTickers.join(", ")}`);
+      parts.push(`오래된 캐시 ${summarizeTickers(staleTickers)}`);
     }
     return parts.join(" | ");
   }, [cacheBlocked, missingTickerLabels, missingTickers, staleTickers]);
