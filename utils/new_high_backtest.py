@@ -39,8 +39,12 @@ def _cap_by_industry(
     industry_by: dict[str, str],
     cap: int | None,
     free: int,
-) -> list[str]:
+) -> tuple[list[str], list[str]]:
     """우선순위를 지키되 **한 업종이 상한을 넘지 않도록** 빈 자리만큼 고른다.
+
+    `(고른 것, 상한에 걸려 밀린 것)` 을 돌려준다. 밀린 목록은 화면이 '돌파했지만
+    업종 상한 때문에 못 산다' 를 표시하는 데 쓴다 — 그냥 '돌파성공' 으로 두면
+    살 것처럼 보인다.
 
     이미 보유 중인 종목이 상한을 차지한다 — 오늘 새로 담는 것만 세면 계좌 전체로는
     한 업종에 몰릴 수 있다. 상한에 걸린 종목은 건너뛰고 다음 순위가 그 자리를 채운다.
@@ -48,25 +52,27 @@ def _cap_by_industry(
     백테스트와 화면이 같은 함수를 써야 표시된 진입 예정과 성과가 어긋나지 않는다.
     """
     if free <= 0:
-        return []
+        return [], []
     if not cap:
-        return candidates[:free]
+        return candidates[:free], []
     counts: dict[str, int] = {}
     for ticker in held:
         key = industry_by.get(ticker, "")
         if key:
             counts[key] = counts.get(key, 0) + 1
     picked: list[str] = []
+    blocked: list[str] = []
     for ticker in candidates:
         if len(picked) >= free:
             break
         key = industry_by.get(ticker, "")
         if key:
             if counts.get(key, 0) >= cap:
+                blocked.append(ticker)
                 continue
             counts[key] = counts.get(key, 0) + 1
         picked.append(ticker)
-    return picked
+    return picked, blocked
 
 
 def _drawdown_pct(series: pd.Series) -> float:
@@ -223,7 +229,7 @@ def run_backtest(
                 and _meets_min_mult(value_mult.at[day, t], min_mult)
             ]
             picks.sort(key=lambda t: priority_of(day, t), reverse=True)
-            picks = _cap_by_industry(picks, list(holdings), industry_by, settings["max_per_industry"], free)
+            picks, _ = _cap_by_industry(picks, list(holdings), industry_by, settings["max_per_industry"], free)
             for ticker in picks:
                 entry_open = float(open_df.at[nxt, ticker])
                 holdings[ticker] = {
@@ -500,6 +506,7 @@ def available_dates(
     min_value_mult: float | None,
     limit: int = 20,
     held_by_day: dict[str, list[str]] | None = None,
+    max_per_industry: int | None = None,
 ) -> list[dict[str, Any]]:
     """최근 거래일 목록과 그날의 후보·돌파 종목 수. 날짜 셀렉트가 이 값을 쓴다.
 
@@ -507,6 +514,7 @@ def available_dates(
     보유 중이던 종목까지 세면 "돌파 4"인데 진입은 3건인 날이 생겨 사람을 오해하게 만든다.
     """
     panel, signals = context["panel"], context["signals"]
+    industry_by = context["industry_by"]
     close_df, prior_high, value_mult = panel["close"], signals["prior_high"], signals["value_mult"]
     gap = (close_df / prior_high - 1) * 100
     qualified = value_mult >= min_value_mult if min_value_mult is not None else value_mult.notna() | True
@@ -516,14 +524,25 @@ def available_dates(
         row, ok = gap.loc[day], qualified.loc[day]
         breakout = row >= 0
         buyable = breakout & ok
-        held = (held_by_day or {}).get(str(day.date()))
+        held = (held_by_day or {}).get(str(day.date())) or []
         if held:
             buyable = buyable & ~buyable.index.isin(held)
+        count = int(buyable.sum())
+        if max_per_industry:
+            # 업종 상한에 밀리는 종목은 살 수 없으니 빼고 센다. 우선순위는 진입과 같은
+            # 거래대금 배수 순 — 상한에 걸리면 다음 순위가 그 자리를 채운다.
+            ranked = sorted(
+                buyable[buyable].index,
+                key=lambda t: float(value_mult.at[day, t]) if pd.notna(value_mult.at[day, t]) else 0.0,
+                reverse=True,
+            )
+            picked, _ = _cap_by_industry(ranked, list(held), industry_by, max_per_industry, len(ranked))
+            count = len(picked)
         rows.append(
             {
                 "date": str(day.date()),
                 "candidate_count": int((breakout | ((row >= -12) & (row < 0))).sum()),
-                "breakout_count": int(buyable.sum()),
+                "breakout_count": count,
             }
         )
     return rows[::-1]
@@ -633,6 +652,8 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         """자리·자격·우선순위를 적용해 다음 시가에 살 종목을 고른다."""
         planned_exits = sum(1 for h in holdings if h.get("status") == "sell")
         free = int(settings["top_n"]) - (len(holdings) - planned_exits)
+        for row in rows:
+            row["industry_blocked"] = False
         if free <= 0:
             return []
         ready = [
@@ -645,7 +666,7 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
             reverse=True,
         )
         by_ticker = {row["ticker"]: row for row in ready}
-        chosen = _cap_by_industry(
+        chosen, blocked = _cap_by_industry(
             list(by_ticker),
             # 오늘 팔 종목은 자리를 비우므로 업종 상한도 차지하지 않는다(`free` 계산과 같은 기준).
             [h["ticker"] for h in holdings if h.get("status") != "sell"],
@@ -653,6 +674,9 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
             settings["max_per_industry"],
             free,
         )
+        # 돌파했고 자격도 통과했는데 업종 상한에 밀린 종목 — 화면이 따로 표시한다.
+        for ticker in blocked:
+            by_ticker[ticker]["industry_blocked"] = True
         return [by_ticker[ticker] for ticker in chosen]
 
     def confirmed_close(ticker: str) -> float | None:
@@ -788,7 +812,12 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         "universe_count": len(rows),
         "window_weeks": HIGH_WINDOW_WEEKS,
         "min_value_mult": settings["min_value_mult"],
-        "available_dates": available_dates(context, settings["min_value_mult"], held_by_day=simulated["held_by_day"]),
+        "available_dates": available_dates(
+            context,
+            settings["min_value_mult"],
+            held_by_day=simulated["held_by_day"],
+            max_per_industry=settings["max_per_industry"],
+        ),
         # 가격 캐시가 마지막으로 갱신된 시각 — 화면이 "언제 기준인지"를 알린다.
         "refreshed_at": _cache_refreshed_at(pool),
         # 진행 중인 세션의 시세를 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.
