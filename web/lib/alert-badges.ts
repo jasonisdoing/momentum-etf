@@ -33,7 +33,8 @@ export function normalizeBadgeTicker(ticker: string): string {
 export async function fetchAlertBadges(accountId: string): Promise<AlertBadgeInfo> {
   const cacheKey = `${BADGES_SESSION_CACHE_PREFIX}${accountId}`;
   const cached = readSessionTtlCache<AlertBadgeInfo>(cacheKey, BADGES_SESSION_CACHE_TTL_MS);
-  if (cached !== null) return cached;
+  // 예전 버전이 남긴 캐시(티커→아이콘 맵)는 형태가 달라 그대로 쓰면 화면이 깨진다. 모양을 확인한다.
+  if (cached !== null && cached.badgeByTicker) return cached;
   try {
     const resp = await fetch(`/api/alarms/badges?account=${encodeURIComponent(accountId)}`, { cache: "no-store" });
     const payload = (await resp.json()) as {

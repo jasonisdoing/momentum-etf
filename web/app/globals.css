@@ -3712,6 +3712,18 @@ a {
   background: #ffffff;
 }
 
+/* 추세 이탈 회색은 보유 행(흰 배경)보다 뒤에 와야 보인다 — 자산 화면은 보유가 곧 기본 상태라
+   위 흰색 규칙이 모든 행을 덮는다. 편집 중인 행은 편집 색이 계속 우선한다(아래에 정의). */
+.assetsAgGrid .ag-row.appTrendBrokenRow,
+.assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.assetsAgGrid .ag-row.appTrendBrokenRow:hover,
+.assetsAgGrid .ag-row.appTrendBrokenRow.appHeldRow:hover {
+  background: rgba(148, 163, 184, 0.22);
+}
+
 .assetsAgGrid .ag-row.assetsEditingRow,
 .assetsAgGrid .ag-row.assetsEditingRow.appHeldRow {
   background: rgba(32, 107, 196, 0.12);
