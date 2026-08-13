@@ -1676,7 +1676,10 @@ export function StocksManager({ onHeaderSummaryChange }: { onHeaderSummaryChange
                 theme={rankGridTheme}
                 getRowClass={(params: RowClassParams<RankGridRow>) => {
                   const classes: string[] = [];
-                  // 추세 이탈(장기·단기 중 하나라도 음수)은 행 배경 대신 종목명 뒤 ❗ 로 표시한다.
+                  // 추세 이탈(장기·단기 중 하나라도 음수) — 종목명 뒤 ❗ 와 같은 조건으로 행을 연한 회색으로.
+                  if (isTrendBroken(params.data?.단기이격, params.data?.이격)) {
+                    classes.push("appTrendBrokenRow");
+                  }
                   if (params.data?.exclude_from_ranking) {
                     classes.push("rankFixedRow");
                   }

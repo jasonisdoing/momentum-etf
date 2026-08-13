@@ -319,6 +319,8 @@ export function AssetHelperClient() {
   const [marketTrendItems, setMarketTrendItems] = useState<MarketTrendItem[]>([]);
   // 알람 배지(이동선 이탈·손절 아이콘) — /alarms 설정·판정 그대로. 보조 정보라 실패 시 빈 맵.
   const [alertBadges, setAlertBadges] = useState<AlertBadges>({});
+  // 이동선 이탈 종목 — 배지와 같은 조건으로 행을 회색 처리한다.
+  const [maBrokenTickers, setMaBrokenTickers] = useState<Set<string>>(new Set());
   const [accountReturns, setAccountReturns] = useState<Record<string, AccountReturns>>({});
   const [memo, setMemo] = useState("");
   const [savedMemo, setSavedMemo] = useState("");
@@ -477,11 +479,14 @@ export function AssetHelperClient() {
   useEffect(() => {
     if (!selectedAccount) {
       setAlertBadges({});
+      setMaBrokenTickers(new Set());
       return;
     }
     let alive = true;
-    void fetchAlertBadges(selectedAccount).then((badges) => {
-      if (alive) setAlertBadges(badges);
+    void fetchAlertBadges(selectedAccount).then((info) => {
+      if (!alive) return;
+      setAlertBadges(info.badgeByTicker);
+      setMaBrokenTickers(new Set(info.maTickers));
     });
     return () => {
       alive = false;
@@ -1113,6 +1118,10 @@ export function AssetHelperClient() {
               theme={gridTheme}
               getRowId={(params) =>
                 params.data.is_adding ? "__adding__" : String(params.data.ticker || `row_${params.data.row_index}`)
+              }
+              getRowClass={(params) =>
+                // 이동선 이탈은 종목명 뒤 배지와 같은 조건으로 행을 연한 회색으로 눌러 둔다.
+                maBrokenTickers.has(normalizeBadgeTicker(params.data?.ticker ?? "")) ? "appTrendBrokenRow" : ""
               }
             />
           </div>

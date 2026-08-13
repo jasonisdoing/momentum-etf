@@ -648,9 +648,12 @@ export function NewHighClient() {
       entry_date: t.entry_date, entry_price: t.entry_price, return_pct: t.return_pct,
       plan: "exited", days: t.days, is_new: false, exit_reason: t.reason,
     }));
-    // 내일 움직일 것이 위, 이미 끝난 것이 아래.
-    const rank = { sell: 0, buy: 1, hold: 2, exited: 3 } as const;
-    return [...held, ...buys, ...exited].sort((a, b) => rank[a.plan] - rank[b.plan]);
+    // 보유(매도 예정 포함)가 위, 아직 안 산 것, 이미 끝난 것 순.
+    // 같은 묶음 안에서는 **오래 들고 있는 것이 위** — 편입일이 이른 순이다.
+    const rank = { hold: 0, sell: 0, buy: 1, exited: 2 } as const;
+    return [...held, ...buys, ...exited].sort(
+      (a, b) => rank[a.plan] - rank[b.plan] || (a.entry_date ?? "").localeCompare(b.entry_date ?? ""),
+    );
   }, [positions]);
 
   // 차트를 그릴 대상 — 이미 나간 종목은 뺀다. 표와 같은 순서로 그린다.

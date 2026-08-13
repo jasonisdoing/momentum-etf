@@ -34,12 +34,12 @@ _DEFAULT_MA_LONG_DAYS = 120
 _DEFAULT_STOPLOSS_PCT = -7.0
 # 화면 셀렉트 선택지(백엔드는 값만 검증하고, 목록은 화면과 공유)
 MA_DAYS_OPTIONS: tuple[int, ...] = (5, 10, 20, 40, 60, 120, 200)
-STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-3.0, -5.0, -7.0, -10.0, -15.0, -20.0)
+STOPLOSS_PCT_OPTIONS: tuple[float, ...] = (-3.0, -5.0, -7.0, -8.0, -10.0, -15.0, -20.0)
 
 
 # 화면 배지용 기본 아이콘 — 계좌별로 저장해 덮어쓸 수 있다(빈값 저장 = 배지 미표시).
-_DEFAULT_MA_ICON = "🚫"  # 이동선 이탈(단기·장기 공용)
-_DEFAULT_STOPLOSS_ICON = "✂️"
+_DEFAULT_MA_ICON = "❗"  # 이동선 이탈(단기·장기 공용)
+_DEFAULT_STOPLOSS_ICON = "🚫"
 
 
 def _account_ma_days(doc: dict[str, Any]) -> tuple[int, int]:
@@ -130,7 +130,9 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
     """한 계좌의 (켜진) 알람 종류별 트리거와 실패 사유를 계좌 자체 기준으로 계산한다."""
     account_id = account_doc["account_id"]
     detail = load_all_holdings_detail(account_id)
-    rows = [r for r in detail.get("rows", []) if str(r.get("ticker") or "").strip() and str(r.get("ticker")).strip() != "IS"]
+    rows = [
+        r for r in detail.get("rows", []) if str(r.get("ticker") or "").strip() and str(r.get("ticker")).strip() != "IS"
+    ]
 
     ma_days = _account_ma_days(account_doc)
     threshold = _account_stoploss_pct(account_doc)
@@ -146,11 +148,13 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
         for row in rows:
             ret = row.get("return_pct")
             if isinstance(ret, (int, float)) and not isinstance(ret, bool) and ret <= threshold:
-                stoploss_hits.append({
-                    "ticker": str(row["ticker"]).strip(),
-                    "name": str(row.get("name") or row["ticker"]),
-                    "return_pct": round(float(ret), 2),
-                })
+                stoploss_hits.append(
+                    {
+                        "ticker": str(row["ticker"]).strip(),
+                        "name": str(row.get("name") or row["ticker"]),
+                        "return_pct": round(float(ret), 2),
+                    }
+                )
 
     # 이동선 이탈: 종가 vs 이동평균. 종목풀 순위와 동일하게 실시간 스냅샷을 국가별로 미리 조회해 반영.
     if ma_on:
@@ -177,7 +181,9 @@ def compute_account_alerts(account_doc: dict[str, Any]) -> tuple[dict[str, Any],
             if status is None:
                 errors.append(f"{fetch_ticker}: 가격 데이터 부족")
             elif status["below"]:
-                ma_hits.append({"ticker": str(row["ticker"]).strip(), "name": str(row.get("name") or row["ticker"]), **status})
+                ma_hits.append(
+                    {"ticker": str(row["ticker"]).strip(), "name": str(row.get("name") or row["ticker"]), **status}
+                )
 
     return {
         "ma": ma_hits,
@@ -223,11 +229,15 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     def _norm_ticker(value: str) -> str:
         return str(value or "").strip().upper().split(":")[-1]
 
+    # 이동선 이탈 종목 — 배지와 별개로 화면이 행 전체를 회색 처리하는 데 쓴다.
+    # 아이콘을 비운 계좌는 배지가 안 붙으므로 회색도 하지 않는다(같은 조건으로 묶는다).
+    ma_tickers: list[str] = []
     if ma_icon:
         for hit in alerts["ma"]:
             key = _norm_ticker(hit["ticker"])
             if key:
                 badge_by_ticker[key] = badge_by_ticker.get(key, "") + ma_icon
+                ma_tickers.append(key)
     if stoploss_icon:
         for hit in alerts["stoploss"]:
             key = _norm_ticker(hit["ticker"])
@@ -237,6 +247,7 @@ def compute_account_alert_badges(account_id: str) -> dict[str, Any]:
     result = {
         "account_id": norm_id,
         "badge_by_ticker": badge_by_ticker,
+        "ma_tickers": sorted(set(ma_tickers)),
         "ma_icon": ma_icon,
         "stoploss_icon": stoploss_icon,
         "ma_short_days": alerts["ma_short_days"],
@@ -328,7 +339,9 @@ def _post_slack(sections: list[dict[str, Any]], *, manual: bool) -> bool:
             parts.append(f"🛑 *손절* ({s['threshold']:.1f}% 이하)")
             parts += [f"  • {b['name']}({b['ticker']}): 수익률 {b['return_pct']:+.2f}%" for b in s["stoploss"]]
         blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": "\n".join(parts)}})
-    blocks.append({"type": "context", "elements": [{"type": "mrkdwn", "text": f"총 {len(sections)}개 계좌 · {total}건"}]})
+    blocks.append(
+        {"type": "context", "elements": [{"type": "mrkdwn", "text": f"총 {len(sections)}개 계좌 · {total}건"}]}
+    )
 
     ts = send_slack_message_v2(text=header, blocks=blocks)
     if ts:
