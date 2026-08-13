@@ -211,7 +211,11 @@ def fetch_overseas_etf_nav_snapshot(ticker: str, country_code: str) -> dict[str,
     try:
         import yfinance as yf
 
-        info = getattr(yf.Ticker(symbol), "info", {}) or {}
+        from utils.yfinance_guard import yfinance_lock
+
+        # 동시 호출 시 남의 티커 데이터를 받는 것을 막는다(utils/yfinance_guard).
+        with yfinance_lock():
+            info = getattr(yf.Ticker(symbol), "info", {}) or {}
     except Exception as exc:
         logger.debug("해외 ETF NAV 조회 실패 (%s): %s", symbol, exc)
         return {}
@@ -362,9 +366,7 @@ def fetch_naver_stock_realtime_snapshot(tickers: Sequence[str]) -> dict[str, dic
     return snapshot
 
 
-def fetch_naver_daily_ohlcv_snapshot(
-    tickers: Sequence[str], target_day: pd.Timestamp
-) -> dict[str, dict[str, float]]:
+def fetch_naver_daily_ohlcv_snapshot(tickers: Sequence[str], target_day: pd.Timestamp) -> dict[str, dict[str, float]]:
     """한국 종목들의 **확정 당일 일봉(OHLCV)** 을 폴링 API 로 일괄 조회한다.
 
     가격 캐시 증분 갱신용 — 종목당 pykrx 호출 대신 50종목 단위 배치 호출로
@@ -848,8 +850,7 @@ def fetch_toss_kr_stock_snapshot(tickers: Sequence[str]) -> dict[str, dict[str, 
         return snapshot
 
     code_to_ticker = {
-        (ticker if ticker.startswith("A") else f"A{ticker}"): ticker.removeprefix("A")
-        for ticker in expired
+        (ticker if ticker.startswith("A") else f"A{ticker}"): ticker.removeprefix("A") for ticker in expired
     }
     price_url = f"{TOSS_INVEST_API_BASE_URL}/api/v3/stock-prices/details"
 

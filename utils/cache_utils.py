@@ -186,7 +186,9 @@ def get_all_ticker_type_lookup_keys() -> list[str]:
     """모든 종목풀 캐시 키를 명시적으로 반환한다."""
     from utils.settings_loader import list_available_ticker_types
 
-    return [str(ticker_type).strip().lower() for ticker_type in list_available_ticker_types() if str(ticker_type).strip()]
+    return [
+        str(ticker_type).strip().lower() for ticker_type in list_available_ticker_types() if str(ticker_type).strip()
+    ]
 
 
 def _load_cached_frames_bulk_from_keys(cache_keys: Iterable[str], tickers: Iterable[str]) -> dict[str, pd.DataFrame]:
@@ -826,6 +828,69 @@ def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> No
     )
 
 
+# 이상치 경고 — 최근 이 일수 안에서 하루 등락이 한도를 넘으면 저장은 하되 슬랙으로 알린다.
+# 차단하지 않는 이유: 유닛 병합·액면분할 직후처럼 정상적으로 큰 변동도 있다(호주 IOO 6.35:1).
+# 한도 50%: 한국 상하한가(±30%)·3배 레버리지 급락일도 안 걸리고, 데이터 사고(+542%, +1998%)만 걸린다.
+_ANOMALY_ALERT_WINDOW_DAYS = 40
+_ANOMALY_ALERT_PCT = 50.0
+_ANOMALY_ALERT_COLLECTION = "price_anomaly_alerts"
+
+
+def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> None:
+    """저장 직전 종가의 하루 등락을 검사해 한도 초과를 슬랙으로 경고한다.
+
+    같은 (풀, 티커, 날짜) 조합은 한 번만 보낸다 — 오염된 프레임이 매시 재저장돼도
+    슬랙이 도배되지 않게 DB 에 알림 이력을 남긴다. 검사·발송 실패는 저장을 막지 않는다.
+    """
+    try:
+        close_column = _resolve_close_column(df.columns.astype(str).tolist())
+        if close_column is None:
+            return
+        close = pd.to_numeric(df[close_column], errors="coerce").dropna().astype(float)
+        if len(close) < 2:
+            return
+        recent = close.iloc[-_ANOMALY_ALERT_WINDOW_DAYS:]
+        change = recent.pct_change().abs() * 100
+        jumps = change[change > _ANOMALY_ALERT_PCT]
+        if jumps.empty:
+            return
+
+        db = get_db_connection()
+        if db is None:
+            return
+        alerts = db[_ANOMALY_ALERT_COLLECTION]
+        lines = []
+        for stamp, pct in jumps.items():
+            key = {
+                "account_id": str(account_id).strip().lower(),
+                "ticker": (ticker or "").strip().upper(),
+                "date": pd.Timestamp(stamp).strftime("%Y-%m-%d"),
+            }
+            marked = alerts.update_one(
+                key,
+                {"$setOnInsert": {**key, "pct": round(float(pct), 1), "created_at": datetime.utcnow()}},
+                upsert=True,
+            )
+            if marked.upserted_id is not None:  # 처음 보는 (풀, 티커, 날짜)만 알린다
+                position = close.index.get_loc(stamp)
+                before = float(close.iloc[position - 1])
+                lines.append(f"· {key['date']} {before:,.2f} → {float(close.loc[stamp]):,.2f} ({pct:+.0f}%)")
+        if not lines:
+            return
+
+        from utils.notification import send_slack_message_v2
+
+        send_slack_message_v2(
+            f":rotating_light: 가격 캐시 이상치 감지 — {key['account_id'].upper()}/{key['ticker']}\n"
+            + "\n".join(lines)
+            + f"\n하루 등락 {_ANOMALY_ALERT_PCT:.0f}% 초과. 분할·병합이면 정상이지만, "
+            "yfinance 동시 호출 오염이나 원천 데이터 사고일 수 있어 확인이 필요합니다. 저장은 그대로 진행됐습니다."
+        )
+        logger.warning("[CACHE] 가격 이상치 감지 %s/%s: %s", account_id, ticker, "; ".join(lines))
+    except Exception as exc:  # 경고 실패가 저장을 막으면 안 된다
+        logger.warning("[CACHE] 가격 이상치 검사 실패 (%s/%s): %s", account_id, ticker, exc)
+
+
 def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
     """캐시 DataFrame을 저장합니다. CACHE_START_DATE 이전 데이터는 제외합니다."""
     if df is None or df.empty:
@@ -848,6 +913,9 @@ def save_cached_frame(account_id: str, ticker: str, df: pd.DataFrame) -> None:
         raise ValueError("CACHE_START_DATE 적용 후 저장할 캐시 데이터가 비어 있습니다.")
 
     ticker_norm = (ticker or "").strip().upper()
+
+    # 이상치 경고(차단 아님) — 뒤섞인 가격이 조용히 저장되는 것을 그날 알아채기 위한 그물.
+    _alert_price_anomalies(account_id, ticker_norm, df_to_save)
 
     # [HOTFIX] 직렬화 오류 방지를 위한 정규화 및 중복 컬럼 제거
     df_to_save.columns = [str(c) for c in df_to_save.columns]

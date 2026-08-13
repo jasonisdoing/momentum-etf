@@ -1066,23 +1066,27 @@ def fetch_stock_info(ticker: str, country_code: str) -> dict[str, Any] | None:
             if country_norm == "au" and not yf_ticker.endswith(".AX"):
                 yf_ticker = f"{yf_ticker}.AX"
 
-            t = yf.Ticker(yf_ticker)
-            try:
-                info = t.info
-                # 이름
-                name = info.get("longName") or info.get("shortName")
-                if name:
-                    result["name"] = name
-            except Exception:
-                pass
+            # 웹(종목 추가 검증) 경로라 락으로 직렬화한다 — 배치 워커는 이 함수를 쓰지 않는다.
+            from utils.yfinance_guard import yfinance_lock
 
-            # 상장일
-            try:
-                hist = t.history(period="max")
-                if not hist.empty:
-                    result["listing_date"] = hist.index.min().strftime("%Y-%m-%d")
-            except Exception:
-                pass
+            with yfinance_lock():
+                t = yf.Ticker(yf_ticker)
+                try:
+                    info = t.info
+                    # 이름
+                    name = info.get("longName") or info.get("shortName")
+                    if name:
+                        result["name"] = name
+                except Exception:
+                    pass
+
+                # 상장일
+                try:
+                    hist = t.history(period="max")
+                    if not hist.empty:
+                        result["listing_date"] = hist.index.min().strftime("%Y-%m-%d")
+                except Exception:
+                    pass
 
         # 이름이라도 찾았으면 성공
         if result["name"]:
