@@ -33,6 +33,42 @@ MAX_BACKTEST_MONTHS = 60
 _HELD_HISTORY_DAYS = 40
 
 
+def _cap_by_industry(
+    candidates: list[str],
+    held: list[str],
+    industry_by: dict[str, str],
+    cap: int | None,
+    free: int,
+) -> list[str]:
+    """우선순위를 지키되 **한 업종이 상한을 넘지 않도록** 빈 자리만큼 고른다.
+
+    이미 보유 중인 종목이 상한을 차지한다 — 오늘 새로 담는 것만 세면 계좌 전체로는
+    한 업종에 몰릴 수 있다. 상한에 걸린 종목은 건너뛰고 다음 순위가 그 자리를 채운다.
+    업종을 모르는 종목(ETF 풀 등)은 묶을 근거가 없어 상한을 적용하지 않는다.
+    백테스트와 화면이 같은 함수를 써야 표시된 진입 예정과 성과가 어긋나지 않는다.
+    """
+    if free <= 0:
+        return []
+    if not cap:
+        return candidates[:free]
+    counts: dict[str, int] = {}
+    for ticker in held:
+        key = industry_by.get(ticker, "")
+        if key:
+            counts[key] = counts.get(key, 0) + 1
+    picked: list[str] = []
+    for ticker in candidates:
+        if len(picked) >= free:
+            break
+        key = industry_by.get(ticker, "")
+        if key:
+            if counts.get(key, 0) >= cap:
+                continue
+            counts[key] = counts.get(key, 0) + 1
+        picked.append(ticker)
+    return picked
+
+
 def _drawdown_pct(series: pd.Series) -> float:
     return float(((series / series.cummax()) - 1).min() * 100)
 
@@ -187,7 +223,8 @@ def run_backtest(
                 and _meets_min_mult(value_mult.at[day, t], min_mult)
             ]
             picks.sort(key=lambda t: priority_of(day, t), reverse=True)
-            for ticker in picks[:free]:
+            picks = _cap_by_industry(picks, list(holdings), industry_by, settings["max_per_industry"], free)
+            for ticker in picks:
                 entry_open = float(open_df.at[nxt, ticker])
                 holdings[ticker] = {
                     "open": entry_open,
@@ -607,7 +644,16 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
             key=lambda row: caps.get(row["ticker"], 0.0) if use_market_cap else (row["value_mult"] or 0.0),
             reverse=True,
         )
-        return ready[:free]
+        by_ticker = {row["ticker"]: row for row in ready}
+        chosen = _cap_by_industry(
+            list(by_ticker),
+            # 오늘 팔 종목은 자리를 비우므로 업종 상한도 차지하지 않는다(`free` 계산과 같은 기준).
+            [h["ticker"] for h in holdings if h.get("status") != "sell"],
+            industry_by,
+            settings["max_per_industry"],
+            free,
+        )
+        return [by_ticker[ticker] for ticker in chosen]
 
     def confirmed_close(ticker: str) -> float | None:
         price = close_df.at[last, ticker]

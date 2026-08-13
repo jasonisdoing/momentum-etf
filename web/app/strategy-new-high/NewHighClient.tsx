@@ -37,6 +37,8 @@ type Settings = {
   entry_priority: "value_surge" | "market_cap";
   /** 진입 자격 — 거래대금 급증 배수 하한. null 이면 조건 없음. */
   min_value_mult: number | null;
+  /** 한 업종 최대 보유 종목 수. null 이면 제한 없음. */
+  max_per_industry: number | null;
 };
 
 const ENTRY_PRIORITY_LABEL: Record<Settings["entry_priority"], string> = {
@@ -53,6 +55,7 @@ type Constraints = {
   exit_ma_options: number[];
   entry_priority_options: Settings["entry_priority"][];
   min_value_mult_options: (number | null)[];
+  max_per_industry_options: (number | null)[];
   month_options: number[];
   /** 신고가 창 — "52주" 같은 문구를 이 값에서 만든다(화면에 숫자를 박지 않는다). */
   high_window_weeks: number;
@@ -965,6 +968,23 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">업종 상한</span>
+                  <select
+                    className="form-select form-select-sm"
+                    value={draft.max_per_industry == null ? "" : String(draft.max_per_industry)}
+                    onChange={(event) => setDraft({
+                      ...draft,
+                      max_per_industry: event.target.value === "" ? null : Number(event.target.value),
+                    })}
+                  >
+                    {constraints.max_per_industry_options.map((value) => (
+                      <option key={String(value)} value={value == null ? "" : String(value)}>
+                        {value == null ? "제한 없음" : `${value}종목`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">백테스트 기간</span>
                   <select
                     className="form-select form-select-sm"
@@ -993,6 +1013,9 @@ export function NewHighClient() {
                   ? ` 단, 20일 평균 대비 거래대금이 ${draft.min_value_mult}배 이상 늘어난 돌파만 삽니다.`
                   : ""}
                 {" "}자리가 모자라면 <strong>{ENTRY_PRIORITY_LABEL[draft.entry_priority]}</strong>이 큰 순으로 담습니다.
+                {draft.max_per_industry != null
+                  ? ` 한 업종은 최대 ${draft.max_per_industry}종목까지만 담아, 상한에 걸리면 다음 순위가 그 자리를 채웁니다.`
+                  : ""}
               </div>
             </div>
           </div>
