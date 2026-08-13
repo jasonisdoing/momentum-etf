@@ -96,12 +96,14 @@ const REGIME_COLORS: Record<RegimeKey, string> = {
 /** ADR 4단계 — 백엔드 `classify_adr()` 과 같은 구분이다. */
 type AdrLevel = "overbought" | "bullish" | "bearish" | "oversold";
 
-const ADR_LEVEL_STYLE: Record<AdrLevel, { label: string; color: string; emoji: string }> = {
-  // 과매수/과매도는 되돌림을 경계하는 구간이라 강세·약세와 색을 나눈다.
-  overbought: { label: "과매수", color: "#d62828", emoji: "🔥" },
-  bullish: { label: "강세", color: "#e8590c", emoji: "⬆️" },
-  bearish: { label: "약세", color: "#1971c2", emoji: "⬇️" },
-  oversold: { label: "과매도", color: "#0b7285", emoji: "🧊" },
+/** 표기는 **강세/약세 두 덩어리**로 하고, 과매수·과매도는 괄호로 덧붙인다.
+ *  과매수는 강세의 연장이라 따로 세면 국면이 끊긴 것처럼 보인다(연속일도 묶어서 센다).
+ *  색은 네 단계를 그대로 유지해 과매수·과매도가 눈에 띄게 남긴다. */
+const ADR_LEVEL_STYLE: Record<AdrLevel, { label: string; note: string | null; color: string; emoji: string }> = {
+  overbought: { label: "강세", note: "과매수", color: "#d62828", emoji: "🔥" },
+  bullish: { label: "강세", note: null, color: "#e8590c", emoji: "⬆️" },
+  bearish: { label: "약세", note: null, color: "#1971c2", emoji: "⬇️" },
+  oversold: { label: "약세", note: "과매도", color: "#0b7285", emoji: "🧊" },
 };
 
 const REGIME_DESCRIPTIONS: Array<{ key: RegimeKey; text: string }> = [
@@ -285,12 +287,16 @@ export function MarketTrendPanel({
           }
           const style = ADR_LEVEL_STYLE[level];
           return (
-            <span style={{ color: "var(--text-strong)" }} title={`${style.label} — 20일 누적 ADR ${data.adr.toFixed(1)}`}>
+            <span
+              style={{ color: "var(--text-strong)" }}
+              title={`${style.label}${style.note ? `(${style.note})` : ""} — 20일 누적 ADR ${data.adr.toFixed(1)}`}
+            >
               <strong style={{ color: style.color }}>
                 {style.emoji} {style.label}
               </strong>
               {` ${data.adr.toFixed(1)}`}
               {data.adr_level_days ? ` · ${data.adr_level_days}일째` : ""}
+              {style.note ? ` (${style.note})` : ""}
             </span>
           );
         },
