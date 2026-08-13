@@ -643,6 +643,18 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         row["is_held"] = row["ticker"] in held
 
     rows.sort(key=lambda r: r["gap_pct"], reverse=True)
+
+    # 보유·이탈 행에도 일간 등락률을 붙인다 — 후보 표와 같은 값을 쓰도록 rows 에서 가져온다
+    # (장중이면 위 실시간 덮어쓰기까지 반영된 값이다). rows 에 없는 종목은 값 없음으로 둔다.
+    change_pct_by = {row["ticker"]: row["change_pct"] for row in rows}
+    for item in [*holdings, *simulated["exited_today"]]:
+        item["change_pct"] = change_pct_by.get(item["ticker"])
+
+    # 이탈 행은 청산가와 별개로 현재 시세도 담는다 — 판 뒤로 얼마나 더 갔는지 보이게.
+    price_by = {row["ticker"]: row["price"] for row in rows}
+    for item in simulated["exited_today"]:
+        item["price"] = price_by.get(item["ticker"])
+
     # 장이 열려 있으면 오늘 시가 체결은 이미 끝났으므로, 다음 체결일은 오늘 다음 거래일이다.
     fill_base = pd.Timestamp(str(quotes["traded_at"])[:10]) if quotes["live"] else last
     return {
