@@ -58,9 +58,11 @@ _CONFIG_COLLECTION = "system_config"
 _SETTINGS_KEY = "new_high_settings"
 
 # 풀을 바꾸면 그 풀의 값으로 전환되는 항목.
+# 풀별로 따로 보관하는 설정. 여기 빠진 키는 저장을 눌러도 버려진다 — 설정을 추가하면
+# 반드시 같이 넣어야 한다.
 PER_POOL_SETTING_KEYS = (
     "top_n", "stop_loss_pct", "exit_ma_days", "slippage_pct", "backtest_months",
-    "entry_priority", "min_value_mult",
+    "entry_priority", "min_value_mult", "max_per_industry",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
