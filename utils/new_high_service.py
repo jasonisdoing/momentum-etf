@@ -12,6 +12,11 @@
    목표가(익절)는 두지 않는다 — 오르는 종목은 계속 들고 간다.
 4. 자리 배분: 동시 보유 상한 top_n, 균등 배분. 신호가 자리보다 많으면
    **거래대금 급증 배수**가 큰 순으로 담는다(돌파에 자금이 실린 쪽 우선).
+   자리가 꽉 차 있으면 새 돌파가 와도 **교체하지 않는다** — 2026-08-14 kor(24개월)·
+   us(60개월) 백테스트에서 최저수익/손실만/최장보유 교체 전부가 현행보다 나빴다
+   (kor +1912% vs 교체 시 +142~779%, us +240% vs -76~+95%). 보유 중이라는 것 자체가
+   손절·이탈에 안 걸린 살아있는 추세라는 뜻이라, 교체는 청산 규칙을 앞질러 이익
+   종목을 자르고 슬리피지 왕복 비용만 쌓는다.
 
 `/strategy-sm` 의 구조를 본떴지만 공용 모듈로 묶지 않았다 — 그쪽은 폐기 예정이라
 지금 묶으면 나중에 그 연결을 다시 끊어야 한다.
@@ -61,8 +66,14 @@ _SETTINGS_KEY = "new_high_settings"
 # 풀별로 따로 보관하는 설정. 여기 빠진 키는 저장을 눌러도 버려진다 — 설정을 추가하면
 # 반드시 같이 넣어야 한다.
 PER_POOL_SETTING_KEYS = (
-    "top_n", "stop_loss_pct", "exit_ma_days", "slippage_pct", "backtest_months",
-    "entry_priority", "min_value_mult", "max_per_industry",
+    "top_n",
+    "stop_loss_pct",
+    "exit_ma_days",
+    "slippage_pct",
+    "backtest_months",
+    "entry_priority",
+    "min_value_mult",
+    "max_per_industry",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -235,9 +246,7 @@ def compute_signals(panel: dict[str, pd.DataFrame], exit_ma_days: int) -> dict[s
     # 오늘은 창에서 뺀다 — 오늘 종가가 '직전' 최고를 넘었는지를 본다.
     prior_high = close_df.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
     # 관례상의 '52주 신고가'(장중 고가)는 화면 표시용으로만 쓴다 — 판정에는 쓰지 않는다.
-    prior_high_intraday = (
-        panel["high"].rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
-    )
+    prior_high_intraday = panel["high"].rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW_MIN_DAYS).max().shift(1)
     exit_ma = close_df.rolling(exit_ma_days, min_periods=exit_ma_days).mean()
     value_df = panel["value"]
     return {
@@ -350,9 +359,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     raw_min = settings.get("min_value_mult", DEFAULT_SETTINGS["min_value_mult"])
     min_value_mult = None if raw_min in (None, "", "none") else float(raw_min)
     if min_value_mult not in MIN_VALUE_MULT_OPTIONS:
-        raise ValueError(
-            f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})"
-        )
+        raise ValueError(f"min_value_mult 는 {list(MIN_VALUE_MULT_OPTIONS)} 중 하나여야 합니다 (받은 값: {raw_min})")
 
     raw_cap = settings.get("max_per_industry", DEFAULT_SETTINGS["max_per_industry"])
     max_per_industry = None if raw_cap in (None, "", "none") else int(raw_cap)

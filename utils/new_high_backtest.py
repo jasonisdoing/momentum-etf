@@ -418,7 +418,9 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         "live": live,
         "pre_market": pre_market,
         "traded_at": traded_at,
-        "by_ticker": by_ticker if live else {},
+        # 장전에도 현재가·등락률은 오늘 값이라 표시에는 쓴다. 판정에 쓰는 고가·시가가
+        # 직전 세션 값이라 `live` 만 거짓으로 둘 뿐이다.
+        "by_ticker": by_ticker if (live or pre_market) else {},
     }
 
 
@@ -778,6 +780,24 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
                 below_ma_last[held["ticker"]] = live["price"] < sum(window) / exit_ma_days
         mark_exits(lambda ticker: (quotes["by_ticker"].get(ticker) or {}).get("price"))
         entries = pick_entries()
+
+    elif quotes["pre_market"]:
+        # 장전(동시호가) — 예상체결가와 등락률만 얹는다. 종목풀 순위 화면과 같은 기준이라
+        # 두 화면의 '일간(%)' 이 어긋나지 않는다(프리장 거래가 없으면 0%).
+        # 고가·시가는 아직 직전 세션 값이라 돌파 거리·터치·진입 예정은 확정 종가 기준 그대로 둔다.
+        for row in rows:
+            live = quotes["by_ticker"].get(row["ticker"])
+            if not live:
+                continue
+            row["price"] = live["price"]
+            if live["change_pct"] is not None:
+                row["change_pct"] = round(live["change_pct"], 2)
+        for held in holdings:
+            live = quotes["by_ticker"].get(held["ticker"])
+            if not live:
+                continue
+            held["price"] = live["price"]
+            held["return_pct"] = round((live["price"] / held["entry_price"] - 1) * 100, 2)
 
     # 이미 보유 중인 종목은 다시 사지 않는다(백테스트도 같다). 목록에는 남기되 표시를 구분한다 —
     # 보유 종목이 아직 신고가를 갱신 중인지가 추세 판단에 쓸모 있다.

@@ -293,7 +293,7 @@ export function KorMarketStockManager({
         minWidth: 180,
       },
       {
-        headerName: "등락률",
+        headerName: "일간(%)",
         field: "change_pct",
         width: 110,
         minWidth: 96,
