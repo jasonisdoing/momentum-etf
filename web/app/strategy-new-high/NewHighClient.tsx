@@ -94,6 +94,8 @@ type PositionRow = {
   touched: boolean;
   /** 이미 보유 중 — 다시 사지 않는다. */
   is_held: boolean;
+  /** 돌파·자격을 다 통과했지만 업종 상한에 밀려 이번에는 사지 않는다. */
+  industry_blocked: boolean;
   value_mult: number | null;
 };
 
@@ -259,7 +261,7 @@ function toPeriodRows(daily: Backtest["daily"], keyLength: number): PeriodRow[] 
  */
 const STAGE_STYLE = {
   breakout: { color: "#d62828", text: "장중 현재가가 직전 최고 종가 이상이면 돌파중, 장 마감 후 종가가 그 이상이면 돌파성공입니다. 다음 거래일 시가에 매수합니다." },
-  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 거래대금 급증 하한에 못 미쳐 사지 않는 종목입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
+  blocked: { color: "#0c8599", text: "최고 종가는 넘었지만 사지 않는 종목입니다. (미달)은 거래대금 급증 하한에 못 미친 것이고, (상한)은 그 업종을 이미 상한만큼 들고 있어 다음 순위에 자리를 넘긴 것입니다. 날짜 목록의 돌파 수에서도 빠집니다." },
   pullback: { color: "#7048e8", text: "장중 고가는 최고 종가선에 닿았지만 종가가 다시 아래로 내려온 상태입니다." },
   imminent: { color: "#e8590c", text: "최고 종가까지 3% 이내로 남은 종목입니다." },
   near: { color: "#2f9e44", text: "최고 종가까지 3% 초과 7% 이내로 남은 종목입니다." },
@@ -273,9 +275,10 @@ function describeStage(row: PositionRow, live: boolean): { label: string; color:
   if (row.gap_pct >= 0) {
     // 장중에는 종가가 아직 안 나왔으니 '돌파중' — 마감 뒤 확정되면 '돌파성공'.
     const label = live ? "돌파중" : "돌파성공";
-    return row.qualifies
-      ? { label, color: STAGE_STYLE.breakout.color }
-      : { label: `${label}(미달)`, color: STAGE_STYLE.blocked.color };
+    if (!row.qualifies) return { label: `${label}(미달)`, color: STAGE_STYLE.blocked.color };
+    // 자격은 통과했는데 업종 상한에 밀린 종목 — 그냥 '돌파성공'으로 두면 살 것처럼 보인다.
+    if (row.industry_blocked) return { label: `${label}(상한)`, color: STAGE_STYLE.blocked.color };
+    return { label, color: STAGE_STYLE.breakout.color };
   }
   // 장중에 선을 건드렸다가 밀린 것은 그냥 '임박'과 성격이 달라 따로 표시한다.
   if (row.touched) return { label: "터치 후 밀림", color: STAGE_STYLE.pullback.color };
@@ -287,7 +290,7 @@ function describeStage(row: PositionRow, live: boolean): { label: string; color:
 /** 상태 단계 설명 — 진입 후보를 펼치면 보여준다. 색·문구는 STAGE_STYLE 이 단일 소스다. */
 const STAGE_GUIDE: { label: string; key: keyof typeof STAGE_STYLE }[] = [
   { label: "돌파중 / 돌파성공", key: "breakout" },
-  { label: "돌파(미달)", key: "blocked" },
+  { label: "돌파(미달) · 돌파(상한)", key: "blocked" },
   { label: "터치 후 밀림", key: "pullback" },
   { label: "임박", key: "imminent" },
   { label: "근접", key: "near" },
