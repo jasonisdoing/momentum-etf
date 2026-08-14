@@ -830,10 +830,26 @@ def set_cache_refresh_completed_at(target_id: str, completed_at: datetime) -> No
 
 # 이상치 경고 — 최근 이 일수 안에서 하루 등락이 한도를 넘으면 저장은 하되 슬랙으로 알린다.
 # 차단하지 않는 이유: 유닛 병합·액면분할 직후처럼 정상적으로 큰 변동도 있다(호주 IOO 6.35:1).
-# 한도 50%: 한국 상하한가(±30%)·3배 레버리지 급락일도 안 걸리고, 데이터 사고(+542%, +1998%)만 걸린다.
+# 한도 60% 초과: 개별주 상하한가(±30%)의 2배 = 단일종목 2배 레버리지 ETF 의 이론상 최대가
+# 정확히 ±60%다 (2026-07-31 SK하이닉스 상한가 날 +58% 실측). 그 위는 정상 시장에서
+# 나올 수 없어 데이터 사고(+542%, +1998% 등)만 걸린다.
 _ANOMALY_ALERT_WINDOW_DAYS = 40
-_ANOMALY_ALERT_PCT = 50.0
+_ANOMALY_ALERT_PCT = 60.0
 _ANOMALY_ALERT_COLLECTION = "price_anomaly_alerts"
+
+
+def _lookup_ticker_name(account_id: str, ticker: str) -> str:
+    """알림 표시용 종목명 — 풀 문서에서 찾고 없으면 다른 풀, 그래도 없으면 빈 값."""
+    try:
+        db = get_db_connection()
+        if db is None:
+            return ""
+        doc = db.stock_meta.find_one(
+            {"ticker_type": str(account_id).strip().lower(), "ticker": ticker}, {"name": 1}
+        ) or db.stock_meta.find_one({"ticker": ticker, "name": {"$nin": [None, ""]}}, {"name": 1})
+        return str((doc or {}).get("name") or "").strip()
+    except Exception:
+        return ""
 
 
 def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> None:
@@ -850,8 +866,9 @@ def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> No
         if len(close) < 2:
             return
         recent = close.iloc[-_ANOMALY_ALERT_WINDOW_DAYS:]
-        change = recent.pct_change().abs() * 100
-        jumps = change[change > _ANOMALY_ALERT_PCT]
+        # 부호를 살려 둔다 — 하락 사고를 (+60%) 로 보여주면 오독한다.
+        change = recent.pct_change() * 100
+        jumps = change[change.abs() > _ANOMALY_ALERT_PCT]
         if jumps.empty:
             return
 
@@ -880,11 +897,14 @@ def _alert_price_anomalies(account_id: str, ticker: str, df: pd.DataFrame) -> No
 
         from utils.notification import send_slack_message_v2
 
+        name = _lookup_ticker_name(account_id, key["ticker"])
+        title = f"{key['account_id'].upper()}/{key['ticker']}" + (f" {name}" if name else "")
         send_slack_message_v2(
-            f":rotating_light: 가격 캐시 이상치 감지 — {key['account_id'].upper()}/{key['ticker']}\n"
+            f":rotating_light: 가격 캐시 이상치 감지 — {title}\n"
             + "\n".join(lines)
-            + f"\n하루 등락 {_ANOMALY_ALERT_PCT:.0f}% 초과. 분할·병합이면 정상이지만, "
-            "yfinance 동시 호출 오염이나 원천 데이터 사고일 수 있어 확인이 필요합니다. 저장은 그대로 진행됐습니다."
+            + f"\n하루 등락 {_ANOMALY_ALERT_PCT:.0f}% 초과 (단일종목 2배 레버리지의 이론상 최대). "
+            "분할·병합이면 정상이지만, yfinance 동시 호출 오염이나 원천 데이터 사고일 수 있어 "
+            "확인이 필요합니다. 저장은 그대로 진행됐습니다."
         )
         logger.warning("[CACHE] 가격 이상치 감지 %s/%s: %s", account_id, ticker, "; ".join(lines))
     except Exception as exc:  # 경고 실패가 저장을 막으면 안 된다

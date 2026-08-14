@@ -1191,14 +1191,14 @@ export function NewHighClient() {
                 ) : charts && charts.length > 0 ? (
                   <>
                     <div style={{ ...hintStyle, margin: "4px 0 10px" }}>
-                      최근 6개월 일봉입니다. 종가가 <strong style={{ color: "#7048e8" }}>직전 최고 종가선</strong>을
-                      넘으면 진입, <strong style={{ color: "#f08c00" }}>{draft.exit_ma_days}일선</strong>을 하회하면
-                      청산합니다. 진입한 종목은 매수가에 점선이 그려집니다.
+                      최근 6개월 일봉입니다. 종가가 직전 최고 종가를 넘으면 진입,{" "}
+                      <strong style={{ color: "#12b886" }}>MA{draft.exit_ma_days}</strong>를 하회하면 청산합니다.
+                      진입한 종목은 매수가와 함께 Buy 화살표가 표시됩니다.
                     </div>
                     <div
                       style={{
                         display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
                         gap: "18px 20px",
                       }}
                     >
@@ -1210,6 +1210,8 @@ export function NewHighClient() {
                             chart={item}
                             entryDate={row?.entry_date}
                             entryPrice={row?.entry_price}
+                            returnPct={row?.return_pct}
+                            days={row?.days}
                             maDays={draft.exit_ma_days}
                           />
                         );
