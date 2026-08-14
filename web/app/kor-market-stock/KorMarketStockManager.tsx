@@ -5,6 +5,11 @@ import { IconPlus } from "@tabler/icons-react";
 import type { CellStyle, ColDef } from "ag-grid-community";
 
 import { BUCKET_OPTIONS } from "@/lib/bucket-theme";
+import {
+  INDUSTRY_COLUMN_MIN_WIDTH,
+  INDUSTRY_COLUMN_WIDTH,
+  renderIndustryCell,
+} from "@/lib/grid-cells";
 import { formatKorMarketCap } from "@/lib/market-cap-format";
 import { useLatestRequest } from "@/lib/use-latest-request";
 import { formatPoolLabel } from "@/lib/pool-label";
@@ -25,6 +30,7 @@ type KorMarketStockRow = {
   rank: number;
   ticker: string;
   name: string;
+  industry: string;
   ticker_pools: string;
   is_held: boolean;
   current_price: number | null;
@@ -291,6 +297,14 @@ export function KorMarketStockManager({
         field: "name",
         flex: 1,
         minWidth: 180,
+      },
+      {
+        headerName: "업종",
+        field: "industry",
+        width: INDUSTRY_COLUMN_WIDTH,
+        minWidth: INDUSTRY_COLUMN_MIN_WIDTH,
+        headerTooltip: "네이버 업종 분류 — 신고가 돌파·종목풀 순위 화면과 같은 값.",
+        cellRenderer: (params: { value?: string }) => renderIndustryCell(params.value),
       },
       {
         headerName: "일간(%)",
