@@ -155,10 +155,10 @@ def _collect_pool(pool: str, *, force: bool) -> dict[str, Any] | None:
 
 
 def _send_sections(sections: list[dict[str, Any]]) -> None:
-    """풀 번호순 섹션들을 한 건의 메시지로 발송한다."""
+    """풀 번호순 섹션들을 *신고가 돌파* 제목 아래 한 건의 메시지로 발송한다."""
     from utils.notification import send_slack_message_v2
 
-    parts = []
+    parts = ["*신고가 돌파*"]
     for section in sorted(sections, key=lambda s: s["order"]):
         parts.append("\n".join([section["label"], *section["lines"]]))
     send_slack_message_v2("\n\n".join(parts))
@@ -191,6 +191,39 @@ def notify_pool(pool: str, *, force: bool = False) -> dict[str, Any]:
     }
 
 
+# 감시 창 여유 — 개장 전 10분(장전 상태 반영)부터 마감 후 90분(마감 후 가격 캐시 배치가
+# 확정 종가를 채우는 :20 실행을 덮는다)까지를 감시한다. 창 밖에서는 가격이 안 움직여
+# 변화가 있을 수 없으므로 계산 자체를 건너뛴다.
+_WINDOW_BEFORE_OPEN_MIN = 10
+_WINDOW_AFTER_CLOSE_MIN = 90
+
+
+def _within_notify_window(pool: str) -> bool:
+    """이 풀의 시장이 감시 창 안인지 — 창 밖이면 계산을 건너뛴다(비용 절약)."""
+    import pandas as pd
+
+    from config import MARKET_SCHEDULES
+    from utils.settings_loader import get_ticker_type_settings
+
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    schedule = (MARKET_SCHEDULES or {}).get(country)
+    if not isinstance(schedule, dict):
+        return False
+    tz_name = str(schedule.get("timezone") or "").strip()
+    open_time, close_time = schedule.get("open"), schedule.get("close")
+    if not tz_name or open_time is None or close_time is None:
+        return False
+    try:
+        now_local = pd.Timestamp.now(tz=tz_name)
+        opens_at = pd.Timestamp(f"{now_local.date()} {open_time.hour:02d}:{open_time.minute:02d}", tz=tz_name)
+        closes_at = pd.Timestamp(f"{now_local.date()} {close_time.hour:02d}:{close_time.minute:02d}", tz=tz_name)
+    except Exception:
+        return False
+    window_start = opens_at - pd.Timedelta(minutes=_WINDOW_BEFORE_OPEN_MIN)
+    window_end = closes_at + pd.Timedelta(minutes=_WINDOW_AFTER_CLOSE_MIN)
+    return window_start <= now_local <= window_end
+
+
 def notify_all(*, force: bool = False) -> dict[str, Any]:
     """슬랙 알람을 켠 모든 풀을 번호순으로 묶어 한 건으로 발송한다 (장중 감시 배치용).
 
@@ -201,6 +234,8 @@ def notify_all(*, force: bool = False) -> dict[str, Any]:
     sections: list[dict[str, Any]] = []
     summaries: list[dict[str, Any]] = []
     for pool in available_pools():
+        if not force and not _within_notify_window(pool):
+            continue
         try:
             collected = _collect_pool(pool, force=force)
         except Exception as exc:  # 한 풀 실패가 다른 풀 알림을 막지 않게
@@ -210,7 +245,12 @@ def notify_all(*, force: bool = False) -> dict[str, Any]:
         if collected is None:
             continue
         summaries.append(
-            {"pool": pool, "changed": bool(collected["lines"]), "added": collected["added"], "removed": collected["removed"]}
+            {
+                "pool": pool,
+                "changed": bool(collected["lines"]),
+                "added": collected["added"],
+                "removed": collected["removed"],
+            }
         )
         if collected["lines"]:
             sections.append(collected)
