@@ -74,6 +74,7 @@ PER_POOL_SETTING_KEYS = (
     "entry_priority",
     "min_value_mult",
     "max_per_industry",
+    "slack_enabled",
 )
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -89,6 +90,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # 세 구간 모두에서 가장 좋았지만(60개월 7749% → 9416%), us 는 종목이 100개뿐이라
     # 상한에 걸리면 대체할 후보가 없어 자리를 놀린다(240% → 113%). ETF 풀은 업종 자체가 없다.
     "max_per_industry": None,
+    # 슬랙 알람 — 켠 풀만 장중 감시 배치가 진입·매도 예정 변화를 발송한다. 기본 꺼짐.
+    "slack_enabled": False,
 }
 
 
@@ -378,6 +381,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
         "exit_ma_days": pick("exit_ma_days", EXIT_MA_OPTIONS, int),
         "slippage_pct": slippage,
         "backtest_months": months,
+        "slack_enabled": bool(settings.get("slack_enabled", DEFAULT_SETTINGS["slack_enabled"])),
     }
 
 

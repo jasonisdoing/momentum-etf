@@ -39,6 +39,8 @@ type Settings = {
   min_value_mult: number | null;
   /** 한 업종 최대 보유 종목 수. null 이면 제한 없음. */
   max_per_industry: number | null;
+  /** 슬랙 알람 — 켠 풀만 장중 감시 배치가 진입·매도 예정 변화를 발송한다. */
+  slack_enabled: boolean;
 };
 
 const ENTRY_PRIORITY_LABEL: Record<Settings["entry_priority"], string> = {
@@ -1000,6 +1002,23 @@ export function NewHighClient() {
                       <option key={n} value={n}>{n}개월</option>
                     ))}
                   </select>
+                </label>
+                <label className="appLabeledField">
+                  <span className="appLabeledFieldLabel">슬랙 알람</span>
+                  <div className="form-check form-switch" style={{ paddingLeft: "2.6em", marginBottom: 0, minHeight: 31, display: "flex", alignItems: "center" }}>
+                    <input
+                      className="form-check-input"
+                      type="checkbox"
+                      role="switch"
+                      id="newHighSlackToggle"
+                      style={{ width: "2.2em", height: "1.2em" }}
+                      checked={draft.slack_enabled}
+                      onChange={(event) => setDraft({ ...draft, slack_enabled: event.target.checked })}
+                    />
+                    <span style={{ fontWeight: 700, marginLeft: 8, fontSize: "var(--fs-sm)", color: draft.slack_enabled ? "inherit" : "var(--text-muted)" }}>
+                      {draft.slack_enabled ? "켜짐" : "꺼짐"}
+                    </span>
+                  </div>
                 </label>
                 <button
                   className="btn btn-primary"
