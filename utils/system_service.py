@@ -90,6 +90,17 @@ SCHEDULE_ROWS = [
         "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
     },
     {
+        "key": "new_high_notify",
+        "group": "장중 알림",
+        "job": "신고가 알림",
+        "target": "슬랙 알람 켠 종목풀 (진입·매도 예정 변화)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "평일 09:10~15:20 KST 10분 간격",
+        "command": "python scripts/new_high_notify.py",
+        # 전략 사고팔기 알림과 같은 슬롯 — 한국 장중만 감시한다(미국 풀을 켜면 시간대 재검토).
+        "schedule": {"slots": _STRATEGY_TRADE_SLOTS, "weekdays": _WEEKDAYS_MON_FRI},
+    },
+    {
         "key": "holdings_alarm",
         "group": "장중 알림",
         "job": "보유종목 알람",
@@ -228,16 +239,6 @@ SCHEDULE_ROWS = [
         "cadence": "매일 24시간 매시 0분 KST",
         "command": "python scripts/live_24h_slack.py",
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
-    },
-    {
-        "key": "new_high_notify",
-        "group": "상시 운영",
-        "job": "신고가 알림",
-        "target": "슬랙 알람 켠 종목풀 (진입·매도 예정 변화)",
-        "run_location": "SERVER/LOCAL",
-        "cadence": "월~토 10분 간격 KST (장 시간 풀만 계산)",
-        "command": "python scripts/new_high_notify.py",
-        "schedule": {"minutes": [0, 10, 20, 30, 40, 50], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
     },
     {
         "key": "db_backup",
