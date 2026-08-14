@@ -11,6 +11,7 @@ import requests
 
 from config import NAVER_FINANCE_HEADERS
 from services.price_service import get_realtime_snapshot
+from utils.industry_map import industry_map
 from utils.market_service import load_ticker_pool_map
 from utils.naver_chart import fetch_naver_daily_ohlc
 from utils.portfolio_io import load_all_holding_tickers
@@ -80,6 +81,9 @@ def load_kor_stock_market(
     # 종목풀 및 보유 정보 로드
     ticker_pool_map = load_ticker_pool_map()
     held_tickers = load_all_holding_tickers()
+    # 업종 — 신고가·순위 화면과 같은 소스(`industry_map`)를 쓴다. 분류가 없는 종목은
+    # 빈 문자열로 두고 임의 값으로 묶지 않는다.
+    industry_by = industry_map("kor")
 
     target_count = min(limit, 200)
     rows: list[dict[str, Any]] = []
@@ -114,6 +118,7 @@ def load_kor_stock_market(
                     "rank": 0,
                     "ticker": ticker,
                     "name": name,
+                    "industry": industry_by.get(ticker, ""),
                     "ticker_pools": ", ".join(ticker_pool_map.get(ticker, [])),
                     "is_held": ticker in held_tickers,
                     "current_price": close_price,
