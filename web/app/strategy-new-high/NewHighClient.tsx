@@ -1059,19 +1059,6 @@ export function NewHighClient() {
                   저장
                 </button>
               </div>
-              <div style={{ ...hintStyle, marginTop: 10, lineHeight: 1.6 }}>
-                종가가 <strong>직전 {windowLabel} 최고가</strong>를 넘으면 다음 거래일 시가에 매수합니다.
-                {" "}진입가 대비 <strong>{draft.stop_loss_pct}%</strong> 또는{" "}
-                <strong>{draft.exit_ma_days}일선 종가 하회</strong> 중 먼저 걸리는 쪽에서 청산합니다.
-                {" "}목표가는 두지 않습니다 — 오르는 종목은 계속 보유합니다.
-                {draft.min_value_mult != null
-                  ? ` 단, 20일 평균 대비 거래대금이 ${draft.min_value_mult}배 이상 늘어난 돌파만 삽니다.`
-                  : ""}
-                {" "}자리가 모자라면 <strong>{ENTRY_PRIORITY_LABEL[draft.entry_priority]}</strong>이 큰 순으로 담습니다.
-                {draft.max_per_industry != null
-                  ? ` 한 업종은 최대 ${draft.max_per_industry}종목까지만 담아, 상한에 걸리면 다음 순위가 그 자리를 채웁니다.`
-                  : ""}
-              </div>
             </div>
           </div>
         </section>
