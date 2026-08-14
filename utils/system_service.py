@@ -29,6 +29,7 @@ SystemAction = Literal[
     "leverage_ma_cross",
     "holdings_alarm",
     "strategy_trade_notify",
+    "new_high_notify",
     "db_backup",
 ]
 
@@ -229,6 +230,16 @@ SCHEDULE_ROWS = [
         "schedule": {"minutes": [0], "hours": list(range(24)), "weekdays": _WEEKDAYS_ALL},
     },
     {
+        "key": "new_high_notify",
+        "group": "상시 운영",
+        "job": "신고가 알림",
+        "target": "슬랙 알람 켠 종목풀 (진입·매도 예정 변화)",
+        "run_location": "SERVER/LOCAL",
+        "cadence": "월~토 10분 간격 KST (장 시간 풀만 계산)",
+        "command": "python scripts/new_high_notify.py",
+        "schedule": {"minutes": [0, 10, 20, 30, 40, 50], "hours": list(range(24)), "weekdays": _WEEKDAYS_MON_SAT},
+    },
+    {
         "key": "db_backup",
         "group": "상시 운영",
         "job": "DB 백업",
@@ -256,6 +267,7 @@ _SCRIPT_BY_ACTION: dict[str, str] = {
     "leverage_ma_cross": "scripts/leverage_recommend_ma_cross.py",
     "holdings_alarm": "scripts/holdings_alarm.py",
     "strategy_trade_notify": "scripts/strategy_trade_notify.py",
+    "new_high_notify": "scripts/new_high_notify.py",
     "db_backup": "scripts/backup_mongo_full.py",
 }
 
@@ -388,10 +400,7 @@ def _compute_next_run(schedule: dict | None) -> datetime | None:
     slots = schedule.get("slots")
     if slots:
         slot_rules = {
-            (int(s["hour"]), int(s["minute"])): frozenset(
-                int(w) for w in s.get("weekdays", weekdays)
-            )
-            for s in slots
+            (int(s["hour"]), int(s["minute"])): frozenset(int(w) for w in s.get("weekdays", weekdays)) for s in slots
         }
         candidate = (now + timedelta(minutes=1)).replace(second=0, microsecond=0)
         end = candidate + timedelta(days=8)
@@ -643,6 +652,7 @@ def _read_last_job_run_from_queue(
         if db is None:
             return None
         import re
+
         doc = db.batch_queue.find_one(
             {
                 "job_name": {"$regex": f"^{re.escape(job_key)}(:|$)"},
