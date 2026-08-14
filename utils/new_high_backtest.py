@@ -418,9 +418,10 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
         "live": live,
         "pre_market": pre_market,
         "traded_at": traded_at,
-        # 장전에도 현재가·등락률은 오늘 값이라 표시에는 쓴다. 판정에 쓰는 고가·시가가
-        # 직전 세션 값이라 `live` 만 거짓으로 둘 뿐이다.
-        "by_ticker": by_ticker if (live or pre_market) else {},
+        # 시세는 항상 담는다. 현재가·등락률은 어느 구간이든 오늘 값이라 표시에 쓰고,
+        # 돌파 판정은 `live` 일 때만 한다 — ETF 처럼 체결 시각·고가를 안 주는 종목도
+        # 일간(%) 은 정상으로 보여야 한다.
+        "by_ticker": by_ticker,
     }
 
 
@@ -485,6 +486,31 @@ def _next_session(pool: str, last: pd.Timestamp) -> str | None:
         logger.exception("[new_high] 다음 거래일 조회 실패 (%s)", pool)
         return None
     return str(days[0].date()) if days else None
+
+
+def _apply_display_quotes(
+    rows: list[dict[str, Any]],
+    holdings: list[dict[str, Any]],
+    by_ticker: dict[str, dict[str, Any]],
+) -> None:
+    """현재가·일간(%)·보유 수익률만 실시간으로 바꾼다. **판정에는 쓰지 않는다.**
+
+    돌파 거리·터치·진입 예정은 확정 종가로 정해지고, 이 함수는 사람이 보는 숫자만 바꾼다.
+    그래서 체결 시각이나 고가를 안 주는 종목(국내 ETF)도 일간(%) 은 정상으로 나온다.
+    """
+    for row in rows:
+        quote = by_ticker.get(row["ticker"])
+        if not quote:
+            continue
+        row["price"] = quote["price"]
+        if quote["change_pct"] is not None:
+            row["change_pct"] = round(quote["change_pct"], 2)
+    for held in holdings:
+        quote = by_ticker.get(held["ticker"])
+        if not quote:
+            continue
+        held["price"] = quote["price"]
+        held["return_pct"] = round((quote["price"] / held["entry_price"] - 1) * 100, 2)
 
 
 def _apply_live_trade_values(
@@ -782,13 +808,12 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
                 }
             )
 
+        _apply_display_quotes(rows, holdings, quotes["by_ticker"])
         for row in rows:
             live = quotes["by_ticker"].get(row["ticker"])
             if not live:
                 continue
             price = live["price"]
-            row["price"] = price
-            row["change_pct"] = round(live["change_pct"], 2) if live["change_pct"] is not None else row["change_pct"]
             row["gap_pct"] = round((price / row["prior_high"] - 1) * 100, 2)
             if row["prior_high_intraday"]:
                 row["gap_high_pct"] = round((price / row["prior_high_intraday"] - 1) * 100, 2)
@@ -798,13 +823,6 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         # 거래대금·배수도 오늘 값으로 바꾼다. 캐시 값(어제)을 그대로 두면 진입 자격을
         # 어제 자금 유입으로 판정하게 된다 — 오늘 돌파한 종목을 오늘 거래대금으로 봐야 한다.
         _apply_live_trade_values(rows, pool, panel["value"], last, settings["min_value_mult"])
-
-        for held in holdings:
-            live = quotes["by_ticker"].get(held["ticker"])
-            if not live:
-                continue
-            held["price"] = live["price"]
-            held["return_pct"] = round((live["price"] / held["entry_price"] - 1) * 100, 2)
 
         # 남은 보유·후보는 이제 **오늘 잠정 종가** 기준으로 다시 판정한다 — 내일 할 일이다.
         # 이탈 이평선도 오늘 잠정 종가를 넣어 다시 계산한다(어제 선으로 보면 하루 뒤처진다).
@@ -819,23 +837,12 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         mark_exits(lambda ticker: (quotes["by_ticker"].get(ticker) or {}).get("price"))
         entries = pick_entries()
 
-    elif quotes["pre_market"]:
-        # 장전(동시호가) — 예상체결가와 등락률만 얹는다. 종목풀 순위 화면과 같은 기준이라
-        # 두 화면의 '일간(%)' 이 어긋나지 않는다(프리장 거래가 없으면 0%).
-        # 고가·시가는 아직 직전 세션 값이라 돌파 거리·터치·진입 예정은 확정 종가 기준 그대로 둔다.
-        for row in rows:
-            live = quotes["by_ticker"].get(row["ticker"])
-            if not live:
-                continue
-            row["price"] = live["price"]
-            if live["change_pct"] is not None:
-                row["change_pct"] = round(live["change_pct"], 2)
-        for held in holdings:
-            live = quotes["by_ticker"].get(held["ticker"])
-            if not live:
-                continue
-            held["price"] = live["price"]
-            held["return_pct"] = round((live["price"] / held["entry_price"] - 1) * 100, 2)
+    else:
+        # 장중으로 인정되지 않는 구간(장전, 또는 ETF 처럼 체결 시각을 안 주는 종목).
+        # 현재가·등락률·보유 수익률만 얹는다 — 종목풀 순위 화면과 같은 기준이라 두 화면의
+        # '일간(%)' 이 어긋나지 않는다. 고가·시가가 없거나 직전 세션 값이라 돌파 거리·터치·
+        # 진입 예정은 확정 종가 기준 그대로 둔다.
+        _apply_display_quotes(rows, holdings, quotes["by_ticker"])
 
     # 이미 보유 중인 종목은 다시 사지 않는다(백테스트도 같다). 목록에는 남기되 표시를 구분한다 —
     # 보유 종목이 아직 신고가를 갱신 중인지가 추세 판단에 쓸모 있다.
