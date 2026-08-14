@@ -83,30 +83,37 @@ def snapshot_from_positions(positions: dict[str, Any]) -> dict[str, Any]:
     return {"as_of": str(positions.get("as_of") or ""), "entries": entries, "sells": sells}
 
 
-def _pool_label(pool: str) -> str:
+def _pool_order_and_label(pool: str) -> tuple[int, str]:
+    """(정렬용 번호, "3. 코스피 + 코스닥" 형식 라벨) — 종목풀 설정의 order·name 을 쓴다."""
     from utils.settings_loader import get_ticker_type_settings
 
     try:
         settings = get_ticker_type_settings(pool) or {}
     except Exception:
         settings = {}
-    return str(settings.get("name") or pool)
+    name = str(settings.get("name") or pool)
+    try:
+        order = int(settings.get("order"))
+    except (TypeError, ValueError):
+        order = 999
+    return order, f"{order}. {name}"
 
 
-def notify_pool(pool: str, *, force: bool = False) -> dict[str, Any]:
-    """한 풀의 진입·매도 예정 변화를 계산해 필요하면 슬랙으로 보낸다.
+def _collect_pool(pool: str, *, force: bool) -> dict[str, Any] | None:
+    """한 풀을 계산해 섹션(제목+줄들)과 저장할 상태를 만든다. 대상이 아니면 None.
 
-    반환: {"pool", "sent", "reason", "entries", "sells", ...} — 배치 로그·화면 토스트 공용.
+    force=False 면 직전 발송 상태와 비교해 **변화 줄만** 담고, 변화가 없으면 줄이 비어
+    발송 대상에서 빠진다. force=True(테스트)는 비교 없이 현재 예정 전체를 담는다.
     """
     from utils.new_high_backtest import current_positions
     from utils.new_high_service import load_settings_map, validate_settings
 
     saved = load_settings_map().get(pool)
     if not saved:
-        return {"pool": pool, "sent": False, "reason": "저장된 설정 없음"}
+        return None
     settings = validate_settings({**saved, "pool": pool})
     if not force and not settings.get("slack_enabled"):
-        return {"pool": pool, "sent": False, "reason": "슬랙 알람 꺼짐"}
+        return None
 
     positions = current_positions(settings)
     snapshot = snapshot_from_positions(positions)
@@ -121,52 +128,95 @@ def notify_pool(pool: str, *, force: bool = False) -> dict[str, Any]:
     added_sells = {t: v for t, v in snapshot["sells"].items() if t not in prev_sells}
     removed_entries = {t: v for t, v in prev_entries.items() if t not in snapshot["entries"]}
     removed_sells = {t: v for t, v in prev_sells.items() if t not in snapshot["sells"]}
-    changed = bool(added_entries or added_sells or removed_entries or removed_sells)
 
     lines: list[str] = []
     if force:
-        # 테스트 발송 — 비교 없이 현재 상태 전체.
-        for text in snapshot["entries"].values():
-            lines.append(f"🔴 진입 예정: {text}")
-        for text in snapshot["sells"].values():
-            lines.append(f"🔵 매도 예정: {text}")
+        lines += [f"🚀 진입 예정: {text}" for text in snapshot["entries"].values()]
+        lines += [f"🔻 매도 예정: {text}" for text in snapshot["sells"].values()]
         if not lines:
             lines.append("진입·매도 예정 없음")
-    elif changed:
-        for text in added_entries.values():
-            lines.append(f"🔴 진입 예정: {text}")
-        for text in added_sells.values():
-            lines.append(f"🔵 매도 예정: {text}")
-        for text in removed_entries.values():
-            lines.append(f"⚪ 진입 예정 해제: {text}")
-        for text in removed_sells.values():
-            lines.append(f"⚪ 매도 예정 해제: {text}")
+    else:
+        lines += [f"🚀 진입 예정: {text}" for text in added_entries.values()]
+        lines += [f"🔻 매도 예정: {text}" for text in added_sells.values()]
+        lines += [f"⚪ 진입 예정 해제: {text}" for text in removed_entries.values()]
+        lines += [f"⚪ 매도 예정 해제: {text}" for text in removed_sells.values()]
 
-    sent = False
-    if lines and (force or changed):
-        basis = "장중" if positions.get("live") else "마감"
-        header = f"🚀 신고가 돌파 · {_pool_label(pool)} — {snapshot['as_of']} {basis} 기준"
-        footer = "장중 기준이라 종가 확정 시 달라질 수 있습니다." if positions.get("live") else ""
-        if force:
-            header += " (수동 테스트)"
-        from utils.notification import send_slack_message_v2
-
-        message = "\n".join([header, *lines] + ([footer] if footer else []))
-        send_slack_message_v2(message)
-        sent = True
-        logger.info("[NEW-HIGH NOTIFY] %s 발송 %d줄 (force=%s)", pool, len(lines), force)
-
-    # 발송 여부와 무관하게 현재 상태를 저장한다 — 다음 비교의 기준.
-    _save_pool_state(pool, snapshot)
-
+    order, label = _pool_order_and_label(pool)
     return {
         "pool": pool,
-        "sent": sent,
-        "reason": None if sent else ("변화 없음" if not force else "발송됨"),
-        "as_of": snapshot["as_of"],
+        "order": order,
+        "label": label,
+        "lines": lines,
+        "snapshot": snapshot,
         "live": bool(positions.get("live")),
-        "entries": len(snapshot["entries"]),
-        "sells": len(snapshot["sells"]),
         "added": len(added_entries) + len(added_sells),
         "removed": len(removed_entries) + len(removed_sells),
     }
+
+
+def _send_sections(sections: list[dict[str, Any]]) -> None:
+    """풀 번호순 섹션들을 한 건의 메시지로 발송한다."""
+    from utils.notification import send_slack_message_v2
+
+    parts = []
+    for section in sorted(sections, key=lambda s: s["order"]):
+        parts.append("\n".join([section["label"], *section["lines"]]))
+    send_slack_message_v2("\n\n".join(parts))
+
+
+def notify_pool(pool: str, *, force: bool = False) -> dict[str, Any]:
+    """한 풀만 계산·발송한다 (화면 '지금 발송(테스트)' 버튼)."""
+    collected = _collect_pool(pool, force=force)
+    if collected is None:
+        return {"pool": pool, "sent": False, "reason": "저장된 설정 없음 또는 슬랙 알람 꺼짐"}
+
+    sent = False
+    if collected["lines"]:
+        _send_sections([collected])
+        sent = True
+        logger.info("[NEW-HIGH NOTIFY] %s 발송 %d줄 (force=%s)", pool, len(collected["lines"]), force)
+
+    # 발송 여부와 무관하게 현재 상태를 저장한다 — 다음 비교의 기준.
+    _save_pool_state(pool, collected["snapshot"])
+    return {
+        "pool": pool,
+        "sent": sent,
+        "reason": None if sent else "변화 없음",
+        "as_of": collected["snapshot"]["as_of"],
+        "live": collected["live"],
+        "entries": len(collected["snapshot"]["entries"]),
+        "sells": len(collected["snapshot"]["sells"]),
+        "added": collected["added"],
+        "removed": collected["removed"],
+    }
+
+
+def notify_all(*, force: bool = False) -> dict[str, Any]:
+    """슬랙 알람을 켠 모든 풀을 번호순으로 묶어 한 건으로 발송한다 (장중 감시 배치용).
+
+    변화가 없는 풀·설정이 없는 풀·알람을 끈 풀은 메시지에서 빠진다.
+    """
+    from utils.new_high_service import available_pools
+
+    sections: list[dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
+    for pool in available_pools():
+        try:
+            collected = _collect_pool(pool, force=force)
+        except Exception as exc:  # 한 풀 실패가 다른 풀 알림을 막지 않게
+            logger.warning("[NEW-HIGH NOTIFY] %s 계산 실패: %s", pool, exc)
+            summaries.append({"pool": pool, "error": str(exc)[:120]})
+            continue
+        if collected is None:
+            continue
+        summaries.append(
+            {"pool": pool, "changed": bool(collected["lines"]), "added": collected["added"], "removed": collected["removed"]}
+        )
+        if collected["lines"]:
+            sections.append(collected)
+        _save_pool_state(pool, collected["snapshot"])
+
+    if sections:
+        _send_sections(sections)
+        logger.info("[NEW-HIGH NOTIFY] 통합 발송 — %d개 풀", len(sections))
+    return {"sent": bool(sections), "pools": summaries, "section_count": len(sections)}
