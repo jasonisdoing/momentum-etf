@@ -424,6 +424,44 @@ def _live_quotes(pool: str, tickers: list[str], cached_last: pd.Timestamp) -> di
     }
 
 
+# 장전에 화면을 주기적으로 다시 받기 시작할 시점 — 개장 몇 분 전부터인가.
+# 실제로 예상체결가가 움직이는 구간은 동시호가(개장 30분 전~개장)라 한 시간이면 넉넉하다.
+# 시세 제공처의 '장전' 플래그는 새벽부터 켜져 있을 수 있어 그것만 믿고 돌리지 않는다.
+_PRE_MARKET_REFRESH_LEAD_MINUTES = 60
+
+
+def _should_auto_refresh(pool: str, quotes: dict[str, Any]) -> bool:
+    """화면이 주기 갱신을 걸어야 하는 시점인지.
+
+    장중이면 늘 참이고, 장전이면 개장이 가까울 때만 참이다. 개장 시각은 시장마다 달라
+    화면이 알 수 없으므로 여기서 판단해 내려준다.
+    """
+    if quotes["live"]:
+        return True
+    if not quotes["pre_market"]:
+        return False
+
+    from config import MARKET_SCHEDULES
+    from utils.settings_loader import get_ticker_type_settings
+
+    country = str((get_ticker_type_settings(pool) or {}).get("country_code") or "").strip().lower()
+    schedule = (MARKET_SCHEDULES or {}).get(country)
+    if not isinstance(schedule, dict):
+        return False
+    tz_name = str(schedule.get("timezone") or "").strip()
+    open_time = schedule.get("open")
+    if not tz_name or open_time is None:
+        return False
+    try:
+        now_local = pd.Timestamp.now(tz=tz_name)
+        opens_at = pd.Timestamp(
+            f"{now_local.date()} {open_time.hour:02d}:{open_time.minute:02d}", tz=tz_name
+        )
+    except Exception:
+        return False
+    return opens_at - pd.Timedelta(minutes=_PRE_MARKET_REFRESH_LEAD_MINUTES) <= now_local <= opens_at
+
+
 def _next_session(pool: str, last: pd.Timestamp) -> str | None:
     """캐시 마지막 거래일 **다음**의 거래일 — 진입·청산이 체결되는 날.
 
@@ -842,8 +880,10 @@ def current_positions(settings: dict[str, Any] | None = None, as_of: str | None 
         "refreshed_at": _cache_refreshed_at(pool),
         # 진행 중인 세션의 시세를 얹었는지 — 화면이 '돌파중/돌파성공'을 가르는 데 쓴다.
         "live": quotes["live"],
-        # 장전 구간 — 실시간을 섞지 않았다는 표시. 화면이 '장중' 대신 '장전'으로 알린다.
+        # 장전 구간 — 판정에는 안 쓰고 현재가·등락률만 얹었다는 표시.
         "pre_market": quotes["pre_market"],
+        # 화면이 주기 갱신을 걸어야 하는지. 장중이거나 개장이 가까운 장전이면 참.
+        "auto_refresh": _should_auto_refresh(pool, quotes),
         "quote_at": quotes["traded_at"],
         "breakouts": [r for r in rows if r["gap_pct"] >= 0],
         # 임박(-3% 이내) → 근접(-7% 이내) → 관찰(-12% 이내) 순으로 후보를 보여준다.

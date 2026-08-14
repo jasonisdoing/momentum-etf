@@ -153,8 +153,10 @@ type Positions = {
   refreshed_at: string | null;
   /** 진행 중인 세션의 실시간 시세를 얹었는지. 참이면 종가가 아직 확정 전이다. */
   live: boolean;
-  /** 장전(동시호가) 구간 — 고가·시가가 아직 직전 세션 값이라 실시간을 섞지 않았다. */
+  /** 장전(동시호가) 구간 — 판정에는 안 쓰고 현재가·등락률만 얹었다. */
   pre_market: boolean;
+  /** 주기 갱신을 걸 시점인지(장중이거나 개장이 가까운 장전). 개장 시각은 시장마다 달라 백엔드가 판단한다. */
+  auto_refresh: boolean;
   quote_at: string | null;
   breakouts: PositionRow[];
   candidates: PositionRow[];
@@ -487,10 +489,10 @@ export function NewHighClient() {
   // 장중에는 실시간 시세가 움직이므로 주기적으로 다시 받는다.
   // 과거 날짜를 보는 중이거나 장이 닫혀 있으면 갱신할 것이 없어 타이머를 걸지 않는다.
   useEffect(() => {
-    if (!positions?.live || asOf || mainTab !== "current" || !draft) return;
+    if (!positions?.auto_refresh || asOf || mainTab !== "current" || !draft) return;
     const id = window.setInterval(() => void runPositions(draft, ""), LIVE_REFRESH_MS);
     return () => window.clearInterval(id);
-  }, [positions?.live, asOf, mainTab, draft, runPositions]);
+  }, [positions?.auto_refresh, asOf, mainTab, draft, runPositions]);
 
   // 백테스트 탭을 처음 열거나 설정이 바뀌어 결과가 비워졌을 때만 돌린다.
   useEffect(() => {
@@ -1031,9 +1033,9 @@ export function NewHighClient() {
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
               {mainTab === "current" && positions ? (
                 <span style={hintStyle}>
-                  {positions.live
-                    ? `${formatKstDateTime(positions.quote_at)} 시세 · 장중`
-                    : `${formatKstDateTime(positions.refreshed_at)} 갱신${positions.pre_market ? " · 장전" : ""}`}
+                  {positions.live || positions.pre_market
+                    ? `${formatKstDateTime(positions.quote_at)} 시세 · ${positions.live ? "장중" : "장전"}`
+                    : `${formatKstDateTime(positions.refreshed_at)} 갱신`}
                 </span>
               ) : null}
               {mainTab === "current" && positions ? (
@@ -1047,7 +1049,9 @@ export function NewHighClient() {
                   }}
                 >
                   <option value="">
-                    {positions.live ? "오늘 (장중 자동 갱신)" : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
+                    {positions.auto_refresh
+                      ? `오늘 (${positions.live ? "장중" : "장전"} 자동 갱신)`
+                      : `오늘 (${formatDateWithWeekday(positions.as_of)})`}
                   </option>
                   {positions.available_dates.map((d) => (
                     <option key={d.date} value={d.date}>
