@@ -3,7 +3,7 @@
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
+import AccountSelect, { formatAccountLabel, type AccountOptionBase } from "../components/AccountSelect";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
@@ -74,6 +74,21 @@ type Holding = {
   change_pct: number | null;
   sm_status: string | null;
   nh_status: string | null;
+  /** 적용 계좌가 있을 때만 온다 — 계좌 총자산 기준 목표 금액·주수. */
+  target_amount?: number | null;
+  target_quantity?: number | null;
+  held_quantity?: number | null;
+  trade_quantity?: number | null;
+};
+
+/** 적용 계좌의 실제 상태 — 계좌가 연결된 풀에서만 온다. */
+type AccountState = {
+  account_id: string;
+  cash_balance: number;
+  stock_value: number;
+  total_assets: number;
+  /** 목표에 없는 보유 종목 = 전량 매도 대상. */
+  sell_all: { ticker: string; name: string; quantity: number; value: number | null }[];
 };
 
 type Positions = {
@@ -81,6 +96,8 @@ type Positions = {
   pool: string;
   as_of: string;
   live: boolean;
+  /** 적용 계좌를 저장한 풀에서만 온다. 없으면 비중만 보여준다. */
+  account: AccountState | null;
   /** 과거 날짜 셀렉트용 — 신고가 화면과 같은 날짜 목록. */
   available_dates: string[];
   summary: {
@@ -162,6 +179,11 @@ function formatPrice(value: number | null | undefined): string {
   return value.toLocaleString("ko-KR", { maximumFractionDigits: 2 });
 }
 
+function formatAmount(value: number | null | undefined): string {
+  if (value == null) return "-";
+  return value.toLocaleString("ko-KR", { maximumFractionDigits: 0 });
+}
+
 const SOURCE_LABEL: Record<string, string> = { sm: "모멘텀", nh: "신고가" };
 
 /** 보유 표 행 — 현금 행도 같은 표에 넣는다 (비중 합이 100%임을 한눈에 보이게). */
@@ -187,9 +209,10 @@ export function StrategyMixClient() {
   const [positionsLoading, setPositionsLoading] = useState(false);
   const [positionsError, setPositionsError] = useState<string | null>(null);
   const [positionsProgress, setPositionsProgress] = useState<LoadingProgress | null>(null);
-  const [totalAssetText, setTotalAssetText] = useState<string>("");
   /** 과거 날짜 조회 — 빈 값이면 오늘. */
   const [asOf, setAsOf] = useState<string>("");
+  /** 계좌를 저장하면 목표 금액이 달라지므로 현재 상태를 다시 계산한다. */
+  const [positionsReloadKey, setPositionsReloadKey] = useState(0);
 
   // 백테스트 탭.
   const [view, setView] = useState<View | null>(null);
@@ -257,7 +280,7 @@ export function StrategyMixClient() {
       alive = false;
       stopRamp();
     };
-  }, [pool, asOf]);
+  }, [pool, asOf, positionsReloadKey]);
 
   // 저장 전 초안과 저장분이 다른지 — 다르면 저장 버튼이 열린다.
   const isDirty = useMemo(() => (savedByPool[pool]?.account_id ?? "") !== accountId, [savedByPool, pool, accountId]);
@@ -274,7 +297,7 @@ export function StrategyMixClient() {
       const payload = (await response.json()) as { error?: string };
       if (!response.ok || payload.error) throw new Error(payload.error ?? "설정을 저장하지 못했습니다.");
       setSavedByPool((prev) => ({ ...prev, [pool]: { account_id: accountId || null } }));
-      setPositions(null);
+      setPositionsReloadKey((key) => key + 1);
       toast.success("설정을 저장했습니다.");
     } catch (saveError) {
       toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
@@ -308,23 +331,18 @@ export function StrategyMixClient() {
     }
   }, [pool, months, toast]);
 
-  // 입력 단위는 만원 — 환산은 원 단위로 한다.
-  const totalAsset = useMemo(() => {
-    const parsed = Number(totalAssetText.replaceAll(",", ""));
-    return Number.isFinite(parsed) && parsed > 0 ? parsed * 10_000 : null;
-  }, [totalAssetText]);
+  // 목표 금액의 기준 = 적용 계좌의 총자산(주식 평가액 + 현금). 계좌가 없으면 비중만 보여준다.
+  const totalAsset = positions?.account?.total_assets ?? null;
 
   const positionRows = useMemo<PositionRow[]>(() => {
     if (!positions) return [];
     const toAmount = (weightPct: number) => (totalAsset == null ? null : (totalAsset * weightPct) / 100);
-    const rows: PositionRow[] = positions.holdings.map((holding) => {
-      const amount = toAmount(holding.weight_pct);
-      return {
-        ...holding,
-        amount,
-        shares: amount != null && holding.price ? Math.floor(amount / holding.price) : null,
-      };
-    });
+    // 목표 종목 행은 백엔드가 계산한 목표 금액·주수를 그대로 쓴다(계좌가 있을 때만 온다).
+    const rows: PositionRow[] = positions.holdings.map((holding) => ({
+      ...holding,
+      amount: holding.target_amount ?? null,
+      shares: holding.target_quantity ?? null,
+    }));
     // 빈 슬롯은 슬리브별로 채워 슬롯 수(예: 8+8)가 표에서 그대로 보이게 한다.
     // 빈 슬롯은 각 전략의 진입 예정 종목부터 채우고(다음 시가 매수), 남으면 현금 슬롯이다.
     const nhWeight = 50 / positions.summary.nh.top_n;
@@ -542,6 +560,14 @@ export function StrategyMixClient() {
     ];
   }, [viewMode, view?.benchmark_name]);
 
+  // 요약 바에 쓰는 계좌 표기 — 셀렉터와 같은 형식.
+  const accountLabel = useMemo(() => {
+    const id = positions?.account?.account_id ?? "";
+    if (!id) return "";
+    const found = accountOptions.find((option) => option.account_id === id);
+    return found ? formatAccountLabel(found) : id;
+  }, [positions?.account?.account_id, accountOptions]);
+
   const actions = positions?.actions ?? null;
   const hasActions =
     actions != null &&
@@ -643,6 +669,18 @@ export function StrategyMixClient() {
                       <span style={{ fontSize: "var(--fs-lg)", fontWeight: 800 }}>
                         주식 {positions.summary.stock_pct.toFixed(1)}% · 현금 {positions.summary.cash_pct.toFixed(1)}%
                       </span>
+                      {/* 적용 계좌 — 목표 금액의 기준이 되는 실제 잔고. */}
+                      {positions.account ? (
+                        <span style={{ fontSize: "var(--fs-base)", fontWeight: 700 }}>
+                          {accountLabel} 총자산 {formatAmount(positions.account.total_assets)}
+                          <span style={{ ...hintStyle, marginLeft: 8, fontWeight: 500 }}>
+                            (주식 {formatAmount(positions.account.stock_value)} · 현금{" "}
+                            {formatAmount(positions.account.cash_balance)})
+                          </span>
+                        </span>
+                      ) : (
+                        <span style={hintStyle}>적용 계좌 없음 — 계좌를 저장하면 목표 금액·주수가 나옵니다</span>
+                      )}
                       <span style={hintStyle}>
                         모멘텀 슬리브 {positions.summary.sm.slots_used}/{positions.summary.sm.top_n}종목 보유 (현금{" "}
                         {positions.summary.sm.cash_pct.toFixed(1)}%) · 신고가 슬리브 {positions.summary.nh.slots_used}/
