@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { HoldingChart, type HoldingChartData } from "./HoldingChart";
 import { AppAgGrid } from "../components/AppAgGrid";
+import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
@@ -357,6 +358,8 @@ export function NewHighClient() {
   const [backtesting, setBacktesting] = useState(false);
   // 백테스트 기간 — 저장하지 않고 실행할 때 고른다.
   const [backtestMonths, setBacktestMonths] = useState<number>(12);
+  const [backtestProgress, setBacktestProgress] = useState<LoadingProgress | null>(null);
+  const [positionsProgress, setPositionsProgress] = useState<LoadingProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
@@ -399,6 +402,8 @@ export function NewHighClient() {
 
   const runPositions = useCallback(async (settings: Settings, date = "") => {
     setRunning(true);
+    setPositionsProgress({ percent: 10, message: "돌파·보유 상태를 계산하는 중" });
+    const stopRamp = startProgressRamp(setPositionsProgress);
     try {
       const response = await fetch("/api/strategy-new-high/positions", {
         method: "POST",
@@ -411,7 +416,9 @@ export function NewHighClient() {
     } catch (runError) {
       toast.error(runError instanceof Error ? runError.message : "돌파 종목을 불러오지 못했습니다.");
     } finally {
+      stopRamp();
       setRunning(false);
+      setPositionsProgress(null);
     }
   }, [toast]);
 
@@ -464,6 +471,8 @@ export function NewHighClient() {
     if (!draft) return;
     setBacktesting(true);
     setBacktestError(null);
+    setBacktestProgress({ percent: 10, message: "체결 내역을 계산하는 중" });
+    const stopRamp = startProgressRamp(setBacktestProgress);
     try {
       const response = await fetch("/api/strategy-new-high/backtest", {
         method: "POST",
@@ -472,15 +481,18 @@ export function NewHighClient() {
       });
       const payload = (await response.json()) as Backtest & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "백테스트에 실패했습니다.");
+      setBacktestProgress({ percent: 100, message: "결과 반영 중" });
       setBacktest(payload);
     } catch (runError) {
       const message = runError instanceof Error ? runError.message : "백테스트에 실패했습니다.";
       setBacktestError(message);
       toast.error(message);
     } finally {
+      stopRamp();
       setBacktesting(false);
+      setBacktestProgress(null);
     }
-  }, [draft, toast]);
+  }, [draft, toast, backtestMonths]);
 
   // 장중에는 실시간 시세가 움직이므로 주기적으로 다시 받는다.
   // 과거 날짜를 보는 중이거나 장이 닫혀 있으면 갱신할 것이 없어 타이머를 걸지 않는다.
@@ -1097,7 +1109,9 @@ export function NewHighClient() {
                   label="현재 상태 보기"
                   style={{ marginBottom: 12 }}
                 />
-                {currentTab === "list" ? (
+                {running && !positions ? (
+                  <AppLoadingProgress title="현재 상태 계산 중..." progress={positionsProgress} />
+                ) : currentTab === "list" ? (
                   <>
                     <div style={{ ...hintStyle, fontWeight: 700, margin: "4px 0 6px" }}>
                       보유 종목 ({positions?.holdings.length ?? 0}개)
@@ -1232,9 +1246,11 @@ export function NewHighClient() {
             </div>
               <div className="card-body appCardBodyTight">
                 {backtestError ? <div className="alert alert-danger">{backtestError}</div> : null}
-                {!backtest ? (
+                {backtesting ? (
+                  <AppLoadingProgress title="백테스트 실행 중..." progress={backtestProgress} />
+                ) : !backtest ? (
                   <div style={{ ...hintStyle, padding: "24px 0", textAlign: "center" }}>
-                    {backtesting ? "체결 내역을 계산하고 있습니다. 구간이 길면 1분 이상 걸립니다." : "실행을 누르면 결과가 표시됩니다."}
+                    실행을 누르면 결과가 표시됩니다.
                   </div>
                 ) : (
                 <>

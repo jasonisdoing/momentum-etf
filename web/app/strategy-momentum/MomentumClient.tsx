@@ -4,7 +4,7 @@ import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AppAgGrid } from "../components/AppAgGrid";
-import { AppLoadingProgress, type LoadingProgress } from "../components/AppLoadingProgress";
+import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
 import { NavTabs } from "../components/NavTabs";
 import { PageFrame } from "../components/PageFrame";
@@ -261,20 +261,6 @@ function formatNumber(value: number | null | undefined, digits = 0): string {
 
 // 부호 %·색 헬퍼는 공용 모듈(@/lib/grid-cells)을 쓴다.
 const formatSigned = formatSignedPct;
-
-/** 성과 요약 한 덩어리 — 전략·벤치마크·참고 지수를 같은 형식으로 보여준다. */
-/**
- * 진행률을 일정 간격으로 90%까지 올린다. 서버가 단일 요청으로 응답해 실제 단계를
- * 알 수 없으므로, 실제 소요 시간(수 초)에 맞춘 완만한 램프만 보여준다.
- */
-function startProgressRamp(
-  setProgress: (updater: (prev: LoadingProgress | null) => LoadingProgress | null) => void,
-): () => void {
-  const timer = window.setInterval(() => {
-    setProgress((prev) => (prev ? { ...prev, percent: Math.min(90, prev.percent + 6) } : prev));
-  }, 400);
-  return () => window.clearInterval(timer);
-}
 
 export function MomentumClient() {
   const toast = useToast();
