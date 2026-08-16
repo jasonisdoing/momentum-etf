@@ -29,11 +29,10 @@ import { formatPrice } from "../../lib/price-format";
 const gridTheme = createAppGridTheme();
 
 // 풀별로 따로 저장되는 설정 — 풀 셀렉트를 바꾸면 그 풀의 저장분으로 폼이 전환된다.
+// 슬리피지는 종목풀 설정을, 백테스트 기간은 실행할 때 고른 값을 쓴다 — 여기 없다.
 type PoolSettings = {
   top_n: number;
-  slippage_pct: number;
   max_per_industry: number;
-  backtest_months: number;
   short_ma_days: number;
   long_ma_days: number;
 };
@@ -298,18 +297,15 @@ export function SteadyMomentumClient() {
   // 초안 초기값은 자리만 잡는다 — 설정을 받은 뒤 applyView 가 항상 덮어쓰며,
   // 설정을 못 받으면 폼 자체를 그리지 않으므로 이 값이 화면에 보이는 경우는 없다.
   const [draftPool, setDraftPool] = useState<string>("");
-  const [draftBacktestMonths, setDraftBacktestMonths] = useState<number>(0);
   const [draftMaxPerIndustry, setDraftMaxPerIndustry] = useState<number>(0);
   // 이평선 초안 — 전략 전용 값(steady_momentum_settings)으로 풀별 저장되며 종목풀 설정과 무관하다.
   const [draftMaRule, setDraftMaRule] = useState<{ short: number; long: number } | null>(null);
 
   // 풀별 설정을 폼 초안에 채운다 — 풀 셀렉트 전환과 응답 반영이 같은 경로를 쓴다.
   const fillDrafts = useCallback((values: PoolSettings) => {
-    setDraftBacktestMonths(values.backtest_months);
     setDraftMaxPerIndustry(values.max_per_industry);
     setDraft({
       top_n: String(values.top_n),
-      slippage_pct: String(values.slippage_pct),
     });
     setDraftMaRule({ short: values.short_ma_days, long: values.long_ma_days });
   }, []);
@@ -414,8 +410,7 @@ export function SteadyMomentumClient() {
 
   const saveSettings = useCallback(async () => {
     const topN = Number(draft.top_n);
-    const slippage = Number(draft.slippage_pct);
-    if (![topN, slippage].every((v) => Number.isFinite(v)) || draftMaRule == null) {
+    if (!Number.isFinite(topN) || draftMaRule == null) {
       toast.error("설정 값이 올바르지 않습니다.");
       return;
     }
@@ -423,16 +418,14 @@ export function SteadyMomentumClient() {
       {
         pool: draftPool,
         top_n: topN,
-        slippage_pct: slippage,
         max_per_industry: draftMaxPerIndustry,
-        backtest_months: draftBacktestMonths,
         // 이평선은 전략 전용 값 — 설정의 일부로 풀별 저장한다(종목풀 설정과 무관).
         short_ma_days: draftMaRule.short,
         long_ma_days: draftMaRule.long,
       },
       "설정을 저장했습니다.",
     );
-  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
+  }, [draft, draftMaRule, draftMaxPerIndustry, draftPool, persistSettings, toast]);
 
   // 풀 셀렉트 변경 — 그 풀의 저장 설정이 있으면 **즉시 전환·저장·재선정**한다
   // (전환은 초안이 아니라 컨텍스트 스위치다). 저장분이 없는 풀(첫 설정)만 초안으로
@@ -449,10 +442,10 @@ export function SteadyMomentumClient() {
     [fillDrafts, persistSettings, view],
   );
 
+  const [backtestMonths, setBacktestMonths] = useState<number>(12);
+
   const runBacktest = useCallback(async () => {
-    // 기간도 저장된 설정을 따른다 — 미저장 상태에서는 실행 버튼이 막혀 있다.
-    const months = view?.settings.backtest_months;
-    if (months == null) return;
+    const months = backtestMonths;
     setBacktesting(true);
     setBacktestProgress({ percent: 10, message: "월별 리밸런싱 시뮬레이션 중" });
     const stopRamp = startProgressRamp(setBacktestProgress);
@@ -474,7 +467,7 @@ export function SteadyMomentumClient() {
       setBacktesting(false);
       setBacktestProgress(null);
     }
-  }, [toast, view?.settings.backtest_months]);
+  }, [toast, backtestMonths]);
 
   // 저장하지 않은 입력이 있으면 실행 결과가 화면 값과 어긋난다 — 저장을 먼저 요구한다.
   const isDirty = useMemo(() => {
@@ -482,16 +475,14 @@ export function SteadyMomentumClient() {
     const saved = view.settings;
     return (
       draftPool !== saved.pool ||
-      draftBacktestMonths !== saved.backtest_months ||
       draftMaxPerIndustry !== saved.max_per_industry ||
       draft.top_n !== String(saved.top_n) ||
-      draft.slippage_pct !== String(saved.slippage_pct) ||
       (draftMaRule != null &&
         view.ma_rule != null &&
         (draftMaRule.short !== view.ma_rule.short_ma_days ||
           draftMaRule.long !== view.ma_rule.long_ma_days))
     );
-  }, [draft, draftBacktestMonths, draftMaRule, draftMaxPerIndustry, draftPool, view]);
+  }, [draft, draftMaRule, draftMaxPerIndustry, draftPool, view]);
 
   const monthlyLabels = view?.picks?.monthly_return_labels ?? [];
   // 선정 결과 풀의 국가 — 마켓·시가총액 컬럼 표시와 티커 표기(ASX:)를 정한다.
@@ -1053,32 +1044,6 @@ export function SteadyMomentumClient() {
                     </label>
                   </>
                 ) : null}
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">슬리피지(%)</span>
-                  <input
-                    className="form-control form-control-sm"
-                    style={numberInputStyle}
-                    value={draft.slippage_pct ?? ""}
-                    onChange={(e) => setDraft((d) => ({ ...d, slippage_pct: e.target.value }))}
-                    inputMode="decimal"
-                  />
-                </label>
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">백테스트 기간</span>
-                  <select
-                    className="form-select form-select-sm"
-                    style={{ width: 120 }}
-                    value={draftBacktestMonths}
-                    onChange={(e) => setDraftBacktestMonths(Number(e.target.value))}
-                  >
-                    {/* 풀 전환으로 넘어온 초안 값이 목록에 없으면 함께 노출한다 — 빼면 셀렉트가 빈칸이 된다. */}
-                    {withSavedValue(view.month_options ?? [view.settings.backtest_months], String(draftBacktestMonths)).map((m) => (
-                      <option key={m} value={m}>
-                        {m}개월
-                      </option>
-                    ))}
-                  </select>
-                </label>
               </div>
               <div className="appMainHeaderRight">
                 {isNewPoolDraft ? (
@@ -1163,6 +1128,19 @@ export function SteadyMomentumClient() {
               </div>
               <div className="appMainHeaderRight">
                 {isDirty ? <span style={hintStyle}>설정을 저장해야 실행할 수 있습니다</span> : null}
+                <select
+                  className="form-select form-select-sm"
+                  style={{ width: "auto" }}
+                  value={String(backtestMonths)}
+                  disabled={backtesting}
+                  onChange={(event) => setBacktestMonths(Number(event.target.value))}
+                >
+                  {(view.month_options ?? [12]).map((m) => (
+                    <option key={m} value={m}>
+                      {m}개월
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"

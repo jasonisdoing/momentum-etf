@@ -32,8 +32,6 @@ type Settings = {
   top_n: number;
   stop_loss_pct: number;
   exit_ma_days: number;
-  slippage_pct: number;
-  backtest_months: number;
   /** 신호가 자리보다 많을 때의 진입 우선순위. */
   entry_priority: "value_surge" | "market_cap";
   /** 진입 자격 — 거래대금 급증 배수 하한. null 이면 조건 없음. */
@@ -357,6 +355,8 @@ export function NewHighClient() {
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [backtesting, setBacktesting] = useState(false);
+  // 백테스트 기간 — 저장하지 않고 실행할 때 고른다.
+  const [backtestMonths, setBacktestMonths] = useState<number>(12);
   const [error, setError] = useState<string | null>(null);
   const [backtestError, setBacktestError] = useState<string | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
@@ -468,7 +468,7 @@ export function NewHighClient() {
       const response = await fetch("/api/strategy-new-high/backtest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ months: draft.backtest_months, settings: draft }),
+        body: JSON.stringify({ months: backtestMonths, settings: draft }),
       });
       const payload = (await response.json()) as Backtest & { error?: string };
       if (!response.ok) throw new Error(payload.error ?? "백테스트에 실패했습니다.");
@@ -989,18 +989,6 @@ export function NewHighClient() {
                   </select>
                 </label>
                 <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">백테스트 기간</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={String(draft.backtest_months)}
-                    onChange={(event) => setDraft({ ...draft, backtest_months: Number(event.target.value) })}
-                  >
-                    {constraints.month_options.map((n) => (
-                      <option key={n} value={n}>{n}개월</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="appLabeledField">
                   <span className="appLabeledFieldLabel">슬랙 알람</span>
                   <div className="form-check form-switch" style={{ paddingLeft: "2.6em" }}>
                     <input
@@ -1221,13 +1209,17 @@ export function NewHighClient() {
             <div className="card-header appCardHeader">
               <span style={{ fontWeight: 700, fontSize: "var(--fs-base)" }}>백테스트</span>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <span style={hintStyle}>
-                  {backtest
-                    ? `${backtest.months}개월`
-                    : backtesting
-                      ? "실행 중…"
-                      : `${draft.backtest_months}개월`}
-                </span>
+                <select
+                  className="form-select form-select-sm"
+                  style={{ width: "auto" }}
+                  value={String(backtestMonths)}
+                  disabled={backtesting}
+                  onChange={(event) => setBacktestMonths(Number(event.target.value))}
+                >
+                  {constraints.month_options.map((n) => (
+                    <option key={n} value={n}>{n}개월</option>
+                  ))}
+                </select>
                 <button
                   type="button"
                   className="btn btn-sm btn-dark"

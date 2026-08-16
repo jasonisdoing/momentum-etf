@@ -167,7 +167,7 @@ export function StrategyMixClient() {
   const toast = useToast();
   const [pool, setPool] = useState<string>("");
   const [poolOptions, setPoolOptions] = useState<PoolLabelSource[]>([]);
-  const [months, setMonths] = useState<number>(24);
+  const [months, setMonths] = useState<number>(12);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
 
   // 현재 상태 탭.

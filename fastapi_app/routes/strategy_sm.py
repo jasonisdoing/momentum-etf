@@ -24,11 +24,6 @@ def _month_options(settings: dict) -> list[int]:
     options = [month for month in get_month_options() if month <= limit]
     if limit not in options:
         options.append(limit)
-    # 상한이 줄기 전에 저장된 값은 선택지에 남겨 둔다 — 빼면 셀렉트가 빈칸이 되어
-    # 무엇이 저장돼 있는지 알 수 없다. 실행·저장할 때 명시적 에러로 안내된다.
-    saved = settings.get("backtest_months")
-    if isinstance(saved, int) and saved not in options:
-        options.append(saved)
     return sorted(options)
 
 

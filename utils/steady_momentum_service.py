@@ -115,11 +115,11 @@ def pool_info(pool: str) -> dict[str, str]:
 
 # ── 설정 ──────────────────────────────────────────────────────────────────
 # 풀별로 따로 저장되는 항목 — 풀을 바꾸면 이 값들이 그 풀의 저장분으로 전환된다.
+# 슬리피지는 종목풀 설정(BUY/SELL_SLIPPAGE_PCT)을 쓰고, 백테스트 기간은 화면에서
+# 실행할 때 고른다 — 둘 다 전략 설정으로 저장하지 않는다.
 PER_POOL_SETTING_KEYS = (
     "top_n",
-    "slippage_pct",
     "max_per_industry",
-    "backtest_months",
     "short_ma_days",
     "long_ma_days",
 )
@@ -139,21 +139,10 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     top_n = int(_num("top_n"))
     if not 5 <= top_n <= 100:
         raise ValueError("'top_n' 은 5~100 사이여야 합니다.")
-    slippage_pct = _num("slippage_pct")
-    if not 0.0 <= slippage_pct <= 1.0:
-        raise ValueError("'slippage_pct' 는 0~1(%) 사이여야 합니다.")
-    # 기간 상한은 종목풀 백테스트와 같은 계산(가격 캐시 시작일 기준)을 재사용한다.
-    from utils.pool_signal_backtest_service import get_max_backtest_months
-
-    max_months = get_max_backtest_months()
     max_per_industry = int(_num("max_per_industry"))
     if max_per_industry not in MAX_PER_INDUSTRY_OPTIONS:
         allowed = ", ".join(str(v) for v in MAX_PER_INDUSTRY_OPTIONS)
         raise ValueError(f"'max_per_industry' 는 {allowed} 중 하나여야 합니다.")
-    backtest_months = int(_num("backtest_months"))
-    if not 1 <= backtest_months <= max_months:
-        raise ValueError(f"'backtest_months' 는 1~{max_months} 사이여야 합니다.")
-
     pool = str(settings.get("pool") or "").strip().lower()
     if pool not in available_pools():
         raise ValueError(f"지원하지 않는 종목풀입니다: {settings.get('pool')}")
@@ -173,9 +162,7 @@ def validate_settings(settings: dict[str, Any]) -> dict[str, Any]:
     return {
         "pool": pool,
         "top_n": top_n,
-        "slippage_pct": slippage_pct,
         "max_per_industry": max_per_industry,
-        "backtest_months": backtest_months,
         "short_ma_days": short_ma_days,
         "long_ma_days": long_ma_days,
     }
@@ -274,16 +261,9 @@ def load_settings() -> dict[str, Any]:
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
     """검증 후 선택 풀의 설정으로 저장하고 정규화된 평면 설정을 반환한다.
 
-    다른 풀의 저장분은 건드리지 않는다(풀별 독립). 기간 상한은 벤치마크 데이터와
-    장기 이평선이 정하므로 여기서 실제 데이터로 한 번 더 막는다.
+    다른 풀의 저장분은 건드리지 않는다(풀별 독립).
     """
     normalized = validate_settings(settings)
-    limit = available_backtest_months(load_benchmark_close(normalized["pool"]), int(normalized["long_ma_days"]))
-    if normalized["backtest_months"] > limit:
-        raise ValueError(
-            f"장기 이평선 기준으로 이 종목풀은 백테스트 최대 {limit}개월입니다 "
-            f"(요청 {normalized['backtest_months']}개월). 기간을 줄이세요."
-        )
     from utils.db_manager import get_db_connection
 
     db = get_db_connection()
