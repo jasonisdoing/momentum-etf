@@ -3,6 +3,7 @@
 import type { ColDef } from "ag-grid-community";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import AccountSelect, { type AccountOptionBase } from "../components/AccountSelect";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { AppLoadingProgress, startProgressRamp, type LoadingProgress } from "../components/AppLoadingProgress";
 import { BacktestSummary } from "../components/BacktestSummary";
@@ -18,10 +19,15 @@ import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 const gridTheme = createAppGridTheme();
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
+type AccountOption = AccountOptionBase;
+
 type Meta = {
   pool: string;
   pool_options: PoolLabelSource[];
   month_options: number[];
+  accounts: AccountOption[];
+  /** 풀별 저장 설정 — 풀을 바꾸면 그 풀의 계좌로 전환한다. */
+  settings_by_pool: Record<string, { account_id: string | null }>;
 };
 
 type View = {
@@ -170,6 +176,11 @@ export function StrategyMixClient() {
   const [poolOptions, setPoolOptions] = useState<PoolLabelSource[]>([]);
   const [months, setMonths] = useState<number>(12);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
+  const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
+  // 풀별 저장 설정 — 저장 전 초안과 비교해 저장 버튼 활성화를 정한다.
+  const [savedByPool, setSavedByPool] = useState<Record<string, { account_id: string | null }>>({});
+  const [accountId, setAccountId] = useState<string>("");
+  const [saving, setSaving] = useState(false);
 
   // 현재 상태 탭.
   const [positions, setPositions] = useState<Positions | null>(null);
@@ -199,6 +210,9 @@ export function StrategyMixClient() {
         setPoolOptions(payload.pool_options);
         setPool(payload.pool);
         setMonthOptions(payload.month_options);
+        setAccountOptions(payload.accounts ?? []);
+        setSavedByPool(payload.settings_by_pool ?? {});
+        setAccountId((payload.settings_by_pool ?? {})[payload.pool]?.account_id ?? "");
       } catch (metaError) {
         if (alive) setError(metaError instanceof Error ? metaError.message : "종목풀 목록을 불러오지 못했습니다.");
       }
@@ -244,6 +258,30 @@ export function StrategyMixClient() {
       stopRamp();
     };
   }, [pool, asOf]);
+
+  // 저장 전 초안과 저장분이 다른지 — 다르면 저장 버튼이 열린다.
+  const isDirty = useMemo(() => (savedByPool[pool]?.account_id ?? "") !== accountId, [savedByPool, pool, accountId]);
+
+  const saveSettings = useCallback(async () => {
+    if (!pool) return;
+    setSaving(true);
+    try {
+      const response = await fetch("/api/strategy-mix/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pool, account_id: accountId || null }),
+      });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok || payload.error) throw new Error(payload.error ?? "설정을 저장하지 못했습니다.");
+      setSavedByPool((prev) => ({ ...prev, [pool]: { account_id: accountId || null } }));
+      setPositions(null);
+      toast.success("설정을 저장했습니다.");
+    } catch (saveError) {
+      toast.error(saveError instanceof Error ? saveError.message : "설정을 저장하지 못했습니다.");
+    } finally {
+      setSaving(false);
+    }
+  }, [pool, accountId, toast]);
 
   const runBacktest = useCallback(async () => {
     if (!pool) return;
@@ -530,7 +568,9 @@ export function StrategyMixClient() {
                     value={pool}
                     disabled={loading || positionsLoading || poolOptions.length === 0}
                     onChange={(event) => {
-                      setPool(event.target.value);
+                      const next = event.target.value;
+                      setPool(next);
+                      setAccountId(savedByPool[next]?.account_id ?? "");
                       setPositions(null);
                       setView(null);
                       setAsOf("");
@@ -543,17 +583,24 @@ export function StrategyMixClient() {
                     ))}
                   </select>
                 </label>
-                <label className="appLabeledField" style={{ marginBottom: 0 }}>
-                  <span className="appLabeledFieldLabel">총자산 (금액·주수 환산용, 단위 만원)</span>
-                  <input
-                    className="form-control form-control-sm"
-                    style={{ width: 180 }}
-                    inputMode="numeric"
-                    placeholder="예: 1,000"
-                    value={totalAssetText}
-                    onChange={(event) => setTotalAssetText(event.target.value)}
-                  />
-                </label>
+                <AccountSelect
+                  label="적용 계좌"
+                  accounts={accountOptions}
+                  value={accountId}
+                  onChange={setAccountId}
+                  disabled={saving}
+                  emptyLabel="선택 안 함"
+                  style={{ width: "auto" }}
+                  labelStyle={{ marginBottom: 0 }}
+                />
+                <button
+                  className="btn btn-sm btn-primary"
+                  type="button"
+                  disabled={saving || !pool || !isDirty}
+                  onClick={() => void saveSettings()}
+                >
+                  {saving ? "저장 중…" : "저장"}
+                </button>
                 </div>
               </div>
             </div>

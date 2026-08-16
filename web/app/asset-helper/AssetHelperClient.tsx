@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColDef, GridOptions } from "ag-grid-community";
 
+import AccountSelect from "../components/AccountSelect";
 import { AppAgGrid } from "../components/AppAgGrid";
 import { GridToolbarButton } from "../components/GridToolbarButton";
 import { PageFrame } from "../components/PageFrame";
@@ -99,20 +100,6 @@ function formatMarketRegimeBullet(item: MarketTrendItem): { text: string; color:
     text: sinceUp != null ? `⬇️ 하락 ${sinceUp}일째` : "⬇️ 1년 내 상승 없음",
     color: "#1971c2",
   };
-}
-
-// 계좌 셀렉터 표기 — /pools-backtest 종목풀 셀렉터(formatPoolLabel)와 같은 조합 형식.
-// `1. 💰 연금저축 계좌(pension_account)`. order/icon 이 없으면 그 부분만 빠진다.
-function formatAccountLabel(acc: AccountOption): string {
-  const name = String(acc.name ?? "").trim() || acc.account_id;
-  const prefix = [
-    acc.order === null || acc.order === undefined ? null : `${acc.order}.`,
-    String(acc.icon ?? "").trim() || null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  const body = `${name}(${acc.account_id})`;
-  return prefix ? `${prefix} ${body}` : body;
 }
 
 type HelperTicker = {
@@ -974,25 +961,12 @@ export function AssetHelperClient() {
           <div className="card-body">
             <div className="appMainHeader">
               <div className="appMainHeaderLeft">
-                <label className="appLabeledField">
-                  <span className="appLabeledFieldLabel">계좌</span>
-                  <select
-                    className="form-select form-select-sm"
-                    value={selectedAccount ?? ""}
-                    disabled={loading || accounts.length === 0}
-                    onChange={(event) => void load(event.target.value)}
-                  >
-                    {accounts.length === 0 ? (
-                      <option value="">계좌 불러오는 중...</option>
-                    ) : (
-                      accounts.map((a) => (
-                        <option key={a.account_id} value={a.account_id}>
-                          {formatAccountLabel(a)}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </label>
+                <AccountSelect
+                  accounts={accounts}
+                  value={selectedAccount ?? ""}
+                  onChange={(accountId) => void load(accountId)}
+                  disabled={loading}
+                />
               </div>
             </div>
           </div>
