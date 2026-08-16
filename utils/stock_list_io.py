@@ -292,43 +292,31 @@ def get_all_etfs(ticker_type: str) -> list[dict[str, Any]]:
     return results
 
 
-def get_active_holding_tickers() -> dict[str, set[str]]:
-    """
-    현재 사용자가 포트폴리오 마스터에 보유 중인 종목을 ticker_type 기준으로 분류하여 조회한다.
+def get_active_holding_tickers() -> set[str]:
+    """현재 계좌들이 실제로 보유 중인 티커 집합.
 
-    반환 형태:
-    {
-        "kor_kr": {"122630", ...},
-        "kor": {"005930", ...},
-        "us": {"AAPL", ...},
-    }
+    종목풀 구분은 하지 않는다 — 쓰는 쪽이 필요한 답은 "이 티커를 보유 중인가" 하나뿐이고,
+    같은 티커가 여러 풀에 등록돼 있으면 풀 추론이 실패해 보유 종목이 누락됐다.
     """
     from utils.portfolio_io import load_portfolio_master
     from utils.settings_loader import list_available_accounts
 
-    holdings_by_type: dict[str, set[str]] = {}
+    held: set[str] = set()
     for account_id in list_available_accounts():
         snapshot = load_portfolio_master(account_id)
         if not snapshot:
             continue
         for h in snapshot.get("holdings", []):
-            t = str(h.get("ticker") or "").strip().upper()
-            if not t or t in {"IS", "__CASH__"}:
+            ticker = str(h.get("ticker") or "").strip().upper()
+            if not ticker or ticker in {"IS", "__CASH__"}:
                 continue
             try:
-                qty = float(h.get("quantity") or 0)
+                quantity = float(h.get("quantity") or 0)
             except (TypeError, ValueError):
-                qty = 0.0
-            if qty <= 0:
-                continue
-            try:
-                inferred_type = infer_ticker_type_for_ticker(t)
-            except Exception as exc:
-                logger.warning("보유 종목 ticker_type 추론 실패, 건너뜀 (%s/%s): %s", account_id, t, exc)
-                continue
-            holdings_by_type.setdefault(inferred_type, set()).add(t)
-
-    return holdings_by_type
+                quantity = 0.0
+            if quantity > 0:
+                held.add(ticker)
+    return held
 
 
 # ---------------------------------------------------------------------------

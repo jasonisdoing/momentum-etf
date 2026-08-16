@@ -44,7 +44,7 @@ from utils.kis_market import load_cached_kis_domestic_etf_master
 from utils.portfolio_io import load_portfolio_master
 from utils.settings_loader import list_available_accounts, load_common_settings
 from utils.stock_cache_meta_io import get_previous_stock_cache_meta
-from utils.stock_list_io import get_active_holding_tickers, get_etfs
+from utils.stock_list_io import get_etfs
 from utils.ticker_registry import load_ticker_type_configs
 
 router = APIRouter(prefix="/internal/ticker-detail", tags=["ticker-detail"])
@@ -198,34 +198,6 @@ def _resolve_ticker_meta_item(
             "country_code": "au",
             "is_etf": True,
         }
-
-    holding_matches = [
-        ticker_type
-        for ticker_type, tickers in get_active_holding_tickers().items()
-        if ticker_key in tickers and _allowed(str(ticker_type))
-    ]
-    if len(holding_matches) == 1:
-        holding_type = holding_matches[0]
-        holding_config = next(
-            (config for config in configs if str(config.get("ticker_type") or "").strip().lower() == holding_type),
-            {},
-        )
-        cache_doc = get_stock_cache_meta(holding_type, ticker_key)
-        cache_name = cache_doc.get("name") if isinstance(cache_doc, dict) else None
-        if not cache_name and ticker_key.isdigit() and len(ticker_key) == 6:
-            cache_name = _lookup_domestic_etf_name(ticker_key)
-
-        return {
-            "ticker": ticker_key,
-            "name": cache_name or ticker_key,
-            "ticker_type": holding_type,
-            "country_code": str(holding_config.get("country_code") or "").strip().lower(),
-            "is_etf": holding_type != "kor",
-            "bucket": int(cache_doc.get("bucket") or 1) if isinstance(cache_doc, dict) else 1,
-        }
-    if len(holding_matches) > 1:
-        joined = ", ".join(sorted(holding_matches))
-        raise RuntimeError(f"보유 중인 동일 티커 {ticker_key}가 여러 종목풀에 있습니다: {joined}")
 
     if ticker_key.isdigit() and len(ticker_key) == 6:
         domestic_etf_tickers = _load_domestic_etf_ticker_set()
