@@ -362,20 +362,38 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             target_qty = int(target_amount // float(price)) if price else None
             row["target_quantity"] = target_qty
             row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
-        # 목표 포트폴리오에 없는 보유 종목 = 전량 매도 대상.
+        # 목표 포트폴리오에 없는 보유 종목 = 전량 매도 대상. 목표 비중 0% 행으로 표에 함께 넣는다
+        # — 팔아야 할 종목이 표 밖에 있으면 계좌를 표 하나로 대조할 수 없다.
         target_tickers = {row["ticker"] for row in holdings}
-        account["sell_all"] = [
-            {
-                "ticker": ticker,
-                "name": item["name"],
-                "quantity": item["quantity"],
-            }
-            for ticker, item in sorted(account["holdings"].items())
-            if ticker not in target_tickers
-        ]
-        account["sell_all"] = [
-            {**row, "value": account["holdings"][row["ticker"]].get("value")} for row in account["sell_all"]
-        ]
+        account["sell_all"] = []
+        for ticker, item in sorted(account["holdings"].items()):
+            if ticker in target_tickers:
+                continue
+            value = item.get("value")
+            account["sell_all"].append(
+                {"ticker": ticker, "name": item["name"], "quantity": item["quantity"], "value": value}
+            )
+            holdings.append(
+                {
+                    "ticker": ticker,
+                    "name": item["name"],
+                    "sources": [],
+                    "weight_pct": 0.0,
+                    "price": item.get("price"),
+                    "change_pct": None,
+                    "sm_status": None,
+                    "nh_status": None,
+                    "is_sell_all": True,
+                    "held_quantity": item["quantity"],
+                    "held_value": value,
+                    "current_weight_pct": round(float(value) / total_assets * 100.0, 2)
+                    if value and total_assets > 0
+                    else 0.0,
+                    "target_amount": 0.0,
+                    "target_quantity": 0,
+                    "trade_quantity": -int(item["quantity"]),
+                }
+            )
 
     return {
         "computed_at": datetime.now().astimezone().isoformat(),

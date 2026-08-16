@@ -81,6 +81,8 @@ type Holding = {
   held_value?: number | null;
   current_weight_pct?: number;
   trade_quantity?: number | null;
+  /** 목표 포트폴리오에 없는 보유 종목 — 목표 비중 0% 행으로 표 하단에 온다. */
+  is_sell_all?: boolean;
 };
 
 /** 적용 계좌의 실제 상태 — 계좌가 연결된 풀에서만 온다. */
@@ -496,6 +498,7 @@ export function StrategyMixClient() {
       valueGetter: (p) => {
         if (!p.data) return "";
         if (p.data.is_cash) return "미배분 현금";
+        if (p.data.is_sell_all) return "전량 매도 (목표에 없음)";
         const parts: string[] = [];
         if (p.data.sm_status) parts.push(`모멘텀 ${p.data.sm_status}`);
         if (p.data.nh_status) parts.push(`신고가 ${p.data.nh_status}`);
@@ -599,6 +602,23 @@ export function StrategyMixClient() {
     const found = accountOptions.find((option) => option.account_id === id);
     return found ? formatAccountLabel(found) : id;
   }, [positions?.account?.account_id, accountOptions]);
+
+  // 액션 문구가 쓰는 종목별 수량 — 표와 같은 값을 쓰려고 행을 그대로 참조한다.
+  const rowByTicker = useMemo(
+    () => new Map((positions?.holdings ?? []).map((row) => [row.ticker, row])),
+    [positions],
+  );
+  /** `종목명(티커) N주` — 계좌가 없으면 수량 없이 이름만 나온다. */
+  const labelOf = useCallback(
+    (ticker: string, name: string, kind: "buy" | "sell") => {
+      const base = `${name}(${ticker})`;
+      const row = rowByTicker.get(ticker);
+      const quantity = kind === "buy" ? row?.trade_quantity : (row?.held_quantity ?? null);
+      if (quantity == null || quantity === 0) return base;
+      return `${base} ${Math.abs(quantity).toLocaleString("ko-KR")}주`;
+    },
+    [rowByTicker],
+  );
 
   const actions = positions?.actions ?? null;
   const hasActions =
@@ -758,6 +778,7 @@ export function StrategyMixClient() {
                       // 아직 체결 전인 행(진입 예정)과 곧 나갈 행(매도 예정)은 확정 보유와
                       // 구분되게 회색으로 눌러 둔다 — 추세 이탈 행과 같은 공용 클래스.
                       getRowClass={(params) => {
+                        if (params.data?.is_sell_all) return "appTrendBrokenRow";
                         const status = `${params.data?.sm_status ?? ""} ${params.data?.nh_status ?? ""}`;
                         return status.includes("예정") ? "appTrendBrokenRow" : "";
                       }}
@@ -773,33 +794,36 @@ export function StrategyMixClient() {
                         <ul style={{ margin: 0, paddingLeft: 18, display: "flex", flexDirection: "column", gap: 4 }}>
                           {actions!.sm_sells.map((row) => (
                             <li key={`sm-sell-${row.ticker}`}>
-                              <strong style={{ color: "#d62828" }}>모멘텀 매도 예정</strong> — {row.name} ({row.reason})
-                              · 다음 시가에 매도, 슬롯은 다음 교체까지 현금
+                              <strong style={{ color: "#d62828" }}>모멘텀 매도 예정</strong> —{" "}
+                              {labelOf(row.ticker, row.name, "sell")} ({row.reason}) · 다음 시가에 매도, 슬롯은 다음
+                              교체까지 현금
                             </li>
                           ))}
                           {actions!.nh_sells.map((row) => (
                             <li key={`sell-${row.ticker}`}>
-                              <strong style={{ color: "#d62828" }}>신고가 매도 예정</strong> — {row.name} ({row.reason}
+                              <strong style={{ color: "#d62828" }}>신고가 매도 예정</strong> —{" "}
+                              {labelOf(row.ticker, row.name, "sell")} ({row.reason}
                               {row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""}) · 다음 시가에 매도
                             </li>
                           ))}
                           {actions!.nh_entries.map((row) => (
                             <li key={`entry-${row.ticker}`}>
-                              <strong style={{ color: "#2f9e44" }}>신고가 진입 예정</strong> — {row.name}
+                              <strong style={{ color: "#2f9e44" }}>신고가 진입 예정</strong> —{" "}
+                              {labelOf(row.ticker, row.name, "buy")}
                               {row.price != null ? ` (현재가 ${formatPrice(row.price)})` : ""} · 다음 시가에 매수
                             </li>
                           ))}
                           {actions!.sm_rebalance.buys.length > 0 ? (
                             <li>
                               <strong style={{ color: "#2f9e44" }}>모멘텀 교체 매수</strong> —{" "}
-                              {actions!.sm_rebalance.buys.map((r) => r.name).join(", ")} ·{" "}
+                              {actions!.sm_rebalance.buys.map((r) => labelOf(r.ticker, r.name, "buy")).join(", ")} ·{" "}
                               {actions!.sm_rebalance.fill_date} 시가
                             </li>
                           ) : null}
                           {actions!.sm_rebalance.sells.length > 0 ? (
                             <li>
                               <strong style={{ color: "#d62828" }}>모멘텀 교체 매도</strong> —{" "}
-                              {actions!.sm_rebalance.sells.map((r) => r.name).join(", ")} ·{" "}
+                              {actions!.sm_rebalance.sells.map((r) => labelOf(r.ticker, r.name, "sell")).join(", ")} ·{" "}
                               {actions!.sm_rebalance.fill_date} 시가
                             </li>
                           ) : null}
@@ -811,8 +835,9 @@ export function StrategyMixClient() {
                           ) : null}
                           {(positions.account?.sell_all ?? []).map((row) => (
                             <li key={`sell-all-${row.ticker}`}>
-                              <strong style={{ color: "#d62828" }}>전량 매도</strong> — {row.name} {formatPrice(row.quantity)}
-                              주{row.value != null ? ` (${formatAmount(row.value)})` : ""} · 목표 포트폴리오에 없는 보유
+                              <strong style={{ color: "#d62828" }}>전량 매도</strong> —{" "}
+                              {labelOf(row.ticker, row.name, "sell")}
+                              {row.value != null ? ` (${formatAmount(row.value)})` : ""} · 목표 포트폴리오에 없는 보유
                               종목
                             </li>
                           ))}
