@@ -19,11 +19,13 @@ import { formatPoolLabel, type PoolLabelSource } from "@/lib/pool-label";
 const gridTheme = createAppGridTheme();
 const hintStyle: React.CSSProperties = { color: "var(--text-muted)", fontSize: "var(--fs-sm)" };
 
-type AccountOption = AccountOptionBase;
+/** 통화가 다른 계좌는 목표 금액·주수를 낼 수 없어 셀렉터에서 걸러낸다. */
+type AccountOption = AccountOptionBase & { currency?: string };
+type PoolOption = PoolLabelSource & { currency?: string };
 
 type Meta = {
   pool: string;
-  pool_options: PoolLabelSource[];
+  pool_options: PoolOption[];
   month_options: number[];
   accounts: AccountOption[];
   /** 풀별 저장 설정 — 풀을 바꾸면 그 풀의 계좌로 전환한다. */
@@ -100,6 +102,8 @@ type Positions = {
   pool: string;
   as_of: string;
   live: boolean;
+  /** 다음 거래일 — 모든 체결이 시가라 액션 묶음의 날짜가 된다. */
+  next_trading_day: string | null;
   /** 적용 계좌를 저장한 풀에서만 온다. 없으면 비중만 보여준다. */
   account: AccountState | null;
   /** 과거 날짜 셀렉트용 — 신고가 화면과 같은 날짜 목록. */
@@ -216,7 +220,7 @@ type ActionGroup = { key: string; title: string; items: ActionItem[] };
 export function StrategyMixClient() {
   const toast = useToast();
   const [pool, setPool] = useState<string>("");
-  const [poolOptions, setPoolOptions] = useState<PoolLabelSource[]>([]);
+  const [poolOptions, setPoolOptions] = useState<PoolOption[]>([]);
   const [months, setMonths] = useState<number>(12);
   const [monthOptions, setMonthOptions] = useState<number[]>([]);
   const [accountOptions, setAccountOptions] = useState<AccountOption[]>([]);
@@ -616,6 +620,14 @@ export function StrategyMixClient() {
     return found ? formatAccountLabel(found) : id;
   }, [positions?.account?.account_id, accountOptions]);
 
+  // 적용 계좌 후보 — 선택한 풀과 통화가 같은 계좌만. 다르면 목표 금액·주수를 낼 수 없다.
+  const poolCurrency = poolOptions.find((option) => option.ticker_type === pool)?.currency ?? "";
+  const accountChoices = useMemo(
+    () =>
+      accountOptions.filter((option) => !poolCurrency || !option.currency || option.currency === poolCurrency),
+    [accountOptions, poolCurrency],
+  );
+
   const actions = positions?.actions ?? null;
 
   // 오늘의 액션 — 체결 시점으로 묶고 묶음 안에서는 매도 → 매수 순서로 세운다.
@@ -636,95 +648,72 @@ export function StrategyMixClient() {
     const entryTickers = new Set(actions.nh_entries.map((row) => row.ticker));
     const sellPending = new Set([...actions.sm_sells, ...actions.nh_sells].map((row) => row.ticker));
 
-    const now: ActionItem[] = [];
-    // ① 매도 — 목표에 없는 보유(교체일에 파는 것은 ②로 미룬다) → 매도 예정 → 비중 초과분.
-    for (const row of positions.account?.sell_all ?? []) {
-      if (rebalanceSells.has(row.ticker)) continue;
-      now.push({
-        key: `sell-all-${row.ticker}`,
-        side: "sell",
-        title: "전량 매도",
-        text: `${label(row.ticker, row.name, row.quantity)}${row.value != null ? ` (${formatAmount(row.value)})` : ""} · 목표에 없는 보유 종목`,
-      });
-    }
-    for (const row of actions.sm_sells) {
-      now.push({
-        key: `sm-sell-${row.ticker}`,
-        side: "sell",
-        title: "모멘텀 매도 예정",
-        text: `${label(row.ticker, row.name, rowByTicker.get(row.ticker)?.held_quantity)} (${row.reason}) · 슬롯은 다음 교체까지 현금`,
-      });
-    }
+    const rebalanceDate = !rebalance.is_filled && rebalance.fill_date ? rebalance.fill_date : null;
+    const nextOpen = positions.next_trading_day;
+    const sellReason = new Map<string, string>();
+    for (const row of actions.sm_sells) sellReason.set(row.ticker, row.reason);
     for (const row of actions.nh_sells) {
-      now.push({
-        key: `nh-sell-${row.ticker}`,
-        side: "sell",
-        title: "신고가 매도 예정",
-        text: `${label(row.ticker, row.name, rowByTicker.get(row.ticker)?.held_quantity)} (${row.reason}${row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""})`,
-      });
+      sellReason.set(row.ticker, `${row.reason}${row.return_pct != null ? `, ${formatSignedPct(row.return_pct)}` : ""}`);
     }
+
+    // 종목마다 항목은 하나다 — 매매수량 부호가 매도/매수를 정하고, 0이면 할 일이 없다.
+    const items: (ActionItem & { date: string | null })[] = [];
     for (const row of positions.holdings) {
       const trade = row.trade_quantity;
-      if (row.is_sell_all || trade == null || trade >= 0) continue;
-      if (rebalanceSells.has(row.ticker) || sellPending.has(row.ticker)) continue;
-      now.push({
-        key: `trim-${row.ticker}`,
+      if (trade == null || trade === 0) continue;
+      const isRebalance = rebalanceBuys.has(row.ticker) || rebalanceSells.has(row.ticker);
+      const date = isRebalance ? rebalanceDate : nextOpen;
+      const reason = sellReason.get(row.ticker);
+      let title: string;
+      if (row.is_sell_all) title = rebalanceSells.has(row.ticker) ? "교체 매도" : "전량 매도";
+      else if (reason) title = "매도 예정";
+      else if (isRebalance) title = trade > 0 ? "교체 매수" : "교체 비중 조정";
+      else if (entryTickers.has(row.ticker)) title = "신고가 진입";
+      else title = trade > 0 ? "비중 조정 매수" : "비중 조정 매도";
+      const note = reason
+        ? `(${reason})`
+        : row.is_sell_all
+          ? `${row.held_value != null ? `(${formatAmount(row.held_value)}) ` : ""}· 목표에 없는 보유 종목`
+          : `· 목표 ${row.weight_pct.toFixed(2)}%`;
+      items.push({
+        key: `act-${row.ticker}`,
+        side: trade > 0 ? "buy" : "sell",
+        title,
+        text: `${label(row.ticker, row.name, trade)} ${note}`.trim(),
+        date,
+      });
+    }
+    // 매도 예정인데 매매수량이 0인 경우(목표가 아직 그대로라 차이가 없음)도 알려야 한다.
+    for (const ticker of sellPending) {
+      if (items.some((item) => item.key === `act-${ticker}`)) continue;
+      const row = rowByTicker.get(ticker);
+      if (!row) continue;
+      items.push({
+        key: `act-${ticker}`,
         side: "sell",
-        title: "비중 조정 매도",
-        text: `${label(row.ticker, row.name, trade)} · 목표 ${row.weight_pct.toFixed(2)}%`,
-      });
-    }
-    // ① 매수 — 신고가 진입 예정 → 비중 부족분(모멘텀 교체 매수는 ②).
-    for (const row of actions.nh_entries) {
-      now.push({
-        key: `entry-${row.ticker}`,
-        side: "buy",
-        title: "신고가 진입 예정",
-        text: `${label(row.ticker, row.name, rowByTicker.get(row.ticker)?.trade_quantity)}${row.price != null ? ` (현재가 ${formatPrice(row.price)})` : ""}`,
-      });
-    }
-    for (const row of positions.holdings) {
-      const trade = row.trade_quantity;
-      if (row.is_sell_all || trade == null || trade <= 0) continue;
-      if (rebalanceBuys.has(row.ticker) || entryTickers.has(row.ticker)) continue;
-      now.push({
-        key: `add-${row.ticker}`,
-        side: "buy",
-        title: "비중 조정 매수",
-        text: `${label(row.ticker, row.name, trade)} · 목표 ${row.weight_pct.toFixed(2)}%`,
+        title: "매도 예정",
+        text: `${label(ticker, row.name, row.held_quantity)} (${sellReason.get(ticker) ?? "이탈"})`,
+        date: nextOpen,
       });
     }
 
-    // ② 모멘텀 교체 — 판정은 끝났고 교체일 시가에만 체결된다.
-    const rebalanceItems: ActionItem[] = [];
-    for (const row of rebalance.sells) {
-      rebalanceItems.push({
-        key: `reb-sell-${row.ticker}`,
-        side: "sell",
-        title: "교체 매도",
-        text: label(row.ticker, row.name, rowByTicker.get(row.ticker)?.held_quantity),
-      });
+    // 체결일이 같으면 한 묶음이다 — 연휴가 끼면 다음 거래일과 교체일이 같은 날이 된다.
+    const byDate = new Map<string, (ActionItem & { date: string | null })[]>();
+    for (const item of items) {
+      const key = item.date ?? "";
+      if (!byDate.has(key)) byDate.set(key, []);
+      byDate.get(key)!.push(item);
     }
-    for (const row of rebalance.buys) {
-      const target = rowByTicker.get(row.ticker);
-      rebalanceItems.push({
-        key: `reb-buy-${row.ticker}`,
-        side: "buy",
-        title: "교체 매수",
-        text: `${label(row.ticker, row.name, target?.trade_quantity ?? target?.target_quantity)}${row.price != null ? ` (현재가 ${formatPrice(row.price)})` : ""}`,
-      });
-    }
-
-    const groups: ActionGroup[] = [];
-    if (now.length > 0) groups.push({ key: "now", title: "지금 · 다음 거래일 시가", items: now });
-    if (rebalanceItems.length > 0 && !rebalance.is_filled) {
-      groups.push({
-        key: "rebalance",
-        title: `${rebalance.fill_date} 시가 · 모멘텀 교체`,
-        items: rebalanceItems,
-      });
-    }
-    return groups;
+    return [...byDate.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, groupItems]) => ({
+        key: date || "unscheduled",
+        title: date
+          ? `${formatDateWithWeekday(date)} 시가${date === rebalanceDate ? " · 모멘텀 교체 포함" : ""}`
+          : "체결일 미정",
+        // 매도가 끝나야 매수 대금이 생긴다.
+        items: [...groupItems].sort((a, b) => (a.side === b.side ? 0 : a.side === "sell" ? -1 : 1)),
+      }));
   }, [positions, actions]);
 
   const hasActions = actionGroups.length > 0 || Boolean(actions?.sleeve_rebalance_today);
@@ -762,7 +751,7 @@ export function StrategyMixClient() {
                 </label>
                 <AccountSelect
                   label="적용 계좌"
-                  accounts={accountOptions}
+                  accounts={accountChoices}
                   value={accountId}
                   onChange={setAccountId}
                   disabled={saving}
