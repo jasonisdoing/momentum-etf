@@ -588,9 +588,7 @@ export function StrategyMixClient() {
               {positionsError ? (
                   <div className="alert alert-danger" style={{ marginBottom: 0 }}>{positionsError}</div>
                 ) : positionsLoading || !positions ? (
-                  <div style={{ ...hintStyle, textAlign: "center", padding: "48px 0" }}>
-                    두 전략의 현재 상태를 계산하고 있습니다… (수십 초 걸릴 수 있습니다)
-                  </div>
+                  <AppLoadingProgress title="현재 상태 계산 중..." progress={positionsProgress} />
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                     {/* ① 요약 바 — 오늘 주식·현금을 얼마씩 둬야 하는지. */}
