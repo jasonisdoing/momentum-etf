@@ -246,7 +246,41 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
     sm_holdings = sm_selected
     nh_holdings = list(nh.get("holdings") or [])
 
+    # 신고가 빈 슬롯을 채울 진입 예정 — 다음 시가에 사므로 목표 포트폴리오에 포함한다.
+    nh_free = max(nh_top_n - len(nh_holdings), 0)
+    nh_planned = list(nh.get("planned_entries") or [])[:nh_free]
+
+    # 목표 포트폴리오는 **종목 단위**다. 두 슬리브가 같은 종목을 담으면 비중을 합쳐
+    # 한 행으로 둔다 — 계좌에는 그 종목이 하나뿐이라 슬리브별로 나누면 보유 수량이
+    # 두 번 세어지고 매매 지시가 반대로 나온다.
     holdings: list[dict[str, Any]] = []
+    by_ticker: dict[str, dict[str, Any]] = {}
+
+    def add_target(ticker: str, name: str, source: str, weight: float, price: Any, change_pct: Any, status: str) -> None:
+        ticker = str(ticker).strip()
+        row = by_ticker.get(ticker)
+        if row is None:
+            row = {
+                "ticker": ticker,
+                "name": name or ticker,
+                "sources": [],
+                "weight_pct": 0.0,
+                "price": price,
+                "change_pct": change_pct,
+                "sm_status": None,
+                "nh_status": None,
+            }
+            by_ticker[ticker] = row
+            holdings.append(row)
+        if source not in row["sources"]:
+            row["sources"].append(source)
+        row["weight_pct"] += weight
+        if row.get("price") is None:
+            row["price"] = price
+        if row.get("change_pct") is None:
+            row["change_pct"] = change_pct
+        row[f"{source}_status"] = status
+
     for row in sm_selected:
         ticker = str(row["ticker"]).strip()
         if ticker in sm_current_tickers:
@@ -256,39 +290,21 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             status = f"매수 예정 ({sm.get('rebalance_date')} 시가)"
         if row.get("is_exit_pending"):
             status += " · 매도 예정(자격 상실)"
-        holdings.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name") or ticker,
-                "sources": ["sm"],
-                "weight_pct": weight_sm,
-                "price": row.get("price"),
-                "change_pct": row.get("daily_change_pct"),
-                "sm_status": status,
-                "nh_status": None,
-            }
-        )
+        add_target(ticker, row.get("name"), "sm", weight_sm, row.get("price"), row.get("daily_change_pct"), status)
     for row in nh_holdings:
-        ticker = str(row["ticker"]).strip()
         status = "오늘 진입" if row.get("is_new") else f"{row.get('days')}일째"
         if str(row.get("status")) == "sell":
             reason = str(row.get("exit_reason") or "이탈")
             status += f" · 매도 예정({reason})"
-        holdings.append(
-            {
-                "ticker": ticker,
-                "name": row.get("name") or ticker,
-                "sources": ["nh"],
-                "weight_pct": weight_nh,
-                "price": row.get("price"),
-                "change_pct": row.get("change_pct"),
-                "sm_status": None,
-                "nh_status": status,
-            }
+        add_target(row["ticker"], row.get("name"), "nh", weight_nh, row.get("price"), row.get("change_pct"), status)
+    for row in nh_planned:
+        add_target(
+            row["ticker"], row.get("name"), "nh", weight_nh, row.get("price"), row.get("change_pct"), "진입 예정 (다음 시가 매수)"
         )
-    stock_pct = len(sm_holdings) * weight_sm + len(nh_holdings) * weight_nh
+
+    stock_pct = sum(row["weight_pct"] for row in holdings)
     sm_cash = (sm_top_n - len(sm_holdings)) * weight_sm
-    nh_cash = (nh_top_n - len(nh_holdings)) * weight_nh
+    nh_cash = (nh_top_n - len(nh_holdings) - len(nh_planned)) * weight_nh
 
     # 매월 첫 거래일 = 슬리브 50:50 리밸런싱 날 (그 시장 달력 기준).
     from config import MARKET_SCHEDULES
@@ -330,16 +346,23 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         account["stock_value"] = round(stock_value, 2)
         account["total_assets"] = round(total_assets, 2)
         # 종목별 목표 금액·주수 → 현재 보유와의 차이가 그대로 매매 지시가 된다.
+        # 행이 종목 단위라 계좌 보유와 1:1 로 비교된다(겹치는 종목도 한 번만 센다).
         for row in holdings:
             held = account["holdings"].get(row["ticker"])
             row["held_quantity"] = held["quantity"] if held else 0.0
+            row["held_value"] = (held or {}).get("value")
+            row["current_weight_pct"] = (
+                round(float(row["held_value"]) / total_assets * 100.0, 2)
+                if row.get("held_value") and total_assets > 0
+                else 0.0
+            )
             target_amount = total_assets * row["weight_pct"] / 100.0
             row["target_amount"] = round(target_amount, 2)
             price = row.get("price")
             target_qty = int(target_amount // float(price)) if price else None
             row["target_quantity"] = target_qty
             row["trade_quantity"] = None if target_qty is None else target_qty - int(row["held_quantity"])
-        # 목표에 없는 보유 종목 = 전량 매도 대상.
+        # 목표 포트폴리오에 없는 보유 종목 = 전량 매도 대상.
         target_tickers = {row["ticker"] for row in holdings}
         account["sell_all"] = [
             {
@@ -365,8 +388,20 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
         "summary": {
             "stock_pct": round(stock_pct, 2),
             "cash_pct": round(100 - stock_pct, 2),
-            "sm": {"slots_used": len(sm_holdings), "top_n": sm_top_n, "cash_pct": round(sm_cash, 2)},
-            "nh": {"slots_used": len(nh_holdings), "top_n": nh_top_n, "cash_pct": round(nh_cash, 2)},
+            # slots_used = 목표가 찬 슬롯, held_count = 지금 실제로 들고 있는 종목 수.
+            # 둘이 다르면 아직 체결 전이라는 뜻이라 화면이 구분해서 보여준다.
+            "sm": {
+                "slots_used": len(sm_holdings),
+                "held_count": len(sm_current),
+                "top_n": sm_top_n,
+                "cash_pct": round(sm_cash, 2),
+            },
+            "nh": {
+                "slots_used": len(nh_holdings) + len(nh_planned),
+                "held_count": len(nh_holdings),
+                "top_n": nh_top_n,
+                "cash_pct": round(nh_cash, 2),
+            },
         },
         "holdings": [{**row, "weight_pct": round(row["weight_pct"], 2)} for row in holdings],
         "actions": {
@@ -381,13 +416,13 @@ def mix_positions(pool: str | None = None, as_of: str | None = None) -> dict[str
             ],
             "nh_entries": [
                 {
-                    "ticker": row["ticker"],
-                    "name": row["name"],
+                    "ticker": str(row["ticker"]).strip(),
+                    "name": row.get("name") or row["ticker"],
                     "price": row.get("price"),
                     "change_pct": row.get("change_pct"),
                     "value_mult": row.get("value_mult"),
                 }
-                for row in (nh.get("planned_entries") or [])
+                for row in nh_planned
             ],
             "nh_sells": [
                 {
