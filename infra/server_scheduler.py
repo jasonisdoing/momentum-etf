@@ -352,7 +352,7 @@ def main() -> int:
                 max_instances=1,
                 replace_existing=True,
             )
-            log.info("등록: %-25s  cron=\"%s\"  script=%s", job_name, cron_expr, script_path)
+            log.info('등록: %-25s  cron="%s"  script=%s', job_name, cron_expr, script_path)
     else:
         log.info("cron 스케줄러 비활성 — APP_TYPE=%s (worker 만 동작)", app_type)
 

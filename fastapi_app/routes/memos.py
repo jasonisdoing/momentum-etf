@@ -30,9 +30,7 @@ def post_memo(payload: dict = Body(...), _: None = Depends(require_internal_toke
 
 
 @router.put("/{memo_id}")
-def put_memo(
-    memo_id: str, payload: dict = Body(...), _: None = Depends(require_internal_token)
-) -> dict:
+def put_memo(memo_id: str, payload: dict = Body(...), _: None = Depends(require_internal_token)) -> dict:
     """기존 메모의 형식·제목·본문·항목을 교체한다."""
     return {"memo": update_memo(memo_id, *_payload_fields(payload))}
 

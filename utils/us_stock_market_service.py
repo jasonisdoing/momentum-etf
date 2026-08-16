@@ -48,14 +48,19 @@ def _fetch_us_market_value_page(
     # 네이버 API 가 간헐적으로 5xx/타임아웃을 내므로 짧게 재시도한다 (일시 장애 흡수).
     for attempt in range(1, max_attempts + 1):
         try:
-            resp = requests.get(NAVER_US_STOCK_MARKET_VALUE_URL, params=params, headers=NAVER_FINANCE_HEADERS, timeout=10)
+            resp = requests.get(
+                NAVER_US_STOCK_MARKET_VALUE_URL, params=params, headers=NAVER_FINANCE_HEADERS, timeout=10
+            )
             resp.raise_for_status()
             payload = resp.json()
         except Exception as exc:
             if attempt < max_attempts:
                 logger.warning(
                     "네이버 미국 주식 리스트 일시 오류 재시도 (%d/%d, market=%s): %s",
-                    attempt, max_attempts, market, exc,
+                    attempt,
+                    max_attempts,
+                    market,
+                    exc,
                 )
                 time.sleep(0.7 * attempt)
                 continue
@@ -83,15 +88,15 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
     target_count = limit
     min_market_cap_usd = min_market_cap_ukm * 100_000_000
     rows: list[dict[str, Any]] = []
-    
+
     start_idx = 0
     page_size = 100
-    
+
     while len(rows) < target_count:
         items = _fetch_us_market_value_page(market, start_idx=start_idx, page_size=page_size)
         if not items:
             break
-            
+
         for item in items:
             market_cap = _parse_float(item.get("marketValue"))
             if market_cap is None or market_cap < min_market_cap_usd:
@@ -135,7 +140,7 @@ def load_us_stock_market(market: str, limit: int, min_market_cap_ukm: int = 0) -
             )
             if len(rows) >= target_count:
                 break
-                
+
         start_idx += page_size
 
     _apply_us_realtime_overlay(rows)
@@ -231,7 +236,8 @@ def fetch_naver_us_stock_info_map(tickers: set[str] | list[str] | tuple[str, ...
                 # 누락된 종목은 호출측에서 enrichment 가 스킵되어 기존 DB 값이 보존된다 (가짜값 X).
                 logger.warning(
                     "네이버 미국 업종맵 조회 실패 — 보조 데이터 일부/전체 생략하고 진행 (수집 %d건): %s",
-                    len(found), exc,
+                    len(found),
+                    exc,
                 )
                 return found
             if not page:
@@ -270,6 +276,7 @@ def _apply_us_realtime_overlay(rows: list[dict[str, Any]]) -> None:
 
     try:
         from services.price_service import get_realtime_snapshot
+
         snapshot = get_realtime_snapshot("us", tickers)
     except Exception as exc:
         logger.warning("미국 개별주 실시간 가격 오버레이 실패: %s", exc)

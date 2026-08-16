@@ -75,7 +75,9 @@ def count_trading_days_market(country: str, calendar_ticker: str, start_date_str
     from utils.data_loader import fetch_ohlcv, is_trading_day
 
     try:
-        df = fetch_ohlcv(calendar_ticker, country, months_back=None, date_range=[start_date_str, None], ticker_type="etf")
+        df = fetch_ohlcv(
+            calendar_ticker, country, months_back=None, date_range=[start_date_str, None], ticker_type="etf"
+        )
         if df is not None and not df.empty:
             count = len(df)
             today_ts = pd.Timestamp.today().normalize()

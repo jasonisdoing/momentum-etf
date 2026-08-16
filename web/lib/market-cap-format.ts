@@ -1,6 +1,6 @@
 /** 한국 시가총액(억 원) 표기 표준 — `1,350조 4,904억` / `7,088억`.
  *
- * /kor-market-stock 과 Steady Momentum 이 같은 표기를 쓰도록 여기서만 만든다.
+ * /kor-market-stock 과 모멘텀 전략 이 같은 표기를 쓰도록 여기서만 만든다.
  */
 export function formatKorMarketCap(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return "-";

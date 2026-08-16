@@ -4,7 +4,6 @@
 서비스와 시장 데이터 층을 재사용한다.
 """
 
-
 from __future__ import annotations
 
 from typing import Any
@@ -224,7 +223,9 @@ def run_asset_helper_backtest(
 
         weights_by_date = {date: fixed_weights for date in requested_rebalance_dates}
     else:
-        composite_frame, trend_by_order = _build_asset_helper_weight_engine(candidate_close, clean_tickers, clean_settings)
+        composite_frame, trend_by_order = _build_asset_helper_weight_engine(
+            candidate_close, clean_tickers, clean_settings
+        )
         trend_frame = trend_by_order[1]
 
         for date in requested_rebalance_dates:

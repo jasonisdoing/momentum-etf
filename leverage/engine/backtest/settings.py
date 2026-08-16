@@ -123,9 +123,13 @@ def _normalize_offense_candidates(settings: dict) -> None:
         candidates.append({"ticker": ticker, "name": entry.get("name") or ticker})
     if not candidates and settings.get("offense_ticker"):
         # 하위 호환: 옛 설정(단일 offense)만 있으면 그것을 후보 1개로 사용
-        candidates = [{"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}]
+        candidates = [
+            {"ticker": settings["offense_ticker"], "name": settings.get("offense_name", settings["offense_ticker"])}
+        ]
     if not candidates:
-        raise ValueError("레버리지 후보(tuning.offense_candidates)가 1개 이상 필요합니다. 레버리지-설정 화면에서 저장하세요.")
+        raise ValueError(
+            "레버리지 후보(tuning.offense_candidates)가 1개 이상 필요합니다. 레버리지-설정 화면에서 저장하세요."
+        )
     settings["offense_candidates"] = candidates
 
 

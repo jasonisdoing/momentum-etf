@@ -87,14 +87,14 @@
 * 별도 지연 없이 ST 방향에 따라 즉각적으로 상승/하락이 결정된다.
 * 전환 조건은 차트에 ST(SuperTrend) 가격선과 목표치로 안내됩니다.
 
-## 5. Steady Momentum (`/strategy-sm`)
+## 5. 모멘텀 전략 (`/strategy-momentum`)
 
 선택한 종목풀에서 **장기 이평선 이격 상위 종목을 월 단위로 유지**하는 전략입니다.
 순위 화면과 같은 신호(이격)를 쓰되 리듬이 다릅니다 — 순위는 매일 갱신되지만,
-Steady Momentum 은 월말에 한 번 판정해 한 달 동안 손절 없이 보유합니다.
+모멘텀 전략 은 월말에 한 번 판정해 한 달 동안 손절 없이 보유합니다.
 
-로직 단일 소스는 `utils/steady_momentum_service.py`(선정)와 `utils/steady_momentum_backtest.py`(백테스트)이며,
-설정은 MongoDB `system_config.steady_momentum_settings` 문서가 단일 소스입니다.
+로직 단일 소스는 `utils/momentum_service.py`(선정)와 `utils/momentum_backtest.py`(백테스트)이며,
+설정은 MongoDB `system_config.momentum_settings` 문서가 단일 소스입니다.
 
 ### 선정 점수
 
@@ -165,7 +165,7 @@ Steady Momentum 은 월말에 한 번 판정해 한 달 동안 손절 없이 보
 설정은 **DB 문서가 단일 소스이고 코드에 기본값을 두지 않습니다.** 문서가 없거나 스키마가 맞지 않으면
 임의 값으로 대체하지 않고 명시적 에러를 내며, 화면은 입력 폼 대신 실패 사유와 `다시 시도` 만 보여줍니다.
 
-콘솔에서 같은 결과를 보려면 `./.venv/bin/python scripts/find_steady_momentum_stocks.py` 를 사용합니다.
+콘솔에서 같은 결과를 보려면 `./.venv/bin/python scripts/find_momentum_stocks.py` 를 사용합니다.
 
 ## (부가) 레버리지 전략 — `leverage/`
 

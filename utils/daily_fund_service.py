@@ -297,9 +297,7 @@ def _collect_live_daily_summary() -> dict[str, Any]:
                 all_missing_tickers.extend(missing)
             # 수량이 있는데 평가금액이 0 이하인 종목 = 가격을 못 얻은 종목.
             # (캐시 문서는 있으나 값이 비정상인 경우 — missing_price_tickers 가드가 못 잡는 구멍)
-            zero_rows = holdings_df[
-                (holdings_df["수량"].fillna(0) > 0) & (holdings_df["평가금액(KRW)"].fillna(0) <= 0)
-            ]
+            zero_rows = holdings_df[(holdings_df["수량"].fillna(0) > 0) & (holdings_df["평가금액(KRW)"].fillna(0) <= 0)]
             if not zero_rows.empty:
                 all_zero_valuation_tickers.extend(str(t) for t in zero_rows["티커"].tolist())
 
@@ -537,9 +535,7 @@ def _check_total_jump_guard(
         return
     jump_pct = abs(new_total - baseline_total - deposit_withdrawal) / baseline_total * 100.0
     if jump_pct > DAILY_TOTAL_JUMP_GUARD_PCT:
-        raise TotalJumpGuardError(
-            new_total, baseline_total, baseline_date, deposit_withdrawal, jump_pct
-        )
+        raise TotalJumpGuardError(new_total, baseline_total, baseline_date, deposit_withdrawal, jump_pct)
 
 
 def aggregate_today_daily_data() -> dict[str, str]:
@@ -549,9 +545,7 @@ def aggregate_today_daily_data() -> dict[str, str]:
     update_doc["updated_at"] = _get_now_kst()
 
     # 서킷브레이커 기준: 대상일 직전의 마지막 기록(과거 문서). 첫 기록이면 통과.
-    previous_doc = db[DAILY_COLLECTION].find_one(
-        {"date": {"$lt": target_date}}, sort=[("date", -1)]
-    )
+    previous_doc = db[DAILY_COLLECTION].find_one({"date": {"$lt": target_date}}, sort=[("date", -1)])
     existing_doc = db[DAILY_COLLECTION].find_one({"date": target_date}) or {}
     _check_total_jump_guard(
         float(update_doc.get("total_assets") or 0),

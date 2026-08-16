@@ -128,9 +128,7 @@ def _values_from_start_year(series: pd.Series | None) -> list[float]:
     return [by_year[year] for year in sorted(by_year) if year >= TREND_START_YEAR]
 
 
-def _trend_score(
-    series: pd.Series | None, max_score: int, consensus_value: float | None = None
-) -> tuple[float, str]:
+def _trend_score(series: pd.Series | None, max_score: int, consensus_value: float | None = None) -> tuple[float, str]:
     """TREND_START_YEAR 이후 값의 우상향 정도를 0~max_score 로 점수화한다.
 
     '전년 대비 증가한 해의 비율' 을 그대로 배점에 곱한다.
@@ -247,10 +245,7 @@ def _naver_dps_series(consensus: dict[str, Any]) -> pd.Series | None:
     if not confirmed:
         return None
     latest_year = max(confirmed)
-    filled = {
-        year: confirmed.get(year, 0.0)
-        for year in range(min(TREND_START_YEAR, min(confirmed)), latest_year + 1)
-    }
+    filled = {year: confirmed.get(year, 0.0) for year in range(min(TREND_START_YEAR, min(confirmed)), latest_year + 1)}
     return pd.Series(filled).sort_index(ascending=False)
 
 
@@ -383,9 +378,7 @@ def _analyze(row: dict[str, Any]) -> dict[str, Any] | None:
             return {
                 "ticker": ticker,
                 "name": str(row.get("name") or "-"),
-                "excluded_reason": (
-                    f"배당수익률({gate_basis}) {gate_yield:.2%} < {FILTER_MIN_DIVIDEND_YIELD:.0%}"
-                ),
+                "excluded_reason": (f"배당수익률({gate_basis}) {gate_yield:.2%} < {FILTER_MIN_DIVIDEND_YIELD:.0%}"),
             }
 
     operating_score, operating_label = _trend_score(
@@ -504,9 +497,7 @@ def _print_detail(rank: int, item: dict[str, Any]) -> None:
     cap_text = f" · 시가총액 {float(market_cap_eok) / 10000:.1f}조" if market_cap_eok else ""
     payout_year = f", {item['payout_year']}년 기준" if item.get("payout_year") else ""
     payout_text = f"{item['payout'] * 100:.0f}%{payout_year}" if item["payout"] is not None else "-"
-    per_text = (
-        f"{item['per']:.1f}{'*' if item.get('per_is_consensus') else ''}" if item.get("per") is not None else "-"
-    )
+    per_text = f"{item['per']:.1f}{'*' if item.get('per_is_consensus') else ''}" if item.get("per") is not None else "-"
     yield_text = (
         f"{item['dividend_yield'] * 100:.1f}%{'*' if item.get('yield_is_consensus') else ''}"
         if item.get("dividend_yield") is not None
@@ -547,9 +538,7 @@ def _print_detail(rank: int, item: dict[str, Any]) -> None:
 
     rows: list[tuple[str, list[str]]] = []
     for name, series in item["series"].items():
-        by_year = (
-            {_year_of(label): float(value) for label, value in series.items()} if series is not None else {}
-        )
+        by_year = {_year_of(label): float(value) for label, value in series.items()} if series is not None else {}
         values = [_format_jo(by_year[y]) if y in by_year else "-" for y in ordered_years]
         if consensus_year_label:
             estimate = consensus_by_row.get(name)
@@ -622,7 +611,20 @@ def main() -> None:
     print()
 
     # ── 1. 전체 순위 리스트 ──────────────────────────────────────────
-    headers = ["순위", "티커", "종목명", "점수", "영업익", "순이익", "배당", "환원율", "PER", "배당률", "배당액", "자사주"]
+    headers = [
+        "순위",
+        "티커",
+        "종목명",
+        "점수",
+        "영업익",
+        "순이익",
+        "배당",
+        "환원율",
+        "PER",
+        "배당률",
+        "배당액",
+        "자사주",
+    ]
     aligns = ["right", "left", "left", "right", "right", "right", "right", "right", "right", "right", "right", "right"]
     table_rows: list[list[str]] = []
     for rank, item in enumerate(results[: args.top], 1):

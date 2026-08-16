@@ -112,10 +112,7 @@ def compute_trend_frame(
         ma_cols[ticker] = ma_series.reindex(close_frame.index)
     ma_frame = pd.DataFrame(ma_cols, index=close_frame.index)
     trend = pd.DataFrame(
-        {
-            ticker: calculate_maps_score(close_frame[ticker], ma_frame[ticker])
-            for ticker in close_frame.columns
-        },
+        {ticker: calculate_maps_score(close_frame[ticker], ma_frame[ticker]) for ticker in close_frame.columns},
         index=close_frame.index,
     )
     return trend

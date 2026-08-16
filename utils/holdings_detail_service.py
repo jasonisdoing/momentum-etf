@@ -143,11 +143,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
     rates = get_exchange_rates()
     cash_data = load_cash_accounts()
     cash_accounts = cash_data.get("accounts", [])
-    cash_map = {
-        str(account.get("account_id") or ""): account
-        for account in cash_accounts
-        if isinstance(account, dict)
-    }
+    cash_map = {str(account.get("account_id") or ""): account for account in cash_accounts if isinstance(account, dict)}
 
     target_id = str(account_id or "").strip()
     if target_id.upper() == "TOTAL":
@@ -180,6 +176,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
         # df 가 None 이거나 비어있으면 빈 DataFrame 으로 처리해서 이어 진행한다.
         if df is None or df.empty:
             import pandas as pd  # 지연 import (위 모듈 import 와 일관성)
+
             df = pd.DataFrame()
 
         settings = account.get("settings") or {}
@@ -210,6 +207,7 @@ def load_all_holdings_detail(account_id: str | None = None) -> dict[str, Any]:
 
             def safe_int(val):
                 import pandas as pd
+
                 if pd.isna(val) or val is None:
                     return 0
                 try:
@@ -382,13 +380,15 @@ def delete_holding(account_id: str, ticker: str) -> dict[str, str]:
         raise RuntimeError(f"종목 {ticker}을 찾을 수 없습니다.")
 
     save_portfolio_master(account_id, _assign_sort_order(new_holdings))
-    
+
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
         from utils.snapshot_service import update_today_snapshot_all_accounts
+
         update_today_snapshot_all_accounts()
     except Exception as e:
         from utils.logger import get_app_logger
+
         get_app_logger().warning(f"Failed to update snapshot after deletion: {e}")
 
     return {"deleted": ticker}
@@ -438,9 +438,11 @@ def update_holding(
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
         from utils.snapshot_service import update_today_snapshot_all_accounts
+
         update_today_snapshot_all_accounts()
     except Exception as e:
         from utils.logger import get_app_logger
+
         get_app_logger().warning(f"Failed to update snapshot after update: {e}")
 
     return {"updated": ticker}
@@ -503,9 +505,11 @@ def add_holding(
     # 변경 사항을 스냅샷에 즉시 동기화
     try:
         from utils.snapshot_service import update_today_snapshot_all_accounts
+
         update_today_snapshot_all_accounts()
     except Exception as e:
         from utils.logger import get_app_logger
+
         get_app_logger().warning(f"Failed to update snapshot after addition: {e}")
 
     return {"added": ticker, "name": res["name"]}
@@ -538,10 +542,7 @@ def reorder_holdings(account_id: str, ordered_tickers: list[str]) -> dict[str, A
     if not holdings:
         raise RuntimeError("정렬할 종목이 없습니다.")
 
-    holding_map = {
-        _normalize_target_ticker(str(holding.get("ticker") or "")): holding
-        for holding in holdings
-    }
+    holding_map = {_normalize_target_ticker(str(holding.get("ticker") or "")): holding for holding in holdings}
     missing_tickers = [ticker for ticker in normalized_tickers if ticker not in holding_map]
     if missing_tickers:
         joined = ", ".join(missing_tickers)
@@ -659,9 +660,7 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
 
         account_currencies = set(resolve_cash_currencies(inner_settings))
         matched = {
-            cc: cand
-            for cc, cand in candidates_by_country.items()
-            if currency_for_country(cc) in account_currencies
+            cc: cand for cc, cand in candidates_by_country.items() if currency_for_country(cc) in account_currencies
         }
         if len(matched) == 1:
             validated_res = next(iter(matched.values()))
@@ -677,5 +676,5 @@ def validate_ticker_for_account(account_id: str, ticker: str) -> dict[str, Any]:
         "name": validated_res["name"],
         "bucket_id": validated_res.get("bucket_id") or 1,
         "country_code": str(validated_res.get("country_code") or "").strip().lower(),
-        "status": "success"
+        "status": "success",
     }

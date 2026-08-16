@@ -67,9 +67,7 @@ def get_realtime_snapshot(country_code: str, tickers: Sequence[str]) -> dict[str
         # 장 전에 idle TTL(3600s)로 캐시된 항목도 개장 후 active TTL(30s) 경과 즉시 만료된다.
         fetched_at = entry.get("fetched_at") if entry else None
         is_alive = (
-            entry is not None
-            and isinstance(fetched_at, datetime)
-            and (now - fetched_at).total_seconds() < ttl_seconds
+            entry is not None and isinstance(fetched_at, datetime) and (now - fetched_at).total_seconds() < ttl_seconds
         )
         if is_alive:
             cached_result[ticker] = entry["data"]  # type: ignore[index]
@@ -171,6 +169,7 @@ def get_worldstock_snapshot(reuters_codes: Sequence[str]) -> dict[str, dict[str,
 
     # 일괄 조회 후 응답에 빠진 코드는 영구 누락 가능성 → 블랙리스트에 마킹
     from utils.symbol_resolution_blacklist import mark_failed
+
     for code in expired_codes:
         if code not in fetched_data:
             mark_failed(code, source="네이버", reason="Worldstock: 응답에 누락된 코드")
@@ -381,6 +380,7 @@ def get_realtime_snapshot_meta(country_code: str, tickers: Sequence[str]) -> dic
 # ────────────────────────────────────────────
 # 내부 함수
 # ────────────────────────────────────────────
+
 
 def _normalize_country_code(country_code: str) -> str:
     country = str(country_code or "").strip().lower()

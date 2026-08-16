@@ -78,9 +78,7 @@ def enqueue(
         raise RuntimeError("DB 연결 실패 — 큐 enqueue 불가")
     coll = db[BATCH_QUEUE_COLLECTION]
 
-    existing = coll.find_one(
-        {"job_name": job_name, "status": {"$in": [STATUS_PENDING, STATUS_RUNNING]}}
-    )
+    existing = coll.find_one({"job_name": job_name, "status": {"$in": [STATUS_PENDING, STATUS_RUNNING]}})
     if existing:
         return {"enqueued": False, "reason": f"이미 큐에 있음 (status={existing.get('status')})", "item": existing}
 
@@ -222,12 +220,7 @@ def list_queue(limit: int = 50) -> list[dict[str, Any]]:
     db = get_db_connection()
     if db is None:
         return []
-    return list(
-        db[BATCH_QUEUE_COLLECTION]
-        .find({})
-        .sort("triggered_at", -1)
-        .limit(limit)
-    )
+    return list(db[BATCH_QUEUE_COLLECTION].find({}).sort("triggered_at", -1).limit(limit))
 
 
 def get_pending_count() -> int:
@@ -260,9 +253,7 @@ def cancel_pending(item_id: Any) -> bool:
     db = get_db_connection()
     if db is None:
         return False
-    result = db[BATCH_QUEUE_COLLECTION].delete_one(
-        {"_id": item_id, "status": STATUS_PENDING}
-    )
+    result = db[BATCH_QUEUE_COLLECTION].delete_one({"_id": item_id, "status": STATUS_PENDING})
     return result.deleted_count > 0
 
 
@@ -299,7 +290,5 @@ def is_cancel_requested(item_id: Any) -> bool:
     db = get_db_connection()
     if db is None:
         return False
-    doc = db[BATCH_QUEUE_COLLECTION].find_one(
-        {"_id": item_id}, {"_id": 0, "cancel_requested": 1}
-    )
+    doc = db[BATCH_QUEUE_COLLECTION].find_one({"_id": item_id}, {"_id": 0, "cancel_requested": 1})
     return bool(isinstance(doc, dict) and doc.get("cancel_requested"))

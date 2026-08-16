@@ -128,9 +128,7 @@ def _resolve_snapshot_date() -> str:
 
     now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
     today_str = now_kst.strftime("%Y-%m-%d")
-    trading_days = get_trading_days(
-        (now_kst - timedelta(days=14)).strftime("%Y-%m-%d"), today_str, "kor"
-    )
+    trading_days = get_trading_days((now_kst - timedelta(days=14)).strftime("%Y-%m-%d"), today_str, "kor")
     trading_days_str = [d.strftime("%Y-%m-%d") for d in trading_days]
 
     if now_kst.hour >= 9 and today_str in trading_days_str:

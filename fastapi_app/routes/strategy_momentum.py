@@ -1,9 +1,9 @@
-"""Steady Momentum(전략-ST) 설정·선정 API."""
+"""모멘텀 전략(전략-ST) 설정·선정 API."""
 
 from fastapi import APIRouter, Body, Depends
 
 from fastapi_app.dependencies import require_internal_token
-from utils.steady_momentum_service import (
+from utils.momentum_service import (
     compute_picks,
     load_settings,
     load_settings_map,
@@ -11,14 +11,14 @@ from utils.steady_momentum_service import (
     save_settings,
 )
 
-router = APIRouter(prefix="/internal/strategy-sm", tags=["strategy-sm"])
+router = APIRouter(prefix="/internal/strategy-momentum", tags=["strategy-momentum"])
 
 
 def _month_options(settings: dict) -> list[int]:
     """기간 선택지 — 종목풀 백테스트와 같은 목록을 쓰되, 이 전략이 실제로 돌릴 수
     있는 개월 수까지만 남긴다. 상한은 벤치마크 데이터와 전략 장기 이평선이 정한다."""
+    from utils.momentum_service import available_backtest_months, load_benchmark_close
     from utils.pool_signal_backtest_service import get_month_options
-    from utils.steady_momentum_service import available_backtest_months, load_benchmark_close
 
     limit = available_backtest_months(load_benchmark_close(settings["pool"]), int(settings["long_ma_days"]))
     options = [month for month in get_month_options() if month <= limit]
@@ -28,7 +28,7 @@ def _month_options(settings: dict) -> list[int]:
 
 
 def _ma_rule_payload(settings: dict) -> dict:
-    """전략 전용 이평선 + 선택지 — steady_momentum_settings 가 단일 소스다."""
+    """전략 전용 이평선 + 선택지 — momentum_settings 가 단일 소스다."""
     from utils.pool_settings_store import MA_DAY_OPTIONS
 
     return {
@@ -40,7 +40,7 @@ def _ma_rule_payload(settings: dict) -> dict:
 
 def _constraints_payload() -> dict:
     """화면 셀렉트 선택지 — 백엔드 상수가 단일 소스(프론트 복사본 제거)."""
-    from utils.steady_momentum_service import MAX_PER_INDUSTRY_OPTIONS, TOP_N_OPTIONS
+    from utils.momentum_service import MAX_PER_INDUSTRY_OPTIONS, TOP_N_OPTIONS
 
     return {
         "top_n_options": list(TOP_N_OPTIONS),
@@ -49,7 +49,7 @@ def _constraints_payload() -> dict:
 
 
 @router.get("")
-def get_strategy_sm(
+def get_strategy_momentum(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """저장된 설정을 반환한다. 저장된 값이 없거나 깨졌으면 에러다(기본값 대체 없음)."""
@@ -67,7 +67,7 @@ def get_strategy_sm(
 
 
 @router.put("/settings")
-def put_strategy_sm_settings(
+def put_strategy_momentum_settings(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
@@ -93,7 +93,7 @@ def put_strategy_sm_settings(
 
 
 @router.post("/picks")
-def post_strategy_sm_picks(
+def post_strategy_momentum_picks(
     _: None = Depends(require_internal_token),
 ) -> dict:
     """현재 월 확정 포트폴리오 선정을 실행한다 (가격 캐시 기반 — 수 초)."""
@@ -101,7 +101,7 @@ def post_strategy_sm_picks(
 
 
 @router.post("/backtest")
-def post_strategy_sm_backtest(
+def post_strategy_momentum_backtest(
     payload: dict = Body(...),
     _: None = Depends(require_internal_token),
 ) -> dict:
@@ -111,7 +111,7 @@ def post_strategy_sm_backtest(
     ``include_daily`` 는 일간 탭을 볼 때만 참으로 보낸다 — 일별 계산은 응답이
     수천 행으로 커지므로 필요할 때만 만든다.
     """
-    from utils.steady_momentum_backtest import run_backtest
+    from utils.momentum_backtest import run_backtest
 
     months = payload.get("months") if isinstance(payload, dict) else None
     if not isinstance(months, int) or isinstance(months, bool):

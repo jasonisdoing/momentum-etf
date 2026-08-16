@@ -17,9 +17,7 @@ SUPPORTED_INDICES = {"SP500", "NDX100", "ASX200"}
 def _normalize_index(index: str) -> str:
     key = str(index or "").strip().upper()
     if key not in SUPPORTED_INDICES:
-        raise ValueError(
-            f"지원하지 않는 인덱스입니다: {index} (지원: {', '.join(sorted(SUPPORTED_INDICES))})"
-        )
+        raise ValueError(f"지원하지 않는 인덱스입니다: {index} (지원: {', '.join(sorted(SUPPORTED_INDICES))})")
     return key
 
 
@@ -53,9 +51,7 @@ def load_index_meta(index: str) -> dict[str, Any]:
     return {k: v for k, v in doc.items() if k not in ("tickers", "_id")}
 
 
-def save_index_constituents(
-    index: str, tickers: list[dict[str, Any]], meta: dict[str, Any]
-) -> None:
+def save_index_constituents(index: str, tickers: list[dict[str, Any]], meta: dict[str, Any]) -> None:
     """구성종목과 메타를 통째로 교체 저장한다 (배치 전용)."""
     from utils.db_manager import get_db_connection
 

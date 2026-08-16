@@ -73,9 +73,7 @@ def put_account_settings(
 
 
 @router.post("")
-def post_account(
-    payload: AccountCreatePayload, _: None = Depends(require_internal_token)
-) -> dict[str, object]:
+def post_account(payload: AccountCreatePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
     try:
         created = create_account(
             payload.account_id,
@@ -91,9 +89,7 @@ def post_account(
 
 
 @router.delete("")
-def delete_account_route(
-    payload: AccountDeletePayload, _: None = Depends(require_internal_token)
-) -> dict[str, object]:
+def delete_account_route(payload: AccountDeletePayload, _: None = Depends(require_internal_token)) -> dict[str, object]:
     try:
         result = delete_account(payload.account_id)
     except AccountSettingsStoreError as exc:

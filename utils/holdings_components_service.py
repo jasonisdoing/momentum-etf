@@ -134,10 +134,7 @@ def list_holding_country_options() -> list[dict[str, str]]:
 
     첫 항목이 화면의 기본 선택값이 된다.
     """
-    return [
-        {"code": code, "label": _HOLDING_COUNTRY_LABELS[code]}
-        for code in _HOLDING_COUNTRY_ORDER
-    ]
+    return [{"code": code, "label": _HOLDING_COUNTRY_LABELS[code]} for code in _HOLDING_COUNTRY_ORDER]
 
 
 def _is_hidden_component_ticker(ticker: Any) -> bool:
@@ -264,7 +261,9 @@ def _append_account_components(
     if not ticker_types:
         raise RuntimeError("사용 가능한 종목풀이 없습니다.")
 
-    total_valuation = float(total_valuation_krw) if total_valuation_krw is not None else float(df["평가금액(KRW)"].sum())
+    total_valuation = (
+        float(total_valuation_krw) if total_valuation_krw is not None else float(df["평가금액(KRW)"].sum())
+    )
     if total_valuation <= 0:
         total_valuation = 1.0
 
@@ -399,13 +398,19 @@ def _append_account_components(
             source_buy_amount = buy_amount * component_ratio
             source_current_value = valuation * component_ratio
             source_cumulative_profit = etf_profit * component_ratio
-            source_return_pct = (source_cumulative_profit / source_buy_amount * 100.0) if source_buy_amount > 0 else None
+            source_return_pct = (
+                (source_cumulative_profit / source_buy_amount * 100.0) if source_buy_amount > 0 else None
+            )
             # 거래소 접미사가 붙은 원본 심볼(NAB.AX)이 티커(NAB)보다 상장 시장을 정확히 알려준다.
             component_yahoo_symbol = str(item.get("yahoo_symbol") or "").strip().upper()
             component_listing_currency = str(item.get("listing_currency") or "").strip().upper()
             component_price_country_code = _infer_price_country_code(component_yahoo_symbol or comp_ticker)
             component_currency = component_listing_currency or (
-                "KRW" if component_price_country_code == "kor" else "AUD" if component_price_country_code == "au" else "USD"
+                "KRW"
+                if component_price_country_code == "kor"
+                else "AUD"
+                if component_price_country_code == "au"
+                else "USD"
             )
             component_price_fields = {
                 "raw_code": item.get("raw_code"),
@@ -600,7 +605,9 @@ def load_account_holdings_components(
             source_ticker = _normalize_ticker(source.get("etf_ticker"))
             if not source_ticker or source_ticker in {"-", "IS"}:
                 continue
-            country = str(source.get("price_country_code") or "").strip().lower() or _infer_price_country_code(source_ticker)
+            country = str(source.get("price_country_code") or "").strip().lower() or _infer_price_country_code(
+                source_ticker
+            )
             if country in source_tickers_by_country:
                 source_tickers_by_country[country].add(source_ticker)
 

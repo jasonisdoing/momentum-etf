@@ -102,7 +102,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             if df is not None and not df.empty:
                 acc_valuation = float(df["평가금액(KRW)"].sum())
                 acc_purchase = float(df["매입금액(KRW)"].sum())
-                
+
                 # 보유 종목 상세 (티커만; 보유일 컬럼은 더 이상 사용하지 않음)
                 holding_details = []
                 for _, row in df.iterrows():
@@ -115,6 +115,7 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
                 holding_details = []
         except Exception as e:
             from utils.logger import get_app_logger
+
             get_app_logger().error(f"Failed to calculate valuation for account {aid}: {e}")
             acc_valuation = 0.0
             acc_purchase = 0.0
@@ -130,18 +131,20 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
             intl_shares_value = normalize_number(m_data.get("intl_shares_value"))
 
         # 계좌별 개별 스냅샷 저장 데이터 구성
-        account_summaries.append({
-            "account_id": aid,
-            "total_assets": acc_total_assets,
-            "total_principal": acc_principal,
-            "cash_balance": acc_cash,
-            "cash_balance_native": cash_balance_native,
-            "cash_currency": cash_currency,
-            "valuation_krw": acc_valuation,
-            "purchase_amount": acc_purchase,
-            "holding_details": holding_details,
-            "intl_shares_value": intl_shares_value,
-        })
+        account_summaries.append(
+            {
+                "account_id": aid,
+                "total_assets": acc_total_assets,
+                "total_principal": acc_principal,
+                "cash_balance": acc_cash,
+                "cash_balance_native": cash_balance_native,
+                "cash_currency": cash_currency,
+                "valuation_krw": acc_valuation,
+                "purchase_amount": acc_purchase,
+                "holding_details": holding_details,
+                "intl_shares_value": intl_shares_value,
+            }
+        )
 
         # DB에 개별 계좌 데이터로 먼저 저장 (save_daily_snapshot 호출)
         save_daily_snapshot(
@@ -160,18 +163,10 @@ def update_today_snapshot_all_accounts() -> dict[str, Any]:
     # 전체 통합 데이터 저장
     total_assets = global_valuation + global_cash
     save_daily_snapshot(
-        "TOTAL",
-        total_assets,
-        global_principal,
-        global_cash,
-        global_valuation,
-        purchase_amount=global_purchase
+        "TOTAL", total_assets, global_principal, global_cash, global_valuation, purchase_amount=global_purchase
     )
 
-    return {
-        "total_assets": total_assets,
-        "account_count": len(account_summaries)
-    }
+    return {"total_assets": total_assets, "account_count": len(account_summaries)}
 
 
 # 계좌별 최근 거래일 기간 수익률 창.

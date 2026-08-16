@@ -1,4 +1,4 @@
-"""Steady Momentum 주간 리밸런싱 백테스트.
+"""모멘텀 전략 주간 리밸런싱 백테스트.
 
 방식
 ----
@@ -30,9 +30,7 @@ from typing import Any
 import pandas as pd
 
 from leverage.engine.backtest.ma_cross import max_drawdown_pct, sortino
-from utils.pool_settings_store import get_pool_slippage
-from utils.pool_signal_backtest_service import get_max_backtest_months
-from utils.steady_momentum_service import (
+from utils.momentum_service import (
     available_backtest_months,
     benchmark_info,
     industry_map,
@@ -49,6 +47,8 @@ from utils.steady_momentum_service import (
     week_last_trading_day,
     week_rebalance_pair,
 )
+from utils.pool_settings_store import get_pool_slippage
+from utils.pool_signal_backtest_service import get_max_backtest_months
 
 # 미국 풀 참고 지수 — 유사 컨셉 ETF(FMTM)와 같은 구간을 나란히 비교한다 (벤치마크 아님).
 US_REFERENCE_TICKER = "FMTM"
